@@ -18,8 +18,7 @@
 #   DragTap                           press/drag/release over a ScrollRegion
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
 #   AppHost                           a shipped app's host side of the verbs (ctx.ui)
-#   HeldPage                          the page under a dialog, washed, held while it is up; release_held
-#   DialogRows                        a dialog's frame begun ahead of its page: its rows frame
+#   Hold                              the page under a modal, held while it is up; its rows frames
 #   TextView                          a text area's rows in C: its record, shift and floor
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
@@ -1973,7 +1972,7 @@ class AppHost:
         # A dialog's rows frame is the host's to allow: `held(plan)` answers
         # whether every buffer holds the page under the dialog the plan names
         # (its card and drop, plan[0:4], standing plan[7] frames) as the
-        # frames before left it (`HeldPage.rows`); None, never.
+        # frames before left it (`Hold.rows`); None, never.
         self.held = None
         self._t3 = 0
         self._keys = False              # the frame begun last took the keys
@@ -2301,39 +2300,61 @@ def wash_page(src=None, also=None):
 NO_WASH = {"wash": False}
 
 
-class HeldPage:
-    """The page under a dialog, washed, held while the dialog is up
-    (docs/surface_model_v1.md §14.5). A dialog takes the keys and the
-    pointer, so the page under it does not change while it stays: the
-    first frame draws the page and washes it (`wash`), the wash storing
-    to the held layer as it lands and the rest of the page's rect copied
-    there; each frame after puts that copy back (`put`) instead of drawing
-    the page and its wash, and draws the dialog over it. `key` is what the
-    page's pixels are a function of while the dialog is up (the dialog
-    itself, the page's rect, the look); a key that differs, a page that
-    was not still, anything animating, a canvas that retains nothing or
-    one drawing into a viewport of its buffer draws it whole.
+# What the page under a dialog draws this frame (`Hold.under`): put back
+# washed, the dialog drawn over it held; the last frame's, taken from its
+# buffer; or drawn.
+HOLD_PUT, HOLD_LAST, HOLD_DRAW = 0, 1, 2
 
-    The first frame takes the page from the last frame instead of drawing
-    it where that frame drew it alone and still, with no dialog up
+
+class Hold:
+    """The page under a modal, held while the modal is up
+    (docs/surface_model_v1.md §14.5): a dialog's page, the system menu's
+    home, the run's frame under the pause card. A modal takes the keys and
+    the pointer, so the page under it does not change while it stays: the
+    first frame draws the page and washes it (`wash`, or `keep` where the
+    scrim stored to the held layer as it landed), the rest of the page's
+    rect copied there; each frame after puts that copy back (`put`)
+    instead of drawing the page and its wash, and draws the modal over it.
+    `key` is what the page's pixels are a function of while the modal is
+    up (the modal itself, the page's rect, the look); a key that differs,
+    a page that was not still, anything animating, a canvas that retains
+    nothing or one drawing into a viewport of its buffer draws it whole.
+
+    A page nothing draws again -- the run's frozen frame under the pause
+    card -- is kept as it was too (`snap`), put back for the frame the card
+    washes and for the resumed game (`unsnap`).
+
+    A dialog's first frame takes the page from the last frame instead of
+    drawing it where that frame drew it alone and still, with no dialog up
     (`shown`), and the input that opened the dialog changed nothing else
     in it with nothing reported before it (`opened`): `last` says so, and
     the wash reads the page from the buffer that frame drew into.
 
     A frame whose input only typed into the dialog's field or moved its
-    focus skips the put back too (`rows`, a dialog's rows frame:
-    docs/scroll_and_text_2026-10.md §5): where every buffer holds the page
-    as the frames before left it (`note`, each a frame the dialog drew over
-    the hold alone on the glass), the dialog draws its changed rows alone."""
+    focus puts nothing back (a dialog's rows frame:
+    docs/scroll_and_text_2026-10.md §5): the dialog's frame begins ahead
+    of the page (`rows_frame`), and where its host allows it (`ok`, the
+    host's `held`) the dialog draws its changed rows alone. That is where
+    every buffer holds the page as the frames before left it (`rows`: each
+    a frame the dialog drew over the hold alone on the glass, `note`), or
+    on the desk where the Editor's window buffer holds it (`desk_frame`),
+    and only on a frame whose dialog gave the gen it gave the last."""
 
     def __init__(self):
         self.key = None
+        self.snapped = False            # the page kept as it was (`snap`)
         self._shown = -1                # the frame that drew the page alone and still
         self._over = -1                 # the frame a dialog opened over it first draws
         self._src = None                # this frame's page: the last frame's buffer
-        self._at = array("i", [-1] * _MAX_RETAINED)   # the frames drawn over the hold
-        self._ati = 0
+        self._at = PaintRing()          # the frames that drew the dialog over the hold
         self._ask = [None, None, None, 0]   # this frame's console, canvas, key, dt (`ask`)
+        self.desk = -1                  # the frame the desk vouched its window holds the page
+        self.on_desk = -1               # the frame the desk drew the dialog into its window
+        self.begun = -1                 # the frame the dialog's host began ahead of the page
+        self._gen = None
+        self._same = False
+
+    # -- the page held washed
 
     def put(self, ws, cv, rect, key, dt=0):
         """Put the held page back into `rect`: whether it was held under
@@ -2364,57 +2385,78 @@ class HeldPage:
         keys drew this frame -- is copied there after it. Where `last`
         took the page from the last frame, the wash reads it from that
         frame's buffer."""
-        self.key = None
         src = self._src
         self._src = None
         lay = self.layer(ws, cv, still, dt)
         also = None if lay is None else getattr(lay, "_buf", None)
         box = wash_page(src, also)
-        if lay is None:
-            return
-        for r in _outside(rect, box) if also is not None else (rect,):
-            lay.blit_strip_rect(cv, 0, 0, r[0], r[1], r[2], r[3])
-        ws.held_pages[1] = self
-        self.key = key
+        self._store(ws, cv, lay, key, (rect,) if also is None else _outside(rect, box))
 
     def keep(self, ws, cv, rect, key, still, dt=0, washed=()):
         """Hold `rect` of the frame drawn so far under `key`, where it may
         be held (`layer`); `washed`: rects a scrim already stored to the
         held layer (`scrim`'s `also`), which are not copied again."""
-        self.key = None
-        lay = self.layer(ws, cv, still, dt)
-        if lay is None:
-            return
         parts = [rect]
         for w in washed:
             parts = [p for r in parts for p in _outside(r, w)]
+        self._store(ws, cv, self.layer(ws, cv, still, dt), key, parts)
+
+    def _store(self, ws, cv, lay, key, parts):
+        self.key = None
+        if lay is None:
+            return
         for r in parts:
             lay.blit_strip_rect(cv, 0, 0, r[0], r[1], r[2], r[3])
         ws.held_pages[1] = self
         self.key = key
 
     def drop(self):
-        """The dialog closed: the page is no longer held."""
+        """The modal closed: the page is no longer held, nor kept."""
         self.key = None
-        self._forget()
+        self.snapped = False
+        self._at.clear()
 
-    def _forget(self):
-        a = self._at
-        for i in range(len(a)):
-            a[i] = -1
+    # -- the page kept as it was
+
+    def snap(self, ws, cv):
+        """Keep the whole frame of `cv` as it is, before a modal draws over
+        it, where there is room for it (`held_layer`)."""
+        lay = held_layer(ws, cv, 2)
+        self.snapped = lay is not None
+        if lay is not None:
+            lay.blit_strip(cv, 0, 0)
+            ws.held_pages[3] = self
+
+    def unsnap(self, ws, cv):
+        """Put the frame `snap` kept back into `cv`."""
+        if self.snapped:
+            lay = ws.held_pages[2]
+            cv.blit_strip_rect(lay, 0, 0, 0, 0, lay.w, lay.h)
+
+    # -- a dialog's page: its first frame, its rows frames
+
+    def under(self, ws, key, rect, dt=0):
+        """What the page in `rect` draws this frame under the dialog up,
+        `key` what it is a function of (None with no dialog up): HOLD_PUT,
+        HOLD_LAST or HOLD_DRAW. The dialog's rows frame is asked first
+        (`rows_frame`)."""
+        if key is None:
+            if self.key is not None:
+                self.drop()
+            return HOLD_DRAW
+        cv = ws.sys_canvas
+        if self.put(ws, cv, rect, key, dt):
+            return HOLD_PUT
+        return HOLD_LAST if self.last(ws, cv, rect, dt) else HOLD_DRAW
 
     def note(self):
         """The frame drew the dialog over the page held (put back, washed
         into the hold, or left as it was by a rows frame): counted where it
         was alone on the glass."""
         if self.key is None or not _PAINT[1]:
-            self._forget()
-            return
-        i = self._ati + 1
-        if i >= len(self._at):
-            i = 0
-        self._ati = i
-        self._at[i] = _PAINT[0]
+            self._at.clear()
+        else:
+            self._at.note(_PAINT[0])
 
     def ask(self, ws, cv, key, dt=0):
         """This frame's terms for `rows`, before the dialog's frame begins."""
@@ -2434,15 +2476,12 @@ class HeldPage:
         self._ask[0] = self._ask[1] = None
         n = getattr(cv, "RETAINED_FRAMES", 0)
         if (ws is None or self.key is None or ws.held_pages[1] is not self or self.key != key
-                or n < 1 or n > len(self._at) or plan[7] < n or ws._animating(dt)):
+                or n < 1 or n > self._at.size or plan[7] < n or ws._animating(dt)):
             return False
         f = _PAINT[0]
-        at = self._at
-        j = self._ati
         for k in range(n):
-            if at[j] != f - 1 - k:
+            if self._at.frame(k) != f - 1 - k:
                 return False
-            j = j - 1 if j else len(at) - 1
         return True
 
     def shown(self, ws, cv, still, dt=0):
@@ -2483,27 +2522,6 @@ class HeldPage:
         cl = getattr(cv, "copy_last", None)
         return cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
 
-
-class DialogRows:
-    """A dialog over a held page whose frame begins before the page is drawn
-    (docs/scroll_and_text_2026-10.md §5): its host's begin says whether the
-    frame is a dialog's rows frame, which draws the dialog's changed rows
-    alone and leaves the page as it is, before anything is drawn. `ok` is
-    its host's `held` (`AppHost.held`): the desk Editor's word that its
-    window's buffer holds the page as the frame before left it
-    (`desk_frame`), else the held page's (`HeldPage.rows`), and only on a
-    frame whose app gave the gen it gave the last (`gen`). `begin` begins
-    the host ahead of the page this frame, and `take` answers it once, so
-    the dialog's draw resumes that frame instead of beginning another."""
-
-    def __init__(self, held):
-        self.held = held
-        self.desk = -1
-        self.on_desk = -1
-        self.begun = -1
-        self._gen = None
-        self._same = False
-
     def desk_frame(self, holds):
         """The desk Editor draws the dialog this frame, into its window's
         buffer: a window frame (`window_frame`), whose buffer holds the page
@@ -2512,45 +2530,54 @@ class DialogRows:
         self.on_desk = f
         self.desk = f if holds else -1
 
-    def begin(self, host, cv, th, rect, desk=False):
-        """Begin the dialog's frame on its `host` ahead of the page (its
-        `begin`'s arguments): on the desk a window frame (`window_frame`),
-        one the desk vouches for where it said so. Whether it is a dialog's
-        rows frame."""
+    def rows_frame(self, ws, key, gen, host, rect, desk, dt=0):
+        """Begin the dialog's frame on its `host` ahead of the page, once a
+        painted frame, `key` what the page is a function of and `gen` the
+        dialog's: on the desk a window frame (`window_frame`), one the desk
+        vouches for where it said so. Whether it is the dialog's rows frame,
+        which draws the dialog's changed rows alone and leaves the page as
+        it is; else the frame draws the page and the dialog as ever, the
+        dialog's draw resuming the frame begun here (`dialog`)."""
         f = _PAINT[0]
+        if self.begun == f:
+            return False
+        cv = ws.sys_canvas
+        self.ask(ws, cv, key, dt)
+        self._same = gen == self._gen
+        self._gen = gen
         w = 2 if self.desk == f else 1 if self.on_desk == f else 0
         if w:
             _WIN[0] = w
         try:
-            host.begin(cv, th, rect, desk)
+            host.begin(cv, ws.theme_colors, rect, desk)
         finally:
             if w:
                 _WIN[0] = 0
         self.begun = f
         return host.shifting
 
+    def dialog(self, host, cv, th, rect, desk):
+        """Begin the dialog's draw on its `host`, or resume the frame
+        `rows_frame` began ahead of the page this frame."""
+        if self.begun == _PAINT[0]:
+            self.begun = -1
+            host.resume(cv, th)
+        else:
+            host.begin(cv, th, rect, desk)
+
     def floor_box(self, host, out):
         """The floor's bounding rect the dialog's last pass drew into
         `out`, an array('i') of four: whether it drew one."""
         return _C.api_floor_box(host.ctx, out)
 
-    def gen(self, g):
-        """The dialog's gen this frame, before its host begins: a frame
-        whose gen moved draws the dialog whole."""
-        self._same = g == self._gen
-        self._gen = g
-
     def ok(self, plan):
+        """The dialog's host's `held`: whether its rows frame `plan` may
+        leave the page as it is."""
         if not self._same:
             return False
         if self.desk == _PAINT[0]:
             return plan[7] >= 1
-        return self.held.rows(plan)
-
-    def take(self):
-        got = self.begun == _PAINT[0]
-        self.begun = -1
-        return got
+        return self.rows(plan)
 
 
 
@@ -2755,39 +2782,51 @@ def _whole_retained(cv):
                                   getattr(cv, "_bh", cv.h))
 
 
-# A console's held pages share one layer of its canvas's size,
-# `ws.held_pages` = [the layer, the HeldPage whose page it holds]: one modal
-# is up at a time. Kept across dialogs (minting one is a third of a dialog's
-# first frame on the T-Deck: the pause card mints it on an idle frame); the
-# fit check's release frees it.
+# A console's holds share two layers of its canvas's size, one modal up at
+# a time: `ws.held_pages` = [the layer the page is held in washed, the Hold
+# whose page it holds, the layer a frame is kept in as it was (`Hold.snap`),
+# the Hold that kept it]. Kept across modals (minting one is a third of a
+# dialog's first frame on the T-Deck: the pause card mints both on an idle
+# frame); the fit check's release frees them.
 
-def held_layer(ws, cv):
-    """Console `ws`'s held pages' layer, of canvas `cv`'s size: minted
-    where there is none of it (an idle frame's work where a modal will want
-    it, so the modal's first frame does not mint it); None with no room."""
-    lay = ws.held_pages[0]
+def held_layer(ws, cv, i=0):
+    """Console `ws`'s hold layer `i` -- 0 the page held washed, 2 the frame
+    kept as it was (`Hold.snap`) -- of canvas `cv`'s size: minted where
+    there is none of it (an idle frame's work where a modal will want it,
+    so the modal's first frame does not mint it); None with no room, or
+    while the frame kept in another size is still up."""
+    held = ws.held_pages
+    lay = held[i]
     if lay is not None and lay.w == cv.w and lay.h == cv.h:
         return lay
-    release_held(ws)
+    if lay is not None and i and held[3] is not None and held[3].snapped:
+        return None
+    _release(lay)
+    held[i] = held[i + 1] = None
     try:
-        lay = ws.held_pages[0] = cv.new_layer(cv.w, cv.h)
+        lay = held[i] = cv.new_layer(cv.w, cv.h)
     except Exception:  # noqa: BLE001
         return None
     return lay
 
 
 def release_held(ws):
-    """Free console `ws`'s held pages' layer (the fit check's release):
-    True when there was one. The next dialog mints it again."""
+    """Free one of console `ws`'s hold layers (the fit check's release):
+    the washed page's, then the kept frame's while no modal is up over it.
+    True when there was one; the next modal mints it again."""
     held = ws.held_pages
-    lay = held[0]
-    held[0] = held[1] = None
-    if lay is None:
-        return False
+    for i in (0, 2):
+        if held[i] is not None and not (i and held[3] is not None and held[3].snapped):
+            _release(held[i])
+            held[i] = held[i + 1] = None
+            return True
+    return False
+
+
+def _release(lay):
     rel = getattr(lay, "release", None)
     if rel is not None:
         rel()
-    return True
 
 
 # A coverless cart's cover (`initial_cover`): (block, ink) pairs of MOY64

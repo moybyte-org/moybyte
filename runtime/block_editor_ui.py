@@ -243,8 +243,9 @@ class BlockEditorUI:
         # buffer `shift_last` reads holds it as the last draw left it, 1 a
         # window's frame drawn whole, 0 none (the handheld)
         self.vouch = 0
-        self._held = _ui_draw.HeldPage()   # the page under blk_kbd (`_draw_blk_kbd`)
-        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
+        # the page under blk_kbd (`_draw_blk_kbd`); `_rows` is the desk
+        # Editor's name for it (its rows frames)
+        self._hold = self._rows = _ui_draw.Hold()
         self._kbd_gen = 0             # what the prompt draws besides its field's text
 
     def page(self):
@@ -792,7 +793,7 @@ class BlockEditorUI:
         entry.open(text, seed, guard=True)
         host = _ui_draw.AppHost()
         host.key = seed                # the byte that opened it types nothing
-        host.held = self._rows.ok
+        host.held = self._hold.ok
         self._kbd_gen += 1
         fields["gen"] = self._kbd_gen
         fields["kind"] = kind
@@ -1161,7 +1162,7 @@ class BlockEditorUI:
         if i.pressed("a"):
             self._blk_a()
             if self.blk_kbd is not None and not moved:
-                self._held.opened(ws)            # a slot's prompt over the page as it was
+                self._hold.opened(ws)            # a slot's prompt over the page as it was
         elif i.pressed("run"):
             self.save_blocks()
         else:
@@ -1299,20 +1300,18 @@ class BlockEditorUI:
         rect, the bar's strip, and an entry prompt over them."""
         ws = self.ws
         k = self.blk_kbd
-        held = self._held
+        hold = self._hold
         if k is not None and self._page is not None:
             self._page.forget()             # a prompt over the page: the next frame draws it whole
-        if k is None:
-            if held.key is not None:
-                held.drop()
-        elif self.prompt_rows(dt):
+        if k is not None and self.prompt_rows(dt):
             return
-        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(k), dt):
+        how = hold.under(ws, None if k is None else self._held_key(k), self._page_rect(), dt)
+        if how == _ui_draw.HOLD_PUT:
             ws.bar_layer._draw_status_strip("menu")
             self._draw_blk_kbd(True, dt)
-            held.note()
+            hold.note()
             return
-        if k is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
+        if how == _ui_draw.HOLD_DRAW:
             if self.vouch:
                 _ui_draw.window_frame(self.vouch)
             try:
@@ -1323,9 +1322,9 @@ class BlockEditorUI:
         ws.bar_layer._draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)
-            held.note()
+            hold.note()
         else:
-            held.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
+            hold.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
 
     def prompt_host(self):
         """The open prompt's host (`ui_draw.AppHost`), None where none is up."""
@@ -1336,25 +1335,17 @@ class BlockEditorUI:
         """Begin the open prompt's frame ahead of the page under it, once a
         painted frame: where it is a dialog's rows frame (its field typed
         into, its focus moved, the page held as the frames before left it:
-        `ui_draw.DialogRows`), draw the prompt's changed rows alone and
+        `ui_draw.Hold.rows_frame`), draw the prompt's changed rows alone and
         answer True; else the frame draws the page and the prompt as ever."""
         k = self.blk_kbd
-        if k is None:
-            return False
         ws = self.ws
-        rows = self._rows
-        if rows.begun == _ui_draw.painted():
-            return False
-        self._held.ask(ws, ws.sys_canvas, self._held_key(k), dt)
-        lay = self.block_layout
-        rows.gen(k["gen"])
-        if not rows.begin(k["host"], ws.sys_canvas, ws.theme_colors,
-                          (lay.cx, lay.cy, lay.cw, lay.ch),
-                          _layout_base.metric_class() == _layout_base.DESK):
+        if k is None or not self._hold.rows_frame(
+                ws, self._held_key(k), k["gen"], k["host"], self._page_rect(),
+                _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
         ws.bar_layer._draw_status_strip("menu")
         self._draw_blk_kbd(True, dt)
-        self._held.note()
+        self._hold.note()
         return True
 
     def _page_rect(self):
@@ -1375,7 +1366,7 @@ class BlockEditorUI:
         digit pad; the T-Deck's keys are its hint strip's, where a touch
         glass and the desk add Cancel and OK. On the SYSTEM canvas: the
         game canvas is a hidden buffer on a bigger glass (#85/#93). `held`:
-        the page under it was put back washed (`HeldPage`), else it was
+        the page under it was put back washed (`ui_draw.Hold`), else it was
         drawn this frame and is washed and held here."""
         ws = self.ws
         k = self.blk_kbd
@@ -1384,17 +1375,14 @@ class BlockEditorUI:
         host = k["host"]
         desk = _layout_base.metric_class() == _layout_base.DESK
         lay = self.block_layout
-        if self._rows.take():
-            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
-        else:
-            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        self._hold.dialog(host, ws.sys_canvas, ws.theme_colors, self._page_rect(), desk)
         num = kind == "num"
         to_block = num and k.get("allow_block")
         keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
                 + ("cancel", "Cancel"))
         _strip(ws, lay, keys, desk)
         if not held:
-            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
+            self._hold.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
                             self._page is None or self._page.host.still(), dt)
         tdeck = _ui.input_kind() == "tdeck"
         o = k.get("o")

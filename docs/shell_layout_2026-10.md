@@ -202,7 +202,7 @@ resize takes. There is no allocation-retry hook. The home's `_lib_cache`
 lives across switches (the home is console mode's root and hot on return)
 and is released by the same fit-check path after the stamps, and after it
 the layers a modal keeps what lies under it in, kept across modals: a
-dialog's held page (`ui_draw.HeldPage`) and the frame under the pause card. The Waveshare
+dialog's held page and the frame under the pause card (`ui_draw.Hold`). The Waveshare
 P4's off-heap PSRAM is unmeasured: `tools/mem_census.py p4 offheap` runs
 before step 1 commits and its numbers go to #58.
 

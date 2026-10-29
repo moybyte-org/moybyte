@@ -1,4 +1,4 @@
-"""The page held under a dialog (`ui_draw.HeldPage`, docs/surface_model_v1.md
+"""The page held under a dialog (`ui_draw.Hold`, docs/surface_model_v1.md
 §14.5): while the Editor's Cart info dialog or a Blocks entry prompt is up,
 or the pause or stop card stands over a run, a frame puts the page under it
 back washed instead of drawing the page and its wash.
@@ -11,7 +11,7 @@ glass, picture by picture, to the second's bytes -- and that the hold put
 the page back on most of the session's frames, so it cannot silently stop.
 The dialogs the keys open run on frames the gate lets through, as a
 board's, and their first frames take the page from the last frame's
-buffer (`HeldPage.last`) where it may."""
+buffer (`Hold.last`) where it may."""
 
 import pytest
 
@@ -56,11 +56,11 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     the dialog washing it. `force`: every frame paints (else only those
     the gate lets through, as on a board). `puts` counts the frames that
     put the held page back, the first frames that took the page from the
-    last frame (`HeldPage.last`), and the dialogs' rows frames, which left
-    the page as it was (`ui_draw.DialogRows`)."""
+    last frame (`Hold.last`), and the dialogs' rows frames, which left
+    the page as it was (`ui_draw.Hold`)."""
     puts = [0, 0, 0]
-    real = ui_draw.HeldPage.put
-    real_last = ui_draw.HeldPage.last
+    real = ui_draw.Hold.put
+    real_last = ui_draw.Hold.last
 
     def put(self, *a, **k):
         if ref:
@@ -75,8 +75,8 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
         got = real_last(self, *a, **k)
         puts[1] += got
         return got
-    monkeypatch.setattr(ui_draw.HeldPage, "put", put)
-    monkeypatch.setattr(ui_draw.HeldPage, "last", last)
+    monkeypatch.setattr(ui_draw.Hold, "put", put)
+    monkeypatch.setattr(ui_draw.Hold, "last", last)
     if ref:
         # the dialog washes the page itself, as one with no held page did,
         # and draws whole on every frame
@@ -89,7 +89,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
                 o = None
             return real_dialog(title, buttons, kind, o)
         monkeypatch.setattr(ui, "dialog", dialog)
-        monkeypatch.setattr(ui_draw.DialogRows, "ok", lambda self, plan: False)
+        monkeypatch.setattr(ui_draw.Hold, "ok", lambda self, plan: False)
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     host_app.moy_carts.create("Stripes", carts, src=_GAME, type="game")
@@ -357,10 +357,10 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
     frame(2)
     ws.pause.close()
     frame(2)
-    assert ws.pause._under_lay is not None
+    assert ws.held_pages[2] is not None
     while ws.wm.release_cache():
         pass
-    assert ws.held_pages[0] is None and ws.pause._under_lay is None
+    assert ws.held_pages[0] is None and ws.held_pages[2] is None
     ws.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
     ws.set_menu_view("cards")

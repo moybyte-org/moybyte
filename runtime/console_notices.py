@@ -239,10 +239,13 @@ class PauseMenu:
         self.page = 0               # 0 the menu, 1 Options
         self._host = None
         self._key = 0               # the key typed last frame (a press is its change)
-        self._under = None          # what the card's band covered: (layer, x)
-        self._under_lay = None      # the layer it is kept in, kept across cards
-        self._capture = False       # take that band before the card first draws
-        self._washed = _ui_draw.HeldPage()   # that frame washed, as the card draws over it
+        # The run's frame under the card, kept as the game left it and held
+        # washed as the card draws over it (`ui_draw.Hold`), where the game's
+        # frame is the system canvas (the handheld): each frame starts from
+        # it, and a smaller card (Options) and the resumed game find it
+        # whole. Where the game is composited, its frame repaints under it.
+        self._hold = _ui_draw.Hold()
+        self._capture = False       # keep that frame before the card first draws
         self.stopped = False        # the stop card, over a run that stopped
         self.rows = self.ITEMS      # the card's rows
         self.icons = self.ICONS
@@ -253,68 +256,19 @@ class PauseMenu:
             return 520 if desk else min(self.ws.sys_canvas.w - 32 * fs, 340 * fs)
         return 300 if desk else 188 * self.ws.layout.fs
 
-    def _keep_under(self, cv, desk):
-        """Where the game's frame IS the system canvas (the handheld), the
-        card draws over the frozen frame itself: keep the whole frame, which
-        the scrim dims under the card, so each frame starts from it, and a
-        smaller card (Options) and the resumed game find it whole. Where the
-        game is composited, its frame repaints under the card."""
-        self._capture = False
-        lay = self.prealloc()
-        if lay is None:
-            return                        # no room: the card draws without it
-        lay.blit_strip(cv, 0, 0)
-        self._under = (lay, 0)
-
     def prealloc(self):
-        """The layer the frame under the card is kept in, and the one its
-        washed copy is held in (`ui_draw.held_layer`), minted where the
-        game's frame is the system canvas (an idle frame's work, so the
-        card's first frame does not mint them): the first, or None
-        elsewhere or with no room."""
+        """Mint the layers the frame under the card is kept and held in
+        (`ui_draw.held_layer`) where the game's frame is the system canvas:
+        an idle frame's work, so the card's first frame does not mint them.
+        The first, or None elsewhere or with no room."""
         ws = self.ws
         cv = ws.sys_canvas
         if ws.canvas is not cv:
             return None
-        lay = self._under_lay
-        if lay is not None and lay.w == cv.w and lay.h == cv.h:
+        lay = _ui_draw.held_layer(ws, cv, 2)
+        if lay is not None:
             _ui_draw.held_layer(ws, cv)
-            return lay                    # (an idle frame's answer: allocates nothing)
-        new = getattr(cv, "new_layer", None)
-        if new is None:
-            return None
-        if not self.release_under() and lay is not None:
-            return None                   # (its frame is up: never here)
-        try:
-            lay = self._under_lay = new(cv.w, cv.h)
-        except Exception:  # noqa: BLE001
-            return None
-        _ui_draw.held_layer(ws, cv)
         return lay
-
-    def _put_under(self, cv):
-        u = self._under
-        if u is not None:
-            lay, x = u
-            cv.blit_strip_rect(lay, x, 0, x, 0, lay.w, lay.h)
-
-    def _drop_under(self):
-        self._washed.drop()
-        self._under = None
-
-    def release_under(self):
-        """Free the layer the frame under the card is kept in, kept across
-        cards (minting it is a third of the card's first frame on the
-        T-Deck): the fit check's release. True when there was one; never
-        while a card is up over it."""
-        lay, self._under_lay = self._under_lay, None
-        if lay is None or self._under is not None:
-            self._under_lay = lay
-            return False
-        rel = getattr(lay, "release", None)
-        if rel is not None:
-            rel()
-        return True
 
     def show(self):
         ws = self.ws
@@ -349,7 +303,7 @@ class PauseMenu:
         self.sel = 0
         self.page = 0
         self._key = getattr(ws.input, "last_key", 0)
-        self._drop_under()
+        self._hold.drop()
         self._capture = True
         if self._host is None:
             self._host = _ui_draw.AppHost()
@@ -365,8 +319,8 @@ class PauseMenu:
             self.choose_row(self.HOME)
             return
         self.open = False
-        self._put_under(self.ws.sys_canvas)   # the frame as the game left it
-        self._drop_under()
+        self._hold.unsnap(self.ws, self.ws.sys_canvas)   # the frame as the game left it
+        self._hold.drop()
         self.ws.player.resume()
         self.ws.pause_touch()
 
@@ -388,8 +342,8 @@ class PauseMenu:
         """The stop card goes, the run's last frame put back."""
         self.open = False
         self.stopped = False
-        self._put_under(self.ws.sys_canvas)
-        self._drop_under()
+        self._hold.unsnap(self.ws, self.ws.sys_canvas)
+        self._hold.drop()
         self.ws.pause_touch()
         self.ws._dirty = True
 
@@ -520,32 +474,35 @@ class PauseMenu:
     def _draw(self):
         ws = self.ws
         cv = ws.sys_canvas
+        hold = self._hold
         top = ws.wm.top_is_player()
         if not top:
             self._capture = False         # a notice over the screen it opened from
         elif self._capture:
-            self._keep_under(cv, _desk_class())
-        elif self._under is not None and self._washed.put(
-                ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv)):
+            self._capture = False
+            if self.prealloc() is not None:
+                hold.snap(ws, cv)
+        elif hold.snapped and hold.put(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv)):
             ws.icon_spec()
             self._card()                  # over the frame kept washed
             return
         else:
-            self._put_under(cv)
+            hold.unsnap(ws, cv)
         ws.icon_spec()                    # the theme's set in the engine, as the bar has it
         # the paused game dims under the card (D-01): over the frame just
         # put back, or the composite just made, never over the last scrim;
         # the whole glass, or on the desk the content under its bar
-        if self._under is not None or ws.canvas is not cv or not top:
+        if hold.snapped or ws.canvas is not cv or not top:
             _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
-            if self._under is not None and top:
-                self._washed.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
+            if hold.snapped and top:
+                hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
         self._card()
 
     def _washed_key(self, cv):
         """What the kept frame washed is a function of: the frame kept, the
         glass and the look."""
-        return (self._under[0], cv, cv.w, cv.h, self.scrim_rect(), self.ws.look.look_gen)
+        return (self.ws.held_pages[2], cv, cv.w, cv.h, self.scrim_rect(),
+                self.ws.look.look_gen)
 
     def scrim_rect(self):
         """What the card's scrim washes: on the desk, and under a notice
@@ -819,7 +776,7 @@ class SystemMenuUI:
         self.about = _about_ui.AboutCard(ws)
         # The handheld home under the card, washed (`put_home`), and the
         # frame that put it back
-        self._held = _ui_draw.HeldPage()
+        self._held = _ui_draw.Hold()
         self._put_f = -1
         self._key = None            # the key `put_home` asked, on frame `_key_f`
         self._key_f = -1
@@ -1005,7 +962,7 @@ class SystemMenuUI:
     def draw_full(self, dt):
         """The menu on a frame of the whole glass: the scrim, then the card.
         Where the handheld home lies under it alone the frame under the
-        card is held washed (`ui_draw.HeldPage`, surface model §14.5): a
+        card is held washed (`ui_draw.Hold`, surface model §14.5): a
         frame that put it back draws the card alone."""
         ws = self.ws
         f = ws._frames_drawn

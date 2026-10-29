@@ -928,8 +928,8 @@ change while it stays up; a frame that types into it or moves its focus
 paid the page and its wash anyway, and on the T-Deck the two were most of
 the frame. #66 has the numbers.
 
-**A modal keeps the page under it washed** (`ui_draw.HeldPage`): the first
-frame draws the page and washes it (`HeldPage.wash` over
+**A modal keeps the page under it washed** (`ui_draw.Hold`, one per modal):
+the first frame draws the page and washes it (`Hold.wash` over
 `ui_draw.wash_page`, the toolkit's own rule: the surface less the page's
 hint band at its foot), the wash storing each pixel to the held layer as
 it lands (`moy_shape_shadow_io`) and the rest of the page's rect copied
@@ -944,14 +944,15 @@ that retains its pixels and draws into its whole buffer: a pane's viewport
 so the holds share one layer of the canvas's size, kept across dialogs
 and freed by the Player's fit check after the home's retained frame
 (`docs/shell_layout_2026-10.md` §3). The Editor's Cart info
-dialog and Blocks' entry prompts hold their page; the pause and stop cards
-hold the run's frame washed beside the frame `_keep_under` keeps for the
-resumed game, whose layer is kept across cards and freed by the fit check
-the same way; where the game's frame is the system canvas (the handheld)
-an idle frame mints both, so no card's first frame does.
+dialog and Blocks' entry prompts hold their page (`Hold.under`); the pause
+and stop cards hold the run's frame washed beside the frame the same hold
+keeps as the game left it for the resumed game (`Hold.snap`), in a second
+shared layer kept across cards and freed by the fit check the same way
+(`ui_draw.held_layer`); where the game's frame is the system canvas (the
+handheld) an idle frame mints both, so no card's first frame does.
 
 **A dialog's first frame takes the page from the last frame where it can**
-(`HeldPage.shown`, `opened`, `last`): where the frame before drew the page
+(`Hold.shown`, `opened`, `last`): where the frame before drew the page
 with no dialog up, still and alone on the glass (no banner, overlay,
 cursor or pill over it, nothing animating), and the input that opened the
 dialog changed nothing else in the page -- A on a Blocks slot with no move
@@ -972,10 +973,10 @@ hold, so the menu's close stamps the one from before it.
 
 **A frame that only types into the dialog or moves its focus puts nothing
 back** (a dialog's rows frame, §14.7): the Editor's dialogs begin their
-frame ahead of the page (`ui_draw.DialogRows`), and where the engine
+frame ahead of the page (`Hold.rows_frame`), and where the engine
 licenses one and every buffer holds the page as the frames before left
 it -- each of the RETAINED_FRAMES painted frames before drew the same
-dialog over the hold, alone on the glass (`HeldPage.note`, `rows`) -- the
+dialog over the hold, alone on the glass (`Hold.note`, `rows`) -- the
 dialog draws its changed rows and the page stays as it is. On the desk the
 window's buffer is the hold: while a pane's tab has a prompt up the desk
 Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),

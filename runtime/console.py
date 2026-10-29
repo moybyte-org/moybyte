@@ -1215,8 +1215,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
-        # the layer a modal's held page lies in, and its holder (ui_draw.HeldPage)
-        self.held_pages = [None, None]
+        # the layers a modal's hold keeps what is under it in, and their
+        # holders (ui_draw.Hold, `held_layer`)
+        self.held_pages = [None, None, None, None]
         self.confirm = DeleteConfirm(self)   # the question before a cart is deleted
         self._marks_held = False      # a modal turned the focus marks off
         # Reboot hook: the device injects a callable (machine.reset via the OTA
@@ -3702,7 +3703,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # content layer is at the bottom and always consumes.
         i = self.input
         # Whether a change was reported since the last painted frame, before
-        # this input's own (`HeldPage.opened`).
+        # this input's own (`Hold.opened`).
         self._dirty_in = self._dirty or self._press_owed
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
@@ -4556,9 +4557,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def release_held(self):
         """Free one of the layers a modal holds what is under it in -- a
-        dialog's page (`ui_draw.HeldPage`), the frame under the pause card --
+        page held washed, the frame under the pause card (`ui_draw.Hold`) --
         the fit check's last releases: True when there was one."""
-        return _ui_draw.release_held(self) or self.pause.release_under()
+        return _ui_draw.release_held(self)
 
     def request_frame(self):
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
