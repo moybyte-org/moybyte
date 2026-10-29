@@ -77,6 +77,12 @@ _OWN_FRAMES = ("blocks", "cards", "code", "theme_config", "map", "music", "paint
 # Code tab's and theme Config's, the text view's rows).
 _PAGES = ("cards", "blocks", "code", "theme_config")
 
+# The panes whose text view moves its rows on a frame that draws the desk
+# whole only because the buffer it paints lags outside the pane, where the
+# WM says the buffer `shift_last` reads holds the page as the last draw left
+# it: a text view's rows draw for more than their move.
+_TEXT_PANES = ("code", "theme_config")
+
 # The Editor tabs whose surface, drawn in a pane, fills the pane's whole body
 # before anything else (Sprite, Map and Scene their `body_fill`, Code its
 # ground round the text view's rows, Settings its `ui.page`): their card is
@@ -185,6 +191,7 @@ class EditorDesk(Layer):
         # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
         self._own_key = None            # ...and at the last frame of a pane of its own
+        self._moves = None              # the pane whose text view moves on a whole frame
         self._clip = None               # the rect a frame of the Sound pane's own is clipped to
         # the layout the desk drew in last: its window's, which the WM has
         # not installed yet where it asks HELD and takes_lag
@@ -551,16 +558,18 @@ class EditorDesk(Layer):
             else:
                 ws.code_layout = old
 
-    def _tab_pane(self, tab, r, dt, own=False):
+    def _tab_pane(self, tab, r, dt, own=False, moves=False):
         layer = self.ws.layer_of(tab)
         if layer is None:
             return
         if tab in _PAGES:
             # the page's own shift and rows frames, on a frame of its pane's
             # own where the WM says the buffer `shift_last` reads holds it as
-            # the last draw left it; a whole frame draws it whole
+            # the last draw left it; a whole frame draws it whole, but for a
+            # text view's moves out of the last frame (`_TEXT_PANES`)
             page = self.ws.block_ui if tab == "blocks" else layer
-            page.vouch = self._vouch if own and self._vouch >= 2 else 1
+            page.vouch = (self._vouch if own and self._vouch >= 2 else 2 if moves
+                          else 1)
             try:
                 self._in_pane(tab, r, layer.draw, dt)
             finally:
@@ -773,7 +782,15 @@ class EditorDesk(Layer):
         x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
         if ret[3] > ret[1] and ret[4] > ret[2] and (ret[1] < x0 or ret[2] < y0
                                                      or ret[3] > x1 or ret[4] > y1):
-            return False                # the buffer lags outside the pane
+            # the buffer lags outside the pane: the frame draws whole, and
+            # what it changed is still the pane alone -- everything else
+            # draws as the frame before showed it -- so the buffers behind
+            # catch up rather than lag whole again; a text view moves its
+            # rows out of the last frame all the same
+            self._changed = [x0, y0, x1, y1]
+            if c in _TEXT_PANES and self._vouch >= 2:
+                self._moves = pane
+            return False
         if c == "music":
             # the desk's verbs run whole (focus rests on the first pane's
             # header), their pixels clipped to the pane
@@ -862,13 +879,14 @@ class EditorDesk(Layer):
                     self._own_key = None
                 if not alone:
                     self._draw(dt)
-                    if own is not None:
+                    if own is not None and self._changed is None:
                         cv = ws.sys_canvas
                         self._changed = [0, 0, cv.w, cv.h]
         finally:
             self._known = False
             self._ret[0] = 0
             self._vouch = 0
+            self._moves = None
 
     def _draw(self, dt):
         ws = self.ws
@@ -896,7 +914,7 @@ class EditorDesk(Layer):
                       and ws.layer_of(tab) is not None else 0)
             self._card(cv, th, r, n == fi, u, filled)
             if tab is not None and c not in _ON_VERBS:
-                self._tab_pane(tab, body, dt)
+                self._tab_pane(tab, body, dt, moves=pane == self._moves)
             elif c == "game":
                 self._game(cv, th, body, u)
             elif c in ("sheet", "sprites", "stamps"):

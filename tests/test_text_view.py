@@ -335,6 +335,40 @@ def test_a_key_step_past_the_foot_lands_as_one_shift(tmp_path, windowed):
     assert a.top == landed
 
 
+@pytest.mark.parametrize("bufs", (2, 3))
+def test_a_whole_frame_mid_drag_leaves_each_buffer_one_catch_up(tmp_path, bufs):
+    """On the desk, a frame that draws the Editor whole mid-drag (here the
+    pane's own key moved) leaves the buffers behind it lagging the whole
+    desk. Each catches up in a whole frame that changed the pane alone, and
+    the pane's frames are its own again: one whole frame never becomes a
+    gesture of them. The code moves its rows on every frame after the one
+    whose key moved, the catch-ups too."""
+    p = Pair(tmp_path, bufs, True)
+    _code(p)
+    d = p.a.editor_desk
+    whole = []
+    draw = d._draw
+
+    def counted(dt):
+        whole.append(p.n)
+        draw(dt)
+    d._draw = counted
+    cx, cy, cw, ch = p.a.wm._wins["menu"].content_rect()
+    x, y = cx + cw // 5, cy + 3 * ch // 5
+    p.both("touch", x, y)
+    p.frame()
+    p.both("touch_drag", x, y - 20)
+    p.frame()
+    del whole[:]
+    d._own_key = p.b.editor_desk._own_key = None
+    n = len(p.kinds)
+    for k in range(2, 14):
+        p.both("touch_drag", x, y - 20 * k)
+        p.frame()
+    assert whole == list(range(n, n + bufs)), whole
+    assert not p.kinds[n] and all(p.kinds[n + 1:]), p.kinds[n:]
+
+
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 def test_the_gutter_widening_draws_whole(tmp_path, bufs):
     p = Pair(tmp_path, bufs, False)
