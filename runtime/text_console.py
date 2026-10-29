@@ -131,6 +131,7 @@ class TextConsole:
         self._gen = 0             # moves with every write: the view's rows are made again
         self._shown = []          # ...the rows as the log's text view takes them
         self._shown_gen = -1
+        self.top = 0              # the first row the log shows, as its view last drew
         self.ed = CodeEditor("", cols=self.cols, rows=1)
         self._ekey = KeyEdge()
         self._armed = False       # a script is waiting on a line
@@ -301,7 +302,7 @@ class TextConsole:
         self.title = str(title)
         self._lang = lang
         self._ekey = KeyEdge()
-        self._host.reset()                # the log's view starts at its top
+        self._host.reset()                # the log's view starts afresh, at its foot
         self.ended = False
 
     def api(self):
@@ -471,7 +472,7 @@ class TextConsole:
         if sym_h:
             cv.rect(cx, bottom - sym_h, cw, sym_h, th["surface"])
         _ui.at(cx, top + pad, cw, max(0, by - top - pad))
-        _ui.text_view("log", self._rows(), _LOG)
+        self.top = _ui.text_view("log", self._rows(), _LOG)[0]
         was = _ui_draw.print_font(fid)
         try:
             self._sym_rects = ()
