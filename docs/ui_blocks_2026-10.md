@@ -64,11 +64,9 @@ and are the model for anything new:
 
 ## 3. The gaps
 
-**G1. A full nest failed silently** (closed by §4.0). `MOY_UI_API_NEST` is
-2. Before §4.0, when it was full, `ui.scroll` and `ui.text_view` returned,
-`ui.dialog` answered -1 and `ui.popover` answered 0, which an app reads as
-"dismissed". Deeper nests are cheap: a nest record is a few bytes per
-context.
+**G1. Nest depth.** `MOY_UI_API_NEST` is 2, and a scroll region, text
+view, dialog or popover opened past it is an error (§4.0), never a silent
+return. Deeper nests are cheap: a nest record is a few bytes per context.
 
 **G2. Lists of rich rows.** `list` and `table` rows hold text cells only.
 Blocks outline, Music steps, the cards drawer and the home grid need rows
@@ -128,7 +126,7 @@ allocation pin in `tests/test_frame_alloc.py`.
 Every nest open past the limit raises in Python and Lua, and answers a
 distinct code in wasm (-5, `-MOY_UI_DEEP`); `tests/test_ui_nest.py` holds the
 three faces. `MOY_UI_API_NEST` rises to the depth the blocks below need,
-when one needs it. This came first because it is a correctness fix.
+when one needs it.
 
 ### 4.1 `ui.rows`: a list of rich rows
 
