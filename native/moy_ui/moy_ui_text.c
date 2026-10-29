@@ -1137,8 +1137,11 @@ int moy_ui_text_paint(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
         }
         int y = v[MOY_UI_TV_Y] + i * lh - v[MOY_UI_TV_OFF];
         // a row the clip leaves out draws nothing (an error's underline
-        // reaches the row after: the band is a row and its leak)
-        if (y - cy >= rin[3] || y - cy + lh + d.fs <= rin[1]) {
+        // reaches the row after: the error row's band is a row and its leak)
+        int leak = rows[i].p != NULL && v[MOY_UI_TV_ERR_ROW] >= 0
+                   && rows[i].line == v[MOY_UI_TV_ERR_ROW]
+                   && v[MOY_UI_TV_TEXT_H] + d.fs > lh ? d.fs : 0;
+        if (y - cy >= rin[3] || y - cy + lh + leak <= rin[1]) {
             continue;
         }
         draw_row(&d, rin, &rows[i], i > 0 ? &rows[i - 1] : NULL, y, err, find);
