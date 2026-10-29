@@ -3202,13 +3202,9 @@ class ScrollRegion:
     # sets it from C.
     BAR_W = 4
     # The motion -- a drag, the fling a release leaves, the glide a step or a
-    # reveal aims -- is native/moy_ui's (moy_ui_scroll_t); every dt is
-    # INJECTED (the loop's tick), never read from a clock, so the physics is
-    # deterministic under test. The fling's constants, as moy_ui.h has them:
-    FRICTION = 0.995    # per-ms decay: a fling coasts ~1s (0.995^1000 ~ 0.007)
-    MIN_FLING = 0.15    # px/ms (150 px/s): a release slower than this is a stop
-    STOP_VEL = 0.02     # px/ms: coasting below this comes to rest
-    VEL_EMA = 0.5       # release velocity reflects the last few pointer samples
+    # reveal aims -- is native/moy_ui's (moy_ui_scroll_t), its constants
+    # moy_ui.h's; every dt is INJECTED (the loop's tick), never read from a
+    # clock, so the physics is deterministic under test.
 
     def __init__(self, horizontal=False):
         self.horizontal = bool(horizontal)
