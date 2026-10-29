@@ -254,6 +254,7 @@ _DRAW_SIGS = (
     ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,
                        c.POINTER(_Box)], _I),
     ("moy_ui_month_h", [_I, _I, _I], _I),
+    ("moy_ui_modal_band", [_I, _I], _I),
     ("moy_ui_modal", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
     ("moy_ui_perf", [c.POINTER(_Sink), _I, _I, _I, c.POINTER(c.c_int16), _I, _I, _Span, _I,
                      _I, _I, c.POINTER(_Box)], _I),
@@ -834,6 +835,9 @@ def binding():
     def month_h(weeks, fs, desk):
         return int(lib.moy_ui_month_h(int(weeks), int(fs), int(desk)))
 
+    def modal_band(fs, desk):
+        return int(lib.moy_ui_modal_band(int(fs), 1 if desk else 0))
+
     def modal(cv, look, rect, fs, desk):
         t, keep = span("")
         _check(lib.moy_ui_modal(c.byref(sink(cv, look)), box_of(rect), t, int(fs), int(desk), 0))
@@ -946,7 +950,7 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock, modal, month_h, perf,
+              scrim, tile, unlock, modal, modal_band, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):

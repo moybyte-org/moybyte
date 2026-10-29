@@ -1723,13 +1723,9 @@ def rows_drawn():
 def popover_band(card, cv, desk):
     """The rows of popover card `card` (x, y, w, h) its body lies in, as
     (x, y, w, h): the card's width, inside its inset top and foot, clear of
-    its rounded corners and its drop (moy_ui_modal_band: the value row's
-    inset, MOY_UI_M_VALUE_ROW_INSET, at the scale)."""
-    pad = _METRICS["value_row"][_VALUE_ROW_INSET + (1 if desk else 0)] * _fs(cv)
+    its rounded corners and its drop (moy_ui_modal_band)."""
+    pad = _C.modal_band(_fs(cv), 1 if desk else 0)
     return (card[0], card[1] + pad, card[2], card[3] - 2 * pad)
-
-
-_VALUE_ROW_INSET = 28
 
 
 def repeat_frame():
