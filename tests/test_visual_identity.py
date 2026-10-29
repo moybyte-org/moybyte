@@ -122,7 +122,7 @@ def test_base_tier_editors_follow_the_theme(tmp_path):
     # The code editor gets exactly a light-and-dark pair on the base tier.
     tc = ws.code_layer._tones()
     assert tc["bg"] == ws.theme_colors["surface"]
-    assert tc["hl"] is not None                     # the light syntax set
+    assert ws.look.content_colors()["code_keyword"] is not None   # the light syntax set
 
 
 def test_bar_icons_get_plateless_light_variants(tmp_path):

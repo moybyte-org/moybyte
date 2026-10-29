@@ -175,7 +175,7 @@ def test_clean_cart_has_no_crash_line(tmp_path):
 
 
 def _colour_at(runs, i):
-    """The class of character `i` in the TextView's runs of a line."""
+    """The class of character `i` in the text view's runs of a line."""
     for a, b, cl in runs:
         if a <= i < b:
             return cl
@@ -183,7 +183,7 @@ def _colour_at(runs, i):
 
 
 def _runs(line, lang):
-    """The TextView's colour runs of `line` (native/moy_ui/moy_ui_text.c),
+    """The text view's colour runs of `line` (native/moy_ui/moy_ui_text.c),
     as (first column, column after, class)."""
     from runtime import ui_draw
     from runtime.code_layer import _HL_CLASSES
@@ -238,7 +238,10 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
     ws.screen = "menu"
     want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1b6e34,
             _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5f6478, _HL_BUILTIN: 0x1662a8}
-    hl = ws.code_layer._hl_map()
+    c = ws.look.content_colors()            # the roles the text view's tones take
+    hl = {_HL_TEXT: c["code_text"], _HL_KEYWORD: c["code_keyword"],
+          _HL_STRING: c["code_string"], _HL_NUMBER: c["code_number"],
+          _HL_COMMENT: c["code_comment"], _HL_BUILTIN: c["code_builtin"]}
     for cls, rgb in want.items():
         r, g, b = rgb >> 16, (rgb >> 8) & 255, rgb & 255
         assert chrome.rgb565_of(hl[cls]) == ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), cls

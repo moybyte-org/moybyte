@@ -1,14 +1,16 @@
-"""The TextView (native/moy_ui/moy_ui_text.h; docs/scroll_and_text_2026-10.md
-§5): the Code tab's and theme Config's rows drawn in C, one call a frame,
-and only the rows that changed.
+"""The text view (native/moy_ui/moy_ui_text.h, `ui.text_view`;
+docs/scroll_and_text_2026-10.md §5): the Code tab's and theme Config's rows,
+the desk's made code and an app's terminal, drawn in C through the verb, and
+only the rows that changed.
 
-Each session runs on two consoles fed the same input: one as it ships, and
-one whose Code tab draws its rows as the Python did before they crossed into
-C (`tests/text_twin.py`), whole, every frame -- on one, two and three buffers
-presented in turn as a board's are. Every presented picture of the first is
-held to the second's bytes, so the C is the Python's pixel for pixel and
-every rows and shift frame is a whole repaint's; the share of floor frames
-is held above a floor, so the mechanism cannot silently stop."""
+Each Code session runs on two consoles fed the same input: one as it ships,
+and one whose Code tab draws every frame whole (its host never shifts) -- on
+one, two and three buffers presented in turn as a board's are. Every
+presented picture of the first is held to the second's bytes, so every rows
+and shift frame is a whole repaint's; the share of floor frames is held
+above a floor, so the mechanism cannot silently stop. The C's colour runs
+are held to the Python highlighter's (`tests/text_twin.py`), and the Code
+tab's pixels at rest to the goldens (tests/test_shell_goldens.py)."""
 
 import re
 from pathlib import Path
@@ -23,30 +25,17 @@ _C = ui_draw._C
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_the_view_words_are_the_headers():
-    """ui_draw's TV_* and the binding's are moy_ui_text.h's MOY_UI_TV_*."""
-    src = (ROOT / "native" / "moy_ui" / "moy_ui_text.h").read_text()
-    body = src[src.index("MOY_UI_TV_X = 0"):src.index("MOY_UI_TV_LEN")]
-    names = []
-    for n in re.findall(r"MOY_UI_TV_([A-Z0-9_]+)", body):
-        if n not in names:
-            names.append(n)
-    tones = ui_draw.TT_N
-    assert "MOY_UI_TT_DIM, MOY_UI_TT_N" in src and src.count("MOY_UI_TT_") > tones
-    want = []
-    for n in names:
-        if n == "KEY":
-            break
-        want.append(n)
-    assert want[-1] == "TONE0"
-    assert [getattr(ui_draw, "TV_" + n) for n in want] == list(range(len(want)))
-    rest = names[names.index("KEY"):]
-    assert [getattr(ui_draw, "TV_" + n) for n in rest] == list(
-        range(ui_draw.TV_TONE0 + tones, ui_draw.TV_TONE0 + tones + len(rest)))
-    assert ui_draw.TV_LEN == ui_draw.TV_TONE0 + tones + len(rest)
+def test_the_options_are_the_headers():
+    """ui.text_view's options and the host binding's defaults are
+    moy_ui_api.h's MOY_UI_TXO_*."""
+    src = (ROOT / "native" / "moy_ui" / "moy_ui_api.h").read_text()
+    body = src[src.index("MOY_UI_TXO_ROWS = 0"):src.index("MOY_UI_TXO_LEN")]
+    names = re.findall(r"MOY_UI_TXO_([A-Z0-9_]+)", body)
     from tools import moy_ui_binding
-    assert (moy_ui_binding._TV_TOP, moy_ui_binding._TV_LINES) == (ui_draw.TV_TOP,
-                                                                  ui_draw.TV_LINES)
+    assert len(names) == moy_ui_binding._TXO_LEN == len(ui._TXO)
+    words = re.search(r"#define MOY_UI_TXO_DEFAULTS \{([^}]*)\}", src).group(1).split(",")
+    want = tuple(ui_draw.SYN_SGR if w.strip() == "MOY_UI_SYN_SGR" else int(w) for w in words)
+    assert want == moy_ui_binding._TXO_DEFAULTS
 
 
 # -- the runs ------------------------------------------------------------------------
@@ -124,16 +113,22 @@ def _console(tmp_path, windowed):
     return ws
 
 
+def _whole(host):
+    """`host`'s frames draw whole: it never plans a shift or rows frame."""
+    def shift(_cv, _th):
+        host.shifting = False
+    host._shift = shift
+
+
 class Pair:
     """The session on both consoles, frame by frame: `a` as it ships, `b`
-    drawing the Code tab's rows as the Python did, whole; `a`'s buffers
-    presented in turn."""
+    drawing the Code tab's rows whole; `a`'s buffers presented in turn."""
 
     def __init__(self, tmp_path, bufs, windowed):
         self.a = _console(tmp_path / "ships", windowed)
-        self.b = _console(tmp_path / "python", windowed)
-        text_twin.install(self.b.code_layer)
-        text_twin.install(self.b.theme_config_layer)
+        self.b = _console(tmp_path / "whole", windowed)
+        _whole(self.b.code_layer._host)
+        _whole(self.b.theme_config_layer._host)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -158,7 +153,7 @@ class Pair:
                     ws._dirty = True
                 ws.pointer.visible = False
                 k = ws._frames_drawn
-                ws.code_layer.text_kind = ws.theme_config_layer.text_kind = None
+                ws.code_layer._host.shifting = ws.theme_config_layer._host.shifting = False
                 drv.frame(1 / 30)
                 ws.painted = ws._frames_drawn != k
             a, b = self.a, self.b
@@ -166,14 +161,14 @@ class Pair:
             if not a.painted:
                 continue
             self.n += 1
-            self.kinds.append(a.code_layer.text_kind or a.theme_config_layer.text_kind)
+            self.kinds.append(a.code_layer._host.shifting or a.theme_config_layer._host.shifting)
             ra = self.root(a)
             shot, want = bytes(ra._buf), bytes(self.root(b)._buf)
             if shot != want:
                 w = ra.w
                 at = next(i for i in range(0, len(shot), 2) if shot[i:i + 2] != want[i:i + 2]) // 2
-                raise AssertionError("frame %d (%s, %d buffers) differs from the Python's at "
-                                     "(%d, %d)" % (self.n, a.code_layer.text_kind, self.bufs,
+                raise AssertionError("frame %d (%s, %d buffers) differs from a whole draw at "
+                                     "(%d, %d)" % (self.n, self.kinds[-1], self.bufs,
                                                    at % w, at // w))
             self.held.append(shot)
             if self.bufs > 1:
@@ -206,7 +201,7 @@ class Pair:
         self.frame(2)
 
     def floors(self):
-        return sum(1 for k in self.kinds if k in ("rows", "shift"))
+        return sum(1 for k in self.kinds if k)
 
 
 _BS = 8
@@ -224,6 +219,28 @@ def _code(p, title="Star Catcher"):
     p.frame(6, force=True)
 
 
+def _fling(p):
+    """A finger dragged up the code and let go: the view follows it by
+    pixels and coasts on after the release; a key brings the caret back."""
+    a = p.a.editor
+    lay = p.a.code_layout
+    x, y = lay.x0 + 60, lay.y0 + 8 * lay.lh
+    top = a.top
+    p.both("touch", x, y)
+    p.frame()
+    for k in range(1, 7):
+        p.both("touch_drag", x, y - k * lay.lh)
+        p.frame()
+    p.both("touch_up")
+    p.frame()
+    let_go = a.top
+    assert let_go > top, "the drag did not scroll the code"
+    p.frame(4)
+    assert a.top > let_go, "the release did not coast"
+    p.frame(40)
+    p.key(moy_input.KEY_DOWN)                   # the caret, out of view, glides back
+
+
 def _session(p):
     """Typing, caret moves, a held key, a selection and a paste, a long
     line scrolled across, find past the view, completion and the crash
@@ -237,6 +254,8 @@ def _session(p):
     p.key(moy_input.KEY_LEFT)
     p.held_key(moy_input.KEY_DOWN, 30)          # a held key: the view scrolls
     p.held_key(moy_input.KEY_UP, 12)
+    if not p.windowed:
+        _fling(p)                               # a drag scrolls, its release coasts
     p.held_key(_BS, 10)                         # Backspace held
     p.key(moy_input.KEY_DOWN, mods=moy_input.SHIFT)     # a selection
     p.key(moy_input.KEY_DOWN, mods=moy_input.SHIFT)
@@ -443,8 +462,9 @@ def test_a_terminal_appends_follows_and_scrolls(th, bufs):
 def test_a_line_added_below_the_view_draws_no_history(th):
     """While the view is scrolled up, a line added below it draws none of the
     history the view shows: the frame's text is the page's title and the
-    input line, drawn every frame outside the region, and the foot's row
-    under the fade, which the rows' growth moved."""
+    input line, drawn every frame outside the region, and the rows under
+    the foot's fade, which the rows' growth moved -- two where the view
+    stands part way down a row, three colour runs each."""
     r = TermRig(th, 1)
     r.app.add(30)
     for _ in range(40):
@@ -460,7 +480,7 @@ def test_a_line_added_below_the_view_draws_no_history(th):
     r.texts.clear()
     r.app.add()
     r.frame()
-    assert r.texts[-1] <= 4, r.texts
+    assert r.texts[-1] <= 2 + 2 * 3, r.texts
 
 
 def _cart_pixels(ws):
@@ -531,23 +551,3 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
         assert py[k][0] == lua[k][0], "frame %d: the Lua terminal drew other pixels" % k
     assert py[69][1][1] > 0, "the view did not follow its lines"
     assert py[129][1][1] < py[69][1][1], "the drag did not scroll it back"
-
-
-@pytest.mark.parametrize("first", (0, 7, 95))
-def test_the_desks_read_only_code_draws_the_pythons_pixels(tmp_path, first):
-    """`CodeLayer.draw_lines` (the desk's made code): numbered from the
-    line it starts at, cut at its width, the Python's pixels."""
-    ws = _console(tmp_path, False)
-    ws.open_in_editor([c for c in ws.carts.all if c.get("title") == "Star Catcher"][0])
-    ws.editor_app.set_tab("code")
-    lines = ["v%d = %d  # a line of made code, longer than the rect is wide" % (i, i)
-             for i in range(120)]
-    cv = ws.sys_canvas
-    shots = []
-    for twin in (False, True):
-        if twin:
-            text_twin.install(ws.code_layer)
-        cv.cls(0)
-        rows = ws.code_layer.draw_lines(lines, first, (12, 30, 250, 150))
-        shots.append((rows, bytes(cv._buf)))
-    assert shots[0] == shots[1]

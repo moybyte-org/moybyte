@@ -158,7 +158,7 @@ int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8
 // ui_table_part answers the next part's row of the table drawn last (from
 // 0; -1 after the last) and writes its cell's x, y, w and h at `out`.
 int32_t moy_ui_wasm_table_part(void *e, uint8_t *out, uint32_t cap);
-// ui_text_view: its lines NUL-separated, its options the MOY_UI_TXO_* words
+// ui_text_view: its lines NUL-separated, its options the first of the MOY_UI_TXO_* words
 // (little-endian i32s); writes the first line shown and the rows shown at
 // `out`.
 int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint8_t *lines,

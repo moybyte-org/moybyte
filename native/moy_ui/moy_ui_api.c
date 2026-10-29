@@ -194,6 +194,7 @@ size_t moy_ui_api_size(void) {
 }
 
 void moy_ui_api_reset(moy_ui_ctx_t *c) {
+    moy_ui_text_views_drop(c);
     memset(c, 0, sizeof(*c));
     c->magic = MAGIC;
     c->fs = 1;
@@ -1103,7 +1104,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             int32_t content, extent;
             k->over = 0;
             span_of(&v[pg], k, &content, &extent);
-            moy_ui_scroll_step(&k->sc, k->a, wy, MOY_UI_WHEEL_ROWS * row_h(c), content, extent);
+            int step = !(k->kd & MOY_UI_KD_TABLE) && k->rh > 0 ? k->rh : row_h(c);
+            moy_ui_scroll_step(&k->sc, k->a, wy, MOY_UI_WHEEL_ROWS * step, content, extent);
             moved = 1;
         }
     }
@@ -3147,9 +3149,11 @@ static void edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, 
 
 // The page's (or a scroll region's) foot, its groups closed: where its rows
 // run on below what shows, a fade over its last FADE_H rows of the scale.
+static int s_no_foot;               // the region closing draws no fade at its foot
+
 static void foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_keep_t *k = page_keep(c);
-    if (k != NULL) {
+    if (k != NULL && !s_no_foot) {
         edge_fades(c, s, c->page, k->b, c->scroll, MOY_UI_DEFAULT, 0, FADE_H * c->fs);
     }
 }
@@ -3222,7 +3226,8 @@ void moy_ui_text_tones(const int16_t tones[6]) {
 }
 
 #define TEXT_SALT 0x27d4eb2fu
-#define TEXT_PAD 4                  // the text's inset from the view's left, at the scale
+#define TEXT_PAD 8                  // the text's inset from the view's left, at the scale
+#define TEXT_MARK 3                 // the current line's mark, in from the view's left
 #define TEXT_WRAP_ROWS MOY_UI_TEXT_BREAKS
 static moy_ui_trow_t *s_trows;
 static uint32_t *s_starts;
@@ -3254,9 +3259,21 @@ static int tone_of(int look, int tt) {
     return moy_ui_token(look, token[tt]);
 }
 
+// The visual row line `line` starts on, where each line wraps at `cols`.
+static int32_t text_row_of(const moy_ui_lines_t *L, int32_t line, int cols, int sgr) {
+    int32_t row = 0;
+    for (int32_t i = 0; i < line && i < L->n; i++) {
+        const uint8_t *p;
+        size_t n;
+        row += text_line_rows(L, i, 1, cols, sgr, &p, &n);
+    }
+    return row;
+}
+
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
-                             const moy_ui_over_t *o, int32_t out[2]) {
+                             const moy_ui_span_t *marks, const moy_ui_over_t *o,
+                             int32_t out[2]) {
     o = over(o);
     out[0] = out[1] = 0;
     s_trows = moy_ui_text_scratch();
@@ -3300,24 +3317,42 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         }
         gc++;
     }
+    // a cut line runs on to the view's right edge, where it fades; a
+    // wrapped one breaks the inset in from it
     int pad = TEXT_PAD * fs;
-    int cols = (b.w - 2 * pad - gc * cell) / (cell > 0 ? cell : 1);
+    int cols = (b.w - (wrap ? 2 : 1) * pad - gc * cell) / (cell > 0 ? cell : 1);
     cols = cols < 1 ? 1 : cols;
-    // its rows: a line each, or each line's wrapped rows
+    uint32_t rid = hash(id.p, id.n, TEXT_SALT);
+    moy_ui_keep_t *k0 = keep_of(c, rid);
+    // the view's record: a view new to the context starts a fresh one
+    moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 1);
+    if (w != NULL && k0 == NULL) {
+        memset(&w->gen, 0, sizeof(*w) - offsetof(moy_ui_tview_t, gen));
+        moy_ui_text_reset(&w->t);
+    }
+    // its rows: a line each, or each line's wrapped rows (kept against the
+    // caller's gen)
+    int32_t gen = opt[MOY_UI_TXO_GEN];
     int32_t total = 0;
     if (!wrap) {
         total = L->n;
+    } else if (w != NULL && gen != 0 && w->gen == gen && w->cols == cols && w->n == L->n) {
+        total = w->total;
     } else {
         for (int32_t i = 0; i < L->n; i++) {
             const uint8_t *p;
             size_t n;
             total += text_line_rows(L, i, 1, cols, sgr, &p, &n);
         }
+        if (w != NULL) {
+            w->gen = gen;
+            w->cols = cols;
+            w->n = L->n;
+            w->total = total;
+        }
     }
     int32_t content = total * lh;
     content = content > 32767 ? 32767 : content;
-    uint32_t rid = hash(id.p, id.n, TEXT_SALT);
-    moy_ui_keep_t *k0 = keep_of(c, rid);
     int32_t was_b = k0 != NULL ? k0->b : 0;
     int was_foot = k0 != NULL && was_b > 0 && k0->a >= was_b - b.h;
     // its rows are its own gens (the view's record): the region carries a
@@ -3331,11 +3366,28 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     moy_ui_keep_t *k = page_keep(c);
     int32_t scroll = c->scroll;
     if (k != NULL) {
+        k->rh = (int16_t)lh;            // the wheel's step is its lines
         int32_t most = content - b.h;
         most = most < 0 ? 0 : most;
-        if (opt[MOY_UI_TXO_FOLLOW] && was_foot && content > was_b && scroll < most
-            && !(k->sc.flags & MOY_UI_SCROLL_DRAG)) {
-            moy_ui_scroll_glide_to(&k->sc, scroll, most, 0, content, b.h);
+        int32_t aim_to = -1;
+        if (opt[MOY_UI_TXO_TOP] >= 0) {
+            int32_t row = wrap ? text_row_of(L, opt[MOY_UI_TXO_TOP], cols, sgr)
+                               : opt[MOY_UI_TXO_TOP];
+            aim_to = row * lh;
+            aim_to = aim_to > most ? most : aim_to;
+        } else if (opt[MOY_UI_TXO_FOLLOW] && (k0 == NULL || (was_foot && content > was_b))
+                   && scroll < most) {
+            aim_to = most;              // a view that follows its foot starts there
+        }
+        if (aim_to >= 0 && aim_to != scroll && !(k->sc.flags & MOY_UI_SCROLL_DRAG)) {
+            if (k0 == NULL || c->in[MOY_UI_IN_DT] <= 0) {
+                // a view's first frame, or a frame with no time: it lands
+                k->a = aim_to;
+                moy_ui_scroll_land(&k->sc, &k->a);
+                c->scroll = scroll = aim_to;
+            } else {
+                moy_ui_scroll_glide_to(&k->sc, scroll, aim_to, 0, content, b.h);
+            }
         }
     }
     // the rows R shows
@@ -3351,17 +3403,23 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     v[MOY_UI_TV_FS] = fs;
     v[MOY_UI_TV_FONT] = (int32_t)font;
     v[MOY_UI_TV_TX] = b.x + pad;
-    v[MOY_UI_TV_MARK] = -1;
+    v[MOY_UI_TV_MARK] = opt[MOY_UI_TXO_MARK] ? b.x + TEXT_MARK * fs : -1;
     v[MOY_UI_TV_GUTTER] = gc;
     v[MOY_UI_TV_COLS] = cols;
     v[MOY_UI_TV_TOP] = scroll / lh;
     v[MOY_UI_TV_OFF] = scroll % lh;
+    v[MOY_UI_TV_LEFT] = wrap || opt[MOY_UI_TXO_LEFT] < 0 ? 0 : opt[MOY_UI_TXO_LEFT];
     v[MOY_UI_TV_CARET_ROW] = opt[MOY_UI_TXO_CARET_LINE];
     v[MOY_UI_TV_CARET_COL] = opt[MOY_UI_TXO_CARET_COL];
-    v[MOY_UI_TV_SEL_R0] = -1;
-    v[MOY_UI_TV_ERR_ROW] = -1;
+    v[MOY_UI_TV_SEL_R0] = opt[MOY_UI_TXO_SEL_R0];
+    v[MOY_UI_TV_SEL_C0] = opt[MOY_UI_TXO_SEL_C0];
+    v[MOY_UI_TV_SEL_R1] = opt[MOY_UI_TXO_SEL_R1];
+    v[MOY_UI_TV_SEL_C1] = opt[MOY_UI_TXO_SEL_C1];
+    v[MOY_UI_TV_ERR_ROW] = opt[MOY_UI_TXO_ERR_LINE];
+    v[MOY_UI_TV_FIND_CI] = opt[MOY_UI_TXO_FIND_CI] != 0;
     v[MOY_UI_TV_SYNTAX] = syn;
     v[MOY_UI_TV_FLAGS] = MOY_UI_TVF_GROUND | MOY_UI_TVF_CLIP | (wrap ? 0 : MOY_UI_TVF_FADE);
+    v[MOY_UI_TV_LINES] = L->n;
     int look = s->look;
     v[MOY_UI_TV_BG] = moy_ui_token(look, MOY_UI_T_SURFACE);
     v[MOY_UI_TV_CARET] = moy_ui_token(look, MOY_UI_T_INK_ACCENT);
@@ -3374,6 +3432,16 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         v[MOY_UI_TV_TONE0 + i] = tone_of(look, i);
     }
     v[MOY_UI_TV_KEY] = (int32_t)(c->cls | (c->win << 1));
+    if (w != NULL) {
+        v[MOY_UI_TV_OVER_Y0] = w->over0;
+        v[MOY_UI_TV_OVER_Y1] = w->over1;
+        w->over0 = w->over1 = 0;
+    }
+    moy_ui_span_t none = {(const uint8_t *)"", 0};
+    moy_ui_span_t err = marks != NULL && v[MOY_UI_TV_ERR_ROW] >= 0 ? marks[0] : none;
+    moy_ui_span_t find = marks != NULL ? marks[1] : none;
+    err = err.p == NULL ? none : err;
+    find = find.p == NULL ? none : find;
     int nrows = moy_ui_text_rows(&v[0]);
     nrows = nrows < MOY_UI_TEXT_ROWS ? nrows : MOY_UI_TEXT_ROWS;
     int32_t top = v[MOY_UI_TV_TOP];
@@ -3381,11 +3449,11 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         for (int i = 0; i < nrows; i++) {
             moy_ui_trow_t *r = &s_trows[i];
             int32_t ln = top + i;
-            r->line = ln;
             r->ca = 0;
             r->a = 0;
             size_t n = 0;
             r->p = ln < L->n ? L->get(L->src, ln, &n) : NULL;
+            r->line = ln;
             r->n = r->b = (uint32_t)n;
         }
         out[0] = top;
@@ -3426,52 +3494,75 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         out[0] = out[0] < 0 ? 0 : out[0];
     }
     out[1] = nrows;
-    // the record: this view's, or none where another view of the context
-    // holds it this frame
-    moy_ui_text_t *t = &c->text;
-    int recorded = c->text_id == 0 || c->text_id == rid;
-    if (recorded) {
-        c->text_id = rid;
-    }
-    moy_ui_span_t none = {(const uint8_t *)"", 0};
-    if (recorded && armed(c) && c->fl_stage == 1) {
+    moy_ui_text_t *t = w != NULL ? &w->t : NULL;
+    if (armed(c) && c->fl_stage == 1) {
         // a floor frame: the rows whose gen moved join the floor
         // the foot's fade, where the rows' height moved under it this frame
-        if (content != was_b && (content > scroll + b.h || was_b > scroll + b.h)) {
+        if (!opt[MOY_UI_TXO_MARK] && content != was_b
+            && (content > scroll + b.h || was_b > scroll + b.h)) {
             int fh = FADE_H * fs;
             floor_add(c, (rc_t){b.x, b.y + b.h - fh, b.x + b.w, b.y + b.h}, 1);
         }
-        if (!moy_ui_text_plan(t, v, s_trows, nrows, none, none)) {
-            floor_add(c, rc_of(b), 1);
+        if (t == NULL || !moy_ui_text_plan(t, v, s_trows, nrows, err, find)) {
+            floor_add(c, rc_of(b), 1);  // no record to say which rows moved: all of them
         } else {
-            for (int i = 0; i < nrows; i++) {
-                if ((t->floor[i >> 3] >> (i & 7)) & 1) {
-                    int y = b.y + i * lh - v[MOY_UI_TV_OFF];
-                    floor_add(c, (rc_t){b.x, y, b.x + b.w, y + lh}, 1);
+            // each run of rows whose gen moved, one band
+            for (int i = 0; i < nrows;) {
+                if (!((t->floor[i >> 3] >> (i & 7)) & 1)) {
+                    i++;
+                    continue;
                 }
+                int j = i + 1;
+                while (j < nrows && ((t->floor[j >> 3] >> (j & 7)) & 1)) {
+                    j++;
+                }
+                int y = b.y + i * lh - v[MOY_UI_TV_OFF];
+                floor_add(c, (rc_t){b.x, y, b.x + b.w, y + (j - i) * lh}, 1);
+                i = j;
             }
         }
-    }
-    if (!recorded && armed(c) && c->fl_stage == 1) {
-        floor_add(c, rc_of(b), 1);      // no record to say which rows moved: all of them
+        if (c->fl_lost) {
+            moy_ui_api_shift_break(c);  // a floor too broken up to hold: the pass draws whole
+        }
     }
     int64_t was = moy_text_print_font_use(font);
     clip_t kk;
     EACH_PIECE(c, kk, s, b) {
-        moy_ui_text_paint(NULL, s, v, s_trows, nrows, none, none, 1);
+        moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
     }
     if (was >= 0) {
         moy_text_print_font_use((uint32_t)was);
     }
-    if (recorded) {
-        moy_ui_text_note(t, v, s_trows, nrows, none, none);
+    if (t != NULL) {
+        moy_ui_text_note(t, v, s_trows, nrows, err, find);
+        // where its rows lay, for a hit test
+        w->x = b.x;
+        w->y = b.y;
+        w->w = b.w;
+        w->h = b.h;
+        w->lh = lh;
+        w->cell = cell;
+        w->tx = b.x + pad + gc * cell;
+        w->left = v[MOY_UI_TV_LEFT];
+        w->off = v[MOY_UI_TV_OFF];
+        w->rows = nrows;
+        for (int i = 0; i < nrows; i++) {
+            const moy_ui_trow_t *r = &s_trows[i];
+            w->line[i] = r->line;
+            w->ca[i] = r->p != NULL ? r->ca : 0;
+            w->cb[i] = r->p == NULL ? 0 : !wrap ? -1
+                       : r->ca + moy_ui_text_cols(r->p + r->a, r->b - r->a, sgr);
+        }
     }
-    // its rows' height, the scroll's range
+    // its rows' height, the scroll's range; an editor's view (`mark`) keeps
+    // its caret's line in view, and its foot draws no fade over the code
     c->y = (int16_t)content;
     if (k != NULL) {
         k->b = content;
     }
+    s_no_foot = opt[MOY_UI_TXO_MARK] != 0;
     nest_close(c, s, 1);
+    s_no_foot = 0;
     return 0;
 }
 
@@ -3558,6 +3649,42 @@ static void parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         edge_fades(c, s, c->tp_view, c->tp_n * c->tp_rh, c->tp_off, MOY_UI_DEFAULT, 1, c->tp_rh);
     }
     c->tp_id = 0;
+}
+
+int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
+                       int32_t out[2]) {
+    out[0] = out[1] = 0;
+    const moy_ui_tview_t *w = moy_ui_text_view_of(c, hash(id.p, id.n, TEXT_SALT), 0);
+    if (w == NULL || w->lh <= 0 || px < w->x || px >= w->x + w->w || py < w->y
+        || py >= w->y + w->h) {
+        return 0;
+    }
+    int i = (py - w->y + w->off) / w->lh;
+    if (i < 0 || i >= w->rows || w->line[i] < 0) {
+        return 0;
+    }
+    int col = px < w->tx ? 0 : (px - w->tx) / (w->cell > 0 ? w->cell : 1);
+    col += w->cb[i] < 0 ? w->left : w->ca[i];
+    if (w->cb[i] >= 0 && col > w->cb[i]) {
+        col = w->cb[i];
+    }
+    out[0] = w->line[i];
+    out[1] = col;
+    return 1;
+}
+
+void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int y1) {
+    moy_ui_tview_t *w = moy_ui_text_view_of(c, hash(id.p, id.n, TEXT_SALT), 0);
+    if (w == NULL || y1 <= y0) {
+        return;
+    }
+    if (w->over1 <= w->over0) {
+        w->over0 = y0;
+        w->over1 = y1;
+        return;
+    }
+    w->over0 = y0 < w->over0 ? y0 : w->over0;
+    w->over1 = y1 > w->over1 ? y1 : w->over1;
 }
 
 void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,

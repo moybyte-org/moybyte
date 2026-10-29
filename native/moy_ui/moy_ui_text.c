@@ -1,4 +1,4 @@
-// TextView (moy_ui_text.h): a text area in visual rows, its record and its
+// A text view (moy_ui_text.h): a text area in visual rows, its record and its
 // rows drawn.
 
 #include <string.h>
@@ -41,6 +41,8 @@ typedef struct {
     } word[WORD_MAX];
     uint8_t slot[WORD_SLOTS];   // word index + 1, 0 empty
     uint16_t pool_n, words;
+    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
+    uint32_t used;
 } text_mem_t;
 
 static text_mem_t *s_mem;
@@ -63,6 +65,48 @@ moy_ui_trow_t *moy_ui_text_scratch(void) {
 uint32_t *moy_ui_text_breaks(void) {
     text_mem_t *m = mem();
     return m != NULL ? m->starts : NULL;
+}
+
+moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
+    text_mem_t *m = make ? mem() : s_mem;
+    if (m == NULL || owner == NULL) {
+        return NULL;
+    }
+    moy_ui_tview_t *old = &m->views[0];
+    for (int i = 0; i < MOY_UI_TEXT_VIEWS; i++) {
+        moy_ui_tview_t *w = &m->views[i];
+        if (w->owner == owner && w->id == id) {
+            if (make) {
+                w->used = ++m->used;
+            }
+            return w;
+        }
+        if (w->owner == NULL || (old->owner != NULL && w->used < old->used)) {
+            old = w;
+        }
+    }
+    if (!make) {
+        return NULL;
+    }
+    memset(old, 0, sizeof(*old));
+    old->owner = owner;
+    old->id = id;
+    old->used = ++m->used;
+    old->over0 = old->over1 = 0;
+    moy_ui_text_reset(&old->t);
+    return old;
+}
+
+void moy_ui_text_views_drop(const void *owner) {
+    text_mem_t *m = s_mem;
+    if (m == NULL) {
+        return;
+    }
+    for (int i = 0; i < MOY_UI_TEXT_VIEWS; i++) {
+        if (m->views[i].owner == owner) {
+            memset(&m->views[i], 0, sizeof(m->views[i]));
+        }
+    }
 }
 
 static uint32_t word_hash(const uint8_t *p, size_t n) {
@@ -658,10 +702,6 @@ static uint32_t view_key(const int32_t *v) {
 
 // -- the record --------------------------------------------------------------------------
 
-size_t moy_ui_text_size(void) {
-    return sizeof(moy_ui_text_t);
-}
-
 void moy_ui_text_reset(moy_ui_text_t *t) {
     t->magic = MOY_UI_TEXT_MAGIC;
     t->key = 0;
@@ -786,6 +826,7 @@ typedef struct {
     const moy_ui_sink_t *s;
     const int32_t *v;
     int fs, scale;
+    int grounded;               // R's ground is filled already: a row fills none of its own
     // the run printer's state
     const uint8_t *p;
     int left, cols, tx0, y;
@@ -943,7 +984,9 @@ static void draw_row(dr_t *d, const int32_t in[4], const moy_ui_trow_t *r,
     int gc = v[MOY_UI_TV_GUTTER], cols = v[MOY_UI_TV_COLS], left = v[MOY_UI_TV_LEFT];
     int tx = v[MOY_UI_TV_TX], tx0 = tx + gc * cell;
     if (v[MOY_UI_TV_FLAGS] & MOY_UI_TVF_GROUND) {
-        rect(d, v[MOY_UI_TV_X], y, v[MOY_UI_TV_W], lh, v[MOY_UI_TV_BG]);
+        if (!d->grounded) {
+            rect(d, v[MOY_UI_TV_X], y, v[MOY_UI_TV_W], lh, v[MOY_UI_TV_BG]);
+        }
         // the error's underline of the row above, where it reaches this row,
         // under this row's marks as a whole draw lays it
         if (above != NULL && above->p != NULL && above->line == v[MOY_UI_TV_ERR_ROW]
@@ -1081,6 +1124,13 @@ int moy_ui_text_paint(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
                   && t->want_rows == n;
     int lh = v[MOY_UI_TV_LH], drawn = 0;
     int cy = d.t.cam_y;
+    // every row drawn where the clip lets it: R's ground is one fill, under
+    // the rows as their own would lie (they cover R)
+    if (!planned && (v[MOY_UI_TV_FLAGS] & MOY_UI_TVF_GROUND) && clip) {
+        rect(&d, v[MOY_UI_TV_X], v[MOY_UI_TV_Y], v[MOY_UI_TV_W], v[MOY_UI_TV_H],
+             v[MOY_UI_TV_BG]);
+        d.grounded = 1;
+    }
     for (int i = 0; i < n && rin[1] < rin[3]; i++) {
         if (planned && (i >= MOY_UI_TEXT_ROWS || !floor_has(t, i))) {
             continue;
@@ -1131,10 +1181,3 @@ void moy_ui_text_note(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, i
     t->want = 0;
 }
 
-int moy_ui_text_draw(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
-                     const moy_ui_trow_t *rows, int n, moy_ui_span_t err, moy_ui_span_t find,
-                     int whole) {
-    int drawn = moy_ui_text_paint(t, s, v, rows, n, err, find, whole);
-    moy_ui_text_note(t, v, rows, n, err, find);
-    return drawn;
-}

@@ -49,14 +49,14 @@ def draw(desk, c, r, u):
         map_foot(desk, r, u)
     elif c == "log":
         log(desk, r, u)
+    elif c == "made":
+        made(desk, r, u)
 
 
 def drawn_before(desk, c, cv, th, r, u):
-    """The parts drawn on the canvas before the frame begins: the made code
-    (in the Code tab's print font) and the Reference's map."""
-    if c == "made":
-        made(desk, r, u)
-    elif c == "maps":
+    """The parts drawn on the canvas before the frame begins: the
+    Reference's map."""
+    if c == "maps":
         map_view(desk, cv, th, r, u)
 
 
@@ -425,29 +425,21 @@ def made_lines(be):
 
 def made(desk, r, u):
     """The code the blocks make (EDITOR_LAYOUT.md's blocks cart), read only,
-    in the Code tab's type and colours, numbered; the wheel scrolls it.
-    Drawn before the frame begins, as the Code tab draws."""
+    numbered, in the Code tab's colours: a text view, which a drag and the
+    wheel scroll."""
     ws = desk.ws
     _bu, be = _blocks(desk)
     if be is None:
         return
-    lines = made_lines(be)
     x, y, w, h = r
     pad = 8 * u
-    rows = max(1, (h - 2 * pad) // ws.code_layout.lh)
-    st = desk.part_state
-    first = max(0, min(st.get("made top", 0), len(lines) - rows))
-    st["made top"] = first
-    ws.code_layer.draw_lines(lines, first, (x + pad, y + pad, w - 2 * pad, h - 2 * pad))
+    ui.at(x, y + pad, w, h - 2 * pad)
+    ui.text_view("made", made_lines(be), {"gutter": True, "syntax": ws.code_layer._lang()})
 
 
 def scroll(desk, c, d):
     """The wheel over a part that scrolls by rows: `d` notches."""
     st = desk.part_state
-    if c == "made":
-        st["made top"] = max(0, st.get("made top", 0) + 3 * d)
-        desk.ws._dirty = True
-        return True
     if c == "maps":
         vx, vy = st.get("ref view", (0, 0))
         cx, cy = st.get("ref cell", (0, 0))

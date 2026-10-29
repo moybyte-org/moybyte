@@ -777,8 +777,9 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
 
 
 def test_code_editor_drag_scrolls_without_crashing(tmp_path):
-    # Regression: press+drag inside the code area on the first frame must not blow up
-    # (self._drag was read before init), and should pan the viewport.
+    # Regression: press+drag inside the code area on the tab's first frame under a
+    # finger must not blow up, and pans the viewport (the text view's region, which
+    # takes a press once it has drawn).
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
@@ -790,6 +791,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.set_menu_view("code")
     ws.editor.set_text("\n".join("line %02d" % i for i in range(40)))
+    drv.frame(1 / 30)                         # the tab's first frame draws it
     drv.touch(C._CODE_X0 + 20, C._CODE_Y0 + 100); drv.frame(1 / 30)   # finger down
     drv.touch_drag(C._CODE_X0 + 20, C._CODE_Y0 + 10); drv.frame(1 / 30)  # drag up
     drv.touch_drag(C._CODE_X0 + 20, C._CODE_Y0 + 0); drv.frame(1 / 30)

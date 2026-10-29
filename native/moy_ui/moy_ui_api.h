@@ -387,10 +387,6 @@ typedef struct {
     moy_ui_box_t was_surface;
     uint16_t was_flags;
     uint8_t was_fs, was_hint;
-    // ui.text_view's record: the one text view of the context that keeps one
-    // (the first drawn each frame), by its id
-    uint32_t text_id;
-    moy_ui_text_t text;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -424,13 +420,30 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // the page). Its rows are the lines `L` gives: whole lines cut at its
 // width, or wrapped there (`wrap`); in the mono face, coloured by `syntax`
 // (MOY_UI_SYN_*: SGR escapes by default, a terminal's), numbered where
-// `gutter`, a caret at `caret_line`, `caret_col` (-1: none). Where
-// `follow`, a view at its foot when the text grows glides to the new foot
-// (a log, a terminal). A frame draws only the rows that changed and moves
-// the rest, as a scroll region's floor (§3.3 of
+// `gutter`, a caret at `caret_line`, `caret_col` (-1: none). An editor's
+// marks: a selection from (sel_r0, sel_c0) to (sel_r1, sel_c1) (sel_r0 -1:
+// none), an error on line `err_line` (-1: none) underlined, its words
+// `marks[0]` after it, the matches of the find query `marks[1]` (across
+// case where `find_ci`), the current line's mark (`mark`: an editor's view,
+// which keeps its caret's line in view itself and draws no fade at its
+// foot), the columns cut off at the left (`left`; a change draws the view
+// whole). `gen`, where
+// the caller gives one (non-zero), names the lines' content: the wrapped
+// rows' count is kept against it, else counted every frame. `top` (-1:
+// none) aims the view at that line, its first row at the view's top: a
+// glide there, or a jump on the view's first frame or a frame with no dt.
+// Where `follow`, a view starts at its foot, and at its foot when the text
+// grows it glides to the new foot (a log, a terminal). A frame draws only the rows that changed and
+// moves the rest, as a scroll region's floor (§3.3 of
 // docs/scroll_and_text_2026-10.md). out: the first line shown and the rows
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
 // the end are cut.
+//
+// A view keeps a record by its id (moy_ui_text.h's MOY_UI_TEXT_VIEWS, every
+// context's views together, the least recently drawn given up first): the
+// rows it drew, which it plans the next frame against, and where they lay,
+// which moy_ui_api_text_at reads. Its scroll is its region's, kept by the
+// context like every page's.
 typedef struct {
     void *src;
     int32_t n;
@@ -438,12 +451,28 @@ typedef struct {
 } moy_ui_lines_t;
 enum {
     MOY_UI_TXO_ROWS = 0, MOY_UI_TXO_WRAP, MOY_UI_TXO_SYNTAX, MOY_UI_TXO_FOLLOW,
-    MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL, MOY_UI_TXO_LEN
+    MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL,
+    MOY_UI_TXO_SEL_R0, MOY_UI_TXO_SEL_C0, MOY_UI_TXO_SEL_R1, MOY_UI_TXO_SEL_C1,
+    MOY_UI_TXO_ERR_LINE, MOY_UI_TXO_FIND_CI, MOY_UI_TXO_LEFT, MOY_UI_TXO_MARK,
+    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_LEN
 };
+// The options' defaults, in MOY_UI_TXO_* order: what a face that takes
+// fewer of them fills the rest with.
+#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1}
 // Answers 0, or MOY_UI_API_DEEP.
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
-                             const moy_ui_over_t *o, int32_t out[2]);
+                             const moy_ui_span_t *marks, const moy_ui_over_t *o,
+                             int32_t out[2]);
+// The text cell under (px, py) in view `id` as its last pass drew it: its
+// line and column into out, 1; 0 where the point lies off its rows (a
+// column left of the text is 0, past a row's end that row's end where it
+// wraps, else the column the point is over).
+int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
+                       int32_t out[2]);
+// Rows y0..y1 of view `id` were drawn over after its pass this frame (an
+// overlay the pass does not draw): its next frame draws them again.
+void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int y1);
 // The colour indices the syntax classes take under the live theme
 // (MOY_UI_TT_KEYWORD .. MOY_UI_TT_BUILTIN, the theme's code_* content roles;
 // TT_TEXT the code's ink), -1 where a role falls back to a token.

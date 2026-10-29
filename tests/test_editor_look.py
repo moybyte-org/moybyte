@@ -196,7 +196,7 @@ def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
     fs = lay.fs
     cv = ws.glass_canvas
     px = _px(ws)
-    caret = _rgb(cv, ws.code_layer._tones()["caret"])
+    caret = _rgb(cv, ws.theme_colors["ink_accent"])     # the text view's caret
     y = oy + lay.y0 + (ed.row - ed.top) * lay.lh
     x = ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
     cols = [c for c in range(x - lay.cell, x + lay.cell)

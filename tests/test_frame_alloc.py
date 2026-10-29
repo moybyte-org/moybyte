@@ -1027,10 +1027,11 @@ def test_an_app_drag_frame_allocates_only_its_moved_answers(result, app):
 #   Code pane's symbol keys included) until the debounce closed the burst.
 # * Each visible line printed its highlight runs as slices of the line, and
 #   looked its runs up under a fresh (language, line) key: ~200 bytes a line,
-#   every line, every frame.
+#   every line, every frame. The rows are the text view's now, planned and
+#   drawn in C inside `ui.text_view`.
 #
-# Both are measured here on the board-model MicroPython, over the modules
-# themselves: they allocate nothing.
+# The first is measured here on the board-model MicroPython, over the module
+# itself: it allocates nothing.
 
 BURST_DRIVER = r'''
 import sys, gc
@@ -1068,43 +1069,6 @@ while n < 50:
 print("RESULT", idle, typed, gc.mem_alloc() - m0)
 '''
 
-RUNS_DRIVER = r'''
-import sys, gc
-sys.path.insert(0, @RUNTIME@)
-from array import array
-import moy_ui
-
-# The Code tab's text view planning a frame: its rows' gens against its
-# record, every frame, the view scrolled a row each time.
-st = bytearray(moy_ui.text_size())
-v = array("i", [0] * @TV_LEN@)
-v[2] = 320
-v[3] = 200
-v[4] = 10           # lh
-v[5] = 8            # cell
-v[6] = 8            # text_h
-v[7] = 1            # fs
-v[11] = 4           # gutter
-v[12] = 38          # cols
-v[16] = 3           # the caret's row
-v[18] = -1          # no selection
-v[22] = -1          # no error
-v[24] = 1           # python
-lines = ["x = %d + y  # a line of a long cart" % i for i in range(400)]
-for i in range(3):
-    moy_ui.text_plan(st, v, lines, None, None)
-gc.collect()
-gc.disable()
-n = 0
-m0 = gc.mem_alloc()
-while n < 40:
-    v[13] = n
-    moy_ui.text_plan(st, v, lines, None, "cart")
-    n += 1
-print("RESULT", gc.mem_alloc() - m0)
-'''
-
-
 def _mp_result(tmp_path, driver, why):
     exe = require_unix_mp(board_model=True, why=why)
     script = tmp_path / "driver.py"
@@ -1123,12 +1087,3 @@ def test_the_bar_undo_read_allocates_nothing_through_a_typing_burst(tmp_path):
         "board-model MicroPython measures what it allocates.")
     assert (idle, typed) == (0, 1), "the burst's edit does not light the bar's undo"
     assert spent == 0, "50 bar undo reads through a typing burst allocated %d bytes" % spent
-
-
-def test_the_code_tabs_rows_plan_without_allocating(tmp_path):
-    from runtime import ui_draw
-    spent, = _mp_result(
-        tmp_path, RUNS_DRIVER.replace("@TV_LEN@", str(ui_draw.TV_LEN)),
-        "The Code tab's text view plans every painted Code frame; only "
-        "the board-model MicroPython measures what it allocates.")
-    assert spent == 0, "40 planned Code frames allocated %d bytes" % spent

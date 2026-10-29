@@ -138,9 +138,9 @@ class _Span(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
 
 
-# The TextView's view words this face writes (moy_ui_text.h's MOY_UI_TV_*;
-# runtime/ui_draw.py's TV_* names them all, tests/test_text_view.py pins both).
-_TV_TOP, _TV_LINES = 13, 45
+# moy_ui_api.h's MOY_UI_TXO_LEN and MOY_UI_TXO_DEFAULTS (tests/test_text_view.py pins both).
+_TXO_LEN = 17
+_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1)
 
 
 _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
@@ -148,11 +148,6 @@ _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
 
 class _Lines(c.Structure):
     _fields_ = [("src", c.c_void_p), ("n", c.c_int32), ("get", _LINE_FN)]
-
-
-class _TRow(c.Structure):
-    _fields_ = [("p", c.c_void_p), ("n", c.c_uint32), ("a", c.c_uint32), ("b", c.c_uint32),
-                ("ca", c.c_int32), ("line", c.c_int32)]
 
 
 class _Depth(c.Structure):
@@ -348,17 +343,13 @@ _DRAW_SIGS = (
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
-                              c.c_void_p, c.c_void_p], c.c_int32),
+                              c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
+    ("moy_ui_api_text_at", [c.c_void_p, _Span, _I, _I, c.c_void_p], _I),
+    ("moy_ui_api_text_cover", [c.c_void_p, _Span, _I, _I], None),
     ("moy_ui_text_tones", [c.c_void_p], None),
     ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_text_words_reset", [], None),
-    ("moy_ui_text_size", [], c.c_size_t),
     ("moy_ui_text_runs", [c.c_char_p, c.c_size_t, _I, c.c_void_p, _I], _I),
-    ("moy_ui_text_rows", [c.c_void_p], _I),
-    ("moy_ui_text_reset", [c.c_void_p], None),
-    ("moy_ui_text_plan", [c.c_void_p, c.c_void_p, c.c_void_p, _I, _Span, _Span], _I),
-    ("moy_ui_text_draw", [c.c_void_p, c.POINTER(_Sink), c.c_void_p, c.c_void_p, _I, _Span,
-                          _Span, _I], _I),
     ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
     ("moy_ui_api_audit", [_I], c.c_uint32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
@@ -1504,15 +1495,12 @@ def binding():
         return None if d is None else d.decode("utf-8", "replace")
 
 
-    # -- TextView (native/moy_ui/moy_ui_text.h) ------------------------------------
-    def text_size():
-        return int(lib.moy_ui_text_size())
-
+    # -- text views (native/moy_ui/moy_ui_text.h, ui.text_view) ---------------------
     def text_words(syn, words, tone):
         b = bytes(words)
         _check(lib.moy_ui_text_words(int(syn), b, len(b), int(tone)))
 
-    def api_text_view(ctx, cv, look, id, lines, opt, o):
+    def api_text_view(ctx, cv, look, id, lines, opt, o, err=None, find=None):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
         sp, keep = span(id)
@@ -1530,12 +1518,30 @@ def binding():
             return c.addressof(b[0])
         fn = _LINE_FN(get)
         L = _Lines(None, len(lines), fn)
-        w = (c.c_int32 * 7)(*[int(v) for v in opt])
+        w = (c.c_int32 * _TXO_LEN)(*_TXO_DEFAULTS)
+        for i, v in enumerate(list(opt)[:_TXO_LEN]):
+            w[i] = int(v)
         ob, okeep = _over(o)
+        e, ek = span(err or "")
+        f, fk = span(find or "")
+        marks = (_Span * 2)(e, f)
         out = (c.c_int32 * 2)()
-        _nested(lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w), ob,
-                                         c.addressof(out)))
+        _nested(lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w),
+                                         c.addressof(marks), ob, c.addressof(out)))
         return (out[0], out[1])
+
+    def api_text_at(ctx, id_, px, py):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        out = (c.c_int32 * 2)()
+        if not lib.moy_ui_api_text_at(p, t, int(px), int(py), c.addressof(out)):
+            return None
+        return (out[0], out[1])
+
+    def api_text_cover(ctx, id_, y0, y1):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        lib.moy_ui_api_text_cover(p, t, int(y0), int(y1))
 
     def text_tones(tones):
         t = (c.c_int16 * 6)(*[-1 if v is None else int(v) for v in list(tones)[:6]])
@@ -1548,49 +1554,7 @@ def binding():
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
-    def _tv_rows(view, lines):
-        v = (c.c_int32 * len(view)).from_buffer(view)
-        v[_TV_LINES] = len(lines)
-        n = min(256, int(lib.moy_ui_text_rows(c.addressof(v))))
-        rows = (_TRow * max(1, n))()
-        keep = []
-        top = v[_TV_TOP]
-        for i in range(n):
-            k = top + i
-            r = rows[i]
-            r.line = k
-            if 0 <= k < len(lines):
-                b = _b(lines[k])
-                buf = c.create_string_buffer(b, len(b))
-                keep.append(buf)
-                r.p = c.addressof(buf)
-                r.n = r.b = len(b)
-            else:
-                r.p = None
-        return v, rows, n, keep
-
-    def text_plan(state, view, lines, err, find):
-        v, rows, n, _keep = _tv_rows(view, lines)
-        e, ek = span(err)
-        f, fk = span(find)
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        return bool(lib.moy_ui_text_plan(c.addressof(st), c.addressof(v), c.addressof(rows), n,
-                                         e, f))
-
-    def text_draw(state, cv, look, view, lines, err, find, whole):
-        s = sink(cv, look)
-        v, rows, n, _keep = _tv_rows(view, lines)
-        e, ek = span(err)
-        f, fk = span(find)
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        return int(lib.moy_ui_text_draw(c.addressof(st), c.byref(s), c.addressof(v),
-                                        c.addressof(rows), n, e, f, 1 if whole else 0))
-
-    def text_reset(state):
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        lib.moy_ui_text_reset(c.addressof(st))
-
-    for f in (api_text_view, text_tones, text_size, text_words, text_runs, text_plan, text_draw, text_reset):
+    for f in (api_text_view, api_text_at, api_text_cover, text_tones, text_words, text_runs):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,

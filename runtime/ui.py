@@ -549,7 +549,7 @@ def scroll(id=None, o=None):
     _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
 
 
-_TXO = array("i", [0] * 7)              # text_view's options (moy_ui_api.h's MOY_UI_TXO_*)
+_TXO = array("i", [0] * 17)             # text_view's options (moy_ui_api.h's MOY_UI_TXO_*)
 _SYNTAXES = ("plain", "python", "lua", "json", "sgr")
 
 
@@ -563,7 +563,16 @@ def text_view(id, lines, o=None):
     when lines are added glides to the new foot: a log, a terminal),
     `gutter` (line numbers), `caret` (a line and column: an input line's).
     In the mono face; only the rows that changed draw. Answers the first
-    line shown and the rows shown."""
+    line shown and the rows shown.
+
+    The Python face's own, an editor's (the Code tab's): `sel` (line,
+    column, line, column: a selection's two ends), `err` (a line and the
+    error's words: underlined, its words after it), `find` (a query and
+    whether it matches across case: its matches marked), `left` (the
+    columns cut off at the left), `mark` (the current line's mark),
+    `lines_gen` (a number naming the lines' content, so a wrapped view
+    counts its rows once a gen) and `top` (a line the view glides to show
+    first)."""
     t = _T
     opt = _TXO
     o = o or {}
@@ -579,7 +588,26 @@ def text_view(id, lines, o=None):
         opt[6] = int(caret[1])
     else:
         opt[5] = opt[6] = -1
-    return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o))
+    sel = o.get("sel")
+    if sel:
+        opt[7] = int(sel[0])
+        opt[8] = int(sel[1])
+        opt[9] = int(sel[2])
+        opt[10] = int(sel[3])
+    else:
+        opt[7] = opt[9] = -1
+        opt[8] = opt[10] = 0
+    err = o.get("err")
+    opt[11] = int(err[0]) if err else -1
+    find = o.get("find")
+    opt[12] = 1 if find and find[1] else 0
+    opt[13] = int(o.get("left", 0) or 0)
+    opt[14] = 1 if o.get("mark") else 0
+    opt[15] = int(o.get("lines_gen", 0) or 0)
+    top = o.get("top")
+    opt[16] = -1 if top is None else int(top)
+    return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o),
+                            err[1] if err else None, find[0] if find else None)
 
 
 def field(label, text, max=32, o=None):

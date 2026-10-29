@@ -3257,7 +3257,7 @@ def _caret_pairs(ws, probe, img):
     column before its cell, a scale in from its glyph box's top and foot."""
     t = getattr(ws.code_layer, "_t", None)
     ed = ws.editor
-    if ws.screen != "menu" or t is None or "caret" not in t or ed is None:
+    if ws.screen != "menu" or t is None or ed is None:
         return []
     px = img.load()
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)

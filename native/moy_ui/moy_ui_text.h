@@ -1,8 +1,8 @@
-// TextView: a text area in visual rows (docs/scroll_and_text_2026-10.md §5,
-// docs/ui_api_2026-10.md's `ui.text`). One body for every text surface:
-// the shell's Code tab and theme Config (runtime/ui_draw.py's TextView), and
-// an app's text area through the public UI API (moy_ui_api_text: Python, Lua
-// and a compiled app).
+// A text view: a text area in visual rows (docs/scroll_and_text_2026-10.md §5,
+// docs/ui_api_2026-10.md's `ui.text_view`). One body for every text area
+// that draws through the public UI API's verb (moy_ui_api_text_view: Python,
+// Lua and a compiled app): the shell's Code tab and theme Config, the desk's
+// made code, the text console's log, and an app's.
 //
 // A view is a rect R of rows `lh` pixels apart, each row a span of one line
 // of text: a code line's whole length (scrolled across by `left` columns), or
@@ -27,8 +27,8 @@
 // draws whole; otherwise R's pixels move by the scroll (the caller's
 // shift_last) and the FLOOR -- the rows whose gen moved, the band the move
 // uncovered, and the rows an overlay covered last frame -- is all the frame
-// draws inside R. moy_ui_text_draw draws the floor (or every row) and
-// records the frame.
+// draws inside R. moy_ui_text_paint draws the floor (or every row) and
+// moy_ui_text_note records the frame.
 
 #ifndef MOY_UI_TEXT_H
 #define MOY_UI_TEXT_H
@@ -123,14 +123,33 @@ typedef struct {
     uint32_t ngen[MOY_UI_TEXT_ROWS], ngen2[MOY_UI_TEXT_ROWS];
 } moy_ui_text_t;
 
+// A view's record as the verb keeps it (moy_ui_api_text_view), by its owner
+// (the context it draws in) and its id: the rows' record, the wrapped rows'
+// count against the caller's gen, what an overlay covered, and where its rows
+// lay last pass -- R, the pitch, a column's width, where the text starts and
+// each row's line and columns -- which a hit test reads.
+#define MOY_UI_TEXT_VIEWS 4
+typedef struct {
+    const void *owner;
+    uint32_t id, used;
+    int32_t gen, cols, n, total;
+    int32_t over0, over1;
+    int32_t x, y, w, h, lh, cell, tx, left, off, rows;
+    int32_t line[MOY_UI_TEXT_ROWS], ca[MOY_UI_TEXT_ROWS], cb[MOY_UI_TEXT_ROWS];
+    moy_ui_text_t t;
+} moy_ui_tview_t;
+// Owner `owner`'s view `id`, or NULL where it keeps none; with `make`, the
+// least recently drawn record taken for it where it has none (forgotten:
+// its next frame draws whole). NULL where no memory could be had.
+moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make);
+// Every view `owner` keeps, forgotten.
+void moy_ui_text_views_drop(const void *owner);
 // The rows one draw lays out (MOY_UI_TEXT_ROWS) and a wrapped line's breaks
 // (MOY_UI_TEXT_BREAKS), shared by every face, one view drawing at a time:
 // taken at first use, NULL where no memory could be had.
 moy_ui_trow_t *moy_ui_text_scratch(void);
 uint32_t *moy_ui_text_breaks(void);
 
-// The bytes a record takes.
-size_t moy_ui_text_size(void);
 
 // Forget the record: the next frame draws whole.
 void moy_ui_text_reset(moy_ui_text_t *t);
@@ -147,15 +166,9 @@ int moy_ui_text_rows(const int32_t *v);
 int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, int n,
                      moy_ui_span_t err, moy_ui_span_t find);
 
-// Draw the rows the plan named into sink `s` -- every row where `whole`
-// (or where the plan said whole) -- and record the frame. Answers the rows
-// drawn (also v[DRAWN]).
-int moy_ui_text_draw(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
-                     const moy_ui_trow_t *rows, int n, moy_ui_span_t err, moy_ui_span_t find,
-                     int whole);
-
-// The two halves of moy_ui_text_draw: the rows drawn (those the clip meets;
-// `t` NULL or `whole`: every one), and the frame recorded.
+// Draw the rows the plan named into sink `s` -- every row where `whole`, `t`
+// NULL or the plan said whole, those the clip meets -- answering the rows
+// drawn (also v[DRAWN]); and record the frame.
 int moy_ui_text_paint(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
                       const moy_ui_trow_t *rows, int n, moy_ui_span_t err, moy_ui_span_t find,
                       int whole);

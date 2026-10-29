@@ -1,7 +1,8 @@
 """A drag scrolls content by the distance the finger moved, in both
-directions: the Code tab's pan (`code_layer._code_drag`) and a text handle's
-(`editor_handle.EditorHandle.drag`, the Notes cart's page), both through
-`ui_draw.drag_steps`, which keeps the sub-line remainder with the anchor.
+directions: the Code tab's text view (`ui.text_view`, which scrolls by
+pixels) and a text handle's (`editor_handle.EditorHandle.drag`, the Notes
+cart's page, through `ui_draw.drag_steps`, which keeps the sub-line
+remainder with the anchor).
 A slow drag -- a pixel a frame -- is the case that ran away: floor division
 made every upward pixel a whole line."""
 
@@ -61,7 +62,9 @@ def _code_ws(tmp_path):
     drv.frame(DT)
     ws.editor.lines = ["line %d" % i for i in range(300)]
     ws.editor.top = 100
-    drv.frame(DT)
+    for _ in range(30):                     # the view glides there
+        drv.frame(DT)
+    assert ws.editor.top == 100
     return ws, drv
 
 
@@ -93,6 +96,8 @@ def test_a_slow_code_drag_moves_the_lines_the_finger_moved(tmp_path, step):
 def test_a_code_drag_past_the_top_need_not_be_undone(tmp_path):
     ws, drv = _code_ws(tmp_path)
     ws.editor.top = 1
+    for _ in range(30):
+        drv.frame(DT)
     lay = ws.code_layout
     lh = lay.lh
     ax, ay, aw, ah = lay.code_area()

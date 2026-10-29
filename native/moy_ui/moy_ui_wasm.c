@@ -338,7 +338,7 @@ int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o) {
 int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
                          const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]) {
     OPEN(target);
-    return close_run(&r, nest_rc(moy_ui_api_text_view(c, &r.s, id, lines, opt, o, out)));
+    return close_run(&r, nest_rc(moy_ui_api_text_view(c, &r.s, id, lines, opt, NULL, o, out)));
 }
 
 int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
@@ -640,8 +640,10 @@ int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint
                               uint32_t on, uint8_t *out, uint32_t cap) {
     (void)e;
     OVER(ob, on);
-    int32_t words[MOY_UI_TXO_LEN] = {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1};
-    for (uint32_t k = 0; k < MOY_UI_TXO_LEN && 4 * k + 4 <= optn; k++) {
+    // a compiled app passes the public verb's options (rows .. caret); the
+    // editor's marks after them are the shell's
+    int32_t words[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;
+    for (uint32_t k = 0; k < MOY_UI_TXO_SEL_R0 && 4 * k + 4 <= optn; k++) {
         const uint8_t *b = opt + 4 * k;
         words[k] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16)
                              | ((uint32_t)b[3] << 24));

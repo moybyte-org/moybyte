@@ -923,7 +923,8 @@ def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, var
     _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
     t = _ws.code_layer._tones()
     bg = lum(t["bg"])
-    for role, v in (("caret", t["caret"]), ("value", _ws.theme_colors["value"])):
+    for role, v in (("caret", _ws.theme_colors["ink_accent"]),     # the text view's caret
+                    ("value", _ws.theme_colors["value"])):
         fg = lum(v)
         ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
         assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))

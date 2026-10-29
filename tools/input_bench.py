@@ -1702,8 +1702,8 @@ def _rect(bench, surf):
         v = bench.val("ws.projects_grid._region.view")
         return (x + v[0], y + v[1], v[2], v[3]) if v else (x, y, w, h)
     if r == "pane":
-        b = bench.val("(lambda d, c: c and c[3])(ws.editor_desk, ws.editor_desk is not None "
-                      "and ws.editor_desk.active() and ws.editor_desk._code_pane())")
+        b = bench.val("(lambda d, c: c and c[4])(ws.editor_desk, ws.editor_desk is not None "
+                      "and ws.editor_desk.active() and ws.editor_desk._own_pane())")
         if b:
             return (x + b[0] + b[2] // 16, y + b[1] + b[3] // 16, b[2] * 7 // 8, b[3] * 7 // 8)
         r = CODE_RECT                   # a handheld's Editor: the code fills the content

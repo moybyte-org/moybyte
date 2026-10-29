@@ -410,6 +410,8 @@ def test_the_wheel_scrolls_the_code_pane_past_its_caret_and_a_key_brings_it_back
     assert ed.top + ed.ROWS == len(ed.lines), "the last line is shown"
     assert (ed.row, ed.col) == (0, 0), "the caret stays"
     _tap(drv, ord("x"))
+    for _ in range(30):                         # the view glides back to the caret
+        drv.frame(DT)
     assert ed.top <= ed.row < ed.top + ed.ROWS and ed.lines[0].startswith("x")
 
 
@@ -693,6 +695,28 @@ def test_a_blocks_carts_code_workspace_shows_the_palette_and_the_made_code(block
     assert d._host.box("palette blocks") is not None
 
 
+def test_the_made_code_is_a_text_view_the_wheel_scrolls(blocks_desk):
+    """The made code draws through `ui.text_view` on the desk's verbs: its
+    rows answer a hit test, and the wheel over it scrolls it by pixels."""
+    from runtime import ui_draw, editor_parts as Parts
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    lines = len(Parts.made_lines(ws.block_ui.blocks_ed))
+    pane, r = next((p, r) for p, r, _p in d.panes() if p == ("made",))
+    x, y, w, h = d._body(r, d._unit(), pane)
+    px, py = x + 60, y + 20
+    first = ui_draw.text_at(d._host, "made", px, py)
+    assert first is not None and first[0] == 0
+    ox, oy = d._origin()
+    drv.hover(ox + px, oy + py)
+    drv.wheel(0, 3)
+    for _ in range(20):
+        drv.frame(DT)
+    got = ui_draw.text_at(d._host, "made", px, py)
+    assert lines > h // ws.code_layout.lh, "the made code fits its pane: nothing to scroll"
+    assert got[0] > 0, "the wheel did not scroll the made code"
+
+
 def test_a_palette_pick_puts_its_block_at_the_cursor_and_the_made_code_follows(blocks_desk):
     ws, drv = blocks_desk
     d = ws.editor_desk
@@ -893,7 +917,7 @@ def _code_ready(ws, drv):
     for _ in range(4):
         drv.frame(DT)
     d = ws.editor_desk
-    _tab, _layer, _pane, b = d._code_pane()
+    b = d._own_pane()[4]
     return d, (b[0], b[1], b[0] + b[2], b[1] + b[3])
 
 
@@ -932,7 +956,7 @@ def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
         drv.key_up(code)
         drv.frame(DT)
     shown = bytes(ws.glass_canvas._buf)
-    d._code_key = None                          # the next frame draws whole
+    d._own_key = None                           # the next frame draws whole
     ws._dirty = True
     drv.frame(DT)
     assert d.changed() == [0, 0, ws.sys_canvas.w, ws.sys_canvas.h]
@@ -986,7 +1010,7 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
             root._comp.last = shot
             root._buf[:] = held[-2]
     for ws in (a, b):
-        ws.editor_desk._code_key = None         # a whole frame
+        ws.editor_desk._own_key = None          # a whole frame
         ws._dirty = True
     frame()
     got = []

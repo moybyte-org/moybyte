@@ -496,7 +496,7 @@ static int moycore_ui_text_view(lua_State *L)
     luaL_checktype(L, 2, LUA_TTABLE);
     moycore_ui_lines_t ls = {L, 2};
     moy_ui_lines_t lines = {&ls, (int32_t)lua_rawlen(L, 2), moycore_ui_line};
-    int32_t opt[MOY_UI_TXO_LEN] = {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1};
+    int32_t opt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;
     if (lua_type(L, 3) == LUA_TTABLE) {
         lua_getfield(L, 3, "rows");
         opt[MOY_UI_TXO_ROWS] = lua_isinteger(L, -1) ? (int32_t)lua_tointeger(L, -1) : 0;

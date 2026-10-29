@@ -228,6 +228,8 @@ def test_a_mouse_selects_in_the_code_tab_and_a_finger_still_pans(tmp_path):
     d.frame(DT)
     assert not ed.has_selection()
     ed.top = 0
+    for _ in range(30):                 # the pan's coast and the glide back settle
+        d.frame(DT)
     d.hover(x, y)                       # a mouse hovers: its drag selects
     d.frame(DT)
     d.touch(x, y)
@@ -242,7 +244,8 @@ def test_a_mouse_selects_in_the_code_tab_and_a_finger_still_pans(tmp_path):
 def test_the_wheel_scrolls_the_code_and_shift_scrolls_it_across(tmp_path):
     ws, d, ed = _code(tmp_path, "\n".join("x" * 200 for _ in range(80)))
     d.wheel(0, 2)
-    d.frame(DT)
+    for _ in range(30):                 # the view glides three lines a notch
+        d.frame(DT)
     assert ed.top == 6 and (ed.row, ed.col) == (0, 0)
     d.wheel(0, 1, mi.SHIFT)
     d.frame(DT)

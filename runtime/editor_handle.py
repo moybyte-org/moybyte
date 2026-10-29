@@ -1201,8 +1201,9 @@ class EditorHandle:
 
         In SELECT mode it extends the selection to the finger. Otherwise it
         PANS, content following the finger, sideways too in the modes that do
-        not wrap -- `code_layer._code_drag`'s gesture, because it is the one a
-        kid's hand already learned in the Code tab."""
+        not wrap -- the Code tab's gesture (its text view scrolls by the
+        finger's pixels), because it is the one a kid's hand already learned
+        there."""
         self._gen += 1
         if not down:
             self._drag = None
