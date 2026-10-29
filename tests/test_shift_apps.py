@@ -2,8 +2,8 @@
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
 Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
 list of projects, Storybook's stories and Appearance's rows,
-dragged, flung and stepped through by keys, on one, two and three buffers
-presented in turn.
+dragged, flung and stepped through by keys, and the text console typed into,
+on one, two and three buffers presented in turn.
 
 Each case runs the same session on two consoles: one as it ships, its
 frames free to shift (the content's own ring vouching, §3.4), and one whose
@@ -83,6 +83,15 @@ def _settle_mtimes(root):
                 os.utime(os.path.join(dirpath, f), (1700000000 + n, 1700000000 + n))
 
 
+# the text console's script: a log longer than its view, and a line that
+# answers each line typed
+_LOG_SCRIPT = ("for i in range(40):\n    print('row %d of the log, a little longer' % i)\n"
+               "def _update(dt):\n"
+               "    s = input('> ')\n"
+               "    if s is not None:\n"
+               "        print('you said', s)\n")
+
+
 def _console(tmp_path, app, ships):
     import json
     from runtime import cart_index as ci
@@ -103,6 +112,10 @@ def _console(tmp_path, app, ships):
         ws.open_settings()
         if app != "settings":
             ws.settings_layer.open_page(app)
+    elif app == "console":
+        stored = moy_carts.save_file("docs", "log.py", _LOG_SCRIPT, ws.carts_root)
+        ok, why = ws.run_script("docs", stored)
+        assert ok, why
     elif app == "myart":
         for i in range(18):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
@@ -318,6 +331,57 @@ def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_pa
     p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch // 2)
     p.settle()
     assert p.share() > 0
+
+
+def _console_session(p):
+    """The text console: a prompt typed, a line entered and answered, the
+    prompt typed again on the frames after that move of the log, and the
+    log dragged back and coasting."""
+    cx, top, _cw, _ch = p.a.app_content_rect()
+    del p.kinds[:]
+
+    def typed(text):
+        for ch in text:
+            p.both("key_down", ord(ch), 0)
+            p.frame()
+            p.both("key_up", ord(ch), 0)
+            p.frame()
+    typed("hello\r")
+    typed("ok")
+    p.drag(cx + 40, top + 30, 100)
+    for _ in range(6):
+        p.frame()
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs):
+    """The text console under the FPS chip (`overdrew`), whose log the
+    chip misses: a typed prompt's frames draw its rows alone -- on two and
+    three buffers moving nothing where the buffer the frame paints holds the
+    log (`AppHost._lag`), the frames after a move of it too -- a moving log
+    draws whole, and every frame is a whole repaint's bytes."""
+    p = Pair(tmp_path, "console", bufs)
+    assert p.a.show_fps
+    _console_session(p)
+    k = p.kinds
+    assert k[:10] + k[12:16] == ["rows"] * 14, k
+    assert "shift" not in k, k
+
+
+def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
+    """Where what the console draws over the page after its pass meets
+    the log (the HUD's card, `overdrew`), a frame moves none of the
+    buffers it lies in: from the first frame it lies in one, the frames draw
+    whole, and every frame is a whole repaint's bytes."""
+    p = Pair(tmp_path, "console", 2)
+    cx, top, _cw, _ch = p.a.app_content_rect()
+    for ws in (p.a, p.b):
+        def over(ws=ws):
+            ws.canvas.rect(cx + 100, top + 60, 60, 30, 3)
+            ui_draw.overdrew(cx + 100, top + 60, 60, 30)
+        ws.perf_ui.draw = over
+    _console_session(p)
+    assert not any(p.kinds[1:]), p.kinds
 
 
 class _NoMark:

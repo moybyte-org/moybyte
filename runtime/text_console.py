@@ -451,13 +451,14 @@ class TextConsole:
         host = self._host
         moved = False
         if self._shown_gen != self._gen:
-            # rows came: a log at its foot moves to the new foot as this
-            # frame's shift
+            # rows came: a log at its foot moves to the new foot
             moved = _ui_draw.text_aim(host, "log", -1, len(self._rows()))
         inp = host.inp
-        if not (moved or host.hold or inp[7] or inp[8] or host.moving):
-            # the log neither scrolls nor follows (a typed prompt): its rows
-            # draw whole for less than the copy of them a shift would make
+        if moved or host.hold or inp[7] or inp[8] or host.moving:
+            # the log scrolls or follows: its rows draw whole for less than
+            # the copy of them a shift would make; a frame where it does
+            # neither (a typed prompt) draws none of them where the buffer
+            # it paints holds them
             host.whole()
         host.begin(cv, th, (cx, top, cw, ch))
         touch = _ui.input_kind() == "touch"

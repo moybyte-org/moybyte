@@ -415,9 +415,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # a tool through the bar X; the #71 BACKSPACE pause is retired, do not
 # reintroduce it.
 try:
-    from player import (Player, BAR_TYPES, SCRIPT_TYPE)
+    from player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE)
+    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
 
 # The TEXT CONSOLE (text_console.py): the surface a `type: "script"` cart runs
 # on -- scrollback + prompt, drawn by the shell as the run's `_draw` so a
@@ -5012,9 +5012,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _ui_draw.marks(_modal is None)
         _stack = self.wm.draw_stack()               # memoized (Stage 6c) -- no per-frame alloc
         # The content's own ring vouches for its buffers where it is alone on
-        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4).
-        _ui_draw.paint_frame(self._frames_drawn,
-                             self.wm.CONTENT_RING and self.wm.content_alone(), self)
+        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4), or alone
+        # but for the FPS chip, which names where it drew (`overdrew`).
+        _ring = self.wm.CONTENT_RING
+        _alone = _ring and self.wm.content_alone()
+        _ui_draw.paint_frame(self._frames_drawn, _alone, self,
+                             not _alone and _ring and self.show_fps
+                             and self.wm.content_alone(_SIG_FPS))
         for layer in _stack:
             if _modal is not None and layer.id in _modal:
                 _ui_draw.marks(True)

@@ -1687,8 +1687,13 @@ _AGAIN = [False]                        # a pass since again_take owes the next 
 # its content is alone on the glass -- the content's ring vouches for its
 # buffers there (a full-screen tier's content, no overlay, cursor or pill
 # over it); the console; the last painted frame before it that drew (not a
-# repeat of the one before it, `repeat_frame`); and the last repeat.
-_PAINT = [-1, False, None, -1, -1]
+# repeat of the one before it, `repeat_frame`); the last repeat; and whether
+# its content is alone but for rects the console draws over it after and
+# names (`overdrew`: the FPS chip).
+_PAINT = [-1, False, None, -1, -1, False]
+# The rect drawn over the painted frame's content after its pass, and that
+# frame (`overdrew`).
+_OVER = array("i", [0, 0, 0, 0, -1])
 # A window's content drawn by the windowed WM: 0 none, 1 a window frame, 2 one
 # whose target the WM's shown ring vouches holds the page as the frame before
 # left it (`window_frame`): the one voucher of a window's pages.
@@ -1698,16 +1703,32 @@ _SHIFT = "shift"
 _ROWS = "rows"
 
 
-def paint_frame(n, alone, console=None):
+def paint_frame(n, alone, console=None, over=False):
     """`console` paints frame `n` (its count of painted frames), its
     content alone on the glass where `alone`: an app's `AppHost` may then
-    make it a shift frame out of the frame before (`PaintRing`)."""
+    make it a shift frame out of the frame before (`PaintRing`). `over`:
+    alone but for what the console draws over it after its pass and names
+    (`overdrew`), which a shift frame's region must miss."""
     if _PAINT[4] != _PAINT[0]:
         _PAINT[3] = _PAINT[0]
     _PAINT[0] = n
     _PAINT[1] = bool(alone)
     _PAINT[2] = console
+    _PAINT[5] = bool(over) and not alone
     _CHANGE[0] = None
+
+
+def overdrew(x, y, w, h):
+    """Rect x, y, w, h was drawn over the painted frame's content after its
+    pass (the FPS chip, on a frame `paint_frame` was told is alone but for
+    it): an `AppHost` whose region it meets moves nothing out of the buffer
+    it lies in."""
+    o = _OVER
+    o[0] = x
+    o[1] = y
+    o[2] = w
+    o[3] = h
+    o[4] = _PAINT[0]
 
 
 def painted():
@@ -1877,6 +1898,55 @@ _DIRS = 15                              # the four directions' bits
 _KEYS_HOST = [None]
 
 
+def _band_add(a, at, cap, y0, y1):
+    """Rows [y0, y1) join the bands a[at:at + 2 * cap] (pairs y0, y1, kept in
+    order, an empty pair unused): merged with the bands they meet or touch,
+    and where all `cap` are taken, with the nearest."""
+    i = at
+    end = at + 2 * cap
+    while i < end and a[i + 1] > a[i] and a[i + 1] < y0:
+        i += 2
+    if i < end and a[i + 1] > a[i] and a[i] <= y1:
+        # it meets the band at i: grow that one, then fold the next ones in
+        if y0 < a[i]:
+            a[i] = y0
+        if y1 > a[i + 1]:
+            a[i + 1] = y1
+        j = i + 2
+        while j < end and a[j + 1] > a[j] and a[j] <= a[i + 1]:
+            if a[j + 1] > a[i + 1]:
+                a[i + 1] = a[j + 1]
+            j += 2
+        k = i + 2
+        while j < end:
+            a[k] = a[j]
+            a[k + 1] = a[j + 1]
+            k += 2
+            j += 2
+        while k < end:
+            a[k] = a[k + 1] = 0
+            k += 2
+        return
+    if a[end - 1] > a[end - 2]:
+        # every band taken: the new rows join the band before or after them
+        if i >= end or (i > at and y0 - a[i - 1] <= a[i] - y1):
+            i -= 2
+            a[i + 1] = y1 if y1 > a[i + 1] else a[i + 1]
+            a[i] = y0 if y0 < a[i] else a[i]
+        else:
+            a[i] = y0 if y0 < a[i] else a[i]
+            a[i + 1] = y1 if y1 > a[i + 1] else a[i + 1]
+        return
+    # a free pair: shift the bands from i on down one, and take i
+    k = end - 2
+    while k > i:
+        a[k] = a[k - 2]
+        a[k + 1] = a[k - 1]
+        k -= 2
+    a[i] = y0
+    a[i + 1] = y1
+
+
 def _rep_dirs(rw):
     """The directions a `rep_word` steps, as a frame's direction bits."""
     m = 0
@@ -1953,6 +2023,9 @@ _PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
 
 _LAG_HIST = 4                   # the frames a host remembers (RETAINED_FRAMES - 1 at most)
+_LAG_BANDS = 3                  # the bands a frame's floor is kept as (`_note`)
+_LAG_SLOT = 2 + 2 * _LAG_BANDS
+_FLOOR_MAX = 16                 # the floor rects `_note` reads; past them, one band
 
 
 class AppHost:
@@ -1980,7 +2053,10 @@ class AppHost:
         self.key = 0                    # the key typed last frame (a press is its change)
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
-        self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
+        self.ring = PaintRing()         # what the frames before left of the page in their buffers
+        # ...and what was drawn over it after each one's pass, a slot each
+        # (`overdrew`: x, y, w, h, and whether it was)
+        self._over = [array("i", [0] * 5) for _ in range(self.ring.n)]
         self._plan = array("i", [0] * 8)
         self._again = False           # `again` since the last begin: no shift frame
         # A dialog's rows frame is the host's to allow: `held(plan)` answers
@@ -2001,12 +2077,13 @@ class AppHost:
         self._wr = array("i", [0] * (4 * HOST_ROWS))
         self._wm = array("i", [0] * 5)
         # the last frames' plans, a slot a frame (n % _LAG_HIST): the frame,
-        # its kind (0 whole, 1 rows, 2 shift) and the band its floor spans;
-        # `_lag`'s answer, the band the buffer a frame paints lags
-        self._hist = array("i", [-1] * (4 * _LAG_HIST))
-        self._band = array("i", [0, 0])
+        # its kind (0 whole, 1 rows, 2 shift) and the bands its floor spans,
+        # a pair (y0, y1) each, _LAG_BANDS at most (an empty pair unused);
+        # `_lag`'s answer, the bands the buffer a frame paints lags
+        self._hist = array("i", [-1] * (_LAG_SLOT * _LAG_HIST))
+        self._band = array("i", [0] * (2 * _LAG_BANDS * _LAG_HIST))
         self._dy = 0
-        self._fl = array("i", [0] * 4)
+        self._fl = array("i", [0] * (4 * _FLOOR_MAX))
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -2115,6 +2192,7 @@ class AppHost:
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
         drawn = _C.api_shift_drawn(self.ctx)
         self.ring.close(drawn & 4)
+        self._overdrawn()
         self._note(drawn)
         away = elsewhere or _ON_BAR[0]
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
@@ -2183,7 +2261,7 @@ class AppHost:
         if w:
             ok = w >= 2 and ring.vouch_key(key, th)     # the WM's shown ring vouches
         else:
-            ok = _PAINT[1] and ring.vouch(cv, f, key, th)
+            ok = (_PAINT[1] or _PAINT[5]) and ring.vouch(cv, f, key, th)
         # A canvas whose copy costs about what the raster it saves does
         # (`SHIFT_COST`, per mille of a row's raster a row it copies costs;
         # None where unknown) draws the frame whole instead. A dialog's rows
@@ -2200,20 +2278,28 @@ class AppHost:
                 _pays(cv, p) if not p[7] else self.held is not None and self.held(p)):
             # the engine's plan; an app with rows of its own takes a rows
             # plan where it asked for one, its rows joining the floor
-            # (`floor_take`). Where the WM's word is that the buffer this
-            # frame paints holds the page as the frames RETAINED_FRAMES back
-            # left it (3, a direct render's), a rows frame moves only the
-            # band the rows frames since drew.
+            # (`floor_take`). Where the buffer this frame paints holds the
+            # page as the frames RETAINED_FRAMES back left it -- the WM's
+            # word (3, a direct render's), or this ring's on a full-screen
+            # tier (`held`) -- a rows frame moves only the band the rows
+            # frames since drew.
             ox = getattr(cv, "_ox", 0)
             oy = getattr(cv, "_oy", 0)
-            lag = self._lag(f, getattr(cv, "RETAINED_FRAMES", 1)) if w == 3 and not p[4] else -1
-            if lag < 0:
+            k = getattr(cv, "RETAINED_FRAMES", 1)
+            lag = (self._lag(f, k) if not p[4] and (
+                w == 3 or not w and k > 1 and ring.held(cv, f) == k - 1) else -1)
+            if not w and self._over_meets(p[0] + ox, p[1] + oy, p[2], p[3], k):
+                moved = False
+            elif lag < 0:
                 moved = cv.shift_last(p[0] + ox, p[1] + oy, p[2], p[3], 0, p[4])
-            elif lag:
-                b = self._band
-                moved = cv.shift_last(p[0] + ox, b[0] + oy, p[2], b[1] - b[0], 0, 0)
             else:
+                b = self._band
                 moved = True
+                for k in range(lag):
+                    y0 = b[2 * k]
+                    if moved and not cv.shift_last(p[0] + ox, y0 + oy, p[2], b[2 * k + 1] - y0,
+                                                   0, 0):
+                        moved = False
             if moved:
                 if lag:
                     cv.shift_fence()    # the floor draws over rows the move wrote
@@ -2221,7 +2307,33 @@ class AppHost:
                 self.shifting = True
                 self._dy = p[4]
                 _CHANGE[0] = _SHIFT if p[4] else _ROWS
-        ring.note(f, key, 0, None, cv, th, _PAINT[1] or w != 0)
+        ring.note(f, key, 0, None, cv, th, _PAINT[1] or _PAINT[5] or w != 0)
+
+    def _overdrawn(self):
+        """The newest paint's slot of what was drawn over it after its pass
+        (`overdrew`)."""
+        s = self._over[self.ring._i]
+        o = _OVER
+        if self.ring.size and o[4] == self._began >= 0:
+            s[0] = o[0]
+            s[1] = o[1]
+            s[2] = o[2]
+            s[3] = o[3]
+            s[4] = 1
+        else:
+            s[4] = 0
+
+    def _over_meets(self, x, y, w, h, n):
+        """Whether what was drawn over the page after any of the last `n`
+        paints' passes meets rect x, y, w, h: a move of it out of those
+        buffers would carry it."""
+        ring = self.ring
+        for b in range(n if n < ring.size else ring.size):
+            s = self._over[ring._slot(b)]
+            if (s[4] and s[0] < x + w and x < s[0] + s[2] and s[1] < y + h
+                    and y < s[1] + s[3]):
+                return True
+        return False
 
     def _note(self, drawn):
         """The frame begun last, as its pass left it (`drawn`, the engine's
@@ -2231,42 +2343,49 @@ class AppHost:
         if f < 0:
             return
         h = self._hist
-        i = (f % _LAG_HIST) * 4
+        i = (f % _LAG_HIST) * _LAG_SLOT
         h[i] = f
         if not (self.shifting and drawn):
             h[i + 1] = 0
             return
         h[i + 1] = 2 if self._dy else 1
+        for k in range(i + 2, i + _LAG_SLOT):
+            h[k] = 0
         b = self._fl
-        if _C.api_floor_box(self.ctx, b):
-            h[i + 2] = b[1]
-            h[i + 3] = b[1] + b[3]
-        else:
-            h[i + 2] = h[i + 3] = 0
+        n = _C.api_floor_into(self.ctx, b)
+        if n > _FLOOR_MAX:
+            if _C.api_floor_box(self.ctx, b):
+                h[i + 2] = b[1]
+                h[i + 3] = b[1] + b[3]
+            return
+        for r in range(n):
+            if b[4 * r + 3] > 0:
+                _band_add(h, i + 2, _LAG_BANDS, b[4 * r + 1], b[4 * r + 1] + b[4 * r + 3])
 
     def _lag(self, f, n):
         """Whether the buffer frame f paints lags the frame before's page
-        only in the bands the rows frames since f - n drew -- 1, their span
-        in `_band`; 0 none -- else -1."""
+        only in the bands the rows frames since f - n drew: how many bands,
+        each a pair (y0, y1) in `_band` (0, none), else -1."""
         if n > _LAG_HIST:
             return -1
         h = self._hist
-        y0 = 1 << 30
-        y1 = -y0
+        out = self._band
+        cap = len(out) // 2
+        for k in range(len(out)):
+            out[k] = 0
         for b in range(1, n):
-            i = ((f - b) % _LAG_HIST) * 4
+            i = ((f - b) % _LAG_HIST) * _LAG_SLOT
             if h[i] != f - b:
                 continue                # the page drew nothing that frame
             if h[i + 1] != 1:
                 return -1
-            if h[i + 3] > h[i + 2]:
-                y0 = h[i + 2] if h[i + 2] < y0 else y0
-                y1 = h[i + 3] if h[i + 3] > y1 else y1
-        if y1 <= y0:
-            return 0
-        self._band[0] = y0
-        self._band[1] = y1
-        return 1
+            for k in range(i + 2, i + _LAG_SLOT, 2):
+                if h[k + 1] > h[k]:
+                    _band_add(out, 0, cap, h[k], h[k + 1])
+        m = 0
+        while m < cap and out[2 * m + 1] > out[2 * m]:
+            m += 1
+        return m
 
     def floor_rects(self, out):
         """This rows frame's floor as the pass has it, into `out` (x, y, w,

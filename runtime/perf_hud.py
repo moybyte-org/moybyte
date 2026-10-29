@@ -89,6 +89,7 @@ class PerfHud:
             _ui_draw.perf(cv, th, a, _WORDS, b)
         finally:
             _ui_draw.cart_text(was)
+        _ui_draw.overdrew(b[0], b[1], b[2], b[3])
         pl = ws.player
         if pl is not None:
             pl.overdrew(cv, b[0], b[1], b[2], b[3])
