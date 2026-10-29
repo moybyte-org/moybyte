@@ -1500,7 +1500,7 @@ def binding():
         b = bytes(words)
         _check(lib.moy_ui_text_words(int(syn), b, len(b), int(tone)))
 
-    def api_text_view(ctx, cv, look, id, lines, opt, o, err=None, find=None):
+    def api_text_view(ctx, cv, look, id, lines, opt, o, err=None, find=None, into=None):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
         sp, keep = span(id)
@@ -1528,6 +1528,10 @@ def binding():
         out = (c.c_int32 * 2)()
         _nested(lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w),
                                          c.addressof(marks), ob, c.addressof(out)))
+        if into is not None:
+            into[0] = out[0]
+            into[1] = out[1]
+            return into
         return (out[0], out[1])
 
     def api_text_at(ctx, id_, px, py):

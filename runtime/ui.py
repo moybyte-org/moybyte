@@ -571,8 +571,9 @@ def text_view(id, lines, o=None):
     whether it matches across case: its matches marked), `left` (the
     columns cut off at the left), `mark` (the current line's mark),
     `lines_gen` (a number naming the lines' content, so a wrapped view
-    counts its rows once a gen) and `top` (a line the view glides to show
-    first)."""
+    counts its rows once a gen), `top` (a line the view glides to show
+    first) and `into` (an array('i') of two the answer is written into and
+    handed back, so a frame makes no tuple)."""
     t = _T
     opt = _TXO
     o = o or {}
@@ -607,7 +608,8 @@ def text_view(id, lines, o=None):
     top = o.get("top")
     opt[16] = -1 if top is None else int(top)
     return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o),
-                            err[1] if err else None, find[0] if find else None)
+                            err[1] if err else None, find[0] if find else None,
+                            o.get("into"))
 
 
 def field(label, text, max=32, o=None):

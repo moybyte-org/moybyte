@@ -369,6 +369,10 @@ class CodeLayer:
         self._pop = _array("i", [0, 0, 0, 0])    # a popover's card, as its pass drew it
         self.vouch = 0                # a desk pane's word for its buffer (EditorDesk.vouched)
         self._t = None                # per-draw tone map (set by _draw_code)
+        self._tk = [None, -1, None]   # ...made once a theme and look gen
+        self._rr = [0, 0, 0, 0]       # R, the code's rows' rect, each draw
+        self._view["into"] = _array("i", [0, 0])   # the view's answer: no tuple a frame
+        self._st = [-1, -1, -1, -1, -1, -1, -1, b""]   # the status line, made once a change
         self._stop_host = None        # the stopped line's popover's UI context
         self._stop_card = None        # and the card its last pass drew
         # -- #89 additions: selection / tools / find / gutter -----------------
@@ -1123,7 +1127,12 @@ class CodeLayer:
         # largest line number + one separating cell, so it stays readable at 320x240.
         if not self._gutter or ed is None:
             return 0
-        return len(str(len(ed.lines))) + 1
+        n = len(ed.lines)
+        d = 1
+        while n >= 10:                  # its digits, counted: no str a frame
+            n //= 10
+            d += 1
+        return d + 1
 
     def _text_x0(self, lay, ed):
         return lay.x0 + self._gutter_cols(ed) * lay.cell
@@ -1137,7 +1146,7 @@ class CodeLayer:
             return
         target = max(4, lay.cols - self._gutter_cols(ed))
         rows = max(1, lay.rows - self._top_rows(lay))
-        if (ed.COLS, ed.ROWS) != (target, rows):
+        if ed.COLS != target or ed.ROWS != rows:
             ed.set_view_size(target, rows)
 
     def _top_rows(self, lay):
@@ -1156,9 +1165,17 @@ class CodeLayer:
         """Per-draw color roles from the theme tokens, on every tier: the
         code surface and the chrome round its rows in the theme's roles (the
         rows' own are the text view's, `ui.text_view`)."""
-        th = self.ws.theme_colors
-        return _as_theme({"bg": th["surface"], "sym_bg": th["surface_alt"],
-                          "sym_edge": th["border"], "sym_ink": th["ink"]})
+        ws = self.ws
+        th = ws.theme_colors
+        gen = ws.look.look_gen
+        k = self._tk
+        if k[0] is th and k[1] == gen:
+            return k[2]                         # a painted frame makes no map
+        k[0] = th
+        k[1] = gen
+        k[2] = t = _as_theme({"bg": th["surface"], "sym_bg": th["surface_alt"],
+                              "sym_edge": th["border"], "sym_ink": th["ink"]})
+        return t
 
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
@@ -1178,7 +1195,11 @@ class CodeLayer:
             cv.cls(t["bg"])
         else:
             self._apply_gutter(lay, ed)          # #89: narrow ed.COLS while the gutter is on
-            r = (lay.cx, self._y0(lay), lay.cw, ed.ROWS * lay.lh)
+            r = self._rr                     # R: the view's rect, made once
+            r[0] = lay.cx
+            r[1] = self._y0(lay)
+            r[2] = lay.cw
+            r[3] = ed.ROWS * lay.lh
             self._ground_around(cv, r, t["bg"])
             self._rows(cv, r, ed)
         if lay.status_band is not None and ed is not None:
@@ -1255,11 +1276,26 @@ class CodeLayer:
         strip, the band across the content and its text on the code's
         column."""
         ws = self.ws
-        issues = "1 issue" if ws.code_err else "No issues"
+        st = self._st
+        err = 1 if ws.code_err else 0
+        n = len(ed.lines)
+        room = lay.status_text[2]
+        gen = ws.look.look_gen
+        if (st[0] != ed.row or st[1] != ed.col or st[2] != n or st[3] != err
+                or st[4] != room or st[5] != lay.fs or st[6] != gen):
+            st[0] = ed.row
+            st[1] = ed.col
+            st[2] = n
+            st[3] = err
+            st[4] = room
+            st[5] = lay.fs
+            st[6] = gen
+            st[7] = _status_line(
+                ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
+                 str(n) + " lines", "1 issue" if err else "No issues"),
+                room, lay.fs).encode("utf-8")
         _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
-        _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, (_status_line(
-            ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
-             str(len(ed.lines)) + " lines", issues), lay.status_text[2], lay.fs),))
+        _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, st[7])
 
     def _btn_spec(self, label, glyph):
         """The face spec for one chip: the chrome glyph KIND when this button has

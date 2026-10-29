@@ -384,6 +384,7 @@ def measure(loop):
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     notes(loop, info)
+    code(loop, info)
     apps(loop, info)
     achievements(loop, info)
     home(loop, info)
@@ -449,6 +450,114 @@ def notes(loop, info):
     info["notes_typing_drawn"] = ws._frames_drawn - d1
     info["notes_text"] = len(ws.player._focus_editor.text())
     gc.enable()
+
+
+def code(loop, info):
+    """The Editor's Code tab, a `ui.text_view`: typed into (a key every
+    fourth frame, the edit the editor's, outside the frame measured), then
+    its view sent down the file and back (`top`, the glide a key or Go to
+    starts). What each frame allocates, and what the tab's draw does: its
+    text view's pass (`_rows`) and the rest of it but the status line,
+    which a moved caret makes again."""
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    ed = None
+    for cart in ws.carts.all:            # a cart whose code the Editor opens
+        ws.open_in_editor(cart)
+        ws.set_menu_view("code")
+        ed = ws.editor
+        if ed is not None:
+            break
+        ws.exit()
+    info["code_cart"] = cart.get("title")
+    ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
+                          for i in range(120)))
+    ed.row = 5
+    ed.col = 0
+    for _ in range(60):
+        loop.step()
+    info["code_top"] = ws.wm.top_kind()
+    cl = ws.code_layer
+    acc = [0, 0, 0, 0, 0]               # rows bytes, rows calls, draw bytes, status bytes, draws
+    rows = cl._rows
+    draw = cl._draw_code
+    status = cl._draw_status
+
+    def _rows(cv, r, e):
+        m = mem_alloc()
+        rows(cv, r, e)
+        acc[0] += mem_alloc() - m
+        acc[1] += 1
+
+    def _draw():
+        m = mem_alloc()
+        draw()
+        acc[2] += mem_alloc() - m
+        acc[4] += 1
+
+    def _status(cv, lay, e):
+        m = mem_alloc()
+        status(cv, lay, e)
+        acc[3] += mem_alloc() - m
+
+    cl._rows = _rows
+    cl._draw_code = _draw
+    cl._draw_status = _status
+    keys = b"score = score + 1  "
+
+    def typing(ms):
+        out = []
+        n = 0
+        t0 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), t0) < ms:
+            if n % 4 == 0:
+                ed.key(keys[(n // 4) % len(keys)])
+                ws.mark_dirty()
+            n += 1
+            a = mem_alloc()
+            loop.step()
+            out.append(mem_alloc() - a)
+        return out
+
+    def take():
+        got = list(acc)
+        for i in range(len(acc)):
+            acc[i] = 0
+        return got
+
+    typing(1000)                         # the first keys' edges, settled
+    gc.collect()
+    gc.disable()
+    take()
+    info["code_typing"] = typing(@WINDOW_MS@)
+    info["code_typing_acc"] = take()
+    gc.enable()
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    take()
+    out = []
+    for top in (60, 0, 60, 0):
+        ed.top = top
+        ed.row = top
+        ws.mark_dirty()
+        for _ in range(40):
+            a = mem_alloc()
+            loop.step()
+            out.append(mem_alloc() - a)
+    info["code_glide"] = out
+    info["code_glide_acc"] = take()
+    gc.enable()
+    del cl._rows
+    del cl._draw_code
+    del cl._draw_status
+    ws.exit()
+    for _ in range(30):
+        loop.step()
 
 
 class _Resp:
@@ -897,6 +1006,23 @@ def test_notes_idle_allocates_nothing(result):
 def test_notes_typing_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["notes_typing"], "Notes typed into", text, minute=True)
+
+
+def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding(result):
+    """The Code tab draws through `ui.text_view` on every painted frame: its
+    text view's pass allocates nothing, typed into or gliding, and the rest
+    of its draw nothing but the status line a moved caret makes again. (A
+    frame of the Editor also pays its bar's strip, which every tab draws.)"""
+    info, text = result
+    assert info["code_top"] == "menu", info["code_top"]
+    for what in ("typing", "glide"):
+        rows, calls, drew, status, draws = info["code_%s_acc" % what]
+        assert calls > 20 and draws > 20, "Code %s: %d text view passes" % (what, calls)
+        assert rows == 0, "Code %s: its text view's passes allocated %d bytes over %d" % (
+            what, rows, calls)
+        assert drew - status == 0, (
+            "Code %s: its draws allocated %d bytes over %d, the status line aside"
+            % (what, drew - status, draws))
 
 
 # -- the desk Editor's Code pane -----------------------------------------------

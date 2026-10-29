@@ -1239,12 +1239,20 @@ def hints(cv, th, rect, items, desk=False, draw=True):
 
 def status_row(cv, th, rect, items):
     """The window status band ("Ln 13, Col 1" / "No issues"): a quiet strip on
-    the alt surface with dim ink, items spaced left-to-right."""
+    the alt surface with dim ink, items spaced left-to-right. `items` may be
+    the line already made: bytes, its items joined by NUL, which draws with
+    nothing made."""
+    look = _LOOK if th is _TH else _look(th)
+    if not items:
+        _C.status(cv, look, rect, b"", 0)
+        return
+    if type(items) is bytes:
+        _C.status(cv, look, rect, items, items.count(b"\0") + 1)
+        return
     parts = []
     for item in items:
         parts.append(item if type(item) is str else str(item))
-    _C.status(cv, _LOOK if th is _TH else _look(th), rect,
-              "\0".join(parts).encode("utf-8"), len(parts))
+    _C.status(cv, look, rect, "\0".join(parts).encode("utf-8"), len(parts))
 
 
 # --- the classic game-canvas button family -----------------------------------

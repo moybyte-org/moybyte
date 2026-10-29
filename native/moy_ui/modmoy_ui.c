@@ -2842,9 +2842,10 @@ static const uint8_t *tv_line(void *src, int32_t i, size_t *n) {
     return (const uint8_t *)mp_obj_str_get_data(it[i], n);
 }
 
-// api_text_view(ctx, cv, look, id, lines, opt, o[, err, find]) -> (first line
-// shown, rows shown); `opt` the MOY_UI_TXO_* words (an array('i')), `err` an
-// error's words and `find` the find query (None: none)
+// api_text_view(ctx, cv, look, id, lines, opt, o[, err, find, into]) -> (first
+// line shown, rows shown); `opt` the MOY_UI_TXO_* words (an array('i')), `err`
+// an error's words and `find` the find query (None: none); `into`, an
+// array('i') of two, takes the answer and is handed back: no tuple is made
 static mp_obj_t ui_api_text_view(size_t n_args, const mp_obj_t *a) {
     moy_ui_ctx_t *c = ctx_of(a[0]);
     moy_ui_sink_t s;
@@ -2864,10 +2865,20 @@ static mp_obj_t ui_api_text_view(size_t n_args, const mp_obj_t *a) {
                               span_of(n_args > 8 ? a[8] : mp_const_none)};
     nested(moy_ui_api_text_view(c, &s, span_of(a[3]), &L, (const int32_t *)ob.buf, marks,
                                 over_of(a[6], &o), out));
+    if (n_args > 9 && a[9] != mp_const_none) {
+        mp_buffer_info_t ib;
+        mp_get_buffer_raise(a[9], &ib, MP_BUFFER_WRITE);
+        if (ib.len < 2 * sizeof(int32_t)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: text_view's answer"));
+        }
+        ((int32_t *)ib.buf)[0] = out[0];
+        ((int32_t *)ib.buf)[1] = out[1];
+        return a[9];
+    }
     mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(out[0]), MP_OBJ_NEW_SMALL_INT(out[1])};
     return ret_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_view_obj, 7, 9, ui_api_text_view);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_view_obj, 7, 10, ui_api_text_view);
 
 // api_text_at(ctx, id, px, py) -> (line, column) under the point in view
 // `id` as its last pass drew it, or None
