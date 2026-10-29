@@ -2318,6 +2318,13 @@ class AppHost:
                 and not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
                 and not _C.api_moving(self.ctx))
 
+    def whole(self):
+        """The frame begun next draws whole, its page's pixels not moved out
+        of the last frame's: its app knows every row of it changes (a text
+        view's columns scrolled across), so a move would be copied for
+        nothing."""
+        self._again = True
+
     def again(self):
         """The pass changed what it had drawn before the change (a page it
         opened, a place it picked): the next frame is owed, as one the

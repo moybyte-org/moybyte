@@ -371,6 +371,7 @@ class CodeLayer:
         self._t = None                # per-draw tone map (set by _draw_code)
         self._tk = [None, -1, None]   # ...made once a theme and look gen
         self._rr = [0, 0, 0, 0]       # R, the code's rows' rect, each draw
+        self._left = 0                # the first column the view drew
         self._view["into"] = _array("i", [0, 0])   # the view's answer: no tuple a frame
         self._st = [-1, -1, -1, -1, -1, -1, -1, b""]   # the status line, made once a change
         self._stop_host = None        # the stopped line's popover's UI context
@@ -1238,6 +1239,11 @@ class CodeLayer:
             # the editor moved its top (a key, a typed line, Go to): the
             # view lands there as this frame's shift
             _ui_draw.text_aim(host, "code", top, len(ed.lines))
+        if ed.left != self._left:
+            # the columns scrolled across: every row changes, so the frame
+            # draws whole rather than first moving the last frame's pixels
+            self._left = ed.left
+            host.whole()
         if self.vouch:
             _ui_draw.window_frame(self.vouch)
         try:

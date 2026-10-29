@@ -546,7 +546,7 @@ def code(loop, info):
         wheel_y = 0
         mods = 0
     wheel = _Wheel()
-    for notches in (6, -6, 6, -6):
+    for notches in (6, -6) * 4:
         wheel.wheel_y = notches          # the wheel, which glides the view
         cl._wheel(wheel)
         for _ in range(40):
