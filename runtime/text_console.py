@@ -42,6 +42,10 @@ Nothing grows: the oldest row is overwritten, and a resize does not reflow rows
 that are already in the ring (a terminal does not either) -- new writes take
 the new width.
 
+The log draws through `ui.text_view` (docs/scroll_and_text_2026-10.md §5): a
+drag scrolls it by pixels and its release coasts, and while it shows its foot
+new rows glide it down to the new foot; scrolled up, it stays where it is.
+
 ## What the terminal (#115) inherits
 
 All of it. `on_line` is the seam: set it and every entered line goes to that
@@ -72,6 +76,7 @@ _ANSWER = "\x01"
 _ENDED = "The script ended."
 _KEYS_READING = ("confirm", "Send", "cancel", "Stop")
 _KEYS_ENDED = ("confirm", "Run again", "back", "Back")
+_LOG = {"follow": True}             # the log's text view: it follows its foot
 
 
 # Lua has no `input` of its own and libmoy owns `print` (the DRAW verb), so a
@@ -113,19 +118,19 @@ class TextConsole:
 
     LINES = 200          # scrollback capacity, in WRAPPED rows
     MIN_COLS = 8
-    MIN_ROWS = 2
 
     def __init__(self, ws, names):
         self.ws = ws
         self.NAMES = names
         self.cols = 38
-        self.rows = 16
         self._cap = self.LINES
         self._buf = [""] * self._cap
         self._start = 0
         self._n = 0
         self._open = False        # the newest row is unterminated (print(end=""))
-        self.back = 0             # rows scrolled up from the bottom
+        self._gen = 0             # moves with every write: the view's rows are made again
+        self._shown = []          # ...the rows as the log's text view takes them
+        self._shown_gen = -1
         self.ed = CodeEditor("", cols=self.cols, rows=1)
         self._ekey = KeyEdge()
         self._armed = False       # a script is waiting on a line
@@ -134,10 +139,11 @@ class TextConsole:
         self.on_line = None       # #115: a REPL takes every line instead
         self.title = ""
         self._lang = "python"
-        self._drag = None         # (y, back) while a finger scrolls the log
         self._sym_rects = ()      # built by draw(), read by the tick's pointer
         self.ended = False        # the script's run is over (its prompt band says so)
-        self._host = _ui_draw.AppHost()   # the hint strip's UI context
+        # the page's UI context: the log's text view (a drag scrolls it and
+        # its release coasts, new rows glide it to its foot) and the hints
+        self._host = _ui_draw.AppHost()
 
     # -- the ring -------------------------------------------------------------
 
@@ -147,7 +153,7 @@ class TextConsole:
         self._start = 0
         self._n = 0
         self._open = False
-        self.back = 0
+        self._gen += 1
 
     def count(self):
         return self._n
@@ -163,6 +169,7 @@ class TextConsole:
         return "\n".join(self.row(i) for i in range(self._n))
 
     def _push(self, row):
+        self._gen += 1
         if self._n < self._cap:
             self._buf[(self._start + self._n) % self._cap] = row
             self._n += 1
@@ -174,7 +181,24 @@ class TextConsole:
         return self._buf[(self._start + self._n - 1) % self._cap]
 
     def _set_last(self, row):
+        self._gen += 1
         self._buf[(self._start + self._n - 1) % self._cap] = row
+
+    def _rows(self):
+        """The log as its text view takes it, made again after a write: an
+        echoed line's prompt in the dim ink and its answer in `value` (SGR
+        2 and 36, `ui.text_view`'s)."""
+        if self._shown_gen != self._gen:
+            out = []
+            for i in range(self._n):
+                raw = self._buf[(self._start + i) % self._cap]
+                cut = raw.find(_ANSWER)
+                if cut >= 0:
+                    raw = "\x1b[2m" + raw[:cut] + "\x1b[36m" + raw[cut + 1:]
+                out.append(raw)
+            self._shown = out
+            self._shown_gen = self._gen
+        return self._shown
 
     def _append(self, seg):
         """Add `seg` to the open row, opening rows as it fills them."""
@@ -203,7 +227,6 @@ class TextConsole:
                 self._push("")            # a bare newline is a blank row
             self._open = False
             i = j + 1
-        self.back = 0                     # writing follows the tail
         self._dirty()
 
     # -- the prompt -----------------------------------------------------------
@@ -265,12 +288,6 @@ class TextConsole:
             return True
         return False
 
-    def scroll(self, rows):
-        """Scroll the log by `rows` (positive = back through history)."""
-        top = max(0, self._n - self.rows)
-        self.back = max(0, min(top, self.back + int(rows)))
-        self._dirty()
-
     # -- the run --------------------------------------------------------------
 
     def start(self, title, lang="python"):
@@ -284,7 +301,7 @@ class TextConsole:
         self.title = str(title)
         self._lang = lang
         self._ekey = KeyEdge()
-        self._drag = None
+        self._host.reset()                # the log's view starts at its top
         self.ended = False
 
     def api(self):
@@ -382,6 +399,8 @@ class TextConsole:
         if gp is not None:
             self._pointer(gp[0], gp[1], bool(gp[2]),
                           bool(gp[3]) if len(gp) > 3 else False)
+        if not self._host.still():
+            self._dirty()                       # the log coasts or glides
 
     def _pointer(self, px, py, click, down):
         if click:
@@ -389,17 +408,8 @@ class TextConsole:
                 if (r[0] <= px < r[0] + r[2]) and (r[1] <= py < r[1] + r[3]):
                     self.key(ord(self._symbols()[i]))
                     return
-        if down:
-            if self._drag is None:
-                self._drag = (py, self.back)
-            else:
-                lh = self._lh()
-                moved = _ui_draw.drag_steps(py - self._drag[0], lh) if lh else 0
-                top = max(0, self._n - self.rows)
-                self.back = max(0, min(top, self._drag[1] + moved))
-                self._dirty()
-        else:
-            self._drag = None
+        if self._host.point(px, py, click, down):   # a drag scrolls the log
+            self._dirty()
 
     def _symbols(self):
         return symbols_for(self._lang)
@@ -411,9 +421,6 @@ class TextConsole:
 
     def _fs(self):
         return max(1, int(getattr(self.ws.canvas, "font_scale", 1) or 1))
-
-    def _lh(self):
-        return _ui_draw.font("mono")[2] * self._fs() + 4 * self._fs()
 
     def draw(self):
         """The run's draw hook: the whole console, on whatever surface the
@@ -438,7 +445,7 @@ class TextConsole:
         fid, cell, line, _asc = _ui_draw.font("mono")
         fw = cell * fs
         lh = line * fs + 4 * fs
-        out_ink, dim, value, accent = th["ink"], th["ink_dim"], th["value"], th["accent"]
+        dim, value, accent = th["ink_dim"], th["value"], th["accent"]
         cx, top, cw, ch = self.ws.app_content_rect()   # under the host's strip
         self._host.begin(cv, th, (cx, top, cw, ch))
         touch = _ui.input_kind() == "touch"
@@ -452,30 +459,22 @@ class TextConsole:
                 _ui.hints(keys)
         bottom = top + ch - foot
         pad = 8 * fs
-        cv.rect(cx, top, cw, bottom - top, th["surface"])
         sym_h = 12 * fs + 2 * 3 * fs if touch else 0
         band = lh + 2 * pad
-        body_h = bottom - top - band - sym_h
+        by = bottom - band - sym_h
         self.cols = max(self.MIN_COLS, (cw - 2 * pad) // fw)
-        self.rows = max(self.MIN_ROWS, (body_h - pad) // lh)
         self.ed.set_view_size(self.cols, 1)
         self.ed._scroll()                # the one-line prompt follows its caret
+        # The log: a text view from under the pad above it to the prompt's
+        # band, which follows its foot as rows come.
+        cv.rect(cx, top, cw, pad, th["surface"])
+        if sym_h:
+            cv.rect(cx, bottom - sym_h, cw, sym_h, th["surface"])
+        _ui.at(cx, top + pad, cw, max(0, by - top - pad))
+        _ui.text_view("log", self._rows(), _LOG)
         was = _ui_draw.print_font(fid)
         try:
-            # The log, oldest-visible first. `back` is how far up from the tail.
-            first = max(0, self._n - self.rows - self.back)
-            y = top + pad
-            for i in range(first, min(self._n, first + self.rows)):
-                raw = self._buf[(self._start + i) % self._cap]
-                cut = raw.find(_ANSWER)
-                if cut < 0:
-                    cv.print(raw, cx + pad, y, out_ink, 1)
-                else:
-                    cv.print(raw[:cut], cx + pad, y, dim, 1)
-                    cv.print(raw[cut + 1:], cx + pad + cut * fw, y, value, 1)
-                y += lh
             self._sym_rects = ()
-            by = bottom - band - sym_h
             cv.rect(cx, by, cw, band, th["surface_alt"])
             cv.rect(cx, by, cw, fs, th["border"])
             ty = by + pad

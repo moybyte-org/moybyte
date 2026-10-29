@@ -72,18 +72,3 @@ def test_print_wraps_at_the_view_width_and_end_keeps_the_row_open(tmp_path):
     con.clear()
     con.write("\n\n")          # a bare newline is a blank row, not nothing
     assert con.count() == 2 and con.row(0) == ""
-
-
-def test_scrolling_back_holds_a_window_of_the_log(tmp_path):
-    from runtime.text_console import TextConsole
-    con = TextConsole(_ws(tmp_path), {})
-    con.rows = 4
-    for i in range(20):
-        con.write("row %d\n" % i)
-    assert con.back == 0                     # a write follows the tail
-    con.scroll(3)
-    assert con.back == 3
-    con.scroll(100)
-    assert con.back == 20 - con.rows         # clamped at the oldest row
-    con.scroll(-100)
-    assert con.back == 0

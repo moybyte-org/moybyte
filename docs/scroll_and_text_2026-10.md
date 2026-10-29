@@ -236,7 +236,8 @@ default.
 |---|---|---|---|
 | verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
-| the Code tab, theme Config text, Notes, the fields, the text console | `TextView` (§5) over a `ScrollRegion` in visual rows | the view's region | a caret move reveals through `glide_to`; a page key is `step` |
+| the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, glides the view there (`glide_to`) |
+| Notes, the fields | Notes' handle in whole lines (`EditorHandle`); a field is one row | the handle's drag (`pan_drag`) | the handle keeps its caret in view |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
 The Blocks outline and Music's steps scroll in Python by whole rows
@@ -303,7 +304,7 @@ key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
-fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `TextView`
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `AppHost`
 own one; the home's `_still_ring` (§14.4) is one whose change is its
 parts' keys and the bar's. The one-body guard is a grep: no other list of painted frames
 in `runtime/` or `native/moy_ui/`.
@@ -448,7 +449,7 @@ WM's ring vouches, as windowed.
 
 ### 3.5 Text contents and the home
 
-The same record, two more speakers. A `TextView` (§5) reports its change as
+The same record, two more speakers. A text view (§5) reports its change as
 a translation of the text rect by k visual rows plus the rows it edited and
 the caret's; a home arrangement (§9) as a translation of its band plus the
 cells whose selection changed. Each draws its lag from the record: rows are
@@ -472,7 +473,7 @@ paint re-arms the ring.
 
 ## 5. Text editors: the edited line and the caret
 
-**One body: `TextView`**, a verb of the C UI library (`native/moy_ui`) and
+**One body: the text view**, `ui.text_view`, a verb of the C UI library (`native/moy_ui`) and
 part of the app-facing `ui` API (`docs/ui_api_2026-10.md`), not an Editor
 helper: an app that wants a text area -- a chat log, a terminal -- calls the
 same verb in Python, Lua or a compiled app and gets the same rows, its look
@@ -480,12 +481,17 @@ from the theme like every other part and changed per call through the
 API's overrides (§3 there). The shell's editors are its first callers. It
 is the view of a text buffer
 in **visual rows** -- a wrapped paragraph's rows, a code line's one row --
-with the first visible row, the rows' pitch, the caret, the selection, and a
-`PaintRing`. The Code tab (`CodeLayer`, which the theme Config text extends
-as `ConfigLayer`), the editor handle (`EditorHandle`, which the Player makes
-for Notes), the verbs' fields and the text console draw their rows through
-it. The buffer stays where it is (`CodeEditor`, the handle's document, the
-console's ring), and what changed is the view's to find: it keeps each
+with the first visible row, the rows' pitch, the caret, the selection; its
+scroll is its region's, kept by the context as every page's, and its record
+is kept by its id (`MOY_UI_TEXT_VIEWS` of them, every context's together,
+the least recently drawn given up first). What draws through it: the Code
+tab (`CodeLayer`, which the theme Config text extends as `ConfigLayer`),
+the desk's made code (`editor_parts.made`) and the text console's log
+(`TextConsole`), each with one `ui.text_view` call a frame. Notes' editor
+handle (`EditorHandle`) paints its rows itself; the verbs' fields and the
+console's prompt line are drawn by their own. The buffer stays where it is
+(`CodeEditor`, the console's ring), and what changed is the view's to find:
+it keeps each
 visible row's gen -- a hash of what the row draws: its text, its line's
 number where a gutter shows it, and its marks (the current row, the
 caret's column, the selection's span, the find matches, an error) -- and a
@@ -502,8 +508,8 @@ in P4 on 2026-10-28). By cause, those rows are:
   the k exposed rows. `ui.text_view` is a scroll region of the verbs
   engine: a drag scrolls it by pixels, its release coasts, and a view that
   `follow`s its foot glides there when lines come, every frame of which is
-  a translation. The Code tab still pans by whole lines
-  (`CodeLayer._code_drag`), each a translation.
+  a translation; the Code tab's drag is that drag, and a `top` its editor
+  moved (a caret kept in view, find, Go to) glides the view there.
 
 **What draws the whole view**, named so none is inferred: a horizontal
 scroll (the Code tab's `ed.left` moves every row); a gutter width change
@@ -513,20 +519,25 @@ page change, and its p90 is priced as one in §15); and a buffer replaced.
 **Overlays over the text rect** -- the Code tab's completion popup, its
 crash popup, the jump and files overlays, the tool row, the autoscroll
 mark -- are rows: the rows an overlay covered last frame (its card and the
-shadow round it), moved by this frame's translation, join the floor, and
-the overlay draws over the frame's rows. On the desk a popover, a tooltip,
-a loupe or a divider's flash over the panes draws the next frame whole.
+shadow round it, `ui_draw.text_cover`), moved by this frame's translation,
+join the floor, and the overlay draws over the frame's rows. On the desk a
+popover, a tooltip, a loupe or a divider's flash over the panes draws the
+next frame whole.
 
-`TextView.plan(cv, ...)` asks the voucher whether the buffer `shift_last`
-reads holds R as the view drew it last -- the view's own `PaintRing` on the
-full-screen tier, and in a desk pane the Editor's word from the WM
-(`EditorDesk.vouched`: the window's buffer holds its last draw) -- and the
-record which rows moved; R's pixels then always come from that buffer
-(`shift_last` by the scroll, by 0 on a rows frame: translations never
-compose; where the WM's word is that the buffer the frame paints holds R as
-the frames `RETAINED_FRAMES` back left it -- a direct render's, 3 -- a rows
-frame moves only the bands the rows frames since drew), and `draw` draws
-the floor's rows, each whole and alone: its ground, the current mark, the
+The view's host (`AppHost._shift`, at begin) asks the voucher whether the
+buffer `shift_last` reads holds the page as the frame before drew it -- the
+host's `PaintRing` on the full-screen tier, and in a desk pane the WM's word
+handed down by the Editor (`EditorDesk.vouched`, `window_frame`) -- and the
+engine plans the frame (`moy_ui_api_shift_plan`); R's pixels then always
+come from that buffer (`shift_last` by the scroll, by 0 on a rows frame:
+translations never compose; where the WM's word is that the buffer the
+frame paints holds the page as the frames `RETAINED_FRAMES` back left it --
+a direct render's, 3 -- a rows frame moves only the band the rows frames
+since drew, `AppHost._lag`). In the pass the view plans its rows against
+its record (`moy_ui_text_plan`): the rows whose gen moved join the floor, a
+run of them one band, and a floor too broken up to hold draws the pass
+whole (`moy_ui_api_shift_break`). The floor's rows draw each whole and
+alone: its ground, the current mark, the
 gutter number, an error's underline, the selection, the find matches, the
 text in its colour runs (tokenized in C for those rows only), the fade, the
 caret. An error's underline reaches the row after where the glyph box fills
@@ -541,12 +552,17 @@ whole.
 
 **Each editor, what it keeps and what it drops.**
 
-- *The Code tab* draws its rows, and the desk's read-only code
-  (`draw_lines`), through the view, and loses its whole-pane loop; the status band and the bar strip are outside the text
-  rect and draw as today (the strip through the WM's bar word,
-  `strip_moved`). Its drag pans by whole lines (`CodeLayer._code_drag`),
-  each a shift frame; panning by pixels through a `ScrollRegion`, as
-  `ui.text_view` scrolls, is not built for it.
+- *The Code tab* draws its rows through the view (`ui.text_view("code",
+  ...)` on its own host's page, R): its marks are the view's options
+  (`sel`, `err`, `find`, `left`, `mark`), its taps find their cell through
+  the view (`ui_draw.text_at`), and the wheel and a drag scroll the view by
+  pixels, a release coasting. `ed.top` reads back the first line the view
+  showed; a `top` the editor moved since glides the view there (`top`).
+  The status band, the tools and the symbol keys are outside R and draw
+  every frame; the bar strip draws through the WM's bar word
+  (`strip_moved`). On the desk the Code pane is one of the panes whose
+  frames are their own (`_OWN_FRAMES`, a verbs page). The desk's read-only
+  made code is a view too (`editor_parts.made`, on the desk's verbs).
 - *The theme Config text* is the Code tab's class and takes all of it;
   `ThemeDoc.follow` runs before the draw as today.
 - *The fields* (`ui.field`: Settings' name, Cart info's, Blocks' prompts,
@@ -626,12 +642,14 @@ whole.
   cursor bar, the meters, which overlap no verb) after, and the rows and
   the pad the floor misses are kept as the last frame drew them
   (`ui.keep`).
-- *The text console* (`runtime/text_console.py`) draws through the view for
-  its scrollback rows and its prompt line; a script that prints appends
-  rows, a translation of the scrollback by the rows appended plus those
-  rows. Its frame cadence is the script's (a cart's loop), and both boards
-  measure it under target; it takes the view for the one body, not for a
-  row it needs.
+- *The text console* (`runtime/text_console.py`) draws its scrollback
+  through the view (`ui.text_view("log", ..., {"follow": True})`, an echoed
+  line's prompt and answer in SGR's dim and value); its prompt line is drawn
+  by its own. A script that prints appends rows, and a view at its foot
+  glides to the new foot; a drag scrolls the log back by pixels and its
+  release coasts. Its frame cadence is the script's (a cart's loop), and
+  both boards measure it under target; it takes the view for the one body,
+  not for a row it needs.
 
 **The cost** of a keystroke becomes the row's raster (one row of glyphs,
 ~0.3-0.5 ms on the P4 at the mono font, a few hundred µs on the T-Deck) and
@@ -1140,7 +1158,7 @@ cart's to set.
    pickers lay out, focus and draw through the engine, as the apps do.
    Their look does not change: the Editor goldens stay byte-identical, and
    a detail the engine cannot draw extends the engine.
-6. `TextView` is a public `ui` verb, consistent with the rest of the API,
+6. The text area is a public `ui` verb (`ui.text_view`), consistent with the rest of the API,
    so any app (a chat app, a terminal) gets a text area and restyles it
    through the theme and the per-call overrides.
 

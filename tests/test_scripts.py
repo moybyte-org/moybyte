@@ -125,6 +125,40 @@ def test_the_symbol_palette_types_the_keys_the_keyboard_lacks(tmp_path):
     assert con.ed.text() == con._symbols()[0]
 
 
+def test_the_log_is_a_text_view_that_scrolls_back_and_coasts(tmp_path):
+    """The log draws through `ui.text_view`: it starts at its foot, a drag
+    scrolls it back by pixels and its release coasts on, and it stays where
+    it was left while no rows come."""
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    con = _run(ws, "many.py", "for i in range(60):\n    print('row %d' % i)\n"
+                              "def _update(dt):\n    input('> ')\n")
+    _frame(ws, 4)
+    cx, top, _cw, _ch = ws.app_content_rect()
+    x, y = cx + 40, top + 24
+
+    def first():
+        return ui_draw.text_at(con._host, "log", x, y)[0]
+
+    foot = first()
+    assert foot > 30, "the log does not start at its foot"
+    con._pointer(x, y, True, True)
+    _frame(ws)
+    for k in range(1, 9):
+        con._pointer(x, y + 14 * k, False, True)
+        _frame(ws)
+    con._pointer(x, y + 112, False, False)
+    _frame(ws)
+    let_go = first()
+    assert let_go < foot, "the drag did not scroll the log back"
+    _frame(ws, 3)
+    assert first() < let_go, "the release did not coast"
+    _frame(ws, 60)
+    held = first()
+    _frame(ws, 4)
+    assert first() == held
+
+
 def test_the_x_exits_and_flushes_nothing(tmp_path):
     """A script has no document, so leaving writes nothing: the exit is the
     OS bar's X (a script is tool-shaped), and the vault is untouched."""
