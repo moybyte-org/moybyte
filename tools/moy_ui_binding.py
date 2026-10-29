@@ -346,6 +346,7 @@ _DRAW_SIGS = (
                               c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
     ("moy_ui_api_text_at", [c.c_void_p, _Span, _I, _I, c.c_void_p], _I),
     ("moy_ui_api_text_cover", [c.c_void_p, _Span, _I, _I], None),
+    ("moy_ui_api_text_aim", [c.c_void_p, _Span, _I, _I], _I),
     ("moy_ui_text_tones", [c.c_void_p], None),
     ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_text_words_reset", [], None),
@@ -1547,6 +1548,11 @@ def binding():
         t, keep = span(id_)
         lib.moy_ui_api_text_cover(p, t, int(y0), int(y1))
 
+    def api_text_aim(ctx, id_, line, lines):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        return bool(lib.moy_ui_api_text_aim(p, t, int(line), int(lines)))
+
     def text_tones(tones):
         t = (c.c_int16 * 6)(*[-1 if v is None else int(v) for v in list(tones)[:6]])
         lib.moy_ui_text_tones(c.addressof(t))
@@ -1558,7 +1564,7 @@ def binding():
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
-    for f in (api_text_view, api_text_at, api_text_cover, text_tones, text_words, text_runs):
+    for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, text_tones, text_words, text_runs):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,

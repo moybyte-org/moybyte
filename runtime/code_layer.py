@@ -1232,7 +1232,12 @@ class CodeLayer:
         o["err"] = None if row is None else (row, ws.code_err or "")
         o["find"] = (self._find_q, self._find_ci) if self._find_open and self._find_q else None
         o["left"] = ed.left
-        o["top"] = ed.top if ed.top != self._top else None
+        top = ed.top
+        o["top"] = top if top != self._top else None
+        if top != self._top and self._top >= 0:
+            # the editor moved its top (a key, a typed line, Go to): the
+            # view lands there as this frame's shift
+            _ui_draw.text_aim(host, "code", top, len(ed.lines))
         if self.vouch:
             _ui_draw.window_frame(self.vouch)
         try:

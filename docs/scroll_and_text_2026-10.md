@@ -236,7 +236,7 @@ default.
 |---|---|---|---|
 | verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
-| the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, glides the view there (`glide_to`) |
+| the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, lands the view there in that frame (`ui_draw.text_aim`); a fling and the wheel glide |
 | Notes, the fields | Notes' handle in whole lines (`EditorHandle`); a field is one row | the handle's drag (`pan_drag`) | the handle keeps its caret in view |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
@@ -506,10 +506,13 @@ in P4 on 2026-10-28). By cause, those rows are:
   §14.1's invariant, so the two rows are the whole change);
 - **a scroll** by k rows is a translation of the text rect by k pitches plus
   the k exposed rows. `ui.text_view` is a scroll region of the verbs
-  engine: a drag scrolls it by pixels, its release coasts, and a view that
-  `follow`s its foot glides there when lines come, every frame of which is
-  a translation; the Code tab's drag is that drag, and a `top` its editor
-  moved (a caret kept in view, find, Go to) glides the view there.
+  engine: a drag scrolls it by pixels, its release coasts and the wheel
+  glides it, every frame of which is a translation; a view that `follow`s
+  its foot glides there when lines come, and so to a `top` it is given. A
+  host that aims the view before its frame begins (`ui_draw.text_aim`)
+  lands it in that frame, one translation: the Code tab's `top` its editor
+  moved (a caret kept in view, a typed line, find, Go to) and the console's
+  new foot.
 
 **What draws the whole view**, named so none is inferred: a horizontal
 scroll (the Code tab's `ed.left` moves every row); a gutter width change
@@ -557,7 +560,8 @@ whole.
   (`sel`, `err`, `find`, `left`, `mark`), its taps find their cell through
   the view (`ui_draw.text_at`), and the wheel and a drag scroll the view by
   pixels, a release coasting. `ed.top` reads back the first line the view
-  showed; a `top` the editor moved since glides the view there (`top`).
+  showed; a `top` the editor moved since lands the view there in that
+  frame (`ui_draw.text_aim`, before the host's frame begins).
   The status band, the tools and the symbol keys are outside R and draw
   every frame; the bar strip draws through the WM's bar word
   (`strip_moved`). On the desk the Code pane is one of the panes whose
@@ -646,7 +650,7 @@ whole.
   through the view (`ui.text_view("log", ..., {"follow": True})`, an echoed
   line's prompt and answer in SGR's dim and value); its prompt line is drawn
   by its own. A script that prints appends rows, and a view at its foot
-  glides to the new foot; a drag scrolls the log back by pixels and its
+  lands at the new foot (`ui_draw.text_aim`); a drag scrolls the log back by pixels and its
   release coasts. Its frame cadence is the script's (a cart's loop), and
   both boards measure it under target; it takes the view for the one body,
   not for a row it needs.

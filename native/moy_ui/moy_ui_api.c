@@ -3351,6 +3351,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
             w->total = total;
         }
     }
+    if (w != NULL) {
+        w->wrap = wrap;                 // a wrapped view's rows are its pass's to aim
+    }
     int32_t content = total * lh;
     content = content > 32767 ? 32767 : content;
     int32_t was_b = k0 != NULL ? k0->b : 0;
@@ -3386,6 +3389,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
                 moy_ui_scroll_land(&k->sc, &k->a);
                 c->scroll = scroll = aim_to;
             } else {
+                // past its frame's start the pixels have moved for it: it
+                // glides there from the next frame (a host that lands it
+                // aims before its frame, moy_ui_api_text_aim)
                 moy_ui_scroll_glide_to(&k->sc, scroll, aim_to, 0, content, b.h);
             }
         }
@@ -3670,6 +3676,39 @@ int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
     }
     out[0] = w->line[i];
     out[1] = col;
+    return 1;
+}
+
+int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t lines) {
+    uint32_t rid = hash(id.p, id.n, TEXT_SALT);
+    moy_ui_keep_t *k = keep_of(c, rid);
+    const moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 0);
+    if (k == NULL || w == NULL || w->wrap || w->lh <= 0 || w->h <= 0
+        || (k->sc.flags & MOY_UI_SCROLL_DRAG)) {
+        return 0;                       // its pass aims it (a wrapped view's rows are its pass's)
+    }
+    int32_t content = lines * w->lh;
+    content = content > 32767 ? 32767 : content;
+    int32_t most = content - w->h;
+    most = most < 0 ? 0 : most;
+    int32_t aim;
+    if (line < 0) {
+        // the foot, where the view stood at it and the lines grew
+        if (!(k->b > 0 && k->a >= k->b - w->h) || content <= k->b) {
+            return 0;
+        }
+        aim = most;
+    } else {
+        aim = line * w->lh;
+        aim = aim > most ? most : aim;
+    }
+    if (aim == k->a) {
+        return 0;
+    }
+    k->b = content;
+    k->a = aim;
+    k->over = 0;
+    moy_ui_scroll_land(&k->sc, &k->a);
     return 1;
 }
 

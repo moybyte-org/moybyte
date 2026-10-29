@@ -238,7 +238,7 @@ def _fling(p):
     p.frame(4)
     assert a.top > let_go, "the release did not coast"
     p.frame(40)
-    p.key(moy_input.KEY_DOWN)                   # the caret, out of view, glides back
+    p.key(moy_input.KEY_DOWN)                   # the caret, out of view, brings it back
 
 
 def _session(p):
@@ -310,6 +310,29 @@ def test_the_code_tab_draws_the_pythons_pixels(tmp_path, bufs, windowed):
     p = Pair(tmp_path, bufs, windowed)
     _session(p)
     assert p.floors() >= 0.6 * len(p.kinds), p.kinds
+
+
+@pytest.mark.parametrize("windowed", (False, True))
+def test_a_key_step_past_the_foot_lands_as_one_shift(tmp_path, windowed):
+    """The editor's top, moved by a key past the view's foot, lands in the
+    key's own frame as a shift (`ui_draw.text_aim` before the
+    frame begins): no glide frames follow it, and it draws the Python's
+    pixels."""
+    p = Pair(tmp_path, 2, windowed)
+    _code(p)
+    a = p.a.editor
+    p.run("ws.editor.row = ws.editor.top + ws.editor.ROWS - 1; ws.mark_dirty()")
+    p.frame(4)
+    top = a.top
+    p.both("key_down", moy_input.KEY_DOWN, 0)
+    p.frame()
+    landed = a.top
+    assert landed > top, "the key's frame did not show the caret's line"
+    assert p.kinds[-1], "the key's frame drew whole"
+    assert p.a.code_layer._host.still(), "the view glides on after the key"
+    p.both("key_up", moy_input.KEY_DOWN, 0)
+    p.frame(2)
+    assert a.top == landed
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))

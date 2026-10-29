@@ -2903,6 +2903,15 @@ static mp_obj_t ui_api_text_cover(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_cover_obj, 4, 4, ui_api_text_cover);
 
+// api_text_aim(ctx, id, line, lines) -> whether the view moved: before the
+// frame begins, its first line (-1 its foot), so the move is the frame's shift
+static mp_obj_t ui_api_text_aim(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    return mp_obj_new_bool(moy_ui_api_text_aim(ctx_of(a[0]), span_of(a[1]),
+                                               mp_obj_get_int(a[2]), mp_obj_get_int(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_aim_obj, 4, 4, ui_api_text_aim);
+
 // text_tones(tones): the colour indices the syntax classes take under the
 // live theme (text, keyword, string, number, comment, builtin; -1 a token's)
 static mp_obj_t ui_text_tones(mp_obj_t tones) {
@@ -3611,6 +3620,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_cover), MP_ROM_PTR(&ui_api_text_cover_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_text_aim), MP_ROM_PTR(&ui_api_text_aim_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_tones), MP_ROM_PTR(&ui_text_tones_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_words), MP_ROM_PTR(&ui_text_words_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_runs), MP_ROM_PTR(&ui_text_runs_obj) },

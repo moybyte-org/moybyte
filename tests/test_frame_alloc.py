@@ -455,8 +455,7 @@ def notes(loop, info):
 def code(loop, info):
     """The Editor's Code tab, a `ui.text_view`: typed into (a key every
     fourth frame, the edit the editor's, outside the frame measured), then
-    its view sent down the file and back (`top`, the glide a key or Go to
-    starts). What each frame allocates, and what the tab's draw does: its
+    its view sent down the file and back by the wheel, which glides it. What each frame allocates, and what the tab's draw does: its
     text view's pass (`_rows`) and the rest of it but the status line,
     which a moved caret makes again."""
     from gc import mem_alloc
@@ -541,10 +540,15 @@ def code(loop, info):
     gc.disable()
     take()
     out = []
-    for top in (60, 0, 60, 0):
-        ed.top = top
-        ed.row = top
-        ws.mark_dirty()
+
+    class _Wheel:
+        wheel_x = 0
+        wheel_y = 0
+        mods = 0
+    wheel = _Wheel()
+    for notches in (6, -6, 6, -6):
+        wheel.wheel_y = notches          # the wheel, which glides the view
+        cl._wheel(wheel)
         for _ in range(40):
             a = mem_alloc()
             loop.step()

@@ -433,7 +433,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // none) aims the view at that line, its first row at the view's top: a
 // glide there, or a jump on the view's first frame or a frame with no dt.
 // Where `follow`, a view starts at its foot, and at its foot when the text
-// grows it glides to the new foot (a log, a terminal). A frame draws only the rows that changed and
+// grows it glides to the new foot (a log, a terminal). A host that aims the
+// view before its frame begins (moy_ui_api_text_aim) lands it there instead,
+// as that frame's shift. A frame draws only the rows that changed and
 // moves the rest, as a scroll region's floor (§3.3 of
 // docs/scroll_and_text_2026-10.md). out: the first line shown and the rows
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
@@ -470,6 +472,12 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
 // wraps, else the column the point is over).
 int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
                        int32_t out[2]);
+// Before a frame begins: view `id` shows line `line` first (-1: its foot,
+// where it stood at its foot and its `lines` grew), so the move is that
+// frame's shift; its pass, given the same `top`, moves nothing. 0 where it
+// did not move: a view new to the context, a wrapped one, one held by a
+// finger, or one already there (its pass aims it: a glide).
+int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t lines);
 // Rows y0..y1 of view `id` were drawn over after its pass this frame (an
 // overlay the pass does not draw): its next frame draws them again.
 void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int y1);

@@ -20,6 +20,7 @@
 #   AppHost                           a shipped app's host side of the verbs (ctx.ui)
 #   Hold                              the page under a modal, held while it is up; its rows frames
 #   text_at                           the (line, column) under a point of a text view (`ui.text_view`)
+#   text_aim                          a text view's move, aimed before its frame begins
 #   text_cover                        a text view's rows another pass drew over
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
@@ -2718,6 +2719,14 @@ class _Wheel:
 
 
 _WHEEL = _Wheel()
+
+
+def text_aim(host, id, line, lines):
+    """Before AppHost `host` begins its frame: text view `id` shows line
+    `line` first (-1: its foot, where it stood at its foot and its `lines`
+    grew), so the move is the frame's shift; its pass, given the same `top`,
+    moves nothing. Whether it moved."""
+    return _C.api_text_aim(host.ctx, id, line, lines)
 
 
 def text_cover(host, id, y0, y1):

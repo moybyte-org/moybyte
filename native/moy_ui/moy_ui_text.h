@@ -132,7 +132,7 @@ typedef struct {
 typedef struct {
     const void *owner;
     uint32_t id, used;
-    int32_t gen, cols, n, total;
+    int32_t gen, cols, n, total, wrap;
     int32_t over0, over1;
     int32_t x, y, w, h, lh, cell, tx, left, off, rows;
     int32_t line[MOY_UI_TEXT_ROWS], ca[MOY_UI_TEXT_ROWS], cb[MOY_UI_TEXT_ROWS];
