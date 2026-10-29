@@ -1632,6 +1632,10 @@ def surfaces():
         inputs=("type", "type_fast"), text={"type": ("helpers", 10),
                                             "type_fast": ("more_helpers", 20)},
         teardown="ws.cards_layer.prompt and ws.cards_layer._close_prompt()"))
+    s.append(Surface("Pause card", [("_ib_desk()", 1.0), ("@run Star Catcher", 4.0),
+                                    ("ws.pause.show()\nws.mark_dirty()", 1.5)],
+                     "ws.pause.sel", inputs=("key_steps", "key_20"),
+                     teardown="ws.pause.open and ws.pause.close()\nws.exit()"))
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
