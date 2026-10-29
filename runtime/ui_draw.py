@@ -3365,6 +3365,12 @@ class ScrollRegion:
         carousel). A target where the view is ends any glide."""
         _C.scroll_glide_to(self._st, self.offset, p, slide, self.content, self._extent())
 
+    def fling(self, vel):
+        """Add `vel` px/ms to the fling, begun from the offset where none
+        coasts: a momentum that is not a drag's release (the trackball's
+        coast). Stops a glide."""
+        _C.scroll_fling(self._st, self.offset, vel)
+
     def step(self, n, size):
         """Move the glide's target `n` steps of `size` -- from the target
         while a glide is live, else from the offset -- and answer it."""

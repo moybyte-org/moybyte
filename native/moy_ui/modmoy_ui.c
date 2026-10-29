@@ -2221,6 +2221,13 @@ static mp_obj_t ui_scroll_glide_to(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_glide_to_obj, 6, 6, ui_scroll_glide_to);
 
+// scroll_fling(st, offset, vel): add vel px/ms to the fling
+static mp_obj_t ui_scroll_fling(mp_obj_t st, mp_obj_t offset, mp_obj_t vel) {
+    moy_ui_scroll_fling(scroll_of(st), num(offset), dt_of(vel));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_scroll_fling_obj, ui_scroll_fling);
+
 // scroll_step(st, offset, n, size, content, extent) -> the glide's target
 static mp_obj_t ui_scroll_step(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3660,6 +3667,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scroll_drag_end), MP_ROM_PTR(&ui_scroll_drag_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_tick), MP_ROM_PTR(&ui_scroll_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_glide_to), MP_ROM_PTR(&ui_scroll_glide_to_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_fling), MP_ROM_PTR(&ui_scroll_fling_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_step), MP_ROM_PTR(&ui_scroll_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_land), MP_ROM_PTR(&ui_scroll_land_obj) },
     { MP_ROM_QSTR(MP_QSTR_dragtap), MP_ROM_PTR(&ui_dragtap_obj) },

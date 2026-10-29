@@ -75,6 +75,15 @@ void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, 
     }
 }
 
+void moy_ui_scroll_fling(moy_ui_scroll_t *s, int32_t offset, float vel) {
+    if (!(s->flags & MOY_UI_SCROLL_FLING)) {
+        s->foff = (float)offset;
+        s->vel = 0.0f;
+    }
+    s->flags = (s->flags & ~(MOY_UI_SCROLL_GLIDE | MOY_UI_SCROLL_SLIDE)) | MOY_UI_SCROLL_FLING;
+    s->vel += vel;
+}
+
 int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
                            int32_t content, int32_t extent) {
     int32_t base = (s->flags & MOY_UI_SCROLL_GLIDE) ? s->target : offset;

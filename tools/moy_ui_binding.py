@@ -289,6 +289,7 @@ _DRAW_SIGS = (
     ("moy_ui_scroll_tick", [c.c_void_p, c.c_float, c.c_void_p, c.c_int32, c.c_int32], _I),
     ("moy_ui_scroll_glide_to", [c.c_void_p, c.c_int32, c.c_int32, _I, c.c_int32, c.c_int32],
      None),
+    ("moy_ui_scroll_fling", [c.c_void_p, c.c_int32, c.c_float], None),
     ("moy_ui_scroll_step", [c.c_void_p, c.c_int32, c.c_int32, c.c_int32, c.c_int32,
                             c.c_int32], c.c_int32),
     ("moy_ui_scroll_land", [c.c_void_p, c.c_void_p], _I),
@@ -988,6 +989,9 @@ def binding():
         lib.moy_ui_scroll_glide_to(_buf(st), int(offset), int(target), 1 if slide else 0,
                                    int(content), int(extent))
 
+    def scroll_fling(st, offset, vel):
+        lib.moy_ui_scroll_fling(_buf(st), int(offset), float(vel))
+
     def scroll_step(st, offset, n, size, content, extent):
         return int(lib.moy_ui_scroll_step(_buf(st), int(offset), int(n), int(size),
                                           int(content), int(extent)))
@@ -1009,7 +1013,7 @@ def binding():
         return bool(tapped)
 
     for f in (scroll_stop, scroll_drag_start, scroll_drag_move, scroll_drag_end,
-              scroll_tick, scroll_glide_to, scroll_step, scroll_land, dragtap):
+              scroll_tick, scroll_glide_to, scroll_fling, scroll_step, scroll_land, dragtap):
         setattr(m, f.__name__, f)
 
     # -- the public UI API -----------------------------------------------------

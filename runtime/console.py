@@ -1100,7 +1100,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The trackball's steps where a surface takes the keys (`ball`): its
         # source, the pulses toward a step on each axis and when the last
         # came, the click's press held now, and the coast (BALL_COAST): its
-        # direction, velocity in steps/ms and the part of a step it owes.
+        # direction, and its motion, a fling on the toolkit's scroller
+        # (COAST_UNIT a step) with the steps it has delivered.
         self._ball_src = None
         self._ball_ax = self._ball_ay = 0
         self._ball_at = 0
@@ -1109,8 +1110,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._ball_down = None
         self._coast, self._coast_rate = _ball_coast()
         self._coast_dir = None
-        self._coast_v = self._coast_acc = 0.0
-        self._coast_at = self._ball_rate_at = 0
+        self._coast_r = _ui_draw.ScrollRegion()
+        self._coast_r.set((0, 0, 0, 0), 1 << 24)
+        self._coast_got = 0
+        self._coast_fed = False
+        self._ball_rate_at = 0
         self.ball_owed = False        # a press is held or a coast moves: `ball` runs next frame
         self.ball_stepped = 0         # every step a roll delivered (the bench's count)
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
@@ -4038,6 +4042,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     BALL_TURN = 4           # pulses a step across a roll takes while it rolls
     BALL_ROLLING_MS = 150   # a roll stops this long after its axis's last pulse
     BALL_IDLE_MS = 300      # a pause this long forgets a partial step
+    # A step's length on the coast's scroller: the scroller's fling rests
+    # below MOY_UI_STOP_VEL (moy_ui.h, 0.02 a ms), a step a second here.
+    COAST_UNIT = 20
 
     def ball_steps(self):
         """Whether the trackball is the W A S D of the surface that holds
@@ -4096,27 +4103,26 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 src = self._ball_src = self.input.source("ball")
             src.set_button("run", True)
             self._ball_down = "run"
-        if self._coast_v:
+        r = self._coast_r
+        if r.flinging:
             self._ball_coast_tick(self.ball_steps())
-        self.ball_owed = self._ball_down is not None or bool(self._coast_v)
+        self.ball_owed = self._ball_down is not None or r.flinging
         return took
 
     def _ball_coast_tick(self, on):
-        """A coasting roll's steps this frame: its velocity over the time
-        since the last, decaying as a fling does (`ScrollRegion.FRICTION`);
-        off a surface that steps, or below a step a second, it stops."""
-        now = _ticks_ms()
-        ms = max(0, _ticks_diff(now, self._coast_at))
-        self._coast_at = now
-        v = self._coast_v * _ui_draw.ScrollRegion.FRICTION ** ms
-        if not on or v < 0.001:
-            self._coast_v = self._coast_acc = 0.0
+        """A coasting roll's steps this frame: its fling on the toolkit's
+        scroller advanced by the loop's dt (none the frame a roll fed it),
+        decaying as a page's fling does; off a surface that steps, or below
+        a step a second, it stops."""
+        r = self._coast_r
+        if not on:
+            r.stop()
             return
-        self._coast_v = v
-        self._coast_acc += v * ms
-        k = int(self._coast_acc)
-        if k:
-            self._coast_acc -= k
+        r.tick(0.0 if self._coast_fed else self._frame_dt_ms)
+        self._coast_fed = False
+        k = r.offset // self.COAST_UNIT - self._coast_got
+        if k > 0:
+            self._coast_got += k
             self._ball_steps(self._coast_dir, k, coast=False)
 
     def _ball_roll(self, dx, dy):
@@ -4170,12 +4176,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             ms = max(1, _ticks_diff(now, self._ball_rate_at))
             self._ball_rate_at = now
             keep = max(1, self._coast_rate * ms // 1000)
+            r = self._coast_r
             if name != self._coast_dir:
-                self._coast_v = self._coast_acc = 0.0
+                r.stop()
             if k > keep:
                 self._coast_dir = name
-                self._coast_v += (k - keep) * self._coast / 1000.0
-                self._coast_at = now
+                if not r.flinging:
+                    r.offset = self._coast_got = 0
+                r.fling((k - keep) * self._coast * self.COAST_UNIT / 1000.0)
+                self._coast_fed = True
                 k = keep
         self.input.add_steps(name, k)
         self.ball_stepped += k

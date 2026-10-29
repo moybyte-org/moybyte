@@ -733,6 +733,10 @@ void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
 // the content; a target where the offset is ends any glide. Stops a fling.
 void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, int slide,
                             int32_t content, int32_t extent);
+// Add `vel` px/ms to the fling, begun from `offset` where none coasts (a
+// momentum that is not a drag's release: the trackball's coast); stops a
+// glide.
+void moy_ui_scroll_fling(moy_ui_scroll_t *s, int32_t offset, float vel);
 // Move the glide's target `n` steps of `size` (from the target while a glide
 // is live, else from `offset`); answers the target.
 int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
