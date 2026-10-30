@@ -746,9 +746,17 @@ band -- a row of cards side by side (`o.axis "x"`, the carousel's with
 `o.snap`) or the icons' rows -- hands it the scroll as `o.offset` and the
 cards' reach past their cells as `o.spill`, and draws each part the engine
 answers through `ui.table_part`, the focused card last. The engine says
-which cards show and where; the cards draw from their covers every frame
-(the kept faces of 2026-10-28, a layer of pre-drawn cards and the
-`moy_gfx.face` copy, were retired with the move). The band frame
+which cards show and where. A grid or icons card that wears no focus is
+drawn out of its KEPT FACE (`launcher_layer._Faces`, built 2026-10-28,
+retired with the move and brought back 2026-10-30 by #243's perf pass,
+the P4s' band frame having gone from a copy a card to a whole draw of
+each): its picture and rim drawn once, on an idle frame, into a slot of
+one owned layer, keyed on the item, its title, the cover object and the
+look's gen, and copied in one `moy_gfx.face` call, which over anything but
+the plain ground draws the pixels a corner covers in part as the card
+draws them, because they blend over what lies there. The layer goes back
+with `release_retained` and when the arrangement is left; the carousel's
+cards draw. The band frame
 (`launcher_layer._band_frame`, through `_try_band_frame`) runs on a drag,
 a fling and, on the fullscreen home, a key, repeat or ball step too: the
 backdrop goes back under the whole band in one copy (`fill`: the
@@ -1075,7 +1083,7 @@ each.** On the P4: the Code tab's and theme Config's find past the view
 and glyph cost, a kernel question, not a scroll one); the home's grid and
 icons on `bd` and picture themes (~30-55) and the carousel's key rows
 (~35-45, the settle frame's hero and details pane; the lever was the
-cards' kept faces, built 2026-10-28 and retired 2026-10-30, §9, and what the carousel's step
+grid's and icons' kept faces, §9, and what the carousel's step
 frame keeps over the target is its hero, its details pane and its band
 drawn in one frame -- #66 has the rows);
 Notes if the cart floor does not hold (~35-45; the lever is then the

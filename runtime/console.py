@@ -3509,6 +3509,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.tab_sel = old.tab_sel
         g.sel = old.sel
         g._scroll_to_sel()
+        old.release_faces()
         self.launcher = g
         self._dirty = True
 

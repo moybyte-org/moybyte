@@ -317,6 +317,105 @@ class _Cells:
         self.desk = desk
 
 
+class _Faces:
+    """The cards' faces kept drawn (docs/scroll_and_text_2026-10.md §9): one
+    layer of `cap` square slots stacked down, each a card's picture and rim
+    drawn once at the arrangement's card side `side` (the square frame's
+    margin `m` round it), so a band paint stamps a card in one copy where it
+    drew it. A slot is the face of the item it holds (compared `is`), under
+    that item's title and the cover it was drawn from (`is`: a landing or an
+    eviction is another object); `key` is what every face is a function of
+    beside them -- the look's generation, the ground's colour where the
+    ground is one plain colour (else None: the corners are the backdrop's)
+    and the side. `of` maps an item's index to its slot, a hint a list
+    change outdates. The layer is owned: `release` gives it back."""
+
+    def __init__(self, cv, key, side, m, cap):
+        self.key = key
+        self.cv = cv
+        self.side = side
+        self.m = m
+        self.s = side + 2 * m
+        self.cap = cap
+        self.lay = cv.new_layer(self.s, self.s * cap)
+        self.item = [None] * cap
+        self.title = [None] * cap
+        self.cover = [None] * cap
+        self.fill = [None] * cap      # a title tile's (block, letter's rects)
+                                      # (`ui_draw.initial_parts`)
+        self.div = 1                  # the cover decode, corners and ring a paint's
+        self.stepped = False          # faces are drawn with (`_faces_for`)
+        self.ring = None
+        self.used = [-1] * cap
+        self.built = [0] * cap        # the painted frame each slot was drawn by (after)
+        self.of = {}
+        self.tick = 0
+        self.kept = False
+        self.held = None
+
+    def nbytes(self):
+        return self.s * self.s * self.cap * 2
+
+    def release(self):
+        lay = self.lay
+        self.lay = None
+        if lay is not None:
+            rel = getattr(lay, "release", None)
+            if rel is not None:
+                rel()
+        self.item = self.title = self.cover = self.fill = None
+        self.of = {}
+
+    def find(self, i, it, cover):
+        """The slot holding item `it`'s face (index `i`) drawn from `cover`
+        under its title, else None; `held` the slot holding another face of
+        it, or None."""
+        self.tick += 1
+        items = self.item
+        j = self.of.get(i)
+        if j is None or items[j] is not it:
+            j = None
+            for q in range(self.cap):
+                if items[q] is it:
+                    j = q
+                    break
+        self.held = j
+        if j is not None and self.title[j] == it.get("title") and self.cover[j] is cover:
+            self.used[j] = self.tick
+            self.of[i] = j
+            return j
+        return None
+
+    def slot(self, i, it, cover):
+        """The slot holding item `it`'s face drawn from `cover` under its
+        title, at index `i`; `kept` says whether it is drawn (False: the
+        caller draws it into the slot answered, the least recently
+        stamped)."""
+        got = self.find(i, it, cover)
+        self.kept = got is not None
+        if got is not None:
+            return got
+        items = self.item
+        j = self.held
+        if j is None:
+            used = self.used
+            j = 0
+            for q in range(1, self.cap):
+                if used[q] < used[j]:
+                    j = q
+            old = items[j]
+            if old is not None:
+                for k in list(self.of):
+                    if self.of[k] == j:
+                        del self.of[k]
+        items[j] = it
+        self.title[j] = it.get("title")
+        self.cover[j] = cover
+        self.used[j] = self.tick
+        self.of[i] = j
+        return j
+
+
 class Launcher:
     """The home's grid arrangement (docs/look_2026-10.md step 33): a shelf
     of cards, each cart's whole cover at a clean scale with the card radius
@@ -376,6 +475,11 @@ class Launcher:
         self.today_for = None         # optional () -> today as YYYYMMDD, 0 unknown
         self._card_clip = None        # the clip cards draw in while a draw runs
         self.restore_whole = False    # a band's backdrop goes back in one copy (the home's)
+        self.face_key = None          # (look gen, plain ground or None): the cards'
+                                      # faces are kept (`_Faces`); None: drawn
+        self.frame_no = 0             # the painted frame a paint is (the home's)
+        self._faces = None
+        self._faces_off = False       # a canvas whose layers hold no pixels
         self._c = None                # the cells laid out, and what for
         self._c_key = None
         self._show = None             # the cells the band shows (`_shown`), and what for
@@ -769,10 +873,11 @@ class Launcher:
         the band's table drawn whole (`band_pass`)."""
         self.band_pass(cv, sheet_for, None)
 
-    def repaint_band(self, cv, sheet_for, fill):
+    def repaint_band(self, cv, sheet_for, fill, part=None):
         """A band frame: the band's table (`band_pass`), the ground put back
-        by `fill(cv, rect)` under what it draws."""
-        self.band_pass(cv, sheet_for, fill)
+        by `fill(cv, rect)` under what it draws; `part`, a rect of the band,
+        draws that rect alone."""
+        self.band_pass(cv, sheet_for, fill, part)
 
     def _band_host(self):
         """The band's app host (`ui_draw.AppHost`): the context its table
@@ -790,7 +895,7 @@ class Launcher:
             rows = self._rows = [_ROW_CELL] * n
         return rows
 
-    def band_pass(self, cv, sheet_for, fill):
+    def band_pass(self, cv, sheet_for, fill, part=None):
         """The band as a table of parts (`ui.table` with `o.part`, its rows
         the shelf's columns side by side, or the icons' rows): on the band's
         own app host, the scroll the home's (`o.offset`), no mark of the
@@ -800,7 +905,9 @@ class Launcher:
         puts the ground back under what the frame draws (None: a full
         paint drew it), then the fade over the cells. The band draws whole:
         what a card shows is more than its row's cells (its cover landing,
-        the look), so no row is carried."""
+        the look), so no row is carried. `part` (x, y, w, h), where given,
+        is all the frame draws: the ground under it, and the cards whose
+        reach meets it clipped to it (a step's two cells, `_band_frame`)."""
         c = self._cells()
         b = c.band
         host = self._band_host()
@@ -824,27 +931,72 @@ class Launcher:
         sel = self.sel
         o["gen"] = sel if self._focused(True) else -1
         _ui.table("", _PART_COL, self._band_rows((n + per - 1) // per), sel // per, o)
+        q = b
+        if part is not None:
+            x0 = part[0] if part[0] > b[0] else b[0]
+            y0 = part[1] if part[1] > b[1] else b[1]
+            x1 = min(part[0] + part[2], b[0] + b[2])
+            y1 = min(part[1] + part[3], b[1] + b[3])
+            if x1 <= x0 or y1 <= y0:
+                _ui.end()
+                return
+            q = (x0, y0, x1 - x0, y1 - y0)
         if fill is not None:
-            fill(cv, b)
-        self._card_clip = b
+            fill(cv, q)
+        self._card_clip = q
+        sp = o["spill"]
+        faces = None
+        if self.face_key is not None:
+            faces = self._faces_for(cv, c.side, c.r, (c.cols + 2) * c.rows if self.horizontal
+                                    else (c.rows + 2) * c.cols)
         r = _PART
         items = self.items
         on = False
         i = _ui.table_part(r)
+        side = c.side
+        hz = self.horizontal
         while i >= 0:
+            # the part is a column of the shelf (a row of the icons): its
+            # cards lie along it, a pitch apart, from where the engine put it
+            x = r[0] if hz else c.x0
+            y = c.y0 if hz else r[1]
             for k in range(i * per, min(n, (i + 1) * per)):
                 if k == sel:
                     on = True
+                    if hz:
+                        y += c.py
+                    else:
+                        x += c.px
+                    continue
+                t = (x, y, side, side)
+                if hz:
+                    y += c.py
                 else:
-                    self._draw_cell(cv, items[k], self._cell_rect(c, k), False, c)
+                    x += c.px
+                if part is not None:
+                    if (t[0] - sp >= q[0] + q[2] or t[0] + c.px + sp <= q[0]
+                            or t[1] - sp >= q[1] + q[3] or t[1] + c.py + sp <= q[1]):
+                        continue
+                    cv.clip(q[0], q[1], q[2], q[3])
+                if faces is None:
+                    self._draw_cell(cv, items[k], t, False, c)
+                else:
+                    self._stamp_cell(cv, items[k], k, t, c, q, faces)
             i = _ui.table_part(r)
         if on:
             # the focused card last, over its neighbours' reach, in the band
-            cv.clip(b[0], b[1], b[2], b[3])
-            self._draw_cell(cv, items[sel], self._cell_rect(c, sel), True, c)
+            cv.clip(q[0], q[1], q[2], q[3])
+            if faces is None or self._focused(True):
+                self._draw_cell(cv, items[sel], self._cell_rect(c, sel), True, c)
+            else:
+                self._stamp_cell(cv, items[sel], sel, self._cell_rect(c, sel), c, q, faces)
             cv.clip()
         self._card_clip = None
+        if part is not None:
+            cv.clip(q[0], q[1], q[2], q[3])
         self._fade(cv, c)
+        if part is not None:
+            cv.clip()
         _ui.end()
 
     def _cell_rect(self, c, i):
@@ -853,6 +1005,52 @@ class Launcher:
         if self.horizontal:
             return (c.x0 + col * c.px - self.scroll, c.y0 + row * c.py, c.side, c.side)
         return (c.x0 + col * c.px, c.y0 + row * c.py - self.scroll, c.side, c.side)
+
+    def _faces_for(self, cv, side, r, cap):
+        """The faces (`_Faces`) this paint stamps its cards from on canvas
+        `cv`, `cap` of them, minted for cards of `side` with corners `r`
+        where the home keeps them (`face_key`), else None: the cards draw.
+        A canvas whose layer holds no pixels forfeits them."""
+        key = self.face_key
+        if key is None or self._faces_off:
+            return None
+        m = 0 if r else self.layout.fs - 1
+        f = self._faces
+        if f is not None and f.cv is cv and f.side == side and f.m == m and f.cap == cap:
+            if f.key != key:
+                f.key = key
+                for j in range(f.cap):
+                    f.item[j] = None
+                    f.used[j] = -1
+                f.of = {}
+        else:
+            self.release_faces()
+            try:
+                f = self._faces = _Faces(cv, key, side, m, cap)
+            except Exception:  # noqa: BLE001 -- a recording canvas: draw the cards
+                self._faces = None
+                self._faces_off = True
+                return None
+        # what every face of this paint is drawn with, read once a paint
+        f.div = self._face_div(side)
+        f.stepped = bool(_ui_draw.depth()[4])
+        f.ring = self._face_ring()
+        return f
+
+    def release_faces(self):
+        """Give the faces' layer back (the fit check's release, a layout
+        change, an arrangement left): True when there was one."""
+        f = self._faces
+        if f is None:
+            return False
+        self._faces = None
+        f.release()
+        return True
+
+    def faces_bytes(self):
+        """The faces' layer's bytes, 0 where none is kept."""
+        f = self._faces
+        return 0 if f is None else f.nbytes()
 
     def _face_div(self, n):
         """The decode a card of side `n` draws its cover from."""
@@ -898,6 +1096,155 @@ class Launcher:
                      pic[3], r, stepped)
         else:
             self._draw_title_tile(cv, it, pic, r)
+
+    def _stamp_cell(self, cv, it, i, t, c, b, faces):
+        """An unfocused cell, its card out of its kept face (`_stamp_face`)
+        and its title, which lies on the ground."""
+        self._stamp_face(cv, it, i, t, c.r, b, faces)
+        if self._titled(c):
+            self._draw_title(cv, it, t[0] + t[2] // 2, t[1] + c.title_dy, c.title_w, False)
+
+    def _stamp_face(self, cv, it, i, t, r, b, faces, plain=True):
+        """Card `it` (index `i`) over `t`, corners `r`, out of its kept face
+        (`faces`), clipped to `b`:
+        the face drawn into its slot where the slot is stale, then copied --
+        whole on a plain ground, which the slot's corners were drawn over;
+        over a backdrop, as where the corners lie over anything but the
+        plain ground (not `plain`: the shelf's shadows), a corner's partly
+        covered pixels blend over what lies under them, and are drawn as the
+        card draws them (`DeviceCanvas.face`, a cover's and a title tile's;
+        the "+ New" page's rows under its corners from its own draw,
+        clipped)."""
+        x, y, n, _n = t
+        cover = self._cover_of(it, faces.div)
+        j = faces.find(i, it, cover)
+        if j is None:
+            # no face of it yet: drawn as a paint without faces draws it,
+            # and an idle frame draws its face (`warm_faces`)
+            self._face(cv, it, t, r, cover)
+            return
+        m = faces.m
+        s = faces.s
+        lay = faces.lay
+        new = it.get("type") in PSEUDO_TILE_TYPES
+        if (faces.key[1] is None or not plain) and (r or new):
+            if m == 0 and r and not new and 2 * r < n:
+                fill = faces.fill[j]
+                if cover is not None or fill is not None:
+                    # the face copied, its corners' partly covered pixels
+                    # drawn over what is there: one call (`DeviceCanvas.face`)
+                    if cover is None:
+                        cv.face(lay, j * s, x, y, n, n, None, 0, 0, 0, fill[0], fill[1], r,
+                                faces.stepped, faces.ring)
+                    else:
+                        cv.face(lay, j * s, x, y, n, n, cover.pix, cover.w, cover.w,
+                                cover.h, None, None, r, faces.stepped, faces.ring)
+                    return
+            # the "+ New" page's frame runs round its corners: its rows
+            # under them drawn from its own draw, the rest copied
+            k = r + 2 * self.layout.fs + 1
+            if 2 * k >= n:
+                y0 = y1 = y + n // 2
+            else:
+                y0 = y + k
+                y1 = y + n - k
+        else:
+            y0 = y - m
+            y1 = y + n + m
+        bx0, by0, bx1, by1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+        ry0 = y0 if y0 > by0 else by0
+        ry1 = y1 if y1 < by1 else by1
+        rx0 = x - m if x - m > bx0 else bx0
+        rx1 = x + n + m if x + n + m < bx1 else bx1
+        if ry1 > ry0 and rx1 > rx0:
+            cv.blit_strip_rect(lay, x - m, y - m - j * s, rx0, ry0, rx1 - rx0, ry1 - ry0)
+        if y0 > y - m and rx1 > rx0:
+            self._face_rows(cv, it, t, r, cover, rx0, rx1,
+                            y - m if y - m > by0 else by0, y0 if y0 < by1 else by1)
+            self._face_rows(cv, it, t, r, cover, rx0, rx1,
+                            y1 if y1 > by0 else by0, y + n + m if y + n + m < by1 else by1)
+            cv.clip(b[0], b[1], b[2], b[3])
+
+    def _draw_face(self, faces, j, it, r, cover, new, frame=0):
+        """Card `it`'s face drawn into slot `j` on painted frame `frame`
+        (or after it), over the plain ground where the faces have one, and
+        what its corners are drawn from kept beside it (a title tile's block
+        and letter)."""
+        faces.built[j] = frame
+        s = faces.s
+        m = faces.m
+        n = faces.side
+        lay = faces.lay
+        sy = j * s
+        lay.clip(0, sy, s, s)
+        flat = faces.key[1]
+        if flat is not None:
+            lay.rect(0, sy, s, s, flat)
+        self._face(lay, it, (m, sy + m, n, n), r, cover)
+        lay.clip()
+        faces.fill[j] = None if cover is not None or new else \
+            _ui_draw.initial_parts(lay, it.get("title") or "", n, n)
+
+    def warm_faces(self, ms=4):
+        """On a frame nothing waits on: draw the faces of the cards the band
+        shows, then of the row (or column) past either end of it, whose
+        covers are decoded or known absent, for about `ms` -- a paint copies
+        what has a face and draws the rest, so a step copies the row it
+        brings in. True where one was drawn."""
+        f = self._faces
+        ready = self.cover_ready
+        if f is None or f.lay is None or self.face_key is None or ready is None:
+            return False
+        order = self._warm_order(f)
+        if not order:
+            return False
+        items = self.items
+        r = self._face_r()
+        t0 = _ticks_ms()
+        done = 0
+        for i in order:
+            if i < 0 or i >= len(items):
+                continue
+            it = items[i]
+            new = it.get("type") in PSEUDO_TILE_TYPES
+            cover = None if new else ready(it, f.div)
+            if cover is False:
+                continue                 # its cover lands first: the draw path takes it
+            j = f.slot(i, it, cover)
+            if f.kept:
+                continue
+            self._draw_face(f, j, it, r, cover, new, self.frame_no + 1)
+            done += 1
+            if _ticks_diff(_ticks_ms(), t0) >= ms:
+                break
+        return done > 0
+
+    def _warm_order(self, f):
+        """The cells whose faces an idle frame draws, in the order it draws
+        them: the band's, then the row past each end; None where the faces
+        are another layout's."""
+        c = self._cells()
+        if c.side != f.side or (0 if c.r else self.layout.fs - 1) != f.m:
+            return None
+        vis = self._shown()[0]
+        if not vis:
+            return None
+        per = c.rows if self.horizontal else c.cols
+        lo, hi = vis[0][0], vis[-1][0]
+        sel = self.sel if self._focused(True) else -1
+        return ([i for i, _t in vis if i != sel] + list(range(hi + 1, hi + 1 + per))
+                + list(range(lo - 1, lo - 1 - per, -1)))
+
+    def _face_r(self):
+        """The corners a face is drawn with."""
+        return self._cells().r
+
+    def _face_rows(self, cv, it, t, r, cover, x0, x1, y0, y1):
+        """Card `it`'s face over `t` drawn in rows [y0, y1) of columns
+        [x0, x1) alone: the rows under its corners, over what is there."""
+        if y1 > y0:
+            cv.clip(x0, y0, x1 - x0, y1 - y0)
+            self._face(cv, it, t, r, cover)
 
     def _fade(self, cv, c):
         """The handheld shelf's last rows dissolve into the hint strip, on
@@ -2559,9 +2906,25 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
     _t0 = _ticks_ms() if timed and getattr(ws, "perf_capture", False) else None
     out = layer._outside_key() if steps else None
     now = grid.paint_key()
-    if (k is not None and not moving and k[0] == now and k[2] == ws.covers.gen
-            and k[3] == out and ring.offset(e) == region.offset and ring.stamp(e) is None):
+    held = k is not None and k[2] == ws.covers.gen and ring.offset(e) == region.offset
+    st = ring.stamp(e) if held else None
+    if held and k[0] == now and st is None and k[3] == out:
         drew = ()                       # the buffer holds this frame's band as it is
+    elif held and not isinstance(grid, Carousel):
+        # the buffer holds the band at this offset: the cells whose focus
+        # moved since (their reach) and the cursor's stamp are drawn again
+        drew = ()
+        for r in ((grid.reach_rect(k[0]), grid.reach_rect(now)) if k[0] != now else ()) + (st,):
+            if r is None:
+                continue
+            x0, y0 = max(bx, r[0]), max(by, r[1])
+            x1, y1 = min(bx + bw, r[0] + r[2]), min(by + bh, r[1] + r[3])
+            if x1 > x0 and y1 > y0:
+                r = (x0, y0, x1 - x0, y1 - y0)
+                grid.repaint_band(cv, ws.covers.sheet_icon, fill, r)
+                drew += (r,)
+        if steps and k[3] != out:
+            drew += layer._paint_outside(cv, k[3], out)
     else:
         grid.repaint_band(cv, ws.covers.sheet_icon, fill)
         drew = ((bx, by, bw, bh),)
@@ -2898,6 +3261,9 @@ class LauncherHomeLayer:
         cv = ws.sys_canvas
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return
+        g = self._grid_or_none()
+        if g is not None and not g.moving and ws.screen == self.id:
+            g.warm_faces()               # (only under the home: a face is the home's)
         cache = self._lib_cache
         try:
             if cache is None or cache.w != cv.w or cache.h != cv.h:
@@ -2925,9 +3291,9 @@ class LauncherHomeLayer:
     def release_retained(self):
         """Free the retained-frame layer (the fit check's release, after any
         parked window stamps): True when there was one. The next settled
-        visit re-mints and re-captures it. The band's backdrop goes with
-        it."""
-        freed = False
+        visit re-mints and re-captures it. The band's backdrop and the
+        cards' kept faces go with it."""
+        freed = self.grid.release_faces()
         for name in ("_lib_cache", "_band_bg"):
             cache = getattr(self, name)
             if cache is None:
@@ -3063,6 +3429,29 @@ class LauncherHomeLayer:
                  and not (self._carousel() and self.grid.desk()))
         return _band_frame(self, cv, dt, self.grid, self.id, fill, self.strip,
                            timed=True, steps=steps)
+
+    def _face_key(self, bd):
+        """What the cards' kept faces (`Launcher._faces_for`) are drawn
+        under for a paint over backdrop `bd` (a `restore_key`): the look's
+        generation, the plain ground's colour (None over a backdrop or a
+        picture) and the font scale; None where the canvas keeps no
+        pixels. And whether the band's backdrop goes back in one copy
+        (`restore_whole`): a baked backdrop, a picture or the band's
+        capture, whose cut round the cards costs more in calls than the
+        bytes it saves."""
+        ws = self.ws
+        g = self.grid
+        g.frame_no = ws._frames_drawn
+        g.restore_whole = True
+        if self._lib_unsupported:
+            g.face_key = None
+            return
+        gen = ws.look.look_gen
+        flat = bd[1] if bd is not None and bd[0] == "bg" else None
+        fs = ws.layout.fs
+        k = g.face_key
+        if k is None or k[0] != gen or k[1] != flat or k[2] != fs:
+            g.face_key = (gen, flat, fs)     # (kept while it holds: a frame allocates nothing)
 
     def _outside_key(self):
         """What the home's parts outside the band show of the selection:
@@ -3423,7 +3812,10 @@ class LauncherHomeLayer:
         if self.grid.flinging:
             ws.request_frame()
         self._bd_now = ws.wallpaper.restore_key(True)
-        self.grid.restore_whole = True
+        if carousel:
+            self.grid.restore_whole = True
+        else:
+            self._face_key(self._bd_now)
         if carousel and self._try_still_frame(cv, dt):
             return
         if self._try_band_frame(cv, dt):    # drag-scroll fast path (#58/#66)
@@ -3454,6 +3846,8 @@ class LauncherHomeLayer:
         # The hint strip and the cells' band (docs/shell_layout_2026-10.md
         # §12) over the wallpaper; the cards draw inside the band.
         self._draw_home_chrome(cv)
+        if not carousel:                      # (a carousel's cards draw: no faces)
+            self._face_key(ws.wallpaper.restore_key(True))
         self.grid.draw(cv, ws.covers.sheet_icon)
         if carousel and self.grid.desk():
             self._draw_details(cv)
