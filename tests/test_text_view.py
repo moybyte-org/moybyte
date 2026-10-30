@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 import text_twin
-from runtime import code_layer, host_app, moy_input, ui, ui_draw
+from runtime import appearance, code_layer, host_app, moy_input, ui, ui_draw
 from ws_helpers import no_unlock_banner, quiesce
 
 _C = ui_draw._C
@@ -160,6 +160,21 @@ def test_the_markdown_runs_colour_a_notes_marks():
         assert got == line[:end]
         for (t, tone), (wt, wtone) in zip(part[:-1], whole):
             assert (t, tone) == (wt, wtone), line[:end]
+
+
+def test_a_note_draws_at_15_px_on_the_desk_alone(tmp_path):
+    """The note's face (`Appearance.note_font`, a text view's `font`): the
+    mono family's 15 px regular on the desk, the mono role's own (0) on the
+    handheld; the desk's Code keeps the mono role."""
+    desk = _console(tmp_path / "desk", True)
+    fid = desk.look.note_font()
+    assert fid and fid != ui_draw.font("mono")[0]
+    assert ui_draw.font_info(fid)[0] > ui_draw.font("mono")[1]
+    names = {v: k[1] for k, v in appearance._FONTS.items()}
+    assert names[fid] == "jbmono-15-400-4.fnt"
+    assert names[ui_draw.font("mono")[0]] == "jbmono-11-400-2.fnt"
+    hand = _console(tmp_path / "hand", False)
+    assert hand.look.note_font() == 0
 
 
 # -- two consoles, one drawing the Python's whole ------------------------------------

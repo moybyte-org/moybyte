@@ -28,7 +28,9 @@ surfaces are on them. The plan that moves the surfaces, and its state, is
   2026-10-29).
 - Notes draws in the monospace face. A `.md` note's later form is a synced
   pair: the monospace source beside a proportional preview (owner,
-  2026-10-29).
+  2026-10-29). The source is coloured as Code colours a program (the
+  engine's `markdown` syntax), and on the desk it draws at 15 px where
+  Code stays at 11 (owner, 2026-10-30).
 
 ## 1. What the engine's pass costs
 
