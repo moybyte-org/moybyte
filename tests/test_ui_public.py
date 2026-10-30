@@ -102,12 +102,12 @@ def _pixels(ws):
 def _pmem(ws):
     lua = getattr(ws.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:14]
+        return list(lua._run.pmem()[1])[:15]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:14]
+        return list(img)[:15]
     pm = ws.player.ns["pmem"]
     return [pm(i) for i in range(15)]
 
