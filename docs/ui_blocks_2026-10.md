@@ -102,10 +102,14 @@ the Notes split needs.
 
 **G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
 `floor*`) are not in any public face. They reach the shell through
-`modmoy_ui.c`'s private table. But the Code tab, the Blocks and desk panes, the Launcher's bands and the pickers each drive
-them with a path of their own (#243 lists
-them). `AppHost.begin` (`runtime/ui_draw.py`, over
-`moy_ui_api_host_begin`) is the one path that stays. The others go as their surfaces move.
+`modmoy_ui.c`'s private table. But the Code tab, the desk's panes (a
+pane's own frame, `EditorDesk._pane_rows`, and a pane's dialog's rows,
+`_prompt_rows`) and the Launcher's bands each drive them with a path of
+their own (#243 lists them). `AppHost.begin` (`runtime/ui_draw.py`, over
+`moy_ui_api_host_begin`) is the one path that stays. The others go as
+their surfaces move. Paint's pickers have none: the page under them is a
+modal's page (`ui_draw.Hold`), and their cells are read from a part
+(§4.4).
 
 **G5. Budgets.**
 - `MOY_UI_API_STOPS` (40): stops a frame. A stop past it is drawn and
