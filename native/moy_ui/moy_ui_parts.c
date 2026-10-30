@@ -1779,15 +1779,23 @@ int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, 
         if (y < t->cy0 || y >= t->cy1) {
             continue;
         }
-        // a row mostly lies over a few colours: each mixed once
+        // a row mostly lies over a few colours, and over text over two by
+        // turns, its ground and its ink: the last two met are kept mixed
         uint16_t *row = &t->px[(size_t)y * (size_t)t->dw];
-        uint16_t from = row[x0], to = mix(from, g, k);
+        uint16_t f0 = row[x0], t0 = mix(f0, g, k), f1 = f0, t1 = t0;
         for (int x = x0; x < x1; x++) {
-            if (row[x] != from) {
-                from = row[x];
-                to = mix(from, g, k);
+            uint16_t p = row[x];
+            if (p == f0) {
+                row[x] = t0;
+            } else if (p == f1) {
+                row[x] = t1;
+            } else {
+                f1 = f0;
+                t1 = t0;
+                f0 = p;
+                t0 = mix(p, g, k);
+                row[x] = t0;
             }
-            row[x] = to;
         }
     }
     d.row->st[MOY_ST_N_FILL]++;
