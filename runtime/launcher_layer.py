@@ -3235,8 +3235,9 @@ class LauncherHomeLayer:
             self._button_focus = None
             return False
         k = min(k, len(buttons) - 1)
-        if not (any(i.steps(n) for n in ("left", "right", "up", "down"))
-                or any(i.pressed(n) for n in ("a", "run", "b", "home"))):
+        if not (i.steps("left") or i.steps("right") or i.steps("up") or i.steps("down")
+                or i.pressed("a") or i.pressed("run") or i.pressed("b")
+                or i.pressed("home")):
             return False                     # the strip's letters still act
         up, down = self._button_rows_apart(buttons, k)
         if i.steps("left"):

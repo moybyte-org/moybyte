@@ -55,6 +55,9 @@ more; the bar's clock turning its minute is an event of its own, one frame.
 Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
+Then the home, idle: the launcher's input and frame path with nothing pressed
+paints nothing and allocates nothing.
+
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
 gc_free charge each block to the Python line running (the code state's ip,
@@ -382,6 +385,7 @@ def measure(loop):
     notes(loop, info)
     apps(loop, info)
     achievements(loop, info)
+    home(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -609,6 +613,20 @@ def achievements(loop, info):
     ws._exit_settings()
     for _ in range(30):
         loop.step()
+
+
+def home(loop, info):
+    """The home with nothing pressed: what each frame paints and allocates."""
+    ws = loop.ws
+    for _ in range(60):
+        loop.step()
+    info["home_top"] = ws.wm.top_kind()
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    info["home_idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["home_idle_drawn"] = ws._frames_drawn - d0
+    gc.enable()
 
 
 class _Loop:
@@ -930,6 +948,15 @@ def test_the_achievements_page_allocates_nothing(result, key):
     info, text = result
     assert info["ach_page"] == "achievements", text[-3000:]
     _assert_quiet(info[key], key, text)
+
+
+def test_the_home_idle_paints_nothing_and_allocates_nothing(result):
+    """The launcher's input path runs every frame whether or not it paints:
+    a key probe that holds a generator makes its closure cells each call."""
+    info, text = result
+    assert info["home_top"] == "launcher", text[-3000:]
+    assert info["home_idle_drawn"] == 0, info["home_idle_drawn"]
+    _assert_quiet(info["home_idle"], "the home idle", text, minute=True)
 
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
