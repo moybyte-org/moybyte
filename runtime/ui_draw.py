@@ -2000,12 +2000,16 @@ _HP_HOST = 14
 _HP_DEAD = 15
 _HP_N = 16
 _HP_MOVES = 17
+# The pointer word a tap makes (MOY_UI_IN_PTR), by AppHost.tap: none, a
+# press (live, held, its edge), its release (live), held.
+_TAP_PTR = (0, 7, 1, 3)
 _HH_OWN_ROWS = 1
 _HH_HELD = 2
 # moy_ui_api_host_begin's answer (MOY_UI_HB_*)
 _HB_SETTLED = 1
 _HB_MOVING = 2
 _HB_EDGE = 4
+_HB_DUP = 8
 _HB_SHIFT = 16
 _HB_HELD = 32
 _HB_FENCE = 64
@@ -2163,7 +2167,7 @@ class AppHost:
         bar (`on_bar`): one focus mark a screen."""
         a = self.inp
         t = self.tap
-        a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
+        a[4] = _TAP_PTR[t]
         if (self.mid or a[7] or a[8]) and self.px >= 0:
             if not a[4]:                # the wheel and the middle button act where it rests
                 a[2] = self.px
@@ -2175,9 +2179,6 @@ class AppHost:
         u[0] = ctx
         u[1] = cv
         u[2] = _LOOK if th is _TH else _look(th)
-        dup = _C.api_dup(ctx)
-        if dup is not None:
-            print("ui: two stops share the id %r; the later is no stop" % dup)
         if rect is None:
             rect = _WHOLE[0]
             if rect is None or rect[2] != cv.w or rect[3] != cv.h:
@@ -2218,6 +2219,9 @@ class AppHost:
         # its plan names, then the pass draws the floor alone. A dialog's
         # rows frame is the host's to allow (`held`).
         r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
+        if r & _HB_DUP:
+            print("ui: two stops share the id %r; the later is no stop" % _C.api_dup(ctx))
+            r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
         self.shifting = False
         self._dy = 0
         if r & _HB_SHIFT and (not r & _HB_HELD or h(hp)):

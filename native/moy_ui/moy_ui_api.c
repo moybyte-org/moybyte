@@ -5598,6 +5598,9 @@ int moy_ui_api_host_begin(moy_ui_ctx_t *c, int32_t *in, moy_ui_box_t surface, in
                           int fs, const int32_t *pf, int32_t *hp) {
     moy_ui_host_t *h = &c->host;
     int f = pf[MOY_UI_PF_FRAME];
+    if (c->dup != 0 && c->dup != c->dup_told) {
+        return MOY_UI_HB_DUP;           // the host logs it (moy_ui_api_dup), then begins
+    }
     // the frame begun last, as its pass left it: whether it left the page
     // whole, what was drawn over it after, its kind and its floor's bands
     int clean = 0;

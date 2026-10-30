@@ -790,8 +790,24 @@ def test_the_hosts_words_are_the_engines():
                   ("_HP_DEAD", "MOY_UI_HP_DEAD"), ("_HP_N", "MOY_UI_HP_N"),
                   ("_HP_MOVES", "MOY_UI_HP_MOVES"), ("_HH_OWN_ROWS", "MOY_UI_HH_OWN_ROWS"),
                   ("_HH_HELD", "MOY_UI_HH_HELD"), ("_HB_SETTLED", "MOY_UI_HB_SETTLED"),
-                  ("_HB_MOVING", "MOY_UI_HB_MOVING"), ("_HB_EDGE", "MOY_UI_HB_EDGE"),
+                  ("_HB_MOVING", "MOY_UI_HB_MOVING"), ("_HB_EDGE", "MOY_UI_HB_EDGE"), ("_HB_DUP", "MOY_UI_HB_DUP"),
                   ("_HB_SHIFT", "MOY_UI_HB_SHIFT"), ("_HB_HELD", "MOY_UI_HB_HELD"),
                   ("_HB_FENCE", "MOY_UI_HB_FENCE")):
         assert getattr(ui_draw, py) == vals[c], (py, c, vals.get(c))
     assert len(ui_draw._PF) == vals["MOY_UI_PF_LEN"]
+
+
+def test_a_hosts_duplicate_id_is_logged_once_and_its_frame_still_begins(th, capsys):
+    """A pass that drew two stops under one id: the host's next begin logs it
+    once (moy_ui_api_host_begin answers MOY_UI_HB_DUP before beginning
+    anything) and begins the frame all the same."""
+    cv = make_system_canvas(W, H)
+    host = ui_draw.AppHost()
+    for n in range(3):
+        ui_draw.paint_frame(n, True)
+        assert host.begin(cv, th, (0, 0, W, H)) in (True, False)
+        ui.page("Dup")
+        ui.button("Same")
+        ui.button("Same")
+    out = capsys.readouterr().out
+    assert out.count("two stops share the id 'Same'") == 1, out

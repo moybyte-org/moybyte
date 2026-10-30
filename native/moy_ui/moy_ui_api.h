@@ -862,8 +862,9 @@ int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
 // to the host, which then arms it (moy_ui_api_host_arm). `in`, `surface`,
 // `flags` and `fs` are moy_ui_api_begin's; `in`'s press words (buttons
 // pressed, the key, the wheel) are cleared after, as a frame takes each
-// once (the host logs a duplicate id with moy_ui_api_dup first). `pf` is
-// the console's frame (MOY_UI_PF_*), `hp` the host's words
+// once. Where the last pass drew a duplicate id, nothing begins: the answer
+// is MOY_UI_HB_DUP, and the host logs it (moy_ui_api_dup) and begins again.
+// `pf` is the console's frame (MOY_UI_PF_*), `hp` the host's words
 // (MOY_UI_HP_*): its canvas, its tap, and the answers. Answers
 // MOY_UI_HB_* bits.
 enum {
@@ -898,6 +899,7 @@ enum {
     MOY_UI_HB_SETTLED = 1,          // moy_ui_api_begin's answer
     MOY_UI_HB_MOVING = 2,           // a page flings or glides
     MOY_UI_HB_EDGE = 4,             // an up press went past the page's top
+    MOY_UI_HB_DUP = 8,              // nothing begun: a duplicate id the last pass drew waits to be logged
     MOY_UI_HB_SHIFT = 16,           // a shift frame: make hp's moves, then arm it
     MOY_UI_HB_HELD = 32,            // ...where the host's dialog allows the plan
     MOY_UI_HB_FENCE = 64,           // ...fencing them before the floor draws
