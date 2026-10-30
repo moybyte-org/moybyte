@@ -789,19 +789,17 @@ source pixel) of the source rect the body shows, clipped to the part inside
 the card's band (`ui_draw.popover_band`: the card less its inset, clear of
 its corners and drop), so what the body does not show of the sheet draws
 nowhere. While the pickers are up the page under them changes only by what
-their pass does to it (the size, a picked sprite), so a frame whose buffer
-holds that page draws the pickers' body alone, clipped to the band
-(`PaintLayer._pick_held`): on the full-screen tier where each of the
-RETAINED_FRAMES frames before drew the pickers over the same page under
-one key (the sprite, its size, the sheet's gen, the look, the input's kind,
-the card), with nothing over it; on the desk as the Sprite pane's own
-frame (§15 P5's `_OWN_FRAMES`, while the pickers are up), where the WM
-vouches for the buffer and the lag it names lies inside the band or each
-frame it holds since drew that page. The release of a press the engine
-may still activate (`AppHost.tap_armed`: no page's drag) draws the desk
-whole, since a pick changes the Sheet pane beside the pickers. The
-popover's body is an overlay to the engine, drawn whole over the page, so
-its scroll moves no pixels (no shift frame); the two-axis region this
+their pass does to it (the size, a picked sprite), so it is a modal's page,
+held under one key (the sprite, its size, the sheet's gen, the look, the
+input's kind) by `ui_draw.Hold`: on a canvas that keeps its pixels a frame
+puts it back as it was held and draws the pickers over it. On the desk the
+pane draws through a viewport, which holds nothing, and the frame is the
+Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the pickers are up). The
+release of a press the engine may still activate (`AppHost.tap_armed`: no
+page's drag) draws the desk whole, since a pick changes the Sheet pane
+beside the pickers. A tapped tile is read from the sheet's part
+(`ui.part_at`). The popover's body is an overlay to the engine, drawn
+whole over the page, so its scroll moves no pixels (no shift frame); the two-axis region this
 section once named was not built, so a sheet wider than the body (a large
 font scale on a handheld) shows only the columns its row holds.
 

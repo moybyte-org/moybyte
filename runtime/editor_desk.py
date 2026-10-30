@@ -579,22 +579,6 @@ class EditorDesk(Layer):
             finally:
                 page.vouch = 0
             return
-        if tab == "paint":
-            # the pickers draw their body alone over the page the buffer
-            # holds where the WM says it holds it as the last draw left it,
-            # but for the lag it names (`retained`), in the pane's pixels
-            layer.vouch = self._vouch if own else 1
-            ret = self._ret
-            lag = layer.lag
-            lag[0] = ret[1] - r[0]
-            lag[1] = ret[2] - r[1]
-            lag[2] = ret[3] - r[0]
-            lag[3] = ret[4] - r[1]
-            try:
-                self._in_pane(tab, r, layer.draw, dt)
-            finally:
-                layer.vouch = 0
-            return
         self._in_pane(tab, r, layer.draw, dt)
 
     # -- drawing ------------------------------------------------------------------
@@ -812,11 +796,6 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
-            a = ws.paint_layer.alone_rect if c == "paint" else None
-            if a is not None:
-                # the pickers' body alone, over the page the buffer holds
-                x0, y0 = body[0] + a[0], body[1] + a[1]
-                x1, y1 = x0 + a[2], y0 + a[3]
         self._changed = [x0, y0, x1, y1]
         return True
 
