@@ -543,6 +543,16 @@ def _ib_editor(title, tab=None, ws_key=None):
         ws.editor_app.set_tab(tab)
     ws.mark_dirty()
 
+def _ib_window():
+    # the Editor a window, whatever this board last left it as (`win_full`):
+    # the window is the WM's once a frame drew it, so this is a step after
+    # _ib_editor; "Code full screen" is the rows that take it full (_ib_full)
+    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    if _w is not None and getattr(_w, 'full', None) is not None and _w.full():
+        ws.wm.bring_forward('menu')
+        ws.wm.full_key()
+        ws.mark_dirty()
+
 def _ib_focus(tab):
     # the keys on the desk pane that shows `tab`, found in the arrangement
     # of the window the desk drew in
@@ -586,8 +596,11 @@ def _ib_picker():
     return (_s[0] + _ox, _s[1] + _oy, _s[2] - _s[0], _s[3] - _s[1])
 
 def _ib_full():
+    # the window full screen (never a toggle: _ib_window left it a window)
+    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
     f = getattr(ws.wm, 'full_key', None)
-    if f is not None:
+    if f is not None and not (_w is not None and getattr(_w, 'full', None) is not None
+                              and _w.full()):
         f()
         ws.mark_dirty()
 """
@@ -1537,6 +1550,7 @@ def _app(app):
 
 def _ed(title, tab=None, key=None):
     return [("_ib_editor(%r, %r, %r)" % (title, tab, key), 4.0),
+            ("_ib_window()", 1.0),
             ("_ib_focus(%r)" % tab, 1.0)]
 
 
