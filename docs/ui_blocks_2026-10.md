@@ -64,8 +64,9 @@ gens" (branch `s0`, an experiment). What it showed:
 So:
 
 - **Unchanged rows are carried, in C (design ii), with no app Python per
-  carried row.** A Python carry, as `MusicPage`'s `_plan` and `ui.keep` are,
-  roughly breaks even with (i), so it buys nothing.
+  carried row.** A Python carry, as Music's own rows frame was when this
+  was measured (its `_plan` and `ui.keep`), roughly breaks even with (i),
+  so it buys nothing.
 - **The independent lever is Python per verb call.** A frame that reuses
   its option dicts, ids and strings costs measurably less, which is why every
   block allocates nothing per frame (§6).
@@ -90,9 +91,9 @@ view, dialog or popover opened past it is an error (§4.0), never a silent
 return. Deeper nests are cheap: a nest record is a few bytes per context.
 
 **G2. Lists of rich rows.** §4.1 builds the block: a table's rows can be
-parts the app draws, carried in C. The Blocks outline, Music steps, the
-cards drawer and the home grid still plan their own rows; §4.1 says what
-each of the first two waits on.
+parts the app draws, carried in C. The Blocks outline and Music steps are
+tables of parts; the cards drawer and the home grid still plan their own
+rows.
 
 **G3. Scrolling is y-only, one region a frame.** The engine records one
 shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`). Map, Scene and
@@ -178,21 +179,23 @@ cells hashed, their marks), one such table a context. A carried row keeps
 its stop and its pixels, with no app Python. A row whose cells or marks
 change (focus, the current row, a field's caret) is drawn again. The
 engine owns the extent (rows × row height) and the reveal, including a
-current row the app moved with its own keys. There is no page gen and no
-app plan; a table of parts' `o.gen` keys its current row alone (a cursor
-inside the row).
+current row the app moved with its own keys, which lands in view in the
+frame that moved it (a step of the engine's own glides, planned at
+begin). The table has no app plan; its `o.gen` keys its current row alone
+(a cursor inside the row).
 
-The table carries the Blocks outline: its cursor's plate is a tool drawn
-in the part and its slot is the table's gen, so `ui.rows` is not added.
-Measured on the boards before the move rule changed (#66, 2026-10-30):
-- A table of parts' frames make the table's view the region R. Music's
-  head, pad and foot are stops placed with `ui.at` outside it, so they
-  draw whole on every frame the table moves or changes. R that can be the
-  page, with the table's move inside it, is what keeps them.
-- The Blocks outline on the table drags, flings and coasts where its own
-  rows frame stopped dead, and draws less a frame. A cursor the app moved
-  reveals as a glide over the frames after the step, which lengthens a key
-  or ball step's interval and latency.
+The page that holds a table of parts may be its frames' region R, placed
+stops and all, where the page carries a gen keyed on what it shows beside
+the table and its own scroll is still: R moves by nothing and the table's
+view moves inside it, a second move the host makes (`sh_in`, `sh_in_dy`
+in `moy_ui_api.c`'s `shift_plan`). The stops an app places round its table
+then keep their pixels on the table's frames. With no such page the
+table's view is R, and what lies outside it draws on every frame.
+
+The Blocks outline and Music's steps are tables of parts, each inside a
+page under a gen. The Blocks cursor's plate is a tool drawn in its part and
+its slot is the table's gen, so `ui.rows` is not added; Music's cursor is
+the table's current row with `o.bar`, its meters drawn in the parts.
 
 A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
 from the viewport centre, makes the home carousel a composition: an app

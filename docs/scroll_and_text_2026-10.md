@@ -240,12 +240,10 @@ default.
 | Notes, the fields | Notes' handle in whole lines (`EditorHandle`); a field is one row | the handle's drag (`pan_drag`) | the handle keeps its caret in view |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
-The Blocks outline and Music's steps scroll in Python by whole rows
-(`blk_top` and `block_editor_ui._outline_drag`; `MusicPage._window`, which
-keeps the cursor in the middle), their rows the page's own pixels among its
-verbs. A key step or a scroll there is a rows frame the page asks its
-`AppHost` for (`AppHost.rows`, §5): the rows it changed, the rows moved out
-of the last frame by the rows they scrolled. Config's cards are a verbs
+The Blocks outline and Music's steps are tables of parts
+(`docs/ui_blocks_2026-10.md` §4.1): the engine's region, drag, fling and
+reveal, their rows carried in C, and the page holding each table the
+region R its frames move the table inside. Config's cards are a verbs
 page (`editor_settings.SettingsPage`) whose gen makes a key step the
 engine's rows frame; `cards_layer`'s own loop and `mtop` draw a broken
 manifest and the file list. Carts are out: a
@@ -628,26 +626,17 @@ whole.
   (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
   the last phase (§15 P8), priced honestly, and §15 says what it costs if
   the cart floor does not hold.
-- *The Blocks outline and Music's steps* are rows a shell page draws itself
-  among its verbs, and the page asks for the same frame from its
-  `AppHost` (`AppHost.rows`): where the last frame it drew differs from
-  this one only by the cursor and a whole-row scroll, the rects of the rows
-  that changed and the region the scroll moves, which the host moves out
-  of the last frame (`shift_last`) before the engine plans the floor
-  (`moy_ui_api_shift_rows`); a page with rows of its own takes no plan the
-  engine makes without them (`own_rows`). The Blocks page takes each run of
-  rows its floor reaches into the floor (`floor_take`) and draws them
-  clipped to it. Its cursor plate and insert button are one placed stop
-  (`Row`), whose bands take the gap pixel either side where the plate
-  reaches past its box: a stop `ui.at` placed both frames that moved where
-  the floor holds both its boxes floors nothing more, so a step is the
-  cursor's two rows; a prompt over the page makes the next frame whole
-  (`BlocksPage.forget`). Music's page
-  keeps what each shown row held, so an edit of one step is that row's
-  frame too; its rows draw their verbs first and their own pixels (the
-  cursor bar, the meters, which overlap no verb) after, and the rows and
-  the pad the floor misses are kept as the last frame drew them
-  (`ui.keep`).
+- *The Blocks outline and Music's steps* are tables of parts
+  (`docs/ui_blocks_2026-10.md` §4.1): each row's cells are its key, the
+  engine carries the rows that did not change and `ui.table_part` answers
+  the rest, which the page draws clipped to their cells. Each page carries
+  a gen keyed on what it shows beside its table (the head, Music's pad, the
+  foot), so R is the page, its placed stops lying still, and the table's
+  move is a second move inside it (`sh_in`, `sh_in_dy`): the page beside
+  the table keeps its pixels on the table's frames. The Blocks cursor's
+  plate and insert button are a tool drawn in the cursor's part, its slot
+  the table's gen; under a prompt the page draws whole until a frame
+  draws it with the prompt gone (`BlocksPage.forget`).
 - *The text console* (`runtime/text_console.py`) draws its scrollback
   through the view (`ui.text_view("log", ..., {"follow": True})`, an echoed
   line's prompt and answer in SGR's dim and value); its prompt line is drawn
@@ -888,7 +877,7 @@ Per canvas, then per source:
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
-| a page's own rows frame (`AppHost.rows`) | the Blocks outline and Music's steps, a frame whose only change is the cursor or a whole-row scroll (and on Music a step's value) | an edit the head or foot shows, a press, a floor past three fifths of the page |
+| a table of parts moving inside its page | the Blocks outline and Music's steps: a drag, a fling, a key step, a changed row, the page under its gen | an edit the head or foot shows (the page's gen moves), a prompt over the page, a floor past three fifths of the page |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
@@ -1102,7 +1091,7 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 | **P2 repeat and the ball** | `begin_frame(now)`, the repeat counts, the typing-level slot, the page's `e.repeat` dropped, the ball as counts, `BALL_COAST`; then the owner's hand trial | T-Deck, host | P1c, P1d | T-Deck `ball_fast` rows 13-27 of 30 → 30 of 30 within one glide; held keys move on every surface (none today); P4 held-key rows (Code, Notes, Music ~11 Hz with no delay) repeat at the rate |
 | **P3 fields and dialogs** (Editor sequence begins) | the field's row; the held page's put-back skipped on rows frames; Blocks' prompts, Cart info, Settings' name, Notes' name field | P4, T-Deck | P6 | P4 Blocks prompts 123 → ~14-20, Cart info fields 86 → ~14-20; T-Deck fields 19-25 → ~12-15 |
 | **P4 the Code tab and theme Config** | `TextView` in visual rows, the whole-draw triggers, overlays as rows, the pixel drag | P4, T-Deck | P6 | P4 Code key steps 86 → ~14-18, typing 86-92 → ~14-18, held 84 → ~14-18, drag 57-82 → ~17-22, fling 87-105 → ~17-22, find 104 → ~50-60 (a find past the view is a whole view under direct render); theme Config keys and typing 91-94 → ~14-18, fling 121 → ~17-22; T-Deck Code type 40 → ~25-40 (its p90 is two outliers P0's tool must name before P4 prices them), drag 24 → ~14-17, find 68 → ~25-45, theme Config 12-15 → ~9-11 |
-| **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as their pages' own rows frames (`AppHost.rows`) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
+| **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as tables of parts moving inside their pages (`docs/ui_blocks_2026-10.md` §4.1) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
 | **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
 | **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
 | **P7b the pickers** (Editor sequence) | the picker on the kernel; its body alone over the page it holds (§9) | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
