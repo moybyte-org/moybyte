@@ -1158,6 +1158,150 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
     return n;
 }
 
+// An rr_t for moy_shape_rrect's shape (w, h, corners r, `stepped`, a ring
+// `line` wide in `ring`, a fill or none): what rr_px reads, set as that
+// function sets it.
+static void rr_init(rr_t *s, int w, int h, int r, int stepped, int line, int32_t ring,
+                    int fill) {
+    int rr[4], ri[4];
+    for (int k = 0; k < 4; k++) {
+        rr[k] = clamp_r(r, w, h);
+    }
+    s->line = imax(0, imin(line, imin(w, h) / 2));
+    s->fill = fill;
+    s->bevel = 0;
+    s->hi = s->lo = (uint16_t)ring;
+    corners_set(&s->out, w, h, rr, stepped);
+    int iw = w - 2 * s->line, ih = h - 2 * s->line;
+    s->has_in = s->line > 0 && iw > 0 && ih > 0;
+    if (s->has_in) {
+        for (int k = 0; k < 4; k++) {
+            ri[k] = clamp_r(rr[k] - s->line, iw, ih);
+        }
+        corners_set(&s->in, iw, ih, ri, stepped);
+    }
+}
+
+// Whether rr_px writes shape pixel (i, j) of `s` without reading what is
+// under it (a pixel it leaves alone reads nothing either).
+static int rr_opaque(const rr_t *s, int i, int j) {
+    int co = corners_cov(&s->out, i, j);
+    if (co == 0) {
+        return 0;
+    }
+    int ci = s->line ? (s->has_in ? corners_cov(&s->in, i - s->line, j - s->line) : 0) : co;
+    int wr = co - ci, wf = s->fill ? ci : 0;
+    return 15 - wr - wf <= 0;
+}
+
+// Whether card pixel (i, j) lies in one of the `nq` rects (x, y, w, h, ink)
+// `q` names: a title tile's letter, opaque over the block.
+static int in_quads(const int16_t *q, int nq, int i, int j) {
+    for (int k = 0; k < nq; k++, q += 5) {
+        if (j >= q[0] && j < q[0] + q[2] && i >= q[1] && i < q[1] + q[3]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int mg_face(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
+            const uint16_t *face, size_t fcap, int fw, int fy0, const uint16_t *src,
+            size_t scap, int sw, int cw, int ch, int32_t fill, const int16_t *q, int nq,
+            int r, int stepped, int32_t ring, int cam_x, int cam_y, int cx0, int cy0, int cx1,
+            int cy1) {
+    moy_text_target_t t;
+    tgt_t g;
+    flat_target(&t, dst, cap, dw, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    if (w <= 0 || h <= 0 || face == NULL || fw < w || fy0 < 0
+        || (size_t)(fy0 + h) * (size_t)fw > fcap || !tgt_open(&t, NULL, &g)) {
+        return 0;
+    }
+    if (src != NULL && (sw <= 0 || cw <= 0 || ch <= 0 || cw > sw || cw > 32767 || ch > 32767
+                        || (size_t)ch * (size_t)sw > scap)) {
+        return 0;
+    }
+    int rr = clamp_r(r, w, h);
+    int rad[4] = {rr, rr, rr, rr};
+    corners_t c;                          // the picture's outline (mg_cover's)
+    corners_set(&c, w, h, rad, stepped);
+    rr_t pic, edge;                       // the title tile's block; the edge ring
+    rr_init(&pic, w, h, r, stepped, 0, 0, 1);
+    prow_t pr = {(uint16_t)fill, (uint16_t)fill, 0};
+    prow_t none = {0, 0, 0};
+    if (ring >= 0) {
+        rr_init(&edge, w, h, r, 0, 1, ring, 0);
+    }
+    int bx = x - g.cam_x, by = y - g.cam_y;
+    int X0 = imax(bx, g.x0), X1 = imin(bx + w, g.x1);
+    int Y0 = imax(by, g.y0), Y1 = imin(by + h, g.y1);
+    if (X1 <= X0 || Y1 <= Y0) {
+        return 0;
+    }
+    // Per row, the columns the smooth outline leaves alone, those it covers
+    // in part and those it covers whole (cov_side): a stepped picture's
+    // outline is the smooth one's thresholded and the ring's is smooth, so
+    // every pixel either one blends lies in the part-covered columns.
+    corners_t sm;
+    corners_set(&sm, w, h, rad, 0);
+    int tabled = rr == 0 || sm.t[0] != NULL;
+    uint32_t fx = src != NULL ? ((uint32_t)cw << 16) / (uint32_t)w : 0;
+    uint32_t fy = src != NULL ? ((uint32_t)ch << 16) / (uint32_t)h : 0;
+    int n = 0;
+    for (int Y = Y0; Y < Y1; Y++) {
+        int i = Y - by;
+        uint16_t *row = g.px + (size_t)Y * (size_t)g.stride;
+        const uint16_t *frow = face + (size_t)(fy0 + i) * (size_t)fw - bx;
+        int zl = 0, al = 0, zr = 0, ar = 0;
+        if (tabled) {
+            cov_side(&sm, 0, i, &zl, &al);
+            cov_side(&sm, 1, i, &zr, &ar);
+        } else if (i < rr || i >= h - rr) {
+            al = ar = rr;                 // no tables: a corner's box, a pixel at a time
+        }
+        int a = imax(X0, bx + al), b = imin(X1, bx + w - ar);
+        if (b > a) {
+            memcpy(row + a, frow + a, (size_t)(b - a) * sizeof(uint16_t));
+            n += b - a;
+        }
+        if (al == 0 && ar == 0) {
+            continue;
+        }
+        const uint16_t *srow = src != NULL
+            ? src + (size_t)(((uint32_t)i * fy + (fy >> 1)) >> 16) * (size_t)sw : NULL;
+        for (int side = 0; side < 2; side++) {
+            int j0 = side ? w - ar : zl, j1 = side ? w - zr : al;
+            for (int j = imax(j0, X0 - bx); j < imin(j1, X1 - bx); j++) {
+                int X = bx + j;
+                int co = corners_cov(&c, i, j);
+                int pin = src != NULL ? co == 15
+                    : (rr_opaque(&pic, i, j) || (nq > 0 && in_quads(q, nq, i, j)));
+                if (pin || (ring >= 0 && rr_opaque(&edge, i, j))) {
+                    // the card's pixel whatever lies under it: its face's
+                    row[X] = frow[X];
+                    n++;
+                    continue;
+                }
+                int wrote = 0;
+                if (src != NULL) {
+                    if (co > 0) {
+                        uint16_t p = srow[((uint32_t)j * fx + (fx >> 1)) >> 16];
+                        row[X] = wire(mix3(can(row[X]), 15 - co, can(p), co, 0, 0));
+                        wrote = 1;
+                    }
+                } else {
+                    wrote = rr_px(&pic, &g, MOY_SHAPE_ALL, i, j, X, row, &pr);
+                }
+                if (ring >= 0) {
+                    wrote |= rr_px(&edge, &g, MOY_SHAPE_ALL, i, j, X, row, &none);
+                }
+                n += wrote;
+            }
+        }
+    }
+    return n;
+}
+
 int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw, int sx,
             int sy, int w, int h, uint16_t col, int alpha, int dw, int dx, int dy) {
     if (dw <= 0) {

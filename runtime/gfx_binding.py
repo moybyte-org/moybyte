@@ -124,6 +124,8 @@ _SIGS = (
                    _P, _I, _I, _I, _I, _I, _I], _I),
     ("mg_cover", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I,
                   _I, _I, _I, _I, _I, _I], _I),
+    ("mg_face", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z, _I, _I, _I,
+                 ctypes.c_int32, _P, _I, _I, _I, ctypes.c_int32, _I, _I, _I, _I, _I, _I], _I),
     ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I, _I, _I, _I], _I),
     ("moy_shape_stats", [_P], None),
     ("moy_shape_reset", [_I], None),
@@ -343,6 +345,22 @@ def cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped,
                            int(h), ctypes.cast(sarr, _P), scap, int(sw), int(sx), int(sy),
                            int(cw), int(ch), int(r), int(bool(stepped)), int(cam_x),
                            int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def face(dst, dw, x, y, w, h, face_, fw, fy0, src, sw, cw, ch, fill, quads, r, stepped,
+         ring, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    farr, fcap = _rbuf(face_)
+    sarr, scap = (None, 0) if src is None else _rbuf(src)
+    qarr = None if quads is None else (ctypes.c_int16 * len(quads))(*quads)
+    return _lib().mg_face(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w), int(h),
+                          ctypes.cast(farr, _P), fcap, int(fw), int(fy0),
+                          None if sarr is None else ctypes.cast(sarr, _P), scap, int(sw),
+                          int(cw), int(ch), int(fill),
+                          None if qarr is None else ctypes.cast(qarr, _P),
+                          0 if quads is None else len(quads) // 5, int(r),
+                          int(bool(stepped)), int(ring), int(cam_x), int(cam_y), int(cx0),
+                          int(cy0), int(cx1), int(cy1))
 
 
 def tint(dst, src, sw, sx, sy, w, h, col, alpha, dw=0, dx=0, dy=0):
