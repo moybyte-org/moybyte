@@ -44,10 +44,25 @@ step 0):
   re-runs no app code. The engine moves pixels and draws the entering band
   from records it kept. This is what `ui.keep` does for one stop.
 
-Which helps depends on how the pass's time splits between MicroPython calling
-verbs and C laying out and checking stops. A `moy_prof` capture during a long
-Settings drag (`tools/prof_sample.py`, `--frame 0` and `--frame 1`) splits it.
-No block in §3 is built until that capture is read.
+**The measurement (2026-10-30, #66).** It used a `moy_prof` capture of a
+held drag on the T-Deck, plus Music steps redrawn as "visible rows only, no
+gens" (branch `s0`, an experiment). What it showed:
+
+- The engine's C layout and stop checks are a small share of the pass.
+- The app's Python is most of it: the VM's dict and attribute lookups, and
+  the strings it makes each frame. The pixel move of a shift frame is most
+  of the rest.
+- Design (i) alone loses on key frames, because every visible row's verbs
+  cost more than the copy it replaces, and wins on drag frames.
+
+So:
+
+- **Unchanged rows are carried, in C (design ii), with no app Python per
+  carried row.** A Python carry, as `MusicPage`'s `_plan` and `ui.keep` are,
+  roughly breaks even with (i), so it buys nothing.
+- **The independent lever is Python per verb call.** A frame that reuses
+  its option dicts, ids and strings costs measurably less, which is why every
+  block allocates nothing per frame (§6).
 
 ## 2. What already composes
 
@@ -128,34 +143,33 @@ distinct code in wasm (-5, `-MOY_UI_DEEP`); `tests/test_ui_nest.py` holds the
 three faces. `MOY_UI_API_NEST` rises to the depth the blocks below need,
 when one needs it.
 
-### 4.1 `ui.rows`: a list of rich rows
+### 4.1 A list of rich rows: `ui.table`, extended
 
-First, extending `ui.table` with a part column and `ui.grid` with virtual
-cards is tried. `rows` is added only if those cannot carry the G2 surfaces,
-and the reason is recorded here.
+`ui.table` already carries most of what §1's measurement asks for:
+- it draws only the rows that show, as one stop (`STOP_ROWS`);
+- it moves focus by row index, and reveals the focused row;
+- it memoises its cells, so a steady frame runs no row Python;
+- a placed table has the shift-frame and floor support in `moy_ui_api.c`.
 
-If it is added, its shape follows the engine's `STOP_ROWS`. One list stop
-holds the scroll, the focus by row index and the reveal. Child stops exist
-only for the rows that show, under an id scope of the row index, so repeated
-labels across rows stay distinct. It allocates nothing a frame, in every
-face:
+The memo stands in for gens, so an app keeps no gens.
 
-```python
-r = ui.rows_begin("steps", len(steps), ROW_H, o)   # a kept array("i")
-while ui.row(r):                                   # r[0] index, r[1:5] rect
-    ui.at(r[1], r[2], r[3], r[4])
-    if ui.button(steps[r[0]].name): pick(r[0])
-```
+The list block is therefore `ui.table`, with two additions:
+- **a part column.** A row's cell is a rect the app draws into (a meter, a
+  picture, a control), over the picture-column path Files' covers take
+  (`table_rows`/`table_pictures`);
+- **per-row marks**, for a cursor bar and a current row.
 
-`o.gens` is an optional kept int array, one entry per row. An absent `gens`
-means "no licence": every row that shows draws. It never means "unchanged".
-Whether an unchanged row is re-called (§1's design i) or carried (design ii)
-is §1's measurement's answer. Under (ii), a carried row keeps its stops
-through the engine, as `ui.keep` does, and a row whose marks change (focus,
-press, hover, a field's caret) is always re-called.
+A carried row keeps its stop and its pixels. A row whose cell or marks
+change (focus, press, hover, a field's caret) is redrawn. Ids inside a row
+are scoped by its row index, so repeated labels across rows stay distinct.
+The engine owns the extent (rows × row height) and the reveal: a list whose
+off-screen rows are not called otherwise loses its height and its focus.
 
-`o.axis = "x"` with `o.snap`, plus each row's fractional distance from the
-viewport centre in `r[5]`, makes the home carousel a composition: an app
+A separate `ui.rows` is added only if the table cannot carry the Blocks
+outline, and the reason is recorded here.
+
+A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
+from the viewport centre, makes the home carousel a composition: an app
 scales each card's `part` by that distance. The carousel moves only if §5's
 spike holds its numbers. Otherwise it stays bespoke over `scroll` and `part`.
 
@@ -195,15 +209,12 @@ Notes split.
 
 ## 5. Order, each step gated
 
-0. **Measure.**
-   - A `moy_prof` split of the Settings pass on the T-Deck (§1).
-   - Music steps redrawn as "visible rows only, through today's verbs, no
-     gens", benched on both boards against the run before. If that holds,
-     gens are not needed for lists.
+0. **Measure** where the pass's time goes, before any block is built (§1,
+   2026-10-30).
 1. §4.0: nest overflow becomes an error.
 2. Plan step 1 (`text_view`) is its own gate: Code and the console must hold
    their p90.
-3. §4.1 (table, grid or `rows`), proven on Blocks outline and Music steps.
+3. §4.1, `ui.table` extended, proven on Music steps and the Blocks outline.
    Then the cards drawer, then the home grid.
 4. §4.2 with the Editor desk's panes.
 5. §4.3 and §4.4 with the canvas editors and the Notes preview.
