@@ -31,7 +31,7 @@ PAGES = os.path.join(ROOT, "tests", "fixtures", "ui_page")
 WASM = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_ui.moy")
 _DT = 1.0 / 30.0
 P_FRAMES, P_SOUND, P_VOL, P_CUR, P_SAVES, P_KEYS, P_PART, P_FOCUS, P_FAIL = range(9)
-P_PANE, P_SIZE, P_TAP = 10, 11, 12             # the panes (ui.split, ui.part_at)
+P_PANE, P_SIZE, P_TAP, P_HELD = 10, 11, 12, 13     # the panes (ui.split, ui.part_at)
 
 # -- one page, three runtimes ----------------------------------------------------------
 
@@ -101,14 +101,14 @@ def _pixels(ws):
 def _pmem(ws):
     lua = getattr(ws.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:13]
+        return list(lua._run.pmem()[1])[:14]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:13]
+        return list(img)[:14]
     pm = ws.player.ns["pmem"]
-    return [pm(i) for i in range(13)]
+    return [pm(i) for i in range(14)]
 
 
 def _script(ws):
@@ -146,6 +146,17 @@ def _script(ws):
     drv.touch(93, 224)
     _frame(drv)
     drv.touch_drag(113, 224)
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    drv.touch_up()
+    _frame(drv)
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    # a press on the second pane's part dragged across it, past the slop:
+    # its nav is off, so the press stays its own and part_at follows it
+    drv.touch(120, 216)
+    _frame(drv)
+    drv.touch_drag(140, 231)
     _frame(drv)
     shots.append((_pixels(ws), _pmem(ws)))
     drv.touch_up()
@@ -211,6 +222,9 @@ def test_the_page_answers_its_script(page_runs):
     # pane is 20 px wider
     assert after[12][P_SIZE] == 80
     assert after[13][P_SIZE] == 100 and after[13][P_PANE] == 0
+    # the part's press held through a drag: where the pointer is, from the
+    # part's top-left, the second pane at x 116 now
+    assert after[14][P_HELD] == (140 - 116) * 256 + (231 - 214) + 1
 
 
 # -- the engine under scripted input -----------------------------------------------------

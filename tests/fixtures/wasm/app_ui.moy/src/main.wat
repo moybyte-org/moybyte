@@ -12,7 +12,9 @@
 ;; negated (0: none), 9 a hash of the page's rows 40 to 159 (every eighth
 ;; frame), which a board's run is held to the host's by, 10 the focused pane
 ;; (from 0), 11 the first pane's size, 12 where a tap activated the second
-;; pane's part (x * 256 + y + 1; 0 none).
+;; pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on it
+;; last was while pressed (the same; the part's nav is off, so a held press
+;; stays its own).
 (module
   (import "moy" "rect" (func $rect (param i32 i32 i32 i32 i32)))
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
@@ -97,6 +99,9 @@
   ;; of 6, the focused pane written each frame)
   (data (i32.const 1300) "panes")
   (data (i32.const 1310) "cell")
+  ;; the cell's override block: nav off (a held press stays the part's)
+  (data (i32.const 1320) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "\00\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff")
   (data (i32.const 2300) "\50\00\00\00\00\00\00\00\28\00\00\00\28\00\00\00")
   (data (i32.const 2320) "\06\00\00\00\06\00\00\00")
 
@@ -194,10 +199,16 @@
     (call $ok (call $ui_at (i32.load (i32.const 2416)) (i32.load (i32.const 2420))
                            (i32.load (i32.const 2424)) (i32.load (i32.const 2428))))
     (call $ok (call $ui_part (i32.const 1310) (i32.const 4) (i32.const 0) (i32.const 0)
-                             (i32.const 0) (i32.const 0) (i32.const 2460) (i32.const 20)))
+                             (i32.const 1320) (i32.const 36) (i32.const 2460) (i32.const 20)))
     (if (i32.and (i32.load (i32.const 2476)) (i32.const 2))
       (then (if (call $ui_part_at (i32.const 2490) (i32.const 8))
         (then (global.set $tap
+          (i32.add (i32.add (i32.mul (i32.load (i32.const 2490)) (i32.const 256))
+                            (i32.load (i32.const 2494)))
+                   (i32.const 1)))))))
+    (if (i32.and (i32.load (i32.const 2476)) (i32.const 4))
+      (then (if (call $ui_part_at (i32.const 2490) (i32.const 8))
+        (then (global.set $held
           (i32.add (i32.add (i32.mul (i32.load (i32.const 2490)) (i32.const 256))
                             (i32.load (i32.const 2494)))
                    (i32.const 1)))))))
@@ -213,4 +224,5 @@
     (drop (call $pmem (i32.const 7) (local.get $f) (i32.const 1)))
     (drop (call $pmem (i32.const 10) (global.get $pane) (i32.const 1)))
     (drop (call $pmem (i32.const 11) (i32.load (i32.const 2300)) (i32.const 1)))
-    (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))))
+    (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))
+    (drop (call $pmem (i32.const 13) (global.get $held) (i32.const 1)))))
