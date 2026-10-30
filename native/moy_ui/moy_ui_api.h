@@ -484,7 +484,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // region of its own -- a drag scrolls it and its release coasts, the wheel
 // steps it -- in ui.at's rect or stacked `rows` rows tall (0: the rest of
 // the page). Its rows are the lines `L` gives: whole lines cut at its
-// width, or wrapped there (`wrap`); in the mono face, coloured by `syntax`
+// width, or wrapped there (`wrap`); in the mono face (or `font`, a loaded
+// monospace font's id, where the caller gives one: 0 the mono role's; a
+// cart's code draws in petme128 whatever it names), coloured by `syntax`
 // (MOY_UI_SYN_*: SGR escapes by default, a terminal's), numbered where
 // `gutter`, a caret at `caret_line`, `caret_col` (-1: none). An editor's
 // marks: a selection from (sel_r0, sel_c0) to (sel_r1, sel_c1) (sel_r0 -1:
@@ -522,11 +524,11 @@ enum {
     MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL,
     MOY_UI_TXO_SEL_R0, MOY_UI_TXO_SEL_C0, MOY_UI_TXO_SEL_R1, MOY_UI_TXO_SEL_C1,
     MOY_UI_TXO_ERR_LINE, MOY_UI_TXO_FIND_CI, MOY_UI_TXO_LEFT, MOY_UI_TXO_MARK,
-    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_LEN
+    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_LEN
 };
 // The options' defaults, in MOY_UI_TXO_* order: what a face that takes
 // fewer of them fills the rest with.
-#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1}
+#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0}
 // Answers 0, or MOY_UI_API_DEEP.
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,

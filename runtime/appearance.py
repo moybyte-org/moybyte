@@ -804,6 +804,24 @@ class Appearance:
                 return "tiny5" if key[1] == "tiny5.fnt" else None
         return None
 
+    def note_font(self):
+        """The font a note's text view draws in (runtime/editor_handle.py,
+        `ui.text_view`'s `font`): on the desk the live `mono` face's family
+        at 15 pixels, where the image carries it (tools/make_font.py's
+        NOTE); 0, the `mono` role's own, on the handheld, for petme128 and
+        for a face of a theme's own."""
+        if getattr(self.ws, "metric_class", None) != _layout_base.DESK:
+            return 0
+        fid = _ui_draw.font("mono")[0]
+        if not fid:
+            return 0
+        for key in _FONTS:
+            if _FONTS[key] == fid and key[0] is None and _fontset.face(key[1]):
+                parts = key[1][:-4].split("-")
+                f = "-".join((parts[0], "15", parts[2], "4")) + ".fnt"
+                return self._font_id((None, f)) if font_file(f) is not None else 0
+        return 0
+
     def _code_font_preset(self):
         """The CODE FONT preset the live `mono` font is, None for a font of
         the theme's own."""

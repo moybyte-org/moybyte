@@ -3910,7 +3910,11 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     group_close(c, s);
     int fs = c->fs;
     moy_font_info_t fi;
-    uint32_t font = moy_ui_font(MOY_UI_FONT_MONO, &fi);
+    // the caller's font where it names a loaded one, outside a cart's code
+    uint32_t font = (uint32_t)opt[MOY_UI_TXO_FONT];
+    if (font == 0 || moy_ui_cmask() != 127 || !moy_font_info(font, &fi)) {
+        font = moy_ui_font(MOY_UI_FONT_MONO, &fi);
+    }
     int cell = (fi.w > 0 ? fi.w : 8) * fs, th, lh;
     if (font != 0 && fi.first == 0) {
         th = fi.h * fs;

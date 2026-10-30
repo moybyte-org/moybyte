@@ -504,8 +504,8 @@ static int moycore_ui_scroll(lua_State *L)
 
 /* ui.text_view(id, lines, o) -> the first line shown (from 1), the rows
  * shown. `lines` a table of strings from 1; `o`'s rows, wrap, syntax ("sgr"
- * by default, "plain", "python", "lua", "json"), follow, gutter and caret
- * ({line, col}, each from 1). */
+ * by default, "plain", "python", "lua", "json", "markdown"), follow, gutter
+ * and caret ({line, col}, each from 1). */
 typedef struct {
     lua_State *L;
     int t;
@@ -525,7 +525,7 @@ static const uint8_t *moycore_ui_line(void *src, int32_t i, size_t *n)
 
 static int moycore_ui_text_view(lua_State *L)
 {
-    static const char *const syn[] = {"plain", "python", "lua", "json", "sgr"};
+    static const char *const syn[] = {"plain", "python", "lua", "json", "sgr", "markdown"};
     luaL_checktype(L, 2, LUA_TTABLE);
     moycore_ui_lines_t ls = {L, 2};
     moy_ui_lines_t lines = {&ls, (int32_t)lua_rawlen(L, 2), moycore_ui_line};
@@ -540,7 +540,7 @@ static int moycore_ui_text_view(lua_State *L)
         lua_getfield(L, 3, "syntax");
         if (lua_type(L, -1) == LUA_TSTRING) {
             const char *name = lua_tostring(L, -1);
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < (int)(sizeof(syn) / sizeof(syn[0])); i++) {
                 if (strcmp(name, syn[i]) == 0) {
                     opt[MOY_UI_TXO_SYNTAX] = i;
                 }

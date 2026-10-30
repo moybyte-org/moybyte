@@ -580,9 +580,10 @@ whole.
 - *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
   verbs page every tick (`ui.bar`, `ui.page`, the hints, the sheet), and
   the handle draws the open note as a view (`ui.text_view("editor<n>",
-  ...)` at the note's rect, placed with `ui.at`) in the monospace face: the
-  note's source as written, a heading's `#`, a `[[link]]` and a `[ ]` box
-  in the text's colour. A tap finds its cell through the view
+  ...)` at the note's rect, placed with `ui.at`) in the monospace face (on
+  the desk its family's 15 px face, the view's `font`): the note's source
+  as written, coloured by the view's `markdown` syntax (its marks dim, a
+  heading, a task's box and a `[[link]]`'s name in the code tones). A tap finds its cell through the view
   (`ui_draw.text_at`); a box's brackets toggle it and a link opens its
   note from that cell (`EditorHandle.tap`). The Player begins the run's
   frame through its app host (`AppHost.run`, the host every shell app's
