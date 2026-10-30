@@ -1686,7 +1686,7 @@ class Player:
         """The cart's `cls`: a clear under a floor makes the frame whole
         from there."""
         if self._pass and self._uh.shifting:
-            self._uh.break_rows()
+            _ui_draw._C.api_shift_break(self._uh.ctx)
             self._broke = True
         self._cls(c)
 

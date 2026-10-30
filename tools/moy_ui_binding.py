@@ -332,7 +332,6 @@ _DRAW_SIGS = (
     ("moy_ui_api_moving", [c.c_void_p], _I),
     ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
     ("moy_ui_api_shift_plan", [c.c_void_p, c.c_void_p], _I),
-    ("moy_ui_api_floor_take", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], _I),
     ("moy_ui_api_shift_break", [c.c_void_p], None),
     ("moy_ui_api_shift_drawn", [c.c_void_p, c.POINTER(_I)], _I),
     ("moy_ui_api_band", [c.c_void_p, c.c_void_p], _I),
@@ -1341,11 +1340,6 @@ def binding():
         w = (c.c_int32 * 8).from_buffer(out)
         return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
 
-    def api_floor_take(ctx, cv, look, x, y, w, h):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_floor_take(p, c.byref(sink(cv, look)), int(x), int(y),
-                                              int(w), int(h)))
-
     def api_shift_break(ctx):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_shift_break(p)
@@ -1370,12 +1364,6 @@ def binding():
         if n < 0:
             return None
         return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
-
-    def api_floor_into(ctx, out):
-        p, _k = _ctx(ctx)
-        n = len(out) // 4
-        v = (c.c_int32 * max(4, 4 * n)).from_buffer(out)
-        return int(lib.moy_ui_api_floor(p, v, n))
 
     def api_floor_box(ctx, out):
         p, _k = _ctx(ctx)
@@ -1618,8 +1606,8 @@ def binding():
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
-              api_shift_plan, api_floor_take, api_shift_break,
-              api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
+              api_shift_plan, api_shift_break,
+              api_shift_drawn, api_band, api_floor, api_floor_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,
               api_host_whole,
               api_pop_box,

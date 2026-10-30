@@ -3270,17 +3270,6 @@ static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_shift_plan_obj, ui_api_shift_plan);
 
-// api_floor_take(ctx, cv, look, x, y, w, h) -> whether the rect joined an
-// armed frame's floor over the page's ground (moy_ui_api_floor_take)
-static mp_obj_t ui_api_floor_take(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    return mp_obj_new_bool(moy_ui_api_floor_take(ctx_of(a[0]), &s, num(a[3]), num(a[4]),
-                                                 num(a[5]), num(a[6])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_floor_take_obj, 7, 7, ui_api_floor_take);
-
 // api_shift_break(ctx): the frame draws whole from here
 static mp_obj_t ui_api_shift_break(mp_obj_t ctx) {
     moy_ui_api_shift_break(ctx_of(ctx));
@@ -3335,16 +3324,6 @@ static mp_obj_t ui_api_band(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_band_obj, 1, 2, ui_api_band);
 
-// api_floor_into(ctx, out) -> the floor's rects into `out`, writable int32
-// words, x, y, w, h each, as many as it holds: their count, -1 where the
-// pass draws whole (moy_ui_api_floor)
-static mp_obj_t ui_api_floor_into(mp_obj_t ctx, mp_obj_t out) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_floor(ctx_of(ctx), (int32_t *)b.buf,
-                                                 (int)(b.len / (4 * sizeof(int32_t)))));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_into_obj, ui_api_floor_into);
 
 // api_floor_box(ctx, out) -> whether the pass drew a floor; `out`, four
 // writable int32 words, its bounding rect on screen (moy_ui_api_floor_box)
@@ -3677,7 +3656,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus_ahead), MP_ROM_PTR(&ui_api_focus_ahead_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_plan), MP_ROM_PTR(&ui_api_shift_plan_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_floor_take), MP_ROM_PTR(&ui_api_floor_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_break), MP_ROM_PTR(&ui_api_shift_break_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
@@ -3696,7 +3674,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_text_tones), MP_ROM_PTR(&ui_text_tones_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_words), MP_ROM_PTR(&ui_text_words_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_runs), MP_ROM_PTR(&ui_text_runs_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_floor_into), MP_ROM_PTR(&ui_api_floor_into_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_clip), MP_ROM_PTR(&ui_api_card_clip_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },
