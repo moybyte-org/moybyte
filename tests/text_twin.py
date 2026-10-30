@@ -4,8 +4,7 @@ C's runs are held to (tests/test_text_view.py), as tests/ui_twin.py is the
 toolkit's."""
 
 from runtime.code_layer import (_HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT,
-                                _HL_BUILTIN, _HL_KEYWORDS, _HL_LUA_KEYWORDS, _HL_BUILTINS,
-                                _highlight)
+                                _HL_BUILTIN, _HL_KEYWORDS, _HL_LUA_KEYWORDS, _HL_BUILTINS)
 
 _HL_CLASS = bytes((1 if (c == 95 or 65 <= c <= 90 or 97 <= c <= 122) else
                    2 if 48 <= c <= 57 else 3 if c in (34, 39) else
@@ -98,6 +97,65 @@ def _runs_of(line, cols):
 
 def _is_alpha(ch):
     return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+
+
+def _highlight(line, lua=False):
+    """The Code tab's highlight as Python had it before the C took it: a
+    list of palette indices, one per character of `line` (#24).
+    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython.
+    `lua` (#67 Phase 5) switches the comment marker (`--`; `#` is Lua's length
+    operator, NOT a comment) and the keyword set; strings/numbers/cart-verb
+    builtins scan identically in both languages."""
+    n = len(line)
+    out = [_HL_TEXT] * n
+    i = 0
+    keywords = _HL_LUA_KEYWORDS if lua else _HL_KEYWORDS
+    while i < n:
+        ch = line[i]
+        if (lua and ch == "-" and i + 1 < n and line[i + 1] == "-") or \
+                (not lua and ch == "#"):       # comment to end of line
+            while i < n:
+                out[i] = _HL_COMMENT
+                i += 1
+            break
+        if ch == '"' or ch == "'":             # string literal (single line)
+            q = ch
+            out[i] = _HL_STRING
+            i += 1
+            while i < n:
+                out[i] = _HL_STRING
+                if line[i] == "\\" and i + 1 < n:   # escape: consume next char too
+                    i += 1
+                    out[i] = _HL_STRING
+                    i += 1
+                    continue
+                if line[i] == q:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if "0" <= ch <= "9":                   # number literal
+            while i < n and (("0" <= line[i] <= "9") or line[i] == "." or line[i] == "x"):
+                out[i] = _HL_NUMBER
+                i += 1
+            continue
+        if _is_alpha(ch):                      # identifier / keyword / builtin
+            j = i
+            while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
+                j += 1
+            word = line[i:j]
+            if word in keywords:
+                cl = _HL_KEYWORD
+            elif word in _HL_BUILTINS:
+                cl = _HL_BUILTIN
+            else:
+                cl = _HL_TEXT
+            while i < j:
+                out[i] = cl
+                i += 1
+            continue
+        i += 1                                 # operator / punctuation / space
+    return out
 
 
 def _highlight_json(line):

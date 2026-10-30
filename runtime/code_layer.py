@@ -218,10 +218,9 @@ def draw_symbol_keys(cv, th, syms, x0, y, cell, h, fs, rects=None, w=None):
 
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
-# A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and returns a
-# per-character list of MOY64 palette indices, so the code view draws colored runs
-# without any re/tokenize dependency (those are heavy/absent on the device). Token
-# classes map to:
+# The token classes (their MOY64 palette indices name them) and the words each
+# language colours, installed into the text view's C highlight
+# (native/moy_ui/moy_ui_text.c) below:
 _HL_TEXT = 6        # light_grey -- identifiers, operators, punctuation (default)
 _HL_KEYWORD = 12    # blue
 _HL_STRING = 11     # green
@@ -265,68 +264,6 @@ for _lang, _kw in (("python", _HL_KEYWORDS), ("lua", _HL_LUA_KEYWORDS)):
 # What a popover's shadow reaches past its card, at the font scale: the rows
 # under it draw again the frame after.
 _POP_PAD = 32
-
-
-def _is_alpha(ch):
-    return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
-
-
-def _highlight(line, lua=False):
-    """Return a list of palette indices, one per character of `line` (#24).
-    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython.
-    `lua` (#67 Phase 5) switches the comment marker (`--`; `#` is Lua's length
-    operator, NOT a comment) and the keyword set; strings/numbers/cart-verb
-    builtins scan identically in both languages."""
-    n = len(line)
-    out = [_HL_TEXT] * n
-    i = 0
-    keywords = _HL_LUA_KEYWORDS if lua else _HL_KEYWORDS
-    while i < n:
-        ch = line[i]
-        if (lua and ch == "-" and i + 1 < n and line[i + 1] == "-") or \
-                (not lua and ch == "#"):       # comment to end of line
-            while i < n:
-                out[i] = _HL_COMMENT
-                i += 1
-            break
-        if ch == '"' or ch == "'":             # string literal (single line)
-            q = ch
-            out[i] = _HL_STRING
-            i += 1
-            while i < n:
-                out[i] = _HL_STRING
-                if line[i] == "\\" and i + 1 < n:   # escape: consume next char too
-                    i += 1
-                    out[i] = _HL_STRING
-                    i += 1
-                    continue
-                if line[i] == q:
-                    i += 1
-                    break
-                i += 1
-            continue
-        if "0" <= ch <= "9":                   # number literal
-            while i < n and (("0" <= line[i] <= "9") or line[i] == "." or line[i] == "x"):
-                out[i] = _HL_NUMBER
-                i += 1
-            continue
-        if _is_alpha(ch):                      # identifier / keyword / builtin
-            j = i
-            while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
-                j += 1
-            word = line[i:j]
-            if word in keywords:
-                cl = _HL_KEYWORD
-            elif word in _HL_BUILTINS:
-                cl = _HL_BUILTIN
-            else:
-                cl = _HL_TEXT
-            while i < j:
-                out[i] = cl
-                i += 1
-            continue
-        i += 1                                 # operator / punctuation / space
-    return out
 
 
 class CodeLayer:

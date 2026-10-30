@@ -1,15 +1,13 @@
 """#24 -- code-editor syntax highlighting + inline syntax-error markers.
 
-The tokenizer is a pure module function (MicroPython-safe), so it's unit-tested
-directly; the inline-error behavior is driven through the shared console exactly
-like test_safe_edit drives it (host_app + a hand-authored cart).
+The tokenizer is the C's oracle (tests/text_twin.py), unit-tested directly;
+the inline-error behavior is driven through the shared console exactly like
+test_safe_edit drives it (host_app + a hand-authored cart).
 """
 
 from runtime import host_app  # noqa: F401  -- registers the `editors` alias console.py needs
-from runtime.code_layer import (   # the syntax highlighter moved to the code editor's own file
-    _highlight,
-    _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN,
-)
+from runtime.code_layer import _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN
+from text_twin import _highlight    # the C's oracle (tests/test_text_view.py)
 from ws_helpers import build_ws_with_cart
 
 
