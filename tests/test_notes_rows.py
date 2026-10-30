@@ -33,17 +33,34 @@ _BODY = "\n".join(
        for i in range(36)])
 
 
+_PATCH = [None]
+
+
+def _pin_clock():
+    """Every loaded runtime and device module reads the one clock. A module
+    takes `_ticks_ms` by name at its import, so this runs again once a
+    console is built: the windowed WM and the apps it loads come in then."""
+    import sys
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if (("/runtime/" in f or "/device/" in f) and hasattr(mod, "_ticks_ms")
+                and getattr(mod, "_ticks_ms") is not _now):
+            _PATCH[0].setattr(mod, "_ticks_ms", _now)
+
+
+def _now():
+    return _NOW[0]
+
+
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
     """One clock for both consoles, a frame's worth a frame: the idle save
     lands on the same frame of each."""
-    import sys
     from runtime import editor_handle, ticks  # noqa: F401 -- loaded, then patched
-    for mod in list(sys.modules.values()):
-        f = getattr(mod, "__file__", None) or ""
-        if "/runtime/" in f.replace("\\", "/") and hasattr(mod, "_ticks_ms"):
-            monkeypatch.setattr(mod, "_ticks_ms", lambda: _NOW[0])
+    _PATCH[0] = monkeypatch
+    _pin_clock()
     yield
+    _PATCH[0] = None
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +83,7 @@ def _console(tmp_path, name, ships, desk):
     moy_carts.save_file("docs", "alpha", _BODY, ws.carts_root)
     assert select_on_home(ws, "Notes") is not None
     ws.open()
+    _pin_clock()
     if not ships:
         # the run's host plans nothing: every frame draws whole
         h = ws.player._uh
