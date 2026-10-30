@@ -390,6 +390,7 @@ def measure(loop):
     home(loop, info)
     editor(loop, info)
     panes(loop, info)
+    row_of_parts(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -821,6 +822,54 @@ def panes(loop, info):
     info["split_sizes"] = list(sizes)
     info["split_focus"] = o["focus"]
     info["part_at"] = at
+    ws.mark_dirty()
+    for _ in range(10):
+        loop.step()
+
+
+def row_of_parts(loop, info):
+    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
+    section 4.1): on an app host of its own, a drag across it, its fling
+    and its glide to a part's centre, each part drawn at its distance
+    (ui.table_dist): what the table, its parts and their distances
+    allocate each frame."""
+    from gc import mem_alloc
+    from array import array
+    import ui
+    import ui_draw
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    rows = [["a"], ["b"], ["c"], ["d"], ["e"], ["f"], ["g"]]
+    o = {"id": "row", "part": (60, 60), "axis": "x", "snap": True}
+    r = array("i", [0] * 4)
+    steps = ([(None, 0, False, False)] * 3 + [(W - 40, 40, True, True)]
+             + [(W - 40 - 12 * k, 40, False, True) for k in range(1, 16)]
+             + [(W - 220, 40, False, False)] + [(None, 0, False, False)] * 40)
+    row = []
+    cur = 0
+    gc.collect()
+    gc.disable()
+    for x, y, click, down in steps:
+        if x is not None:
+            host.point(x, y, click, down)
+        host.begin(cv, th, (0, 0, W, 100))
+        m = mem_alloc()
+        ui.at(0, 0, W, 100)
+        was = cur
+        cur = ui.table("", ("",), rows, cur, o)[0]
+        i = ui.table_part(r)
+        while i >= 0:
+            d = ui.table_dist()
+            cv.rect(r[0] + 2, r[1] + 2, r[2] - 4, r[3] - 4 - ((d * d) >> 16), 9 + i)
+            i = ui.table_part(r)
+        row.append((mem_alloc() - m, cur != was))
+        ui.end()
+    gc.enable()
+    info["row_of_parts"] = row
+    info["row_of_parts_cur"] = cur
     ws.mark_dirty()
     for _ in range(10):
         loop.step()
@@ -1404,6 +1453,19 @@ def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
     assert len(shifted) > len(drawn) // 2, (tab, len(shifted), len(drawn))
     over = [d for d in drawn if d[0] > ANSWER]
     assert len(over) <= 1, (tab, over)
+
+
+def test_a_row_of_parts_allocates_nothing(result):
+    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
+    section 4.1): no frame of a drag across it, its fling and its glide to a
+    part's centre allocates, its parts and their distances included, past
+    the first, which makes its rows' cells once, but the answer of a frame
+    whose current row moved."""
+    info, text = result
+    assert info.get("row_of_parts_cur", 0) > 0, text[-3000:]
+    row = info["row_of_parts"][1:]
+    assert all(b == 0 for b, moved in row if not moved), info["row_of_parts"]
+    assert all(b <= ANSWER for b, moved in row if moved), info["row_of_parts"]
 
 
 def test_a_splits_divider_drag_allocates_nothing(result):

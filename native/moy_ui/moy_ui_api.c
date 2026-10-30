@@ -87,6 +87,9 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->has_part = 0;
     o->part_w = o->part_h = 0;
     o->bar = -1;
+    o->axis_x = o->snap = o->has_offset = 0;
+    o->offset = 0;
+    o->spill = 0;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -153,6 +156,18 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     at += 8u;
                 }
                 o->bar = (int8_t)((fl & MOY_UI_O_BAR) != 0 ? 1 : -1);
+                o->axis_x = (int8_t)((fl & MOY_UI_O_AXIS_X) != 0);
+                o->snap = (int8_t)((fl & MOY_UI_O_SNAP) != 0);
+                if ((fl & MOY_UI_O_OFFSET) && n - at >= 4u) {
+                    o->has_offset = 1;
+                    o->offset = word(w + at, 0);
+                    at += 4u;
+                }
+                if ((fl & MOY_UI_O_SPILL) && n - at >= 4u) {
+                    int32_t sp = word(w + at, 0);
+                    o->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
+                    at += 4u;
+                }
             }
         }
     }
@@ -166,7 +181,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
-                                       -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1};
+                                       -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0};
     return o != NULL ? o : &none;
 }
 
@@ -242,6 +257,22 @@ static int page_at(const moy_ui_stop_t *v, int n, int x, int y) {
     for (int i = n - 1; i >= 0; i--) {
         if ((v[i].flags & STOP_PAGE) && inside(v[i].b, x, y)) {
             return i;
+        }
+    }
+    return -1;
+}
+
+static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id);
+
+// The topmost page at (x, y) that scrolls across (`across`), or down: its
+// stop's index, or -1.
+static int page_on(moy_ui_ctx_t *c, const moy_ui_stop_t *v, int n, int x, int y, int across) {
+    for (int i = n - 1; i >= 0; i--) {
+        if ((v[i].flags & STOP_PAGE) && inside(v[i].b, x, y)) {
+            const moy_ui_keep_t *k = keep_of(c, v[i].id);
+            if ((k != NULL && (k->kd & MOY_UI_KD_X)) == (across != 0)) {
+                return i;
+            }
         }
     }
     return -1;
@@ -356,7 +387,7 @@ static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id) {
 static void span_of(const moy_ui_stop_t *p, const moy_ui_keep_t *k, int32_t *content,
                     int32_t *extent) {
     *content = k->b + (k->over > 0 ? k->over : 0);
-    *extent = p->b.h;
+    *extent = (k->kd & MOY_UI_KD_X) ? p->b.w : p->b.h;
 }
 
 // The page stop kept as `k` among the frame's stops, or NULL.
@@ -1131,16 +1162,30 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             int dx = x - c->press_x, dy = y - c->press_y;
             dx = dx < 0 ? -dx : dx;
             dy = dy < 0 ? -dy : dy;
+            int across = !own && dx > slop && dx > dy
+                             ? page_on(c, v, n, c->press_x, c->press_y, 1) : -1;
             if (own) {
                 // a part with nav off, or with no page under it to drag,
                 // keeps its press: the pointer held on it is the part's
                 // (ui.part_at)
+            } else if (across >= 0) {
+                // a mostly-horizontal drag over rows side by side scrolls them
+                c->drag_page = v[across].id;
+                c->drag_x = 1;
+                c->drag_y = (int16_t)x;
+                c->press = 0;
+                c->gesture = 2;
+                moy_ui_keep_t *k = keep_of(c, c->drag_page);
+                if (k != NULL) {
+                    moy_ui_scroll_drag_start(&k->sc, c->press_x);
+                }
             } else if (keep_lr && dx > slop && dx > dy) {
                 c->gesture = 3;         // a slider's knob follows it; a stepper's release taps
                 settled = 0;
             } else if (dy > slop) {
-                int pg = page_at(v, n, c->press_x, c->press_y);
+                int pg = page_on(c, v, n, c->press_x, c->press_y, 0);
                 c->drag_page = pg >= 0 ? v[pg].id : 0;
+                c->drag_x = 0;
                 c->press = 0;
                 c->gesture = 2;
                 moy_ui_keep_t *k = c->drag_page ? keep_of(c, c->drag_page) : NULL;
@@ -1154,19 +1199,20 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             // feeds the release velocity
             moy_ui_keep_t *k = keep_of(c, c->drag_page);
             const moy_ui_stop_t *pp = k != NULL ? page_of_keep(v, n, k) : NULL;
+            int at = c->drag_x ? x : y;
             if (pp != NULL) {
                 int32_t content, extent, off = k->a;
-                if (y != c->drag_y) {
+                if (at != c->drag_y) {
                     k->over = 0;
                 }
                 span_of(pp, k, &content, &extent);
-                moy_ui_scroll_drag_move(&k->sc, y, (float)dt, &off, content, extent);
+                moy_ui_scroll_drag_move(&k->sc, at, (float)dt, &off, content, extent);
                 if (off != k->a) {
                     k->a = off;
                     moved = 1;
                 }
             }
-            c->drag_y = (int16_t)y;
+            c->drag_y = (int16_t)at;
         }
     } else if (!held && c->gesture) {
         if (c->gesture == 2 && c->drag_page) {
@@ -1195,6 +1241,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         c->gesture = 0;
         c->press = 0;
         c->drag_page = 0;
+        c->drag_x = 0;
         settled = 0;
     }
     // The wheel scrolls the page under the pointer; Shift turns it across.
@@ -4367,21 +4414,29 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int count = moy_ui_fields(cells, cells_n) / nc;
     int part = o->has_part == 1;
     int rh = part && o->part_h > 0 ? o->part_h : row_h(c);
+    // rows side by side (`axis` "x"): rh is a row's width along the axis,
+    // ph its height (0: the view's), and the row is the part
+    int xa = part && o->axis_x == 1, ph = 0;
+    if (xa) {
+        rh = o->part_w > 0 ? o->part_w : row_h(c);
+        ph = o->part_h;
+    }
     int cap_h = label.n ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_CAPTION + (c->cls ? 1 : 0)) * c->fs
                         : 0;
     int named = 0;
     for (size_t i = 0; i < cols_n && !named; i++) {
         named = cols[i] != 0;
     }
-    int head_h = named ? pmetric(c, MOY_UI_M_VALUE_ROW_HEAD) : 0;
+    int head_h = named && !xa ? pmetric(c, MOY_UI_M_VALUE_ROW_HEAD) : 0;
     int placed = c->has_at;
     int stacked;
     c->pic_tbl = 0;
-    moy_ui_box_t b = place(c, cap_h + head_h + (count ? count : 1) * rh, &stacked);
+    moy_ui_box_t b = place(c, cap_h + head_h + (xa ? (ph > 0 ? ph : row_h(c))
+                                                   : (count ? count : 1) * rh), &stacked);
     moy_ui_box_t view = {b.x, (int16_t)(b.y + cap_h + head_h), b.w,
                          (int16_t)(b.h - cap_h - head_h > 0 ? b.h - cap_h - head_h : 0)};
     moy_ui_tgeo_t g;
-    if (part && nc == 1) {
+    if (part && (nc == 1 || xa)) {
         memset(&g, 0, sizeof(g));       // the row is the part
         g.n = 1;
         g.pic = 1;
@@ -4401,15 +4456,21 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     uint32_t id = id_of(o, label);
     int disabled = o->disabled == 1;
     moy_ui_keep_t *kp = disabled || !placed ? NULL : keep(c, id, 1);
-    int carry = part && kp != NULL;
+    int carry = part && kp != NULL && !xa;
     if (cur >= count) {
         cur = count - 1;
     }
     int focused = !disabled && c->focus == id && count > 0;
     int row = cur;
     if (focused) {
-        row = cur < 0 ? 0 : cur + c->step_y;
+        row = cur < 0 ? 0 : cur + (xa ? c->step_x : c->step_y);
     }
+    // the view's extent along the rows' axis, and where row 0 starts in it
+    // at scroll 0: centred, where a still view rests on a row's centre
+    int ext = xa ? view.w : view.h;
+    int lead = o->snap == 1 && count > 0 ? (ext - rh) / 2 : 0;
+    int32_t content = o->snap == 1 && count > 0 ? (int32_t)(count - 1) * rh + ext
+                                                : (int32_t)count * rh;
     if (row >= count) {
         row = count - 1;
     }
@@ -4427,8 +4488,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         p->row = -1;
         p->top = 0;
     }
-    int flags = STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0)
-                | (placed ? 0 : STOP_ROWS);
+    int flags = xa ? STOP_KEEP_LR
+                   : STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0)
+                         | (row >= count - 1 ? STOP_AT_END : 0) | (placed ? 0 : STOP_ROWS);
     int st = disabled ? 0 : stop(c, id, b, flags, name_of(o, label));
     if (carry && st >= 0 && s_audit_on) {
         // where its rows end is the carried rows' record's, not its own
@@ -4446,10 +4508,14 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int32_t was_gen = kp != NULL ? kp->gen : 0;
     int was_kd = kp != NULL ? kp->kd : 0, was_rh = kp != NULL ? kp->rh : 0;
     int opened = 0;
+    if (kp != NULL && o->has_offset) {
+        offset = o->offset;             // the app's own scroll
+    }
     if ((st & MOY_UI_ST_ACTIVATED) && count) {
         if (c->tap_y != INT16_MIN) {
-            int r = moy_ui_fdiv(c->tap_y - view.y + offset, rh > 0 ? rh : 1);
-            if (c->tap_y >= view.y && r >= 0 && r < count) {
+            int t = xa ? c->tap_x - view.x - lead : c->tap_y - view.y;
+            int r = moy_ui_fdiv(t + offset, rh > 0 ? rh : 1);
+            if (t >= 0 && r >= 0 && r < count) {
                 opened = r == cur;
                 row = r;
             }
@@ -4463,33 +4529,54 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (kp != NULL) {
         // the rows' own scroll: a step glides it to the row, where the
         // frame has a clock (with none, it is there at once)
-        kp->b = count * rh;
+        kp->b = content;
         // a step or a tap moved it, else the app did (its own keys)
-        int stepped = focused && (c->step_y || (st & MOY_UI_ST_ACTIVATED));
+        int stepped = focused && ((xa ? c->step_x : c->step_y) || (st & MOY_UI_ST_ACTIVATED));
         int moved = carry && !stepped && cur >= 0 && cur != c->tc_cur;
-        if (cur >= 0 && (stepped || moved)) {
+        int snap = o->snap == 1 && count > 0 && !o->has_offset;
+        if (cur >= 0 && (stepped || moved) && !o->has_offset) {
             int to = (kp->sc.flags & MOY_UI_SCROLL_GLIDE) ? kp->sc.target : offset;
             int was = to;
-            if (cur * rh < to) {
+            if (snap) {
+                to = cur * rh;          // the row at the centre
+            } else if (cur * rh < to) {
                 to = cur * rh;
-            } else if ((cur + 1) * rh > to + view.h) {
-                to = (cur + 1) * rh - view.h;
+            } else if ((cur + 1) * rh > to + ext) {
+                to = (cur + 1) * rh - ext;
             }
             if (to != was && c->in[MOY_UI_IN_DT] > 0 && !moved) {
                 int32_t off = offset;   // the glide's first step is this frame's
-                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, view.h);
-                moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, view.h);
+                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, ext);
+                moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, ext);
                 offset = off;
             } else if (to != was) {
                 offset = to;            // the app moved its current row: it lands at once
                 moy_ui_scroll_stop(&kp->sc);
             }
         }
-        int most = count * rh - view.h;
-        if (offset > most) {
+        if (snap) {
+            int near = (int)moy_ui_fdiv(offset + rh / 2, rh > 0 ? rh : 1);
+            near = near < 0 ? 0 : near >= count ? count - 1 : near;
+            if (kp->sc.flags & (MOY_UI_SCROLL_DRAG | MOY_UI_SCROLL_FLING)) {
+                cur = near;             // a drag or a fling: the row at the centre is current
+            } else if (!(kp->sc.flags & MOY_UI_SCROLL_GLIDE) && offset != near * rh) {
+                // a view come to rest between rows glides on to the nearest
+                cur = near;
+                if (c->in[MOY_UI_IN_DT] > 0) {
+                    int32_t off = offset;
+                    moy_ui_scroll_glide_to(&kp->sc, offset, near * rh, 1, kp->b, ext);
+                    moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, ext);
+                    offset = off;
+                } else {
+                    offset = near * rh;
+                }
+            }
+        }
+        int most = (int)(content - ext);
+        if (!o->has_offset && offset > most) {
             offset = most;
         }
-        if (offset < 0) {
+        if (!o->has_offset && offset < 0) {
             offset = 0;
         }
         kp->a = offset;
@@ -4498,7 +4585,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         kp->rh = (int16_t)rh;
         kp->s0 = kp->sn = 0;
     }
-    rows_note(c, id, cur, view.y);
+    if (!xa) {
+        rows_note(c, id, cur, view.y);
+    }
     if (!placed && focused && c->step_y && cur >= 0
         && !(c->step_rev == id && c->step_row == cur)) {
         c->reveal = 1;              // a step begin did not reveal: the next frame does
@@ -4518,10 +4607,13 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     // the rows that show, and (a table carrying its rows) each one's record
     int vis0 = 0, vis1 = count;
+    int sp = part ? o->spill : 0;
     if (placed && rh > 0) {
-        vis0 = offset / rh;
-        vis1 = (offset + view.h + rh - 1) / rh;
+        vis0 = (int)moy_ui_fdiv(offset - lead - sp, rh);
+        vis1 = (int)moy_ui_fdiv(offset - lead + ext + sp + rh - 1, rh);
+        vis0 = vis0 > 0 ? vis0 : 0;
         vis1 = vis1 < count ? vis1 : count;
+        vis1 = vis1 > vis0 ? vis1 : vis0;
     }
     int nk = vis1 - vis0;
     int kept = carry && nk >= 0 && nk <= MOY_UI_API_TROWS;
@@ -4555,8 +4647,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     int table_r = 0;
     if (kp != NULL) {
+        // (rows side by side are never a shift frame's region: a frame
+        // that draws them draws them whole)
         kp->kd = (uint8_t)(MOY_UI_KD_PAGE | MOY_UI_KD_TABLE | MOY_UI_KD_DRAWN
                            | (o->has_gen || carry ? MOY_UI_KD_GEN : 0)
+                           | (xa ? MOY_UI_KD_X | MOY_UI_KD_BAD : 0)
                            | (g.pic && !part && !o->has_gen ? MOY_UI_KD_BAD : 0));
         if (s_audit_on) {
             moy_ui_stop_t *vs = &c->cur[c->n_cur - 1];
@@ -4611,6 +4706,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                     }
                 }
             }
+        } else if (xa && armed(c) && c->fl_stage == 1 && !c->sh_dlg && !c->fl_mute
+                   && rc_meets(rc_of(view), rc_of(c->sh_r))) {
+            floor_add(c, rc_of(view), 1);   // inside a page that moved or holds: whole
         } else if (carry && armed(c) && c->fl_stage == 1 && !c->sh_dlg && !c->fl_mute
                    && rc_meets(rc_of(view), rc_of(c->sh_r))) {
             // inside the R of a page that moved or holds: the rows whose
@@ -4704,7 +4802,20 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         int any = clip_in(&kv, s, view);
         size_t at = 0;
         int reach = table_r ? mark_room(c) : 0;
-        for (int i = 0; any && i < count && at <= cells_n; i++) {
+        for (int i = 0; any && xa && i < count && at <= cells_n; i++) {
+            // rows side by side: each cell's marks, the row its part
+            size_t e = table_row_end(cells, cells_n, nc, at);
+            int rx = view.x + lead + i * rh - offset;
+            if (rx + rh > view.x && rx < view.x + view.w) {
+                int f = table_flags(c, o, id, i, cur, st, disabled, 0) | MOY_UI_F_PART;
+                g.x[0] = (int16_t)rx;
+                g.w[0] = (int16_t)rh;
+                moy_ui_table_row(s, (moy_ui_box_t){(int16_t)rx, view.y, (int16_t)rh, view.h}, &g,
+                                 cells + at, (e < cells_n ? e : cells_n) - at, f, c->fs, c->cls);
+            }
+            at = e + 1;
+        }
+        for (int i = 0; any && !xa && i < count && at <= cells_n; i++) {
             size_t e = table_row_end(cells, cells_n, nc, at);
             int ry = view.y + i * rh - offset;
             if (ry + rh > view.y && ry < view.y + view.h && (!table_r || clip_meets(s, ry, rh, reach))) {
@@ -4745,7 +4856,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
         c->tp_id = id;
         c->tp_view = box_of(pv);
-        c->tp_y0 = (int16_t)(view.y - offset);
+        c->tp_x1 = (uint8_t)xa;
+        c->tp_x0 = (int16_t)(view.x + lead - offset);
+        c->tp_spill = (int16_t)sp;
+        c->tp_mid2 = xa ? 2 * view.x + view.w : 2 * view.y + view.h;
+        c->tp_dist = 0;
+        c->tp_y0 = (int16_t)(xa ? view.y : view.y + lead - offset);
         c->tp_rh = (int16_t)rh;
         c->tp_i = (int16_t)vis0;
         c->tp_e = (int16_t)vis1;
@@ -4757,7 +4873,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         c->tp_ans = 0;
         c->tp_py0 = tc_y0;
         c->tp_carry = (uint8_t)(carry && valid && armed(c) && c->fl_stage != 0);
-        c->tp_fade = (uint8_t)(placed && pv.x0 < pv.x1 && pv.y0 < pv.y1);
+        c->tp_fade = (uint8_t)(placed && !xa && pv.x0 < pv.x1 && pv.y0 < pv.y1);
+        if (xa) {
+            c->tp_w = (int16_t)(ph > 0 && ph < view.h ? ph : view.h);   // a row's height
+        }
     }
     out[0] = cur;
     out[1] = opened;
@@ -4767,25 +4886,38 @@ int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t o
     part_out(c);
     while (c->tp_id && c->tp_i < c->tp_e) {
         int i = c->tp_i++;
-        int y = c->tp_y0 + i * c->tp_rh;
-        rc_t r = {c->tp_view.x, y, c->tp_view.x + c->tp_view.w, y + c->tp_rh};
-        if (!rc_cut(&r, rc_of(c->tp_view)) || !row_draws(c, box_of(r))) {
+        int sp = c->tp_spill;
+        int x = c->tp_x1 ? c->tp_x0 + i * c->tp_rh : c->tp_x;
+        int y = c->tp_x1 ? c->tp_y0 : c->tp_y0 + i * c->tp_rh;
+        int w = c->tp_x1 ? c->tp_rh : c->tp_w, h = c->tp_x1 ? c->tp_w : c->tp_rh;
+        // what shows of the cell, and of the room past it a part may draw in
+        rc_t q = {x - sp, y - sp, x + w + sp, y + h + sp};
+        if (!c->tp_x1 && !sp) {
+            q.x0 = c->tp_view.x;
+            q.x1 = c->tp_view.x + c->tp_view.w;
+        }
+        if (!rc_cut(&q, rc_of(c->tp_view)) || !row_draws(c, box_of(q))) {
             continue;
         }
-        rc_t q = {c->tp_x, r.y0, c->tp_x + c->tp_w, r.y1};
-        if (!rc_cut(&q, r)) {
-            continue;
+        if (!c->tp_x1 && !sp) {
+            q.x0 = x;
+            q.x1 = x + w;
+            if (!rc_cut(&q, rc_of(c->tp_view))) {
+                continue;
+            }
         }
+        int along = c->tp_x1 ? 2 * x + w : 2 * y + h;
+        c->tp_dist = (int32_t)(((int64_t)(along - c->tp_mid2) * 128) / (c->tp_rh > 0 ? c->tp_rh : 1));
         c->tp_open = 1;
         c->tp_row = (int16_t)i;
         if (i - c->tp_v0 < 64) {
             c->tp_ans |= (uint64_t)1 << (i - c->tp_v0);
         }
         s_scope = hash((const uint8_t *)&i, sizeof(i), c->tp_id);
-        out[0] = c->tp_x;               // the cell whole: its row's top, its height
+        out[0] = x;                     // the cell whole
         out[1] = y;
-        out[2] = c->tp_w;
-        out[3] = c->tp_rh;
+        out[2] = w;
+        out[3] = h;
         out[4] = q.x0;                  // what shows of it, the app's clip
         out[5] = q.y0;
         out[6] = q.x1 - q.x0;
@@ -4794,6 +4926,10 @@ int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t o
     }
     parts_close(c, s);
     return -1;
+}
+
+int32_t moy_ui_api_table_dist(const moy_ui_ctx_t *c) {
+    return c->tp_open ? c->tp_dist : 0;
 }
 
 int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,

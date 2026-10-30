@@ -23,6 +23,8 @@
  *   ui.table(label, columns, rows, cur, o) -> the new cur (from 1; 0 is none), opened
  *   ui.table_part()                -> the next part's row (from 1), x, y, w, h of its
  *                                    cell, the canvas clipped to it; nil after the last
+ *   ui.table_dist()                -> that part's distance from the view's centre along
+ *                                    the table's axis, in 256ths of a row
  *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.text_view(id, lines, o)     -> the first line shown, the rows shown
@@ -129,6 +131,26 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->wash = moycore_ui_flag(L, i, "wash");
     o->lead = moycore_ui_flag(L, i, "lead");
     o->bar = moycore_ui_flag(L, i, "bar");
+    o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);
+    lua_getfield(L, i, "axis");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        size_t n = 0;
+        const char *a = lua_tolstring(L, -1, &n);
+        o->axis_x = (int8_t)(n == 1 && a[0] == 'x');
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, i, "offset");
+    if (lua_isnumber(L, -1)) {
+        o->has_offset = 1;
+        o->offset = (int32_t)lua_tointeger(L, -1);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, i, "spill");
+    if (lua_isnumber(L, -1)) {
+        lua_Integer sp = lua_tointeger(L, -1);
+        o->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
+    }
+    lua_pop(L, 1);
     lua_getfield(L, i, "part");
     if (lua_type(L, -1) == LUA_TTABLE) {
         lua_geti(L, -1, 1);
@@ -785,6 +807,12 @@ static int moycore_ui_focus(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_table_dist(lua_State *L)
+{
+    lua_pushinteger(L, (lua_Integer)moy_ui_run_table_dist(moycore_ui_canvas()));
+    return 1;
+}
+
 static int moycore_ui_keys_taken(lua_State *L)
 {
     lua_pushboolean(L, moy_ui_run_keys_taken(moycore_ui_canvas()) != 0);
@@ -806,7 +834,7 @@ static void moycore_ui_open(lua_State *L)
         {"group", moycore_ui_group}, {"info", moycore_ui_info}, {"link", moycore_ui_link},
         {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
-        {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
+        {"keys_taken", moycore_ui_keys_taken}, {"table_dist", moycore_ui_table_dist}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"table_part", moycore_ui_table_part}, {"part_at", moycore_ui_part_at},
         {"split", moycore_ui_split},

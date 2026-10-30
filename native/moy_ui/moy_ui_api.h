@@ -134,6 +134,13 @@ typedef struct {
     int8_t has_part;
     int16_t part_w, part_h;
     int8_t bar;                     // a table: its current row wears the cursor bar (-1 absent)
+    // A table of parts: its rows lie side by side (`axis` "x": 1, else 0),
+    // row 0 centred in the view at scroll 0 and a still view resting on a
+    // row's centre (`snap`, 0 or 1); the app's own scroll (has_offset); what
+    // a part may draw past its cell on every side (`spill`, px).
+    int8_t axis_x, snap, has_offset;
+    int32_t offset;
+    int16_t spill;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -141,6 +148,10 @@ typedef struct {
 #define MOY_UI_O_NO_WASH 8          // and `wash` not given (it stays absent)
 #define MOY_UI_O_PART 16            // and `part`, whose two words (w, h) follow the gen's
 #define MOY_UI_O_BAR 32             // and `bar`
+#define MOY_UI_O_AXIS_X 1024        // and `axis` "x"
+#define MOY_UI_O_SNAP 2048          // and `snap`
+#define MOY_UI_O_OFFSET 4096        // and `offset`, its word after the part's
+#define MOY_UI_O_SPILL 8192         // and `spill`, its word after the offset's
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -226,7 +237,8 @@ typedef struct {
     uint8_t sp_pn, sp_held, sf_on;
     int8_t sp_cur;
     int32_t sf_gen;
-    int16_t press_x, press_y, drag_y;
+    int16_t press_x, press_y, drag_y;   // drag_y: the drag's last place along its axis
+    uint8_t drag_x;                 // the drag scrolls across (a table's rows side by side)
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
     uint8_t keys, reveal, cls, fs;
@@ -348,6 +360,13 @@ typedef struct {
     int32_t tp_off;
     uint8_t tp_open, tp_fade, tp_carry;
     uint64_t tp_ans;
+    // ...where its rows lie side by side (tp_x1): row 0's left on screen
+    // (scrolled), the room a part may draw past its cell (tp_spill), and the
+    // part answered last's distance from the view's centre, in 256ths of a
+    // row (moy_ui_api_table_dist)
+    uint8_t tp_x1;
+    int16_t tp_x0, tp_spill;
+    int32_t tp_mid2, tp_dist;       // twice the view's centre along the axis
     // The dialog drawn this frame: its id (0: none) and its card; whether
     // it stands over a held page (`wash` false) under the app's gen
     // (dlg_held), that gen, its buttons (a hash) and its body's foot on
@@ -710,6 +729,10 @@ void moy_ui_api_table_pics(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // (those that entered, and those whose cells or marks changed): what an
 // app draws in a row's part is a function of that row's cells.
 int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t out[8]);
+// The part moy_ui_api_table_part answered last: its cell's centre's distance
+// from its view's centre along the rows' axis, in 256ths of a row, negative
+// before it (above, or on the left); 0 where none was answered.
+int32_t moy_ui_api_table_dist(const moy_ui_ctx_t *c);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting
@@ -911,6 +934,7 @@ enum {
     MOY_UI_KD_PAGE = 8,             // a page (or a placed table's rows): its `a` is a scroll
     MOY_UI_KD_TABLE = 16,           // ...a placed table's rows, R its view
     MOY_UI_KD_AT = 32,              // ...holding a stop ui.at placed, which no move carries
+    MOY_UI_KD_X = 64,               // ...a table whose rows lie side by side: `a` scrolls across
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings

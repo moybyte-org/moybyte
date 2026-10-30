@@ -196,11 +196,17 @@ def _over(o):
     gen = o.get("gen")
     part = o.get("part")
     bar = o.get("bar")
+    axis = o.get("axis") == "x"
+    snap = o.get("snap")
+    offset = o.get("offset")
+    spill = o.get("spill")
     flags = None
-    if wash is not None or lead is not None or gen is not None or part is not None or bar:
+    if (wash is not None or lead is not None or gen is not None or part is not None or bar
+            or axis or snap or offset is not None or spill is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
-                 | (32 if bar else 0))
+                 | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
+                 | (4096 if offset is not None else 0) | (8192 if spill is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -210,6 +216,10 @@ def _over(o):
         tail += _pack("<i", g - 0x100000000 if g & 0x80000000 else g)
     if part is not None:
         tail += _pack("<2i", int(part[0]), int(part[1]))
+    if offset is not None:
+        tail += _pack("<i", int(offset))
+    if spill is not None:
+        tail += _pack("<i", int(spill))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -472,7 +482,12 @@ def table(label, columns, rows, cur, o=None):
     where there is one column), each row's cells its key, so a frame that
     moves it carries the rows whose cells did not change. `o.bar` marks
     the current row with a bar at its left edge, `o.current = False` draws
-    no current mark."""
+    no current mark. `o.axis = "x"` lays a table of parts' rows side by
+    side, each `w` wide and `h` tall (0: the view's), scrolled across;
+    `o.snap` puts row 0 at the view's centre and rests the view on a row's
+    centre; `o.offset` is the app's own scroll (a drag, a step or the wheel
+    move it no more); `o.spill` is the room a part may draw past its cell
+    on every side (`table_dist` says where each part lies)."""
     t = _T
     n = len(columns)
     b = _memo_get(rows, n)
@@ -524,6 +539,14 @@ def table_part(r):
     r[3] = a[3]
     cv.clip(a[4], a[5], a[6], a[7])
     return i
+
+
+def table_dist():
+    """The part `table_part` answered last: its cell's centre's distance
+    from the view's centre along the table's axis, in 256ths of a row,
+    negative before it (above it, or on its left); 0 where no part is
+    open. A carousel scales each card by it."""
+    return _C.api_table_dist(_T[0])
 
 
 def table_rows():

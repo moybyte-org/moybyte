@@ -32,6 +32,7 @@ WASM = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_ui.moy")
 _DT = 1.0 / 30.0
 P_FRAMES, P_SOUND, P_VOL, P_CUR, P_SAVES, P_KEYS, P_PART, P_FOCUS, P_FAIL = range(9)
 P_PANE, P_SIZE, P_TAP, P_HELD = 10, 11, 12, 13     # the panes (ui.split, ui.part_at)
+P_XCUR = 14                                     # the row of parts (o.axis "x")
 
 # -- one page, three runtimes ----------------------------------------------------------
 
@@ -108,7 +109,7 @@ def _pmem(ws):
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:14]
     pm = ws.player.ns["pmem"]
-    return [pm(i) for i in range(14)]
+    return [pm(i) for i in range(15)]
 
 
 def _script(ws):
@@ -162,6 +163,17 @@ def _script(ws):
     drv.touch_up()
     _frame(drv)
     _frame(drv)
+    # the row of parts: drag it two parts to the left and let it go; it
+    # coasts and rests on a part's centre
+    drv.touch(290, 196)
+    _frame(drv)
+    for x in (270, 250, 230):
+        drv.touch_drag(x, 196)
+        _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    drv.touch_up()
+    for _ in range(40):
+        _frame(drv)
     shots.append((_pixels(ws), _pmem(ws)))
     return shots
 
@@ -200,8 +212,7 @@ def test_the_page_answers_its_script(page_runs):
     assert first[P_KEYS] == 0
     # down: Volume; right, right: its value; down, down: into the list, which
     # starts on its current row, then its next; a: that row is current; down:
-    # past the last row to the swatch, then the part in the second pane at
-    # the foot, which the focus moves into as it moves between groups
+    # past the last row to the swatch, then the row of parts under it
     after = [s[1] for s in shots]
     assert after[1][P_FOCUS] == len("Volume")
     assert after[3][P_VOL] == 7
@@ -209,10 +220,10 @@ def test_the_page_answers_its_script(page_runs):
     assert after[6][P_CUR] == 2
     assert after[7][P_FOCUS] == len("swatch") and after[7][P_PART] & ui.FOCUS
     assert after[7][P_PANE] == 0
-    assert after[8][P_FOCUS] == len("cell") and after[8][P_PANE] == 1
+    assert after[8][P_FOCUS] == len("row") and after[8][P_PANE] == 0
     assert after[8][P_SAVES] == 0
     assert after[9][P_SAVES] == 1, "the tap on Save activated it"
-    assert after[9][P_PANE] == 1, "a press in no pane leaves the focused one"
+    assert after[9][P_PANE] == 0, "a press in no pane leaves the focused one"
     assert after[9][P_SIZE] == 80 and after[9][P_TAP] == 0
     # a tap on the part answers where it fell from the part's top-left
     assert after[10][P_TAP] == (120 - 96) * 256 + (222 - 214) + 1
@@ -225,6 +236,10 @@ def test_the_page_answers_its_script(page_runs):
     # the part's press held through a drag: where the pointer is, from the
     # part's top-left, the second pane at x 116 now
     assert after[14][P_HELD] == (140 - 116) * 256 + (231 - 214) + 1
+    # the row of parts follows the drag, its centre part current, then the
+    # release's fling carries it on to rest on the last part's centre
+    assert after[15][P_XCUR] == 2
+    assert after[16][P_XCUR] == 4
 
 
 # -- the engine under scripted input -----------------------------------------------------
@@ -421,6 +436,93 @@ def test_mark_off_draws_no_focus_mark_but_keeps_the_state():
     drew_off = ui_draw.marks(None, True)[1]
     assert drew_on == 1 and drew_off == 0
     assert bytes(on.cv._buf) != bytes(off.cv._buf)
+
+
+_XROWS = [["a"], ["b"], ["c"], ["d"], ["e"], ["f"]]
+
+
+def _row_of_parts(o):
+    """A page whose one stop is a row of six parts 60 px wide side by side in
+    a 280 x 80 view at (20, 40): each frame's answers, (row, x, y, w, h,
+    distance) a part, and its current row."""
+    st = {"cur": 0}
+    r = array("i", [0] * 4)
+
+    def draw():
+        ui.page("Row")
+        ui.at(20, 40, 280, 80)
+        st["cur"] = ui.table("", ("",), _XROWS, st["cur"], o)[0]
+        got = []
+        clips = []
+        i = ui.table_part(r)
+        while i >= 0:
+            got.append((i, r[0], r[1], r[2], r[3], ui.table_dist()))
+            clips.append(tuple(ui._TP[4:8]))
+            i = ui.table_part(r)
+        st["parts"] = got
+        st["clips"] = clips
+        return st
+    run = _Run(draw)
+    run.inp[ui_draw._IN_DT] = 16
+    return run, st
+
+
+def test_a_row_of_parts_lies_side_by_side_its_first_at_the_centre_under_snap():
+    run, st = _row_of_parts({"id": "row", "part": (60, 50), "axis": "x", "snap": True})
+    run.frame()
+    run.frame()
+    # (280 - 60) / 2 = 110 in: row 0's centre is the view's; a row's
+    # distance is 256 a part's width
+    assert st["parts"] == [(0, 130, 40, 60, 50, 0), (1, 190, 40, 60, 50, 256),
+                           (2, 250, 40, 60, 50, 512)]
+    run.frame(press=("right",))
+    for _ in range(30):
+        run.frame()
+    assert st["cur"] == 1, "the arrows step a row side by side"
+    assert [p[5] for p in st["parts"] if p[0] == 1] == [0], "and glide it to the centre"
+
+
+def test_a_row_of_parts_dragged_follows_and_rests_on_a_parts_centre():
+    run, st = _row_of_parts({"id": "row", "part": (60, 50), "axis": "x", "snap": True})
+    run.frame()
+    # a slow drag 100 px to the left: no fling, so the view glides on from
+    # between two parts to the nearer one's centre
+    run.frame(ptr=(250, 60, 1 | 2 | 4))
+    for k in range(1, 11):
+        run.frame(ptr=(250 - 10 * k, 60, 1 | 2))
+    for _ in range(4):
+        run.frame(ptr=(150, 60, 1 | 2))
+    assert st["cur"] == 2, "a drag's current row is the one at the centre"
+    run.frame(ptr=(150, 60, 1))
+    for _ in range(40):
+        run.frame()
+    assert st["cur"] == 2
+    assert [p[5] for p in st["parts"] if p[0] == 2] == [0]
+    # a vertical drag over the row moves nothing across
+    run.frame(ptr=(150, 60, 1 | 2 | 4))
+    run.frame(ptr=(150, 100, 1 | 2))
+    run.frame(ptr=(150, 100, 1))
+    for _ in range(10):
+        run.frame()
+    assert st["cur"] == 2 and [p[5] for p in st["parts"] if p[0] == 2] == [0]
+
+
+def test_a_row_of_parts_takes_the_apps_own_scroll_and_spill():
+    run, st = _row_of_parts({"id": "row", "part": (60, 50), "axis": "x", "offset": -25,
+                             "spill": 4})
+    run.frame()
+    # no snap: row 0 at the view's left, moved by the app's offset; each
+    # part's clip reaches 4 px past its cell, inside the view
+    assert [p[:5] for p in st["parts"]] == [(0, 45, 40, 60, 50), (1, 105, 40, 60, 50),
+                                            (2, 165, 40, 60, 50), (3, 225, 40, 60, 50),
+                                            (4, 285, 40, 60, 50)]
+    assert st["clips"] == [(41, 40, 68, 54), (101, 40, 68, 54), (161, 40, 68, 54),
+                           (221, 40, 68, 54), (281, 40, 19, 54)]
+    run.frame(ptr=(200, 60, 1 | 2 | 4))
+    for k in range(1, 6):
+        run.frame(ptr=(200 - 20 * k, 60, 1 | 2))
+    run.frame(ptr=(100, 60, 1))
+    assert st["parts"][0][1] == 45, "a drag moves the app's scroll no more"
 
 
 def test_a_lists_row_and_a_sliders_value_are_kept_by_id():

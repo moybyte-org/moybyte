@@ -95,8 +95,9 @@ parts the app draws, carried in C. The Blocks outline and Music steps are
 tables of parts; the cards drawer and the home grid still plan their own
 rows.
 
-**G3. Scrolling is y-only, one region a frame.** The engine records one
-shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`). Map, Scene and
+**G3. Fast frames are y-only, one region a frame.** The engine records one
+shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`); a table whose
+rows lie side by side (§4.1) scrolls across and draws its view whole. Map, Scene and
 Paint pan with their own drag code. Two views cannot share a scroll, which
 the Notes split needs.
 
@@ -200,10 +201,13 @@ page under a gen. The Blocks cursor's plate is a tool drawn in its part and
 its slot is the table's gen, so `ui.rows` is not added; Music's cursor is
 the table's current row with `o.bar`, its meters drawn in the parts.
 
-A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
-from the viewport centre, makes the home carousel a composition: an app
-scales each card's `part` by that distance. The carousel moves only if §5's
-pass holds its numbers. Otherwise it is drawn over `scroll` and `part`.
+A table of parts' `o.axis = "x"` lays its rows side by side, and `o.snap`
+rests its view on a row's centre; `ui.table_dist()` answers each part's
+distance from the view's centre, in 256ths of a row, so a carousel is a
+composition: the app scales each card by that distance, inside the room
+`o.spill` gives a part past its cell. `o.offset` hands the table the app's
+own scroll, for an app that moves its rows itself (the home keeps its
+glides). Its frames draw the view whole (G3).
 
 ### 4.2 `ui.split`: panes
 

@@ -72,6 +72,7 @@
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_table_part" (func $ui_table_part (param i32 i32) (result i32)))
   (import "moybyte.app" "ui_part_at" (func $ui_part_at (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_table_dist" (func $ui_table_dist (result i32)))
   (import "moybyte.app" "ui_split" (func $ui_split
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
@@ -105,10 +106,19 @@
   (data (i32.const 2300) "\50\00\00\00\00\00\00\00\28\00\00\00\28\00\00\00")
   (data (i32.const 2320) "\06\00\00\00\06\00\00\00")
 
+  ;; the row of parts: its rows' cells, and its override block -- id "row",
+  ;; no hint, the flags (wash absent, part, axis "x", snap) and its parts 30
+  ;; wide and 26 tall
+  (data (i32.const 2600) "a\00b\00c\00d\00e\00")
+  (data (i32.const 2620) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\03\00\00\00"
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "row\ff\ff\ff\ff\18\0c\00\00\1e\00\00\00\1a\00\00\00")
+
   ;; 2048: the page's rect (16 bytes); 2064: the part's (20); 2096: the
   ;; focused id (32); 2200: the table's answers (8); 2208: a part's cell (16);
   ;; 2400: the panes' rects and the divider's words (48); 2460: the second
-  ;; pane's part (20); 2490: where the pointer is in it (8).
+  ;; pane's part (20); 2490: where the pointer is in it (8); 2700: the row
+  ;; of parts' answers (8); 2710: a part's cell (16).
   (global $sound (mut i32) (i32.const 1))
   (global $vol (mut i32) (i32.const 5))
   (global $cur (mut i32) (i32.const 1))
@@ -117,6 +127,7 @@
   (global $pane (mut i32) (i32.const 0))
   (global $tap (mut i32) (i32.const 0))
   (global $held (mut i32) (i32.const 0))
+  (global $xcur (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 8.
   (func $ok (param $r i32)
@@ -150,6 +161,7 @@
 
   (func (export "_draw")
     (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32) (local $i i32)
+    (local $d i32)
     (call $ok (call $ui_page (i32.const 1024) (i32.const 7) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_label (i32.const 1040) (i32.const 5) (i32.const 0) (i32.const 0)))
@@ -190,6 +202,23 @@
     (if (i32.eqz (i32.and (global.get $frames) (i32.const 7)))
       (then (drop (call $pmem (i32.const 9) (call $hash (i32.const 40) (i32.const 120))
                         (i32.const 1)))))
+    (call $ok (call $ui_at (i32.const 200) (i32.const 182) (i32.const 110) (i32.const 28)))
+    (call $ok (call $ui_table (i32.const 0) (i32.const 0) (i32.const 1200) (i32.const 1)
+                              (i32.const 2600) (i32.const 10) (global.get $xcur)
+                              (i32.const 2620) (i32.const 55) (i32.const 2700) (i32.const 8)))
+    (global.set $xcur (i32.load (i32.const 2700)))
+    (block $row
+      (loop $more
+        (local.set $i (call $ui_table_part (i32.const 2710) (i32.const 16)))
+        (br_if $row (i32.lt_s (local.get $i) (i32.const 0)))
+        (local.set $d (call $ui_table_dist))
+        (call $rect (i32.add (i32.load (i32.const 2710)) (i32.const 3))
+                    (i32.add (i32.load (i32.const 2714)) (i32.const 2))
+                    (i32.sub (i32.load (i32.const 2718)) (i32.const 6))
+                    (i32.sub (i32.sub (i32.load (i32.const 2722)) (i32.const 4))
+                             (i32.shr_s (i32.mul (local.get $d) (local.get $d)) (i32.const 16)))
+                    (i32.add (i32.const 9) (local.get $i)))
+        (br $more)))
     (call $ok (call $ui_at (i32.const 10) (i32.const 214) (i32.const 180) (i32.const 20)))
     (i32.store (i32.const 2328) (global.get $pane))
     (global.set $pane (call $ui_split (i32.const 1300) (i32.const 5) (i32.const 2300) (i32.const 8)
@@ -225,4 +254,5 @@
     (drop (call $pmem (i32.const 10) (global.get $pane) (i32.const 1)))
     (drop (call $pmem (i32.const 11) (i32.load (i32.const 2300)) (i32.const 1)))
     (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))
-    (drop (call $pmem (i32.const 13) (global.get $held) (i32.const 1)))))
+    (drop (call $pmem (i32.const 13) (global.get $held) (i32.const 1)))
+    (drop (call $pmem (i32.const 14) (global.get $xcur) (i32.const 1)))))

@@ -2344,6 +2344,23 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         }
     }
     out->bar = over_flag(m, MP_QSTR_bar);
+    v = over_key(m, MP_QSTR_axis);
+    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
+        size_t n = 0;
+        const char *a = mp_obj_str_get_data(v, &n);
+        out->axis_x = (int8_t)(n == 1 && a[0] == 'x');
+    }
+    out->snap = (int8_t)(over_flag(m, MP_QSTR_snap) == 1);
+    v = over_key(m, MP_QSTR_offset);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        out->offset = (int32_t)mp_obj_get_int_truncated(v);
+        out->has_offset = 1;
+    }
+    v = over_key(m, MP_QSTR_spill);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        mp_int_t sp = mp_obj_get_int_truncated(v);
+        out->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
+    }
 }
 
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
@@ -2668,6 +2685,13 @@ static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
     return ret_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_rows_obj, ui_api_table_rows);
+
+// api_table_dist(ctx) -> the part answered last's distance from its view's
+// centre along its table's axis, in 256ths of a row (0: none open)
+static mp_obj_t ui_api_table_dist(mp_obj_t ctx) {
+    return mp_obj_new_int(moy_ui_api_table_dist(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_dist_obj, ui_api_table_dist);
 
 // api_table_pics(ctx, cv, look): the table drawn last's edge fades again over
 // its picture column, its pictures drawn
@@ -3701,6 +3725,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_dist), MP_ROM_PTR(&ui_api_table_dist_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },

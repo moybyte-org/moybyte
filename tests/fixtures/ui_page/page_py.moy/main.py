@@ -6,7 +6,10 @@
 # focused pane (from 0), 11 the first pane's size, 12 where a tap activated the
 # second pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on
 # it last was while pressed (the same; a part with nav off keeps a held
-# press). A table at the right draws its rows as parts (ui.table_part); two
+# press), 14 the row of parts' current row. A table at the right draws its
+# rows as parts (ui.table_part); a row of parts above the Save button lies
+# side by side (o.axis "x"), its view resting on a part's centre (o.snap),
+# each part shorter by its distance from the centre (ui.table_dist); two
 # panes at the foot (ui.split) have a divider the script drags and a part in
 # the second it taps and drags across (ui.part_at).
 
@@ -21,10 +24,13 @@ _spl = [0] * 12         # their rects and the divider's words
 _pane = 0
 _tap = 0
 _held = 0
+_xcur = 0
+_ROW = [["a"], ["b"], ["c"], ["d"], ["e"]]
+_XO = {"id": "row", "part": (30, 26), "axis": "x", "snap": True}
 
 
 def _draw():
-    global sound, vol, cur, saves, frames, _pane, _tap, _held
+    global sound, vol, cur, saves, frames, _pane, _tap, _held, _xcur
     ui.page("UI page")
     ui.label("Hello")
     sound = ui.toggle("Sound", sound)
@@ -40,6 +46,13 @@ def _draw():
     i = ui.table_part(_cell)
     while i >= 0:
         rect(_cell[0] + 4, _cell[1] + 3, 20, _cell[3] - 6, 9 + i)
+        i = ui.table_part(_cell)
+    ui.at(200, 182, 110, 28)
+    _xcur = ui.table("", ("",), _ROW, _xcur, _XO)[0]
+    i = ui.table_part(_cell)
+    while i >= 0:
+        d = ui.table_dist()
+        rect(_cell[0] + 3, _cell[1] + 2, _cell[2] - 6, _cell[3] - 4 - ((d * d) >> 16), 9 + i)
         i = ui.table_part(_cell)
     ui.at(10, 214, 180, 20)
     _pane = ui.split("panes", "x", _sizes,
@@ -68,3 +81,4 @@ def _draw():
     pmem(11, _sizes[0])
     pmem(12, _tap)
     pmem(13, _held)
+    pmem(14, _xcur)
