@@ -2,9 +2,9 @@
 
 What the public UI API (`docs/ui_api_2026-10.md`) needs so that every Moybyte
 surface, and a new app, is a COMPOSITION of engine blocks rather than a new
-element per screen. It also says how each block is proven fast enough before
-any surface moves onto it. The plan that moves the surfaces, and its state,
-is #243.
+element per screen, and how the boards' speed is won back once the
+surfaces are on them. The plan that moves the surfaces, and its state, is
+#243.
 
 ## The goal (owner, 2026-10-29)
 
@@ -15,11 +15,17 @@ is #243.
   screen that first needed it.
 - The blocks are C (`native/moy_ui/`), and a Python, Lua and compiled app call
   the same ones (`docs/ui_api_2026-10.md` §1's three faces).
-- **Perf decides, not elegance (owner, 2026-10-29).** The bespoke paths exist
-  because a generic one was once too slow on a board. A surface moves onto a
-  block only when the move holds that surface's p90 on BOTH the T-Deck and the
-  P4 (`tools/input_gate.py` over `tools/input_bench.py`, against same-day
-  dev on freshly flashed boards). A surface whose move fails stays bespoke. Its numbers go in #66.
+- **Move first, then one perf pass (owner, 2026-10-30).** Every surface
+  moves onto the blocks on the host, held by its goldens, its allocation
+  pins and its tests. Then one pass measures the boards with
+  `tools/input_gate.py` against dev 4d0483d3, the last dev before the
+  moves, and optimizes the blocks until each surface is back within the
+  tolerance the owner sets. Each move changes what the next one measures, so
+  a per-move board gate measured a moving target. It ran eight rounds on
+  `text_view` (2026-10-29/30, #66), whose Theme Config and Code find rows
+  passed while the bench's own faults kept moving the rest. The rule it
+  replaced: a surface moved only when it held its p90 on both boards (owner,
+  2026-10-29).
 - Notes draws in the monospace face. A `.md` note's later form is a synced
   pair: the monospace source beside a proportional preview (owner,
   2026-10-29).
@@ -178,24 +184,20 @@ inside the row).
 
 The table carries the Blocks outline: its cursor's plate is a tool drawn
 in the part and its slot is the table's gen, so `ui.rows` is not added.
-Both editors stay on their page's own rows frame (`AppHost.rows`) until
-the table holds every row of their gate (#243):
+Measured on the boards before the move rule changed (#66, 2026-10-30):
 - A table of parts' frames make the table's view the region R. Music's
   head, pad and foot are stops placed with `ui.at` outside it, so they
-  draw whole on every frame the table moves or changes, where the rows
-  frame keeps them. Music moves when R can be the page with the table's
-  move inside it: a page holding placed stops that does not itself scroll.
-- The Blocks outline on the table drags, flings and coasts where the rows
-  frame stopped dead, and draws less a frame; what holds it back is the
-  reveal of a cursor the app moved, a glide over the frames after the
-  step, which lengthens the interval and the latency of a key or ball
-  step, and the whole frame a gesture begins with, which the table and
-  its fades make dearer than the page's own rows.
+  draw whole on every frame the table moves or changes. R that can be the
+  page, with the table's move inside it, is what keeps them.
+- The Blocks outline on the table drags, flings and coasts where its own
+  rows frame stopped dead, and draws less a frame. A cursor the app moved
+  reveals as a glide over the frames after the step, which lengthens a key
+  or ball step's interval and latency.
 
 A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
 from the viewport centre, makes the home carousel a composition: an app
 scales each card's `part` by that distance. The carousel moves only if §5's
-spike holds its numbers. Otherwise it stays bespoke over `scroll` and `part`.
+pass holds its numbers. Otherwise it is drawn over `scroll` and `part`.
 
 ### 4.2 `ui.split`: panes
 
@@ -236,14 +238,15 @@ Notes split.
 0. **Measure** where the pass's time goes, before any block is built (§1,
    2026-10-30).
 1. §4.0: nest overflow becomes an error.
-2. Plan step 1 (`text_view`) is its own gate: Code and the console must hold
-   their p90.
-3. §4.1, `ui.table` extended; the Blocks outline and Music steps move
-   onto it when they hold their gate (§4.1 names what each waits on).
-   Then the cards drawer, then the home grid.
+2. Plan step 1: Code, theme Config, the desk's made code and the console
+   on `text_view`.
+3. §4.1, `ui.table` extended: the Blocks outline and Music steps, then
+   the cards drawer, then the home grid.
 4. §4.2 with the Editor desk's panes.
 5. §4.3 and §4.4 with the canvas editors and the Notes preview.
-6. The home carousel spike (§4.1). It moves or stays.
+6. The home carousel (§4.1).
+7. The perf pass: every moved surface's `input_gate` rows on both boards
+   against dev 4d0483d3, and the blocks optimized until they hold.
 
 A composition replacing a verb draws the verb's goldens byte for byte and
 keeps its input semantics. A verb that leaves takes its callers with it in
@@ -255,5 +258,5 @@ the same commit, with no alias: there are no user apps to keep working.
   by grepping the composition's file for any engine call outside the faces'
   verb table.
 - Every block has an allocation pin for its moving frame.
-- Every surface moved has its `input_bench` rows on both boards in #66, from
-  before and after.
+- Every surface moved has its `input_gate` rows on both boards in #66, from
+  dev 4d0483d3 and from the perf pass.

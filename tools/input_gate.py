@@ -19,8 +19,9 @@ image against same-day dev on fresh boots, on every board named.
         --out DIR --runs 2 --alternate
     python3 tools/input_gate.py compare DIR [--base dev] [--cand ui1] [--board p4] [--tol MS]
 
-The rule it applies is the owner's: a surface moves only when every row of it
-holds its p90 on every board, against same-day dev on fresh boots. A row is
+A surface holds when every row of it holds its p90 on every board, against a
+dev image benched the same day on fresh boots: the perf pass's measure
+(`docs/ui_blocks_2026-10.md`, "Move first, then one perf pass"). A row is
 one surface under one input; its number is the row's `gate` p90 (input_bench's
 presented interval over the live, coast and glide frames), and a side's number
 is the MEDIAN over its runs. The line is dev's number plus `--tol` (0: the
