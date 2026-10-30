@@ -43,6 +43,7 @@ def test_an_owner_ends_with_every_loan_and_its_generation_refuses_the_old():
 
 
 def test_a_lent_layer_waits_in_the_pool_and_comes_out_zeroed():
+    g.evict()                           # room in the pool, whatever ran before
     n = 4096 + 64
     o = g.owner("t_pool")
     a = g.buf(n, g.ROLE_LAYER, o)
