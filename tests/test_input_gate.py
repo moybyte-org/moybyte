@@ -284,12 +284,12 @@ def test_a_first_gate_alternates_dev_and_the_candidate_then_reruns_the_near_rows
     res = g.gate_board(_ctx(tmp_path, "r1"), "tdeck")
     assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2",
                           "dev_tdeck_3", "ui1_tdeck_3"]
-    # the third run plays the near rows alone, on both images
+    # the third run plays the whole selection again: a row is measured in its sequence
     meta = g.read_meta(str(tmp_path / "r1" / "ui1_tdeck_3"))
-    assert meta["requested"] == [["Code", "ball_fast"]]
+    first = g.read_meta(str(tmp_path / "r1" / "ui1_tdeck_1"))
+    assert meta["requested"] == first["requested"] and ["Code", "ball_fast"] in meta["requested"]
     rows = dict(((r["surface"], r["input"]), r) for r in res["rows"])
     assert len(rows[("Code", "ball_fast")]["cand_runs"]) == 3
-    assert len(rows[("Code", "fling")]["cand_runs"]) == 2
     assert rows[("Code", "ball_fast")]["noisy"] == []
     # dev's runs are the day's baseline, the third included
     st = g.Store(str(tmp_path / "store"))
@@ -301,7 +301,8 @@ def test_a_later_gate_the_same_day_reuses_the_baseline_after_a_sentinel(tmp_path
     del fake.calls[:]
     res = g.gate_board(_ctx(tmp_path, "r2", no_third=True), "tdeck")
     assert fake.calls == ["sentinel_tdeck_1", "ui1_tdeck_1", "ui1_tdeck_2"]
-    assert len(g.read_meta(str(tmp_path / "r2" / "sentinel_tdeck_1"))["requested"]) == 3
+    sent = g.read_meta(str(tmp_path / "r2" / "sentinel_tdeck_1"))["requested"]
+    assert sent == g.read_meta(str(tmp_path / "r2" / "ui1_tdeck_1"))["requested"]
     assert any("sentinel: holds" in h for h in res["head"])
     assert len(res["rows"][0]["base_runs"]) == 2
 
@@ -319,7 +320,7 @@ def test_a_drifted_sentinel_stops_the_gate_and_asks_for_a_fresh_baseline(tmp_pat
     assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2"]
 
 
-def test_a_gate_asking_for_rows_the_baseline_lacks_benches_dev_for_those_only(tmp_path, fake):
+def test_a_gate_asking_for_rows_the_baseline_lacks_benches_dev_in_sequence(tmp_path, fake):
     g.gate_board(_ctx(tmp_path, "r1", no_third=True, only="Theme Config text"), "tdeck")
     del fake.calls[:]
     g.gate_board(_ctx(tmp_path, "r2", no_third=True, only="Theme Config text,Code"), "tdeck")
@@ -327,7 +328,8 @@ def test_a_gate_asking_for_rows_the_baseline_lacks_benches_dev_for_those_only(tm
                           "ui1_tdeck_2"]
     meta = g.read_meta(str(tmp_path / "r2" / "dev_tdeck_1"))
     assert {s for s, _ in map(tuple, meta["requested"])} == {"Code", "Code find",
-                                                              "Code long line"}
+                                                              "Code long line",
+                                                              "Theme Config text"}
 
 
 def test_iter_is_one_run_of_the_rows_against_the_stored_baseline(tmp_path, fake, capsys):

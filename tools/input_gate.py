@@ -50,17 +50,25 @@ each.
 `~/.cache/moybyte/input_gate`, or MOY_INPUT_GATE_STORE), keyed by dev's commit
 (`-dirty` when the worktree has tracked changes), the board and the local
 date. A later gate against the same dev commit on the same day reuses them for
-every row they cover with `--runs` runs, and benches dev only for the rest.
-Before it reuses one, a SENTINEL flashes dev and plays a few of the
-baseline's steadiest rows (three surfaces' least spread rows, or
-`--sentinel-rows`): when their median change passes `--drift` ms (1.0) the
+every row they cover with `--runs` runs, and benches dev for the rest.
+Before it reuses one, a SENTINEL flashes dev, plays the whole selection once
+and reads a few of the baseline's steadiest rows (three surfaces' least
+spread rows, or `--sentinel-rows`): when their median change passes
+`--drift` ms (1.0) the
 board no longer measures what the baseline did (a P4 slows with run order),
 and the gate stops and asks for `--fresh-baseline`, which retires the stored
 runs and benches dev beside the candidate, alternating.
 
-**The third run.** After the runs, the near rows are played once more, alone
-(`input_bench --rows`): the candidate, and dev where its side of the row has
+**The third run.** After the runs, when a row is near, the whole selection
+is played once more: the candidate, and dev where its side of a near row has
 fewer than three runs (that dev run joins the baseline).
+
+**A row is measured in its sequence.** What played before a row is its
+state (the scratch document Code's paste grew, the P4's run-order slowdown),
+so the sentinel, the dev runs and the third run all play the gate's whole
+selection: on 2026-10-30 a Guition S3's Code find played alone read 67.7
+against 78.2 in sequence, and a Guition P4's console drag 67.4 against 47.5.
+Only `iter` plays rows alone, against the stored runs, and says so.
 
 **Like-for-like.** Where a row's probe reads on one image and not the other
 (dev's Text console has no scroll probe), the two images class the frames
@@ -196,6 +204,13 @@ class Sel:
         for s, i in keys:
             rows.setdefault(s, []).append(i)
         return cls(rows=rows)
+
+    @classmethod
+    def of_args(cls, args):
+        """The selection a run's meta recorded (its input_bench arguments)."""
+        kw = dict(zip(args[::2], args[1::2]))
+        rows = ib.parse_rows(kw["--rows"]) if kw.get("--rows") else None
+        return cls(kw.get("--only", ""), kw.get("--inputs", ""), rows)
 
     def args(self):
         a = []
@@ -641,7 +656,9 @@ def gate_board(ctx, board):
         base_runs = [load_run(d, board) for d in stored]
         keys = (list(ib.planned(board, windowed, (), (), ib.parse_rows(a.sentinel_rows)))
                 if a.sentinel_rows else sentinel_rows(base_runs, covered))
-        d = run_one(board, dev, out, Sel.of_rows(keys), ctx.bench_root, label="sentinel")
+        # the whole selection, read for those rows: a row played alone is not
+        # the row the runs measured (what played before it is its state)
+        d = run_one(board, dev, out, ctx.sel, ctx.bench_root, label="sentinel")
         rows, med = drift(base_runs, load_run(d, board), keys)
         for k, b, now, ch in rows:
             say(board, "sentinel %s / %s: stored %.1f, today %.1f (%+.1f)" % (k + (b, now, ch)))
@@ -658,10 +675,10 @@ def gate_board(ctx, board):
         if missing is None:
             steps.append(("dev", ctx.sel))
         elif missing:
-            steps.append(("dev", Sel.of_rows(missing)))
+            steps.append(("dev", ctx.sel))
         steps.append(("cand", ctx.sel))
     cand_dirs = run_steps(board, steps, dev, cand, ctx)
-    # the third run: the near rows alone
+    # the third run: the whole selection again, for the near rows' medians
     rows = _gate_compare(ctx, board, key, cand_dirs)
     near = near_rows(rows)
     if near and not a.no_third:
@@ -670,11 +687,11 @@ def gate_board(ctx, board):
         steps = []
         dev_rows = [k for k in near if cov.get(k, 0) < SURE_RUNS]
         if dev_rows:
-            steps.append(("dev", Sel.of_rows(dev_rows)))
+            steps.append(("dev", ctx.sel))
         cand_n = coverage(cand_dirs, board)
         cand_rows = [k for k in near if cand_n.get(k, 0) < SURE_RUNS]
         if cand_rows:
-            steps.append(("cand", Sel.of_rows(cand_rows)))
+            steps.append(("cand", ctx.sel))
         if steps:
             say(board, "third run: %d near rows" % len(near))
             cand_dirs += run_steps(board, steps, dev, cand, ctx)
@@ -845,7 +862,8 @@ def cmd_sentinel(a):
         keys = (list(ib.planned(board, windowed_of(stored, board), (), (),
                                 ib.parse_rows(a.sentinel_rows)))
                 if a.sentinel_rows else sentinel_rows(base, list(coverage(stored, board))))
-        d = run_one(board, dev, ctx.store.scratch("sentinel"), Sel.of_rows(keys),
+        sel = Sel.of_args(read_meta(stored[0]).get("selection") or [])
+        d = run_one(board, dev, ctx.store.scratch("sentinel"), sel,
                     ctx.bench_root, label="sentinel")
         rows, med = drift(base, load_run(d, board), keys)
         for k, b, now, ch in rows:
@@ -885,7 +903,9 @@ def cmd_iter(a):
                        a.tol, a.near, a.noise, keys=keys)
         per_board[board] = rows
         texts.append(render(board, rows, "dev", cand.label, a.tol, head=[
-            "  dev %s: %d stored runs; %s: %s" % (key, len(stored), cand.label, d)]))
+            "  dev %s: %d stored runs; %s: %s" % (key, len(stored), cand.label, d)]
+            + (["  rows played alone, against runs that played them in sequence: "
+                "a direction, not a verdict"] if ctx.sel.rows else [])))
 
     res = parallel(_boards(a.board), one)
     if texts:
