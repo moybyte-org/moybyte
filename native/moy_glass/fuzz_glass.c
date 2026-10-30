@@ -106,6 +106,20 @@ static void check_model(void) {
             CHECK(moy_buf_get(stale[i], &r) != MOY_GLASS_OK);
         }
     }
+    // A canvas draws only where a live row is: its whole capacity is
+    // written, so a row released under it is a use-after-free the sanitizer
+    // names.
+    for (int k = 0; k < 8; k++) {
+        moy_canvas_row_t *c;
+        if (canvases[k] && moy_canvas_get(canvases[k], &c) == MOY_GLASS_OK
+            && c->px != NULL) {
+            if (c->buf != 0u) {
+                moy_buf_row_t *r;
+                CHECK(moy_buf_get(c->buf, &r) == MOY_GLASS_OK && r->px == (uint8_t *)c->px);
+            }
+            memset(c->px, 0x5a, (size_t)c->cap * 2u);
+        }
+    }
     CHECK(st.rows == live + st.pool_rows);
     CHECK(st.pool_bytes <= st.pool_bound);
     CHECK(st.rows <= MOY_GLASS_ROWS);
@@ -176,6 +190,12 @@ static void step(void) {
                     canvases[o] = h;
                     uint32_t w = moy_canvas_word(h);
                     CHECK(moy_canvas_check(moy_canvas_table(), h & 0xffu, w) != NULL);
+                    moy_buf_row_t *row;             // drawing into a live buffer
+                    if (bufs[i].h && moy_buf_get(bufs[i].h, &row) == MOY_GLASS_OK
+                        && row->px != NULL) {
+                        CHECK(moy_canvas_point(h, (uint16_t *)row->px, row->nbytes / 2u,
+                                               bufs[i].h) == MOY_GLASS_OK);
+                    }
                 }
             }
             break;
