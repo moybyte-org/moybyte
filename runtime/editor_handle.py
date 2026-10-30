@@ -192,6 +192,10 @@ class EditorHandle:
         self._own = None
         self._frame = frame
         self.live = True             # not closed since its last draw: it draws the run's rows
+        # A `.py` or `.lua` is a PROGRAM the console runs (`run`): fixed for
+        # the handle's life, because its name is.
+        self._runs = bool(_modes.script_runtime(self._name)) and \
+            getattr(host, "ask_run", None) is not None
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -448,6 +452,38 @@ class EditorHandle:
         self._edit_ms = None
         self._commit_history()
         return (True, self._badge)
+
+    # -- running --------------------------------------------------------------
+
+    def can_run(self):
+        """True when the document is a program the console can RUN: a `.py`
+        or a `.lua` (`text_modes.script_runtime`) -- what a skin shows its Run
+        tool on."""
+        return self._runs
+
+    def run(self):
+        """RUN the document as a script, the way Files' RUN does
+        (`Workstation.run_script`, docs/text_editing_2026-09.md's Scripts).
+        Saved first when it has edits, written even when it does not parse:
+        a syntax error is the script console's to show. The run starts once
+        this frame is drawn (`Workstation.ask_run`), and when it ends the console
+        opens this cart again on this document, the caret where it was. False
+        when there is nothing to run or the save failed (`badge` says why)."""
+        if not self._runs:
+            return False
+        if self.dirty():
+            ok, why = self.save()
+            if not ok:
+                self._badge = why
+                return False
+        self._host.ask_run(self)
+        return True
+
+    def _refuse(self, why):
+        """The console could not start the run `run` asked for: `why` is the
+        badge until the next save. The shell's call, as `_blur` is."""
+        self._gen += 1
+        self._badge = str(why)
 
     def close(self):
         """Flush (hard) and release. Idempotent; the shell calls it for any

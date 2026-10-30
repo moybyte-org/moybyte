@@ -612,7 +612,8 @@ do
       end
       function e:set_text(body) ed_settext(self.__id, body or "") end
       for _, v in ipairs({"focused", "can_undo", "can_redo", "undo", "redo",
-                          "select_all", "copy", "cut", "paste", "dirty"}) do
+                          "select_all", "copy", "cut", "paste", "dirty",
+                          "can_run", "run"}) do
         e[v] = function(self) return ed_do(self.__id, v) == 1 end
       end
       for _, v in ipairs({"text", "badge", "name", "mode"}) do
@@ -683,7 +684,7 @@ def install_handles(ns, reg):
 # and an answer that is already a scalar. Split by what they answer, because
 # Lua compares the booleans against 1 and takes the strings as they are.
 _ED_FLAGS = ("focused", "can_undo", "can_redo", "undo", "redo", "select_all",
-             "copy", "cut", "paste", "dirty")
+             "copy", "cut", "paste", "dirty", "can_run", "run")
 _ED_TEXTS = ("text", "badge", "name", "mode")
 
 

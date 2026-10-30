@@ -75,7 +75,7 @@ DOCS = {
 class Run:
     """One Lua cart over a real editor handle, wired as the Player wires it."""
 
-    def __init__(self, granted=True):
+    def __init__(self, granted=True, host=None):
         from runtime.editor_handle import EditorHandle
 
         from runtime.host_canvas import make_system_canvas
@@ -87,7 +87,7 @@ class Run:
             if name is None:
                 name = "hub"              # stands in for the router's request
             ed = EditorHandle(self.files, "docs", name, mode, self.canvas,
-                              lambda: THEME)
+                              lambda: THEME, host=host)
             self.made.append(ed)
             return ed
 
@@ -106,9 +106,9 @@ class Run:
 
 
 @contextlib.contextmanager
-def run_cart(body, granted=True):
+def run_cart(body, granted=True, host=None):
     """`load` runs the chunk AND `_init`, so the body below IS the cart."""
-    r = Run(granted)
+    r = Run(granted, host)
     try:
         err = r.run.load([("function _init()\n%s\nend\n"
                          "function _update(dt) end\nfunction _draw() end\n"
@@ -199,6 +199,36 @@ def test_the_clipboard_verbs_round_trip():
     """) as r:
         assert r.get("COPIED") == 1 and r.get("PASTED") == 1
         assert r.ed.text() == "the other one\n"
+
+
+class _Runner:
+    """The shell's half of `run`: what an editor handle asked it to RUN."""
+
+    def __init__(self):
+        self.asked = []
+
+    def ask_run(self, ed):
+        self.asked.append(ed.name())
+
+    def cart_editor_focus(self, ed):
+        pass
+
+
+def test_run_saves_a_program_and_asks_the_console_to_run_it():
+    host = _Runner()
+    with run_cart("""
+      local ed = open_editor("hi.py")
+      local note = open_editor("other")
+      CANRUN = ed:can_run() and 1 or 0
+      NOTERUN = note:can_run() and 1 or 0
+      ed:set_text("print(1)")
+      RAN = ed:run() and 1 or 0
+      NOTERAN = note:run() and 1 or 0
+    """, host=host) as r:
+        assert r.get("CANRUN") == 1 and r.get("NOTERUN") == 0
+        assert r.get("RAN") == 1 and r.get("NOTERAN") == 0
+        assert r.files.docs[("docs", "hi.py")] == "print(1)", "saved before it ran"
+        assert host.asked == ["hi.py"]
 
 
 def test_save_answers_two_values_and_writes_the_document():

@@ -24,7 +24,7 @@ drawings the Files app owns.
 | door | path | what opens |
 |---|---|---|
 | make a game | Launcher → cart → EDIT → tab ladder | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
-| write | Launcher → Notes | the vault as a table (New note first, then each file's kind icon and its name: a note's bare, another file's with its extension), New note → a name in a dialog, one file open with Select, Copy, Cut and Paste at its foot and undo and redo in the bar (docs/media/look_2026-10/APPS_RESTYLE.md's Notes) |
+| write | Launcher → Notes | the vault as a table (New note first, then each file's kind icon and its name: a note's bare, another file's with its extension), New note → a name in a dialog, one file open with Select, Copy, Cut and Paste at its foot (and Run on a `.py` or `.lua`) and undo and redo in the bar (docs/media/look_2026-10/APPS_RESTYLE.md's Notes) |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
@@ -77,13 +77,22 @@ what was typed (`moy_carts.free_file_name`), so NEW never overwrites.
 
 A script is a cart with no folder: a bare `.py` or `.lua` in the vault, listed
 under its whole name like every other vault file (a
-separate `scripts/` root waits for the terminal's `run`, #115). RUN (from Files, later `run name.py` at the terminal prompt) wraps
+separate `scripts/` root waits for the terminal's `run`, #115). RUN (from Files, from the editor handle the script is open in, later `run name.py` at the terminal prompt) wraps
 it on the fly — a synthesized manifest of `type: "script"`, the same portable
 subset every cart gets, a TEXT CONSOLE as its surface (`print` to scrollback,
 `input` on the prompt's line editor). Default grants are `files`, `prefs` and the
 console; `carts` and the network go through the capability gate (#120). The
 terminal (#115) inherits all of it: its `run` is this, its REPL is the script
 surface with a live prompt, its scrollback is the console.
+
+**Run belongs to the editor, not to Notes (2026-10-30).** A script open
+in the console's editor handle runs from it: `ed.can_run()` on a `.py`/`.lua`,
+`ed.run()` saves it (hard, so a syntax error is the console's to show) and runs
+it in the handle's kind down the path Files' RUN takes. Its exit comes back
+INTO the cart that ran it -- that cart started again on the same document,
+the caret put back, and the cart's own caller restored, so Notes opened from
+Files still returns to the shelf. Notes shows it as a fifth tool, Run, at the
+foot and after a rule on the desk; any cart holding a handle gets the same verb.
 
 ## The board split
 
