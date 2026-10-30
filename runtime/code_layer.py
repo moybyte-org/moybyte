@@ -389,8 +389,8 @@ class CodeLayer:
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
         # find_count's key (the editor, its edits, the query, the case), the
-        # caret its answer is for, -, the answer and the matches
-        self._fk = [None, -1, None, None, -1, -1, (0, 0), []]
+        # caret its answer is for, the answer, each line's matches and their sum
+        self._fk = [None, -1, None, None, -1, -1, (0, 0), [], 0]
         self._find_ci = True          # case-insensitive find (the default)
         self._find_anchor = None      # where the incremental search re-runs from
         # -- #89 autocomplete + jump-to-symbol popups -------------------------
@@ -932,28 +932,56 @@ class CodeLayer:
         if ed is None or not q:
             return 0, 0
         k = self._fk                    # the last count, made once an edit, query and caret
-        if k[0] is not ed or k[1] != ed.edits or k[2] != q or k[3] != self._find_ci:
-            # the matches, each as its line << 16 | its column, made once an
-            # edit, query and case
+        ci = self._find_ci
+        if ci:
+            q = q.lower()
+        if k[0] is not ed or k[1] != ed.edits or k[2] != q or k[3] != ci:
+            # each line's matches, counted once an edit, query and case: by
+            # str.count where no match can overlap the next (no border of
+            # the query is also its head), else one find at a time
             k[0] = ed
             k[1] = ed.edits
             k[2] = q
-            k[3] = self._find_ci
+            k[3] = ci
             k[4] = -1
-            ci = self._find_ci
-            if ci:
-                q = q.lower()
-            got = []
-            for r in range(len(ed.lines)):
-                line = ed.lines[r].lower() if ci else ed.lines[r]
-                at = line.find(q)
-                while at >= 0:
-                    got.append(r << 16 | (at if at < 0xFFFF else 0xFFFF))
-                    at = line.find(q, at + 1)
-            k[7] = got
-        c = ed.row << 16 | (ed.col if ed.col < 0xFFFF else 0xFFFF)
-        if k[4] == c:
+            over = False
+            for b in range(1, len(q)):
+                if q[:b] == q[-b:]:
+                    over = True
+                    break
+            per = []
+            for line in ed.lines:
+                if ci:
+                    line = line.lower()
+                if over:
+                    m = 0
+                    at = line.find(q)
+                    while at >= 0:
+                        m += 1
+                        at = line.find(q, at + 1)
+                    per.append(m)
+                else:
+                    per.append(line.count(q))
+            k[7] = per
+            k[8] = sum(per)
+        row, col = ed.row, ed.col
+        if k[4] == row and k[5] == col:
             return k[6]
+        k[4] = row
+        k[5] = col
+        per = k[7]
+        cur = 0
+        for r in range(min(row, len(per))):
+            cur += per[r]
+        if row < len(ed.lines):
+            line = ed.lines[row].lower() if ci else ed.lines[row]
+            at = line.find(q)
+            while 0 <= at <= col:
+                cur += 1
+                at = line.find(q, at + 1)
+        n = k[8]
+        k[6] = (cur or (1 if n else 0)), n
+        return k[6]
         k[4] = c
         got = k[7]
         lo, hi = 0, len(got)            # the matches at or before the caret

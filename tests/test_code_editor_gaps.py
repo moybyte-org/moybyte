@@ -1046,3 +1046,35 @@ def test_the_symbol_keys_follow_the_last_input(tmp_path):
     assert lay.symbols and lay.sym_h > 0 and lay.rows < keys_rows
     assert ws.editor.ROWS == lay.rows
     ui_draw.input_kind("keys")
+
+
+def test_find_count_is_the_matches_at_or_before_the_caret(tmp_path):
+    """find_count's kept counts answer what a scan of every match does --
+    overlapping ones included ("aa" three times in "aaaa"), across case
+    where the find ignores it -- at any caret."""
+    import random
+    ws = _ws(tmp_path)
+    _enter_code(ws)
+    ed = ws.editor
+    cl = ws.code_layer
+    rnd = random.Random(7)
+    for _ in range(60):
+        lines = ["".join(rnd.choice("aAb ") for _ in range(rnd.randrange(0, 12)))
+                 for _ in range(rnd.randrange(1, 6))]
+        ed.set_text("\n".join(lines))
+        cl._find_q = rnd.choice(("a", "aa", "aba", "Ab", "b a"))
+        cl._find_ci = rnd.random() < 0.5
+        for _ in range(4):
+            ed.row = rnd.randrange(len(lines))
+            ed.col = rnd.randrange(len(lines[ed.row]) + 1)
+            q = cl._find_q.lower() if cl._find_ci else cl._find_q
+            n = cur = 0
+            for r, line in enumerate(lines):
+                line = line.lower() if cl._find_ci else line
+                at = line.find(q)
+                while at >= 0:
+                    n += 1
+                    if (r, at) <= (ed.row, ed.col):
+                        cur = n
+                    at = line.find(q, at + 1)
+            assert cl.find_count() == ((cur or (1 if n else 0)), n), (lines, cl._find_q)
