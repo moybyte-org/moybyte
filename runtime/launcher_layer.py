@@ -2914,7 +2914,19 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
         # the buffer holds the band at this offset: the cells whose focus
         # moved since (their reach) and the cursor's stamp are drawn again
         drew = ()
-        for r in ((grid.reach_rect(k[0]), grid.reach_rect(now)) if k[0] != now else ()) + (st,):
+        rects = (st,)
+        if k[0] != now:
+            a = grid.reach_rect(k[0])
+            c = grid.reach_rect(now)
+            if (a is not None and c is not None and a[0] <= c[0] + c[2] and c[0] <= a[0] + a[2]
+                    and a[1] <= c[1] + c[3] and c[1] <= a[1] + a[3]):
+                # the two cells meet (a step to a neighbour): one pass over both
+                x0, y0 = min(a[0], c[0]), min(a[1], c[1])
+                a = (x0, y0, max(a[0] + a[2], c[0] + c[2]) - x0,
+                     max(a[1] + a[3], c[1] + c[3]) - y0)
+                c = None
+            rects = (a, c, st)
+        for r in rects:
             if r is None:
                 continue
             x0, y0 = max(bx, r[0]), max(by, r[1])
