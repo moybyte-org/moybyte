@@ -335,6 +335,33 @@ def test_a_key_step_past_the_foot_lands_as_one_shift(tmp_path, windowed):
     assert a.top == landed
 
 
+def test_a_held_keys_steps_draw_each_row_once(tmp_path):
+    """A held key's steps past the foot: each frame's floor is the row the
+    move uncovered and the rows the caret left and entered, in touching
+    pieces. The view grounds them under one fill and lays out a row that
+    crosses from one piece into the next once (it was a row twice and a
+    page ground under the view's own: 16 fills and up to 21 texts a frame).
+    A dearer step needs a reason before this budget moves."""
+    p = Pair(tmp_path, 1, False)
+    _code(p)
+    p.run("ws.editor.row = ws.editor.top + ws.editor.ROWS - 1; ws.mark_dirty()")
+    p.frame(4)
+    cv = p.root(p.a)
+    got = []
+    for _ in range(10):
+        cv.gate_counts_reset()
+        p.both("key_down", moy_input.KEY_DOWN, 0)
+        p.frame()
+        assert p.kinds[-1], "the step's frame drew whole"
+        got.append(tuple(cv.gate_counts()[:2]))
+        p.both("key_up", moy_input.KEY_DOWN, 0)
+        p.frame()
+    budget = [(9, 10), (9, 14), (9, 14), (9, 16), (9, 16), (9, 14), (9, 12), (9, 10), (9, 10),
+              (9, 9)]
+    over = [(i, g, b) for i, (g, b) in enumerate(zip(got, budget)) if g[0] > b[0] or g[1] > b[1]]
+    assert not over, "steps drew more (fills, texts) than their budget: %r" % (over,)
+
+
 @pytest.mark.parametrize("bufs", (2, 3))
 def test_a_whole_frame_mid_drag_leaves_each_buffer_one_catch_up(tmp_path, bufs):
     """On the desk, a frame that draws the Editor whole mid-drag (here the

@@ -3270,6 +3270,66 @@ static int32_t text_row_of(const moy_ui_lines_t *L, int32_t line, int cols, int 
     return row;
 }
 
+// The view's rows in box b through the pieces the frame draws. The view
+// grounds all of b itself, so a floor rect inside b takes no page ground
+// first; and pieces that stack into one band (the same columns, rows
+// touching) clip as one, so a row that crosses from one into the next is
+// laid out and drawn once.
+static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int32_t *v,
+                       int nrows, moy_ui_span_t err, moy_ui_span_t find) {
+    rc_t in = rc_of(b);
+    uint32_t bit = 1;
+    for (int i = 0; i < c->fl_n; i++, bit <<= 1) {
+        rc_t f = rc_of(c->fl[i]);
+        if (f.x0 >= in.x0 && f.y0 >= in.y0 && f.x1 <= in.x1 && f.y1 <= in.y1) {
+            c->fl_pend &= ~bit;
+        }
+    }
+    int32_t *st = ((moy_canvas_row_t *)s->dst)->st;
+    rc_t q[4 + MOY_UI_API_FLOOR];
+    int nq = 0;
+    clip_t k;
+    for (int ok = clip_row(c, &k, s, b, 0, b); ok; ok = clip_next(&k)) {
+        if (k.c == NULL) {
+            // no pieces: the one clip there is
+            moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
+            continue;
+        }
+        rc_t p = {st[MOY_ST_CX0], st[MOY_ST_CY0], st[MOY_ST_CX1], st[MOY_ST_CY1]};
+        rc_t bb = {in.x0 - st[MOY_ST_CAM_X], in.y0 - st[MOY_ST_CAM_Y], in.x1 - st[MOY_ST_CAM_X],
+                   in.y1 - st[MOY_ST_CAM_Y]};
+        if (!rc_meets(p, bb)) {
+            continue;                   // a piece beside the view (its mark's reach)
+        }
+        for (int i = 0; i < nq; i++) {
+            if (q[i].x0 == p.x0 && q[i].x1 == p.x1 && q[i].y0 <= p.y1 && p.y0 <= q[i].y1) {
+                // one band with p: p takes it in and looks again from the
+                // first, grown
+                p.y0 = p.y0 < q[i].y0 ? p.y0 : q[i].y0;
+                p.y1 = p.y1 > q[i].y1 ? p.y1 : q[i].y1;
+                q[i] = q[--nq];
+                i = -1;
+            }
+        }
+        if (nq < (int)(sizeof(q) / sizeof(q[0]))) {
+            q[nq++] = p;
+        }
+    }
+    if (nq == 0) {
+        return;
+    }
+    int32_t saved[4];
+    memcpy(saved, &st[MOY_ST_CX0], sizeof(saved));
+    for (int i = 0; i < nq; i++) {
+        st[MOY_ST_CX0] = q[i].x0;
+        st[MOY_ST_CY0] = q[i].y0;
+        st[MOY_ST_CX1] = q[i].x1;
+        st[MOY_ST_CY1] = q[i].y1;
+        moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
+    }
+    memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
+}
+
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
                              const moy_ui_span_t *marks, const moy_ui_over_t *o,
@@ -3532,10 +3592,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         }
     }
     int64_t was = moy_text_print_font_use(font);
-    clip_t kk;
-    EACH_PIECE(c, kk, s, b) {
-        moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
-    }
+    text_paint(c, s, b, v, nrows, err, find);
     if (was >= 0) {
         moy_text_print_font_use((uint32_t)was);
     }
