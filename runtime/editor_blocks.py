@@ -83,13 +83,15 @@ class BlocksPage:
         # page's gen keys it: [gen, then what it was made from]
         self._pg = [0, None, None, None, None, None, None, None, None, None, None]
         self._po = {"gen": 0}
+        self._over = False              # a prompt drew over the page (`forget`)
 
     # -- drawing ------------------------------------------------------------------
 
     def forget(self):
         """The page as the last frame drew it is not what the glass holds
-        (a prompt drew over it): the next frame draws it whole."""
-        self.host.ring.clear()
+        (a prompt draws over it): each frame draws it whole until one has
+        drawn it with no prompt over it."""
+        self._over = True
 
     def _gen(self, be, rect, desk):
         """The page's options, its gen moved where what it shows beside the
@@ -159,6 +161,9 @@ class BlocksPage:
         bu = self.bu
         host = self.host
         be = bu.blocks_ed
+        if self._over:
+            host.whole()
+            self._over = bu.blk_kbd is not None
         host.begin(cv, th, rect, desk, False, elsewhere=bu.blk_menu is None)
         ui.at(rect[0], rect[1], rect[2], rect[3])
         ui.page("", self._gen(be, rect, desk))
