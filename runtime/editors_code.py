@@ -78,7 +78,23 @@ class CodeEditor:
         if self.left < 0:
             self.left = 0
 
+    # Every change to the lines sets `dirty`, which counts it (`edits`), and
+    # so does a new text: what a reader found in the lines (the find's
+    # count) stands while `edits` does.
+    edits = 0
+
+    @property
+    def dirty(self):
+        return self._dirty
+
+    @dirty.setter
+    def dirty(self, v):
+        self._dirty = v
+        if v:
+            self.edits += 1
+
     def set_text(self, src):
+        self.edits += 1
         self.lines = str(src).split("\n")
         if not self.lines:
             self.lines = [""]

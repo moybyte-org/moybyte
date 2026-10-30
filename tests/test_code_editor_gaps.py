@@ -437,6 +437,31 @@ def test_find_bar_type_and_navigate(tmp_path):
     assert not cl._find_open
 
 
+def test_find_counts_once_an_edit_query_and_caret(tmp_path):
+    """The find's count is made once per edit, query and caret: a painted
+    frame that changes none of them reads the last count back, and any edit
+    (typed, joined, a new text) counts again."""
+    ws = _ws(tmp_path)
+    _enter_code(ws)
+    ed = ws.editor
+    ed.set_text("alpha beta alpha\nbeta alpha")
+    cl = ws.code_layer
+    cl._find_q = "alpha"
+    first = cl.find_count()
+    assert first == (1, 3)
+    assert cl.find_count() is first                # nothing moved: the same answer
+    ed.row, ed.col = 1, 0
+    assert cl.find_count() == (2, 3)
+    ed.row, ed.col = 0, 0
+    ed.key(ord("a"))                               # "aalpha ...": counted again, still three
+    assert ed.edits and cl.find_count() == (1, 3)
+    ed.set_text("alpha")
+    assert cl.find_count() == (1, 1)
+    ed.lines.append("alpha")                       # not an edit the editor saw...
+    ed.dirty = True                                # ...until it is marked
+    assert cl.find_count() == (1, 2)
+
+
 def test_tool_palette_indent_outdent(tmp_path):
     ws = _ws(tmp_path)
     drv = _enter_code(ws)

@@ -388,6 +388,7 @@ class CodeLayer:
         self._gutter = True           # the line-number gutter, on by default (look 2026-10, D-03.1)
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
+        self._fk = [None, -1, None, None, -1, -1, (0, 0)]   # find_count's last answer, and its key
         self._find_ci = True          # case-insensitive find (the default)
         self._find_anchor = None      # where the incremental search re-runs from
         # -- #89 autocomplete + jump-to-symbol popups -------------------------
@@ -928,6 +929,16 @@ class CodeLayer:
         q = self._find_q
         if ed is None or not q:
             return 0, 0
+        k = self._fk                    # the last count, made once an edit, query and caret
+        if (k[0] is ed and k[1] == ed.edits and k[2] == q and k[3] == self._find_ci
+                and k[4] == ed.row and k[5] == ed.col):
+            return k[6]
+        k[0] = ed
+        k[1] = ed.edits
+        k[2] = q
+        k[3] = self._find_ci
+        k[4] = ed.row
+        k[5] = ed.col
         if self._find_ci:
             q = q.lower()
         n = cur = 0
@@ -939,7 +950,8 @@ class CodeLayer:
                 if (r, at) <= (ed.row, ed.col):
                     cur = n
                 at = line.find(q, at + 1)
-        return (cur or (1 if n else 0)), n
+        k[6] = (cur or (1 if n else 0)), n
+        return k[6]
 
     def overlay_step(self, d):
         """Up or down (the arrows, the T-Deck's trackball) in an open
