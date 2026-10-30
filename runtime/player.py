@@ -168,14 +168,12 @@ except ImportError:                     # host: the runtime package
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
-    from ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                         ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+    from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
-    from runtime.ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                                 ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+    from runtime.ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from runtime.moy_input import pointer_state as _pointer_state
     from runtime import layout_base as _layout_base
 try:
@@ -184,8 +182,7 @@ except ImportError:  # pragma: no cover - host
     from runtime import ui_draw as _ui_draw
 from array import array as _array
 _UI_MASKS = [0, 0]                      # reused: the frame's button masks
-_HR = 6                                 # moy_ui_api.h's MOY_UI_API_HOST
-_ROWS = 2                               # ...and MOY_UI_SHIFT_ROWS
+_P_LIVE = 1                             # moy_ui_api.h's MOY_UI_P_LIVE: a pointer over the page
 _UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
 try:
     from system_api import draws_in_look, make_system_api, wants_layout
@@ -532,32 +529,8 @@ _CODE_CACHE = {}
 # (the tick model's rule for paced carts, kept for the unpaced ones).
 FREE_DT_MAX = 0.1
 
-# The kind a document's embedded pictures are (`![[name]]`): the shell reads
-# them through a grant of its own for it (`Player._embeds`).
-_EMBED_KIND = "drawings"
-
-
-
 _SIG_FPS = 2                            # the WM's overlay sig bit of the FPS chip
 
-
-def _grow(r, x0, y0, x1, y1):
-    """Rect r (x0, y0, x1, y1) grown to hold x0, y0, x1, y1; that rect where
-    r holds nothing."""
-    if r[2] <= r[0] or r[3] <= r[1]:
-        r[0] = x0
-        r[1] = y0
-        r[2] = x1
-        r[3] = y1
-        return
-    if x0 < r[0]:
-        r[0] = x0
-    if y0 < r[1]:
-        r[1] = y0
-    if x1 > r[2]:
-        r[2] = x1
-    if y1 > r[3]:
-        r[3] = y1
 
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
@@ -618,7 +591,6 @@ class Player:
         self._owe = 0                 # drawn frames it still owes after the last change
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self._app_ctx = None          # a user app's or script's context: its run grant
-        self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._flag_put = None         # flag_edits' applier for the running cart
@@ -664,28 +636,16 @@ class Player:
         # the way out so a kid who taps X never loses a note (#154).
         self._editors = []
         self._focus_editor = None     # the handle holding the keyboard, if any
-        # An app on the verbs with an editor handle draws its frames as rows
-        # where it can (docs/scroll_and_text_2026-10.md §5): what the cart's
-        # canvas holds of its page (`_ring`, a PaintRing, and a rect a slot
-        # for what each frame changed), the rects a frame names (`_hr`), the
-        # plan, whether this frame's pass draws its floor (`_armed`) and
-        # whether a clear broke it; `change` is what this frame's draw
-        # changed of the canvas, x0, y0, x1, y1 and 1 where known, which the
-        # window's composite reads.
-        self._ring = None
-        self._ring_rects = None
-        self._hr = _array("i", [0] * (4 * _HR))
-        self._plan = _array("i", [0] * 8)
-        self._fbox = _array("i", [0] * 4)
-        self._armed = False
+        # An app on the verbs draws through its app host (`_ui_begin`):
+        # whether its pass is drawing now, whether a clear broke its floor,
+        # and what drew over its page after the pass (the FPS chip).
+        self._uh = None
+        self._pass = False
         self._broke = False
-        self._mv = None                # the rect the handle's move shifted this frame
-        self._over = _array("i", [0] * 4)   # what drew over the page after its pass (the FPS chip)
+        self._over = _array("i", [0] * 4)
         self._cls = None
         self._bg = None
         self._bg_on = False
-        self.change = [0, 0, 0, 0, 0]
-        self.change_f = -1             # the painted frame `change` is of
 
     # -- the cart-facing text editor (#181/#112) ----------------------------
 
@@ -695,20 +655,9 @@ class Player:
         Handed to `make_system_api` as its `editor` factory, so a cart reaches
         it only through the `open_editor` its manifest earned."""
         ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
-                          clip=clip, host=self.ws, images=self._embeds(),
-                          look=self._look, frame=self)
+                          clip=clip, host=self.ws, frame=self)
         self._editors.append(ed)
         return ed
-
-    def _embeds(self):
-        """The drawings a document embeds, read by the shell behind the
-        handle: a grant of the console's own for the drawings kind, since the
-        cart's reaches its own kind alone."""
-        ctx = self._embed_ctx
-        if ctx is None:
-            ctx = self._embed_ctx = self.ws.app_context(
-                "moybyte.embeds", ("files",), None, False, _EMBED_KIND)
-        return ctx.files
 
     def _theme_colors(self):
         # The flat kernel token dict every shell surface reads per draw.
@@ -961,6 +910,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._ui = None
+        self._uh = None
         self._on_change = False
         self._end_grant()
         if self._app_id is not None:
@@ -1000,8 +950,7 @@ class Player:
         self._update = None
         self._draw = None
         self._restore_bg = None
-        self._ring = None             # what the canvas holds is the next run's to say
-        self._armed = False
+        self._pass = False
         # #65: drop the net handler/inbox with the dead run so a stale on_net
         # callback (closing over the cleared ns) can't fire into the next run.
         if self._net is not None:
@@ -1429,6 +1378,7 @@ class Player:
         self._app_id = None
         self._look = False
         self._ui = None
+        self._uh = None
         self._on_change = False
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
@@ -1612,11 +1562,19 @@ class Player:
         self._net = net
         return wifi, net, gpio, console
 
-    def _ui_begin(self, ws):
+    def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/ui.py) over the
         input its btn() and touch() read, in the run snapshot's shape, before
-        its update, so `ui.keys_taken()` answers there."""
+        its update, so `ui.keys_taken()` answers there.
+
+        The frame begins through the run's app host (`AppHost.run`), the
+        path every shell app's frames take: where the run has an editor
+        handle open and drawn, the engine may plan it a shift frame -- its
+        text view's fling, glide or a keyed step moved out of the frame
+        before, or its changed rows drawn alone
+        (docs/scroll_and_text_2026-10.md §5). Any other run draws whole."""
         ctx, a, cv = self._ui
+        host = self._uh
         inp = ws.input
         bm = self._masks
         if bm is not None:
@@ -1638,14 +1596,37 @@ class Player:
         a[8] = getattr(inp, "wheel_y", 0)
         if getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE:
             a[4] |= _P_MIDDLE
-        if self._focus_editor is not None:
+        fed = self._focus_editor
+        if fed is not None:
             a[0] = a[1] = a[5] = 0      # the keys are the focused editor handle's
+            if a[4] and fed.claims(a[2], a[3]):
+                a[4] = _P_LIVE          # its own gesture (a mouse's, a selection's): a hover
         # an app on the whole surface (a desk's window, or its glass) lays out
         # on the desk's rows there; the fixed raster is the handheld's
         desk = ws.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK
-        settled = _ui_frame(ctx, cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
-                            elsewhere=self._focus_editor is not None)
-        self._rows_begin(ws, ctx, cv)
+        ed = self._note() if render and not self._bg_on else None
+        if ed is None or (self._over[2] and ed.meets(self._over)):
+            host.whole()                # nothing vouches for the page's pixels
+        else:
+            ed.aim(host)                # a caret's step lands as this frame's shift
+        self._over[2] = 0
+        lost = _ui_draw._C.api_lost(ctx)
+        if lost:
+            print("ui: a frame drew %d stops past the ones it records; they take no focus or "
+                  "input (a long list is one ui.list or ui.table)" % lost)
+        # On a desk the run's canvas is its window's own, which only the run
+        # draws (`holds`): it holds the page as the run's last frame left it.
+        own = self.holds(cv)
+        if own:
+            _ui_draw.window_frame(2)
+        try:
+            settled = host.run(cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
+                               fed is not None)
+        finally:
+            if own:
+                _ui_draw.window_frame(0)
+        self._pass = render
+        self._broke = False
         if self._on_change:
             # A frame that moved anything owes the next, which paints the
             # state it left (a verb acts after its part drew, a tap on the
@@ -1657,205 +1638,43 @@ class Player:
             elif self._owe:
                 self._owe -= 1
 
-    # -- rows frames (docs/scroll_and_text_2026-10.md §5) -------------------
-
-    def _rows_begin(self, ws, ctx, cv):
-        """Begin the frame as a rows frame where it may be one: the app's
-        editor handle names the rows its draw changes, the canvas holds the
-        page as a frame before left it (`_ring`: the last frame's on a canvas
-        only the run draws, which the window composites; on the glass, the
-        last frame's moved over, or the one RETAINED_FRAMES back with what
-        each frame since changed), and the engine licenses the frame from
-        the page's gen and the input it applied. Where the handle's view
-        moved by whole rows, the rows it keeps are shifted first
-        (`rows_move`). Its pass then draws the floor alone, and the handle
-        draws its rows into it."""
-        self._armed = False
-        self._broke = False
-        self._mv = None
-        o = self._over
-        ow = o[2]
-        o[2] = 0
-        ring = self._ring
-        if (ring is None or self._bg_on or getattr(cv, "_buf", None) is None
-                or not ring.size):
-            return
+    def _note(self):
+        """The one editor handle the run's pass drew last, else None."""
         ed = None
-        for e in self._editors:         # the one handle open: a closed one draws nothing
+        for e in self._editors:         # a closed one draws nothing
             if e.live:
                 if ed is not None:
-                    return
+                    return None
                 ed = e
-        if ed is None:
-            return
-        th = ws.theme_colors
-        key = _ui_draw._GEN
-        if not ring.vouch_key(key, th) or ring._cv[ring._i] is not cv:
-            return
-        hr = self._hr
-        n = 0
-        copy = False
-        k = 1 if self.holds(cv) else getattr(cv, "RETAINED_FRAMES", 0)
-        if k > 1:
-            f = _ui_draw.painted()
-            if not self._alone(ws):
-                return
-            if ring.held(cv, f) == k - 1:
-                for b in range(k - 1):
-                    ch = ring.change(b)
-                    if ch is None or ring.key(b) != key or ch[4]:
-                        n = -1          # (a frame that shifted lags this buffer by its note)
-                        break
-                    if ch[2] > ch[0] and ch[3] > ch[1]:
-                        j = 4 * n
-                        hr[j] = ch[0]
-                        hr[j + 1] = ch[1]
-                        hr[j + 2] = ch[2] - ch[0]
-                        hr[j + 3] = ch[3] - ch[1]
-                        n += 1
-            else:
-                n = -1
-            if n < 0:
-                # the buffer this frame paints lags: the last frame's page
-                # moved over it whole, where that frame painted it
-                if ring.frame(0) != f - 1 or not hasattr(cv, "shift_last"):
-                    return
-                n = 0
-                copy = True
-        if ow > 0:
-            # what drew over the page last frame is the page's again
-            if n >= _HR:
-                return
-            j = 4 * n
-            hr[j] = o[0]
-            hr[j + 1] = o[1]
-            hr[j + 2] = ow
-            hr[j + 3] = o[3]
-            n += 1
-        m = ed.rows_plan(hr, n)
-        if m < 0:
-            return
-        mv = ed.rows_move()
-        if (mv is not None and ow > 0 and o[0] < mv[0] + mv[2] and mv[0] < o[0] + ow
-                and o[1] < mv[1] + mv[3] and mv[1] < o[1] + o[3]):
-            return                      # the move would carry it
-        p = self._plan
-        if not _ui_draw._C.api_shift_rows(ctx, hr, n + m, p):
-            return
-        ox = getattr(cv, "_ox", 0)
-        oy = getattr(cv, "_oy", 0)
-        if mv is not None and not cv.shift_last(mv[0] + ox, mv[1] + oy, mv[2], mv[3], 0, mv[4]):
-            return
-        if copy and not self._copy_page(cv, p, mv, ox, oy):
-            return
-        if copy or mv is not None:
-            cv.shift_fence()
-        _ui_draw._C.api_shift_arm(ctx)
-        self._armed = True
-        self._mv = mv
+        return ed if ed is not None and ed.drawn_in(self._uh) else None
 
-    def _copy_page(self, cv, p, mv, ox, oy):
-        """The last frame's page R (`p`: x, y, w, h) into the buffer this
-        frame draws, around the rect the move shifted (`mv`, None: all of
-        it, which lies inside R): whether it was."""
-        x = p[0] + ox
-        y = p[1] + oy
-        if mv is None:
-            return cv.shift_last(x, y, p[2], p[3], 0, 0)
-        a = mv[1] - p[1]                # R's rows above the move and under it
-        b = p[1] + p[3] - mv[1] - mv[3]
-        c = mv[0] - p[0]                # ...and its columns beside it
-        d = p[0] + p[2] - mv[0] - mv[2]
-        my = mv[1] + oy
-        return (a >= 0 and b >= 0 and c >= 0 and d >= 0
-                and (a == 0 or cv.shift_last(x, y, p[2], a, 0, 0))
-                and (b == 0 or cv.shift_last(x, my + mv[3], p[2], b, 0, 0))
-                and (c == 0 or cv.shift_last(x, my, c, mv[3], 0, 0))
-                and (d == 0 or cv.shift_last(x + c + mv[2], my, d, mv[3], 0, 0)))
+    def _ui_close(self):
+        """The app's pass is done: a frame whose pass a clear broke said so
+        as it drew (`_cart_cls`); the frame's change is the engine's."""
+        self._pass = False
+        if self._broke:
+            _ui_draw._CHANGE[0] = None  # it drew whole from the clear on
 
-    def _rows_close(self, ws):
-        """The app's pass is done: what it changed of the canvas
-        (`change`), into the ring for the frames after it."""
-        ctx, _a, cv = self._ui
-        ring = self._ring
-        if ring is None:
-            ring = self._ring = _ui_draw.PaintRing()
-            self._ring_rects = [[0, 0, 0, 0, 0] for _ in range(ring.n)]
-        k = _ui_draw._C.api_shift_drawn(ctx)
-        clean = (k & 4) != 0 and not self._broke
-        ch = self.change
-        ch[4] = 0
-        self.change_f = _ui_draw.painted()
-        if self._armed and (k & 3) == _ROWS and clean:
-            ch[4] = 1
-            mv = self._mv
-            _ui_draw._CHANGE[0] = _ui_draw._ROWS if mv is None else _ui_draw._SHIFT
-            fb = self._fbox
-            if _ui_draw._C.api_floor_box(ctx, fb):
-                ch[0] = fb[0]
-                ch[1] = fb[1]
-                ch[2] = fb[0] + fb[2]
-                ch[3] = fb[1] + fb[3]
-            else:
-                ch[0] = ch[1] = ch[2] = ch[3] = 0
-            if mv is not None:
-                # the rows the move shifted changed too
-                _grow(ch, mv[0], mv[1], mv[0] + mv[2], mv[1] + mv[3])
-        self._armed = False
-        alone = self.holds(cv) or self._alone(ws)
-        i = ring._i + 1
-        if i >= ring.n:
-            i = 0
-        rect = None
-        if ch[4]:
-            rect = self._ring_rects[i]
-            rect[0] = ch[0]
-            rect[1] = ch[1]
-            rect[2] = ch[2]
-            rect[3] = ch[3]
-            rect[4] = 1 if self._mv is not None else 0
-        ring.note(_ui_draw.painted(), _ui_draw._GEN, 0, None, cv, ws.theme_colors,
-                  clean and alone, rect)
-        self._mv = None
-
-    def _alone(self, ws):
-        """Whether the run's page is all the glass shows this frame, but for
-        the FPS chip, which it draws its page under again (`overdrew`)."""
-        return _ui_draw._PAINT[1] or (ws.show_fps and ws.wm.CONTENT_RING
-                                      and ws.wm.content_alone(_SIG_FPS))
+    def ui_host(self, cv):
+        """The run's app host whose pass draws on `cv` now, else None: an
+        editor handle draws its text view in that pass."""
+        ui = self._ui
+        if not self._pass or ui is None or cv is not ui[2]:
+            return None
+        return self._uh
 
     def overdrew(self, cv, x, y, w, h):
         """Rect x, y, w, h of `cv` was drawn over the run's page after its
-        pass (the FPS chip): this frame changed it, and the next draws the
-        page there again."""
+        pass (the FPS chip): the next frame moves none of an editor
+        handle's rows where it lay."""
         ui = self._ui
-        if ui is None or cv is not ui[2]:
-            return
-        cr = self.ns.get("content_rect") if self.ns is not None else None
-        if cr is not None:
-            # only the run's view reaches the glass, and only it the page holds
-            r = cr()
-            x1 = x + w if x + w < r[0] + r[2] else r[0] + r[2]
-            y1 = y + h if y + h < r[1] + r[3] else r[1] + r[3]
-            x = x if x > r[0] else r[0]
-            y = y if y > r[1] else r[1]
-            w = x1 - x
-            h = y1 - y
-        if w <= 0 or h <= 0:
+        if ui is None or cv is not ui[2] or w <= 0 or h <= 0:
             return
         o = self._over
         o[0] = x
         o[1] = y
         o[2] = w
         o[3] = h
-        ch = self.change
-        if not ch[4] or self.change_f != _ui_draw.painted():
-            return
-        _grow(ch, x, y, x + w, y + h)
-        ring = self._ring
-        r = ring.change(0) if ring is not None else None
-        if r is not None:
-            _grow(r, x, y, x + w, y + h)
 
     def holds(self, cv):
         """Whether `cv`, the run's canvas, is one buffer only the run
@@ -1863,36 +1682,11 @@ class Player:
         what the run drew last, whatever frames the console painted since."""
         return cv is self.ws.canvas and cv is not self.ws.sys_canvas
 
-    def floor_on(self):
-        """Whether this frame's pass draws its floor alone (an editor
-        handle's `draw` reads it)."""
-        return self._armed
-
-    def floor_rects(self, out):
-        """The floor's rects as the pass has them into `out`, x, y, w, h
-        each: their count (0 where it draws whole)."""
-        n = _ui_draw._C.api_floor_into(self._ui[0], out)
-        return n if n > 0 else 0
-
-    def floor_break(self):
-        """This frame's pass draws whole from here: the handle draws its
-        note whole over the floor."""
-        if self._armed:
-            _ui_draw._C.api_shift_break(self._ui[0])
-            self._armed = False
-
-    def floor_take(self, cv, x, y, w, h):
-        """Rect x, y, w, h joins the floor over the page's ground, which
-        the handle draws its rows on: whether it did."""
-        ui = self._ui
-        return (self._armed and ui is not None and cv is ui[2]
-                and _ui_draw._C.api_floor_take(ui[0], cv, _ui_draw.UI_TARGET[2], x, y, w, h))
-
     def _cart_cls(self, c=0):
         """The cart's `cls`: a clear under a floor makes the frame whole
         from there."""
-        if self._armed:
-            self.floor_break()
+        if self._pass and self._uh.shifting:
+            self._uh.break_rows()
             self._broke = True
         self._cls(c)
 
@@ -1976,7 +1770,8 @@ class Player:
                                       request=ws.take_text_request(),
                                       keep=self._keep_grant))
             if "ui" in ns:
-                self._ui = [_ui_context(), _array("i", [0] * _UI_IN_LEN), ws.canvas]
+                self._uh = _ui_draw.AppHost()
+                self._ui = [self._uh.ctx, _array("i", [0] * _UI_IN_LEN), ws.canvas]
                 # Bound once: a getattr that finds a method allocates its
                 # bound method every frame.
                 self._masks = getattr(ws.input, "button_masks", None)
@@ -2599,7 +2394,7 @@ class Player:
                 # once put ~4.7ms of Brick Siege's frame under CHROME and sent
                 # #172 hunting the shell for a regression that was never there.
                 if self._ui is not None and getattr(self, "_lua", None) is None:
-                    self._ui_begin(ws)
+                    self._ui_begin(ws, render)
                 _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:
@@ -2636,7 +2431,7 @@ class Player:
                 if render and self._draw:
                     self._draw()
                     if self._ui is not None and getattr(self, "_lua", None) is None:
-                        self._rows_close(ws)
+                        self._ui_close()
                 _cart_text(_was)
                 _td = _ticks_us() if _perf else 0
                 if ws.audio_out is not None:

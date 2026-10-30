@@ -12,7 +12,7 @@
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
-#   -- scrolling                      drag_steps, pan_drag, row_drag, ScrollRegion, DragTap
+#   -- scrolling                      drag_steps, row_drag, ScrollRegion, DragTap
 #   PaintRing                         what the last painted frames left of a region, per buffer
 #   ScrollRegion                      the one scroll model
 #   DragTap                           press/drag/release over a ScrollRegion
@@ -2170,7 +2170,17 @@ class AppHost:
                 a[2] = self.px
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
-        away = elsewhere or _ON_BAR[0]
+        r = self.run(cv, th, rect, a, desk, window, elsewhere or _ON_BAR[0], True, t)
+        if t:
+            self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
+        return r
+
+    def run(self, cv, th, rect, a, desk=False, window=False, away=False, edge=False, tap=0):
+        """Begin the frame on input `a` (the run snapshot's shape, its
+        pointer's flags as the app's own host made them: a run's Player),
+        as `begin` does: whether it is settled. `away`: no stop holds focus;
+        `edge`: the key in `a` is a press edge already; `tap`: the pointer's
+        tap state (`begin`'s), 0 none."""
         ctx = self.ctx
         u = UI_TARGET
         u[0] = ctx
@@ -2204,9 +2214,9 @@ class AppHost:
         else:
             self._canvas(cv)
             fs = _fs(cv)
-        hp[_HP_TAP] = t
+        hp[_HP_TAP] = tap
         flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
-                 | (_ELSEWHERE if away else 0) | _KEY_EDGE)
+                 | (_ELSEWHERE if away else 0) | (_KEY_EDGE if edge else 0))
         self._t3 = u[3] = flags & (_DESK | _WINDOW)
         if self.app is not None:
             flags |= (_app_row(self.app) + 1) << _APP_SHIFT
@@ -2243,8 +2253,6 @@ class AppHost:
         self._keys = not away
         if not away:
             _KEYS_HOST[0] = self
-        if t:
-            self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         settled = r & _HB_SETTLED != 0
         self.owed = not settled
         return settled
@@ -2686,6 +2694,15 @@ def text_aim(host, id, line, lines):
     return _C.api_text_aim(host.ctx, id, line, lines)
 
 
+def text_reveal(host, id, lines, line, col=-1):
+    """Before AppHost `host` begins its frame: text view `id`, showing
+    `lines`, moves only as far as it needs to show line `line`'s row that
+    holds column `col` (a caret's; -1: shows that line first), its wrapped
+    rows counted as its last pass laid them, so the move is the frame's
+    shift. Whether it moved."""
+    return _C.api_text_reveal(host.ctx, id, lines, line, col)
+
+
 def text_cover(host, id, y0, y1):
     """Rows y0..y1 of text view `id` of AppHost `host`'s context were drawn
     over after its pass this frame (an overlay of another pass): its next
@@ -2949,32 +2966,6 @@ def drag_steps(d, step):
     so a finger moved a pixel either way scrolls nothing. A drag that
     carries its remainder advances its anchor by `drag_steps(d, step) * step`."""
     return d // step if d >= 0 else -(-d // step)
-
-
-def pan_drag(drag, ed, px, py, cell, lh):
-    """One frame of a text pan, content following the finger: `ed` (its
-    `top`/`left` and `scroll(rows, cols)`) sits `drag_steps` of the finger's
-    travel from the anchor, so a drag moves it by the lines the finger moved,
-    either way, at any speed. `drag` is (x, y, cols, rows): the anchor and
-    what has scrolled since it. An edge that stops the pan re-anchors that
-    axis at the finger, so the way back answers at once. `cell` 0 pans rows
-    only. Returns the new drag, the same object when nothing was asked."""
-    ax, ay, nc, nr = drag
-    dr = drag_steps(py - ay, lh) - nr
-    dc = drag_steps(px - ax, cell) - nc if cell else 0
-    if not (dr or dc):
-        return drag
-    top, left = ed.top, ed.left
-    ed.scroll(-dr, -dc)
-    if top - ed.top == dr:
-        nr += dr
-    else:
-        ay, nr = py, 0
-    if left - ed.left == dc:
-        nc += dc
-    else:
-        ax, nc = px, 0
-    return (ax, ay, nc, nr)
 
 
 def row_drag(anchor, py, step, top, top_max):

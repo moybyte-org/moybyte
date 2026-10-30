@@ -332,8 +332,6 @@ _DRAW_SIGS = (
     ("moy_ui_api_moving", [c.c_void_p], _I),
     ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
     ("moy_ui_api_shift_plan", [c.c_void_p, c.c_void_p], _I),
-    ("moy_ui_api_shift_arm", [c.c_void_p], None),
-    ("moy_ui_api_shift_rows", [c.c_void_p, c.c_void_p, _I, c.c_void_p], _I),
     ("moy_ui_api_floor_take", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], _I),
     ("moy_ui_api_shift_break", [c.c_void_p], None),
     ("moy_ui_api_shift_drawn", [c.c_void_p, c.POINTER(_I)], _I),
@@ -353,6 +351,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_text_at", [c.c_void_p, _Span, _I, _I, c.c_void_p], _I),
     ("moy_ui_api_text_cover", [c.c_void_p, _Span, _I, _I], None),
     ("moy_ui_api_text_aim", [c.c_void_p, _Span, _I, _I], _I),
+    ("moy_ui_api_text_reveal", [c.c_void_p, _Span, c.c_void_p, _I, _I], _I),
     ("moy_ui_text_tones", [c.c_void_p], None),
     ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_text_words_reset", [], None),
@@ -1342,16 +1341,6 @@ def binding():
         w = (c.c_int32 * 8).from_buffer(out)
         return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
 
-    def api_shift_arm(ctx):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_shift_arm(p)
-
-    def api_shift_rows(ctx, rects, n, out):
-        p, _k = _ctx(ctx)
-        r = (c.c_int32 * max(1, 4 * int(n))).from_buffer(rects)
-        w = (c.c_int32 * 8).from_buffer(out)
-        return int(lib.moy_ui_api_shift_rows(p, c.addressof(r), int(n), c.addressof(w)))
-
     def api_floor_take(ctx, cv, look, x, y, w, h):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_take(p, c.byref(sink(cv, look)), int(x), int(y),
@@ -1590,6 +1579,25 @@ def binding():
         t, keep = span(id_)
         return bool(lib.moy_ui_api_text_aim(p, t, int(line), int(lines)))
 
+    def api_text_reveal(ctx, id_, lines, line, col):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        bufs = {}
+
+        def get(_src, i, n):
+            if not 0 <= i < len(lines):
+                n[0] = 0
+                return None
+            b = bufs.get(i)
+            if b is None:
+                raw = _b(lines[i])
+                b = bufs[i] = (c.create_string_buffer(raw, len(raw)), len(raw))
+            n[0] = b[1]
+            return c.addressof(b[0])
+        fn = _LINE_FN(get)
+        L = _Lines(None, len(lines), fn)
+        return bool(lib.moy_ui_api_text_reveal(p, t, c.byref(L), int(line), int(col)))
+
     def text_tones(tones):
         t = (c.c_int16 * 6)(*[-1 if v is None else int(v) for v in list(tones)[:6]])
         lib.moy_ui_text_tones(c.addressof(t))
@@ -1601,7 +1609,8 @@ def binding():
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
-    for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, text_tones, text_words, text_runs):
+    for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, api_text_reveal,
+              text_tones, text_words, text_runs):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
@@ -1609,7 +1618,7 @@ def binding():
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
-              api_shift_plan, api_shift_arm, api_shift_rows, api_floor_take, api_shift_break,
+              api_shift_plan, api_floor_take, api_shift_break,
               api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,
               api_host_whole,

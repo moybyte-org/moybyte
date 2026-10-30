@@ -21,7 +21,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from runtime import editors_code, moy_carts, moy_input as mi, web_input  # noqa: E402
+from runtime import editors_code, moy_carts, moy_input as mi, ui_draw, web_input  # noqa: E402
 from ws_helpers import build_ws, make_drv  # noqa: E402
 
 DT = 1 / 30
@@ -278,6 +278,15 @@ def _handle(ws, name):
     return ws.player._open_cart_editor(ctx.files, "docs", name, None, ws.canvas, ctx.clipboard)
 
 
+def _cell(h, col, row=0):
+    """The point over column `col` of view row `row` of handle `h`'s text
+    view, as it drew last."""
+    s = getattr(h._canvas, "font_scale", 1) or 1
+    cell = ui_draw.font("mono")[1] * s
+    x, y, _w, _h = h._vr
+    return x + 8 * s + col * cell + cell // 2, y + row * h._lh() + 2
+
+
 def test_an_editor_handle_takes_the_wheel_the_middle_button_and_mouse_selection(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "long", "\n".join("word%d and more" % i for i in range(80)),
@@ -288,7 +297,10 @@ def test_an_editor_handle_takes_the_wheel_the_middle_button_and_mouse_selection(
     src = inp.source("mouse")
     src.scroll(0, 2)
     inp.begin_frame()
-    assert h.mouse_frame(inp, 100, 100, DT) and h.ed.top == 6
+    assert h.mouse_frame(inp, 100, 100, DT)
+    for _ in range(20):
+        h.draw(0, 0, 320, 200)          # the view takes the wheel and glides
+    assert h.ed.top > 0
     inp.begin_frame()
     src.pointer_buttons = mi.PB_MIDDLE
     inp.begin_frame()
@@ -306,15 +318,14 @@ def test_an_editor_handle_takes_the_wheel_the_middle_button_and_mouse_selection(
     # a mouse's press and drag select; a double press takes the word
     h.ed.top = 0
     h.draw(0, 0, 320, 200)
+    assert h.ed.top == 0
     ws.pointer.hovers = True
-    x0, _y0, cell, _lh, _s = h._geom
-    y = next(yy for brow, si, yy in h._visible() if brow == 0 and si == 0) + 2
-    h.tap(x0 + cell // 2, y)
-    h.drag(x0 + 5 * cell + cell // 2, y, True)
+    h.tap(*_cell(h, 0))
+    h.drag(*_cell(h, 5), True)
     assert h.ed.selected_text() == "word0"
     h.drag(0, 0, False)
-    h.tap(x0 + 7 * cell + cell // 2, y)
-    h.tap(x0 + 7 * cell + cell // 2, y)
+    h.tap(*_cell(h, 7))
+    h.tap(*_cell(h, 7))
     assert h.ed.selected_text() == "and"
 
 

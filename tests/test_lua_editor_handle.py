@@ -36,34 +36,6 @@ pytestmark = pytest.mark.skipif(
     reason="no C compiler for the host lua binding")
 
 
-class _FakeCanvas:
-    """What the handle draws through: the verbs it calls, recorded."""
-
-    w = 96
-    h = 64
-
-    def __init__(self):
-        self.calls = []
-
-    def cls(self, c=0):
-        self.calls.append(("cls", c))
-
-    def rect(self, x, y, w, h, c):
-        self.calls.append(("rect", x, y, w, h, c))
-
-    def rectb(self, x, y, w, h, c):
-        self.calls.append(("rectb", x, y, w, h, c))
-
-    def clip(self, *a):
-        self.calls.append(("clip", a))
-
-    def print(self, s, x, y, c, scale=1):
-        self.calls.append(("print", s, x, y, c, scale))
-
-    def spr(self, img, x, y, scale=1, flip=0):
-        self.calls.append(("spr", x, y))
-
-
 class _FakeFiles:
     """The `(value, err)` shape of the `Files` role over a dict of documents."""
 
@@ -106,7 +78,8 @@ class Run:
     def __init__(self, granted=True):
         from runtime.editor_handle import EditorHandle
 
-        self.canvas = _FakeCanvas()
+        from runtime.host_canvas import make_system_canvas
+        self.canvas = make_system_canvas(96, 64)
         self.files = _FakeFiles(DOCS)
         self.made = []
 
@@ -256,20 +229,26 @@ def test_a_soft_save_refuses_and_badges_in_lua_too():
 DRAWN = 'ED = open_editor("hub")\nED:draw(0, 0, 96, 60)\n'
 
 
-def _tap_at(r, buffer_row, col, tail):
-    """Tap the drawn cell of one BUFFER row through Lua. The y comes from the
-    layout the draw actually produced -- a wrapped line is several rows, so a
-    hardcoded row number would be a guess about the wrap, not about the tap."""
-    x0, y0, cell, lh, _scale = r.ed._geom
-    y = next(y for brow, _si, y in r.ed._visible() if brow == buffer_row)
+def _tap_at(r, line, col, tail):
+    """Tap one cell of a line through Lua. The point comes from the view the
+    draw actually produced (`ui_draw.text_at`) -- a wrapped line is several
+    rows, so a hardcoded row number would be a guess about the wrap, not
+    about the tap."""
+    from runtime import ui_draw
+    ed = r.ed
+    x, y0, w, h = ed._vr
+    lh = ed._lh()
+    y = next(y for y in range(y0 + 1, y0 + h, lh)
+             if (ui_draw.text_at(ed._vh, ed._vid, x + 1, y) or (-1,))[0] == line)
+    cell = ui_draw.font("mono")[1]
     return r.run.exec(
         "do local verb, arg = ED:tap(%d, %d)\n%s\nend"
-        % (x0 + col * cell + 2, y + 2, tail), "tap")
+        % (x + 8 + col * cell + cell // 2, y + 1, tail), "tap")
 
 
 def test_draw_and_tap_reach_the_canvas_and_name_the_tapped_link():
     with run_cart(DRAWN + 'NIL = (ED:tap(0, 500) == nil) and 1 or 0') as r:
-        assert any(c[0] == "print" for c in r.canvas.calls), "nothing drew"
+        assert any(bytes(r.canvas._buf)), "nothing drew"
         assert r.get("NIL") == 1, "a tap outside the editor must answer nil"
         assert _tap_at(r, 1, 4,
                        'LINK = (verb == "link" and arg == "other") and 1 or 0'
@@ -279,7 +258,7 @@ def test_draw_and_tap_reach_the_canvas_and_name_the_tapped_link():
 
 def test_a_checkbox_tap_answers_its_row_as_a_number():
     with run_cart(DRAWN) as r:
-        assert _tap_at(r, 2, 1,                 # the box, its first cells
+        assert _tap_at(r, 2, 3,                 # the box's mark
                        'VERBOK = (verb == "check") and 1 or 0\nROW = arg'
                        ) is None
         assert r.get("VERBOK") == 1

@@ -1811,20 +1811,22 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
                                                                   desk):
     """A Python app's frame begins with the window flag; a Lua and a compiled
     app's snapshot carries it to the RUN face's begin (moy_ui_wasm.c)."""
-    from runtime import player, wasm_binding
+    from runtime import wasm_binding
     seen = []
-    real = player._ui_frame
-
-    def spy(*a, **kw):
-        seen.append(a[6])
-        return real(*a, **kw)
-    monkeypatch.setattr(player, "_ui_frame", spy)
     root, titles = parts_root
     kw = dict(sys_size=(1024, 600), font_scale=2, windowed=True) if desk else {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root, **kw)
         ws.pointer.visible = False
         open_cart(ws, title)
+        host = ws.player._uh
+        if host is not None:
+            real = host.run
+
+            def spy(cv, th, rect, a, d=False, window=False, *rest, real=real):
+                seen.append(window)
+                return real(cv, th, rect, a, d, window, *rest)
+            host.run = spy
         for _ in range(2):
             make_drv(ws).frame(_DT)
         assert ws.player.cart_error is None, (name, ws.player.cart_error)

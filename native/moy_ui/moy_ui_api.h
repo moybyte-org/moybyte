@@ -513,6 +513,14 @@ int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
 // did not move: a view new to the context, a wrapped one, one held by a
 // finger, or one already there (its pass aims it: a glide).
 int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t lines);
+// Before a frame begins: view `id`, showing `L`, moves only as far as its
+// rows need to show line `line`'s row that holds column `col` (a caret's),
+// or with `col` -1 shows that line first, its wrapped rows counted as its
+// last pass laid them; the move is that frame's shift. 0 where it did not
+// move: a view new to the context, one held by a finger, or one that shows
+// it already.
+int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines_t *L,
+                           int32_t line, int32_t col);
 // Rows y0..y1 of view `id` were drawn over after its pass this frame (an
 // overlay the pass does not draw): its next frame draws them again.
 void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int y1);

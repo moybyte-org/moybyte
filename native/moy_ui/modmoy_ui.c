@@ -2912,6 +2912,20 @@ static mp_obj_t ui_api_text_aim(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_aim_obj, 4, 4, ui_api_text_aim);
 
+// api_text_reveal(ctx, id, lines, line, col) -> whether the view moved:
+// before the frame begins, as far as it needs to show (line, col)'s row
+// (col -1: line first), so the move is the frame's shift
+static mp_obj_t ui_api_text_reveal(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t nl;
+    mp_obj_t *it;
+    mp_obj_get_array(a[2], &nl, &it);
+    moy_ui_lines_t L = {(void *)a[2], (int32_t)nl, tv_line};
+    return mp_obj_new_bool(moy_ui_api_text_reveal(ctx_of(a[0]), span_of(a[1]), &L,
+                                                  mp_obj_get_int(a[3]), mp_obj_get_int(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_reveal_obj, 5, 5, ui_api_text_reveal);
+
 // text_tones(tones): the colour indices the syntax classes take under the
 // live theme (text, keyword, string, number, comment, builtin; -1 a token's)
 static mp_obj_t ui_text_tones(mp_obj_t tones) {
@@ -3255,30 +3269,6 @@ static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
     return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_plan(ctx_of(ctx), (int32_t *)b.buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_shift_plan_obj, ui_api_shift_plan);
-
-// api_shift_arm(ctx): R's pixels are moved; this frame's pass draws its floor
-static mp_obj_t ui_api_shift_arm(mp_obj_t ctx) {
-    moy_ui_api_shift_arm(ctx_of(ctx));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_shift_arm_obj, ui_api_shift_arm);
-
-// api_shift_rows(ctx, rects, n, out) -> the rows frame its host asks for
-// (moy_ui_api_shift_rows); `rects`, n x, y, w, h int32 words; `out`, eight
-// writable int32 words, the plan as api_shift_plan's
-static mp_obj_t ui_api_shift_rows(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    mp_buffer_info_t r, o;
-    mp_get_buffer_raise(a[1], &r, MP_BUFFER_READ);
-    mp_get_buffer_raise(a[3], &o, MP_BUFFER_WRITE);
-    int n = mp_obj_get_int(a[2]);
-    if (o.len < 8 * sizeof(int32_t) || n < 0 || r.len < (size_t)n * 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("rects"));
-    }
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_rows(ctx_of(a[0]), (const int32_t *)r.buf, n,
-                                                      (int32_t *)o.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_shift_rows_obj, 4, 4, ui_api_shift_rows);
 
 // api_floor_take(ctx, cv, look, x, y, w, h) -> whether the rect joined an
 // armed frame's floor over the page's ground (moy_ui_api_floor_take)
@@ -3687,8 +3677,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus_ahead), MP_ROM_PTR(&ui_api_focus_ahead_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_plan), MP_ROM_PTR(&ui_api_shift_plan_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_shift_arm), MP_ROM_PTR(&ui_api_shift_arm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_shift_rows), MP_ROM_PTR(&ui_api_shift_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_floor_take), MP_ROM_PTR(&ui_api_floor_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_break), MP_ROM_PTR(&ui_api_shift_break_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
@@ -3704,6 +3692,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_cover), MP_ROM_PTR(&ui_api_text_cover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_aim), MP_ROM_PTR(&ui_api_text_aim_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_text_reveal), MP_ROM_PTR(&ui_api_text_reveal_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_tones), MP_ROM_PTR(&ui_text_tones_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_words), MP_ROM_PTR(&ui_text_words_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_runs), MP_ROM_PTR(&ui_text_runs_obj) },

@@ -451,6 +451,38 @@ def notes(loop, info):
     info["notes_typing_drawn"] = ws._frames_drawn - d1
     info["notes_text"] = len(ws.player._focus_editor.text())
     gc.enable()
+    notes_swiped(loop, info)
+
+
+def notes_swiped(loop, info):
+    """The note swiped up and down its long text: what each frame of the
+    drag and of the coast after it allocates, whether it drew and whether it
+    shifted."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    fed = ws.player._focus_editor
+    fed.set_text("\n".join("Line %d of a long note, with words enough to wrap past the "
+                           "edge of the paper" % i for i in range(120)))
+    fed.save()
+    for _ in range(60):
+        loop.step()
+    x, y, w, h = ws.player.ns["sheet"]
+    out = []
+    for rep in range(4):
+        y0, y1 = (y + h * 3 // 4, y + h // 4) if rep % 2 == 0 else (y + h // 4, y + h * 3 // 4)
+        moy_loop.swipe(x + w // 2, y0, x + w // 2, y1, 12)
+        gc.collect()
+        gc.disable()
+        for _ in range(40):
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            if rep:
+                out.append((mem_alloc() - m, ws._frames_drawn - d0,
+                            ws.frame_change == "shift"))
+        gc.enable()
+    info["notes_swipe"] = out
 
 
 def code(loop, info):
@@ -1080,6 +1112,21 @@ def test_notes_idle_allocates_nothing(result):
 def test_notes_typing_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["notes_typing"], "Notes typed into", text, minute=True)
+
+
+def test_a_notes_swipe_shifts_and_allocates_only_the_fingers_answers(result):
+    """Notes' note swiped and coasting (its `ui.text_view`): its frames
+    shift, and a frame of the drag or the coast allocates no more than the
+    finger's answers (the cart's `touch()`), but for each swipe's press,
+    whose tap reads the line under the finger (`EditorHandle.tap`)."""
+    info, text = result
+    swipe = info["notes_swipe"]
+    drawn = [d for d in swipe if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (len(shifted), len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER * 4]
+    assert len(over) <= 3, over[:10]           # the three swipes measured: a press each
+    assert all(d[0] <= ANSWER * 8 for d in over), over
 
 
 def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding(result):

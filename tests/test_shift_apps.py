@@ -19,7 +19,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import host_app, moy_carts, ui_draw
-from ws_helpers import no_unlock_banner, quiesce, seed_stories
+from ws_helpers import no_unlock_banner, quiesce, seed_stories, select_on_home
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -122,6 +122,14 @@ def _console(tmp_path, app, ships, desk=False):
         stored = moy_carts.save_file("docs", "log.py", _LOG_SCRIPT, ws.carts_root)
         ok, why = ws.run_script("docs", stored)
         assert ok, why
+    elif app == "notes":
+        moy_carts.save_file("docs", "alpha", _NOTE, ws.carts_root)
+        assert select_on_home(ws, "Notes") is not None
+        ws.open()
+        drv = host_app.ConsoleDriver(ws)
+        for _ in range(4):
+            drv.frame(_DT)
+        ws.player.ns["_open"]("alpha")
     elif app == "myart":
         for i in range(18):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
@@ -382,6 +390,44 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     assert k[:10] + k[12:16] == ["rows"] * 14, k
     assert k[10] == "shift", k
     assert set(k[17:]) == {"rows" if desk else "shift"}, k
+
+
+_NOTE = "\n".join(["# Plans", "", "- [ ] buy milk"]
+                  + ["Line %d of the note, with words enough to wrap past the edge of the paper"
+                     % i for i in range(60)])
+
+
+@pytest.mark.parametrize("desk", (False, True))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, bufs, desk):
+    """Notes' note is a text view in the app's pass (`EditorHandle.draw`): a
+    fling of it coasts on frames the console paints with no input, each a
+    shift frame, and a key typed into it draws the rows it changed, never
+    the page whole -- every frame a whole repaint's bytes. (The first key
+    brings the caret, left at the top, back into view: a jump past the
+    view's height, which draws whole.)"""
+    p = Pair(tmp_path, "notes", bufs, desk)
+    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    if desk:
+        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+        sx += ox
+        sy += oy
+    for ws in (p.a, p.b):
+        ws.pointer.hovers = False       # a finger, which flings; a mouse selects
+    del p.kinds[:]
+    p.drag(sx + sw // 2, sy + sh * 4 // 5, -sh // 2, steps=2)
+    k = len(p.kinds)
+    p.settle(60)
+    coast = p.kinds[k:]
+    assert len(coast) >= 4 and coast[:4] == ["shift"] * 4, p.kinds
+    top = p.a.player.ns["ed"].ed.top
+    assert top > 0, top
+    del p.kinds[:]
+    for ch in "hello":
+        p.both("type_char", ord(ch))
+        p.frame()
+        p.frame(idle=True)
+    assert p.kinds[1:] and set(p.kinds[1:]) == {"rows"}, p.kinds
 
 
 def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):

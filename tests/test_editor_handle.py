@@ -7,10 +7,11 @@ clipboard, and the pixel checks read the canvas the cart draws on. What a test
 asserts is the document on the card, the bytes on the screen, or where the
 keyboard went -- never that a method was called.
 
-The pixel statements are per-FEATURE and colour-addressed (a heading is accent
-where a paragraph is ink; a ticked box paints where an empty one does not),
-because that is what says the Markdown rendering happened rather than that
-something drew. The whole-surface pin is `app_notes` in
+The document draws as a text view (`ui.text_view`): its source in the
+monospace face, which tests/test_text_view.py holds pixel by pixel. What is
+the handle's own is held here through the view's hit map (`ui_draw.text_at`):
+which line a point lands on, a checkbox's and a link's taps, the caret kept
+in view. The whole-surface pin is `app_notes` in
 `tests/test_shell_goldens.py`.
 """
 
@@ -24,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe                              # noqa: E402
 from ws_helpers import build_ws, device_frames as _dframe, select_on_home  # noqa: E402
-from runtime import editor_handle, moy_carts, text_modes  # noqa: E402
+from runtime import editor_handle, moy_carts, text_modes, ui_draw  # noqa: E402
 from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
@@ -59,12 +60,12 @@ def _draw(ws, ed, rect=(0, 0, 320, 200)):
     return ws.canvas
 
 
-def _row_y(ed, buffer_row, seg=0):
-    """The y the last draw put one buffer line's visual row at."""
-    for brow, si, y in ed._visible():
-        if brow == buffer_row and si == seg:
-            return y
-    raise AssertionError("row %d/%d was not drawn" % (buffer_row, seg))
+def _rows_of(ed, line):
+    """The y of each of the view's rows that shows `line`, as it drew last."""
+    x, y, w, h = ed._vr
+    lh = ed._lh()
+    return [yy for yy in range(y + 1, y + h, lh)
+            if (ui_draw.text_at(ed._vh, ed._vid, x + w // 2, yy) or (-1,))[0] == line]
 
 
 def _band(cv, y, height=8, x0=0, x1=None):
@@ -84,6 +85,13 @@ def _band(cv, y, height=8, x0=0, x1=None):
 
 
 CARET = 8          # the first cell, where a col-0 caret paints
+
+
+def _xy(ed, line, col):
+    """The point over column `col` of `line`'s first row in the view."""
+    s = getattr(ed._canvas, "font_scale", 1) or 1
+    cell = ui_draw.font("mono")[1] * s
+    return ed._vr[0] + 8 * s + col * cell + cell // 2, _rows_of(ed, line)[0] + 2
 
 
 # ---------------------------------------------------------------------------
@@ -336,77 +344,59 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# markdown, in pixels
+# the source on the view: a program coloured, a note's taps read off its line
 # ---------------------------------------------------------------------------
 
-def test_a_heading_draws_in_the_accent_where_a_paragraph_draws_in_ink(tmp_path):
+def test_a_program_is_coloured_and_a_note_is_its_plain_source(tmp_path):
     ws = build_ws(tmp_path)
-    moy_carts.save_file("docs", "md", "# Title\nplain words\n", ws.carts_root)
-    ed = _handle(ws, "md")
-    cv = _draw(ws, ed)
-    th = ws.theme_colors
-    head = _band(cv, _row_y(ed, 0), x0=CARET)
-    body = _band(cv, _row_y(ed, 1), x0=CARET)
-    assert probe.word_of(th["accent"], cv) in head
-    assert probe.word_of(th["accent"], cv) not in body
-    assert probe.word_of(th["ink"], cv) in body
-    assert probe.word_of(th["ink"], cv) not in head, "the # markers stay dim"
+    moy_carts.save_file("docs", "md", "def go(): return 1\n", ws.carts_root)
+    moy_carts.save_file("music", "src", "def go(): return 1\n", ws.carts_root)
+    note = _handle(ws, "md")
+    code = _handle(ws, "src", kind="music", mode=text_modes.CODE)
+    cv = _draw(ws, note)
+    plain = _band(cv, _rows_of(note, 0)[0], x0=CARET + 8)
+    cv = _draw(ws, code)
+    tones = _band(cv, _rows_of(code, 0)[0], x0=CARET + 8)
+    assert len(tones) > len(plain), "a program's words take their tones"
 
 
-def test_a_checkbox_is_tappable_and_the_tick_paints(tmp_path):
+def test_a_checkbox_is_tappable_and_one_undo_step(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "todo", "- [ ] milk\n", ws.carts_root)
     ed = _handle(ws, "todo")
-    cv = _draw(ws, ed)
-    y = _row_y(ed, 0)
-    empty = probe.painted_pixels_rect(cv, 0, y, 8 * 3, 8)
-    assert ed.tap(8 + 2, y + 3) == ("check", 0)          # the box, its first cells
+    _draw(ws, ed)
+    assert ed.tap(*_xy(ed, 0, 3)) == ("check", 0)        # the box's mark
     assert ed.text() == "- [x] milk\n"
-    cv = _draw(ws, ed)
-    assert probe.painted_pixels_rect(cv, 0, _row_y(ed, 0), 8 * 3, 8) > empty
-    # ...and it is one undo step, not five keystrokes.
-    ed.undo()
+    assert ed.tap(*_xy(ed, 0, 2)) == ("check", 0)        # ...its bracket
     assert ed.text() == "- [ ] milk\n"
+    ed.undo()
+    assert ed.text() == "- [x] milk\n", "a tick is one undo step, not five keystrokes"
+    assert ed.tap(*_xy(ed, 0, 7)) == ("caret", None)     # the words: a caret
 
 
-def test_a_link_is_underlined_and_a_tap_on_it_names_the_note(tmp_path):
+def test_a_tap_on_a_link_names_the_note(tmp_path):
     ws = build_ws(tmp_path)
-    moy_carts.save_file("docs", "hub", "go to [[other]] now\n", ws.carts_root)
+    moy_carts.save_file("docs", "hub", "go to [[other]] now ![[pic]]\n", ws.carts_root)
     ed = _handle(ws, "hub")
-    cv = _draw(ws, ed)
-    th = ws.theme_colors
-    y = _row_y(ed, 0)
-    # The RULE under the link (its brackets are not drawn: "go to other
-    # now"), and nothing under the words either side of it.
-    rule = y + 7
-    link = probe.word_of(th.get("value", th["focus"]), cv)
-    assert link in _band(cv, rule, 1, 6 * 8, 11 * 8)
-    assert link not in _band(cv, rule, 1, CARET, 6 * 8)
-    assert link not in _band(cv, rule, 1, 11 * 8)
-    assert ed.tap(6 * 8 + 2, y + 3) == ("link", "other")
-    # and a tap OFF the link is an ordinary caret place
-    assert ed.tap(1, y + 3) == ("caret", None)
+    _draw(ws, ed)
+    assert ed.tap(*_xy(ed, 0, 6)) == ("link", "other")   # its brackets
+    assert ed.tap(*_xy(ed, 0, 10)) == ("link", "other")
+    # a tap OFF the link is an ordinary caret place; an embed is no link
+    assert ed.tap(*_xy(ed, 0, 1)) == ("caret", None)
+    assert ed.tap(*_xy(ed, 0, 23)) == ("caret", None)
 
 
-def test_an_embedded_drawing_paints_its_own_pixels(tmp_path):
+def test_a_checkbox_line_can_still_carry_a_link(tmp_path):
     ws = build_ws(tmp_path)
-    blob = moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64)   # solid pink
-    moy_carts.save_file("drawings", "dragon", blob, ws.carts_root)
-    moy_carts.save_file("docs", "art", "look\n![[dragon]]\n", ws.carts_root)
-    ed = _handle(ws, "art")
-    cv = _draw(ws, ed)
-    y = _row_y(ed, 1)
-    assert probe.word_of(14, cv) in _band(cv, y)
-    # a missing drawing degrades to its NAME in the danger colour, never a raise
-    moy_carts.save_file("docs", "gone", "![[nope]]\n", ws.carts_root)
-    ed2 = _handle(ws, "gone")
-    cv = _draw(ws, ed2)
-    assert probe.word_of(ws.theme_colors["danger"], cv) in \
-        _band(cv, _row_y(ed2, 0))
+    moy_carts.save_file("docs", "both", "- [ ] read [[other]]\n", ws.carts_root)
+    ed = _handle(ws, "both")
+    _draw(ws, ed)
+    assert ed.tap(*_xy(ed, 0, 14)) == ("link", "other")
+    assert ed.tap(*_xy(ed, 0, 3)) == ("check", 0)
 
 
 # ---------------------------------------------------------------------------
-# wrap, and the per-line memo
+# wrap, and the caret kept in view
 # ---------------------------------------------------------------------------
 
 def test_wrap_is_the_modes_and_only_prose_wraps(tmp_path):
@@ -420,64 +410,18 @@ def test_wrap_is_the_modes_and_only_prose_wraps(tmp_path):
     _draw(ws, code)
     assert text_modes.MODES[text_modes.MD].wrap is True
     assert text_modes.MODES[text_modes.CODE].wrap is False
-    assert len(prose._visible()) > 1, "one prose line must occupy several rows"
-    assert len(code._visible()) == 1, "a code line scrolls sideways, it does not wrap"
+    assert len(_rows_of(prose, 0)) > 1, "one prose line must occupy several rows"
+    assert len(_rows_of(code, 0)) == 1, "a code line scrolls sideways, it does not wrap"
 
 
-def test_the_layout_memo_holds_a_line_and_an_edit_invalidates_it(tmp_path):
-    ws = build_ws(tmp_path)
-    moy_carts.save_file("docs", "memo", "# one\ntwo\n", ws.carts_root)
-    ed = _handle(ws, "memo")
-    _draw(ws, ed)
-    first = ed._row("# one", ed._view[0])
-    _draw(ws, ed)
-    assert ed._row("# one", ed._view[0]) is first, "an unchanged line re-parsed"
-    ed.ed.row, ed.ed.col = 0, 0
-    ed.key(ord("x"))                            # "x# one" -- no longer a heading
-    _draw(ws, ed)
-    fresh = ed._row(ed.ed.lines[0], ed._view[0])
-    assert fresh is not first and fresh.head == 0
-
-
-def test_a_code_lines_highlight_is_memoized_with_its_layout(tmp_path):
-    """The per-frame re-highlight is the thing the memo exists to prevent, so
-    the colours ride the SAME cached row the wrap does."""
-    ws = build_ws(tmp_path)
-    moy_carts.save_file("music", "src", "def go():\n    return 1\n",
-                        ws.carts_root)
-    ed = _handle(ws, "src", kind="music", mode=text_modes.CODE)
-    row = ed._row("def go():", ed._view[0] or 38)
-    assert row.hl is None, "nothing is highlighted before a draw"
-    _draw(ws, ed)
-    row = ed._row("def go():", ed._view[0])
-    assert row.hl is not None and len(row.hl) == len("def go():")
-    colours = row.hl
-    _draw(ws, ed)
-    assert ed._row("def go():", ed._view[0]).hl is colours
-
-
-def test_a_checkbox_line_can_still_carry_a_link(tmp_path):
-    ws = build_ws(tmp_path)
-    moy_carts.save_file("docs", "both", "- [ ] read [[other]]\n",
-                        ws.carts_root)
-    ed = _handle(ws, "both")
-    cv = _draw(ws, ed)
-    y = _row_y(ed, 0)
-    th = ws.theme_colors
-    assert probe.word_of(th.get("value", th["focus"]), cv) in \
-        _band(cv, y + 7, 1, 8 * 8, 13 * 8)      # "   read other": the box, then the words
-    assert ed.tap(10 * 8, y + 3) == ("link", "other")
-    assert ed.tap(8 + 2, y + 3) == ("check", 0)
-
-
-def test_a_resize_drops_the_memo_because_the_wrap_moved(tmp_path):
+def test_a_narrower_view_wraps_into_more_rows(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "wide", "word " * 30, ws.carts_root)
     ed = _handle(ws, "wide")
     _draw(ws, ed, (0, 0, 320, 200))
-    wide = len(ed._visible())
+    wide = len(_rows_of(ed, 0))
     _draw(ws, ed, (0, 0, 120, 200))
-    assert len(ed._visible()) > wide, "a narrower page wraps into more rows"
+    assert len(_rows_of(ed, 0)) > wide, "a narrower page wraps into more rows"
 
 
 def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
@@ -486,22 +430,13 @@ def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
                         ws.carts_root)
     ed = _handle(ws, "tall")
     _draw(ws, ed, (0, 0, 320, 100))
-    ed.ed.row = len(ed.ed.lines) - 1
+    ed.ed.row = len(ed.ed.lines) - 2
+    ed.ed.col = len(ed.ed.lines[ed.ed.row])     # its paragraph's last row
     _draw(ws, ed, (0, 0, 320, 100))
-    assert any(brow == ed.ed.row for brow, _si, _y in ed._visible())
-
-
-@pytest.mark.parametrize("cols,expected", [
-    (10, [("one two", 0), ("three", 8)]),
-    (40, [("one two three", 0)]),
-])
-def test_wrapping_breaks_at_spaces_and_keeps_the_column_map(cols, expected):
-    assert list(editor_handle._wrap("one two three", cols, True)) == expected
-
-
-def test_an_unbroken_word_is_cut_rather_than_dropped():
-    got = editor_handle._wrap("aaaaaaaaaa", 4, True)
-    assert "".join(t for t, _c in got) == "aaaaaaaaaa"
+    assert _rows_of(ed, ed.ed.row), "the caret's line is drawn"
+    x, y, w, h = ed._vr
+    got = ui_draw.text_at(ed._vh, ed._vid, x + w - 1, y + h - ed._lh() // 2)
+    assert got is not None and got[0] == ed.ed.row, "it moved only as far as its row"
 
 
 # ---------------------------------------------------------------------------
@@ -545,10 +480,10 @@ def test_an_empty_container_prints_flat(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# panning: sideways where the mode does not wrap, down in every mode
+# scrolling: the caret sideways where the mode does not wrap, a drag down
 # ---------------------------------------------------------------------------
 
-def test_a_long_line_pans_sideways_where_the_mode_does_not_wrap(tmp_path):
+def test_a_long_line_follows_the_caret_sideways_where_the_mode_does_not_wrap(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "wide.json", '{"k": "' + "x" * 200 + '"}',
                         ws.carts_root)
@@ -556,11 +491,11 @@ def test_a_long_line_pans_sideways_where_the_mode_does_not_wrap(tmp_path):
     _draw(ws, ed)
     assert ed.wraps() is False
     assert ed.ed.left == 0
-    ed.drag(300, 100, True)                 # the press origin
-    assert ed.drag(100, 100, True) is True  # ...dragged LEFT: see further right
+    ed.nav(150, 0)
+    _draw(ws, ed)
     assert ed.ed.left > 0
     _draw(ws, ed)
-    assert ed.ed.left > 0, "a pan STAYS -- the caret does not drag it back"
+    assert ed.ed.left > 0, "it STAYS"
 
 
 def test_a_wrapped_document_never_pans_sideways(tmp_path):
@@ -569,8 +504,7 @@ def test_a_wrapped_document_never_pans_sideways(tmp_path):
     ed = _handle(ws, "prose")
     _draw(ws, ed)
     assert ed.wraps() is True
-    ed.drag(300, 100, True)
-    ed.drag(100, 100, True)
+    ed.nav(500, 0)
     _draw(ws, ed)
     assert ed.ed.left == 0
 
@@ -586,8 +520,11 @@ def test_a_long_note_scrolls_down_under_a_drag_and_stays_there(tmp_path):
     ed = _handle(ws, "long")
     _draw(ws, ed)
     first = ed.ed.top
-    ed.drag(100, 180, True)                 # press near the bottom...
-    assert ed.drag(100, 20, True) is True   # ...and drag up: later lines
+    ed.tap(100, 180)                        # press near the bottom...
+    _draw(ws, ed)
+    ed.drag(100, 20, True)                  # ...and drag up: later lines
+    _draw(ws, ed)
+    ed.drag(100, 20, False)
     _draw(ws, ed)
     assert ed.ed.top > first
     _draw(ws, ed)
@@ -595,12 +532,12 @@ def test_a_long_note_scrolls_down_under_a_drag_and_stays_there(tmp_path):
     # ...but an EDIT brings the caret back, wherever the reader had gone.
     ed.key(ord("!"))
     _draw(ws, ed)
-    assert ed.ed.top == 0
+    assert _rows_of(ed, ed.caret()[0])
 
 
 def test_the_caret_is_reachable_at_the_bottom_of_a_long_note(tmp_path):
-    """The 320x240 note page under the toolbar: 20 rows. The caret at line 79
-    has to be one of the rows the draw pass put on the screen."""
+    """The 320x240 note page under the toolbar: the caret at line 79 has to
+    be one of the rows the view put on the screen."""
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "deep", "\n".join("l%d" % i for i in range(80)),
                         ws.carts_root)
@@ -609,7 +546,7 @@ def test_the_caret_is_reachable_at_the_bottom_of_a_long_note(tmp_path):
     ed.nav(0, 200)                          # roll to the end
     _draw(ws, ed, (4, 40, 312, 186))
     assert ed.caret()[0] == 79
-    assert any(brow == 79 for brow, _si, _y in ed._visible()), "the last line is drawn"
+    assert _rows_of(ed, 79), "the last line is drawn"
 
 
 # ---------------------------------------------------------------------------
@@ -622,10 +559,8 @@ def test_select_mode_makes_a_drag_extend_the_selection(tmp_path):
     ed = _handle(ws, "pick")
     _draw(ws, ed)
     assert ed.select_mode() is True
-    x0, _y0, cell, _lh, _s = ed._geom
-    y = _row_y(ed, 0)
-    ed.tap(x0 + cell // 2, y + 2)           # the press ANCHORS here
-    ed.drag(x0 + 5 * cell, y + 2, True)
+    ed.tap(*_xy(ed, 0, 0))                  # the press ANCHORS here
+    ed.drag(*_xy(ed, 0, 5), True)
     assert ed.has_selection()
     assert ed.ed.selected_text() == "abcde"
     assert ed.copy() is True
@@ -653,13 +588,11 @@ def test_a_fresh_press_starts_a_fresh_selection(tmp_path):
     ed = _handle(ws, "again")
     _draw(ws, ed)
     ed.select_mode(True)
-    x0, _y0, cell, _lh, _s = ed._geom
-    y = _row_y(ed, 0)
-    ed.tap(x0, y + 2)
-    ed.drag(x0 + 6 * cell, y + 2, True)
+    ed.tap(*_xy(ed, 0, 0))
+    ed.drag(*_xy(ed, 0, 6), True)
     assert ed.ed.selected_text() == "abcdef"
-    ed.tap(x0 + 2 * cell, y + 2)            # press again: collapse + re-anchor
-    ed.drag(x0 + 4 * cell, y + 2, True)
+    ed.tap(*_xy(ed, 0, 2))                  # press again: collapse + re-anchor
+    ed.drag(*_xy(ed, 0, 4), True)
     assert ed.ed.selected_text() == "cd"
 
 

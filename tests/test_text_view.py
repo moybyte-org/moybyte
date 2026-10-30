@@ -635,3 +635,70 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
         assert py[k][0] == lua[k][0], "frame %d: the Lua terminal drew other pixels" % k
     assert py[69][1][1] > 0, "the view did not follow its lines"
     assert py[129][1][1] < py[69][1][1], "the drag did not scroll it back"
+
+
+# -- a note's caret revealed (ui_draw.text_reveal, Notes' EditorHandle.aim) ----------
+
+
+class Note:
+    """A wrapped note on the verb, its caret where the test puts it."""
+
+    def __init__(self):
+        self.lines = ["Line %d of the note, with words enough to wrap past the edge" % i
+                      for i in range(40)]
+        self.caret = (0, 0)
+        self.out = None
+
+    def draw(self, cv):
+        ui.page("Note")
+        self.out = ui.text_view("note", self.lines, {"rows": 8, "wrap": True,
+                                                     "syntax": "plain", "caret": self.caret})
+        ui.end()
+
+
+class NoteRig(TermRig):
+    def __init__(self, th, bufs=1):
+        TermRig.__init__(self, th, bufs)
+        self.app = Note()
+
+    def reveal(self, line, col):
+        got = [ui_draw.text_reveal(h, "note", self.app.lines, line, col)
+               for h in (self.a, self.b)]
+        assert got[0] == got[1]
+        return got[0]
+
+    def ends(self):
+        """The (line, column) the view's top and foot pixel rows show, as
+        its last pass drew it."""
+        got = [ui_draw.text_at(self.a, "note", 40, y) for y in range(240)]
+        shown = [g for g in got if g is not None]
+        return shown[0], shown[-1]
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_caret_revealed_moves_the_view_only_as_far_as_its_row(th, bufs):
+    """A wrapped note's caret, put on a row under the view, brings the view
+    down until that row is its last, as the frame's shift; a caret it shows
+    already moves nothing; a line asked for first (col -1) shows its first
+    row at the top; and a caret above the view brings its row to the top.
+    Every frame is a whole draw's."""
+    r = NoteRig(th, bufs)
+    for _ in range(3):
+        r.frame()
+    assert r.app.out[0] == 0
+    n = len(r.app.lines[4])
+    r.app.caret = (4, n)                # the last row of line 4: just under the view
+    assert r.reveal(4, n)
+    r.frame()
+    assert r.kinds[-1] == "shift", r.kinds
+    top, foot = r.ends()
+    assert foot[0] == 4 and foot[1] > 40, "its row, line 4's second, is the view's last"
+    assert top[0] > 0
+    assert not r.reveal(4, n), "a caret the view shows moves nothing"
+    r.frame()
+    assert r.reveal(20, -1)             # line 20 first
+    r.frame()
+    assert r.ends()[0][0] == 20 and r.ends()[0][1] < 40 and r.app.out[0] == 20
+    assert r.reveal(2, 0)               # a caret above: its row at the top
+    r.frame()
+    assert r.ends()[0][0] == 2 and r.ends()[0][1] < 40

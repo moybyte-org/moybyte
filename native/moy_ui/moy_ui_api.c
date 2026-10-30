@@ -3616,6 +3616,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     }
     if (w != NULL) {
         w->wrap = wrap;                 // a wrapped view's rows are its pass's to aim
+        w->at_cols = cols;              // ...and moy_ui_api_text_reveal's to find
+        w->sgr = sgr;
     }
     int32_t content = total * lh;
     content = content > 32767 ? 32767 : content;
@@ -3962,6 +3964,60 @@ int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t
         aim = line * w->lh;
         aim = aim > most ? most : aim;
     }
+    if (aim == k->a) {
+        return 0;
+    }
+    k->b = content;
+    k->a = aim;
+    k->over = 0;
+    moy_ui_scroll_land(&k->sc, &k->a);
+    return 1;
+}
+
+int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines_t *L,
+                           int32_t line, int32_t col) {
+    uint32_t rid = hash(id.p, id.n, TEXT_SALT);
+    moy_ui_keep_t *k = keep_of(c, rid);
+    const moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 0);
+    if (k == NULL || w == NULL || w->lh <= 0 || w->h <= 0 || line < 0
+        || (k->sc.flags & MOY_UI_SCROLL_DRAG)) {
+        return 0;                       // a view new to the context, or held by a finger
+    }
+    // the visual row (line, col) lies on, and the rows the lines make
+    int32_t row = line, total = L->n;
+    if (w->wrap) {
+        s_starts = moy_ui_text_breaks();
+        if (s_starts == NULL) {
+            return 0;
+        }
+        total = 0;
+        for (int32_t i = 0; i < L->n; i++) {
+            const uint8_t *p;
+            size_t n;
+            int m = text_line_rows(L, i, 1, w->at_cols, w->sgr, &p, &n);
+            if (i == line) {
+                row = total;
+                // the last of its rows that starts at or before the column
+                for (int j = 1; col >= 0 && j < m && j < TEXT_WRAP_ROWS
+                                && moy_ui_text_cols(p, s_starts[j], w->sgr) <= col; j++) {
+                    row = total + j;
+                }
+            }
+            total += m;
+        }
+    }
+    int32_t content = total * w->lh;
+    content = content > 32767 ? 32767 : content;
+    int32_t most = content - w->h;
+    most = most < 0 ? 0 : most;
+    int32_t y0 = row * w->lh, aim = k->a;
+    if (col < 0 || y0 < aim) {
+        aim = y0;                       // its line's top, or a row above the view
+    } else if (y0 + w->lh > aim + w->h) {
+        aim = y0 + w->lh - w->h;        // a row under it: as far as it shows
+    }
+    aim = aim > most ? most : aim;
+    aim = aim < 0 ? 0 : aim;
     if (aim == k->a) {
         return 0;
     }

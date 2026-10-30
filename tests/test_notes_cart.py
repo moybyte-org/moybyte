@@ -358,9 +358,9 @@ def test_tapping_a_link_opens_the_note_it_names(tmp_path):
     ns["_open"]("hub")
     _frames(drv)
     ed = ns["ed"]
-    x0, _y0, cell, lh, _s = ed._geom
-    row_y = next(y for brow, _si, y in ed._visible() if brow == 0)
-    drv.click(x0 + 5 * cell + 2, row_y + lh // 2)    # inside the link's words
+    cell = ui_draw.font("mono")[1]
+    x, y, _w, _h = ed._vr
+    drv.click(x + 8 + 6 * cell + 2, y + ed._lh() // 2)    # inside the link's words
     _frames(drv)
     assert ns["ed"].name() == "other_one"
 
@@ -376,17 +376,16 @@ def test_the_last_note_reopens_on_the_next_launch(tmp_path):
     assert ns["ed"] is not None and ns["ed"].name() == "kept"
 
 
-def test_a_drawing_embedded_by_name_reaches_the_page(tmp_path):
-    """Paint's own images, inline. The cart is granted `files:docs` and never
-    sees the drawing -- the shell renders it behind the handle."""
+def test_the_carts_files_see_no_drawing(tmp_path):
+    """The cart is granted `files:docs`: a drawing a note names is not its
+    to load."""
     ws = build_ws(tmp_path)
     blob = moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64)
     moy_carts.save_file("drawings", "dragon", blob, ws.carts_root)
     moy_carts.save_file("docs", "art", "look\n![[dragon]]", ws.carts_root)
     ns, drv = _open(ws)
     _press(drv, "down", "a")
-    ed = ns["ed"]
-    assert ed._image("dragon") is not None
+    assert ns["ed"] is not None
     assert not ns["files"].load("dragon")[0], \
         "the CART's own files handle is scoped to docs and sees no drawing"
 
