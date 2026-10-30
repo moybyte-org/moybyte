@@ -15,7 +15,8 @@
 #   Surface                  a scrolling or text surface: setup, probe, inputs
 #   surfaces                 every surface, on the boards that have it
 #   run_surface              a surface's rows, its setup and teardown
-#   selected, planned        what --only / --inputs / --rows pick, and the rows that plays
+#   selected                 what --only / --inputs / --rows pick
+#   planned                  the rows a selection plays on a board
 #   report                   a run's rows as markdown, the furthest over 33 ms first
 #   main                     the CLI
 """Every scrolling and text surface, under every input a board has, timed as

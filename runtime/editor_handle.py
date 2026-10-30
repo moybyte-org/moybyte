@@ -1,5 +1,4 @@
 # Map (grep -n a name to jump there):
-#   _Row               one buffer line, laid out
 #   EditorHandle       the cart-facing editor over one document
 #   EditorHandle.key   feed one byte
 #   EditorHandle.save  write the document

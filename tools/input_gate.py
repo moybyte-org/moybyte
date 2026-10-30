@@ -4,7 +4,12 @@
 #   -- the runs          Sel, flash, bench, Runner: a fresh flash, then input_bench, per board in parallel
 #   -- the baselines     Store: dev runs by commit, board and date; coverage; the sentinel's rows and drift
 #   -- the compare       load_run, verdict, compare, groups, render: the p90 table and its verdicts
-#   -- like-for-like     probed, lfl_p90: a row's frames re-classed with its probe ignored
+#   probed               whether a row's probe read; lfl_p90 its frames re-classed without it
+#   Image                a worktree's built image, its commit and its baseline key
+#   Sel                  a run's selection, as input_bench takes it
+#   StepFailed           a flash, bench or sentinel that stops a board's gate
+#   Store                the dev baselines by commit, board and date
+#   Ctx                  one invocation's arguments, store and selection
 #   gate_board           one board's gate: baseline or sentinel, candidate runs, the third run
 #   main                 the CLI: run, baseline, sentinel, gate, iter, compare
 """A surface's input gate: `tools/input_bench.py`'s p90 per row, a candidate
