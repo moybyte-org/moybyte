@@ -26,15 +26,17 @@ presented interval over the live, coast and glide frames), and a side's number
 is the MEDIAN over its runs. The line is dev's number plus `--tol` (0: the
 candidate's p90 may not exceed dev's).
 
-    pass   the candidate is more than 1 ms (`--near`) under the line
+    pass   at or under the line
+    near   over it by 1 ms (`--near`) or less, or noisy: a side with fewer
+           than three runs whose p90s spread more than 2 ms (`--noise`). A
+           third run's median settles a noisy row; a near row is the one to
+           re-run, and one still near after it does not hold
     fail   more than 1 ms over it
-    near   within 1 ms of it, or noisy: a side with fewer than three runs
-           whose p90s spread more than 2 ms (`--noise`). A third run's median
-           settles a noisy row; a near row is the one to re-run.
 
 A surface's verdict is its worst row's, a gate's per surface is its worst
-board's. Δ is the candidate less the line, so a near row with Δ > 0 does not
-hold under the strict rule.
+board's. A side with three runs or more whose p90s still spread more than
+twice `--noise` is marked unstable: its median decides, and the note says the
+row has two modes (a collection, a whole frame) a median cannot average.
 
 **Runs.** Each run is a fresh flash of a worktree's built image (`tools/board.py
 BOARD flash`, run in that worktree, so its own dist and board.toml), then one
@@ -105,7 +107,7 @@ sys.path.insert(0, HERE)
 
 import input_bench as ib  # noqa: E402
 
-NEAR_MS = 1.0          # within this of the line: near
+NEAR_MS = 1.0          # over the line by this or less: near
 NOISE_MS = 2.0         # a side's run spread past this, under SURE_RUNS runs: noisy
 SURE_RUNS = 3          # runs whose median settles a noisy side
 DRIFT_MS = 1.0         # the sentinel's median change past this: a fresh baseline
@@ -458,11 +460,14 @@ def verdict(base, cand, tol=0.0, near=NEAR_MS, noise=NOISE_MS):
     d = round(c - (b + tol), 1)
     noisy = [side for side, v in (("base", base), ("cand", cand))
              if len(v) < SURE_RUNS and max(v) - min(v) > noise + 1e-9]
-    if abs(d) <= near + 1e-9 or noisy:
+    if noisy or 0 < d <= near + 1e-9:
         v = "near"
     else:
         v = "fail" if d > 0 else "pass"
-    return {"verdict": v, "base": b, "cand": c, "delta": d, "noisy": noisy}
+    unstable = [side for side, v_ in (("base", base), ("cand", cand))
+                if len(v_) >= SURE_RUNS and max(v_) - min(v_) > 2 * noise + 1e-9]
+    return {"verdict": v, "base": b, "cand": c, "delta": d, "noisy": noisy,
+            "unstable": unstable}
 
 
 def probed(row):
@@ -559,6 +564,9 @@ def render(board, rows, base_label, cand_label, tol=0.0, head=None):
         if r["noisy"]:
             note.append("noisy: " + ", ".join(base_label if s == "base" else cand_label
                                               for s in r["noisy"]))
+        if r.get("unstable"):
+            note.append("unstable: " + ", ".join(base_label if s == "base" else cand_label
+                                                 for s in r["unstable"]))
         if "probe" in r:
             lf = r["lfl"]
             note.append("probe reads on %s only; like-for-like %s -> %s (%s %s)" % (

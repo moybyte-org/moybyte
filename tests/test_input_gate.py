@@ -33,16 +33,18 @@ def _rows():
 
 # -- the verdicts ------------------------------------------------------------------
 
-def test_the_line_is_devs_median_and_near_is_a_millisecond_either_side():
+def test_the_line_is_devs_median_and_near_is_a_millisecond_over_it():
     v = g.verdict([30.0, 30.2, 30.1], [28.0, 28.1, 28.2])
     assert (v["verdict"], v["base"], v["cand"], v["delta"]) == ("pass", 30.1, 28.1, -2.0)
     assert g.verdict([30.0] * 3, [31.5] * 3)["verdict"] == "fail"
     assert g.verdict([30.0] * 3, [30.9] * 3)["verdict"] == "near"      # over, within 1 ms
-    assert g.verdict([30.0] * 3, [29.1] * 3)["verdict"] == "near"      # under, within 1 ms
+    assert g.verdict([30.0] * 3, [29.1] * 3)["verdict"] == "pass"      # under: holds
+    assert g.verdict([30.0] * 3, [30.0] * 3)["verdict"] == "pass"      # level: holds
     assert g.verdict([30.0] * 3, [31.0] * 3)["verdict"] == "near"      # on the edge
     # --tol moves the line, never the medians
     v = g.verdict([30.0] * 3, [31.5] * 3, tol=2.0)
-    assert (v["verdict"], v["base"], v["delta"]) == ("near", 30.0, -0.5)
+    assert (v["verdict"], v["base"], v["delta"]) == ("pass", 30.0, -0.5)
+    assert g.verdict([30.0] * 3, [32.5] * 3, tol=2.0)["verdict"] == "near"
     assert g.verdict([30.0] * 3, [33.5] * 3, tol=1.0)["verdict"] == "fail"
     assert g.verdict([30.0] * 3, [27.5] * 3, tol=1.0)["verdict"] == "pass"
 
@@ -54,7 +56,10 @@ def test_a_side_under_three_runs_that_spreads_is_noisy_until_a_third_settles_it(
     v = g.verdict([20.3, 20.3, 20.4], [21.2, 26.2, 21.4])
     assert v["noisy"] == [] and v["cand"] == 21.4 and v["verdict"] == "fail"
     v = g.verdict([35.7, 54.0, 35.7], [34.4, 52.1, 34.4])
-    assert v["verdict"] == "pass"
+    assert v["verdict"] == "pass" and v["unstable"] == ["base", "cand"]
+    # three runs that still spread past twice --noise: the median decides, marked
+    v = g.verdict([44.0, 47.7, 44.1], [44.5, 75.5, 81.7])
+    assert v["verdict"] == "fail" and v["unstable"] == ["cand"]
 
 
 def test_a_row_without_a_number_on_a_side_is_missing():
@@ -67,12 +72,12 @@ def test_the_fixture_rows_verdicts_and_their_surfaces():
     rows = _rows()
     assert rows[("Code", "fling")]["verdict"] == "pass"
     assert rows[("Code", "key_held")]["verdict"] == "fail"
-    assert rows[("Code", "type_line")]["verdict"] == "near"
+    assert rows[("Code", "type_line")]["verdict"] == "pass"          # 0.4 under: holds
     assert rows[("Code", "ball_fast")]["noisy"] == ["cand"]
     assert rows[("Theme Config text", "drag")]["verdict"] == "pass"
     gs = g.groups(list(rows.values()))
     assert gs == {"Code": "fail", "Theme Config text": "pass", "Text console": "fail"}
-    assert g.near_rows(list(rows.values())) == [("Code", "type_line"), ("Code", "ball_fast")]
+    assert g.near_rows(list(rows.values())) == [("Code", "ball_fast")]
 
 
 def test_the_table_and_the_gate_over_boards():
@@ -281,7 +286,7 @@ def test_a_first_gate_alternates_dev_and_the_candidate_then_reruns_the_near_rows
                           "dev_tdeck_3", "ui1_tdeck_3"]
     # the third run plays the near rows alone, on both images
     meta = g.read_meta(str(tmp_path / "r1" / "ui1_tdeck_3"))
-    assert meta["requested"] == [["Code", "type_line"], ["Code", "ball_fast"]]
+    assert meta["requested"] == [["Code", "ball_fast"]]
     rows = dict(((r["surface"], r["input"]), r) for r in res["rows"])
     assert len(rows[("Code", "ball_fast")]["cand_runs"]) == 3
     assert len(rows[("Code", "fling")]["cand_runs"]) == 2
