@@ -475,7 +475,8 @@ def table(label, columns, rows, cur, o=None):
     its cells icon names -- and `rows` each a sequence of cells. The current
     row `cur` (from 0, -1 none) follows the focus; the columns between the
     first text column and the last, then the last, drop where it would show
-    fewer than eleven characters. `(cur, opened)`, `opened` True the frame
+    fewer than eleven characters. Placed by `at`, its first frame opens on
+    the current row. `(cur, opened)`, `opened` True the frame
     the current row is opened (Enter on it, or a tap on it again).
     `o.part = (w, h)` makes it a table of parts: rows `h` tall, column 0 a
     cell `w` wide the app draws into through `table_part` (the whole row

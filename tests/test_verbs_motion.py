@@ -105,6 +105,24 @@ def _ready(p, n=3):
     return p
 
 
+def test_a_table_opens_on_its_current_row(th):
+    """A placed table's FIRST frame shows the row the app made current, at
+    once: an app started again on the row it left (Notes back from a Run)
+    shows that row, not the table's top."""
+    p = Page(th, "table")
+    p.cur = 30
+    p.frame()
+    at = p.offset()
+    assert at > 0, "the table opened at its top, row 30 out of sight"
+    assert not p.host.moving, "a jump, not a glide"
+    for _ in range(3):
+        p.frame()
+    assert p.offset() == at and p.cur == 30, "and it stays there"
+    top = Page(th, "table")
+    top.frame()
+    assert top.offset() == 0, "row 0 current: the top, as before"
+
+
 @pytest.mark.parametrize("kind", ("page", "scroll", "table"))
 def test_a_fling_coasts_every_nest_and_comes_to_rest(th, kind):
     p = _ready(Page(th, kind, dt=16))

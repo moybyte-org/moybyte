@@ -4534,9 +4534,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         // the rows' own scroll: a step glides it to the row, where the
         // frame has a clock (with none, it is there at once)
         kp->b = content;
-        // a step or a tap moved it, else the app did (its own keys)
+        // a step or a tap moved it, else the app did (its own keys); a
+        // table's first frame (no row height drawn yet) opens on its
+        // current row, wherever the app put it
         int stepped = focused && ((xa ? c->step_x : c->step_y) || (st & MOY_UI_ST_ACTIVATED));
-        int moved = carry && !stepped && cur >= 0 && cur != c->tc_cur;
+        int moved = !stepped && cur >= 0 && ((carry && cur != c->tc_cur) || kp->rh == 0);
         int snap = o->snap == 1 && count > 0 && !o->has_offset;
         if (cur >= 0 && (stepped || moved) && !o->has_offset) {
             int to = (kp->sc.flags & MOY_UI_SCROLL_GLIDE) ? kp->sc.target : offset;
