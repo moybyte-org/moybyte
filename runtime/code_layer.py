@@ -986,37 +986,6 @@ class CodeLayer:
         n = k[8]
         k[6] = (cur or (1 if n else 0)), n
         return k[6]
-        k[4] = c
-        got = k[7]
-        lo, hi = 0, len(got)            # the matches at or before the caret
-        while lo < hi:
-            m = (lo + hi) >> 1
-            if got[m] <= c:
-                lo = m + 1
-            else:
-                hi = m
-        n = len(got)
-        k[6] = (lo or (1 if n else 0)), n
-        return k[6]
-        k[0] = ed
-        k[1] = ed.edits
-        k[2] = q
-        k[3] = self._find_ci
-        k[4] = ed.row
-        k[5] = ed.col
-        if self._find_ci:
-            q = q.lower()
-        n = cur = 0
-        for r in range(len(ed.lines)):
-            line = ed.lines[r].lower() if self._find_ci else ed.lines[r]
-            at = line.find(q)
-            while at >= 0:
-                n += 1
-                if (r, at) <= (ed.row, ed.col):
-                    cur = n
-                at = line.find(q, at + 1)
-        k[6] = (cur or (1 if n else 0)), n
-        return k[6]
 
     def overlay_step(self, d):
         """Up or down (the arrows, the T-Deck's trackball) in an open
