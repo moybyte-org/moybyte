@@ -519,8 +519,8 @@ def test_a_tables_gen_keys_its_current_row(th, bufs):
 @pytest.mark.parametrize("bufs", BUFS)
 def test_the_apps_current_row_moves_and_is_revealed(th, bufs):
     """The app moves the current row (its own keys): the rows it left and
-    took draw again with their marks; one past the view glides it there,
-    the glide's frames shifting."""
+    took draw again with their marks; one past the view lands there at
+    once, in the frame that moved it, with no glide after."""
     r = _ready(Rig(th, "table", bufs, dt=33))
     r.app.cur = 3
     r.app.curs.clear()
@@ -532,12 +532,12 @@ def test_the_apps_current_row_moves_and_is_revealed(th, bufs):
         r.app.cur = c
         r.app.curs.clear()
         r.frame()
+        top = _C.api_offset(r.a.ctx, 20, 100)
+        assert c * 17 >= top and (c + 1) * 17 <= top + H - 60, "row %d shows: %d" % (c, top)
+        assert not r.a.moving, "the reveal lands in the frame"
         _set(r, c, r.app.vals[c] + 1)      # and its value, as a held key edits it
         r.frame()
-    r.coast()
-    assert r.shifted() > 3, "the glides shifted %d frames" % r.shifted()
-    top = _C.api_offset(r.a.ctx, 20, 100)
-    assert top > 0 and (r.app.cur + 1) * 17 <= top + H - 60, "the current row shows: %d" % top
+    assert top > 0
 
 
 @pytest.mark.parametrize("bufs", BUFS)

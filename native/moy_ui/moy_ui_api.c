@@ -4106,17 +4106,14 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             } else if ((cur + 1) * rh > to + view.h) {
                 to = (cur + 1) * rh - view.h;
             }
-            if (to != was && moved && c->in[MOY_UI_IN_DT] > 0 && c->tc_id == id) {
-                // the app moved its current row: the glide begins with the
-                // next frame, this one drawn where begin planned it
-                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, view.h);
-            } else if (to != was && c->in[MOY_UI_IN_DT] > 0 && !moved) {
+            if (to != was && c->in[MOY_UI_IN_DT] > 0 && !moved) {
                 int32_t off = offset;   // the glide's first step is this frame's
                 moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, view.h);
                 moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, view.h);
                 offset = off;
             } else if (to != was) {
-                offset = to;
+                offset = to;            // the app moved its current row: it lands at once
+                moy_ui_scroll_stop(&kp->sc);
             }
         }
         int most = count * rh - view.h;
