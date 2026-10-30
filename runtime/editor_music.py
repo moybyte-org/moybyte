@@ -44,11 +44,34 @@ _METER = array("h", [v for k in range(7) for v in (k * 9, 0, 7, ROW - 10, 0)])
 PAD_W, PAD_H, PAD_DX, PAD_DY = 60, 22, 64, 26
 FOOT = 27                        # the foot: its rule and its buttons
 
+# What a frame would otherwise make, made once: the options its verbs take,
+# the rows' numbers and digits, the note names.
+_COLS = ("",)
+_O_STEPS = {"id": "Steps", "part": (0, ROW), "bar": True}
+_NUMS = tuple("%02d" % i for i in range(1, 257))
+_DIGITS = tuple(str(i) for i in range(16))
+_O_NUM = {"face": "mono", "tone": "dim"}
+_O_MONO = {"face": "mono"}
+_O_MONO_DIM = {"face": "mono", "tone": "dim"}
+_O_CENTER = {"align": "center"}
+_O_DIM_CENTER = {"tone": "dim", "align": "center"}
+_O_DIM = {"tone": "dim"}
+_O_PREV = {"id": "Previous"}
+_O_NEXT = {"id": "Next"}
+_O_SPEED = {"id": "Speed", "current": False}
+_O_HEAR = {"id": "Hear", "current": False}
+_O_LOOP = {"id": "Loop", "current": False}
+_O_PAD = {}
+_NOTE_NAMES = {}
+
 
 def note_name(pitch):
     if pitch is None or pitch < 0:
         return "--"
-    return NOTE_NAMES[pitch % 12] + str(pitch // 12)
+    n = _NOTE_NAMES.get(pitch)
+    if n is None:
+        n = _NOTE_NAMES[pitch] = NOTE_NAMES[pitch % 12] + str(pitch // 12)
+    return n
 
 
 def sound_name(bank, n):
@@ -66,12 +89,9 @@ def _width(text):
     return w
 
 
-def _meets(f, k, x, y, w, h):
-    """Whether rect x, y, w, h meets one of the `k` rects in `f`."""
-    for i in range(0, 4 * k, 4):
-        if f[i] < x + w and x < f[i] + f[i + 2] and f[i + 1] < y + h and y < f[i + 1] + f[i + 3]:
-            return True
-    return False
+def _key(v):
+    """A step's (or a song slot's) key, the row's cell its part is drawn from."""
+    return str(v)
 
 
 class MusicPage:
@@ -82,214 +102,143 @@ class MusicPage:
         self.mu = mu
         self.host = host
         self.pop = None                  # "speed" while its popover is open
-        self.rows = []                   # the visible rows' (index, rect)
-        # The steps' cursor bar and meters are the page's own pixels: a
-        # frame draws the rows a step changed alone (`AppHost.rows`), never
-        # a plan the engine makes without them. The page's gen says what
-        # else it shows.
-        host.own_rows = True
-        self._o = {"gen": 0}
-        self._shows = None
-        self._drawn = None               # (gen, cursor, top) of the last frame drawn
-        self._seen = {}                  # each row's content the last frame drew, by index
-        self._now = {}
-        self._asked = False              # this frame asked for its rows
-        self._rects = array("i", [0] * 24)
-        self._floor = array("i", [0] * 64)
+        # The steps (a song's slots) are a table whose rows are parts
+        # (`ui.table_part`), each row's cell its step's key: a frame draws
+        # the rows whose step or marks changed, the rest carried as drawn.
+        self._rows = []                  # [key] a row
+        self._src = []                   # each row's step as its key was made
+        self._song = None
+        self._r = array("i", [0] * 4)
+        self._hc = [None, None, None, None, 0, None, None, 0]   # the head's words and widths
+        self._fc = [None, None, None, None, None, None, 0]      # the foot's
 
     # -- drawing -----------------------------------------------------------------
 
-    def _window(self, me, song, y, foot):
-        """(count, cursor, rows shown, first shown) of the steps (a song's
-        slots) between y and foot: the cursor kept in the middle."""
-        n = me.slot_count() if song else me.step_count()
-        cur = me.slot if song else me.step
-        rows = max(1, (foot - y - 2) // ROW)
-        top = 0
-        if n > rows:
-            top = max(0, min(n - rows, cur - rows // 2))
-        return n, cur, rows, top
-
-    def _gen(self, me, song, n, rect, desk):
-        """The page's gen: it moves with everything the page shows but the
-        steps' rows (their cursor, their scroll and what each holds)."""
-        obj = me.cur_track() if song else me.cur_sfx()
-        shows = (id(me), song, me.sfx_idx, me.track_idx, n,
-                 sound_name(me.bank, me.sfx_idx), len(me.bank.sfx),
-                 obj.speed if obj is not None else 0, bool(obj.loop) if obj is not None else False,
-                 self.pop, self.mu.music_preview is not None, rect, desk)
-        if shows != self._shows:
-            self._shows = shows
-            self._o["gen"] += 1
-        return self._o["gen"]
-
-    def _contents(self, me, song, n, rows, top):
-        """Each shown row's content by index, into `_now`."""
-        now = self._now
-        now.clear()
-        if song:
-            t = me.cur_track()
-            for i in range(top, min(n, top + rows)):
-                v = t.pattern[i]
-                now[i] = tuple(v) if isinstance(v, list) else v
-        else:
-            st = me.cur_sfx().steps
-            for i in range(top, min(n, top + rows)):
-                now[i] = tuple(st[i])
-
-    def _plan(self, gen, x, y, cur, rows, top):
-        """Ask the host for this frame's rows where the last frame drawn
-        differs from it only by its rows: the cursor's rows, then and now,
-        each row whose content changed, and the rows a scroll shows, the
-        steps moved out of the last frame by the rows they scrolled."""
-        self._asked = False
-        d = self._drawn
-        if d is None or d[0] != gen:
-            return
-        dt = top - d[2]
-        if dt >= rows or -dt >= rows:
-            return
-        r = self._rects
-        n = 0
-        seen = self._seen
-        for vi in range(rows):
-            i = top + vi
-            if i == cur or i == d[1] or (i in seen and self._now.get(i) != seen[i]):
-                if n and r[4 * n - 3] + r[4 * n - 1] == y + vi * ROW:
-                    r[4 * n - 1] += ROW     # the run of rows above, one row longer
-                    continue
-                if n == 5:
-                    return
-                r[4 * n] = x
-                r[4 * n + 1] = y + vi * ROW
-                r[4 * n + 2] = 184
-                r[4 * n + 3] = ROW
-                n += 1
-        if dt:
-            a = rows - dt if dt > 0 else 0
-            r[4 * n] = x
-            r[4 * n + 1] = y + a * ROW
-            r[4 * n + 2] = 184
-            r[4 * n + 3] = (dt if dt > 0 else -dt) * ROW
-            n += 1
-        self._asked = True
-        self.host.rows(r, n, (x, y, 184, rows * ROW, -dt * ROW) if dt else None)
+    def _keys(self, me, song):
+        """The table's rows: each step's key, made again only where the
+        step changed."""
+        src = me.cur_track().pattern if song else me.cur_sfx().steps
+        rows = self._rows
+        seen = self._src
+        if song is self._song and src == seen:
+            return rows
+        if song is not self._song or len(src) != len(seen):
+            self._song = song
+            del rows[:]
+            del seen[:]
+            for v in src:
+                rows.append([_key(v)])
+                seen.append(list(v) if isinstance(v, list) else v)
+            return rows
+        for i in range(len(src)):
+            v = src[i]
+            if v != seen[i]:
+                rows[i] = [_key(v)]
+                seen[i] = list(v) if isinstance(v, list) else v
+        return rows
 
     def draw(self, cv, th, rect, desk):
         host = self.host
         me = self.mu.musicedit
         x, y, w, h = rect
-        foot = y + h - FOOT
-        if me is not None:
-            song = me.view == me.SONG_VIEW
-            n, cur, rows, top = self._window(me, song, y + 24, foot)
-            self._contents(me, song, n, rows, top)
-            self._plan(self._gen(me, song, n, rect, desk), x, y + 24, cur, rows, top)
         host.begin(cv, th, rect, desk, False, elsewhere=self.pop is None)
-        ui.at(*rect)
-        ui.page("", self._o)
+        ui.at(x, y, w, h)
+        ui.page("")
         if me is None:
             ui.at(*rect)
             ui.empty("music", "No sounds", ("This cart has no sound bank",))
             ui.end()
-            self._drawn = None
             return
+        song = me.view == me.SONG_VIEW
+        foot = y + h - FOOT
         self._head(me, song, x, y, w)
-        self._steps(cv, th, me, song, x, y + 24, n, cur, rows, top)
+        self._steps(cv, th, me, song, x, y + 24, foot)
         self._pad(me, song, x + w - 132, y + 24)
         self._foot(me, song, x, foot, w)
         if self.pop == "speed":
             self._speed(me, song)
         ui.end()
-        self._drawn = (self._o["gen"], cur, top)
-        self._seen, self._now = self._now, self._seen
 
     def _head(self, me, song, x, y, w):
         ui.at(x + 4, y + 2, 98, 20)
         got = ui.tabs("View", ("Sound", "Song"), 1 if song else 0)
         if got is not None and got != (1 if song else 0):
             self._view()
-        if song:
-            title = "Song %d" % me.track_idx
-            pick = me.select_track
-        else:
-            title = sound_name(me.bank, me.sfx_idx)
-            pick = me.select_sfx
+        idx = me.track_idx if song else me.sfx_idx
+        sf = None if song else (me.bank.sfx[idx] if 0 <= idx < len(me.bank.sfx) else None)
+        nm = getattr(sf, "name", None)
+        hc = self._hc
+        if hc[0] != song or hc[1] != idx or hc[2] is not nm:
+            hc[0] = song
+            hc[1] = idx
+            hc[2] = nm
+            hc[3] = "Song %d" % idx if song else sound_name(me.bank, idx)
+            hc[4] = _width(hc[3])
         sx = x + 104
         ui.at(sx, y + 2, 20, 20)
-        if ui.tool("back", "", {"id": "Previous"}):
-            pick(-1)
+        if ui.tool("back", "", _O_PREV):
+            (me.select_track if song else me.select_sfx)(-1)
             self._stop()
-        tw = min(_width(title) + 12, w - 224)
+        tw = min(hc[4] + 12, w - 224)
         ui.at(sx + 20, y + 4, tw, 20)
-        ui.label(title, {"align": "center"})
+        ui.label(hc[3], _O_CENTER)
         ui.at(sx + 20 + tw, y + 2, 20, 20)
-        if ui.tool("forward", "", {"id": "Next"}):
-            pick(1)
+        if ui.tool("forward", "", _O_NEXT):
+            (me.select_track if song else me.select_sfx)(1)
             self._stop()
         obj = me.cur_track() if song else me.cur_sfx()
-        word = "Speed %d" % (obj.speed if obj is not None else 0)
-        tw = _width(word) + 8
+        sp = obj.speed if obj is not None else 0
+        if hc[5] != sp:
+            hc[5] = sp
+            hc[6] = "Speed %d" % sp
+            hc[7] = _width(hc[6]) + 8
+        tw = hc[7]
         ui.at(x + w - 4 - tw, y + 2, tw, 20)
-        if ui.tool("", "", {"id": "Speed", "current": self.pop == "speed"}):
+        _O_SPEED["current"] = self.pop == "speed"
+        if ui.tool("", "", _O_SPEED):
             self.pop = None if self.pop == "speed" else "speed"
         ui.at(x + w - 4 - tw, y + 4, tw, 20)
-        ui.label(word, {"tone": "dim", "align": "center"})
+        ui.label(hc[6], _O_DIM_CENTER)
 
-    def _steps(self, cv, th, me, song, x, y, n, cur, rows, top):
-        """The rows' verbs, then their own pixels (the cursor's bar, the
-        meters), which overlap none of them: on a frame of the page's rows
-        only where its floor reaches, the rest kept as the last frame drew
-        them (`ui.keep`)."""
-        self.rows = []
-        s = None if song else me.cur_sfx()
-        t = me.cur_track() if song else None
-        host = self.host
-        f = self._floor
-        k = host.floor_rects(f) if self._asked and host.shifting else -1
-        for vi in range(rows):
-            i = top + vi
-            if i >= n:
-                break
-            ry = y + vi * ROW
-            r = (x + 4, ry, 176, ROW)
-            self.rows.append((i, r))
-            ui.at(*r)
-            if k >= 0 and not _meets(f, k, x, ry, 184, ROW):
-                ui.keep("Row %d" % vi, ROW)
-                continue
-            if ui.tool("", "", {"id": "Row %d" % vi, "current": i == cur}):
-                me.select_cursor(i)
-            ui.at(x + 10, ry, 20, ROW)
-            ui.label("%02d" % (i + 1), {"face": "mono", "tone": None if i == cur else "dim"})
+    def _steps(self, cv, th, me, song, x, y, foot):
+        """The steps (a song's slots) as the table's rows, the cursor its
+        current row with the cursor bar; each row its number, its step (or
+        its slot's sound) and a step's volume meter, drawn in its part."""
+        rows = self._keys(me, song)
+        cur = me.slot if song else me.step
+        ui.at(x + 4, y, 176, max(1, (foot - y - 2) // ROW) * ROW)
+        got, _opened = ui.table("", _COLS, rows, cur, _O_STEPS)
+        if got != cur and got >= 0:
+            me.select_cursor(got)
+            cur = got
+        src = me.cur_track().pattern if song else me.cur_sfx().steps
+        r = self._r
+        i = ui.table_part(r)
+        while i >= 0:
+            px = r[0] - 4
+            ry = r[1]
+            ui.at(px + 10, ry, 20, ROW)
+            ui.label(_NUMS[i] if i < 256 else str(i + 1), _O_MONO if i == cur else _O_NUM)
             if song:
-                self._slot(me, t.pattern[i], x, ry)
+                self._slot(me, src[i], px, ry)
             else:
-                self._step(s.steps[i], x, ry)
-        for vi in range(rows):
-            i = top + vi
-            if i >= n:
-                break
-            ry = y + vi * ROW
-            if k >= 0 and not _meets(f, k, x, ry, 184, ROW):
-                continue
-            if i == cur:
-                cv.rect(x + 4, ry, 2, ROW, th["value"])
-            if not song:
-                lit = max(0, min(7, s.steps[i][2]))
+                step = src[i]
+                self._step(step, px, ry)
+                lit = max(0, min(7, step[2]))
                 if lit < 7:
-                    cv.fill_rects(_METER, -1, x + 112, ry + 5, th["surface_alt"])
+                    cv.fill_rects(_METER, -1, px + 112, ry + 5, th["surface_alt"])
                 if lit:
-                    cv.fill_rects(_METER, lit, x + 112, ry + 5, th["value"])
+                    cv.fill_rects(_METER, lit, px + 112, ry + 5, th["value"])
+            i = ui.table_part(r)
 
     def _step(self, step, x, ry):
         pitch, wave, vol = step[0], step[1], step[2]
         ui.at(x + 34, ry, 30, ROW)
-        ui.label(note_name(pitch) if pitch >= 0 else "..", {"face": "mono"})
+        ui.label(note_name(pitch) if pitch >= 0 else "..", _O_MONO)
         ui.at(x + 66, ry, 30, ROW)
-        ui.label(WAVES[wave & 7], {"face": "mono", "tone": "dim"})
+        ui.label(WAVES[wave & 7], _O_MONO_DIM)
         ui.at(x + 98, ry, 12, ROW)
-        ui.label(str(vol), {"face": "mono"})
+        ui.label(_DIGITS[vol & 15], _O_MONO)
 
     def _slot(self, me, row, x, ry):
         if isinstance(row, list):
@@ -301,51 +250,57 @@ class MusicPage:
         if extra:
             word += "  +%d" % extra
         ui.at(x + 34, ry, 146, ROW)
-        ui.label(word, {"face": "mono"})
+        ui.label(word, _O_MONO)
 
     def _pad(self, me, song, x, y):
-        f = self._floor
-        host = self.host
-        k = host.floor_rects(f) if self._asked and host.shifting else -1
-        skip = k >= 0 and not _meets(f, k, x - 4, y - 4, 3 * PAD_DX, len(PAD) * PAD_DY + 8)
-        for r, pair in enumerate(PAD):
-            for c, (icon, word, verb_sfx, verb_song) in enumerate(pair):
-                verb = verb_song if song else verb_sfx
+        for r in range(len(PAD)):
+            pair = PAD[r]
+            for c in range(2):
                 if song and r == 0:
-                    icon, word, verb = SONG_PAD[c]
+                    e = SONG_PAD[c]
+                    verb = e[2]
+                else:
+                    e = pair[c]
+                    verb = e[3] if song else e[2]
                 if verb is None:
                     continue
                 ui.at(x + c * PAD_DX, y + r * PAD_DY, PAD_W, PAD_H)
-                if skip:
-                    ui.keep("Pad %s" % verb, PAD_H)
-                    continue
-                ui.icon(icon)
-                if ui.button(word, "danger" if verb == "del" else "normal",
-                             {"id": "Pad %s" % verb}):
+                ui.icon(e[0])
+                po = _O_PAD.get(verb)
+                if po is None:
+                    po = _O_PAD[verb] = {"id": "Pad " + verb}
+                if ui.button(e[1], "danger" if verb == "del" else "normal", po):
                     self.act(verb)
 
     def _foot(self, me, song, x, y, w):
         ui.at(x, y, w, 1)
         ui.rule()
         playing = self.mu.music_preview is not None
-        word = "Stop" if playing else "Hear"
-        bw = _width(word) + 34
+        fc = self._fc
+        if fc[0] is None:
+            fc[0] = _width("Stop") + 34
+            fc[1] = _width("Hear") + 34
+            fc[2] = _width("Loop") + 34
+        bw = fc[0] if playing else fc[1]
         ui.at(x + 8, y + 4, bw, 20)
         ui.icon("close" if playing else "music")
-        if ui.button(word, "normal", {"id": "Hear", "current": playing}):
+        _O_HEAR["current"] = playing
+        if ui.button("Stop" if playing else "Hear", "normal", _O_HEAR):
             self.act("hear")
         obj = me.cur_track() if song else me.cur_sfx()
-        loop = bool(obj.loop) if obj is not None else False
-        lw = _width("Loop") + 34
-        ui.at(x + 14 + bw, y + 4, lw, 20)
+        ui.at(x + 14 + bw, y + 4, fc[2], 20)
         ui.icon("loop")
-        if ui.button("Loop", "normal", {"id": "Loop", "current": loop}):
+        _O_LOOP["current"] = bool(obj.loop) if obj is not None else False
+        if ui.button("Loop", "normal", _O_LOOP):
             me.toggle_loop()
         n = me.slot_count() if song else me.step_count()
-        word = "%d %s" % (n, ("slot" if song else "step") + ("" if n == 1 else "s"))
-        tw = _width(word)
-        ui.at(x + w - 6 - tw, y + 6, tw, 20)
-        ui.label(word, {"tone": "dim"})
+        if fc[3] != n or fc[4] != song:
+            fc[3] = n
+            fc[4] = song
+            fc[5] = "%d %s" % (n, ("slot" if song else "step") + ("" if n == 1 else "s"))
+            fc[6] = _width(fc[5])
+        ui.at(x + w - 6 - fc[6], y + 6, fc[6], 20)
+        ui.label(fc[5], _O_DIM)
 
     def _speed(self, me, song):
         obj = me.cur_track() if song else me.cur_sfx()

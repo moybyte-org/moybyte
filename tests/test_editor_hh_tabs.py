@@ -69,7 +69,9 @@ def test_the_music_pad_edits_the_step_under_the_cursor(hh):
     n = me.step_count()
     _tap(drv, page.host.box("Pad add"))
     assert me.step_count() == n + 1
-    _tap(drv, page.host.box("Row 0"))
+    from runtime.editor_music import ROW
+    x, y, w, _h = page.host.box("Steps")
+    _tap(drv, (x, y, w, ROW), dx=16)   # the steps' first row, as they show at the top
     assert me.step == 0
 
 

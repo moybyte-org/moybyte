@@ -1257,10 +1257,7 @@ def _clamp_scroll(top, cur, visible, count):
     """Nudge a persistent scroll offset `top` the minimum amount needed so `cur`
     stays inside a window of `visible` rows out of `count` total -- move only when
     the cursor exits the current window (a stable scrolloff, not a re-center), then
-    clamp to the valid range. The block editor's menu's. NOT used by the music
-    editor's steps, which re-center the window on the cursor every call
-    instead of nudging a persistent offset -- a different (and intentionally
-    different) scrolling feel."""
+    clamp to the valid range. The block editor's menu's."""
     if cur < top:
         top = cur
     elif cur >= top + visible:
