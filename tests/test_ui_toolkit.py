@@ -197,9 +197,11 @@ def _drag(ws, layer_pointer, x, y0, y1, steps=6):
 
 
 def test_blocks_outline_drag_scrolls(tmp_path):
-    """A held drag on the Blocks outline scrolls blk_top when rows overflow."""
+    """A held drag on the Blocks outline scrolls its table when rows
+    overflow."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
     for i, it in enumerate(ws.launcher.items):
         if it.get("path"):
             ws.launcher.sel = i
@@ -215,10 +217,20 @@ def test_blocks_outline_drag_scrolls(tmp_path):
     # Guarantee overflow: pad the program past one screen of rows.
     while len(be.rows) <= lay.rows + 3:
         be.rows.append(be.rows[-1])
+    be._hist.gen += 1
+    for _ in range(3):
+        drv.frame(1 / 30)
     x = lay.x0 + 4
-    y0 = lay.y0 + lay.rows * lay.row_h - 4
-    _drag(ws, bu._blocks_pointer, x, y0, y0 - 4 * lay.row_h)
-    assert bu.blk_top > 0
+    y = lay.y0 + lay.rows * lay.row_h - 4
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for _ in range(6):
+        y -= lay.row_h
+        drv.touch_drag(x, y)
+        drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ui_draw._C.api_offset(bu.page().host.ctx, x, lay.y0 + 2) > 0
 
 
 def test_scroll_region_clamps_and_shows():

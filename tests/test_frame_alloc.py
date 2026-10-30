@@ -388,6 +388,7 @@ def measure(loop):
     apps(loop, info)
     achievements(loop, info)
     home(loop, info)
+    editor(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -676,6 +677,73 @@ def apps(loop, info):
     ui.card = card
 
 
+def editor(loop, info):
+    """The Editor's table of parts (docs/ui_blocks_2026-10.md section 4.1):
+    the Blocks outline grown to 40 rows, its cursor walked a row a frame
+    (the move handed in between frames, as a key's edit is) and its rows
+    swiped and coasting: what each frame and the page's draw allocate."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    for tab in ("blocks",):
+        ws.set_menu_view(tab)
+        bu = ws.block_ui
+        be = bu.blocks_ed
+        while len(be.rows) < 40:
+            be.rows.append(be.rows[-1])
+        be._hist.gen += 1
+        be.cur = 0
+        move = bu._blk_move_cursor
+        ws.mark_dirty()
+        for _ in range(60):
+            loop.step()
+        info[tab + "_view"] = ws.menu_view
+        # the page's own draw, measured apart from the Editor's frame around it
+        import editor_blocks
+        page = editor_blocks.BlocksPage
+        drew = [0]
+        draw = page.draw
+
+        def counted(self, cv, th, rect, desk):
+            m0 = mem_alloc()
+            draw(self, cv, th, rect, desk)
+            drew[0] += mem_alloc() - m0
+        page.draw = counted
+        gc.collect()
+        gc.disable()
+        walk = []
+        for d in (1,) * 24 + (-1,) * 24:
+            move(d)
+            ws.mark_dirty()
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            walk.append((mem_alloc() - m, ws._frames_drawn - d0))
+        gc.enable()
+        info[tab + "_walk"] = walk
+        info[tab + "_page"] = drew[0]
+        drag = []
+        for rep in range(2):
+            y0, y1 = (H * 3 // 4, H // 3) if rep % 2 == 0 else (H // 3, H * 3 // 4)
+            moy_loop.swipe(W // 4, y0, W // 4, y1, 25)
+            gc.collect()
+            gc.disable()
+            for _ in range(30):
+                d0 = ws._frames_drawn
+                p0 = drew[0]
+                loop.step()
+                drag.append((drew[0] - p0, ws._frames_drawn - d0,
+                             ws.frame_change == "shift"))
+            gc.enable()
+        page.draw = draw
+        info[tab + "_drag"] = drag
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+
+
 def achievements(loop, info):
     """Settings' Achievements page, idle at its top, then swiped to its end
     and idle there: what each idle frame allocates."""
@@ -849,6 +917,8 @@ def _stage(dest, exe, apps=False):
     (cart / "config.json").write_text("{}")
     shutil.copytree(ROOT / "system_carts" / "moybyte.notes.moy",
                     dest / "carts" / "moybyte.notes.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.star_catcher.moy",
+                    dest / "carts" / "moybyte.star_catcher.moy")
     if apps:
         for app in ("appearance", "storybook", "get_carts", "my_art"):
             shutil.copytree(ROOT / "system_carts" / ("moybyte.%s.moy" % app),
@@ -1217,3 +1287,23 @@ def test_the_bar_undo_read_allocates_nothing_through_a_typing_burst(tmp_path):
         "board-model MicroPython measures what it allocates.")
     assert (idle, typed) == (0, 1), "the burst's edit does not light the bar's undo"
     assert spent == 0, "50 bar undo reads through a typing burst allocated %d bytes" % spent
+
+
+def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
+    """The Blocks outline, a table of parts: a frame whose cursor moved a
+    row draws, and the page's draw allocates no more than the table's
+    answer; a swipe's frames shift, and the page's draw in each
+    allocates no more than that."""
+    info, text = result
+    tab = "blocks"
+    assert info.get(tab + "_view") == tab, text[-3000:]
+    walk = info[tab + "_walk"]
+    assert sum(1 for d in walk if d[1]) > len(walk) // 2, (tab, walk)
+    # The page's draw allocates no more than the table's answer a frame
+    # (the Editor's frame around it is not the table's to pin).
+    assert info[tab + "_page"] <= ANSWER * len(walk), (tab, info[tab + "_page"], walk)
+    drawn = [d for d in info[tab + "_drag"] if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(shifted) > len(drawn) // 2, (tab, len(shifted), len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER]
+    assert len(over) <= 1, (tab, over)

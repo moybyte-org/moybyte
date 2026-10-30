@@ -371,7 +371,7 @@ def test_a_tap_on_a_row_picks_it(hh):
     drv.click(lay.x0 + 20, lay.y0 + 2 * lay.row_h + lay.row_h // 2)
     for _ in range(2):
         drv.frame(DT)
-    assert be.cur == bu.blk_top + 2
+    assert be.cur == 2                 # the outline at its top
 
 
 def test_a_settled_blocks_tab_paints_nothing(hh):
