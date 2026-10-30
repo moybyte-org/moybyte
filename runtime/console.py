@@ -1042,7 +1042,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._text_request = None
         # The project a text run must return INTO (open_project_file): set with
         # the request, popped by _exit_to_caller, which re-reads the folder on
-        # the way back so the loader sees what was written.
+        # the way back so the loader sees what was written; HOME ends it.
         self._project_return = None
         # A RUN an editor handle asked for (`ask_run`): the handle, parked
         # until the frame that asked is drawn (`_run_asked`).
@@ -3363,6 +3363,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.
         self.returns.take_back()
         self._script_return = None
+        self._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
