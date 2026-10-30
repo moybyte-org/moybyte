@@ -219,9 +219,10 @@ class Pair:
         so where the first's dead-step rule takes a step out its frame must
         show the same."""
         st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3), False])
+            len(ui_draw._PAINT) - 3), False, ui_draw._PF[:]])
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
+        ui_draw._PF[:] = st[3]
         ui_draw._EDGE[0] = st[2]
         twin = ws is self.b
         if twin:
@@ -235,6 +236,7 @@ class Pair:
                 ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
             st[0] = ui_draw._KEYS_HOST[0]
             st[1] = list(ui_draw._PAINT)
+            st[3] = ui_draw._PF[:]
             st[2] = ui_draw._EDGE[0]
 
     def both(self, verb, *args):
@@ -358,7 +360,7 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs):
     """The text console under the FPS chip (`overdrew`), whose log the
     chip misses: a typed prompt's frames draw its rows alone -- on two and
     three buffers moving nothing where the buffer the frame paints holds the
-    log (`AppHost._lag`), the frames after a move of it too -- a moving log
+    log (`moy_ui_api_lag`), the frames after a move of it too -- a moving log
     draws whole, and every frame is a whole repaint's bytes."""
     p = Pair(tmp_path, "console", bufs)
     assert p.a.show_fps

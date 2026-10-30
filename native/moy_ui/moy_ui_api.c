@@ -5446,6 +5446,246 @@ int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
     return m;
 }
 
+// -- an app's host (runtime/ui_draw.py's AppHost) ------------------------------------
+
+static int host_slot(const moy_ui_host_t *h, int back) {
+    int i = h->ri - back;
+    return i < 0 ? i + MOY_UI_HOST_RING : i;
+}
+
+// How many paints back the paint is whose pixels the buffer frame f draws
+// into holds, `k` buffers presented in turn: k - 1, where the frames between
+// were this host's paints, one after another, and that paint left the page
+// whole; else -1.
+static int host_held(const moy_ui_host_t *h, int f, int k) {
+    if (k < 1 || k > h->rn) {
+        return -1;
+    }
+    for (int b = 0; b < k; b++) {
+        if (h->f[host_slot(h, b)] != f - 1 - b) {
+            return -1;
+        }
+    }
+    return h->whole[host_slot(h, k - 1)] ? k - 1 : -1;
+}
+
+// Whether what the console drew over the page after any of the last `n`
+// paints meets rect x, y, w, h: a move of it out of those buffers would
+// carry it.
+static int host_over_meets(const moy_ui_host_t *h, int x, int y, int w, int ht, int n) {
+    for (int b = 0; b < n && b < h->rn; b++) {
+        int i = host_slot(h, b);
+        const int32_t *o = h->over[i];
+        if (h->over_on[i] && o[0] < x + w && x < o[0] + o[2] && o[1] < y + ht
+            && y < o[1] + o[3]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Whether moving region R (plan p) out of the last frame costs the canvas
+// less than drawing what of R the floor does not: `cost` per mille of a
+// plain row's raster each row it copies costs (-1 unknown: it moves). A
+// picture's rows cost more to draw than any copy, so a move that leaves one
+// undrawn pays.
+static int host_pays(int cost, const int32_t *p) {
+    return cost < 0 || p[6] > 0 || p[5] * 1000 + cost * p[3] < 1000 * p[3];
+}
+
+static void host_move(int32_t *hp, int x, int y, int w, int h, int dy) {
+    int32_t *m = hp + MOY_UI_HP_MOVES + 5 * hp[MOY_UI_HP_N]++;
+    m[0] = x;
+    m[1] = y;
+    m[2] = w;
+    m[3] = h;
+    m[4] = dy;
+}
+
+// The shift frame the frame begun may be (docs/scroll_and_text_2026-10.md
+// §3.3): the engine licenses it from the input it applied and the gens the
+// last pass drew, the ring vouches that the frame before drew the page
+// whole into the buffer the canvas's move reads, and the canvas moves that
+// frame's pixels of the page's region R by the scroll's move; the pass then
+// draws R's floor alone. Its moves into hp; the answer's MOY_UI_HB_* bits.
+static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
+    moy_ui_host_t *h = &c->host;
+    int32_t *p = hp + MOY_UI_HP_PLAN;
+    int f = pf[MOY_UI_PF_FRAME], key = pf[MOY_UI_PF_KEY], w = pf[MOY_UI_PF_WIN];
+    int same = hp[MOY_UI_HP_SAME], hh = hp[MOY_UI_HP_HOST];
+    int ox = hp[MOY_UI_HP_OX], oy = hp[MOY_UI_HP_OY], cost = hp[MOY_UI_HP_COST];
+    int again = h->again, want = h->want1 - 1;
+    h->again = 0;
+    h->want1 = 0;
+    int i = h->ri, ok;
+    if (w) {
+        // the windowed WM's shown ring vouches for the buffer
+        ok = w >= 2 && h->rn && h->whole[i] && (same & 2) && h->key[i] == key;
+    } else {
+        ok = (pf[MOY_UI_PF_ALONE] || pf[MOY_UI_PF_OVER]) && h->rn
+             && hp[MOY_UI_HP_RETAINED] >= 1 && h->f[i] == f - 1 && (same & 3) == 3
+             && h->whole[i] && h->key[i] == key;
+    }
+    // A pass that changed what it drew before the change (`again`) left the
+    // last frame's page unlike the app's: this frame draws whole.
+    if (!ok || again) {
+        return 0;
+    }
+    int planned = moy_ui_api_shift_plan(c, p) != MOY_UI_SHIFT_NONE;
+    if (want >= 0 && !planned) {
+        // the app's rows: the page moved out of the last frame, the app's
+        // region by its rows, the floor those rects
+        if (!moy_ui_api_shift_rows(c, h->want, want, p) || !host_pays(cost, p)) {
+            return 0;
+        }
+        host_move(hp, p[0] + ox, p[1] + oy, p[2], p[3], 0);
+        const int32_t *m = h->move;
+        if (m[4] && m[2] > 0) {
+            host_move(hp, m[0] + ox, m[1] + oy, m[2], m[3], m[4]);
+        }
+        h->mv_dy = (int16_t)m[4];
+        return MOY_UI_HB_SHIFT | MOY_UI_HB_FENCE;
+    }
+    // The engine's plan; an app with rows of its own takes a rows plan where
+    // it asked for one, its rows joining the floor. A canvas whose copy costs
+    // about what the raster it saves does draws the frame whole instead. A
+    // dialog's rows frame is the host's to allow, and always pays: the frame
+    // it saves puts the page under the dialog back too.
+    if (!planned || ((hh & MOY_UI_HH_OWN_ROWS) && !(want >= 0 && !p[4] && !h->move[4]))) {
+        return 0;
+    }
+    int got = MOY_UI_HB_SHIFT;
+    if (p[7]) {
+        if (!(hh & MOY_UI_HH_HELD)) {
+            return 0;
+        }
+        got |= MOY_UI_HB_HELD;
+    } else if (!host_pays(cost, p)) {
+        return 0;
+    }
+    // Where the buffer this frame paints holds the page as the frames
+    // RETAINED_FRAMES back left it -- the WM's word (3, a direct render's),
+    // or this ring's on a full-screen tier -- a rows frame moves only the
+    // band the rows frames since drew.
+    int k = hp[MOY_UI_HP_RETAINED] > 0 ? hp[MOY_UI_HP_RETAINED] : 1;
+    int lag = -1;
+    if (!p[4] && (w == 3 || (!w && k > 1 && host_held(h, f, k) == k - 1))) {
+        int32_t band[2 * MOY_UI_HOST_BANDS * MOY_UI_HOST_HIST];
+        lag = moy_ui_api_lag(h->hist, MOY_UI_HOST_HIST, MOY_UI_HOST_BANDS, f, k, band,
+                             MOY_UI_HOST_BANDS * MOY_UI_HOST_HIST);
+        for (int b = 0; b < lag; b++) {
+            host_move(hp, p[0] + ox, band[2 * b] + oy, p[2], band[2 * b + 1] - band[2 * b], 0);
+        }
+    }
+    if (!w && host_over_meets(h, p[0] + ox, p[1] + oy, p[2], p[3], k)) {
+        hp[MOY_UI_HP_N] = 0;
+        return 0;
+    }
+    if (lag < 0) {
+        host_move(hp, p[0] + ox, p[1] + oy, p[2], p[3], p[4]);
+    }
+    h->mv_dy = (int16_t)p[4];
+    // the floor draws over rows the move wrote
+    return got | (lag != 0 ? MOY_UI_HB_FENCE : 0);
+}
+
+static int rep_dirs(uint32_t rw) {
+    return ((rw & 0xFF) ? 1 : 0) | ((rw & 0xFF00) ? 2 : 0) | ((rw & 0xFF0000) ? 4 : 0)
+           | ((rw >> 24) ? 8 : 0);
+}
+
+int moy_ui_api_host_begin(moy_ui_ctx_t *c, int32_t *in, moy_ui_box_t surface, int flags,
+                          int fs, const int32_t *pf, int32_t *hp) {
+    moy_ui_host_t *h = &c->host;
+    int f = pf[MOY_UI_PF_FRAME];
+    // the frame begun last, as its pass left it: whether it left the page
+    // whole, what was drawn over it after, its kind and its floor's bands
+    int clean = 0;
+    int drawn = moy_ui_api_shift_drawn(c, &clean);
+    if (h->rn) {
+        int i = h->ri;
+        if (!clean) {
+            h->whole[i] = 0;
+        }
+        h->over_on[i] = h->began1 && pf[MOY_UI_PF_OVER_F] == h->began1 - 1;
+        if (h->over_on[i]) {
+            memcpy(h->over[i], pf + MOY_UI_PF_OVER_X, sizeof(h->over[i]));
+        }
+    }
+    if (h->began1) {
+        moy_ui_api_lag_note(c, h->hist, MOY_UI_HOST_HIST, MOY_UI_HOST_BANDS, h->began1 - 1,
+                            h->shifting && (drawn || clean) ? (h->dy ? 2 : 1) : 0);
+    }
+    in[MOY_UI_IN_DT] = pf[MOY_UI_PF_DT];
+    int settled = moy_ui_api_begin(c, in, surface, flags, fs);
+    h->shifting = 0;
+    h->dy = 0;
+    h->mv_dy = 0;
+    hp[MOY_UI_HP_N] = 0;
+    int got = host_plan(c, pf, hp);
+    // this frame's paint
+    int i = h->ri + 1 >= MOY_UI_HOST_RING ? 0 : h->ri + 1;
+    h->ri = (uint8_t)i;
+    h->f[i] = f;
+    h->key[i] = pf[MOY_UI_PF_KEY];
+    h->whole[i] = pf[MOY_UI_PF_ALONE] || pf[MOY_UI_PF_OVER] || pf[MOY_UI_PF_WIN];
+    h->over_on[i] = 0;
+    if (h->rn < MOY_UI_HOST_RING) {
+        h->rn++;
+    }
+    h->began1 = f + 1;
+    int moving = moy_ui_api_moving(c);
+    if (settled) {
+        got |= MOY_UI_HB_SETTLED;
+    }
+    if (moving) {
+        got |= MOY_UI_HB_MOVING;
+    }
+    if ((in[MOY_UI_IN_BTNP] & 4) && c->edge) {
+        got |= MOY_UI_HB_EDGE;
+    }
+    // The directions this frame's steps took, where they moved nothing and
+    // the page owes nothing: a held key's further steps that way are no
+    // frame, until a frame begins otherwise.
+    int d = (in[MOY_UI_IN_BTNP] & 15) | rep_dirs((uint32_t)in[MOY_UI_IN_REP]);
+    hp[MOY_UI_HP_DEAD] = d && !(in[MOY_UI_IN_BTNP] & ~15) && !in[MOY_UI_IN_KEY]
+                                 && !hp[MOY_UI_HP_TAP] && !in[MOY_UI_IN_WHEEL_X]
+                                 && !in[MOY_UI_IN_WHEEL_Y] && settled && !c->moved && !moving
+                             ? d : 0;
+    in[MOY_UI_IN_BTN] = in[MOY_UI_IN_BTNP] = in[MOY_UI_IN_KEY] = 0;
+    in[MOY_UI_IN_WHEEL_X] = in[MOY_UI_IN_WHEEL_Y] = 0;
+    return got;
+}
+
+int moy_ui_api_host_arm(moy_ui_ctx_t *c) {
+    moy_ui_host_t *h = &c->host;
+    moy_ui_api_shift_arm(c);
+    h->shifting = 1;
+    h->dy = h->mv_dy;
+    return h->dy;
+}
+
+void moy_ui_api_host_rows(moy_ui_ctx_t *c, const int32_t *r, int n, const int32_t *move) {
+    moy_ui_host_t *h = &c->host;
+    if (n < 0) {
+        n = 0;
+    }
+    if (n > MOY_UI_API_HOST) {
+        n = MOY_UI_API_HOST;
+    }
+    memcpy(h->want, r, 4 * (size_t)n * sizeof(int32_t));
+    if (move == NULL) {
+        h->move[2] = h->move[4] = 0;
+    } else {
+        memcpy(h->move, move, sizeof(h->move));
+    }
+    h->want1 = (uint8_t)(n + 1);
+}
+
+void moy_ui_api_host_whole(moy_ui_ctx_t *c) {
+    c->host.again = 1;
+}
+
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]) {
     if (!c->fl_on || c->fl_stage == 0 || c->fl_n == 0) {
         return 0;

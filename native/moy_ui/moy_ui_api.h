@@ -60,6 +60,35 @@ enum {
     MOY_UI_IN_KEYREP,
     MOY_UI_IN_LEN
 };
+
+// An app's host (runtime/ui_draw.py's AppHost, moy_ui_api_host_begin): what
+// the frames it painted left of its page in the buffers a canvas presents
+// in turn, a slot a paint (the ring, newest at ri, rn held): the frame, its
+// key (what the pixels are a function of besides the page: the look's
+// epoch and the focus marks), whether it left the page whole with nothing
+// over it, and what the console drew over it after its pass (over, where
+// over_on). Then the lag history (moy_ui_api_lag's), the frame begun last
+// (began1, its number + 1; 0 none), what that frame was (shifting, dy: a
+// rows frame, a shift by dy), the move its begin planned for the host's
+// canvas (mv_dy), whether the next frame draws whole (again), and the rows
+// the app asked the next frame to draw alone (want1, their count + 1; 0
+// none: want, and a region moved first, move). All zero is a host that
+// painted nothing.
+#define MOY_UI_HOST_RING 3          // the paints a host remembers (RETAINED_FRAMES at most)
+#define MOY_UI_HOST_HIST 4          // the frames its lag history keeps
+#define MOY_UI_HOST_BANDS 3         // the bands a frame's floor is kept as
+typedef struct {
+    int32_t f[MOY_UI_HOST_RING];
+    int32_t key[MOY_UI_HOST_RING];
+    int32_t over[MOY_UI_HOST_RING][4];
+    uint8_t whole[MOY_UI_HOST_RING], over_on[MOY_UI_HOST_RING];
+    uint8_t ri, rn, shifting, again, want1;
+    int32_t hist[MOY_UI_HOST_HIST * (2 + 2 * MOY_UI_HOST_BANDS)];
+    int32_t began1;
+    int16_t dy, mv_dy;
+    int32_t want[4 * MOY_UI_API_HOST];
+    int32_t move[5];
+} moy_ui_host_t;
 #define MOY_UI_KEYREP(byte, n) ((int32_t)(byte) | ((int32_t)(n) << 16))
 #define MOY_UI_MOD_SHIFT 2
 #define MOY_UI_WHEEL_ROWS 3
@@ -387,6 +416,7 @@ typedef struct {
     moy_ui_box_t was_surface;
     uint16_t was_flags;
     uint8_t was_fs, was_hint;
+    moy_ui_host_t host;             // its app host's (moy_ui_api_host_begin)
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -825,6 +855,64 @@ void moy_ui_api_lag_note(const moy_ui_ctx_t *c, int32_t *hist, int slots, int ba
 // most, merged as lag_note merges), their count (0, none), else -1.
 int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
                    int32_t *out, int cap);
+// An app host's frame begins (runtime/ui_draw.py's AppHost.begin): the
+// frame begun last is noted as its pass left it, the frame begins as
+// moy_ui_api_begin's, and the shift frame it may be is planned against the
+// host's ring -- the canvas's part of it (moving pixels, the fence) is left
+// to the host, which then arms it (moy_ui_api_host_arm). `in`, `surface`,
+// `flags` and `fs` are moy_ui_api_begin's; `in`'s press words (buttons
+// pressed, the key, the wheel) are cleared after, as a frame takes each
+// once (the host logs a duplicate id with moy_ui_api_dup first). `pf` is
+// the console's frame (MOY_UI_PF_*), `hp` the host's words
+// (MOY_UI_HP_*): its canvas, its tap, and the answers. Answers
+// MOY_UI_HB_* bits.
+enum {
+    MOY_UI_PF_FRAME = 0,            // the painted frame's number
+    MOY_UI_PF_ALONE,                // its content alone on the glass
+    MOY_UI_PF_OVER,                 // ...but for what the console names it drew over it after
+    MOY_UI_PF_WIN,                  // the windowed WM's word (ui_draw.window_frame)
+    MOY_UI_PF_OVER_X, MOY_UI_PF_OVER_Y, MOY_UI_PF_OVER_W, MOY_UI_PF_OVER_H,
+    MOY_UI_PF_OVER_F,               // ...that rect, and the frame it was drawn over
+    MOY_UI_PF_KEY,                  // the paints' key: the look's epoch and the focus marks
+    MOY_UI_PF_DT,                   // the loop's tick, which a begun frame's input takes
+    MOY_UI_PF_LEN
+};
+enum {
+    MOY_UI_HP_PLAN = 0,             // 8 words: the plan (moy_ui_api_shift_plan's)
+    MOY_UI_HP_RETAINED = 8,         // the canvas's RETAINED_FRAMES (0 none)
+    MOY_UI_HP_COST,                 // its SHIFT_COST, per mille of a row's raster (-1 none)
+    MOY_UI_HP_OX, MOY_UI_HP_OY,     // its origin on the buffer
+    MOY_UI_HP_SAME,                 // 1 the canvas, 2 the theme, of the frame begun last
+    MOY_UI_HP_TAP,                  // the pointer's tap (a press, held or released: nonzero)
+    MOY_UI_HP_HOST,                 // MOY_UI_HH_*: the host's own
+    MOY_UI_HP_DEAD,                 // out: the directions whose steps moved nothing
+    MOY_UI_HP_N,                    // out: the moves the canvas makes, then each x, y, w, h, dy
+    MOY_UI_HP_MOVES,
+    MOY_UI_HP_LEN = MOY_UI_HP_MOVES + 5 * MOY_UI_HOST_HIST * MOY_UI_HOST_BANDS
+};
+enum {
+    MOY_UI_HH_OWN_ROWS = 1,         // the app draws rows the engine does not see
+    MOY_UI_HH_HELD = 2,             // a dialog's rows frame is the host's to allow
+};
+enum {
+    MOY_UI_HB_SETTLED = 1,          // moy_ui_api_begin's answer
+    MOY_UI_HB_MOVING = 2,           // a page flings or glides
+    MOY_UI_HB_EDGE = 4,             // an up press went past the page's top
+    MOY_UI_HB_SHIFT = 16,           // a shift frame: make hp's moves, then arm it
+    MOY_UI_HB_HELD = 32,            // ...where the host's dialog allows the plan
+    MOY_UI_HB_FENCE = 64,           // ...fencing them before the floor draws
+};
+int moy_ui_api_host_begin(moy_ui_ctx_t *c, int32_t *in, moy_ui_box_t surface, int flags,
+                          int fs, const int32_t *pf, int32_t *hp);
+// The host made every move its begin planned: this frame draws the floor
+// alone. Answers the frame's dy (0, a rows frame).
+int moy_ui_api_host_arm(moy_ui_ctx_t *c);
+// The rows the app asks the frame begun next to draw alone (ui_draw's
+// AppHost.rows): `n` rects, x, y, w, h each, and `move` (x, y, w, h, dy; NULL
+// none) a region moved first.
+void moy_ui_api_host_rows(moy_ui_ctx_t *c, const int32_t *r, int n, const int32_t *move);
+// The frame begun next draws whole (AppHost.whole, AppHost.again).
+void moy_ui_api_host_whole(moy_ui_ctx_t *c);
 // A rows frame its host asks for (docs/scroll_and_text_2026-10.md §5): the
 // host draws part of the page itself (a cart's editor handle, which is not a
 // stop) and names the rects of it its drawing will change this frame, `n` of

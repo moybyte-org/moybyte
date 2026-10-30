@@ -98,8 +98,8 @@ the Notes split needs.
 `modmoy_ui.c`'s private table. But Notes, the Code tab, the Player's rows,
 the Blocks and desk panes, the Launcher's bands and the pickers each drive
 them with a path of their own (#243 lists
-them). `AppHost._shift` (`runtime/ui_draw.py`) is the one path that
-stays. The others go as their surfaces move.
+them). `AppHost.begin` (`runtime/ui_draw.py`, over
+`moy_ui_api_host_begin`) is the one path that stays. The others go as their surfaces move.
 
 **G5. Budgets.**
 - `MOY_UI_API_STOPS` (40): stops a frame. A stop past it is drawn and

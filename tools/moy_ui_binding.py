@@ -343,6 +343,11 @@ _DRAW_SIGS = (
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_lag_note", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_lag", [c.c_void_p, _I, _I, _I, _I, c.c_void_p, _I], _I),
+    ("moy_ui_api_host_begin", [c.c_void_p, c.c_void_p, _Box, _I, _I, c.c_void_p, c.c_void_p],
+     _I),
+    ("moy_ui_api_host_arm", [c.c_void_p], _I),
+    ("moy_ui_api_host_rows", [c.c_void_p, c.c_void_p, _I, c.c_void_p], None),
+    ("moy_ui_api_host_whole", [c.c_void_p], None),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
                               c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
@@ -1396,6 +1401,28 @@ def binding():
                                       int(bands), int(f), int(n),
                                       (c.c_int32 * len(out)).from_buffer(out), len(out) // 2))
 
+    def api_host_begin(ctx, inp, rect, flags, fs, pf, hp):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_host_begin(p, (c.c_int32 * len(inp)).from_buffer(inp),
+                                             box_of(rect), int(flags), int(fs),
+                                             (c.c_int32 * len(pf)).from_buffer(pf),
+                                             (c.c_int32 * len(hp)).from_buffer(hp)))
+
+    def api_host_arm(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_host_arm(p))
+
+    def api_host_rows(ctx, rects, n, move):
+        p, _k = _ctx(ctx)
+        n = max(0, min(6, int(n)))
+        r = (c.c_int32 * max(1, 4 * n))(*[int(v) for v in list(rects)[:4 * n]])
+        m = None if move is None else (c.c_int32 * 5)(*[int(v) for v in list(move)[:5]])
+        lib.moy_ui_api_host_rows(p, c.addressof(r), n, None if m is None else c.addressof(m))
+
+    def api_host_whole(ctx):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_host_whole(p)
+
     def api_pop_box(ctx, out):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_pop_box(p, (c.c_int32 * 4).from_buffer(out)))
@@ -1588,7 +1615,8 @@ def binding():
               api_owes, api_moved, api_moving, api_offset, api_fades,
               api_shift_plan, api_shift_arm, api_shift_rows, api_floor_take, api_shift_break,
               api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
-              api_lag_note, api_lag,
+              api_lag_note, api_lag, api_host_begin, api_host_arm, api_host_rows,
+              api_host_whole,
               api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,

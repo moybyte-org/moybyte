@@ -100,9 +100,10 @@ class Pair:
         """One loop pass of `ws` with the toolkit's per-console state its
         own, as on a board with one console."""
         st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3), False])
+            len(ui_draw._PAINT) - 3), False, ui_draw._PF[:]])
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
+        ui_draw._PF[:] = st[3]
         ui_draw._EDGE[0] = st[2]
         try:
             ws._dirty = True
@@ -110,6 +111,7 @@ class Pair:
         finally:
             st[0] = ui_draw._KEYS_HOST[0]
             st[1] = list(ui_draw._PAINT)
+            st[3] = ui_draw._PF[:]
             st[2] = ui_draw._EDGE[0]
 
     def frame(self, check=True):

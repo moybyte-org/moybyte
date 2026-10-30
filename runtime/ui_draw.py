@@ -520,6 +520,7 @@ def look_moved():
     global _GEN, _TH
     _GEN += 1
     _TH = None
+    _PF[_PF_KEY] = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
 
 
 def _bind_theme(th):
@@ -1643,6 +1644,7 @@ def marks(active=None, reset=False):
     the card's top edge."""
     if active is not None:
         _MARKS_ON[0] = bool(active)
+        _PF[_PF_KEY] = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
     return _C.marks(active, reset)
 
 
@@ -1691,13 +1693,19 @@ _AGAIN = [False]                        # a pass since again_take owes the next 
 # its content is alone but for rects the console draws over it after and
 # names (`overdrew`: the FPS chip).
 _PAINT = [-1, False, None, -1, -1, False]
-# The rect drawn over the painted frame's content after its pass, and that
-# frame (`overdrew`).
-_OVER = array("i", [0, 0, 0, 0, -1])
-# A window's content drawn by the windowed WM: 0 none, 1 a window frame, 2 one
-# whose target the WM's shown ring vouches holds the page as the frame before
-# left it (`window_frame`): the one voucher of a window's pages.
-_WIN = [0]
+# The painted frame as an app host's begin reads it (moy_ui_api.h's
+# MOY_UI_PF_*): its number, whether its content is alone, alone but for what
+# the console drew over it after (`overdrew`), the windowed WM's word
+# (`window_frame`: 0 none, 1 a window frame, 2 one whose target the WM's
+# shown ring vouches holds the page as the frame before left it, the one
+# voucher of a window's pages), the rect drawn over the content after its
+# pass and that frame, the paints' key (the look's epoch and the focus
+# marks) and the loop's tick (`frame_dt`).
+_PF = array("i", [-1, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0])
+_PF_WIN = 3
+_PF_OVER_X = 4
+_PF_KEY = 9
+_PF_DT = 10
 _CHANGE = [None]
 _SHIFT = "shift"
 _ROWS = "rows"
@@ -1715,6 +1723,10 @@ def paint_frame(n, alone, console=None, over=False):
     _PAINT[1] = bool(alone)
     _PAINT[2] = console
     _PAINT[5] = bool(over) and not alone
+    pf = _PF
+    pf[0] = n
+    pf[1] = 1 if alone else 0
+    pf[2] = 1 if _PAINT[5] else 0
     _CHANGE[0] = None
 
 
@@ -1723,12 +1735,12 @@ def overdrew(x, y, w, h):
     pass (the FPS chip, on a frame `paint_frame` was told is alone but for
     it): an `AppHost` whose region it meets moves nothing out of the buffer
     it lies in."""
-    o = _OVER
-    o[0] = x
-    o[1] = y
-    o[2] = w
-    o[3] = h
-    o[4] = _PAINT[0]
+    o = _PF
+    o[_PF_OVER_X] = x
+    o[_PF_OVER_X + 1] = y
+    o[_PF_OVER_X + 2] = w
+    o[_PF_OVER_X + 3] = h
+    o[_PF_OVER_X + 4] = _PAINT[0]
 
 
 def painted():
@@ -1775,9 +1787,9 @@ def window_frame(v):
     holding the page as the last frame left it with nothing over it (`v`
     2: the shift frame's licence on the WM's side, docs/surface_model_v1.md
     §14.7; 3: and the buffer the frame paints holds it as the frames
-    RETAINED_FRAMES back left it but for their rows, `AppHost._lag`), or
+    RETAINED_FRAMES back left it but for their rows, `moy_ui_api_lag`), or
     has done (0)."""
-    _WIN[0] = v
+    _PF[_PF_WIN] = v
 
 
 def change_take():
@@ -1793,7 +1805,7 @@ def frame_dt(ms):
     """The loop's tick in ms, which every frame begun until the next call
     hands the engine as its clock (`MOY_UI_IN_DT`): the console sets it once
     a loop pass. 0, no clock: a glide lands at once and nothing flings."""
-    _DT_MS[0] = int(ms)
+    _DT_MS[0] = _PF[_PF_DT] = int(ms)
 
 
 def moving_take():
@@ -1973,8 +1985,30 @@ _P_MIDDLE = 8                           # MOY_UI_P_MIDDLE: the middle button hel
 _PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
 
-_LAG_HIST = 4                   # the frames a host remembers (RETAINED_FRAMES - 1 at most)
-_LAG_BANDS = 3                  # the bands a frame's floor is kept as (`_note`)
+# An app host's words (moy_ui_api.h's MOY_UI_HP_*): the plan, its canvas's
+# RETAINED_FRAMES, SHIFT_COST, origin, whether the canvas and the theme are
+# the last frame's, the tap, its own (MOY_UI_HH_*); then the answers: the
+# dead directions and the moves its canvas makes, x, y, w, h, dy each.
+_HP_LEN = 77
+_HP_RETAINED = 8
+_HP_COST = 9
+_HP_OX = 10
+_HP_OY = 11
+_HP_SAME = 12
+_HP_TAP = 13
+_HP_HOST = 14
+_HP_DEAD = 15
+_HP_N = 16
+_HP_MOVES = 17
+_HH_OWN_ROWS = 1
+_HH_HELD = 2
+# moy_ui_api_host_begin's answer (MOY_UI_HB_*)
+_HB_SETTLED = 1
+_HB_MOVING = 2
+_HB_EDGE = 4
+_HB_SHIFT = 16
+_HB_HELD = 32
+_HB_FENCE = 64
 
 
 class AppHost:
@@ -2002,12 +2036,12 @@ class AppHost:
         self.key = 0                    # the key typed last frame (a press is its change)
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
-        self.ring = PaintRing()         # what the frames before left of the page in their buffers
-        # ...and what was drawn over it after each one's pass, a slot each
-        # (`overdrew`: x, y, w, h, and whether it was)
-        self._over = [array("i", [0] * 5) for _ in range(self.ring.n)]
-        self._plan = array("i", [0] * 8)
-        self._again = False           # `again` since the last begin: no shift frame
+        # What the frames before left of the page in their buffers, the
+        # plan and the lag are the context's (moy_ui_api_host_begin); its
+        # words are these, with the canvas and theme of the frame begun last.
+        self._hp = array("i", [0] * _HP_LEN)
+        self._cv = self._th = None
+        self._full = False              # the canvas has every word (`_canvas`)
         # A dialog's rows frame is the host's to allow: `held(plan)` answers
         # whether every buffer holds the page under the dialog the plan names
         # (its card and drop, plan[0:4], standing plan[7] frames) as the
@@ -2016,27 +2050,24 @@ class AppHost:
         self._t3 = 0
         self._keys = False              # the frame begun last took the keys
         self.shifting = False           # the frame begun last draws its pages' floor alone
-        self._dead = 0                  # the directions whose steps moved nothing last frame
         self._began = -1                # the painted frame it began last
         self._console = None            # ...and the console that painted it
-        # the rows the app asks the frame begun next to draw alone (`rows`):
-        # their count, the rects, and a region it moves first by dy
-        self._want = -1
-        self.own_rows = False           # the app's rows alone: never a plan of the engine's own
-        self._wr = array("i", [0] * (4 * HOST_ROWS))
-        self._wm = array("i", [0] * 5)
-        # the last frames' plans, a slot a frame (n % _LAG_HIST): the frame,
-        # its kind (0 whole, 1 rows, 2 shift) and the bands its floor spans,
-        # a pair (y0, y1) each, _LAG_BANDS at most (an empty pair unused);
-        # `_lag`'s answer, the bands the buffer a frame paints lags
-        self._hist = array("i", [-1] * ((2 + 2 * _LAG_BANDS) * _LAG_HIST))
-        self._band = array("i", [0] * (2 * _LAG_BANDS * _LAG_HIST))
-        self._dy = 0
+        self._dy = 0                    # the frame begun last moved its page by this
+
+    @property
+    def own_rows(self):
+        """The app draws rows the engine does not see: never a plan of the
+        engine's own, but for a rows plan where the app asked for one."""
+        return bool(self._hp[_HP_HOST] & _HH_OWN_ROWS)
+
+    @own_rows.setter
+    def own_rows(self, on):
+        h = self._hp
+        h[_HP_HOST] = (h[_HP_HOST] & ~_HH_OWN_ROWS) | (_HH_OWN_ROWS if on else 0)
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
         self.ctx = ui_context()
-        self.ring.clear()
         self.clear()
 
     def clear(self):
@@ -2138,33 +2169,95 @@ class AppHost:
                 a[2] = self.px
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
-        drawn = _C.api_shift_drawn(self.ctx)
-        self.ring.close(drawn & 4)
-        self._overdrawn()
-        self._note(drawn)
         away = elsewhere or _ON_BAR[0]
-        settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
-                           elsewhere=away, edge=True)
-        self._t3 = UI_TARGET[3]
-        self._shift(cv, th)
-        if a[1] & _UP and _C.api_edge(self.ctx):
+        ctx = self.ctx
+        u = UI_TARGET
+        u[0] = ctx
+        u[1] = cv
+        u[2] = _LOOK if th is _TH else _look(th)
+        dup = _C.api_dup(ctx)
+        if dup is not None:
+            print("ui: two stops share the id %r; the later is no stop" % dup)
+        if rect is None:
+            rect = _WHOLE[0]
+            if rect is None or rect[2] != cv.w or rect[3] != cv.h:
+                rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
+        hp = self._hp
+        same = 1
+        if cv is not self._cv:
+            self._cv = cv
+            self._full = (hasattr(cv, "RETAINED_FRAMES") and hasattr(cv, "SHIFT_COST")
+                          and hasattr(cv, "_ox"))
+            same = 0
+        if th is self._th:
+            same |= 2
+        else:
+            self._th = th
+        hp[_HP_SAME] = same
+        if self._full:
+            hp[_HP_RETAINED] = cv.RETAINED_FRAMES
+            c = cv.SHIFT_COST
+            hp[_HP_COST] = -1 if c is None else c
+            hp[_HP_OX] = cv._ox
+            hp[_HP_OY] = cv._oy
+        else:
+            self._canvas(cv)
+        hp[_HP_TAP] = t
+        h = self.held
+        if h is not None:
+            hp[_HP_HOST] |= _HH_HELD
+        elif hp[_HP_HOST] & _HH_HELD:
+            hp[_HP_HOST] &= ~_HH_HELD
+        flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
+                 | (_ELSEWHERE if away else 0) | _KEY_EDGE)
+        self._t3 = u[3] = flags & (_DESK | _WINDOW)
+        if self.app is not None:
+            flags |= (_app_row(self.app) + 1) << _APP_SHIFT
+        # The frame begun last noted, this one begun, and the shift frame it
+        # may be planned (moy_ui_api_host_begin): the canvas makes the moves
+        # its plan names, then the pass draws the floor alone. A dialog's
+        # rows frame is the host's to allow (`held`).
+        r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
+        self.shifting = False
+        self._dy = 0
+        if r & _HB_SHIFT and (not r & _HB_HELD or h(hp)):
+            n = hp[_HP_N]
+            k = _HP_MOVES
+            while n:
+                if not cv.shift_last(hp[k], hp[k + 1], hp[k + 2], hp[k + 3], 0, hp[k + 4]):
+                    break
+                n -= 1
+                k += 5
+            if not n:
+                if r & _HB_FENCE:
+                    cv.shift_fence()    # the floor draws over rows the moves wrote
+                self._dy = _C.api_host_arm(ctx)
+                self.shifting = True
+                _CHANGE[0] = _SHIFT if self._dy else _ROWS
+        if r & _HB_MOVING:
+            _MOVING[0] = True
+        if r & _HB_EDGE:
             _EDGE[0] = True
-        # The directions this frame's steps took, where they moved nothing
-        # and the page owes nothing: a held key's further steps that way are
-        # no frame (`dead`), until a frame begins otherwise.
-        d = (a[1] & _DIRS) | _rep_dirs(a[_IN_REP])
-        self._dead = (d if d and not (a[1] & ~_DIRS) and not a[5] and not t and not a[7]
-                      and not a[8] and settled and not _C.api_moved(self.ctx)
-                      and not _C.api_moving(self.ctx) else 0)
         self._began = _PAINT[0]
         self._console = _PAINT[2]
         self._keys = not away
         if not away:
             _KEYS_HOST[0] = self
-        self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
-        a[0] = a[1] = a[5] = a[7] = a[8] = 0
+        if t:
+            self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
+        settled = r & _HB_SETTLED != 0
         self.owed = not settled
         return settled
+
+    def _canvas(self, cv):
+        """Canvas `cv`'s words, of a canvas that lacks some: RETAINED_FRAMES
+        0 (none), SHIFT_COST unknown, its origin 0, 0."""
+        hp = self._hp
+        hp[_HP_RETAINED] = getattr(cv, "RETAINED_FRAMES", 0)
+        c = getattr(cv, "SHIFT_COST", None)
+        hp[_HP_COST] = -1 if c is None else c
+        hp[_HP_OX] = getattr(cv, "_ox", 0)
+        hp[_HP_OY] = getattr(cv, "_oy", 0)
 
     def rows(self, rects, n, move=None):
         """Ask that the frame begun next draw only the `n` rects of
@@ -2177,125 +2270,7 @@ class AppHost:
         (`floor_take`) and draws its own pixels only inside them. A frame begun without a request draws as the engine
         plans it, or whole where the app draws rows the engine does not
         see (`own_rows`)."""
-        w = self._wr
-        for i in range(4 * n):
-            w[i] = rects[i]
-        m = self._wm
-        if move is None:
-            m[4] = 0
-            m[2] = 0
-        else:
-            for i in range(5):
-                m[i] = move[i]
-        self._want = n
-
-    def _shift(self, cv, th):
-        """The frame begun as a shift frame where it may be one
-        (docs/scroll_and_text_2026-10.md §3.3): the engine licenses it from
-        the input it applied and the gens the last pass drew, the ring
-        vouches that the frame before drew the page whole into the buffer
-        `shift_last` reads, and the canvas moves that frame's pixels of the
-        page's region R by the scroll's move; the pass then draws R's floor
-        alone."""
-        f = _PAINT[0]
-        ring = self.ring
-        key = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
-        p = self._plan
-        self.shifting = False
-        self._dy = 0
-        again = self._again
-        self._again = False
-        w = _WIN[0]
-        if w:
-            ok = w >= 2 and ring.vouch_key(key, th)     # the WM's shown ring vouches
-        else:
-            ok = (_PAINT[1] or _PAINT[5]) and ring.vouch(cv, f, key, th)
-        # A canvas whose copy costs about what the raster it saves does
-        # (`SHIFT_COST`, per mille of a row's raster a row it copies costs;
-        # None where unknown) draws the frame whole instead. A dialog's rows
-        # frame is the host's to allow (`held`), and always pays: the frame
-        # it saves puts the page under the dialog back too.
-        # A pass that changed what it drew before the change (`again`) left
-        # the last frame's page unlike the app's: this frame draws whole.
-        want = self._want
-        self._want = -1
-        planned = ok and not again and _C.api_shift_plan(self.ctx, p)
-        if want >= 0 and ok and not again and not planned:
-            self._host_rows(cv, want, p)    # the app's rows
-        elif planned and (not self.own_rows or want >= 0 and not p[4] and not self._wm[4]) and (
-                _pays(cv, p) if not p[7] else self.held is not None and self.held(p)):
-            # the engine's plan; an app with rows of its own takes a rows
-            # plan where it asked for one, its rows joining the floor
-            # (`floor_take`). Where the buffer this frame paints holds the
-            # page as the frames RETAINED_FRAMES back left it -- the WM's
-            # word (3, a direct render's), or this ring's on a full-screen
-            # tier (`held`) -- a rows frame moves only the band the rows
-            # frames since drew.
-            ox = getattr(cv, "_ox", 0)
-            oy = getattr(cv, "_oy", 0)
-            k = getattr(cv, "RETAINED_FRAMES", 1)
-            lag = (self._lag(f, k) if not p[4] and (
-                w == 3 or not w and k > 1 and ring.held(cv, f) == k - 1) else -1)
-            if not w and self._over_meets(p[0] + ox, p[1] + oy, p[2], p[3], k):
-                moved = False
-            elif lag < 0:
-                moved = cv.shift_last(p[0] + ox, p[1] + oy, p[2], p[3], 0, p[4])
-            else:
-                b = self._band
-                moved = True
-                for k in range(lag):
-                    y0 = b[2 * k]
-                    if moved and not cv.shift_last(p[0] + ox, y0 + oy, p[2], b[2 * k + 1] - y0,
-                                                   0, 0):
-                        moved = False
-            if moved:
-                if lag:
-                    cv.shift_fence()    # the floor draws over rows the move wrote
-                _C.api_shift_arm(self.ctx)
-                self.shifting = True
-                self._dy = p[4]
-                _CHANGE[0] = _SHIFT if p[4] else _ROWS
-        ring.note(f, key, 0, None, cv, th, _PAINT[1] or _PAINT[5] or w != 0)
-
-    def _overdrawn(self):
-        """The newest paint's slot of what was drawn over it after its pass
-        (`overdrew`)."""
-        s = self._over[self.ring._i]
-        o = _OVER
-        if self.ring.size and o[4] == self._began >= 0:
-            s[0] = o[0]
-            s[1] = o[1]
-            s[2] = o[2]
-            s[3] = o[3]
-            s[4] = 1
-        else:
-            s[4] = 0
-
-    def _over_meets(self, x, y, w, h, n):
-        """Whether what was drawn over the page after any of the last `n`
-        paints' passes meets rect x, y, w, h: a move of it out of those
-        buffers would carry it."""
-        ring = self.ring
-        for b in range(n if n < ring.size else ring.size):
-            s = self._over[ring._slot(b)]
-            if (s[4] and s[0] < x + w and x < s[0] + s[2] and s[1] < y + h
-                    and y < s[1] + s[3]):
-                return True
-        return False
-
-    def _note(self, drawn):
-        """The frame begun last, as its pass left it (`drawn`, the engine's
-        word: none where it drew whole): its kind and the bands its floor
-        spans (`_lag`)."""
-        if self._began >= 0:
-            _C.api_lag_note(self.ctx, self._hist, _LAG_BANDS, self._began,
-                            (2 if self._dy else 1) if self.shifting and drawn else 0)
-
-    def _lag(self, f, n):
-        """Whether the buffer frame f paints lags the frame before's page
-        only in the bands the rows frames since f - n drew: how many bands,
-        each a pair (y0, y1) in `_band` (0, none), else -1."""
-        return _C.api_lag(self._hist, _LAG_BANDS, f, n, self._band)
+        _C.api_host_rows(self.ctx, rects, n, move)
 
     def floor_rects(self, out):
         """This rows frame's floor as the pass has it, into `out` (x, y, w,
@@ -2317,32 +2292,13 @@ class AppHost:
         if self.shifting:
             _C.api_shift_break(self.ctx)
 
-    def _host_rows(self, cv, n, p):
-        """The frame as the rows the app asked for (`rows`): the page moved
-        out of the last frame, the app's region by its rows, the floor
-        those rects."""
-        if not _C.api_shift_rows(self.ctx, self._wr, n, p) or not _pays(cv, p):
-            return
-        ox = getattr(cv, "_ox", 0)
-        oy = getattr(cv, "_oy", 0)
-        m = self._wm
-        if not cv.shift_last(p[0] + ox, p[1] + oy, p[2], p[3], 0, 0):
-            return
-        if m[4] and m[2] > 0 and not cv.shift_last(m[0] + ox, m[1] + oy, m[2], m[3], 0, m[4]):
-            return
-        cv.shift_fence()
-        _C.api_shift_arm(self.ctx)
-        self.shifting = True
-        self._dy = m[4]
-        _CHANGE[0] = _SHIFT if m[4] else _ROWS
-
     def dead(self, rw):
         """Whether a held key's (or the ball's) steps `rw` (the input
         table's `rep_word`) would move nothing: each is a direction the
         steps of the last painted frame that drew (the repeats of it after
         it seen through) took to no effect, and the page owes nothing and
         does not move."""
-        d = self._dead
+        d = self._hp[_HP_DEAD]
         return (d != 0 and (_rep_dirs(rw) & ~d) == 0 and self._began == _drew_last()
                 and not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
                 and not _C.api_moving(self.ctx))
@@ -2352,7 +2308,7 @@ class AppHost:
         of the last frame's: its app knows every row of it changes (a text
         view's columns scrolled across), so a move would be copied for
         nothing."""
-        self._again = True
+        _C.api_host_whole(self.ctx)
 
     def again(self):
         """The pass changed what it had drawn before the change (a page it
@@ -2360,7 +2316,7 @@ class AppHost:
         engine owes (`keys` answers it, and the console paints it with no
         input: `again_take`), never the page marked whole."""
         self.owed = True
-        self._again = True
+        _C.api_host_whole(self.ctx)
         _AGAIN[0] = True
 
     def tap_armed(self):
@@ -2680,12 +2636,12 @@ class Hold:
         self._gen = gen
         w = 2 if self.desk == f else 1 if self.on_desk == f else 0
         if w:
-            _WIN[0] = w
+            window_frame(w)
         try:
             host.begin(cv, ws.theme_colors, rect, desk)
         finally:
             if w:
-                _WIN[0] = 0
+                window_frame(0)
         self.begun = f
         return host.shifting
 
@@ -3099,8 +3055,9 @@ class PaintRing:
     frame draws into holds, RETAINED_FRAMES back. Under the windowed WM the
     shown ring vouches for the buffer instead (one voucher per region) and
     the content's ring answers only `vouch_key`. Every painted region -- a
-    full-screen app's page, a ScrollRegion, the home's band and the desk
-    home's still frames -- keeps one of these."""
+    ScrollRegion, the home's band and the desk home's still frames -- keeps
+    one of these; an app's page (`AppHost`) keeps its slots in its context
+    (moy_ui_api_host_begin)."""
 
     def __init__(self, n=_MAX_RETAINED):
         self.n = n

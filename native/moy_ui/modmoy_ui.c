@@ -3390,6 +3390,64 @@ static mp_obj_t ui_api_lag(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_lag_obj, 5, 5, ui_api_lag);
 
+// int32 words of `o`, at least `n` of them, writable where `w`
+static int32_t *words_of(mp_obj_t o, size_t n, int w, mp_rom_error_text_t what) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, w ? MP_BUFFER_WRITE : MP_BUFFER_READ);
+    if (b.len < n * sizeof(int32_t)) {
+        mp_raise_ValueError(what);
+    }
+    return (int32_t *)b.buf;
+}
+
+// api_host_begin(ctx, inp, rect, flags, fs, pf, hp) -> MOY_UI_HB_* bits: an
+// app host's frame begins (moy_ui_api_host_begin). `inp` an array('i') of
+// MOY_UI_IN_LEN words, `pf` of MOY_UI_PF_LEN, `hp` of MOY_UI_HP_LEN; nothing
+// made.
+static mp_obj_t ui_api_host_begin(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t *in = words_of(a[1], MOY_UI_IN_LEN, 1, MP_ERROR_TEXT("moy_ui: short input"));
+    const int32_t *pf = words_of(a[5], MOY_UI_PF_LEN, 0, MP_ERROR_TEXT("moy_ui: short frame"));
+    int32_t *hp = words_of(a[6], MOY_UI_HP_LEN, 1, MP_ERROR_TEXT("moy_ui: short host"));
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_host_begin(ctx_of(a[0]), in, box_of(a[2]),
+                                                      mp_obj_get_int(a[3]),
+                                                      mp_obj_get_int(a[4]), pf, hp));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_host_begin_obj, 7, 7, ui_api_host_begin);
+
+// api_host_arm(ctx) -> the frame's dy: the host made its begin's moves
+static mp_obj_t ui_api_host_arm(mp_obj_t ctx) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_host_arm(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_arm_obj, ui_api_host_arm);
+
+// api_host_rows(ctx, rects, n, move): the rows the frame begun next draws
+// alone (moy_ui_api_host_rows): `rects` int32 words; `move` five ints, or None
+static mp_obj_t ui_api_host_rows(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int n = mp_obj_get_int(a[2]);
+    n = n < 0 ? 0 : n > MOY_UI_API_HOST ? MOY_UI_API_HOST : n;
+    const int32_t *r = words_of(a[1], 4 * (size_t)n, 0, MP_ERROR_TEXT("moy_ui: short rows"));
+    int32_t m[5];
+    if (a[3] != mp_const_none) {
+        mp_obj_t *it;
+        mp_obj_get_array_fixed_n(a[3], 5, &it);
+        for (int i = 0; i < 5; i++) {
+            m[i] = mp_obj_get_int(it[i]);
+        }
+    }
+    moy_ui_api_host_rows(ctx_of(a[0]), r, n, a[3] == mp_const_none ? NULL : m);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_host_rows_obj, 4, 4, ui_api_host_rows);
+
+// api_host_whole(ctx): the frame begun next draws whole
+static mp_obj_t ui_api_host_whole(mp_obj_t ctx) {
+    moy_ui_api_host_whole(ctx_of(ctx));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_whole_obj, ui_api_host_whole);
+
 
 // -- text views (moy_ui_text.h) ----------------------------------------------------
 
@@ -3648,6 +3706,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag_note), MP_ROM_PTR(&ui_api_lag_note_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_host_arm), MP_ROM_PTR(&ui_api_host_arm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_host_rows), MP_ROM_PTR(&ui_api_host_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_host_whole), MP_ROM_PTR(&ui_api_host_whole_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },

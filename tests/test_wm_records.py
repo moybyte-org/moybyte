@@ -203,9 +203,10 @@ class Pair:
         always reach (no step is dead), so where the first desk's dead-step
         rule paints nothing the twin's frame must show the same."""
         st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3)])
+            len(ui_draw._PAINT) - 3), ui_draw._PF[:]])
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
+        ui_draw._PF[:] = st[2]
         twin = ws is self.b
         if twin:
             sd, dead = ui_draw.steps_dead, ui_draw.AppHost.dead
@@ -218,6 +219,7 @@ class Pair:
                 ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
             st[0] = ui_draw._KEYS_HOST[0]
             st[1] = list(ui_draw._PAINT)
+            st[2] = ui_draw._PF[:]
 
     def glass(self, ws):
         h = self.held[id(ws)]

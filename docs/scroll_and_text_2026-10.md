@@ -304,10 +304,12 @@ key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
-fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `AppHost`
-own one; the home's `_still_ring` (§14.4) is one whose change is its
-parts' keys and the bar's. The one-body guard is a grep: no other list of painted frames
-in `runtime/` or `native/moy_ui/`.
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one;
+the home's `_still_ring` (§14.4) is one whose change is its parts' keys
+and the bar's. An app's page keeps the same slots in its context, the
+engine's (`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its
+begin is one C call. The one-body guard is a grep: no other list of
+painted frames in `runtime/`.
 
 ### 3.2 The backend verb: `shift_last`
 
@@ -527,16 +529,16 @@ join the floor, and the overlay draws over the frame's rows. On the desk a
 popover, a tooltip, a loupe or a divider's flash over the panes draws the
 next frame whole.
 
-The view's host (`AppHost._shift`, at begin) asks the voucher whether the
-buffer `shift_last` reads holds the page as the frame before drew it -- the
-host's `PaintRing` on the full-screen tier, and in a desk pane the WM's word
+The view's host (`AppHost.begin`, one `moy_ui_api_host_begin`) asks the
+voucher whether the buffer `shift_last` reads holds the page as the frame
+before drew it -- the host's ring in its context on the full-screen tier, and in a desk pane the WM's word
 handed down by the Editor (`EditorDesk.vouched`, `window_frame`) -- and the
 engine plans the frame (`moy_ui_api_shift_plan`); R's pixels then always
 come from that buffer (`shift_last` by the scroll, by 0 on a rows frame:
 translations never compose; where the WM's word is that the buffer the
 frame paints holds the page as the frames `RETAINED_FRAMES` back left it --
 a direct render's, 3 -- a rows frame moves only the band the rows frames
-since drew, `AppHost._lag`). In the pass the view plans its rows against
+since drew, `moy_ui_api_lag`). In the pass the view plans its rows against
 its record (`moy_ui_text_plan`): the rows whose gen moved join the floor, a
 run of them one band, and a floor too broken up to hold draws the pass
 whole (`moy_ui_api_shift_break`). The floor's rows draw each whole and

@@ -641,9 +641,10 @@ def test_a_copy_landing_at_its_fence_draws_the_same_frames(th, kind, bufs):
 def test_one_ring_body():
     """The painted-frame rings are `ui_draw.PaintRing` (docs/scroll_and_text_
     2026-10.md §3.1), one class: no other list of painted frames in the
-    shell or the toolkit. A full-screen app's page, a ScrollRegion (the
-    home's band among them) and the desk home's still frames (§14.4) each
-    keep one; the windowed WM's `_shown` is the windows' ring."""
+    shell or the toolkit. A ScrollRegion (the home's band among them) and
+    the desk home's still frames (§14.4) each keep one; the windowed WM's
+    `_shown` is the windows' ring; an app's page (`AppHost`) keeps its ring
+    in its context, the engine's (moy_ui_api_host_begin)."""
     import re
     root = Path(__file__).resolve().parent.parent
     src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").glob("*.py")}
@@ -654,7 +655,7 @@ def test_one_ring_body():
             found.append("%s: %s" % (name, m.group(1)))
     assert not found, found
     assert isinstance(ui_draw.ScrollRegion().ring, ui_draw.PaintRing)
-    assert isinstance(ui_draw.AppHost().ring, ui_draw.PaintRing)
+    assert not hasattr(ui_draw.AppHost(), "ring")
     assert "self._still_ring = _ui_draw.PaintRing()" in src["launcher_layer.py"]
 
 
@@ -753,3 +754,44 @@ def test_a_lag_is_the_rows_frames_bands_merged():
     assert ui_draw._C.api_lag(hist, bands, 10, 2, array("i", [0] * 4)) == -1
     assert ui_draw._C.api_lag(hist, bands, 12, 2, array("i", [0] * 4)) == 0
     assert ui_draw._C.api_lag(hist, bands, 10, slots + 1, array("i", [0] * 4)) == -1
+
+
+def test_the_hosts_words_are_the_engines():
+    """An app host's begin is one C call (moy_ui_api_host_begin) over words
+    both sides name: the painted frame's (MOY_UI_PF_*), the host's
+    (MOY_UI_HP_*, MOY_UI_HH_*) and the answer's bits (MOY_UI_HB_*). Each
+    name ui_draw keeps is the header's value."""
+    import re
+    h = (Path(__file__).resolve().parent.parent / "native" / "moy_ui"
+         / "moy_ui_api.h").read_text(encoding="utf-8")
+    vals = {}
+    for body in re.findall(r"enum \{(.*?)\};", h, re.S):
+        if "MOY_UI_PF_" not in body and "MOY_UI_HP_" not in body \
+                and "MOY_UI_HB_" not in body and "MOY_UI_HH_" not in body:
+            continue
+        nxt = 0
+        for name, expr in re.findall(r"(MOY_UI_\w+)(?:\s*=\s*([^,/\n]+))?\s*,?",
+                                     re.sub(r"//[^\n]*", "", body)):
+            if expr:
+                expr = expr.strip()
+                for k, v in vals.items():
+                    expr = re.sub(r"\b%s\b" % k, str(v), expr)
+                expr = expr.replace("MOY_UI_HOST_HIST", "4").replace("MOY_UI_HOST_BANDS", "3")
+                nxt = eval(expr)
+            vals[name] = nxt
+            nxt += 1
+    assert "#define MOY_UI_HOST_HIST 4" in h and "#define MOY_UI_HOST_BANDS 3" in h
+    for py, c in (("_PF_WIN", "MOY_UI_PF_WIN"), ("_PF_OVER_X", "MOY_UI_PF_OVER_X"),
+                  ("_PF_KEY", "MOY_UI_PF_KEY"), ("_PF_DT", "MOY_UI_PF_DT"),
+                  ("_HP_LEN", "MOY_UI_HP_LEN"), ("_HP_RETAINED", "MOY_UI_HP_RETAINED"),
+                  ("_HP_COST", "MOY_UI_HP_COST"), ("_HP_OX", "MOY_UI_HP_OX"),
+                  ("_HP_OY", "MOY_UI_HP_OY"), ("_HP_SAME", "MOY_UI_HP_SAME"),
+                  ("_HP_TAP", "MOY_UI_HP_TAP"), ("_HP_HOST", "MOY_UI_HP_HOST"),
+                  ("_HP_DEAD", "MOY_UI_HP_DEAD"), ("_HP_N", "MOY_UI_HP_N"),
+                  ("_HP_MOVES", "MOY_UI_HP_MOVES"), ("_HH_OWN_ROWS", "MOY_UI_HH_OWN_ROWS"),
+                  ("_HH_HELD", "MOY_UI_HH_HELD"), ("_HB_SETTLED", "MOY_UI_HB_SETTLED"),
+                  ("_HB_MOVING", "MOY_UI_HB_MOVING"), ("_HB_EDGE", "MOY_UI_HB_EDGE"),
+                  ("_HB_SHIFT", "MOY_UI_HB_SHIFT"), ("_HB_HELD", "MOY_UI_HB_HELD"),
+                  ("_HB_FENCE", "MOY_UI_HB_FENCE")):
+        assert getattr(ui_draw, py) == vals[c], (py, c, vals.get(c))
+    assert len(ui_draw._PF) == vals["MOY_UI_PF_LEN"]
