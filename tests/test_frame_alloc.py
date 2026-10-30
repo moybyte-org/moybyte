@@ -56,7 +56,9 @@ Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
 Then the home, idle: the launcher's input and frame path with nothing pressed
-paints nothing and allocates nothing.
+paints nothing and allocates nothing. Then its carousel gliding a card and
+back: a moving frame (the band's table pass) allocates under a ceiling,
+HOME_BAND_FRAME, not yet nothing.
 
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
@@ -941,6 +943,30 @@ def home(loop, info):
     info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     info["home_idle_drawn"] = ws._frames_drawn - d0
     gc.enable()
+    # A card right, then back, every 24 frames (the move the home's left and
+    # right keys make, `nav2d`): the carousel glides, its moving frames the
+    # band's (the table pass over its ground).
+    g = ws.launcher
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    band = []
+    t0 = time.ticks_ms()
+    k = 0
+    while time.ticks_diff(time.ticks_ms(), t0) < @WINDOW_MS@ or len(band) < @MIN_FRAMES@:
+        step = k % 48
+        if step == 0 or step == 24:
+            g.nav2d(1 if step == 0 else -1, 0)
+            ws.mark_dirty()
+        k += 1
+        a = gc.mem_alloc()
+        loop.step()
+        band.append(gc.mem_alloc() - a)
+    info["home_band"] = band
+    info["home_band_drawn"] = ws._frames_drawn - d0
+    gc.enable()
+    for _ in range(60):
+        loop.step()
 
 
 class _Loop:
@@ -1314,6 +1340,25 @@ def test_the_home_idle_paints_nothing_and_allocates_nothing(result):
     assert info["home_top"] == "launcher", text[-3000:]
     assert info["home_idle_drawn"] == 0, info["home_idle_drawn"]
     _assert_quiet(info["home_idle"], "the home idle", text, minute=True)
+
+
+# What one moving frame of the T-Deck home's carousel may allocate: a
+# ceiling, not zero. The band's table pass and the frame around it allocate
+# 1.1-2.8 KB a moving frame (2026-10-30; the private band path before it
+# allocated 0.5-2.8 KB on the same driver), and no frame of the home's is
+# pinned at zero until what allocates is found by line.
+HOME_BAND_FRAME = 3 * 1024
+
+
+def test_a_home_band_frame_allocates_under_its_ceiling(result):
+    """A card right and back again on the home: the carousel glides, each
+    moving frame its band's table pass over the ground, and no frame
+    allocates more than HOME_BAND_FRAME; a still frame allocates nothing."""
+    info, text = result
+    band = info["home_band"]
+    assert info["home_band_drawn"] > 20, (info["home_band_drawn"], len(band))
+    assert max(band) <= HOME_BAND_FRAME, ("a band frame's allocation", band)
+    assert band.count(0) > len(band) // 2, ("the still frames allocate", band)
 
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
