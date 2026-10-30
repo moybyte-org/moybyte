@@ -438,9 +438,10 @@ def test_find_bar_type_and_navigate(tmp_path):
 
 
 def test_find_counts_once_an_edit_query_and_caret(tmp_path):
-    """The find's count is made once per edit, query and caret: a painted
-    frame that changes none of them reads the last count back, and any edit
-    (typed, joined, a new text) counts again."""
+    """The find's matches are found once an edit and query, and counted to
+    the caret once a caret: a painted frame that changes none of them reads
+    the last count back, and any edit (typed, joined, a new text) finds them
+    again."""
     ws = _ws(tmp_path)
     _enter_code(ws)
     ed = ws.editor

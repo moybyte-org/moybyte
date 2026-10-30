@@ -388,7 +388,9 @@ class CodeLayer:
         self._gutter = True           # the line-number gutter, on by default (look 2026-10, D-03.1)
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
-        self._fk = [None, -1, None, None, -1, -1, (0, 0)]   # find_count's last answer, and its key
+        # find_count's key (the editor, its edits, the query, the case), the
+        # caret its answer is for, -, the answer and the matches
+        self._fk = [None, -1, None, None, -1, -1, (0, 0), []]
         self._find_ci = True          # case-insensitive find (the default)
         self._find_anchor = None      # where the incremental search re-runs from
         # -- #89 autocomplete + jump-to-symbol popups -------------------------
@@ -930,9 +932,40 @@ class CodeLayer:
         if ed is None or not q:
             return 0, 0
         k = self._fk                    # the last count, made once an edit, query and caret
-        if (k[0] is ed and k[1] == ed.edits and k[2] == q and k[3] == self._find_ci
-                and k[4] == ed.row and k[5] == ed.col):
+        if k[0] is not ed or k[1] != ed.edits or k[2] != q or k[3] != self._find_ci:
+            # the matches, each as its line << 16 | its column, made once an
+            # edit, query and case
+            k[0] = ed
+            k[1] = ed.edits
+            k[2] = q
+            k[3] = self._find_ci
+            k[4] = -1
+            ci = self._find_ci
+            if ci:
+                q = q.lower()
+            got = []
+            for r in range(len(ed.lines)):
+                line = ed.lines[r].lower() if ci else ed.lines[r]
+                at = line.find(q)
+                while at >= 0:
+                    got.append(r << 16 | (at if at < 0xFFFF else 0xFFFF))
+                    at = line.find(q, at + 1)
+            k[7] = got
+        c = ed.row << 16 | (ed.col if ed.col < 0xFFFF else 0xFFFF)
+        if k[4] == c:
             return k[6]
+        k[4] = c
+        got = k[7]
+        lo, hi = 0, len(got)            # the matches at or before the caret
+        while lo < hi:
+            m = (lo + hi) >> 1
+            if got[m] <= c:
+                lo = m + 1
+            else:
+                hi = m
+        n = len(got)
+        k[6] = (lo or (1 if n else 0)), n
+        return k[6]
         k[0] = ed
         k[1] = ed.edits
         k[2] = q
