@@ -22,6 +22,9 @@ python3 tools/p4_perf.py --board p4                  # the roster, one row a car
 python3 tools/p4_cart_bench.py --board tdeck         # the two Bench carts' phases
 python3 tools/shell_bench.py --board p4 --out DIR --gate     # one board's shell run: apps, Editor, pause, memory, p4_bench's runs, the roster
 python3 tools/shell_bench.py --board p4 --out DIR --report --against OLD   # its tables beside an earlier run's, regressions flagged
+python3 tools/input_bench.py --board p4 --out DIR --only Code      # scrolling and text surfaces, presented-frame p90 per input
+python3 tools/input_gate.py gate --board tdeck,p4 --dev WT --cand WT --out DIR   # a surface's move gate: fresh-flash runs against same-day dev, p90 verdicts
+python3 tools/input_gate.py iter --board tdeck --cand WT --rows "Code:fling"      # one run of a few rows against today's stored dev baseline
 ```
 
 `perf` drops the first 4 s (caches, cold flash), takes only samples naming the
