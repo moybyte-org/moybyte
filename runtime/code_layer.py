@@ -538,8 +538,6 @@ class CodeLayer:
             self.ws.mark_dirty()       # an autoscroll moves the code on its own
         self._wheel(i)
         self._editor_input()           # keyboard is in text mode here
-        if not self._host.still():
-            self.ws.mark_dirty()       # the view coasts, glides or owes its frame
         return True
 
     def _wheel(self, i):

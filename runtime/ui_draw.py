@@ -2122,7 +2122,7 @@ class AppHost:
         moved = mid or mid != self.mid or a[7] or a[8] or rw or kn
         self.mid = mid
         return (bool(b) or typed or self.owed or self.tap != 0 or bool(moved)
-                or _C.api_owes(self.ctx) or _C.api_moving(self.ctx))
+                or _C.api_busy(self.ctx))
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.
@@ -2198,7 +2198,7 @@ class AppHost:
         if cv is not self._cv:
             self._cv = cv
             self._full = (hasattr(cv, "RETAINED_FRAMES") and hasattr(cv, "SHIFT_COST")
-                          and hasattr(cv, "_ox"))
+                          and hasattr(cv, "_ox") and hasattr(cv, "font_scale"))
             same = 0
         if th is self._th:
             same |= 2
@@ -2211,8 +2211,12 @@ class AppHost:
             hp[_HP_COST] = -1 if c is None else c
             hp[_HP_OX] = cv._ox
             hp[_HP_OY] = cv._oy
+            fs = cv.font_scale
+            if fs < 1:
+                fs = 1
         else:
             self._canvas(cv)
+            fs = _fs(cv)
         hp[_HP_TAP] = t
         flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
                  | (_ELSEWHERE if away else 0) | _KEY_EDGE)
@@ -2223,10 +2227,10 @@ class AppHost:
         # may be planned (moy_ui_api_host_begin): the canvas makes the moves
         # its plan names, then the pass draws the floor alone. A dialog's
         # rows frame is the host's to allow (`held`).
-        r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
+        r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
         if r & _HB_DUP:
             print("ui: two stops share the id %r; the later is no stop" % _C.api_dup(ctx))
-            r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
+            r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
         self.shifting = False
         self._dy = 0
         if r & _HB_SHIFT and (not r & _HB_HELD or self._held(hp)):
@@ -2309,8 +2313,7 @@ class AppHost:
         does not move."""
         d = self._hp[_HP_DEAD]
         return (d != 0 and (_rep_dirs(rw) & ~d) == 0 and self._began == _drew_last()
-                and not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
-                and not _C.api_moving(self.ctx))
+                and not self.owed and self.tap == 0 and not _C.api_busy(self.ctx))
 
     def whole(self):
         """The frame begun next draws whole, its page's pixels not moved out
@@ -2364,8 +2367,7 @@ class AppHost:
         """Whether the page this context drew last is what it draws next:
         its input moved nothing, no tap waits, it owes no frame and no page
         of it moves on its own."""
-        return (not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
-                and not _C.api_moving(self.ctx))
+        return not (self.owed or self.tap or _C.api_busy(self.ctx))
 
     @property
     def moving(self):

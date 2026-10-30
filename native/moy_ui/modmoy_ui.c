@@ -3195,6 +3195,14 @@ static mp_obj_t ui_api_moving(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_moving_obj, ui_api_moving);
 
+// api_busy(ctx) -> whether the frame drawn last owes the next or a page of
+// the context flings or glides: api_owes or api_moving, in one call
+static mp_obj_t ui_api_busy(mp_obj_t ctx) {
+    const moy_ui_ctx_t *c = ctx_of(ctx);
+    return mp_obj_new_bool(moy_ui_api_owes(c) || moy_ui_api_moving(c));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_busy_obj, ui_api_busy);
+
 // api_offset(ctx, x, y) -> the scroll of the page under (x, y), -1 none
 static mp_obj_t ui_api_offset(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
     return mp_obj_new_int(moy_ui_api_offset(ctx_of(ctx), num(x), num(y)));
@@ -3673,6 +3681,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_moved), MP_ROM_PTR(&ui_api_moved_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_moving), MP_ROM_PTR(&ui_api_moving_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_busy), MP_ROM_PTR(&ui_api_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_offset), MP_ROM_PTR(&ui_api_offset_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },

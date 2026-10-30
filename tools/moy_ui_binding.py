@@ -1327,6 +1327,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_moving(p))
 
+    def api_busy(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_owes(p) or lib.moy_ui_api_moving(p))
+
     def api_offset(ctx, x, y):
         p, _k = _ctx(ctx)
         return int(lib.moy_ui_api_offset(p, int(x), int(y)))
@@ -1612,7 +1616,7 @@ def binding():
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_moved, api_moving, api_offset, api_fades,
+              api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
               api_shift_plan, api_shift_arm, api_shift_rows, api_floor_take, api_shift_break,
               api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm, api_host_rows,

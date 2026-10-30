@@ -1078,3 +1078,48 @@ def test_find_count_is_the_matches_at_or_before_the_caret(tmp_path):
                         cur = n
                     at = line.find(q, at + 1)
             assert cl.find_count() == ((cur or (1 if n else 0)), n), (lines, cl._find_q)
+
+
+def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch):
+    """The text view's coast asks for its own frames from the draw: a
+    release that flings the code paints frame after frame with no input
+    while the view moves, and once it rests the gate paints nothing."""
+    import sys
+    now = [100000]
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if "/runtime/" in f and hasattr(mod, "_ticks_ms"):
+            monkeypatch.setattr(mod, "_ticks_ms", lambda: now[0])
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("\n".join("line %d = %d" % (i, i * 7) for i in range(300)))
+
+    ws._toast_until = 0                # no unlock banner: the gate is the view's
+
+    def frame():
+        now[0] += 33
+        ws.pointer.visible = False
+        k = ws._frames_drawn
+        drv.frame(DT)
+        return ws._frames_drawn != k
+
+    for _ in range(4):
+        frame()
+    x, y, w, h = ws.code_layout.code_area()
+    cx, y0 = x + w // 2, y + h * 3 // 4
+    drv.touch(cx, y0)
+    frame()
+    for k in range(1, 5):
+        drv.touch_drag(cx, y0 - 30 * k)
+        frame()
+    drv.touch_up()
+    frame()
+    let_go = ws.editor.top
+    tops, painted = [], []
+    for _ in range(120):
+        painted.append(frame())
+        tops.append(ws.editor.top)
+    assert tops[3] > let_go, "the release did not coast"
+    assert all(painted[:4]), painted[:4]
+    rest = tops.index(tops[-1])
+    assert not any(painted[rest + 3:]), "the gate paints a view at rest"
