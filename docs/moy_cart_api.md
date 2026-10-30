@@ -802,7 +802,7 @@ The kind that arrives with `open_editor()` may be one you were never granted —
 a person chose that file, not your cart. One of them is a whole PROJECT:
 `project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
 `config.json`, the main program), reached only through the Config tab's
-ADVANCED row so the cart loader re-reads the folder afterwards. You still just
+Files so the cart loader re-reads the folder afterwards. You still just
 draw it; nothing about the handle changes.
 
 Everything else is on the handle you get back:

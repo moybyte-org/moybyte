@@ -36,7 +36,7 @@ Paint has no editor for opens READ-ONLY rather than being refused, because a
 picture always has somewhere to open; any other text file
 (`.md`, `.json`, `.txt`, a script `.py`/`.lua`) opens the editor in the mode for
 its extension. A project's own files as files are reached only through the Config
-tab's ADVANCED row, so the loader stays in the loop.
+tab's Files, so the loader stays in the loop.
 
 **Everything the router opens comes BACK to Files**, on the shelf it was left
 on. Files is a cart app, so a note/project/drawing REPLACES it, and the console

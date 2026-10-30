@@ -234,7 +234,7 @@ default.
 
 | surface | scrolls through | drag/fling | key, repeat, ball steps |
 |---|---|---|---|
-| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
+| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards and its file list, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
 | the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, lands the view there in that frame (`ui_draw.text_aim`); a fling and the wheel glide |
 | Notes | `ui.text_view` (§5), placed in its page with `ui.at` | the engine's drag-tap; the fling | the caret's row lands in view in that frame (`ui_draw.text_reveal`) |
@@ -246,8 +246,8 @@ The Blocks outline and Music's steps are tables of parts
 reveal, their rows carried in C, and the page holding each table the
 region R its frames move the table inside. Config's cards are a verbs
 page (`editor_settings.SettingsPage`) whose gen makes a key step the
-engine's rows frame; `cards_layer`'s own loop and `mtop` draw a broken
-manifest and the file list. Carts are out: a
+engine's rows frame; its broken-manifest page (`ui.empty`) and its file
+list (a placed `ui.table`) are verbs pages too. Carts are out: a
 cart's `btn`/`btnp` and its own scrolling are the cart's (L9); Notes is a
 system cart on the verbs engine whose note is a text view drawn by the
 shell's `EditorHandle`, and §5 says what it gets.
