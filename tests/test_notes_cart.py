@@ -350,6 +350,32 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
     assert ui_draw._C.api_focus(ws.player._ui[0]) is None
 
 
+def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
+    """The handheld: the list scrolled down to a note, the note opened and
+    closed again -- the list shows that note's row, not the list's top. The
+    note's page has an id of its own, so the list's page opens anew and its
+    focused table on its current row (docs/ui_api_2026-10.md)."""
+    ws = build_ws(tmp_path)
+    _seed(ws, *("n%02d" % i for i in range(40)))
+    ns, drv = _open(ws)
+    for _ in range(30):
+        _press(drv, "down")
+    _x, top, _w, h = ns["content_rect"]()
+
+    def shown():
+        y0, rh, _view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+        y = y0 + ns["cur"] * rh
+        return top <= y and y + rh <= top + h
+
+    assert ns["cur"] == 30 and shown()
+    _press(drv, "a")
+    assert ns["ed"] is not None
+    _type(drv, [ESC])                          # leaves the note
+    _frames(drv)
+    assert ns["ed"] is None and ns["cur"] == 30
+    assert shown(), "the list came back at its top, the note's row out of sight"
+
+
 def test_tapping_a_link_opens_the_note_it_names(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "other_one", "the other one", ws.carts_root)

@@ -843,6 +843,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->n_cap_cur = 0;
     c->surface = surface;
     c->page = surface;
+    c->page_new = 0;
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
     c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : 0);
     c->elsewhere = (uint8_t)((flags & MOY_UI_ELSEWHERE) ? 1 : 0);
@@ -1301,9 +1302,11 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->last_y = (int16_t)y;
     c->last_ptr = p;
 
-    // Keep the focused stop (or the list row it moved to) in view.
-    if (c->reveal && c->focus) {
-        int i = find(v, n, c->focus);
+    // Keep the focused stop (or the list row it moved to) in view -- or the
+    // stop a reveal names (a table on its page's first frame).
+    uint32_t rid = c->reveal_id ? c->reveal_id : c->focus;
+    if (c->reveal && rid) {
+        int i = find(v, n, rid);
         if (i >= 0 && v[i].page != NO_PAGE && v[i].page < n) {
             moy_ui_box_t b = c->reveal_box.w ? c->reveal_box : v[i].b;
             int first = !c->reveal_box.w;
@@ -1331,6 +1334,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->reveal = 0;
     c->jump = 0;
     c->reveal_box.w = 0;
+    c->reveal_id = 0;
     // Every page's motion steps on the frame's clock; with none, it lands.
     for (int i = 0; i < MOY_UI_API_KEEP; i++) {
         moy_ui_keep_t *k = &c->keep[i];
@@ -2493,6 +2497,7 @@ static void floor_open(moy_ui_ctx_t *c, const moy_ui_keep_t *k, moy_ui_box_t ct,
 // override block (its gen), `outer` the page it lies in.
 static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
                       const moy_ui_over_t *o, moy_ui_box_t outer) {
+    c->page_new = (uint8_t)(keep_of(c, id) == NULL);
     moy_ui_keep_t *k = keep(c, id, 1);
     c->page = ct;
     c->y = 0;
@@ -2636,7 +2641,9 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         moy_ui_page_ground(s, b, title, c->fs, ground_of(c), &ct);
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
     }
-    open_page(c, hash(title.p, title.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
+    // a page's id is its title, or `o.id` where two pages share one
+    moy_ui_span_t pid = o->id.p != NULL ? o->id : title;
+    open_page(c, hash(pid.p, pid.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
     if (content != NULL) {
         *content = ct;
     }
@@ -4594,11 +4601,20 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (!xa) {
         rows_note(c, id, cur, view.y);
     }
-    if (!placed && focused && c->step_y && cur >= 0
-        && !(c->step_rev == id && c->step_row == cur)) {
+    // a stacked table on its page's first frame opens on its current row,
+    // as a placed one does, where it holds the focus or nothing does (the
+    // keys another surface's this frame, or a focus left free, which the
+    // first stop drawn takes)
+    int fresh = c->page_new && !disabled && count > 0 && (c->focus == id || c->focus == 0);
+    if (!placed && cur >= 0
+        && ((focused && c->step_y && !(c->step_rev == id && c->step_row == cur)) || fresh)) {
         c->reveal = 1;              // a step begin did not reveal: the next frame does
         c->reveal_box = (moy_ui_box_t){b.x, (int16_t)(view.y + cur * rh), b.w, (int16_t)rh};
         c->owe = 1;
+        if (fresh) {
+            c->jump = 1;            // a page's first frame: the current row at once
+            c->reveal_id = id;
+        }
     }
     c->tbl_y0 = (int16_t)(view.y - offset);
     c->tbl_rh = (int16_t)rh;

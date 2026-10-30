@@ -259,7 +259,9 @@ typedef struct {
     int16_t scroll;                 // the page's scroll
     int8_t page_keep;               // the page's kept state, or -1
     uint8_t page_stop;              // its stop, or 0xff
+    uint8_t page_new;               // the page's first frame: no state was kept for it
     moy_ui_box_t reveal_box;        // a list row to keep in view next frame
+    uint32_t reveal_id;             // the stop that row is in where it is not the focus, or 0
     uint32_t dup, dup_told;         // a duplicate id this frame (its hash), the last told
     uint16_t lost, lost_told;       // the stops past MOY_UI_API_STOPS this frame, the last told
     char dup_name[MOY_UI_API_NAME];

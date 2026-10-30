@@ -56,9 +56,11 @@ DIM_O = {"tone": "dim"}
 FIELD_O = {"id": "Name", "hint": "my note"}
 WRAP_O = {"wrap": True, "tone": "dim"}
 WASH_O = {"wash": True}
-# The page's gen: bumped when what the page shows beside the note changes,
-# so a frame that changes the note alone draws its rows alone.
-PAGE_O = {"gen": 0}
+# The note's page: its own id, so the list's page keeps none of its scroll
+# (closing a note opens the list's page anew, on the current row), and its
+# gen, bumped when what the page shows beside the note changes, so a frame
+# that changes the note alone draws its rows alone.
+PAGE_O = {"id": "note", "gen": 0}
 _shows = [None] * 11   # what the page showed beside the note last frame
 
 ed = None              # the open note's editor handle (None: the list)
