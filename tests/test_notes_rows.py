@@ -183,6 +183,27 @@ def test_typing_and_caret_steps_draw_rows_byte_for_byte(tmp_path, bufs):
         p.share(), p.kinds)
 
 
+def test_two_consoles_runs_are_two_lifetimes(tmp_path):
+    """Every case here drives two consoles in one process, and each console's
+    run is its own "cart" lifetime (device_canvas `_owners`): the second
+    console starting its run returns nothing the first's run draws into. One
+    lifetime for both would hand the first window canvas's pixels back at the
+    second start -- to the pool, which lends them to the second, or, with the
+    pool full, to the allocator, and the first run's next frame writes freed
+    memory."""
+    from runtime import glass_binding
+    a = _console(tmp_path, "ships", True, True)
+    cva = a._run_canvas
+    assert cva is not None and a.canvas is cva, "Notes on the desk draws its own canvas"
+    ha = cva._comp.buf_h
+    b = _console(tmp_path, "whole", False, True)
+    assert cva._comp._b.live, "the second console's run returned the first's canvas"
+    hb = b._run_canvas._comp.buf_h
+    assert hb != ha
+    assert glass_binding.row(ha)[3] != glass_binding.row(hb)[3], \
+        "two consoles' runs share one owner"
+
+
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 def test_the_desk_draws_rows_byte_for_byte(tmp_path, bufs):
     """On the desk the run's canvas is its window's own (`Player.holds`):

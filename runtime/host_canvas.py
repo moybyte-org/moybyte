@@ -208,20 +208,26 @@ class HostCompositor:
         return True
 
 
-def make_canvas(w, h, owner=None):
+def make_canvas(w, h, owner=None, owners=None):
     """A DeviceCanvas over a HostCompositor -- the boards' raster, on CPython.
 
     The GAME tier: a cart's fixed 320x240 surface, whose text is always 8px
     (SPEC.md 6). Chrome wants `make_system_canvas` instead. With an `owner`
     it is a run's canvas, as a board makes one: its pixels a glass row on
-    loan to that lifetime, returned at its end.
+    loan to that lifetime, returned at its end. `owners` is the map of the
+    console it belongs to (device_canvas `_owners`), None the module's one.
     """
     install()
-    from device_canvas import DeviceCanvas          # noqa: E402 -- after install
+    import device_canvas as dc                      # noqa: E402 -- after install
+    if owners is None:
+        owners = dc._OWNERS
     if owner is not None:
-        from device_canvas import _LayerComp, _owner_h
-        return DeviceCanvas(_LayerComp(int(w), int(h), gfx_binding, _owner_h(owner)))
-    return DeviceCanvas(HostCompositor(w, h))
+        cv = dc.DeviceCanvas(dc._LayerComp(int(w), int(h), gfx_binding,
+                                           dc._owner_h(owner, owners)))
+    else:
+        cv = dc.DeviceCanvas(HostCompositor(w, h))
+    cv._owners = owners
+    return cv
 
 
 class _Rgb888Lut(dict):

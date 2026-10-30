@@ -319,6 +319,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # nothing). Clamp up so a stray small --size never produces a broken surface.
     sw = max(WIDTH, int(sw))
     sh = max(HEIGHT, int(sh))
+    # This console's lifetimes by tag (device_canvas `_owners`): a host
+    # process runs several consoles (a test drives two side by side), and a
+    # run end in one must never return the buffers another is drawing into.
+    owners = {}
     if (sw, sh) == (WIDTH, HEIGHT) and int(font_scale) <= 1:
         sys_canvas = None                        # share one canvas -> identical to today
         # The SHARED-canvas tier (the T-Deck's arrangement): one surface is both
@@ -332,6 +336,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     else:
         canvas = host_canvas.make_canvas(WIDTH, HEIGHT)   # the fixed 320x240 GAME canvas
         sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
+    for cv in (canvas, sys_canvas):
+        if cv is not None:
+            cv._owners = owners
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale,
@@ -341,7 +348,8 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws.use_inputs(HOST_INPUTS)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
-    ws.make_game_canvas = host_canvas.make_canvas
+    ws.make_game_canvas = lambda w, h, owner=None: host_canvas.make_canvas(
+        w, h, owner, owners)
     # ONE Lua runtime on the host, and it is the boards': device/moycore_glue.py
     # over runtime/moycore.py, the C a board runs (moycore_lua.c) and the
     # kernel's Player (moy_play.c) by ctypes. A "lua" cart with no binding opens

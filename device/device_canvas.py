@@ -91,6 +91,11 @@ except ImportError:  # pragma: no cover - host tree: the ctypes binding
 # "paint"); _OWNERS maps a live tag to its OWNER handle, and ending the tag's
 # lifetime ends the handle, so the next run under the same tag is a new owner
 # and nothing it holds can be returned by a stale reference to the last.
+# A tag names a lifetime of ONE console: a board runs one, and its canvases
+# share _OWNERS. A process that runs several (the host's tests drive two side
+# by side) gives each console's canvases a map of their own (`_owners`, which
+# a layer takes from the canvas that made it), so one console's run end never
+# returns the pixels another's run is drawing into.
 _ROLE_LAYER = _glass_mod.ROLE_LAYER
 _ROLE_BAKE = _glass_mod.ROLE_BAKE
 _ROLE_SCRATCH = _glass_mod.ROLE_SCRATCH
@@ -98,17 +103,17 @@ _BAKE_MASK = 1 << _ROLE_BAKE
 _OWNERS = {}
 
 
-def _owner_h(tag):
+def _owner_h(tag, owners=_OWNERS):
     """The OWNER handle of `tag`'s live lifetime, minted on its first loan."""
-    h = _OWNERS.get(tag)
+    h = owners.get(tag)
     if h is None:
-        h = _OWNERS[tag] = _glass_mod.owner(tag)
+        h = owners[tag] = _glass_mod.owner(tag)
     return h
 
 
-def _owner_done(tag):
+def _owner_done(tag, owners=_OWNERS):
     """End `tag`'s lifetime: every loan it holds goes back, then its row."""
-    h = _OWNERS.pop(tag, None)
+    h = owners.pop(tag, None)
     if h is not None:
         _glass_mod.owner_end(h)
         _sweep_bakes()
@@ -157,7 +162,7 @@ def _bake_buf(img, nbytes):
     return bytearray(nbytes)
 
 
-def _paint_bake_buf(img, nbytes):
+def _paint_bake_buf(img, nbytes, owners=_OWNERS):
     """The buffer for a paint image's one RGB565 bake (_bake_indices).
 
     This is the single biggest allocation the console makes: 153,600 bytes for
@@ -199,7 +204,7 @@ def _paint_bake_buf(img, nbytes):
         b.release()
         img._bake = None
         _BAKED.remove(img)
-    oh = _owner_h(owner)
+    oh = _owner_h(owner, owners)
     lent = 0
     for h in _glass_mod.rows(oh):
         if _glass_mod.row(h)[1] == _ROLE_BAKE:
@@ -233,9 +238,9 @@ def _sweep_bakes():
         _BAKED.pop(i)
 
 
-def _release_bakes(owner):
+def _release_bakes(owner, owners=_OWNERS):
     """Return `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
-    h = _OWNERS.get(owner)
+    h = owners.get(owner)
     if h is not None:
         _glass_mod.reclaim(h, _BAKE_MASK)
         _sweep_bakes()
@@ -541,6 +546,9 @@ class DeviceCanvas:
     # holds the frame BEFORE last -> 2. (Single-buffer mode retains frame-1;
     # advertising 2 stays conservative-correct there too.)
     RETAINED_FRAMES = 2
+    # The console's lifetimes by tag (_owner_h): the module's one map on a
+    # board, a console's own where a process runs several.
+    _owners = _OWNERS
     # What `shift_last` costs against the raster it saves: per mille of a
     # row's raster each row it copies costs, so a shift frame whose floor
     # leaves less than that much of R undrawn draws whole instead
@@ -2025,7 +2033,7 @@ class DeviceCanvas:
         h = img.h
         # #186: a full-surface bake is off-heap for an OWNED image, because the
         # gc heap cannot promise a 150KB contiguous run. See _paint_bake_buf.
-        buf = _paint_bake_buf(img, w * h * 2)
+        buf = _paint_bake_buf(img, w * h * 2, self._owners)
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)
         img._rgb_i = buf
 
@@ -2372,7 +2380,7 @@ class DeviceCanvas:
         if img is not None:
             w = img.w
             h = img.h
-            buf = _paint_bake_buf(img, w * h * 2)
+            buf = _paint_bake_buf(img, w * h * 2, self._owners)
             n = g.backdrop(buf, w, 0, 0, w, h, rec, col, WIRE_SWAPPED, 0, 0, w, h)
             img._rgb_i = buf
             return n
@@ -2523,8 +2531,9 @@ class DeviceCanvas:
         #
         # The compact-first collect a big GC-heap layer needs lives in _LayerComp,
         # on the one path that allocates from the gc heap.
-        own = 0 if owner is None else _owner_h(owner)
+        own = 0 if owner is None else _owner_h(owner, self._owners)
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx, own))
+        lay._owners = self._owners
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must
@@ -2570,7 +2579,7 @@ class DeviceCanvas:
         off, and its leaving hook must not drop a map cache or drain a layer
         copy that belongs to whatever it is leaving to. Probed by getattr like
         its sibling -- the host Canvas has neither."""
-        _release_bakes(owner)
+        _release_bakes(owner, self._owners)
 
     def reclaim_layers(self, owner):
         """End a dead program's lifetime: every buffer on loan to `owner` --
@@ -2580,7 +2589,7 @@ class DeviceCanvas:
         probe via getattr."""
         self._gfx.layer_drain(self._lrs, True)
         self._lrs_layer = None
-        _owner_done(owner)
+        _owner_done(owner, self._owners)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
