@@ -1546,6 +1546,13 @@ _FIND = ("ws.code_layer._find_open or ws.code_layer._toggle_find()\n"
 _UNFIND = "ws.code_layer._find_open and ws.code_layer._toggle_find()"
 _EDPROBE = "ws.editor.top * 100000 + ws.editor.row * 1000 + ws.editor.col"
 _FULL = [("_ib_full()", 1.5)]
+# The sound under the Music tab grown to 32 steps in memory (never saved), so
+# its rows scroll; put back after.
+_MUSIC32 = ("_me = ws.music_ui.musicedit\n_s = _me.cur_sfx()\nws._ib_n0 = len(_s.steps)\n"
+            "_s.steps[ws._ib_n0:] = [[36 + _i % 12, _i % 8, 1 + _i % 7] for _i in range(32 - ws._ib_n0)]\n"
+            "_me.step = 0\nws.mark_dirty()", 1.0)
+_MUSIC0 = ("_me = ws.music_ui.musicedit\n_s = _me.cur_sfx()\n"
+           "del _s.steps[getattr(ws, '_ib_n0', len(_s.steps)):]\n_me.step = 0\nws.mark_dirty()")
 CODE_RECT = (0.02, 0.18, 0.58, 0.62)
 LEFT_PANE = (0.01, 0.17, 0.59, 0.71)
 RIGHT_PANE = (0.385, 0.17, 0.6, 0.71)
@@ -1639,6 +1646,13 @@ def surfaces():
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
+    # the same over 32 steps; "v" walks the steps' cursor, so its rows scroll
+    s.append(Surface("Music steps 32", _ed(SCRATCH, "music", "sound") + [_MUSIC32], axis="h",
+                     keys=("right", "left"), rect=LEFT_PANE, teardown=_MUSIC0,
+                     inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
+    s.append(Surface("Music steps v", _ed(SCRATCH, "music", "sound") + [_MUSIC32],
+                     "ws.music_ui.musicedit.step", rect=LEFT_PANE, teardown=_MUSIC0,
+                     inputs=("key_steps", "key_held", "key_20")))
     s.append(Surface("Sprite pickers", _ed(SCRATCH, "paint", "art") + [
         ("ws.paint_layer._open_pickers()\nws.mark_dirty()", 1.5)],
         rect="picker", teardown="ws.paint_layer._pop = False\nws.mark_dirty()"))
