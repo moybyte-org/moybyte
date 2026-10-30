@@ -62,6 +62,22 @@ class App:
         self.focus_to = None
         self.geo = None                 # the grid's (columns, first top, pitch, card height)
         self.drawn = {}                 # per canvas: the picture gen each card last drew
+        # "table": a placed table whose rows are parts (`o.part`), each
+        # row's value its key, the current row the app's
+        self.vals = [i * 3 for i in range(rows)]
+        self.cells = [[str(v)] for v in self.vals]
+        self.cur = 2                    # the current row the app sets
+        self.curs = {}                  # per canvas: the current row its table answered
+        self.page_gen = False           # the table's page under the app's gen
+        self.parts = {}                 # per canvas: the rows its last frame's parts drew
+        self.tgen = None                # the table's gen, which keys its current row
+        self._r = array("i", [0] * 4)
+
+    def _to(self):
+        o = {"id": "steps", "part": (0, 17), "bar": True}
+        if self.tgen is not None:
+            o["gen"] = self.tgen
+        return o
 
     def learn(self, host):
         """The grid's geometry in the region's coordinates, from where the
@@ -90,6 +106,31 @@ class App:
                 else:
                     ui.link(r, "v%d" % i)
             ui.group()
+        elif self.kind == "table":
+            ui.page("", page_o if self.page_gen else None)
+            if self.focus_to is not None:
+                ui.focus(self.focus_to)
+            ui.label("Above the table")
+            ui.at(8, 40, W - 16, H - 60)
+            self.curs[id(cv)], _ = ui.table("", ("",), self.cells,
+                                            self.curs.get(id(cv), self.cur),
+                                            self._to())
+            r = self._r
+            drew = self.parts[id(cv)] = []
+            i = ui.table_part(r)
+            while i >= 0:
+                drew.append(i)
+                x, y, w, h = r
+                v = self.vals[i]
+                cv.rect(x + 20, y + 3, 30 + (v % 7) * 5, h - 6, 8 + v % 8)
+                ui.at(x + 120, y, 60, h)
+                ui.label(str(v))
+                if i % 4 == 0:
+                    ui.at(x + 200, y + 1, 60, h - 2)
+                    ui.button("Go")             # a stop in the part, its id the row's
+                i = ui.table_part(r)
+            ui.at(8, H - 18, 80, 16)
+            ui.button("After")
         else:
             ui.page("")
             if self.focus_to is not None:
@@ -423,6 +464,144 @@ def test_a_placed_stop_or_a_part_with_no_gen_never_shifts(th, monkeypatch, what)
     r.drag(200, -14, 4)
     r.coast()
     assert r.shifted() == 0, "a %s in the region: whole frames" % what
+
+
+def _set(r, i, v):
+    r.app.vals[i] = v
+    r.app.cells[i] = [str(v)]
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_a_tables_parts_drag_and_fling_byte_for_byte(th, bufs):
+    """A table whose rows are the app's parts (`o.part`) scrolls as a
+    region: the move shifts its pixels and the parts drawn are the rows the
+    move uncovered."""
+    r = _ready(Rig(th, "table", bufs))
+    r.drag(200, -14, 6)
+    r.coast()
+    r.drag(60, 9, 5)
+    r.coast()
+    assert r.share() > 0.6, "the drag and the coast shifted %.2f of the frames" % r.share()
+    assert r.wide == 0
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_a_tables_changed_row_alone_draws_its_part(th, bufs):
+    """A row whose cells change draws again, its part with it; every other
+    row is carried as the last frame drew it, its part not drawn."""
+    r = _ready(Rig(th, "table", bufs, dt=33))
+    for i in (3, 5, 3):
+        _set(r, i, r.app.vals[i] + 1)
+        r.frame()
+        assert r.kinds[-1] == "rows", r.kinds[-1]
+        assert r.app.parts[id(r.cv)] == [i], r.app.parts[id(r.cv)]
+    r.frame()
+    assert r.app.parts[id(r.cv)] == [], "a frame that changes no row draws no part"
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_a_tables_gen_keys_its_current_row(th, bufs):
+    """A part table's gen keys its current row: a gen that moves draws
+    that row's part again, its cells unchanged, and no other."""
+    r = _ready(Rig(th, "table", bufs, dt=33))
+    r.app.tgen = 0
+    r.frame()
+    r.frame()
+    for g in (1, 2):
+        r.app.tgen = g
+        r.frame()
+        assert r.kinds[-1] == "rows", r.kinds[-1]
+        assert r.app.parts[id(r.cv)] == [r.app.cur], r.app.parts[id(r.cv)]
+    r.frame()
+    assert r.app.parts[id(r.cv)] == [], "a gen that holds draws no part"
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_the_apps_current_row_moves_and_is_revealed(th, bufs):
+    """The app moves the current row (its own keys): the rows it left and
+    took draw again with their marks; one past the view glides it there,
+    the glide's frames shifting."""
+    r = _ready(Rig(th, "table", bufs, dt=33))
+    r.app.cur = 3
+    r.app.curs.clear()
+    r.frame()
+    drew = r.app.parts[id(r.cv)]
+    assert r.kinds[-1] == "rows" and 2 in drew and 3 in drew and len(drew) <= 4, (r.kinds[-1], drew)
+    view_rows = (H - 60) // 17
+    for c in range(4, view_rows + 6):
+        r.app.cur = c
+        r.app.curs.clear()
+        r.frame()
+        _set(r, c, r.app.vals[c] + 1)      # and its value, as a held key edits it
+        r.frame()
+    r.coast()
+    assert r.shifted() > 3, "the glides shifted %d frames" % r.shifted()
+    top = _C.api_offset(r.a.ctx, 20, 100)
+    assert top > 0 and (r.app.cur + 1) * 17 <= top + H - 60, "the current row shows: %d" % top
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_a_table_in_a_page_under_a_gen_joins_its_rows_to_the_pages_floor(th, bufs):
+    """The page holding the table carries a gen, so a quiet frame's R is
+    the page: the table's changed rows and moved marks join its floor."""
+    r = Rig(th, "table", bufs, dt=33)
+    r.app.page_gen = True
+    _ready(r)
+    for c in (3, 4):
+        r.app.cur = c
+        r.app.curs.clear()
+        r.frame()
+        drew = r.app.parts[id(r.cv)]
+        assert r.kinds[-1] == "rows"
+        assert c - 1 in drew and c in drew and len(drew) <= 4, drew   # and the marks' reach
+    _set(r, 7, 1000)
+    r.frame()
+    assert r.kinds[-1] == "rows" and r.app.parts[id(r.cv)] == [7], r.app.parts[id(r.cv)]
+    r.drag(200, -14, 4)
+    r.coast()
+
+
+@pytest.mark.parametrize("bufs", BUFS)
+def test_a_focused_tables_key_steps_byte_for_byte(th, bufs):
+    r = _ready(Rig(th, "table", bufs, dt=33))
+    r.app.focus_to = "steps"
+    r.frame()
+    for _ in range(16):
+        r.frame(_DOWN)
+        r.frame()
+    r.coast()
+    assert r.app.curs[id(r.cv)] > 12
+    assert r.shifted() > 3
+
+
+def test_a_part_draws_clipped_to_its_cell_and_scopes_its_ids(th):
+    """A part's canvas is clipped to its cell (cut to the view), and a verb
+    drawn in it takes an id scoped by its row: the same label in two rows
+    is two stops."""
+    seen = []
+    r4 = array("i", [0] * 4)
+    cv = make_system_canvas(W, H)
+    host = ui_draw.AppHost()
+
+    def draw():
+        ui.page("")
+        ui.at(8, 40, 200, 60)
+        ui.table("", ("",), [["a"], ["b"], ["c"], ["d"]], 0, {"id": "t", "part": (0, 24)})
+        i = ui.table_part(r4)
+        while i >= 0:
+            seen.append((i, tuple(r4), cv.get_clip() if hasattr(cv, "get_clip") else None))
+            ui.at(r4[0] + 4, r4[1] + 2, 40, 20)
+            ui.button("Go")
+            i = ui.table_part(r4)
+        ui.end()
+    for _ in range(2):
+        del seen[:]
+        host.begin(cv, th, (0, 0, W, H))
+        draw()
+    assert [s[0] for s in seen] == [0, 1, 2], seen
+    assert seen[2][1] == (8, 88, 200, 24), "the cell whole; the clip cuts it to the view"
+    boxes = [host.box("Go")]
+    assert boxes[0] is None, "a scoped id is no page-level id"
 
 
 def _deferred(cv):

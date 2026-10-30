@@ -267,6 +267,38 @@ def test_arrows_move_to_the_nearest_stop_in_their_direction():
     assert ui.keys_taken(), "the ui took the arrow even where it moved nothing"
 
 
+def _buttons_page(n):
+    def draw():
+        ui.page("P")
+        ui.at(0, 20, 320, 200)
+        ui.scroll("S")
+        for i in range(n):
+            ui.button("Row %d" % i)
+        ui.scroll()
+    return draw
+
+
+@pytest.mark.parametrize("n", (30, 38, 40))
+def test_a_frame_records_its_stops_up_to_its_limit_and_says_past_it(n, capsys):
+    """A frame records MOY_UI_API_STOPS stops (the page's and the scroll
+    region's among them): every row up to the limit is reached by key, and
+    a frame that draws more says so, once, naming none of them a stop."""
+    r = _Run(_buttons_page(n))
+    r.frame()
+    seen = set()
+    for _ in range(n + 2):
+        r.frame(("down",))
+        r.frame()
+        seen.add(ui.focus())
+    r.frame()
+    said = capsys.readouterr().out
+    reached = min(n, 38)                 # 40 stops: the page's, the region's, 38 rows
+    assert seen >= {"Row %d" % i for i in range(1, reached)}, sorted(seen)
+    assert ("Row %d" % reached) not in seen
+    assert ("stops past the ones it records" in said) == (n > reached), said
+    assert said.count("stops past") <= 1, "said once"
+
+
 def test_activation_by_key_and_by_tap():
     r = _Run(_page())
     r.frame()

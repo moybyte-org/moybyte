@@ -3,7 +3,8 @@
 -- tests/fixtures/wasm/app_ui.moy draw the same page with the same calls, and
 -- tests/test_ui_public.py holds the three to the same pixels. Into pmem: 0
 -- frames, 1 sound, 2 volume, 3 the theme row (from 0), 4 saves, 5 keys
--- taken, 6 the swatch's state, 7 the focused id's length.
+-- taken, 6 the swatch's state, 7 the focused id's length. A table at the
+-- right draws its rows as parts (ui.table_part).
 
 sound = true
 vol = 5
@@ -21,6 +22,13 @@ function _draw()
   rect(x + 2, y + 2, w - 4, h - 4, 8)
   ui.at(200, 214, 100, 20)
   if ui.button("Save", "primary") then saves = saves + 1 end
+  ui.at(230, 2, 80, 34)
+  ui.table("", {""}, {{"a"}, {"b"}, {"c"}}, 2, {id = "parts", part = {0, 17}, bar = true})
+  local i, cx, cy, cw, ch = ui.table_part()
+  while i do
+    rect(cx + 4, cy + 3, 20, ch - 6, 8 + i)
+    i, cx, cy, cw, ch = ui.table_part()
+  end
   local f = ui.focus()
   frames = frames + 1
   pmem(0, frames)

@@ -2444,9 +2444,12 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
             }
         }
     }
+    if ((flags & MOY_UI_F_BAR) && !(flags & MOY_UI_F_DISABLED)) {
+        moy_target_fill(&d.t, b.x, b.y, 2 * d.fs, b.h, pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)));
+    }
     pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
     int first = g->pic ? 1 : 0;
-    if (g->pic) {
+    if (g->pic && !(flags & MOY_UI_F_PART)) {
         moy_ui_span_t name = field_at(cells, cells_n, 0);
         int side = g->w[0];
         moy_ui_box_t ib = {g->x[0], (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,

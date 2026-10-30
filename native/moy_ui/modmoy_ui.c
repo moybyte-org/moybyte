@@ -2350,6 +2350,18 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         out->gen = (int32_t)mp_obj_get_int_truncated(v);
         out->has_gen = 1;
     }
+    v = over_key(m, MP_QSTR_part);
+    if (v != MP_OBJ_NULL) {
+        size_t n = 0;
+        mp_obj_t *wh = NULL;
+        mp_obj_get_array(v, &n, &wh);
+        if (n == 2) {
+            out->has_part = 1;
+            out->part_w = (int16_t)mp_obj_get_int_truncated(wh[0]);
+            out->part_h = (int16_t)mp_obj_get_int_truncated(wh[1]);
+        }
+    }
+    out->bar = over_flag(m, MP_QSTR_bar);
 }
 
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
@@ -2684,6 +2696,22 @@ static mp_obj_t ui_api_table_pics(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_pics_obj, ui_api_table_pics);
+
+// api_table_part(ctx, cv, look, r) -> the next part's row of the table drawn
+// last, its cell's x, y, w, h and what shows of it into r (eight words), or
+// -1 after the last
+static mp_obj_t ui_api_table_part(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[3], &b, MP_BUFFER_WRITE);
+    if (b.len < 8 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
+    }
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    return mp_obj_new_int(moy_ui_api_table_part(ctx_of(a[0]), &s, (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_part_obj, 4, 4, ui_api_table_part);
 
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
@@ -3481,6 +3509,13 @@ static mp_obj_t ui_api_dup(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_dup_obj, ui_api_dup);
 
+// api_lost(ctx) -> the stops the last frame drew past the ones it records,
+// once per count, else 0
+static mp_obj_t ui_api_lost(mp_obj_t ctx) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_lost(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
+
 // wasm_rows() -> the public UI API's rows a compiled app imports ("ui_page", ...),
 // in roles.json's order: what this image serves (moy_ui_wasm.h).
 static mp_obj_t ui_wasm_rows(void) {
@@ -3612,6 +3647,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
@@ -3655,6 +3691,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_tap_armed), MP_ROM_PTR(&ui_api_tap_armed_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dup), MP_ROM_PTR(&ui_api_dup_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_lost), MP_ROM_PTR(&ui_api_lost_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_reset), MP_ROM_PTR(&ui_str_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },

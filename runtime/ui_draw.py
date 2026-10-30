@@ -1804,7 +1804,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     it owes no frame after it -- what its input moved (a focus, a scroll)
     this pass draws -- so a page drawn again draws the same pixels; a page
     still moving on its own is `ui_moving`'s. A duplicate id the last frame
-    drew is logged, once."""
+    drew is logged, once, and so are stops past the ones a frame records."""
     t = UI_TARGET
     t[0] = ctx
     t[1] = cv
@@ -1812,6 +1812,10 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     dup = _C.api_dup(ctx)
     if dup is not None:
         print("ui: two stops share the id %r; the later is no stop" % dup)
+    lost = _C.api_lost(ctx)
+    if lost:
+        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
+              "input (a long list is one ui.list or ui.table)" % lost)
     if rect is None:
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:

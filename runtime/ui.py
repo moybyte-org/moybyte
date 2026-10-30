@@ -192,10 +192,13 @@ def _over(o):
     wash = o.get("wash")
     lead = o.get("lead")
     gen = o.get("gen")
+    part = o.get("part")
+    bar = o.get("bar")
     flags = None
-    if wash is not None or lead is not None or gen is not None:
+    if wash is not None or lead is not None or gen is not None or part is not None or bar:
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
-                 | (4 if gen is not None else 0))
+                 | (4 if gen is not None else 0) | (16 if part is not None else 0)
+                 | (32 if bar else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -203,6 +206,8 @@ def _over(o):
     if gen is not None:
         g = int(gen) & 0xffffffff
         tail += _pack("<i", g - 0x100000000 if g & 0x80000000 else g)
+    if part is not None:
+        tail += _pack("<2i", int(part[0]), int(part[1]))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -459,7 +464,13 @@ def table(label, columns, rows, cur, o=None):
     row `cur` (from 0, -1 none) follows the focus; the columns between the
     first text column and the last, then the last, drop where it would show
     fewer than eleven characters. `(cur, opened)`, `opened` True the frame
-    the current row is opened (Enter on it, or a tap on it again)."""
+    the current row is opened (Enter on it, or a tap on it again).
+    `o.part = (w, h)` makes it a table of parts: rows `h` tall, column 0 a
+    cell `w` wide the app draws into through `table_part` (the whole row
+    where there is one column), each row's cells its key, so a frame that
+    moves it carries the rows whose cells did not change. `o.bar` marks
+    the current row with a bar at its left edge, `o.current = False` draws
+    no current mark."""
     t = _T
     n = len(columns)
     b = _memo_get(rows, n)
@@ -469,7 +480,7 @@ def table(label, columns, rows, cur, o=None):
             r = [str(c) for c in r][:n]
             cells.extend(r)
             cells.extend([""] * (n - len(r)))
-        copy = [tuple(r) for r in rows]
+        copy = [r[:] for r in rows]     # each row as its own type, so it compares equal
         b = _memo_put(rows, n, _cells(cells), tuple(copy) if type(rows) is tuple else copy)
     return _C.api_table(t[0], t[1], t[2], label, _columns(columns), b,
                         -1 if cur is None else cur, _over(o))
@@ -480,6 +491,37 @@ def initial(rect, title, r=0):
     `title`'s initial on the colour block that stays the cart's, as the
     home's cards draw it (`ui_draw.initial_cover`)."""
     _D.initial_cover(_T[1], rect, r, title)
+
+
+_TP = array("i", [0] * 8)               # table_part's answer: the cell, what shows of it
+
+
+def table_part(r):
+    """The next part of the table drawn last (one given `o.part`) the frame
+    draws: its row (from 0), its cell's x, y, w and h written into `r` (an
+    `array("i")` of four), the canvas clipped to what shows of the cell and
+    the ids of verbs drawn in it scoped by its row, until the next call;
+    -1 after the last, the clip put back and the table's fades drawn over
+    the parts. A frame drawn whole answers every row that shows; a shift
+    frame only the rows that entered and those whose cells or marks
+    changed, so what an app draws in a row's part is a function of that
+    row's cells."""
+    t = _T
+    a = _TP
+    cv = t[1]
+    if a[6]:
+        cv.clip()                       # the part before's clip, put back
+        a[6] = 0
+    i = _C.api_table_part(t[0], t[1], t[2], a)
+    if i < 0:
+        a[6] = 0
+        return i
+    r[0] = a[0]
+    r[1] = a[1]
+    r[2] = a[2]
+    r[3] = a[3]
+    cv.clip(a[4], a[5], a[6], a[7])
+    return i
 
 
 def table_rows():

@@ -300,6 +300,31 @@ int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, siz
     return close_run(&r, MOY_UI_OK);
 }
 
+// The run's clip before the open part's, put back when it closes.
+static int s_tp_on, s_tp_clip[4];
+
+int moy_ui_run_table_part(void *target, int32_t out[8]) {
+    OPEN(target);
+    int32_t i = moy_ui_api_table_part(c, &r.s, out);
+    close_run(&r, MOY_UI_OK);
+    if (s_tp_on) {
+        t_->clip_x0 = s_tp_clip[0];
+        t_->clip_y0 = s_tp_clip[1];
+        t_->clip_x1 = s_tp_clip[2];
+        t_->clip_y1 = s_tp_clip[3];
+        s_tp_on = 0;
+    }
+    if (i >= 0) {
+        s_tp_clip[0] = t_->clip_x0;
+        s_tp_clip[1] = t_->clip_y0;
+        s_tp_clip[2] = t_->clip_x1;
+        s_tp_clip[3] = t_->clip_y1;
+        s_tp_on = 1;
+        moy_clip(t_, out[4], out[5], out[6], out[7]);
+    }
+    return i;
+}
+
 // A verb that opens a nest: MOY_UI_DEEP where it answered MOY_UI_API_DEEP.
 static int nest_rc(int32_t v) {
     return v == MOY_UI_API_DEEP ? MOY_UI_DEEP : MOY_UI_OK;
@@ -600,6 +625,16 @@ static const uint8_t *wasm_line(void *src, int32_t i, size_t *n) {
     return w->p + w->at;
 }
 
+int32_t moy_ui_wasm_table_part(void *e, uint8_t *out, uint32_t cap) {
+    (void)e;
+    int32_t v[8];
+    int32_t i = moy_ui_run_table_part(wasm_target(), v);
+    if (i >= 0) {
+        put_words(out, cap, v, 4);
+    }
+    return i;
+}
+
 int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint8_t *lines,
                               uint32_t ln, const uint8_t *opt, uint32_t optn, const uint8_t *ob,
                               uint32_t on, uint8_t *out, uint32_t cap) {
@@ -766,6 +801,7 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_bar", FN(moy_ui_wasm_bar) },
     { "ui_rule", FN(moy_ui_wasm_rule) },
     { "ui_text_view", FN(moy_ui_wasm_text_view) },
+    { "ui_table_part", FN(moy_ui_wasm_table_part) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

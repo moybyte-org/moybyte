@@ -73,7 +73,7 @@ and are the model for anything new:
 - `ui.list` and `ui.table` are one stop each (`STOP_ROWS`,
   `native/moy_ui/moy_ui_api.h`). Focus moves by row index, reveal is built
   in, and the engine plans their rows by pitch (`table_floor`, `rows_note`
-  in `moy_ui_api.c`).
+  in `moy_ui_api.c`). A table of parts (§4.1) is the list of rich rows.
 - `ui.grid` lays cards in columns. A card scrolled out of view answers a
   zero size, and the app skips drawing it.
 
@@ -83,9 +83,10 @@ and are the model for anything new:
 view, dialog or popover opened past it is an error (§4.0), never a silent
 return. Deeper nests are cheap: a nest record is a few bytes per context.
 
-**G2. Lists of rich rows.** `list` and `table` rows hold text cells only.
-Blocks outline, Music steps, the cards drawer and the home grid need rows
-holding controls and pictures. So each plans its own rows.
+**G2. Lists of rich rows.** Closed by §4.1: a table's rows can be parts
+the app draws, carried in C. Music steps and the Blocks outline are tables
+of parts (#243 records whether each moved). The cards drawer and the home
+grid still plan their own rows.
 
 **G3. Scrolling is y-only, one region a frame.** The engine records one
 shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`). Map, Scene and
@@ -101,14 +102,18 @@ them). `AppHost._shift` (`runtime/ui_draw.py`) is the one path that
 stays. The others go as their surfaces move.
 
 **G5. Budgets.**
-- `MOY_UI_API_STOPS` (40): stops a frame.
+- `MOY_UI_API_STOPS` (40): stops a frame. A stop past it is drawn and
+  takes no focus or input, and the host logs the count (`moy_ui_api_lost`;
+  `tests/test_ui_public.py` pins 38 buttons in a scroll region reached by
+  key and the 39th said).
 - `MOY_UI_API_KEEP` (16): kept ids.
 - `MOY_UI_API_FLOOR` (24) and `MOY_UI_API_HOST` (6).
 - One text-view record per context.
 
 A list of rich rows on the P4 desk shows more controls than 40 stops hold.
 The stop record is the cost, and it is counted in bytes before a budget is
-raised.
+raised. A table of parts takes one stop for its rows, plus the stops the
+app draws in the parts that show.
 
 **G6. The Python-only verbs.** `empty`, `toast`, `month`, `cursor`, `tile`,
 `table_rows`, `table_pictures`, `card_clip`, `band` and `keep` have no Lua
@@ -145,28 +150,34 @@ when one needs it.
 
 ### 4.1 A list of rich rows: `ui.table`, extended
 
-`ui.table` already carries most of what §1's measurement asks for:
+`ui.table` carries what §1's measurement asks for:
 - it draws only the rows that show, as one stop (`STOP_ROWS`);
 - it moves focus by row index, and reveals the focused row;
 - it memoises its cells, so a steady frame runs no row Python;
 - a placed table has the shift-frame and floor support in `moy_ui_api.c`.
 
-The memo stands in for gens, so an app keeps no gens.
+The list block is `ui.table` with two additions, in every face
+(`docs/ui_api_2026-10.md` §2, A table of parts):
+- **a part column.** `o.part = (w, h)` makes column 0 a part the app draws
+  into (a meter, a picture, a control), rows `h` tall. After the table,
+  `ui.table_part(r)` answers the rows the frame draws, one a call, with
+  each cell's rect, the canvas clipped to it. Ids drawn inside a part are
+  scoped by its row index, so repeated labels across rows stay distinct.
+- **per-row marks.** `cur` wears the current mark, `o.bar` the cursor bar,
+  and `o.current = false` leaves the mark to the part.
 
-The list block is therefore `ui.table`, with two additions:
-- **a part column.** A row's cell is a rect the app draws into (a meter, a
-  picture, a control), over the picture-column path Files' covers take
-  (`table_rows`/`table_pictures`);
-- **per-row marks**, for a cursor bar and a current row.
+A row's cells are its key, and its part is a function of its cells and
+marks. A placed table of parts keeps a record of the rows that show (their
+cells hashed, their marks), one such table a context. A carried row keeps
+its stop and its pixels, with no app Python. A row whose cells or marks
+change (focus, the current row, a field's caret) is drawn again. The
+engine owns the extent (rows × row height) and the reveal, including a
+current row the app moved with its own keys. There is no page gen and no
+app plan; a table of parts' `o.gen` keys its current row alone (a cursor
+inside the row, as the Blocks outline's slot).
 
-A carried row keeps its stop and its pixels. A row whose cell or marks
-change (focus, press, hover, a field's caret) is redrawn. Ids inside a row
-are scoped by its row index, so repeated labels across rows stay distinct.
-The engine owns the extent (rows × row height) and the reveal: a list whose
-off-screen rows are not called otherwise loses its height and its focus.
-
-A separate `ui.rows` is added only if the table cannot carry the Blocks
-outline, and the reason is recorded here.
+The Blocks outline is a table of parts. Its cursor's plate is a tool drawn
+in the part, so `ui.rows` is not added.
 
 A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
 from the viewport centre, makes the home carousel a composition: an app

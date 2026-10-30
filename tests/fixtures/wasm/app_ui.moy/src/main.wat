@@ -66,6 +66,7 @@
   (import "moybyte.app" "ui_rule" (func $ui_rule (result i32)))
   (import "moybyte.app" "ui_text_view" (func $ui_text_view
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_table_part" (func $ui_table_part (param i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -77,9 +78,17 @@
   (data (i32.const 1104) "Moy\00Night\00Berry")
   (data (i32.const 1136) "swatch")
   (data (i32.const 1152) "Save")
+  ;; the parts' table: its one column (a part), its rows' cells, and its
+  ;; override block -- id "parts", no hint, the flags (wash absent, part,
+  ;; bar) and the part's width 0 and rows 17 tall
+  (data (i32.const 1200) "\00")
+  (data (i32.const 1208) "a\00b\00c\00")
+  (data (i32.const 1216) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\05\00\00\00"
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "parts\ff\ff\ff\ff\38\00\00\00\00\00\00\00\11\00\00\00")
 
   ;; 2048: the page's rect (16 bytes); 2064: the part's (20); 2096: the
-  ;; focused id (32).
+  ;; focused id (32); 2200: the table's answers (8); 2208: a part's cell (16).
   (global $sound (mut i32) (i32.const 1))
   (global $vol (mut i32) (i32.const 5))
   (global $cur (mut i32) (i32.const 1))
@@ -117,7 +126,7 @@
   (func (export "_update") (param $dt f32))
 
   (func (export "_draw")
-    (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32)
+    (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32) (local $i i32)
     (call $ok (call $ui_page (i32.const 1024) (i32.const 7) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_label (i32.const 1040) (i32.const 5) (i32.const 0) (i32.const 0)))
@@ -141,6 +150,20 @@
     (if (call $ui_button (i32.const 1152) (i32.const 4) (i32.const 1) (i32.const 0)
                          (i32.const 0))
       (then (global.set $saves (i32.add (global.get $saves) (i32.const 1)))))
+    (call $ok (call $ui_at (i32.const 230) (i32.const 2) (i32.const 80) (i32.const 34)))
+    (call $ok (call $ui_table (i32.const 0) (i32.const 0) (i32.const 1200) (i32.const 1)
+                              (i32.const 1208) (i32.const 6) (i32.const 1)
+                              (i32.const 1216) (i32.const 57) (i32.const 2200) (i32.const 8)))
+    (block $parts
+      (loop $next
+        (local.set $i (call $ui_table_part (i32.const 2208) (i32.const 16)))
+        (br_if $parts (i32.lt_s (local.get $i) (i32.const 0)))
+        (call $rect (i32.add (i32.load (i32.const 2208)) (i32.const 4))
+                    (i32.add (i32.load (i32.const 2212)) (i32.const 3))
+                    (i32.const 20)
+                    (i32.sub (i32.load (i32.const 2220)) (i32.const 6))
+                    (i32.add (i32.const 9) (local.get $i)))
+        (br $next)))
     (if (i32.eqz (i32.and (global.get $frames) (i32.const 7)))
       (then (drop (call $pmem (i32.const 9) (call $hash (i32.const 40) (i32.const 120))
                         (i32.const 1)))))

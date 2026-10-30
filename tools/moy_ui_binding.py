@@ -365,6 +365,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -395,6 +396,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_tap_armed", [c.c_void_p], _I),
     ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
+    ("moy_ui_api_lost", [c.c_void_p], _I),
 )
 
 
@@ -403,7 +405,9 @@ class _Over(c.Structure):
     _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
                 ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
                 ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8),
-                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8)]
+                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8),
+                ("has_gen", c.c_int8), ("gen", c.c_int32), ("has_part", c.c_int8),
+                ("part_w", c.c_int16), ("part_h", c.c_int16), ("bar", c.c_int8)]
 
 
 class _Line(c.Structure):
@@ -1412,6 +1416,11 @@ def binding():
         p, _k = _ctx(ctx)
         lib.moy_ui_api_table_pics(p, c.byref(sink(cv, look)))
 
+    def api_table_part(ctx, cv, look, r):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 8).from_buffer(r)
+        return int(lib.moy_ui_api_table_part(p, c.byref(sink(cv, look)), c.addressof(v)))
+
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 8)()
@@ -1484,6 +1493,10 @@ def binding():
     def api_at(ctx, x, y, w, h):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_at(p, int(x), int(y), int(w), int(h))
+
+    def api_lost(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_lost(p))
 
     def api_dup(ctx):
         p, _k = _ctx(ctx)
@@ -1590,13 +1603,13 @@ def binding():
               api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,
-              api_table_rows, api_table_pics,
+              api_table_rows, api_table_pics, api_table_part,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
-              api_dup):
+              api_dup, api_lost):
         setattr(m, f.__name__, f)
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs

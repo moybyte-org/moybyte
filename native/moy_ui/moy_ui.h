@@ -486,6 +486,7 @@ enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
     MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024, MOY_UI_F_WRAP = 2048,
+    MOY_UI_F_PART = 4096, MOY_UI_F_BAR = 8192,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other
@@ -840,7 +841,9 @@ int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols
                      const uint8_t *cells, size_t cells_n, int fs, int desk, moy_ui_tgeo_t *g);
 // The header row in box b, and one row of `cells` (that row's alone): its
 // marks by flags' F_ON (current), F_FOCUS and F_DISABLED, the picture column's
-// icon by name (moy_ui_icon_slot, else the glyph table's), the first text
+// icon by name (moy_ui_icon_slot, else the glyph table's; none with F_PART,
+// where the column is the app's part), with F_BAR the cursor bar (the
+// `value` token, 2 px of the scale) at the row's left, the first text
 // column cut with an ellipsis where the font has one.
 int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
                       const uint8_t *cols, size_t cols_n, int fs, int desk);

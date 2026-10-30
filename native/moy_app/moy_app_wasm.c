@@ -227,7 +227,7 @@ enum {
     N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT, N_UI_GROUP, N_UI_INFO, N_UI_LINK, N_UI_CYCLE,
     N_UI_SEG, N_UI_SWATCHES, N_UI_HINTS, N_UI_ICON, N_UI_PROGRESS, N_UI_TABLE, N_UI_SCROLL,
     N_UI_FIELD, N_UI_DIALOG, N_UI_TABS, N_UI_GRID, N_UI_CARD, N_UI_POPOVER, N_UI_MENU,
-    N_UI_TOOL, N_UI_BAR, N_UI_RULE, N_UI_TEXT_VIEW,
+    N_UI_TOOL, N_UI_BAR, N_UI_RULE, N_UI_TEXT_VIEW, N_UI_TABLE_PART,
     N_COUNT
 };
 
@@ -244,7 +244,7 @@ static const char *const ROW_OF[N_COUNT] = {
     "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
     "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
     "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
-    "ui.tool", "ui.bar", "ui.rule", "ui.text_view",
+    "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part",
 };
 
 static int16_t s_rows[N_COUNT];
@@ -432,6 +432,7 @@ int32_t moy_ui_wasm_scroll(void *, const uint8_t *, uint32_t, const uint8_t *, u
 int32_t moy_ui_wasm_text_view(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                               const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                               uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_table_part(void *, uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_field(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t, int32_t,
                           const uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_dialog(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
@@ -510,6 +511,7 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "ui_bar", FN(moy_ui_wasm_bar), "(*~*~i)i", NULL },
     { "ui_rule", FN(moy_ui_wasm_rule), "()i", NULL },
     { "ui_text_view", FN(moy_ui_wasm_text_view), "(*~*~*~*~*~)i", NULL },
+    { "ui_table_part", FN(moy_ui_wasm_table_part), "(*~)i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {

@@ -21,6 +21,8 @@
  *   ui.icon(name, o)               -> whether `name` names an icon (the next row's)
  *   ui.progress(label, v, hi, o)   (v of hi done)
  *   ui.table(label, columns, rows, cur, o) -> the new cur (from 1; 0 is none), opened
+ *   ui.table_part()                -> the next part's row (from 1), x, y, w, h of its
+ *                                    cell, the canvas clipped to it; nil after the last
  *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.text_view(id, lines, o)     -> the first line shown, the rows shown
@@ -43,7 +45,8 @@
  *   ui.at(x, y, w, h)
  *
  * `o` is a table of §3's keys: fill, ink, border (a role name or a colour
- * 0xRRGGBB), id, current, disabled, nav, mark, steps, hint, wash, lead.
+ * 0xRRGGBB), id, current, disabled, nav, mark, steps, hint, wash, lead, part
+ * (a table's {w, h}) and bar.
  *
  * Included by native/moycore/moycore_lua.c and opened beside the superset
  * when the build has native/moy_ui (MOYCORE_UI). */
@@ -114,6 +117,17 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->steps = moycore_ui_flag(L, i, "steps");
     o->wash = moycore_ui_flag(L, i, "wash");
     o->lead = moycore_ui_flag(L, i, "lead");
+    o->bar = moycore_ui_flag(L, i, "bar");
+    lua_getfield(L, i, "part");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_geti(L, -1, 1);
+        lua_geti(L, -2, 2);
+        o->has_part = 1;
+        o->part_w = (int16_t)lua_tointeger(L, -2);
+        o->part_h = (int16_t)lua_tointeger(L, -1);
+        lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
     lua_getfield(L, i, "id");
     if (lua_type(L, -1) == LUA_TSTRING) {
         size_t n = 0;
@@ -426,6 +440,19 @@ static int moycore_ui_table(lua_State *L)
     return 2;
 }
 
+static int moycore_ui_table_part(lua_State *L)
+{
+    int32_t v[8];
+    int32_t i = moy_ui_run_table_part(moycore_ui_canvas(), v);
+    if (i < 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, (lua_Integer)i + 1);
+    for (int k = 0; k < 4; k++) lua_pushinteger(L, v[k]);
+    return 5;
+}
+
 /* A verb that opens a nest raises where MOY_UI_API_NEST were open already. */
 static void moycore_ui_nested(lua_State *L, int rc)
 {
@@ -670,6 +697,7 @@ static void moycore_ui_open(lua_State *L)
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
+        {"table_part", moycore_ui_table_part},
         {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
         {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
