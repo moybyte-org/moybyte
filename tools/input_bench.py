@@ -15,6 +15,7 @@
 #   Surface                  a scrolling or text surface: setup, probe, inputs
 #   surfaces                 every surface, on the boards that have it
 #   run_surface              a surface's rows, its setup and teardown
+#   selected, planned        what --only / --inputs / --rows pick, and the rows that plays
 #   report                   a run's rows as markdown, the furthest over 33 ms first
 #   main                     the CLI
 """Every scrolling and text surface, under every input a board has, timed as
@@ -25,7 +26,10 @@ presented frames.
     python3 tools/input_bench.py --board p4 --out DIR --only home --theme blocks   # a backdrop
     python3 tools/input_bench.py --board p4 --out DIR --only home --theme picture  # a picture
     python3 tools/input_bench.py --board tdeck --out DIR --split      # PERF DIAG lines, apart
+    python3 tools/input_bench.py --board p4 --out DIR --rows "Code:fling,Text console:drag"
     python3 tools/input_bench.py --report DIR/p4_input.json [--reanalyse]
+
+`tools/input_gate.py` runs this against a dev image for a surface's gate.
 
 The design this measures is docs/scroll_and_text_2026-10.md; §14 says what
 the tool is for. Numbers live in #66.
@@ -1815,12 +1819,60 @@ def reanalyse(path):
         json.dump(rows, f)
 
 
+def selected(only=(), inputs=(), rows=None):
+    """The surfaces `--only` (lower-case substrings), `--inputs` and `--rows`
+    pick, each with the inputs it plays (None: every one it takes)."""
+    for surf in surfaces():
+        if only and not any(o in surf.name.lower() for o in only):
+            continue
+        want = list(inputs) or None
+        if rows:
+            if surf.name not in rows:
+                continue
+            want = [i for i in rows[surf.name] if not inputs or i in inputs]
+            if not want:
+                continue
+        yield surf, want
+
+
+def planned(board, windowed, only=(), inputs=(), rows=None):
+    """The (surface, input) rows a run with that selection plays on `board`:
+    `selected` less what `run_surface` skips there."""
+    out = []
+    for surf, want in selected(only, inputs, rows):
+        if surf.where in ("desk", "full") and not windowed:
+            continue
+        for inp in surf.inputs:
+            if want and inp not in want:
+                continue
+            if inp.startswith("ball") and board not in MATRIX_BOARDS:
+                continue
+            out.append((surf.name, inp))
+    return out
+
+
+def parse_rows(spec):
+    """`SURFACE:INPUT,...` as {surface: [input, ...]}, in the order given."""
+    rows = {}
+    for item in spec.split(","):
+        if not item.strip():
+            continue
+        surf, sep, inp = item.rpartition(":")
+        if not sep or not surf.strip() or not inp.strip():
+            raise SystemExit("--rows: %r is not SURFACE:INPUT" % item)
+        rows.setdefault(surf.strip(), []).append(inp.strip())
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--board")
     ap.add_argument("--out", help="the run's directory (its rows: BOARD_input.json)")
     ap.add_argument("--only", default="", help="surface names, comma separated (substring)")
     ap.add_argument("--inputs", default="", help="input names, comma separated")
+    ap.add_argument("--rows", default="",
+                    help="exact rows, comma separated SURFACE:INPUT (a gate's re-run); "
+                         "with --only/--inputs, a row runs when it is in both")
     ap.add_argument("--no-null", action="store_true", help="skip the null-floor plays")
     ap.add_argument("--split", action="store_true",
                     help="each surface's long drag under PERF DIAG instead: LOOP/PUMP/PERF")
@@ -1844,15 +1896,14 @@ def main():
     b = P4Board(_port(a.board), board_dir=board_dirs()[a.board])
     only = [x.strip().lower() for x in a.only.split(",") if x.strip()]
     inputs = [x.strip() for x in a.inputs.split(",") if x.strip()]
+    rows = parse_rows(a.rows)
     bench = None
     try:
         bench = Bench(b, a.board, path, null=not a.no_null)
         bench.setup(a.theme)
-        for surf in surfaces():
-            if only and not any(o in surf.name.lower() for o in only):
-                continue
+        for surf, want in selected(only, inputs, rows):
             print("== %s" % surf.name, flush=True)
-            run_surface(bench, surf, inputs, a.split)
+            run_surface(bench, surf, want, a.split)
     finally:
         if bench is not None:
             bench.cleanup()
