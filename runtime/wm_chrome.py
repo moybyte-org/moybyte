@@ -646,7 +646,7 @@ class WindowChrome:
     def _live_resize_ok(self):
         """Live-body resize needs the rect-clipped stamp (see _blit_backdrop_cache);
         without it (the web RecordingLayer) the rubber-band outline preview stays."""
-        return getattr(self._root_canvas, "blit_strip_rect", None) is not None
+        return hasattr(self._root_canvas, "blit_strip_rect")
 
     def _draw_resizing_window(self, win, focused, x, y, cw, ch):
         """The 'real OS' resize feel (#58): during the gesture the window BODY

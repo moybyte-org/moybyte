@@ -1661,7 +1661,14 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     ws = _ws(tmp_path)
     _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
-    ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
+    sc = ws.sys_canvas
+
+    class _NoRectStamp(type(sc)):
+        @property
+        def blit_strip_rect(self):           # absent, as hasattr asks it
+            raise AttributeError("blit_strip_rect")
+
+    sc.__class__ = _NoRectStamp
     # Shrunk, so the rubber rect stays on the glass: the window opens in
     # the work area right of the icon column, near the desk's right edge.
     win, cw, ch = _engage_resize(ws, drv, dx=-60)

@@ -2220,11 +2220,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if win is not None and not win.minimized:
                     hole = self._game_rect(win)   # the game's frame comes next, opaque
             lay = w[0]
-            asb = getattr(root, "blit_strip_async", None)
             # Put back whole, it is the frame's last write there: the engine
             # copies it after the frame has drawn (`blit_strip_async`).
-            if not (hole is None and asb is not None and lay.w == r[2] and lay.h == r[3]
-                    and asb(lay, r[0], r[1])):
+            if not (hole is None and lay.w == r[2] and lay.h == r[3]
+                    and hasattr(root, "blit_strip_async")
+                    and root.blit_strip_async(lay, r[0], r[1])):
                 for b in _bands(r, hole):
                     root.blit_strip_rect(lay, r[0], r[1], b[0], b[1], b[2], b[3])
             self._pop_note(r)
@@ -2867,10 +2867,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self._backdrop is None:
             return
         rc = self._root_canvas
-        stamp = getattr(rc, "blit_strip_rect", None)
         ext = self._gesture_extent()
         n = self._retained_n()
-        if (stamp is None or self._union_disabled or ext is None
+        if (not hasattr(rc, "blit_strip_rect") or self._union_disabled or ext is None
                 or not self._gesture_hist):
             rc.blit_strip(self._backdrop, 0, 0)
             self._restored = None
@@ -2926,7 +2925,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if bx1 < x1:                                       # right strip
                 laid.append((bx1, by0, x1 - bx1, by1 - by0))
         for r in laid:
-            stamp(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
         self._restored = (x0, y0, x1 - x0, y1 - y0)
         return self._restored
@@ -3126,7 +3125,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if sc is gc:
             return
         if getattr(gc, "buf", None) is None \
-                and getattr(sc, "blit_game", None) is None:
+                and not hasattr(sc, "blit_game"):
             # Command-only game canvas (#175): the cart's frame is ALREADY in
             # the stream; the letterbox cls() below would wipe it, so bail.
             # Ask the question _blit_game asks -- a system canvas with a native
@@ -3444,8 +3443,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         viewport has to match win.buf exactly -- the layouts were built for that
         size, and a mismatch would lay the content out for the wrong surface."""
         root = self._root_canvas
-        sv = getattr(root, "set_viewport", None)
-        if sv is None:
+        if not hasattr(root, "set_viewport"):
             return False                      # web RecordingLayer: keep the stamp
         cx, cy, cw, ch = win.content_rect()
         if cw <= 0 or ch <= 0 or cw != win.buf.w or ch != win.buf.h:
@@ -3494,7 +3492,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._install(win.ctx, win)
         ws._sys_canvas = root                 # ...but paint on the framebuffer
         ws._surface_write(cx, cy)
-        sv(cx, cy, cw, ch)
+        root.set_viewport(cx, cy, cw, ch)
         _ui_draw.window_frame(pages)
         self._direct_root = True
         try:
@@ -4084,13 +4082,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                                or self._content_flinging()))
         if ((moving_this or scrolling_this)
                 and self._order and self._wins.get(self._order[-1]) is win):
-            asb = getattr(self._root_canvas, "blit_strip_async", None)
-            if asb is not None:
+            rc = self._root_canvas
+            if hasattr(rc, "blit_strip_async"):
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 cx, cy, _cw, _ch = win.content_rect()
                 _perf = getattr(self.ws, "perf_capture", False)
                 _t0 = _ticks_ms() if _perf else 0
-                if asb(win.buf, cx, cy):
+                if rc.blit_strip_async(win.buf, cx, cy):
                     if _perf:                 # the stamp's CPU share: its submit
                         self.ws._pf_wm_stamp = _ticks_ms() - _t0
                     return
@@ -4144,9 +4142,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 ws._perf_layer.draw(dt)   # game domain: inside the bracket (above)
             if use_view:
                 _view()
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
+        if gc is not self._fb_for:     # the parent's cached flush_batch probe
+            self._fb_for = gc
+            self._fb_fn = getattr(gc, "flush_batch", None)
+        if self._fb_fn is not None:
+            self._fb_fn()
         if use_view:
             if full and win.docked is None:
                 self._win_chrome(win, focused)
@@ -4186,7 +4186,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         own = self._own
         ok = self._shown_ok(win)
         if (not ch[4] or p.change_f != f
-                or getattr(self._root_canvas, "blit_strip_rect", None) is None):
+                or not hasattr(self._root_canvas, "blit_strip_rect")):
             own[4] = 0
             self._shown_note(win, f, ok, False)
             return False
@@ -4224,9 +4224,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         desktop (the web console) there is no framebuffer to copy into: ship the
         game frame as ONE scaled self-contained spr instead (the same move as
         FullscreenStackWM._composite_via_spr)."""
-        bg = getattr(sc, "blit_game", None)
-        if bg is not None:
-            bg(gc, ox, oy, scale, defer, src)
+        if hasattr(sc, "blit_game"):
+            sc.blit_game(gc, ox, oy, scale, defer, src)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
