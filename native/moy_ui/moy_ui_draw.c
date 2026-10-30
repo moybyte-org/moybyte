@@ -687,19 +687,6 @@ int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int
     return MOY_UI_OK;
 }
 
-int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, int can_up,
-                       int can_dn, int ci) {
-    draw_t d;
-    open_draw(s, &d);
-    if (can_up) {
-        text(&d, (const uint8_t *)"^", 1, ux, uy, ci);
-    }
-    if (can_dn) {
-        text(&d, (const uint8_t *)"v", 1, dx, dy, ci);
-    }
-    return MOY_UI_OK;
-}
-
 int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, int hl, int held,
                    int at, int line) {
     draw_t d;

@@ -25,12 +25,6 @@ def _fs(cv):
 def is_light(th):
     return bool(th.get('surface_light', False))
 
-def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
-    if can_up:
-        cv.print('^', up_xy[0], up_xy[1], c, scale)
-    if can_dn:
-        cv.print('v', dn_xy[0], dn_xy[1], c, scale)
-
 # Edited with the text path (sprint 6 step 3, docs/kernel_toolkit_2026-10.md
 # §4): text is measured in UTF-8 BYTES, whitespace is str.split()'s ASCII set,
 # and a truncation backs up to the last whole codepoint, ending its line. For
@@ -779,15 +773,6 @@ def fill_uncovered(cv, inner, outer, col):
         if ix1 > ox1:
             cv.rect(ox1, my0, ix1 - ox1, my1 - my0, col)
 
-def row_drag(anchor, py, step, top, top_max):
-    delta = anchor - py
-    while delta >= step and top < top_max:
-        top += 1
-        delta -= step
-    while delta <= -step and top > 0:
-        top -= 1
-        delta += step
-    return (py + delta, top)
 _MAX_RETAINED = 3
 
 class ScrollRegion:

@@ -214,7 +214,6 @@ _DRAW_SIGS = (
     ("moy_ui_label_paint", [c.POINTER(_Sink), _Box, _Span, _I, _I, c.c_void_p], _I),
     ("moy_ui_bar_rect", [_Box, _I, _I, _I, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_scrollbar", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I], _I),
-    ("moy_ui_scroll_cues", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_fill_uncovered", [c.POINTER(_Sink), _Box, _Box, _I], _I),
     ("moy_ui_fade", [c.POINTER(_Sink), _Box, _I, _I, _I, _I], _I),
     ("moy_ui_list", [c.POINTER(_Sink), _Box, _I, c.c_char_p, _Z, _I, _I, _I, _I, _I,
@@ -667,13 +666,6 @@ def binding():
         _check(lib.moy_ui_scrollbar(c.byref(s), box_of(view), int(content), int(offset),
                                     1 if horizontal else 0, s.fs, int(bar_w)))
 
-    def scroll_cues(cv, up, dn, can_up, can_dn, ci):
-        if not (can_up or can_dn):
-            return
-        _check(lib.moy_ui_scroll_cues(c.byref(sink(cv, None)), int(up[0]), int(up[1]),
-                                      int(dn[0]), int(dn[1]), 1 if can_up else 0,
-                                      1 if can_dn else 0, int(ci)))
-
     def fill_uncovered(cv, inner, outer, ci):
         _check(lib.moy_ui_fill_uncovered(c.byref(sink(cv, None)), box_of(inner),
                                          box_of(outer), int(ci)))
@@ -951,7 +943,7 @@ def binding():
         lib.moy_ui_cell_art(r4(rect), int(fs), opt(pad, DEFAULT), int(caption_h), out)
         return tuple(out)
 
-    for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
+    for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               scrim, tile, unlock, modal, modal_band, month_h, perf,

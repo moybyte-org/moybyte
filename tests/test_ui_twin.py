@@ -146,8 +146,6 @@ def _scroll(m, cv, th, c):
     sr.set(c["box"], c["int"] * 37 + 50)
     sr.scroll_by(c["n"] * 23)
     sr.draw_bar(cv, th)
-    m.scroll_cues(cv, c["box"][:2], c["box2"][:2], c["on"], c["hot"],
-                  c["int"] & 63, c["scale"])
     m.fill_uncovered(cv, c["box"], c["box2"], c["int"] & 63)
     return sr.bar_rect(c["fs"]), sr.offset
 
@@ -328,10 +326,6 @@ def _b_scrollbar(m, cv, th):
     sr.draw_bar(cv, th)
 
 
-def _b_scroll_cues(m, cv, th):
-    m.scroll_cues(cv, (4, 4), (4, 50), True, True, 10, 2)
-
-
 def _b_fill_uncovered(m, cv, th):
     m.fill_uncovered(cv, (0, 20, 120, 40), (10, 25, 60, 20), 3)
 
@@ -362,7 +356,6 @@ OP_BUDGETS = {
     "text_field": (_b_text_field, (3, 1)),
     "panel": (_b_panel, (4, 1)),
     "scrollbar": (_b_scrollbar, (2, 0)),
-    "scroll_cues": (_b_scroll_cues, (0, 2)),
     "fill_uncovered": (_b_fill_uncovered, (4, 0)),
     "glyph": (_b_glyph, (10, 0)),                 # one fill per span
 }

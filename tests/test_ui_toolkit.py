@@ -176,16 +176,6 @@ def test_is_light_gate():
     assert not ui_draw.is_light({"surface_light": False, "ink": 0})
 
 
-def test_scroll_cues_draw_what_can_move():
-    cv = _cv()
-    ui_draw.scroll_cues(cv, (10, 10), (10, 100), True, False, 7)
-    # '^' drew at (10,10); 'v' suppressed at (10,100).
-    assert any(cv.pix(10 + dx, 10 + dy) == 7
-               for dx in range(8) for dy in range(8))
-    assert not any(cv.pix(10 + dx, 100 + dy) == 7
-                   for dx in range(8) for dy in range(8))
-
-
 def _drag(ws, layer_pointer, x, y0, y1, steps=6):
     """Feed a held vertical drag through a layer's pointer handler."""
     ws.pointer.down = True

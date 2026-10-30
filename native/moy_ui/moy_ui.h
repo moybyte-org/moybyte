@@ -538,9 +538,6 @@ int moy_ui_bar_rect(moy_ui_box_t view, int content, int offset, int horizontal, 
                     int bar_w, moy_ui_box_t *out);
 int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int offset,
                      int horizontal, int fs, int bar_w);
-// The overflow chevrons, '^' above and 'v' below.
-int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, int can_up,
-                       int can_dn, int ci);
 // A split's divider in its gap `b` (ui.split): `across` the gap stands
 // between panes side by side (else between panes stacked), its handle a
 // pill `hw` across and `hl` along (0: none) in the `border` token, centred,

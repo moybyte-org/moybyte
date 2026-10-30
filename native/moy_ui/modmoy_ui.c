@@ -1519,24 +1519,6 @@ static mp_obj_t ui_scrollbar(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrollbar_obj, 7, 7, ui_scrollbar);
 
-// scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, ci)
-static mp_obj_t ui_scroll_cues(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    int up = mp_obj_is_true(a[3]), dn = mp_obj_is_true(a[4]);
-    if (!up && !dn) {
-        return mp_const_none;
-    }
-    moy_ui_sink_t s;
-    sink_of(&s, a[0], mp_const_none);
-    size_t n;
-    mp_obj_t *u, *d;
-    mp_obj_get_array(a[1], &n, &u);
-    mp_obj_get_array(a[2], &n, &d);
-    check(moy_ui_scroll_cues(&s, num(u[0]), num(u[1]), num(d[0]), num(d[1]), up, dn,
-                             mp_obj_get_int(a[5])));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_cues_obj, 6, 6, ui_scroll_cues);
 
 // fill_uncovered(cv, inner, outer, ci)
 static mp_obj_t ui_fill_uncovered(size_t n_args, const mp_obj_t *a) {
@@ -3740,7 +3722,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_label), MP_ROM_PTR(&ui_label_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_rect), MP_ROM_PTR(&ui_bar_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrollbar), MP_ROM_PTR(&ui_scrollbar_obj) },
-    { MP_ROM_QSTR(MP_QSTR_scroll_cues), MP_ROM_PTR(&ui_scroll_cues_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_uncovered), MP_ROM_PTR(&ui_fill_uncovered_obj) },
     { MP_ROM_QSTR(MP_QSTR_fade), MP_ROM_PTR(&ui_fade_obj) },
     { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&ui_list_obj) },

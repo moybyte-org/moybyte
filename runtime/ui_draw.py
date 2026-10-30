@@ -12,7 +12,7 @@
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
-#   -- scrolling                      drag_steps, row_drag, ScrollRegion, DragTap
+#   -- scrolling                      drag_steps, ScrollRegion, DragTap
 #   PaintRing                         what the last painted frames left of a region, per buffer
 #   ScrollRegion                      the one scroll model
 #   DragTap                           press/drag/release over a ScrollRegion
@@ -100,13 +100,6 @@ def is_light(th):
     not luminance: a future light theme may use navy/brown ink rather than index
     0, so surfaces must not infer this branch from one palette value."""
     return bool(th.get("surface_light", False))
-
-
-def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
-    """The list-overflow chevrons ('^' above, 'v' below) -- one implementation
-    for every scrolling surface; positions/color stay the caller's (they are
-    part of each surface's frozen geometry)."""
-    _C.scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c)
 
 
 def wrap_words(text, maxc):
@@ -2970,24 +2963,6 @@ def drag_steps(d, step):
     so a finger moved a pixel either way scrolls nothing. A drag that
     carries its remainder advances its anchor by `drag_steps(d, step) * step`."""
     return d // step if d >= 0 else -(-d // step)
-
-
-def row_drag(anchor, py, step, top, top_max):
-    """PURE row-snapped drag scrolling, the Settings-rows contract: a held
-    vertical drag moves the window one row per `step` pixels of travel, finger
-    up scrolls the content down, and the sub-step remainder stays anchored so
-    a slow drag still crosses a row. `anchor` is the finger y the pending
-    travel is measured from, `top` the first visible row, `top_max` the
-    largest `top` the list allows. Returns (anchor, top); the caller marks
-    dirty when `top` moved."""
-    delta = anchor - py
-    while delta >= step and top < top_max:
-        top += 1
-        delta -= step
-    while delta <= -step and top > 0:
-        top -= 1
-        delta += step
-    return py + delta, top
 
 
 # The largest physical-buffer rotation any canvas has (host 1, device
