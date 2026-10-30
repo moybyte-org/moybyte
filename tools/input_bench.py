@@ -48,9 +48,10 @@ plus its key event, a typed character its byte as the key level while down
 
 **A scratch project.** Every row that types, pastes, finds, draws or edits
 runs on `Bench Scratch` (a copy of Star Catcher) or `Bench Scratch Blocks` (a
-copy of Coin Quest), which the bench makes at setup; the long note, the
-console script and My Art's drawings are `Bench Scratch` too. A seed cart is never opened for
-writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
+copy of Coin Quest), which the bench makes fresh at setup, first removing any
+an earlier run left (so the paste rows never grow the document a later run
+types into); the long note, the console script and My Art's drawings are
+`Bench Scratch` too. A seed cart is never opened for writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
 the note, the script and every doc the run made, and puts back the home's
 arrangement and tab, the theme's text and a `--theme` run's theme or wallpaper, the console's name, the clipboard,
 full-screen windows, PERF DIAG, and every wrapper; it leaves the board on
@@ -633,6 +634,25 @@ if _ib is not None:
         except AttributeError:
             pass
     ws._ib = None
+"""
+
+# The scratch content an earlier run left (one stopped before its cleanup, or
+# one whose cleanup found the content already there), removed before the
+# snapshot: every run starts on fresh copies, and the cleanup removes them.
+SCRATCH_RESET = r"""
+import os as _os
+_ib_desk()
+for _c in [c for c in ws.carts.all if c.get('title') in (%r, %r)]:
+    ws.carts.delete(_c)
+for _k in ('docs', 'drawings'):
+    for _n in (ws.carts_store.list_files(_k, ws.carts_root) or ()):
+        if not _n.startswith(%r):       # the note, the script, the drawings
+            continue
+        for _f in (ws.carts_store.file_path, ws.carts_store.history_path):
+            try:
+                _os.remove(_f(_k, _n, ws.carts_root))
+            except OSError:
+                pass
 """
 
 # What the run found at setup, to put back (`SNAPSHOT`) and the putting back
@@ -1382,6 +1402,9 @@ class Bench:
                 json.dump(self.rows, f)
 
     def setup(self, theme=None):
+        slug = SCRATCH.lower().replace(" ", "_")      # the store's name for the title
+        self.ex(SCRATCH_RESET % (SCRATCH, SCRATCH + " Blocks", slug),
+                settle=0.5, strict=True)
         self.ex(SNAPSHOT, strict=True)
         if theme == "picture":
             # a picture wallpaper the size of the glass, over the theme in
