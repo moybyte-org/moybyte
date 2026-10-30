@@ -548,7 +548,9 @@ def code(loop, info):
         out = []
         n = 0
         t0 = time.ticks_ms()
-        while time.ticks_diff(time.ticks_ms(), t0) < ms:
+        # the window's frames, not only its milliseconds: a loaded host
+        # (preflight's xdist) fits fewer frames into the same time
+        while time.ticks_diff(time.ticks_ms(), t0) < ms or n < @MIN_FRAMES@:
             if n % 4 == 0:
                 ed.key(keys[(n // 4) % len(keys)])
                 ws.mark_dirty()
