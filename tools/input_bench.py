@@ -536,12 +536,6 @@ def _ib_cart(title):
 def _ib_editor(title, tab=None, ws_key=None):
     _ib_desk()
     ws.open_in_editor(_ib_cart(title))
-    # the Editor a window, whatever this board last left it as (`win_full`):
-    # "Code full screen" is the rows that take it full (_ib_full)
-    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
-    if _w is not None and getattr(_w, 'full', None) is not None and _w.full():
-        ws.wm.bring_forward('menu')
-        ws.wm.full_key()
     if ws_key is not None:
         d = getattr(ws.editor_app, '_desk', None)
         if d is not None and d() is not None:
