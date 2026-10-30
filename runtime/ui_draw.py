@@ -911,9 +911,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # (hilite on the selected row only, drawn by `moy_chrome`'s C) and
 # `achievements_ui._draw_achievements` (a leading glyph, a locked/dim look
 # that IS `disabled`). `cell` answers a thumbnail with a centred caption and
-# `cards_layer._draw_choice_icons` / `_draw_bg_thumbs` (frame-only cells whose
-# picture is bespoke) -- which is why `cell` RETURNS the art rect instead of
-# trying to own every picture.
+# a frame-only cell whose picture is bespoke -- which is why `cell` RETURNS the
+# art rect instead of trying to own every picture.
 
 
 def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
@@ -1042,8 +1041,8 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     none of them. It draws the FRAME -- which is the part that is copied 16
     times -- and hands back where the picture goes.
 
-    A grid hit-tests arithmetically (`FileGridView.tap`,
-    `cards_layer._choice_cells`); `state` is its cell's cue.
+    A grid hit-tests arithmetically (`FileGridView.tap`); `state` is its
+    cell's cue.
 
       `pad`        inset of the art (default `CELL_PAD * fs`; `FileGridView` 2,
                    the wallpaper cards `3 * fs`, a frame-only cell 0).
@@ -1069,8 +1068,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
 
     Default draw order is field -> caption -> edge -> icon/glyph, so the
     caller's art (drawn after, into the returned rect) never sits under the
-    border and the border never sits under the art -- which is what
-    `cards_layer._draw_bg_thumbs` already does by hand.
+    border and the border never sits under the art.
     """
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0) | (_F_BAND if band else 0) | (

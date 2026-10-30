@@ -71,9 +71,9 @@ class Project(ProjectStore):
 
     def record_config(self, key, old, new):
         """Record one field's old/new value (#111): called by every config
-        mutation point (Workstation.adjust's left/right stepper, the CardsLayer
-        choice-cell tap) AFTER the field is already written, mirroring the
-        paint/map/scene record() contract. A same-value set records
+        mutation point (`SettingsPage._set`: a key's step, a slider's drag,
+        a picker tile's tap) AFTER the field is already written, mirroring
+        the paint/map/scene record() contract. A same-value set records
         nothing."""
         if old != new:
             self.config_hist.record({"k": key, "o": old, "n": new})

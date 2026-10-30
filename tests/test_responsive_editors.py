@@ -566,17 +566,15 @@ def test_cards_editor_320x240_is_byte_identical(tmp_path):
     assert a == b
 
 
-def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
-    """At 960x600 the cards view band grows (more cards visible before scrolling)
-    and the cards span the full width."""
-    from runtime import cards_layer as CL
+def test_cards_editor_fills_a_large_canvas(tmp_path):
+    """At 960x600 the Config tab's page spans the content rect under the bar
+    (the cards' rows run its full width)."""
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     _enter(ws, "cards")
     lay = ws.cards_layer.layout
-    assert lay.view_bottom - lay.card_y0 > CL._CARD_VIEW_BOTTOM - CL._CARD_Y0
-    assert lay.card_w > CL._CARD_W
+    assert (lay.cx, lay.cw) == (ws.layout.cx, ws.layout.cw) and lay.cw > 320
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3

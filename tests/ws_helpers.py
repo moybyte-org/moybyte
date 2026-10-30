@@ -333,6 +333,17 @@ def settings_box(ws, label):
     return ws.cards_layer.page().host.box(label)
 
 
+def step_card(ws, d):
+    """Step the Settings page's focused card (its first, on a fresh open)
+    `d` steps with right (or left), as the keys do."""
+    from runtime import host_app
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    for _ in range(abs(d)):
+        drv.press("right" if d > 0 else "left")
+        drv.frame(1 / 30)
+
+
 def seed_stories(ws, n=14):
     """`n` stories in the console's user files, each its own first slide (a
     caption naming it on a ground of its own colour), dated a second apart

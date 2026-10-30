@@ -1,4 +1,4 @@
-"""The Config tab's ADVANCED row -- a project's own files, as files (step 5 of
+"""The Config tab's Files -- a project's own files, as files (step 5 of
 docs/text_editing_2026-09.md).
 
 The rule the whole step exists to keep: **the loader stays in the loop.** A
@@ -48,40 +48,55 @@ def _frame(ws):
 
 
 def _row_named(cl, ws, name):
-    """The Files page's row for file `name`, as its last frame drew it."""
+    """The Files table's row for file `name`, as its last frame drew it."""
+    from runtime import ui_draw
     _frame(ws)
-    rect = cl._files_host.box(name)
-    if rect is None:
+    names = cl.files["names"]
+    if name not in names:
         raise AssertionError("%r not listed: %r" % (name, cl.files["rows"]))
-    return rect
+    y0, rh, view, _px, _side = ui_draw._C.api_table_rows(cl._files_host.ctx)
+    return (view[0], y0 + names.index(name) * rh, view[2], rh)
 
 
-# -- the row --------------------------------------------------------------
+def _tap(cl, ws, rect):
+    """A tap in `rect` of the Config tab, pressed and released over frames."""
+    x, y = rect[0] + rect[2] // 2, rect[1] + rect[3] // 2
+    ws.pointer.down = True
+    cl.handle_pointer(x, y, True)
+    _frame(ws)
+    ws.pointer.down = False
+    cl.handle_pointer(x, y, False)
+    _frame(ws)
+    _frame(ws)
 
 
-def test_the_advanced_row_is_the_last_row_of_the_card_column(tmp_path):
+def _press(ws, cl, name):
+    """Button `name` pressed for one frame, through the tab's input."""
+    ws.input.begin_frame()
+    ws.input.set_held(name, True)
+    ws.input.begin_frame()
+    cl.handle_input(ws.input)
+    ws.input.set_held(name, False)
+
+
+# -- the door -------------------------------------------------------------
+
+
+def test_files_is_the_last_door_on_the_page(tmp_path):
+    from ws_helpers import settings_box
     ws = build_ws(tmp_path)
-    cl = _on_config(ws, _project(ws))
-    rows = cl._card_layout()
-    assert [r["advanced"] for r in rows] == [False, True]
-    assert cl.card_text(rows[-1]["i"]) == "ADVANCED: FILES IN THIS PROJECT"
-    # it is a door, not a stepper: nothing about the config moves when it is
-    # selected and the -/+ arrives.
-    cl.msel = rows[-1]["i"]
-    before = dict(ws.project.config)
-    ws.adjust(1)
-    ws.adjust(-1)
-    assert dict(ws.project.config) == before
+    _on_config(ws, _project(ws))
+    card = settings_box(ws, "lives")
+    files = settings_box(ws, "Files")
+    assert card is not None and files is not None
+    assert files[1] > card[1]
 
 
-def test_a_cart_with_no_edit_schema_still_has_the_row(tmp_path):
-    """The card column used to be empty for such a cart, so the ADVANCED row
-    would have had nowhere to live."""
+def test_a_cart_with_no_edit_schema_still_has_files(tmp_path):
+    from ws_helpers import settings_box
     ws = build_ws(tmp_path)
-    cl = _on_config(ws, _project(ws, "Bare", edit=[]))
-    rows = cl._card_layout()
-    assert len(rows) == 1 and rows[0]["advanced"]
-    _frame(ws)                                   # and it draws
+    _on_config(ws, _project(ws, "Bare", edit=[]))
+    assert settings_box(ws, "Files") is not None
 
 
 def test_the_row_opens_on_a_tap_and_on_A_and_backs_out(tmp_path):
@@ -140,6 +155,100 @@ def test_the_row_lists_the_project_folder(tmp_path):
         assert name in rows, rows
     assert not [r for r in rows if r.endswith(".bak")]
     _frame(ws)                                   # the panel draws
+
+
+def test_the_list_is_a_table_of_scripts_then_the_rest(tmp_path):
+    """One row a file: its icon, its name and the tab it opens in, the
+    cart's scripts first."""
+    ws = build_ws(tmp_path)
+    cart = _project(ws, "Order")
+    (Path(cart["path"]) / "sprites.moygfx").write_text("0" * 8)
+    cl = _on_config(ws, ws.carts.reload(cart))
+    cl._open_files()
+    names = cl.files["names"]
+    assert names[0] == cart["main"]
+    assert sorted(names) == sorted(cl.files["rows"])
+    cells = dict(zip(names, cl.files["cells"]))
+    assert cells[cart["main"]] == ("code", cart["main"], "Code")
+    assert cells["sprites.moygfx"] == ("sprite", "Sprites", "Art")
+    assert cells["config.json"] == ("doc", "config.json", "Text")
+    _row_named(cl, ws, "config.json")            # the table draws its rows
+
+
+def test_the_keys_and_the_trackball_step_the_list_and_open_a_row(tmp_path):
+    """Down and the trackball move the current row; A, Enter and the
+    trackball's click open it; a frame's keys never open a row they only
+    moved to."""
+    ws = build_ws(tmp_path)
+    cart = _project(ws)
+    cl = _on_config(ws, cart)
+    drv = host_app.ConsoleDriver(ws)
+    cl._open_files()
+    drv.frame(1 / 30)
+    want = cl.files["names"].index("config.json")
+    assert want > 1
+    drv.press("down")
+    drv.frame(1 / 30)
+    assert cl.files["cur"] == 1 and cl.files is not None
+    drv.pan(0, 1)                                # the trackball, rolled down
+    while cl.files["cur"] < want:
+        drv.frame(1 / 30)
+    drv.pan(0, 0)
+    drv.frame(1 / 30)
+    assert cl.files is not None and cl.files["cur"] == want
+    drv.ball_click()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.wm.top_is_player() and ws.player.ns["ed"].name() == "config.json"
+
+    ws._exit_to_caller()
+    cl._open_files()
+    drv.frame(1 / 30)
+    drv.press("a")                               # A on the first row: the main script
+    drv.frame(1 / 30)
+    assert cl.files is None and ws.editor_app.tab == "code"
+
+
+def test_a_tap_on_a_row_opens_it(tmp_path):
+    ws = build_ws(tmp_path)
+    cart = _project(ws)
+    cl = _on_config(ws, cart)
+    drv = host_app.ConsoleDriver(ws)
+    cl._open_files()
+    x, y, w, h = _row_named(cl, ws, cart["main"])
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert cl.files is None and ws.editor_app.tab == "code"
+
+
+def test_a_row_that_does_not_open_says_so_under_the_list(tmp_path):
+    ws = build_ws(tmp_path)
+    cart = _project(ws, "Odd")
+    path = Path(cart["path"])
+    (path / "extras").mkdir()
+    (path / "extras" / "notes.bin").write_text("x")
+    cl = _on_config(ws, ws.carts.reload(cart))
+    cl._open_files()
+    cl._files_open("extras/notes.bin")           # a name no tab claims
+    assert cl.files["msg"] == "Nothing on this console opens that file."
+    _row_named(cl, ws, "config.json")            # the list draws over its line
+    assert ws.wm.top_kind() == "menu" and ws.cart_error is None
+
+
+def test_an_unreadable_folder_lists_nothing_and_says_why(tmp_path):
+    ws = build_ws(tmp_path)
+    cl = _on_config(ws, _project(ws))
+
+    def _boom(*_a):
+        raise OSError("gone")
+    ws.carts_store = type("S", (), {"project_kind": staticmethod(_boom),
+                                    "multi_script": staticmethod(lambda c: False),
+                                    "cart_sources": staticmethod(lambda c: ())})()
+    cl._open_files()
+    assert cl.files["names"] == () and cl.files["msg"]
+    _frame(ws)                                   # the empty page draws
+    assert ws.cart_error is None
 
 
 # -- the router -----------------------------------------------------------
@@ -340,36 +449,79 @@ def test_an_invalid_manifest_is_refused_on_the_soft_save_and_written_on_exit(
     assert "broken" not in ws.project.cart
 
 
+def _broken(ws):
+    """A project whose manifest will not parse, opened from the launcher."""
+    cart = _project(ws, "Fixme")
+    (Path(cart["path"]) / "manifest.json").write_text("{ oops")
+    ws.carts.rescan()
+    cart = next(c for c in ws.carts.all if c["path"].endswith("fixme.moy"))
+    assert ws.select_cart(cart)
+    ws.open()
+    return cart
+
+
 def test_a_broken_manifest_keeps_the_project_openable_with_a_way_back(tmp_path):
     """The failure this step had to remove: `load()` used to return None for an
     unparseable manifest, so the project left the shelf and the file that broke
     it became unreachable."""
     ws = build_ws(tmp_path)
-    cart = _project(ws, "Fixme")
-    (Path(cart["path"]) / "manifest.json").write_text("{ oops")
-    ws.carts.rescan()
-
-    cart = next(c for c in ws.carts.all if c["path"].endswith("fixme.moy"))
+    cart = _broken(ws)
     assert cart["broken"].startswith("manifest.json: ")
     assert cart["title"] == "local.fixme"            # its folder, since nothing else
     assert cart in ws.files_app._nav.projects()      # still an editable project
 
     # a launcher TAP does not run it (there is no manifest to run it BY) -- it
     # opens where it can be fixed.
-    assert ws.select_cart(cart)
-    ws.open()
     assert ws.wm.top_kind() == "menu"
     assert ws.editor_app.tab == "cards"              # Config, whatever the schema
     cl = ws.cards_layer
     assert cl._broken() == cart["broken"]
-    _frame(ws)                                       # the banner draws
+    _frame(ws)                                       # the page draws: why, and Files
+    assert ws.cart_error is None
+    assert cl._why[0] == cart["broken"] and cl._why[2]
+    assert cl._fix_host.box("Files") is not None
 
-    # and the ADVANCED row leads back to the file that broke it
+    # and Files leads back to the file that broke it
     cl._open_files()
     assert "manifest.json" in cl.files["rows"]
     cl._files_open("manifest.json")
     _frame(ws)
     assert ws.player.ns["ed"].mode() == text_modes.JSON
+
+
+def test_a_broken_manifests_files_opens_on_a_tap_and_on_A_and_B_comes_back(tmp_path):
+    ws = build_ws(tmp_path)
+    _broken(ws)
+    cl = ws.cards_layer
+    _frame(ws)
+    _tap(cl, ws, cl._fix_host.box("Files"))
+    assert cl.files is not None and "manifest.json" in cl.files["names"]
+
+    _press(ws, cl, "b")                              # B: back to the broken page
+    assert cl.files is None
+    _frame(ws)
+    assert cl._fix_host.box("Files") is not None
+
+    _press(ws, cl, "a")                              # A: its one door, never PLAY
+    assert cl.files is not None
+    assert ws.wm.top_kind() == "menu"
+    _press(ws, cl, "b")
+    _frame(ws)
+
+    _press(ws, cl, "b")                              # B on the page leaves the Editor
+    _frame(ws)
+    assert ws.wm.top_kind() != "menu"
+
+
+def test_a_broken_manifest_draws_on_the_desk(tmp_path):
+    from ws_helpers import build_desktop_ws
+    ws = build_desktop_ws(tmp_path)
+    _broken(ws)
+    cl = ws.cards_layer
+    for _ in range(3):
+        _frame(ws)
+    assert ws.cart_error is None
+    assert cl._fix_host.box("Files") is not None
 
 
 # -- the store kind -------------------------------------------------------

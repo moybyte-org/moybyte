@@ -246,15 +246,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
-# The "Make it mine" config-card editor surface (#3/#15 -- see cards_layer.py).
-# cards_layer.py is the single source of the card geometry constants (_CARD_*);
-# the ones tests resolve as console._X are imported back here. CART STATE stays
-# on Workstation: ws.config / ws.apply / ws.adjust; CardsLayer mutates ws.config
-# in place + dispatches through them.
+# The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
+# STATE stays on Workstation: ws.config / ws.apply; the tab's page mutates
+# ws.config in place.
 try:
-    from cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
+    from cards_layer import CardsLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
+    from runtime.cards_layer import CardsLayer
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
@@ -1537,7 +1535,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                               str(name), mode)
         # Back to whoever asked, not home: Files opened this, so its X returns
         # to the shelf the person was standing on, and the Editor's Config tab
-        # (step 5's ADVANCED row) gets back the tab it left.
+        # (step 5's Files) gets back the tab it left.
         caller = (self.editor_app if self.wm.top_is("menu")
                   else self._apps_by_id.get(self.wm.top_kind()))
         if not self._open_workspace(cart):
@@ -1548,7 +1546,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_project_file(self, cart, name, mode=None):
         """Open one of a PROJECT's own files in the text app -- the Config tab's
-        ADVANCED row, and the Files router's door for a project file reached
+        Files, and the Files router's door for a project file reached
         from the PROJECTS root (step 5 of docs/text_editing_2026-09.md).
 
         It goes through the EDITOR, not straight into the handle, and that is
@@ -2454,7 +2452,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
-        self.cards_layer.reset()      # fresh card selection/scroll for the new cart
+        self.cards_layer.reset()      # no file list or dialog carried to the new cart
         self.editor = None
         self.code_file = None         # a new cart opens on ITS main file, never on
                                       # the name the last one was left showing
@@ -2681,7 +2679,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_image(self, name, kind=None, cart=None):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files
-        router and by the Editor's ADVANCED files row alike (#108).
+        router and by the Config tab's Files alike (#108).
 
         `cart` names a project whose OWN image this is (`images/<name>.moyimg`,
         or its `cover.png`): Paint then reads and writes it on that project's
@@ -3228,13 +3226,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # was, and nothing below changes for it. A PICO-8 port is not: it arrives as
     # p8.lua (the generated layer), main.lua (the game) and one file per PICO-8
     # tab, and until now the two thirds of it that are not main.lua were
-    # reachable only through the Config tab's ADVANCED row -- which opens them
+    # reachable only through the Config tab's Files -- which opens them
     # in the text handle, where there is no PLAY, no journal and no
     # crash-to-code. A crash reported at `p8.lua:412:` threw the kid at a tab
     # that could not show line 412.
     #
     # There is deliberately NO create verb here. The file list is a list; the
-    # one door that adds a script is the Config tab's ADVANCED row, where a
+    # one door that adds a script is the Config tab's Files, where a
     # project's own folder already lives (docs/text_editing_2026-09.md step 5).
 
     def code_sources(self):
@@ -3648,43 +3646,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     keep.append(c)
             carts = keep
         return [new_tile()] + list(carts)
-
-    def adjust(self, d):
-        # Config mutation stays on Workstation (ws.config is the single source of cart
-        # state); the CARD selection lives on cards_layer, so read msel from there.
-        fields = self.cart.get("edit") or []
-        if self.cards_layer.msel >= len(fields):
-            return                     # the ADVANCED row: a door, not a stepper
-        f = fields[self.cards_layer.msel]
-        # #94: a malformed field definition (bad type, min>max, missing/empty
-        # choices, ...) must not crash left/right stepping -- this is the ONE
-        # call site draw()'s try/except doesn't cover (a d-pad press routes
-        # here directly, not through _draw_cards). _validate_field is the same
-        # check cards_layer uses to swap the card for an inline "!" message; a
-        # kid who navigated onto that card with up/down just can't step it.
-        if self.cards_layer._validate_field(f):
-            return
-        key = f["key"]
-        cur = self.config.get(key, f.get("default"))
-        try:
-            if f["type"] == "int":
-                v = int(cur) + d * f.get("step", 1)
-                if "min" in f:
-                    v = max(f["min"], v)
-                if "max" in f:
-                    v = min(f["max"], v)
-                self.config[key] = v
-                self.project.record_config(key, cur, v)   # #111 phase 4
-            elif f["type"] == "choice":
-                ch = f["choices"]
-                idx = ch.index(cur) if cur in ch else 0
-                v = ch[(idx + d) % len(ch)]
-                self.config[key] = v
-                self.project.record_config(key, cur, v)   # #111 phase 4
-        except (TypeError, ValueError, KeyError):  # noqa: BLE001 -- a bad current
-            # value (e.g. a non-numeric default some other bug left behind) must
-            # not crash the frame loop either; the -/+ just becomes a no-op.
-            pass
 
     def _leave_or_home(self, leave):
         """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by

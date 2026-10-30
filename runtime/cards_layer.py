@@ -1,39 +1,34 @@
 # Map (grep -n a name to jump there):
 #   _Prompt                  one open dialog and what OK does
-#   -- card geometry         the cards' constants (console.py imports them back)
-#   CardsLayout              responsive "Make it mine" geometry
-#   CardsLayer               the cards content layer: draw, input, prompts
-#   CardsLayer.scroll_cards  scroll the cards window
-"""The "Make it mine" config-card editor (#3/#15), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
+#   CardsLayout              the Config tab's content rect under the bar
+#   CardsLayer               the Config tab: its pages, input, prompts
+#   CardsLayer._draw_cards   the page the tab shows: the files, a broken manifest, the cards
+#   CardsLayer._draw_files   the project's files, a placed `ui.table`
+"""The Editor's Config tab ("Make it mine", #3/#15) as its own Layer.
 
-The cards surface is the kid's read-light way to tune a cart: each `edit` field is a
-card the child steps with -/+ (or taps a picture for choice/sprite/bg pickers), then
-PLAY (in the unified bar) re-runs + persists the cart. This module owns the card
-DRAWING, the per-card LAYOUT/geometry, the scroll window (msel/mtop), and the tap/
-scroll/keyboard handling. Stage-4 bar rollout / fix B dissolved its own GO/CODE/CLOSE
-buttons into the bar (PLAY / the Code tab / the context X) and reflowed the cards to
-fill the FULL width below the 18px bar (no centered mini-panel).
+It shows one of three pages on the public UI verbs, each in the content
+rect under the bar:
 
-Boundary (the anti-spaghetti line, per the doc): CART STATE lives on the open
-Project -- the Config tab reads its DATA through the injected workspace,
-`ws.project.config`/`ws.project.cart`/`ws.project.sheet` (Stage 3 of
-docs/history/shell_ux_technical_plan_v1.md moved the tabs' data reach-through off the ws.*
-god-API onto Project; the ws.config/ws.cart forwards stay as tested surface). It is
-the single source of truth, and `ws.apply` re-runs the cart. CardsLayer never OWNS
-config; it mutates ws.project.config in
-place and dispatches the stepping through `ws.adjust(...)` (which reads this layer's
-`msel` to know which card is selected) and re-runs via `ws.apply()`. The card-only
-constants live here (single source; console.py imports them back so tests + a couple
-of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (palette)
-and `_err_text` are injected at construction (the same circular-import dodge the
-other extracted UIs use); the rect hit-test is `ui.rect_in`, imported directly. Shared draw toolkit (ws._glyph/_icon_btn)
-stays on Workstation; the bar draws through it via self.ws.
+- the cards, `editor_settings.SettingsPage`: the cart's `edit` fields, then
+  This project's doors, Cart info and Files;
+- a cart whose manifest did not parse (`moy_carts.load` keeps it on the
+  shelf with its reason in `cart["broken"]`): `ui.empty` with the reason, and
+  Files, the door to the file that broke it;
+- the project's files (Files, from either page): a placed `ui.table` that
+  ROUTES each file to what opens it.
 
-Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu") LAST
-(chrome over content) so the Editor's lent top-bar zone (the tab ladder + PLAY,
+CART STATE lives on the open Project: the tab reads `ws.project.config` /
+`ws.project.cart` / `ws.project.sheet`, mutates the config in place through
+the page (`Project.record_config` keeps the undo), and PLAY in the bar re-runs
+the cart. Two of the cards' helpers stay here for the page: `_validate_field`
+(a field that fails it stays off the page, #94) and `draw_choice` (a picker
+tile's picture). `NAMES` (the palette) and `_err_text` are injected at
+construction, the circular-import dodge the other extracted UIs use.
+
+draw() calls ws.bar_layer._draw_status_strip("menu") LAST (chrome over
+content), so the Editor's lent top-bar zone (the tab ladder + PLAY,
 EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
-ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests.
+ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 """
 
 try:
@@ -54,18 +49,14 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import text_modes as _modes
 
 try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import LayoutBase
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
-
+    from runtime.layout_base import LayoutBase
 
 try:
     from widgets import arm_prompt as _arm_prompt
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import arm_prompt as _arm_prompt
-
-_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 class _Prompt:
@@ -129,38 +120,15 @@ class _Prompt:
 
 
 
-# -- card geometry (single source; console.py imports these back) -------------
-# Stage-4 bar rollout / fix B: the Config screen's own GO / CODE / CLOSE buttons are
-# GONE -- PLAY (bar) runs + persists the config, the Code tab is in the ladder, and the
-# context X exits. Freed of that bottom button bar, the "Make it mine" cards fill the
-# FULL 320 x (240-18) below the unified bar (fix C), not a small centered panel.
-_CARD_X = 12
-_CARD_W = 286
-_CARD_Y0 = 44
-_CARD_H = 20
-# Cards-menu scroll window (#3): cards lay out from _CARD_Y0 down; rows whose bottom
-# would pass _CARD_VIEW_BOTTOM are scrolled off. With the button bar gone the view now
-# runs almost to the screen floor. A small up/down chevron strip on the right scrolls.
-_CARD_VIEW_BOTTOM = 232
-_CARD_SCROLL_UP = (300, 44, 16, 14)     # tap to scroll cards up (toward the top)
-_CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
-# The header "INFO" button (#94): opens the CART INFO modal (title/author manifest
-# editing -- the tracker's gap 2). Sits in the header row (y=21..35), clear of both
-# the "MAKE IT MINE" label (ends ~x234 at scale 2) and the scroll chevrons (y>=44).
-_CARD_INFO_BTN = (278, 21, 36, 14)
-
-
-# The ADVANCED row (step 5 of docs/text_editing_2026-09.md): the last row of the
-# card column, and the ONE door to a project's own files AS FILES. It is here
-# rather than in the Files app because the loader has to stay in the loop -- what
-# it opens is reached through the Editor, which re-reads the folder on the way
-# back (Workstation.open_project_file).
-_ADVANCED_ROW = "ADVANCED: FILES IN THIS PROJECT"
-
+# The project's files (step 5 of docs/text_editing_2026-09.md) are reached from
+# the Config tab rather than the Files app because the loader has to stay in the
+# loop -- what it opens is reached through the Editor, which re-reads the folder
+# on the way back (Workstation.open_project_file).
+#
 # A project file that is an ASSET is opened by the TAB that owns it, never as
-# text -- the row is a router, not a viewer. `images/` is deliberately absent: a
+# text -- the list is a router, not a viewer. `images/` is deliberately absent: a
 # cart's image assets are copies the WALL/GAME flow made from a drawing and no
-# tab edits one in place, so the row says so instead of opening the wrong editor.
+# tab edits one in place, so a picture takes the picture door instead.
 _ASSET_TABS = {
     "sprites.moygfx": "paint",
     "map.moymap": "map",
@@ -169,9 +137,9 @@ _ASSET_TABS = {
 }
 _ASSET_SUBDIR_TABS = {"scenes": "scene"}
 
-# The last row of that list on a cart whose runtime runs more than one script:
-# the ONE door that adds a file to a cart (#89). A sentinel rather than a real
-# name, because the list's rows come from the store and a real file could be
+# The last code row of that list on a cart whose runtime runs more than one
+# script: the ONE door that adds a file to a cart (#89). A sentinel rather than a
+# real name, because the list's rows come from the store and a real file could be
 # called anything -- including this.
 _NEW_ROW = "New script"
 
@@ -183,79 +151,37 @@ _TAB_WORDS = {"code": "Code", "paint": "Art", "map": "World", "music": "Sound",
 _TAB_ICONS = {"code": "code", "paint": "sprite", "map": "map", "music": "music",
               "blocks": "blocks", "scene": "scene"}
 _FILES_HINTS = ("confirm", "Open", "back", "Back")
+# The file table's columns: a picture column (each row's icon), the file's
+# name, the tab it opens in -- no header row.
+_FILE_COLS = ("", "", "")
+# A broken manifest's page: its one door, and its keys.
+_FIX_HINTS = ("confirm", "Files", "back", "Back")
 # The dialogs' lines: the one under the title, and why one stayed open.
 _PROMPT_SUB = {"tone": "dim", "wrap": True, "lines": 2}
 _PROMPT_MSG = {"tone": "danger", "wrap": True, "lines": 2}
-
-
-# The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
-# toolkit cannot resolve a widget kind against it without help. Same answer as
-# `code_layer._as_theme`: carry the role names the toolkit looks up, each
-# pointing at a role this surface already had. A card row is then an ordinary
-# "row_chrome" -- bright label at rest, the selection wash when it is the one
-# being stepped -- and a theme reaches it (#207).
-def _as_theme(t):
-    """Add the ui-toolkit token aliases to a tone map, in place."""
-    t["chrome_ink"] = t["text"]         # row_chrome REST ink
-    t["hilite"] = t["row"]              # row_chrome ON field
-    t["selection_ink"] = t["sel_text"]  # row_chrome ON ink
-    return t
+# The file list's line saying why a row did not open.
+_FILES_MSG = {"tone": "danger"}
 
 
 class CardsLayout(LayoutBase):
-    """Responsive "Make it mine" geometry (#39 step 3): the full-width panel, the
-    card column + scroll chevrons, the per-display card heights and the picture-cell
-    sizes, derived from the SYSTEM canvas size (w, h) + font scale.
-
-    The T-Deck's 320x240 is laid out by the same formulas as every canvas. A bigger panel shows MORE cards at once (the
-    view band grows) and the cards span its full width."""
-
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
-                 chrome_scale=None):
-        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
-        fs = self.fs
-        top = self.cy                 # the content rect, under any bar
-        self.body = (self.cx, top, self.cw, self.ch)
-        x0, r = self.cx, self.cx + self.cw
-        self.head_glyph = (x0 + 8 * fs, top + 4 * fs, 14 * fs, 14 * fs)
-        self.head_xy = (x0 + 26 * fs, top + 4 * fs)
-        self.card_x = x0 + _CARD_X * fs
-        self.card_w = self.cw - 34 * fs
-        self.card_y0 = top + 26 * fs
-        self.card_h = _CARD_H * fs
-        self.view_bottom = self.cy + self.ch - 8 * fs
-        self.scroll_up = (r - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
-        self.scroll_dn = (r - 20 * fs, self.view_bottom - 18 * fs,
-                          16 * fs, 14 * fs)
-        # The INFO chip's label sits at its corner's pads (`ui_draw.mini_btn`,
-        # 2 px each side): the chip holds the `ui` face's line between them.
-        line = _ui_draw.font()[2] * fs
-        self.info_btn = (r - 44 * fs, top + 3 * fs, 40 * fs, max(14 * fs, line + 4))
-        # `lead` is what that line takes past an 8-row cell (0 for a pixel
-        # face): a card's pictures, under its label, move down by it.
-        self.lead = max(0, line - 8 * fs)
-        lead = self.lead
-        self.gap = 2 * fs
-        # Per-display card heights (#15): sprite/bg picker cells, icon choices,
-        # gauge/count meters -- all scale with the font so the pictures stay tappable.
-        self.h_cells, self.h_icons, self.h_meter = (44 * fs + lead, 36 * fs + lead,
-                                                    32 * fs + lead)
+    """The Config tab's geometry: the content rect under the bar (`cx`,
+    `cy`, `cw`, `ch`) its pages draw in, from the SYSTEM canvas size and
+    font scale, the T-Deck's 320x240 by the same formulas as every canvas."""
 
 
 class CardsLayer:
-    """The cards ("Make it mine") content Layer (SYSTEM domain, responsive #39
-    step 3): a full-screen panel on the reflowed system canvas (the frozen-cart
-    backdrop is gone -- the panel always covered every pixel of it anyway).
-    handle_input/handle_pointer own the selection + scroll and dispatch config
-    edits to ws.adjust / the run to ws.apply, hit-testing in SYSTEM coords."""
+    """The Config tab's content Layer (SYSTEM domain): its page fills the
+    content rect under the bar on the reflowed system canvas, and
+    handle_input/handle_pointer hand the frame's input to the page on show,
+    hit-testing in SYSTEM coords."""
 
     id = "cards"
     domain = "system"
 
     # A card field MAY carry an optional `display` hint -- "gauge" | "count" |
     # "choice-icons" | "sprite-tiles" | "bg-thumbs" -- that draws the VALUE as a
-    # picture a kid who can't read can recognize, with the number/word kept as a small
-    # SECONDARY cue. When `display` is absent the card renders as one text line.
+    # picture a kid who can't read can recognize (the cell ones as a row of
+    # tiles on the page, `SettingsPage._tiles_row`).
     _DISPLAYS = ("gauge", "count", "choice-icons", "sprite-tiles", "bg-thumbs")
     _CELL_DISPLAYS = ("choice-icons", "sprite-tiles", "bg-thumbs")
 
@@ -263,37 +189,35 @@ class CardsLayer:
         self.ws = ws
         self._NAMES = names
         self._err_text = err_text
-        self.msel = 0                 # selected card in the menu
-        self.mtop = 0                 # first card scrolled into view (#3)
         # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
         # buffer `shift_last` reads holds it as the last draw left it, 1 a
         # window's frame drawn whole, 0 none (the handheld)
         self.vouch = 0
-        self._t = None                # per-draw tone map (set by _draw_cards)
-        self._broken_host = None      # the UI context of a card that failed to draw
+        self._broken_host = None      # the UI context of a page that failed to draw
+        self._fix_host = _ui_draw.AppHost()     # a broken manifest's page's
+        self._why = None              # (its reason, the width, the reason's lines)
         self._files_host = _ui_draw.AppHost()   # the Files page's
-        self._dragv = None            # drag-to-scroll anchor (held vertical drag)
+        self._files_o = {"id": "files"}
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
         # the page under it (`_draw_prompt`); `_rows` is the desk Editor's
         # name for it (its rows frames)
         self._hold = self._rows = _ui_draw.Hold()
-        # The ADVANCED row's file list: None when closed, else
-        # {"rows", "sel", "top", "msg"} -- see _open_files.
+        # The project's file list: None when closed, else `_listing`'s
+        # {"rows", "msg", "names", "cells", "cur"} -- see _open_files.
         self.files = None
         self._page = None             # the cards on the verbs (editor_settings.py)
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
-        a font-scale change."""
+        """Rebuild the geometry (#39 step 3) -- called by ws._relayout on a
+        font-scale change."""
         self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
     def reset(self):
-        """Reset the scroll/selection state (called by ws.open on a fresh cart)."""
-        self.msel = 0
-        self.mtop = 0
+        """Close the file list and any dialog (called by ws.open on a fresh
+        cart)."""
         self.files = None
         if self.prompt is not None:
             # never leak an open dialog across a cart switch
@@ -373,9 +297,9 @@ class CardsLayer:
         """Whether the page drawn last draws the same next frame."""
         if self.files is not None:
             return self._files_host.still()
-        if self._on_verbs():
-            return self._page is None or self._page.host.still()
-        return True
+        if self._broken():
+            return self._fix_host.still()
+        return self._page is None or self._page.host.still()
 
     def _draw_broken(self, text):
         """What a card that failed to draw leaves: the error, exact, under
@@ -395,146 +319,38 @@ class CardsLayer:
             return self._prompt_input(i)
         if self.files is not None:
             return self._files_input(i)
-        if self._on_verbs():
-            page = self.page()
-            if (i.pressed("run") or i.pressed("a")) and not page.on_door():
-                ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
-                return True
-            if page.open_door(i):
-                if self.prompt is not None:
-                    self._hold.opened(ws)  # Cart info over the page as it was
-                return True
-            if page.keys(i):
-                ws._dirty = True
-            ws._leave_or_home(ws.exit)
+        if self._broken():
+            return self._fix_input(i)
+        page = self.page()
+        if (i.pressed("run") or i.pressed("a")) and not page.on_door():
+            ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
             return True
-        n = self._card_count()
-        if not n:
+        if page.open_door(i):
+            if self.prompt is not None:
+                self._hold.opened(ws)  # Cart info over the page as it was
             return True
-        if i.steps("up"):
-            self.msel = (self.msel - 1) % n
-            self._reveal_card(self.msel)
-        if i.steps("down"):
-            self.msel = (self.msel + 1) % n
-            self._reveal_card(self.msel)
-        if i.steps("left"):
-            ws.adjust(-1)
-        if i.steps("right"):
-            ws.adjust(1)
-        if self._is_advanced(self.msel):
-            # The last row is a DOOR, not a stepper: A opens it rather than
-            # playing, the way A opens a row in every other list on the console.
-            if i.pressed("a") or i.pressed("run"):
-                self._open_files()
-            else:
-                ws._leave_or_home(ws.exit)
-            return True
-        # Enter / RUN in Config = PLAY the cart (the bar's PLAY path). The device keyboard
-        # maps Enter (0x0D) to the "a" button and the host maps it to "run", so BOTH must
-        # play here: _leave_menu() -> EditorApp.leave()'s cards branch re-runs the cart with
-        # the freshly-tuned config, persists config.json, and hands it to the Player with the
-        # Editor as the caller (so the cart's exit returns to these cards). This replaces the
-        # old "a" -> Code-editor shortcut (Code is one tap away on the bar ladder) -- that
-        # shortcut is why a device tap of Enter "just entered code" instead of playing.
-        if i.pressed("a") or i.pressed("run"):
-            ws.defer(ws._leave_menu)   # #184: PLAY runs behind the next paint
-        else:
-            ws._leave_or_home(ws.exit)
-        return True
-
-    def _cards_drag(self, px, py):
-        """A held vertical drag on the card column scrolls the list, one card per
-        base-card-height of travel (row heights vary per display kind, so the
-        base height is the step unit; the sub-step remainder stays anchored).
-        Starts on the column, may continue past its edge -- the Settings-rows
-        drag contract."""
-        ws = self.ws
-        lay = self.layout
-        if not ws.pointer.down:
-            self._dragv = None
-            return
-        if self._dragv is None:
-            area = (lay.card_x, self._cards_top(), lay.card_w,
-                    lay.view_bottom - self._cards_top())
-            if not self._cards_scrollable() or not _in(px, py, area):
-                return
-            self._dragv = py
-            return
-        was = self.mtop
-        self._dragv, self.mtop = _ui_draw.row_drag(self._dragv, py,
-                                              max(1, lay.card_h + lay.gap),
-                                              self.mtop, self._max_mtop())
-        if self.mtop != was:
+        if page.keys(i):
             ws._dirty = True
+        ws._leave_or_home(ws.exit)
+        return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if self.prompt is not None:
             return self._prompt_pointer(px, py, click)
-        if self.files is not None:
-            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
-                return True
-            return self._files_pointer(px, py, click)
-        if self._on_verbs():
-            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
-                return True
-            if self.page().point(px, py, click, ws.pointer.down):
-                ws._dirty = True
-            return True
-        # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
-        self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click and _in(px, py, self.layout.info_btn):
-            self._open_meta()
-            return True
-        ci = self._card_at(px, py)
-        if ci is not None:
-            if ci != self.msel:
-                # Hover highlight -- marking dirty on the CHANGE (#177): the
-                # window content freeze reuses the retained buffer on
-                # position-only frames, so an unmarked msel move painted
-                # nothing inside the Editor window (desktop tier + web).
+        if self.files is not None:
+            return self._files_pointer(px, py, click)
+        if self._broken():
+            if self._fix_host.point(px, py, click, ws.pointer.down):
                 ws._dirty = True
-            self.msel = ci
-        if click:
-            # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
-            # the Code tab is in the ladder, the context X exits.
-            if self._cards_scrollable() and _in(px, py, self.layout.scroll_up):
-                self.scroll_cards(-1)
-            elif self._cards_scrollable() and _in(px, py, self.layout.scroll_dn):
-                self.scroll_cards(1)
-            elif ci is not None:
-                self._card_tap(px, py, ci)
+            return True
+        if self.page().point(px, py, click, ws.pointer.down):
+            ws._dirty = True
         return True
 
-    # -- card text / value helpers -------------------------------------------
-
-    def card_text(self, i):
-        ws = self.ws
-        if self._is_advanced(i):
-            return _ADVANCED_ROW
-        f = self._fields()[i]
-        v = ws.project.config.get(f["key"], f.get("default"))
-        if f["type"] == "choice":
-            v = self._choice_label(f, v)
-        t = f.get("card")
-        return t.replace("{value}", str(v)) if t else "%s: %s" % (f["key"].upper(), v)
-
-    def _card_display(self, f):
-        d = f.get("display")
-        return d if d in self._DISPLAYS else None
-
-    def _choice_label(self, f, v):
-        """A short readable label for a choice value -- a kid-friendly word for a
-        string choice, or just the id for tile/number choices."""
-        if isinstance(v, str):
-            return v.replace("_", " ").upper()
-        return str(v)
-
-    def _choice_index(self, f, cur):
-        ch = f["choices"]
-        return ch.index(cur) if cur in ch else 0
+    # -- the cards' helpers: a field's check, a picker's pictures -------------
 
     def _resolve_tiles(self, f):
         """For a `sprite-tiles` field, the list of sprite tile ids its choices map
@@ -551,20 +367,15 @@ class CardsLayer:
                 out.append(0)
         return out
 
-    # -- edit-field validation (#94) -----------------------------------------
-
     def _validate_field(self, f):
         """Sanity-check ONE `edit` field definition: returns a short human
-        reason it can't be drawn/stepped, or None when it's fine. Checked once
-        per row (in _card_height/_card_layout, so every call site that touches
-        `f` before this line goes through it first) and again by ws.adjust
-        before it mutates config, so a bad hand-edited manifest.json/config.json
-        degrades to one inline "!" card + a no-op stepper instead of taking the
-        whole Config tab down -- draw()'s try/except stays as the belt-and-
-        braces net for a genuinely UNFORESEEN crash; this catches the KNOWN-bad
-        shapes (missing key/type, min>max, a zero step, empty/missing choices,
-        an unknown or type-mismatched `display`) with a message a kid's parent
-        (or the kid, tapping past it) can actually read."""
+        reason it can't be drawn/stepped, or None when it's fine. The Settings
+        page (`SettingsPage._fields`) leaves a field that fails it off the
+        page, so a bad hand-edited manifest.json/config.json costs one card,
+        never the Config tab -- draw()'s try/except stays the net for a
+        genuinely UNFORESEEN crash; this catches the KNOWN-bad shapes (missing
+        key/type, min>max, a zero step, empty/missing choices, an unknown or
+        type-mismatched `display`)."""
         if not isinstance(f, dict):
             return "not a card"
         key = f.get("key")
@@ -600,201 +411,7 @@ class CardsLayer:
             return "display needs type choice"
         return None
 
-    # -- geometry / scroll ---------------------------------------------------
-
-    def _card_height(self, f):
-        lay = self.layout
-        if self._validate_field(f):        # a malformed field never reaches
-            return lay.card_h              # _card_display -- see _draw_bad_card
-        d = self._card_display(f)
-        if d in ("sprite-tiles", "bg-thumbs"):
-            return lay.h_cells
-        if d == "choice-icons":
-            return lay.h_icons    # cells are 22px tall at y+12 -> bottom y+34 fits
-        if d in ("gauge", "count"):
-            return lay.h_meter
-        return lay.card_h
-
-    def _fields(self):
-        """The open cart's `edit` schema, or () -- the ADVANCED row means the
-        card column outlives an empty (or unreadable) one."""
-        cart = self.ws.project.cart
-        return (cart.get("edit") or ()) if cart else ()
-
-    def _is_advanced(self, i):
-        """True when card index `i` is the ADVANCED row -- always the last."""
-        return bool(self.ws.project.cart) and i == len(self._fields())
-
-    def _card_layout(self):
-        """Pure (no-draw) per-card geometry for the VISIBLE cards so draw and
-        hit-test agree (#3). Cards lay out top-down from layout.card_y0 starting at
-        the scrolled-in index self.mtop; a row is included only while its bottom
-        stays within layout.view_bottom. Returns dicts: {i, f, display, x, y, w, h,
-        error} -- `error` (#94) is None for a well-formed field, else the short
-        reason _validate_field gave; `display` is forced None on an errored row
-        (_draw_card/_card_tap branch off `error` before ever reading `display`)."""
-        lay = self.layout
-        rows = []
-        y = self._cards_top()
-        top = self._clamp_mtop()
-        fields = self._fields()
-        for i in range(top, self._card_count()):
-            adv = i >= len(fields)
-            f = None if adv else fields[i]
-            err = None if adv else self._validate_field(f)
-            h = self._row_height(i)
-            if i > top and y + h > lay.view_bottom:
-                break                       # next row would spill past the buttons
-            rows.append({"i": i, "f": f,
-                         "display": None if (adv or err) else self._card_display(f),
-                         "x": lay.card_x, "y": y, "w": lay.card_w, "h": h,
-                         "error": err, "advanced": adv})
-            y += h + lay.gap
-        return rows
-
-    def _card_count(self):
-        """Rows in the card column: the cart's `edit` fields plus the ADVANCED
-        row. Zero only when there is no open cart at all."""
-        return (len(self._fields()) + 1) if self.ws.project.cart else 0
-
-    def _row_height(self, i):
-        return (self.layout.card_h if self._is_advanced(i)
-                else self._card_height(self._fields()[i]))
-
-    def _cards_top(self):
-        """Where the card column starts. A BROKEN cart spends one row of it on
-        the reason (see _draw_cards), so every reader of the column -- draw,
-        hit-test and the scroll clamp -- asks here rather than reading card_y0."""
-        lay = self.layout
-        return lay.card_y0 + (10 * lay.fs if self._broken() else 0)
-
-    def _broken(self):
-        """The reason this cart's manifest would not parse, or "" -- what
-        moy_carts.load left behind instead of dropping the project."""
-        cart = self.ws.project.cart
-        return (cart.get("broken") or "") if cart else ""
-
-    def _max_mtop(self):
-        """Topmost card index that still leaves the view full from the bottom up:
-        walk heights backwards, summing until the next card would no longer fit."""
-        lay = self.layout
-        n = self._card_count()
-        if n == 0:
-            return 0
-        avail = lay.view_bottom - self._cards_top()
-        used = 0
-        top = n
-        for i in range(n - 1, -1, -1):
-            h = self._row_height(i)
-            step = h if top == n else h + lay.gap
-            if used + step > avail:
-                break
-            used += step
-            top = i
-        # Never park past the last card: even a card taller than the window must
-        # still be reachable (_card_layout always shows at least the top row).
-        return min(top, n - 1)
-
-    def _clamp_mtop(self):
-        self.mtop = max(0, min(self._max_mtop(), self.mtop))
-        return self.mtop
-
-    def scroll_cards(self, d):
-        """Scroll the cards window by d rows (clamped). Independent of msel."""
-        self.mtop = max(0, min(self._max_mtop(), self.mtop + d))
-
-    def _cards_scrollable(self):
-        """True when not all cards fit at once (so the chevrons are live)."""
-        return self._max_mtop() > 0
-
-    def _reveal_card(self, i):
-        """Scroll so card i is on screen (mirror Launcher._scroll): bring it down
-        into view if it's above the window, or up into view if it's below."""
-        if i < self.mtop:
-            self.mtop = i
-        else:
-            # Page the window down one card at a time until i's row is included.
-            guard = self._card_count()
-            while guard >= 0:
-                if any(r["i"] == i for r in self._card_layout()):
-                    break
-                if self.mtop >= self._max_mtop():
-                    break
-                self.mtop += 1
-                guard -= 1
-        self._clamp_mtop()
-
-    def _choice_cells(self, row):
-        """Tappable cells for a choice-icons / sprite-tiles card: one box per
-        choice, laid out left-to-right under the label. Returns a list of
-        (choice_index, cell_rect)."""
-        f = row["f"]
-        fs = self.layout.fs
-        n = len(f.get("choices", []))
-        if n <= 0:
-            return []
-        if row["display"] == "bg-thumbs":
-            cw, ch = 40 * fs, 26 * fs      # wide thumbnails for background previews
-        elif row["display"] == "sprite-tiles":
-            cw = ch = 26 * fs
-        else:
-            cw = ch = 22 * fs
-        gap = 4 * fs
-        x0 = row["x"] + 4 * fs
-        top = row["y"] + 12 * fs + self.layout.lead
-        cells = []
-        for k in range(n):
-            cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
-        return cells
-
-    # -- taps ----------------------------------------------------------------
-
-    def _card_at(self, px, py):
-        for row in self._card_layout():
-            if _in(px, py, (row["x"], row["y"], row["w"], row["h"])):
-                return row["i"]
-        return None
-
-    def _card_tap(self, px, py, ci):
-        """Apply a tap inside card `ci`. For an icon/sprite picker, tapping a
-        specific choice cell SETS that choice (no scrolling needed -- a kid taps
-        the picture they want). Otherwise the card is a -/+ stepper: the left half
-        decrements, the right half increments (matching the on-card glyphs)."""
-        ws = self.ws
-        for row in self._card_layout():
-            if row["i"] != ci:
-                continue
-            if row.get("advanced"):
-                self._open_files()
-                return
-            if row.get("error"):
-                return                 # a malformed card def can't be stepped (#94)
-            if row["display"] in self._CELL_DISPLAYS:
-                for k, cell in self._choice_cells(row):
-                    if _in(px, py, cell):
-                        f = row["f"]
-                        old = ws.project.config.get(f["key"], f.get("default"))
-                        new = f["choices"][k]
-                        ws.project.config[f["key"]] = new
-                        ws.project.record_config(f["key"], old, new)  # #111 phase 4
-                        return
-            ws.adjust(-1 if px < self.layout.card_x + self.layout.card_w // 2 else 1)
-            return
-
-    # -- draw ----------------------------------------------------------------
-
-    def _tones(self):
-        """Per-draw color roles: the semantic theme tokens on every tier --
-        the Phase 3 tool surface (visual identity v1 Section 10): the surface
-        body, its ink, the authoring accent on the value controls."""
-        th = self.ws.theme_colors
-        return _as_theme(
-               {"body": th["surface"], "edge": th["border"],
-                "head": th["ink"], "text": th["ink"],
-                "sel_text": th["selection_ink"], "row": th["hilite"],
-                "accent": th["author"], "track": th["ink_dim"],
-                "knob": th["ink"], "cell": th["dim"],
-                "cell_edge": th["ink_dim"]})
+    # -- the pages -----------------------------------------------------------
 
     def page(self):
         """The Settings page on the verbs, built at its first draw."""
@@ -807,220 +424,66 @@ class CardsLayer:
                                       (self._open_meta, self._open_files))
         return self._page
 
-    def _on_verbs(self):
-        """Whether the cards draw on the verbs: everywhere but a cart whose
-        manifest is broken and the file list, which keep this layer's own."""
-        return self.files is None and not self._broken()
+    def _broken(self):
+        """The reason this cart's manifest would not parse, or "" -- what
+        moy_carts.load left behind instead of dropping the project."""
+        cart = self.ws.project.cart
+        return (cart.get("broken") or "") if cart else ""
 
     def _draw_cards(self):
+        """The page the tab shows: the file list where it is open, else a
+        broken manifest's, else the cards."""
         ws = self.ws
-        cv = ws.sys_canvas
-        lay = self.layout
-        t = self._t = self._tones()
+        rect = self._page_rect()
+        desk = _layout_base.metric_class() == _layout_base.DESK
         if self.files is not None:
-            self._draw_files()          # the ADVANCED row's list, same panel
+            self._draw_files(rect, desk)
             return
-        if self._on_verbs():
-            desk = _layout_base.metric_class() == _layout_base.DESK
+        why = self._broken()
+        if why:
+            self._draw_manifest(why, rect, desk)
+            return
+        if self.vouch:
+            _ui_draw.window_frame(self.vouch)
+        try:
+            self.page().draw(ws.sys_canvas, ws.theme_colors, rect, desk)
+        finally:
             if self.vouch:
-                _ui_draw.window_frame(self.vouch)
-            try:
-                self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
-            finally:
-                if self.vouch:
-                    _ui_draw.window_frame(0)
-            return
-        # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
-        # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
-        # in the bar (drawn after this by the layer).
-        cv.rect(*(lay.body + (t["body"],)))
-        cv.rectb(*(lay.body + (t["edge"],)))
-        ws._glyph("edit", lay.head_glyph, t["accent"], cv)  # pencil = "make it yours"
-        broken = self._broken()
-        if broken:
-            # The cart is on the shelf only because load() refused to drop it.
-            # Say why, and leave the ADVANCED row below as the way to the file.
-            cv.print("MANIFEST BROKEN", lay.head_xy[0], lay.head_xy[1],
-                     self._NAMES["red"], 2)
-            cv.print(_ui_draw.print_cut(broken, lay.card_w, lay.fs),
-                     lay.card_x, lay.card_y0, t["text"], 1)
-        else:
-            cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui_draw.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
-        for row in self._card_layout():
-            self._draw_card(row)
-        if self._cards_scrollable():           # up/down chevrons when cards overflow
-            _ui_draw.scroll_cues(
-                cv, (lay.scroll_up[0], lay.scroll_up[1]),
-                (lay.scroll_dn[0], lay.scroll_dn[1]),
-                self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
+                _ui_draw.window_frame(0)
 
-    def _draw_card(self, row):
-        if row.get("advanced"):
-            self._draw_advanced(row)
-            return
-        if row.get("error"):
-            self._draw_bad_card(row)
-            return
+    def _draw_manifest(self, why, rect, desk):
+        """A cart whose manifest did not parse: the reason, exact, and Files,
+        the door to the file that broke it (the cart has no `edit` fields
+        and no title to edit until it parses)."""
         ws = self.ws
-        cv = ws.sys_canvas
+        host = self._fix_host
         fs = self.layout.fs
-        t = self._t
-        i = row["i"]
-        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
-        sel = (i == self.msel)
-        disp = row["display"]
-        # ONE list row: the selection field (the card's full height, starting a
-        # pixel above its text) plus the card's label line, which sits 18px in on
-        # a stepper card (clear of the -/+ glyphs) and 2px in on a visual one.
-        # The stepper glyphs and the picture displays below are this card's own
-        # CONTENT -- `row` draws the row, not the card.
-        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
-                kind="row_chrome", on=sel, edge=False,
-                pad=(18 if disp is None else 2) * fs, text_dy=1 * fs, fs=fs)
-        if disp is None:                                # today's plain text card
-            ws._glyph("minus", (x, y, 14 * fs, 14 * fs), t["accent"], cv)
-            ws._glyph("plus", (x + w - 14 * fs, y, 14 * fs, 14 * fs), t["accent"], cv)
-            return
-        if disp == "gauge":
-            self._draw_gauge(row)
-        elif disp == "count":
-            self._draw_count(row)
-        elif disp == "bg-thumbs":
-            self._draw_bg_thumbs(row)
-        elif disp in ("choice-icons", "sprite-tiles"):
-            self._draw_choice_icons(row)
+        host.begin(ws.sys_canvas, ws.theme_colors, rect, desk)
+        x, y, w, h = _ui.page("")
+        _ui.hints(_FIX_HINTS)
+        lines = self._why
+        if lines is None or lines[0] != why or lines[1] != w:
+            lines = self._why = (why, w, tuple(_ui_draw.wrap_px(why, w - 32 * fs, fs)[:3]))
+        _ui.at(x, y + (h // 6 if desk else 10 * fs), w, h)
+        at = _ui.empty("warn", "The manifest didn't read", lines[2])
+        bw, bh = (180, 40) if desk else (124 * fs, 26 * fs)
+        _ui.at(x + (w - bw) // 2, at + (6 if desk else 3 * fs), bw, bh)
+        if _ui.button("Files", "primary", {"id": "Files"}):
+            self._open_files()
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
-    def _draw_advanced(self, row):
-        """The ADVANCED row: an ordinary list row with a chevron, so it reads as
-        somewhere to GO and not as another value to step."""
-        cv = self.ws.sys_canvas
-        fs = self.layout.fs
-        t = self._t
-        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
-        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
-                kind="row_chrome", on=(row["i"] == self.msel), edge=False,
-                pad=6 * fs, text_dy=1 * fs, fs=fs)
-        cv.print(">", x + w - 10 * fs, y + 1 * fs, t["accent"], fs)
-
-    def _draw_bad_card(self, row):
-        """A card whose `edit` field definition failed _validate_field (#94):
-        a short inline "!" warning instead of crashing the whole Config tab.
-        draw()'s try/except stays the net for a genuinely unforeseen exception;
-        this covers the KNOWN-bad shapes (bad type/min-max/step, missing/empty
-        choices, a display that doesn't match its type) so a kid's hand-edited
-        manifest degrades to one dead card, not a dead tab."""
-        NAMES = self._NAMES
+    def _fix_input(self, i):
+        """A broken manifest's page's keys: A (or Enter) opens Files, its one
+        door; B leaves and HOME backs out."""
         ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.layout.fs
-        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
-        f = row["f"]
-        key = f.get("key") if isinstance(f, dict) else None
-        label = str(key) if key else ("card %d" % row["i"])
-        # The row FRAME only: the "!" and the reason are content with their own
-        # budget (the message is already clipped to 32 chars, which `row`'s
-        # symmetric pad would re-clip to 30).
-        _ui_draw.row(cv, self._t, (x, y, w, h), None,
-                colors=(NAMES["dark_grey"], NAMES["light_grey"], NAMES["red"]),
-                fs=fs)
-        cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
-        msg = _ui_draw.print_cut("%s: %s" % (label, row["error"]), w - 24 * fs, fs)
-        cv.print(msg, x + 20 * fs, y + max(0, (h - _ui_draw.font("ui")[2]) // 2),
-                 NAMES["light_grey"], 1)
-
-    def _draw_gauge(self, row):
-        # A slow->fast slider: a turtle at the low end, a rabbit at the high end,
-        # a track filled to the value's fraction, and a knob. Tap left/right of the
-        # card to step it (the -/+ contract is preserved by _card_tap).
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.layout.fs
-        f = row["f"]
-        x, y, w = row["x"], row["y"], row["w"]
-        lo = f.get("min", 0)
-        hi = f.get("max", lo + 1)
-        cur = ws.project.config.get(f["key"], f.get("default", lo))
-        try:
-            frac = (float(cur) - lo) / (hi - lo) if hi > lo else 0.0
-        except (TypeError, ValueError):
-            frac = 0.0
-        frac = max(0.0, min(1.0, frac))
-        ends = f.get("gauge", {}) if isinstance(f.get("gauge"), dict) else {}
-        ty = y + 18 * fs + self.layout.lead
-        tx0 = x + 18 * fs
-        tx1 = x + w - 18 * fs
-        tw = tx1 - tx0
-        ws._glyph(ends.get("low", "turtle"), (x, ty - 6 * fs, 16 * fs, 14 * fs),
-                  NAMES["green"], cv)
-        ws._glyph(ends.get("high", "rabbit"),
-                  (x + w - 16 * fs, ty - 6 * fs, 16 * fs, 14 * fs), NAMES["peach"], cv)
-        t = self._t
-        cv.rect(tx0, ty, tw, 3 * fs, t["track"])                    # track
-        cv.rect(tx0, ty, int(tw * frac), 3 * fs, t["accent"])       # filled portion
-        kx = tx0 + int(tw * frac)
-        cv.rect(kx - 1 * fs, ty - 3 * fs, 3 * fs, 9 * fs, t["knob"])   # knob
-
-    def _draw_count(self, row):
-        # N repeated icons == the value, so a count reads at a glance. Kept to ONE
-        # tidy row -- the count card is 32px tall, so a 2nd row of glyphs would
-        # spill into the next card. The number itself is the label cue above, so an
-        # over-cap value still reads correctly even when not every icon fits.
-        ws = self.ws
-        fs = self.layout.fs
-        f = row["f"]
-        x, y, w = row["x"], row["y"], row["w"]
-        cur = ws.project.config.get(f["key"], f.get("default", 0))
-        try:
-            n = int(cur)
-        except (TypeError, ValueError):
-            n = 0
-        glyph = f.get("icon", "star")
-        step = 16 * fs
-        per_row = max(1, (w - 4 * fs) // step)
-        cap = int(f.get("count_max", min(f.get("max", 12), 14)))
-        shown = max(0, min(n, cap, per_row))    # clamp to a single row
-        for k in range(shown):
-            gx = x + 2 * fs + k * step
-            ws._glyph(glyph, (gx, y + 14 * fs + self.layout.lead, 14 * fs, 14 * fs),
-                      self._t["accent"], ws.sys_canvas)
-
-    def _draw_choice_icons(self, row):
-        # Each choice is its own tappable cell -- a glyph (choice-icons) or a real
-        # sprite tile from the cart sheet (sprite-tiles). The current pick is boxed.
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.layout.fs
-        f = row["f"]
-        cur = ws.project.config.get(f["key"], f.get("default"))
-        sel_k = self._choice_index(f, cur)
-        tiles = self._resolve_tiles(f) if row["display"] == "sprite-tiles" else None
-        icons = f.get("icons") or []
-        t = self._t
-        use_tiles = tiles is not None and ws.project.sheet is not None
-        for k, (cx, cy, cw, ch) in self._choice_cells(row):
-            chosen = (k == sel_k)
-            # A choice IS a grid cell. The FRAME is the toolkit's; the picture --
-            # a real sprite tile or a chrome glyph -- is this card's own, which is
-            # why `cell` hands back the art rect instead of trying to draw it.
-            # Deliberately NO hit rect per cell: `_choice_cells` hit-tests
-            # arithmetically and `cell` takes no `hits` argument by design.
-            img = None
-            glyph = None
-            if use_tiles:
-                img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
-            else:
-                glyph = icons[k] if k < len(icons) else "dot"
-            art = _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
-                           colors=(NAMES["black"] if chosen else t["cell"],
-                                   NAMES["white"] if chosen else t["text"],
-                                   NAMES["yellow"] if chosen else t["cell_edge"]),
-                           glyph=glyph, glyph_draw=ws._glyph)
-            if img is not None:
-                cv.spr(img, art[0] + (art[2] - 16 * fs) // 2,
-                       art[1] + (art[3] - 16 * fs) // 2, 2 * fs)
+        if i.pressed("a") or i.pressed("run"):
+            self._open_files()
+            return True
+        if self._fix_host.keys(i):
+            ws._dirty = True
+        ws._leave_or_home(ws.exit)
+        return True
 
     def draw_choice(self, f, k, rect):
         """Choice `k`'s picture of a cell card `f` in `rect` on the system
@@ -1077,33 +540,13 @@ class CardsLayer:
         else:                                            # a solid color swatch
             cv.rect(x, y, w, h, NAMES.get(name, NAMES["black"]))
 
-    def _draw_bg_thumbs(self, row):
-        # Each choice is a tappable thumbnail of the resulting background (#15 P3).
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.layout.fs
-        f = row["f"]
-        cur = ws.project.config.get(f["key"], f.get("default"))
-        sel_k = self._choice_index(f, cur)
-        t = self._t
-        for k, (cx, cy, cw, ch) in self._choice_cells(row):
-            # A FRAME-ONLY cell (`field` None): the picture is a hand-painted
-            # preview of the resulting background, so it draws first into its own
-            # inset rect and the cell puts the selection border around it.
-            self._draw_bg_thumb(f["choices"][k],
-                                (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
-            _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
-                     colors=(None, t["cell_edge"],
-                             NAMES["yellow"] if k == sel_k else t["cell_edge"]))
-
-    # -- ADVANCED: the project's own files (step 5) --------------------------
+    # -- Files: the project's own files (step 5) -----------------------------
     #
     # A ROUTER over one project folder, not a viewer: a text-shaped file (by
     # `text_modes`) opens in the shell's editor handle through the SAME request
-    # door Notes uses, the cart's main file opens the Code tab, and an asset
+    # door Notes uses, the cart's scripts open the Code tab, and an asset
     # opens the tab that owns it. Everything it lists comes from the store's
-    # `list_files` on the project KIND (moy_carts.PROJECT_KIND), so the panel
+    # `list_files` on the project KIND (moy_carts.PROJECT_KIND), so the page
     # never spells a cart's layout itself.
 
     def _open_files(self):
@@ -1121,9 +564,41 @@ class CardsLayer:
             msg = self._err_text(exc)
         if self._can_add_source(cart):
             rows = tuple(rows) + (_NEW_ROW,)
-        self.files = {"rows": rows, "msg": msg}
+        self.files = self._listing(rows, msg)
         self._files_host.reset()
         ws._dirty = True
+
+    def _listing(self, rows, msg):
+        """The file list over the store's `rows`: `names` in the order the
+        table shows them (the cart's scripts, New script last, then the
+        rest), `cells` each one's icon, name and the tab it opens in, `cur`
+        the current row, `msg` the line that says why a row did not open."""
+        ws = self.ws
+        cart = ws.project.cart if ws.project is not None else None
+        sources = ws.carts_store.cart_sources(cart) if cart and ws.carts_store else ()
+        code = [r for r in rows if r in sources or r == _NEW_ROW]
+        names = tuple(code + [r for r in rows if r not in code])
+        cells = tuple(self._file_cells(n, n in code) for n in names)
+        return {"rows": rows, "msg": msg, "names": names, "cells": cells, "cur": 0}
+
+    def _file_cells(self, name, code):
+        """A file's row: its icon, its name, and the tab it opens in."""
+        if name == _NEW_ROW:
+            return ("new", _NEW_ROW, "")
+        tab = "code" if code else self._asset_tab(name)
+        if tab is not None:
+            return (_TAB_ICONS.get(tab, "doc"), _FILE_WORDS.get(name, name),
+                    _TAB_WORDS.get(tab, ""))
+        if _modes.is_image(name):
+            return ("art", name, "Paint")
+        return ("doc", name, "Text")
+
+    def _asset_tab(self, name):
+        """The tab that owns asset `name`, or None."""
+        tab = _ASSET_TABS.get(name)
+        if tab is None and "/" in name:
+            tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
+        return tab
 
     def _can_add_source(self, cart):
         """Whether this folder may gain another SCRIPT: a writable cart whose
@@ -1140,7 +615,7 @@ class CardsLayer:
         self.ws._dirty = True
 
     def _files_open(self, name):
-        """Route one project file. The main file is the Code tab (that is where
+        """Route one project file. A script is the Code tab (that is where
         PLAY, the journal and crash-to-code live); an asset is its own tab; a
         text file goes through the request door and comes BACK here."""
         ws = self.ws
@@ -1151,17 +626,14 @@ class CardsLayer:
             self._open_newf()
             return
         # ANY of the cart's scripts, not only main (SPEC.md 4, #89): the Code
-        # tab holds a file now, and it is the tab that has PLAY, the journal and
-        # crash-to-code. A port's p8.lua used to fall past this into the text
-        # handle, where a crash at `p8.lua:412:` had nothing to land on.
+        # tab holds a file, and it is the tab that has PLAY, the journal and
+        # crash-to-code (a crash at `p8.lua:412:` lands there).
         if name in ws.carts_store.cart_sources(cart):
             self._close_files()
             ws.editor_app.set_tab("code")
             ws.open_code_file(name)
             return
-        tab = _ASSET_TABS.get(name)
-        if tab is None and "/" in name:
-            tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
+        tab = self._asset_tab(name)
         if tab is not None:
             self._close_files()
             ws.editor_app.set_tab(tab)
@@ -1174,7 +646,7 @@ class CardsLayer:
             # shape: one Paint cannot edit opens read-only.
             self._close_files()
             if not ws.open_image(name, cart=cart):
-                self.files = {"rows": (), "msg": "There's no Paint app to open it in."}
+                self.files = self._listing((), "There's no Paint app to open it in.")
             return
         if "/" in name:
             # Anything else in a subfolder no tab claims. Saying so beats
@@ -1185,7 +657,7 @@ class CardsLayer:
         mode = _modes.mode_for(name)
         self._close_files()
         if not ws.open_project_file(cart, name, mode):
-            self.files = {"rows": (), "msg": "That file didn't open."}
+            self.files = self._listing((), "That file didn't open.")
 
     def _files_input(self, i):
         ws = self.ws
@@ -1203,62 +675,39 @@ class CardsLayer:
             self.ws._dirty = True
         return True
 
-    def _file_row(self, name, tab):
-        """A file's row: its icon, its name, and the tab it opens in; True
-        the frame it is chosen."""
-        if tab is not None:
-            _ui.icon(_TAB_ICONS.get(tab, "doc"))
-            word = _TAB_WORDS.get(tab, "")
-        elif _modes.is_image(name):
-            _ui.icon("art")
-            word = "Paint"
-        else:
-            _ui.icon("doc")
-            word = "Text"
-        return _ui.link(_FILE_WORDS.get(name, name), word, {"id": name})
-
-    def _draw_files(self):
-        """The project's files as a page of Make it mine (GAPS 52): Code (its
-        scripts, New script last) and Art and sound as groups, each file's
-        icon, its name and the tab it opens in."""
+    def _draw_files(self, rect, desk):
+        """The project's files as a page of the tab (GAPS 52): a placed table,
+        each file's icon, its name and the tab it opens in -- the cart's
+        scripts first, New script last among them, then its art and sound. A
+        tap on a row, or Enter on the current one, opens it."""
         ws = self.ws
         f = self.files
-        lay = self.layout
         host = self._files_host
-        desk = _layout_base.metric_class() == _layout_base.DESK
-        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
-        _ui.page("Files")
-        _ui.hints(_FILES_HINTS)
-        cart = ws.project.cart if ws.project is not None else None
-        sources = ws.carts_store.cart_sources(cart) if cart and ws.carts_store else ()
-        rows = f["rows"]
-        pick = None
-        if not rows:
-            _ui.label(f["msg"] or "No files.")
-        code = [r for r in rows if r in sources or r == _NEW_ROW]
-        rest = [r for r in rows if r not in code]
-        if code:
-            _ui.group("Code")
-            for name in code:
-                if name == _NEW_ROW:
-                    _ui.icon("new")
-                    if _ui.link(_NEW_ROW, "", {"id": _NEW_ROW}):
-                        pick = name
-                elif self._file_row(name, "code"):
-                    pick = name
-        if rest:
-            _ui.group("Art and sound")
-            for name in rest:
-                tab = _ASSET_TABS.get(name)
-                if tab is None and "/" in name:
-                    tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
-                if self._file_row(name, tab):
-                    pick = name
-        _ui.group()
-        if f["msg"] and rows:
-            _ui.label(f["msg"], {"tone": "danger"})
-        if pick is not None:
-            self._files_open(pick)
+        host.begin(ws.sys_canvas, ws.theme_colors, rect, desk)
+        room = _ui.page("Files")
+        if _ui_draw.hint_kind() != "touch":
+            band, room = _ui.cut_bottom(
+                room, _ui_draw.metrics("value_row")[17 if desk else 16] * self.layout.fs)
+            _ui.at(*band)
+            _ui.hints(_FILES_HINTS)
+        names = f["names"]
+        msg = f["msg"]
+        if not names:
+            _ui.at(*room)
+            _ui.empty("doc", "No files", (msg,) if msg else ())
+        else:
+            if msg:
+                line, room = _ui.cut_bottom(room, _ui.text_size(msg)[1] + 8 * self.layout.fs)
+                _ui.at(*line)
+                _ui.label(msg, _FILES_MSG)
+            _ui.at(*room)
+            cur, opened = _ui.table("", _FILE_COLS, f["cells"], f["cur"], self._files_o)
+            if cur != f["cur"]:
+                f["cur"] = cur
+                if not _ui.keys_taken():
+                    opened = True         # a tap opens the row it lands on
+            if opened and 0 <= cur < len(names):
+                self._files_open(names[cur])
         if host.owed or host.tap == 2:
             ws.request_frame()
 
@@ -1268,10 +717,10 @@ class CardsLayer:
     # what OK means. CART INFO edits the manifest's title/author through
     # Project.commit_manifest (`permissions` stays read-only: see the comment
     # over moy_carts.save_manifest_meta). NEW SCRIPT is the ONE door that adds
-    # a file to a cart, on the ADVANCED row and nowhere else, because a console
-    # for eight-year-olds does not want a New File button two taps from every
-    # cart, and a cart that is one file should stay one file unless somebody
-    # went looking.
+    # a file to a cart, the file list's last script row (and the Code tab's
+    # scripts menu) and nowhere else, because a console for eight-year-olds
+    # does not want a New File button two taps from every cart, and a cart
+    # that is one file should stay one file unless somebody went looking.
     #
     # Both are `ui.dialog` with captioned `ui.field`s (GAPS 52) over the page
     # dimmed (D-01), on their own UI context: the keys type (text mode, which

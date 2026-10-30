@@ -9,7 +9,7 @@ index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
 at the canvas's real pixel width."""
 
 from pathlib import Path
-from ws_helpers import shelf, select_on_home  # noqa: E402
+from ws_helpers import shelf, select_on_home, step_card  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -559,9 +559,8 @@ def test_enter_in_config_plays_the_cart(tmp_path):
 
     # Tweak a Config card, then press RUN (== the host's Enter): the cart PLAYS and the
     # tuned value is committed (leave()'s cards branch = GO's old job), NOT the code editor.
-    ws.cards_layer.msel = 0
     before = dict(ws.config)
-    ws.adjust(1)
+    step_card(ws, 1)
     assert dict(ws.config) != before                 # a card value changed
     drv.press("run"); drv.frame(1 / 30); drv.frame(1 / 30)
     assert ws.screen == "desktop"                    # PLAYED the cart...
@@ -706,7 +705,7 @@ def test_console_cards_make_it_mine_edit_and_run(tmp_path):
     ws._open_menu()                         # Space has an edit schema -> cards
     assert ws.menu_view == "cards"
     before = ws.config.get("star_count", 80)
-    ws.adjust(1)                            # +step on the first field (star_count, +10)
+    step_card(ws, 1)                        # +step on the first field (star_count, +10)
     assert ws.config["star_count"] == before + 10
     ws.apply()                              # re-run with the new config
     assert ws.screen == "desktop"

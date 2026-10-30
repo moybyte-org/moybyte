@@ -2,10 +2,10 @@
 
 A kid who can't read should be able to change how-fast / how-many / which-
 character with icons only. These tests assert:
-  * the new per-field `display` hints ("gauge" | "count" | "choice-icons" |
-    "sprite-tiles") render through the SHARED console without error;
-  * a field with NO `display` (and an unknown one) falls back to today's text
-    card -- the back-compat guarantee for every existing cart;
+  * the per-field `display` hints ("gauge" | "count" | "choice-icons" |
+    "sprite-tiles" | "bg-thumbs") render on the Settings page without error;
+  * a field with NO `display` is an ordinary card (a slider for an int), and
+    one that fails `_validate_field` stays off the page;
   * a sprite-tile / choice-icon card SELECTS by tapping a tile (no reading);
   * the showcase cart (Star Catcher, now sprite-tile catcher) still opens + runs
     headless, and the other seed carts still render their (text) cards.
@@ -66,6 +66,11 @@ def _painted_sheet():
 
 # -- each display type renders without error --------------------------------
 
+def _box(ws, key):
+    """Card `key`'s row on the Settings page, as its last frame drew it."""
+    return ws.cards_layer.page().host.box(key)
+
+
 def test_all_display_types_render_without_error():
     sheet = _painted_sheet()
     edit = [
@@ -82,53 +87,41 @@ def test_all_display_types_render_without_error():
     cfg = {"n": 5, "spd": 50, "pick": "b", "who": 1}
     ws = _ws_with_cart(edit, cfg, sheet)
     _draw_once(ws)                          # must not raise
+    assert ws.cart_error is None
     assert probe.drew_something(ws.canvas)  # something was drawn
-
-    # The fullscreen Config panel (fix B/C: no GO/CODE/CLOSE button bar) fits all four
-    # tall visual cards on one screen now -- the extra vertical room the removed buttons
-    # freed. All four display types are laid out + the sprite-tiles row is the tallest.
-    rows = ws.cards_layer._card_layout()
-    # ... plus the ADVANCED row the Config tab always ends on (step 5 of
-    # docs/text_editing_2026-09.md), which is a door and carries no display.
-    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons",
-                                            "sprite-tiles", None]
-    assert rows[-1]["advanced"] and rows[-1]["f"] is None
-    assert not ws.cards_layer._cards_scrollable()        # all four fit -> no scroll needed
-    spr = [r for r in rows if r["display"] == "sprite-tiles"][0]
-    assert spr["h"] > console._CARD_H       # sprite-tiles row is tallest
-    _draw_once(ws)                          # the full view renders cleanly
-    # (cards-menu overflow scrolling itself is covered by
-    # test_cards_menu_scroll_clamps_and_keeps_rows_on_panel, which uses 6 tall cards.)
+    # every card is on the page: the meters as sliders, the pickers as tiles
+    for key in ("n", "spd", "pick", "who"):
+        assert _box(ws, key) is not None, key
+    tiles = ws.cards_layer.page()._tiles
+    assert len(tiles["pick"]) == 3 and len(tiles["who"]) == 2
 
 
-def test_missing_display_falls_back_to_text_card():
+def test_missing_display_is_an_ordinary_card():
     edit = [{"key": "size", "type": "int", "min": 0, "max": 9, "step": 1,
              "card": "SIZE {value}"}]
     ws = _ws_with_cart(edit, {"size": 3})
-    row = ws.cards_layer._card_layout()[0]
-    assert row["display"] is None
-    assert row["h"] == console._CARD_H      # plain single-line text card height
-    assert ws.cards_layer.card_text(0) == "SIZE 3"      # text is still the value's surface
-    _draw_once(ws)                          # renders the legacy text card
-
-
-def test_unknown_display_hint_falls_back_to_text():
-    edit = [{"key": "k", "type": "int", "min": 0, "max": 9, "step": 1,
-             "display": "bananas", "card": "K {value}"}]
-    ws = _ws_with_cart(edit, {"k": 2})
-    row = ws.cards_layer._card_layout()[0]
-    assert row["display"] is None           # unrecognized -> treated as no display
-    assert row["h"] == console._CARD_H
     _draw_once(ws)
+    assert _box(ws, "size") is not None     # a slider, its value at its right
+    assert "size" not in ws.cards_layer.page()._tiles
+
+
+def test_an_unknown_display_hint_leaves_the_card_off_the_page():
+    edit = [{"key": "k", "type": "int", "min": 0, "max": 9, "step": 1,
+             "display": "bananas", "card": "K {value}"},
+            {"key": "ok", "type": "int", "min": 0, "max": 9, "card": "OK {value}"}]
+    ws = _ws_with_cart(edit, {"k": 2, "ok": 1})
+    _draw_once(ws)
+    assert ws.cart_error is None
+    assert _box(ws, "k") is None and _box(ws, "ok") is not None
 
 
 # -- selecting without reading: tap a tile / icon ---------------------------
 
-def _tap_cell(ws, row, k):
-    """A tap on choice `k`'s tile on the Settings page (look step 30: the
-    cards on the verbs), where its last frame drew it."""
+def _tap_cell(ws, key, k):
+    """A tap on choice `k`'s tile of card `key` on the Settings page, where
+    its last frame drew it."""
     _draw_once(ws)
-    (cx, cy, cw, ch), _k = ws.cards_layer.page()._tiles[row["f"]["key"]][k]
+    (cx, cy, cw, ch), _k = ws.cards_layer.page()._tiles[key][k]
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
     ws.pointer.click = True
     ws.handle_pointer()
@@ -139,12 +132,12 @@ def test_sprite_tile_card_selects_by_tapping_a_tile():
     edit = [{"key": "who", "type": "choice", "choices": [0, 1], "tiles": [0, 1],
              "display": "sprite-tiles", "card": "WHO {value}"}]
     ws = _ws_with_cart(edit, {"who": 0}, _painted_sheet())
-    row = ws.cards_layer._card_layout()[0]
-    assert len(ws.cards_layer._choice_cells(row)) == 2  # one tappable cell per choice
+    _draw_once(ws)
+    assert len(ws.cards_layer.page()._tiles["who"]) == 2  # one tappable tile per choice
 
-    _tap_cell(ws, row, 1)                   # tap the second tile
+    _tap_cell(ws, "who", 1)                 # tap the second tile
     assert ws.config["who"] == 1
-    _tap_cell(ws, row, 0)                   # tap the first tile
+    _tap_cell(ws, "who", 0)                 # tap the first tile
     assert ws.config["who"] == 0
 
 
@@ -153,8 +146,12 @@ def test_choice_icons_card_selects_by_tapping_an_icon():
              "display": "choice-icons", "icons": ["star", "heart", "dot"],
              "card": "P {value}"}]
     ws = _ws_with_cart(edit, {"p": "x"})
-    row = ws.cards_layer._card_layout()[0]
-    _tap_cell(ws, row, 2)                   # tap the third icon
+    _draw_once(ws)
+    rx, ry, rw, rh = _box(ws, "p")
+    for (cx, cy, cw, ch), _k in ws.cards_layer.page()._tiles["p"]:
+        # every tile lies inside its card's row: no dead zone at its foot
+        assert rx <= cx and cx + cw <= rx + rw and ry <= cy and cy + ch <= ry + rh
+    _tap_cell(ws, "p", 2)                   # tap the third icon
     assert ws.config["p"] == "z"
 
 
@@ -207,10 +204,9 @@ def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
 
     # its CATCHER card is a sprite-tile picker.
     ws._open_menu()
-    rows = ws.cards_layer._card_layout()
-    basket = [r for r in rows if r["f"] and r["f"]["key"] == "basket"][0]
+    basket = [f for f in ws.cart["edit"] if f["key"] == "basket"][0]
     assert basket["display"] == "sprite-tiles"
-    _tap_cell(ws, basket, 1)                            # pick the robot tile
+    _tap_cell(ws, "basket", 1)                          # pick the robot tile
     assert ws.config["basket"] == 1
     ws.apply()                                          # re-run with the new pick
     assert ws.cart_error is None
@@ -234,11 +230,9 @@ def test_bg_thumbs_card_renders_and_selects_by_tapping_a_thumbnail():
              "choices": ["dark_blue", "night", "stripes", "indigo"],
              "display": "bg-thumbs", "card": "SKY {value}"}]
     ws = _ws_with_cart(edit, {"bg": "dark_blue"})
-    row = ws.cards_layer._card_layout()[0]
-    assert row["display"] == "bg-thumbs"
-    assert len(ws.cards_layer._choice_cells(row)) == 4       # one thumbnail per preset
     _draw_once(ws)                               # draws solid/starfield/stripes thumbs
-    _tap_cell(ws, row, 2)                        # tap the "stripes" thumbnail
+    assert len(ws.cards_layer.page()._tiles["bg"]) == 4      # one thumbnail per preset
+    _tap_cell(ws, "bg", 2)                       # tap the "stripes" thumbnail
     assert ws.config["bg"] == "stripes"
 
 
@@ -246,14 +240,11 @@ def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Space Desktop")
     ws._open_menu()
-    # The PET card is now a (taller) sprite-tiles picker, so all four cards no
-    # longer fit at once -- scroll the BG card into view the way a kid would.
-    bg_i = [i for i, f in enumerate(ws.cart["edit"]) if f["key"] == "bg"][0]
-    ws.cards_layer._reveal_card(bg_i)
-    bg = [r for r in ws.cards_layer._card_layout()
-          if r["f"] and r["f"]["key"] == "bg"][0]
+    bg = [f for f in ws.cart["edit"] if f["key"] == "bg"][0]
     assert bg["display"] == "bg-thumbs"
-    _tap_cell(ws, bg, 2)                         # "stripes"
+    ws.cards_layer.page().host.focus("bg")       # the page scrolls it into view
+    _draw_once(ws)
+    _tap_cell(ws, "bg", 2)                       # "stripes"
     assert ws.config["bg"] == "stripes"
     ws.apply()                                   # the cart paints stripes, no crash
     assert ws.cart_error is None
@@ -284,8 +275,8 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
 
 def test_non_numeric_tiles_entry_does_not_crash_cards_menu():
     # A cart authored with a non-numeric `tiles` entry must not raise through
-    # _resolve_tiles -> _draw_choice_icons -> _draw_cards (which would hang the
-    # device). The bad entry resolves to tile 0 and the frame still draws.
+    # _resolve_tiles -> draw_choice (which would hang the device). The bad
+    # entry resolves to tile 0 and the frame still draws.
     edit = [{"key": "who", "type": "choice", "choices": ["a", "b"],
              "tiles": ["oops", 1], "display": "sprite-tiles", "card": "WHO {value}"}]
     ws = _ws_with_cart(edit, {"who": "a"}, _painted_sheet())
@@ -308,17 +299,15 @@ def test_draw_cards_is_wrapped_against_a_thrown_card():
     assert "boom" in ws.cart_error
 
 
-# -- #94: inline validation feedback for a bad `edit` field def -------------
+# -- #94: a bad `edit` field def costs one card, never the tab --------------
 #
 # Before #94 a malformed field def only surfaced through draw()'s belt-and-
 # braces try/except (test_draw_cards_is_wrapped_against_a_thrown_card, above):
 # ONE bad card took the whole Config tab down to the error panel, and a
-# left/right press on the bad card (outside draw()'s guard entirely) could
-# raise straight out of the input router. These tests pin the friendlier
-# behavior: a bad field renders as a small inline "!" card -- everything else
-# on the panel still works -- and stepping it is just a no-op, never a crash.
+# left/right press on it could raise straight out of the input router. The
+# Settings page leaves a field `_validate_field` refuses off the page.
 
-def test_bad_edit_field_renders_inline_error_others_still_work():
+def test_bad_edit_field_stays_off_the_page_others_still_work():
     edit = [
         {"key": "ok", "type": "int", "min": 0, "max": 9, "card": "OK {value}"},
         {"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"},  # min > max
@@ -326,10 +315,8 @@ def test_bad_edit_field_renders_inline_error_others_still_work():
     ws = _ws_with_cart(edit, {"ok": 3, "bad": 5})
     _draw_once(ws)                                    # must not raise / no error panel
     assert ws.cart_error is None
-    rows = ws.cards_layer._card_layout()
-    assert [r["error"] for r in rows] == [None, "min > max", None]  # + ADVANCED
-    assert rows[1]["display"] is None                  # never reaches the real renderer
-    assert probe.drew_something(ws.canvas)              # something drew (the good card + "!")
+    assert _box(ws, "ok") is not None and _box(ws, "bad") is None
+    assert probe.drew_something(ws.canvas)
 
 
 def test_validate_field_catches_the_known_bad_shapes():
@@ -347,32 +334,10 @@ def test_validate_field_catches_the_known_bad_shapes():
     assert v({"key": "k", "type": "int", "display": "nope"}) is not None    # unknown display
 
 
-def test_adjust_on_malformed_card_is_a_safe_noop():
-    edit = [{"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"}]
-    ws = _ws_with_cart(edit, {"bad": 5})
-    ws.cards_layer.msel = 0
-    ws.adjust(1)                                       # must not raise
-    ws.adjust(-1)
-    assert ws.config["bad"] == 5                        # untouched -- no-op stepping
-
-
-def test_card_tap_on_malformed_card_is_a_safe_noop():
-    edit = [{"key": "bad", "type": "choice", "choices": []}]  # empty choices -> invalid
-    ws = _ws_with_cart(edit, {"bad": 1})
-    row = ws.cards_layer._card_layout()[0]
-    assert row["error"] == "no choices"
-    ws.cards_layer._card_tap(row["x"] + 2, row["y"] + 2, 0)   # must not raise
-    assert ws.config["bad"] == 1
-
-
 def test_left_right_input_on_malformed_card_does_not_crash():
-    # The real regression this closes: a d-pad left/right routes straight to
-    # ws.adjust() through handle_input(), OUTSIDE draw()'s try/except -- before
-    # #94 a bad field def here raised out of the frame loop entirely.
     edit = [{"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"}]
     ws = _ws_with_cart(edit, {"bad": 5})
     drv = host_app.ConsoleDriver(ws)
-    ws.cards_layer.msel = 0
     drv.press("left")
     drv.frame(1 / 30)                                   # must not raise
     drv.press("right")
@@ -381,82 +346,26 @@ def test_left_right_input_on_malformed_card_does_not_crash():
     assert ws.config["bad"] == 5
 
 
-# -- cards-menu scrolling (#3) ----------------------------------------------
+# -- many cards: the page scrolls (#3) --------------------------------------
 
 def _many_tile_cards(n):
     return [{"key": "k%d" % i, "type": "choice", "choices": [0, 1], "tiles": [0, 1],
              "display": "sprite-tiles", "card": "K%d" % i} for i in range(n)]
 
 
-def test_cards_menu_scroll_clamps_and_keeps_rows_on_panel():
-    edit = _many_tile_cards(6)                       # 6 sprite-tiles cards (h=44) overflow
+def test_many_cards_scroll_the_focus_and_files_into_view():
+    edit = _many_tile_cards(6)                       # more tile rows than one 240px page
     ws = _ws_with_cart(edit, {})
-    assert ws.cards_layer._cards_scrollable()
-
-    ws.cards_layer.scroll_cards(99)                              # clamp: never past the last card
-    assert ws.cards_layer.mtop == ws.cards_layer._max_mtop()
-    bottoms = [r["y"] + r["h"] for r in ws.cards_layer._card_layout()]
-    assert max(bottoms) <= console._CARD_VIEW_BOTTOM # nothing runs over the buttons
-    # the last ROW is reachable -- the ADVANCED door, one past the last card
-    assert ws.cards_layer._card_layout()[-1]["i"] == len(edit)
-
-    ws.cards_layer.scroll_cards(-99)                             # clamp the other way
-    assert ws.cards_layer.mtop == 0
-    assert ws.cards_layer._card_layout()[0]["i"] == 0
-    _draw_once(ws)                                   # the scrolled view renders cleanly
-
-
-def test_card_hit_test_agrees_with_scrolled_layout():
-    # _card_at must match the SAME visible rows _draw_cards lays out, at any scroll.
-    edit = _many_tile_cards(6)
-    ws = _ws_with_cart(edit, {})
-    ws.cards_layer.scroll_cards(2)
-    for row in ws.cards_layer._card_layout():
-        cx = row["x"] + row["w"] // 2
-        cy = row["y"] + row["h"] // 2
-        assert ws.cards_layer._card_at(cx, cy) == row["i"]
-    # A point above the first visible card hits nothing (it's scrolled off).
-    assert ws.cards_layer._card_at(ws.cards_layer._card_layout()[0]["x"] + 2, console._CARD_Y0 - 4) is None
-
-
-def test_reveal_card_brings_any_selection_into_view():
-    edit = _many_tile_cards(6)
-    ws = _ws_with_cart(edit, {})
-    # Selecting any card and revealing it must put it in the visible window, and
-    # never scroll past the clamp.
-    for sel in range(len(edit)):
-        ws.cards_layer.msel = sel
-        ws.cards_layer._reveal_card(sel)
-        assert any(r["i"] == sel for r in ws.cards_layer._card_layout())
-        assert 0 <= ws.cards_layer.mtop <= ws.cards_layer._max_mtop()
-
-
-# -- choice-icons hit-test (no dead-zone) (#4) ------------------------------
-
-def test_choice_icons_cells_fit_inside_their_card():
-    edit = [{"key": "p", "type": "choice", "choices": ["x", "y", "z"],
-             "display": "choice-icons", "icons": ["star", "heart", "dot"], "card": "P"}]
-    ws = _ws_with_cart(edit, {"p": "x"})
-    row = ws.cards_layer._card_layout()[0]
-    card_bottom = row["y"] + row["h"]
-    for _, (cx, cy, cw, ch) in ws.cards_layer._choice_cells(row):
-        assert cy + ch <= card_bottom               # cell bottom no longer 2px past
-        # and a tap at the cell's bottom edge still lands inside the card rect.
-        assert ws.cards_layer._card_at(cx + cw // 2, cy + ch - 1) == 0
-
-
-# -- count card stays one tidy row (#6) -------------------------------------
-
-def test_count_card_clamps_to_one_row():
-    # A big count must not wrap to a 2nd row that spills into the next card.
-    edit = [{"key": "n", "type": "int", "min": 0, "max": 99, "step": 1,
-             "display": "count", "icon": "star", "count_max": 99, "card": "N {value}"}]
-    ws = _ws_with_cart(edit, {"n": 99})
-    row = ws.cards_layer._card_layout()[0]
-    # The drawn glyphs all sit on the single row at y+14 (height 32 card) -- assert
-    # by drawing and checking nothing was painted below the card's bottom band.
-    _draw_once(ws)                                   # must not raise
-    # one-row cap = how many 16px glyph slots fit across the card width.
-    per_row = max(1, (row["w"] - 4) // 16)
-    # the loop is clamped to per_row, so even n=99 draws at most per_row glyphs.
-    assert per_row >= 1 and per_row <= 18
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    page = ws.cards_layer.page()
+    lay = ws.cards_layer.layout
+    for _ in range(3 * len(edit)):
+        if page._focus == "Files":
+            break
+        drv.press("down")
+        for _ in range(30):                          # the reveal glides (§7)
+            drv.frame(1 / 30)
+        x, y, w, h = page.host.box(page._focus)
+        assert lay.cy <= y and y + h <= lay.cy + lay.ch, page._focus   # the focus shows
+    assert page._focus == "Files"                    # the last door is reachable

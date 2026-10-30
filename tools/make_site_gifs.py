@@ -447,11 +447,10 @@ def scene_tap(r):
     r.settle(20)
 
     def _other_pet():
-        cards = r.ws.cards_layer
-        row = next(x for x in cards._card_layout() if x["f"]["key"] == "pet")
+        f = next(x for x in r.ws.cart["edit"] if x["key"] == "pet")
         cur = r.ws.config.get("pet", 0)
-        for k, box in cards._choice_cells(row):
-            if row["f"]["choices"][k] != cur:
+        for box, k in r.ws.cards_layer.page()._tiles.get("pet", ()):
+            if f["choices"][k] != cur:
                 return box
         return (0, 0, 0, 0)
 
