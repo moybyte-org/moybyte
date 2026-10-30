@@ -49,6 +49,8 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+# the text view's syntaxes by the highlighter's language (ui.text_options's)
+_SYNTAX = {"plain": 0, "python": 1, "lua": 2, "json": 3}
 # The overlays' fields, lines and keys (`_draw_tools`): the keys every
 # board has, by action, Shift+Enter its own.
 _FIND_FIELD = {"id": "find", "hint": "Find"}
@@ -364,15 +366,15 @@ class CodeLayer:
         self._ed = None
         self._r = (0, 0, 0, 0)        # ...the rows' rect R, as the view drew last
         self._top = -1
-        self._view = {"gutter": True, "syntax": "python", "caret": [0, 0], "sel": None,
-                      "err": None, "find": None, "left": 0, "mark": True, "top": None}
+        # the view's options, packed once and written in place each frame
+        self._view = _ui.text_options({"gutter": True, "syntax": "python", "mark": True})
         self._pop = _array("i", [0, 0, 0, 0])    # a popover's card, as its pass drew it
         self.vouch = 0                # a desk pane's word for its buffer (EditorDesk.vouched)
         self._t = None                # per-draw tone map (set by _draw_code)
         self._tk = [None, -1, None]   # ...made once a theme and look gen
         self._rr = [0, 0, 0, 0]       # R, the code's rows' rect, each draw
         self._left = 0                # the first column the view drew
-        self._view["into"] = _array("i", [0, 0])   # the view's answer: no tuple a frame
+        self._into = _array("i", [0, 0])   # the view's answer: no tuple a frame
         self._st = [-1, -1, -1, -1, -1, -1, -1, b""]   # the status line, made once a change
         self._stop_host = None        # the stopped line's popover's UI context
         self._stop_card = None        # and the card its last pass drew
@@ -1223,18 +1225,27 @@ class CodeLayer:
             self._top = -1
             host.reset()
         o = self._view
-        o["gutter"] = self._gutter
-        o["syntax"] = self._lang()
-        c = o["caret"]
-        c[0] = ed.row
-        c[1] = ed.col
-        o["sel"] = ed.selection_bounds()
+        o[_ui.TXO_GUTTER] = 1 if self._gutter else 0
+        o[_ui.TXO_SYNTAX] = _SYNTAX.get(self._lang(), 4)
+        o[_ui.TXO_CARET] = ed.row
+        o[_ui.TXO_CARET + 1] = ed.col
+        b = ed.selection_bounds()
+        k = _ui.TXO_SEL
+        if b is None:
+            o[k] = o[k + 2] = -1
+            o[k + 1] = o[k + 3] = 0
+        else:
+            o[k] = b[0]
+            o[k + 1] = b[1]
+            o[k + 2] = b[2]
+            o[k + 3] = b[3]
         row = ws.code_err_row
-        o["err"] = None if row is None else (row, ws.code_err or "")
-        o["find"] = (self._find_q, self._find_ci) if self._find_open and self._find_q else None
-        o["left"] = ed.left
+        o[_ui.TXO_ERR] = -1 if row is None else row
+        q = self._find_q if self._find_open and self._find_q else None
+        o[_ui.TXO_FIND_CI] = 1 if q and self._find_ci else 0
+        o[_ui.TXO_LEFT] = ed.left
         top = ed.top
-        o["top"] = top if top != self._top else None
+        o[_ui.TXO_TOP] = top if top != self._top else -1
         if top != self._top and self._top >= 0:
             # the editor moved its top (a key, a typed line, Go to): the
             # view lands there as this frame's shift
@@ -1249,7 +1260,8 @@ class CodeLayer:
         try:
             host.begin(cv, ws.theme_colors, r, _desk(), elsewhere=True)
             _ui.at(r[0], r[1], r[2], r[3])
-            got = _ui.text_view("code", ed.lines, o)
+            got = _ui.text_view("code", ed.lines, o, None if row is None else ws.code_err or "",
+                                q, self._into)
         finally:
             if self.vouch:
                 _ui_draw.window_frame(0)

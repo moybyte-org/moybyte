@@ -54,6 +54,8 @@ is its scrollback, `draw` is its surface, and `api()` is what `run` hands a
 script it starts.
 """
 
+from array import array as _array
+
 try:
     from editors_code import CodeEditor
     from editors_base import KeyEdge
@@ -76,7 +78,8 @@ _ANSWER = "\x01"
 _ENDED = "The script ended."
 _KEYS_READING = ("confirm", "Send", "cancel", "Stop")
 _KEYS_ENDED = ("confirm", "Run again", "back", "Back")
-_LOG = {"follow": True}             # the log's text view: it follows its foot
+_LOG = _ui.text_options({"follow": True})   # the log's text view: it follows its foot
+_INTO = _array("i", [0, 0])         # ...and its answer, written in place
 
 
 # Lua has no `input` of its own and libmoy owns `print` (the DRAW verb), so a
@@ -484,7 +487,7 @@ class TextConsole:
         if sym_h:
             cv.rect(cx, bottom - sym_h, cw, sym_h, th["surface"])
         _ui.at(cx, top + pad, cw, max(0, by - top - pad))
-        self.top = _ui.text_view("log", self._rows(), _LOG)[0]
+        self.top = _ui.text_view("log", self._rows(), _LOG, None, None, _INTO)[0]
         was = _ui_draw.print_font(fid)
         try:
             self._sym_rects = ()

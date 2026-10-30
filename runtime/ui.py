@@ -549,33 +549,25 @@ def scroll(id=None, o=None):
     _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
 
 
-_TXO = array("i", [0] * 17)             # text_view's options (moy_ui_api.h's MOY_UI_TXO_*)
+# text_view's options packed (moy_ui_api.h's MOY_UI_TXO_*): the words of
+# `text_options`'s array, which an app that draws a view every frame keeps
+# and writes in place.
+TXO_ROWS, TXO_WRAP, TXO_SYNTAX, TXO_FOLLOW, TXO_GUTTER, TXO_CARET = 0, 1, 2, 3, 4, 5
+TXO_SEL, TXO_ERR, TXO_FIND_CI, TXO_LEFT, TXO_MARK, TXO_GEN, TXO_TOP = 7, 11, 12, 13, 14, 15, 16
+TXO_LEN = 17
+_TXO = array("i", [0] * TXO_LEN)        # the dict form's, packed each call
 _SYNTAXES = ("plain", "python", "lua", "json", "sgr")
 
 
-def text_view(id, lines, o=None):
-    """A text area of `lines` (a list of str), its own scroll region: a drag
-    scrolls it and its release coasts, the wheel steps it. In `at`'s rect,
-    else stacked `o`'s `rows` rows tall (the rest of the page where none).
-    `o`: `wrap` (long lines break at the view's width, else they are cut),
-    `syntax` ("sgr", the default: a terminal's `ESC [ n m` colours, which take
-    no column; "plain", "python", "lua", "json"), `follow` (a view at its foot
-    when lines are added glides to the new foot: a log, a terminal),
-    `gutter` (line numbers), `caret` (a line and column: an input line's).
-    In the mono face; only the rows that changed draw. Answers the first
-    line shown and the rows shown.
-
-    The Python face's own, an editor's (the Code tab's): `sel` (line,
-    column, line, column: a selection's two ends), `err` (a line and the
-    error's words: underlined, its words after it), `find` (a query and
-    whether it matches across case: its matches marked), `left` (the
-    columns cut off at the left), `mark` (the current line's mark),
-    `lines_gen` (a number naming the lines' content, so a wrapped view
-    counts its rows once a gen), `top` (a line the view glides to show
-    first) and `into` (an array('i') of two the answer is written into and
-    handed back, so a frame makes no tuple)."""
-    t = _T
-    opt = _TXO
+def text_options(o=None, opt=None):
+    """`text_view`'s options dict `o` packed into `opt` (an array('i') of
+    TXO_LEN words; a new one where None), which it answers: the TXO_*
+    words, a caret and a selection their line and column words in turn
+    (-1 none), `syntax` its index in ("plain", "python", "lua", "json",
+    "sgr"), `top` -1 for none. The error's words and the find query are
+    not words: `text_view` takes them beside the packed form."""
+    if opt is None:
+        opt = array("i", [0] * TXO_LEN)
     o = o or {}
     opt[0] = int(o.get("rows", 0) or 0)
     opt[1] = 1 if o.get("wrap") else 0
@@ -607,6 +599,41 @@ def text_view(id, lines, o=None):
     opt[15] = int(o.get("lines_gen", 0) or 0)
     top = o.get("top")
     opt[16] = -1 if top is None else int(top)
+    return opt
+
+
+def text_view(id, lines, o=None, err=None, find=None, into=None):
+    """A text area of `lines` (a list of str), its own scroll region: a drag
+    scrolls it and its release coasts, the wheel steps it. In `at`'s rect,
+    else stacked `o`'s `rows` rows tall (the rest of the page where none).
+    `o`: `wrap` (long lines break at the view's width, else they are cut),
+    `syntax` ("sgr", the default: a terminal's `ESC [ n m` colours, which take
+    no column; "plain", "python", "lua", "json"), `follow` (a view at its foot
+    when lines are added glides to the new foot: a log, a terminal),
+    `gutter` (line numbers), `caret` (a line and column: an input line's).
+    In the mono face; only the rows that changed draw. Answers the first
+    line shown and the rows shown.
+
+    The Python face's own, an editor's (the Code tab's): `sel` (line,
+    column, line, column: a selection's two ends), `err` (a line and the
+    error's words: underlined, its words after it), `find` (a query and
+    whether it matches across case: its matches marked), `left` (the
+    columns cut off at the left), `mark` (the current line's mark),
+    `lines_gen` (a number naming the lines' content, so a wrapped view
+    counts its rows once a gen), `top` (a line the view glides to show
+    first) and `into` (an array('i') of two the answer is written into and
+    handed back, so a frame makes no tuple).
+
+    `o` may be the options packed instead (`text_options`), which a frame
+    reads as they are: the error's words `err`, the find query `find` and
+    `into` then come beside it, and no override applies."""
+    t = _T
+    if type(o) is array:
+        return _C.api_text_view(t[0], t[1], t[2], id, lines, o, None, err, find, into)
+    o = o or {}
+    opt = text_options(o, _TXO)
+    err = o.get("err")
+    find = o.get("find")
     return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o),
                             err[1] if err else None, find[0] if find else None,
                             o.get("into"))
