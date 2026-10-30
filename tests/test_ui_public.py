@@ -31,6 +31,7 @@ PAGES = os.path.join(ROOT, "tests", "fixtures", "ui_page")
 WASM = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_ui.moy")
 _DT = 1.0 / 30.0
 P_FRAMES, P_SOUND, P_VOL, P_CUR, P_SAVES, P_KEYS, P_PART, P_FOCUS, P_FAIL = range(9)
+P_PANE, P_SIZE, P_TAP = 10, 11, 12             # the panes (ui.split, ui.part_at)
 
 # -- one page, three runtimes ----------------------------------------------------------
 
@@ -100,14 +101,14 @@ def _pixels(ws):
 def _pmem(ws):
     lua = getattr(ws.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:9]
+        return list(lua._run.pmem()[1])[:13]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:9]
+        return list(img)[:13]
     pm = ws.player.ns["pmem"]
-    return [pm(i) for i in range(9)]
+    return [pm(i) for i in range(13)]
 
 
 def _script(ws):
@@ -129,6 +130,28 @@ def _script(ws):
     _frame(drv)
     _frame(drv)
     shots.append((_pixels(ws), _pmem(ws)))
+    # the panes at the foot: tap the second pane's part, then drag the
+    # divider 20 px right and let it go
+    drv.touch(120, 222)
+    _frame(drv)
+    drv.touch_up()
+    _frame(drv)
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    drv.touch(40, 224)
+    _frame(drv)
+    drv.touch_up()
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    drv.touch(93, 224)
+    _frame(drv)
+    drv.touch_drag(113, 224)
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
+    drv.touch_up()
+    _frame(drv)
+    _frame(drv)
+    shots.append((_pixels(ws), _pmem(ws)))
     return shots
 
 
@@ -140,7 +163,8 @@ def test_the_page_is_one_page_in_every_runtime(page_runs):
         got = page_runs[name]
         assert len(got) == len(ref)
         for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
-            assert pm[:P_FAIL] == rpm[:P_FAIL], "%s step %d answered %r, python %r" % (
+            assert pm[:P_FAIL] + pm[P_PANE:] == rpm[:P_FAIL] + rpm[P_PANE:], \
+                "%s step %d answered %r, python %r" % (
                 name, i, pm, rpm)
             assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
     if "wasm" in page_runs:
@@ -165,15 +189,28 @@ def test_the_page_answers_its_script(page_runs):
     assert first[P_KEYS] == 0
     # down: Volume; right, right: its value; down, down: into the list, which
     # starts on its current row, then its next; a: that row is current; down:
-    # past the last row to the swatch, then the Save button placed below it
+    # past the last row to the swatch, then the part in the second pane at
+    # the foot, which the focus moves into as it moves between groups
     after = [s[1] for s in shots]
     assert after[1][P_FOCUS] == len("Volume")
     assert after[3][P_VOL] == 7
     assert after[4][P_FOCUS] == len("Theme")
     assert after[6][P_CUR] == 2
     assert after[7][P_FOCUS] == len("swatch") and after[7][P_PART] & ui.FOCUS
-    assert after[8][P_FOCUS] == len("Save") and after[8][P_SAVES] == 0
+    assert after[7][P_PANE] == 0
+    assert after[8][P_FOCUS] == len("cell") and after[8][P_PANE] == 1
+    assert after[8][P_SAVES] == 0
     assert after[9][P_SAVES] == 1, "the tap on Save activated it"
+    assert after[9][P_PANE] == 1, "a press in no pane leaves the focused one"
+    assert after[9][P_SIZE] == 80 and after[9][P_TAP] == 0
+    # a tap on the part answers where it fell from the part's top-left
+    assert after[10][P_TAP] == (120 - 96) * 256 + (222 - 214) + 1
+    # a press in the first pane focuses it
+    assert after[11][P_PANE] == 0
+    # the divider held moves no pane until it is let go, then the first
+    # pane is 20 px wider
+    assert after[12][P_SIZE] == 80
+    assert after[13][P_SIZE] == 100 and after[13][P_PANE] == 0
 
 
 # -- the engine under scripted input -----------------------------------------------------
@@ -685,3 +722,78 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
     assert ws.player.ns["frames"] - n == (20 if every else 0)
     ws.exit()
 
+
+
+# -- ui.split (docs/ui_api_2026-10.md §5a) -----------------------------------------------
+
+
+def _panes(dir="x", o=None):
+    """Three panes stacked or side by side in (10, 10, 300, 200), a gap of
+    6 between them; what each frame answered."""
+    sizes = [60, 80, 0]
+    out = [0] * 16
+    st = {"sizes": sizes, "out": out, "cur": 0}
+    opts = {"drag": True, "focus": 0, "gap": 6, "mins": (40, 40, 40)}
+    opts.update(o or {})
+
+    def draw():
+        opts["focus"] = st["cur"]
+        ui.at(10, 10, 300, 200)
+        st["cur"] = ui.split("p", dir, sizes, opts, out)
+        return list(out)
+    return draw, st
+
+
+def test_a_split_lays_its_panes_out_along_its_axis_the_last_taking_the_rest():
+    draw, st = _panes()
+    out = _Run(draw).frame()
+    assert out[:12] == [10, 10, 60, 200, 76, 10, 80, 200, 162, 10, 148, 200]
+    assert out[12:] == [-1, 0, -1, 0]
+    draw, st = _panes("y")
+    out = _Run(draw).frame()
+    assert out[:12] == [10, 10, 300, 60, 10, 76, 300, 80, 10, 162, 300, 48]
+
+
+def test_a_dividers_drag_stops_at_the_panes_minimum_and_says_which():
+    draw, st = _panes()
+    r = _Run(draw)
+    r.frame()
+    r.frame(ptr=(73, 100, 7))                   # the first divider's gap
+    out = r.frame(ptr=(20, 100, 3))
+    assert out[12] == 0 and out[14] == 0, "held, the first pane at its minimum"
+    assert out[13] == 10 + 40 and out[15] == ui.LIVE
+    out = r.frame(ptr=(400, 100, 3))
+    assert out[14] == 1 and out[13] == 10 + 60 + 80 - 40, "the second pane at its minimum"
+    assert st["sizes"] == [60, 80, 0], "no pane moves while it is held"
+    out = r.frame(ptr=(400, 100, 1))
+    assert out[15] == ui.LIVE | ui.LET_GO
+    assert st["sizes"][0] == 60 + 80 - 40 and st["sizes"][1] == 40
+    assert out[:4] == [10, 10, 100, 200], "the let-go frame lays the panes out"
+
+
+def test_a_tap_on_a_divider_moves_nothing_and_a_slop_holds_a_short_drag():
+    draw, st = _panes(o={"slop": 8})
+    r = _Run(draw)
+    r.frame()
+    r.frame(ptr=(73, 100, 7))
+    out = r.frame(ptr=(77, 100, 3))
+    assert out[12] == 0 and out[15] == 0, "4 px is under the slop: no drag yet"
+    out = r.frame(ptr=(77, 100, 1))
+    assert out[15] == ui.LET_GO and st["sizes"] == [60, 80, 0], "a tap writes nothing"
+
+
+def test_a_press_focuses_its_pane_and_a_split_without_focus_answers_none():
+    draw, st = _panes()
+    r = _Run(draw)
+    r.frame()
+    r.frame(ptr=(200, 100, 7))
+    assert st["cur"] == 2
+    r.frame(ptr=(200, 100, 1))
+    r.frame(ptr=(73, 100, 7))                   # a divider's press is no pane's
+    assert st["cur"] == 2
+    sizes, out = [100, 0], [0] * 12
+
+    def plain():
+        ui.at(0, 0, 200, 100)
+        return ui.split("q", "x", sizes, None, out)
+    assert _Run(plain).frame() == -1

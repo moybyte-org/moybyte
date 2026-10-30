@@ -230,6 +230,18 @@ int moy_ui_run_part(void *target, moy_ui_span_t id, int w, int h, const moy_ui_o
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_part_at(void *target, int32_t out[2]) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_part_at(c, out) : 0;
+}
+
+int moy_ui_run_split(void *target, moy_ui_span_t id, int32_t *sizes, int n, const int32_t *mins,
+                     const int32_t *opt, int32_t *out, int32_t *cur) {
+    OPEN(target);
+    *cur = moy_ui_api_split(c, &r.s, id, sizes, n, mins, opt, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap) {
     moy_ui_ctx_t *c = run_ctx(target);
     if (c == NULL) {
@@ -493,6 +505,43 @@ int32_t moy_ui_wasm_part(void *e, const uint8_t *id, uint32_t n, int32_t w, int3
         put_words(out, cap, v, 5);
     }
     return rc;
+}
+
+int32_t moy_ui_wasm_part_at(void *e, uint8_t *out, uint32_t cap) {
+    (void)e;
+    int32_t v[2];
+    if (!moy_ui_run_part_at(wasm_target(), v)) {
+        return 0;
+    }
+    put_words(out, cap, v, 2);
+    return 1;
+}
+
+int32_t moy_ui_wasm_split(void *e, const uint8_t *id, uint32_t n, uint8_t *sizes, uint32_t sn,
+                          const uint8_t *mins, uint32_t mn, const uint8_t *opt, uint32_t on,
+                          uint8_t *out, uint32_t cap) {
+    (void)e;
+    int k = (int)(sn / 4);
+    if (k < 1 || k > MOY_UI_SPLIT_MAX || (mn != 0 && mn < sn)
+        || cap < 4u * (uint32_t)(4 * k + MOY_UI_SPLIT_OUT)) {
+        return -0x100 - MOY_UI_BAD;
+    }
+    int32_t sz[MOY_UI_SPLIT_MAX], mi[MOY_UI_SPLIT_MAX], o[MOY_UI_SPO_N];
+    int32_t w[4 * MOY_UI_SPLIT_MAX + MOY_UI_SPLIT_OUT];
+    memcpy(sz, sizes, 4u * (uint32_t)k);
+    if (mn != 0) {
+        memcpy(mi, mins, 4u * (uint32_t)k);
+    }
+    memset(o, 0, sizeof(o));
+    memcpy(o, opt, on < sizeof(o) ? on : sizeof(o));
+    int32_t cur = -1;
+    int rc = moy_ui_run_split(wasm_target(), span(id, n), sz, k, mn != 0 ? mi : NULL, o, w, &cur);
+    if (rc != 0) {
+        return -0x100 + rc;
+    }
+    memcpy(sizes, sz, 4u * (uint32_t)k);
+    put_words(out, cap, w, (uint32_t)(4 * k + MOY_UI_SPLIT_OUT));
+    return cur;
 }
 
 int32_t moy_ui_wasm_focus(void *e, const uint8_t *id, uint32_t n, uint8_t *buf, uint32_t cap) {
@@ -804,6 +853,8 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_rule", FN(moy_ui_wasm_rule) },
     { "ui_text_view", FN(moy_ui_wasm_text_view) },
     { "ui_table_part", FN(moy_ui_wasm_table_part) },
+    { "ui_part_at", FN(moy_ui_wasm_part_at) },
+    { "ui_split", FN(moy_ui_wasm_split) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

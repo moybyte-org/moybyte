@@ -700,6 +700,49 @@ int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, i
     return MOY_UI_OK;
 }
 
+int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, int hl, int held,
+                   int at, int line) {
+    draw_t d;
+    open_draw(s, &d);
+    if (hw > 0 && hl > 0) {
+        int x, y, w, h;
+        if (across) {
+            x = b.x + (b.w - hw) / 2;
+            y = b.y + (b.h - hl) / 2;
+            w = hw;
+            h = hl;
+        } else {
+            x = b.x + (b.w - hl) / 2;
+            y = b.y + (b.h - hw) / 2;
+            w = hl;
+            h = hw;
+        }
+        moy_shape_paint_t fillp;
+        memset(&fillp, 0, sizeof(fillp));
+        fillp.n = 1;
+        fillp.c[0] = d.row->pal[moy_ui_pidx(moy_ui_token(d.look, MOY_UI_T_BORDER))];
+        moy_shape_rrect_t sr;
+        memset(&sr, 0, sizeof(sr));
+        int r = hw / 2;
+        for (int i = 0; i < 4; i++) {
+            sr.r[i] = (uint8_t)(r > 255 ? 255 : r);
+        }
+        sr.line_lo = -1;
+        sr.fill = &fillp;
+        moy_shape_rrect(&d.t, x, y, w, h, &sr);
+        d.row->st[MOY_ST_N_FILL]++;
+    }
+    if (held && line > 0) {
+        int ci = moy_ui_token(d.look, MOY_UI_T_VALUE);
+        if (across) {
+            fill(&d, at + (b.w - line) / 2, b.y, line, b.h, ci);
+        } else {
+            fill(&d, b.x, at + (b.h - line) / 2, b.w, line, ci);
+        }
+    }
+    return 1;
+}
+
 int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out,
                           int ci) {
     if (in.w <= 0 || in.h <= 0) {

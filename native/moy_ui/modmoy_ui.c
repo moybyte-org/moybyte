@@ -2761,6 +2761,52 @@ static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
 
+// api_part_at(ctx) -> (x, y) inside the part answered last, or None
+static mp_obj_t ui_api_part_at(mp_obj_t ctx) {
+    int32_t v[2];
+    if (!moy_ui_api_part_at(ctx_of(ctx), v)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[2] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1])};
+    return ret_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_part_at_obj, ui_api_part_at);
+
+// api_split(ctx, cv, look, id, sizes, n, mins, opt, out) -> the focused pane;
+// sizes, mins (None: none), opt and out are array('i')s
+static mp_obj_t ui_api_split(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    int n = num(a[5]);
+    mp_buffer_info_t sb, mb, ob, wb;
+    mp_get_buffer_raise(a[4], &sb, MP_BUFFER_RW);
+    mp_get_buffer_raise(a[7], &ob, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[8], &wb, MP_BUFFER_RW);
+    const int32_t *mins = NULL;
+    if (a[6] != mp_const_none) {
+        mp_get_buffer_raise(a[6], &mb, MP_BUFFER_READ);
+        if (mb.len < (size_t)n * 4) {
+            mp_raise_ValueError(MP_ERROR_TEXT("mins"));
+        }
+        mins = (const int32_t *)mb.buf;
+    }
+    if (n < 1 || n > MOY_UI_SPLIT_MAX || sb.len < (size_t)n * 4 || ob.len < MOY_UI_SPO_N * 4
+        || wb.len < (size_t)(4 * n + MOY_UI_SPLIT_OUT) * 4) {
+        mp_raise_ValueError(MP_ERROR_TEXT("split"));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_split(c, &s, span_of(a[3]), (int32_t *)sb.buf, n, mins,
+                                                 (const int32_t *)ob.buf, (int32_t *)wb.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_split_obj, 9, 9, ui_api_split);
+
+// api_split_at(ctx, x, y) -> whether a divider the last pass drew lies there
+static mp_obj_t ui_api_split_at(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
+    return mp_obj_new_bool(moy_ui_api_split_at(ctx_of(ctx), num(x), num(y)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_split_at_obj, ui_api_split_at);
+
 // api_grid(ctx, cv, look, id, w, h, o): an id of length 0 ends the grid
 static mp_obj_t ui_api_grid(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3620,6 +3666,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_part_at), MP_ROM_PTR(&ui_api_part_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_split), MP_ROM_PTR(&ui_api_split_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_split_at), MP_ROM_PTR(&ui_api_split_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_grid), MP_ROM_PTR(&ui_api_grid_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card), MP_ROM_PTR(&ui_api_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table), MP_ROM_PTR(&ui_api_table_obj) },

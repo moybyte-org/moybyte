@@ -4,6 +4,7 @@
 #   page                     a page and its rows; label, button, toggle, slider, list after it
 #   table                    a list in columns; scroll, field, dialog, popover, menu after it
 #   grid                     a grid of cards the app draws into; card
+#   split                    panes, a divider between them; part_at beside it
 #   band                     the rows a shift frame draws; card_clip, keep beside it
 #   focus                    focus, moved or read; keys_taken, at
 """The public UI API (docs/ui_api_2026-10.md): the verbs every app and cart
@@ -27,7 +28,8 @@ system menu, the pause menu);
 `tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
 the app draws (Appearance's); `empty` an empty page, `tool` an icon button
 in an app's tool row, `bar` the title and tools an app lends its bar and
-`rule` a divider (the apps' restyle's).
+`rule` a divider (the apps' restyle's); `split` cuts panes with dividers
+the pointer drags, and `part_at` says where the pointer is in a part.
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -870,6 +872,85 @@ def part(id, w=0, h=0, o=None):
     PRESSED 4, HOVER 8. The app draws into the rect after."""
     t = _T
     return _C.api_part(t[0], t[1], t[2], id, w, h, _over(o))
+
+
+# ui.split's words (moy_ui_api.h's MOY_UI_SPO_*, MOY_UI_SPLIT_*): kept, so a
+# split's frame makes nothing.
+_SPLIT_MAX = 16
+_SP_OPT = array("i", [0] * 9)
+_SP_SIZES = array("i", [0] * _SPLIT_MAX)
+_SP_MINS = array("i", [0] * _SPLIT_MAX)
+_SP_OUT = array("i", [0] * (4 * _SPLIT_MAX + 4))
+_SP_HIT = ("hit", 4, "handle", 6)
+LIVE, LET_GO = 1, 2                     # ui.split's drag bits (its out's last word)
+
+
+def split(id, dir, sizes, o, out):
+    """Panes: `at`'s rect (else the page's, from its next row down) cut
+    along `dir` ("x": left to right, "y": top to bottom) into one pane a
+    size of `sizes` (a list or `array("i")`), the last taking what is
+    left, `o["gap"]` pixels apart. Writes each pane's x, y, w, h into `out`
+    (4 words a pane, then 4: the divider held or let go this frame, -1
+    none; where its drag takes its gap; the side it stopped at, -1 none, 0
+    the pane before at its minimum, 1 the pane after; LIVE and LET_GO).
+
+    `o["focus"]`, the focused pane (-1 none), makes focus move between the
+    panes as it does between groups: answered as moved by a press in
+    another pane or the focus moving into one (else -1 is answered).
+    `o["drag"]` makes each gap a divider the engine keeps by `id`: a press
+    on it (`o["hit"]`, (across, along), centred; the gap's where absent)
+    holds it, a drag past `o["slop"]` moves its line (`o["line"]` across)
+    and the release writes the two sizes beside it back into `sizes`,
+    neither under its minimum (`o["mins"]`). Its handle is `o["handle"]`
+    (across, along), the gap and six gaps where absent."""
+    t = _T
+    n = len(sizes)
+    sz = _SP_SIZES
+    for i in range(n):
+        sz[i] = sizes[i]
+    opt = _SP_OPT
+    for i in range(9):
+        opt[i] = 0
+    opt[0] = 1 if dir == "y" else 0
+    mins = None
+    if o:
+        if o.get("drag"):
+            opt[0] |= 4
+        f = o.get("focus")
+        if f is not None:
+            opt[0] |= 2
+            opt[2] = f
+        opt[1] = o.get("gap", 0)
+        opt[3] = o.get("slop", 0)
+        opt[8] = o.get("line", 0)
+        h = _SP_HIT
+        for k in (0, 2):
+            v = o.get(h[k])
+            if v is not None:
+                opt[h[k + 1]] = v[0]
+                opt[h[k + 1] + 1] = v[1]
+        m = o.get("mins")
+        if m is not None:
+            mins = _SP_MINS
+            for i in range(n):
+                mins[i] = m[i]
+    w = _SP_OUT
+    cur = _C.api_split(t[0], t[1], t[2], id, sz, n, mins, opt, w)
+    if w[4 * n + 3] & 3 == 3:
+        for i in range(n):
+            if sizes[i] != sz[i]:
+                sizes[i] = sz[i]
+    for i in range(4 * n + 4):
+        out[i] = w[i]
+    return cur
+
+
+def part_at():
+    """Where the pointer is inside the part answered last this frame, as
+    `(x, y)` from its top-left: where the tap that activated it was
+    released, else where the pointer is while it presses or hovers the
+    part; None otherwise (a key activated it, the pointer is off it)."""
+    return _C.api_part_at(_T[0])
 
 
 FOCUS, ACTIVATED, PRESSED, HOVER = 1, 2, 4, 8

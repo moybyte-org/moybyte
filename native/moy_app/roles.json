@@ -148,6 +148,8 @@
     {"role": "ui", "verb": "bar", "server": "c", "grant": "never", "wasm": "(*~*~i)i"},
     {"role": "ui", "verb": "rule", "server": "c", "grant": "never", "wasm": "()i"},
     {"role": "ui", "verb": "text_view", "server": "c", "grant": "never", "wasm": "(*~*~*~*~*~)i"},
-    {"role": "ui", "verb": "table_part", "server": "c", "grant": "never", "wasm": "(*~)i"}
+    {"role": "ui", "verb": "table_part", "server": "c", "grant": "never", "wasm": "(*~)i"},
+    {"role": "ui", "verb": "part_at", "server": "c", "grant": "never", "wasm": "(*~)i"},
+    {"role": "ui", "verb": "split", "server": "c", "grant": "never", "wasm": "(*~*~*~*~*~)i"}
   ]
 }

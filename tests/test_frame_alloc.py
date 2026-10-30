@@ -389,6 +389,7 @@ def measure(loop):
     achievements(loop, info)
     home(loop, info)
     editor(loop, info)
+    panes(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -773,6 +774,55 @@ def editor(loop, info):
         info[tab + "_drag"] = drag
     ws.exit()
     for _ in range(30):
+        loop.step()
+
+
+def panes(loop, info):
+    """ui.split's moving frames (docs/ui_blocks_2026-10.md section 4.2): on
+    an app host of its own, a divider pressed, dragged 40 px and let go, then
+    a tap on a part in the second pane (ui.part_at): what the split
+    allocates each frame, and what part_at does."""
+    from gc import mem_alloc
+    from array import array
+    import ui
+    import ui_draw
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    sizes = array("i", [100, 0])
+    out = array("i", [0] * 12)
+    o = {"drag": True, "focus": 0, "gap": 6, "mins": (40, 40)}
+    steps = ([(None, 0, False, False)] * 3 + [(103, 50, True, True)]
+             + [(103 + 2 * k, 50, False, True) for k in range(1, 21)]
+             + [(143, 50, False, False)] + [(None, 0, False, False)] * 2
+             + [(200, 50, True, True), (200, 50, False, False), (None, 0, False, False)])
+    split = []
+    at = []
+    gc.collect()
+    gc.disable()
+    for x, y, click, down in steps:
+        if x is not None:
+            host.point(x, y, click, down)
+        host.begin(cv, th, (0, 0, W, 100))
+        ui.at(0, 0, W, 100)
+        m = mem_alloc()
+        o["focus"] = ui.split("panes", "x", sizes, o, out)
+        split.append(mem_alloc() - m)
+        ui.at(out[4], out[5], out[6], out[7])
+        st = ui.part("cell")[4]
+        m = mem_alloc()
+        got = ui.part_at()
+        at.append((mem_alloc() - m, st & ui.ACTIVATED != 0, got is not None))
+        ui.end()
+    gc.enable()
+    info["split"] = split
+    info["split_sizes"] = list(sizes)
+    info["split_focus"] = o["focus"]
+    info["part_at"] = at
+    ws.mark_dirty()
+    for _ in range(10):
         loop.step()
 
 
@@ -1354,3 +1404,18 @@ def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
     assert len(shifted) > len(drawn) // 2, (tab, len(shifted), len(drawn))
     over = [d for d in drawn if d[0] > ANSWER]
     assert len(over) <= 1, (tab, over)
+
+
+def test_a_splits_divider_drag_allocates_nothing(result):
+    """ui.split (docs/ui_blocks_2026-10.md section 4.2): no frame of a
+    divider's press, drag and let-go allocates, the drag lands in `sizes`,
+    and ui.part_at answers a tap on a part in a pane, allocating its
+    answer alone on the frame it answers."""
+    info, text = result
+    assert info.get("split_sizes") == [140, info["split_sizes"][1]], text[-3000:]
+    assert info["split"] == [0] * len(info["split"]), info["split"]
+    assert info["split_focus"] == 1, "the tap in the second pane focused it"
+    at = info["part_at"]
+    assert any(act and got for _b, act, got in at), at
+    assert all(b == 0 for b, _act, got in at if not got), at
+    assert all(b <= ANSWER for b, _act, got in at if got), at

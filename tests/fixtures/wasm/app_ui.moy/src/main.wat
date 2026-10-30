@@ -10,7 +10,9 @@
 ;; 2 volume, 3 the theme row (from 0), 4 saves, 5 keys taken, 6 the swatch's
 ;; state, 7 the focused id's length, 8 the last row answer that failed,
 ;; negated (0: none), 9 a hash of the page's rows 40 to 159 (every eighth
-;; frame), which a board's run is held to the host's by.
+;; frame), which a board's run is held to the host's by, 10 the focused pane
+;; (from 0), 11 the first pane's size, 12 where a tap activated the second
+;; pane's part (x * 256 + y + 1; 0 none).
 (module
   (import "moy" "rect" (func $rect (param i32 i32 i32 i32 i32)))
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
@@ -67,6 +69,9 @@
   (import "moybyte.app" "ui_text_view" (func $ui_text_view
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_table_part" (func $ui_table_part (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_part_at" (func $ui_part_at (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_split" (func $ui_split
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -87,13 +92,25 @@
     "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
     "parts\ff\ff\ff\ff\38\00\00\00\00\00\00\00\11\00\00\00")
 
+;; the panes: their id, the part's in the second, and at 2300 their sizes,
+  ;; at 2308 their minimums, at 2320 the split's words (drag and focus, a gap
+  ;; of 6, the focused pane written each frame)
+  (data (i32.const 1300) "panes")
+  (data (i32.const 1310) "cell")
+  (data (i32.const 2300) "\50\00\00\00\00\00\00\00\28\00\00\00\28\00\00\00")
+  (data (i32.const 2320) "\06\00\00\00\06\00\00\00")
+
   ;; 2048: the page's rect (16 bytes); 2064: the part's (20); 2096: the
-  ;; focused id (32); 2200: the table's answers (8); 2208: a part's cell (16).
+  ;; focused id (32); 2200: the table's answers (8); 2208: a part's cell (16);
+  ;; 2400: the panes' rects and the divider's words (48); 2460: the second
+  ;; pane's part (20); 2490: where the pointer is in it (8).
   (global $sound (mut i32) (i32.const 1))
   (global $vol (mut i32) (i32.const 5))
   (global $cur (mut i32) (i32.const 1))
   (global $saves (mut i32) (i32.const 0))
   (global $frames (mut i32) (i32.const 0))
+  (global $pane (mut i32) (i32.const 0))
+  (global $tap (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 8.
   (func $ok (param $r i32)
@@ -167,6 +184,22 @@
     (if (i32.eqz (i32.and (global.get $frames) (i32.const 7)))
       (then (drop (call $pmem (i32.const 9) (call $hash (i32.const 40) (i32.const 120))
                         (i32.const 1)))))
+    (call $ok (call $ui_at (i32.const 10) (i32.const 214) (i32.const 180) (i32.const 20)))
+    (i32.store (i32.const 2328) (global.get $pane))
+    (global.set $pane (call $ui_split (i32.const 1300) (i32.const 5) (i32.const 2300) (i32.const 8)
+                                      (i32.const 2308) (i32.const 8) (i32.const 2320)
+                                      (i32.const 36) (i32.const 2400) (i32.const 48)))
+    (call $ok (global.get $pane))
+    (call $ok (call $ui_at (i32.load (i32.const 2416)) (i32.load (i32.const 2420))
+                           (i32.load (i32.const 2424)) (i32.load (i32.const 2428))))
+    (call $ok (call $ui_part (i32.const 1310) (i32.const 4) (i32.const 0) (i32.const 0)
+                             (i32.const 0) (i32.const 0) (i32.const 2460) (i32.const 20)))
+    (if (i32.and (i32.load (i32.const 2476)) (i32.const 2))
+      (then (if (call $ui_part_at (i32.const 2490) (i32.const 8))
+        (then (global.set $tap
+          (i32.add (i32.add (i32.mul (i32.load (i32.const 2490)) (i32.const 256))
+                            (i32.load (i32.const 2494)))
+                   (i32.const 1)))))))
     (local.set $f (call $ui_focus (i32.const 0) (i32.const 0) (i32.const 2096) (i32.const 32)))
     (global.set $frames (i32.add (global.get $frames) (i32.const 1)))
     (drop (call $pmem (i32.const 0) (global.get $frames) (i32.const 1)))
@@ -176,4 +209,7 @@
     (drop (call $pmem (i32.const 4) (global.get $saves) (i32.const 1)))
     (drop (call $pmem (i32.const 5) (call $ui_keys_taken) (i32.const 1)))
     (drop (call $pmem (i32.const 6) (i32.load (i32.const 2080)) (i32.const 1)))
-    (drop (call $pmem (i32.const 7) (local.get $f) (i32.const 1)))))
+    (drop (call $pmem (i32.const 7) (local.get $f) (i32.const 1)))
+    (drop (call $pmem (i32.const 10) (global.get $pane) (i32.const 1)))
+    (drop (call $pmem (i32.const 11) (i32.load (i32.const 2300)) (i32.const 1)))
+    (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))))

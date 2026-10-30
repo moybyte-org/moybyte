@@ -318,6 +318,10 @@ _DRAW_SIGS = (
                              c.c_void_p], None),
     ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p,
                          c.c_void_p], None),
+    ("moy_ui_api_part_at", [c.c_void_p, c.POINTER(c.c_int32)], _I),
+    ("moy_ui_api_split", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, _I, c.c_void_p,
+                          c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_split_at", [c.c_void_p, _I, _I], _I),
     ("moy_ui_api_table", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                           c.c_int32, c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], c.c_int32),
@@ -1463,6 +1467,28 @@ def binding():
         lib.moy_ui_api_part(p, c.byref(s), t, int(w), int(h), ov, out)
         return tuple(out)
 
+    def api_split(ctx, cv, look, id_, sizes, n, mins, opt, out):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        sv = (c.c_int32 * len(sizes)).from_buffer(sizes)
+        mv = None if mins is None else (c.c_int32 * len(mins)).from_buffer(mins)
+        ov = (c.c_int32 * len(opt)).from_buffer(opt)
+        wv = (c.c_int32 * len(out)).from_buffer(out)
+        return int(lib.moy_ui_api_split(p, c.byref(sink(cv, look)), t, c.addressof(sv), int(n),
+                                        None if mv is None else c.addressof(mv),
+                                        c.addressof(ov), c.addressof(wv)))
+
+    def api_split_at(ctx, x, y):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_split_at(p, int(x), int(y)))
+
+    def api_part_at(ctx):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 2)()
+        if not lib.moy_ui_api_part_at(p, v):
+            return None
+        return (v[0], v[1])
+
     def api_focus(ctx, id_=None):
         p, _k = _ctx(ctx)
         if id_ is None:
@@ -1615,7 +1641,7 @@ def binding():
               api_end,
               api_table_rows, api_table_pics, api_table_part,
               api_grid,
-              api_card, api_part, api_popover, api_menu, api_menu_danger,
+              api_card, api_part, api_part_at, api_split, api_split_at, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,

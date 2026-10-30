@@ -3,14 +3,21 @@
 -- tests/fixtures/wasm/app_ui.moy draw the same page with the same calls, and
 -- tests/test_ui_public.py holds the three to the same pixels. Into pmem: 0
 -- frames, 1 sound, 2 volume, 3 the theme row (from 0), 4 saves, 5 keys
--- taken, 6 the swatch's state, 7 the focused id's length. A table at the
--- right draws its rows as parts (ui.table_part).
+-- taken, 6 the swatch's state, 7 the focused id's length, 10 the focused
+-- pane (from 0), 11 the first pane's size, 12 where a tap activated the second
+-- pane's part (x * 256 + y + 1; 0 none). A table at the right draws its rows
+-- as parts (ui.table_part); two panes at the foot (ui.split) have a divider
+-- the script drags and a part in the second it taps (ui.part_at).
 
 sound = true
 vol = 5
 cur = 2
 saves = 0
 frames = 0
+sizes = {80, 0}
+spl = {}
+pane = 1
+tap = 0
 
 function _draw()
   ui.page("UI page")
@@ -29,6 +36,14 @@ function _draw()
     rect(cx + 4, cy + 3, 20, ch - 6, 8 + i)
     i, cx, cy, cw, ch = ui.table_part()
   end
+  ui.at(10, 214, 180, 20)
+  pane = ui.split("panes", "x", sizes, {drag = true, focus = pane, gap = 6, mins = {40, 40}}, spl)
+  ui.at(spl[5], spl[6], spl[7], spl[8])
+  local px, py, pw, ph, pst = ui.part("cell")
+  if pst & 2 ~= 0 then
+    local ax, ay = ui.part_at()
+    if ax then tap = ax * 256 + ay + 1 end
+  end
   local f = ui.focus()
   frames = frames + 1
   pmem(0, frames)
@@ -39,4 +54,7 @@ function _draw()
   pmem(5, ui.keys_taken() and 1 or 0)
   pmem(6, st)
   pmem(7, f and #f or 0)
+  pmem(10, pane - 1)
+  pmem(11, sizes[1])
+  pmem(12, tap)
 end

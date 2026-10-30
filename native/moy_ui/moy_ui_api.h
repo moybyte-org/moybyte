@@ -34,6 +34,7 @@
 #define MOY_UI_API_CHIP 12          // a lent chip's words (ui.bar), NUL-terminated
 #define MOY_UI_API_BAR 6            // the tools an app lends its bar
 #define MOY_UI_API_FLOOR 24         // the rects a shift frame's floor holds
+#define MOY_UI_API_DIVS 8           // the dividers one frame's splits record (moy_ui_api_split_at)
 #define MOY_UI_API_TROWS 48         // the rows of a carried table a frame keeps the record of
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
@@ -209,6 +210,10 @@ typedef struct {
     uint32_t mid_page;              // the page a middle-button drag scrolls
     int16_t mid_y;
     int16_t tap_x, tap_y;           // where the activating tap was released
+    moy_ui_box_t pa_box;            // the part answered last (w 0: none this frame)...
+    moy_ui_box_t sp_hit[MOY_UI_API_DIVS];   // the dividers this frame's splits drew: what a press takes
+    uint8_t sp_n;
+    uint8_t pa_st;                  // ...and its state bits (moy_ui_api_part_at)
     int16_t press_x, press_y, drag_y;
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
@@ -758,6 +763,50 @@ uint32_t moy_ui_api_fades(int reset);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);
+// ui.part_at(): where the pointer is inside the part answered last this
+// frame, from its top-left: where the tap that activated it was released
+// (its state ACTIVATED by the pointer), else where the pointer is while it
+// presses or hovers the part. 1 with x, y at out; 0 otherwise (the part
+// activated by a key, the pointer off it, no part this frame).
+int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
+// ui.split(id, dir, sizes, o) (docs/ui_blocks_2026-10.md §4.2): ui.at's
+// rect (else the page's, from its row cursor down) cut into `n` panes along
+// one axis, `gap` pixels apart -- left to right, or with MOY_UI_SPLIT_Y top
+// to bottom -- pane i sizes[i] long, the last taking what is left. Writes
+// each pane's x, y, w, h at out, then MOY_UI_SPLIT_OUT words: the divider
+// held or let go this frame (-1 none), the position a drag takes its gap to
+// (its x, or its y), the side it stopped at (-1 none, 0 the pane before it
+// at its minimum, 1 the pane after) and MOY_UI_SPD_* bits.
+//
+// With MOY_UI_SPLIT_FOCUS the panes hold a focused pane, opt's CUR (-1
+// none), which the split answers as it moves: to the pane a press goes down
+// in, and, as focus moves between groups, to the pane the focused stop lies
+// in on the frame the focus moves; else -1 is answered.
+//
+// With MOY_UI_SPLIT_DRAG each gap is a divider, kept by the split's id: a
+// press on it (HIT_W across, HIT_L along, centred; 0 the gap's) holds it,
+// a drag past SLOP pixels moves it, and its line (LINE across, in `value`)
+// shows where; on the release the two sizes beside it are written back to
+// `sizes`, neither under its minimum (`mins`, NULL none). Its handle is a
+// pill HANDLE_W across and HANDLE_L along in `border` (0: the gap, and six
+// gaps). A split with neither stays the rect algebra and draws nothing.
+// Words of opt that are 0 take their defaults.
+enum {
+    MOY_UI_SPLIT_Y = 1, MOY_UI_SPLIT_FOCUS = 2, MOY_UI_SPLIT_DRAG = 4,
+};
+enum {
+    MOY_UI_SPO_FLAGS = 0, MOY_UI_SPO_GAP, MOY_UI_SPO_CUR, MOY_UI_SPO_SLOP, MOY_UI_SPO_HIT_W,
+    MOY_UI_SPO_HIT_L, MOY_UI_SPO_HANDLE_W, MOY_UI_SPO_HANDLE_L, MOY_UI_SPO_LINE,
+    MOY_UI_SPO_N
+};
+enum { MOY_UI_SPD_LIVE = 1, MOY_UI_SPD_LET_GO = 2 };
+#define MOY_UI_SPLIT_OUT 4
+#define MOY_UI_SPLIT_MAX 16          // the panes a split cuts at most
+int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int32_t *sizes,
+                     int n, const int32_t *mins, const int32_t *opt, int32_t *out);
+// Whether (x, y) lies on a divider the last pass's splits drew, where a
+// press would hold it.
+int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
 // Focus moved to `id` (id.p NULL: read only). The focused id's text into
 // `buf` (NUL-terminated within `cap`); answers its length, -1 with none.
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);

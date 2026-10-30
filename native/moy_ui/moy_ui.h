@@ -541,6 +541,13 @@ int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int
 // The overflow chevrons, '^' above and 'v' below.
 int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, int can_up,
                        int can_dn, int ci);
+// A split's divider in its gap `b` (ui.split): `across` the gap stands
+// between panes side by side (else between panes stacked), its handle a
+// pill `hw` across and `hl` along (0: none) in the `border` token, centred,
+// and where `held` a line `line` across in the `value` token at `at` (the
+// gap's position the drag takes it to: its x across, else its y).
+int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, int hl, int held,
+                   int at, int line);
 // Fill the parts of `in` that `out` does not cover.
 int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out, int ci);
 // A scrolling list: `count` rows of `items` (NUL-separated UTF-8 in `len`

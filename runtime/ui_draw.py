@@ -2140,6 +2140,12 @@ class AppHost:
         """(x, y, w, h) where stop `id` drew in the last frame, or None."""
         return _C.api_box(self.ctx, id)
 
+    def split_at(self, x, y):
+        """Whether (x, y) lies on a divider the last frame's splits drew
+        (`ui.split`), where a press would hold it: a host that routes its
+        own presses gives such a press to the frame."""
+        return _C.api_split_at(self.ctx, x, y)
+
     def resume(self, cv, th):
         """Point the verbs at this context again, on `cv` under theme `th`,
         beginning no frame: what its last frame left -- focus, stops, the

@@ -40,6 +40,17 @@
  *   ui.card(title, sub, o)         -> x, y, w, h, state (the picture's rect)
  *   ui.rule()                      (a divider across ui.at's rect, else a row)
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
+ *   ui.part_at()                   -> x, y where the pointer is inside the part
+ *                                    answered last (the activating tap's release, or
+ *                                    pressing or hovering it), from its top-left; nil
+ *   ui.split(id, dir, sizes, o, out) -> the focused pane (from 1; 0 none, or no
+ *                                    o.focus); dir "x" or "y"; out[4i-3..4i] pane
+ *                                    i's x, y, w, h, then the divider held or let go
+ *                                    (from 1; 0 none), where its gap is dragged to,
+ *                                    the side it stopped at (-1 none, 0 before, 1
+ *                                    after) and its bits (1 live, 2 let go); o: drag,
+ *                                    focus (from 1), gap, slop, line, hit {w, l},
+ *                                    handle {w, l}, mins
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
  *   ui.at(x, y, w, h)
@@ -663,6 +674,106 @@ static int moycore_ui_part(lua_State *L)
     return 5;
 }
 
+static int moycore_ui_part_at(lua_State *L)
+{
+    int32_t v[2];
+    if (!moy_ui_run_part_at(moycore_ui_canvas(), v)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, v[0]);
+    lua_pushinteger(L, v[1]);
+    return 2;
+}
+
+/* Field `k` of the table at `i`, an integer (0 where it is none). */
+static int32_t moycore_ui_field_int(lua_State *L, int i, const char *k)
+{
+    lua_getfield(L, i, k);
+    int32_t v = lua_isnumber(L, -1) ? (int32_t)lua_tointeger(L, -1) : 0;
+    lua_pop(L, 1);
+    return v;
+}
+
+/* Field `k` of the table at `i`, a pair {a, b}, into v[0], v[1]. */
+static void moycore_ui_field_pair(lua_State *L, int i, const char *k, int32_t *v)
+{
+    lua_getfield(L, i, k);
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_geti(L, -1, 1);
+        lua_geti(L, -2, 2);
+        v[0] = (int32_t)lua_tointeger(L, -2);
+        v[1] = (int32_t)lua_tointeger(L, -1);
+        lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
+}
+
+static int moycore_ui_split(lua_State *L)
+{
+    moy_ui_span_t id = moycore_ui_span(L, 1);
+    const char *dir = luaL_checkstring(L, 2);
+    luaL_checktype(L, 3, LUA_TTABLE);
+    luaL_checktype(L, 5, LUA_TTABLE);
+    int n = (int)luaL_len(L, 3);
+    if (n < 1 || n > MOY_UI_SPLIT_MAX) return luaL_error(L, "ui.split: 1 to 16 panes");
+    int32_t sz[MOY_UI_SPLIT_MAX], mi[MOY_UI_SPLIT_MAX], opt[MOY_UI_SPO_N];
+    int32_t w[4 * MOY_UI_SPLIT_MAX + MOY_UI_SPLIT_OUT];
+    memset(opt, 0, sizeof(opt));
+    for (int i = 0; i < n; i++) {
+        lua_geti(L, 3, i + 1);
+        sz[i] = (int32_t)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+    }
+    opt[MOY_UI_SPO_FLAGS] = dir[0] == 'y' ? MOY_UI_SPLIT_Y : 0;
+    int mins = 0;
+    if (lua_type(L, 4) == LUA_TTABLE) {
+        lua_getfield(L, 4, "drag");
+        if (lua_toboolean(L, -1)) opt[MOY_UI_SPO_FLAGS] |= MOY_UI_SPLIT_DRAG;
+        lua_pop(L, 1);
+        lua_getfield(L, 4, "focus");
+        if (lua_isnumber(L, -1)) {
+            opt[MOY_UI_SPO_FLAGS] |= MOY_UI_SPLIT_FOCUS;
+            opt[MOY_UI_SPO_CUR] = (int32_t)lua_tointeger(L, -1) - 1;
+        }
+        lua_pop(L, 1);
+        opt[MOY_UI_SPO_GAP] = moycore_ui_field_int(L, 4, "gap");
+        opt[MOY_UI_SPO_SLOP] = moycore_ui_field_int(L, 4, "slop");
+        opt[MOY_UI_SPO_LINE] = moycore_ui_field_int(L, 4, "line");
+        moycore_ui_field_pair(L, 4, "hit", opt + MOY_UI_SPO_HIT_W);
+        moycore_ui_field_pair(L, 4, "handle", opt + MOY_UI_SPO_HANDLE_W);
+        lua_getfield(L, 4, "mins");
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            mins = 1;
+            for (int i = 0; i < n; i++) {
+                lua_geti(L, -1, i + 1);
+                mi[i] = (int32_t)lua_tointeger(L, -1);
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+    int32_t cur = -1;
+    if (moy_ui_run_split(moycore_ui_canvas(), id, sz, n, mins ? mi : NULL, opt, w, &cur) != 0) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    int32_t *d = w + 4 * n;
+    if ((d[3] & (MOY_UI_SPD_LIVE | MOY_UI_SPD_LET_GO)) == (MOY_UI_SPD_LIVE | MOY_UI_SPD_LET_GO)) {
+        for (int i = 0; i < n; i++) {
+            lua_pushinteger(L, sz[i]);
+            lua_seti(L, 3, i + 1);
+        }
+    }
+    d[0] += 1;                          /* the divider from 1, 0 none */
+    for (int i = 0; i < 4 * n + MOY_UI_SPLIT_OUT; i++) {
+        lua_pushinteger(L, w[i]);
+        lua_seti(L, 5, i + 1);
+    }
+    lua_pushinteger(L, (lua_Integer)cur + 1);
+    return 1;
+}
+
 static int moycore_ui_focus(lua_State *L)
 {
     moy_ui_span_t id = { NULL, 0 };
@@ -697,7 +808,8 @@ static void moycore_ui_open(lua_State *L)
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
-        {"table_part", moycore_ui_table_part},
+        {"table_part", moycore_ui_table_part}, {"part_at", moycore_ui_part_at},
+        {"split", moycore_ui_split},
         {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
         {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},

@@ -854,6 +854,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop_card.w = 0;
     c->pop_gone = 0;
     c->pop_id = 0;
+    c->pa_box.w = 0;
+    c->pa_st = 0;
+    c->sp_n = 0;
     // the dialog the last frame drew, for this frame's plan, and the frames
     // it has stood as it is
     int dw = c->dlg_id != 0 && c->dlg_held && !c->fl_top && !c->fl_mute;
@@ -3172,6 +3175,225 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     out[2] = none ? 0 : b.w;
     out[3] = none ? 0 : b.h;
     out[4] = st;
+    c->pa_box = b;
+    if (none) {
+        c->pa_box.w = 0;
+    }
+    c->pa_st = (uint8_t)st;
+}
+
+int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]) {
+    moy_ui_box_t b = c->pa_box;
+    int x, y;
+    if ((c->pa_st & MOY_UI_ST_ACTIVATED) && c->tap_x != INT16_MIN) {
+        x = c->tap_x;
+        y = c->tap_y;
+    } else if (c->pa_st & (MOY_UI_ST_PRESSED | MOY_UI_ST_HOVER)) {
+        x = c->in[MOY_UI_IN_X];
+        y = c->in[MOY_UI_IN_Y];
+    } else {
+        return 0;
+    }
+    if (b.w <= 0 || b.h <= 0 || !inside(b, x, y)) {
+        return 0;
+    }
+    out[0] = x - b.x;
+    out[1] = y - b.y;
+    return 1;
+}
+
+// -- ui.split ------------------------------------------------------------------------
+//
+// A split's kept state (its keep slot, by its id): `a` the divider held + 1
+// (0 none), `b` where the press took it (along the split's axis), `gen` the
+// size of the pane before it then, `over` the position its gap is dragged
+// to, `s0` whether the drag took (past the slop), `sn` the side it stops at
+// + 1, `drawn` the focused id the split saw last.
+
+// Divider gap `g`'s press box: `hw` across and `hl` along it, centred (0:
+// the gap's).
+static moy_ui_box_t split_hitbox(moy_ui_box_t g, int across, int hw, int hl) {
+    moy_ui_box_t h = g;
+    int16_t *ax = across ? &h.x : &h.y, *aw = across ? &h.w : &h.h;
+    int16_t *lx = across ? &h.y : &h.x, *lw = across ? &h.h : &h.w;
+    if (hw > 0) {
+        *ax = (int16_t)(*ax + (*aw - hw) / 2);
+        *aw = (int16_t)hw;
+    }
+    if (hl > 0) {
+        *lx = (int16_t)(*lx + (*lw - hl) / 2);
+        *lw = (int16_t)hl;
+    }
+    return h;
+}
+
+// The panes of split rect `r` at `sizes`: each one's start and length along
+// the axis, and its rect at out.
+static void split_lay(moy_ui_box_t r, int across, int gap, const int32_t *sizes, int n,
+                      int32_t *at, int32_t *sz, int32_t *out) {
+    int o0 = across ? r.x : r.y, len = across ? r.w : r.h;
+    int p0 = o0;
+    for (int i = 0; i < n; i++) {
+        int v = i < n - 1 ? sizes[i] : o0 + len - p0;
+        at[i] = p0;
+        sz[i] = v < 0 ? 0 : v;
+        moy_ui_box_t b = across ? (moy_ui_box_t){(int16_t)p0, r.y, (int16_t)sz[i], r.h}
+                                : (moy_ui_box_t){r.x, (int16_t)p0, r.w, (int16_t)sz[i]};
+        out[4 * i] = b.x;
+        out[4 * i + 1] = b.y;
+        out[4 * i + 2] = b.w;
+        out[4 * i + 3] = b.h;
+        p0 += sz[i] + gap;
+    }
+}
+
+int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int32_t *sizes,
+                     int n, const int32_t *mins, const int32_t *opt, int32_t *out) {
+    if (n < 1 || n > MOY_UI_SPLIT_MAX) {
+        return -1;
+    }
+    moy_ui_box_t r;
+    if (c->has_at) {
+        r = c->at;
+        c->has_at = 0;
+    } else {
+        int top = c->page.y + c->y - c->scroll, bottom = c->page.y + c->page.h;
+        r = (moy_ui_box_t){c->page.x, (int16_t)top, c->page.w,
+                           (int16_t)(bottom > top ? bottom - top : 0)};
+    }
+    int flags = opt[MOY_UI_SPO_FLAGS];
+    int across = !(flags & MOY_UI_SPLIT_Y);
+    int drag = (flags & MOY_UI_SPLIT_DRAG) != 0, focus = (flags & MOY_UI_SPLIT_FOCUS) != 0;
+    int gap = opt[MOY_UI_SPO_GAP] > 0 ? opt[MOY_UI_SPO_GAP] : drag ? 6 * c->fs : 0;
+    int32_t at[MOY_UI_SPLIT_MAX], sz[MOY_UI_SPLIT_MAX];
+    split_lay(r, across, gap, sizes, n, at, sz, out);
+    int32_t *w = out + 4 * n;
+    w[0] = -1;
+    w[1] = 0;
+    w[2] = -1;
+    w[3] = 0;
+    int cur = focus ? opt[MOY_UI_SPO_CUR] : -1;
+    if (!drag && !focus) {
+        return -1;
+    }
+    moy_ui_keep_t *k = keep(c, hash(id.p, id.n, 0x5911u), 1);
+    int p = c->in[MOY_UI_IN_PTR], px = c->in[MOY_UI_IN_X], py = c->in[MOY_UI_IN_Y];
+    int live = (p & MOY_UI_P_LIVE) != 0, held = live && (p & MOY_UI_P_HELD);
+    int press = held && (p & MOY_UI_P_EDGE) && !c->modal;
+    int hw = opt[MOY_UI_SPO_HIT_W], hl = opt[MOY_UI_SPO_HIT_L];
+    int took = 0;
+    if (drag) {
+        if (k != NULL && press && k->a == 0) {
+            for (int i = 0; i < n - 1; i++) {
+                int ga = at[i] + sz[i];
+                moy_ui_box_t g = across ? (moy_ui_box_t){(int16_t)ga, r.y, (int16_t)gap, r.h}
+                                        : (moy_ui_box_t){r.x, (int16_t)ga, r.w, (int16_t)gap};
+                if (gap > 0 && inside(split_hitbox(g, across, hw, hl), px, py)) {
+                    k->a = i + 1;
+                    k->b = across ? px : py;
+                    k->gen = sz[i];
+                    k->over = (int16_t)ga;
+                    k->s0 = (uint8_t)(opt[MOY_UI_SPO_SLOP] <= 0);
+                    k->sn = 0;
+                    took = 1;
+                    break;
+                }
+            }
+        }
+        if (k != NULL && k->a > 0 && k->a < n) {
+            int i = k->a - 1;
+            int moved = (across ? px : py) - k->b;
+            if (!k->s0 && (moved >= opt[MOY_UI_SPO_SLOP] || -moved >= opt[MOY_UI_SPO_SLOP])) {
+                k->s0 = 1;
+            }
+            int lo = mins != NULL ? mins[i] : 0;
+            int hi = sz[i] + sz[i + 1] - (mins != NULL ? mins[i + 1] : 0);
+            hi = hi > lo ? hi : lo;
+            int want = k->gen + moved, size = want < lo ? lo : want > hi ? hi : want;
+            if (live) {
+                k->over = (int16_t)(at[i] + size);
+                k->sn = (uint8_t)(want <= lo ? 1 : want >= hi ? 2 : 0);
+            }
+            w[0] = i;
+            w[1] = k->over;
+            w[2] = (int)k->sn - 1;
+            w[3] = k->s0 ? MOY_UI_SPD_LIVE : 0;
+            if (!held) {
+                w[3] |= MOY_UI_SPD_LET_GO;
+                if (k->s0) {
+                    int pair = sz[i] + sz[i + 1];
+                    int got = k->over - at[i];
+                    sizes[i] = got;
+                    sizes[i + 1] = pair - got;
+                    split_lay(r, across, gap, sizes, n, at, sz, out);
+                }
+                k->a = 0;
+            }
+        } else if (k != NULL) {
+            k->a = 0;
+        }
+    }
+    if (focus) {
+        if (press && !took) {
+            for (int i = 0; i < n; i++) {
+                if (inside((moy_ui_box_t){(int16_t)out[4 * i], (int16_t)out[4 * i + 1],
+                                          (int16_t)out[4 * i + 2], (int16_t)out[4 * i + 3]},
+                           px, py)) {
+                    cur = i;
+                    break;
+                }
+            }
+        } else if (k != NULL && c->focus != 0 && (uint32_t)k->drawn != c->focus) {
+            int fx = c->focus_box.x + c->focus_box.w / 2, fy = c->focus_box.y + c->focus_box.h / 2;
+            for (int i = 0; i < n; i++) {
+                if (inside((moy_ui_box_t){(int16_t)out[4 * i], (int16_t)out[4 * i + 1],
+                                          (int16_t)out[4 * i + 2], (int16_t)out[4 * i + 3]},
+                           fx, fy)) {
+                    cur = i;
+                    break;
+                }
+            }
+        }
+        if (k != NULL) {
+            k->drawn = (int32_t)c->focus;
+        }
+    }
+    if (drag && gap > 0) {
+        int dw = opt[MOY_UI_SPO_HANDLE_W] > 0 ? opt[MOY_UI_SPO_HANDLE_W] : gap;
+        int dl = opt[MOY_UI_SPO_HANDLE_L] > 0 ? opt[MOY_UI_SPO_HANDLE_L] : 6 * gap;
+        int line = opt[MOY_UI_SPO_LINE] > 0 ? opt[MOY_UI_SPO_LINE] : c->fs;
+        for (int i = 0; i < n - 1; i++) {
+            int ga = at[i] + sz[i];
+            moy_ui_box_t g = across ? (moy_ui_box_t){(int16_t)ga, r.y, (int16_t)gap, r.h}
+                                    : (moy_ui_box_t){r.x, (int16_t)ga, r.w, (int16_t)gap};
+            if (c->sp_n < MOY_UI_API_DIVS) {
+                c->sp_hit[c->sp_n++] = split_hitbox(g, across, hw, hl);
+            }
+            clip_t kc;
+            EACH_PIECE(c, kc, s, g) {
+                moy_ui_divider(s, g, across, dw, dl, 0, 0, line);
+            }
+            if (w[0] == i && (w[3] & MOY_UI_SPD_LIVE) && !(w[3] & MOY_UI_SPD_LET_GO)) {
+                // the line where the drag takes the gap, which may lie past it
+                int l0 = w[1] + ((across ? g.w : g.h) - line) / 2;
+                moy_ui_box_t lb = across ? (moy_ui_box_t){(int16_t)l0, g.y, (int16_t)line, g.h}
+                                         : (moy_ui_box_t){g.x, (int16_t)l0, g.w, (int16_t)line};
+                EACH_PIECE(c, kc, s, lb) {
+                    moy_ui_divider(s, g, across, 0, 0, 1, w[1], line);
+                }
+            }
+        }
+    }
+    return cur;
+}
+
+int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y) {
+    for (int i = 0; i < c->sp_n; i++) {
+        if (inside(c->sp_hit[i], x, y)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap) {
