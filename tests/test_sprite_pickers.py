@@ -63,12 +63,12 @@ def _console(path, desk, ships):
     ws.took = [False]
     if desk:
         ws.editor_desk.switch("art")
-        rows = ws.editor_desk._pane_rows
+        rows = ws.editor_desk._split_frame
 
-        def own(o, dt, rows=rows, took=ws.took):
-            took[0] = got = ships and rows(o, dt)
-            return got
-        ws.editor_desk._pane_rows = own
+        def own(dt, got, o, rows=rows, took=ws.took):
+            took[0] = drew = ships and rows(dt, got, o)
+            return drew
+        ws.editor_desk._split_frame = own
     else:
         if not ships:
             ws.wm.CONTENT_RING = False

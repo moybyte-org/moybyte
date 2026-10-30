@@ -956,7 +956,7 @@ def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
         drv.key_up(code)
         drv.frame(DT)
     shown = bytes(ws.glass_canvas._buf)
-    d._own_key = None                           # the next frame draws whole
+    d._surround = None                          # the next frame draws whole
     ws._dirty = True
     drv.frame(DT)
     assert d.changed() == [0, 0, ws.sys_canvas.w, ws.sys_canvas.h]
@@ -1010,7 +1010,7 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
             root._comp.last = shot
             root._buf[:] = held[-2]
     for ws in (a, b):
-        ws.editor_desk._own_key = None          # a whole frame
+        ws.editor_desk._surround = None         # a whole frame
         ws._dirty = True
     frame()
     got = []

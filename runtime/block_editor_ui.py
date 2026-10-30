@@ -237,13 +237,7 @@ class BlockEditorUI:
         self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
-        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
-        # buffer `shift_last` reads holds it as the last draw left it, 1 a
-        # window's frame drawn whole, 0 none (the handheld)
-        self.vouch = 0
-        # the page under blk_kbd (`_draw_blk_kbd`); `_rows` is the desk
-        # Editor's name for it (its rows frames)
-        self._hold = self._rows = _ui_draw.Hold()
+        self._hold = _ui_draw.Hold()      # the page under blk_kbd (`_draw_blk_kbd`)
         self._kbd_gen = 0             # what the prompt draws besides its field's text
 
     def page(self):
@@ -1237,13 +1231,7 @@ class BlockEditorUI:
             hold.note()
             return
         if how == _ui_draw.HOLD_DRAW:
-            if self.vouch:
-                _ui_draw.window_frame(self.vouch)
-            try:
-                self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
-            finally:
-                if self.vouch:
-                    _ui_draw.window_frame(0)
+            self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
         ws.bar_layer._draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)

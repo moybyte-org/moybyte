@@ -2450,8 +2450,10 @@ class Hold:
     host's `held`) the dialog draws its changed rows alone. That is where
     every buffer holds the page as the frames before left it (`rows`: each
     a frame the dialog drew over the hold alone on the glass, `note`), or
-    on the desk where the Editor's window buffer holds it (`desk_frame`),
-    and only on a frame whose dialog gave the gen it gave the last."""
+    where the frame is a window's whose target holds it as the last frame
+    left it (`window_frame` 2 and up: the desk Editor's split frame of the
+    dialog's pane, docs/ui_blocks_2026-10.md §4.2), and only on a frame
+    whose dialog gave the gen it gave the last."""
 
     def __init__(self):
         self.key = None
@@ -2461,8 +2463,6 @@ class Hold:
         self._src = None                # this frame's page: the last frame's buffer
         self._at = PaintRing()          # the frames that drew the dialog over the hold
         self._ask = [None, None, None, 0]   # this frame's console, canvas, key, dt (`ask`)
-        self.desk = -1                  # the frame the desk vouched its window holds the page
-        self.on_desk = -1               # the frame the desk drew the dialog into its window
         self.begun = -1                 # the frame the dialog's host began ahead of the page
         self._gen = None
         self._same = False
@@ -2635,19 +2635,11 @@ class Hold:
         cl = getattr(cv, "copy_last", None)
         return cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
 
-    def desk_frame(self, holds):
-        """The desk Editor draws the dialog this frame, into its window's
-        buffer: a window frame (`window_frame`), whose buffer holds the page
-        as the frame before left it where `holds`."""
-        f = _PAINT[0]
-        self.on_desk = f
-        self.desk = f if holds else -1
-
     def rows_frame(self, ws, key, gen, host, rect, desk, dt=0):
         """Begin the dialog's frame on its `host` ahead of the page, once a
         painted frame, `key` what the page is a function of and `gen` the
-        dialog's: on the desk a window frame (`window_frame`), one the desk
-        vouches for where it said so. Whether it is the dialog's rows frame,
+        dialog's, under the window word its caller set (`window_frame`).
+        Whether it is the dialog's rows frame,
         which draws the dialog's changed rows alone and leaves the page as
         it is; else the frame draws the page and the dialog as ever, the
         dialog's draw resuming the frame begun here (`dialog`)."""
@@ -2658,14 +2650,7 @@ class Hold:
         self.ask(ws, cv, key, dt)
         self._same = gen == self._gen
         self._gen = gen
-        w = 2 if self.desk == f else 1 if self.on_desk == f else 0
-        if w:
-            window_frame(w)
-        try:
-            host.begin(cv, ws.theme_colors, rect, desk)
-        finally:
-            if w:
-                window_frame(0)
+        host.begin(cv, ws.theme_colors, rect, desk)
         self.begun = f
         return host.shifting
 
@@ -2678,17 +2663,12 @@ class Hold:
         else:
             host.begin(cv, th, rect, desk)
 
-    def floor_box(self, host, out):
-        """The floor's bounding rect the dialog's last pass drew into
-        `out`, an array('i') of four: whether it drew one."""
-        return _C.api_floor_box(host.ctx, out)
-
     def ok(self, plan):
         """The dialog's host's `held`: whether its rows frame `plan` may
         leave the page as it is."""
         if not self._same:
             return False
-        if self.desk == _PAINT[0]:
+        if _PF[_PF_WIN] >= 2:
             return plan[7] >= 1
         return self.rows(plan)
 

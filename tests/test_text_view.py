@@ -387,7 +387,7 @@ def test_a_whole_frame_mid_drag_leaves_each_buffer_one_catch_up(tmp_path, bufs):
     p.both("touch_drag", x, y - 20)
     p.frame()
     del whole[:]
-    d._own_key = p.b.editor_desk._own_key = None
+    d._surround = p.b.editor_desk._surround = None
     n = len(p.kinds)
     for k in range(2, 14):
         p.both("touch_drag", x, y - 20 * k)

@@ -67,9 +67,9 @@ _OWNERS_OR_CODE = tuple(_OWNERS) + ("code",)
 # editor core, not by the tab's own surface: the Sound pane.
 _ON_VERBS = ("music",)
 
-# The panes whose frames may be their own: a frame whose input reached that
-# pane alone draws it alone (`_pane_rows`); the Sprite pane's while its
-# pickers are up.
+# The panes whose frames may be their own: a frame the engine plans as the
+# pane's split frame draws it alone (`_split_frame`); the Sprite pane's while
+# its pickers are up.
 _OWN_FRAMES = ("blocks", "cards", "code", "theme_config", "map", "music", "paint")
 
 # The Editor tabs drawn as one verbs page whose gen says what it shows: a
@@ -127,6 +127,7 @@ _F6 = 0x101 + 5
 _LEFT, _RIGHT, _UP, _DOWN = 0x110, 0x111, 0x112, 0x113
 _ENTERS = (10, 13)
 _PAD_DIRS = (("left", -1, 0), ("right", 1, 0), ("up", 0, -1), ("down", 0, 1))
+_NO_LAG = (0, 0, 0, 0)           # a split frame's target lagging nothing
 _PB_MIDDLE = 2
 
 
@@ -150,6 +151,8 @@ class EditorDesk(Layer):
         self._splits = None             # (placed, [(path, axis, rect, mins, id)]): the splits
         self._split_out = [0] * (4 * 8 + 4)
         self._split_o = {"drag": True}
+        self._one = [0]                 # the split of one pane alone over the area
+        self._one_o = {"focus": 0}
         self._press = None              # the pane a press went down in
         self._last = (None, 0)          # the last press: its target, when
         self._ev = 0                    # last frame's key event
@@ -179,10 +182,12 @@ class EditorDesk(Layer):
         self.dt = 0
         # The shown protocol (docs/surface_model_v1.md §14.3) while a prompt
         # is up: whether the buffer this draw goes into holds the desk as the
-        # last draw left it (`retained`), what the desk was a function of then
-        # (`_rows_key`), and what the draw changed (`changed`).
+        # last draw left it (`retained`), and what the draw changed
+        # (`changed`). What the desk draws outside the pane the keys reach
+        # is a function of `_surround`, its gen `_gen` (`_split_frame`).
         self._known = False
-        self._rows_key = None
+        self._surround = None
+        self._gen = 0
         self._changed = None
         self._acts = 0                  # input the desk took itself (a press, a chord)
         self._in_code = False           # this press went to the focused pane (its own frames)
@@ -194,7 +199,6 @@ class EditorDesk(Layer):
         # (`vouched`: 2, 3 where the ring says the buffer this frame paints
         # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
-        self._own_key = None            # ...and at the last frame of a pane of its own
         self._moves = None              # the pane whose text view moves on a whole frame
         self._clip = None               # the rect a frame of the Sound pane's own is clipped to
         # the layout the desk drew in last: its window's, which the WM has
@@ -567,17 +571,18 @@ class EditorDesk(Layer):
         if layer is None:
             return
         if tab in _PAGES:
-            # the page's own shift and rows frames, on a frame of its pane's
-            # own where the WM says the buffer `shift_last` reads holds it as
-            # the last draw left it; a whole frame draws it whole, but for a
-            # text view's moves out of the last frame (`_TEXT_PANES`)
-            page = self.ws.block_ui if tab == "blocks" else layer
-            page.vouch = (self._vouch if own and self._vouch >= 2 else 2 if moves
-                          else 1)
+            # the WM's word for the pane's frame (`window_frame`),
+            # which its page's shift and rows frames and its dialog's read:
+            # on a split frame the WM's own where it says the buffer
+            # `shift_last` reads holds the page as the last draw left it; a
+            # whole frame a window's, but for a text view's moves out of the
+            # last frame (`_TEXT_PANES`)
+            host = self._host
+            was = host.window(self._vouch if own and self._vouch >= 2 else 2 if moves else 1)
             try:
                 self._in_pane(tab, r, layer.draw, dt)
             finally:
-                page.vouch = 0
+                host.window(was)
             return
         self._in_pane(tab, r, layer.draw, dt)
 
@@ -670,7 +675,7 @@ class EditorDesk(Layer):
         return self._changed
 
     def unclip(self, cv):
-        """A draw's own clip let go: back to the frame's (`_pane_rows`)."""
+        """A draw's own clip let go: back to the frame's (`_split_frame`)."""
         if self._clip is None:
             cv.clip()
         else:
@@ -680,11 +685,12 @@ class EditorDesk(Layer):
     #
     # While the focused pane shows Blocks, Settings, the Code tab, theme
     # Config, the Map or the Sound pane, the desk speaks the shown protocol:
-    # a frame whose input reached only that pane and changed nothing another
-    # pane draws (no edit the other panes show: the made code, the sounds
-    # list) draws that pane alone and names it as what it changed. A tab's
-    # pane draws its body (its header holds nothing the frame moved); the
-    # Sound pane, drawn on the desk's own verbs, its card, header and body.
+    # a frame the engine plans as that pane's split frame (its input reached
+    # only that pane, and nothing another pane draws changed: no edit the
+    # other panes show, the made code, the sounds list) draws that pane alone
+    # and names it as what it changed. A tab's pane draws its body (its
+    # header holds nothing the frame moved); the Sound pane, drawn on the
+    # desk's own verbs, its card, header and body.
 
     def _own_pane(self):
         """(content, tab, pane, rect, body, index) of the focused pane where
@@ -738,38 +744,58 @@ class EditorDesk(Layer):
             return (pe.n, pe.size, pe.sheet, pe.sheet.gen)
         return None
 
-    def _pane_rows(self, own, dt):
-        """The frame as the focused pane's alone, where it may be one: True
-        where the pane drew and nothing else changed."""
+    def _split_frame(self, dt, got, own):
+        """The frame as the split frame of the pane the keys reach, where
+        the engine plans one (`AppHost.split_frame`, docs/ui_blocks_2026-10.md
+        §4.2): that pane drawn alone -- its prompt's rows (`got`), or its
+        body (`own`; the Sound pane its card, header and body) -- and what
+        it changed said (`changed`). True where it drew. The desk gives the
+        engine what it draws outside the pane as a gen, and None where that
+        changes on its own this frame."""
         ws = self.ws
-        c, tab, pane, r, body, n = own
+        host = self._host
+        b = self._box
+        if got is None and own is None:
+            host.split_frame(None, False, 0, _NO_LAG, b)
+            return False
         cv = ws.sys_canvas
         look = ws.look
         app = ws.editor_app
-        data = self._own_data(c)
-        key = (c, self._acts, self.key, n, self.grown, pane, r, self.placed()[0],
-               cv.w, cv.h, look.look_gen, look.effective_font_scale(),
-               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"), data,
-               self._loupe, self._flash, self.part_state.get("code more"),
-               self.part_state.get("head more"))
         ret = self._ret
-        same = key == self._own_key
-        # a frame the WM did not speak to (the content not held when it
-        # asked) arms nothing: its row is the WM's to settle first
-        self._own_key = key if ret[0] else None
-        if (not same or data is False or not ret[0] or app.playing()
-                or ws._animating(dt, False)
-                or self._spills() or self._over_panes()):
+        u = self._unit()
+        if got is not None:
+            tab, layer, pane, r = got
+            c = None
+            data = layer.prompt_host()
+            known = self._known
+            lag = _NO_LAG
+            still = not ws._animating(dt)
+        else:
+            c, tab, pane, r, _body, _n = own
+            layer = None
+            data = self._own_data(c)
+            known = ret[0] != 0
+            lag = ret[1:]
+            still = not (data is False or app.playing() or ws._animating(dt, False)
+                         or self._spills() or self._loupe is not None
+                         or (c == "paint" and ws.paint_layer._host.tap == 2
+                             and ws.paint_layer._host.tap_armed()))
+        self._known = False
+        key = (c, tab, self._acts, self.key, self._focus.get(self.key, 0), self.grown, pane,
+               r, self.placed()[0], cv.w, cv.h, look.look_gen, look.effective_font_scale(),
+               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"), data,
+               self._flash, self.part_state.get("code more"),
+               self.part_state.get("head more"))
+        if key != self._surround:
+            self._surround = key
+            self._gen = (self._gen + 1) & 0x3FFFFFFF
+        top = 0 if c == "music" else r[3] - self._body(r, u, pane)[3]
+        v = host.split_frame(self._gen if still else None, known, top, lag, b)
+        if v == host.SPLIT_WHOLE:
             return False
-        if c == "paint" and ws.paint_layer._host.tap == 2 \
-                and ws.paint_layer._host.tap_armed():
-            return False                # a release the pickers' pass may pick a sprite from
-        if c == "music" and not self._host.quiet():
-            return False                # the desk's verbs take input: focus may move off the pane
-        b = r if c == "music" else body
+        body = (b[0], b[1], b[2], b[3])
         x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
-        if ret[3] > ret[1] and ret[4] > ret[2] and (ret[1] < x0 or ret[2] < y0
-                                                     or ret[3] > x1 or ret[4] > y1):
+        if v == host.SPLIT_LAGS:
             # the buffer lags outside the pane: the frame draws whole, and
             # what it changed is still the pane alone -- everything else
             # draws as the frame before showed it -- so the buffers behind
@@ -779,11 +805,25 @@ class EditorDesk(Layer):
             if c in _TEXT_PANES and self._vouch >= 2:
                 self._moves = pane
             return False
+        if got is not None:
+            # the buffer holds the desk as the last draw left it: the
+            # prompt's frame may be its rows alone (`Hold.ok`)
+            was = host.window(2)
+            try:
+                if not self._in_pane(tab, body, layer.prompt_rows, dt):
+                    return False
+            finally:
+                host.window(was)
+            if data.floor_box(b):
+                self._changed = [body[0] + b[0], body[1] + b[1], body[0] + b[0] + b[2],
+                                 body[1] + b[1] + b[3]]
+            else:
+                self._changed = [0, 0, 0, 0]
+            return True
         if c == "music":
             # the desk's verbs run whole (focus rests on the first pane's
             # header), their pixels clipped to the pane
             th = ws.theme_colors
-            u = self._unit()
             self._corners(cv, th["panel"], r[0], r[1], r[2], r[3], P.RADIUS * u)
             self._card(cv, th, r, True, u)
             self._cursors = []
@@ -799,51 +839,6 @@ class EditorDesk(Layer):
         self._changed = [x0, y0, x1, y1]
         return True
 
-    def _over_panes(self):
-        """Whether the desk drew over the panes last frame, or its next frame
-        may: a loupe, a divider pressed or held (its line, its flash), or a
-        popover or tooltip of its pass."""
-        return (self._loupe is not None or self._on_div or self._drag is not None
-                or self._host.popped(self._box))
-
-    def _prompt_rows(self, dt):
-        """The frame as a prompt's rows frame, where it may be one: True
-        where the prompt drew its changed rows alone."""
-        ws = self.ws
-        got = self._prompt()
-        known = self._known
-        self._known = False
-        if got is None:
-            self._rows_key = None
-            return False
-        tab, layer, pane, r = got
-        cv = ws.sys_canvas
-        look = ws.look
-        key = (layer.prompt_host(), self._acts, self.key, self._focus.get(self.key, 0),
-               self.grown, pane, r, self.placed()[0],
-               cv.w, cv.h, look.look_gen, look.effective_font_scale(),
-               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"))
-        same = key == self._rows_key
-        self._rows_key = key
-        rows = layer._rows
-        if not same or not known or ws._animating(dt):
-            rows.desk_frame(False)
-            return False
-        u = self._unit()
-        body = self._body(r, u, pane)
-        # the buffer holds the desk as the frame before left it: the
-        # prompt's frame may be its rows alone
-        rows.desk_frame(True)
-        if not self._in_pane(tab, body, layer.prompt_rows, dt):
-            return False
-        b = self._box
-        if rows.floor_box(layer.prompt_host(), b):
-            self._changed = [body[0] + b[0], body[1] + b[1], body[0] + b[0] + b[2],
-                             body[1] + b[1] + b[3]]
-        else:
-            self._changed = [0, 0, 0, 0]
-        return True
-
     def draw(self, dt):
         ws = self.ws
         self._drew_in = ws.layout
@@ -855,17 +850,13 @@ class EditorDesk(Layer):
             self._warm_due = True
         self._changed = None
         try:
-            if not (self.HELD and self._prompt_rows(dt)):
-                free = self._prompt() is None
-                own = self._own_pane() if free else None
-                alone = own is not None and self._pane_rows(own, dt)
-                if own is None:
-                    self._own_key = None
-                if not alone:
-                    self._draw(dt)
-                    if own is not None and self._changed is None:
-                        cv = ws.sys_canvas
-                        self._changed = [0, 0, cv.w, cv.h]
+            got = self._prompt()
+            own = self._own_pane() if got is None else None
+            if not self._split_frame(dt, got, own):
+                self._draw(dt)
+                if own is not None and self._changed is None:
+                    cv = ws.sys_canvas
+                    self._changed = [0, 0, cv.w, cv.h]
         finally:
             self._known = False
             self._ret[0] = 0
@@ -901,9 +892,6 @@ class EditorDesk(Layer):
                 self._tab_pane(tab, body, dt, moves=pane == self._moves)
             elif c == "game":
                 self._game(cv, th, body, u)
-            elif c in ("sheet", "sprites", "stamps"):
-                self._ref = c == "sprites"
-                self._sheet(cv, th, body, u, c == "stamps")
             elif c == "maps":
                 Parts.drawn_before(self, c, cv, th, body, u)
         self._frame(cv, th, shown, u)
@@ -1014,8 +1002,14 @@ class EditorDesk(Layer):
         host = self._host
         host.begin(cv, th, (0, 0, cv.w, cv.h), True, True,
                    elsewhere=not self._part_focused())
+        self._loupe = None              # a Sheet's part held says where (`_sheet`)
         if self.alone() is None:
             self._dividers(u)
+        else:
+            # the pane alone over the panes area is a split of one, which
+            # the keys reach (`_split_frame`)
+            ui.at(*self._area())
+            ui.split("split alone", "x", self._one, self._one_o, self._split_out)
         hh = P.HEADER * u
         cell = 32 * u
         for n, pane, r in shown:
@@ -1085,10 +1079,14 @@ class EditorDesk(Layer):
                 Parts.draw(self, c, self._body(r, u, pane), u)
             elif c == "music":
                 Sound.draw(self, cv, th, self._body(r, u, pane), u)
-            elif c == "stamps":
-                Parts.stamps_label(self, self._body(r, u, pane), u)
-            elif c == "sprites":
-                self._pick_line(self._body(r, u, pane), u)
+            elif c in ("sheet", "sprites", "stamps"):
+                body = self._body(r, u, pane)
+                self._ref = c == "sprites"
+                self._sheet(cv, th, body, u, pid, c == "stamps")
+                if c == "stamps":
+                    Parts.stamps_label(self, body, u)
+                elif c == "sprites":
+                    self._pick_line(body, u)
         for r in self._cursors:
             ui.cursor(*r)
         if self.part_state.get("code more") is not None:
@@ -1311,11 +1309,24 @@ class EditorDesk(Layer):
                 for path, axis, rect, mins in self.arrangement().splits()])
         return got[1]
 
+    def _keys_path(self):
+        """The path of the pane the keys reach: a prompt's, else the
+        focused one."""
+        got = self._prompt()
+        if got is not None:
+            for pane, _r, path in self.panes():
+                if pane == got[2]:
+                    return path
+        return self.focused()[2]
+
     def _dividers(self, u):
         """The workspace's splits on the desk's verbs (`ui.split`), one a
         node of its tree: their dividers drawn, a press on one held and its
         line dragged, the release laying out the panes beside it
-        (`Arrangement.drag`) and a double tap putting it back."""
+        (`Arrangement.drag`) and a double tap putting it back. Each split's
+        focus is its child the keys reach (`_keys_path`), where that child
+        is a pane: the engine's split frame and directional moves start
+        there."""
         ws = self.ws
         mouse = bool(getattr(ws.pointer, "hovers", False))
         o = self._split_o
@@ -1328,9 +1339,12 @@ class EditorDesk(Layer):
         arr = self.arrangement()
         held = None
         self._flash = None
+        keys = self._keys_path()
         for path, axis, rect, mins, sid in self._split_nodes():
             sizes = list(arr.sizes[path])
             o["mins"] = mins
+            d = len(path)
+            o["focus"] = keys[d] if len(keys) == d + 1 and keys[:d] == path else -1
             ui.at(*rect)
             ui.split(sid, "x" if axis == "h" else "y", sizes, o, out)
             n = len(sizes)
@@ -1392,9 +1406,12 @@ class EditorDesk(Layer):
         self._still = None if live else (gx, gy, gw, gh)
         self._still_at = (gx, gy, gw, gh)
 
-    def _sheet(self, cv, th, r, u, stamps=False):
+    def _sheet(self, cv, th, r, u, pid, stamps=False):
         """The Sheet: two pages of the sprite sheet at 2x side by side (a page
-        16 x 8 tiles), captioned; the current sprite ringed."""
+        16 x 8 tiles), captioned; the current sprite ringed. The pages are
+        one part (`ui.part`, in no page, so its press stays its own through a
+        drag): a press or a held slide on a tile picks it, its loupe over the
+        finger (`ui.part_at`)."""
         ws = self.ws
         sh = ws.sheet
         if sh is None:
@@ -1405,30 +1422,69 @@ class EditorDesk(Layer):
         s = 2 * u
         tw = 8 * s
         pw = cols * tw
+        ph = prow * tw
         cap = 20 * u
         n = max(1, min(2, (w - cap) // (pw + cap)))
         if stamps or self._ref:
             h -= 40 * u                     # the foot's line
         first = min(self._sheet_page, max(0, pages - n))
-        top = y + max(0, (h - prow * tw) // 2)
+        top = y + max(0, (h - ph) // 2)
+        # the part: the pages and the gaps between them, where the pane
+        # shows them
+        x0 = x + cap
+        sw = max(0, min(n * pw + (n - 1) * cap, x + w - x0))
+        sh_ = max(0, min(ph, y + h - top))
+        ui.at(x0, top, sw, sh_)
+        bx, by, bw, bh, st = ui.part(pid + " sheet", sw, sh_)
+        loupe = None
+        if bw > 0 and st & (ui.PRESSED | ui.ACTIVATED):
+            at = ui.part_at()
+            if at is not None:
+                k = at[0] // (pw + cap)
+                ax = at[0] - k * (pw + cap)
+                if 0 <= k < n and 0 <= ax < pw and 0 <= at[1] < ph:
+                    t = ((first + k) * prow + at[1] // tw) * cols + ax // tw
+                    self._pick_tile(t, stamps)
+                    if st & ui.PRESSED:
+                        loupe = (t, bx + at[0], by + at[1])
+        if loupe is not None:
+            self._loupe = loupe
         cur = self._cur_sprite()
         if stamps:
             se = ws.scene_ui.sceneedit
             cur = se.n if se is not None else -1
-        self._sheet_rects = []
-        px = x + cap
         cv.clip(x, y, w, h)
+        px = x0
+        for k in range(1, n):
+            cv.rect(x0 + k * pw + (k - 1) * cap, top, cap, sh_, th["surface"])  # a gap
+        self._sheet_rects = []          # where the pages drew: (page, rect)
         for k in range(n):
             pg = first + k
             cv.print(str(pg + 1), px - cap + 6 * u, top, th["ink_dim"], 1)
-            cv.rect(px, top, pw, prow * tw, th["surface_alt"])
-            cv.sspr(sh, 0, pg * prow * 8, cols * 8, prow * 8, px, top, pw, prow * tw, 0)
+            cv.rect(px, top, pw, ph, th["surface_alt"])
+            cv.sspr(sh, 0, pg * prow * 8, cols * 8, prow * 8, px, top, pw, ph, 0)
             t = cur - pg * prow * cols
             if 0 <= t < prow * cols:
                 self._cursors.append((px + (t % cols) * tw, top + (t // cols) * tw, tw, tw))
-            self._sheet_rects.append((pg, (px, top, pw, prow * tw)))
+            self._sheet_rects.append((pg, (px, top, pw, ph)))
             px += pw + cap
         cv.clip()
+
+    def _pick_tile(self, t, stamps):
+        """Tile `t` pressed on the Sheet: the Stamps pane's brush, else the
+        sprite picked (`_pick`); the panes drawn before it this frame show
+        it on the next, which the pick asks for."""
+        ws = self.ws
+        if stamps:
+            se = ws.scene_ui.sceneedit
+            if se is None or se.n == t:
+                return
+            se.set_brush(t)
+        elif self._cur_sprite() == t:
+            return
+        else:
+            self._pick(t)
+        ws.request_frame()
 
     def _draw_loupe(self, cv, th, u):
         """The Sheet's loupe (EDITOR_LAYOUT.md): the tile under a held press
@@ -1470,13 +1526,6 @@ class EditorDesk(Layer):
             ws.history.code_burst_open()
             ws.editor.insert_text(call)
             ws._dirty = True
-
-    def _sheet_at(self, px, py):
-        for pg, (x, y, w, h) in getattr(self, "_sheet_rects", ()):
-            if x <= px < x + w and y <= py < y + h:
-                tw = w // 16
-                return (pg * 8 + (py - y) // tw) * 16 + (px - x) // tw
-        return None
 
     def _pick(self, t):
         """A sprite picked on the Sheet: the Sprite pane's and the map's
@@ -1739,33 +1788,16 @@ class EditorDesk(Layer):
             return True
         for name, dx, dy in _PAD_DIRS:
             if i.pressed(name):
-                self._focus_toward(dx, dy)
+                # the pane that way of the splits' (`ui.split`'s focus)
+                b = self._box
+                f = self.focused()[1] if self.alone() is None else self._area()
+                if self._host.split_toward(f[0] + f[2] // 2, f[1] + f[3] // 2, dx, dy, b):
+                    cx, cy = b[0] + b[2] // 2, b[1] + b[3] // 2
+                    for n, _p, r in self._shown_panes():
+                        if r[0] <= cx < r[0] + r[2] and r[1] <= cy < r[1] + r[3]:
+                            self.focus_pane(n)
                 return True
         return False
-
-    def _focus_toward(self, dx, dy):
-        """The keys to the nearest pane whose centre lies the way (dx, dy)
-        from the focused one's, nearest along the way first."""
-        shown = self._shown_panes()
-        fi = self._focus.get(self.key, 0)
-        cur = None
-        for n, _p, r in shown:
-            if n == fi:
-                cur = r
-        if cur is None:
-            return
-        cx, cy = cur[0] + cur[2] // 2, cur[1] + cur[3] // 2
-        best = None
-        for n, _p, r in shown:
-            px, py = r[0] + r[2] // 2 - cx, r[1] + r[3] // 2 - cy
-            along = px * dx + py * dy
-            if n == fi or along <= 0:
-                continue
-            k = along + 2 * abs(px * dy + py * dx)
-            if best is None or k < best[0]:
-                best = (k, n)
-        if best is not None:
-            self.focus_pane(best[1])
 
     def select_start(self):
         """Select+Start (the pad's Play): Play, or Restart while the
@@ -1883,18 +1915,7 @@ class EditorDesk(Layer):
                 ws._dirty = True
             return True
         if c in ("sheet", "sprites", "stamps"):
-            t = self._sheet_at(px, py)
-            if t is not None and (click or down):
-                if c == "stamps":
-                    se = ws.scene_ui.sceneedit
-                    if se is not None:
-                        se.set_brush(t)
-                        ws._dirty = True
-                else:
-                    self._pick(t)           # a held slide previews each it passes
-            loupe = (t, px, py) if t is not None and down else None
-            if loupe != self._loupe:
-                self._loupe = loupe
+            if host.point(px, py, click, down):     # the Sheet's part (`_sheet`)
                 ws._dirty = True
             return True
         if c in Parts.PARTS:

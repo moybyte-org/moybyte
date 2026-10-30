@@ -311,7 +311,6 @@ class CodeLayer:
         # the view's options, packed once and written in place each frame
         self._view = _ui.text_options({"gutter": True, "syntax": "python", "mark": True})
         self._pop = _array("i", [0, 0, 0, 0])    # a popover's card, as its pass drew it
-        self.vouch = 0                # a desk pane's word for its buffer (EditorDesk.vouched)
         self._t = None                # per-draw tone map (set by _draw_code)
         self._tk = [None, -1, None]   # ...made once a theme and look gen
         self._rr = [0, 0, 0, 0]       # R, the code's rows' rect, each draw
@@ -1238,16 +1237,10 @@ class CodeLayer:
             # draws whole rather than first moving the last frame's pixels
             self._left = ed.left
             host.whole()
-        if self.vouch:
-            _ui_draw.window_frame(self.vouch)
-        try:
-            host.begin(cv, ws.theme_colors, r, _desk(), False, True)   # elsewhere
-            _ui.at(r[0], r[1], r[2], r[3])
-            got = _ui.text_view("code", ed.lines, o, None if row is None else ws.code_err or "",
-                                q, self._into)
-        finally:
-            if self.vouch:
-                _ui_draw.window_frame(0)
+        host.begin(cv, ws.theme_colors, r, _desk(), False, True)   # elsewhere
+        _ui.at(r[0], r[1], r[2], r[3])
+        got = _ui.text_view("code", ed.lines, o, None if row is None else ws.code_err or "",
+                            q, self._into)
         ed.top = self._top = got[0]
         if self.wants_tools() and self._tools_open:
             tb = self._toolbar_rect(ws.code_layout)

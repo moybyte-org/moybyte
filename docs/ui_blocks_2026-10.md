@@ -102,14 +102,14 @@ the Notes split needs.
 
 **G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
 `floor*`) are not in any public face. They reach the shell through
-`modmoy_ui.c`'s private table. But the Code tab, the desk's panes (a
-pane's own frame, `EditorDesk._pane_rows`, and a pane's dialog's rows,
-`_prompt_rows`) and the Launcher's bands each drive them with a path of
-their own (#243 lists them). `AppHost.begin` (`runtime/ui_draw.py`, over
-`moy_ui_api_host_begin`) is the one path that stays. The others go as
-their surfaces move. Paint's pickers have none: the page under them is a
-modal's page (`ui_draw.Hold`), and their cells are read from a part
-(§4.4).
+`modmoy_ui.c`'s private table. But the Code tab and the Launcher's bands
+each drive them with a path of their own (#243 lists them).
+`AppHost.begin` (`runtime/ui_draw.py`, over `moy_ui_api_host_begin`) is
+the one path that stays. The others go as their surfaces move. The desk's
+panes have none: a frame of one pane alone, or of its dialog's rows, is the
+engine's split frame (§4.2). Paint's pickers have none either: the page
+under them is a modal's page (`ui_draw.Hold`), and their cells are read
+from a part (§4.4).
 
 **G5. Budgets.**
 - `MOY_UI_API_STOPS` (40): stops a frame. A stop past it is drawn and
@@ -213,6 +213,43 @@ engine keeps by id. A split with neither focus nor a divider stays the rect
 algebra (`hsplit`/`vsplit`). `docs/ui_api_2026-10.md` §5a says each answer;
 the Editor desk's dividers are splits.
 
+**The panes a pass cut are a record.** Each split with focus or a divider
+records its panes in its context until the next pass (`sp_pane` in
+`moy_ui_api.c`). A pane that a later split of the same pass cuts again is
+a node, not a pane; the split whose `o.focus` names one of its panes marks
+the pane the keys reach. The desk gives each split the child the keys
+reach (a prompt's pane, else the focused one), and a pane grown or alone
+over the area is a split of one.
+
+**The split frame.** A pane's content lives in a context of its own (each
+Editor tab's `AppHost`), and one context's plan cannot see another's. So
+the frame that draws one pane alone is decided before any pass begins,
+from the record: `AppHost.split_frame(gen, known, top, lag, out)`
+(`moy_ui_api_split_frame`). It answers ALONE, with the pane's rect below
+`top` (the header the context's own pass draws), where all of these hold:
+- the host holds no input for its own context, nothing is owed and no page
+  moves;
+- the last pass drew no popover and held no divider;
+- `gen`, what the app draws outside the pane, is the last frame's, and the
+  WM's word (`known`) says the target held the page on both frames.
+
+It answers LAGS where the target lags outside that rect: the frame draws
+whole and changes the rect alone. Otherwise it answers WHOLE. The app's
+part is data: a gen of what it shows outside the pane (the desk's
+`_surround`), or None where that changes on its own (a playtest, an
+animation, a loupe). The pane's own context then plans what in the pane
+changed: its page's shift and rows frames, or its dialog's rows
+(`Hold.ok`). Either reads the WM's word, which the desk relays with
+`window_frame` around the pane's draw (2 on a prompt's split frame). The
+change the WM takes is the pane's rect, or the dialog's floor
+(`AppHost.floor_box`).
+
+**Directional moves.** `AppHost.split_toward(x, y, dx, dy, out)` answers the
+recorded pane that lies (dx, dy) from the one holding (x, y). Of the panes
+whose centre lies that way it takes the nearest along it, and a pane off to
+the side counts twice its distance across. The desk's Select and d-pad
+move the keys there.
+
 ### 4.3 Linked and two-axis scroll
 
 - **Link.** `o.link = leader_id` makes a nest a follower. The leader's
@@ -229,7 +266,9 @@ the Editor desk's dividers are splits.
 ### 4.4 `ui.part`, with input
 
 - A part answers the pointer's position inside it (`ui.part_at`) and its
-  pressed state. Paint's sprite picker reads its cell from it.
+  pressed state. A press held on a part with no page under it, or with
+  `nav` off, stays its own through a drag. Paint's sprite picker reads its
+  cell from it, and so does the desk's Sheet, during a held slide too.
 - `o.gen` lets an unchanged part be left as drawn.
 - `o.cursor = {x, y, w, h}` draws `ui.cursor`'s mark with no extra stop.
 

@@ -982,9 +982,10 @@ window's buffer is the hold: while a pane's tab has a prompt up the desk
 Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),
 and a frame whose buffer holds the desk as its last draw left it, with no
 input the desk took itself (a press, a chord) and no look, size, layout or
-bar key moved, draws the prompt's rows alone; the stamp copies them, and
-the full-screen row over the band stays as the buffer holds it
-(`WindowedWM._row_over`).
+bar key moved, is the prompt pane's split frame
+(`docs/ui_blocks_2026-10.md` §4.2) and draws the prompt's rows alone; the
+stamp copies them, and the full-screen row over the band stays as the
+buffer holds it (`WindowedWM._row_over`).
 
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by

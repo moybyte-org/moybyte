@@ -189,10 +189,6 @@ class CardsLayer:
         self.ws = ws
         self._NAMES = names
         self._err_text = err_text
-        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
-        # buffer `shift_last` reads holds it as the last draw left it, 1 a
-        # window's frame drawn whole, 0 none (the handheld)
-        self.vouch = 0
         self._broken_host = None      # the UI context of a page that failed to draw
         self._fix_host = _ui_draw.AppHost()     # a broken manifest's page's
         self._why = None              # (its reason, the width, the reason's lines)
@@ -200,9 +196,7 @@ class CardsLayer:
         self._files_o = {"id": "files"}
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
-        # the page under it (`_draw_prompt`); `_rows` is the desk Editor's
-        # name for it (its rows frames)
-        self._hold = self._rows = _ui_draw.Hold()
+        self._hold = _ui_draw.Hold()  # the page under it (`_draw_prompt`)
         # The project's file list: None when closed, else `_listing`'s
         # {"rows", "msg", "names", "cells", "cur"} -- see _open_files.
         self.files = None
@@ -443,13 +437,7 @@ class CardsLayer:
         if why:
             self._draw_manifest(why, rect, desk)
             return
-        if self.vouch:
-            _ui_draw.window_frame(self.vouch)
-        try:
-            self.page().draw(ws.sys_canvas, ws.theme_colors, rect, desk)
-        finally:
-            if self.vouch:
-                _ui_draw.window_frame(0)
+        self.page().draw(ws.sys_canvas, ws.theme_colors, rect, desk)
 
     def _draw_manifest(self, why, rect, desk):
         """A cart whose manifest did not parse: the reason, exact, and Files,
