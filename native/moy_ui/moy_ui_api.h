@@ -230,11 +230,10 @@ typedef struct {
     // The panes the last pass's splits cut (moy_ui_api_split_frame): a pane
     // a later split cut again (`sp_cut`, a bit a pane) is no pane of its own;
     // `sp_cur` the one a split's focus names (-1 none), `sp_held` whether a
-    // divider was held. `sf_gen` the gen the last split frame was asked with,
-    // `sf_on` whether the WM knew that frame's target.
+    // divider was held. `sf_gen` the gen the last split frame was asked with.
     moy_ui_box_t sp_pane[MOY_UI_API_PANES];
     uint16_t sp_cut;
-    uint8_t sp_pn, sp_held, sf_on;
+    uint8_t sp_pn, sp_held;
     int8_t sp_cur;
     int32_t sf_gen;
     int16_t press_x, press_y, drag_y;   // drag_y: the drag's last place along its axis
@@ -857,7 +856,7 @@ int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
 // owed and no page moves, the WM says the target holds the page as the last
 // frame left it (`known`), and `gen` -- what the context draws outside the
 // pane is a function of, MOY_UI_SPLIT_WHOLE where it changes on its own --
-// is the gen the last frame was asked with, on a frame the WM knew too.
+// is the gen the last frame was asked with.
 // `top`: the rows at the pane's top that the context's own pass draws (a
 // header), which the pane's frame leaves. Answers MOY_UI_SF_ALONE with the
 // pane's rect below `top` at out; MOY_UI_SF_LAGS with it where `lag` (x0,

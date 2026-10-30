@@ -216,7 +216,9 @@ class _Win:
         # While buf is stale: [x0, y0, x1, y1, known], the part of it the
         # content changed since buf last held its page (known 0: unknown).
         self._lag = [0, 0, 0, 0, 0]
-        self._row_sig = None          # the full-screen row last painted over it
+        # the full-screen row last painted over it: w, h, title, buttons,
+        # look gen, font scale (`_row_note`)
+        self._row_sig = [None, None, None, None, None, None]
         self._row_moved = False       # ...and it differs from the one before
 
     def full(self):
@@ -1323,17 +1325,35 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         none of the row's band (`changed`), the row is the buffer's already
         (painted again, its controls would blend over themselves)."""
         if win.saved is not None and not win.row and win.kind != "desktop":
-            if not held:
-                self._paint_row(win, cv)
-                return
             t = self._full_title(win)
-            sig = (win.w, win.h, t, self._win_btns(win), self.ws.look.look_gen, self._fs())
-            if sig != win._row_sig:
-                win._row_sig = sig
+            if not held:
+                # painted over a whole draw: a held frame after it finds the
+                # row as this one painted it
+                self._row_note(win, t)
+                self._paint_row(win, cv, t)
+                return
+            if self._row_note(win, t):
                 win._row_moved = True     # the row's pixels are not the ones before
             elif kept and self._row_clear(win):
                 return
             self._paint_row(win, cv, t)
+
+    def _row_note(self, win, t):
+        """Record the full-screen row about to be painted over `win`, its
+        title `t`, in `win._row_sig`: whether it differs from the one last
+        painted."""
+        s = win._row_sig
+        w, h, b = win.w, win.h, self._win_btns(win)
+        g, fs = self.ws.look.look_gen, self._fs()
+        if s[0] == w and s[1] == h and s[2] == t and s[3] == b and s[4] == g and s[5] == fs:
+            return False
+        s[0] = w
+        s[1] = h
+        s[2] = t
+        s[3] = b
+        s[4] = g
+        s[5] = fs
+        return True
 
     def _row_clear(self, win, r=None):
         """Whether what the focused content's last draw changed (`changed`),

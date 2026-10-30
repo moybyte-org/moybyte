@@ -3484,9 +3484,8 @@ int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y) {
 int moy_ui_api_split_frame(moy_ui_ctx_t *c, int32_t gen, int known, int still, int top,
                            const int32_t lag[4], int32_t out[4]) {
     int whole = gen == MOY_UI_SPLIT_WHOLE;
-    int same = c->sf_on && !whole && gen == c->sf_gen;
+    int same = !whole && gen == c->sf_gen;
     c->sf_gen = gen;
-    c->sf_on = (uint8_t)(known && !whole);
     int i = c->sp_cur;
     int32_t pop[4];
     if (!same || !known || !still || i < 0 || i >= c->sp_pn || (c->sp_cut & (1u << i))

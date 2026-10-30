@@ -239,7 +239,10 @@ from the record: `AppHost.split_frame(gen, known, top, lag, out)`
   moves;
 - the last pass drew no popover and held no divider;
 - `gen`, what the app draws outside the pane, is the last frame's, and the
-  WM's word (`known`) says the target held the page on both frames.
+  WM's word (`known`) says the target holds the page as the last frame
+  left it. That word is the whole of it: what the WM paints over the page
+  (a full-screen window's row) is the WM's to keep in step, whatever
+  target the last frame drew into.
 
 It answers LAGS where the target lags outside that rect: the frame draws
 whole and changes the rect alone. Otherwise it answers WHOLE. The app's
