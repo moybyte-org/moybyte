@@ -3429,25 +3429,6 @@ static mp_obj_t ui_api_host_arm(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_arm_obj, ui_api_host_arm);
 
-// api_host_rows(ctx, rects, n, move): the rows the frame begun next draws
-// alone (moy_ui_api_host_rows): `rects` int32 words; `move` five ints, or None
-static mp_obj_t ui_api_host_rows(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    int n = mp_obj_get_int(a[2]);
-    n = n < 0 ? 0 : n > MOY_UI_API_HOST ? MOY_UI_API_HOST : n;
-    const int32_t *r = words_of(a[1], 4 * (size_t)n, 0, MP_ERROR_TEXT("moy_ui: short rows"));
-    int32_t m[5];
-    if (a[3] != mp_const_none) {
-        mp_obj_t *it;
-        mp_obj_get_array_fixed_n(a[3], 5, &it);
-        for (int i = 0; i < 5; i++) {
-            m[i] = mp_obj_get_int(it[i]);
-        }
-    }
-    moy_ui_api_host_rows(ctx_of(a[0]), r, n, a[3] == mp_const_none ? NULL : m);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_host_rows_obj, 4, 4, ui_api_host_rows);
 
 // api_host_whole(ctx): the frame begun next draws whole
 static mp_obj_t ui_api_host_whole(mp_obj_t ctx) {
@@ -3717,7 +3698,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_arm), MP_ROM_PTR(&ui_api_host_arm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_host_rows), MP_ROM_PTR(&ui_api_host_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_whole), MP_ROM_PTR(&ui_api_host_whole_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },

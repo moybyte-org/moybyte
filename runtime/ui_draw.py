@@ -1676,7 +1676,6 @@ _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
-HOST_ROWS = 6                           # moy_ui_api.h's MOY_UI_API_HOST: the rects of `AppHost.rows`
 
 
 _WHOLE = [None]                         # ui_frame's last whole-canvas rect
@@ -2003,7 +2002,6 @@ _HP_MOVES = 17
 # The pointer word a tap makes (MOY_UI_IN_PTR), by AppHost.tap: none, a
 # press (live, held, its edge), its release (live), held.
 _TAP_PTR = (0, 7, 1, 3)
-_HH_OWN_ROWS = 1
 _HH_HELD = 2
 # moy_ui_api_host_begin's answer (MOY_UI_HB_*)
 _HB_SETTLED = 1
@@ -2067,17 +2065,6 @@ class AppHost:
         self._held = fn
         h = self._hp
         h[_HP_HOST] = (h[_HP_HOST] & ~_HH_HELD) | (_HH_HELD if fn is not None else 0)
-
-    @property
-    def own_rows(self):
-        """The app draws rows the engine does not see: never a plan of the
-        engine's own, but for a rows plan where the app asked for one."""
-        return bool(self._hp[_HP_HOST] & _HH_OWN_ROWS)
-
-    @own_rows.setter
-    def own_rows(self, on):
-        h = self._hp
-        h[_HP_HOST] = (h[_HP_HOST] & ~_HH_OWN_ROWS) | (_HH_OWN_ROWS if on else 0)
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -2271,39 +2258,6 @@ class AppHost:
         hp[_HP_COST] = -1 if c is None else c
         hp[_HP_OX] = getattr(cv, "_ox", 0)
         hp[_HP_OY] = getattr(cv, "_oy", 0)
-
-    def rows(self, rects, n, move=None):
-        """Ask that the frame begun next draw only the `n` rects of
-        `rects` (x, y, w, h each, HOST_ROWS at most), the page's rows its
-        app changed, after moving `move` (x, y, w, h, dy: a region of the
-        page whose pixels the app scrolled by whole rows) out of the last
-        frame. The frame is such a rows frame where the engine licenses it
-        (`shifting` then says so): the page's gen held and nothing the
-        engine applies moved; the app then joins those rects to the floor
-        (`floor_take`) and draws its own pixels only inside them. A frame begun without a request draws as the engine
-        plans it, or whole where the app draws rows the engine does not
-        see (`own_rows`)."""
-        _C.api_host_rows(self.ctx, rects, n, move)
-
-    def floor_rects(self, out):
-        """This rows frame's floor as the pass has it, into `out` (x, y, w,
-        h each): its count, 0 where the frame draws whole. The app's rows
-        each rect reaches draw again."""
-        if not self.shifting:
-            return 0
-        n = _C.api_floor_into(self.ctx, out)
-        return n if n > 0 else 0
-
-    def floor_take(self, cv, x, y, w, h):
-        """Rect x, y, w, h joins the rows frame's floor over the page's
-        ground, which the app draws its rows on: whether it did."""
-        return self.shifting and _C.api_floor_take(self.ctx, cv, UI_TARGET[2], x, y, w, h)
-
-    def break_rows(self):
-        """This rows frame draws whole from here: the app's rows could not
-        join its floor."""
-        if self.shifting:
-            _C.api_shift_break(self.ctx)
 
     def dead(self, rw):
         """Whether a held key's (or the ball's) steps `rw` (the input

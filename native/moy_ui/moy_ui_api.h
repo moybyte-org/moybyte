@@ -70,10 +70,8 @@ enum {
 // over_on). Then the lag history (moy_ui_api_lag's), the frame begun last
 // (began1, its number + 1; 0 none), what that frame was (shifting, dy: a
 // rows frame, a shift by dy), the move its begin planned for the host's
-// canvas (mv_dy), whether the next frame draws whole (again), and the rows
-// the app asked the next frame to draw alone (want1, their count + 1; 0
-// none: want, and a region moved first, move). All zero is a host that
-// painted nothing.
+// canvas (mv_dy) and whether the next frame draws whole (again). All zero is
+// a host that painted nothing.
 #define MOY_UI_HOST_RING 3          // the paints a host remembers (RETAINED_FRAMES at most)
 #define MOY_UI_HOST_HIST 4          // the frames its lag history keeps
 #define MOY_UI_HOST_BANDS 3         // the bands a frame's floor is kept as
@@ -82,12 +80,10 @@ typedef struct {
     int32_t key[MOY_UI_HOST_RING];
     int32_t over[MOY_UI_HOST_RING][4];
     uint8_t whole[MOY_UI_HOST_RING], over_on[MOY_UI_HOST_RING];
-    uint8_t ri, rn, shifting, again, want1;
+    uint8_t ri, rn, shifting, again;
     int32_t hist[MOY_UI_HOST_HIST * (2 + 2 * MOY_UI_HOST_BANDS)];
     int32_t began1;
     int16_t dy, mv_dy;
-    int32_t want[4 * MOY_UI_API_HOST];
-    int32_t move[5];
 } moy_ui_host_t;
 #define MOY_UI_KEYREP(byte, n) ((int32_t)(byte) | ((int32_t)(n) << 16))
 #define MOY_UI_MOD_SHIFT 2
@@ -901,7 +897,6 @@ enum {
     MOY_UI_HP_LEN = MOY_UI_HP_MOVES + 5 * MOY_UI_HOST_HIST * MOY_UI_HOST_BANDS
 };
 enum {
-    MOY_UI_HH_OWN_ROWS = 1,         // the app draws rows the engine does not see
     MOY_UI_HH_HELD = 2,             // a dialog's rows frame is the host's to allow
 };
 enum {
@@ -918,10 +913,6 @@ int moy_ui_api_host_begin(moy_ui_ctx_t *c, int32_t *in, moy_ui_box_t surface, in
 // The host made every move its begin planned: this frame draws the floor
 // alone. Answers the frame's dy (0, a rows frame).
 int moy_ui_api_host_arm(moy_ui_ctx_t *c);
-// The rows the app asks the frame begun next to draw alone (ui_draw's
-// AppHost.rows): `n` rects, x, y, w, h each, and `move` (x, y, w, h, dy; NULL
-// none) a region moved first.
-void moy_ui_api_host_rows(moy_ui_ctx_t *c, const int32_t *r, int n, const int32_t *move);
 // The frame begun next draws whole (AppHost.whole, AppHost.again).
 void moy_ui_api_host_whole(moy_ui_ctx_t *c);
 // A rows frame its host asks for (docs/scroll_and_text_2026-10.md §5): the

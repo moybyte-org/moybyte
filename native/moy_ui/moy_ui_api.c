@@ -5799,9 +5799,8 @@ static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
     int f = pf[MOY_UI_PF_FRAME], key = pf[MOY_UI_PF_KEY], w = pf[MOY_UI_PF_WIN];
     int same = hp[MOY_UI_HP_SAME], hh = hp[MOY_UI_HP_HOST];
     int ox = hp[MOY_UI_HP_OX], oy = hp[MOY_UI_HP_OY], cost = hp[MOY_UI_HP_COST];
-    int again = h->again, want = h->want1 - 1;
+    int again = h->again;
     h->again = 0;
-    h->want1 = 0;
     int i = h->ri, ok;
     if (w) {
         // the windowed WM's shown ring vouches for the buffer
@@ -5816,27 +5815,11 @@ static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
     if (!ok || again) {
         return 0;
     }
-    int planned = moy_ui_api_shift_plan(c, p) != MOY_UI_SHIFT_NONE;
-    if (want >= 0 && !planned) {
-        // the app's rows: the page moved out of the last frame, the app's
-        // region by its rows, the floor those rects
-        if (!moy_ui_api_shift_rows(c, h->want, want, p) || !host_pays(cost, p)) {
-            return 0;
-        }
-        host_move(hp, p[0] + ox, p[1] + oy, p[2], p[3], 0);
-        const int32_t *m = h->move;
-        if (m[4] && m[2] > 0) {
-            host_move(hp, m[0] + ox, m[1] + oy, m[2], m[3], m[4]);
-        }
-        h->mv_dy = (int16_t)m[4];
-        return MOY_UI_HB_SHIFT | MOY_UI_HB_FENCE;
-    }
-    // The engine's plan; an app with rows of its own takes a rows plan where
-    // it asked for one, its rows joining the floor. A canvas whose copy costs
-    // about what the raster it saves does draws the frame whole instead. A
-    // dialog's rows frame is the host's to allow, and always pays: the frame
-    // it saves puts the page under the dialog back too.
-    if (!planned || ((hh & MOY_UI_HH_OWN_ROWS) && !(want >= 0 && !p[4] && !h->move[4]))) {
+    // The engine's plan. A canvas whose copy costs about what the raster it
+    // saves does draws the frame whole instead. A dialog's rows frame is the
+    // host's to allow, and always pays: the frame it saves puts the page
+    // under the dialog back too.
+    if (moy_ui_api_shift_plan(c, p) == MOY_UI_SHIFT_NONE) {
         return 0;
     }
     int got = MOY_UI_HB_SHIFT;
@@ -5956,23 +5939,6 @@ int moy_ui_api_host_arm(moy_ui_ctx_t *c) {
     h->shifting = 1;
     h->dy = h->mv_dy;
     return h->dy;
-}
-
-void moy_ui_api_host_rows(moy_ui_ctx_t *c, const int32_t *r, int n, const int32_t *move) {
-    moy_ui_host_t *h = &c->host;
-    if (n < 0) {
-        n = 0;
-    }
-    if (n > MOY_UI_API_HOST) {
-        n = MOY_UI_API_HOST;
-    }
-    memcpy(h->want, r, 4 * (size_t)n * sizeof(int32_t));
-    if (move == NULL) {
-        h->move[2] = h->move[4] = 0;
-    } else {
-        memcpy(h->move, move, sizeof(h->move));
-    }
-    h->want1 = (uint8_t)(n + 1);
 }
 
 void moy_ui_api_host_whole(moy_ui_ctx_t *c) {

@@ -825,7 +825,7 @@ def test_the_hosts_words_are_the_engines():
                   ("_HP_OY", "MOY_UI_HP_OY"), ("_HP_SAME", "MOY_UI_HP_SAME"),
                   ("_HP_TAP", "MOY_UI_HP_TAP"), ("_HP_HOST", "MOY_UI_HP_HOST"),
                   ("_HP_DEAD", "MOY_UI_HP_DEAD"), ("_HP_N", "MOY_UI_HP_N"),
-                  ("_HP_MOVES", "MOY_UI_HP_MOVES"), ("_HH_OWN_ROWS", "MOY_UI_HH_OWN_ROWS"),
+                  ("_HP_MOVES", "MOY_UI_HP_MOVES"),
                   ("_HH_HELD", "MOY_UI_HH_HELD"), ("_HB_SETTLED", "MOY_UI_HB_SETTLED"),
                   ("_HB_MOVING", "MOY_UI_HB_MOVING"), ("_HB_EDGE", "MOY_UI_HB_EDGE"), ("_HB_DUP", "MOY_UI_HB_DUP"),
                   ("_HB_SHIFT", "MOY_UI_HB_SHIFT"), ("_HB_HELD", "MOY_UI_HB_HELD"),
