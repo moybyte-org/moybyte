@@ -527,10 +527,14 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
                             && !c->act && !c->step_x && !c->step_y && c->hover_off
                             && !(p & MOY_UI_P_MIDDLE)
                             && (!(p & MOY_UI_P_EDGE) || c->press_bare));
-    // a press, an activation, a stepped value, a hover, an overlay: whole
+    // a press, an activation, a stepped value, a hover, an overlay: whole.
+    // A press that went down on no stop and rests over none (`hover_off`:
+    // a finger on a text view's rows, placing its caret) marks nothing
+    // while held or let go: the rows the input changes are the floor's.
+    int bare = c->hover_off;
     if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
-        || c->step_x || (p & MOY_UI_P_EDGE) || (live && !held)
-        || (held && c->gesture != 2) || (p & MOY_UI_P_MIDDLE)) {
+        || c->step_x || ((p & MOY_UI_P_EDGE) && !bare) || (live && !held && !bare)
+        || (held && c->gesture != 2 && !bare) || (p & MOY_UI_P_MIDDLE)) {
         return;
     }
     const moy_ui_stop_t *v = c->prev;
@@ -568,7 +572,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
                          != (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN)) {
         return;
     }
-    if (held && c->drag_page != r->id) {
+    if (held && c->gesture == 2 && c->drag_page != r->id) {
         return;                         // a drag of another page
     }
     int table = (r->kd & MOY_UI_KD_TABLE) != 0;
@@ -580,6 +584,10 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     if (rp == NULL || rp->b.w <= 0 || rp->b.h <= 0 || (dy < 0 ? -dy : dy) >= rp->b.h
         || r->s0 + r->sn > n) {
         return;
+    }
+    if (live && !held && dy
+        && stop_at(v, n, c->in[MOY_UI_IN_X], c->in[MOY_UI_IN_Y] - dy) >= 0) {
+        return;                         // the move slides a stop under the pointer: its hover mark
     }
     c->sh_id = r->id;
     c->sh_r = rp->b;
