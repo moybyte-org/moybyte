@@ -18,8 +18,8 @@ is #243.
 - **Perf decides, not elegance (owner, 2026-10-29).** The bespoke paths exist
   because a generic one was once too slow on a board. A surface moves onto a
   block only when the move holds that surface's p90 on BOTH the T-Deck and the
-  P4 (`tools/input_bench.py`, against the run before). A surface whose move
-  fails stays bespoke. Its numbers go in #66.
+  P4 (`tools/input_gate.py` over `tools/input_bench.py`, against same-day
+  dev on freshly flashed boards). A surface whose move fails stays bespoke. Its numbers go in #66.
 - Notes draws in the monospace face. A `.md` note's later form is a synced
   pair: the monospace source beside a proportional preview (owner,
   2026-10-29).
