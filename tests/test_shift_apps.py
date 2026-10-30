@@ -367,10 +367,12 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     """The text console under the FPS chip (`overdrew`), whose log the
     chip misses: a typed prompt's frames draw its rows alone -- on two and
     three buffers moving nothing where the buffer the frame paints holds the
-    log (`moy_ui_api_lag`), the frames after a move of it too -- a moving log
-    draws whole, and every frame is a whole repaint's bytes. On a desk the
-    run's canvas is its window's own (`Player.holds`), which holds the log
-    whatever the glass's buffers do."""
+    log (`moy_ui_api_lag`), the frames after a move of it too -- the entered
+    line's move of the log and a drag of it are shift frames (on a desk the
+    drag's finger lies outside the log, so its frames draw rows), and every
+    frame is a whole repaint's bytes. On a desk the run's canvas is its
+    window's own (`Player.holds`), which holds the log whatever the glass's
+    buffers do."""
     p = Pair(tmp_path, "console", bufs, desk)
     assert p.a.show_fps
     if desk:
@@ -378,7 +380,8 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k
-    assert "shift" not in k, k
+    assert k[10] == "shift", k
+    assert set(k[17:]) == {"rows" if desk else "shift"}, k
 
 
 def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
