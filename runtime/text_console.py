@@ -437,9 +437,19 @@ class TextConsole:
         # the shell's pixels, not the script's: its fonts and its colours,
         # whatever the app-cart boundary is at
         was = _ui_draw.cart_text(False)
+        # On a desk the run's canvas is its window's own, which the run
+        # alone draws (`Player.holds`): it holds the page as the last frame
+        # left it, but for the FPS chip, which names where it drew
+        # (`overdrew`), so the log's view may move or keep its rows there.
+        pl = self.ws.player
+        own = pl is not None and pl.holds(self.ws.canvas)
+        if own:
+            _ui_draw.window_frame(2)
         try:
             self._draw()
         finally:
+            if own:
+                _ui_draw.window_frame(0)
             _ui_draw.cart_text(was)
 
     def _draw(self):

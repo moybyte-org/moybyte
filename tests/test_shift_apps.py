@@ -92,17 +92,23 @@ _LOG_SCRIPT = ("for i in range(40):\n    print('row %d of the log, a little long
                "        print('you said', s)\n")
 
 
-def _console(tmp_path, app, ships):
+def _console(tmp_path, app, ships, desk=False):
     import json
     from runtime import cart_index as ci
     root = tmp_path / ("ships" if ships else "whole")
-    ws = host_app.build_workstation(str(root / "carts"))
+    if desk:
+        # a desk: what the console runs presents in its window
+        ws = host_app.build_workstation(str(root / "carts"), sys_size=(1024, 600),
+                                        windowed=True)
+    else:
+        ws = host_app.build_workstation(str(root / "carts"))
     ws.bar_layer._clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
     if not ships:
         ws.wm.CONTENT_RING = False
+        ws.player.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -160,9 +166,9 @@ class Pair:
     """The session on both consoles, frame by frame; the first's buffers
     presented in turn, `bufs` of them."""
 
-    def __init__(self, tmp_path, app, bufs):
-        self.a = _console(tmp_path, app, True)
-        self.b = _console(tmp_path, app, False)
+    def __init__(self, tmp_path, app, bufs, desk=False):
+        self.a = _console(tmp_path, app, True, desk)
+        self.b = _console(tmp_path, app, False, desk)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -355,15 +361,20 @@ def _console_session(p):
         p.frame()
 
 
+@pytest.mark.parametrize("desk", (False, True))
 @pytest.mark.parametrize("bufs", (1, 2, 3))
-def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs):
+def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     """The text console under the FPS chip (`overdrew`), whose log the
     chip misses: a typed prompt's frames draw its rows alone -- on two and
     three buffers moving nothing where the buffer the frame paints holds the
     log (`moy_ui_api_lag`), the frames after a move of it too -- a moving log
-    draws whole, and every frame is a whole repaint's bytes."""
-    p = Pair(tmp_path, "console", bufs)
+    draws whole, and every frame is a whole repaint's bytes. On a desk the
+    run's canvas is its window's own (`Player.holds`), which holds the log
+    whatever the glass's buffers do."""
+    p = Pair(tmp_path, "console", bufs, desk)
     assert p.a.show_fps
+    if desk:
+        assert p.a.player.holds(p.a.canvas)
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k
