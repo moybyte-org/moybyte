@@ -38,6 +38,13 @@
 // micropython.cmake adds that include dir -- so the compiler checks the
 // signature and the linker joins the single body; no transcribed twin.
 #include "moy_gfx_kernels.h"
+#include "moy_text.h"
+
+// The least block the DMA fill takes from moy_gfx's target: P4SystemCanvas's
+// PPA_FILL_MIN_PX, below which the submit costs more than the CPU's fill.
+#define MOY_PPA_FILL_LEAST 16384
+static int ppa_target_fill(uint16_t *px, size_t cap, int dw, int x, int y, int w, int h,
+                           uint16_t col);
 
 static ppa_client_handle_t s_srm = NULL;
 static ppa_client_handle_t s_fill = NULL;
@@ -167,6 +174,9 @@ static mp_obj_t moy_ppa_init(void) {
     };
     if (ppa_register_client(&fcfg, &s_fill) != ESP_OK) {
         s_fill = NULL;            // fill unavailable; the CPU path still works
+    } else {
+        // the C draws' big fills too (the canvas's PPA_FILL_MIN_PX)
+        moy_target_dma(ppa_target_fill, MOY_PPA_FILL_LEAST);
     }
     s_submitted = 0;
     s_done = 0;
@@ -185,6 +195,7 @@ static mp_obj_t moy_ppa_deinit(void) {
         s_srm = NULL;
     }
     if (s_fill != NULL) {
+        moy_target_dma(NULL, 0);
         ppa_unregister_client(s_fill);
         s_fill = NULL;
     }
@@ -1642,27 +1653,15 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_crisp_obj, 10, 10,
                                            moy_ppa_blit_crisp);
 
 
-// fill(dst, dw, dh, x, y, w, h, rgb565) -> True when the PPA took it.
-// Fills the (x, y, w, h) block of an RGB565 picture on the DMA engine, skipping
-// the CPU cache's write-allocate read (see init). Blocking: the caller wants the
-// pixels before it draws over them.
-static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
-    if (s_fill == NULL) {
-        return mp_const_false;
-    }
-    mp_buffer_info_t dst;
-    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
-    mp_int_t dw = mp_obj_get_int(args[1]);
-    mp_int_t dh = mp_obj_get_int(args[2]);
-    mp_int_t x = mp_obj_get_int(args[3]);
-    mp_int_t y = mp_obj_get_int(args[4]);
-    mp_int_t w = mp_obj_get_int(args[5]);
-    mp_int_t h = mp_obj_get_int(args[6]);
-    uint32_t c565 = (uint32_t)(mp_obj_get_int(args[7]) & 0xFFFF);
-    if (dw <= 0 || dh <= 0 || w <= 0 || h <= 0
+// The (x, y, w, h) block of an RGB565 picture (`len` bytes, dw x dh) filled
+// on the DMA engine, skipping the CPU cache's write-allocate read (see
+// init): whether the PPA took it. Blocking: the caller wants the pixels
+// before it draws over them.
+static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, int w, int h,
+                          uint32_t c565) {
+    if (s_fill == NULL || dw <= 0 || dh <= 0 || w <= 0 || h <= 0
         || x < 0 || y < 0 || x + w > dw || y + h > dh) {
-        return mp_const_false;
+        return 0;
     }
     // The IDF's fill validator requires the out-picture buffer's ADDRESS *and*
     // SIZE to be cache-line aligned, and rejects the op otherwise. Surfaces that
@@ -1674,8 +1673,8 @@ static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
     // error line. Decline here instead: the caller's CPU path is the same either
     // way, minus the noise. 64 is the P4's PSRAM cache line (internal SRAM's 32
     // divides it, so this is the conservative test for both).
-    if (((uintptr_t)dst.buf & 63u) != 0 || (dst.len & 63u) != 0) {
-        return mp_const_false;
+    if (((uintptr_t)buf & 63u) != 0 || (len & 63u) != 0) {
+        return 0;
     }
     // The PPA fill colour is ARGB8888; expand the RGB565 the console works in.
     uint32_t r = (c565 >> 11) & 0x1F, g = (c565 >> 5) & 0x3F, bch = c565 & 0x1F;
@@ -1687,8 +1686,8 @@ static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
     };
     ppa_fill_oper_config_t op = {
         .out = {
-            .buffer = dst.buf,
-            .buffer_size = (uint32_t)dst.len,
+            .buffer = buf,
+            .buffer_size = (uint32_t)len,
             .pic_w = (uint32_t)dw,
             .pic_h = (uint32_t)dh,
             .block_offset_x = (uint32_t)x,
@@ -1704,12 +1703,33 @@ static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
     // out-picture buffer at submit, so every dirty CPU line in it must be
     // written back first or this frame's CPU drawing is silently discarded. The
     // whole buffer, not just the block -- the invalidate is not block-scoped.
-    esp_cache_msync(dst.buf, dst.len,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-    if (ppa_do_fill(s_fill, &op) != ESP_OK) {
-        return mp_const_false;
+    esp_cache_msync(buf, len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    return ppa_do_fill(s_fill, &op) == ESP_OK;
+}
+
+// The fill moy_gfx's target lends its big blocks (moy_target_dma): the
+// toolkit's grounds and a text view's ground, which draw in C through no
+// canvas method, fill as the canvas's own big rects do.
+static int ppa_target_fill(uint16_t *px, size_t cap, int dw, int x, int y, int w, int h,
+                           uint16_t col) {
+    if (dw <= 0) {
+        return 0;
     }
-    return mp_const_true;
+    return ppa_fill_block(px, cap * sizeof(uint16_t), dw, (int)(cap / (size_t)dw), x, y, w, h,
+                          col);
+}
+
+// fill(dst, dw, dh, x, y, w, h, rgb565) -> True when the PPA took it: the
+// (x, y, w, h) block of an RGB565 picture, filled on the DMA engine.
+static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    mp_buffer_info_t dst;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    return mp_obj_new_bool(ppa_fill_block(dst.buf, dst.len, mp_obj_get_int(args[1]),
+                                          mp_obj_get_int(args[2]), mp_obj_get_int(args[3]),
+                                          mp_obj_get_int(args[4]), mp_obj_get_int(args[5]),
+                                          mp_obj_get_int(args[6]),
+                                          (uint32_t)(mp_obj_get_int(args[7]) & 0xFFFF)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_fill_obj, 8, 8, moy_ppa_fill);
 

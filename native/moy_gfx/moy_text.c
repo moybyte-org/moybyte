@@ -686,6 +686,14 @@ size_t moy_text_cut_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int 
     return k;
 }
 
+static moy_target_dma_fn s_dma;
+static int s_dma_least;
+
+void moy_target_dma(moy_target_dma_fn fn, int least) {
+    s_dma = fn;
+    s_dma_least = least > 0 ? least : 1;
+}
+
 void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col) {
     int stride = t->dw;
     if (stride <= 0 || t->px == NULL) {
@@ -711,6 +719,10 @@ void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uin
         y1 = rows;
     }
     if (x1 <= x0 || y1 <= y0) {
+        return;
+    }
+    if (s_dma != NULL && (x1 - x0) * (y1 - y0) >= s_dma_least
+        && s_dma(t->px, (size_t)rows * (size_t)stride, stride, x0, y0, x1 - x0, y1 - y0, col)) {
         return;
     }
     for (int row = y0; row < y1; row++) {
