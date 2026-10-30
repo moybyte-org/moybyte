@@ -51,6 +51,11 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 # the text view's syntaxes by the highlighter's language (ui.text_options's)
 _SYNTAX = {"plain": 0, "python": 1, "lua": 2, "json": 3}
+# ...and the words of its packed options the Code tab writes each frame
+_TXO_GUTTER, _TXO_SYNTAX, _TXO_CARET, _TXO_SEL = (_ui.TXO_GUTTER, _ui.TXO_SYNTAX, _ui.TXO_CARET,
+                                                  _ui.TXO_SEL)
+_TXO_ERR, _TXO_FIND_CI, _TXO_LEFT, _TXO_TOP = (_ui.TXO_ERR, _ui.TXO_FIND_CI, _ui.TXO_LEFT,
+                                               _ui.TXO_TOP)
 # The overlays' fields, lines and keys (`_draw_tools`): the keys every
 # board has, by action, Shift+Enter its own.
 _FIND_FIELD = {"id": "find", "hint": "Find"}
@@ -376,6 +381,7 @@ class CodeLayer:
         self._left = 0                # the first column the view drew
         self._into = _array("i", [0, 0])   # the view's answer: no tuple a frame
         self._st = [-1, -1, -1, -1, -1, -1, -1, b""]   # the status line, made once a change
+        self._sb = [None, None, None]     # the band, its text, and the band left of the text
         self._stop_host = None        # the stopped line's popover's UI context
         self._stop_card = None        # and the card its last pass drew
         # -- #89 additions: selection / tools / find / gutter -----------------
@@ -1296,12 +1302,12 @@ class CodeLayer:
             self._top = -1
             host.reset()
         o = self._view
-        o[_ui.TXO_GUTTER] = 1 if self._gutter else 0
-        o[_ui.TXO_SYNTAX] = _SYNTAX.get(self._lang(), 4)
-        o[_ui.TXO_CARET] = ed.row
-        o[_ui.TXO_CARET + 1] = ed.col
-        b = ed.selection_bounds()
-        k = _ui.TXO_SEL
+        o[_TXO_GUTTER] = 1 if self._gutter else 0
+        o[_TXO_SYNTAX] = _SYNTAX.get(self._lang(), 4)
+        o[_TXO_CARET] = ed.row
+        o[_TXO_CARET + 1] = ed.col
+        b = ed.selection_bounds() if ed.sel is not None else None
+        k = _TXO_SEL
         if b is None:
             o[k] = o[k + 2] = -1
             o[k + 1] = o[k + 3] = 0
@@ -1311,12 +1317,12 @@ class CodeLayer:
             o[k + 2] = b[2]
             o[k + 3] = b[3]
         row = ws.code_err_row
-        o[_ui.TXO_ERR] = -1 if row is None else row
+        o[_TXO_ERR] = -1 if row is None else row
         q = self._find_q if self._find_open and self._find_q else None
-        o[_ui.TXO_FIND_CI] = 1 if q and self._find_ci else 0
-        o[_ui.TXO_LEFT] = ed.left
+        o[_TXO_FIND_CI] = 1 if q and self._find_ci else 0
+        o[_TXO_LEFT] = ed.left
         top = ed.top
-        o[_ui.TXO_TOP] = top if top != self._top else -1
+        o[_TXO_TOP] = top if top != self._top else -1
         if top != self._top and self._top >= 0:
             # the editor moved its top (a key, a typed line, Go to): the
             # view lands there as this frame's shift
@@ -1329,7 +1335,7 @@ class CodeLayer:
         if self.vouch:
             _ui_draw.window_frame(self.vouch)
         try:
-            host.begin(cv, ws.theme_colors, r, _desk(), elsewhere=True)
+            host.begin(cv, ws.theme_colors, r, _desk(), False, True)   # elsewhere
             _ui.at(r[0], r[1], r[2], r[3])
             got = _ui.text_view("code", ed.lines, o, None if row is None else ws.code_err or "",
                                 q, self._into)
@@ -1388,7 +1394,15 @@ class CodeLayer:
                 ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
                  str(n) + " lines", "1 issue" if err else "No issues"),
                 room, lay.fs).encode("utf-8")
-        _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
+        # the band's ground left of its text, then the text on its own
+        # ground: the band whole, its every pixel drawn once
+        sb = self._sb
+        if sb[0] is not lay.status_band or sb[1] is not lay.status_text:
+            b = sb[0] = lay.status_band
+            t = sb[1] = lay.status_text
+            sb[2] = (b[0], b[1], t[0] - b[0], b[3]) if t[0] > b[0] else None
+        if sb[2] is not None:
+            _ui_draw.status_row(cv, ws.theme_colors, sb[2], ())
         _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, st[7])
 
     def _btn_spec(self, label, glyph):
