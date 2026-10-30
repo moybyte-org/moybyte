@@ -326,11 +326,10 @@ def test_gen_has_no_ws_mirror(tmp_path):
     launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
     windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
-    # Six reads: the band frame's check of its ring, of the last frame it
-    # shifts from and of the one it copies from (`_drag_partial`, three), the
-    # one body every painted frame records its band through (`_note_band`),
-    # the retained frame's key and the desk home's still parts.
-    assert launcher.count("ws.covers.gen") == 6
+    # Four reads: the band frame's check of its ring, the one body every
+    # painted frame records its band through (`_note_band`), the retained
+    # frame's key and the desk home's still parts.
+    assert launcher.count("ws.covers.gen") == 4
 
 
 # -- the grids reach covers through injected bound methods ----------------------

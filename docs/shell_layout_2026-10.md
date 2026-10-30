@@ -821,7 +821,7 @@ the details where the height holds both at a hero no smaller, and a short
 one drops the details' facts, then their metadata
 (`Carousel._geom_desk`). Its backdrop is the panel field rather than the
 wallpaper, so an idle window draws nothing, and its drag rides
-`_drag_partial` and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
+the band frame (`_band_frame`) and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
 the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
 While search is open the handheld's hint strip reads "Search: " and the
@@ -834,7 +834,7 @@ glass's foot and a tap on it closes search (design review R5-04).
 card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
 move the carousel by a card with the drag's glide (the handheld's 6-frame
 slide), run through the same `flinging` path as a touch fling
-(`_drag_partial`), so a held key is one continuous motion; up moves focus to
+(`_band_frame`), so a held key is one continuous motion; up moves focus to
 the tabs in the bar, where left/right move the focus along them and the
 bar's items beside them, enter opens the focused one and down returns (§8); the trackball is the same
 four directions and its click is enter. On the desk a key or a
@@ -849,8 +849,8 @@ Open, New, or Change on Make), X for the card's list and the tabs'
 shoulders. Under touch there is no strip, and the home lays out in its
 height too; a long press opens the card's list.
 
-**Damage first.** The fullscreen home's band frame (`_drag_partial`) hands
-the rects it changed -- the band, or a step's cards and hint strip -- to
+**Damage first.** The fullscreen home's band frame (`_band_frame`) hands
+the rects it changed -- the band, and a step's hint strip -- to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
 nothing handed while an overlay, the cursor or an owed LOADING pill also
 drew), so a moving home frame on the Guition P4 rotates the band, not the

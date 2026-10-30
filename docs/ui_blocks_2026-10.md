@@ -91,9 +91,10 @@ view, dialog or popover opened past it is an error (§4.0), never a silent
 return. Deeper nests are cheap: a nest record is a few bytes per context.
 
 **G2. Lists of rich rows.** §4.1 builds the block: a table's rows can be
-parts the app draws, carried in C. The Blocks outline and Music steps are
-tables of parts; the cards drawer and the home grid still plan their own
-rows.
+parts the app draws, carried in C. The Blocks outline, Music steps and the
+home's bands (grid, icons, the carousel and the desk shelf,
+`Launcher.band_pass`) are tables of parts; the cards drawer still plans its
+own rows.
 
 **G3. Fast frames are y-only, one region a frame.** The engine records one
 shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`); a table whose
@@ -103,14 +104,15 @@ the Notes split needs.
 
 **G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
 `floor*`) are not in any public face. They reach the shell through
-`modmoy_ui.c`'s private table. But the Code tab and the Launcher's bands
-each drive them with a path of their own (#243 lists them).
-`AppHost.begin` (`runtime/ui_draw.py`, over `moy_ui_api_host_begin`) is
-the one path that stays. The others go as their surfaces move. The desk's
-panes have none: a frame of one pane alone, or of its dialog's rows, is the
-engine's split frame (§4.2). Paint's pickers have none either: the page
-under them is a modal's page (`ui_draw.Hold`), and their cells are read
-from a part (§4.4).
+`modmoy_ui.c`'s private table. But the Code tab drives them with a path
+of its own (#243 lists it). `AppHost.begin` (`runtime/ui_draw.py`, over
+`moy_ui_api_host_begin`) is the one path that stays. The others go as
+their surfaces move. The Launcher's bands have none: their pass opens
+through `AppHost.begin` and draws whole. The desk's panes have none: a
+frame of one pane alone, or of its dialog's rows, is the engine's split
+frame (§4.2). Paint's pickers have none either: the page under them is a
+modal's page (`ui_draw.Hold`), and their cells are read from a part
+(§4.4).
 
 **G5. Budgets.**
 - `MOY_UI_API_STOPS` (40): stops a frame. A stop past it is drawn and

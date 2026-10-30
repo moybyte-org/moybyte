@@ -3510,7 +3510,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.sel = old.sel
         g._scroll_to_sel()
         self.launcher = g
-        old.release_faces()
         self._dirty = True
 
     def set_home_tab(self, tab, grid=None):

@@ -433,7 +433,7 @@ def _streak_layers(tmp_path):
 
 def test_advance_streak_counts_up_to_the_retained_horizon(tmp_path):
     """An unchanged statics key advances the streak by one per full paint and
-    STOPS at `_retained_n(cv)` -- the horizon `_try_drag_partial` gates on."""
+    STOPS at `_retained_n(cv)` -- the horizon `_try_band_frame` gates on."""
     from runtime import launcher_layer
 
     ws, layers = _streak_layers(tmp_path)

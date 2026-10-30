@@ -891,8 +891,8 @@ The desk's console home is a still backdrop under three parts that change:
 the hero with its details pane (the selection), the shelf's band and the
 bar. A full paint draws the backdrop whole; on the P4 that is a third of the
 frame, and a key press on the shelf, a tab switch or a fling's last frame
-paid it because the selection or the tab sat in the statics key the drag
-partial gates on. #66 has the numbers.
+paid it because the selection or the tab sat in the statics key the band
+frame gates on. #66 has the numbers.
 
 **The home keeps §4's per-buffer last-seen for its parts**
 (`LauncherHomeLayer._still_ring`, a `PaintRing` slot a painted frame): the backdrop's
@@ -907,7 +907,8 @@ where the buffer's was drawn under another key (the ring keeps the bar's
 `shown_key` beside the parts) or a part put back meets it.
 Where it can be had, the backdrop's pixels come from the wallpaper itself
 (`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
-plain fill); a cart wallpaper keeps the drag partial and its band copy.
+plain fill); a cart wallpaper keeps the band frame, which draws the shelf's
+band as an engine table of parts over the band's own ground.
 
 **A change leaves the other buffers lagging, and the home asks for the frames
 that bring them to it** while nothing moves and no press waits (as the

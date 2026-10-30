@@ -221,21 +221,21 @@ def test_the_desk_names_every_tile(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("arrangement, dx, dy", (("grid", -9, 0), ("icons", 0, -9)))
 def test_a_drag_frame_equals_a_full_paint(tmp_path, arrangement, dx, dy):
-    """The band frame (#113) shifts the band or repaints it over its
-    backdrop: a drag frame's pixels equal a full paint's at the same offset,
-    and the drag opens nothing."""
+    """The band frame (#113) repaints the band through its table pass: a
+    drag frame's pixels equal a full paint's at the same offset, and the
+    drag opens nothing."""
     ws, drv = _home(tmp_path, arrangement, 40)
     g = ws.launcher
     for _ in range(10):                                   # arm the streak and the capture
         _full_frame(ws, drv)
     calls = [0]
-    real = g.draw_shift
+    real = g.band_pass
 
     def spy(*a):
         calls[0] += 1
         return real(*a)
 
-    g.draw_shift = spy
+    g.band_pass = spy
     b = g.band_rect()
     x, y = b[0] + b[2] // 2, b[1] + b[3] // 2
     drv.touch(x, y)

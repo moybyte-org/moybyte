@@ -178,21 +178,6 @@ int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int
 int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
              const uint16_t *src, size_t scap, int sw, int sx, int sy, int cw, int ch,
              int r, int stepped, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
-// A home card's kept face (docs/scroll_and_text_2026-10.md §9): the w x h
-// card at (x, y) out of `face`, a picture `fw` words a row holding the same
-// card drawn w x h at its row `fy0`. A pixel the card paints whatever lies
-// under it is copied; one that blends over what is there is drawn as the
-// card draws it: the picture -- the whole cw x ch picture `src`, `sw` words a
-// row, as mg_cover samples it, or with src NULL the solid `fill` (wire),
-// moy_shape_rrect's, with the `nq` rects `q` (x, y, w, h, ink: a title
-// tile's letter) opaque over it -- in corners of radius r, anti-aliased or
-// `stepped`, then where `ring` >= 0 (wire) the edge ring moy_shape_rrect
-// draws one pixel wide with no fill and smooth corners. The pixels written.
-int mg_face(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
-            const uint16_t *face, size_t fcap, int fw, int fy0, const uint16_t *src,
-            size_t scap, int sw, int cw, int ch, int32_t fill, const int16_t *q, int nq,
-            int r, int stepped, int32_t ring, int cam_x, int cam_y, int cx0, int cy0, int cx1,
-            int cy1);
 // The tint (step 15): the sub-rect (sx, sy, w, h) of a picture `sw` words a
 // row copied into `dst` at (dx, dy), `dw` words a row (0: w, a picture of its
 // own), `col` over each pixel at `alpha` (0..255), all in the wire order: a

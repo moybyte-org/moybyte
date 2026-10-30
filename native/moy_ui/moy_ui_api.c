@@ -4873,7 +4873,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         c->tp_ans = 0;
         c->tp_py0 = tc_y0;
         c->tp_carry = (uint8_t)(carry && valid && armed(c) && c->fl_stage != 0);
-        c->tp_fade = (uint8_t)(placed && !xa && pv.x0 < pv.x1 && pv.y0 < pv.y1);
+        // (rows side by side, and rows the app scrolls itself, fade at no edge)
+        c->tp_fade = (uint8_t)(placed && !xa && !o->has_offset && pv.x0 < pv.x1 && pv.y0 < pv.y1);
         if (xa) {
             c->tp_w = (int16_t)(ph > 0 && ph < view.h ? ph : view.h);   // a row's height
         }

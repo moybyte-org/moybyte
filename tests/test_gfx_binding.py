@@ -401,10 +401,6 @@ cover(buf, 16, -2, -1, 9, 9, src, 4, 1, 1, 3, 3, 4, 0, 0, 0, 0, 0, 16, 8)
 cover(buf, 16, 6, 2, 8, 5, src, 4, 1, 0, 2, 4, 2, 1, 1, 1, 2, 1, 15, 7)
 cover(buf, 16, 0, 0, 16, 8, src, 4, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 16, 8)
 cover(buf, 16, 0, 0, 8, 8, src, 4, 2, 0, 4, 4, 3, 0, 0, 0, 0, 0, 16, 8)
-face(buf, 16, 1, 0, 12, 8, fface, 12, 4, src, 4, 4, 4, 0, None, 3, 0, 0x7bef, 0, 0, 0, 0, 16, 8)
-face(buf, 16, 2, 1, 10, 6, fface, 12, 0, None, 0, 0, 0, 0xf800, None, 3, 0, -1, 0, 0, 0, 0, 16, 8)
-face(buf, 16, -2, -1, 12, 9, fface, 12, 10, src, 4, 3, 3, 0, None, 4, 1, 0x1234, 1, 1, 1, 2, 15, 7)
-face(buf, 16, 0, 0, 8, 8, fface, 12, 16, None, 0, 0, 0, 0x07e0, fquads, 2, 0, 0xffff, 0, 0, 0, 0, 16, 8)
 tint(buf, src, 4, 0, 0, 4, 4, 0x1234, 77)
 tint(buf, src, 4, 1, 1, 3, 2, 0xffff, 255)
 tint(buf, src, 4, 2, 2, 3, 3, 0x0000, 128)
@@ -488,10 +484,6 @@ for _y in range(8):
         sheet[_y * 128 + 8 + _x] = 7 if _x < 4 else 3           # tile 1
         sheet[_y * 128 + 16 + _x] = 9 if _y < 3 else 11         # tile 2
 lut = array.array("H", [(i * 0x0101) & 0xFFFF for i in range(64)])
-# A card's kept face, 12 words a row: a patterned picture, so a copied pixel
-# from the wrong row or column shows.
-fface = bytearray(array.array("H", [(i * 7919) & 0xFFFF for i in range(12 * 24)]))
-fquads = array.array("h", [0, 0, 2, 1, 5, 6, 6, 2, 2, 5])   # a letter in two corners
 palt = bytearray(64)
 palt[9] = 1                     # index 9 transparent: exercises the palt path
 quads = array.array("h", [0] * 12)
@@ -555,8 +547,7 @@ nostack = bytearray(0)
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
                   "no_quads", "over_quads", "lr", "bdrec", "bdbad", "ptri", "ptri_ends",
-                  "bad_ends", "ring", "ring_ends", "word", "spal", "marks", "stack", "nostack",
-                  "fface", "fquads")
+                  "bad_ends", "ring", "ring_ends", "word", "spal", "marks", "stack", "nostack")
 
 
 def _fixtures():
@@ -947,7 +938,6 @@ def shape(*a): moy_gfx.shape(*a); _shot()
 def rrect(*a): moy_gfx.rrect(*a); _shot()
 def shadow(*a): moy_gfx.shadow(*a); _shot()
 def cover(*a): moy_gfx.cover(*a); _shot()
-def face(*a): moy_gfx.face(*a); _shot()
 def tint(*a): moy_gfx.tint(*a); _shot()
 
 @OPS@

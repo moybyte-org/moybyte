@@ -2421,25 +2421,6 @@ class DeviceCanvas:
                                stepped, self._cam_x, self._cam_y, self._clip_x0,
                                self._clip_y0, self._clip_x1, self._clip_y1)
 
-    def face(self, layer, fy, x, y, w, h, buf, sw, cw, ch, fill, quads, r, stepped, ring):
-        """A home card out of its kept face: rows fy.. of `layer` hold the
-        same w x h card drawn at its left edge, and the card at (x, y) is
-        copied out of it but for the pixels its corners blend over what lies
-        under them, which are drawn as the card draws them -- its `cover`
-        of the whole cw x ch picture `buf` (`sw` words a row), or with `buf`
-        None the colour `fill` in `rrect`'s corners, `stepped` or not, under
-        `quads` (`fill_rects`' rects at the card's corner: a title tile's
-        letter; None: none), then
-        the one-pixel edge ring `ring` `rrect` draws with no fill (None:
-        none). Camera and clip honoured; one kernel call (moy_shape.h's
-        mg_face). The pixels written."""
-        self.flush_batch()
-        return self._gfx.face(self._buf, self._stride, x, y, w, h, layer._buf, layer.w, fy,
-                              buf, sw, cw, ch, 0 if fill is None else self._col(fill), quads,
-                              r, stepped, -1 if ring is None else self._col(ring), self._cam_x,
-                              self._cam_y, self._clip_x0, self._clip_y0, self._clip_x1,
-                              self._clip_y1)
-
     def picture(self, img, x, y, w, h, r=0, src=None):
         """Drawing `img` (MOY64 indices) -- its (sx, sy, sw, sh) part `src`,
         else the whole -- scaled to w x h at (x, y) inside corners of radius

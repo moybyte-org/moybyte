@@ -739,38 +739,27 @@ the panes otherwise.
 
 ## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 
-**The grid and icons arrangements** (`Launcher`, `IconHome`) repaint the
-whole home every painted frame (97-123 ms on the P4, 80-102 on the T-Deck),
-while the carousel repaints a band and shifts the rest (24-27 on the
-T-Deck's same inputs, 33-57 on the P4's). The same path reaches them, with
-two changes and one honest limit:
-
-- **a selection step is two cells**: the drag fast path
-  (`_try_drag_partial`) runs on a key, repeat or ball step too, its floor
-  the cells whose selection changed, and on a glide the band's translation
-  plus the cells exposed;
-- **the band shifts only on a plain ground**: `Launcher.draw_shift` repaints
-  the band whole today because the cards lie on the wallpaper, and the
-  wallpaper's restorer puts a baked backdrop (`bd`) or a picture back at
-  glass coordinates -- they stay put while the cards move. Only the plain
-  fill (`bg`) moves with the cards, and there the band is a translation.
-  On a `bd` or picture theme the band repaint stays, its cards out of their
-  KEPT FACES (`launcher_layer._Faces`, 2026-10-28): a card that wears no
-  focus is drawn once into a slot of one owned layer -- its picture and
-  rim, keyed on the item, its title, the cover object it was drawn from and
-  the look's gen -- and copied; over anything but the plain ground a
-  corner's partly covered pixels blend over what lies under them, so the
-  copy is `moy_gfx.face` (`mg_face`, `moy_shape.h`), which draws those
-  pixels as the cover or the title tile and the edge ring draw them and
-  copies the rest, one call a card. The desk shelf's cards take the same
-  faces; the handheld carousel's change size with the offset and draw. A
-  paint draws no face: idle frames draw them, the band's cards' and then
-  the row past either end of the band (`Launcher.warm_faces`), and a paint
-  copies the cards that have one and draws the rest, so a home's first
-  paint costs what it did and a step copies the row it brings in. The
-  backdrop goes back under the whole band in one copy and the pictures
-  paint over it: its cut round the cards cost more in calls than the bytes
-  it saved (a block that big is the P4s' 2D-DMA's, `FBCPY_MIN_PX`).
+**The grid, icons and carousel arrangements** (`Launcher`, `IconHome`,
+`Carousel`) draw their band as an engine table of parts (2026-10-30, #243
+step 7): `Launcher.band_pass` opens a `ui.table` with `o.part` over the
+band -- a row of cards side by side (`o.axis "x"`, the carousel's with
+`o.snap`) or the icons' rows -- hands it the scroll as `o.offset` and the
+cards' reach past their cells as `o.spill`, and draws each part the engine
+answers through `ui.table_part`, the focused card last. The engine says
+which cards show and where; the cards draw from their covers every frame
+(the kept faces of 2026-10-28, a layer of pre-drawn cards and the
+`moy_gfx.face` copy, were retired with the move). The band frame
+(`launcher_layer._band_frame`, through `_try_band_frame`) runs on a drag,
+a fling and, on the fullscreen home, a key, repeat or ball step too: the
+backdrop goes back under the whole band in one copy (`fill`: the
+wallpaper's restorer, the carousel's ground round its cards) and the band's
+table pass draws over it, the parts outside the band a selection changes
+(the hint strip, the icons' caption band) drawn where the buffer the
+paint ring names holds another selection's. Its two limits, from the
+moves before it: the band is drawn whole (there is no shift of the plain
+ground's band and no two-cell step any more), and the carousel's card
+sizes and the desk shelf's are the carousel's own geometry, the engine
+answering which cards show.
 
 The desk home's still ring (§14.4) keeps the parts' keys; it is a
 `PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
@@ -1066,7 +1055,7 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 | **P3 fields and dialogs** (Editor sequence begins) | the field's row; the held page's put-back skipped on rows frames; Blocks' prompts, Cart info, Settings' name, Notes' name field | P4, T-Deck | P6 | P4 Blocks prompts 123 → ~14-20, Cart info fields 86 → ~14-20; T-Deck fields 19-25 → ~12-15 |
 | **P4 the Code tab and theme Config** | `TextView` in visual rows, the whole-draw triggers, overlays as rows, the pixel drag | P4, T-Deck | P6 | P4 Code key steps 86 → ~14-18, typing 86-92 → ~14-18, held 84 → ~14-18, drag 57-82 → ~17-22, fling 87-105 → ~17-22, find 104 → ~50-60 (a find past the view is a whole view under direct render); theme Config keys and typing 91-94 → ~14-18, fling 121 → ~17-22; T-Deck Code type 40 → ~25-40 (its p90 is two outliers P0's tool must name before P4 prices them), drag 24 → ~14-17, find 68 → ~25-45, theme Config 12-15 → ~9-11 |
 | **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as tables of parts moving inside their pages (`docs/ui_blocks_2026-10.md` §4.1) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
-| **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
+| **P6 the home and PROJECTS** | steps on `_try_band_frame` (then `_try_drag_partial`), two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
 | **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
 | **P7b the pickers** (Editor sequence) | the picker on the kernel; its body alone over the page it holds (§9) | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
 | **P8 Notes** | the handle's rows at begin, the cart's pass under the floor, the counters' licence, the Player's declared rect through the shown ring | P4, T-Deck | -- | P4 Notes 59-93 → ~22-28 with the cart floor (~35-45 without it: content 33 stays and only the composite shrinks); T-Deck 21-23 → ~15-19 |
@@ -1086,7 +1075,7 @@ each.** On the P4: the Code tab's and theme Config's find past the view
 and glyph cost, a kernel question, not a scroll one); the home's grid and
 icons on `bd` and picture themes (~30-55) and the carousel's key rows
 (~35-45, the settle frame's hero and details pane; the lever was the
-cards' kept faces, built 2026-10-28, §9, and what the carousel's step
+cards' kept faces, built 2026-10-28 and retired 2026-10-30, §9, and what the carousel's step
 frame keeps over the target is its hero, its details pane and its band
 drawn in one frame -- #66 has the rows);
 Notes if the cart floor does not hold (~35-45; the lever is then the
@@ -1167,7 +1156,7 @@ gen-licensed writes, and the clip-ignoring ops are listed as breaks
 every whole-draw trigger and the overlays as rows (§5). S1-S8: the T-Deck
 draws everything outside R; one voucher per region; rows after the fence;
 the picker kernel; the held page's put-back skipped; the dt word; the
-host's cursor hidden; the names (`AppHost.owed`, `_try_drag_partial`, no
+host's cursor hidden; the names (`AppHost.owed`, `_try_band_frame`, no
 fade is captured, no table clock).
 
 Where the design differs from a review's fix: M7 asked for the floor as

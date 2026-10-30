@@ -1028,37 +1028,6 @@ static mp_obj_t moy_gfx_cover(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_cover_obj, 20, 20, moy_gfx_cover);
 
-// face(dst, dw, x, y, w, h, face, fw, fy0, src, sw, cw, ch, fill, quads, r,
-// stepped, ring, cam_x, cam_y, cx0, cy0, cx1, cy1): a home card out of its
-// kept face, the pixels its corners blend drawn over what is there
-// (moy_shape.h's mg_face); `src` None: the solid `fill`'s picture, under the
-// array('h') of (x, y, w, h, ink) `quads` (None: none). The pixels written.
-static mp_obj_t moy_gfx_face(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    size_t cap, fcap, scap = 0;
-    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
-    const uint16_t *face = moy_gfx_buf_r(a[6], &fcap);
-    const uint16_t *src = a[9] == mp_const_none ? NULL : moy_gfx_buf_r(a[9], &scap);
-    const int16_t *q = NULL;
-    int nq = 0;
-    if (a[14] != mp_const_none) {
-        mp_buffer_info_t qi;
-        mp_get_buffer_raise(a[14], &qi, MP_BUFFER_READ);
-        q = (const int16_t *)qi.buf;
-        nq = (int)(qi.len / (5 * sizeof(int16_t)));
-    }
-    int v[24];
-    for (int i = 1; i < 24; i++) {
-        v[i] = (i == 6 || i == 9 || i == 14) ? 0
-               : (i == 16 ? mp_obj_is_true(a[i]) : mp_obj_get_int(a[i]));
-    }
-    int n = mg_face(dst, cap, v[1], v[2], v[3], v[4], v[5], face, fcap, v[7], v[8], src, scap,
-                    v[10], v[11], v[12], v[13], q, nq, v[15], v[16], v[17], v[18], v[19],
-                    v[20], v[21], v[22], v[23]);
-    return MP_OBJ_NEW_SMALL_INT(n);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_face_obj, 24, 24, moy_gfx_face);
-
 // tint(dst, src, sw, sx, sy, w, h, col, alpha[, dw, dx, dy]): a picture's
 // sub-rect copied into dst (at (dx, dy), dw words a row; else a picture of
 // its own) with `col` over it at `alpha` (moy_shape.h). Answers the pixels.
@@ -2466,7 +2435,6 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rrect),      MP_ROM_PTR(&moy_gfx_rrect_obj) },
     { MP_ROM_QSTR(MP_QSTR_shadow),     MP_ROM_PTR(&moy_gfx_shadow_obj) },
     { MP_ROM_QSTR(MP_QSTR_cover),      MP_ROM_PTR(&moy_gfx_cover_obj) },
-    { MP_ROM_QSTR(MP_QSTR_face),       MP_ROM_PTR(&moy_gfx_face_obj) },
     { MP_ROM_QSTR(MP_QSTR_tint),       MP_ROM_PTR(&moy_gfx_tint_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
