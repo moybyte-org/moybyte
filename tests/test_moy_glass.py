@@ -57,6 +57,29 @@ def test_a_lent_layer_waits_in_the_pool_and_comes_out_zeroed():
     g.owner_end(o)
 
 
+def test_a_returned_row_takes_its_view_with_it():
+    """A view of C memory outlives nothing it names: an owner's end or
+    reclaim releases the views of the rows it returned in that call -- no
+    Buf is asked first -- so a holder of the view raises on its next use,
+    never writes the pixels the pool lends the next layer."""
+    o = g.owner("t_view")
+    a = g.buf(4096, g.ROLE_LAYER, o)
+    held = a.view
+    g.reclaim(o)
+    with pytest.raises(ValueError):
+        held[0] = 1
+    b = g.buf(1000, g.ROLE_BAKE, o)
+    held = b.view
+    g.owner_end(o)
+    with pytest.raises(ValueError):
+        len(held)
+    c = g.buf(64, g.ROLE_SCRATCH)
+    held = c.view
+    del c                               # the collection is a release too
+    with pytest.raises(ValueError):
+        held[0] = 1
+
+
 def test_an_unlent_buffer_is_freed_never_pooled():
     n = 4096 + 128
     before = _pooled(n)
@@ -128,7 +151,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
     assert out.returncode == 0, out.stderr[-2000:]
 
 
-GATES = r'''import sys
+_MP_HEAD = r'''import sys
 sys.path.insert(0, @RUNTIME@)
 sys.path.insert(0, @DEVICE@)
 sys.path.insert(0, @STAGE@)
@@ -152,7 +175,9 @@ class Comp:
         return moy_gfx
 
 
-cv = dc.DeviceCanvas(Comp(32, 16))
+'''
+
+GATES = _MP_HEAD + r'''cv = dc.DeviceCanvas(Comp(32, 16))
 for name in ("rect", "rectb", "print", "pix"):
     print("verb", name, type(getattr(cv, name)).__name__)
 lay = cv.new_layer(16, 8)
@@ -167,6 +192,23 @@ print("DONE")
 '''
 
 
+def _run_mp(exe, tmp_path, src):
+    """Run `src` (a _MP_HEAD script) under the desktop MicroPython; its result."""
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    shutil.copy(os.path.join(ROOT, "runtime", "font.py"), stage / "moy_font.py")
+    shutil.copy(os.path.join(ROOT, "runtime", "moy_image.py"), stage / "moy_image.py")
+    src = (src.replace("@DEVICE@", repr(os.path.join(ROOT, "device")))
+           .replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+           .replace("@STAGE@", repr(str(stage))))
+    script = tmp_path / "glass.py"
+    script.write_text(src)
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
+                         timeout=120)
+    assert out.returncode == 0, out.stderr or out.stdout
+    return out
+
+
 def test_the_four_hot_verbs_are_c_gates_over_a_checked_row(tmp_path):
     """No Python frame per draw verb on a gated canvas: rect, rectb, print
     and pix are moy_gfx's C gate objects, and a gate whose canvas row has
@@ -174,22 +216,49 @@ def test_the_four_hot_verbs_are_c_gates_over_a_checked_row(tmp_path):
     compare in the draw context)."""
     exe = require_unix_mp("moy_gfx", "moy_glass",
                           why="the draw gates over canvas rows (section 3.1)")
-    stage = tmp_path / "stage"
-    stage.mkdir()
-    shutil.copy(os.path.join(ROOT, "runtime", "font.py"), stage / "moy_font.py")
-    shutil.copy(os.path.join(ROOT, "runtime", "moy_image.py"), stage / "moy_image.py")
-    src = (GATES.replace("@DEVICE@", repr(os.path.join(ROOT, "device")))
-           .replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
-           .replace("@STAGE@", repr(str(stage))))
-    script = tmp_path / "gates.py"
-    script.write_text(src)
-    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
-                         timeout=120)
-    assert out.returncode == 0, out.stderr or out.stdout
+    out = _run_mp(exe, tmp_path, GATES)
     lines = out.stdout.split("\n")
     for name in ("rect", "rectb", "print", "pix"):
         assert "verb %s draw_gate" % name in lines, out.stdout
     assert "stale refused" in lines and lines[-2] == "DONE"
+
+
+RECLAIMED = _MP_HEAD + r'''
+cv = dc.DeviceCanvas(Comp(32, 16))
+old = cv.new_layer(64, 32, "cart")
+view = old._buf
+cv.reclaim_layers("cart")
+print("stale len", len(view))
+new = cv.new_layer(64, 32, "cart")
+old.line(0, 0, 63, 0, 8)
+old.circ(8, 8, 6, 8)
+print("next user", sum(1 for i in range(len(new._buf)) if new._buf[i]))
+o = moy_glass.owner("t_view")
+b = moy_glass.buf(4000, moy_glass.ROLE_BAKE, o)
+v = b.view
+moy_glass.reclaim(o)
+print("reclaimed len", len(v))
+b = moy_glass.buf(4000, moy_glass.ROLE_BAKE, o)
+v = b.view
+moy_glass.owner_end(o)
+print("ended len", len(v))
+print("DONE")
+'''
+
+
+def test_a_reclaimed_buffer_is_written_through_no_view_a_canvas_still_holds(tmp_path):
+    """An owner's end returns its layers while their canvases still hold the
+    views they draw through: a lent layer goes to the pool and the next layer
+    of its size is lent the same pixels. Every view of a returned row is
+    neutered in the reclaim itself, so a stale canvas's Python-verb draw (its
+    moy_gfx call over `_buf`) writes nothing, never the next user's pixels."""
+    exe = require_unix_mp("moy_gfx", "moy_glass",
+                          why="a reclaimed Buf's view under the board binding")
+    lines = _run_mp(exe, tmp_path, RECLAIMED).stdout.split("\n")
+    assert "stale len 0" in lines, lines
+    assert "next user 0" in lines, lines
+    assert "reclaimed len 0" in lines and "ended len 0" in lines, lines
+    assert lines[-2] == "DONE", lines
 
 
 def test_device_canvas_defines_no_python_twin_of_the_glass():

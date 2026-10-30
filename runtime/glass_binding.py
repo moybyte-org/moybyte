@@ -15,13 +15,19 @@ What it adds to the C is what ctypes cannot do by itself: a Buf's and a
 Canvas's lifetime ends with the Python object (`__del__`, which CPython runs
 the moment the last reference goes), and a view of C memory is a plain
 writable memoryview made by `PyMemoryView_FromMemory`, so the rest of the host
-sees the same buffer type a board's moy_alloc view is.
+sees the same buffer type a board's moy_alloc view is. When a Buf's row goes --
+release(), its owner's end or reclaim, or the Buf's collection -- its view is
+released in that same call, so a canvas still holding it raises on its next
+draw instead of writing pixels the pool has lent again (the board's binding
+neuters it to nothing). A slice or cast of the view is a view of its own and
+is not released: nothing keeps one.
 """
 
 from __future__ import annotations
 
 import ctypes
 import os
+import weakref
 
 from . import host_native, native_build
 
@@ -160,6 +166,11 @@ def _collect():
     gc.collect()
 
 
+# The Buf holding each live BUF row, by handle, so an owner's end or reclaim
+# releases the views of the rows it returned (_sweep_bufs).
+_HELD = {}
+
+
 class Buf:
     """A BUF row and its bytes; `view` is their writable memoryview."""
 
@@ -169,13 +180,22 @@ class Buf:
         self.h = h
         self.view = view
         self._heap = heap
+        _HELD[h] = weakref.ref(self)
+
+    def _gone(self):
+        """The row went: the view raises on every use from here on."""
+        if _HELD.get(self.h) is not None and _HELD[self.h]() is self:
+            del _HELD[self.h]
+        self.h = 0
+        self._heap = None
+        self.view.release()
 
     def _row(self):
         if not self.h:
             return None
         out = (ctypes.c_uint32 * 6)()
         if _lib().moy_glass_host_row(self.h, out) != OK:
-            self.h = 0
+            self._gone()
             return None
         return out
 
@@ -201,17 +221,36 @@ class Buf:
     def release(self):
         h = self.h
         if h:
-            self.h = 0
             lib = _LIB[0]
             if lib:
                 lib.moy_buf_release(h)
-        self._heap = None
+        self._gone()
 
     def __del__(self):
         try:
             self.release()
         except Exception:  # noqa: BLE001 -- interpreter teardown
             pass
+
+
+def _sweep_bufs():
+    """After an owner's end or reclaim: every Buf whose row went is released
+    now, not the next time something asks it."""
+    out = (ctypes.c_uint32 * 6)()
+    lib = _lib()
+    held = None
+    for h, ref in list(_HELD.items()):
+        if lib.moy_glass_host_row(h, out) != OK:
+            b = ref()
+            if b is None:
+                del _HELD[h]
+                continue
+            try:
+                b._gone()
+            except BufferError as exc:     # something holds the bytes it
+                held = exc                 # names: loud, once every row is done
+    if held is not None:
+        raise held
 
 
 def buf(nbytes, role, owner=0):
@@ -248,12 +287,14 @@ def owner(tag, cls=CLASS_CART):
 
 def reclaim(h, roles=0):
     rc = _lib().moy_owner_reclaim(int(h), int(roles))
+    _sweep_bufs()
     if rc != OK:
         _raise(rc, "owner")
 
 
 def owner_end(h):
     rc = _lib().moy_owner_end(int(h))
+    _sweep_bufs()
     if rc != OK:
         _raise(rc, "owner")
 

@@ -10,9 +10,11 @@
 //   kernel_epoch(), kernel_bump()
 //
 // A Buf holds its row: `view` is a writable memoryview of its bytes, and when
-// the row goes -- release(), its owner's end, or the Buf's own collection --
-// the view is neutered (length 0, no items), so a stale draw raises instead of
-// writing memory the pool has lent again. A HEAP row's bytes are a bytearray
+// the row goes -- release(), its owner's end or reclaim, or the Buf's own
+// collection -- the view is neutered (length 0, no items) in that same call, so
+// a draw through a view a canvas still holds writes nothing instead of writing
+// memory the pool has lent again. A slice taken of the view is a view of its
+// own and is not neutered: nothing keeps one. A HEAP row's bytes are a bytearray
 // the Buf holds: the last resort when PSRAM refuses even after the pool is
 // evicted, counted so the gate sees it.
 //
@@ -178,13 +180,54 @@ typedef struct {
 
 static const mp_obj_type_t glass_buf_type;
 
-static void buf_drop(glass_buf_obj_t *b) {
-    if (b->h != 0u) {
-        moy_buf_release(b->h);
-        b->h = 0u;
+#if !MICROPY_ENABLE_FINALISER
+#error "moy_glass: a Buf's finaliser takes it out of buf_at before it is freed"
+#endif
+
+// The Buf holding each BUF slot's row, so an owner's end or reclaim neuters the
+// views of the rows it returned before anything can draw through them. Not a
+// gc root: a Buf's finaliser takes it out (buf_drop) before it is freed.
+static glass_buf_obj_t *buf_at[MOY_GLASS_ROWS];
+
+static uint32_t buf_slot(uint32_t h) {
+    return h & (MOY_GLASS_ROWS - 1u);
+}
+
+static void buf_gone(glass_buf_obj_t *b) {
+    if (b->h != 0u && buf_at[buf_slot(b->h)] == b) {
+        buf_at[buf_slot(b->h)] = NULL;
     }
+    b->h = 0u;
     neuter(b->view);
     b->heap = MP_OBJ_NULL;
+}
+
+static void buf_hold(glass_buf_obj_t *b, uint32_t h) {
+    glass_buf_obj_t *was = buf_at[buf_slot(h)];
+    if (was != NULL) {
+        buf_gone(was);          // its row went without a sweep: the slot is reused
+    }
+    b->h = h;
+    buf_at[buf_slot(h)] = b;
+}
+
+// After an owner's end or reclaim: every Buf whose row went is neutered now.
+static void bufs_sweep(void) {
+    for (uint32_t s = 0u; s < MOY_GLASS_ROWS; s++) {
+        glass_buf_obj_t *b = buf_at[s];
+        moy_buf_row_t *r;
+        if (b != NULL && moy_buf_get(b->h, &r) != MOY_GLASS_OK) {
+            buf_gone(b);
+        }
+    }
+}
+
+static void buf_drop(glass_buf_obj_t *b) {
+    uint32_t h = b->h;
+    buf_gone(b);
+    if (h != 0u) {
+        moy_buf_release(h);
+    }
 }
 
 static mp_obj_t buf_release(mp_obj_t self_in) {
@@ -193,14 +236,10 @@ static mp_obj_t buf_release(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(buf_release_obj, buf_release);
 
-// The row may have gone without this object (its owner ended): then the view
-// is neutered here, the first time anything asks.
 static moy_buf_row_t *buf_row(glass_buf_obj_t *b) {
     moy_buf_row_t *r;
     if (b->h == 0u || moy_buf_get(b->h, &r) != MOY_GLASS_OK) {
-        b->h = 0u;
-        neuter(b->view);
-        b->heap = MP_OBJ_NULL;
+        buf_gone(b);
         return NULL;
     }
     return r;
@@ -271,7 +310,7 @@ static mp_obj_t glass_buf(size_t n_args, const mp_obj_t *a) {
     if (rc == MOY_GLASS_OK) {
         moy_buf_row_t *r;
         moy_buf_get(h, &r);
-        b->h = h;
+        buf_hold(b, h);
         mp_obj_array_t *v = MP_OBJ_TO_PTR(
             mp_obj_new_memoryview(BYTEARRAY_TYPECODE, (size_t)n, r->px));
         v->typecode |= 0x80;
@@ -293,7 +332,7 @@ static mp_obj_t glass_buf(size_t n_args, const mp_obj_t *a) {
     }
     mp_buffer_info_t bi;
     mp_get_buffer_raise(ba, &bi, MP_BUFFER_RW);
-    b->h = h;
+    buf_hold(b, h);
     b->heap = ba;
     mp_obj_array_t *v = MP_OBJ_TO_PTR(
         mp_obj_new_memoryview(BYTEARRAY_TYPECODE, (size_t)n, bi.buf));
@@ -322,6 +361,7 @@ static mp_obj_t glass_reclaim(size_t n_args, const mp_obj_t *a) {
     ready();
     uint32_t roles = n_args > 1 ? (uint32_t)mp_obj_get_int(a[1]) : 0u;
     int rc = moy_owner_reclaim(h_arg(a[0]), roles);
+    bufs_sweep();
     if (rc != MOY_GLASS_OK) {
         raise_rc(rc, "owner");
     }
@@ -332,6 +372,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_reclaim_obj, 1, 2, glass_reclai
 static mp_obj_t glass_owner_end(mp_obj_t h) {
     ready();
     int rc = moy_owner_end(h_arg(h));
+    bufs_sweep();
     if (rc != MOY_GLASS_OK) {
         raise_rc(rc, "owner");
     }
@@ -2295,8 +2336,10 @@ void moy_glass_vm_stop(void) {
 }
 
 // After the sweep: every Buf and Canvas the VM held was finalised (its row
-// given back); the lifetimes it named are ended.
+// given back, its buf_at entry gone); the lifetimes it named are ended, and
+// buf_at names nothing of the freed heap.
 void moy_glass_vm_swept(void) {
+    memset(buf_at, 0, sizeof(buf_at));
     if (moy_glass_ready()) {
         moy_glass_end_owners();
     }
