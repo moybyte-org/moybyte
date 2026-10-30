@@ -15,9 +15,9 @@
 # (`files.list()`, `files.new_name()`, `files.rename()`, `files.duplicate()`,
 # `files.delete()`, `files.badge()`) and `open_editor(name)` -- a handle onto
 # one note, over the console's own editor. The editor is not in this file: the
-# text, the caret, wrap, undo, the clipboard, Select and the Markdown (headings,
-# checkboxes, `[[links]]`, `![[drawings]]`) all live in the shell and are drawn
-# through the handle, the way `make_layer` hands a cart the layer engine. This
+# text, the caret, wrap, undo, the clipboard, Select and the Markdown taps
+# (a `[ ]` box toggles, a `[[link]]` opens its note) all live in the shell and
+# are drawn through the handle, the way `make_layer` hands a cart the layer engine. This
 # file is the page: the list, the tools and where the note goes, drawn with the
 # public UI API (`ui`), which moves focus, keys and taps for it.
 #

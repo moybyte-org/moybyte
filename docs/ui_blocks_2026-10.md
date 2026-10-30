@@ -102,8 +102,7 @@ the Notes split needs.
 
 **G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
 `floor*`) are not in any public face. They reach the shell through
-`modmoy_ui.c`'s private table. But Notes, the Code tab, the Player's rows,
-the Blocks and desk panes, the Launcher's bands and the pickers each drive
+`modmoy_ui.c`'s private table. But the Code tab, the Blocks and desk panes, the Launcher's bands and the pickers each drive
 them with a path of their own (#243 lists
 them). `AppHost.begin` (`runtime/ui_draw.py`, over
 `moy_ui_api_host_begin`) is the one path that stays. The others go as their surfaces move.
@@ -114,8 +113,8 @@ them). `AppHost.begin` (`runtime/ui_draw.py`, over
   `tests/test_ui_public.py` pins 38 buttons in a scroll region reached by
   key and the 39th said).
 - `MOY_UI_API_KEEP` (16): kept ids.
-- `MOY_UI_API_FLOOR` (24) and `MOY_UI_API_HOST` (6).
-- One text-view record per context.
+- `MOY_UI_API_FLOOR` (24): the rects a shift frame's floor holds.
+- `MOY_UI_TEXT_VIEWS` (4): text-view records, every context's together.
 
 A list of rich rows on the P4 desk shows more controls than 40 stops hold.
 The stop record is the cost, and it is counted in bytes before a budget is

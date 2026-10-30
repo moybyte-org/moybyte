@@ -237,7 +237,8 @@ default.
 | verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
 | the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, lands the view there in that frame (`ui_draw.text_aim`); a fling and the wheel glide |
-| Notes, the fields | Notes' handle in whole lines (`EditorHandle`); a field is one row | the handle's drag (`pan_drag`) | the handle keeps its caret in view |
+| Notes | `ui.text_view` (§5), placed in its page with `ui.at` | the engine's drag-tap; the fling | the caret's row lands in view in that frame (`ui_draw.text_reveal`) |
+| the fields | one row in the verbs engine | -- | -- |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
 The Blocks outline and Music's steps are tables of parts
@@ -248,8 +249,8 @@ page (`editor_settings.SettingsPage`) whose gen makes a key step the
 engine's rows frame; `cards_layer`'s own loop and `mtop` draw a broken
 manifest and the file list. Carts are out: a
 cart's `btn`/`btnp` and its own scrolling are the cart's (L9); Notes is a
-system cart on the verbs engine whose text is the shell's `EditorHandle`,
-and §5 says what it gets.
+system cart on the verbs engine whose note is a text view drawn by the
+shell's `EditorHandle`, and §5 says what it gets.
 
 ### 2.5 The browser
 
@@ -487,9 +488,9 @@ is kept by its id (`MOY_UI_TEXT_VIEWS` of them, every context's together,
 the least recently drawn given up first). What draws through it: the Code
 tab (`CodeLayer`, which the theme Config text extends as `ConfigLayer`),
 the desk's made code (`editor_parts.made`) and the text console's log
-(`TextConsole`), each with one `ui.text_view` call a frame. Notes' editor
-handle (`EditorHandle`) paints its rows itself; the verbs' fields and the
-console's prompt line are drawn by their own. The buffer stays where it is
+(`TextConsole`) and Notes' note (`EditorHandle`), each with one
+`ui.text_view` call a frame. The verbs' fields and the console's prompt
+line are drawn by their own. The buffer stays where it is
 (`CodeEditor`, the console's ring), and what changed is the view's to find:
 it keeps each
 visible row's gen -- a hash of what the row draws: its text, its line's
@@ -512,7 +513,8 @@ in P4 on 2026-10-28). By cause, those rows are:
   host that aims the view before its frame begins (`ui_draw.text_aim`)
   lands it in that frame, one translation: the Code tab's `top` its editor
   moved (a caret kept in view, a typed line, find, Go to) and the console's
-  new foot.
+  new foot; `ui_draw.text_reveal` lands it only as far as a (line, column)
+  needs to show, wrap-aware (Notes' caret).
 
 **What draws the whole view**, named so none is inferred: a horizontal
 scroll (the Code tab's `ed.left` moves every row); a gutter width change
@@ -577,55 +579,28 @@ whole.
   dialog skips the put-back and draws the dialog's rows alone.
 - *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
   verbs page every tick (`ui.bar`, `ui.page`, the hints, the sheet), and
-  the page's ground fills the cart's canvas before the handle draws, so
-  rows in the handle alone save nothing. Notes takes the floor as a host's
-  rows frame. Its page and its vault table carry a gen (`PAGE_O`, moved
-  when the tools, the foot's word or the vault change). At begin the Player
-  asks the handle the rows its next draw changes (`EditorHandle.rows_plan`:
-  each visual row's laid line, caret cell and selection against the last
-  draw's, the bands of rows that differ; an embed or a new look is the
-  whole document). A view moved by whole lines -- a drag, a fling, the
-  wheel, the trackball, the caret leaving it -- is a **shift frame**: the
-  handle finds the k visual rows the move brings each row by (from the
-  lines its first row moved), compares row i with the last draw's row
-  i + k, and names the rect whose rows it keeps (`EditorHandle.rows_move`:
-  the rows that lie, before and after, inside the paper's straight sides,
-  clear of its round corners), which the Player moves by k rows
-  (`shift_last`) before the pass; the bands are then the rows the move
-  brings, the rows it does not keep, and the rows whose line or marks
-  changed. The Player adds what the buffer it draws into lags (its
-  `PaintRing`: on a glass of two or three buffers the floors the frames
-  since changed, else -- and after a frame that shifted -- the last
-  frame's page moved over with `shift_last`), and the engine plans the
-  frame (`moy_ui_api_shift_rows`): R is the page under its gen, which may
-  hold stops `ui.at` placed since nothing moves, and the floor is those
-  rects and what begin's input changes, under a hover over no stop or a
-  press that went down on none, held or let go; a rows frame begin planned of its own
-  (the desk's vault table) gives way to it. The cart's
-  pass runs under the floor, the page's ground filling it alone; the handle
-  takes each band into the floor over the ground (`moy_ui_api_floor_take`),
-  papers it and draws its rows, with the row above where a link's underline
-  reaches into it. Where no floor is drawn and the canvas is one buffer
-  only the run draws, the handle draws its rows when the canvas's gate
-  counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) and its clears show nothing
-  else wrote it since its last draw -- otherwise whole. A `cls` under a
-  floor breaks the frame (`moy_ui_api_shift_break`: the pass draws whole
-  from there), as does a handle that finds it must draw whole after all
-  (it takes its whole rect into the floor first), and a declared
-  `background` draws every frame whole. The handle the run draws is the one
-  it has open: a note closed for another draws nothing (`EditorHandle.live`).
-  The FPS chip, drawn over the page after its pass, is what the frame
-  changed there too, and the next frame's floor (`Player.overdrew`); the
-  run's page is then alone on the glass but for it. The
-  cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart
-  (render the document into that rect, this frame): a cart that `cls()`es
-  and calls it gets the whole document. What a frame changed of the canvas
-  is the floor's bounding rect and the rect the move shifted
-  (`Player.change`); the Player's window on
-  the desk copies it and the shown ring's lag onto the glass
-  (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
-  the last phase (§15 P8), priced honestly, and §15 says what it costs if
-  the cart floor does not hold.
+  the handle draws the open note as a view (`ui.text_view("editor<n>",
+  ...)` at the note's rect, placed with `ui.at`) in the monospace face: the
+  note's source as written, a heading's `#`, a `[[link]]` and a `[ ]` box
+  in the text's colour. A tap finds its cell through the view
+  (`ui_draw.text_at`); a box's brackets toggle it and a link opens its
+  note from that cell (`EditorHandle.tap`). The Player begins the run's
+  frame through its app host (`AppHost.run`, the host every shell app's
+  frames begin through), and the page, holding stops `ui.at` placed, is
+  not R: the view is. Before the frame begins the handle aims the view
+  (`EditorHandle.aim`): a caret moved since its last draw lands the view
+  only as far as its visual row needs (`ui_draw.text_reveal`, wrap-aware),
+  and a `top` the editor moved lands there. A drag, a fling and the wheel
+  scroll the view by pixels and a release coasts; Shift and the wheel,
+  and the caret, move the unwrapped view sideways (`left`). So a key step,
+  a typed key and a glide are the engine's shift and rows frames inside
+  the view, and the tools, the foot and the desk's vault draw every frame.
+  The frame is whole where the run has no note open, where a declared
+  `background` repaints the canvas, where the FPS chip drew over the view
+  (`Player.overdrew`), and from a cart's `cls` on (`moy_ui_api_shift_break`).
+  The cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other
+  cart: the document, in that rect, this frame. On the desk the Player's
+  window composites the run's canvas whole each frame it draws.
 - *The Blocks outline and Music's steps* are tables of parts
   (`docs/ui_blocks_2026-10.md` §4.1): each row's cells are its key, the
   engine carries the rows that did not change and `ui.table_part` answers
@@ -892,7 +867,8 @@ is queued. The host runs every mechanism under test as an emulated tier
 
 - A cart's own scrolling, and every Lua and compiled cart: a cart may read
   `btn` in its draw and its `cls` writes past any floor; the Player
-  composites a declared rect at most (§5, Notes, whose pass is shell code).
+  composites its canvas whole (§5; Notes' pass is shell code, its note a
+  text view).
 - An overshoot or a rubber band at the clamp: the fling hard-stops, as #113
   v1 did (owner, 2026-10-27).
 - A replay of the app's pass (§3.3): no host has a re-run hook and the

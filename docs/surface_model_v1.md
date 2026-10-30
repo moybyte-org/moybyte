@@ -742,7 +742,7 @@ check plus a case per leg of the gate.
 surface-granularity freeze breaks is a surface that animates without
 signalling: it silently stops moving. The 2026-07-27 audit found the feared
 case does not exist here — **both carets, the code editor's and the editor
-handle's, are deliberately SOLID** (`runtime/editor_handle.py` paints its caret
+handle's, are deliberately SOLID** (both are `ui.text_view`'s `caret`, drawn
 unconditionally). A blinking caret added later without a Class B declaration is
 exactly how this freeze breaks.
 
