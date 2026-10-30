@@ -2046,17 +2046,27 @@ class AppHost:
         self._hp = array("i", [0] * _HP_LEN)
         self._cv = self._th = None
         self._full = False              # the canvas has every word (`_canvas`)
-        # A dialog's rows frame is the host's to allow: `held(plan)` answers
-        # whether every buffer holds the page under the dialog the plan names
-        # (its card and drop, plan[0:4], standing plan[7] frames) as the
-        # frames before left it (`Hold.rows`); None, never.
-        self.held = None
+        self.held = None                # a dialog's rows frame's licence (`held`)
         self._t3 = 0
         self._keys = False              # the frame begun last took the keys
         self.shifting = False           # the frame begun last draws its pages' floor alone
         self._began = -1                # the painted frame it began last
         self._console = None            # ...and the console that painted it
         self._dy = 0                    # the frame begun last moved its page by this
+
+    @property
+    def held(self):
+        """A dialog's rows frame is the host's to allow: `held(plan)`
+        answers whether every buffer holds the page under the dialog the
+        plan names (its card and drop, plan[0:4], standing plan[7] frames)
+        as the frames before left it (`Hold.rows`); None, never."""
+        return self._held
+
+    @held.setter
+    def held(self, fn):
+        self._held = fn
+        h = self._hp
+        h[_HP_HOST] = (h[_HP_HOST] & ~_HH_HELD) | (_HH_HELD if fn is not None else 0)
 
     @property
     def own_rows(self):
@@ -2204,11 +2214,6 @@ class AppHost:
         else:
             self._canvas(cv)
         hp[_HP_TAP] = t
-        h = self.held
-        if h is not None:
-            hp[_HP_HOST] |= _HH_HELD
-        elif hp[_HP_HOST] & _HH_HELD:
-            hp[_HP_HOST] &= ~_HH_HELD
         flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
                  | (_ELSEWHERE if away else 0) | _KEY_EDGE)
         self._t3 = u[3] = flags & (_DESK | _WINDOW)
@@ -2224,7 +2229,7 @@ class AppHost:
             r = _C.api_host_begin(ctx, a, rect, flags, _fs(cv), _PF, hp)
         self.shifting = False
         self._dy = 0
-        if r & _HB_SHIFT and (not r & _HB_HELD or h(hp)):
+        if r & _HB_SHIFT and (not r & _HB_HELD or self._held(hp)):
             n = hp[_HP_N]
             k = _HP_MOVES
             while n:
