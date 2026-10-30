@@ -23,7 +23,7 @@ enum {
     STOP_KEEP_UD = 4,       // a list: up and down are its own...
     STOP_AT_TOP = 8,        // ...but up at its first row
     STOP_AT_END = 16,       // ...and down at its last
-    STOP_HOLD = 32,         // nav = false on a part: focus stays, the keys are the cart's
+    STOP_HOLD = 32,         // nav = false on a part: focus, the keys, a held press are its
     STOP_NAV_OFF = 64,      // nav = false on a page: the engine moves no focus in it
     STOP_MODAL = 128,       // a dialog's or a popover's: while one is drawn, the others take no input
     STOP_DLG_BTN = 256,     // a dialog's button (focus opens on its body first)
@@ -857,6 +857,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pa_box.w = 0;
     c->pa_st = 0;
     c->sp_n = 0;
+    c->sp_pn = 0;
+    c->sp_cut = 0;
+    c->sp_cur = -1;
+    c->sp_held = 0;
     // the dialog the last frame drew, for this frame's plan, and the frames
     // it has stood as it is
     int dw = c->dlg_id != 0 && c->dlg_held && !c->fl_top && !c->fl_mute;
@@ -1123,10 +1127,15 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         if (c->gesture == 1) {
             int h = c->press ? find(v, n, c->press) : -1;
             int keep_lr = h >= 0 && (v[h].flags & STOP_KEEP_LR);
+            int own = h >= 0 && ((v[h].flags & STOP_HOLD) || (v[h].part && v[h].page == NO_PAGE));
             int dx = x - c->press_x, dy = y - c->press_y;
             dx = dx < 0 ? -dx : dx;
             dy = dy < 0 ? -dy : dy;
-            if (keep_lr && dx > slop && dx > dy) {
+            if (own) {
+                // a part with nav off, or with no page under it to drag,
+                // keeps its press: the pointer held on it is the part's
+                // (ui.part_at)
+            } else if (keep_lr && dx > slop && dx > dy) {
                 c->gesture = 3;         // a slider's knob follows it; a stepper's release taps
                 settled = 0;
             } else if (dy > slop) {
@@ -2019,6 +2028,7 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     s->b = b;
     s->flags = (uint16_t)(flags | (dlg ? STOP_MODAL : 0) | (c->at_last ? STOP_AT : 0));
     s->page = c->page_stop;
+    s->part = 0;
     s->row = -1;
     s->top = 0;
     if (c->tp_open) {
@@ -3151,6 +3161,9 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     uint32_t pid = o->id.p != NULL ? hash(o->id.p, o->id.n, 0) : hash(id.p, id.n, 0);
     int st = disabled ? 0
                       : stop(c, pid, b, o->nav == 0 ? STOP_HOLD : 0, o->id.p != NULL ? o->id : id);
+    if (st >= 0 && !disabled && c->n_cur > 0 && c->cur[c->n_cur - 1].id == pid) {
+        c->cur[c->n_cur - 1].part = 1;
+    }
     if (!disabled && st >= 0 && pic_note(c, o, 1)) {
         pic_redraw(c, b);
     }
@@ -3247,6 +3260,25 @@ static void split_lay(moy_ui_box_t r, int across, int gap, const int32_t *sizes,
     }
 }
 
+// The panes split `r` cuts, recorded for the split frame: a pane recorded
+// before that holds `r` is cut again (a split inside it), no pane of its
+// own; `cur` (-1 none) is the one the keys reach.
+static void split_note(moy_ui_ctx_t *c, moy_ui_box_t r, int n, const int32_t *out, int cur) {
+    for (int j = 0; j < c->sp_pn; j++) {
+        moy_ui_box_t p = c->sp_pane[j];
+        if (r.x >= p.x && r.y >= p.y && r.x + r.w <= p.x + p.w && r.y + r.h <= p.y + p.h) {
+            c->sp_cut = (uint16_t)(c->sp_cut | (1u << j));
+        }
+    }
+    for (int i = 0; i < n && c->sp_pn < MOY_UI_API_PANES; i++) {
+        if (i == cur) {
+            c->sp_cur = (int8_t)c->sp_pn;
+        }
+        c->sp_pane[c->sp_pn++] = (moy_ui_box_t){(int16_t)out[4 * i], (int16_t)out[4 * i + 1],
+                                                (int16_t)out[4 * i + 2], (int16_t)out[4 * i + 3]};
+    }
+}
+
 int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int32_t *sizes,
                      int n, const int32_t *mins, const int32_t *opt, int32_t *out) {
     if (n < 1 || n > MOY_UI_SPLIT_MAX) {
@@ -3318,6 +3350,7 @@ int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
             w[1] = k->over;
             w[2] = (int)k->sn - 1;
             w[3] = k->s0 ? MOY_UI_SPD_LIVE : 0;
+            c->sp_held = (uint8_t)(c->sp_held | held);
             if (!held) {
                 w[3] |= MOY_UI_SPD_LET_GO;
                 if (k->s0) {
@@ -3333,6 +3366,7 @@ int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
             k->a = 0;
         }
     }
+    split_note(c, r, n, out, cur);
     if (focus) {
         if (press && !took) {
             for (int i = 0; i < n; i++) {
@@ -3394,6 +3428,74 @@ int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y) {
         }
     }
     return 0;
+}
+
+int moy_ui_api_split_frame(moy_ui_ctx_t *c, int32_t gen, int known, int still, int top,
+                           const int32_t lag[4], int32_t out[4]) {
+    int whole = gen == MOY_UI_SPLIT_WHOLE;
+    int same = c->sf_on && !whole && gen == c->sf_gen;
+    c->sf_gen = gen;
+    c->sf_on = (uint8_t)(known && !whole);
+    int i = c->sp_cur;
+    int32_t pop[4];
+    if (!same || !known || !still || i < 0 || i >= c->sp_pn || (c->sp_cut & (1u << i))
+        || c->sp_held || moy_ui_api_pop_box(c, pop) || moy_ui_api_owes(c)
+        || moy_ui_api_moving(c)) {
+        return MOY_UI_SF_WHOLE;
+    }
+    moy_ui_box_t p = c->sp_pane[i];
+    int t = top < 0 ? 0 : top > p.h ? p.h : top;
+    out[0] = p.x;
+    out[1] = p.y + t;
+    out[2] = p.w;
+    out[3] = p.h - t;
+    if (lag[2] > lag[0] && lag[3] > lag[1]
+        && (lag[0] < out[0] || lag[1] < out[1] || lag[2] > out[0] + out[2]
+            || lag[3] > out[1] + out[3])) {
+        return MOY_UI_SF_LAGS;
+    }
+    return MOY_UI_SF_ALONE;
+}
+
+int moy_ui_api_split_toward(const moy_ui_ctx_t *c, int x, int y, int dx, int dy,
+                            int32_t out[4]) {
+    int i = -1;
+    for (int j = 0; j < c->sp_pn && i < 0; j++) {
+        if (!(c->sp_cut & (1u << j)) && inside(c->sp_pane[j], x, y)) {
+            i = j;
+        }
+    }
+    if (i < 0) {
+        return 0;
+    }
+    moy_ui_box_t f = c->sp_pane[i];
+    int cx = f.x + f.w / 2, cy = f.y + f.h / 2;
+    int best = -1, bk = 0;
+    for (int j = 0; j < c->sp_pn; j++) {
+        if (j == i || (c->sp_cut & (1u << j))) {
+            continue;
+        }
+        moy_ui_box_t p = c->sp_pane[j];
+        int px = p.x + p.w / 2 - cx, py = p.y + p.h / 2 - cy;
+        int along = px * dx + py * dy, across = px * dy + py * dx;
+        if (along <= 0) {
+            continue;
+        }
+        int k = along + 2 * (across < 0 ? -across : across);
+        if (best < 0 || k < bk) {
+            best = j;
+            bk = k;
+        }
+    }
+    if (best < 0) {
+        return 0;
+    }
+    moy_ui_box_t p = c->sp_pane[best];
+    out[0] = p.x;
+    out[1] = p.y;
+    out[2] = p.w;
+    out[3] = p.h;
+    return 1;
 }
 
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap) {

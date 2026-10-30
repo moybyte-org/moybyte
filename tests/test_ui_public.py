@@ -797,3 +797,79 @@ def test_a_press_focuses_its_pane_and_a_split_without_focus_answers_none():
         ui.at(0, 0, 200, 100)
         return ui.split("q", "x", sizes, None, out)
     assert _Run(plain).frame() == -1
+
+
+def test_a_split_frame_is_the_focused_panes_where_nothing_else_moved():
+    """The engine's split frame (docs/ui_blocks_2026-10.md §4.2): the pane a
+    split's focus names, drawn alone where the gen the host gives is the
+    last frame's, the WM knew both frames' targets and the context holds
+    no input of its own; whole where a divider is held."""
+    draw, st = _panes()
+    r = _Run(draw)
+    r.frame()
+    host = ui_draw.AppHost()
+    host.ctx = r.ctx
+    out, none = array("i", [0] * 4), (0, 0, 0, 0)
+    whole, alone = host.SPLIT_WHOLE, host.SPLIT_ALONE
+    assert host.split_frame(5, True, 8, none, out) == whole, "no gen before it"
+    assert host.split_frame(5, True, 8, none, out) == alone
+    assert list(out) == [10, 18, 60, 192], "the focused pane below its 8 rows"
+    assert host.split_frame(6, True, 0, none, out) == whole, "the gen moved"
+    assert host.split_frame(6, False, 0, none, out) == whole, "the WM knew nothing"
+    assert host.split_frame(6, True, 0, none, out) == whole, "...nor of the last"
+    assert host.split_frame(6, True, 0, none, out) == alone
+    assert host.split_frame(6, True, 0, (0, 0, 320, 240), out) == host.SPLIT_LAGS
+    assert host.split_frame(None, True, 0, none, out) == whole
+    r.frame(ptr=(73, 100, 7))                   # the first divider held
+    host.split_frame(6, True, 0, none, out)
+    assert host.split_frame(6, True, 0, none, out) == whole
+    r.frame(ptr=(73, 100, 1))
+    r.frame()
+    assert host.split_frame(6, True, 0, none, out) == alone
+    host.point(200, 100, True)                  # the context's own input waits
+    assert host.split_frame(6, True, 0, none, out) == whole
+
+
+def test_a_directional_move_goes_to_the_nearest_pane_that_way():
+    """`split_toward`: from the pane holding a point, the pane of the last
+    pass's splits whose centre lies that way, nearest along it; a pane a
+    later split cut again is none, its panes are."""
+    draw, st = _panes()
+    inner, sub = [100, 0], [0] * 12
+
+    def nested():
+        got = draw()
+        ui.at(got[4], got[5], got[6], got[7])
+        ui.split("q", "y", inner, {"focus": -1, "gap": 6}, sub)
+        return got
+    r = _Run(nested)
+    r.frame()
+    host = ui_draw.AppHost()
+    host.ctx = r.ctx
+    out = array("i", [0] * 4)
+    assert host.split_toward(40, 100, 1, 0, out) and list(out) == [76, 10, 80, 100]
+    assert host.split_toward(116, 60, 0, 1, out) and list(out) == [76, 116, 80, 94]
+    assert host.split_toward(116, 160, 1, 0, out) and out[0] == 162
+    assert not host.split_toward(200, 100, 1, 0, out), "nothing right of the last"
+    assert not host.split_toward(116, 160, 0, 1, out), "nothing below the lowest"
+    assert not host.split_toward(5, 5, 1, 0, out), "no pane holds the point"
+
+
+def test_a_parts_press_with_no_page_to_drag_stays_its_own_through_a_drag():
+    """A part in no page keeps a held press as it moves past the slop:
+    PRESSED, and part_at where the pointer is, until the release activates
+    it where it comes up."""
+    got = {}
+
+    def draw():
+        ui.at(20, 20, 100, 100)
+        got["st"] = ui.part("p")[4]
+        got["at"] = ui.part_at()
+    r = _Run(draw)
+    r.frame()
+    r.frame(ptr=(30, 30, 7))
+    assert got["st"] & ui.PRESSED and got["at"] == (10, 10)
+    r.frame(ptr=(60, 90, 3))
+    assert got["st"] & ui.PRESSED and got["at"] == (40, 70)
+    r.frame(ptr=(60, 90, 1))
+    assert got["st"] & ui.ACTIVATED and got["at"] == (40, 70)

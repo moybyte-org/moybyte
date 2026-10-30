@@ -35,6 +35,7 @@
 #define MOY_UI_API_BAR 6            // the tools an app lends its bar
 #define MOY_UI_API_FLOOR 24         // the rects a shift frame's floor holds
 #define MOY_UI_API_DIVS 8           // the dividers one frame's splits record (moy_ui_api_split_at)
+#define MOY_UI_API_PANES 16         // the panes one pass's splits record (moy_ui_api_split_frame)
 #define MOY_UI_API_TROWS 48         // the rows of a carried table a frame keeps the record of
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
@@ -152,6 +153,7 @@ typedef struct {
     moy_ui_box_t b;                 // on screen, as drawn
     uint16_t flags;                 // STOP_* (moy_ui_api.c)
     uint8_t page;                   // the index of its page's stop, or 0xff
+    uint8_t part;                   // a part: a held press with no page to drag stays its
     // A list's or a table's rows on its page (STOP_ROWS): the focused row
     // and row 0's top on screen, so a key step reveals its row at begin.
     int16_t row, top;
@@ -214,6 +216,16 @@ typedef struct {
     moy_ui_box_t sp_hit[MOY_UI_API_DIVS];   // the dividers this frame's splits drew: what a press takes
     uint8_t sp_n;
     uint8_t pa_st;                  // ...and its state bits (moy_ui_api_part_at)
+    // The panes the last pass's splits cut (moy_ui_api_split_frame): a pane
+    // a later split cut again (`sp_cut`, a bit a pane) is no pane of its own;
+    // `sp_cur` the one a split's focus names (-1 none), `sp_held` whether a
+    // divider was held. `sf_gen` the gen the last split frame was asked with,
+    // `sf_on` whether the WM knew that frame's target.
+    moy_ui_box_t sp_pane[MOY_UI_API_PANES];
+    uint16_t sp_cut;
+    uint8_t sp_pn, sp_held, sf_on;
+    int8_t sp_cur;
+    int32_t sf_gen;
     int16_t press_x, press_y, drag_y;
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
@@ -766,8 +778,10 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // ui.part_at(): where the pointer is inside the part answered last this
 // frame, from its top-left: where the tap that activated it was released
 // (its state ACTIVATED by the pointer), else where the pointer is while it
-// presses or hovers the part. 1 with x, y at out; 0 otherwise (the part
-// activated by a key, the pointer off it, no part this frame).
+// presses or hovers the part (a press held on a part with no page under
+// it, or with nav off, stays its own through a drag). 1 with x, y at out;
+// 0 otherwise (the part activated by a key, the pointer off it, no part
+// this frame).
 int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
 // ui.split(id, dir, sizes, o) (docs/ui_blocks_2026-10.md §4.2): ui.at's
 // rect (else the page's, from its row cursor down) cut into `n` panes along
@@ -781,7 +795,9 @@ int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
 // With MOY_UI_SPLIT_FOCUS the panes hold a focused pane, opt's CUR (-1
 // none), which the split answers as it moves: to the pane a press goes down
 // in, and, as focus moves between groups, to the pane the focused stop lies
-// in on the frame the focus moves; else -1 is answered.
+// in on the frame the focus moves; else -1 is answered. A split with focus
+// or a divider records its panes until the next pass, CUR marking the one
+// the keys reach (moy_ui_api_split_frame, moy_ui_api_split_toward).
 //
 // With MOY_UI_SPLIT_DRAG each gap is a divider, kept by the split's id: a
 // press on it (HIT_W across, HIT_L along, centred; 0 the gap's) holds it,
@@ -807,6 +823,31 @@ int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // Whether (x, y) lies on a divider the last pass's splits drew, where a
 // press would hold it.
 int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
+// The split frame (docs/ui_blocks_2026-10.md §4.2), asked before the frame
+// begins: whether it draws the pane the keys reach alone. That pane is the
+// one a split of the last pass named with its focus (opt's CUR), of the
+// panes its splits cut (a pane a later split cut again is none). It is the
+// frame's alone where the host has no input waiting for this context
+// (`still`), the last pass drew no popover and held no divider, nothing is
+// owed and no page moves, the WM says the target holds the page as the last
+// frame left it (`known`), and `gen` -- what the context draws outside the
+// pane is a function of, MOY_UI_SPLIT_WHOLE where it changes on its own --
+// is the gen the last frame was asked with, on a frame the WM knew too.
+// `top`: the rows at the pane's top that the context's own pass draws (a
+// header), which the pane's frame leaves. Answers MOY_UI_SF_ALONE with the
+// pane's rect below `top` at out; MOY_UI_SF_LAGS with it where `lag` (x0,
+// y0, x1, y1: what the target lags) reaches outside that rect, the frame
+// drawing whole but changing that rect alone; MOY_UI_SF_WHOLE otherwise.
+#define MOY_UI_SPLIT_WHOLE INT32_MIN
+enum { MOY_UI_SF_WHOLE = 0, MOY_UI_SF_ALONE = 1, MOY_UI_SF_LAGS = 2 };
+int moy_ui_api_split_frame(moy_ui_ctx_t *c, int32_t gen, int known, int still, int top,
+                           const int32_t lag[4], int32_t out[4]);
+// The pane of the last pass's splits that lies (dx, dy) from the one
+// holding (x, y): of those whose centre lies that way, the nearest along
+// it, a pane off to the side counting twice its distance across. 1 with
+// its rect at out; 0 none (no pane holds (x, y), or none lies that way).
+int moy_ui_api_split_toward(const moy_ui_ctx_t *c, int x, int y, int dx, int dy,
+                            int32_t out[4]);
 // Focus moved to `id` (id.p NULL: read only). The focused id's text into
 // `buf` (NUL-terminated within `cap`); answers its length, -1 with none.
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);

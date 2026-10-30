@@ -5,9 +5,11 @@
 -- frames, 1 sound, 2 volume, 3 the theme row (from 0), 4 saves, 5 keys
 -- taken, 6 the swatch's state, 7 the focused id's length, 10 the focused
 -- pane (from 0), 11 the first pane's size, 12 where a tap activated the second
--- pane's part (x * 256 + y + 1; 0 none). A table at the right draws its rows
--- as parts (ui.table_part); two panes at the foot (ui.split) have a divider
--- the script drags and a part in the second it taps (ui.part_at).
+-- pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on it
+-- last was while pressed (the same; a part with nav off keeps a held press).
+-- A table at the right draws its rows as parts (ui.table_part); two panes at
+-- the foot (ui.split) have a divider the script drags and a part in the
+-- second it taps and drags across (ui.part_at).
 
 sound = true
 vol = 5
@@ -39,10 +41,14 @@ function _draw()
   ui.at(10, 214, 180, 20)
   pane = ui.split("panes", "x", sizes, {drag = true, focus = pane, gap = 6, mins = {40, 40}}, spl)
   ui.at(spl[5], spl[6], spl[7], spl[8])
-  local px, py, pw, ph, pst = ui.part("cell")
+  local px, py, pw, ph, pst = ui.part("cell", 0, 0, {nav = false})
   if pst & 2 ~= 0 then
     local ax, ay = ui.part_at()
     if ax then tap = ax * 256 + ay + 1 end
+  end
+  if pst & 4 ~= 0 then
+    local ax, ay = ui.part_at()
+    if ax then held = ax * 256 + ay + 1 end
   end
   local f = ui.focus()
   frames = frames + 1
@@ -57,4 +63,5 @@ function _draw()
   pmem(10, pane - 1)
   pmem(11, sizes[1])
   pmem(12, tap)
+  pmem(13, held)
 end

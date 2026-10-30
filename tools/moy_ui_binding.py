@@ -321,6 +321,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_split", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, _I, c.c_void_p,
                           c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_split_at", [c.c_void_p, _I, _I], _I),
+    ("moy_ui_api_split_frame", [c.c_void_p, c.c_int32, _I, _I, _I, c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_split_toward", [c.c_void_p, _I, _I, _I, _I, c.c_void_p], _I),
     ("moy_ui_api_table", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                           c.c_int32, c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], c.c_int32),
@@ -1474,6 +1476,18 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_split_at(p, int(x), int(y)))
 
+    def api_split_frame(ctx, words, out):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 8).from_buffer(words)
+        return int(lib.moy_ui_api_split_frame(p, v[0], v[1], v[2], v[3],
+                                              c.addressof(v) + 16,
+                                              (c.c_int32 * 4).from_buffer(out)))
+
+    def api_split_toward(ctx, x, y, dx, dy, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_split_toward(p, int(x), int(y), int(dx), int(dy),
+                                                (c.c_int32 * 4).from_buffer(out)))
+
     def api_part_at(ctx):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 2)()
@@ -1633,7 +1647,8 @@ def binding():
               api_end,
               api_table_rows, api_table_pics, api_table_part,
               api_grid,
-              api_card, api_part, api_part_at, api_split, api_split_at, api_popover, api_menu, api_menu_danger,
+              api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
+              api_split_toward, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,

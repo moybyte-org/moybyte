@@ -2789,6 +2789,38 @@ static mp_obj_t ui_api_split_at(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_split_at_obj, ui_api_split_at);
 
+// api_split_frame(ctx, words, out) -> the split frame's answer
+// (moy_ui_api_split_frame): `words` eight int32 -- gen, known, still, top
+// and the lag's x0, y0, x1, y1 -- and `out` four writable ones, the pane's
+// rect
+static mp_obj_t ui_api_split_frame(mp_obj_t ctx, mp_obj_t words, mp_obj_t out) {
+    mp_buffer_info_t w, o;
+    mp_get_buffer_raise(words, &w, MP_BUFFER_READ);
+    mp_get_buffer_raise(out, &o, MP_BUFFER_WRITE);
+    if (w.len < 8 * sizeof(int32_t) || o.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("eight words and four"));
+    }
+    const int32_t *v = (const int32_t *)w.buf;
+    return MP_OBJ_NEW_SMALL_INT(
+        moy_ui_api_split_frame(ctx_of(ctx), v[0], v[1], v[2], v[3], v + 4, (int32_t *)o.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_split_frame_obj, ui_api_split_frame);
+
+// api_split_toward(ctx, x, y, dx, dy, out) -> whether a pane of the last
+// pass's splits lies (dx, dy) from the one holding (x, y); its rect into
+// `out`
+static mp_obj_t ui_api_split_toward(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t o;
+    mp_get_buffer_raise(a[5], &o, MP_BUFFER_WRITE);
+    if (o.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    return mp_obj_new_bool(moy_ui_api_split_toward(ctx_of(a[0]), num(a[1]), num(a[2]),
+                                                   num(a[3]), num(a[4]), (int32_t *)o.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_split_toward_obj, 6, 6, ui_api_split_toward);
+
 // api_grid(ctx, cv, look, id, w, h, o): an id of length 0 ends the grid
 static mp_obj_t ui_api_grid(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3651,6 +3683,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_part_at), MP_ROM_PTR(&ui_api_part_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_split), MP_ROM_PTR(&ui_api_split_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_split_at), MP_ROM_PTR(&ui_api_split_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_split_frame), MP_ROM_PTR(&ui_api_split_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_split_toward), MP_ROM_PTR(&ui_api_split_toward_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_grid), MP_ROM_PTR(&ui_api_grid_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card), MP_ROM_PTR(&ui_api_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table), MP_ROM_PTR(&ui_api_table_obj) },

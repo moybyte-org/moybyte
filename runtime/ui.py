@@ -949,7 +949,9 @@ def part_at():
     """Where the pointer is inside the part answered last this frame, as
     `(x, y)` from its top-left: where the tap that activated it was
     released, else where the pointer is while it presses or hovers the
-    part; None otherwise (a key activated it, the pointer is off it)."""
+    part; None otherwise (a key activated it, the pointer is off it). A
+    press held on a part with no page under it, or with `nav` off, stays
+    its own through a drag."""
     return _C.api_part_at(_T[0])
 
 

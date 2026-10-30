@@ -1778,8 +1778,10 @@ def window_frame(v):
     2: the shift frame's licence on the WM's side, docs/surface_model_v1.md
     §14.7; 3: and the buffer the frame paints holds it as the frames
     RETAINED_FRAMES back left it but for their rows, `moy_ui_api_lag`), or
-    has done (0)."""
+    has done (0). Answers the word it replaces."""
+    was = _PF[_PF_WIN]
     _PF[_PF_WIN] = v
+    return was
 
 
 def change_take():
@@ -2004,6 +2006,11 @@ _HB_HELD = 32
 _HB_FENCE = 64
 
 
+# AppHost.split_frame's gen for a frame whose surround changes on its own
+# (moy_ui_api.h's MOY_UI_SPLIT_WHOLE).
+_SPLIT_GEN_WHOLE = -0x80000000
+
+
 class AppHost:
     """The host side of one shipped app's verbs (`ctx.ui`, for an app class
     with `UI = True`; Settings, the update screen and the wifi popover hold
@@ -2018,6 +2025,9 @@ class AppHost:
     owes one more, so the rest state a press or a move leaves is painted,
     then nothing. `app` is the app's id (its buttons take the theme's
     `app_buttons[app]`)."""
+
+    # split_frame's answers (moy_ui_api.h's MOY_UI_SF_*)
+    SPLIT_WHOLE, SPLIT_ALONE, SPLIT_LAGS = 0, 1, 2
 
     def __init__(self, app=None):
         self.app = app
@@ -2042,6 +2052,7 @@ class AppHost:
         self._began = -1                # the painted frame it began last
         self._console = None            # ...and the console that painted it
         self._dy = 0                    # the frame begun last moved its page by this
+        self._sf = array("i", [0] * 8)  # split_frame's words
 
     @property
     def held(self):
@@ -2138,6 +2149,49 @@ class AppHost:
         (`ui.split`), where a press would hold it: a host that routes its
         own presses gives such a press to the frame."""
         return _C.api_split_at(self.ctx, x, y)
+
+    def split_frame(self, gen, known, top, lag, out):
+        """Whether the frame about to begin draws the pane the keys reach
+        alone (`moy_ui_api_split_frame`, docs/ui_blocks_2026-10.md §4.2):
+        SPLIT_ALONE with that pane's rect below `top` (the header the
+        context's own pass draws) in `out`, an array('i') of four;
+        SPLIT_LAGS with it where the target lags (`lag`, x0, y0, x1, y1)
+        outside it, so the frame draws whole and changes that rect alone;
+        SPLIT_WHOLE otherwise. `gen` is what the context draws outside the
+        pane is a function of (None: it changes on its own this frame),
+        `known` the WM's word that the target holds the page as the last
+        frame left it. The pane is the one the last pass's splits named
+        with their focus; the context's own input waiting, a popover or a
+        divider held makes the frame whole."""
+        w = self._sf
+        w[0] = _SPLIT_GEN_WHOLE if gen is None else gen
+        w[1] = 1 if known else 0
+        w[2] = 1 if self.quiet() else 0
+        w[3] = top
+        w[4] = lag[0]
+        w[5] = lag[1]
+        w[6] = lag[2]
+        w[7] = lag[3]
+        return _C.api_split_frame(self.ctx, w, out)
+
+    def split_toward(self, x, y, dx, dy, out):
+        """Whether a pane of the last frame's splits lies (dx, dy) from the
+        one holding (x, y), nearest along the way first: its rect into
+        `out`, an array('i') of four."""
+        return _C.api_split_toward(self.ctx, x, y, dx, dy, out)
+
+    @staticmethod
+    def window(v):
+        """The window word (`window_frame`) for the frames begun next, a
+        content's relay of the WM's word for the part of its window it has
+        another host draw: answers the word it replaces, which the caller
+        puts back."""
+        return window_frame(v)
+
+    def floor_box(self, out):
+        """The bounding rect of the floor the last pass drew (its rows
+        frame's), into `out`, an array('i') of four: whether it drew one."""
+        return _C.api_floor_box(self.ctx, out)
 
     def resume(self, cv, th):
         """Point the verbs at this context again, on `cv` under theme `th`,

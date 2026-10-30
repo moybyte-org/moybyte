@@ -111,6 +111,7 @@
   (global $frames (mut i32) (i32.const 0))
   (global $pane (mut i32) (i32.const 0))
   (global $tap (mut i32) (i32.const 0))
+  (global $held (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 8.
   (func $ok (param $r i32)
