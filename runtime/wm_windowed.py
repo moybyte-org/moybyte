@@ -2592,7 +2592,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._win_sig = None
                 self._desk_streak = 0
                 if (up and not ws._dirty and follows and self._scrim_rides()
-                        and getattr(self._root_canvas, "copy_last", None) is not None):
+                        and hasattr(self._root_canvas, "copy_last")):
                     self._wash_all = True
                 else:
                     ws._dirty = True
@@ -2625,7 +2625,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
         if (quiet and follows
-                and getattr(self._root_canvas, "copy_last", None) is not None):
+                and hasattr(self._root_canvas, "copy_last")):
             # The buffer this frame paints is owed the last change: the last
             # painted frame holds it, and every pixel but the game's is this
             # frame's. Copied whole (whole rows go to the GDMA; round the
@@ -2641,7 +2641,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         settled = not quiet and self._settled(still)
         if (follows and settled and (self._calm() or self._pop_holds_input())
                 and ("desktop" not in self._wins or self._game_held())
-                and getattr(self._root_canvas, "copy_last", None) is not None):
+                and hasattr(self._root_canvas, "copy_last")):
             self._repeating = same_pop
             self._wash_repeats = same_wash
         if pop and settled:
@@ -2713,7 +2713,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         if win.buf is not None and not win._buf_stale:
             return True
-        return (getattr(self._root_canvas, "copy_last", None) is not None
+        return (hasattr(self._root_canvas, "copy_last")
                 and ("desktop" not in self._wins or self._game_held()))
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------

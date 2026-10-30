@@ -2840,7 +2840,7 @@ def _last_band(region, cv, f, statics, gen, bx, by, bw, bh):
     and cover gen, its stamp inside the band, and the canvas moves a rect of
     its buffer into this one (`shift_last`): the paint ring's newest slot is
     that frame's. Else None."""
-    if getattr(cv, "shift_last", None) is None or getattr(cv, "RETAINED_FRAMES", 1) < 2:
+    if not hasattr(cv, "shift_last") or getattr(cv, "RETAINED_FRAMES", 1) < 2:
         return None
     ring = region.ring
     if ring.frame(0) != f - 1 or not ring.whole(0):
@@ -2863,8 +2863,7 @@ def _copy_from_last(layer, cv, region, grid, key, delta, cells, stamp, outside):
     cells whose focus moved and the stamp, and the parts outside the band
     (`outside`). The rects copied, or None where the canvas cannot (the
     caller draws them)."""
-    cl = getattr(cv, "copy_last", None)
-    if cl is None or getattr(cv, "RETAINED_FRAMES", 1) < 2:
+    if not hasattr(cv, "copy_last") or getattr(cv, "RETAINED_FRAMES", 1) < 2:
         return None
     ring = region.ring
     if (ring.frame(0) != layer.ws._frames_drawn - 1 or not ring.whole(0)
@@ -2884,7 +2883,7 @@ def _copy_from_last(layer, cv, region, grid, key, delta, cells, stamp, outside):
     if outside:
         rects.extend(layer._outside_rects())
     for r in rects:
-        if not cl(r[0], r[1], r[2], r[3]):
+        if not cv.copy_last(r[0], r[1], r[2], r[3]):
             return None
     return rects
 
@@ -3783,10 +3782,9 @@ class LauncherHomeLayer:
         which holds it as this frame would draw it (§14.6) -- its whole rows
         with `rows`: what else they hold, the backdrop and the bar, is this
         frame's there too. False where the canvas cannot copy."""
-        cl = getattr(cv, "copy_last", None)
         if rows:
             r = (0, r[1], cv.w, r[3])
-        if cl is None or not cl(r[0], r[1], r[2], r[3]):
+        if not hasattr(cv, "copy_last") or not cv.copy_last(r[0], r[1], r[2], r[3]):
             return False
         self.ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
         return True
