@@ -369,7 +369,7 @@ def _dialog():
                   ("Cancel", "Make" if asking == "new" else "Rename"))
     typed, done = ui.field("", typed, NAME_MAX, FIELD_O)
     if asking == "new":
-        ui.label("End the name with .py or .lua to make a program.", WRAP_O)
+        ui.label("End the name with .py or .lua to make a program you can Run.", WRAP_O)
     ui.dialog()
     if p == 1 or done:
         _answer()
