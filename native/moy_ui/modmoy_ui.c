@@ -3421,6 +3421,19 @@ static mp_obj_t ui_api_floor_box(mp_obj_t ctx, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_box_obj, ui_api_floor_box);
 
+// api_change_box(ctx, out) -> whether the pass was a shift or rows frame;
+// `out`, eight writable int32 words: what it changed, and its R
+// (moy_ui_api_change_box)
+static mp_obj_t ui_api_change_box(mp_obj_t ctx, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    if (b.len < 8 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
+    }
+    return mp_obj_new_bool(moy_ui_api_change_box(ctx_of(ctx), (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_change_box_obj, ui_api_change_box);
+
 // api_lag_note(ctx, hist, bands, f, kind): frame f's slot of the lag history
 // `hist`, writable int32 words in slots of 2 + 2 * bands, from the pass begun
 // last (moy_ui_api_lag_note)
@@ -3750,6 +3763,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_change_box), MP_ROM_PTR(&ui_api_change_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag_note), MP_ROM_PTR(&ui_api_lag_note_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },

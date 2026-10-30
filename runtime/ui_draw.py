@@ -2220,6 +2220,16 @@ class AppHost:
         frame's), into `out`, an array('i') of four: whether it drew one."""
         return _C.api_floor_box(self.ctx, out)
 
+    def change_box(self, out):
+        """What the frame begun last changed of its canvas, where its plan
+        made it a shift or rows frame: the rect its floor and its moves
+        span into `out[0:4]` as x0, y0, x1, y1 (all 0 where they span
+        nothing), and its region R, inside which alone it drew no more than
+        that, into `out[4:8]` (`moy_ui_api_change_box`); `out` an
+        array('i') of eight. False where the frame drew whole: what it
+        changed is not known."""
+        return self.shifting and _C.api_change_box(self.ctx, out)
+
     def resume(self, cv, th):
         """Point the verbs at this context again, on `cv` under theme `th`,
         beginning no frame: what its last frame left -- focus, stops, the

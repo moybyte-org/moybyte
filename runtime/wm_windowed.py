@@ -4161,19 +4161,72 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         src = self._view_src()
         if defer is None:
             defer = not full
-        if ws.app_window_canvas and running:
-            self._player_note(win)
+        if (ws.app_window_canvas and running and ws.cart_frame is None
+                and self._player_rows(win, gc, ox, oy, scale)):
+            if full and win.docked is None:
+                self._win_chrome(win, focused, quiet=self._chrome_quiet)
+            return
         if not self._window_frame(gc, ox, oy, scale, defer, src):
             self._blit_game(self._root_canvas, gc, ox, oy, scale,
                             defer=defer, src=src)
         if full and win.docked is None:
             self._win_chrome(win, focused)
 
-    def _player_note(self, win):
-        """A window-bound app's frame into the shown ring: its window, and a
-        change it does not name, which its composite copies whole."""
-        self._own[4] = 0
-        self._shown_note(win, self.ws._frames_drawn, self._shown_ok(win), False)
+    def _player_rows(self, win, gc, ox, oy, scale):
+        """A window-bound app's frame through the shown ring: where its run
+        says what its draw changed of its canvas (`Player.change`, the
+        rect its pass's shift or rows frame spans, inside a region that
+        holds the window's whole view) and the ring vouches for the buffer
+        this frame paints, only that and what the buffer lags is copied onto
+        the glass; else what it shows whole (`app_window_content`), one copy
+        at 1:1 (`blit_game` crops the canvas first). Records the frame's change either way; whether
+        it composited."""
+        ws = self.ws
+        p = ws.player
+        ch = p.change
+        f = ws._frames_drawn
+        own = self._own
+        ok = self._shown_ok(win)
+        cx, cy, _cw, _ch = win.content_rect()
+        cw, chh = self.app_window_content()     # what of the canvas the window shows
+        root = self._root_canvas
+        if (scale != 1 or ox != cx or oy != cy or cw > gc.w or chh > gc.h
+                or not hasattr(root, "blit_strip_rect")):
+            own[4] = 0
+            self._shown_note(win, f, ok, False)
+            return False
+        if (not ch[8] or p.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
+                or ch[6] < cw or ch[7] < chh):
+            own[4] = 0
+            self._shown_note(win, f, ok, False)
+            root.blit_strip_rect(gc, cx, cy, cx, cy, cw, chh)
+            self._win_touched = True
+            return True
+        own[0] = ch[0]
+        own[1] = ch[1]
+        own[2] = ch[2]
+        own[3] = ch[3]
+        own[4] = 1
+        sc = self._sc
+        sc[0] = ch[0]
+        sc[1] = ch[1]
+        sc[2] = ch[2]
+        sc[3] = ch[3]
+        if not ok or not self._shown_chain(win, f, sc):
+            self._shown_note(win, f, ok, False)
+            root.blit_strip_rect(gc, cx, cy, cx, cy, cw, chh)
+            self._win_touched = True
+            return True
+        x0 = sc[0] if sc[0] > 0 else 0
+        y0 = sc[1] if sc[1] > 0 else 0
+        x1 = sc[2] if sc[2] < cw else cw
+        y1 = sc[3] if sc[3] < chh else chh
+        if x1 > x0 and y1 > y0:
+            self._root_canvas.blit_strip_rect(gc, cx, cy, cx + x0, cy + y0, x1 - x0, y1 - y0)
+            self._win_touched = True
+        self._shown_part(win, own[0], own[1], own[2], own[3])
+        self._shown_note(win, f, ok, False)
+        return True
 
     def _blit_game(self, sc, gc, ox, oy, scale, defer=False, src=None):
         """Integer-scale the 320x240 game canvas into the desktop at (ox, oy) --

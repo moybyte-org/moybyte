@@ -601,7 +601,11 @@ whole.
   (`Player.overdrew`), and from a cart's `cls` on (`moy_ui_api_shift_break`).
   The cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other
   cart: the document, in that rect, this frame. On the desk the Player's
-  window composites the run's canvas whole each frame it draws.
+  window composites, of the run's canvas, only what the frame changed
+  (`Player.change`, from `moy_ui_api_change_box`: the view's floor and
+  moves) where the page holding the view drew under the gen it drew under
+  the last frame and covers the window (`MOY_UI_KD_HELD`) and the shown
+  ring vouches for the buffer; else the canvas whole.
 - *The Blocks outline and Music's steps* are tables of parts
   (`docs/ui_blocks_2026-10.md` §4.1): each row's cells are its key, the
   engine carries the rows that did not change and `ui.table_part` answers

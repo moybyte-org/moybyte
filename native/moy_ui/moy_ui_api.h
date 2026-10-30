@@ -937,6 +937,7 @@ enum {
     MOY_UI_KD_TABLE = 16,           // ...a placed table's rows, R its view
     MOY_UI_KD_AT = 32,              // ...holding a stop ui.at placed, which no move carries
     MOY_UI_KD_X = 64,               // ...a table whose rows lie side by side: `a` scrolls across
+    MOY_UI_KD_HELD = 128,           // ...a page drawn under the gen the last frame drew it under, still
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings
@@ -967,6 +968,15 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
 // The floor's bounding rect as the pass drew it, x, y, w, h on screen into
 // out: 1, or 0 where the pass drew whole (or drew no floor at all).
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
+// What the pass's shift or rows frame changed of its canvas -- its floor,
+// and the region it moved and the view moved inside it -- as x0, y0, x1, y1
+// into out[0..3] (all 0 where nothing), and the rect it changed nothing
+// else inside, x0, y0, x1, y1 into out[4..7]: R, which it draws through
+// the floor alone, or the page holding R where that page drew under the
+// gen it drew under the last frame, still and with no picture of no gen
+// (what it draws outside R draws as it did; a dialog's rows frame's: the
+// surface). 1, or 0 where the pass drew whole.
+int moy_ui_api_change_box(const moy_ui_ctx_t *c, int32_t out[8]);
 // A host's lag history (docs/scroll_and_text_2026-10.md §3.4): `slots`
 // slots of 2 + 2 * `bands` words, a frame's in slot f % slots -- the frame,
 // its kind (0 whole, 1 rows, 2 shift) and its floor's rows as `bands` pairs

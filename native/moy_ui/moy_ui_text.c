@@ -890,9 +890,10 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
         int k = v[MOY_UI_TV_TOP] + i - t->top;    // its index in the record
         int same = k >= 0 && k < t->rows && t->gen[k] == t->ngen[i]
                    && t->gen2[k] == t->ngen2[i];
-        // a row the record holds cut (R's edge cut it) is drawn again
+        // a row the record holds cut (R's edge cut it) is drawn again where
+        // the move brings in what the edge cut; left where it was, it holds
         int old_y = ry + k * lh - t->off;
-        if (same && (old_y < ry || old_y + lh > ry + h)) {
+        if (same && dy != 0 && (old_y < ry || old_y + lh > ry + h)) {
             same = 0;
         }
         if (dy != 0 && y < band1 && y1 > band0) {

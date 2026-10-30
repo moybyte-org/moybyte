@@ -2522,9 +2522,13 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
             r.h = (int16_t)(r.h - foot);
             floor_open(c, k, r, c->scroll, o, outer);
         }
+        int held = o != NULL && o->has_gen && o->gen == k->gen && k->drawn == c->scroll
+                   && (k->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN))
+                          == (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN);
         k->drawn = c->scroll;
         k->gen = o != NULL ? o->gen : 0;
-        k->kd = (uint8_t)(MOY_UI_KD_PAGE | (o != NULL && o->has_gen ? MOY_UI_KD_GEN : 0));
+        k->kd = (uint8_t)(MOY_UI_KD_PAGE | (o != NULL && o->has_gen ? MOY_UI_KD_GEN : 0)
+                          | (held ? MOY_UI_KD_HELD : 0));
     }
     c->page_stop = NO_PAGE;
     if (c->n_cur < MOY_UI_API_STOPS) {
@@ -6377,6 +6381,89 @@ int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]) {
     out[1] = u.y0;
     out[2] = u.x1 - u.x0;
     out[3] = u.y1 - u.y0;
+    return 1;
+}
+
+// The innermost page this frame drew that holds R's page stop, where it
+// drew under the gen it drew under the last frame, still, with no picture
+// of no gen; NULL otherwise.
+static const moy_ui_keep_t *holder_now(const moy_ui_ctx_t *c) {
+    int ri = -1;
+    for (int i = 0; i < c->n_cur; i++) {
+        if (c->cur[i].id == c->sh_id && (c->cur[i].flags & STOP_PAGE)) {
+            ri = i;
+            break;
+        }
+    }
+    const moy_ui_keep_t *got = NULL;
+    int32_t area = 0;
+    for (int i = 0; ri >= 0 && i < MOY_UI_API_KEEP; i++) {
+        const moy_ui_keep_t *k = &c->keep[i];
+        if (k->id == 0 || k->id == c->sh_id || !(k->kd & MOY_UI_KD_PAGE) || k->s0 < 1
+            || ri < k->s0 || ri >= k->s0 + k->sn || k->s0 - 1 >= c->n_cur
+            || c->cur[k->s0 - 1].id != k->id) {
+            continue;
+        }
+        int32_t a = (int32_t)c->cur[k->s0 - 1].b.w * c->cur[k->s0 - 1].b.h;
+        if (got == NULL || a < area) {
+            got = k;
+            area = a;
+        }
+    }
+    if (got == NULL || (got->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_HELD | MOY_UI_KD_BAD
+                                   | MOY_UI_KD_TABLE))
+                           != (MOY_UI_KD_DRAWN | MOY_UI_KD_HELD)) {
+        return NULL;
+    }
+    return got;
+}
+
+int moy_ui_api_change_box(const moy_ui_ctx_t *c, int32_t out[8]) {
+    if (!c->fl_on || c->fl_stage == 0 || c->sh_plan == MOY_UI_SHIFT_NONE) {
+        return 0;
+    }
+    rc_t u = {0, 0, 0, 0};
+    int any = 0;
+    for (int i = 0; i <= c->fl_n + 1; i++) {
+        rc_t f;
+        if (i < c->fl_n) {
+            f = rc_of(c->fl[i]);
+        } else if (i == c->fl_n && c->sh_dy) {
+            f = rc_of(c->sh_r);         // the region moved
+        } else if (i == c->fl_n + 1 && c->sh_in_dy) {
+            f = rc_of(c->sh_in);        // ...and the view moved inside it
+        } else {
+            continue;
+        }
+        if (f.x1 <= f.x0 || f.y1 <= f.y0) {
+            continue;
+        }
+        if (!any) {
+            u = f;
+            any = 1;
+            continue;
+        }
+        u.x0 = f.x0 < u.x0 ? f.x0 : u.x0;
+        u.y0 = f.y0 < u.y0 ? f.y0 : u.y0;
+        u.x1 = f.x1 > u.x1 ? f.x1 : u.x1;
+        u.y1 = f.y1 > u.y1 ? f.y1 : u.y1;
+    }
+    out[0] = u.x0;
+    out[1] = u.y0;
+    out[2] = u.x1;
+    out[3] = u.y1;
+    // a dialog's rows frame draws through its floor alone; any other draws
+    // what lies outside R whole, which the page holding R drew as it did
+    // where it held its gen (the app's word that what it shows is the same)
+    rc_t r = rc_of(c->sh_dlg ? c->surface : c->sh_r);
+    const moy_ui_keep_t *h = c->sh_dlg ? NULL : holder_now(c);
+    if (h != NULL) {
+        r = rc_of(c->cur[h->s0 - 1].b);
+    }
+    out[4] = r.x0;
+    out[5] = r.y0;
+    out[6] = r.x1;
+    out[7] = r.y1;
     return 1;
 }
 
