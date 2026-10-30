@@ -1681,8 +1681,8 @@ _AGAIN = [False]                        # a pass since again_take owes the next 
 # over it); the console; the last painted frame before it that drew (not a
 # repeat of the one before it, `repeat_frame`); the last repeat; and whether
 # its content is alone but for rects the console draws over it after and
-# names (`overdrew`: the FPS chip).
-_PAINT = [-1, False, None, -1, -1, False]
+# names (`overdrew`: the FPS chip). `console_reset` gives it its values.
+_PAINT = [None] * 6
 # The painted frame as an app host's begin reads it (moy_ui_api.h's
 # MOY_UI_PF_*): its number, whether its content is alone, alone but for what
 # the console drew over it after (`overdrew`), the windowed WM's word
@@ -1690,8 +1690,9 @@ _PAINT = [-1, False, None, -1, -1, False]
 # shown ring vouches holds the page as the frame before left it, the one
 # voucher of a window's pages), the rect drawn over the content after its
 # pass and that frame, the paints' key (the look's epoch and the focus
-# marks) and the loop's tick (`frame_dt`).
-_PF = array("i", [-1, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0])
+# marks) and the loop's tick (`frame_dt`). `console_reset` gives it its
+# values.
+_PF = array("i", [0] * 11)
 _PF_WIN = 3
 _PF_OVER_X = 4
 _PF_KEY = 9
@@ -1963,6 +1964,32 @@ def on_bar(on=None):
 def bar_or(items):
     """`items`, or `BAR_KEYS` while the keys are on the bar (`on_bar`)."""
     return BAR_KEYS if _ON_BAR[0] else items
+
+
+def console_reset():
+    """The toolkit's per-console state as a fresh process has it: no frame
+    painted, repeated or drawn over (`paint_frame`, `repeat_frame`,
+    `overdrew`), no window's word, no change spoken, no host holding the
+    keys, no press past a page's top and the keys off the bar. A board
+    runs one console; a process that runs one after another (the host's
+    tests, a workstation each) calls this between them, or the next one's
+    frame numbers, counted from 0 again, meet the last one's marks: an FPS
+    chip it never drew, read as drawn over a page it shifts."""
+    p = _PAINT
+    p[0], p[1], p[2], p[3], p[4], p[5] = -1, False, None, -1, -1, False
+    pf = _PF
+    for i in range(len(pf)):
+        pf[i] = 0
+    pf[0] = pf[_PF_OVER_X + 4] = -1
+    pf[_PF_KEY] = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
+    pf[_PF_DT] = _DT_MS[0]
+    _CHANGE[0] = None
+    _KEYS_HOST[0] = None
+    _EDGE[0] = False
+    _ON_BAR[0] = False
+
+
+console_reset()
 
 # The words of a frame's input (moy_ui_api.h's MOY_UI_IN_*): the buttons held
 # and pressed, the pointer's x, y and flags, the key typed, its modifiers,

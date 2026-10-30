@@ -232,8 +232,12 @@ class Pair:
         that took the keys. The second console's held steps are never dead,
         so where the first's dead-step rule takes a step out its frame must
         show the same."""
-        st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3), False, ui_draw._PF[:]])
+        st = self._state.get(id(ws))
+        if st is None:
+            # a console's first pass starts from a fresh process's state,
+            # not the one the other console's pass left
+            ui_draw.console_reset()
+            st = self._state[id(ws)] = [None, list(ui_draw._PAINT), False, ui_draw._PF[:]]
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
         ui_draw._PF[:] = st[3]

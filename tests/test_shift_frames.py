@@ -848,3 +848,29 @@ def test_a_hosts_duplicate_id_is_logged_once_and_its_frame_still_begins(th, caps
         ui.button("Same")
     out = capsys.readouterr().out
     assert out.count("two stops share the id 'Same'") == 1, out
+
+
+
+@pytest.mark.parametrize("left", ("chip", "window", "bar"))
+def test_another_consoles_frames_name_none_of_the_next_ones(th, left):
+    """The painted frame is one per process (`ui_draw.console_reset`): what a
+    console that ran before left -- its FPS chip drawn over its frame 2, a
+    window's word, the keys on its bar -- reaches no frame
+    of the next console's, whose frames count from 0 again: its table's
+    quiet frame 3 draws its rows."""
+    ui_draw.paint_frame(2, False, over=True)
+    if left == "chip":
+        ui_draw.overdrew(0, 0, W, H)
+    elif left == "window":
+        ui_draw.window_frame(2)
+    else:
+        ui_draw.on_bar(True)
+    ui_draw.console_reset()
+    assert not ui_draw.on_bar() and ui_draw.window_frame(0) == 0
+    r = Rig(th, "table", 1, dt=33)
+    r.app.page_gen = True
+    _ready(r)
+    r.app.cur = 3
+    r.app.curs.clear()
+    r.frame()
+    assert r.kinds[-1] == "rows", r.kinds
