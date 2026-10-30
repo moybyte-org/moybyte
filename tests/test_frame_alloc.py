@@ -337,13 +337,14 @@ DONE = _thread.allocate_lock()
 DONE.acquire()
 
 
-def _frames(loop, ms, held):
+def _frames(loop, ms, held, least=0):
+    """What each loop frame allocates, over `ms` and at least `least` frames."""
     import fake_machine
     fake_machine.KBD[0] = 0x02 if held else 0      # "w": the up button
     from gc import mem_alloc
     out = []
     t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+    while time.ticks_diff(time.ticks_ms(), t0) < ms or len(out) < least:
         a = mem_alloc()
         loop.step()
         out.append(mem_alloc() - a)
@@ -378,9 +379,9 @@ def measure(loop):
     gc.collect()
     gc.disable()
     info["diag"] = bool(getattr(ws, "diag_live", False))
-    info["idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     _frames(loop, 100, True)             # the press edge itself may allocate
-    info["held"] = _frames(loop, @WINDOW_MS@, True)
+    info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     notes(loop, info)
     apps(loop, info)
@@ -389,17 +390,18 @@ def measure(loop):
     print("RESULT " + json.dumps(info))
 
 
-def _typing(loop, ms):
+def _typing(loop, ms, least=0):
     """Notes' note typed into, one key every fourth frame, handed to its
     editor handle as shell_bench's typing hands it (the edit is the
-    document's, outside the frame measured): what each frame allocates."""
+    document's, outside the frame measured): what each frame allocates,
+    over `ms` and at least `least` frames."""
     from gc import mem_alloc
     keys = b"the quick brown fox jumps over the lazy dog "
     fed = loop.ws.player._focus_editor
     out = []
     n = 0
     t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+    while time.ticks_diff(time.ticks_ms(), t0) < ms or n < least:
         if n % 4 == 0:
             fed.key(keys[(n // 4) % len(keys)])
         n += 1
@@ -439,10 +441,10 @@ def notes(loop, info):
     gc.collect()
     gc.disable()
     d0 = ws._frames_drawn
-    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     d1 = ws._frames_drawn
     info["notes_text0"] = len(ws.player._focus_editor.text())
-    info["notes_typing"] = _typing(loop, @WINDOW_MS@)
+    info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
     info["notes_typing_drawn"] = ws._frames_drawn - d1
     info["notes_text"] = len(ws.player._focus_editor.text())
@@ -624,7 +626,7 @@ def home(loop, info):
     gc.collect()
     gc.disable()
     d0 = ws._frames_drawn
-    info["home_idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     info["home_idle_drawn"] = ws._frames_drawn - d0
     gc.enable()
 
@@ -682,6 +684,14 @@ MANIFEST = {"format": "moy-1", "title": "Frame Probe", "runtime": "wasm",
 # Each measured window, in ms: two PERF periods (2 s) and a T-Deck diag tick
 # (3 s) fall inside it.
 WINDOW_MS = 4500
+
+# ...and the frames each takes in at least, whatever the machine's load. A
+# window's power is its frame count -- an allocation on one frame in eight
+# nets 16 bytes x frames / 8 against SLACK -- and a loaded machine (xdist
+# beside the rest of the suite) fits a third of the frames into the same
+# milliseconds, so it runs its windows longer instead: about what the loop
+# paces into WINDOW_MS on a machine to itself, as CI's serial run has it.
+MIN_FRAMES = 150
 
 
 def _stage(dest, exe, apps=False):
@@ -787,7 +797,8 @@ def _run(tmp_path):
     _stage(tmp_path, exe, apps=True)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
-                      .replace("@WINDOW_MS@", str(WINDOW_MS)))
+                      .replace("@WINDOW_MS@", str(WINDOW_MS))
+                      .replace("@MIN_FRAMES@", str(MIN_FRAMES)))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
