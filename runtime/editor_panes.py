@@ -251,6 +251,16 @@ class Arrangement:
                     y += s + g
                     h -= s + g
 
+    def splits(self):
+        """Each split as (path, axis, rect, mins): what the desk lays out as
+        a `ui.split`, its children's minimums along its axis."""
+        out = []
+        for node, rect, path in self._rects():
+            if not is_pane(node):
+                k = 0 if node[0] == "h" else 1
+                out.append((path, node[0], rect, [node_min(c, self.unit)[k] for c in node[1]]))
+        return out
+
     def minimum(self):
         """The least panes area this workspace holds, (w, h): where a
         restored window stops shrinking."""

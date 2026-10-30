@@ -203,10 +203,11 @@ pass holds its numbers. Otherwise it is drawn over `scroll` and `part`.
 
 ### 4.2 `ui.split`: panes
 
-`ui.split(id, dir, sizes, o)` answers one rect per pane, with focus moving
-between panes as between groups. With `o.drag` it adds a divider the engine
-keeps by id. A split with neither focus nor a divider stays the rect algebra
-(`hsplit`/`vsplit`).
+`ui.split(id, dir, sizes, o, out)` answers one rect per pane, with focus
+moving between panes as between groups. With `o.drag` it adds a divider the
+engine keeps by id. A split with neither focus nor a divider stays the rect
+algebra (`hsplit`/`vsplit`). `docs/ui_api_2026-10.md` §5a says each answer;
+the Editor desk's dividers are splits.
 
 ### 4.3 Linked and two-axis scroll
 
@@ -223,8 +224,8 @@ keeps by id. A split with neither focus nor a divider stays the rect algebra
 
 ### 4.4 `ui.part`, with input
 
-- A part answers the pointer's position inside it and its pressed state.
-  This replaces the four pixel-to-cell copies (#243).
+- A part answers the pointer's position inside it (`ui.part_at`) and its
+  pressed state. Paint's sprite picker reads its cell from it.
 - `o.gen` lets an unchanged part be left as drawn.
 - `o.cursor = {x, y, w, h}` draws `ui.cursor`'s mark with no extra stop.
 

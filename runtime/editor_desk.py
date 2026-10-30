@@ -145,7 +145,11 @@ class EditorDesk(Layer):
         self._arr = None                # the Arrangement on show
         self._placed = None             # its (panes, dividers)
         self._lay = {}                  # (tab, w, h, fs, cs) -> the pane's layout
-        self._drag = None               # a divider held: [path, i, axis, start, at, base, live, stop]
+        self._drag = None               # a divider held: (path, i, axis, at, stop, live)
+        self._on_div = False            # the pointer went down on a divider: the frame's
+        self._splits = None             # (placed, [(path, axis, rect, mins, id)]): the splits
+        self._split_out = [0] * (4 * 8 + 4)
+        self._split_o = {"drag": True}
         self._press = None              # the pane a press went down in
         self._last = (None, 0)          # the last press: its target, when
         self._ev = 0                    # last frame's key event
@@ -773,7 +777,7 @@ class EditorDesk(Layer):
                 or ws._animating(dt, False)
                 or self._spills() or self._over_panes()):
             return False
-        if c == "paint" and ws.paint_layer._pop_tap is not None \
+        if c == "paint" and ws.paint_layer._host.tap == 2 \
                 and ws.paint_layer._host.tap_armed():
             return False                # a release the pickers' pass may pick a sprite from
         if c == "music" and not self._host.quiet():
@@ -817,9 +821,10 @@ class EditorDesk(Layer):
         return True
 
     def _over_panes(self):
-        """Whether the desk drew over the panes last frame: a loupe, a
-        divider's flash, or a popover or tooltip of its pass."""
-        return (self._loupe is not None or self._flash is not None and self._drag is not None
+        """Whether the desk drew over the panes last frame, or its next frame
+        may: a loupe, a divider pressed or held (its line, its flash), or a
+        popover or tooltip of its pass."""
+        return (self._loupe is not None or self._on_div or self._drag is not None
                 or self._host.popped(self._box))
 
     def _prompt_rows(self, dt):
@@ -922,8 +927,6 @@ class EditorDesk(Layer):
                 self._sheet(cv, th, body, u, c == "stamps")
             elif c == "maps":
                 Parts.drawn_before(self, c, cv, th, body, u)
-        if alone is None:
-            self._dividers(cv, th, divs, u)
         self._frame(cv, th, shown, u)
         if self._loupe is not None and not ws.pointer.down:
             self._loupe = None
@@ -1032,6 +1035,8 @@ class EditorDesk(Layer):
         host = self._host
         host.begin(cv, th, (0, 0, cv.w, cv.h), True, True,
                    elsewhere=not self._part_focused())
+        if self.alone() is None:
+            self._dividers(u)
         hh = P.HEADER * u
         cell = 32 * u
         for n, pane, r in shown:
@@ -1318,20 +1323,61 @@ class EditorDesk(Layer):
             return "made by your blocks"
         return ""
 
-    def _dividers(self, cv, th, divs, u):
-        d = self._drag
-        for path, i, axis, (x, y, w, h) in divs:
-            hw, hl = P.HANDLE[0] * u, P.HANDLE[1] * u
-            if axis == "h":
-                cv.rrect(x + (w - hw) // 2, y + (h - hl) // 2, hw, hl, hw // 2, th["border"])
-            else:
-                cv.rrect(x + (w - hl) // 2, y + (h - hw) // 2, hl, hw, hw // 2, th["border"])
-            if d is not None and d[0] == path and d[1] == i and d[6]:
-                at = d[4]
-                if axis == "h":
-                    cv.rect(at + (w - 2 * u) // 2, y, 2 * u, h, th["value"])
+    def _split_nodes(self):
+        placed = self.placed()
+        got = self._splits
+        if got is None or got[0] is not placed:
+            got = self._splits = (placed, [
+                (path, axis, rect, mins, "split %r" % (path,))
+                for path, axis, rect, mins in self.arrangement().splits()])
+        return got[1]
+
+    def _dividers(self, u):
+        """The workspace's splits on the desk's verbs (`ui.split`), one a
+        node of its tree: their dividers drawn, a press on one held and its
+        line dragged, the release laying out the panes beside it
+        (`Arrangement.drag`) and a double tap putting it back."""
+        ws = self.ws
+        mouse = bool(getattr(ws.pointer, "hovers", False))
+        o = self._split_o
+        o["gap"] = P.GUTTER * u
+        o["hit"] = None if mouse else (P.HANDLE_HIT[0] * u, P.HANDLE_HIT[1] * u)
+        o["handle"] = (P.HANDLE[0] * u, P.HANDLE[1] * u)
+        o["line"] = 2 * u
+        o["slop"] = 0 if mouse else P.DRAG_SLOP * u
+        out = self._split_out
+        arr = self.arrangement()
+        held = None
+        self._flash = None
+        for path, axis, rect, mins, sid in self._split_nodes():
+            sizes = list(arr.sizes[path])
+            o["mins"] = mins
+            ui.at(*rect)
+            ui.split(sid, "x" if axis == "h" else "y", sizes, o, out)
+            n = len(sizes)
+            i, at, stop, bits = out[4 * n], out[4 * n + 1], out[4 * n + 2], out[4 * n + 3]
+            if i < 0:
+                continue
+            if bits & ui.LET_GO:
+                if bits & ui.LIVE:
+                    arr.drag(path, i, sizes[i])
+                elif self._double(("div", path, i), _ticks_ms()):
+                    arr.reset(path, i)
                 else:
-                    cv.rect(x, at + (h - 2 * u) // 2, w, 2 * u, th["value"])
+                    continue
+                self._placed = None
+                self._remember()
+                ws._dirty = True
+                continue
+            held = (path, i, axis, at, stop, bool(bits & ui.LIVE))
+            if held[5] and stop >= 0:
+                child = arr.node(path)[1][i + stop]
+                pane = self._first_pane(child)
+                label = P.CONTENTS[pane[0]][0]
+                mw, mh = P.pane_min(pane, u)
+                self._flash = (pane, "%s stops at its minimum, %d %s" % (
+                    label, mw if axis == "h" else mh, "wide" if axis == "h" else "tall"))
+        self._drag = held
 
     def _game(self, cv, th, r, u):
         """The Run slot: the game's frame at the largest whole scale the pane
@@ -1782,28 +1828,25 @@ class EditorDesk(Layer):
     def _pointer(self, px, py, click):
         ws = self.ws
         down = ws.pointer.down
-        if self._drag is not None:
-            return self._divider_drag(px, py, down)
+        if self._on_div:
+            # a divider's press, its drag and its release are the frame's
+            # (`_dividers`)
+            if self._host.point(px, py, click, down):
+                ws._dirty = True
+            if not down:
+                self._on_div = False
+            return True
         lay = ws.layout
         if py < lay.cy:
             if click:
                 return bool(ws.bar_layer.handle_bar_tap("menu", px, py))
             return False
         if click:
-            d = self._divider_at(px, py)
-            if d is not None:
-                path, i, axis, rect = d
-                at = rect[0] if axis == "h" else rect[1]
-                now = _ticks_ms()
-                if self._double(("div", path, i), now):
-                    self.arrangement().reset(path, i)
-                    self._placed = None
-                    self._remember()
-                    ws._dirty = True
-                    return True
-                self._drag = [path, i, axis, px if axis == "h" else py, at,
-                              self.arrangement().sizes[path][i],
-                              bool(getattr(ws.pointer, "hovers", False)), -1]
+            if self.alone() is None and self._host.split_at(px, py):
+                self._on_div = True
+                self._press = None
+                self._host.point(px, py, click, down)
+                ws._dirty = True
                 return True
             self._press = None
             for n, pane, r in self._shown_panes():
@@ -1899,64 +1942,6 @@ class EditorDesk(Layer):
             self._last = (None, 0)
             return True
         return False
-
-    def _divider_at(self, px, py):
-        """The divider under a press: anywhere on its gutter for a pointer,
-        its handle's 16 x 48 for a finger."""
-        if self.alone() is not None:
-            return None
-        u = self._unit()
-        mouse = bool(getattr(self.ws.pointer, "hovers", False))
-        for path, i, axis, (x, y, w, h) in self.placed()[1]:
-            if mouse:
-                if x <= px < x + w and y <= py < y + h:
-                    return (path, i, axis, (x, y, w, h))
-                continue
-            hw, hl = P.HANDLE_HIT[0] * u, P.HANDLE_HIT[1] * u
-            if axis == "h":
-                r = (x + (w - hw) // 2, y + (h - hl) // 2, hw, hl)
-            else:
-                r = (x + (w - hl) // 2, y + (h - hw) // 2, hl, hw)
-            if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
-                return (path, i, axis, (x, y, w, h))
-        return None
-
-    def _divider_drag(self, px, py, down):
-        """A divider held: only its line moves while held; on release the
-        two panes beside it lay out. A finger's drag takes after 8 px."""
-        ws = self.ws
-        d = self._drag
-        path, i, axis, start, at, base, live, _stop = d
-        arr = self.arrangement()
-        p = px if axis == "h" else py
-        moved = p - start
-        if not live and abs(moved) >= P.DRAG_SLOP * self._unit():
-            d[6] = live = True
-        lo, hi = arr.limits(path, i)
-        size = max(lo, min(hi, base + moved))
-        rect = arr.child_rect(path, i)
-        origin = rect[0] if axis == "h" else rect[1]
-        d[4] = origin + size
-        stop = 0 if base + moved <= lo else 1 if base + moved >= hi else -1
-        d[7] = stop
-        self._flash = None
-        if stop >= 0 and live:
-            node = arr.node(path)
-            child = node[1][i + stop]
-            pane = self._first_pane(child)
-            label = P.CONTENTS[pane[0]][0]
-            mw, mh = P.pane_min(pane, self._unit())
-            self._flash = (pane, "%s stops at its minimum, %d %s" % (
-                label, mw if axis == "h" else mh, "wide" if axis == "h" else "tall"))
-        ws._dirty = True
-        if not down:
-            self._drag = None
-            self._flash = None
-            if live:
-                arr.drag(path, i, size)
-                self._placed = None
-                self._remember()
-        return True
 
     @staticmethod
     def _first_pane(node):

@@ -362,11 +362,9 @@ class PaintLayer:
         # dragged over, moved by the arrows; `a` acts there as a tap would.
         self._cur = [0, 0]
         # The pickers (the sprite and its size): a popover of the public UI
-        # API's, its host side made at the first open; the release that
-        # tapped inside it last.
+        # API's, its host side made at the first open.
         self._pop = False             # the popover open: "pickers", "more" or False
         self._host = None
-        self._pop_tap = None
         # The pickers' frames over the page they leave as it is
         # (`_pick_held`): what each painted frame drew under; the desk's
         # word for its pane's buffer and the rect it lags, x0, y0, x1, y1
@@ -524,12 +522,9 @@ class PaintLayer:
                 return True
         if self._pop:
             # The pickers hold the pointer while open: a press outside them
-            # closes them (ui.popover answers it), and a release is the tap
-            # their sheet reads its tile from.
-            down = bool(ws.pointer.down)
-            if self._host.point(px, py, click, down):
-                if not click and not down:
-                    self._pop_tap = (px, py)
+            # closes them (ui.popover answers it), and the sheet's part
+            # answers where a tap on it fell (ui.part_at).
+            if self._host.point(px, py, click, bool(ws.pointer.down)):
                 ws.mark_dirty()
             return True
         # A tap (click) routes through _paint_click (grid OR buttons). A held drag with
@@ -1314,7 +1309,6 @@ class PaintLayer:
         else:
             self._host.reset()
         self._pop = "pickers"
-        self._pop_tap = None
         self.ws.mark_dirty()
 
     def _pick_key(self, sheet):
@@ -1413,10 +1407,10 @@ class PaintLayer:
                 cv.clip()
             else:
                 cv.clip(*band)
-            tap = self._pop_tap
-            if st & _ui.ACTIVATED and tap is not None:
-                col = (tap[0] - x0) // tile
-                row = (tap[1] - y0) // tile
+            tap = _ui.part_at() if st & _ui.ACTIVATED else None
+            if tap is not None:
+                col = (tap[0] - m) // tile
+                row = (tap[1] - m) // tile
                 if 0 <= col < sheet.cols and 0 <= row < sheet.rows:
                     pe.n = row * sheet.cols + col
                     pe._clamp_size()
@@ -1432,7 +1426,6 @@ class PaintLayer:
             key = key[:-1] + (card,)
         self._pick_ring.note(_ui_draw.painted(), key, 0, None, cv, None,
                              bool(self.vouch) or _ui_draw.painted_alone())
-        self._pop_tap = None
         if not shown:
             self._pop = False
             ws.request_frame()
