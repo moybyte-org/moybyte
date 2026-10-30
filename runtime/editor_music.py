@@ -111,6 +111,10 @@ class MusicPage:
         self._r = array("i", [0] * 4)
         self._hc = [None, None, None, None, 0, None, None, 0]   # the head's words and widths
         self._fc = [None, None, None, None, None, None, 0]      # the foot's
+        # what the page shows beside the steps (its head, pad and foot), as
+        # the page's gen keys it: [gen, then what it was made from]
+        self._pg = [0] + [None] * 12
+        self._po = {"gen": 0}
 
     # -- drawing -----------------------------------------------------------------
 
@@ -137,13 +141,51 @@ class MusicPage:
                 seen[i] = list(v) if isinstance(v, list) else v
         return rows
 
+    def _gen(self, me, rect, desk):
+        """The page's options, its gen moved where what it shows beside the
+        steps changed: the view, the sound or song and its name, its speed
+        and loop, the popover, the preview playing, the count (the steps'
+        rows are the table's)."""
+        g = self._pg
+        song = me is not None and me.view == me.SONG_VIEW
+        obj = None if me is None else me.cur_track() if song else me.cur_sfx()
+        sf = None
+        n = 0
+        if me is not None:
+            if not song and 0 <= me.sfx_idx < len(me.bank.sfx):
+                sf = me.bank.sfx[me.sfx_idx]
+            n = me.slot_count() if song else me.step_count()
+        nm = getattr(sf, "name", None)
+        sp = obj.speed if obj is not None else 0
+        lp = bool(obj.loop) if obj is not None else False
+        pv = self.mu.music_preview is not None
+        if (g[1] is not me or g[2] != song or g[3] is not obj or g[4] is not nm
+                or g[5] != sp or g[6] != lp or g[7] != self.pop or g[8] != pv
+                or g[9] != n or g[10] != rect or g[11] != desk
+                or g[12] != (len(me.bank.sfx) if me is not None else 0)):
+            g[0] += 1
+            g[1] = me
+            g[2] = song
+            g[3] = obj
+            g[4] = nm
+            g[5] = sp
+            g[6] = lp
+            g[7] = self.pop
+            g[8] = pv
+            g[9] = n
+            g[10] = rect
+            g[11] = desk
+            g[12] = len(me.bank.sfx) if me is not None else 0
+            self._po["gen"] = g[0]
+        return self._po
+
     def draw(self, cv, th, rect, desk):
         host = self.host
         me = self.mu.musicedit
         x, y, w, h = rect
         host.begin(cv, th, rect, desk, False, elsewhere=self.pop is None)
         ui.at(x, y, w, h)
-        ui.page("")
+        ui.page("", self._gen(me, rect, desk))
         if me is None:
             ui.at(*rect)
             ui.empty("music", "No sounds", ("This cart has no sound bank",))

@@ -562,6 +562,43 @@ def test_a_table_in_a_page_under_a_gen_joins_its_rows_to_the_pages_floor(th, buf
 
 
 @pytest.mark.parametrize("bufs", BUFS)
+def test_a_tables_move_inside_its_page_keeps_the_page(th, bufs):
+    """The page holding the table (a label over it, a stop placed under
+    it) carries a gen, so the table's drag, fling and key steps move the
+    table inside the page R: each moving frame shifts, draws the parts of
+    the rows it uncovered and the rows its edges fade over, and none of
+    the page beside it."""
+    r = Rig(th, "table", bufs, dt=33)
+    r.app.page_gen = True
+    _ready(r)
+    plan = array("i", [0] * 8)
+    drew = []
+    real = r.frame
+
+    def frame(*a, **k):
+        real(*a, **k)
+        if r.kinds[-1] == "shift":
+            _C.api_shift_plan(r.a.ctx, plan)
+            assert tuple(plan[:4]) == (0, 0, W, H), tuple(plan[:4])
+            drew.append(len(r.app.parts[id(r.cv)]))
+    r.frame = frame
+    r.drag(200, -14, 6)
+    r.coast()
+    r.drag(60, 9, 5)
+    r.coast()
+    assert r.share() > 0.6, "the drag and the coast shifted %.2f of the frames" % r.share()
+    r.app.focus_to = "steps"
+    r.frame()
+    for _ in range(16):
+        r.frame(_DOWN)
+        r.frame()
+    r.coast()
+    assert r.app.curs[id(r.cv)] > 12
+    assert drew and max(drew) <= 6, drew          # of the view's 11
+    assert r.wide == 0
+
+
+@pytest.mark.parametrize("bufs", BUFS)
 def test_a_focused_tables_key_steps_byte_for_byte(th, bufs):
     r = _ready(Rig(th, "table", bufs, dt=33))
     r.app.focus_to = "steps"

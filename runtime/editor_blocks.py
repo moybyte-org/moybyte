@@ -79,6 +79,10 @@ class BlocksPage:
                        for t in TOOLS]
         self._code_w = [0]
         self._r = array("i", [0] * 4)
+        # what the page shows beside the outline (its head and foot), as the
+        # page's gen keys it: [gen, then what it was made from]
+        self._pg = [0, None, None, None, None, None, None, None, None, None, None]
+        self._po = {"gen": 0}
 
     # -- drawing ------------------------------------------------------------------
 
@@ -86,6 +90,32 @@ class BlocksPage:
         """The page as the last frame drew it is not what the glass holds
         (a prompt drew over it): the next frame draws it whole."""
         self.host.ring.clear()
+
+    def _gen(self, be, rect, desk):
+        """The page's options, its gen moved where what it shows beside the
+        outline changed: the objects' tabs and the status over it, the
+        foot's tools under it (the outline's rows are the table's)."""
+        bu = self.bu
+        se = bu.ws.scene_ui.sceneedit
+        g = self._pg
+        sg = se._hist.gen if se is not None else -1
+        mv = be.moving() if be is not None else False
+        tg = be.target if be is not None else None
+        if (g[10] != tg or g[1] is not be or g[3] is not se or g[4] != sg
+                or g[5] is not bu.blk_status or g[6] != bu.blk_graduated
+                or g[7] != mv or g[8] != rect or g[9] != desk):
+            g[0] += 1
+            g[1] = be
+            g[3] = se
+            g[4] = sg
+            g[5] = bu.blk_status
+            g[6] = bu.blk_graduated
+            g[7] = mv
+            g[8] = rect
+            g[9] = desk
+            g[10] = tg
+            self._po["gen"] = g[0]
+        return self._po
 
     def _keys(self, be, lay):
         """The table's rows: each outline row's key -- its kind, depth and
@@ -131,7 +161,7 @@ class BlocksPage:
         be = bu.blocks_ed
         host.begin(cv, th, rect, desk, False, elsewhere=bu.blk_menu is None)
         ui.at(rect[0], rect[1], rect[2], rect[3])
-        ui.page("")
+        ui.page("", self._gen(be, rect, desk))
         x, y, w, h = rect
         if be is None:
             ui.at(*rect)

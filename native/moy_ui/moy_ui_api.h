@@ -402,6 +402,15 @@ typedef struct {
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
     uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
+    // R a page that holds the table carrying its rows (sh_in_id; tc_*): the
+    // table's view as the last frame drew it and its move inside R (the
+    // host's second shift_last; R itself moves by sh_dy, 0). A stop drawn
+    // in one of its parts moves with its row, so R's stops are matched with
+    // the last frame's past them (fl_ci, fl_pi: the next of each to match).
+    uint32_t sh_in_id;
+    moy_ui_box_t sh_in;
+    int16_t sh_in_dy;
+    uint8_t fl_ci, fl_pi;
     // sh_quiet: begin found nothing that draws the frame whole (no press,
     // activation, step, hover, overlay or owed frame), so a host may name the
     // rows its own drawing changed (hr, hr_n of them: moy_ui_api_shift_rows);
