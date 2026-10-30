@@ -1048,8 +1048,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # until the frame that asked is drawn (`_run_asked`).
         self._editor_run = None
         # The cart a script run from its editor handle must return INTO
-        # (`_return_to_runner`): (cart, kind, name, mode, caret, the cart's
-        # own caller kind), popped by _exit_to_caller.
+        # (`_return_to_runner`): (cart, kind, name, mode, where its view
+        # stood, the cart's own caller kind), popped by _exit_to_caller.
         self._script_return = None
         # Where an Editor the console-mode home handed to the desk goes back
         # to when its window closes (`open_in_editor`, `editor_closed`):
@@ -2701,7 +2701,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._editor_run = None
         if ed is None or ed not in self.player._editors:
             return
-        back = (self.cart, ed.kind, ed.name(), ed.mode(), ed.caret(),
+        back = (self.cart, ed.kind, ed.name(), ed.mode(), ed._where(),
                 self.returns.caller())
         ok, why = self.run_script(ed.kind, ed.name())
         if ok:
@@ -2714,10 +2714,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _return_to_runner(self, back):
         """Come back from a script an editor handle ran to the cart that ran
         it: that cart started again with the document parked as its request
-        (what its `open_editor()` answers), the caret put back, and the cart's
-        own caller restored, so leaving it still lands where it would have
-        (Files' shelf, the Config tab, home)."""
-        cart, kind, name, mode, caret, caller = back
+        (what its `open_editor()` answers), the caret and the view's top line
+        and column put back (`EditorHandle._put`), and the cart's own caller
+        restored, so leaving it still lands where it would have (Files' shelf,
+        the Config tab, home). A list the cart keeps on the document's row
+        shows that row: a placed table opens on its current row."""
+        cart, kind, name, mode, where, caller = back
         self._text_request = (kind, name, mode)
         if not self._open_workspace(cart):
             self._text_request = None
@@ -2726,7 +2728,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.run(self.project, caller)
         for ed in self.player._editors:
             if ed.kind == kind and ed.name() == name:
-                ed._place(caret[0], caret[1], False)
+                ed._put(where)
 
     def open_image(self, name, kind=None, cart=None):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files

@@ -90,8 +90,9 @@ in the console's editor handle runs from it: `ed.can_run()` on a `.py`/`.lua`,
 `ed.run()` saves it (hard, so a syntax error is the console's to show) and runs
 it in the handle's kind down the path Files' RUN takes. Its exit comes back
 INTO the cart that ran it -- that cart started again on the same document,
-the caret put back, and the cart's own caller restored, so Notes opened from
-Files still returns to the shelf. Notes shows it as a fifth tool, Run, at the
+the caret and the view's first line put back, and the cart's own caller
+restored, so Notes opened from Files still returns to the shelf. Notes' vault
+comes back on the program's row: a placed table opens on its current row. Notes shows it as a fifth tool, Run, at the
 foot and after a rule on the desk; any cart holding a handle gets the same verb.
 
 ## The board split

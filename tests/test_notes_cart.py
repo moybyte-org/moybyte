@@ -485,6 +485,53 @@ def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
     assert ws.wm.top_kind() == "files", "Notes' own X still returns to Files"
 
 
+def test_the_program_comes_back_scrolled_where_it_was(tmp_path):
+    """Not only the caret: the view's first line, so a kid reading line 50
+    of a long program is still reading it after the run."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "long.py",
+                        "".join("print(%d)\n" % i for i in range(100)), ws.carts_root)
+    ns, drv = _open(ws)
+    ns["_open"]("long.py")
+    _frames(drv)
+    ed = ns["ed"]
+    ed.nav(0, 60)
+    _frames(drv)
+    ed.scroll(-5, 0)
+    _frames(drv)
+    where, top = ed._where(), ed._top
+    assert top > 0
+    _tap(drv, _box(ws, "Run"))
+    ws._exit_to_caller()
+    _frames(drv)
+    back = ws.player.ns["ed"]
+    assert back._where() == where
+    assert back._top == top, "the view shows the line it showed"
+
+
+def test_on_the_desk_the_vault_comes_back_on_the_programs_row(tmp_path):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    moy_carts.save_file("docs", "zz.py", "print(1)\n", ws.carts_root)
+    _seed(ws, *("n%02d" % i for i in range(40)))
+    ns, drv = _open(ws)
+    for _ in range(41):
+        _press(drv, "down")
+    _press(drv, "a")
+    assert ns["ed"].name() == "zz.py" and ns["cur"] == 41
+
+    def shown():
+        y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+        y = y0 + ws.player.ns["cur"] * rh
+        return view[1] <= y and y + rh // 2 <= view[1] + view[3]
+
+    assert shown()
+    _tap(drv, _box(ws, "Run"))
+    ws._exit_to_caller()
+    _frames(drv)
+    assert ws.player.ns["cur"] == 41
+    assert shown(), "the vault shows the program's row, not its top"
+
+
 def test_a_program_that_does_not_parse_says_so_in_the_console(tmp_path):
     """Files' RUN's answer: the error is the script console's scrollback, and
     the way out is the same way back to the program."""
