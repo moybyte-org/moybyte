@@ -72,11 +72,6 @@ _ON_VERBS = ("music",)
 # its pickers are up.
 _OWN_FRAMES = ("blocks", "cards", "code", "theme_config", "map", "music", "paint")
 
-# The Editor tabs drawn as one verbs page whose gen says what it shows: a
-# frame of the page may move its pixels or draw its changed rows alone (the
-# Code tab's and theme Config's, the text view's rows).
-_PAGES = ("cards", "blocks", "code", "theme_config")
-
 # The panes whose text view moves its rows on a frame that draws the desk
 # whole only because the buffer it paints lags outside the pane, where the
 # WM says the buffer `shift_last` reads holds the page as the last draw left
@@ -199,6 +194,7 @@ class EditorDesk(Layer):
         # (`vouched`: 2, 3 where the ring says the buffer this frame paints
         # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
+        self._within = array("i", [0] * 4)   # what the pane drew inside alone
         self._moves = None              # the pane whose text view moves on a whole frame
         self._clip = None               # the rect a frame of the Sound pane's own is clipped to
         # the layout the desk drew in last: its window's, which the WM has
@@ -570,21 +566,18 @@ class EditorDesk(Layer):
         layer = self.ws.layer_of(tab)
         if layer is None:
             return
-        if tab in _PAGES:
-            # the WM's word for the pane's frame (`window_frame`),
-            # which its page's shift and rows frames and its dialog's read:
-            # on a split frame the WM's own where it says the buffer
-            # `shift_last` reads holds the page as the last draw left it; a
-            # whole frame a window's, but for a text view's moves out of the
-            # last frame (`_TEXT_PANES`)
-            host = self._host
-            was = host.window(self._vouch if own and self._vouch >= 2 else 2 if moves else 1)
-            try:
-                self._in_pane(tab, r, layer.draw, dt)
-            finally:
-                host.window(was)
-            return
-        self._in_pane(tab, r, layer.draw, dt)
+        # the WM's word for the pane's frame (`window_frame`), which its
+        # page's shift and rows frames and the page held under its modal
+        # (`Hold`) read: on a split frame the WM's own where it says the
+        # buffer holds the window as the last draw left it; a whole frame a
+        # window's, but for a text view's moves out of the last frame
+        # (`_TEXT_PANES`)
+        host = self._host
+        was = host.window(self._vouch if own and self._vouch >= 2 else 2 if moves else 1)
+        try:
+            self._in_pane(tab, r, layer.draw, dt)
+        finally:
+            host.window(was)
 
     # -- drawing ------------------------------------------------------------------
 
@@ -845,6 +838,13 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
+            w = self._within
+            if self._host.within(w):
+                # it drew inside that rect of the pane alone (a modal's band
+                # over the page it left)
+                self._changed = [body[0] + w[0], body[1] + w[1], body[0] + w[0] + w[2],
+                                 body[1] + w[1] + w[3]]
+                return True
         self._changed = [x0, y0, x1, y1]
         return True
 

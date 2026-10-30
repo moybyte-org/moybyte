@@ -826,13 +826,15 @@ class PaintLayer:
         hold = self._hold
         if self._pop == "pickers" and pe is not None:
             # the page under the pickers put back as it was held, where it
-            # was (a frame whose canvas keeps its pixels), else drawn and held
+            # was (a frame whose canvas keeps its pixels), else drawn and held;
+            # it is no verbs page, so the pickers' body coasting moves none of it
             key = self._pick_key(sheet)
             rect = self.layout.body_fill
-            if hold.under(ws, key, rect, self._dt) == _ui_draw.HOLD_DRAW:
+            how = hold.under(ws, key, rect, self._dt, False, True)
+            if how == _ui_draw.HOLD_DRAW:
                 self._draw_look(sheet)
                 hold.keep(ws, ws.sys_canvas, rect, key, True, self._dt)
-            self._draw_pickers()
+            self._draw_pickers(how == _ui_draw.HOLD_LEFT)
             return
         hold.under(ws, None, None, self._dt)
         self._draw_look(sheet)
@@ -1312,19 +1314,24 @@ class PaintLayer:
 
     def _pick_key(self, sheet):
         """What the page under the pickers is a function of while they are
-        up: the sprite, its size, the sheet, the look, the input's kind."""
+        up: the sprite, its size, the sheet, the look, the input's kind, and
+        the card they drew in last; the canvas's size, not which canvas (a
+        desk window's content draws into its buffer or into the glass)."""
         ws = self.ws
         pe = ws.paint
         cv = ws.sys_canvas
         c = self._cur
-        return (self.layout, cv, cv.w, cv.h, ws.theme_colors, ws.look.look_gen, sheet,
+        return (self.layout, cv.w, cv.h, ws.theme_colors, ws.look.look_gen, sheet,
                 sheet.gen, pe.n, pe.size, pe.color, pe.tool, pe.erase, pe.sel, c[0], c[1],
-                self._shape, self._keys(), _ui_draw.on_bar())
+                self._shape, self._keys(), _ui_draw.on_bar(), self._host.box("Sprites"))
 
-    def _draw_pickers(self):
+    def _draw_pickers(self, left=False):
         """The pickers, a popover of the public UI API's hung from the
         preview: the size as a seg, and the sheet in a part, whose tapped
-        tile becomes the sprite. A press outside, or Esc, closes it."""
+        tile becomes the sprite. A press outside, or Esc, closes it. Where
+        the page and the card are `left` as the frames before drew them
+        (`ui_draw.HOLD_LEFT`), it draws inside the card's band alone
+        (`ui_draw.popover_band`)."""
         ws = self.ws
         cv = ws.sys_canvas
         pe = ws.paint
@@ -1332,6 +1339,11 @@ class PaintLayer:
         th = ws.theme_colors
         fs = lay.fs
         sheet = pe.sheet
+        box = self._host.box("Sprites") if left else None
+        band = None if box is None else _ui_draw.popover_band(box, cv, lay.desk)
+        if band is not None:
+            cv.clip(*band)
+            _ui_draw.drew_within(*band)
         settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
         k = 2 if lay.desk else fs
         m = 2 * fs
@@ -1352,7 +1364,10 @@ class PaintLayer:
             tx, ty = sheet.tile_origin(pe.n)
             span = pe.size * tile
             cv.rectb(x0 + tx * k - 1, y0 + ty * k - 1, span + 2, span + 2, th["value"])
-            cv.clip()
+            if band is None:
+                cv.clip()
+            else:
+                cv.clip(*band)
             tap = _ui.part_at() if st & _ui.ACTIVATED else None
             if tap is not None:
                 col = (tap[0] - m) // tile
@@ -1362,6 +1377,8 @@ class PaintLayer:
                     pe._clamp_size()
                     shown = False
         _ui.popover()
+        if band is not None:
+            cv.clip()
         if not shown:
             self._pop = False
             ws.request_frame()

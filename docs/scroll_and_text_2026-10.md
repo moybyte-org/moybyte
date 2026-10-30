@@ -793,10 +793,16 @@ its corners and drop), so what the body does not show of the sheet draws
 nowhere. While the pickers are up the page under them changes only by what
 their pass does to it (the size, a picked sprite), so it is a modal's page,
 held under one key (the sprite, its size, the sheet's gen, the look, the
-input's kind) by `ui_draw.Hold`: on a canvas that keeps its pixels a frame
-puts it back as it was held and draws the pickers over it. On the desk the
-pane draws through a viewport, which holds nothing, and the frame is the
-Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the pickers are up). The
+input's kind, the card's place) by `ui_draw.Hold`: on a canvas that keeps
+its pixels a frame puts it back as it was held and draws the pickers over
+it. Where the buffer a frame paints holds the page and the card as the
+frames before drew them under that key (`HOLD_LEFT`: each of the
+RETAINED_FRAMES painted frames before it, alone on the glass; in a window,
+the WM's word, `window_frame` 2 and up), the pickers draw inside the card's
+band alone, the card's corners and drop left as they lie, and say so
+(`ui_draw.drew_within`). On the desk the pane draws through a viewport, and
+the frame is the Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the
+pickers are up), which names that band as what it changed. The
 release of a press the engine may still activate (`AppHost.tap_armed`: no
 page's drag) draws the desk whole, since a pick changes the Sheet pane
 beside the pickers. A tapped tile is read from the sheet's part
