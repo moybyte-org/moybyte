@@ -139,8 +139,8 @@ class _Span(c.Structure):
 
 
 # moy_ui_api.h's MOY_UI_TXO_LEN and MOY_UI_TXO_DEFAULTS (tests/test_text_view.py pins both).
-_TXO_LEN = 17
-_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1)
+_TXO_LEN = 18
+_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0)
 
 
 _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))

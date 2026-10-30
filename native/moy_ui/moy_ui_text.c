@@ -363,6 +363,122 @@ static void runs_json(runs_t *r, const uint8_t *p, uint32_t n) {
     }
 }
 
+// A line of Markdown as typed (a note's source; Notes' editor handle): its
+// marks dim, in the comment's tone -- a heading's `#`s, a list's bullet or
+// number, a quote's `>`, a rule, a `[[link]]`'s brackets, a code span's
+// backticks and `**` -- a heading's words in the number's, a task's open
+// box `[ ]` in the keyword's (the seed themes' accent), a ticked one `[x]`
+// in the string's and its words dim, and a link's name in the builtin's
+// (their blue). Read left to right with nothing looked for past the line's
+// end, so a wrapped row's runs are its line's up to it: an unclosed link or
+// code span runs to the line's end, as an unclosed string does.
+#define MD_MARK MOY_UI_TT_COMMENT
+#define MD_HEAD MOY_UI_TT_NUMBER
+#define MD_OPEN MOY_UI_TT_KEYWORD
+#define MD_DONE MOY_UI_TT_STRING
+#define MD_LINK MOY_UI_TT_BUILTIN
+
+// Whether p[i, n) is a rule: three or more of one of `-`, `*` and `_`, with
+// only spaces between.
+static int md_rule(const uint8_t *p, uint32_t i, uint32_t n) {
+    uint8_t c = p[i];
+    if (c != '-' && c != '*' && c != '_') {
+        return 0;
+    }
+    int k = 0;
+    for (; i < n; i++) {
+        if (p[i] == c) {
+            k++;
+        } else if (p[i] != ' ') {
+            return 0;
+        }
+    }
+    return k >= 3;
+}
+
+static void runs_markdown(runs_t *r, const uint8_t *p, uint32_t n) {
+    uint32_t i = 0, j;
+    while (i < n && (p[i] == ' ' || p[i] == '\t')) {
+        i++;
+    }
+    run_to(r, MOY_UI_TT_TEXT, i);
+    if (i == n) {
+        return;
+    }
+    // a heading: one to six `#` and a space, or the line's end
+    for (j = i; j < n && p[j] == '#'; j++) {
+    }
+    if (j > i && j - i <= 6 && (j == n || p[j] == ' ')) {
+        run_to(r, MD_MARK, j);
+        run_to(r, MD_HEAD, n);
+        return;
+    }
+    if (md_rule(p, i, n)) {
+        run_to(r, MD_MARK, n);
+        return;
+    }
+    // a quote's `>`s, then a list item's bullet or number and its space
+    while (i < n && p[i] == '>') {
+        i += i + 1 < n && p[i + 1] == ' ' ? 2 : 1;
+        run_to(r, MD_MARK, i);
+    }
+    j = i;
+    if (j + 1 < n && (p[j] == '-' || p[j] == '*' || p[j] == '+') && p[j + 1] == ' ') {
+        j += 2;
+    } else {
+        while (j < n && is_digit(p[j])) {
+            j++;
+        }
+        j = j > i && j - i <= 9 && j + 1 < n && (p[j] == '.' || p[j] == ')') && p[j + 1] == ' '
+                ? j + 2 : i;
+    }
+    if (j > i) {
+        run_to(r, MD_MARK, j);
+        i = j;
+        // a task's box, then a space or the line's end
+        if (i + 2 < n && p[i] == '[' && p[i + 2] == ']' && (i + 3 == n || p[i + 3] == ' ')) {
+            uint8_t b = p[i + 1];
+            if (b == ' ') {
+                run_to(r, MD_OPEN, i + 3);
+                i += 3;
+            } else if (b == 'x' || b == 'X') {
+                run_to(r, MD_DONE, i + 3);
+                run_to(r, MD_MARK, n);
+                return;
+            }
+        }
+    }
+    // the line's words: links, code spans and `**`
+    while (i < n) {
+        uint8_t c = p[i];
+        if (c == '[' && i + 1 < n && p[i + 1] == '[') {
+            run_to(r, MD_MARK, i + 2);
+            for (j = i + 2; j < n && !(p[j] == ']' && j + 1 < n && p[j + 1] == ']'); j++) {
+            }
+            run_to(r, MD_LINK, j);
+            i = j < n ? j + 2 : n;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        if (c == '`') {
+            for (j = i + 1; j < n && p[j] != '`'; j++) {
+            }
+            run_to(r, MD_MARK, i + 1);
+            run_to(r, MOY_UI_TT_TEXT, j);
+            i = j < n ? j + 1 : n;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        if (c == '*' && i + 1 < n && p[i + 1] == '*') {
+            i += 2;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        i++;
+        run_to(r, MOY_UI_TT_TEXT, i);
+    }
+}
+
 // An SGR escape at p[i] (`ESC [ params final`): where it ends; 0 where
 // none starts there.
 static uint32_t sgr_at(const uint8_t *p, uint32_t n, uint32_t i, int *tone) {
@@ -446,6 +562,9 @@ static void runs_of(const uint8_t *p, uint32_t n, int syntax, run_fn fn, void *c
             break;
         case MOY_UI_SYN_SGR:
             runs_sgr(&r, p, n);
+            break;
+        case MOY_UI_SYN_MARKDOWN:
+            runs_markdown(&r, p, n);
             break;
         default:
             run_to(&r, MOY_UI_TT_TEXT, n);

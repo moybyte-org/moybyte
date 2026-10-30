@@ -2702,8 +2702,9 @@ class Hold:
 
 
 # -- text areas (native/moy_ui/moy_ui_text.h, `ui.text_view`) ----------------------------
-SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR = range(5)
-SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR}
+SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR, SYN_MARKDOWN = range(6)
+SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR,
+          "markdown": SYN_MARKDOWN}
 
 
 def text_words(syntax, words, tone):

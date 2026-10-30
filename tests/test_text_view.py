@@ -38,6 +38,22 @@ def test_the_options_are_the_headers():
     assert want == moy_ui_binding._TXO_DEFAULTS
 
 
+def test_the_syntaxes_are_named_alike_in_every_face():
+    """A syntax's name is its MOY_UI_SYN_* number's place among the names,
+    in the Python face, the Lua face and ui_draw's table alike."""
+    head = (ROOT / "native" / "moy_ui" / "moy_ui_text.h").read_text()
+    body = head[head.index("MOY_UI_SYN_NONE = 0"):head.index("MOY_UI_SYN_N\n")]
+    syns = re.findall(r"MOY_UI_SYN_([A-Z]+)", body)
+    lua = (ROOT / "native" / "moycore" / "moycore_ui.h").read_text()
+    names = re.search(r"syn\[\] = \{([^}]*)\}", lua).group(1)
+    names = tuple(n.strip().strip('"') for n in names.split(","))
+    assert names == ui._SYNTAXES
+    assert len(names) == len(syns)
+    for i, name in enumerate(names[1:], 1):
+        assert syns[i] == name.upper()
+        assert ui_draw.SYNTAX[name] == i
+
+
 # -- the runs ------------------------------------------------------------------------
 
 def _c_runs(line, syn):
@@ -94,6 +110,56 @@ def test_sgr_escapes_take_no_column():
     runs = [tuple(w[k:k + 4]) for k in range(0, len(w), 4)]
     # (bytes, column, tone): text, danger, text, string
     assert [(r[2], r[3]) for r in runs] == [(0, 0), (1, 7), (4, 0), (6, 2)]
+
+
+def _md_runs(line):
+    """The C's Markdown runs as (text, tone name)."""
+    w = _C.text_runs(line, ui_draw.SYN_MARKDOWN)
+    b = line.encode()
+    names = ("text", "keyword", "string", "number", "comment", "builtin")
+    return [(b[w[k]:w[k + 1]].decode(), names[w[k + 3]]) for k in range(0, len(w), 4)]
+
+
+def test_the_markdown_runs_colour_a_notes_marks():
+    """A note's source, coloured as Code colours a program: its marks dim
+    (the comment's tone), a heading's words in the number's, a task's open
+    box in the keyword's (the seed themes' accent) and a ticked one in the
+    string's with its words dim, a link's name in the builtin's (their
+    blue). Each run is the line's own, read with nothing past it."""
+    want = {
+        "## Plan [[x]]": [("##", "comment"), (" Plan [[x]]", "number")],
+        "#": [("#", "comment")],
+        "#hashtag": [("#hashtag", "text")],
+        "####### seven": [("####### seven", "text")],
+        "- [ ] buy [[Milk]]": [("- ", "comment"), ("[ ]", "keyword"), (" buy ", "text"),
+                               ("[[", "comment"), ("Milk", "builtin"), ("]]", "comment")],
+        "  * [x] done **now**": [("  ", "text"), ("* ", "comment"), ("[x]", "string"),
+                                 (" done **now**", "comment")],
+        "- [X]": [("- ", "comment"), ("[X]", "string")],
+        "- [y] odd": [("- ", "comment"), ("[y] odd", "text")],
+        "12. step `x = 1` **b**": [("12. ", "comment"), ("step ", "text"), ("`", "comment"),
+                                   ("x = 1", "text"), ("`", "comment"), (" ", "text"),
+                                   ("**", "comment"), ("b", "text"), ("**", "comment")],
+        "> quote - no": [("> ", "comment"), ("quote - no", "text")],
+        "---": [("---", "comment")],
+        "* * *": [("* * *", "comment")],
+        "see [[open": [("see ", "text"), ("[[", "comment"), ("open", "builtin")],
+        "a `b": [("a ", "text"), ("`", "comment"), ("b", "text")],
+        "é [[ü]]": [("é ", "text"), ("[[", "comment"), ("ü", "builtin"), ("]]", "comment")],
+        "-x and 1.5": [("-x and 1.5", "text")],
+        "": [],
+    }
+    for line, runs in want.items():
+        assert _md_runs(line) == runs, line
+    # a wrapped row's runs are its line's up to the row's end
+    line = "- [ ] call [[Ana]] today"
+    whole = _md_runs(line)
+    for end in range(len(line) + 1):
+        part = _md_runs(line[:end])
+        got = "".join(t for t, _ in part)
+        assert got == line[:end]
+        for (t, tone), (wt, wtone) in zip(part[:-1], whole):
+            assert (t, tone) == (wt, wtone), line[:end]
 
 
 # -- two consoles, one drawing the Python's whole ------------------------------------
