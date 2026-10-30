@@ -208,6 +208,25 @@ class HostCompositor:
         return True
 
 
+class ConsoleOwners(dict):
+    """One console's lifetimes by tag (device_canvas `_owners`), which end
+    with the console: a board's console lives as long as its process, a
+    host's as long as whoever built it holds it, and the glass's loans are C
+    memory no collector returns."""
+
+    def __del__(self):
+        try:
+            from . import glass_binding
+        except Exception:  # noqa: BLE001 -- interpreter teardown
+            return
+        for h in list(self.values()):
+            try:
+                glass_binding.owner_end(h)
+            except Exception:  # noqa: BLE001 -- already ended, or teardown
+                pass
+        self.clear()
+
+
 def make_canvas(w, h, owner=None, owners=None):
     """A DeviceCanvas over a HostCompositor -- the boards' raster, on CPython.
 

@@ -322,7 +322,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # This console's lifetimes by tag (device_canvas `_owners`): a host
     # process runs several consoles (a test drives two side by side), and a
     # run end in one must never return the buffers another is drawing into.
-    owners = {}
+    owners = host_canvas.ConsoleOwners()
     if (sw, sh) == (WIDTH, HEIGHT) and int(font_scale) <= 1:
         sys_canvas = None                        # share one canvas -> identical to today
         # The SHARED-canvas tier (the T-Deck's arrangement): one surface is both

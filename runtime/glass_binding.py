@@ -238,6 +238,9 @@ def buf(nbytes, role, owner=0):
 def owner(tag, cls=CLASS_CART):
     h = ctypes.c_uint32()
     rc = _lib().moy_owner_new(ctypes.byref(h), str(tag).encode(), int(cls))
+    if rc == FULL:          # a dropped host console's lifetimes end at its collection
+        _collect()
+        rc = _lib().moy_owner_new(ctypes.byref(h), str(tag).encode(), int(cls))
     if rc != OK:
         _raise(rc, "owner")
     return h.value

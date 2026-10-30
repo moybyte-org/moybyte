@@ -222,6 +222,27 @@ def test_two_consoles_runs_are_two_lifetimes(tmp_path):
         "two consoles' runs share one owner"
 
 
+def test_a_consoles_lifetimes_end_with_it(tmp_path):
+    """A console's own lifetimes end when it goes: an OWNER row is the
+    glass's, and a worker that built consoles by the hundred would fill the
+    table with lifetimes nothing ends. (The process's last
+    console stays reachable through module slots the next one takes over:
+    moy_loop's role door, chrome's theme reader.)"""
+    import gc
+    from runtime import glass_binding
+    a = _console(tmp_path, "ships", True, True)
+    h = a._run_canvas._comp.buf_h
+    owner = glass_binding.row(h)[3]
+    del a
+    b = _console(tmp_path, "whole", False, True)
+    gc.collect()
+    assert b._run_canvas._comp._b.live
+    with pytest.raises(ValueError):
+        glass_binding.row(h)
+    with pytest.raises(ValueError):
+        glass_binding.reclaim(owner)    # a lifetime that ended refuses
+
+
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 def test_the_desk_draws_rows_byte_for_byte(tmp_path, bufs):
     """On the desk the run's canvas is its window's own (`Player.holds`):
