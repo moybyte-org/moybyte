@@ -83,10 +83,10 @@ and are the model for anything new:
 view, dialog or popover opened past it is an error (§4.0), never a silent
 return. Deeper nests are cheap: a nest record is a few bytes per context.
 
-**G2. Lists of rich rows.** Closed by §4.1: a table's rows can be parts
-the app draws, carried in C. Music steps and the Blocks outline are tables
-of parts (#243 records whether each moved). The cards drawer and the home
-grid still plan their own rows.
+**G2. Lists of rich rows.** §4.1 builds the block: a table's rows can be
+parts the app draws, carried in C. The Blocks outline, Music steps, the
+cards drawer and the home grid still plan their own rows; §4.1 says what
+each of the first two waits on.
 
 **G3. Scrolling is y-only, one region a frame.** The engine records one
 shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`). Map, Scene and
@@ -174,10 +174,23 @@ change (focus, the current row, a field's caret) is drawn again. The
 engine owns the extent (rows × row height) and the reveal, including a
 current row the app moved with its own keys. There is no page gen and no
 app plan; a table of parts' `o.gen` keys its current row alone (a cursor
-inside the row, as the Blocks outline's slot).
+inside the row).
 
-The Blocks outline is a table of parts. Its cursor's plate is a tool drawn
-in the part, so `ui.rows` is not added.
+The table carries the Blocks outline: its cursor's plate is a tool drawn
+in the part and its slot is the table's gen, so `ui.rows` is not added.
+Both editors stay on their page's own rows frame (`AppHost.rows`) until
+the table holds every row of their gate (#243):
+- A table of parts' frames make the table's view the region R. Music's
+  head, pad and foot are stops placed with `ui.at` outside it, so they
+  draw whole on every frame the table moves or changes, where the rows
+  frame keeps them. Music moves when R can be the page with the table's
+  move inside it: a page holding placed stops that does not itself scroll.
+- The Blocks outline on the table drags, flings and coasts where the rows
+  frame stopped dead, and draws less a frame; what holds it back is the
+  reveal of a cursor the app moved, a glide over the frames after the
+  step, which lengthens the interval and the latency of a key or ball
+  step, and the whole frame a gesture begins with, which the table and
+  its fades make dearer than the page's own rows.
 
 A list's `o.axis = "x"` with `o.snap`, plus each row's fractional distance
 from the viewport centre, makes the home carousel a composition: an app
@@ -225,7 +238,8 @@ Notes split.
 1. §4.0: nest overflow becomes an error.
 2. Plan step 1 (`text_view`) is its own gate: Code and the console must hold
    their p90.
-3. §4.1, `ui.table` extended, proven on Music steps and the Blocks outline.
+3. §4.1, `ui.table` extended; the Blocks outline and Music steps move
+   onto it when they hold their gate (§4.1 names what each waits on).
    Then the cards drawer, then the home grid.
 4. §4.2 with the Editor desk's panes.
 5. §4.3 and §4.4 with the canvas editors and the Notes preview.
