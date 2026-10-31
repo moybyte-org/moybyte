@@ -1602,7 +1602,37 @@ CODE_RECT = (0.02, 0.18, 0.58, 0.62)
 LEFT_PANE = (0.01, 0.17, 0.59, 0.71)
 RIGHT_PANE = (0.385, 0.17, 0.6, 0.71)
 PICKER = (0.055, 0.27, 0.285, 0.33)
-_NOTES = [("_ib_desk()", 1.0), ("@run Notes", 4.0),
+# The Notes the image ships, whichever image ran last: the boot seeds a
+# built-in only over an OLDER one, so after a newer image a dev image runs the
+# store's newer Notes against its own runtime, which it may not open a note
+# in. Where the store's version is not the image's, the folder is seeded
+# again from the image's roster (its manifest and the manifest's backup
+# gone, the seed rewrites it whole) and the catalogue read again.
+NOTES_OWN = r"""
+def _ib_own(title):
+    import moy_seed as _ms
+    try:
+        import carts_data as _cd
+    except ImportError:
+        return None
+    ros = getattr(_cd, 'CARTS_Z', None)
+    if not ros or not _ms.is_packed(ros):
+        return None
+    for e in ros:
+        if e[0] != title:
+            continue
+        d = _ms.cart_path(ws.carts_root, _ms.cart_folder(title, _ms.BUILTIN_NS))
+        if _ms._cart_version(d) == int(e[1]):
+            return int(e[1])
+        for f in ('/manifest.json', '/manifest.json.bak'):
+            _ms._remove(d + f)
+        _ms.seed_packed([e], ws.carts_root)
+        ws.carts.apply(ws.carts.store.call(lambda: _mc.catalogue(ws.carts_root)))
+        return int(e[1])
+_ib_own('Notes')
+"""
+
+_NOTES = [(NOTES_OWN, 1.0), ("_ib_desk()", 1.0), ("@run Notes", 4.0),
           ("ws._ib_last = ws.player.ns['prefs'].get('last')\n"
            "ws.player.ns['_open'](ws._ib_note)\nws.mark_dirty()", 2.0)]
 _NOTES_OUT = ("_p = ws.player.ns['prefs']\n"
