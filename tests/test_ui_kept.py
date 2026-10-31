@@ -6,12 +6,14 @@ paints lacks of the table: the parts whose cells, gen or marks changed since
 that buffer's paint and what was drawn over that paint, or the view whole
 where the buffer is unknown, the scroll moved or the key changed."""
 
+import json
+import os
 from array import array
 from pathlib import Path
 
 import pytest
 
-from runtime import ui, ui_draw
+from runtime import host_app, ui, ui_draw
 from runtime.host_canvas import make_system_canvas
 from ws_helpers import build_ws
 
@@ -224,3 +226,72 @@ def test_parts_across_a_row_draw_alone(th):
     changed = [r[:] for r in rows]
     changed[4][2] = "C4"
     assert frame(2, 1, changed) == [(10 + 206 - 2, 60 - 2, 96, 14)]   # cut to the view
+
+
+_LUA = """
+function _draw()
+  ui.page("Kept")
+  ui.at(10, 40, 300, 60)
+  ui.table("", {"", ""}, {{"a", "b"}, {"c", "d"}, {"e", "f"}}, 1,
+           {id = "t", part = {0, 20}, offset = 0, keep = 5, spill = 2, gen = 1,
+            current = false, mark = false, across = {4, 120}, at = 2,
+            over = {12, 44, 8, 13}})
+  local n, x, y, w, h = 0
+  x, y, w, h = ui.table_floor()
+  while x do
+    n = n + 1
+    pmem(n, x * 65536 + y)
+    pmem(n + 4, w * 65536 + h)
+    x, y, w, h = ui.table_floor()
+  end
+  pmem(0, n)
+  pmem(9, y + 10)                 -- the floor's end (nil, then the end)
+  local p = ui.table_part()
+  local parts = 0
+  while p do parts = parts + 1; p = ui.table_part() end
+  pmem(10, parts)
+  pmem(11, ui.held("hint", 3) and 1 or 0)
+  ui.held("hint", 3)
+end
+"""
+
+
+def test_the_lua_face_answers_the_floor_and_held(tmp_path):
+    """The Lua face (moycore_ui.h): `ui.table_floor()` returns x, y, w, h of
+    each floor rect, then nil and the end; `ui.held(id, key)` a boolean;
+    `o.keep`, `o.over`, `o.across` and `o.at` (from 1) are read. A cart's
+    canvas keeps no buffers, so its kept table draws its view whole each
+    frame and every part shows."""
+    from ws_helpers import make_drv, open_cart
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    d = os.path.join(root, "kept_lua.moy")
+    os.makedirs(d)
+    with open(os.path.join(d, "manifest.json"), "w") as f:
+        json.dump({"format": "moy-1", "title": "Kept Lua", "runtime": "lua",
+                   "main": "main.lua", "canvas": "320x240", "extensions": ["moybyte.ui"],
+                   "moybyte": {"type": "app", "permissions": []}}, f)
+    with open(os.path.join(d, "main.lua"), "w") as f:
+        f.write(_LUA)
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    open_cart(ws, "Kept Lua")
+    drv = make_drv(ws)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    lua = ws.player._lua
+    if hasattr(lua._run, "pmem"):
+        pm = list(lua._run.pmem()[1])[:12]
+    else:
+        import sys
+        img = array("i", bytearray(4 * 256))
+        sys.modules[type(lua).__module__]._moycore.pmem_image(img)
+        pm = list(img)[:12]
+    assert pm[0] == 1                                  # one rect: the view
+    assert (pm[1], pm[5]) == (10 * 65536 + 40, 300 * 65536 + 60)
+    assert pm[9] == 10                                 # its end, 0: nothing lags
+    assert pm[10] == 3                                 # every row shows
+    assert pm[11] == 0                                 # no buffer holds the hint
+    ws.exit()
