@@ -2378,14 +2378,12 @@ class Carousel(Launcher):
 
     def _shelf(self):
         """(left, cards) of the desk's shelf: it starts at its margin
-        `left`, where a card scrolled past it is cut, and at rest one the
-        scroll left across it is not shown; `cards` the (index, rect) it
+        `left`, where a card scrolled across it is cut, moving or at rest,
+        as the band's right edge cuts one; `cards` the (index, rect) it
         shows."""
         g = self._geom()
         left = g[1][0] + g[9][4] - g[5]
-        moving = self.moving
-        return left, [e for e in self._visible()
-                      if ((e[1][0] + e[1][2] > left) if moving else (e[1][0] >= left))]
+        return left, [e for e in self._visible() if e[1][0] + e[1][2] > left]
 
     def _draw_shelf_caption(self, cv):
         """The shelf's caption over its first card: the tab and its count,
