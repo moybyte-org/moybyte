@@ -247,6 +247,72 @@ def test_a_divider_dragged_by_the_pointer_lays_out_on_release(desk):
     assert d.panes()[0][1][2] == w - 100
 
 
+def _glass(ws):
+    return bytes(ws.glass_canvas.to_rgb888())
+
+
+def _shows_what_a_whole_repaint_shows(ws, drv):
+    """The frames after an input, with no input of their own, leave the
+    glass as a whole repaint of the same state draws it."""
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    got = _glass(ws)
+    ws._dirty = True
+    ws.wm._win_sig = None                        # every window and the desk drawn again
+    for _ in range(3):
+        drv.frame(DT)
+    return got == _glass(ws)
+
+
+@pytest.mark.parametrize("fast", (False, True), ids=("press-then-release", "one-frame-click"))
+def test_a_header_tools_tap_shows_with_no_input_after_it(desk, fast):
+    """The panes' headers are the desk's verbs pass, drawn after the panes'
+    bodies: a tap a header answers (a tab, a tool, Grow) changes what the
+    bodies drew, and the pass owes the frame that shows it (the AppHost's
+    `owed`), never the next input."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("4"), 1)                       # World: the Scene's zoom in its header
+    n = next(i for i, p in enumerate(d.panes()) if "scene" in p[0])
+    for _ in range(3):
+        drv.frame(DT)
+    zoom = ws.scene_ui.scene_zoom
+    bx, by, bw, bh = d._host.box("pane %d scene:zoom" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert ws.scene_ui.scene_zoom != zoom and shows
+    bx, by, bw, bh = d._host.box("pane %d grow" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert d.grown == d.panes()[n][0] and shows
+
+
+def test_a_divider_dragged_shows_its_layout_with_no_input_after_it(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    (_p, (x, y, w, h), _path), = [p for p in d.panes() if p[0] == ("code",)]
+    gx, gy = x + w + 3, y + h // 2
+    drv.touch(gx, gy)
+    drv.frame(DT)
+    drv.touch_drag(gx - 100, gy)
+    drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    assert d.panes()[0][1][2] == w - 100
+    assert _shows_what_a_whole_repaint_shows(ws, drv)
+
+
 def test_a_grown_pane_takes_the_workspace_and_esc_gives_it_back(desk):
     ws, drv = desk
     d = ws.editor_desk
