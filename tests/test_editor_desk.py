@@ -467,6 +467,27 @@ def test_a_docked_game_moves_with_its_editor_window(desk):
     assert off() == held and (game.x, game.y) == game.docked[:2]
 
 
+def test_closing_the_editor_leaves_its_playtest_running_in_a_window(desk):
+    """Closes are surgical and only an explicit exit ends a run
+    (docs/shell_ux_v1.md, the 2026-07-08 status): the Editor's X leaves its
+    docked playtest running, in the window Play opened it in, with its frame
+    and its strip back, and focused."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)
+    for _ in range(4):
+        drv.frame(DT)
+    game = ws.wm._wins["desktop"]
+    assert game.docked
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ws.wm.window_kinds() == ["desktop"] and ws.wm._wins["desktop"] is game
+    assert game.docked is None and game.dock_off is None and not game.minimized
+    assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed again
+    assert ws.wm._focus == "desktop" and not ws.player.paused
+
+
 def test_play_selects_the_game_tab_and_stop_gives_the_map_back(desk):
     ws, drv = desk
     d = ws.editor_desk
