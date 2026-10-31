@@ -2900,24 +2900,25 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
                             layer._beside if steps else None, True)
     if end is None:
         return False
+    # The rects drawn are the frame's damage (read before a landing's note
+    # empties the floor); the bar strip carries its own word.
+    fl = grid.floor
+    whole = len(fl) == 1 and fl[0] == (bx, by, bw, bh)
+    for r in fl:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
     if not moving:
         # (a moving frame notes no cover landing: the next frame scrolls
         # the band and draws it whatever its key)
-        layer._band_landed(cv, dt, steps)
+        whole = layer._band_landed(cv, dt, steps) or whole
     _t1 = _ticks_ms() if _t0 is not None else None
     ws.bar_layer._draw_status_strip(strip)
-    # The rects drawn are the frame's damage; the bar strip carries its own
-    # word.
-    for r in grid.floor:
-        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
     if steps:
         for r in layer._beside_drew:
             ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
     if _t0 is not None:
         ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
     if steps and not moving:
-        fl = grid.floor
-        layer._band_settle(end, len(fl) == 1 and fl[0] == (bx, by, bw, bh))
+        layer._band_settle(end, whole)
     return True
 
 
@@ -3502,9 +3503,12 @@ class LauncherHomeLayer:
         """After a pass that drew the band: where a cover landed while it
         drew (the cover gen moved from the one its key holds), the cards
         drew it, so the band is noted again under the key the new gen is
-        in."""
+        in: the buffer then holds the band whole under that key. Answers
+        whether it noted."""
         if self.ws.covers.gen != self._keyed_gen:
             self._band_note(cv, dt, vouch)
+            return True
+        return False
 
     # -- the desk home's still-backdrop frame ------------------------------
     #

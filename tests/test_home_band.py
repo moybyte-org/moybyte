@@ -418,3 +418,38 @@ def test_a_paint_draws_no_face(tmp_path, monkeypatch, arrangement):
             drv.frame(1 / 30)
     assert drawn[1] == 0 and drawn[0] > 0, drawn
     assert g.faces_bytes() > 0
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_cover_landing_keeps_the_frames_damage(tmp_path, monkeypatch, arrangement):
+    """A step whose pass a cover landed in (the band noted again under the
+    new cover gen) hands what it drew as its damage, and owes the frame
+    that brings the other buffer to it: the note says this buffer holds
+    the band whole under a key the other's paint is not under."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    L = launcher_layer.Launcher
+    real = L.repaint_band
+    land = [False]
+
+    def repaint_band(self, *a, **k):
+        end = real(self, *a, **k)
+        if land[0]:
+            ws.covers.gen += 1             # (a cover decoded while the cards drew)
+        return end
+    monkeypatch.setattr(L, "repaint_band", repaint_band)
+    hits = []
+    real_damage = ws.wm.hand_content_damage
+    monkeypatch.setattr(ws.wm, "hand_content_damage",
+                        lambda cv, *r: (hits.append(r), real_damage(cv, *r)))
+    asked = [0]
+    real_ask = ws.request_frame
+    monkeypatch.setattr(ws, "request_frame", lambda: (asked.__setitem__(0, asked[0] + 1),
+                                                       real_ask()))
+    land[0] = True
+    del hits[:]
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    frame()
+    assert hits, "the frame's drawn rects were not handed as damage"
+    assert asked[0] > 0
