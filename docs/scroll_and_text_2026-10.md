@@ -782,9 +782,11 @@ blend over what lies there. The engine keeps which card's face each slot
 holds (`ui.slots` on the band's table, keyed on the look's gen, the plain
 ground, the font scale and the layer; `ui.slot` per card, named by its
 cell -- path, title, kind -- and its cover decode's serial) and answers
-stamp or draw-then-stamp; an idle frame draws the faces `ui.slot_next`
-names (`Launcher.mint_faces`: the band's cards, then the row past either
-end), so a step copies the row it brings in. The layer goes back with
+the slot to stamp from or none. A paint never draws a face: a card no
+slot holds is drawn as it is, so a step that brings in a cold row evicts
+nothing as it goes (2026-10-31). An idle frame draws the faces `ui.slot_next` names
+(`Launcher.mint_faces`: the band's cards, then the row past either end),
+so a step copies the row it brings in. The layer goes back with
 `release_retained` and when the arrangement is left; the carousel's
 cards draw. The band frame (`launcher_layer._band_frame`, through
 `_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a

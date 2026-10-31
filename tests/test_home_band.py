@@ -383,3 +383,38 @@ def _kept(g):
                                           False) >= 0:
             out.add(k)
     return out
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_paint_draws_no_face(tmp_path, monkeypatch, arrangement):
+    """A step that brings in cards no slot holds draws them as they are:
+    a paint never draws a face into a slot (which would evict another
+    as it goes); the idle frames draw them."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False, n=120)
+    g = ws.launcher
+    L = launcher_layer.Launcher
+    painting = [0]
+    drawn = [0, 0]
+    real_pass, real_face = L.band_pass, L._draw_face
+
+    def band_pass(self, *a, **k):
+        painting[0] += 1
+        try:
+            return real_pass(self, *a, **k)
+        finally:
+            painting[0] -= 1
+
+    def draw_face(self, *a, **k):
+        drawn[1 if painting[0] else 0] += 1
+        return real_face(self, *a, **k)
+    monkeypatch.setattr(L, "band_pass", band_pass)
+    monkeypatch.setattr(L, "_draw_face", draw_face)
+    for _ in range(30):
+        ws.launcher_layer.handle_input(_Key("down"))
+        ws.mark_dirty()
+        frame()
+        for _ in range(3):
+            drv.frame(1 / 30)
+    assert drawn[1] == 0 and drawn[0] > 0, drawn
+    assert g.faces_bytes() > 0

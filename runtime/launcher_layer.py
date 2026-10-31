@@ -1129,26 +1129,25 @@ class Launcher:
 
     def _stamp_face(self, cv, it, i, t, r, b, plain=True):
         """Card `it` (index `i`) over `t`, corners `r`, out of its kept face
-        (`ui.slot`), clipped to `b`:
-        the face drawn into the slot the engine names where it holds none
-        of the card as it is now (`_draw_face`), then copied --
+        (`ui.slot`), clipped to `b`: copied from the slot holding the card
+        as it is now --
         whole on a plain ground, which the slot's corners were drawn over;
         over a backdrop, as where the corners lie over anything but the
         plain ground (not `plain`: the shelf's shadows), a corner's partly
         covered pixels blend over what lies under them, and are drawn as the
         card draws them (`DeviceCanvas.face`, a cover's and a title tile's;
         the "+ New" page's rows under its corners from its own draw,
-        clipped)."""
+        clipped). A card no slot holds is drawn as it is: a paint never
+        draws a face, so a step that brings in a cold row evicts nothing
+        (the idle frames' `mint_faces` draws them)."""
         x, y, n, _n = t
         cover = self._cover_of(it, self._fdiv)
         new = it.get("type") in PSEUDO_TILE_TYPES
-        j = _ui.slot(self._face_name(i), 0 if cover is None else cover.serial, True)
+        j = _ui.slot(self._face_name(i), 0 if cover is None else cover.serial, False)
         if j < 0:
-            self._face(cv, it, t, r, cover)      # (the engine keeps no faces here)
+            cv.clip(b[0], b[1], b[2], b[3])
+            self._face(cv, it, t, r, cover)
             return
-        if j >= _ui.SLOT_MINT:
-            j -= _ui.SLOT_MINT
-            self._draw_face(j, it, r, cover, new)
         m = self._face_geo[2]
         s = self._face_geo[1] + 2 * m
         lay = self._face_lay
