@@ -2074,24 +2074,48 @@ def a_stuck_run_with_the_vm_down_is_ended(board):
     line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
     assert line is not None and "force" in line, line
     board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    n0 = len(board.lines)
+    ended = False
     try:
         line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
         assert line is not None and title in line, line
         assert board.wait_line("STOP running", 60) is not None, "the run never started"
         said = board.wait_line("PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)
         assert said is not None and "stuck: one frame ran over 2 s" in said, said
-        assert board.wait_line("STOP refused or raised", 10) is not None
+        # (the stop's line can share the stuck line's burst: read from it)
+        assert _said_since(board, n0, "STOP refused or raised", 10), "the stop never said it raised"
         board.ser.write(b"\x03")
         board.ser.flush()
-        assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+        ended = _said_since(board, n0, "STOP 1/1 ended", 30)
+        assert ended, "the run never ended"
         _desk_back(board)
         info = board.pyval("__import__('moy_play').info()", strict=True)
         assert info[12] is True and info[14] is True, info
         print("\nSTUCK down: %s" % said.strip())
         return said
     finally:
+        if not ended and not _said_since(board, n0, "STOP 1/1 ended", 0):
+            # a failure above left the run stopped with no VM: a Ctrl-C
+            # ends it and brings one back, or nothing after answers
+            board.ser.write(b"\x03")
+            board.ser.flush()
+            board.wait_line("STOP 1/1 ended", 30)
+            _desk_back(board)
         board.pyval("__import__('moy_play').watch(0)", strict=True)
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
+def _said_since(board, n0, needle, timeout):
+    """Whether a line the board said since line `n0` of its transcript holds
+    `needle`, waiting up to `timeout` s for one."""
+    import time
+    end = time.time() + timeout
+    while True:
+        if any(needle in ln for ln in board.lines[n0:]):
+            return True
+        if time.time() >= end:
+            return False
+        board.drain(0.2)
 
 
 def mem_reports_the_heap(board):
