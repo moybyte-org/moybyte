@@ -398,19 +398,21 @@ def _scrolled(p, desk=False):
 
 
 def _moves(p):
-    """Every region a shift frame moves (x, y, w, h, dy), kept as the
-    session runs."""
+    """Every region a shift frame moves by a row's worth or less (x, y,
+    w, h, dy): the last of the moves its host made (the view's, inside the
+    page R that holds it), kept as the session runs."""
     pl = p.a.player
     h = pl._uh
     run = h.run
     got = []
-    out = array("i", [0] * 8)
 
     def kept(*a, **k):
         r = run(*a, **k)
         if h.shifting and h._dy:
-            ui_draw._C.api_shift_plan(h.ctx, out)
-            got.append(tuple(out[:5]))
+            hp = h._hp
+            n = hp[ui_draw._HP_N]
+            k = ui_draw._HP_MOVES + 5 * (n - 1)
+            got.append(tuple(hp[k:k + 5]))
         return r
     h.run = kept
     return got

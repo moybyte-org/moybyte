@@ -432,11 +432,15 @@ typedef struct {
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
     uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
-    // R a page that holds the table carrying its rows (sh_in_id; tc_*): the
-    // table's view as the last frame drew it and its move inside R (the
-    // host's second shift_last; R itself moves by sh_dy, 0). A stop drawn
-    // in one of its parts moves with its row, so R's stops are matched with
-    // the last frame's past them (fl_ci, fl_pi: the next of each to match).
+    // R a page that holds the table carrying its rows, or a text view
+    // (sh_in_id; tc_*): the view as the last frame drew it and its move
+    // inside R (the host's second shift_last; R itself moves by sh_dy, 0).
+    // A stop drawn in one of its tables' parts moves with its row, so R's
+    // stops are matched with the last frame's past them (fl_ci, fl_pi: the
+    // next of each to match). sh_over: what the console drew over R after
+    // the passes whose pixels R keeps (the FPS chip), which the floor draws
+    // again; w 0: nothing.
+    moy_ui_box_t sh_over;
     uint32_t sh_in_id;
     moy_ui_box_t sh_in;
     int16_t sh_in_dy;
@@ -485,7 +489,11 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // the page). Its rows are the lines `L` gives: whole lines cut at its
 // width, or wrapped there (`wrap`); in the mono face (or `font`, a loaded
 // monospace font's id, where the caller gives one: 0 the mono role's; a
-// cart's code draws in petme128 whatever it names), coloured by `syntax`
+// cart's code draws in petme128 whatever it names), on a paper where
+// `paper` is not -1 (the rect's ground in the `surface` token, its corners
+// that radius, the rows inset from its top and foot by the radius or the
+// text's inset, whichever is more, where the rect is that tall), coloured
+// by `syntax`
 // (MOY_UI_SYN_*: SGR escapes by default, a terminal's), numbered where
 // `gutter`, a caret at `caret_line`, `caret_col` (-1: none). An editor's
 // marks: a selection from (sel_r0, sel_c0) to (sel_r1, sel_c1) (sel_r0 -1:
@@ -523,11 +531,11 @@ enum {
     MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL,
     MOY_UI_TXO_SEL_R0, MOY_UI_TXO_SEL_C0, MOY_UI_TXO_SEL_R1, MOY_UI_TXO_SEL_C1,
     MOY_UI_TXO_ERR_LINE, MOY_UI_TXO_FIND_CI, MOY_UI_TXO_LEFT, MOY_UI_TXO_MARK,
-    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_LEN
+    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_PAPER, MOY_UI_TXO_LEN
 };
 // The options' defaults, in MOY_UI_TXO_* order: what a face that takes
 // fewer of them fills the rest with.
-#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0}
+#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1}
 // Answers 0, or MOY_UI_API_DEEP.
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,

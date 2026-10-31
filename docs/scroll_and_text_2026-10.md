@@ -587,18 +587,24 @@ whole.
   (`ui_draw.text_at`); a box's brackets toggle it and a link opens its
   note from that cell (`EditorHandle.tap`). The Player begins the run's
   frame through its app host (`AppHost.run`, the host every shell app's
-  frames begin through), and the page, holding stops `ui.at` placed, is
-  not R: the view is. Before the frame begins the handle aims the view
+  frames begin through). The page carries a gen keyed on what it shows
+  beside the note (the tools' states, the foot's word, the desk's vault),
+  so R is the page, its placed stops lying still, and the view's move is a
+  second move inside it (`sh_in`, `sh_in_dy`), as a table of parts' is;
+  the handle hands the view its paper (`paper`, the sheet's corners), whose
+  bands draw through the frame's pieces. Before the frame begins the handle aims the view
   (`EditorHandle.aim`): a caret moved since its last draw lands the view
   only as far as its visual row needs (`ui_draw.text_reveal`, wrap-aware),
   and a `top` the editor moved lands there. A drag, a fling and the wheel
   scroll the view by pixels and a release coasts; Shift and the wheel,
   and the caret, move the unwrapped view sideways (`left`). So a key step,
   a typed key and a glide are the engine's shift and rows frames inside
-  the view, and the tools, the foot and the desk's vault draw every frame.
+  the page, and the tools, the foot and the desk's vault keep their pixels.
   The frame is whole where the run has no note open, where a declared
   `background` repaints the canvas, where the FPS chip drew over the view
-  (`Player.overdrew`), and from a cart's `cls` on (`moy_ui_api_shift_break`).
+  (`Player.overdrew`; over the page beside it, a frame that moves nothing
+  draws it again), where the pass draws the view outside the page the plan
+  named, and from a cart's `cls` on (`moy_ui_api_shift_break`).
   The cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other
   cart: the document, in that rect, this frame. On the desk the Player's
   window composites, of the run's canvas, only what the frame changed

@@ -530,12 +530,11 @@ static int same_box(moy_ui_box_t a, moy_ui_box_t b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
-// The innermost page holding the table kept as `t` among the last frame's
-// stops that may be R around it: drawn under its gen with no picture of no
-// gen, its own scroll still.
-static moy_ui_keep_t *table_holder(moy_ui_ctx_t *c, const moy_ui_stop_t *v, int n,
-                                   const moy_ui_keep_t *t) {
-    const moy_ui_stop_t *ts = table_of(v, n, t->id);
+// The innermost page holding the last frame's stop `ts` (the table or the
+// text view kept as `t`) that may be R around it: drawn under its gen with
+// no picture of no gen, its own scroll still.
+static moy_ui_keep_t *view_holder(moy_ui_ctx_t *c, const moy_ui_stop_t *v, int n,
+                                  const moy_ui_keep_t *t, const moy_ui_stop_t *ts) {
     if (ts == NULL) {
         return NULL;
     }
@@ -569,6 +568,8 @@ static void in_rows(moy_ui_ctx_t *c, int y0, int y1, int base, int rh);
 static void table_in_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_mark, int now,
                            int mark, int of);
 
+static void view_in_floor(moy_ui_ctx_t *c, int of);
+
 // The frame begin just resolved, as a shift frame (docs/scroll_and_text_
 // 2026-10.md §3.3): which page R it moves and by how much, where the input
 // it applied and the last pass license one. `owed` the last pass owed this
@@ -582,6 +583,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     c->sh_dlg = 0;
     c->sh_in_id = 0;
     c->sh_in_dy = 0;
+    c->sh_over.w = 0;
     int p = c->in[MOY_UI_IN_PTR];
     int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
     int same = c->was_flags == (uint16_t)(flags & ~MOY_UI_KEY_EDGE) && c->was_fs == c->fs
@@ -636,11 +638,25 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     moy_ui_keep_t *in = NULL;
     moy_ui_keep_t *t = c->tc_id ? keep_of(c, c->tc_id) : NULL;
     if (t != NULL && (t->kd & MOY_UI_KD_TABLE) && (r == NULL || r == t)) {
-        moy_ui_keep_t *h = table_holder(c, v, n, t);
+        moy_ui_keep_t *h = view_holder(c, v, n, t, table_of(v, n, t->id));
         const moy_ui_stop_t *hp = h != NULL ? page_of_keep(v, n, h) : NULL;
         const moy_ui_stop_t *bp = best != NULL ? page_of_keep(v, n, best) : NULL;
         if (hp != NULL && (r == t || bp == NULL || (int32_t)hp->b.w * hp->b.h >= area)) {
             in = t;
+            r = h;
+        }
+    }
+    // A text view (a page of rows `rh` high, not a table's) that moved, or
+    // the page a rows frame would take, inside the page that holds it: that
+    // page is R and the view moves inside it, so the stops placed round the
+    // view keep their pixels
+    moy_ui_keep_t *tv = r != NULL ? r : best;
+    if (in == NULL && tv != NULL && !(tv->kd & MOY_UI_KD_TABLE) && tv->rh > 0
+        && (tv->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD | MOY_UI_KD_AT))
+               == (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN)) {
+        moy_ui_keep_t *h = view_holder(c, v, n, tv, page_of_keep(v, n, tv));
+        if (h != NULL && page_of_keep(v, n, h) != NULL) {
+            in = tv;
             r = h;
         }
     }
@@ -2261,6 +2277,9 @@ static int mark_room(const moy_ui_ctx_t *c) {
 static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of) {
     moy_ui_box_t r = c->sh_r;
     int top = r.y, foot = r.y + r.h, dy = c->sh_dy;
+    if (c->sh_over.w > 0) {
+        floor_add(c, rc_of(c->sh_over), 1);     // what the console drew over R
+    }
     if (dy < 0) {
         floor_strip(c, foot + dy, foot);
     } else if (dy > 0) {
@@ -2386,6 +2405,26 @@ static void table_in_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_m
         if (now >= 0) {
             in_rows(c, base + now * rh - reach, base + (now + 1) * rh + reach, base, rh);
         }
+    }
+}
+
+// The text view moving inside R (its view sh_in, by sh_in_dy): the fades
+// the move carries join the floor -- its foot's and the outer page's (`of`,
+// its bottom) over it. The band the move uncovers and the rows whose gens
+// moved are the view's pass's own (moy_ui_text_plan).
+static void view_in_floor(moy_ui_ctx_t *c, int of) {
+    int dy = c->sh_in_dy;
+    if (!dy) {
+        return;
+    }
+    int foot = c->sh_in.y + c->sh_in.h, f = FADE_H * c->fs;
+    rc_t a = {c->sh_in.x, foot - f + (dy < 0 ? dy : 0), c->sh_in.x + c->sh_in.w, foot};
+    rc_t b = {c->sh_in.x, of - f, c->sh_in.x + c->sh_in.w, of};
+    if (rc_cut(&a, rc_of(c->sh_in))) {
+        floor_add(c, a, 1);
+    }
+    if (rc_cut(&b, rc_of(c->sh_in))) {
+        floor_add(c, b, 1);
     }
 }
 
@@ -3896,6 +3935,20 @@ static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, 
     memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
 }
 
+// A text view's paper (sheet `b`, corners `r`): its bands `band` tall at
+// its top and foot, through every piece of the frame they reach.
+static void text_paper(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int r,
+                       int band) {
+    int ci = moy_ui_token(s->look, MOY_UI_T_SURFACE);
+    for (int i = 0; i < 2; i++) {
+        moy_ui_box_t e = {b.x, (int16_t)(i ? b.y + b.h - band : b.y), b.w, (int16_t)band};
+        clip_t k;
+        EACH_ROW(c, k, s, e, 1, e) {
+            moy_ui_paper(s, b, r, ci);
+        }
+    }
+}
+
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
                              const moy_ui_span_t *marks, const moy_ui_over_t *o,
@@ -3938,6 +3991,20 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         b = (moy_ui_box_t){c->page.x, (int16_t)top, c->page.w, (int16_t)(h > 0 ? h : 0)};
         used = b.h;
     }
+    if (armed(c) && c->sh_in_id == hash(id.p, id.n, TEXT_SALT) && c->fl_stage != 1) {
+        moy_ui_api_shift_break(c);      // planned inside a page this pass did not draw round it
+    }
+    int pad = TEXT_PAD * fs;
+    if (opt[MOY_UI_TXO_PAPER] >= 0) {
+        // its paper: the bands above and under the rows drawn through the
+        // frame's pieces, so a frame that keeps them draws neither
+        int r = opt[MOY_UI_TXO_PAPER], band = r > pad ? r : pad;
+        if (2 * band < b.h) {
+            text_paper(c, s, b, r, band);
+            b.y = (int16_t)(b.y + band);
+            b.h = (int16_t)(b.h - 2 * band);
+        }
+    }
     int wrap = opt[MOY_UI_TXO_WRAP] != 0, syn = opt[MOY_UI_TXO_SYNTAX];
     int sgr = syn == MOY_UI_SYN_SGR;
     int gc = 0;
@@ -3949,7 +4016,6 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     }
     // a cut line runs on to the view's right edge, where it fades; a
     // wrapped one breaks the inset in from it
-    int pad = TEXT_PAD * fs;
     int cols = (b.w - (wrap ? 2 : 1) * pad - gc * cell) / (cell > 0 ? cell : 1);
     cols = cols < 1 ? 1 : cols;
     uint32_t rid = hash(id.p, id.n, TEXT_SALT);
@@ -4134,6 +4200,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     out[1] = nrows;
     moy_ui_text_t *t = w != NULL ? &w->t : NULL;
     if (armed(c) && c->fl_stage == 1) {
+        if (c->sh_in_id == rid) {
+            view_in_floor(c, c->sh_r.y + c->sh_r.h);    // its move inside R
+        }
         // a floor frame: the rows whose gen moved join the floor
         // the foot's fade, where the rows' height moved under it this frame
         if (!opt[MOY_UI_TXO_MARK] && content != was_b
@@ -4155,7 +4224,10 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
                     j++;
                 }
                 int y = b.y + i * lh - v[MOY_UI_TV_OFF];
-                floor_add(c, (rc_t){b.x, y, b.x + b.w, y + (j - i) * lh}, 1);
+                rc_t q = {b.x, y, b.x + b.w, y + (j - i) * lh};
+                if (rc_cut(&q, rc_of(b))) {
+                    floor_add(c, q, 1);     // (its rows cut at its box: its paper is R's)
+                }
                 i = j;
             }
         }
@@ -6188,6 +6260,47 @@ static int host_over_meets(const moy_ui_host_t *h, int x, int y, int w, int ht, 
     return 0;
 }
 
+// What the console drew over R after the passes whose pixels R keeps (the
+// last `n` buffers' slots), where R does not move and the view inside it
+// meets none of it: the floor draws it again (sh_over), and 1. 0 where it
+// must draw whole.
+static int host_over_floor(moy_ui_ctx_t *c, int ox, int oy, int n) {
+    if (c->sh_dy || c->sh_dlg) {
+        return 0;
+    }
+    rc_t u = {0, 0, 0, 0};
+    int any = 0;
+    for (int b = 0; b < n && b < c->host.rn; b++) {
+        int i = host_slot(&c->host, b);
+        const int32_t *o = c->host.over[i];
+        if (!c->host.over_on[i] || o[2] <= 0 || o[3] <= 0) {
+            continue;
+        }
+        rc_t q = {o[0] - ox, o[1] - oy, o[0] - ox + o[2], o[1] - oy + o[3]};
+        if (c->sh_in_id && rc_meets(q, rc_of(c->sh_in))) {
+            return 0;                   // (a view draws the rows its own record says)
+        }
+        if (!any) {
+            u = q;
+            any = 1;
+            continue;
+        }
+        u.x0 = q.x0 < u.x0 ? q.x0 : u.x0;
+        u.y0 = q.y0 < u.y0 ? q.y0 : u.y0;
+        u.x1 = q.x1 > u.x1 ? q.x1 : u.x1;
+        u.y1 = q.y1 > u.y1 ? q.y1 : u.y1;
+    }
+    if (!any || !rc_cut(&u, rc_of(c->sh_r))) {
+        return any ? 1 : 0;
+    }
+    c->sh_over = (moy_ui_box_t){(int16_t)u.x0, (int16_t)u.y0, (int16_t)(u.x1 - u.x0),
+                                (int16_t)(u.y1 - u.y0)};
+    if (c->fl_early) {
+        floor_add(c, u, 1);             // begin's floor is the pass's: it joins it now
+    }
+    return 1;
+}
+
 // Whether moving region R (plan p) out of the last frame costs the canvas
 // less than drawing what of R the floor does not: `cost` per mille of a
 // plain row's raster each row it copies costs (-1 unknown: it moves). A
@@ -6264,7 +6377,8 @@ static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
             host_move(hp, p[0] + ox, band[2 * b] + oy, p[2], band[2 * b + 1] - band[2 * b], 0);
         }
     }
-    if (!w && host_over_meets(h, p[0] + ox, p[1] + oy, p[2], p[3], k)) {
+    if (!w && host_over_meets(h, p[0] + ox, p[1] + oy, p[2], p[3], k)
+        && !host_over_floor(c, ox, oy, k)) {
         hp[MOY_UI_HP_N] = 0;
         return 0;
     }

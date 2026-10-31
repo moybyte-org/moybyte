@@ -730,6 +730,24 @@ int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, i
     return 1;
 }
 
+void moy_ui_paper(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int ci) {
+    draw_t d;
+    open_quiet(s, &d);
+    moy_shape_paint_t fillp;
+    memset(&fillp, 0, sizeof(fillp));
+    fillp.n = 1;
+    fillp.c[0] = d.row->pal[moy_ui_pidx(ci)];
+    moy_shape_rrect_t sr;
+    memset(&sr, 0, sizeof(sr));
+    for (int i = 0; i < 4; i++) {
+        sr.r[i] = (uint8_t)(r > 255 ? 255 : r < 0 ? 0 : r);
+    }
+    sr.line_lo = -1;
+    sr.fill = &fillp;
+    moy_shape_rrect(&d.t, b.x, b.y, b.w, b.h, &sr);
+    d.row->st[MOY_ST_N_FILL]++;
+}
+
 int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out,
                           int ci) {
     if (in.w <= 0 || in.h <= 0) {

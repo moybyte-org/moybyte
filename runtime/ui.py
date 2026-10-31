@@ -579,8 +579,8 @@ def scroll(id=None, o=None):
 # and writes in place.
 TXO_ROWS, TXO_WRAP, TXO_SYNTAX, TXO_FOLLOW, TXO_GUTTER, TXO_CARET = 0, 1, 2, 3, 4, 5
 TXO_SEL, TXO_ERR, TXO_FIND_CI, TXO_LEFT, TXO_MARK, TXO_GEN, TXO_TOP = 7, 11, 12, 13, 14, 15, 16
-TXO_FONT = 17
-TXO_LEN = 18
+TXO_FONT, TXO_PAPER = 17, 18
+TXO_LEN = 19
 _TXO = array("i", [0] * TXO_LEN)        # the dict form's, packed each call
 _SYNTAXES = ("plain", "python", "lua", "json", "sgr", "markdown")
 
@@ -590,7 +590,7 @@ def text_options(o=None, opt=None):
     TXO_LEN words; a new one where None), which it answers: the TXO_*
     words, a caret and a selection their line and column words in turn
     (-1 none), `syntax` its index in ("plain", "python", "lua", "json",
-    "sgr", "markdown"), `top` -1 for none, `font` 0 for none. The error's words and the find query are
+    "sgr", "markdown"), `top` -1 for none, `font` 0 for none, `paper` -1 for none. The error's words and the find query are
     not words: `text_view` takes them beside the packed form."""
     if opt is None:
         opt = array("i", [0] * TXO_LEN)
@@ -626,6 +626,8 @@ def text_options(o=None, opt=None):
     top = o.get("top")
     opt[16] = -1 if top is None else int(top)
     opt[17] = int(o.get("font", 0) or 0)
+    paper = o.get("paper")
+    opt[18] = -1 if paper is None else int(paper)
     return opt
 
 
@@ -650,8 +652,11 @@ def text_view(id, lines, o=None, err=None, find=None, into=None):
     `lines_gen` (a number naming the lines' content, so a wrapped view
     counts its rows once a gen), `top` (a line the view glides to show
     first), `font` (a loaded monospace font's id the rows draw in, in
-    place of the mono face: the shell's, as `ui_draw.font` answers one)
-    and `into` (an array('i') of two the answer is written into and
+    place of the mono face: the shell's, as `ui_draw.font` answers one),
+    `paper` (the radius of the corners of a paper under the rows: `at`'s
+    rect filled in the surface colour, the rows inset from its top and foot
+    by the radius or the text's inset, whichever is more; a frame that keeps
+    the rect's pixels draws none of it) and `into` (an array('i') of two the answer is written into and
     handed back, so a frame makes no tuple).
 
     `o` may be the options packed instead (`text_options`), which a frame

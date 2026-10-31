@@ -92,7 +92,7 @@ _BURST_BREAK = ".,!?;:"   # a typing burst closes here (#111 phase 3)
 # (`ui.text_options`), and the text's inset from its left (moy_ui_api.c's
 # TEXT_PAD) at the scale.
 _TXO_CARET, _TXO_SEL, _TXO_LEFT, _TXO_GEN = _ui.TXO_CARET, _ui.TXO_SEL, _ui.TXO_LEFT, _ui.TXO_GEN
-_TXO_FONT = _ui.TXO_FONT
+_TXO_FONT, _TXO_PAPER = _ui.TXO_FONT, _ui.TXO_PAPER
 _TEXT_PAD = 8
 _VIEWS = [0]           # the handles made: each view's id is its own
 
@@ -523,27 +523,22 @@ class EditorHandle:
         self._view_in(host, cv, th, x, y, w, h, r)
 
     def _view_in(self, host, cv, th, x, y, w, h, r):
-        """The paper and the view on it, in `host`'s pass: the paper's
-        bands above and under the view, as tall as the text's inset from
-        its sides (or its round corners, where taller), which they leave
-        whole (a shift frame moves the view's rows alone)."""
+        """The view on its paper (corners `r`), in `host`'s pass: the
+        view's `paper`, whose bands above and under its rows draw where the
+        frame's pieces reach them (a shift frame moves the rows alone).
+        `_vr` is the rows' rect: the paper less its bands, as tall as the
+        text's inset from its sides or its corners' radius, where taller."""
         self._vh = host
         s = getattr(cv, "font_scale", 1) or 1
         band = r if r > _TEXT_PAD * s else _TEXT_PAD * s
-        if 2 * band < h:
-            bg = th["surface"]
-            cv.clip(x, y, w, band)
-            cv.rrect(x, y, w, h, r, bg)
-            cv.clip(x, y + h - band, w, band)
-            cv.rrect(x, y, w, h, r, bg)
-            cv.clip()
-            y += band
-            h -= 2 * band
         v = self._vr
         v[0] = x
         v[1] = y
         v[2] = w
         v[3] = h
+        if 2 * band < h:
+            v[1] = y + band
+            v[3] = h - 2 * band
         ed = self.ed
         o = self._opt
         o[_TXO_CARET] = ed.row
@@ -563,6 +558,7 @@ class EditorHandle:
         o[_TXO_LEFT] = ed.left
         o[_TXO_GEN] = ed.edits + 1
         o[_TXO_FONT] = self._face()[1]
+        o[_TXO_PAPER] = r
         if ed.left != self._left:
             # the columns scrolled across: every row changes
             self._left = ed.left
