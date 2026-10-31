@@ -453,3 +453,23 @@ def test_a_cover_landing_keeps_the_frames_damage(tmp_path, monkeypatch, arrangem
     frame()
     assert hits, "the frame's drawn rects were not handed as damage"
     assert asked[0] > 0
+
+
+def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
+    """A step that drew its cells alone leaves the other buffer behind and
+    asks for no frame from inside its draw (a rolling ball's next step
+    would wait on it): the frame is owed to an idle frame, which asks for
+    it, and that frame brings the buffer level."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "grid", "blocks", 2, False)
+    layer = ws.launcher_layer
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    n = ws._frames_drawn
+    drv.frame(1 / 30)
+    assert ws._frames_drawn == n + 1
+    assert layer._debt_owed + 1 == ws._frames_drawn
+    assert not ws._frame_requested
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert layer._debt_owed is None
+    assert ws._frames_drawn == n + 2       # the owed frame, then quiet

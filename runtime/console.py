@@ -4898,6 +4898,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                             break
                     if getattr(self.launcher_layer, "_cap_owed", None) is not None:
                         self.launcher_layer.capture_due()
+                    if getattr(self.launcher_layer, "_debt_owed", None) is not None:
+                        self.launcher_layer.debt_due()   # (a step's buffer behind)
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
                     if not self._idle_warned:
                         self._idle_warned = True

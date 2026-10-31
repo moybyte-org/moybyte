@@ -2902,10 +2902,11 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
         return False
     # The rects drawn are the frame's damage (read before a landing's note
     # empties the floor); the bar strip carries its own word.
-    fl = grid.floor
-    whole = len(fl) == 1 and fl[0] == (bx, by, bw, bh)
-    for r in fl:
+    a = 0
+    for r in grid.floor:
         ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
+    whole = 2 * a > bw * bh             # (more than a step's cells: a scroll's, a jump's)
     if not moving:
         # (a moving frame notes no cover landing: the next frame scrolls
         # the band and draws it whatever its key)
@@ -2972,6 +2973,7 @@ class LauncherHomeLayer:
         self._lib_cache = None        # cv.new_layer sized to the canvas
         self._lib_key = None          # _retained_key at capture
         self._cap_owed = None         # (frame, key, parts) a still frame owes
+        self._debt_owed = None        # the frame a step left a buffer behind (`debt_due`)
         self._lib_unsupported = False # web RecordingLayer: no pixels to copy
         # The wallpaper under the carousel band, captured on every full paint
         # right after the wallpaper drew: a moving frame restores the band's
@@ -3476,19 +3478,23 @@ class LauncherHomeLayer:
         """After a band frame with nothing moving, by its floor's end
         (`ui.table_floor`): where every buffer holds this frame, the
         retained frame is owed to an idle frame (`capture_due`); where one
-        lags behind a frame that drew the band `whole` (a glide's or a
-        fling's last), the frame that brings one more buffer to it is asked
-        for, while nothing moves and no press waits (`_still_debt`). A step
-        that drew its cells alone asks for none: the next step's floor
-        takes what that buffer lacks, and a frame between two steps of a
-        rolling ball would only delay the second."""
+        lags behind a frame that drew the band `whole` (more than half of
+        it: a scroll's, a jump's, a cover's landing), the frame that brings
+        one more buffer to it is asked for, while nothing moves and no
+        press waits (`_still_debt`). Behind a step that drew its cells
+        alone, that frame is owed to an idle frame (`debt_due`): a frame
+        between two steps of a rolling ball would only delay the second,
+        and the next step's floor takes what that buffer lacks."""
         if end == 0:
             # (the statics this frame's band key was made of: `_band_key`)
             key = self._retained_key(self.ws.sys_canvas, self._sk.v)
             if key != self._lib_key:
                 self._cap_owed = (self.ws._frames_drawn, key, None)
-        elif end == -1 and whole:
-            self._still_debt()
+        elif end == -1:
+            if whole:
+                self._still_debt()
+            else:
+                self._debt_owed = self.ws._frames_drawn
 
     def _band_note(self, cv, dt, vouch=True):
         """A frame that put the band there by other means (the retained
@@ -3689,6 +3695,15 @@ class LauncherHomeLayer:
         else:
             self._still_debt()
         return True
+
+    def debt_due(self):
+        """Ask, on an idle frame, for the frame a step owed (`_band_settle`)
+        where no frame has painted since it and nothing moves."""
+        owed = self._debt_owed
+        self._debt_owed = None
+        ws = self.ws
+        if owed is not None and owed + 1 == ws._frames_drawn and not self.grid.moving:
+            ws.mark_dirty()
 
     def capture_due(self):
         """Take the retained frame a still frame owed (`_cap_owed`) on an
