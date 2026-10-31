@@ -4413,6 +4413,58 @@ void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int 
     w->over1 = y1 > w->over1 ? y1 : w->over1;
 }
 
+// A stacked table on its page's first frame, about to lay out at content
+// `top` (its rows `head` below that, `count` of them `rh` tall): where its
+// row `row` lies below what the page shows, the page's scroll moves there IN
+// THIS FRAME, before the rows draw -- far enough that everything above the
+// table goes out of sight with it, which is what lets the frame stand: what
+// the page drew above at scroll 0 is painted over with its ground, and the
+// stops and captions it recorded move with the scroll. 1 when it moved the
+// scroll; 0 where the row shows already or the rows end before the scroll
+// would stop (the next frame's reveal then does it).
+static int page_open_on(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int top, int head, int rh,
+                        int row, int count) {
+    moy_ui_keep_t *k = page_keep(c);
+    if (k == NULL || c->scroll != 0 || c->page_stop == NO_PAGE || c->sh_dlg) {
+        return 0;
+    }
+    int vis = c->page.h;
+    int y1 = top + head + (row + 1) * rh;
+    int fade = row < count - 1 ? FADE_H * c->fs : 0;
+    if (y1 + fade <= vis) {
+        return 0;                       // the row shows at the page's top
+    }
+    int to = y1 + fade - vis;
+    if (to < top) {
+        to = top;                       // what lies above goes out of sight with it
+    }
+    if (to > top + head + count * rh - vis) {
+        return 0;                       // the table's rows end first
+    }
+    ground_fill(c, s, (moy_ui_box_t){c->page.x, c->page.y, c->page.w,
+                                     (int16_t)(top < c->page.h ? top : c->page.h)});
+    for (int i = c->page_stop + 1; i < c->n_cur; i++) {
+        if (c->cur[i].page == c->page_stop) {
+            c->cur[i].b.y = (int16_t)(c->cur[i].b.y - to);
+            if (c->cur[i].row >= 0) {
+                c->cur[i].top = (int16_t)(c->cur[i].top - to);   // a list's row 0
+            }
+        }
+    }
+    for (int i = 0; i < c->n_cap_cur; i++) {
+        if (c->cap_cur[i].page == c->page_stop) {
+            c->cap_cur[i].y = (int16_t)(c->cap_cur[i].y - to);
+        }
+    }
+    if (c->grp_open && c->grp_n) {
+        c->grp_last.y = (int16_t)(c->grp_last.y - to);
+    }
+    c->scroll = (int16_t)to;
+    k->a = to;
+    k->drawn = to;
+    return 1;
+}
+
 void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                       const uint8_t *cols, size_t cols_n, const uint8_t *cells, size_t cells_n,
                       int32_t cur, const moy_ui_over_t *o, int32_t out[2]) {
@@ -4442,6 +4494,21 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int placed = c->has_at;
     int stacked;
     c->pic_tbl = 0;
+    // a stacked table on its page's first frame opens on its current row,
+    // as a placed one does, where it holds the focus or nothing does (the
+    // keys another surface's this frame, or a focus left free, which the
+    // first stop drawn takes): in this frame where the page can move before
+    // the rows draw, else the next frame reveals it
+    int fresh = 0, opened_on = 0;
+    if (!placed && !xa && c->page_new && c->n_nest == 0 && o->disabled != 1 && count > 0
+        && cur > 0) {
+        uint32_t tid = id_of(o, label);
+        fresh = c->focus == tid || c->focus == 0;
+        if (fresh) {
+            opened_on = page_open_on(c, s, c->y, cap_h + head_h, rh,
+                                     cur < count ? cur : count - 1, count);
+        }
+    }
     moy_ui_box_t b = place(c, cap_h + head_h + (xa ? (ph > 0 ? ph : row_h(c))
                                                    : (count ? count : 1) * rh), &stacked);
     moy_ui_box_t view = {b.x, (int16_t)(b.y + cap_h + head_h), b.w,
@@ -4601,11 +4668,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (!xa) {
         rows_note(c, id, cur, view.y);
     }
-    // a stacked table on its page's first frame opens on its current row,
-    // as a placed one does, where it holds the focus or nothing does (the
-    // keys another surface's this frame, or a focus left free, which the
-    // first stop drawn takes)
-    int fresh = c->page_new && !disabled && count > 0 && (c->focus == id || c->focus == 0);
+    fresh = fresh && !opened_on;        // a first frame its page could not move in
     if (!placed && cur >= 0
         && ((focused && c->step_y && !(c->step_rev == id && c->step_row == cur)) || fresh)) {
         c->reveal = 1;              // a step begin did not reveal: the next frame does

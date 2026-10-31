@@ -478,7 +478,7 @@ def table(label, columns, rows, cur, o=None):
     first text column and the last, then the last, drop where it would show
     fewer than eleven characters. It opens on the current row: placed by
     `at`, on its first frame; stacked, on its page's first frame where it
-    holds the focus or nothing does. `(cur, opened)`, `opened` True the
+    holds the focus or nothing does, in that frame. `(cur, opened)`, `opened` True the
     frame the current row is opened (Enter on it, or a tap on it again).
     `o.part = (w, h)` makes it a table of parts: rows `h` tall, column 0 a
     cell `w` wide the app draws into through `table_part` (the whole row

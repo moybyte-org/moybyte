@@ -352,9 +352,10 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
 
 def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     """The handheld: the list scrolled down to a note, the note opened and
-    closed again -- the list shows that note's row, not the list's top. The
-    note's page has an id of its own, so the list's page opens anew and its
-    focused table on its current row (docs/ui_api_2026-10.md)."""
+    closed again -- the list shows that note's row, not the list's top, from
+    the very frame the note closes. The note's page has an id of its own, so
+    the list's page opens anew and its table on its current row
+    (docs/ui_api_2026-10.md)."""
     ws = build_ws(tmp_path)
     _seed(ws, *("n%02d" % i for i in range(40)))
     ns, drv = _open(ws)
@@ -370,9 +371,11 @@ def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     assert ns["cur"] == 30 and shown()
     _press(drv, "a")
     assert ns["ed"] is not None
-    _type(drv, [ESC])                          # leaves the note
-    _frames(drv)
+    drv.type_char(ESC)                         # leaves the note
+    _frames(drv, 1)
     assert ns["ed"] is None and ns["cur"] == 30
+    assert shown(), "the first frame showed the list's top: the row came a frame late"
+    _frames(drv)
     assert shown(), "the list came back at its top, the note's row out of sight"
 
 
