@@ -370,6 +370,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_table_dist", [c.c_void_p], c.c_int32),
     ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_floor", [c.c_void_p, c.c_void_p], c.c_int32),
+    ("moy_ui_api_held", [c.c_void_p, _Span, c.c_int32], _I),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -413,7 +415,9 @@ class _Over(c.Structure):
                 ("has_gen", c.c_int8), ("gen", c.c_int32), ("has_part", c.c_int8),
                 ("part_w", c.c_int16), ("part_h", c.c_int16), ("bar", c.c_int8),
                 ("axis_x", c.c_int8), ("snap", c.c_int8), ("has_offset", c.c_int8),
-                ("offset", c.c_int32), ("spill", c.c_int16)]
+                ("offset", c.c_int32), ("spill", c.c_int16), ("has_keep", c.c_int8), ("whole", c.c_int8),
+                ("keep", c.c_int32), ("over_x", c.c_int16), ("over_y", c.c_int16),
+                ("over_w", c.c_int16), ("over_h", c.c_int16)]
 
 
 class _Line(c.Structure):
@@ -1442,6 +1446,19 @@ def binding():
         v = (c.c_int32 * 8).from_buffer(r)
         return int(lib.moy_ui_api_table_part(p, c.byref(sink(cv, look)), c.addressof(v)))
 
+    def api_table_floor(ctx, r):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4).from_buffer(r)
+        return int(lib.moy_ui_api_table_floor(p, c.addressof(v)))
+
+    def api_held(ctx, id_, key):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return bool(lib.moy_ui_api_held(p, t, int(key)))
+
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 8)()
@@ -1663,6 +1680,7 @@ def binding():
               api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics, api_table_part, api_table_dist,
+              api_table_floor, api_held,
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,

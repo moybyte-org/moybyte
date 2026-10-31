@@ -25,6 +25,11 @@
  *                                    cell, the canvas clipped to it; nil after the last
  *   ui.table_dist()                -> that part's distance from the view's centre along
  *                                    the table's axis, in 256ths of a row
+ *   ui.table_floor()               -> x, y, w, h of the next rect of the kept table's
+ *                                    floor; nil, then 0 (every buffer holds it), -1 (one
+ *                                    lags) or -2 (held but for what was drawn over it)
+ *   ui.held(id, key)               -> whether the buffer this frame paints holds part
+ *                                    `id` as a frame drew it under `key`
  *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.text_view(id, lines, o)     -> the first line shown, the rows shown
@@ -132,6 +137,7 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->lead = moycore_ui_flag(L, i, "lead");
     o->bar = moycore_ui_flag(L, i, "bar");
     o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);
+    o->whole = (int8_t)(moycore_ui_flag(L, i, "whole") == 1);
     lua_getfield(L, i, "axis");
     if (lua_type(L, -1) == LUA_TSTRING) {
         size_t n = 0;
@@ -159,6 +165,28 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
         o->part_w = (int16_t)lua_tointeger(L, -2);
         o->part_h = (int16_t)lua_tointeger(L, -1);
         lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, i, "keep");
+    if (lua_isnumber(L, -1)) {
+        o->has_keep = 1;
+        o->keep = (int32_t)lua_tointeger(L, -1);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, i, "over");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_Integer r[4];
+        for (int k = 0; k < 4; k++) {
+            lua_geti(L, -1 - k, k + 1);
+            r[k] = lua_tointeger(L, -1);
+        }
+        lua_pop(L, 4);
+        if (r[2] > 0 && r[3] > 0) {
+            o->over_x = (int16_t)r[0];
+            o->over_y = (int16_t)r[1];
+            o->over_w = (int16_t)(r[2] > 0x7fff ? 0x7fff : r[2]);
+            o->over_h = (int16_t)(r[3] > 0x7fff ? 0x7fff : r[3]);
+        }
     }
     lua_pop(L, 1);
     lua_getfield(L, i, "id");
@@ -807,6 +835,26 @@ static int moycore_ui_focus(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_table_floor(lua_State *L)
+{
+    int32_t v[4];
+    int32_t r = moy_ui_run_table_floor(moycore_ui_canvas(), v);
+    if (r <= 0) {
+        lua_pushnil(L);
+        lua_pushinteger(L, (lua_Integer)r);
+        return 2;
+    }
+    for (int k = 0; k < 4; k++) lua_pushinteger(L, v[k]);
+    return 4;
+}
+
+static int moycore_ui_held(lua_State *L)
+{
+    lua_pushboolean(L, moy_ui_run_held(moycore_ui_canvas(), moycore_ui_span(L, 1),
+                                       (int32_t)luaL_checkinteger(L, 2)) != 0);
+    return 1;
+}
+
 static int moycore_ui_table_dist(lua_State *L)
 {
     lua_pushinteger(L, (lua_Integer)moy_ui_run_table_dist(moycore_ui_canvas()));
@@ -834,7 +882,8 @@ static void moycore_ui_open(lua_State *L)
         {"group", moycore_ui_group}, {"info", moycore_ui_info}, {"link", moycore_ui_link},
         {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
-        {"keys_taken", moycore_ui_keys_taken}, {"table_dist", moycore_ui_table_dist}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
+        {"keys_taken", moycore_ui_keys_taken}, {"table_dist", moycore_ui_table_dist},
+        {"table_floor", moycore_ui_table_floor}, {"held", moycore_ui_held}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"table_part", moycore_ui_table_part}, {"part_at", moycore_ui_part_at},
         {"split", moycore_ui_split},

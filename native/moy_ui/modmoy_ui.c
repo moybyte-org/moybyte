@@ -2351,6 +2351,7 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         out->axis_x = (int8_t)(n == 1 && a[0] == 'x');
     }
     out->snap = (int8_t)(over_flag(m, MP_QSTR_snap) == 1);
+    out->whole = (int8_t)(over_flag(m, MP_QSTR_whole) == 1);
     v = over_key(m, MP_QSTR_offset);
     if (v != MP_OBJ_NULL && v != mp_const_none) {
         out->offset = (int32_t)mp_obj_get_int_truncated(v);
@@ -2360,6 +2361,26 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     if (v != MP_OBJ_NULL && v != mp_const_none) {
         mp_int_t sp = mp_obj_get_int_truncated(v);
         out->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
+    }
+    v = over_key(m, MP_QSTR_keep);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        out->keep = (int32_t)mp_obj_get_int_truncated(v);
+        out->has_keep = 1;
+    }
+    v = over_key(m, MP_QSTR_over);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        size_t n = 0;
+        mp_obj_t *r = NULL;
+        mp_obj_get_array(v, &n, &r);
+        if (n == 4) {
+            mp_int_t w = mp_obj_get_int_truncated(r[2]), h = mp_obj_get_int_truncated(r[3]);
+            if (w > 0 && h > 0) {
+                out->over_x = (int16_t)mp_obj_get_int_truncated(r[0]);
+                out->over_y = (int16_t)mp_obj_get_int_truncated(r[1]);
+                out->over_w = (int16_t)(w > 0x7fff ? 0x7fff : w);
+                out->over_h = (int16_t)(h > 0x7fff ? 0x7fff : h);
+            }
+        }
     }
 }
 
@@ -2718,6 +2739,30 @@ static mp_obj_t ui_api_table_part(size_t n_args, const mp_obj_t *a) {
     return mp_obj_new_int(moy_ui_api_table_part(ctx_of(a[0]), &s, (int32_t *)b.buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_part_obj, 4, 4, ui_api_table_part);
+
+// api_table_floor(ctx, r) -> 1 and the next rect of the kept table's floor
+// into r (four words); 0, -1 or -2 after the last
+static mp_obj_t ui_api_table_floor(mp_obj_t ctx, mp_obj_t r) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
+    if (b.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    return mp_obj_new_int(moy_ui_api_table_floor(ctx_of(ctx), (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_table_floor_obj, ui_api_table_floor);
+
+// api_held(ctx, id, key) -> whether the buffer this frame paints holds part
+// `id` as a frame drew it under `key`
+static mp_obj_t ui_api_held(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_bool(moy_ui_api_held(ctx_of(ctx), sp,
+                                           (int32_t)mp_obj_get_int_truncated(key)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_obj, ui_api_held);
 
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
@@ -3749,6 +3794,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_table_dist), MP_ROM_PTR(&ui_api_table_dist_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_floor), MP_ROM_PTR(&ui_api_table_floor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_held), MP_ROM_PTR(&ui_api_held_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },

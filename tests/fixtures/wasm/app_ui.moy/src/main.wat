@@ -73,6 +73,8 @@
   (import "moybyte.app" "ui_table_part" (func $ui_table_part (param i32 i32) (result i32)))
   (import "moybyte.app" "ui_part_at" (func $ui_part_at (param i32 i32) (result i32)))
   (import "moybyte.app" "ui_table_dist" (func $ui_table_dist (result i32)))
+  (import "moybyte.app" "ui_table_floor" (func $ui_table_floor (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_held" (func $ui_held (param i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_split" (func $ui_split
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
