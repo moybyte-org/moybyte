@@ -861,7 +861,7 @@ def _menus_plan(ws, cfg):
             ws.system_key()
             assert ws.pause.open
             if options:
-                ws.pause.choose(2)
+                ws.pause.choose(ws.pause.rows.index("Options"))
         return enter
 
     return [("sysmenu", sysmenu), ("pause", pause(False)), ("pause_options", pause(True))]

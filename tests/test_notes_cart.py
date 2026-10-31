@@ -644,6 +644,53 @@ def test_the_desk_shows_the_vault_beside_the_note(tmp_path):
     assert ws.wm._win_title(ws.wm._wins["desktop"]).endswith("Story")
 
 
+def _new_note_over_story(tmp_path):
+    """The desk, a mouse, `story` open, and New note's row tapped: the
+    dialog up over the note. (ws, namespace, driver)."""
+    ws, ns, drv = _desk(tmp_path)
+    ws.pointer.hovers = True            # a mouse: a focused handle claims its view
+    new = _row(ws, ns, 0)
+    ns["_open"]("story")
+    _frames(drv)
+    assert ns["ed"].focused()
+    for _ in range(2):                  # the first tap lands the row, the second opens it
+        if ns["asking"] is None:
+            _tap(drv, new)
+    assert ns["asking"] == "new"
+    return ws, ns, drv
+
+
+def test_new_note_over_an_open_note_takes_the_keys_and_its_buttons_work(tmp_path):
+    """Owner report 2026-10-31: New note tapped while a note was open left the
+    keyboard on the note, so the name was typed into the note and a mouse's
+    Make and Cancel, drawn over the note, were the note's clicks."""
+    ws, ns, drv = _new_note_over_story(tmp_path)
+    assert not ns["ed"].focused(), "the dialog has the keyboard"
+    _type(drv, "plan")
+    assert ns["typed"] == "plan"
+    assert ns["ed"].text() == "body of story", "nothing typed into the note"
+    _tap(drv, _box(ws, "Make"))
+    assert ns["asking"] is None and ns["ed"].name() == "plan"
+    assert ns["ed"].focused(), "the new note has the keyboard"
+    assert ns["names"][ns["cur"] - 1] == "plan", "the vault stands on the new note"
+    _frames(drv)
+    assert ns["ed"].name() == "plan", "and stays on it"
+
+
+def test_cancel_and_esc_over_an_open_note_give_it_the_keys_back(tmp_path):
+    ws, ns, drv = _new_note_over_story(tmp_path)
+    _tap(drv, _box(ws, "Cancel"))
+    assert ns["asking"] is None and ns["ed"].name() == "story"
+    assert ns["ed"].focused()
+    ns["_ask"]("new")
+    _frames(drv)
+    assert not ns["ed"].focused()
+    _type(drv, [ESC])
+    assert ns["asking"] is None, "Esc closes the dialog"
+    assert ns["ed"] is not None and ns["ed"].name() == "story", "not the note under it"
+    assert ns["ed"].focused()
+
+
 def test_a_resized_window_moves_the_page_not_its_pixels(tmp_path):
     ws, ns, drv = _desk(tmp_path)
     cv = ws.canvas

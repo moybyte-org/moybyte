@@ -181,7 +181,8 @@ class CardsLayer:
     # A card field MAY carry an optional `display` hint -- "gauge" | "count" |
     # "choice-icons" | "sprite-tiles" | "bg-thumbs" -- that draws the VALUE as a
     # picture a kid who can't read can recognize (the cell ones as a row of
-    # tiles on the page, `SettingsPage._tiles_row`).
+    # tiles on the page, `SettingsPage._tiles_row`, but a two-way
+    # "choice-icons" is off and on, a toggle at row height).
     _DISPLAYS = ("gauge", "count", "choice-icons", "sprite-tiles", "bg-thumbs")
     _CELL_DISPLAYS = ("choice-icons", "sprite-tiles", "bg-thumbs")
 

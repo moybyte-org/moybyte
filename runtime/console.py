@@ -363,13 +363,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from launcher_layer import (Launcher, Carousel, IconHome, LauncherHomeLayer,
                                 HomeWindowLayer, new_tile, NEW_TILE_TYPE,
-                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
+                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title,
+                                PROJECTS_VERB_SETS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, Carousel, IconHome,
                                         LauncherHomeLayer,
                                         HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                         PSEUDO_TILE_TYPES, HOME_TABS,
-                                        tab_count_title)
+                                        tab_count_title, PROJECTS_VERB_SETS)
 # The home's arrangements by the layout's `home` value
 # (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
@@ -1916,7 +1917,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         elif m.open and m.widget == "menu":
             m.close()
             self.popover_touch()
-        elif self.plays_fullscreen():
+        elif self.plays_fullscreen() or self._game_pauses():
             p.show()
         else:
             self.toggle_sysmenu()
@@ -1930,9 +1931,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
 
     def plays_fullscreen(self):
-        """A game runs fullscreen, live: what Super pauses."""
+        """A game runs fullscreen, live: what Super pauses -- in console
+        mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool and not self.wm.desk_open())
+                and not self.player._is_tool
+                and (not self.wm.desk_open() or self.wm.game_full()))
+
+    def _game_pauses(self):
+        """The desk's other play Super pauses: the game docked in the
+        Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
+        gp = getattr(self.wm, "game_pauses", None)
+        return (gp is not None and self.wm.top_is_player() and self.cart_error is None
+                and not self.player._is_tool and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -2986,6 +2996,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             g = self.projects_grid = self._home_grid(
                 "carousel", self._launcher_items(self.carts.all, "make"))
             g.tab = "make"
+            g.verb_sets = PROJECTS_VERB_SETS   # Make's Play, its pane's rows
         else:
             self.set_home_tab("make", g)
         self.projects_layer._tab_focus = False

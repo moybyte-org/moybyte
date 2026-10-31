@@ -950,6 +950,11 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     v0 = me.cur_slot_value()
     page.act("slot+")
     assert me.cur_slot_value() == min(v0 + 1, len(me.bank.sfx) - 1)
+    # The foot's Hear plays the song, and stops it.
+    page.act("hear")
+    assert ws.music_ui.music_preview == ("song", me.track_idx)
+    page.act("hear")
+    assert ws.music_ui.music_preview is None
 
 
 # -- music editor UI: copy/paste/duplicate/reorder/undo touch surface (#92) -

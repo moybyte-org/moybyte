@@ -3,7 +3,8 @@
 #   actor           the World's Actor pane: the selected actor's props
 #   stamps_label    the Stamps pane's line: the tag the stamp gives
 #   sounds          the Sound workspace's list: the song, then a row a sound
-#   song            the Song pane: the tracks, the current one marked
+#   song            the Song pane: its verbs, then its slots, the current one marked
+#   song_do         a Song verb on the core: a slot's sound, add, delete, play
 #   palette         the Blocks workspace's palette: the categories, then their blocks
 #   made            the code the blocks make, read only
 #   ref_sounds      the Reference's Sounds: a pick puts its sfx() at the caret
@@ -30,6 +31,7 @@ PARTS = ("actor", "sounds", "song", "log", "maps", "palette", "made")
 
 _ROW = 36
 _LIST_ROW = 28              # a list's row on the desk (style.json's stack_desk)
+_INK, _DIM = {"tone": "ink"}, {"tone": "dim"}
 
 
 def draw(desk, c, r, u):
@@ -237,27 +239,105 @@ def sounds_header(desk, pid, tx, y, hh, u):
 
 
 def song(desk, r, u):
-    """The song's tracks, four a row, the one being edited marked."""
+    """The Song (EDITOR_LAYOUT.md's Sound workspace): its line -- what a slot
+    is, the current slot's sound back and forward, add and delete a slot,
+    play the song -- then its slots four a row, each its sound's number and
+    name over a sketch of its notes, the current one on the current plate.
+    A tap on a slot edits the song there."""
     mu, me = _music(desk)
     if me is None:
         return
-    x, y, w, _h = r
+    ws = desk.ws
+    x, y, w, h = r
     pad = 10 * u
+    cell = 32 * u
+    t = me.cur_track()
+    pat = t.pattern if t is not None else ()
+    tracks = len(me.bank.music)
+    on = me.view == me.SONG_VIEW
+    playing = mu.music_preview is not None and mu.music_preview[0] == "song"
+    tools = [("run", "Stop" if playing else "Play", "play"),
+             ("del", "Delete slot", "del"), ("new", "Add slot", "add"),
+             ("forward", "Next sound", "slot+"), ("back", "Previous sound", "slot-")]
+    if tracks > 1:
+        tools += [("forward", "Next song", "song+"), ("back", "Previous song", "song-")]
+    tx = x + w - pad
+    ty = y + 4 * u
+    for icon, word, op in tools:
+        tx -= cell
+        ui.at(tx, ty, cell, cell)
+        if ui.tool(icon, word, {"id": "song " + op, "current": op == "play" and playing,
+                                "disabled": op == "del" and len(pat) <= 1}):
+            song_do(desk, op)
+    ui.at(x + pad, ty, max(0, tx - x - pad), cell)
+    ui.label("Song %d of %d" % (me.track_idx + 1, tracks) if tracks > 1
+             else "One sound a slot", _DIM)
+    if not pat:
+        return
     cw, ch = 72 * u, 56 * u
     gap = max(4 * u, (w - 2 * pad - 4 * cw) // 3)
-    for k in range(max(8, len(me.bank.music))):
+    gy = ty + cell + 6 * u
+    fit = max(1, (y + h - gy + 8 * u) // (ch + 8 * u))
+    cur = me.slot if 0 <= me.slot < len(pat) else 0
+    first = max(0, cur // 4 - fit + 1) * 4      # the rows that show the current slot
+    th = ws.theme_colors
+    cv = ws.sys_canvas
+    lh = max(20 * u, ui.text_size("0")[1] + 4)
+    for k in range(first, min(len(pat), first + 4 * fit)):
         cx = x + pad + (k % 4) * (cw + gap)
-        cy = y + pad + (k // 4) * (ch + 8 * u)
+        cy = gy + ((k - first) // 4) * (ch + 8 * u)
+        sid = _slot_sound(pat[k])
         ui.at(cx, cy, cw, ch)
-        if ui.button(str(k + 1), "normal", {"id": "track %d" % k,
-                                            "current": k == me.track_idx,
-                                            "disabled": k >= len(me.bank.music)}):
-            if k < len(me.bank.music):
-                me.track_idx = k
-                me.slot = 0
-                if me.view != me.SONG_VIEW:
-                    me.toggle_view()
-                desk.ws._dirty = True
+        if ui.button("", "normal", {"id": "slot %d" % k, "current": on and k == cur}):
+            if not on:
+                me.toggle_view()
+            me.select_cursor(k)
+            ws._dirty = True
+        heard = 0 <= sid < len(me.bank.sfx)
+        ui.at(cx + 6 * u, cy + 4 * u, cw - 12 * u, lh)
+        ui.label(Sound.row_label(me, sid) if heard else "-", _INK if heard else _DIM)
+        if heard:
+            _sketch(cv, th, me.bank.sfx[sid], cx + 6 * u, cy + ch - 22 * u, cw - 12 * u, 16 * u, u)
+
+
+def _slot_sound(row):
+    """A slot's sound: its channel-0 SFX id (a multi-channel row's first), -1 silent."""
+    if isinstance(row, list):
+        return row[0] if row else -1
+    return row
+
+
+def song_do(desk, op):
+    """One of the Song's verbs on the core (each edit an undo step): the
+    slot's sound back or forward, add or delete a slot, the next or
+    previous song, play or stop. An edit is the song's, so it puts the core
+    in the song view."""
+    mu, me = _music(desk)
+    if me is None:
+        return
+    if op == "play":
+        if mu.music_preview is not None:
+            mu._stop_music_preview()
+            return
+        if me.view != me.SONG_VIEW:
+            me.toggle_view()
+        mu._play_music_preview()
+        return
+    if me.view != me.SONG_VIEW:
+        me.toggle_view()
+    if op == "slot-":
+        me.nudge_slot(-1)
+    elif op == "slot+":
+        me.nudge_slot(1)
+    elif op == "add":
+        me.add_slot()
+    elif op == "del":
+        me.del_slot()
+    elif op == "song-":
+        me.select_track(-1)
+    elif op == "song+" and me.track_idx + 1 < len(me.bank.music):
+        me.select_track(1)
+    desk.ws._dirty = True
 
 
 # -- the block palette ---------------------------------------------------------------

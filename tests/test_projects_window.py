@@ -183,9 +183,10 @@ def _own(ws, grid):
 @pytest.mark.parametrize("size", [None, (360, 534)])
 def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
     """On Make the hero's filled button acts on the hero: CHANGE, with
-    DUPLICATE and DELETE beside it, every one of them at any width (a button
-    that does not fit wraps under, R5-02); NEW is the + tile's primary and
-    stays on the strip's N."""
+    DUPLICATE, PLAY (third: the cart in a desk window, owner 2026-10-31) and
+    DELETE beside it, every one of them at any width (a button that does not
+    fit wraps under, R5-02); NEW is the + tile's primary and stays on the
+    strip's N."""
     from runtime import ui_draw
     ws = _ws(tmp_path)
     win, grid = _projects(ws, size)
@@ -198,7 +199,8 @@ def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
         home = ws.projects_layer
         buttons = home._desk_buttons()
         assert [(v, k) for v, _r, k in buttons] == [
-            ("change", "primary"), ("copy", "normal"), ("delete", "danger")]
+            ("change", "primary"), ("copy", "normal"), ("window", "normal"),
+            ("delete", "danger")]
         pane = grid.plate_rect()
         for _v, r, _k in buttons:
             assert _inside(r, content) and _inside(r, pane), (r, pane)
@@ -233,14 +235,66 @@ def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
 
 def test_delete_stands_a_groups_gap_apart(tmp_path):
     """DEL is set apart from the verbs before it by a group's gap, wider
-    than the gap between Change and Duplicate (R5-15)."""
+    than the gap between Change and Duplicate (R5-15), and Play keeps the
+    plain gap after Duplicate."""
     ws = _ws(tmp_path)
     win, grid = _projects(ws)
     _own(ws, grid)
     ws.wm._install(win.ctx)
     try:
-        (_c, a, _k1), (_y, b, _k2), (_d, c, kind) = ws.projects_layer._desk_buttons()
-        assert kind == "danger" and a[1] == b[1] == c[1], "one row at the full size"
-        assert c[0] - (b[0] + b[2]) > b[0] - (a[0] + a[2]) > 0
+        (_c, a, _k1), (_y, b, _k2), (_p, p, _k3), (_d, c, kind) = \
+            ws.projects_layer._desk_buttons()
+        assert kind == "danger" and a[1] == b[1] == p[1] == c[1], "one row at the full size"
+        assert p[0] - (b[0] + b[2]) == b[0] - (a[0] + a[2]) > 0
+        assert c[0] - (p[0] + p[2]) > b[0] - (a[0] + a[2])
     finally:
         ws.wm._install(ws.wm._root_ctx)
+
+
+@pytest.mark.parametrize("where", ["projects", "play"])
+def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where):
+    """At rest at any offset (where a fling leaves the shelf), the card the
+    shelf's left margin cuts draws the part of it past the margin, as the
+    band's right edge cuts one: those pixels are the card's own, the ones it
+    shows uncut a scroll away. In the Projects window and on Play, the
+    console-mode home (owner report, 2026-10-31: the cut card was not
+    drawn at all, a card-wide gap at the shelf's start)."""
+    ws = _ws(tmp_path)
+    if where == "projects":
+        win, grid = _projects(ws)
+        cv, ctx = win.buf, win.ctx
+    else:
+        ws.open_library()
+        ws.set_home_arrangement("carousel")
+        ws.set_home_tab("games")
+        grid, cv, ctx = ws.launcher, ws.wm._root_canvas, ws.wm._root_ctx
+    grid.sel = len(grid.items) - 1         # far past the card it looks at
+    _frame(ws)
+
+    def at(fn):
+        ws.wm._install(ctx)
+        try:
+            return fn()
+        finally:
+            ws.wm._install(ws.wm._root_ctx)
+
+    g = at(grid._geom)
+    left, pitch, side = g[1][0] + g[9][4] - g[5], g[3], g[2]
+    k = 3
+
+    def put(s):
+        at(lambda: setattr(grid, "scroll", s))
+        _frame(ws)
+        assert at(lambda: grid.scroll) == s and not grid.moving
+        return at(lambda: dict(grid._visible())[k]), bytes(cv._buf)
+
+    whole, a = put(2 * pitch)
+    assert whole[0] >= left, "the card shows uncut"
+    cut, b = put(2 * pitch + whole[0] - (left - side // 2))
+    assert cut[0] < left < cut[0] + cut[2], "the margin cuts the card"
+    w, dx = cv.w, whole[0] - cut[0]
+    off = [(x, y) for y in range(cut[1] + side // 4, cut[1] + 3 * side // 4)
+           for x in range(left, cut[0] + cut[2])
+           if b[2 * (y * w + x):2 * (y * w + x) + 2]
+           != a[2 * (y * w + x + dx):2 * (y * w + x + dx) + 2]]
+    assert not off, "%d of the cut card's pixels past the margin are not its own" % len(off)

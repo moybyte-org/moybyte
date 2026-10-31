@@ -306,9 +306,12 @@ class EditorHandle:
                 n += len(line)
             if n >= self._max:
                 return False
-        if self._burst is None:
+        opened = self._burst is None
+        if opened:
             self._burst = ed.text()
         if not ed.key(code):
+            if opened:
+                self._burst = None          # a key the text did not take opens no burst
             return False
         self._mark()
         if code in (0x0D, 0x0A) or (0x20 <= code <= 0x7E

@@ -135,13 +135,20 @@ class WindowChrome:
             self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
 
+    def _is_game(self, win):
+        """Whether `win` is a game's window: the player's, running a game.
+        The player's window running a window-bound app cart (Notes) is an
+        app window, full screen as every app's is: its row, its title."""
+        return win.kind == "desktop" and not self.ws.app_window_canvas
+
     def _full_chrome(self, win, focused, quiet):
         """A full-screen window's row on the root canvas: the band's ground
-        and the row (`_paint_row`) where the row lies above the content, the
-        corner's controls alone over a game's black; nothing where the app's
-        own band is the row, which its content draw carries (`_paint_row`
-        into the window's buffer). Frozen on quiet frames as a strip is."""
-        if win.kind != "desktop" and not win.row:
+        and the row (`_paint_row`) where the row lies above the content;
+        nothing where the app's own band is the row, which its content draw
+        carries (`_paint_row` into the window's buffer), and nothing over a
+        game: play shows no window buttons (owner, 2026-10-31). Frozen on
+        quiet frames as a strip is."""
+        if (win.kind != "desktop" and not win.row) or self._is_game(win):
             return
         sig = (win.w, win.h, win.row, self._full_title(win), self._win_btns(win),
                self.ws.look.look_gen, self._fs())
@@ -162,22 +169,17 @@ class WindowChrome:
         """A full-screen row's head and controls on `cv` (the glass's
         coordinates): the back chevron where its app has a page open, the
         window's icon and title, then minimise, restore and close at the
-        right, drawn by the frame as on every strip (`FRAME_FULL`). A game's
-        row is its controls alone."""
+        right, drawn by the frame as on every strip (`FRAME_FULL`)."""
         self.ws.icon_spec()               # the look's icon set, for the buttons
         btns = self._win_btns(win) | _ui_draw.FRAME_FULL
         rect = self._row_rect(win)
-        game = win.kind == "desktop"
-        if game:
-            title = ""
-        elif title is None:
+        if title is None:
             title = self._full_title(win)
         _ui_draw.frame(cv, self.ws.theme_colors, rect, win.title_h,
                        title, True, btns, self._fs())
-        if not game:
-            slot = _ui_draw.frame_icon(rect, win.title_h, btns)
-            if slot is not None:
-                self._win_icon(win, slot, True, cv, row=True)
+        slot = _ui_draw.frame_icon(rect, win.title_h, btns)
+        if slot is not None:
+            self._win_icon(win, slot, True, cv, row=True)
 
     def _full_title(self, win):
         """A full-screen row's title: the Editor's names its cart alone
@@ -494,8 +496,11 @@ class WindowChrome:
     def _frame_buttons(self, win):
         """The title-strip buttons as the frame style lays them, left to right:
         [(name, rect, right)]. Close, maximize, and `_win_btns`' minimize and
-        back; a full-screen window's on its row (`_row_rect`)."""
+        back; a full-screen window's on its row (`_row_rect`), and none on a
+        full-screen game's."""
         if win.saved is not None:
+            if self._is_game(win):
+                return []
             return _ui_draw.frame_buttons(self._row_rect(win), win.title_h, "",
                                           self._win_btns(win) | _ui_draw.FRAME_FULL,
                                           self._fs())

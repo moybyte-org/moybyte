@@ -209,7 +209,11 @@ class PauseMenu:
     Super holds the run (`Player.pause`: no tick, no draw, its clock and its
     music held) and a card centred on the glass names the game and offers
     Resume, Restart, Options and Quit; Esc, B or Super again resumes, and
-    the cart's next frame comes as if no time passed. Options is the card's
+    the cart's next frame comes as if no time passed. On a board with a
+    desk, in both modes, over a game full screen or docked in the Editor's
+    Run slot, Play in a window follows Resume (owner, 2026-10-31): the run
+    goes on in a desk window of its own (`WindowedWM.play_in_window`); over
+    a game already in a window there is no such row. Options is the card's
     second page, the console's Volume (Esc goes back). The card is a
     popover of the public UI API's with nothing to hang from, holding a
     `ui.menu`, drawn on the system canvas over the frozen frame; the menu's
@@ -228,6 +232,9 @@ class PauseMenu:
 
     ITEMS = ("Resume", "Restart", "Options", "Quit")
     ICONS = ("play", "rotate", "settings", "close")
+    WINDOW = "Play in a window"
+    DESK_ITEMS = ("Resume", WINDOW, "Restart", "Options", "Quit")
+    DESK_ICONS = ("play", "maximize", "rotate", "settings", "close")
     SEE_WHY, RESTART, HOME, UPDATES = "See why", "Restart", "Home", "Open Updates"
     _STOP_ICONS = {"See why": "code", "Restart": "rotate", "Home": "home",
                    "Open Updates": "settings"}
@@ -277,7 +284,11 @@ class PauseMenu:
             return
         ws.player.pause()
         self.stopped = False
-        self.rows, self.icons = self.ITEMS, self.ICONS
+        offers = getattr(ws.wm, "offers_window", None)
+        if offers is not None and offers():
+            self.rows, self.icons = self.DESK_ITEMS, self.DESK_ICONS
+        else:
+            self.rows, self.icons = self.ITEMS, self.ICONS
         self._open()
 
     def stop(self):
@@ -369,26 +380,30 @@ class PauseMenu:
 
     def choose(self, i):
         ws = self.ws
+        row = self.rows[i]
         if self.stopped:
-            self.choose_row(self.rows[i])
+            self.choose_row(row)
             return
-        if i == 0:
+        if row == "Resume":
             self.close()
-        elif i == 1:
+            return
+        if row == self.WINDOW:
+            self.close()
+            ws.wm.play_in_window()        # the same run, in a desk window
+        elif row == "Restart":
             self.close()
             ws._reset_canvas_state()
             ws._start()                   # the same cart from the top, same caller
-        elif i == 2:
+        elif row == "Options":
             self.page = 1
             self._host.reset()
             ws.pause_touch()
             return
-        elif i == 3:
+        elif row == "Quit":
             self.close()
             ws._reset_canvas_state()
             ws._exit_to_caller()
-        if i:
-            ws._dirty = True
+        ws._dirty = True
 
     def _unwash_strip(self, cv):
         """The desk's PROJECTS window's hint strip names the dialog's keys
@@ -507,13 +522,20 @@ class PauseMenu:
     def scrim_rect(self):
         """What the card's scrim washes: on the desk, and under a notice
         over the screen it was asked from, the content under its bar, else
-        the glass."""
+        the glass -- a desk game full screen's too."""
         ws = self.ws
-        if getattr(ws.wm, "mode", None) == "desktop" or not ws.wm.top_is_player():
+        wm = ws.wm
+        if not wm.top_is_player() or (getattr(wm, "mode", None) == "desktop"
+                                      and not self._over_full()):
             lay = ws.layout
             return (lay.cx, lay.cy, lay.cw, lay.ch)
         cv = ws.sys_canvas
         return (0, 0, cv.w, cv.h)
+
+    def _over_full(self):
+        """Whether the card is over a desk game full screen."""
+        win = getattr(self.ws.wm, "_wins", {}).get("desktop")
+        return win is not None and not win.minimized and win.saved is not None
 
     def draw_card(self):
         """The card alone, over a scrim already there: the desk's frame
@@ -572,7 +594,7 @@ class PauseMenu:
                 sl.set_level("volume", got)
             _ui.hints(("change", "Change", "back", "Back"))
         else:
-            _ui.menu("", self.ITEMS, self.ICONS)
+            _ui.menu("", self.rows, self.icons)
             _ui.hints(("back", "Resume"))
         _ui.popover()
         if not settled or host.moved:

@@ -733,6 +733,7 @@ def editor(loop, info):
     from gc import mem_alloc
     ws = loop.ws
     W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    banner = ws._toast_until
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     for tab in ("blocks",):
         ws.set_menu_view(tab)
@@ -786,6 +787,7 @@ def editor(loop, info):
             gc.enable()
         page.draw = draw
         info[tab + "_drag"] = drag
+        info[tab + "_banner"] = ws._toast_until != banner
     ws.exit()
     for _ in range(30):
         loop.step()
@@ -890,10 +892,14 @@ def row_of_parts(loop, info):
 
 def achievements(loop, info):
     """Settings' Achievements page, idle at its top, then swiped to its end
-    and idle there: what each idle frame allocates."""
+    and idle there: what each idle frame allocates. The page shows three
+    badges set for it, and the run's own go back after: a badge the run had
+    earned and the page's set lacks would be earned again by the next
+    scenario's open, its banner over the frames that scenario measures."""
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
+    earned = ws.ach.unlocked
     ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
     ws.open_settings()
     # the rows page swiped, its pictures met once: what each frame of a drag
@@ -938,6 +944,7 @@ def achievements(loop, info):
         gc.enable()
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
     ws._exit_settings()
+    ws.ach.unlocked = earned
     for _ in range(30):
         loop.step()
 
@@ -1549,6 +1556,10 @@ def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
     info, text = result
     tab = "blocks"
     assert info.get(tab + "_view") == tab, text[-3000:]
+    # An unlock banner is up for a span of the WALL clock, and no frame under
+    # it shifts: one armed while these frames ran makes the count below
+    # depend on the machine's speed.
+    assert not info[tab + "_banner"], "a badge was earned while the outline was measured"
     walk = info[tab + "_walk"]
     assert sum(1 for d in walk if d[1]) > len(walk) // 2, (tab, walk)
     # The page's draw allocates no more than the table's answer a frame

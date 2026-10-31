@@ -155,6 +155,22 @@ def test_choice_icons_card_selects_by_tapping_an_icon():
     assert ws.config["p"] == "z"
 
 
+def test_a_two_way_choice_icons_card_is_a_toggle_at_row_height():
+    """Owner report 2026-10-31: the seed carts' AUTOPLAY (choices 0 and 1,
+    icons close and run) drew as two big tiles in a row far taller
+    than a slider's. Its two icons are off and on: a toggle row."""
+    edit = [{"key": "enemies", "type": "int", "min": 1, "max": 16,
+             "card": "FIGHT {value} TANKS"},
+            {"key": "autoplay", "type": "choice", "choices": [0, 1],
+             "icons": ["close", "run"], "display": "choice-icons",
+             "card": "AUTOPLAY {value}"}]
+    ws = _ws_with_cart(edit, {"enemies": 6, "autoplay": 0})
+    _draw_once(ws)
+    page = ws.cards_layer.page()
+    assert "autoplay" not in page._tiles, "no picture tiles"
+    assert _box(ws, "autoplay")[3] == _box(ws, "enemies")[3], "a row as tall as the slider's"
+
+
 def test_an_int_card_steps_by_its_step_with_left_and_right():
     # A gauge card is a slider on the Settings page: left and right step it
     # by the card's own step.

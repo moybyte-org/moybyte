@@ -6,7 +6,10 @@ text/javascript (older CPython mimetypes map it to text/plain, which browsers
 refuse for ES modules) and .wasm as application/wasm (streaming compile).
 
     python serve.py [port] [dir]            # defaults: 8321, dist/
-                                            # dir may be absolute (the _site build)
+                                            # dir may be absolute (the _site build);
+                                            # this tree's dist/ built before a
+                                            # commit to what it bakes is named
+                                            # STALE on stderr (tools/web.py)
     python serve.py [port] [dir] --carts D  # BOARD-TWIN mode: serve carts.json
                                             # (and files.json, the #108 layer
                                             # beside D) LIVE and accept POST
@@ -116,6 +119,15 @@ if "--pin" in args:
     del args[i:i + 2]
 root = os.path.join(_here, args[1] if len(args) > 1 else "dist")
 port = int(args[0]) if args else 8321
+if os.path.realpath(root) == os.path.realpath(os.path.join(_here, "dist")):
+    try:
+        sys.path.insert(0, os.path.join(_here, "..", "..", "tools"))
+        from web import behind_note
+        _stale = behind_note(root, os.path.join(_here, "..", ".."))
+    except ImportError:
+        _stale = None
+    if _stale:
+        print(_stale, file=sys.stderr, flush=True)
 
 http.server.SimpleHTTPRequestHandler.extensions_map[".mjs"] = "text/javascript"
 http.server.SimpleHTTPRequestHandler.extensions_map[".js"] = "text/javascript"

@@ -194,7 +194,11 @@ def _answer():
     what, asking = asking, None
     name = typed.strip()
     if what == "new":
+        # Made is written: the vault lists the note and stands on its row,
+        # so the desk's column never reopens the note that was open before.
         got, err = files.new_name(name or None)
+        if err is None:
+            got, err = files.save_text(got, "")
         if err is None:
             _open(got)
     elif what == "rename" and name and _row() is not None:
@@ -224,10 +228,6 @@ def _update(dt):
     k = keyp()
     if not k:
         return
-    if ed is not None:
-        if k == KEY_ESC or btnp("b"):
-            _close()
-        return
     if asking is not None:
         if k == KEY_ESC:
             asking = None
@@ -235,8 +235,13 @@ def _update(dt):
             _answer()                   # Enter makes
         elif k == KEY_BS and not typed:
             asking = None               # backspacing off the start backs out
+        _hand_keys()
         return
     if menu:
+        return
+    if ed is not None:
+        if k == KEY_ESC or btnp("b"):
+            _close()
         return
     if k in (KEY_DEL, KEY_BS):
         _trash()
@@ -264,6 +269,17 @@ def _draw():
     else:
         _list_page(x, y, w, h)
     _tapping()
+    _hand_keys()
+
+
+def _hand_keys():
+    """The open note holds the keyboard unless a dialog or a row's menu is
+    up over it: those take the keys, and a mouse's click on their buttons,
+    which a focused handle would claim over its note."""
+    if ed is not None:
+        want = asking is None and not menu
+        if ed.focused() != want:
+            ed.focus(want)
 
 
 # -- the handheld's pages -------------------------------------------------------
@@ -541,7 +557,7 @@ def _desk(x, y, w, h):
 
 def _tapping():
     global paging
-    if ed is None or not sheet[2]:
+    if ed is None or asking is not None or menu or not sheet[2]:
         return
     t = touch()
     if t is None:

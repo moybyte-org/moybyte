@@ -247,6 +247,72 @@ def test_a_divider_dragged_by_the_pointer_lays_out_on_release(desk):
     assert d.panes()[0][1][2] == w - 100
 
 
+def _glass(ws):
+    return bytes(ws.glass_canvas.to_rgb888())
+
+
+def _shows_what_a_whole_repaint_shows(ws, drv):
+    """The frames after an input, with no input of their own, leave the
+    glass as a whole repaint of the same state draws it."""
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    got = _glass(ws)
+    ws._dirty = True
+    ws.wm._win_sig = None                        # every window and the desk drawn again
+    for _ in range(3):
+        drv.frame(DT)
+    return got == _glass(ws)
+
+
+@pytest.mark.parametrize("fast", (False, True), ids=("press-then-release", "one-frame-click"))
+def test_a_header_tools_tap_shows_with_no_input_after_it(desk, fast):
+    """The panes' headers are the desk's verbs pass, drawn after the panes'
+    bodies: a tap a header answers (a tab, a tool, Grow) changes what the
+    bodies drew, and the pass owes the frame that shows it (the AppHost's
+    `owed`), never the next input."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("4"), 1)                       # World: the Scene's zoom in its header
+    n = next(i for i, p in enumerate(d.panes()) if "scene" in p[0])
+    for _ in range(3):
+        drv.frame(DT)
+    zoom = ws.scene_ui.scene_zoom
+    bx, by, bw, bh = d._host.box("pane %d scene:zoom" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert ws.scene_ui.scene_zoom != zoom and shows
+    bx, by, bw, bh = d._host.box("pane %d grow" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert d.grown == d.panes()[n][0] and shows
+
+
+def test_a_divider_dragged_shows_its_layout_with_no_input_after_it(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    (_p, (x, y, w, h), _path), = [p for p in d.panes() if p[0] == ("code",)]
+    gx, gy = x + w + 3, y + h // 2
+    drv.touch(gx, gy)
+    drv.frame(DT)
+    drv.touch_drag(gx - 100, gy)
+    drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    assert d.panes()[0][1][2] == w - 100
+    assert _shows_what_a_whole_repaint_shows(ws, drv)
+
+
 def test_a_grown_pane_takes_the_workspace_and_esc_gives_it_back(desk):
     ws, drv = desk
     d = ws.editor_desk
@@ -432,6 +498,125 @@ def test_play_runs_the_game_in_the_run_slot_and_stop_ends_it(desk):
     for _ in range(3):
         drv.frame(DT)
     assert "desktop" not in ws.wm._wins
+
+
+def test_a_docked_game_moves_with_its_editor_window(desk):
+    """The Editor's content is stamped, not drawn, while its window is
+    dragged, so the docked playtest follows its host in the WM: it stands
+    where the Run slot is at every step, never where the slot was."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)                             # Ctrl+Enter: Play
+    for _ in range(4):
+        drv.frame(DT)
+    ws.wm.full_key()                             # the Editor restored: a window to drag
+    for _ in range(4):
+        drv.frame(DT)
+    menu, game = ws.wm._wins["menu"], ws.wm._wins["desktop"]
+
+    def off():
+        cx, cy = menu.content_rect()[:2]
+        return game.docked[0] - cx, game.docked[1] - cy, game.docked[2], game.docked[3]
+
+    held = off()
+    x0, y0 = menu.x + 200, menu.y + menu.title_h // 2
+    drv.touch(x0, y0)
+    drv.frame(DT)
+    for i in range(1, 6):
+        drv.touch_drag(x0 - 20 * i, y0 + 6 * i)
+        drv.frame(DT)
+        assert off() == held
+    drv.touch_up()
+    for _ in range(3):
+        drv.frame(DT)
+    assert (menu.x, menu.y) != (x0 - 200, y0 - menu.title_h // 2)
+    assert off() == held and (game.x, game.y) == game.docked[:2]
+
+
+def test_closing_the_editor_ends_its_playtest(desk):
+    """Closing the Editor closes its playtest (owner, 2026-10-31), the way
+    the pause card's Quit ends a run: its world released, its pmem
+    flushed, its window gone."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)
+    for _ in range(4):
+        drv.frame(DT)
+    assert ws.wm._wins["desktop"].docked
+    released = []
+    orig = ws.player.release_world
+    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert released and "desktop" not in ws.wm._wins
+    assert not ws.wm.stack.has("desktop") and "menu" not in ws.wm._wins
+
+
+def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
+    """The pause card's Play in a window takes the docked playtest out of
+    the Run slot into a window of its own, its run going on; that window
+    is no playtest of the Editor's, and closing the Editor leaves it
+    running, framed and focused."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)
+    for _ in range(4):
+        drv.frame(DT)
+    game = ws.wm._wins["desktop"]
+    assert game.docked and ws.wm._focus == "desktop"
+    ws.system_key()                              # Super over the docked game
+    assert ws.pause.open and ws.pause.WINDOW in ws.pause.rows
+    ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
+    for _ in range(3):
+        drv.frame(DT)
+    assert game.docked is None and not game.minimized and not ws.player.paused
+    assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed
+    assert not ws.editor_app.playing(), "the Editor's Play is Play again"
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ws.wm.window_kinds() == ["desktop"] and ws.wm._wins["desktop"] is game
+    assert game.docked is None and not game.minimized
+    assert ws.wm._focus == "desktop" and not ws.player.paused
+
+
+def _contents(d):
+    return [c for pane, _r, _p in d.panes() for c in pane]
+
+
+def test_a_game_moved_to_a_window_leaves_the_workspaces_until_it_closes(desk):
+    """While the game plays in a window of its own the Editor has no Game
+    tab: Code's right column holds the panes left in the Run slot's room,
+    and Art's Map pane is the Map alone; when that window closes the Game
+    tabs come back, Art's on the Map it showed before Play."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code: Run slot over the context pane
+    before = {pane: r for pane, r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)                       # Art: Map · Game
+    _tap(drv, 13, 1)                             # Play: the pane turns to Game
+    for _ in range(4):
+        drv.frame(DT)
+    assert d.tab_of(("map", "game")) == "game"
+    ws.system_key()
+    ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
+    for _ in range(3):
+        drv.frame(DT)
+    assert "game" not in _contents(d) and ("map",) in [p for p, _r, _x in d.panes()]
+    ws.wm._move_focus("menu")                    # the Editor takes the keys back
+    _tap(drv, ord("2"), 1)
+    assert "game" not in _contents(d)
+    after = {pane: r for pane, r, _p in d.panes()}
+    rest = ("sprites", "sounds", "maps", "log")
+    gx, gy, gw, _gh = before[("game",)]
+    assert after[rest][:3] == (gx, gy, gw), "the column's panes take the Run slot's room"
+    ws.wm.close_window_kind("desktop")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ("game",) in {pane for pane, _r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)
+    assert d.tab_of(("map", "game")) == "map"
 
 
 def test_play_selects_the_game_tab_and_stop_gives_the_map_back(desk):
@@ -654,6 +839,42 @@ def test_the_sounds_list_adds_a_sound_and_plays_one(desk):
     bx, by, bw, bh = d._host.box("pane 0 new sound")
     _click(drv, bx + bw // 2, by + bh // 2)
     assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
+
+
+def test_the_song_pane_edits_the_songs_slots_and_plays_it(desk):
+    """Owner report 2026-10-31: the desk had no way to edit or play a song --
+    its Song pane was a row of track numbers. It is the song
+    (EDITOR_LAYOUT.md's Sound workspace): its slots, a tap on one edits the
+    song there, its sound steps back and forward, a slot is added and
+    deleted, and the song plays and stops."""
+    ws, drv, d, me, S = _sound(desk)
+    pat = me.cur_track().pattern
+    n = len(pat)
+
+    def press(id):
+        bx, by, bw, bh = d._host.box(id)
+        _click(drv, bx + bw // 2, by + bh // 2)
+
+    assert all(d._host.box("slot %d" % k) is not None for k in range(min(n, 8)))
+    press("slot 0")
+    assert me.view == me.SONG_VIEW and me.slot == 0
+    press("song add")
+    assert len(pat) == n + 1 and me.slot == 1
+    was = pat[1]
+    hi = len(me.bank.sfx) - 1
+    press("song slot+" if was < hi else "song slot-")
+    assert pat[1] == (was + 1 if was < hi else was - 1), "the slot's sound stepped"
+    assert d._host.box("slot 1") is not None, "the new slot shows"
+    press("song del")
+    assert len(pat) == n
+    press("song play")
+    assert ws.music_ui.music_preview == ("song", me.track_idx)
+    press("song play")
+    assert ws.music_ui.music_preview is None
+    me.undo()                                    # the delete
+    me.undo()                                    # the sound's step
+    pat = me.cur_track().pattern
+    assert len(pat) == n + 1 and pat[1] == was, "each edit is an undo step"
 
 
 def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
