@@ -151,6 +151,13 @@
     {"role": "ui", "verb": "table_part", "server": "c", "grant": "never", "wasm": "(*~)i"},
     {"role": "ui", "verb": "part_at", "server": "c", "grant": "never", "wasm": "(*~)i"},
     {"role": "ui", "verb": "split", "server": "c", "grant": "never", "wasm": "(*~*~*~*~*~)i"},
-    {"role": "ui", "verb": "table_dist", "server": "c", "grant": "never", "wasm": "()i"}
+    {"role": "ui", "verb": "table_dist", "server": "c", "grant": "never", "wasm": "()i"},
+    {"role": "ui", "verb": "table_floor", "server": "c", "grant": "never", "wasm": "(*~)i"},
+    {"role": "ui", "verb": "held", "server": "c", "grant": "never", "wasm": "(*~i)i"},
+    {"role": "ui", "verb": "slots", "server": "c", "grant": "never", "wasm": "(ii)i"},
+    {"role": "ui", "verb": "slot", "server": "c", "grant": "never", "wasm": "(*~ii)i"},
+    {"role": "ui", "verb": "slot_next", "server": "c", "grant": "never", "wasm": "()i"},
+    {"role": "ui", "verb": "held_last", "server": "c", "grant": "never", "wasm": "(*~i)i"},
+    {"role": "ui", "verb": "held_all", "server": "c", "grant": "never", "wasm": "()i"}
   ]
 }

@@ -20,14 +20,11 @@ def test_helper_floors_at_two(tmp_path):
     """Host canvas declares RETAINED_FRAMES = 1; the horizon still gates at 2
     (today's conservative behavior, byte-identical goldens). An N=3 canvas
     raises it to 3."""
-    from runtime.launcher_layer import _retained_n
     ws = _ws(tmp_path)
     assert ws.sys_canvas.RETAINED_FRAMES == 1      # the host contract
     assert ws.wm._retained_n() == 2
-    assert _retained_n(ws.sys_canvas) == 2
     ws.sys_canvas.RETAINED_FRAMES = 3              # instance shadow
     assert ws.wm._retained_n() == 3
-    assert _retained_n(ws.sys_canvas) == 3
 
 
 def test_full_paint_debt_scales_to_n_minus_one(tmp_path):

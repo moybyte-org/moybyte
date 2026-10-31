@@ -234,10 +234,11 @@ def test_a_band_frame_is_pixel_faithful(tmp_path):
     partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
     # Force the FULL path for the identical state and compare the pixels.
-    ws.launcher_layer._full_streak = 0
+    ws.launcher_layer._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.touch_drag(lastx, cy)                 # same pos: scroll unchanged
     drv.frame(1 / 30)
+    del ws.launcher_layer._try_band_frame
     assert calls[0] == n_mid + 1              # the forced frame went FULL
     assert ws.launcher.scroll == scroll
     full = bytes(ws.sys_canvas._buf)

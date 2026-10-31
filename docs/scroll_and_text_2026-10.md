@@ -303,11 +303,11 @@ key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
-fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one;
-the home's `_still_ring` (§14.4) is one whose change is its parts' keys
-and the bar's. An app's page keeps the same slots in its context, the
-engine's (`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its
-begin is one C call. The one-body guard is a grep: no other list of
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one.
+An app's page keeps the same slots in its context, the engine's
+(`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its begin is one
+C call; the home names its parts per buffer in its band host's paints
+there (`ui.held`, the engine's kept ring: §9 and §14.4). The one-body guard is a grep: no other list of
 painted frames in `runtime/`.
 
 ### 3.2 The backend verb: `shift_last`
@@ -751,37 +751,55 @@ the panes otherwise.
 ## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 
 **The grid, icons and carousel arrangements** (`Launcher`, `IconHome`,
-`Carousel`) draw their band as an engine table of parts (2026-10-30, #243
-step 7): `Launcher.band_pass` opens a `ui.table` with `o.part` over the
-band -- a row of cards side by side (`o.axis "x"`, the carousel's with
-`o.snap`) or the icons' rows -- hands it the scroll as `o.offset` and the
-cards' reach past their cells as `o.spill`, and draws each part the engine
-answers through `ui.table_part`, the focused card last. The engine says
-which cards show and where. A grid or icons card that wears no focus is
-drawn out of its KEPT FACE (`launcher_layer._Faces`, built 2026-10-28,
-retired with the move and brought back 2026-10-30 by #243's perf pass,
-the P4s' band frame having gone from a copy a card to a whole draw of
-each): its picture and rim drawn once, on an idle frame, into a slot of
-one owned layer, keyed on the item, its title, the cover object and the
-look's gen, and copied in one `moy_gfx.face` call, which over anything but
-the plain ground draws the pixels a corner covers in part as the card
-draws them, because they blend over what lies there. The layer goes back
-with `release_retained` and when the arrangement is left; the carousel's
-cards draw. The band frame
-(`launcher_layer._band_frame`, through `_try_band_frame`) runs on a drag,
-a fling and, on the fullscreen home, a key, repeat or ball step too: the
-backdrop goes back under the whole band in one copy (`fill`: the
-wallpaper's restorer, the carousel's ground round its cards) and the band's
-table pass draws over it, the parts outside the band a selection changes
-(the hint strip, the icons' caption band) drawn where the buffer the
-paint ring names holds another selection's. Its two limits, from the
-moves before it: the band is drawn whole (there is no shift of the plain
-ground's band and no two-cell step any more), and the carousel's card
-sizes and the desk shelf's are the carousel's own geometry, the engine
-answering which cards show.
+`Carousel`) draw their band as an engine table of parts that keeps its
+parts (2026-10-30, #243 step 7; kept since 2026-10-31,
+`docs/ui_api_2026-10.md` §2, A kept table): `Launcher.band_pass` opens a
+`ui.table` with `o.part` over the band -- a row of cards side by side
+(`o.axis "x"`, the carousel's with `o.snap`) or the icons' rows -- hands
+it the scroll as `o.offset`, the cards' reach past their cells as
+`o.spill`, each row's cards' keys as its cells across (`_band_keys`,
+`o.across`), the focused card as the current row's part (`o.at`) and gen,
+the cursor's stamp as `o.over` and as
+`o.keep` what every card is a function of beside its row (`_band_key`: the
+statics, the cover gen and the carousel's centre card), and draws what
+the engine answers: the floor the buffer this frame paints lacks
+(`ui.table_floor`, the ground put back there) and the parts that meet it,
+each clipped to its floor rect, the focused card last. A grid or icons step
+draws the two cards the focus left and entered; a frame whose buffer holds
+the band draws nothing; a scroll, a key
+that moved or a buffer the engine cannot vouch for draws the band whole.
+The carousel's key holds its centre card, so its floor is nothing, the
+stamp or the band whole. A grid or icons card that wears no focus is
+drawn out of its KEPT FACE (built 2026-10-28, retired with the move and
+brought back 2026-10-30 by #243's perf pass, the P4s' band frame having
+gone from a copy a card to a whole draw of each; its record moved into
+the engine 2026-10-31): its picture and rim drawn once into a slot of one
+owned layer (`Launcher._faces_for`, `(cols + 2) * rows` slots of the
+shelf, `(rows + 2) * cols` of the icons) and copied in one
+`moy_gfx.face` call, which over anything but the plain ground draws the
+pixels a corner covers in part as the card draws them, because they
+blend over what lies there. The engine keeps which card's face each slot
+holds (`ui.slots` on the band's table, keyed on the look's gen, the plain
+ground, the font scale and the layer; `ui.slot` per card, named by its
+cell -- path, title, kind -- and its cover decode's serial) and answers
+stamp or draw-then-stamp; an idle frame draws the faces `ui.slot_next`
+names (`Launcher.mint_faces`: the band's cards, then the row past either
+end), so a step copies the row it brings in. The layer goes back with
+`release_retained` and when the arrangement is left; the carousel's
+cards draw. The band frame (`launcher_layer._band_frame`, through
+`_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a
+key, repeat or ball step too, where the buffer this frame paints holds the
+band and the frame round it under this frame's statics (`ui.held("band",
+...)`); the parts outside the band a selection changes (the hint strip,
+the icons' caption band) are named with `ui.held` too and drawn where that
+buffer holds another selection's. The floor's end says whether every
+buffer holds the frame: the home then owes the retained frame's capture to
+an idle frame, or asks for the frame that brings the next buffer to it.
+The carousel's card sizes and the desk shelf's are the carousel's own
+geometry, the engine answering which cards show.
 
-The desk home's still ring (§14.4) keeps the parts' keys; it is a
-`PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
+The desk home's still frames (§14.4) name the backdrop's, the hero's,
+the shelf's and the bar's keys in the band host's paints (`ui.held`). The PROJECTS window is a `Carousel` in a window
 (`HomeWindowLayer`) and speaks the record through the WM like any windowed
 content. The carousel's settle frame (the selection changes when the row is
 still: the hero and details pane repaint) is the carousel's key-row p90 on

@@ -678,10 +678,11 @@ def test_a_copy_landing_at_its_fence_draws_the_same_frames(th, kind, bufs):
 def test_one_ring_body():
     """The painted-frame rings are `ui_draw.PaintRing` (docs/scroll_and_text_
     2026-10.md §3.1), one class: no other list of painted frames in the
-    shell or the toolkit. A ScrollRegion (the home's band among them) and
-    the desk home's still frames (§14.4) each keep one; the windowed WM's
+    shell or the toolkit. A ScrollRegion keeps one; the windowed WM's
     `_shown` is the windows' ring; an app's page (`AppHost`) keeps its ring
-    in its context, the engine's (moy_ui_api_host_begin)."""
+    in its context, the engine's (moy_ui_api_host_begin), and the home --
+    its band and the desk's still frames (§14.4) -- names its parts in its
+    band host's paints there (`ui.held`): launcher_layer keeps no ring."""
     import re
     root = Path(__file__).resolve().parent.parent
     src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").glob("*.py")}
@@ -693,7 +694,7 @@ def test_one_ring_body():
     assert not found, found
     assert isinstance(ui_draw.ScrollRegion().ring, ui_draw.PaintRing)
     assert not hasattr(ui_draw.AppHost(), "ring")
-    assert "self._still_ring = _ui_draw.PaintRing()" in src["launcher_layer.py"]
+    assert "PaintRing" not in src["launcher_layer.py"]
 
 
 def test_the_band_is_the_floor_in_the_pages_coordinates(th, monkeypatch):

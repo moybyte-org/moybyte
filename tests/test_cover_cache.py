@@ -326,9 +326,9 @@ def test_gen_has_no_ws_mirror(tmp_path):
     launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
     windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
-    # Four reads: the band frame's check of its ring, the one body every
-    # painted frame records its band through (`_note_band`), the retained
-    # frame's key and the desk home's still parts.
+    # Four reads: the band's key (`_band_key`), the check that a cover
+    # landed while the band drew (`_band_landed`), the retained frame's key
+    # and the desk home's still parts.
     assert launcher.count("ws.covers.gen") == 4
 
 

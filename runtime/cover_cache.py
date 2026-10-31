@@ -123,16 +123,22 @@ _COVER_SLICE_MS = 20
 # Output rows a decode advances between clock checks: a BASE is 128 of them.
 _COVER_ROWS = 16
 
+_SERIAL = [0]
+
+
 class _CoverImage:
     """A decoded cover: `pix` is w * h RGB565 words in the system canvas's
     byte order (BASE, HALF), drawn by `DeviceCanvas.blit565` -- or w * h
-    palette indices (ICON), a sprite like any icon, drawn by `spr`."""
+    palette indices (ICON), a sprite like any icon, drawn by `spr`.
+    `serial` names this decode among every other (a card's kept face is
+    drawn from one: `ui.slot`'s gen)."""
 
     def __init__(self, w, h, pix):
         self.w = w
         self.h = h
         self.pix = pix
         self.transparent = -1
+        _SERIAL[0] = self.serial = (_SERIAL[0] + 1) & 0x3fffffff
 
 
 class _CoverJob:

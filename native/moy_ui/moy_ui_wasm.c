@@ -258,6 +258,41 @@ int32_t moy_ui_run_table_dist(void *target) {
     return c != NULL ? moy_ui_api_table_dist(c) : 0;
 }
 
+int32_t moy_ui_run_table_floor(void *target, int32_t out[4]) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_table_floor(c, out) : 0;
+}
+
+int moy_ui_run_held(void *target, moy_ui_span_t id, int32_t key) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_held(c, id, key) : 0;
+}
+
+int moy_ui_run_held_last(void *target, moy_ui_span_t id, int32_t key) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_held_last(c, id, key) : 0;
+}
+
+int moy_ui_run_held_all(void *target) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_held_all(c) : 0;
+}
+
+int32_t moy_ui_run_slots(void *target, int32_t cap, int32_t key) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_slots(c, cap, key) : 0;
+}
+
+int32_t moy_ui_run_slot(void *target, moy_ui_span_t name, int32_t gen, int mint) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_slot(c, name, gen, mint) : -1;
+}
+
+int32_t moy_ui_run_slot_next(void *target) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_slot_next(c) : -1;
+}
+
 int moy_ui_run_keys_taken(void *target) {
     moy_ui_ctx_t *c = run_ctx(target);
     return c != NULL ? moy_ui_api_keys_taken(c) : 0;
@@ -554,6 +589,46 @@ int32_t moy_ui_wasm_focus(void *e, const uint8_t *id, uint32_t n, uint8_t *buf, 
     moy_ui_span_t s = span(n ? id : NULL, n);
     int len = moy_ui_run_focus(wasm_target(), s, (char *)buf, cap);
     return len < 0 ? 0 : len;
+}
+
+int32_t moy_ui_wasm_table_floor(void *e, uint8_t *out, uint32_t cap) {
+    (void)e;
+    int32_t v[4];
+    int32_t r = moy_ui_run_table_floor(wasm_target(), v);
+    if (r > 0) {
+        put_words(out, cap, v, 4);
+    }
+    return r;
+}
+
+int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key) {
+    (void)e;
+    return moy_ui_run_held(wasm_target(), span(n ? id : NULL, n), key);
+}
+
+int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key) {
+    (void)e;
+    return moy_ui_run_held_last(wasm_target(), span(n ? id : NULL, n), key);
+}
+
+int32_t moy_ui_wasm_held_all(void *e) {
+    (void)e;
+    return moy_ui_run_held_all(wasm_target());
+}
+
+int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key) {
+    (void)e;
+    return moy_ui_run_slots(wasm_target(), cap, key);
+}
+
+int32_t moy_ui_wasm_slot(void *e, const uint8_t *name, uint32_t n, int32_t gen, int32_t mint) {
+    (void)e;
+    return moy_ui_run_slot(wasm_target(), span(n ? name : NULL, n), gen, mint != 0);
+}
+
+int32_t moy_ui_wasm_slot_next(void *e) {
+    (void)e;
+    return moy_ui_run_slot_next(wasm_target());
 }
 
 int32_t moy_ui_wasm_table_dist(void *e) {
@@ -864,6 +939,13 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_text_view", FN(moy_ui_wasm_text_view) },
     { "ui_table_part", FN(moy_ui_wasm_table_part) },
     { "ui_table_dist", FN(moy_ui_wasm_table_dist) },
+    { "ui_table_floor", FN(moy_ui_wasm_table_floor) },
+    { "ui_held", FN(moy_ui_wasm_held) },
+    { "ui_held_last", FN(moy_ui_wasm_held_last) },
+    { "ui_held_all", FN(moy_ui_wasm_held_all) },
+    { "ui_slots", FN(moy_ui_wasm_slots) },
+    { "ui_slot", FN(moy_ui_wasm_slot) },
+    { "ui_slot_next", FN(moy_ui_wasm_slot_next) },
     { "ui_part_at", FN(moy_ui_wasm_part_at) },
     { "ui_split", FN(moy_ui_wasm_split) },
 };

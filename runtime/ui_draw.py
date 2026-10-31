@@ -3160,10 +3160,10 @@ class PaintRing:
     reads, so a shift brings n-1 to n. `held` names the paint the buffer a
     frame draws into holds, RETAINED_FRAMES back. Under the windowed WM the
     shown ring vouches for the buffer instead (one voucher per region) and
-    the content's ring answers only `vouch_key`. Every painted region -- a
-    ScrollRegion, the home's band and the desk home's still frames -- keeps
-    one of these; an app's page (`AppHost`) keeps its slots in its context
-    (moy_ui_api_host_begin)."""
+    the content's ring answers only `vouch_key`. A ScrollRegion keeps one
+    of these; an app's page (`AppHost`) keeps its slots in its context
+    (moy_ui_api_host_begin), and the home's band and the desk home's still
+    frames name their parts in the band host's paints there (`ui.held`)."""
 
     def __init__(self, n=_MAX_RETAINED):
         self.n = n

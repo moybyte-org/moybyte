@@ -850,7 +850,7 @@ shoulders. Under touch there is no strip, and the home lays out in its
 height too; a long press opens the card's list.
 
 **Damage first.** The fullscreen home's band frame (`_band_frame`) hands
-the rects it changed -- the band, and a step's hint strip -- to
+the rects it changed -- its kept table's floor, and a step's hint strip -- to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
 nothing handed while an overlay, the cursor or an owed LOADING pill also
 drew), so a moving home frame on the Guition P4 rotates the band, not the

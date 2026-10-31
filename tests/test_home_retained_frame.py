@@ -117,10 +117,14 @@ def test_selection_change_invalidates(tmp_path):
     calls = _count_grid(ws)
     nxt = next(i for i, it in enumerate(ws.launcher.items)
                if it.get("path") and i != ws.launcher.sel)
+    band = [0]
+    real = ws.launcher.repaint_band
+    ws.launcher.repaint_band = lambda *a, **k: (band.__setitem__(0, band[0] + 1),
+                                                real(*a, **k))[1]
     ws.launcher.sel = nxt
     ws._dirty = True
     drv.frame(0.0)
-    assert calls[0] == 1                             # live redraw, ring + all
+    assert calls[0] + band[0] == 1                   # live: a whole paint or the band's
 
 
 def test_title_change_invalidates(tmp_path):
@@ -139,23 +143,31 @@ def test_title_change_invalidates(tmp_path):
     assert calls[0] + band[0] == 1
 
 
-def test_foreign_paints_reset_the_partial_streak(tmp_path):
-    """After a visit elsewhere the retained ping-pong buffers hold the OTHER
-    screen -- the drag partial's streak must re-arm from zero (latent on the
-    device root before this; masked while transitions painted many frames)."""
+def test_foreign_paints_void_the_band(tmp_path):
+    """After a visit elsewhere the retained buffers hold the OTHER screen: the
+    band's record (`ui.held`, its kept table) answers no buffer, so the
+    re-entry paints whole and a band frame comes only once the home's own
+    paints fill the buffers again."""
     ws, drv = _settle_home(tmp_path)
-    ws._dirty = True
-    drv.frame(0.0)                                   # second consecutive paint
-    assert ws.launcher_layer._full_streak == 2
+    home = ws.launcher_layer
+    took = []
+    real = home._try_band_frame
+    home._try_band_frame = lambda cv, dt: took.append(real(cv, dt)) or took[-1]
+    calls = [0]
+    orig = ws.wallpaper.draw
+    ws.wallpaper.draw = lambda dt, **kw: (calls.__setitem__(0, calls[0] + 1),
+                                          orig(dt, **kw))[1]
     ws.open_settings()
     drv.frame(0.0)                                   # a foreign paint
     ws.go_home()
     _quiesce(ws)
-    drv.frame(0.0)                                   # re-entry paint no. 1
-    assert ws.launcher_layer._full_streak == 1       # NOT the inherited 2
-    ws._dirty = True
-    drv.frame(0.0)                                   # consecutive paint no. 2
-    assert ws.launcher_layer._full_streak == 2
+    home._lib_key = None                             # (no retained frame to stamp)
+    drv.frame(0.0)                                   # the re-entry paint
+    assert calls[0] == 1 and not any(took)
+    for _ in range(4):
+        ws._dirty = True
+        drv.frame(0.0)
+    assert calls[0] < 5                              # the home's own paints: band frames
 
 
 def test_a_frame_that_deferred_a_cover_is_not_stamped_back(tmp_path, monkeypatch):

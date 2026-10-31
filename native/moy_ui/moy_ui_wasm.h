@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 36
+#define MOY_UI_WASM_ROWS 43
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -99,6 +99,23 @@ int moy_ui_run_table_part(void *target, int32_t out[8]);
 // The part answered last's distance from its view's centre, in 256ths of a
 // row (moy_ui_api_table_dist).
 int32_t moy_ui_run_table_dist(void *target);
+// The next rect of the floor of the table drawn last (moy_ui_api_table_floor)
+// at out: 1, then 0, -1 or -2 after the last.
+int32_t moy_ui_run_table_floor(void *target, int32_t out[4]);
+// Whether the buffer the frame paints holds part `id` under `key`
+// (moy_ui_api_held).
+int moy_ui_run_held(void *target, moy_ui_span_t id, int32_t key);
+// Whether the buffer the last frame painted holds part `id` under `key`
+// (moy_ui_api_held_last), and whether every buffer holds every part the
+// frame named (moy_ui_api_held_all).
+int moy_ui_run_held_last(void *target, moy_ui_span_t id, int32_t key);
+int moy_ui_run_held_all(void *target);
+// The faces the table drawn last keeps (moy_ui_api_slots), the slot of
+// one (moy_ui_api_slot) and the next part an idle frame draws the face of
+// (moy_ui_api_slot_next).
+int32_t moy_ui_run_slots(void *target, int32_t cap, int32_t key);
+int32_t moy_ui_run_slot(void *target, moy_ui_span_t name, int32_t gen, int mint);
+int32_t moy_ui_run_slot_next(void *target);
 int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o);
 int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
                          const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]);
@@ -170,6 +187,19 @@ int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8
 int32_t moy_ui_wasm_table_part(void *e, uint8_t *out, uint32_t cap);
 // ui_table_dist answers moy_ui_run_table_dist.
 int32_t moy_ui_wasm_table_dist(void *e);
+// ui_table_floor answers moy_ui_run_table_floor, its rect's x, y, w and h
+// at `out`.
+int32_t moy_ui_wasm_table_floor(void *e, uint8_t *out, uint32_t cap);
+// ui_held answers moy_ui_run_held.
+int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key);
+// ui_held_last and ui_held_all answer moy_ui_run_held_last and _held_all.
+int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key);
+int32_t moy_ui_wasm_held_all(void *e);
+// ui_faces, ui_face and ui_slot_next answer moy_ui_run_slots, _face and
+// _slot_next.
+int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key);
+int32_t moy_ui_wasm_slot(void *e, const uint8_t *name, uint32_t n, int32_t gen, int32_t mint);
+int32_t moy_ui_wasm_slot_next(void *e);
 // ui_part_at answers 1 where the pointer is inside the part answered last
 // and writes its x and y from the part's top-left at `out`, else 0.
 int32_t moy_ui_wasm_part_at(void *e, uint8_t *out, uint32_t cap);

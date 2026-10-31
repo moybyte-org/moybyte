@@ -200,13 +200,22 @@ def _over(o):
     snap = o.get("snap")
     offset = o.get("offset")
     spill = o.get("spill")
+    keep = o.get("keep")
+    ov = o.get("over")
+    whole = o.get("whole")
+    across = o.get("across")
+    at = o.get("at")
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
-            or axis or snap or offset is not None or spill is not None):
+            or axis or snap or offset is not None or spill is not None or keep is not None
+            or ov is not None or whole or across is not None or at is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
-                 | (4096 if offset is not None else 0) | (8192 if spill is not None else 0))
+                 | (4096 if offset is not None else 0) | (8192 if spill is not None else 0)
+                 | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
+                 | (65536 if whole else 0) | (131072 if across is not None else 0)
+                 | (262144 if at is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -220,6 +229,14 @@ def _over(o):
         tail += _pack("<i", int(offset))
     if spill is not None:
         tail += _pack("<i", int(spill))
+    if keep is not None:
+        tail += _pack("<i", int(keep))
+    if ov is not None:
+        tail += _pack("<4i", int(ov[0]), int(ov[1]), int(ov[2]), int(ov[3]))
+    if across is not None:
+        tail += _pack("<2i", int(across[0]), int(across[1]))
+    if at is not None:
+        tail += _pack("<i", int(at))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -490,7 +507,17 @@ def table(label, columns, rows, cur, o=None):
     `o.snap` puts row 0 at the view's centre and rests the view on a row's
     centre; `o.offset` is the app's own scroll (a drag, a step or the wheel
     move it no more); `o.spill` is the room a part may draw past its cell
-    on every side (`table_dist` says where each part lies)."""
+    on every side (`table_dist` says where each part lies). `o.keep = key`
+    keeps a placed table of parts' parts across frames: `key` what every
+    part is a function of beside its row's cells (negative: this frame's
+    paint keeps nothing), and a frame draws only what the buffer it paints
+    lacks (`table_floor`); `o.whole = True` draws its view whole (the app
+    drew its ground anew); `o.over = (x, y, w, h)` is what the frame draws
+    over the table after its pass (a cursor). `o.across = (first, pitch)`
+    makes each row's cells its parts across, the first `first` px into the
+    view across the rows' axis and each `pitch` on from the last, so a kept
+    table draws the parts that changed, not their rows; `o.at` is the
+    current row's part its gen and marks belong to."""
     t = _T
     n = len(columns)
     b = _memo_get(rows, n)
@@ -550,6 +577,91 @@ def table_dist():
     negative before it (above it, or on its left); 0 where no part is
     open. A carousel scales each card by it."""
     return _C.api_table_dist(_T[0])
+
+
+_TF = array("i", [0] * 4)               # table_floor's answer
+
+
+def table_floor(r):
+    """The table drawn last, where it keeps its parts (`o.keep`): the next
+    rect of its view this frame draws (its floor) written into `r` (an
+    `array("i")` of four), 1, for the app to put its own ground back there
+    before its parts draw; `table_part` then answers the parts that meet
+    the floor, each clipped to the rect it meets. After the last, 0 where
+    every buffer the canvas presents holds the table as this frame draws
+    it, -1 where one lags (the frame owes the next), -2 where they hold it
+    but for what was drawn over it (`o.over`). A frame whose buffer holds
+    the table's paint under its key at its scroll draws the parts whose
+    cells, gen or marks changed since and what was drawn over that paint;
+    any other frame draws the view whole. A table that keeps nothing
+    answers its view, then 0."""
+    a = _TF
+    v = _C.api_table_floor(_T[0], a)
+    if v > 0:
+        r[0] = a[0]
+        r[1] = a[1]
+        r[2] = a[2]
+        r[3] = a[3]
+    return v
+
+
+def held(id, key):
+    """Whether the buffer this frame paints holds part `id` of the page as
+    a frame drew it under `key` (an int): the buffers the canvas presents
+    in turn, the frames between this page's, and that frame the app's
+    alone (its kept table's key not negative). Names `id` under `key` for
+    this frame, whose pass draws the part where it answers False."""
+    return _C.api_held(_T[0], id, key)
+
+
+SLOT_MINT = 0x10000                     # `face`'s answer: draw the face into the slot first
+
+
+def slots(cap, key):
+    """The table drawn last keeps its parts' faces drawn: each part drawn
+    once into a square slot of a layer the app owns (`cap` of them; 0
+    none), then stamped from it. `key` (an int) is what every face is
+    drawn under beside its part's own content -- the look, the slot's
+    size, the layer: another key or `cap` forgets every face. The engine
+    keeps one such record, held by the context that asked last. Answers
+    the slots kept (at most 128)."""
+    return _C.api_slots(_T[0], cap, key)
+
+
+def slot(name, gen=0, mint=False):
+    """The face of a part drawn from what `name` (a str, its content) and
+    `gen` (an int, a generation of it the name does not carry: its
+    picture's) name: the slot holding it, to stamp; else with `mint` the
+    slot to draw it into (the one stamped least recently) | `SLOT_MINT`,
+    the app drawing the face there and then stamping it; else -1, the part
+    drawn as it is."""
+    return _C.api_slot(_T[0], name, gen, mint)
+
+
+def slot_next():
+    """The next part whose face a frame nothing waits on draws (its key
+    handed to `face` with `mint`): the parts of the rows the table drawn
+    last showed, then of the row past its end, then of the row before its
+    start; -1 after the last, and the order starts again (as `faces`
+    starts it)."""
+    return _C.api_slot_next(_T[0])
+
+
+def held_last(id, key):
+    """Whether the buffer the last frame painted holds part `id` of the
+    page as that frame named it under `key` (`held`): the frame before
+    this one, this page's and the app's alone -- for a part the app copies
+    out of that buffer. Names nothing."""
+    return _C.api_held_last(_T[0], id, key)
+
+
+def held_all():
+    """Whether every buffer the canvas presents holds every part this
+    frame named (`held`) as it names it: the paints before this one, a
+    buffer each, this page's, one a frame, each naming each part under the
+    same key -- whether or not a kept table was drawn. False where the
+    canvas keeps nothing."""
+    return _C.api_held_all(_T[0])
 
 
 def table_rows():

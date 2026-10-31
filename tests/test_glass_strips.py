@@ -114,8 +114,11 @@ def _drag_home(ws, drv, root):
     for _ in range(80):
         drv.frame(1 / 30)
     quiesce(ws)
+    home = ws.launcher_layer
+    home._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.frame(1 / 30)
+    del home._try_band_frame
     assert root.damage == [], "a full home paint describes nothing"
     gx, gy, gw, gh = ws.layout.lib_grid
     cx, cy = gx + gw - 10, gy + gh // 2

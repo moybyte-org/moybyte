@@ -86,6 +86,32 @@ typedef struct {
     int32_t began1;
     int16_t dy, mv_dy;
 } moy_ui_host_t;
+// One paint of a context (moy_ui_ctx_t's kt): the painted frame (-1:
+// none), whether it is the app's alone (`kept`: no key of its table was
+// negative), and its kept table (has_tbl), as moy_ui_api_table recorded it:
+// its id, key, columns' geometry, view, scroll, row height and count,
+// current row (its part `at`) and focus mark, the record (each part's cell
+// hashed, np parts a row, the current part's gen in it) of rows r0 .. r0 +
+// k - 1 (k -1: none kept), and what was
+// drawn over it after its pass (`over`, w 0 none); then the parts `held`
+// named (id, key), nh of them.
+#define MOY_UI_KEPT_RING 4          // RETAINED_FRAMES at most, and the paint begun
+#define MOY_UI_KEPT_HELD 8          // the parts `held` names a paint
+#define MOY_UI_KEPT_FLOOR 4         // the rects a kept table's floor is merged to
+#define MOY_UI_KEPT_PARTS 48        // the parts that show a kept table records (more: drawn whole)
+#define MOY_UI_KF_HELD 1            // kf_held: every buffer holds the kept table
+#define MOY_UI_KF_OVER 2            // ...but for what was drawn over it
+typedef struct {
+    int32_t f, key, off;
+    uint32_t id, geo;
+    moy_ui_box_t view, over;
+    int16_t rh, n, cur, r0, k;
+    int8_t at;
+    uint8_t mark, kept, has_tbl, nh, np;
+    uint32_t h[MOY_UI_KEPT_PARTS];
+    uint32_t hid[MOY_UI_KEPT_HELD];
+    int32_t hkey[MOY_UI_KEPT_HELD];
+} moy_ui_kept_t;
 #define MOY_UI_KEYREP(byte, n) ((int32_t)(byte) | ((int32_t)(n) << 16))
 #define MOY_UI_MOD_SHIFT 2
 #define MOY_UI_WHEEL_ROWS 3
@@ -141,6 +167,21 @@ typedef struct {
     int8_t axis_x, snap, has_offset;
     int32_t offset;
     int16_t spill;
+    // A placed table of parts keeps its parts across frames (has_keep):
+    // `keep` what every part is a function of beside its row's cells (a
+    // negative key keeps nothing of this frame's paint); `whole` (0 or 1)
+    // this frame draws its view whole (the app drew its ground anew);
+    // `over_*` a rect drawn over the table after its pass this frame (a
+    // cursor; w 0 none).
+    int8_t has_keep, whole;
+    int32_t keep;
+    int16_t over_x, over_y, over_w, over_h;
+    // A table of parts whose rows hold parts across (has_across): a row's
+    // cells are its parts' keys, the first `across_first` px into the view
+    // across the rows' axis, each `across_pitch` px on from the last; `at`
+    // the current row's part its gen and marks belong to.
+    int8_t has_across;
+    int16_t across_first, across_pitch, at;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -152,6 +193,11 @@ typedef struct {
 #define MOY_UI_O_SNAP 2048          // and `snap`
 #define MOY_UI_O_OFFSET 4096        // and `offset`, its word after the part's
 #define MOY_UI_O_SPILL 8192         // and `spill`, its word after the offset's
+#define MOY_UI_O_KEEP 16384         // and `keep`, its word after the spill's
+#define MOY_UI_O_OVER 32768         // and `over`, its four words (x, y, w, h) after the keep's
+#define MOY_UI_O_WHOLE 65536        // and `whole`
+#define MOY_UI_O_ACROSS 131072      // and `across`, its two words (first, pitch) after the over's
+#define MOY_UI_O_AT 262144          // and `at`, its word after the across's
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -464,6 +510,20 @@ typedef struct {
     uint16_t was_flags;
     uint8_t was_fs, was_hint;
     moy_ui_host_t host;             // its app host's (moy_ui_api_host_begin)
+    // What the paints this context began left in the buffers a canvas
+    // presents in turn, a slot a paint (newest at kt_ri, kt_n held): its
+    // kept table and the parts `held` named (moy_ui_api_held). kt_f is the
+    // frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is kept);
+    // kf the floor the kept table drawn last draws this frame, kf_i the next
+    // rect moy_ui_api_table_floor answers, kf_held whether every buffer
+    // holds the table as this frame draws it.
+    moy_ui_kept_t kt[MOY_UI_KEPT_RING];
+    uint8_t kt_ri, kt_n, kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np;
+    int32_t kt_f;
+    moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
+    // The ticket of the engine's faces this context holds (moy_ui_api_slots;
+    // 0: none), tp_np the parts a row of the table drawn last holds.
+    uint32_t fc_id;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -750,6 +810,62 @@ int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t o
 // from its view's centre along the rows' axis, in 256ths of a row, negative
 // before it (above, or on the left); 0 where none was answered.
 int32_t moy_ui_api_table_dist(const moy_ui_ctx_t *c);
+// The table drawn last, where it keeps its parts (o->keep): the next rect
+// of its view the frame draws (its floor) into out[0..3], 1, for an app
+// that puts its own ground back there before its parts draw; the parts
+// moy_ui_api_table_part answers are then those that meet it, each clipped
+// to the floor rect it meets. After the last: 0 where every buffer the
+// canvas presents holds the table as this frame draws it, -1 where one
+// lags (the frame owes the next), -2 where they hold it but for what was
+// drawn over it (o->over_*), which no frame of the table's brings back. A frame whose buffer holds the table's
+// paint under its key at its scroll draws the rows whose cells, gen or
+// marks changed since and what was drawn over that paint (o->over_*); any
+// other frame draws the view whole. A table that keeps nothing answers
+// its view, then 0.
+int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]);
+// Whether the buffer this frame paints holds part `id` of the app's page
+// as a frame drew it under `key`: the buffers RETAINED_FRAMES back, the
+// frames between this context's paints, that paint the app's alone and
+// `held` named there with `key`. Names it under `key` for this frame's
+// paint, which the app draws where it answers 0.
+int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key);
+// Whether the buffer the last frame painted holds part `id` as that frame
+// named it under `key` (moy_ui_api_held): the frame before this one, this
+// context's paint and the app's alone; for a part the app copies out of
+// that buffer. Names nothing.
+int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key);
+// Whether every buffer the canvas presents holds every part this frame
+// named (moy_ui_api_held) as it names it: the paints before this one, a
+// buffer each, this context's, one a frame, each naming each part under
+// the same key -- with no kept table drawn too. 0 where nothing is kept.
+int moy_ui_api_held_all(const moy_ui_ctx_t *c);
+// The faces of a table's parts kept drawn: each part drawn once into a
+// square slot of a layer the app owns, then stamped from it. The engine
+// keeps the slots' record -- which part's face each holds, which was
+// stamped least recently -- and the app draws: a face into the slot the
+// engine names, the slot onto its canvas. It keeps one such record, held
+// by the context that asked last (another's asking forgets its faces).
+#define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
+#define MOY_UI_SLOT_MINT 0x10000    // moy_ui_api_slot: draw the face into the slot first
+// The table drawn last keeps its parts' faces in `cap` slots (at most
+// MOY_UI_FACE_SLOTS; 0 keeps none), each a function of `key` -- what
+// every face is drawn under beside its part's own content: the look, the
+// slot's size, the layer -- and of its part: another key or cap forgets
+// every face. Its parts are the order moy_ui_api_slot_next answers from.
+// Answers the slots kept.
+int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key);
+// The face of a part drawn from what `name` and `gen` name (its content,
+// hashed, and a generation of it the name does not carry: its picture's):
+// the slot holding it, to stamp; else with `mint` the slot to draw it
+// into, the one stamped least recently, | MOY_UI_SLOT_MINT; else -1, the
+// part drawn as it is.
+int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mint);
+// The next part whose face a frame nothing waits on draws (its name and
+// gen handed to moy_ui_api_slot with mint): the parts of the rows the table drawn
+// last showed, then those of the row past its end, then those of the row
+// before its start, nearest first; -1 after the last, and the order
+// starts again (as moy_ui_api_slots starts it).
+int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting
