@@ -350,23 +350,42 @@ def link(label, value="", o=None):
 
 # The encodings verbs made lately, so a frame that hands a verb the same
 # options draws without building them again: by identity, and for a mutable
-# sequence also by a copy an edit no longer equals (a tuple is its own).
+# sequence also by a copy an edit no longer equals (a tuple is its own). The
+# slot each kind (a table's column count, a verb's options, the columns) hit
+# last is tried first: a frame asks for the same few in the same order, and a
+# board pays a scan of the slots in bytecode.
 _MEMO = 24
 _memo_k = [None] * _MEMO
 _memo_c = [None] * _MEMO
 _memo_v = [None] * _MEMO
 _memo_at = [0]
+_memo_hint = {}
+
+
+def _memo_hit(i, items, kind):
+    c = _memo_c[i]
+    if c is None or c == items:
+        v = _memo_v[i]
+        if v[0] == kind:
+            return v[1]
+    return None
 
 
 def _memo_get(items, kind):
     k = _memo_k
+    j = _memo_hint.get(kind, -1)
+    if j >= 0 and k[j] is items:
+        c = _memo_c[j]
+        if c is None or c == items:
+            v = _memo_v[j]
+            if v[0] == kind:
+                return v[1]
     for i in range(_MEMO):
         if k[i] is items:
-            c = _memo_c[i]
-            if c is None or c == items:
-                v = _memo_v[i]
-                if v[0] == kind:
-                    return v[1]
+            v = _memo_hit(i, items, kind)
+            if v is not None:
+                _memo_hint[kind] = i
+                return v
     return None
 
 
