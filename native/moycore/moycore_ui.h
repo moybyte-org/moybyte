@@ -30,6 +30,13 @@
  *                                    lags) or -2 (held but for what was drawn over it)
  *   ui.held(id, key)               -> whether the buffer this frame paints holds part
  *                                    `id` as a frame drew it under `key`
+ *   ui.slots(cap, key)             -> the slots the table drawn last keeps its parts'
+ *                                    faces in, under `key` (0 keeps none)
+ *   ui.slot(name, gen, mint)       -> the slot (from 1) holding the face of the part
+ *                                    drawn from `name` and `gen`, and true where it is
+ *                                    to be drawn there first (`mint`); nil where none
+ *   ui.slot_next()                 -> the next part (from 1) whose face an idle frame
+ *                                    draws; nil after the last
  *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.text_view(id, lines, o)     -> the first line shown, the rows shown
@@ -870,6 +877,38 @@ static int moycore_ui_held(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_slots(lua_State *L)
+{
+    lua_pushinteger(L, (lua_Integer)moy_ui_run_slots(moycore_ui_canvas(),
+                                                     (int32_t)luaL_checkinteger(L, 1),
+                                                     (int32_t)luaL_checkinteger(L, 2)));
+    return 1;
+}
+
+static int moycore_ui_slot(lua_State *L)
+{
+    int32_t j = moy_ui_run_slot(moycore_ui_canvas(), moycore_ui_span(L, 1),
+                                (int32_t)luaL_optinteger(L, 2, 0), lua_toboolean(L, 3));
+    if (j < 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, (lua_Integer)(j & (MOY_UI_SLOT_MINT - 1)) + 1);
+    lua_pushboolean(L, (j & MOY_UI_SLOT_MINT) != 0);
+    return 2;
+}
+
+static int moycore_ui_slot_next(lua_State *L)
+{
+    int32_t p = moy_ui_run_slot_next(moycore_ui_canvas());
+    if (p < 0) {
+        lua_pushnil(L);
+    } else {
+        lua_pushinteger(L, (lua_Integer)p + 1);
+    }
+    return 1;
+}
+
 static int moycore_ui_table_dist(lua_State *L)
 {
     lua_pushinteger(L, (lua_Integer)moy_ui_run_table_dist(moycore_ui_canvas()));
@@ -898,7 +937,8 @@ static void moycore_ui_open(lua_State *L)
         {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"table_dist", moycore_ui_table_dist},
-        {"table_floor", moycore_ui_table_floor}, {"held", moycore_ui_held}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
+        {"table_floor", moycore_ui_table_floor}, {"held", moycore_ui_held},
+        {"slots", moycore_ui_slots}, {"slot", moycore_ui_slot}, {"slot_next", moycore_ui_slot_next}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"table_part", moycore_ui_table_part}, {"part_at", moycore_ui_part_at},
         {"split", moycore_ui_split},

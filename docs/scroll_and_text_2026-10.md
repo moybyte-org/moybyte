@@ -770,15 +770,22 @@ the band draws nothing; a scroll, a key
 that moved or a buffer the engine cannot vouch for draws the band whole.
 The carousel's key holds its centre card, so its floor is nothing, the
 stamp or the band whole. A grid or icons card that wears no focus is
-drawn out of its KEPT FACE (`launcher_layer._Faces`, built 2026-10-28,
-retired with the move and brought back 2026-10-30 by #243's perf pass,
-the P4s' band frame having gone from a copy a card to a whole draw of
-each): its picture and rim drawn once, on an idle frame, into a slot of
-one owned layer, keyed on the item, its title, the cover object and the
-look's gen, and copied in one `moy_gfx.face` call, which over anything but
-the plain ground draws the pixels a corner covers in part as the card
-draws them, because they blend over what lies there. The layer goes back
-with `release_retained` and when the arrangement is left; the carousel's
+drawn out of its KEPT FACE (built 2026-10-28, retired with the move and
+brought back 2026-10-30 by #243's perf pass, the P4s' band frame having
+gone from a copy a card to a whole draw of each; its record moved into
+the engine 2026-10-31): its picture and rim drawn once into a slot of one
+owned layer (`Launcher._faces_for`, `(cols + 2) * rows` slots of the
+shelf, `(rows + 2) * cols` of the icons) and copied in one
+`moy_gfx.face` call, which over anything but the plain ground draws the
+pixels a corner covers in part as the card draws them, because they
+blend over what lies there. The engine keeps which card's face each slot
+holds (`ui.slots` on the band's table, keyed on the look's gen, the plain
+ground, the font scale and the layer; `ui.slot` per card, named by its
+cell -- path, title, kind -- and its cover decode's serial) and answers
+stamp or draw-then-stamp; an idle frame draws the faces `ui.slot_next`
+names (`Launcher.mint_faces`: the band's cards, then the row past either
+end), so a step copies the row it brings in. The layer goes back with
+`release_retained` and when the arrangement is left; the carousel's
 cards draw. The band frame (`launcher_layer._band_frame`, through
 `_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a
 key, repeat or ball step too, where the buffer this frame paints holds the

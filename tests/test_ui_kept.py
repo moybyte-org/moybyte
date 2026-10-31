@@ -228,6 +228,81 @@ def test_parts_across_a_row_draw_alone(th):
     assert frame(2, 1, changed) == [(10 + 206 - 2, 60 - 2, 96, 14)]   # cut to the view
 
 
+def _faces_frame(rig, th, cap, key, rows, offset=0):
+    """A painted frame of a kept table of parts three across whose faces
+    are kept in `cap` slots under `key` (`ui.slots`); ends the page."""
+    rig.n += 1
+    ui_draw.paint_frame(rig.n, True)
+    rig.host.whole()
+    rig.host.begin(rig.cv, th, None, False, False, True)
+    ui.at(*_VIEW)
+    ui.table("", ("", "", ""), rows, 0, {
+        "id": "t", "part": [0, 10], "offset": offset, "keep": 3, "spill": 0, "gen": 1,
+        "current": False, "mark": False, "across": (0, 100), "at": 0})
+    got = ui.slots(cap, key)
+    while ui.table_part(rig.r) >= 0:
+        pass
+    ui.end()
+    return got
+
+
+def test_faces_keep_a_slot_a_part_and_reuse_the_least_recently_stamped(th):
+    """`ui.slots` / `ui.slot`: a part's face is minted into a slot once
+    (`SLOT_MINT`), then held under its name and gen; a full record mints
+    over the face stamped least recently; another gen, key or cap, or
+    another context asking, forgets."""
+    rig = Rig(th, 2, axis="y")
+    rows = [["a%d" % i, "b%d" % i, "c%d" % i] for i in range(20)]
+    assert _faces_frame(rig, th, 3, 11, rows) == 3
+    assert ui.slot("a0", 0) == -1                       # (none yet, none minted)
+    assert ui.slot("a0", 0, True) == 0 | ui.SLOT_MINT
+    assert ui.slot("b0", 0, True) == 1 | ui.SLOT_MINT
+    assert ui.slot("c0", 0, True) == 2 | ui.SLOT_MINT
+    assert (ui.slot("a0", 0), ui.slot("b0", 0, True), ui.slot("c0", 0)) == (0, 1, 2)
+    assert ui.slot("c0", 5) == -1                       # another picture of it
+    assert ui.slot("a1", 0, True) == 0 | ui.SLOT_MINT   # a0 stamped least recently
+    assert ui.slot("a0", 0) == -1 and ui.slot("b0", 0) == 1
+    _faces_frame(rig, th, 3, 11, rows)
+    assert ui.slot("b0", 0) == 1                        # kept across frames
+    _faces_frame(rig, th, 3, 12, rows)
+    assert ui.slot("b0", 0) == -1                       # another key forgets
+    ui.slot("b0", 0, True)
+    _faces_frame(rig, th, 4, 12, rows)
+    assert ui.slot("b0", 0) == -1                       # ...and another cap
+    ui.slot("b0", 0, True)
+    other = ui_draw.AppHost()
+    other.begin(rig.cv, th, None, False, False, True)
+    assert ui.slot("b0", 0) == -1                       # it is the one context's
+    ui.slots(4, 12)
+    ui.end()
+    _faces_frame(rig, th, 4, 12, rows)
+    assert ui.slot("b0", 0) == -1                       # another asked: forgotten
+    assert _faces_frame(rig, th, 500, 12, rows) == 128  # at most 128 slots
+
+
+def test_slot_next_names_the_parts_shown_then_the_rows_past_either_end(th):
+    """`ui.slot_next`: the parts of the rows the table showed, then the
+    row past its end, then the row before its start, nearest first; -1,
+    and the order starts again."""
+    rig = Rig(th, 2, axis="y")
+    rows = [["a%d" % i, "b%d" % i, "c%d" % i] for i in range(20)]
+    _faces_frame(rig, th, 30, 1, rows, offset=30)       # rows 3 .. 8 show (60 tall)
+    got = []
+    i = ui.slot_next()
+    while i >= 0:
+        got.append(i)
+        i = ui.slot_next()
+    assert got == list(range(9, 27)) + [27, 28, 29] + [8, 7, 6]
+    assert ui.slot_next() == 9                          # (again from the first)
+    _faces_frame(rig, th, 30, 1, rows[:2])
+    got = []
+    i = ui.slot_next()
+    while i >= 0:
+        got.append(i)
+        i = ui.slot_next()
+    assert got == list(range(6))                        # (no row past either end)
+
+
 _LUA = """
 function _draw()
   ui.page("Kept")
@@ -294,4 +369,64 @@ def test_the_lua_face_answers_the_floor_and_held(tmp_path):
     assert pm[9] == 10                                 # its end, 0: nothing lags
     assert pm[10] == 3                                 # every row shows
     assert pm[11] == 0                                 # no buffer holds the hint
+    ws.exit()
+
+
+_LUA_FACES = """
+function _draw()
+  ui.page("Faces")
+  ui.at(10, 40, 300, 60)
+  ui.table("", {"", ""}, {{"a", "b"}, {"c", "d"}, {"e", "f"}, {"g", "h"}, {"i", "j"}}, 1,
+           {id = "t", part = {0, 20}, offset = 20, keep = 5, spill = 0, gen = 1,
+            current = false, mark = false, across = {0, 120}, at = 1})
+  pmem(0, ui.slots(3, 9))
+  local s, m = ui.slot("c", 0, true)
+  pmem(1, s); pmem(2, m and 1 or 0)
+  s, m = ui.slot("c", 0)
+  pmem(3, s); pmem(4, m and 1 or 0)
+  pmem(5, ui.slot("d", 0) == nil and 1 or 0)
+  local p, n = ui.slot_next(), 0
+  while p do n = n + 1; pmem(5 + n, p); p = ui.slot_next() end
+  pmem(20, n)
+  while ui.table_part() do end
+end
+"""
+
+
+def test_the_lua_face_keeps_faces(tmp_path):
+    """The Lua face: `ui.slots(cap, key)` the slots kept, `ui.slot(name,
+    gen, mint)` the slot from 1 and whether it is to be drawn first (nil
+    where none), `ui.slot_next()` the next part from 1, nil after the
+    last."""
+    from ws_helpers import make_drv, open_cart
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    d = os.path.join(root, "faces_lua.moy")
+    os.makedirs(d)
+    with open(os.path.join(d, "manifest.json"), "w") as f:
+        json.dump({"format": "moy-1", "title": "Faces Lua", "runtime": "lua",
+                   "main": "main.lua", "canvas": "320x240", "extensions": ["moybyte.ui"],
+                   "moybyte": {"type": "app", "permissions": []}}, f)
+    with open(os.path.join(d, "main.lua"), "w") as f:
+        f.write(_LUA_FACES)
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    open_cart(ws, "Faces Lua")
+    drv = make_drv(ws)
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    lua = ws.player._lua
+    if hasattr(lua._run, "pmem"):
+        pm = list(lua._run.pmem()[1])[:21]
+    else:
+        import sys
+        img = array("i", bytearray(4 * 256))
+        sys.modules[type(lua).__module__]._moycore.pmem_image(img)
+        pm = list(img)[:21]
+    assert pm[0] == 3
+    assert pm[1:6] == [1, 1, 1, 0, 1]             # minted into slot 1, then held there
+    # rows 2 .. 4 show (20 down, 60 tall), two parts each: then row 5 past
+    # the end, then row 1 before the start, nearest first
+    assert pm[20] == 10 and pm[6:16] == [3, 4, 5, 6, 7, 8, 9, 10, 2, 1]
     ws.exit()

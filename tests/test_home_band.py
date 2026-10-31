@@ -14,7 +14,7 @@ picture, to the second's bytes."""
 
 import pytest
 
-from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui_draw
+from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui, ui_draw
 from ws_helpers import cover_bytes, no_unlock_banner, quiesce
 
 
@@ -121,7 +121,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         frame()
     if not ref:                            # the faces an idle second draws
         for _ in range(4):
-            ws.launcher.warm_faces(10 ** 6)
+            ws.launcher.mint_faces(10 ** 6)
         # the band's frames, and the desk's still
         for name in ("_try_band_frame", "_try_still_frame"):
             def counted(cv, dt, real=getattr(ws.launcher_layer, name)):
@@ -321,15 +321,15 @@ def test_band_frames_follow_what_the_cards_show(tmp_path, monkeypatch, arrangeme
     """Through a rename, a cover landing, a theme change and the focus
     leaving the cards for the tab row, every picture byte-equal to whole
     repaints that draw every card, the cards out of their kept faces
-    (`launcher_layer._Faces`)."""
+    (`ui.slot`)."""
     hits = [0]
-    real = launcher_layer._Faces.find
+    real = ui.slot
 
-    def find(self, i, it, cover):
-        j = real(self, i, it, cover)
-        hits[0] += j is not None
+    def slot(name, gen=0, mint=False):
+        j = real(name, gen, mint)
+        hits[0] += 0 <= j < ui.SLOT_MINT
         return j
-    monkeypatch.setattr(launcher_layer._Faces, "find", find)
+    monkeypatch.setattr(launcher_layer._ui, "slot", slot)
     ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs,
                         session=_edits)
     assert stats["band"] * 4 > stats["frames"], stats      # (a rescan paints whole)
@@ -348,16 +348,16 @@ def test_kept_faces_are_released(tmp_path, monkeypatch):
     arrangement give it back."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "icons", "blocks", 2, False)
     g = ws.launcher
-    lay = g._faces.lay
+    lay = g._face_lay
     assert ws.launcher_layer.release_retained()
-    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+    assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
     ws.launcher_layer.handle_input(_Key("down"))
     ws.mark_dirty()
     assert frame() is not None
     assert g.faces_bytes() > 0
-    lay = g._faces.lay
+    lay = g._face_lay
     ws.set_home_arrangement("grid")
-    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+    assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
 
 
 @pytest.mark.parametrize("arrangement", ["grid", "icons"])
@@ -370,5 +370,16 @@ def test_idle_frames_draw_the_next_rows_faces(tmp_path, monkeypatch, arrangement
     shown = {i for i, _r in g._visible()}
     for _ in range(12):
         drv.frame(1 / 30)
-    kept = {k for k, j in g._faces.of.items() if g._faces.item[j] is not None}
-    assert kept - shown, (sorted(shown), sorted(kept))
+    assert _kept(g) - shown, (sorted(shown), sorted(_kept(g)))
+
+
+def _kept(g):
+    """The cards whose faces the engine holds as they are now."""
+    g._host.resume(g._face_geo[0], g.theme)
+    out = set()
+    for k, it in enumerate(g.items):
+        cover = g.cover_ready(it, g._fdiv)
+        if cover is not False and ui.slot(g._face_name(k), 0 if cover is None else cover.serial,
+                                          False) >= 0:
+            out.add(k)
+    return out

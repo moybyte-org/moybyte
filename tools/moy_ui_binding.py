@@ -372,6 +372,9 @@ _DRAW_SIGS = (
     ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
     ("moy_ui_api_table_floor", [c.c_void_p, c.c_void_p], c.c_int32),
     ("moy_ui_api_held", [c.c_void_p, _Span, c.c_int32], _I),
+    ("moy_ui_api_slots", [c.c_void_p, c.c_int32, c.c_int32], c.c_int32),
+    ("moy_ui_api_slot", [c.c_void_p, _Span, c.c_int32, _I], c.c_int32),
+    ("moy_ui_api_slot_next", [c.c_void_p], c.c_int32),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -1460,6 +1463,22 @@ def binding():
             t = _Span(c.addressof(keep), 0)
         return bool(lib.moy_ui_api_held(p, t, int(key)))
 
+    def api_slots(ctx, cap, key):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_slots(p, int(cap), int(key)))
+
+    def api_slot(ctx, name, gen, mint):
+        p, _k = _ctx(ctx)
+        t, keep = span(name)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return int(lib.moy_ui_api_slot(p, t, int(gen), 1 if mint else 0))
+
+    def api_slot_next(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_slot_next(p))
+
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 8)()
@@ -1681,7 +1700,7 @@ def binding():
               api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics, api_table_part, api_table_dist,
-              api_table_floor, api_held,
+              api_table_floor, api_held, api_slots, api_slot, api_slot_next,
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,

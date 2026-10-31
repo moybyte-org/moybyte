@@ -518,9 +518,12 @@ typedef struct {
     // rect moy_ui_api_table_floor answers, kf_held whether every buffer
     // holds the table as this frame draws it.
     moy_ui_kept_t kt[MOY_UI_KEPT_RING];
-    uint8_t kt_ri, kt_n, kt_k, kf_n, kf_i, kf_held, tp_keep;
+    uint8_t kt_ri, kt_n, kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np;
     int32_t kt_f;
     moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
+    // The ticket of the engine's faces this context holds (moy_ui_api_slots;
+    // 0: none), tp_np the parts a row of the table drawn last holds.
+    uint32_t fc_id;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -826,6 +829,33 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]);
 // `held` named there with `key`. Names it under `key` for this frame's
 // paint, which the app draws where it answers 0.
 int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key);
+// The faces of a table's parts kept drawn: each part drawn once into a
+// square slot of a layer the app owns, then stamped from it. The engine
+// keeps the slots' record -- which part's face each holds, which was
+// stamped least recently -- and the app draws: a face into the slot the
+// engine names, the slot onto its canvas. It keeps one such record, held
+// by the context that asked last (another's asking forgets its faces).
+#define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
+#define MOY_UI_SLOT_MINT 0x10000    // moy_ui_api_slot: draw the face into the slot first
+// The table drawn last keeps its parts' faces in `cap` slots (at most
+// MOY_UI_FACE_SLOTS; 0 keeps none), each a function of `key` -- what
+// every face is drawn under beside its part's own content: the look, the
+// slot's size, the layer -- and of its part: another key or cap forgets
+// every face. Its parts are the order moy_ui_api_slot_next answers from.
+// Answers the slots kept.
+int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key);
+// The face of a part drawn from what `name` and `gen` name (its content,
+// hashed, and a generation of it the name does not carry: its picture's):
+// the slot holding it, to stamp; else with `mint` the slot to draw it
+// into, the one stamped least recently, | MOY_UI_SLOT_MINT; else -1, the
+// part drawn as it is.
+int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mint);
+// The next part whose face a frame nothing waits on draws (its name and
+// gen handed to moy_ui_api_slot with mint): the parts of the rows the table drawn
+// last showed, then those of the row past its end, then those of the row
+// before its start, nearest first; -1 after the last, and the order
+// starts again (as moy_ui_api_slots starts it).
+int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting

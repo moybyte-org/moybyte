@@ -614,6 +614,39 @@ def held(id, key):
     return _C.api_held(_T[0], id, key)
 
 
+SLOT_MINT = 0x10000                     # `face`'s answer: draw the face into the slot first
+
+
+def slots(cap, key):
+    """The table drawn last keeps its parts' faces drawn: each part drawn
+    once into a square slot of a layer the app owns (`cap` of them; 0
+    none), then stamped from it. `key` (an int) is what every face is
+    drawn under beside its part's own content -- the look, the slot's
+    size, the layer: another key or `cap` forgets every face. The engine
+    keeps one such record, held by the context that asked last. Answers
+    the slots kept (at most 128)."""
+    return _C.api_slots(_T[0], cap, key)
+
+
+def slot(name, gen=0, mint=False):
+    """The face of a part drawn from what `name` (a str, its content) and
+    `gen` (an int, a generation of it the name does not carry: its
+    picture's) name: the slot holding it, to stamp; else with `mint` the
+    slot to draw it into (the one stamped least recently) | `SLOT_MINT`,
+    the app drawing the face there and then stamping it; else -1, the part
+    drawn as it is."""
+    return _C.api_slot(_T[0], name, gen, mint)
+
+
+def slot_next():
+    """The next part whose face a frame nothing waits on draws (its key
+    handed to `face` with `mint`): the parts of the rows the table drawn
+    last showed, then of the row past its end, then of the row before its
+    start; -1 after the last, and the order starts again (as `faces`
+    starts it)."""
+    return _C.api_slot_next(_T[0])
+
+
 def table_rows():
     """Where the table drawn last put its rows, for an app that draws a
     row's own picture over its picture column's cell (Files' covers):

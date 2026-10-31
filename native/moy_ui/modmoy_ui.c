@@ -2779,6 +2779,33 @@ static mp_obj_t ui_api_held(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_obj, ui_api_held);
 
+// api_slots(ctx, cap, key) -> the slots the table drawn last keeps its
+// parts' faces in (moy_ui_api_slots)
+static mp_obj_t ui_api_slots(mp_obj_t ctx, mp_obj_t cap, mp_obj_t key) {
+    return mp_obj_new_int(moy_ui_api_slots(ctx_of(ctx), (int32_t)mp_obj_get_int_truncated(cap),
+                                           (int32_t)mp_obj_get_int_truncated(key)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_faces_obj, ui_api_slots);
+
+// api_slot(ctx, name, gen, mint) -> the slot of the face `name` and `gen`
+// name, | MINT where it is to be drawn there first; -1 none (moy_ui_api_slot)
+static mp_obj_t ui_api_slot(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_span_t sp = span_of(a[1]);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_int(moy_ui_api_slot(ctx_of(a[0]), sp, (int32_t)mp_obj_get_int_truncated(a[2]),
+                                          mp_obj_is_true(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_face_obj, 4, 4, ui_api_slot);
+
+// api_slot_next(ctx) -> the next part whose face an idle frame draws, -1 none
+static mp_obj_t ui_api_slot_next(mp_obj_t ctx) {
+    return mp_obj_new_int(moy_ui_api_slot_next(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_slot_next_obj, ui_api_slot_next);
+
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -3811,6 +3838,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_floor), MP_ROM_PTR(&ui_api_table_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_held), MP_ROM_PTR(&ui_api_held_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_slots), MP_ROM_PTR(&ui_api_faces_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_slot), MP_ROM_PTR(&ui_api_face_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_slot_next), MP_ROM_PTR(&ui_api_slot_next_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },

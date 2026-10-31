@@ -4665,6 +4665,101 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
     return 1;
 }
 
+// -- the faces a table's parts keep drawn (moy_ui_api_slots) -------------------------
+
+// The engine's one record of faces: the context holding it (its fc_id),
+// the key and slots it keeps them under, the uses counted, the warm
+// order's next part and the table's rows it runs over (r0 .. r1 showed,
+// of rows, np parts each); each slot's part key and last use (0: empty).
+static struct {
+    uint32_t id, tick;
+    int32_t key;
+    uint16_t cap, w;
+    int16_t r0, r1, rows;
+    uint8_t np;
+    uint32_t pk[MOY_UI_FACE_SLOTS], used[MOY_UI_FACE_SLOTS];
+} s_fc;
+static uint32_t s_fc_ids;
+
+static int faces_mine(const moy_ui_ctx_t *c) {
+    return c->fc_id != 0 && s_fc.id == c->fc_id && s_fc.cap > 0;
+}
+
+int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
+    cap = cap < 0 ? 0 : cap > MOY_UI_FACE_SLOTS ? MOY_UI_FACE_SLOTS : cap;
+    if (c->fc_id == 0 || s_fc.id != c->fc_id) {
+        if (++s_fc_ids == 0) {
+            s_fc_ids = 1;
+        }
+        c->fc_id = s_fc_ids;
+        s_fc.id = c->fc_id;
+        s_fc.cap = 0;
+    }
+    if (s_fc.cap != cap || s_fc.key != key) {
+        s_fc.cap = (uint16_t)cap;
+        s_fc.key = key;
+        s_fc.tick = 0;
+        memset(s_fc.used, 0, sizeof(s_fc.used));
+    }
+    s_fc.w = 0;
+    s_fc.np = c->tp_np ? c->tp_np : 1;
+    s_fc.rows = c->tp_n;
+    s_fc.r0 = c->tp_v0;
+    s_fc.r1 = c->tp_id ? c->tp_e : c->tp_v0;
+    return cap;
+}
+
+int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mint) {
+    if (!faces_mine(c)) {
+        return -1;
+    }
+    uint32_t key = hash(name.p, name.n, 0x66616365u) ^ ((uint32_t)gen * 0x9e3779b1u);
+    if (++s_fc.tick == 0) {             // (the uses wrapped: every face forgotten)
+        memset(s_fc.used, 0, sizeof(s_fc.used));
+        s_fc.tick = 1;
+    }
+    int lru = 0;
+    for (int j = 0; j < s_fc.cap; j++) {
+        if (s_fc.used[j] && s_fc.pk[j] == key) {
+            s_fc.used[j] = s_fc.tick;
+            return j;
+        }
+        if (s_fc.used[j] < s_fc.used[lru]) {
+            lru = j;
+        }
+    }
+    if (!mint) {
+        return -1;
+    }
+    s_fc.pk[lru] = key;
+    s_fc.used[lru] = s_fc.tick;
+    return lru | MOY_UI_SLOT_MINT;
+}
+
+int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
+    if (!faces_mine(c)) {
+        return -1;
+    }
+    int np = s_fc.np, shown = (s_fc.r1 - s_fc.r0) * np, n = s_fc.rows * np;
+    for (;;) {
+        int w = s_fc.w, p;
+        if (w < shown) {
+            p = s_fc.r0 * np + w;
+        } else if (w < shown + np) {
+            p = s_fc.r1 * np + (w - shown);
+        } else if (w < shown + 2 * np) {
+            p = s_fc.r0 * np - 1 - (w - shown - np);
+        } else {
+            s_fc.w = 0;                 // (the next asks from the first again)
+            return -1;
+        }
+        s_fc.w++;
+        if (p >= 0 && p < n) {
+            return p;
+        }
+    }
+}
+
 int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
                        int32_t out[2]) {
     out[0] = out[1] = 0;
@@ -5378,6 +5473,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         c->tp_py0 = tc_y0;
         c->tp_carry = (uint8_t)(carry && valid && armed(c) && c->fl_stage != 0);
         c->tp_keep = (uint8_t)keeping;
+        c->tp_np = (uint8_t)(o->has_across && nc < 256 ? nc : 1);
         // (rows side by side, and rows the app scrolls itself, fade at no edge)
         c->tp_fade = (uint8_t)(placed && !xa && !o->has_offset && pv.x0 < pv.x1 && pv.y0 < pv.y1);
         if (xa) {

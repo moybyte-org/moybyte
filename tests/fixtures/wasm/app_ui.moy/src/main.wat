@@ -75,6 +75,9 @@
   (import "moybyte.app" "ui_table_dist" (func $ui_table_dist (result i32)))
   (import "moybyte.app" "ui_table_floor" (func $ui_table_floor (param i32 i32) (result i32)))
   (import "moybyte.app" "ui_held" (func $ui_held (param i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slots" (func $ui_slots (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slot" (func $ui_slot (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slot_next" (func $ui_slot_next (result i32)))
   (import "moybyte.app" "ui_split" (func $ui_split
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
