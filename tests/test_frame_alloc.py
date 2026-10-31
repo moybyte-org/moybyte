@@ -58,7 +58,16 @@ top and idle again swiped to its end: it allocates nothing either way.
 Then the home, idle: the launcher's input and frame path with nothing pressed
 paints nothing and allocates nothing. Then its carousel gliding a card and
 back: a moving frame (the band's table pass) allocates under a ceiling,
-HOME_BAND_FRAME, not yet nothing.
+HOME_BAND_FRAME, not yet nothing, and the carousel at rest allocates nothing.
+
+THE CLOCK. The console's frame is handed one slot of the T-Deck's 60 fps cap as
+its dt, whatever the frame cost (the driver's FRAME_S), and an input is given a
+fixed number of frames. A glide, a coast and a swipe's release velocity then
+take the same frames on a machine of any speed, so a check that counts which
+frames moved, shifted or rested counts the same everywhere. The bar's wall
+clock is held at one minute, so its turning lands on no measured frame. The
+idle and typing windows alone are timed (WINDOW_MS), for the periodic work they
+take in.
 
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
@@ -945,40 +954,71 @@ def home(loop, info):
     info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     info["home_idle_drawn"] = ws._frames_drawn - d0
     gc.enable()
-    # A card right, then back, every 24 frames (the move the home's left and
-    # right keys make, `nav2d`): the carousel glides, its moving frames the
-    # band's (the table pass over its ground).
+    # A card right, then back, BAND_STEPS frames each (the move the home's
+    # left and right keys make, `nav2d`): the carousel glides, its moving
+    # frames the band's (the table pass over its ground), then rests. A
+    # frame's allocation and whether it drew.
     g = ws.launcher
     gc.collect()
     gc.disable()
     d0 = ws._frames_drawn
     band = []
-    t0 = time.ticks_ms()
-    k = 0
-    while time.ticks_diff(time.ticks_ms(), t0) < @WINDOW_MS@ or len(band) < @MIN_FRAMES@:
-        step = k % 48
-        if step == 0 or step == 24:
-            g.nav2d(1 if step == 0 else -1, 0)
-            ws.mark_dirty()
-        k += 1
-        a = gc.mem_alloc()
-        loop.step()
-        band.append(gc.mem_alloc() - a)
+    drew = []
+    for k in range(@BAND_MOVES@):
+        g.nav2d(1 if k % 2 == 0 else -1, 0)
+        ws.mark_dirty()
+        for _ in range(@BAND_STEPS@):
+            n = ws._frames_drawn
+            a = gc.mem_alloc()
+            loop.step()
+            band.append(gc.mem_alloc() - a)
+            drew.append(ws._frames_drawn != n)
     info["home_band"] = band
+    info["home_band_drew"] = drew
     info["home_band_drawn"] = ws._frames_drawn - d0
     gc.enable()
     for _ in range(60):
         loop.step()
 
 
+# The console's clock as the measurement drives it: one slot of the T-Deck's
+# 60 fps cap a frame, whatever the frame cost. A glide, a fling and a swipe's
+# release velocity then run the same frames on any machine: on the loop's own
+# clock a loaded machine's longer frames run them in fewer frames and a fast
+# machine's in more.
+FRAME_S = 1 / 60
+
+
+class _HeldClock:
+    """The bar's wall clock, held at the minute the run began. A minute
+    turning re-sets the bar's text on the next frame that draws it (about
+    1.6 KB), at a moment of the wall clock, which the frames measured do not
+    run on: a home band frame it fell on read over HOME_BAND_FRAME."""
+
+    def __init__(self):
+        self.lt = time.localtime()
+
+    def localtime(self):
+        return self.lt
+
+
 class _Loop:
     """The kernel's loop as the measurement drives it: one step a frame over
-    the console the board's run_desktop handed it."""
+    the console the board's run_desktop handed it, the console's frame
+    handed FRAME_S as its dt, the bar's clock held (_HeldClock)."""
 
     def __init__(self, desktop):
         import moy_loop
-        self.ws = desktop.ws
+        import bar_layer
+        ws = self.ws = desktop.ws
         self.step = moy_loop.step
+        frame = ws.frame
+
+        def _frame(dt):
+            frame(FRAME_S)
+        ws.frame = _frame
+        bar_layer.time = _HeldClock()
+        ws.bar_layer._clock_at = -1      # read the held clock from the next frame
 
 
 def main():
@@ -1032,6 +1072,14 @@ WINDOW_MS = 4500
 # milliseconds, so it runs its windows longer instead: about what the loop
 # paces into WINDOW_MS on a machine to itself, as CI's serial run has it.
 MIN_FRAMES = 150
+
+# The home band's moves, the frames each is given, and the frames at the end
+# of each that are still: the slide (MOY_UI_SLIDE_MS, 200 ms) draws 13 frames
+# at the driver's FRAME_S and the selection settles on the third after it,
+# so a move is still from its 17th frame.
+BAND_MOVES = 6
+BAND_STEPS = 40
+BAND_REST = 16
 
 
 def _stage(dest, exe, apps=False):
@@ -1140,7 +1188,9 @@ def _run(tmp_path):
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
                       .replace("@WINDOW_MS@", str(WINDOW_MS))
-                      .replace("@MIN_FRAMES@", str(MIN_FRAMES)))
+                      .replace("@MIN_FRAMES@", str(MIN_FRAMES))
+                      .replace("@BAND_MOVES@", str(BAND_MOVES))
+                      .replace("@BAND_STEPS@", str(BAND_STEPS)))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
@@ -1149,7 +1199,9 @@ def _run(tmp_path):
                                 stdin=subprocess.PIPE, stdout=out,
                                 stderr=subprocess.STDOUT)
         try:
-            proc.wait(timeout=240)
+            # a hang's guard: the run is its frames, about two minutes on a
+            # machine to itself and twice that beside a full load
+            proc.wait(timeout=600)
         finally:
             if proc.poll() is None:
                 proc.kill()
@@ -1355,12 +1407,19 @@ HOME_BAND_FRAME = 3 * 1024
 def test_a_home_band_frame_allocates_under_its_ceiling(result):
     """A card right and back again on the home: the carousel glides, each
     moving frame its band's table pass over the ground, and no frame
-    allocates more than HOME_BAND_FRAME; a still frame allocates nothing."""
+    allocates more than HOME_BAND_FRAME; a still frame allocates nothing.
+    Each move is BAND_STEPS frames on the driver's frame clock, so which
+    frames move is the same on a machine of any speed."""
     info, text = result
     band = info["home_band"]
+    assert len(band) == BAND_MOVES * BAND_STEPS, len(band)
     assert info["home_band_drawn"] > 20, (info["home_band_drawn"], len(band))
     assert max(band) <= HOME_BAND_FRAME, ("a band frame's allocation", band)
     assert band.count(0) > len(band) // 2, ("the still frames allocate", band)
+    # the last BAND_REST frames of each move: the carousel at rest
+    rest = [k for k in range(len(band)) if k % BAND_STEPS >= BAND_STEPS - BAND_REST]
+    assert not any(info["home_band_drew"][k] for k in rest), info["home_band_drew"]
+    _assert_quiet([band[k] for k in rest], "the home band at rest", text)
 
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
