@@ -21,13 +21,20 @@ on:
     branches: ["master", "main", "dev"]
 
 jobs:
+  # The suite runs as four shards a Python version, each SERIALLY: no xdist
+  # here, on purpose -- a serial run is what catches a timing-sensitive pin
+  # that passes under preflight's xdist. tools/ci_shard.py deals the test
+  # files out by their recorded weights (tools/ci_shard_weights.json), and
+  # tests/test_ci_shard.py pins that every file lands in exactly one shard
+  # and that the matrix and the call below agree.
   test:
-    name: Python ${{ matrix.python-version }}
+    name: Python ${{ matrix.python-version }} (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11"]
+        shard: [1, 2, 3, 4]
     env:
       # Nothing in the suite needs a real display: pygame is imported lazily
       # everywhere (moybyte_sim/pygame_backend.PygameBackend.__init__,
@@ -129,17 +136,20 @@ jobs:
       # note for the observed history.
       # --durations names the slowest tests in the log. The suite's runtime is
       # the thing nobody measures until it is already the reason to skip it.
-      - name: Run test suite (excluding the wall-clock-flaky redraw tests)
+      # Each shard's files (the redraw file is in none of them).
+      - name: Run test suite, shard ${{ matrix.shard }} of 4
         run: |
           .venv/bin/python -m pytest --durations=25 \
-            --ignore=tests/test_redraw_on_change.py
+            $(.venv/bin/python tools/ci_shard.py 4 ${{ matrix.shard }})
 
       - name: Run redraw-on-change tests in isolation
+        if: matrix.shard == 1
         run: .venv/bin/python -m pytest tests/test_redraw_on_change.py
 
       # The console itself, headless: boot the launcher, run a cart, exit. This
       # is what the .moyproj SDK's example steps used to stand in for.
       - name: Boot the console headless
+        if: matrix.shard == 1
         run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif --strict
 
   classify-hardware-impact:
