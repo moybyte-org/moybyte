@@ -314,6 +314,18 @@ def test_the_dirty_flag_tracks_the_edits_a_save_has_not_taken(tmp_path):
     assert ed.dirty() is False
 
 
+def test_a_key_the_text_does_not_take_leaves_the_document_clean(tmp_path):
+    """Esc (the note's way out) changes no text: it opens no typing burst, so
+    the handle is not dirty and closing it writes nothing -- a rewrite would
+    move the note to the top of the newest-first list."""
+    ws = build_ws(tmp_path)
+    ed = _handle(ws, "kept")
+    assert ed.key(0x1B) is False
+    assert ed.dirty() is False and not ed.can_undo()
+    ed.key(ord("x"))
+    assert ed.dirty() is True
+
+
 def test_a_read_only_store_keeps_the_text_and_reports_the_failure(tmp_path):
     ws = build_ws(tmp_path)
     ed = _handle(ws, "stuck")

@@ -202,6 +202,8 @@ class _Win:
                                       # pane (the desk Editor's Run slot): no
                                       # frame and no strip; None: a window
         self.undock = None            # where it goes back to (x, y, w, h)
+        self.dock_off = None          # docked: its corner from its host's
+                                      # content corner, which it follows
         self.corner = 0               # full screen: where its controls start
         self.row = 0                  # full screen: the rows the WM's row takes
                                       # above the content (0 where the app's
@@ -1520,7 +1522,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # ground under the WM's row otherwise, with the window's icon and title
     # at its head and minimise, restore and close at its right, drawn and
     # answered as every strip's. A game's window is the game alone, at the
-    # largest whole scale that leaves the corner's controls clear, on black.
+    # largest whole scale that leaves the corner's controls clear, on black;
+    # the player's window running a window-bound app cart (Notes) is an
+    # app's, under the WM's row (`_is_game`).
 
     def _row_h(self):
         """The full-screen row's height: the band's (a window's bar)."""
@@ -1536,7 +1540,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         is not the row (none for a game)."""
         full = self._root_canvas
         win.x, win.y, win.w, win.h = 0, 0, full.w, full.h
-        win.row = (0 if win.kind == "desktop" or self._band_is_row(win.kind)
+        win.row = (0 if self._is_game(win) or self._band_is_row(win.kind)
                    else self._row_h())
 
     def _on_row_head(self, win, px, py):
@@ -1544,7 +1548,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         WM draws it: the whole row above the content, or, where the app's
         band is the row, its head -- the icon and title left of the zone
         the band is lent (`band_span`)."""
-        if win.saved is None or win.kind == "desktop" \
+        if win.saved is None or self._is_game(win) \
                 or not (win.y <= py < win.y + self._row_h()):
             return False
         return bool(win.row) or px < self._full_slot(win)
@@ -1652,6 +1656,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if rect is None or rect is False:
             if win.docked is not None:
                 win.docked = None
+                win.dock_off = None
                 if win.undock is not None:
                     win.x, win.y, win.w, win.h = win.undock
                     win.undock = None
@@ -1665,6 +1670,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win.minimized:
             self._minimize(win, False)
         rect = tuple(rect)
+        host = self._wins.get("menu")
+        if host is not None:
+            hx, hy = host.content_rect()[:2]
+            win.dock_off = (rect[0] - hx, rect[1] - hy)
         if win.docked != rect:
             if win.docked is None:
                 win.undock = (win.x, win.y, win.w, win.h)
@@ -1681,13 +1690,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
-        desk's workspaces gets its window back."""
+        desk's workspaces gets its window back; one whose host moved moves
+        with it. The host's content is stamped, not drawn, while it moves,
+        so the game follows its host here rather than from the host's draw."""
         win = self._wins.get("desktop")
         if win is None or win.docked is None:
             return
         host = self._wins.get("menu")
         if host is not None and not host.minimized \
                 and self.ws.editor_layer() is self.ws.editor_desk:
+            off = win.dock_off
+            if off is not None:
+                hx, hy = host.content_rect()[:2]
+                d = win.docked
+                if d[0] != hx + off[0] or d[1] != hy + off[1]:
+                    self.dock("desktop", (hx + off[0], hy + off[1], d[2], d[3]))
             return
         self.dock("desktop", None)
 
@@ -1741,7 +1758,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         (`Player.pause`), and a restore lands on the pause menu, which gives
         the run back on Resume (the owner's D-25, 2026-10-19) -- unless the
         run was already held (the pause menu open), which stays its
-        holder's."""
+        holder's. A window-bound app cart's run (Notes) is held the same
+        way and simply goes on when it is shown: an app has no pause menu."""
         if win.minimized == bool(on):
             return
         win.minimized = bool(on)
@@ -1757,7 +1775,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         elif getattr(win, "held", False):
             win.held = False
             pause = getattr(self.ws, "pause", None)
-            if pause is not None:
+            if pause is not None and self._is_game(win):
                 pause.show()
             else:
                 player.resume()
@@ -4127,7 +4145,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
-        return (self.ws.show_fps and self.stack.top() == "desktop")
+        return (self.ws.show_fps and self.stack.top() == "desktop"
+                and not self.ws.app_window_canvas)
 
     def _draw_player_window(self, win, running, focused, dt, full=True,
                             defer=None):

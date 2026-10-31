@@ -1021,7 +1021,11 @@ class EditorDesk(Layer):
     def _frame(self, cv, th, shown, u):
         """Every pane's header on the verbs: its icon and name, or its tabs;
         its grow tool; the empties of the panes not built yet; the tag of a
-        divider stopped at its minimum."""
+        divider stopped at its minimum. It runs inside the draw, after the
+        bodies, so what its answers change (a tab, a tool, Grow, a divider's
+        release) shows on the frame it owes (`AppHost.owed`, asked for with
+        `request_frame`): a `ws._dirty` set here is spent by this frame's
+        own tail."""
         host = self._host
         host.begin(cv, th, (0, 0, cv.w, cv.h), True, True,
                    elsewhere=not self._part_focused())
@@ -1126,6 +1130,8 @@ class EditorDesk(Layer):
                     ui.at(r[0] + 8 * u, r[1] + r[3] - 28 * u, r[2] - 16 * u, 24 * u)
                     ui.label(why, {"tone": "value"})
         ui.end()
+        if host.owed or host.tap == 2:
+            self.ws.request_frame()     # the frame that shows what the pass answered
 
     def _code_head(self, pid, x, y, hh, u, tx):
         """The Code pane's header (EDITOR_LAYOUT.md): the cart's scripts as

@@ -308,3 +308,50 @@ def test_a_full_screen_game_is_the_largest_scale_clear_of_the_corner(tmp_path, s
     drv = _drv(ws)
     _tap(ws, drv, *_centre(_btn(ws, win, "max")))
     assert not win.full()
+
+
+def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
+    """Notes runs in the player's window but is an app: full screen it takes
+    the row an app's window takes -- its icon, its title, the corner's
+    controls -- over content that fills the glass under the row, and wears
+    no game's FPS chip."""
+    ws = _desk(tmp_path)
+    open_cart(ws, "Notes")
+    _frames(ws)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert ws.app_window_canvas and not win.full()
+    drv = _drv(ws)
+    _tap(ws, drv, *_centre(_btn(ws, win, "max")))
+    assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
+    assert win.row == wm._row_h() == 40
+    assert win.content_rect() == (0, 40, 1024, 560)
+    assert wm.app_window_content() == (1024, 560)       # the content reaches the glass's foot
+    assert wm._player_view(win) == (0, 40, 1)
+    assert wm._full_title(win).startswith("Notes")
+    names = [n for n, _r in wm._strip_buttons(win)]
+    assert names[:3] == ["close", "max", "min"]
+    ws.show_fps = True
+    assert not wm._fps_chip_on()
+    # the row is the WM's: its head drags, the content under it does not
+    assert wm._on_row_head(win, 20, 20) and not wm._on_row_head(win, 20, 60)
+    _tap(ws, drv, *_centre(_btn(ws, win, "max")))
+    assert not win.full() and win.row == 0
+
+
+def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path):
+    """Minimised, an app cart's run is held as a game's is, and shown again
+    it goes on: the pause menu a game's restore lands on (D-25) is a game's."""
+    ws = _desk(tmp_path)
+    open_cart(ws, "Notes")
+    _frames(ws)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    wm._toggle_max(win)
+    _frames(ws)
+    wm._minimize(win, True)
+    _frames(ws)
+    assert ws.player.paused and win.held
+    wm._minimize(win, False)
+    _frames(ws)
+    assert not ws.pause.open and not ws.player.paused and win.full()
