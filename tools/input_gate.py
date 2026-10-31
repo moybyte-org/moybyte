@@ -43,6 +43,11 @@ candidate's p90 may not exceed dev's).
                 frame: the surface the bench drives was not up (its setup
                 did not open it), so its number times something else; no
                 verdict, and its surface does not pass
+    mixed       the two sides' rows were analysed under different interval
+                rules (input_bench's RULE: a row records its own), so their
+                numbers time different things; no verdict, and its surface
+                does not pass. A stored baseline of an older rule covers no
+                row, so a gate benches dev again
     unrecorded  neither side has one (the bench records nothing there on
                 either image, as the T-Deck's ball_fast rows on the verbs
                 pages): shown, and left out of the surface's verdict
@@ -136,7 +141,8 @@ DRIFT_MS = 1.0         # the sentinel's median change past this: a fresh baselin
 SENTINEL_ROWS = 3
 STORE_ENV = "MOY_INPUT_GATE_STORE"
 STORE_DEFAULT = os.path.join("~", ".cache", "moybyte", "input_gate")
-RANK = {"unrecorded": -1, "pass": 0, "near": 1, "missing": 2, "invalid": 2, "fail": 3}
+RANK = {"unrecorded": -1, "pass": 0, "near": 1, "missing": 2, "invalid": 2, "mixed": 2,
+        "fail": 3}
 
 # What a probe reads where the surface it reads is not up (the Notes probe
 # with no note open).
@@ -409,9 +415,13 @@ class Store:
 
 def coverage(run_dirs, board):
     """{row: how many of the runs asked for it}: their meta's `requested`,
-    else the rows each run holds."""
+    else the rows each run holds. A run recorded under another interval rule
+    than the bench's (`rule_of`) covers nothing: its rows cannot be gated
+    against the candidate's."""
     n = {}
     for d in run_dirs:
+        if any(rule_of(r) != ib.RULE for r in load_run(d, board).values()):
+            continue
         req = read_meta(d).get("requested")
         keys = [tuple(k) for k in req] if req is not None else list(load_run(d, board))
         for k in keys:
@@ -478,6 +488,12 @@ def value(row):
     return ((row or {}).get("gate") or {}).get("p90")
 
 
+def rule_of(row):
+    """The interval rule a row was analysed under (input_bench.RULE; 1: a
+    row from before the rule was written down)."""
+    return (row or {}).get("rule") or 1
+
+
 def _med(vals):
     return round(statistics.median(vals), 1)
 
@@ -511,7 +527,7 @@ def probed(row):
     raw = (row or {}).get("raw")
     if not raw:
         return None
-    k, n = ib.FIELDS.index("probe"), len(ib.FIELDS)
+    k, n = ib.FIELDS.index("probe"), ib.row_nf(row)
     return any(raw[i * n + k] != ib.NONE_PROBE for i in range(len(raw) // n))
 
 
@@ -521,7 +537,7 @@ def absent(row):
     raw = (row or {}).get("raw")
     if not raw:
         return False
-    k, n = ib.FIELDS.index("probe"), len(ib.FIELDS)
+    k, n = ib.FIELDS.index("probe"), ib.row_nf(row)
     return all(raw[i * n + k] == ABSENT for i in range(len(raw) // n))
 
 
@@ -532,7 +548,7 @@ def lfl_p90(row):
     raw = (row or {}).get("raw")
     if not raw:
         return None
-    fr = ib.frames_of(raw)
+    fr = ib.frames_of(raw, ib.row_nf(row))
     for f in fr:
         f["probe"] = ib.NONE_PROBE
     pres = ib.presented(fr, row.get("tail"))
@@ -560,6 +576,10 @@ def compare(base_runs, cand_runs, tol=0.0, near=NEAR_MS, noise=NOISE_MS, keys=No
         if gone:
             row["absent"] = gone
             row["verdict"] = "invalid"
+        rules = sorted(set(rule_of(r) for r in b_rows + c_rows))
+        if len(rules) > 1:
+            row["rules"] = rules
+            row["verdict"] = "mixed"
         bp = [p for p in map(probed, b_rows) if p is not None]
         cp = [p for p in map(probed, c_rows) if p is not None]
         if bp and cp and any(bp) != any(cp):
@@ -622,6 +642,9 @@ def render(board, rows, base_label, cand_label, tol=0.0, head=None):
             note.append("probe reads %d throughout on %s: the surface was not up" % (
                 ABSENT, ", ".join(base_label if s == "base" else cand_label
                                   for s in r["absent"])))
+        if r.get("rules"):
+            note.append("recorded under interval rules %s: rerun the older side" % "/".join(
+                map(str, r["rules"])))
         if "probe" in r:
             lf = r["lfl"]
             note.append("probe reads on %s only; like-for-like %s -> %s (%s %s)" % (

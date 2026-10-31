@@ -73,10 +73,12 @@ first frame after a key, a roll or a typed key), `coast` (after a release,
 the view moving), `glide` (after a step, the view moving), `settle` (the
 rest: the paints and copies a press costs after the view stopped). The gate
 is the p90 of the presented interval over live, coast and glide: from the
-previous presentation where the frames ran back to back, else from where
-the frame's own loop began (its start less the loop's measured share before
-a frame), so a press frame after idle loops is its upcalls, its paint and
-its present, never the pacing sleep before it; each class has its own p90. `first3` is the max
+previous presentation where the frames ran back to back, else from the top
+of the frame's own loop (`top`, read from the kernel's loop clock), so a
+press frame after idle loops is its inputs, its upcalls, its paint and its
+present, never the pacing sleep before it; each class has its own p90. The
+rule is `RULE`, which each row records: tools/input_gate.py never gates a
+row against one analysed under another. `first3` is the max
 of the first three presented intervals of every gesture (the press frame is
 its own gate). Per press: `lat` (the input to its first presentation) and
 `calm` (to its last frame before the next input: the debt and the refill).
@@ -124,8 +126,13 @@ COIN = "Coin Quest"
 DEVICE = r"""
 import time, array
 _T = time.ticks_us
+_M = time.ticks_ms
 _D = time.ticks_diff
-_NS = 18
+_NS = 19
+try:
+    from moy_loop import frame_at as _FA
+except ImportError:
+    _FA = None
 
 class _IB:
     pass
@@ -302,6 +309,7 @@ def _fr(dt):
     if not ib.on:
         return ib.of(dt)
     a = _T()
+    ta = _FA() if _FA is not None else None
     if ib.dfr >= 0:
         # the last frame's show waited for this loop's pre-frame hook
         ib.rec[ib.dfr * _NS + 12] = _D(a, ib.t0)
@@ -360,6 +368,16 @@ def _fr(dt):
         fc = getattr(ws, 'frame_change', None)
         rec[i + 16] = 1 if (ib.shifted or fc == 'shift') else 2 if fc == 'rows' else 0
         rec[i + 17] = pl
+        # the top of this frame's loop, from the kernel's ms clock: the run's
+        # zero sits on a ms edge (_ib_arm), so the top lies in a known ms of
+        # the run; its middle, never past the frame's own start
+        v = -1
+        if ta is not None:
+            lo = _D(ta, ib.m0) * 1000
+            if rec[i] - 1000000 <= lo <= rec[i]:
+                hi = lo + 999 if lo + 999 < rec[i] else rec[i]
+                v = (lo + hi) // 2
+        rec[i + 18] = v
         ib.n += 1
     ib.le = _D(_T(), ib.t0)
     return r
@@ -472,7 +490,12 @@ def _ib_arm(ev, probe, ms, null=False):
         elif ib.ks is None:
             ib.ks = _s
     ib.done = False
+    # the run's zero on an edge of the ms clock the kernel's loop keeps
+    m = _M()
+    while _M() == m:
+        _T()
     ib.t0 = _T()
+    ib.m0 = _M()
     ib.end = ms
     ib.on = True
 
@@ -1009,13 +1032,32 @@ def build_plan(name, surf, rect, matrix):
 # -- the numbers -------------------------------------------------------------------
 
 FIELDS = ("t0", "t1", "total", "content", "stamp", "windows", "home", "other", "present",
-          "copy", "fence", "probe", "show", "deferred", "flushes", "span", "kind", "prev")
+          "copy", "fence", "probe", "show", "deferred", "flushes", "span", "kind", "prev",
+          "top")
 NONE_PROBE = -99999
+# A row recorded before `top` holds the first 18 fields a frame, and is gated
+# under the interval rule of its day (`rule` absent): rows of two rules never
+# compare (tools/input_gate.py).
+LEGACY_NF = 18
+RULE = 2
+NO_TOP = -1
 
 
-def frames_of(raw):
-    n = len(raw) // len(FIELDS)
-    return [dict(zip(FIELDS, raw[i * len(FIELDS):(i + 1) * len(FIELDS)])) for i in range(n)]
+def frames_of(raw, nf=None):
+    """The frames of a row's `raw`, `nf` fields each (a row's own `nf`;
+    LEGACY_NF for a row that has none)."""
+    nf = nf or len(FIELDS)
+    n = len(raw) // nf
+    out = []
+    for i in range(n):
+        f = dict(zip(FIELDS, raw[i * nf:(i + 1) * nf]))
+        f.setdefault("top", -1)
+        out.append(f)
+    return out
+
+
+def row_nf(row):
+    return (row or {}).get("nf") or LEGACY_NF
 
 
 def presented(fr, tail=None):
@@ -1054,12 +1096,16 @@ def classes(fr, pres, marks):
     probed = any(f["probe"] != NONE_PROBE for f in fr)
     # A frame whose loop came right after the last painted one presents
     # `pres - pres_prev` after it. One after idle loops starts its interval
-    # where its own loop began: its start less the loop's own share before a
-    # frame (its upcalls and present wait), the median of that share where
-    # frames ran back to back, so the idle loops' pacing sleep is left out.
+    # at the top of its own loop (`top`: the kernel's clock where the loop
+    # woke), so its inputs, upcalls and present stage count and the idle
+    # loops' pacing sleep does not; a row recorded without `top` starts it
+    # at the frame's own start. Never a share borrowed from other frames:
+    # the gap between back-to-back frames holds their pacing sleep and the
+    # last frame's present wait, and which frames ran back to back is the
+    # image's frame mix, so a share taken from them moved every after-idle
+    # frame of a row with it (a P4 grid key_steps whose worst frame matched
+    # dev's read 6 ms over it).
     cont = [i > 0 and abs(f["prev"] - fr[i - 1]["t1"]) < 1000 for i, f in enumerate(fr)]
-    pre = [(f["t0"] - f["prev"]) / 1000.0 for i, f in enumerate(fr) if cont[i]]
-    up = statistics.median(pre) if pre else 0.0
     out = []
     mi = -1
     first_of = {}
@@ -1075,7 +1121,8 @@ def classes(fr, pres, marks):
         if cont[i]:
             iv = pres[i] - prev
         else:
-            iv = pres[i] - max(prev if prev is not None else 0.0, f["t0"] / 1000.0 - up)
+            top = f["top"] if f["top"] != NO_TOP and f["top"] <= f["t0"] else f["t0"]
+            iv = pres[i] - max(prev if prev is not None else 0.0, top / 1000.0)
         moved = (f["probe"] != NONE_PROBE and i > 0 and fr[i - 1]["probe"] != NONE_PROBE
                  and f["probe"] != fr[i - 1]["probe"])
         if m[1] == "touch":
@@ -1092,12 +1139,16 @@ def classes(fr, pres, marks):
     return out
 
 
-def analyse(raw, plan_d, tail=None, steps=None, rect=None, px=False, axis="v"):
-    """A row's numbers from its frames (`raw`, FIELDS each) and its plan's
-    marks, segments and releases (`plan_d`, as `Bench.play` keeps them)."""
-    fr = frames_of(raw)
+def analyse(raw, plan_d, tail=None, steps=None, rect=None, px=False, axis="v", nf=None):
+    """A row's numbers from its frames (`raw`, `nf` fields each: FIELDS) and
+    its plan's marks, segments and releases (`plan_d`, as `Bench.play` keeps
+    them). `rule` is RULE where the frames carry their loop's top."""
+    nf = nf or len(FIELDS)
+    fr = frames_of(raw, nf)
     marks = [tuple(m) for m in plan_d["marks"]]
     out = {"painted": len(fr), "gestures": len(marks)}
+    if nf == len(FIELDS):
+        out["rule"] = RULE
     if not fr:
         return out
     pres = presented(fr, tail)
@@ -1278,17 +1329,17 @@ def expected(row, null_row, board):
     ph, kind = phase_of(row["surface"], row["input"], board)
     if ph is None:
         return None
-    fr = frames_of(row.get("raw") or [])
+    fr = frames_of(row.get("raw") or [], row_nf(row))
     if not fr:
         return None
     a = analyse(row["raw"], row["plan"], row.get("tail"), px=row.get("px", False),
-                axis=row.get("axis", "v"))
+                axis=row.get("axis", "v"), nf=row_nf(row))
     pres = presented(fr, row.get("tail"))
     cl = classes(fr, pres, [tuple(m) for m in row["plan"]["marks"]])
     pass_by = {}
     home = row["surface"].startswith("home")
     if null_row is not None and null_row.get("raw"):
-        nf = frames_of(null_row["raw"])
+        nf = frames_of(null_row["raw"], row_nf(null_row))
         npres = presented(nf, null_row.get("tail"))
         ncl = classes(nf, npres, [tuple(m) for m in null_row["plan"]["marks"]])
         for c in ("live", "coast", "glide", "settle"):
@@ -1487,14 +1538,14 @@ class Bench:
         row = {"surface": surf.name, "input": inp, "board": self.board,
                "windowed": self.windowed, "api_offset": self.offset, "speaks": self.speaks, "rect": rect,
                "axis": surf.axis, "px": surf.px, "plan": plan_d, "tail": tail,
-               "raw": got["raw"]}
+               "raw": got["raw"], "nf": len(FIELDS)}
         row.update(analyse(got["raw"], plan_d, tail, got["steps"] if ball else None,
                            rect, surf.px, surf.axis))
         if self.null:
             ng = self.play(plan, probe, null=True)
             if ng is not None:
                 nrow = {"surface": surf.name, "input": inp, "plan": plan_d,
-                        "tail": ng["tail"], "raw": ng["raw"], "rect": rect,
+                        "tail": ng["tail"], "raw": ng["raw"], "nf": len(FIELDS), "rect": rect,
                         "axis": surf.axis, "px": surf.px}
                 row["null"] = nrow
         ex = expected(row, row.get("null"), self.board)
@@ -1881,8 +1932,8 @@ def reanalyse(path):
     for r in rows:
         if not r.get("raw"):
             continue
-        r.update(analyse(r["raw"], r["plan"], r.get("tail"),
-                         r.get("steps"), r.get("rect"), r.get("px", False), r.get("axis", "v")))
+        r.update(analyse(r["raw"], r["plan"], r.get("tail"), r.get("steps"), r.get("rect"),
+                         r.get("px", False), r.get("axis", "v"), nf=row_nf(r)))
         ex = expected(r, r.get("null"), r.get("board", ""))
         if ex is not None:
             r["expected"] = ex

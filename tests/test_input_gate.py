@@ -121,13 +121,14 @@ def test_like_for_like_classes_every_painted_frame_after_a_release_as_coast():
         f = dict((k, 0) for k in ib.FIELDS)
         f.update(t0=t0 * 1000, t1=t0 * 1000 + 15000, show=(t0 + 16 + late) * 1000,
                  total=15000, content=1000, probe=probe, flushes=-1, span=-1,
-                 prev=t0 * 1000 - 5000)
+                 prev=t0 * 1000 - 5000, top=t0 * 1000 - 5000)
         return [f[k] for k in ib.FIELDS]
     # one touch, released at 100 ms; the view stops at 120 ms and the two
     # paints after it present late
     probes = [0, 10, 20, 30, 30, 30]
     raw = sum((rec(60 + 20 * i, p, 30 if i > 3 else 0) for i, p in enumerate(probes)), [])
-    row = {"raw": raw, "tail": None, "plan": {"marks": [[50, "touch", 100]]}}
+    row = {"raw": raw, "nf": len(ib.FIELDS), "tail": None,
+           "plan": {"marks": [[50, "touch", 100]]}}
     probed = ib.analyse(raw, row["plan"])
     assert probed["coast"]["n"] == 1 and probed["settle"]["n"] == 2
     assert probed["gate"]["p90"] < 25
@@ -138,7 +139,7 @@ def test_like_for_like_classes_every_painted_frame_after_a_release_as_coast():
     ignored = ib.analyse(blind, row["plan"])
     assert ignored["coast"]["n"] == 3 and ignored["settle"] is None
     assert g.lfl_p90(row) == ignored["gate"]["p90"] == 50.0
-    assert g.probed(row) is True and g.probed({"raw": blind}) is False
+    assert g.probed(row) is True and g.probed({"raw": blind, "nf": len(ib.FIELDS)}) is False
 
 
 def test_a_run_whose_probe_reads_absent_throughout_makes_its_row_invalid():
@@ -149,7 +150,8 @@ def test_a_run_whose_probe_reads_absent_throughout_makes_its_row_invalid():
             f.update(t0=i * 20000, t1=i * 20000 + 15000, probe=p, flushes=-1, span=-1)
             out += [f[k] for k in ib.FIELDS]
         return out
-    up = {"surface": "Notes", "input": "fling", "gate": {"p90": 30.0}, "raw": raw([3, 4, 5])}
+    up = {"surface": "Notes", "input": "fling", "gate": {"p90": 30.0}, "raw": raw([3, 4, 5]),
+          "nf": len(ib.FIELDS)}
     gone = dict(up, gate={"p90": 12.0}, raw=raw([g.ABSENT] * 3))
     once = dict(up, raw=raw([g.ABSENT, 4, 5]))
     key = ("Notes", "fling")
@@ -175,6 +177,14 @@ def test_the_store_keys_runs_by_commit_board_and_day(tmp_path):
     assert st.runs("abc123", "tdeck", "2026-10-31") == []
     assert st.runs("abc123", "p4", "2026-10-30") == []
     assert st.keys("tdeck", "2026-10-30") == ["abc123"]
+    # the fixtures' rows are of the first interval rule: they cover nothing
+    assert g.coverage(st.runs("abc123", "tdeck", "2026-10-30"), "tdeck") == {}
+    for d in st.runs("abc123", "tdeck", "2026-10-30"):
+        path = os.path.join(d, "tdeck_input.json")
+        with open(path) as f:
+            rows = json.load(f)
+        with open(path, "w") as f:
+            json.dump([dict(r, rule=ib.RULE) for r in rows], f)
     cov = g.coverage(st.runs("abc123", "tdeck", "2026-10-30"), "tdeck")
     assert cov[("Code", "fling")] == 2 and len(cov) == 6
     assert g.windowed_of(st.runs("abc123", "tdeck", "2026-10-30"), "tdeck") is False
@@ -262,7 +272,7 @@ class _Img:
 @pytest.fixture
 def fake(monkeypatch):
     calls = []
-    state = {"slow": 0.0, "n": {}}
+    state = {"slow": 0.0, "n": {}, "rule": ib.RULE}
 
     def flash(board, wt, log):
         calls.append(os.path.basename(os.path.dirname(log)))
@@ -278,7 +288,7 @@ def fake(monkeypatch):
         rows = []
         for k, r in src.items():
             if k in want:
-                r = dict(r)
+                r = dict(r, rule=state["rule"])
                 if label == "dev" and state["slow"]:
                     r["gate"] = dict(r["gate"], p90=round(r["gate"]["p90"] + state["slow"], 1))
                 rows.append(r)
@@ -341,6 +351,26 @@ def test_a_drifted_sentinel_stops_the_gate_and_asks_for_a_fresh_baseline(tmp_pat
     del fake.calls[:]
     g.gate_board(_ctx(tmp_path, "r3", no_third=True, fresh_baseline=True), "tdeck")
     assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2"]
+
+
+def test_a_baseline_of_an_older_interval_rule_covers_no_row(tmp_path, fake):
+    fake.state["rule"] = None
+    g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
+    fake.state["rule"] = ib.RULE
+    del fake.calls[:]
+    g.gate_board(_ctx(tmp_path, "r2", no_third=True), "tdeck")
+    # no sentinel: the stored runs time another interval, so dev runs again
+    assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2"]
+
+
+def test_rows_of_two_interval_rules_never_compare():
+    dev, cand = _runs("dev"), _runs("ui1")
+    for run in cand:
+        for k in run:
+            run[k] = dict(run[k], rule=ib.RULE)
+    rows = g.compare(dev, cand)
+    assert rows and all(r["verdict"] == "mixed" and r["rules"] == [1, ib.RULE] for r in rows)
+    assert "rerun the older side" in g.render("tdeck", rows, "dev", "ui1")
 
 
 def test_a_gate_asking_for_rows_the_baseline_lacks_benches_dev_in_sequence(tmp_path, fake):

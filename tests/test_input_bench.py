@@ -24,7 +24,7 @@ from runtime import host_app, moy_loop  # noqa: E402
 
 def _rec(**kw):
     f = dict((k, 0) for k in ib.FIELDS)
-    f.update(probe=ib.NONE_PROBE, flushes=-1, span=-1)
+    f.update(probe=ib.NONE_PROBE, flushes=-1, span=-1, top=ib.NO_TOP)
     f.update(kw)
     return [f[k] for k in ib.FIELDS]
 
@@ -62,21 +62,44 @@ def test_presentation_is_the_switch_or_the_feeders_completion():
 
 def test_the_classes_the_first_three_and_the_press_latency():
     marks = [(100, "key", 160), (400, "key", 460)]
-    raw = (_rec(t0=50000, t1=58000, show=60000, content=1, prev=40000)
-           + _rec(t0=110000, t1=125000, show=130000, content=1, probe=0, prev=105000)
-           + _rec(t0=127000, t1=148000, show=150000, content=1, probe=5, prev=125000)
-           + _rec(t0=160000, t1=168000, show=170000, probe=5, prev=155000)
-           + _rec(t0=420000, t1=490000, show=500000, content=1, probe=9, prev=410000))
+    raw = (_rec(t0=50000, t1=58000, show=60000, content=1, prev=40000, top=49000)
+           + _rec(t0=110000, t1=125000, show=130000, content=1, probe=0, prev=105000,
+                  top=108000)
+           + _rec(t0=127000, t1=148000, show=150000, content=1, probe=5, prev=125000,
+                  top=126000)
+           + _rec(t0=160000, t1=168000, show=170000, probe=5, prev=155000, top=158000)
+           + _rec(t0=420000, t1=490000, show=500000, content=1, probe=9, prev=410000,
+                  top=418000))
     a = ib.analyse(raw, {"marks": marks, "segs": [], "releases": []})
     assert a["live"]["n"] == 2 and a["glide"]["n"] == 1 and a["settle"]["n"] == 1
     # back to back, a frame presents after the one before it (130 -> 150);
-    # after idle loops, from its own loop's start -- its start less the
-    # loop's share before a frame where frames ran back to back (2 ms) --
-    # never from the idle loop's end; its latency from the press
+    # after idle loops, from the top of its own loop (418), never from the
+    # idle loop's end; its latency from the press
     assert a["glide"]["max"] == 20.0
     assert a["live"]["max"] == 82.0 and a["first3"] == 82.0
     assert a["lat"]["max"] == 100.0
     assert a["copies"] == 1 and a["coalesced"] == 0
+    assert a["rule"] == ib.RULE
+
+
+def test_an_after_idle_frame_owes_nothing_to_the_frames_that_ran_back_to_back():
+    marks = [(100, "key", 160), (400, "key", 460)]
+    press = _rec(t0=420000, t1=440000, show=445000, content=1, prev=300000, top=419000)
+
+    def row(gap):
+        # the first press's frame, then one back to back after a pacing sleep
+        # of `gap` ms: the frame mix an image chose
+        raw = (_rec(t0=110000, t1=120000, show=122000, content=1, prev=90000, top=109000)
+               + _rec(t0=120000 + gap * 1000, t1=125000 + gap * 1000, show=126000 + gap * 1000,
+                      content=1, prev=120000, top=119000 + gap * 1000)
+               + press)
+        return ib.analyse(raw, {"marks": marks, "segs": [], "releases": []})
+    assert row(1)["live"]["max"] == row(12)["live"]["max"] == 26.0
+    # a row recorded before `top` starts the frame at its own start, and says
+    # no rule
+    legacy = [v for i, v in enumerate(press) if ib.FIELDS[i] != "top"]
+    a = ib.analyse(legacy, {"marks": marks, "segs": [], "releases": []}, nf=ib.LEGACY_NF)
+    assert a["live"]["max"] == 25.0 and "rule" not in a
 
 
 def test_the_finger_against_the_content():
