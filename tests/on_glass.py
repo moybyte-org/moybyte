@@ -2509,8 +2509,12 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
     tried, `moy_audio.out()`): what a run starts keeps its internal RAM
     after it."""
     assert board.pyval("__import__('moy_wasm').FORK", strict=True)
+    # a board built without sound (the Guition S3) has no moy_audio: its sound
+    # never started, which is absence, not an error
+    board.pyexec("try:\n    ws._g['_snd'] = __import__('moy_audio').out()[0] in (1, 2)\n"
+                 "except ImportError:\n    ws._g['_snd'] = False", strict=True)
     if board.pyval("__import__('moy_play').info() is not None "
-                   "or __import__('moy_audio').out()[0] in (1, 2)", strict=True):
+                   "or ws._g['_snd']", strict=True):
         pytest.skip("a cart has run this boot and what it started keeps its "
                     "internal RAM; reboot the board and run the suite first")
     if board.pyval("bool(getattr(ws.wifi, 'driver_up', False))", strict=True):
