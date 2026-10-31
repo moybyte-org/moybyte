@@ -2900,7 +2900,10 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
                             layer._beside if steps else None, True)
     if end is None:
         return False
-    layer._band_landed(cv, dt, steps)
+    if not moving:
+        # (a moving frame notes no cover landing: the next frame scrolls
+        # the band and draws it whatever its key)
+        layer._band_landed(cv, dt, steps)
     _t1 = _ticks_ms() if _t0 is not None else None
     ws.bar_layer._draw_status_strip(strip)
     # The rects drawn are the frame's damage; the bar strip carries its own
@@ -2913,7 +2916,8 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
     if _t0 is not None:
         ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
     if steps and not moving:
-        layer._band_settle(end)
+        fl = grid.floor
+        layer._band_settle(end, len(fl) == 1 and fl[0] == (bx, by, bw, bh))
     return True
 
 
@@ -3450,11 +3454,12 @@ class LauncherHomeLayer:
         if now is None:
             return
         held = _ui.held("hint", self._hk.of(now[0]))
-        h = g.foot()[5]
-        if draw and (whole or not held) and h[2] > 0 and h[3] > 0:
-            self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
-            self._draw_home_chrome(cv)
-            drew.append(h)
+        if draw and (whole or not held):
+            h = g.foot()[5]
+            if h[2] > 0 and h[3] > 0:
+                self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
+                self._draw_home_chrome(cv)
+                drew.append(h)
         if now[1] is not None:
             held = _ui.held("caption", self._ck.of(now[1]))
             if draw and (whole or not held):
@@ -3466,17 +3471,22 @@ class LauncherHomeLayer:
         """`_beside` naming the parts a whole paint drew."""
         self._beside(cv, whole, False)
 
-    def _band_settle(self, end):
+    def _band_settle(self, end, whole=True):
         """After a band frame with nothing moving, by its floor's end
         (`ui.table_floor`): where every buffer holds this frame, the
         retained frame is owed to an idle frame (`capture_due`); where one
-        lags, the frame that brings one more buffer to it is asked for,
-        while nothing moves and no press waits (`_still_debt`)."""
+        lags behind a frame that drew the band `whole` (a glide's or a
+        fling's last), the frame that brings one more buffer to it is asked
+        for, while nothing moves and no press waits (`_still_debt`). A step
+        that drew its cells alone asks for none: the next step's floor
+        takes what that buffer lacks, and a frame between two steps of a
+        rolling ball would only delay the second."""
         if end == 0:
-            key = self._retained_key(self.ws.sys_canvas)
+            # (the statics this frame's band key was made of: `_band_key`)
+            key = self._retained_key(self.ws.sys_canvas, self._sk.v)
             if key != self._lib_key:
                 self._cap_owed = (self.ws._frames_drawn, key, None)
-        elif end == -1:
+        elif end == -1 and whole:
             self._still_debt()
 
     def _band_note(self, cv, dt, vouch=True):
