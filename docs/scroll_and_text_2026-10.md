@@ -808,8 +808,8 @@ the frames that bring each buffer up to it while the input rests
 (`ws.request_frame`), so the next input's first frame draws the band
 alone; it holds the page in the hold's layer only where the next frame
 cannot take it from this one (`Hold.copies`: a frame not alone on the
-glass, a canvas with no `copy_last`), and a frame there puts it back as
-it was held and draws the pickers over it. On the desk the pane draws through a viewport, and
+glass, a canvas of one buffer or with no `copy_last`), and a frame there
+puts it back as it was held and draws the pickers over it. On the desk the pane draws through a viewport, and
 the frame is the Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the
 pickers are up), which names that band as what it changed. The
 release of a press the engine may still activate (`AppHost.tap_armed`: no

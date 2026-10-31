@@ -2668,11 +2668,13 @@ class Hold:
 
     def copies(self, cv):
         """Whether the frame painted, alone on the glass, leaves the page
-        and the modal's card for the next frame to take from its buffer
-        (`_left`), where that frame draws under the same key: the page
-        then needs no hold (`keep`)."""
+        and the modal's card for the next frame to copy out of its buffer
+        (`_left`, a canvas of more than one buffer), where that frame draws
+        under the same key: the page then needs no hold (`keep`). One
+        buffer keeps the hold, which puts the page back on a frame that
+        follows one not alone."""
         return (bool(_PAINT[1]) and not _PF[_PF_WIN] and _whole_retained(cv)
-                and (cv.RETAINED_FRAMES == 1 or getattr(cv, "copy_last", None) is not None))
+                and cv.RETAINED_FRAMES > 1 and getattr(cv, "copy_last", None) is not None)
 
     def _left(self, ws, cv, key, rect, f, dt, pages):
         """Whether this frame finds the page under `key`, and the modal over
