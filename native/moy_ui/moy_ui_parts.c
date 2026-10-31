@@ -2277,12 +2277,20 @@ static moy_ui_span_t field_at(const uint8_t *p, size_t n, int i) {
 }
 
 // The fields of `p` (NUL-separated in n bytes, a trailing NUL ending the last).
+// A table's cells are kilobytes a frame: the NULs are found with memchr,
+// which reads words where a byte loop reads bytes.
 int moy_ui_fields(const uint8_t *p, size_t n) {
     int k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += p[i] == 0;
+    const uint8_t *q = p, *e = p + n;
+    while (q < e) {
+        const uint8_t *z = (const uint8_t *)memchr(q, 0, (size_t)(e - q));
+        if (z == NULL) {
+            return k + 1;               // (the last field has no NUL after it)
+        }
+        k++;
+        q = z + 1;
     }
-    return n && p[n - 1] != 0 ? k + 1 : k;
+    return k;
 }
 
 int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols, size_t cols_n,

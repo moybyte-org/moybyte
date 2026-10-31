@@ -4365,8 +4365,9 @@ static int table_flags(const moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t i
 static size_t table_row_end(const uint8_t *cells, size_t cells_n, int nc, size_t at) {
     size_t e = at;
     for (int j = 0; j < nc; j++) {
-        while (e < cells_n && cells[e] != 0) {
-            e++;
+        if (e < cells_n) {
+            const uint8_t *z = (const uint8_t *)memchr(cells + e, 0, cells_n - e);
+            e = z != NULL ? (size_t)(z - cells) : cells_n;
         }
         if (j < nc - 1) {
             e++;
@@ -5452,9 +5453,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 } else {
                     size_t f0 = q;
                     for (int j = 0; j < np; j++) {
-                        size_t f1 = f0;
-                        while (f1 < end && cells[f1] != 0) {
-                            f1++;
+                        size_t f1 = end;
+                        if (f0 < end) {
+                            const uint8_t *z = (const uint8_t *)memchr(cells + f0, 0, end - f0);
+                            f1 = z != NULL ? (size_t)(z - cells) : end;
                         }
                         hp[j] = hash(cells + f0, f1 - f0, (uint32_t)j);
                         f0 = f1 + 1;
@@ -5516,9 +5518,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         int reach = table_r ? mark_room(c) : 0;
         for (int i = 0; any && xa && i < count && at <= cells_n; i++) {
             // rows side by side: each cell's marks, the row its part
-            size_t e = table_row_end(cells, cells_n, nc, at);
             int rx = view.x + lead + i * rh - offset;
-            if (rx + rh > view.x && rx < view.x + view.w) {
+            if (rx >= view.x + view.w) {
+                break;                  // (the rows after lie past the view too)
+            }
+            size_t e = table_row_end(cells, cells_n, nc, at);
+            if (rx + rh > view.x) {
                 int f = table_flags(c, o, id, i, cur, st, disabled, 0) | MOY_UI_F_PART;
                 g.x[0] = (int16_t)rx;
                 g.w[0] = (int16_t)rh;
@@ -5528,9 +5533,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             at = e + 1;
         }
         for (int i = 0; any && !xa && i < count && at <= cells_n; i++) {
-            size_t e = table_row_end(cells, cells_n, nc, at);
             int ry = view.y + i * rh - offset;
-            if (ry + rh > view.y && ry < view.y + view.h && (!table_r || clip_meets(s, ry, rh, reach))) {
+            if (ry >= view.y + view.h) {
+                break;                  // (the rows after lie past the view too)
+            }
+            size_t e = table_row_end(cells, cells_n, nc, at);
+            if (ry + rh > view.y && (!table_r || clip_meets(s, ry, rh, reach))) {
                 int f = table_flags(c, o, id, i, cur, st, disabled, grp) | (part ? MOY_UI_F_PART : 0);
                 if (grp) {
                     moy_ui_group_band(s, gcard, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh},
