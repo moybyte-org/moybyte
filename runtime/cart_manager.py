@@ -101,12 +101,20 @@ class CartManager:
         self.all = list(carts) if carts else []
         # Moves with every `apply`: what a reader of the roster keys on.
         self.gen = 0
+        # Moves with every title a cart's dict takes in place (the Editor's
+        # rename, `ProjectStore.commit_manifest`): what a reader of the titles
+        # keys on beside the list it holds.
+        self.titled = 0
         # The favorites as `is_favorite` last decoded them, with the row's text
-        # it decoded them from: a card asks per paint, a decode is per change.
+        # it decoded them from and the rows' generation it read that text at
+        # (`gen`): a card asks per paint, a read of the row is per change of
+        # the rows and a decode per change of the row.
         self._fav_text = None
+        self._fav_gen = -1
         self._fav_paths = ()
         # The play records as `plays` last decoded them, the same way.
         self._plays_text = None
+        self._plays_gen = -1
         self._plays = {}
 
     # -- the roster ----------------------------------------------------------
@@ -365,10 +373,13 @@ class CartManager:
         if not path:
             return False
         rows = self.ws.system
-        text = rows.text("favorites")
-        if text != self._fav_text:
-            self._fav_text = text
-            self._fav_paths = tuple(rows.get("favorites", ()))
+        g = rows.gen()
+        if g != self._fav_gen:
+            self._fav_gen = g
+            text = rows.text("favorites")
+            if text != self._fav_text:
+                self._fav_text = text
+                self._fav_paths = tuple(rows.get("favorites", ()))
         return path in self._fav_paths
 
     def toggle_favorite(self, cart):
@@ -403,6 +414,10 @@ class CartManager:
     def _plays_rows(self):
         """{path: (count, day)} of the well-formed play records."""
         rows = self.ws.system
+        g = rows.gen()
+        if g == self._plays_gen:
+            return self._plays
+        self._plays_gen = g
         text = rows.text("plays")
         if text != self._plays_text:
             self._plays_text = text

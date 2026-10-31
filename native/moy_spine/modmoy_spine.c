@@ -1076,6 +1076,12 @@ static mp_obj_t settings_dirty(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_dirty_obj, settings_dirty);
 
+// The changes since the rows were made (moy_settings_gen), a small int.
+static mp_obj_t settings_gen(mp_obj_t self) {
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)(moy_settings_gen(settings_of(self)) & 0x3fffffffu));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_gen_obj, settings_gen);
+
 // `text` as `key`'s row, kept as written: the text is checked before the key,
 // as the Python twin does.
 static void settings_store(mp_obj_t self, mp_obj_t key, mp_obj_t text,
@@ -1188,6 +1194,7 @@ static const mp_rom_map_elem_t settings_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_text), MP_ROM_PTR(&settings_set_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_delete), MP_ROM_PTR(&settings_delete_obj) },
     { MP_ROM_QSTR(MP_QSTR_dirty), MP_ROM_PTR(&settings_dirty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&settings_gen_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&settings_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_keys), MP_ROM_PTR(&settings_keys_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&settings_dump_obj) },

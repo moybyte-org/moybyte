@@ -466,6 +466,7 @@ class Settings:
         self._text = {}
         self._save = save
         self._dirty = 0
+        self._gen = 0
 
     def load(self, text):
         """Replace every row with the object `text` holds; ValueError when it
@@ -489,6 +490,7 @@ class Settings:
         self._keys = keys
         self._text = rows
         self._dirty = 0
+        self._gen = (self._gen + 1) & 0x3fffffff
 
     def get(self, key, default=None):
         """The value of `key`'s row, decoded afresh, or `default` when the key
@@ -512,6 +514,7 @@ class Settings:
             self._keys.append(key)
         self._text[key] = text
         self._dirty += 1
+        self._gen = (self._gen + 1) & 0x3fffffff
         if persist:
             self.flush()
 
@@ -523,6 +526,7 @@ class Settings:
         del self._text[key]
         self._keys.remove(key)
         self._dirty += 1
+        self._gen = (self._gen + 1) & 0x3fffffff
         if persist:
             self.flush()
         return True
@@ -530,6 +534,11 @@ class Settings:
     def dirty(self):
         """True while a change has not reached the file."""
         return self._dirty > 0
+
+    def gen(self):
+        """The changes since the store was made -- each set, delete and
+        load one, written or not -- wrapping at 30 bits."""
+        return self._gen
 
     def flush(self):
         """Write the rows when the store is dirty: True when it is clean

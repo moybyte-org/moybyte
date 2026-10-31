@@ -129,11 +129,15 @@ def test_selection_change_invalidates(tmp_path):
 
 def test_title_change_invalidates(tmp_path):
     """A rename with an unchanged item COUNT must still repaint -- the key
-    carries per-item titles precisely because len() alone cannot see it.
+    carries the roster's count of titles taken in place (`titled`, which
+    the Editor's rename moves) precisely because len() alone cannot see it.
     (The band frame repaints the carousel's band, its title with it.)"""
     ws, drv = _settle_home(tmp_path)
     it = next(x for x in ws.launcher.items if x.get("path"))
+    key = ws.launcher_layer._retained_key(ws.sys_canvas)
     it["title"] = "RENAMED"
+    ws.carts.titled += 1                 # (as ProjectStore.commit_manifest does)
+    assert ws.launcher_layer._retained_key(ws.sys_canvas) != key
     calls = _count_grid(ws)
     band = [0]
     real = ws.launcher.repaint_band

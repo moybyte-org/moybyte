@@ -101,9 +101,11 @@ def test_project_commit_manifest_persists_and_syncs_ram(tmp_path):
     ws.open_in_editor()
     assert ws.menu_view == "cards"
 
+    titled = ws.carts.titled
     ok = ws.project.commit_manifest(title="Renamed", author="Kid Coder")
     assert ok is True
     assert ws.project.cart["title"] == "Renamed"       # in-RAM sync
+    assert ws.carts.titled == titled + 1               # what a title reader keys on
     assert ws.project.cart["author"] == "Kid Coder"
     reloaded = moy_carts.load(ws.project.cart["path"])
     assert reloaded["title"] == "Renamed"

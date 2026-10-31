@@ -106,6 +106,7 @@ _SIGS = (
     ("moy_settings_set", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE], c.c_int),
     ("moy_settings_delete", [_P, _PCHAR, _SIZE], c.c_int),
     ("moy_settings_dirty", [_P], _U32),
+    ("moy_settings_gen", [_P], _U32),
     ("moy_settings_clean", [_P], None),
     ("moy_settings_count", [_P], _U32),
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
@@ -542,6 +543,9 @@ def binding(sanitize=False):
 
         def dirty(self):
             return lib.moy_settings_dirty(self._p) > 0
+
+        def gen(self):
+            return lib.moy_settings_gen(self._p) & 0x3fffffff
 
         def flush(self):
             clean = lib.moy_settings_flush(self._p)

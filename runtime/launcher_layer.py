@@ -3179,22 +3179,23 @@ class LauncherHomeLayer:
             self._on_bar, self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
-    def _retained_key(self, cv):
+    def _retained_key(self, cv, statics=None):
         """Everything the WHOLE home frame's pixels are a pure function of: the
-        chrome statics plus the grid's dynamics (selection, scroll offset, the
-        cover-cache generation, trackball hover, per-item titles, favorites)
-        and the bar's own pixel key (`shown_key` -- clock minute, wifi state,
+        chrome statics (`statics`, where the caller made them this frame)
+        plus the grid's dynamics (selection, scroll offset, the cover-cache
+        generation, trackball hover, the items and the titles they carry
+        (the list, never mutated, and the roster's count of titles taken in
+        place), the settings rows' generation for the favorites and the play
+        records) and the bar's own pixel key (`shown_key` -- clock minute, wifi state,
         the look; reusing it means the bar's cache discipline IS this cache's
         discipline). Anything that draws a pixel of the home frame and is NOT
         derivable from this tuple is a staleness bug -- the silent-cache family
         surface_model_v1.md §14.2 documents -- so additions to the home draw
         must extend this key."""
         ws = self.ws
-        return (self._statics_key(cv), self.grid.sel, self.grid.scroll,
-                ws.covers.gen, self._lhover,
-                tuple(it.get("title") for it in self.grid.items),
-                ws.system.text("favorites"), ws.system.text("plays"),
-                ws.bar_layer.shown_key("home"))
+        return (self._statics_key(cv) if statics is None else statics, self.grid.sel,
+                self.grid.scroll, ws.covers.gen, self._lhover, self.grid.items,
+                ws.carts.titled, ws.system.gen(), ws.bar_layer.shown_key("home"))
 
     def _try_stamp_retained(self, cv, dt):
         """Present the retained home frame when nothing it depends on changed:
@@ -3523,16 +3524,14 @@ class LauncherHomeLayer:
                 self._on_bar, self._back_tip)
         items = g.items
         it = items[g.nearest()] if items else None
-        st = ws.system
-        fav = st.text("favorites")
-        plays = st.text("plays")
+        rows = ws.system.gen()
         gen = ws.covers.gen
         sel = g.statics_sel()
         return (base,
                 (g.tab, sel, it, it and it.get("title"), it and it.get("description"),
-                 gen, fav, plays, self._button_focus, g.today()),
+                 gen, rows, self._button_focus, g.today()),
                 (g.tab, sel, gen, self._lhover, tuple(i.get("title") for i in items),
-                 fav, plays, g.scroll, g.moving))
+                 rows, g.scroll, g.moving))
 
     def _sel_rect(self):
         """The desk home's hero and details pane with all they cast (the

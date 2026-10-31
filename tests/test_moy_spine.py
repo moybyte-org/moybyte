@@ -423,6 +423,25 @@ def test_a_write_marks_the_store_dirty_and_persists_it(sp):
     assert not s.dirty() and s.flush() is True and len(wrote) == 5
 
 
+def test_the_generation_counts_every_change_clean_or_not(sp):
+    """`gen` moves on each set, delete and load and on nothing else, a write
+    landing or not: a reader keyed on the rows compares it, not their text."""
+    s = sp.Settings(lambda text: None)
+    g0 = s.gen()
+    s.get("a")
+    s.text("a")
+    s.flush()
+    assert s.gen() == g0
+    s.set("a", 1)
+    assert s.gen() == g0 + 1 and not s.dirty()
+    s.set("a", 1, persist=False)
+    assert s.gen() == g0 + 2
+    assert s.delete("b") is False and s.gen() == g0 + 2
+    assert s.delete("a") is True and s.gen() == g0 + 3
+    s.load('{"x": 2}')
+    assert s.gen() == g0 + 4 and s.get("x") == 2
+
+
 def test_a_failed_write_leaves_the_store_dirty_until_one_lands(sp):
     landed = [False]
     wrote = []
