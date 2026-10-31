@@ -656,6 +656,42 @@ def test_the_sounds_list_adds_a_sound_and_plays_one(desk):
     assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
 
 
+def test_the_song_pane_edits_the_songs_slots_and_plays_it(desk):
+    """Owner report 2026-10-31: the desk had no way to edit or play a song --
+    its Song pane was a row of track numbers. It is the song
+    (EDITOR_LAYOUT.md's Sound workspace): its slots, a tap on one edits the
+    song there, its sound steps back and forward, a slot is added and
+    deleted, and the song plays and stops."""
+    ws, drv, d, me, S = _sound(desk)
+    pat = me.cur_track().pattern
+    n = len(pat)
+
+    def press(id):
+        bx, by, bw, bh = d._host.box(id)
+        _click(drv, bx + bw // 2, by + bh // 2)
+
+    assert all(d._host.box("slot %d" % k) is not None for k in range(min(n, 8)))
+    press("slot 0")
+    assert me.view == me.SONG_VIEW and me.slot == 0
+    press("song add")
+    assert len(pat) == n + 1 and me.slot == 1
+    was = pat[1]
+    hi = len(me.bank.sfx) - 1
+    press("song slot+" if was < hi else "song slot-")
+    assert pat[1] == (was + 1 if was < hi else was - 1), "the slot's sound stepped"
+    assert d._host.box("slot 1") is not None, "the new slot shows"
+    press("song del")
+    assert len(pat) == n
+    press("song play")
+    assert ws.music_ui.music_preview == ("song", me.track_idx)
+    press("song play")
+    assert ws.music_ui.music_preview is None
+    me.undo()                                    # the delete
+    me.undo()                                    # the sound's step
+    pat = me.cur_track().pattern
+    assert len(pat) == n + 1 and pat[1] == was, "each edit is an undo step"
+
+
 def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     ws, drv, d, me, S = _sound(desk)
     S.open_rename(d)
