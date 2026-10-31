@@ -2276,15 +2276,38 @@ static moy_ui_span_t field_at(const uint8_t *p, size_t n, int i) {
     return option(all, i);
 }
 
+// The first NUL in [p, e), else e. A table's cells are kilobytes a frame,
+// and the C library's memchr is the S3's ROM one, a byte loop (it was the
+// hottest code of the home's band frame on the T-Deck): this reads a word
+// at a time and looks at its bytes only in the word that holds a NUL.
+const uint8_t *moy_ui_nul(const uint8_t *p, const uint8_t *e) {
+    while (p < e && ((uintptr_t)p & 3u) != 0) {
+        if (*p == 0) {
+            return p;
+        }
+        p++;
+    }
+    while (e - p >= 4) {
+        uint32_t v;
+        memcpy(&v, p, 4);
+        if (((v - 0x01010101u) & ~v & 0x80808080u) != 0) {
+            break;                      // (a NUL in this word)
+        }
+        p += 4;
+    }
+    while (p < e && *p != 0) {
+        p++;
+    }
+    return p;
+}
+
 // The fields of `p` (NUL-separated in n bytes, a trailing NUL ending the last).
-// A table's cells are kilobytes a frame: the NULs are found with memchr,
-// which reads words where a byte loop reads bytes.
 int moy_ui_fields(const uint8_t *p, size_t n) {
     int k = 0;
     const uint8_t *q = p, *e = p + n;
     while (q < e) {
-        const uint8_t *z = (const uint8_t *)memchr(q, 0, (size_t)(e - q));
-        if (z == NULL) {
+        const uint8_t *z = moy_ui_nul(q, e);
+        if (z == e) {
             return k + 1;               // (the last field has no NUL after it)
         }
         k++;

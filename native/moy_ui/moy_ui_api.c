@@ -4366,8 +4366,7 @@ static size_t table_row_end(const uint8_t *cells, size_t cells_n, int nc, size_t
     size_t e = at;
     for (int j = 0; j < nc; j++) {
         if (e < cells_n) {
-            const uint8_t *z = (const uint8_t *)memchr(cells + e, 0, cells_n - e);
-            e = z != NULL ? (size_t)(z - cells) : cells_n;
+            e = (size_t)(moy_ui_nul(cells + e, cells + cells_n) - cells);
         }
         if (j < nc - 1) {
             e++;
@@ -5455,8 +5454,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                     for (int j = 0; j < np; j++) {
                         size_t f1 = end;
                         if (f0 < end) {
-                            const uint8_t *z = (const uint8_t *)memchr(cells + f0, 0, end - f0);
-                            f1 = z != NULL ? (size_t)(z - cells) : end;
+                            f1 = (size_t)(moy_ui_nul(cells + f0, cells + end) - cells);
                         }
                         hp[j] = hash(cells + f0, f1 - f0, (uint32_t)j);
                         f0 = f1 + 1;

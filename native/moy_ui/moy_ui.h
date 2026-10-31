@@ -839,6 +839,8 @@ typedef struct {
 } moy_ui_tgeo_t;
 // The NUL-separated fields of `p` in n bytes (a trailing NUL ends the last).
 int moy_ui_fields(const uint8_t *p, size_t n);
+// The first NUL in [p, e), else e (a word at a time).
+const uint8_t *moy_ui_nul(const uint8_t *p, const uint8_t *e);
 // The geometry of a table of columns `cols` over every row's `cells` (both
 // NUL-separated, the cells row by row): the columns after the first text
 // column take their widest cell, right-aligned; it takes the rest, and where
