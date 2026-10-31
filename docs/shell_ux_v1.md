@@ -124,7 +124,8 @@ owner-directed refinements to this section's sketch: INPUT FOCUS is decoupled
 from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
 and only an explicit exit ends a run); and closes are surgical (closing one
-window never closes another). One cart still runs at a time (#73's multi-cart
+window never closes another, but for the Editor's own playtest, which ends
+with it: the 2026-10-31 paragraph below). One cart still runs at a time (#73's multi-cart
 boundary). The P4 device port of this tier rides #58.)*
 
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
@@ -149,10 +150,17 @@ size. A **PLAY from the Editor is a dev action** — the window opens at **2× o
 the cart canvas, centred over the Editor**, where the desk holds it, else at
 1× at the Editor's top right, clear of its symbol keys (owner, 2026-10-19:
 the game is the point of the window); a **run from the desk is a play
-action** and opens as big as the desktop fits. The size is read ONCE, at window creation, so a window the kid
+action** and opens full screen (the paragraph below). The size is read ONCE, at window creation, so a window the kid
 resizes is never re-sized under them. No new UI and no setting — the two entry
 points already carry the meaning. An explicit scale chooser and per-project
 memory remain open on #178.)*
+
+*(Owner, 2026-10-31 — PLAY IS FULL SCREEN ON THE DESK, as in Steam's Big
+Picture: no window buttons during play, and the pause menu's **Play in a
+window** (§9a) is the one way into a window. **Closing the Editor closes its
+playtest**; a game the kid moved out with Play in a window is its own window
+and stays open. `docs/shell_layout_2026-10.md` §3, "Games on the desk",
+holds the rule.)*
 
 ---
 
@@ -288,7 +296,8 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
 - **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen (on a
-  desk, in the workspace's Run slot or Game tab); exit returns to the Editor **on
+  desk, in the workspace's Run slot or Game tab, and closing the Editor ends it,
+  §3's 2026-10-31 paragraph); exit returns to the Editor **on
   the tab you were on**. Test-play is a round trip, not a
   context switch.
 - **B and Esc** back out one level: to wherever the Editor was opened
@@ -396,7 +405,7 @@ lives only in a window's title strip and closes the window.
 | Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **none** — the PLAY icon enters console mode; a window's X closes it | a plain key |
 | Editor | taskbar | back → pop back, to where it was opened from | a plain key |
 | Settings (incl. wifi setup) | taskbar | back, Esc or B → a page of it, else out of it | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | the console's key (§9a) → the pause menu's Quit → return to caller (§2) | a plain key the game reads |
+| Running game | fullscreen, on the desk too (§3's 2026-10-31 paragraph) | the console's key (§9a) → the pause menu's Quit → return to caller (§2); a game moved to a desk window also closes by its X | a plain key the game reads |
 | Registered app (Calc, Files, …) | the bar: Moy, back, title, status | back, Esc or B → a page of it, else return to caller | a plain key — delete in text fields |
 | Running tool/app cart | minimal bar (back + title + status) | back → return to caller | a plain key — delete in text fields |
 
@@ -434,6 +443,11 @@ menu, the pause menu to the game). The pause menu holds the run — no tick, no 
 its `time()` and its music stopped where they are — and offers Resume, Restart (the
 same cart from the top, the same caller), Options (the console's Volume) and Quit
 (return to caller); Resume gives the cart its next frame as if no time passed.
+On the desk (`wm.mode` is `"desktop"`), over a game full screen or docked in
+the Editor's Run slot, the console's key opens the same menu, with **Play in a
+window** after Resume (owner, 2026-10-31): the run goes on where it stood in a
+desk window of its own (`WindowedWM.play_in_window`), whose maximise is the way
+back to full screen. A handheld, and a P4 in console mode, never offer it.
 
 Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
 mode. A **`textmode(True)` game** reaches its pause menu through the console key

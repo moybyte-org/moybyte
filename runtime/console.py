@@ -1916,7 +1916,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         elif m.open and m.widget == "menu":
             m.close()
             self.popover_touch()
-        elif self.plays_fullscreen():
+        elif self.plays_fullscreen() or self._game_pauses():
             p.show()
         else:
             self.toggle_sysmenu()
@@ -1930,9 +1930,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
 
     def plays_fullscreen(self):
-        """A game runs fullscreen, live: what Super pauses."""
+        """A game runs fullscreen, live: what Super pauses -- in console
+        mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool and not self.wm.desk_open())
+                and not self.player._is_tool
+                and (not self.wm.desk_open() or self.wm.game_full()))
+
+    def _game_pauses(self):
+        """The desk's other play Super pauses: the game docked in the
+        Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
+        gp = getattr(self.wm, "game_pauses", None)
+        return (gp is not None and self.wm.top_is_player() and self.cart_error is None
+                and not self.player._is_tool and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it

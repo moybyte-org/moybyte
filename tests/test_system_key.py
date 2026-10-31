@@ -17,7 +17,8 @@ import pytest
 
 from runtime import audio_session, ui_draw
 from runtime.moy_input import InputTable
-from ws_helpers import build_desktop_ws, build_ws, build_ws_with_cart, make_drv, open_cart, quiesce
+from ws_helpers import (build_desktop_ws, build_ws, build_ws_with_cart, make_drv, open_cart,
+                        quiesce, select_on_home)
 
 _DT = 1 / 30
 
@@ -520,3 +521,78 @@ def test_the_ux_spec_states_one_console_key_per_input():
     assert "d0 bit 6" in sec and mi.decode_raw(bytes([1 << 6, 0, 0, 0, 0]))[0] == ("start",)
     for retired in ("own** exit", "has none", "hold gesture can", "chord is an owner"):
         assert retired not in sec, retired
+
+
+# -- Play in a window (owner, 2026-10-31) ---------------------------------------------
+
+
+def _desk_game(tmp_path):
+    """The desk with the counter cart played from it: full screen."""
+    from runtime import host_app
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    host_app.moy_carts.create("Counter", carts, src=COUNTER, type="game", edit=[])
+    ws = build_desktop_ws(tmp_path)
+    ws.open_desk()
+    assert select_on_home(ws, "Counter") is not None
+    ws.open()
+    drv = make_drv(ws)
+    _frames(drv, 3)
+    return ws, drv
+
+
+def _choose(ws, row):
+    ws.pause.choose(ws.pause.rows.index(row))
+
+
+def test_the_pause_card_offers_play_in_a_window_on_the_desk_alone(tmp_path):
+    """The desk's pause card has Play in a window; a handheld's has not, nor
+    has a P4's console mode, the handhelds' presentation (`wm.mode`)."""
+    ws, drv = _game(tmp_path / "handheld")
+    drv.system_key()
+    assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS
+    ws, drv = _desk_game(tmp_path / "desk")
+    assert ws.wm.mode == "desktop" and ws.plays_fullscreen()
+    drv.system_key()
+    assert ws.pause.open and ws.pause.WINDOW in ws.pause.rows
+    _frames(drv, 2)
+    assert ws.pause._host.box(ws.pause.WINDOW) is not None, "drawn on the card"
+    drv.system_key()
+    ws._exit_to_caller()
+    ws.open_library()                            # console mode on the same board
+    assert select_on_home(ws, "Counter") is not None
+    ws.open()
+    _frames(drv, 3)
+    assert ws.wm.mode == "console"
+    drv.system_key()
+    assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS
+
+
+def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_path):
+    """A desk play is full screen with no window buttons; Play in a window
+    moves the same run, its state going on, into a window with its strip,
+    and that window's maximize is full screen again, with no buttons."""
+    ws, drv = _desk_game(tmp_path)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    cv = wm._root_canvas
+    assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, cv.w, cv.h)
+    assert wm._frame_buttons(win) == [], "no window buttons during play"
+    drv.system_key()
+    n0 = ws.player.ns["n"]
+    assert n0 > 0
+    _choose(ws, ws.pause.WINDOW)
+    _frames(drv, 3)
+    assert wm._wins["desktop"] is win and not ws.pause.open and not ws.player.paused
+    assert ws.player.ns["n"] > n0, "the same run goes on, from where it stood"
+    assert not win.full() and win.content_rect()[1] > win.y, "a title strip"
+    names = [n for n, _r, _side in wm._frame_buttons(win)]
+    assert {"min", "max", "close"} <= set(names)
+    assert not ws.plays_fullscreen()
+    mx = next(r for n, r, _side in wm._frame_buttons(win) if n == "max")
+    drv.touch(mx[0] + mx[2] // 2, mx[1] + mx[3] // 2)
+    drv.frame(_DT)
+    drv.touch_up()
+    _frames(drv, 2)
+    assert win.full() and wm._frame_buttons(win) == []
+    assert ws.player.ns["n"] > n0 and ws.plays_fullscreen()

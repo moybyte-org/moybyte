@@ -49,7 +49,11 @@ to whoever called it.
   - **Input focus is decoupled from the back-stack**: clicking a window or its chip
     moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
     Editor beside it is typed in — its pointer feed click-stripped so the
-    background cart never eats editor taps. Only an explicit exit ends a run.
+    background cart never eats editor taps. Only an explicit exit ends a run,
+    and closing the Editor is one for its own playtest (owner, 2026-10-31); a
+    game the pause card's Play in a window moved out (`WindowedWM.play_in_window`)
+    is its own window and outlives the Editor. Play on the desk is full
+    screen with no window buttons (`docs/shell_layout_2026-10.md` §3).
     The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
     window gets back the mode it had, so a field in one never leaves a game
     beside it in text mode.

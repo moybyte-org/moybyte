@@ -41,7 +41,7 @@ memory and compositors); this doc cites, it does not copy.
 | L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §5, §12 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
-| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
+| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs full screen (owner, 2026-10-31, §3), an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
 | L18 | **On a board with a desk the Editor is a window** (owner, 2026-10-20): a Make pick, CHANGE or NEW from the console-mode home gives console mode back to the desk and opens the Editor there in a window, and closing that window gives the glass back to the console-mode home on the tab and card it came from, unless a window the desk did not have then is open on it (R5-05); a board with no desk opens it fullscreen | §3, §12 |
 
 ## 2. What exists, read against this doc
@@ -183,6 +183,20 @@ and no kind exists twice.
 playtest running in a window is ended first, as closing its window ends it
 (owner, 2026-10-13: the simplest to build): the cart slot is one and console
 mode's games need it. Steam's Big Picture on a PC is the shape, from memory.
+
+**Games on the desk** (owner, 2026-10-31). Play is full screen, as Steam's
+Big Picture is: a game run from the desk opens as a window full screen with
+no row and no buttons, and the console's key opens its pause card. The
+card's **Play in a window**, offered only in desktop mode (`wm.mode`), never
+in console mode or on a handheld, moves the running game, its run untouched,
+into a normal desk window with its strip (minimise, maximise, close); that
+window's maximise gives it the glass again. It is the one way out of full
+screen, and the desk has no game icons. The Editor's playtest stands docked
+in its Run slot and is the Editor's: closing the Editor ends it, as the
+pause card's Quit does. The card offers Play in a window over it too, and a
+game moved out so is its own window, which outlives the Editor
+(`WindowedWM.play_in_window`, the path an orphaned docked game takes back to
+its window).
 
 **The way back** goes one level, wherever something is beneath the surface
 (owner, 2026-10-13; its shape 2026-10-18, `docs/look_2026-10.md` step 27a):
@@ -474,7 +488,7 @@ surfaces only, a running app keeping today's top strip — is declined (§15).
 | app carts (Python, `type: app`) | nothing breaks: `bar_h()` stays; `content_rect()` is the verb to move to; `docs/app_api_v1.md` says so in place |
 | shipped apps | read the content rect through their layouts (step 3 is byte-identical under the top bar) |
 | compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
-| games | untouched: the Player surface is the cart's; no mode draws a bar over a game; the windowed player window keeps #178's two sizes |
+| games | untouched: the Player surface is the cart's; no mode draws a bar over a game; on the desk a play opens full screen and the Editor's playtest docks (§3), and a game moved to a window keeps the size it opened at (#178) |
 | versioning | `docs/app_api_v1.md` stays v1: one additive verb; the role table's generation moves as any row addition does |
 
 ## 8. Popovers and components

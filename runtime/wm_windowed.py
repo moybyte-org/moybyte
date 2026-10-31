@@ -204,6 +204,9 @@ class _Win:
         self.undock = None            # where it goes back to (x, y, w, h)
         self.dock_off = None          # docked: its corner from its host's
                                       # content corner, which it follows
+        self.own = False              # a game moved out by the pause card's
+                                      # Play in a window: never docked, and
+                                      # no Editor's playtest (it outlives one)
         self.corner = 0               # full screen: where its controls start
         self.row = 0                  # full screen: the rows the WM's row takes
                                       # above the content (0 where the app's
@@ -1143,6 +1146,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         from the Editor) or "play" (the desk/home). Only the player window's
         DEFAULT size reads it; see _win_size."""
         self._play_intent = intent if intent == "dev" else "play"
+        win = self._wins.get("desktop")
+        if win is not None:
+            win.own = False               # a new run is its caller's again
 
     def _win_size(self, key, full, fs):
         """Default window OUTER size per window slot: on a desk, the apps the
@@ -1522,9 +1528,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # ground under the WM's row otherwise, with the window's icon and title
     # at its head and minimise, restore and close at its right, drawn and
     # answered as every strip's. A game's window is the game alone, at the
-    # largest whole scale that leaves the corner's controls clear, on black;
-    # the player's window running a window-bound app cart (Notes) is an
-    # app's, under the WM's row (`_is_game`).
+    # largest whole scale the glass holds, on black, with no buttons (owner,
+    # 2026-10-31: play is full screen, as Big Picture's); the player's
+    # window running a window-bound app cart (Notes) is an app's, under the
+    # WM's row (`_is_game`).
 
     def _row_h(self):
         """The full-screen row's height: the band's (a window's bar)."""
@@ -1598,7 +1605,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _opens_full(self, kind):
         """Whether a window of `kind` opens full screen: as it was last left
         on this board, and the Editor so the first time, on a desk (E-04)."""
-        if kind == "desktop" or _layout_base.metric_class() != _layout_base.DESK:
+        if kind == "desktop":
+            # Play is full screen on the desk (owner, 2026-10-31): a desk
+            # play opens so, with no buttons; an Editor's playtest and a
+            # window-bound app cart open as windows.
+            return self._play_intent == "play" and not self.ws.app_window_canvas
+        if _layout_base.metric_class() != _layout_base.DESK:
             return False
         got = self.ws.system.get("win_full", None)
         if isinstance(got, dict) and kind in got:
@@ -1649,9 +1661,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         no strip, above the window it docks in: the desk Editor's Run slot
         and Game tab hold the playtest so (runtime/editor_desk.py). `rect`
         None gives the window back its place; False hides it, its run held,
-        as a minimise does. Whether there is such a window."""
+        as a minimise does. Whether there is such a window: a game moved
+        out to a window of its own (`play_in_window`) never docks."""
         win = self._wins.get(kind)
-        if win is None:
+        if win is None or win.own:
             return False
         if rect is None or rect is False:
             if win.docked is not None:
@@ -1687,6 +1700,72 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             order.remove(kind)
             order.append(kind)
         return True
+
+    def offers_window(self):
+        """Whether the pause card offers Play in a window (owner,
+        2026-10-31): on the desk, over a game that is full screen or docked
+        in the Editor's Run slot. Never in console mode, the handhelds'."""
+        win = self._wins.get("desktop")
+        return (self.mode == "desktop" and win is not None and self._is_game(win)
+                and (win.saved is not None or win.docked is not None))
+
+    def play_in_window(self):
+        """The pause card's Play in a window: the running game, its run
+        untouched, in a desk window of its own with its strip -- a full-screen
+        one restored to the rect it opened at, a docked one given back its
+        window as an orphaned one is (`dock`). It is no Editor's playtest
+        from then on: closing the Editor leaves it, and its maximize is the
+        way back to full screen. False where nothing moved."""
+        if self.mode == "desktop":
+            self._sync_windows()          # a run spawned this frame has its window
+        if not self.offers_window():
+            return False
+        win = self._wins["desktop"]
+        docked = win.docked is not None
+        if docked:
+            self.dock("desktop", None)
+        else:
+            self._toggle_max(win)
+        win.own = True
+        host = self._wins.get("menu")
+        if docked and host is not None:
+            self.ws.editor_app.zone_gen += 1  # its bar's Play again
+            self._prewarm(host)           # and its Run slot's still
+        self._bring_forward("desktop")
+        self.ws._dirty = True
+        return True
+
+    def game_full(self):
+        """Whether the focused desk window is a game full screen: a play
+        the console's key pauses, as in console mode."""
+        win = self._focus_win()
+        return (self.mode == "desktop" and win is not None and not win.minimized
+                and win.saved is not None and self._is_game(win))
+
+    def game_pauses(self):
+        """Whether the console's key opens the pause card on the desk: over
+        a game full screen, or docked in the Editor's Run slot, holding the
+        keys."""
+        if self.game_full():
+            return True
+        win = self._focus_win()
+        return (self.mode == "desktop" and win is not None and not win.minimized
+                and win.docked is not None and self._is_game(win))
+
+    def _end_playtest(self):
+        """Closing the Editor ends its playtest (owner, 2026-10-31), the
+        way the pause card's Quit ends a run: the world released, its pmem
+        flushed, its window closed. A game moved to a window of its own, or
+        one the Editor did not run, goes on."""
+        ws = self.ws
+        win = self._wins.get("desktop")
+        if win is None or win.own or ws.returns.caller() != EDITOR:
+            return
+        pause = ws.pause
+        if pause.open and not pause.stopped:
+            pause.close()
+        ws._reset_canvas_state()
+        ws._exit_to_caller()
 
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
@@ -2271,7 +2350,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if w[2] <= 0:
                 w[1] = None
                 w[3] = False
-        self.ws.bar_layer.redraw_tile("desk")   # the system button, as it now stands
+        if self.full_cover() < 0:               # a full-screen window covers the bar
+            self.ws.bar_layer.redraw_tile("desk")   # the system button, as it now stands
 
     def _pop_restore_slots(self, root, cur, ride):
         for i in range(2):
@@ -3073,15 +3153,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         scale = max(1, min(cw // gw, ch // gh))
         ox = cx + (cw - gw * scale) // 2
         oy = cy + (ch - gh * scale) // 2
-        if win.saved is not None:
-            # Full screen: the largest whole scale that leaves the corner's
-            # controls clear, their row's height down from the top.
-            kx = win.corner
-            ky = cy + self._row_h()
-            while scale > 1 and ox + gw * scale > kx and oy < ky:
-                scale -= 1
-                ox = cx + (cw - gw * scale) // 2
-                oy = cy + (ch - gh * scale) // 2
         return (ox, oy, scale)
 
     def game_is_fullscreen(self):
@@ -4618,6 +4689,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 ws.look.save_icons()
             else:
                 ws.editor_app.save_current()      # the Editor's active tab
+        if kind == "menu" and not ws._editing_icons:
+            self._end_playtest()              # its playtest goes with it
         if kind == "desktop":
             self.close_player()
         else:
