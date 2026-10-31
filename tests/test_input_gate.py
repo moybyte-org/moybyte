@@ -141,6 +141,29 @@ def test_like_for_like_classes_every_painted_frame_after_a_release_as_coast():
     assert g.probed(row) is True and g.probed({"raw": blind}) is False
 
 
+def test_a_run_whose_probe_reads_absent_throughout_makes_its_row_invalid():
+    def raw(probes):
+        out = []
+        for i, p in enumerate(probes):
+            f = dict((k, 0) for k in ib.FIELDS)
+            f.update(t0=i * 20000, t1=i * 20000 + 15000, probe=p, flushes=-1, span=-1)
+            out += [f[k] for k in ib.FIELDS]
+        return out
+    up = {"surface": "Notes", "input": "fling", "gate": {"p90": 30.0}, "raw": raw([3, 4, 5])}
+    gone = dict(up, gate={"p90": 12.0}, raw=raw([g.ABSENT] * 3))
+    once = dict(up, raw=raw([g.ABSENT, 4, 5]))
+    key = ("Notes", "fling")
+    assert g.absent(gone) and not g.absent(up) and not g.absent(once)
+    assert not g.absent({"gate": {"p90": 1}})
+    row = g.compare([{key: gone}] * 3, [{key: up}] * 3)[0]
+    assert (row["verdict"], row["absent"]) == ("invalid", ["base"])
+    assert g.groups([row]) == {"Notes": "invalid"}
+    assert g.worst(["pass", "invalid"]) == "invalid"
+    assert "probe reads -1 throughout on dev: the surface was not up" in g.render(
+        "tdeck", [row], "dev", "ui1")
+    assert g.compare([{key: up}] * 3, [{key: once}] * 3)[0]["verdict"] == "pass"
+
+
 # -- the baselines -----------------------------------------------------------------
 
 def test_the_store_keys_runs_by_commit_board_and_day(tmp_path):
