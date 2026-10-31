@@ -196,7 +196,9 @@ The page that holds a table of parts may be its frames' region R, placed
 stops and all, where the page carries a gen keyed on what it shows beside
 the table and its own scroll is still: R moves by nothing and the table's
 view moves inside it, a second move the host makes (`sh_in`, `sh_in_dy`
-in `moy_ui_api.c`'s `shift_plan`). The stops an app places round its table
+in `moy_ui_api.c`'s `shift_plan`); of R the buffer takes from the last
+frame's only what lies outside the view (`host_plan`), the view's move
+bringing the rest. The stops an app places round its table
 then keep their pixels on the table's frames. With no such page the
 table's view is R, and what lies outside it draws on every frame. A text
 view (§4.5) moves inside the page that holds it the same way (Notes'

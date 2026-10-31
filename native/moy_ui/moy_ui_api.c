@@ -6404,6 +6404,13 @@ static void host_move(int32_t *hp, int x, int y, int w, int h, int dy) {
     m[4] = dy;
 }
 
+// The copy of (x0, y0)-(x1, y1) unmoved, where it holds any pixel.
+static void host_move_rect(int32_t *hp, int ox, int oy, int x0, int y0, int x1, int y1) {
+    if (x1 > x0 && y1 > y0) {
+        host_move(hp, x0 + ox, y0 + oy, x1 - x0, y1 - y0, 0);
+    }
+}
+
 // The shift frame the frame begun may be (docs/scroll_and_text_2026-10.md
 // §3.3): the engine licenses it from the input it applied and the gens the
 // last pass drew, the ring vouches that the frame before drew the page
@@ -6467,7 +6474,21 @@ static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
         hp[MOY_UI_HP_N] = 0;
         return 0;
     }
-    if (lag < 0) {
+    if (lag < 0 && c->sh_in_dy && !p[4]) {
+        // R holds still around the view that moves inside it: what of R
+        // lies outside the view comes over from the last frame's buffer,
+        // the view's move bringing the rest
+        rc_t r = {p[0], p[1], p[0] + p[2], p[1] + p[3]};
+        rc_t v = rc_of(c->sh_in);
+        if (!rc_cut(&v, r)) {
+            v.x0 = v.x1 = r.x0;
+            v.y0 = v.y1 = r.y0;
+        }
+        host_move_rect(hp, ox, oy, r.x0, r.y0, r.x1, v.y0);
+        host_move_rect(hp, ox, oy, r.x0, v.y1, r.x1, r.y1);
+        host_move_rect(hp, ox, oy, r.x0, v.y0, v.x0, v.y1);
+        host_move_rect(hp, ox, oy, v.x1, v.y0, r.x1, v.y1);
+    } else if (lag < 0) {
         host_move(hp, p[0] + ox, p[1] + oy, p[2], p[3], p[4]);
     }
     h->mv_dy = (int16_t)p[4];
