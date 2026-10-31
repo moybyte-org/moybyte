@@ -490,6 +490,7 @@ class Launcher:
         self._rows = []               # its table's rows
         self._krows = []              # ...as their cards' keys, and the list they are of
         self._krows_of = None
+        self._kcols = ()              # ...and their columns, one a card across
         self.floor = []               # the rects the band's frame draws (`band_floor`)
         self._bo = {"id": "band", "part": [0, 0], "axis": "x", "snap": False, "offset": 0,
                     "spill": 0, "gen": 0, "current": False, "mark": False}
@@ -907,21 +908,28 @@ class Launcher:
 
     def _band_keys(self, n, per):
         """The band table's rows as their cards' keys, `n` rows of `per`
-        cards: each row's one cell names what its cards are drawn from (the
-        item, its title, its kind), so a row whose cards changed draws
-        again. Made again only for another list."""
+        cards across: each cell names what its card is drawn from (the
+        item, its title, its kind), so a card that changed draws again.
+        Made again only for another list or another `per`; the columns
+        (`per` empty headers) with them."""
         items = self.items
-        if self._krows_of is items and len(self._krows) == n:
-            return self._krows
+        rows = self._krows
+        if self._krows_of is items and len(rows) == n and len(self._kcols) == per:
+            return rows
         rows = []
         for i in range(n):
-            cell = ""
-            for k in range(i * per, min(len(items), (i + 1) * per)):
-                it = items[k]
-                cell += "%s\x1f%s\x1f%s\x1e" % (it.get("path"), it.get("title"), it.get("type"))
-            rows.append((cell,))
+            row = []
+            for k in range(i * per, (i + 1) * per):
+                if k < len(items):
+                    it = items[k]
+                    row.append("%s\x1f%s\x1f%s" % (it.get("path"), it.get("title"),
+                                                    it.get("type")))
+                else:
+                    row.append("")
+            rows.append(tuple(row))
         self._krows = rows
         self._krows_of = items
+        self._kcols = ("",) * per
         return rows
 
     def _begin_band(self, cv, b, desk, key, need, over=None):
@@ -1010,11 +1018,19 @@ class Launcher:
         o["axis"] = "x" if self.horizontal else "y"
         sp = o["spill"] = c.grow + _ui_draw.mark_reach("card") + 2
         sel = self.sel
-        o["gen"] = sel if self._focused(True) else -1
+        # the cards across a row: the first's offset into the band, the pitch
+        a = o.get("across")
+        if a is None:
+            a = o["across"] = [0, 0]
+        a[0] = c.y0 - b[1] if self.horizontal else c.x0 - b[0]
+        a[1] = c.py if self.horizontal else c.px
+        o["at"] = sel % per
+        o["gen"] = 1 if self._focused(True) else 0
         o["keep"] = key[1]
         o["whole"] = whole or not held
         o["over"] = over
-        _ui.table("", _PART_COL, self._band_keys((n + per - 1) // per, per), sel // per, o)
+        rows = self._band_keys((n + per - 1) // per, per)
+        _ui.table("", self._kcols, rows, sel // per, o)
         if beside is not None:
             beside(cv, whole or not held)
         end = self.band_floor(cv, fill)
@@ -1046,8 +1062,9 @@ class Launcher:
                 if k == sel:
                     on = q
                     continue
-                if q is None:
-                    continue
+                if (q is None or t[0] - sp >= q[0] + q[2] or t[0] + c.px + sp <= q[0]
+                        or t[1] - sp >= q[1] + q[3] or t[1] + c.py + sp <= q[1]):
+                    continue               # (its reach lies outside the floor)
                 if faces is None:
                     self._draw_cell(cv, items[k], t, False, c)
                 else:

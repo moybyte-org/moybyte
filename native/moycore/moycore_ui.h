@@ -167,6 +167,21 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
         lua_pop(L, 2);
     }
     lua_pop(L, 1);
+    lua_getfield(L, i, "across");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        lua_geti(L, -1, 1);
+        lua_geti(L, -2, 2);
+        o->has_across = 1;
+        o->across_first = (int16_t)lua_tointeger(L, -2);
+        o->across_pitch = (int16_t)lua_tointeger(L, -1);
+        lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, i, "at");
+    if (lua_isnumber(L, -1)) {
+        o->at = (int16_t)(lua_tointeger(L, -1) - 1);   /* (from 1, as every Lua index) */
+    }
+    lua_pop(L, 1);
     lua_getfield(L, i, "keep");
     if (lua_isnumber(L, -1)) {
         o->has_keep = 1;

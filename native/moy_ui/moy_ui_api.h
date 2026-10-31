@@ -90,14 +90,15 @@ typedef struct {
 // none), whether it is the app's alone (`kept`: no key of its table was
 // negative), and its kept table (has_tbl), as moy_ui_api_table recorded it:
 // its id, key, columns' geometry, view, scroll, row height and count,
-// current row and focus mark, the record (its cells hashed, the current
-// row's gen in it) of rows r0 .. r0 + k - 1 (k -1: none kept), and what was
+// current row (its part `at`) and focus mark, the record (each part's cell
+// hashed, np parts a row, the current part's gen in it) of rows r0 .. r0 +
+// k - 1 (k -1: none kept), and what was
 // drawn over it after its pass (`over`, w 0 none); then the parts `held`
 // named (id, key), nh of them.
 #define MOY_UI_KEPT_RING 4          // RETAINED_FRAMES at most, and the paint begun
 #define MOY_UI_KEPT_HELD 4          // the parts `held` names a paint
 #define MOY_UI_KEPT_FLOOR 4         // the rects a kept table's floor is merged to
-#define MOY_UI_KEPT_ROWS 24         // the rows that show a kept table records (more: drawn whole)
+#define MOY_UI_KEPT_PARTS 48        // the parts that show a kept table records (more: drawn whole)
 #define MOY_UI_KF_HELD 1            // kf_held: every buffer holds the kept table
 #define MOY_UI_KF_OVER 2            // ...but for what was drawn over it
 typedef struct {
@@ -105,8 +106,9 @@ typedef struct {
     uint32_t id, geo;
     moy_ui_box_t view, over;
     int16_t rh, n, cur, r0, k;
-    uint8_t mark, kept, has_tbl, nh;
-    uint32_t h[MOY_UI_KEPT_ROWS];
+    int8_t at;
+    uint8_t mark, kept, has_tbl, nh, np;
+    uint32_t h[MOY_UI_KEPT_PARTS];
     uint32_t hid[MOY_UI_KEPT_HELD];
     int32_t hkey[MOY_UI_KEPT_HELD];
 } moy_ui_kept_t;
@@ -174,6 +176,12 @@ typedef struct {
     int8_t has_keep, whole;
     int32_t keep;
     int16_t over_x, over_y, over_w, over_h;
+    // A table of parts whose rows hold parts across (has_across): a row's
+    // cells are its parts' keys, the first `across_first` px into the view
+    // across the rows' axis, each `across_pitch` px on from the last; `at`
+    // the current row's part its gen and marks belong to.
+    int8_t has_across;
+    int16_t across_first, across_pitch, at;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -188,6 +196,8 @@ typedef struct {
 #define MOY_UI_O_KEEP 16384         // and `keep`, its word after the spill's
 #define MOY_UI_O_OVER 32768         // and `over`, its four words (x, y, w, h) after the keep's
 #define MOY_UI_O_WHOLE 65536        // and `whole`
+#define MOY_UI_O_ACROSS 131072      // and `across`, its two words (first, pitch) after the over's
+#define MOY_UI_O_AT 262144          // and `at`, its word after the across's
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);

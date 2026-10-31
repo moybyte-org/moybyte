@@ -92,6 +92,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->spill = 0;
     o->has_keep = o->whole = 0;
     o->keep = 0;
+    o->has_across = 0;
+    o->across_first = o->across_pitch = o->at = 0;
     o->over_x = o->over_y = o->over_w = o->over_h = 0;
 }
 
@@ -187,6 +189,16 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     }
                     at += 16u;
                 }
+                if ((fl & MOY_UI_O_ACROSS) && n - at >= 8u) {
+                    o->has_across = 1;
+                    o->across_first = (int16_t)word(w + at, 0);
+                    o->across_pitch = (int16_t)word(w + at, 1);
+                    at += 8u;
+                }
+                if ((fl & MOY_UI_O_AT) && n - at >= 4u) {
+                    o->at = (int16_t)word(w + at, 0);
+                    at += 4u;
+                }
             }
         }
     }
@@ -201,7 +213,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
-                                       0, 0, 0, 0, 0, 0, 0};
+                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     return o != NULL ? o : &none;
 }
 
@@ -4440,10 +4452,11 @@ static const moy_ui_kept_t *kept_held(const moy_ui_ctx_t *c) {
 static int kept_same(const moy_ui_kept_t *a, const moy_ui_kept_t *b) {
     if (!a->has_tbl || !b->has_tbl || a->id != b->id || a->key != b->key || a->geo != b->geo
         || !same_box(a->view, b->view) || a->off != b->off || a->rh != b->rh || a->n != b->n
-        || a->cur != b->cur || a->mark != b->mark || a->r0 != b->r0 || a->k != b->k || a->k < 0) {
+        || a->cur != b->cur || a->at != b->at || a->mark != b->mark || a->r0 != b->r0
+        || a->k != b->k || a->np != b->np || a->k < 0) {
         return 0;
     }
-    return memcmp(a->h, b->h, (size_t)a->k * sizeof(a->h[0])) == 0;
+    return memcmp(a->h, b->h, (size_t)a->k * a->np * sizeof(a->h[0])) == 0;
 }
 
 int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
@@ -4475,43 +4488,50 @@ int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
     return 0;
 }
 
-// The kept table's floor, intervals [a0, a1) along its rows' axis merged
-// where a row's reach (rh, sp past it on either side) could meet two; more
+// The kept table's floor, rects f[0..n) (x0, y0, x1, y1 each), merged into
+// their bounding rect where one row's reach -- rh along the axis (y, or x
+// where `xa`), sp past it on either side, across the whole view -- could
+// meet two: a row is answered once, inside the one rect it meets. More
 // than the floor holds become one.
-static int kept_merge(int32_t *a0, int32_t *a1, int n, int rh, int sp) {
-    for (int i = 1; i < n; i++) {           // (a handful: by insertion)
-        for (int j = i; j > 0 && a0[j] < a0[j - 1]; j--) {
-            int32_t t = a0[j]; a0[j] = a0[j - 1]; a0[j - 1] = t;
-            t = a1[j]; a1[j] = a1[j - 1]; a1[j - 1] = t;
-        }
-    }
-    int m = 0;
-    for (int i = 0; i < n; i++) {
-        if (m && a0[i] - a1[m - 1] < rh + 2 * sp) {
-            if (a1[i] > a1[m - 1]) {
-                a1[m - 1] = a1[i];
+static int kept_merge(rc_t *f, int n, int rh, int sp, int xa) {
+    int merged = 1;
+    while (merged) {
+        merged = 0;
+        for (int i = 0; i < n && !merged; i++) {
+            for (int j = i + 1; j < n; j++) {
+                int a0 = xa ? f[i].x0 : f[i].y0, a1 = xa ? f[i].x1 : f[i].y1;
+                int b0 = xa ? f[j].x0 : f[j].y0, b1 = xa ? f[j].x1 : f[j].y1;
+                int gap = a0 > b1 ? a0 - b1 : b0 > a1 ? b0 - a1 : 0;
+                if (gap < rh + 2 * sp) {
+                    f[i].x0 = f[j].x0 < f[i].x0 ? f[j].x0 : f[i].x0;
+                    f[i].y0 = f[j].y0 < f[i].y0 ? f[j].y0 : f[i].y0;
+                    f[i].x1 = f[j].x1 > f[i].x1 ? f[j].x1 : f[i].x1;
+                    f[i].y1 = f[j].y1 > f[i].y1 ? f[j].y1 : f[i].y1;
+                    f[j] = f[--n];
+                    merged = 1;
+                    break;
+                }
             }
-            continue;
         }
-        a0[m] = a0[i];
-        a1[m] = a1[i];
-        m++;
     }
-    if (m > MOY_UI_KEPT_FLOOR) {
-        a1[0] = a1[m - 1];
-        m = 1;
+    while (n > MOY_UI_KEPT_FLOOR) {
+        rc_t q = f[--n];
+        f[0].x0 = q.x0 < f[0].x0 ? q.x0 : f[0].x0;
+        f[0].y0 = q.y0 < f[0].y0 ? q.y0 : f[0].y0;
+        f[0].x1 = q.x1 > f[0].x1 ? q.x1 : f[0].x1;
+        f[0].y1 = q.y1 > f[0].y1 ? q.y1 : f[0].y1;
     }
-    return m;
+    return n;
 }
 
 // A placed table of parts that keeps them (o->keep): this frame's paint of
 // it recorded, and the floor this frame draws planned from the paint the
 // buffer holds (moy_ui_api_table_floor). `hv` the record of rows vis0 ..
-// vis0 + nk - 1 (nk -1: too many to keep), `base` row 0's start along the
-// axis, a0 .. a1 the view's extent along it.
+// vis0 + nk - 1, `np` parts a row (nk -1: too many to keep); `base` row
+// 0's start along the axis.
 static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uint32_t geo,
-                       moy_ui_box_t view, int32_t offset, int rh, int count, int cur, int mark,
-                       int vis0, int nk, const uint32_t *hv, int base, int a0, int a1, int sp,
+                       moy_ui_box_t view, int32_t offset, int rh, int count, int cur, int at,
+                       int mark, int vis0, int nk, int np, const uint32_t *hv, int base, int sp,
                        int xa) {
     moy_ui_kept_t *now = &c->kt[c->kt_ri];
     now->has_tbl = 1;
@@ -4523,55 +4543,62 @@ static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uin
     now->rh = (int16_t)rh;
     now->n = (int16_t)count;
     now->cur = (int16_t)cur;
+    now->at = (int8_t)at;
     now->mark = (uint8_t)mark;
     now->r0 = (int16_t)vis0;
     now->k = (int16_t)nk;
+    now->np = (uint8_t)np;
     if (nk > 0) {
-        memcpy(now->h, hv, (size_t)nk * sizeof(hv[0]));
+        memcpy(now->h, hv, (size_t)nk * np * sizeof(hv[0]));
     }
     now->over = (moy_ui_box_t){o->over_x, o->over_y, o->over_w, o->over_h};
     if (o->keep < 0) {
         now->kept = 0;
     }
     const moy_ui_kept_t *was = kept_held(c);
-    int32_t f0[16], f1[16];
-    int n = 0, whole = o->whole == 1 || was == NULL || !now->kept || nk < 0 || !was->has_tbl || was->id != id
-                       || was->key != o->keep || was->geo != geo || !same_box(was->view, view)
-                       || was->off != offset || was->rh != rh || was->n != count || was->k < 0;
+    rc_t vr = rc_of(view), f[16];
+    int n = 0, whole = o->whole == 1 || was == NULL || !now->kept || nk < 0 || !was->has_tbl
+                       || was->id != id || was->key != o->keep || was->geo != geo
+                       || !same_box(was->view, view) || was->off != offset || was->rh != rh
+                       || was->n != count || was->k < 0 || was->np != np;
+    // the parts across a row: from `across0` on the cross axis, a pitch apart
+    int c0 = (xa ? view.y : view.x) + o->across_first, pitch = o->across_pitch;
+    int moved = !whole && (cur != was->cur || at != was->at || mark != was->mark);
     for (int i = vis0; !whole && i < vis0 + nk; i++) {
-        int j = i - was->r0;
-        int moved = (i == cur || i == was->cur) && (cur != was->cur || mark != was->mark);
-        if (moved || j < 0 || j >= was->k || was->h[j] != hv[i - vis0]) {
+        int r = i - was->r0;
+        for (int j = 0; j < np; j++) {
+            int mk = moved && ((i == cur && j == at) || (i == was->cur && j == was->at));
+            if (!mk && r >= 0 && r < was->k && was->h[r * np + j] == hv[(i - vis0) * np + j]) {
+                continue;
+            }
             if (n == 16) {
                 whole = 1;
                 break;
             }
-            int32_t s0 = base + i * rh - sp, s1 = base + (i + 1) * rh + sp;
-            f0[n] = s0 > a0 ? s0 : a0;
-            f1[n] = s1 < a1 ? s1 : a1;
-            n += f1[n] > f0[n];
+            int a0 = base + i * rh - sp, a1 = base + (i + 1) * rh + sp;
+            int x0 = xa ? vr.y0 : vr.x0, x1 = xa ? vr.y1 : vr.x1;
+            if (np > 1) {
+                x0 = c0 + j * pitch - sp;
+                x1 = c0 + (j + 1) * pitch + sp;
+            }
+            f[n] = xa ? (rc_t){a0, x0, a1, x1} : (rc_t){x0, a0, x1, a1};
+            n += rc_cut(&f[n], vr);
         }
     }
     if (!whole && was->over.w > 0 && n < 16) {
         // what was drawn over the paint the buffer holds: the floor takes it
-        rc_t q = rc_of(was->over);
-        if (rc_cut(&q, rc_of(view))) {
-            f0[n] = xa ? q.x0 : q.y0;
-            f1[n] = xa ? q.x1 : q.y1;
-            n++;
-        }
+        f[n] = rc_of(was->over);
+        n += rc_cut(&f[n], vr);
     }
     if (whole) {
-        f0[0] = a0;
-        f1[0] = a1;
-        n = a1 > a0;
+        f[0] = vr;
+        n = vr.x1 > vr.x0 && vr.y1 > vr.y0;
     }
-    n = kept_merge(f0, f1, n, rh, sp);
+    n = kept_merge(f, n, rh, sp, xa);
     c->kf_i = 0;
     c->kf_n = (uint8_t)n;
     for (int i = 0; i < n; i++) {
-        c->kf[i] = xa ? (moy_ui_box_t){(int16_t)f0[i], view.y, (int16_t)(f1[i] - f0[i]), view.h}
-                      : (moy_ui_box_t){view.x, (int16_t)f0[i], view.w, (int16_t)(f1[i] - f0[i])};
+        c->kf[i] = box_of(f[i]);
     }
     // every buffer holds it where the paints before this one, a buffer
     // each, left it as this one does, with nothing over it
@@ -4857,8 +4884,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     moy_ui_box_t view = {b.x, (int16_t)(b.y + cap_h + head_h), b.w,
                          (int16_t)(b.h - cap_h - head_h > 0 ? b.h - cap_h - head_h : 0)};
     moy_ui_tgeo_t g;
-    if (part && (nc == 1 || xa)) {
-        memset(&g, 0, sizeof(g));       // the row is the part
+    if (part && (nc == 1 || xa || o->has_across)) {
+        memset(&g, 0, sizeof(g));       // the row is the part (its parts across, where `across`)
         g.n = 1;
         g.pic = 1;
         g.x[0] = view.x;
@@ -5196,23 +5223,39 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int keeping = part && placed && kp != NULL && !disabled && o->has_keep && c->kt_k > 0
                   && c->kt_n > 0 && c->kt[c->kt_ri].f == c->kt_f;
     if (keeping) {
-        int nr = nk >= 0 && nk <= MOY_UI_KEPT_ROWS ? nk : -1;
-        uint32_t kh[MOY_UI_KEPT_ROWS];
-        size_t at = 0;
-        for (int i = 0; nr > 0 && i < vis1 && at <= cells_n; i++) {
-            size_t e = table_row_end(cells, cells_n, nc, at);
+        // each part's record: a row's own, or with `across` each cell's
+        int np = o->has_across ? nc : 1;
+        int nr = nk >= 0 && nk * np <= MOY_UI_KEPT_PARTS ? nk : -1;
+        int at = o->has_across && o->at >= 0 && o->at < np ? o->at : 0;
+        uint32_t kh[MOY_UI_KEPT_PARTS];
+        size_t q = 0;
+        for (int i = 0; nr > 0 && i < vis1 && q <= cells_n; i++) {
+            size_t e = table_row_end(cells, cells_n, nc, q);
+            size_t end = e < cells_n ? e : cells_n;
             if (i >= vis0) {
-                size_t end = e < cells_n ? e : cells_n;
-                kh[i - vis0] = hash(cells + at, end - at, (uint32_t)nc);
+                uint32_t *hp = kh + (i - vis0) * np;
+                if (np == 1) {
+                    hp[0] = hash(cells + q, end - q, (uint32_t)nc);
+                } else {
+                    size_t f0 = q;
+                    for (int j = 0; j < np; j++) {
+                        size_t f1 = f0;
+                        while (f1 < end && cells[f1] != 0) {
+                            f1++;
+                        }
+                        hp[j] = hash(cells + f0, f1 - f0, (uint32_t)j);
+                        f0 = f1 + 1;
+                    }
+                }
                 if (o->has_gen && i == cur) {
-                    kh[i - vis0] ^= (uint32_t)o->gen * 0x9e3779b1u + 0x7f4a7c15u;
+                    hp[at] ^= (uint32_t)o->gen * 0x9e3779b1u + 0x7f4a7c15u;
                 }
             }
-            at = e + 1;
+            q = e + 1;
         }
         int a0 = xa ? view.x : view.y;
-        kept_table(c, o, id, geo, view, offset, rh, count, cur, mark, vis0, nr, kh,
-                   a0 + lead - offset, a0, a0 + ext, sp, xa);
+        kept_table(c, o, id, geo, view, offset, rh, count, cur, at, mark, vis0, nr, np, kh,
+                   a0 + lead - offset, sp, xa);
     } else {
         c->kf[0] = view;
         c->kf_n = (uint8_t)(view.w > 0 && view.h > 0);

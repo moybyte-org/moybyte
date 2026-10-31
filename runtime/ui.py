@@ -203,16 +203,19 @@ def _over(o):
     keep = o.get("keep")
     ov = o.get("over")
     whole = o.get("whole")
+    across = o.get("across")
+    at = o.get("at")
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
             or axis or snap or offset is not None or spill is not None or keep is not None
-            or ov is not None or whole):
+            or ov is not None or whole or across is not None or at is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
                  | (4096 if offset is not None else 0) | (8192 if spill is not None else 0)
                  | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
-                 | (65536 if whole else 0))
+                 | (65536 if whole else 0) | (131072 if across is not None else 0)
+                 | (262144 if at is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -230,6 +233,10 @@ def _over(o):
         tail += _pack("<i", int(keep))
     if ov is not None:
         tail += _pack("<4i", int(ov[0]), int(ov[1]), int(ov[2]), int(ov[3]))
+    if across is not None:
+        tail += _pack("<2i", int(across[0]), int(across[1]))
+    if at is not None:
+        tail += _pack("<i", int(at))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -506,7 +513,11 @@ def table(label, columns, rows, cur, o=None):
     paint keeps nothing), and a frame draws only what the buffer it paints
     lacks (`table_floor`); `o.whole = True` draws its view whole (the app
     drew its ground anew); `o.over = (x, y, w, h)` is what the frame draws
-    over the table after its pass (a cursor)."""
+    over the table after its pass (a cursor). `o.across = (first, pitch)`
+    makes each row's cells its parts across, the first `first` px into the
+    view across the rows' axis and each `pitch` on from the last, so a kept
+    table draws the parts that changed, not their rows; `o.at` is the
+    current row's part its gen and marks belong to."""
     t = _T
     n = len(columns)
     b = _memo_get(rows, n)

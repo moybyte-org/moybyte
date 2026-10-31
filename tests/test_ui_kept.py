@@ -136,7 +136,7 @@ def test_what_was_drawn_over_the_table_draws_in_the_buffer_that_holds_it(th, buf
     for _ in range(bufs - 1):
         assert rig.frame()[0] == []
     floor, end, _p, _h = rig.frame()           # the buffer the stamp lies in
-    assert floor == [(100, 20, 8, 60)] and end == 0
+    assert floor == [stamp] and end == 0
 
 
 def test_a_vertical_kept_table(th):
@@ -188,3 +188,39 @@ def test_a_table_that_keeps_nothing_answers_its_view(th):
     assert ui.table_floor(r) == 1 and tuple(r) == _VIEW
     assert ui.table_floor(r) == 0
     ui.end()
+
+
+def test_parts_across_a_row_draw_alone(th):
+    """`o.across`: a row's cells are its parts across the view; a step
+    between two parts of one row, or between rows, draws those two parts'
+    reach alone (`o.at` the current row's part)."""
+    rig = Rig(th, 2, axis="y")
+    rows = [["a%d" % i, "b%d" % i, "c%d" % i] for i in range(6)]
+
+    def frame(cur, at, rows=rows):
+        rig.n += 1
+        ui_draw.paint_frame(rig.n, True)
+        rig.host.whole()
+        rig.host.begin(rig.cv, th, None, False, False, True)
+        ui.at(*_VIEW)
+        ui.table("", ("", "", ""), rows, cur, {
+            "id": "t", "part": [0, 10], "offset": 0, "keep": 3, "spill": 2, "gen": 1,
+            "current": False, "mark": False, "across": (6, 100), "at": at})
+        floor = []
+        while ui.table_floor(rig.r) > 0:
+            floor.append(tuple(rig.r))
+        while ui.table_part(rig.r) >= 0:
+            pass
+        ui.end()
+        return floor
+
+    for _ in range(3):
+        frame(1, 0)
+    assert frame(1, 1) == [(10 + 6 - 2, 30 - 2, 204, 14)]       # (1, 0) and (1, 1)
+    frame(1, 1)
+    assert frame(1, 1) == []
+    assert frame(2, 1) == [(10 + 106 - 2, 30 - 2, 104, 24)]     # (1, 1) and (2, 1)
+    frame(2, 1)
+    changed = [r[:] for r in rows]
+    changed[4][2] = "C4"
+    assert frame(2, 1, changed) == [(10 + 206 - 2, 60 - 2, 96, 14)]   # cut to the view

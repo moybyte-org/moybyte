@@ -757,15 +757,16 @@ parts (2026-10-30, #243 step 7; kept since 2026-10-31,
 `ui.table` with `o.part` over the band -- a row of cards side by side
 (`o.axis "x"`, the carousel's with `o.snap`) or the icons' rows -- hands
 it the scroll as `o.offset`, the cards' reach past their cells as
-`o.spill`, each row's cards' keys as its cells (`_band_keys`), the focused
-card as the current row's gen, the cursor's stamp as `o.over` and as
+`o.spill`, each row's cards' keys as its cells across (`_band_keys`,
+`o.across`), the focused card as the current row's part (`o.at`) and gen,
+the cursor's stamp as `o.over` and as
 `o.keep` what every card is a function of beside its row (`_band_key`: the
 statics, the cover gen and the carousel's centre card), and draws what
 the engine answers: the floor the buffer this frame paints lacks
 (`ui.table_floor`, the ground put back there) and the parts that meet it,
 each clipped to its floor rect, the focused card last. A grid or icons step
-draws the rows (the shelf's columns, the icons' rows) the focus left and
-entered; a frame whose buffer holds the band draws nothing; a scroll, a key
+draws the two cards the focus left and entered; a frame whose buffer holds
+the band draws nothing; a scroll, a key
 that moved or a buffer the engine cannot vouch for draws the band whole.
 The carousel's key holds its centre card, so its floor is nothing, the
 stamp or the band whole. A grid or icons card that wears no focus is

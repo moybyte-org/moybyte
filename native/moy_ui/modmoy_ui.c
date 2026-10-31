@@ -2362,6 +2362,21 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         mp_int_t sp = mp_obj_get_int_truncated(v);
         out->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
     }
+    v = over_key(m, MP_QSTR_across);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        size_t n = 0;
+        mp_obj_t *r = NULL;
+        mp_obj_get_array(v, &n, &r);
+        if (n == 2) {
+            out->has_across = 1;
+            out->across_first = (int16_t)mp_obj_get_int_truncated(r[0]);
+            out->across_pitch = (int16_t)mp_obj_get_int_truncated(r[1]);
+        }
+    }
+    v = over_key(m, MP_QSTR_at);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        out->at = (int16_t)mp_obj_get_int_truncated(v);
+    }
     v = over_key(m, MP_QSTR_keep);
     if (v != MP_OBJ_NULL && v != mp_const_none) {
         out->keep = (int32_t)mp_obj_get_int_truncated(v);

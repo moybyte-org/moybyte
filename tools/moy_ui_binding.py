@@ -417,7 +417,8 @@ class _Over(c.Structure):
                 ("axis_x", c.c_int8), ("snap", c.c_int8), ("has_offset", c.c_int8),
                 ("offset", c.c_int32), ("spill", c.c_int16), ("has_keep", c.c_int8), ("whole", c.c_int8),
                 ("keep", c.c_int32), ("over_x", c.c_int16), ("over_y", c.c_int16),
-                ("over_w", c.c_int16), ("over_h", c.c_int16)]
+                ("over_w", c.c_int16), ("over_h", c.c_int16), ("has_across", c.c_int8),
+                ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16)]
 
 
 class _Line(c.Structure):
