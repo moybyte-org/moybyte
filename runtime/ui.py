@@ -642,7 +642,8 @@ def slot_next():
     """The next part whose face a frame nothing waits on draws (its key
     handed to `face` with `mint`): the parts of the rows the table drawn
     last showed, then of the row past its end, then of the row before its
-    start; -1 after the last, and the order starts again (as `faces`
+    start, no more of them than the slots kept (a round's minting never
+    takes the slot of a part it named); -1 after the last, and the order starts again (as `faces`
     starts it)."""
     return _C.api_slot_next(_T[0])
 

@@ -337,6 +337,26 @@ def test_slot_next_names_the_parts_shown_then_the_rows_past_either_end(th):
     assert got == list(range(6))                        # (no row past either end)
 
 
+
+def test_slot_next_names_no_more_parts_than_the_slots_kept(th):
+    """A round of `ui.slot_next` names at most the slots kept, nearest
+    first, so minting each part it names never takes the slot of another
+    it named: a second round finds every one kept."""
+    rig = Rig(th, 2, axis="y")
+    rows = [["a%d" % i, "b%d" % i, "c%d" % i] for i in range(20)]
+    _faces_frame(rig, th, 20, 1, rows, offset=30)       # 18 shown, 3 past, 3 before
+    got = []
+    i = ui.slot_next()
+    while i >= 0:
+        got.append(i)
+        ui.slot("p%d" % i, 0, True)
+        i = ui.slot_next()
+    assert got == list(range(9, 27)) + [27, 28]
+    i = ui.slot_next()
+    while i >= 0:
+        assert ui.slot("p%d" % i, 0) >= 0               # (none taken by the round)
+        i = ui.slot_next()
+
 _LUA = """
 function _draw()
   ui.page("Kept")
@@ -413,7 +433,7 @@ function _draw()
   ui.table("", {"", ""}, {{"a", "b"}, {"c", "d"}, {"e", "f"}, {"g", "h"}, {"i", "j"}}, 1,
            {id = "t", part = {0, 20}, offset = 20, keep = 5, spill = 0, gen = 1,
             current = false, mark = false, across = {0, 120}, at = 1})
-  pmem(0, ui.slots(3, 9))
+  pmem(0, ui.slots(10, 9))
   local s, m = ui.slot("c", 0, true)
   pmem(1, s); pmem(2, m and 1 or 0)
   s, m = ui.slot("c", 0)
@@ -460,7 +480,7 @@ def test_the_lua_face_keeps_faces(tmp_path):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         pm = list(img)[:22]
-    assert pm[0] == 3 and pm[21] == 0
+    assert pm[0] == 10 and pm[21] == 0
     assert pm[1:6] == [1, 1, 1, 0, 1]             # minted into slot 1, then held there
     # rows 2 .. 4 show (20 down, 60 tall), two parts each: then row 5 past
     # the end, then row 1 before the start, nearest first

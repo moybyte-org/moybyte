@@ -4713,7 +4713,7 @@ int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
         c->fc.tick = 0;
         memset(c->fc.used, 0, sizeof(c->fc.used));
     }
-    c->fc.w = 0;
+    c->fc.w = c->fc.wn = 0;
     c->fc.np = c->tp_np ? c->tp_np : 1;
     c->fc.rows = c->tp_n;
     c->fc.r0 = c->tp_v0;
@@ -4755,6 +4755,10 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     int np = c->fc.np, shown = (c->fc.r1 - c->fc.r0) * np, n = c->fc.rows * np;
     for (;;) {
         int w = c->fc.w, p;
+        if (c->fc.wn >= c->fc.cap) {
+            p = -1;                      // (as many as the slots: the round is over)
+            w = shown + 2 * np;
+        }
         if (w < shown) {
             p = c->fc.r0 * np + w;
         } else if (w < shown + np) {
@@ -4762,11 +4766,12 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
         } else if (w < shown + 2 * np) {
             p = c->fc.r0 * np - 1 - (w - shown - np);
         } else {
-            c->fc.w = 0;                 // (the next asks from the first again)
+            c->fc.w = c->fc.wn = 0;      // (the next asks from the first again)
             return -1;
         }
         c->fc.w++;
         if (p >= 0 && p < n) {
+            c->fc.wn++;
             return p;
         }
     }

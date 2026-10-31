@@ -102,15 +102,16 @@ typedef struct {
 #define MOY_UI_KF_HELD 1            // kf_held: every buffer holds the kept table
 #define MOY_UI_KF_OVER 2            // ...but for what was drawn over it
 // The faces a table's parts keep drawn (moy_ui_api_slots): the key and
-// slots they are kept under, the uses counted, the warm order's next part and
-// the table's rows it runs over (r0 .. r1 showed, of rows, np parts each);
+// slots they are kept under, the uses counted, the warm order's next step,
+// the parts it named this round (wn) and the table's rows it runs over
+// (r0 .. r1 showed, of rows, np parts each);
 // each slot's part key and last use (0: empty). In the context, so in the
 // memory its face gave it (PSRAM on a board), never the engine's statics.
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
     int32_t key;
-    uint16_t cap, w;
+    uint16_t cap, w, wn;
     int16_t r0, r1, rows;
     uint8_t np;
     uint32_t pk[MOY_UI_FACE_SLOTS], used[MOY_UI_FACE_SLOTS];
@@ -880,8 +881,9 @@ int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mi
 // The next part whose face a frame nothing waits on draws (its name and
 // gen handed to moy_ui_api_slot with mint): the parts of the rows the table drawn
 // last showed, then those of the row past its end, then those of the row
-// before its start, nearest first; -1 after the last, and the order
-// starts again (as moy_ui_api_slots starts it).
+// before its start, nearest first -- no more of them than the slots kept,
+// so a round's minting never takes the slot of a part it named; -1 after
+// the last, and the order starts again (as moy_ui_api_slots starts it).
 int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
