@@ -92,7 +92,7 @@ _BURST_BREAK = ".,!?;:"   # a typing burst closes here (#111 phase 3)
 # (`ui.text_options`), and the text's inset from its left (moy_ui_api.c's
 # TEXT_PAD) at the scale.
 _TXO_CARET, _TXO_SEL, _TXO_LEFT, _TXO_GEN = _ui.TXO_CARET, _ui.TXO_SEL, _ui.TXO_LEFT, _ui.TXO_GEN
-_TXO_FONT, _TXO_PAPER = _ui.TXO_FONT, _ui.TXO_PAPER
+_TXO_FONT, _TXO_PAPER, _TXO_TOP = _ui.TXO_FONT, _ui.TXO_PAPER, _ui.TXO_TOP
 _TEXT_PAD = 8
 _VIEWS = [0]           # the handles made: each view's id is its own
 
@@ -187,11 +187,16 @@ class EditorHandle:
         self._fm = [None, 0, 8, 10]  # look_gen, the view's font (0: mono's), its cell, line
         self._vr = [0, 0, 0, 0]
         self._top = -1
+        self._aim_top = -1           # a line the view's first frame shows first (`_put`)
         self._left = 0
         self._vh = None
         self._own = None
         self._frame = frame
         self.live = True             # not closed since its last draw: it draws the run's rows
+        # A `.py` or `.lua` is a PROGRAM the console runs (`run`): fixed for
+        # the handle's life, because its name is.
+        self._runs = bool(_modes.script_runtime(self._name)) and \
+            getattr(host, "ask_run", None) is not None
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -449,6 +454,60 @@ class EditorHandle:
         self._commit_history()
         return (True, self._badge)
 
+    # -- running --------------------------------------------------------------
+
+    def can_run(self):
+        """True when the document is a program the console can RUN: a `.py`
+        or a `.lua` (`text_modes.script_runtime`) -- what a skin shows its Run
+        tool on."""
+        return self._runs
+
+    def run(self):
+        """RUN the document as a script, the way Files' RUN does
+        (`Workstation.run_script`, docs/text_editing_2026-09.md's Scripts).
+        Saved first when it has edits, written even when it does not parse:
+        a syntax error is the script console's to show. The run starts once
+        this frame is drawn (`Workstation.ask_run`), and when it ends the console
+        opens this cart again on this document, the caret and the view where
+        they were. False
+        when there is nothing to run or the save failed (`badge` says why)."""
+        if not self._runs:
+            return False
+        if self.dirty():
+            ok, why = self.save()
+            if not ok:
+                self._badge = why
+                return False
+        self._host.ask_run(self)
+        return True
+
+    def _where(self):
+        """`(row, col, top, left)`: the caret and the view's first line and
+        column -- what `_put` gives a handle opened again on this document
+        (`Workstation._return_to_runner`). The shell's call."""
+        ed = self.ed
+        return (ed.row, ed.col, ed.top, ed.left)
+
+    def _put(self, where):
+        """Put the caret and the view back where `_where` read them, before
+        this handle's first draw: its first frame shows that top line
+        (`ui.text_view`'s `top`, a jump on a view's first frame), not the
+        caret's row from the top. The shell's call."""
+        row, col, top, left = where
+        self._place(row, col, False)
+        ed = self.ed
+        ed.top = self._aim_top = max(0, min(len(ed.lines) - 1, int(top)))
+        ed.left = max(0, int(left))
+        self._caret_at = ed.row          # the caret is where the view left it:
+        self._caret_col = ed.col         # its move is not this frame's to show
+        self._gen += 1
+
+    def _refuse(self, why):
+        """The console could not start the run `run` asked for: `why` is the
+        badge until the next save. The shell's call, as `_blur` is."""
+        self._gen += 1
+        self._badge = str(why)
+
     def close(self):
         """Flush (hard) and release. Idempotent; the shell calls it for any
         handle still open when the cart's world drops."""
@@ -559,6 +618,8 @@ class EditorHandle:
         o[_TXO_GEN] = ed.edits + 1
         o[_TXO_FONT] = self._face()[1]
         o[_TXO_PAPER] = r
+        o[_TXO_TOP] = self._aim_top     # -1 but on the frame after a `_put`
+        self._aim_top = -1
         if ed.left != self._left:
             # the columns scrolled across: every row changes
             self._left = ed.left

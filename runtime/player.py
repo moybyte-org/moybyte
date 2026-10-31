@@ -674,11 +674,16 @@ class Player:
         """The handle the keyboard belongs to, or None. Written by
         `Workstation.cart_editor_focus`, which also flips the T-Deck. The one
         it replaces is blurred here, so two handles can never both believe
-        they are being typed into."""
+        they are being typed into; the keys let go inside a frame are the
+        page's again in that frame (`api_keys_back`)."""
         prev = self._focus_editor
         if prev is not None and prev is not handle:
             prev._blur()
         self._focus_editor = handle
+        if handle is None and prev is not None and self._pass and self._ui is not None:
+            # Let go inside the frame (the cart's update closed it): the page
+            # this frame draws has the keys back, so its focus marks now.
+            _ui_draw._C.api_keys_back(self._ui[0])
 
     def focused_editor(self):
         """The handle holding the keyboard, or None -- what `ws.nav` asks

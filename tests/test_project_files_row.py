@@ -390,6 +390,26 @@ def test_leaving_the_handle_returns_to_the_config_tab(tmp_path):
     _frame(ws)
 
 
+def test_home_ends_the_way_back_to_the_project(tmp_path):
+    """HOME from the handle ends the journey: the next run's exit lands home,
+    not in a project the kid left by going home."""
+    from ws_helpers import select_on_home
+    ws = build_ws(tmp_path)
+    cart = _project(ws)
+    cl = _on_config(ws, cart)
+    cl._open_files()
+    cl._files_open("config.json")
+    _frame(ws)
+    assert ws._project_return is cart
+    ws.go_home()
+    assert ws._project_return is None
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    _frame(ws)
+    ws._exit_to_caller()
+    assert ws.wm.top_kind() == "launcher", "home, not the project's Editor"
+
+
 def test_the_write_goes_through_the_project_and_its_journal(tmp_path):
     ws = build_ws(tmp_path)
     cart = _project(ws)

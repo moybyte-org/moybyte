@@ -1042,8 +1042,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._text_request = None
         # The project a text run must return INTO (open_project_file): set with
         # the request, popped by _exit_to_caller, which re-reads the folder on
-        # the way back so the loader sees what was written.
+        # the way back so the loader sees what was written; HOME ends it.
         self._project_return = None
+        # A RUN an editor handle asked for (`ask_run`): the handle, parked
+        # until the frame that asked is drawn (`_run_asked`).
+        self._editor_run = None
+        # The cart a script run from its editor handle must return INTO
+        # (`_return_to_runner`): (cart, kind, name, mode, where its view
+        # stood, the cart's own caller kind), popped by _exit_to_caller.
+        self._script_return = None
         # Where an Editor the console-mode home handed to the desk goes back
         # to when its window closes (`open_in_editor`, `editor_closed`):
         # (tab, the card's path, the desk's windows then), or None.
@@ -2680,6 +2687,52 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.run(self.project, caller)
         return (True, "")
 
+    def ask_run(self, handle):
+        """RUN the script an editor handle holds (`EditorHandle.run`), as a
+        deferred transition (`defer`): the asking cart is mid-frame, and its
+        window is still to be drawn from the world the run replaces."""
+        self._editor_run = handle
+        self.defer(self._run_asked)
+
+    def _run_asked(self):
+        """Start the run `ask_run` parked: the script runs down Files' path
+        (`run_script`), and its exit comes back into the cart that asked, on
+        the same document (`_return_to_runner`). A refusal before the world
+        changed is the handle's badge; one after it (the workspace would not
+        open) goes straight back. Nothing runs when the asking run is over."""
+        ed = self._editor_run
+        self._editor_run = None
+        if ed is None or ed not in self.player._editors:
+            return
+        back = (self.cart, ed.kind, ed.name(), ed.mode(), ed._where(),
+                self.returns.caller())
+        ok, why = self.run_script(ed.kind, ed.name())
+        if ok:
+            self._script_return = back
+        elif ed in self.player._editors:
+            ed._refuse(why)
+        else:
+            self._return_to_runner(back)
+
+    def _return_to_runner(self, back):
+        """Come back from a script an editor handle ran to the cart that ran
+        it: that cart started again with the document parked as its request
+        (what its `open_editor()` answers), the caret and the view's top line
+        and column put back (`EditorHandle._put`), and the cart's own caller
+        restored, so leaving it still lands where it would have (Files' shelf,
+        the Config tab, home). A list the cart keeps on the document's row
+        shows that row: a placed table opens on its current row."""
+        cart, kind, name, mode, where, caller = back
+        self._text_request = (kind, name, mode)
+        if not self._open_workspace(cart):
+            self._text_request = None
+            self._go_home_or_back()
+            return
+        self.run(self.project, caller)
+        for ed in self.player._editors:
+            if ed.kind == kind and ed.name() == name:
+                ed._put(where)
+
     def open_image(self, name, kind=None, cart=None):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files
         router and by the Config tab's Files alike (#108).
@@ -3314,6 +3367,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # outlived its journey here would drag an unrelated later exit into
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.
         self.returns.take_back()
+        self._script_return = None
+        self._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches

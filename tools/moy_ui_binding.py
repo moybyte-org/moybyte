@@ -350,6 +350,7 @@ _DRAW_SIGS = (
      _I),
     ("moy_ui_api_host_arm", [c.c_void_p], _I),
     ("moy_ui_api_host_whole", [c.c_void_p], None),
+    ("moy_ui_api_keys_back", [c.c_void_p], None),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
                               c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
@@ -1402,6 +1403,10 @@ def binding():
         p, _k = _ctx(ctx)
         lib.moy_ui_api_host_whole(p)
 
+    def api_keys_back(ctx):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_keys_back(p)
+
     def api_pop_box(ctx, out):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_pop_box(p, (c.c_int32 * 4).from_buffer(out)))
@@ -1653,7 +1658,7 @@ def binding():
               api_shift_plan, api_shift_break,
               api_shift_drawn, api_band, api_floor, api_floor_box, api_change_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,
-              api_host_whole,
+              api_host_whole, api_keys_back,
               api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,

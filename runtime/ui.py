@@ -236,7 +236,8 @@ def _hint(b):
 
 def page(title, o=None):
     """A page filling the app's surface (or `at`'s rect) under `title`, its
-    rows stacking from the top: the content rect `(x, y, w, h)`."""
+    rows stacking from the top: the content rect `(x, y, w, h)`. Its id is
+    its title, or `o.id` where two pages share one."""
     t = _T
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
 
@@ -475,8 +476,10 @@ def table(label, columns, rows, cur, o=None):
     its cells icon names -- and `rows` each a sequence of cells. The current
     row `cur` (from 0, -1 none) follows the focus; the columns between the
     first text column and the last, then the last, drop where it would show
-    fewer than eleven characters. `(cur, opened)`, `opened` True the frame
-    the current row is opened (Enter on it, or a tap on it again).
+    fewer than eleven characters. It opens on the current row: placed by
+    `at`, on its first frame; stacked, on its page's first frame where it
+    holds the focus or nothing does, in that frame. `(cur, opened)`, `opened` True the
+    frame the current row is opened (Enter on it, or a tap on it again).
     `o.part = (w, h)` makes it a table of parts: rows `h` tall, column 0 a
     cell `w` wide the app draws into through `table_part` (the whole row
     where there is one column), each row's cells its key, so a frame that

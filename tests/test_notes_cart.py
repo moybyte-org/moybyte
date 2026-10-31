@@ -350,6 +350,39 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
     assert ui_draw._C.api_focus(ws.player._ui[0]) is None
 
 
+def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
+    """The handheld: the list scrolled down to a note, the note opened and
+    closed again -- the list shows that note's row, not the list's top, and
+    the row's focus mark, from the very frame the note closes. The note's page has an id of its own, so
+    the list's page opens anew and its table on its current row
+    (docs/ui_api_2026-10.md)."""
+    ws = build_ws(tmp_path)
+    _seed(ws, *("n%02d" % i for i in range(40)))
+    ns, drv = _open(ws)
+    for _ in range(30):
+        _press(drv, "down")
+    _x, top, _w, h = ns["content_rect"]()
+
+    def shown():
+        y0, rh, _view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+        y = y0 + ns["cur"] * rh
+        return top <= y and y + rh <= top + h
+
+    assert ns["cur"] == 30 and shown()
+    _press(drv, "a")
+    assert ns["ed"] is not None
+    drv.type_char(ESC)                         # leaves the note
+    ui_draw.marks(None, True)
+    _frames(drv, 1)
+    assert ns["ed"] is None and ns["cur"] == 30
+    assert shown(), "the first frame showed the list's top: the row came a frame late"
+    assert ui_draw._C.api_focus(ws.player._ui[0], None) == "vault"
+    assert ui_draw.marks()[1] == 1, \
+        "the keys the note let go were the list's that frame: its row wears the mark"
+    _frames(drv)
+    assert shown(), "the list came back at its top, the note's row out of sight"
+
+
 def test_tapping_a_link_opens_the_note_it_names(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "other_one", "the other one", ws.carts_root)
@@ -430,6 +463,155 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_list(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# a program runs from its note, and comes back to it
+# ---------------------------------------------------------------------------
+
+def _no_box(ws, id):
+    return ui_draw._C.api_box(ws.player._ui[0], id) is None
+
+
+def test_a_program_shows_run_and_a_note_does_not(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "hi.py", "print('hi')\n", ws.carts_root)
+    moy_carts.save_file("docs", "hi.lua", "print('hi')\n", ws.carts_root)
+    moy_carts.save_file("docs", "list", "milk", ws.carts_root)
+    ns, drv = _open(ws)
+    for name in ("hi.py", "hi.lua"):
+        ns["_open"](name)
+        _frames(drv)
+        assert ns["ed"].can_run() is True
+        assert _box(ws, "Run")[0] == 6 + 4 * 46, "Run is the fifth tool"
+    ns["_open"]("list")
+    _frames(drv)
+    assert ns["ed"].can_run() is False
+    assert _no_box(ws, "Run")
+
+
+def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
+    """Opened from Files: Run writes the edit, the script runner starts on
+    THAT document, and its exit lands back in Notes on the same program, the
+    caret where it was -- whose own X still goes back to Files."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "hi.py", "print('hello')\n", ws.carts_root)
+    app = _open_files(ws)
+    app.open_place("docs")
+    app._act("OPEN", "hi.py")
+    drv = host_app.ConsoleDriver(ws)
+    _frames(drv)
+    ed = ws.player.ns["ed"]
+    ed.nav(0, 1)
+    _type(drv, "print('again')")
+    caret = ed.caret()
+    assert ed.dirty()
+    _tap(drv, _box(ws, "Run"))
+    assert ws.cart.get("type") == "script" and ws.cart.get("title") == "hi"
+    assert moy_carts.load_file("docs", "hi.py", ws.carts_root) == \
+        "print('hello')\nprint('again')"
+    assert ws.script_console.text() == "hello\nagain"
+    ws._exit_to_caller()
+    _frames(drv)
+    assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
+    back = ws.player.ns["ed"]
+    assert back is not ed and back.name() == "hi.py"
+    assert back.caret() == caret and back.focused()
+    ws._exit_to_caller()
+    assert ws.wm.top_kind() == "files", "Notes' own X still returns to Files"
+
+
+def test_the_program_comes_back_scrolled_where_it_was(tmp_path):
+    """Not only the caret: the view's first line, so a kid reading line 50
+    of a long program is still reading it after the run."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "long.py",
+                        "".join("print(%d)\n" % i for i in range(100)), ws.carts_root)
+    ns, drv = _open(ws)
+    ns["_open"]("long.py")
+    _frames(drv)
+    ed = ns["ed"]
+    ed.nav(0, 60)
+    _frames(drv)
+    ed.scroll(-5, 0)
+    _frames(drv)
+    where, top = ed._where(), ed._top
+    assert top > 0
+    _tap(drv, _box(ws, "Run"))
+    ws._exit_to_caller()
+    _frames(drv)
+    back = ws.player.ns["ed"]
+    assert back._where() == where
+    assert back._top == top, "the view shows the line it showed"
+
+
+def test_on_the_desk_the_vault_comes_back_on_the_programs_row(tmp_path):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    moy_carts.save_file("docs", "zz.py", "print(1)\n", ws.carts_root)
+    _seed(ws, *("n%02d" % i for i in range(40)))
+    ns, drv = _open(ws)
+    for _ in range(41):
+        _press(drv, "down")
+    _press(drv, "a")
+    assert ns["ed"].name() == "zz.py" and ns["cur"] == 41
+
+    def shown():
+        y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+        y = y0 + ws.player.ns["cur"] * rh
+        return view[1] <= y and y + rh // 2 <= view[1] + view[3]
+
+    assert shown()
+    _tap(drv, _box(ws, "Run"))
+    ws._exit_to_caller()
+    _frames(drv)
+    assert ws.player.ns["cur"] == 41
+    assert shown(), "the vault shows the program's row, not its top"
+
+
+def test_a_program_that_does_not_parse_says_so_in_the_console(tmp_path):
+    """Files' RUN's answer: the error is the script console's scrollback, and
+    the way out is the same way back to the program."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "bad.py", "def (\n", ws.carts_root)
+    ns, drv = _open(ws)
+    ns["_open"]("bad.py")
+    _frames(drv)
+    _tap(drv, _box(ws, "Run"))
+    assert ws.cart.get("type") == "script"
+    assert "SyntaxError" in ws.script_console.text()
+    ws._exit_to_caller()
+    _frames(drv)
+    assert ws.cart.get("title") == "Notes"
+    assert ws.player.ns["ed"].name() == "bad.py"
+
+
+def test_a_run_that_cannot_start_badges_the_program_and_stays(tmp_path, monkeypatch):
+    """`run_script` refusing before it touched the world (a card that would
+    not read): Notes is still running, and the program's word says why."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "gone.py", "print(1)\n", ws.carts_root)
+    ns, drv = _open(ws)
+    ns["_open"]("gone.py")
+    _frames(drv)
+    ed = ns["ed"]
+    monkeypatch.setattr(ws, "run_script", lambda kind, name: (False, "CAN'T READ IT"))
+    _tap(drv, _box(ws, "Run"))
+    assert ws.cart.get("title") == "Notes" and ns["ed"] is ed
+    assert ed.badge() == "CAN'T READ IT"
+    assert ns["_status"]() == "CAN'T READ IT"
+
+
+def test_home_from_the_script_forgets_the_way_back(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "hi.py", "print(1)\n", ws.carts_root)
+    ns, drv = _open(ws)
+    ns["_open"]("hi.py")
+    _frames(drv)
+    _tap(drv, _box(ws, "Run"))
+    assert ws.cart.get("type") == "script"
+    ws.go_home()
+    assert ws._script_return is None
+    assert not ws.wm.top_is_player()
+
+
+# ---------------------------------------------------------------------------
 # the desk: a window is the app's surface
 # ---------------------------------------------------------------------------
 
@@ -477,3 +659,20 @@ def test_the_canvas_goes_back_when_notes_closes(tmp_path):
     ws._exit_to_caller()
     _frames(drv)
     assert not ws.app_window_canvas and not ws.app_full_canvas
+
+
+def test_on_the_desk_run_comes_back_to_the_notes_window(tmp_path):
+    ws, ns, drv = _desk(tmp_path)
+    moy_carts.save_file("docs", "hi.py", "print('desk')\n", ws.carts_root)
+    ns["_open"]("hi.py")
+    _frames(drv)
+    run = _box(ws, "Run")
+    assert run[0] > _box(ws, "Select")[0] + 4 * 40, "Run stands after the clipboard's tools"
+    _tap(drv, run)
+    assert ws.cart.get("type") == "script"
+    assert ws.script_console.text() == "desk"
+    ws._exit_to_caller()
+    _frames(drv)
+    assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
+    assert ws.player.ns["ed"].name() == "hi.py"
+    assert ws.app_window_canvas, "back in its window"

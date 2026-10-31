@@ -258,7 +258,9 @@ typedef struct {
     int16_t scroll;                 // the page's scroll
     int8_t page_keep;               // the page's kept state, or -1
     uint8_t page_stop;              // its stop, or 0xff
+    uint8_t page_new;               // the page's first frame: no state was kept for it
     moy_ui_box_t reveal_box;        // a list row to keep in view next frame
+    uint32_t reveal_id;             // the stop that row is in where it is not the focus, or 0
     uint32_t dup, dup_told;         // a duplicate id this frame (its hash), the last told
     uint16_t lost, lost_told;       // the stops past MOY_UI_API_STOPS this frame, the last told
     char dup_name[MOY_UI_API_NAME];
@@ -888,6 +890,11 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 // inside a pass does.
 void moy_ui_api_focus_ahead(moy_ui_ctx_t *c, moy_ui_span_t id);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
+// The keys another surface held when this frame began (MOY_UI_ELSEWHERE)
+// came back mid-frame, before the pass drew its stops (a cart's editor handle
+// let them go in its update): from here a stop takes the focus as on a frame
+// begun with them, so the first frame after shows its mark.
+void moy_ui_api_keys_back(moy_ui_ctx_t *c);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.
 int moy_ui_api_edge(const moy_ui_ctx_t *c);
