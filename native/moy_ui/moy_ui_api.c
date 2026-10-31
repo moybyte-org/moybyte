@@ -4688,45 +4688,36 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
 
 // -- the faces a table's parts keep drawn (moy_ui_api_slots) -------------------------
 
-// The engine's one record of faces: the context holding it (its fc_id),
-// the key and slots it keeps them under, the uses counted, the warm
-// order's next part and the table's rows it runs over (r0 .. r1 showed,
-// of rows, np parts each); each slot's part key and last use (0: empty).
-static struct {
-    uint32_t id, tick;
-    int32_t key;
-    uint16_t cap, w;
-    int16_t r0, r1, rows;
-    uint8_t np;
-    uint32_t pk[MOY_UI_FACE_SLOTS], used[MOY_UI_FACE_SLOTS];
-} s_fc;
+// The engine keeps one context's faces at a time: the ticket it gave last
+// (s_fc_owner) names that context, whose record (its `fc`) counts.
+static uint32_t s_fc_owner;
 static uint32_t s_fc_ids;
 
 static int faces_mine(const moy_ui_ctx_t *c) {
-    return c->fc_id != 0 && s_fc.id == c->fc_id && s_fc.cap > 0;
+    return c->fc_id != 0 && s_fc_owner == c->fc_id && c->fc.cap > 0;
 }
 
 int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
     cap = cap < 0 ? 0 : cap > MOY_UI_FACE_SLOTS ? MOY_UI_FACE_SLOTS : cap;
-    if (c->fc_id == 0 || s_fc.id != c->fc_id) {
+    if (c->fc_id == 0 || s_fc_owner != c->fc_id) {
         if (++s_fc_ids == 0) {
             s_fc_ids = 1;
         }
         c->fc_id = s_fc_ids;
-        s_fc.id = c->fc_id;
-        s_fc.cap = 0;
+        s_fc_owner = c->fc_id;
+        c->fc.cap = 0;
     }
-    if (s_fc.cap != cap || s_fc.key != key) {
-        s_fc.cap = (uint16_t)cap;
-        s_fc.key = key;
-        s_fc.tick = 0;
-        memset(s_fc.used, 0, sizeof(s_fc.used));
+    if (c->fc.cap != cap || c->fc.key != key) {
+        c->fc.cap = (uint16_t)cap;
+        c->fc.key = key;
+        c->fc.tick = 0;
+        memset(c->fc.used, 0, sizeof(c->fc.used));
     }
-    s_fc.w = 0;
-    s_fc.np = c->tp_np ? c->tp_np : 1;
-    s_fc.rows = c->tp_n;
-    s_fc.r0 = c->tp_v0;
-    s_fc.r1 = c->tp_id ? c->tp_e : c->tp_v0;
+    c->fc.w = 0;
+    c->fc.np = c->tp_np ? c->tp_np : 1;
+    c->fc.rows = c->tp_n;
+    c->fc.r0 = c->tp_v0;
+    c->fc.r1 = c->tp_id ? c->tp_e : c->tp_v0;
     return cap;
 }
 
@@ -4735,25 +4726,25 @@ int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mi
         return -1;
     }
     uint32_t key = hash(name.p, name.n, 0x66616365u) ^ ((uint32_t)gen * 0x9e3779b1u);
-    if (++s_fc.tick == 0) {             // (the uses wrapped: every face forgotten)
-        memset(s_fc.used, 0, sizeof(s_fc.used));
-        s_fc.tick = 1;
+    if (++c->fc.tick == 0) {             // (the uses wrapped: every face forgotten)
+        memset(c->fc.used, 0, sizeof(c->fc.used));
+        c->fc.tick = 1;
     }
     int lru = 0;
-    for (int j = 0; j < s_fc.cap; j++) {
-        if (s_fc.used[j] && s_fc.pk[j] == key) {
-            s_fc.used[j] = s_fc.tick;
+    for (int j = 0; j < c->fc.cap; j++) {
+        if (c->fc.used[j] && c->fc.pk[j] == key) {
+            c->fc.used[j] = c->fc.tick;
             return j;
         }
-        if (s_fc.used[j] < s_fc.used[lru]) {
+        if (c->fc.used[j] < c->fc.used[lru]) {
             lru = j;
         }
     }
     if (!mint) {
         return -1;
     }
-    s_fc.pk[lru] = key;
-    s_fc.used[lru] = s_fc.tick;
+    c->fc.pk[lru] = key;
+    c->fc.used[lru] = c->fc.tick;
     return lru | MOY_UI_SLOT_MINT;
 }
 
@@ -4761,20 +4752,20 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     if (!faces_mine(c)) {
         return -1;
     }
-    int np = s_fc.np, shown = (s_fc.r1 - s_fc.r0) * np, n = s_fc.rows * np;
+    int np = c->fc.np, shown = (c->fc.r1 - c->fc.r0) * np, n = c->fc.rows * np;
     for (;;) {
-        int w = s_fc.w, p;
+        int w = c->fc.w, p;
         if (w < shown) {
-            p = s_fc.r0 * np + w;
+            p = c->fc.r0 * np + w;
         } else if (w < shown + np) {
-            p = s_fc.r1 * np + (w - shown);
+            p = c->fc.r1 * np + (w - shown);
         } else if (w < shown + 2 * np) {
-            p = s_fc.r0 * np - 1 - (w - shown - np);
+            p = c->fc.r0 * np - 1 - (w - shown - np);
         } else {
-            s_fc.w = 0;                 // (the next asks from the first again)
+            c->fc.w = 0;                 // (the next asks from the first again)
             return -1;
         }
-        s_fc.w++;
+        c->fc.w++;
         if (p >= 0 && p < n) {
             return p;
         }

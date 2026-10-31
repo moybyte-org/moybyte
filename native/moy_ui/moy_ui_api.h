@@ -101,6 +101,21 @@ typedef struct {
 #define MOY_UI_KEPT_PARTS 48        // the parts that show a kept table records (more: drawn whole)
 #define MOY_UI_KF_HELD 1            // kf_held: every buffer holds the kept table
 #define MOY_UI_KF_OVER 2            // ...but for what was drawn over it
+// The faces a table's parts keep drawn (moy_ui_api_slots): the key and
+// slots they are kept under, the uses counted, the warm order's next part and
+// the table's rows it runs over (r0 .. r1 showed, of rows, np parts each);
+// each slot's part key and last use (0: empty). In the context, so in the
+// memory its face gave it (PSRAM on a board), never the engine's statics.
+#define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
+typedef struct {
+    uint32_t tick;
+    int32_t key;
+    uint16_t cap, w;
+    int16_t r0, r1, rows;
+    uint8_t np;
+    uint32_t pk[MOY_UI_FACE_SLOTS], used[MOY_UI_FACE_SLOTS];
+} moy_ui_faces_t;
+
 typedef struct {
     int32_t f, key, off;
     uint32_t id, geo;
@@ -522,8 +537,10 @@ typedef struct {
     int32_t kt_f;
     moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
-    // 0: none), tp_np the parts a row of the table drawn last holds.
+    // 0: none), tp_np the parts a row of the table drawn last holds; and the
+    // record of them, which counts while the ticket is the engine's.
     uint32_t fc_id;
+    moy_ui_faces_t fc;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -844,8 +861,8 @@ int moy_ui_api_held_all(const moy_ui_ctx_t *c);
 // keeps the slots' record -- which part's face each holds, which was
 // stamped least recently -- and the app draws: a face into the slot the
 // engine names, the slot onto its canvas. It keeps one such record, held
-// by the context that asked last (another's asking forgets its faces).
-#define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
+// by the context that asked last (another's asking forgets its faces), in
+// that context (moy_ui_faces_t; MOY_UI_FACE_SLOTS slots at most).
 #define MOY_UI_SLOT_MINT 0x10000    // moy_ui_api_slot: draw the face into the slot first
 // The table drawn last keeps its parts' faces in `cap` slots (at most
 // MOY_UI_FACE_SLOTS; 0 keeps none), each a function of `key` -- what
