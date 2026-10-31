@@ -3490,6 +3490,14 @@ static mp_obj_t ui_api_host_whole(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_whole_obj, ui_api_host_whole);
 
+// api_keys_back(ctx): the keys another surface held at the frame's begin are
+// the page's again, from here in the pass
+static mp_obj_t ui_api_keys_back(mp_obj_t ctx) {
+    moy_ui_api_keys_back(ctx_of(ctx));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_back_obj, ui_api_keys_back);
+
 
 // -- text views (moy_ui_text.h) ----------------------------------------------------
 
@@ -3755,6 +3763,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_arm), MP_ROM_PTR(&ui_api_host_arm_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_whole), MP_ROM_PTR(&ui_api_host_whole_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_keys_back), MP_ROM_PTR(&ui_api_keys_back_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },

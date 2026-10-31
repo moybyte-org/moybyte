@@ -3597,6 +3597,10 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c) {
     return c->keys;
 }
 
+void moy_ui_api_keys_back(moy_ui_ctx_t *c) {
+    c->elsewhere = 0;
+}
+
 int moy_ui_api_edge(const moy_ui_ctx_t *c) {
     return c->edge;
 }

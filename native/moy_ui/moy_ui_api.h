@@ -883,6 +883,11 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 // inside a pass does.
 void moy_ui_api_focus_ahead(moy_ui_ctx_t *c, moy_ui_span_t id);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
+// The keys another surface held when this frame began (MOY_UI_ELSEWHERE)
+// came back mid-frame, before the pass drew its stops (a cart's editor handle
+// let them go in its update): from here a stop takes the focus as on a frame
+// begun with them, so the first frame after shows its mark.
+void moy_ui_api_keys_back(moy_ui_ctx_t *c);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.
 int moy_ui_api_edge(const moy_ui_ctx_t *c);

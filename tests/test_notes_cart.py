@@ -352,8 +352,8 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
 
 def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     """The handheld: the list scrolled down to a note, the note opened and
-    closed again -- the list shows that note's row, not the list's top, from
-    the very frame the note closes. The note's page has an id of its own, so
+    closed again -- the list shows that note's row, not the list's top, and
+    the row's focus mark, from the very frame the note closes. The note's page has an id of its own, so
     the list's page opens anew and its table on its current row
     (docs/ui_api_2026-10.md)."""
     ws = build_ws(tmp_path)
@@ -372,9 +372,13 @@ def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     _press(drv, "a")
     assert ns["ed"] is not None
     drv.type_char(ESC)                         # leaves the note
+    ui_draw.marks(None, True)
     _frames(drv, 1)
     assert ns["ed"] is None and ns["cur"] == 30
     assert shown(), "the first frame showed the list's top: the row came a frame late"
+    assert ui_draw._C.api_focus(ws.player._ui[0], None) == "vault"
+    assert ui_draw.marks()[1] == 1, \
+        "the keys the note let go were the list's that frame: its row wears the mark"
     _frames(drv)
     assert shown(), "the list came back at its top, the note's row out of sight"
 
