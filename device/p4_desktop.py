@@ -85,7 +85,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     print("%s display up (%dx%d, gfx=%s)"
           % (name, comp.size()[0], comp.size()[1], "native" if gfx else "NONE"))
     sys_canvas = P4SystemCanvas(comp, font_scale=font_scale)
-    sys_canvas.LAYER_SHIFT_COST = layer_shift_cost
+    sys_canvas.shift_costs(None, layer_shift_cost)
     # Hardware compositing (#58): the PPA offloads the game->window scale blit
     # + the drag backdrop-cache copy from the CPU. CPU kernel if it fails to
     # register.

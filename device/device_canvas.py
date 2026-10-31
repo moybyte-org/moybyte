@@ -458,8 +458,13 @@ def _room(obj):
     for s in _MAP_SIZES:
         if s >= n:
             if n * 5 > s * 4:
-                for i in range(s + 1 - n):
-                    setattr(obj, "_room%d" % i, None)
+                need, i = s + 1 - n, 0
+                while need:             # a spare an earlier call left counts already
+                    k = "_room%d" % i
+                    if k not in obj.__dict__:
+                        setattr(obj, k, None)
+                        need -= 1
+                    i += 1
             return
 
 
@@ -2562,7 +2567,6 @@ class DeviceCanvas:
         own = 0 if owner is None else _owner_h(owner, self._owners)
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx, own))
         lay._owners = self._owners
-        lay.SHIFT_COST = lay.LAYER_SHIFT_COST = self.LAYER_SHIFT_COST
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must
@@ -2579,6 +2583,7 @@ class DeviceCanvas:
         # every stock layer off the shared module table for nothing.
         if self._wire is not _PAL565_WIRE_BUF:
             lay.palette = self._palette
+        lay.shift_costs(self.LAYER_SHIFT_COST, self.LAYER_SHIFT_COST)
         # Layer lending (#63 leak fix): a layer made for a program (`owner`:
         # "cart" via make_api, "wallpaper" via the wallpaper runner) is a BUF
         # row on loan to that program's OWNER, so reclaim_layers(owner) returns
@@ -2729,6 +2734,14 @@ class DeviceCanvas:
             return True
         self._gfx.scroll_rect(self._buf, self._stride, x, y, w, h, dx, dy)
         return True
+
+    def shift_costs(self, own, layers):
+        """What this canvas's shift_last costs (SHIFT_COST) and its layers'
+        (LAYER_SHIFT_COST), set after its construction, so the attribute map
+        is given its room again (`_room`)."""
+        self.SHIFT_COST = own
+        self.LAYER_SHIFT_COST = layers
+        _room(self)
 
     def shift_fence(self):
         """A queued shift_last has landed and the rows it wrote are this

@@ -985,7 +985,7 @@ def test_each_p4_board_says_what_its_layers_in_place_shift_costs():
     shared P4 body, which gives it to the system canvas its layers come
     from; measured in #58."""
     body = (_REPO / "device" / "p4_desktop.py").read_text()
-    assert "sys_canvas.LAYER_SHIFT_COST = layer_shift_cost" in body
+    assert "sys_canvas.shift_costs(None, layer_shift_cost)" in body
     for board in ("esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c"):
         src = (_REPO / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert re.search(r"^LAYER_SHIFT_COST = \d+$", src, re.M), board
