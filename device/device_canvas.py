@@ -101,6 +101,11 @@ _ROLE_BAKE = _glass_mod.ROLE_BAKE
 _ROLE_SCRATCH = _glass_mod.ROLE_SCRATCH
 _BAKE_MASK = 1 << _ROLE_BAKE
 _OWNERS = {}
+# The board's in-place shift engine for one persistent buffer (a layer, a
+# run's canvas), `shift_in(buf, stride, x, y, w, h, dy)` -> True once moved,
+# False where the CPU must: the P4s' 2D-DMA (moy_ppa.shift_in, registered by
+# P4SystemCanvas.enable_ppa). None: the CPU moves it.
+_IN_PLACE = [None]
 
 
 def _owner_h(tag, owners=_OWNERS):
@@ -2557,7 +2562,7 @@ class DeviceCanvas:
         own = 0 if owner is None else _owner_h(owner, self._owners)
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx, own))
         lay._owners = self._owners
-        lay.SHIFT_COST = self.LAYER_SHIFT_COST
+        lay.SHIFT_COST = lay.LAYER_SHIFT_COST = self.LAYER_SHIFT_COST
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must
@@ -2710,7 +2715,8 @@ class DeviceCanvas:
         The compositor's where it names a last frame's buffer (the P4s' 2D-DMA,
         the S3s' row copy); on one persistent buffer -- a layer, a window
         buffer, a cart's canvas, the host's and the browser's root -- the last
-        frame's is this one and the shift is in place. A queued copy is
+        frame's is this one and the shift is in place: the board's engine
+        (`_IN_PLACE`) where it takes the move, the CPU's otherwise. A queued copy is
         fenced by shift_fence(), and by anything that reads or presents this
         buffer; until then the caller writes no row the shift writes
         (docs/scroll_and_text_2026-10.md §3.2)."""
@@ -2718,6 +2724,9 @@ class DeviceCanvas:
         cs = self._comp_shift
         if cs is not None:
             return cs(x, y, w, h, dx, dy)
+        ip = _IN_PLACE[0]
+        if ip is not None and not dx and ip(self._buf, self._stride, x, y, w, h, dy):
+            return True
         self._gfx.scroll_rect(self._buf, self._stride, x, y, w, h, dx, dy)
         return True
 

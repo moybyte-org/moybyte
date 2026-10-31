@@ -1437,6 +1437,174 @@ static mp_obj_t moy_ppa_sync(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
 
+// -- THE IN-PLACE SHIFT: a layer's shift_last on the 2D-DMA ---------------------
+//
+// A layer (a window's buffer, a run's canvas) is one persistent picture, so
+// its shift_last moves a rect inside itself; the CPU's row memmove through
+// PSRAM costs ~11 ms for a Notes view where the 2D-DMA lands it in ~3. The
+// engine copies forward, which in place is exact for a destination above its
+// source: that move is one transfer. A move down goes through a scratch
+// picture in bands of SHIFT_BAND rows, the bottom band first, each into the
+// scratch and back.
+//
+// Blocking, so no fence: the CPU writes nothing in the picture while it
+// waits. The cache rules widen to whole lines because the picture's rows are
+// not (a layer is as wide as its window): every line the moved rows touch is
+// written back and dropped before the first transfer and dropped again after
+// each, which is sound only because the picture starts on a line (the glass
+// allocates it so) and the lines lie inside it -- a move whose last line
+// would run past the picture is refused. Refused too while the PPA or a copy
+// is in flight (a transfer queued behind a rotate would wait its 20-30 ms):
+// the caller copies on the CPU.
+
+#define SHIFT_BAND 64
+
+static uint8_t *s_sh_scr;
+static size_t s_sh_cap;
+static uint32_t s_sh_moves, s_sh_refused;
+
+// One blocking transfer: the w x h block at (sx, sy) of `src` (sw x sh) to
+// (dx, dy) of `dst` (dw x dh). False where the engine refused it (nothing
+// moved) or never landed it.
+static bool sh_go(uint8_t *src, int sw, int sh, int sx, int sy, uint8_t *dst, int dw, int dh,
+                  int dx, int dy, int w, int h) {
+    uintptr_t a = ((uintptr_t)dst + (size_t)dy * (size_t)dw * 2u) & ~(uintptr_t)63u;
+    uintptr_t e = ((uintptr_t)dst + (size_t)(dy + h) * (size_t)dw * 2u + 63u)
+                  & ~(uintptr_t)63u;
+    esp_async_fbcpy_trans_desc_t tr = {
+        .src_buffer = src,
+        .dst_buffer = dst,
+        .src_buffer_size_x = (size_t)sw,
+        .src_buffer_size_y = (size_t)sh,
+        .dst_buffer_size_x = (size_t)dw,
+        .dst_buffer_size_y = (size_t)dh,
+        .src_offset_x = (size_t)sx,
+        .src_offset_y = (size_t)sy,
+        .dst_offset_x = (size_t)dx,
+        .dst_offset_y = (size_t)dy,
+        .copy_size_x = (size_t)w,
+        .copy_size_y = (size_t)h,
+        .pixel_format_unique_id = {
+            .color_type_id = COLOR_TYPE_ID(COLOR_SPACE_RGB, COLOR_PIXEL_RGB565),
+        },
+    };
+    s_fb_busy = true;
+    s_fb_dst = (uint8_t *)a;
+    s_fb_dst_n = (size_t)(e - a);
+    s_fb_t0 = esp_timer_get_time();
+    s_fb_t_landed = 0;
+    if (esp_async_fbcpy(s_fb, &tr, fb_done_cb, NULL) != ESP_OK) {
+        s_fb_busy = false;
+        s_fb_dst = NULL;
+        s_fb_refused++;
+        return false;
+    }
+    s_fb_copies++;
+    fb_wait_inner();
+    return !s_fb_dead;
+}
+
+// shift_in(buf, stride, x, y, w, h, dy) -> True once the rect (x, y, w, h) of
+//   the RGB565 picture `buf` (`stride` px a row) holds its pixels moved by dy
+//   inside it, moy_gfx's mg_shift_rect in place (dx 0): the band the move
+//   exposes keeps what it held. False: nothing moved -- the engine is busy,
+//   refused or not to be had -- and the caller copies on the CPU.
+static mp_obj_t moy_ppa_shift_in(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(args[0], &bi, MP_BUFFER_WRITE);
+    int W = (int)mp_obj_get_int(args[1]);
+    int x = (int)mp_obj_get_int(args[2]), y = (int)mp_obj_get_int(args[3]);
+    int w = (int)mp_obj_get_int(args[4]), h = (int)mp_obj_get_int(args[5]);
+    int dy = (int)mp_obj_get_int(args[6]);
+    if (W <= 0 || dy == 0) {
+        return mp_const_false;
+    }
+    int rows = (int)(bi.len / 2u / (size_t)W);
+    int b[6];
+    if (!mg_shift_clip(W, rows, x, y, w, h, 0, dy, b)) {
+        return mp_const_true;           // nothing of the rect moves
+    }
+    uint8_t *px = (uint8_t *)bi.buf;
+    size_t rb = (size_t)W * 2u;
+    int r0 = b[1] < b[3] ? b[1] : b[3], r1 = (b[1] > b[3] ? b[1] : b[3]) + b[5];
+    uintptr_t lo = ((uintptr_t)px + (size_t)r0 * rb) & ~(uintptr_t)63u;
+    uintptr_t hi = ((uintptr_t)px + (size_t)r1 * rb + 63u) & ~(uintptr_t)63u;
+    fb_wait_inner();
+    if (s_fb_dead || ((uintptr_t)px & 63u) != 0 || hi > (uintptr_t)px + (bi.len & ~(size_t)63u)
+        || ppa_inflight() != 0 || s_copy_busy || s_snap_busy) {
+        s_sh_refused++;
+        return mp_const_false;
+    }
+    int sw = (b[4] + 31) & ~31;         // the scratch's rows: whole lines
+    if (dy > 0 && s_sh_cap < (size_t)sw * SHIFT_BAND * 2u) {
+        heap_caps_free(s_sh_scr);
+        s_sh_cap = 0;
+        s_sh_scr = heap_caps_aligned_calloc(64, 1, (size_t)sw * SHIFT_BAND * 2u,
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+        if (s_sh_scr == NULL) {
+            s_sh_refused++;
+            return mp_const_false;
+        }
+        s_sh_cap = (size_t)sw * SHIFT_BAND * 2u;
+    }
+    if (s_fb == NULL) {
+        esp_async_fbcpy_config_t cfg = {};
+        if (esp_async_fbcpy_install(&cfg, &s_fb) != ESP_OK) {
+            s_fb = NULL;
+            s_fb_dead = true;
+            s_sh_refused++;
+            return mp_const_false;
+        }
+    }
+    esp_cache_msync((void *)lo, (size_t)(hi - lo),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    if (dy < 0) {
+        if (!sh_go(px, W, rows, b[2], b[3], px, W, rows, b[0], b[1], b[4], b[5])
+            && s_fb_dst == NULL && !s_fb_dead) {
+            s_sh_refused++;
+            return mp_const_false;      // refused at its submit: nothing moved
+        }
+        s_sh_moves++;
+        return mp_const_true;
+    }
+    // down: the bottom band first, each through the scratch; a band the
+    // engine fails is finished on the CPU with every band above it
+    esp_cache_msync(s_sh_scr, s_sh_cap,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    int top = b[5];
+    while (top > 0) {
+        int n = top >= SHIFT_BAND ? SHIFT_BAND : top;
+        top -= n;
+        if (!sh_go(px, W, rows, b[2], b[3] + top, s_sh_scr, sw, SHIFT_BAND, 0, 0, b[4], n)) {
+            top += n;
+            break;
+        }
+        if (!sh_go(s_sh_scr, sw, SHIFT_BAND, 0, 0, px, W, rows, b[0], b[1] + top, b[4], n)) {
+            esp_cache_msync(s_sh_scr, s_sh_cap, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+            for (int r = n - 1; r >= 0; r--) {
+                memcpy(px + (size_t)(b[1] + top + r) * rb + (size_t)b[0] * 2u,
+                       s_sh_scr + (size_t)r * (size_t)sw * 2u, (size_t)b[4] * 2u);
+            }
+            break;
+        }
+    }
+    for (int r = top - 1; r >= 0; r--) {
+        memmove(px + (size_t)(b[1] + r) * rb + (size_t)b[0] * 2u,
+                px + (size_t)(b[3] + r) * rb + (size_t)b[2] * 2u, (size_t)b[4] * 2u);
+    }
+    s_sh_moves++;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_shift_in_obj, 7, 7, moy_ppa_shift_in);
+
+// shift_in_stats() -> (moves, refused).
+static mp_obj_t moy_ppa_shift_in_stats(void) {
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(s_sh_moves), mp_obj_new_int_from_uint(s_sh_refused) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_shift_in_stats_obj, moy_ppa_shift_in_stats);
+
 // The kernel's teardown (native/moy_glass): no snapshot and no transaction
 // still reads or writes a buffer the VM is about to free.
 void moy_ppa_k_sync(void) {
@@ -1750,6 +1918,8 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fbcpy_wait), MP_ROM_PTR(&moy_ppa_fbcpy_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_fbcpy_busy), MP_ROM_PTR(&moy_ppa_fbcpy_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_fbcpy_stats), MP_ROM_PTR(&moy_ppa_fbcpy_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_in), MP_ROM_PTR(&moy_ppa_shift_in_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_in_stats), MP_ROM_PTR(&moy_ppa_shift_in_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap), MP_ROM_PTR(&moy_ppa_snap_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_wait), MP_ROM_PTR(&moy_ppa_snap_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_ppa_snap_stats_obj) },

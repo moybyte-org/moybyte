@@ -71,12 +71,13 @@ def p4_card():
 
 def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                 font_scale, panel_diagonal_in, seed_carts, store_root, ota_dir,
-                power_save_ms, game_wh=(320, 240), fps_cap=60):
+                power_save_ms, game_wh=(320, 240), fps_cap=60, layer_shift_cost=None):
     """Boot the shared console on a P4 board: launcher-as-desktop under
     WindowedWM, this board's glass, its touch as the pointer, a BLE HID
     keyboard over the companion C6, and carts on the TF card when one mounts
     (`store_root`, on the board's internal flash, when not). Ctrl-C over the
-    board's REPL interrupts the loop."""
+    board's REPL interrupts the loop. `layer_shift_cost`: what this board's
+    in-place shift of a layer costs (DeviceCanvas.LAYER_SHIFT_COST)."""
     from wm_windowed import WindowedWM
 
     comp = compositor()
@@ -84,6 +85,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     print("%s display up (%dx%d, gfx=%s)"
           % (name, comp.size()[0], comp.size()[1], "native" if gfx else "NONE"))
     sys_canvas = P4SystemCanvas(comp, font_scale=font_scale)
+    sys_canvas.LAYER_SHIFT_COST = layer_shift_cost
     # Hardware compositing (#58): the PPA offloads the game->window scale blit
     # + the drag backdrop-cache copy from the CPU. CPU kernel if it fails to
     # register.

@@ -1099,8 +1099,10 @@ layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
 place on one buffer (`device/device_canvas.py`, the compositors in
 `native/moy_glass`). A canvas whose copy costs about what the raster it
 saves does declares it (`SHIFT_COST`, per mille of a row's raster a row it
-copies costs; a board's layers take its `LAYER_SHIFT_COST`: the P4s' window
-layers, copied in place through PSRAM, 900). A frame whose move leaves too
+copies costs; a board's layers take its `LAYER_SHIFT_COST`, which each P4
+board's `moy_runtime` sets: a layer moves in place, on the Waveshare through
+the 2D-DMA (`moy_ppa.shift_in`), on the Guition, whose rotate holds that
+engine, on the CPU). A frame whose move leaves too
 little of R undrawn to pay for the copy draws whole, and a text view moving
 inside a still R whose copy costs more than its rows draws its rows instead
 (`host_pays`, `view_pays` in `native/moy_ui/moy_ui_api.c`); a rows frame

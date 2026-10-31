@@ -119,6 +119,11 @@ def run_ppa_smoke(scale=2, iters=60):
 # because the on-glass harness (#156) has to reach a board that has been idle
 # for hours.
 POWER_SAVE_MS = 300000          # 5 minutes
+# A layer's in-place shift (DeviceCanvas.LAYER_SHIFT_COST, measured in #58):
+# the CPU's copy through PSRAM, about what its rows cost to draw. The 2D-DMA
+# (moy_ppa.shift_in) mostly refuses it here: the previous frame's rotate
+# holds the engine when a frame's shift comes.
+LAYER_SHIFT_COST = 900
 
 
 def run_desktop(fps_cap=60):
@@ -142,4 +147,5 @@ def run_desktop(fps_cap=60):
         compositor=P4Compositor, set_backlight=set_backlight, touch_cls=Touch,
         font_scale=FONT_SCALE, panel_diagonal_in=PANEL_DIAGONAL_IN, seed_carts=CARTS,
         store_root=CARTS_ROOT, ota_dir=OTA_UPDATE_DIR,
-        power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H), fps_cap=fps_cap)
+        power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H), fps_cap=fps_cap,
+        layer_shift_cost=LAYER_SHIFT_COST)

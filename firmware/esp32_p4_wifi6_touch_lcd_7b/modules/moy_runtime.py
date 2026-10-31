@@ -126,6 +126,11 @@ def run_ppa_smoke(scale=2, iters=60):
 # out as unmeasured -- its 2.85W draw has never been split between the SoC and
 # the panel, and "one reading with the backlight blanked settles it".
 POWER_SAVE_MS = 300000          # 5 minutes
+# A layer's in-place shift (DeviceCanvas.LAYER_SHIFT_COST, measured in #58):
+# the 2D-DMA moves it (moy_ppa.shift_in), up in one transfer and down through
+# a scratch, for well under what its rows cost to draw; the CPU takes the few
+# the engine refuses.
+LAYER_SHIFT_COST = 500
 
 
 def run_desktop(fps_cap=60):
@@ -148,4 +153,5 @@ def run_desktop(fps_cap=60):
         compositor=P4Compositor, set_backlight=set_backlight, touch_cls=Touch,
         font_scale=FONT_SCALE, panel_diagonal_in=PANEL_DIAGONAL_IN, seed_carts=CARTS,
         store_root=CARTS_ROOT, ota_dir=OTA_UPDATE_DIR,
-        power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H), fps_cap=fps_cap)
+        power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H), fps_cap=fps_cap,
+        layer_shift_cost=LAYER_SHIFT_COST)

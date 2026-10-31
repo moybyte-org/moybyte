@@ -558,11 +558,10 @@ def test_the_boards_c_binding_runs_the_same_scenarios(tmp_path):
 
 
 def test_a_p4_window_layer_declares_its_in_place_copy_and_its_root_does_not():
-    """A layer shifts in place, a CPU copy through its board's memory: it
-    takes its board's `LAYER_SHIFT_COST` (the P4s': 900, about what the rows
-    it saves cost to draw), while the root's compositor copy stays
-    unmeasured (None); a board that measured nothing leaves its layers None
-    too."""
+    """A layer shifts in place: it takes its board's `LAYER_SHIFT_COST` (each
+    P4 board's moy_runtime says what its in-place shift costs), and so do the
+    layers made from it, while the root's compositor copy stays unmeasured
+    (None); a board that measured nothing leaves its layers None too."""
     import importlib.util as ilu
     from runtime import host_canvas
     host_canvas.install()
@@ -571,9 +570,46 @@ def test_a_p4_window_layer_declares_its_in_place_copy_and_its_root_does_not():
     mod = ilu.module_from_spec(spec)
     spec.loader.exec_module(mod)
     cv = mod.P4SystemCanvas(host_canvas.HostCompositor(320, 200), font_scale=1)
+    assert cv.new_layer(8, 8).SHIFT_COST is None
+    cv.LAYER_SHIFT_COST = 500
     assert cv.SHIFT_COST is None
     lay = cv.new_layer(64, 32)
-    assert lay.SHIFT_COST == 900 and lay.new_layer(8, 8).SHIFT_COST == 900
+    assert lay.SHIFT_COST == 500 and lay.new_layer(8, 8).SHIFT_COST == 500
     plain = host_canvas.HostCompositor(320, 200)
     from device.device_canvas import DeviceCanvas
     assert DeviceCanvas(plain).new_layer(8, 8).SHIFT_COST is None
+
+
+@pytest.mark.parametrize("takes", (True, False))
+def test_a_persistent_buffer_shifts_through_the_boards_engine_or_the_cpu(takes):
+    """One persistent buffer's shift_last goes to the board's in-place engine
+    (`_IN_PLACE`, the P4s' 2D-DMA) with the move in buffer coordinates, and
+    where the engine refuses it (False: busy, or a move it cannot make) the
+    CPU makes it, so the buffer ends the same either way; a sideways move
+    never asks the engine."""
+    from runtime import host_canvas
+    from device import device_canvas as dc
+    host_canvas.install()
+    lay = dc.DeviceCanvas(host_canvas.HostCompositor(64, 40)).new_layer(48, 30)
+    for i in range(0, len(lay._buf), 2):
+        lay._buf[i] = (i // 2) & 0xFF
+        lay._buf[i + 1] = (i // 96) & 0xFF
+    want = bytearray(lay._buf)
+    dc.DeviceCanvas(host_canvas.HostCompositor(4, 4))._gfx.scroll_rect(want, 48, 3, 4, 40, 20, 0, -5)
+    asked = []
+
+    def engine(buf, stride, x, y, w, h, dy):
+        asked.append((stride, x, y, w, h, dy))
+        if not takes:
+            return False
+        lay._gfx.scroll_rect(buf, stride, x, y, w, h, 0, dy)
+        return True
+    dc._IN_PLACE[0] = engine
+    try:
+        assert lay.shift_last(3, 4, 40, 20, 0, -5) is True
+        assert lay.shift_last(3, 4, 40, 20, 2, 0) is True
+    finally:
+        dc._IN_PLACE[0] = None
+    assert asked == [(48, 3, 4, 40, 20, -5)]
+    lay._gfx.scroll_rect(want, 48, 3, 4, 40, 20, 2, 0)
+    assert bytes(lay._buf) == bytes(want)
