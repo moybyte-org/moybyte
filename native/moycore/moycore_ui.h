@@ -30,6 +30,10 @@
  *                                    lags) or -2 (held but for what was drawn over it)
  *   ui.held(id, key)               -> whether the buffer this frame paints holds part
  *                                    `id` as a frame drew it under `key`
+ *   ui.held_last(id, key)          -> whether the buffer the last frame painted holds
+ *                                    part `id` as it named it under `key`
+ *   ui.held_all()                  -> whether every buffer holds every part this frame
+ *                                    named as it names it
  *   ui.slots(cap, key)             -> the slots the table drawn last keeps its parts'
  *                                    faces in, under `key` (0 keeps none)
  *   ui.slot(name, gen, mint)       -> the slot (from 1) holding the face of the part
@@ -877,6 +881,19 @@ static int moycore_ui_held(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_held_last(lua_State *L)
+{
+    lua_pushboolean(L, moy_ui_run_held_last(moycore_ui_canvas(), moycore_ui_span(L, 1),
+                                            (int32_t)luaL_checkinteger(L, 2)) != 0);
+    return 1;
+}
+
+static int moycore_ui_held_all(lua_State *L)
+{
+    lua_pushboolean(L, moy_ui_run_held_all(moycore_ui_canvas()) != 0);
+    return 1;
+}
+
 static int moycore_ui_slots(lua_State *L)
 {
     lua_pushinteger(L, (lua_Integer)moy_ui_run_slots(moycore_ui_canvas(),
@@ -938,6 +955,7 @@ static void moycore_ui_open(lua_State *L)
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"table_dist", moycore_ui_table_dist},
         {"table_floor", moycore_ui_table_floor}, {"held", moycore_ui_held},
+        {"held_last", moycore_ui_held_last}, {"held_all", moycore_ui_held_all},
         {"slots", moycore_ui_slots}, {"slot", moycore_ui_slot}, {"slot_next", moycore_ui_slot_next}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"table_part", moycore_ui_table_part}, {"part_at", moycore_ui_part_at},

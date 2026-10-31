@@ -169,6 +169,40 @@ def test_held_answers_what_the_buffer_holds(th, bufs):
     assert rig.frame(named=(("hint", 2),))[3] == [False]
 
 
+@pytest.mark.parametrize("bufs", [1, 2, 3])
+def test_held_last_and_held_all_answer_with_no_table(th, bufs):
+    """`ui.held_last(id, key)`: the buffer the last frame painted holds
+    the part as that frame named it (the frame before, the page's, kept);
+    `ui.held_all()`: every buffer holds every part this frame named as it
+    names it -- no kept table drawn. Neither names anything."""
+    cv = make_system_canvas(320, 240)
+    cv.RETAINED_FRAMES = bufs
+    host = ui_draw.AppHost()
+    n = [100]
+
+    def frame(key, gap=False, name=True):
+        n[0] += 2 if gap else 1
+        ui_draw.paint_frame(n[0], True)
+        host.whole()
+        host.begin(cv, th, None, False, False, True)
+        last = ui.held_last("sel", key)
+        if name:
+            ui.held("sel", key)
+        both = ui.held_all()
+        ui.end()
+        return last, both
+
+    assert frame(1) == (False, bufs == 1)
+    for k in range(1, bufs):
+        assert frame(1) == (True, k == bufs - 1)
+    assert frame(1) == (True, True)
+    assert frame(2) == (False, bufs == 1)          # another key: one buffer holds it
+    assert frame(2)[0] and frame(2, gap=True) == (False, bufs == 1)
+    frame(2)
+    assert frame(2, name=False) == (True, True)    # (nothing named: nothing lags)
+    assert frame(2) == (False, bufs == 1)          # the last named nothing
+
+
 def test_a_part_lagging_is_in_the_floors_end(th):
     """The floor's end counts the parts `held` named before it: a part a
     buffer holds under another key lags as a row would."""
@@ -385,6 +419,7 @@ function _draw()
   s, m = ui.slot("c", 0)
   pmem(3, s); pmem(4, m and 1 or 0)
   pmem(5, ui.slot("d", 0) == nil and 1 or 0)
+  pmem(21, (ui.held_last("hint", 3) and 1 or 0) + (ui.held_all() and 2 or 0))
   local p, n = ui.slot_next(), 0
   while p do n = n + 1; pmem(5 + n, p); p = ui.slot_next() end
   pmem(20, n)
@@ -397,7 +432,8 @@ def test_the_lua_face_keeps_faces(tmp_path):
     """The Lua face: `ui.slots(cap, key)` the slots kept, `ui.slot(name,
     gen, mint)` the slot from 1 and whether it is to be drawn first (nil
     where none), `ui.slot_next()` the next part from 1, nil after the
-    last."""
+    last; `ui.held_last` and `ui.held_all` booleans (a cart's canvas keeps
+    no buffers: neither holds)."""
     from ws_helpers import make_drv, open_cart
     root = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(root)
@@ -418,13 +454,13 @@ def test_the_lua_face_keeps_faces(tmp_path):
     assert ws.player.cart_error is None, ws.player.cart_error
     lua = ws.player._lua
     if hasattr(lua._run, "pmem"):
-        pm = list(lua._run.pmem()[1])[:21]
+        pm = list(lua._run.pmem()[1])[:22]
     else:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        pm = list(img)[:21]
-    assert pm[0] == 3
+        pm = list(img)[:22]
+    assert pm[0] == 3 and pm[21] == 0
     assert pm[1:6] == [1, 1, 1, 0, 1]             # minted into slot 1, then held there
     # rows 2 .. 4 show (20 down, 60 tall), two parts each: then row 5 past
     # the end, then row 1 before the start, nearest first

@@ -268,6 +268,16 @@ int moy_ui_run_held(void *target, moy_ui_span_t id, int32_t key) {
     return c != NULL ? moy_ui_api_held(c, id, key) : 0;
 }
 
+int moy_ui_run_held_last(void *target, moy_ui_span_t id, int32_t key) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_held_last(c, id, key) : 0;
+}
+
+int moy_ui_run_held_all(void *target) {
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_held_all(c) : 0;
+}
+
 int32_t moy_ui_run_slots(void *target, int32_t cap, int32_t key) {
     moy_ui_ctx_t *c = run_ctx(target);
     return c != NULL ? moy_ui_api_slots(c, cap, key) : 0;
@@ -596,6 +606,16 @@ int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key) {
     return moy_ui_run_held(wasm_target(), span(n ? id : NULL, n), key);
 }
 
+int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key) {
+    (void)e;
+    return moy_ui_run_held_last(wasm_target(), span(n ? id : NULL, n), key);
+}
+
+int32_t moy_ui_wasm_held_all(void *e) {
+    (void)e;
+    return moy_ui_run_held_all(wasm_target());
+}
+
 int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key) {
     (void)e;
     return moy_ui_run_slots(wasm_target(), cap, key);
@@ -921,6 +941,8 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_table_dist", FN(moy_ui_wasm_table_dist) },
     { "ui_table_floor", FN(moy_ui_wasm_table_floor) },
     { "ui_held", FN(moy_ui_wasm_held) },
+    { "ui_held_last", FN(moy_ui_wasm_held_last) },
+    { "ui_held_all", FN(moy_ui_wasm_held_all) },
     { "ui_slots", FN(moy_ui_wasm_slots) },
     { "ui_slot", FN(moy_ui_wasm_slot) },
     { "ui_slot_next", FN(moy_ui_wasm_slot_next) },

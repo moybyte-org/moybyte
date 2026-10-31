@@ -94,7 +94,8 @@ enum {
     MOY_ROW_UI_MENU, MOY_ROW_UI_TOOL, MOY_ROW_UI_BAR,
     MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
     MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
-    MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_FACE_NEXT,
+    MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
+    MOY_ROW_UI_HELD_ALL,
     MOY_ROW_N
 };
 
@@ -433,7 +434,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 156u
+#define MOY_APP_TABLE_N 158u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.

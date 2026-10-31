@@ -303,11 +303,11 @@ key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
-fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one;
-the home's `_still_ring` (§14.4) is one whose change is its parts' keys
-and the bar's. An app's page keeps the same slots in its context, the
-engine's (`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its
-begin is one C call. The one-body guard is a grep: no other list of
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one.
+An app's page keeps the same slots in its context, the engine's
+(`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its begin is one
+C call; the home names its parts per buffer in its band host's paints
+there (`ui.held`, the engine's kept ring: §9 and §14.4). The one-body guard is a grep: no other list of
 painted frames in `runtime/`.
 
 ### 3.2 The backend verb: `shift_last`
@@ -798,8 +798,8 @@ an idle frame, or asks for the frame that brings the next buffer to it.
 The carousel's card sizes and the desk shelf's are the carousel's own
 geometry, the engine answering which cards show.
 
-The desk home's still ring (§14.4) keeps the hero's, the band's and the
-bar's keys; it is a `PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
+The desk home's still frames (§14.4) name the backdrop's, the hero's,
+the shelf's and the bar's keys in the band host's paints (`ui.held`). The PROJECTS window is a `Carousel` in a window
 (`HomeWindowLayer`) and speaks the record through the WM like any windowed
 content. The carousel's settle frame (the selection changes when the row is
 still: the hero and details pane repaint) is the carousel's key-row p90 on

@@ -96,7 +96,7 @@ typedef struct {
 // drawn over it after its pass (`over`, w 0 none); then the parts `held`
 // named (id, key), nh of them.
 #define MOY_UI_KEPT_RING 4          // RETAINED_FRAMES at most, and the paint begun
-#define MOY_UI_KEPT_HELD 4          // the parts `held` names a paint
+#define MOY_UI_KEPT_HELD 8          // the parts `held` names a paint
 #define MOY_UI_KEPT_FLOOR 4         // the rects a kept table's floor is merged to
 #define MOY_UI_KEPT_PARTS 48        // the parts that show a kept table records (more: drawn whole)
 #define MOY_UI_KF_HELD 1            // kf_held: every buffer holds the kept table
@@ -829,6 +829,16 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]);
 // `held` named there with `key`. Names it under `key` for this frame's
 // paint, which the app draws where it answers 0.
 int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key);
+// Whether the buffer the last frame painted holds part `id` as that frame
+// named it under `key` (moy_ui_api_held): the frame before this one, this
+// context's paint and the app's alone; for a part the app copies out of
+// that buffer. Names nothing.
+int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key);
+// Whether every buffer the canvas presents holds every part this frame
+// named (moy_ui_api_held) as it names it: the paints before this one, a
+// buffer each, this context's, one a frame, each naming each part under
+// the same key -- with no kept table drawn too. 0 where nothing is kept.
+int moy_ui_api_held_all(const moy_ui_ctx_t *c);
 // The faces of a table's parts kept drawn: each part drawn once into a
 // square slot of a layer the app owns, then stamped from it. The engine
 // keeps the slots' record -- which part's face each holds, which was

@@ -647,6 +647,23 @@ def slot_next():
     return _C.api_slot_next(_T[0])
 
 
+def held_last(id, key):
+    """Whether the buffer the last frame painted holds part `id` of the
+    page as that frame named it under `key` (`held`): the frame before
+    this one, this page's and the app's alone -- for a part the app copies
+    out of that buffer. Names nothing."""
+    return _C.api_held_last(_T[0], id, key)
+
+
+def held_all():
+    """Whether every buffer the canvas presents holds every part this
+    frame named (`held`) as it names it: the paints before this one, a
+    buffer each, this page's, one a frame, each naming each part under the
+    same key -- whether or not a kept table was drawn. False where the
+    canvas keeps nothing."""
+    return _C.api_held_all(_T[0])
+
+
 def table_rows():
     """Where the table drawn last put its rows, for an app that draws a
     row's own picture over its picture column's cell (Files' covers):

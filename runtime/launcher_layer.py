@@ -841,6 +841,19 @@ class Launcher:
         self._kcols = ("",) * per
         return rows
 
+    def begin_band_host(self, cv):
+        """Begin this painted frame's paint on the band's host, drawing
+        nothing: the parts the home names there (`ui.held`) are then
+        asked for, the band's pass beginning it again."""
+        host = self._band_host()
+        host.whole()
+        host.begin(cv, self.theme, self.band_rect(), self.desk(), False, True)
+
+    def resume_band_host(self, cv):
+        """Point the verbs at the band's host again, beginning nothing:
+        the parts named in the paint this frame began there."""
+        self._band_host().resume(cv, self.theme)
+
     def _begin_band(self, cv, b, desk, key, need, over=None):
         """Begin the band's frame on its host: whether the buffer this frame
         paints holds the band as a frame drew it under `key` (`ui.held`);
@@ -2768,17 +2781,6 @@ def _dim_of(ws):
     return (_ground_of(ws), (pct * 255 + 50) // 100)
 
 
-def _retained_n(cv):
-    """The canvas's physical-buffer rotation -- the staleness horizon the
-    desk home's still ring must respect (a back buffer on an N-buffer root is
-    N frames stale). Parameterized for the P4 triple-framebuffer render overlap
-    (#58); FLOORED at 2 so the host's single persistent buffer keeps today's
-    conservative gates (behavior-identical at N<=2). Mirrors
-    WindowedWM._retained_n."""
-    n = getattr(cv, "RETAINED_FRAMES", 1)
-    return n if n > 2 else 2
-
-
 def _cursor_stamp(ws):
     """The cursor sprite's footprint on the system canvas this frame, or None
     when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
@@ -2974,13 +2976,16 @@ class LauncherHomeLayer:
         # the theme, the wallpaper and the band rect.
         self._band_bg = None          # cv.new_layer sized to the band
         self._band_key = None
-        # The desk home's still-backdrop frames (`_try_still_frame`): a
-        # `PaintRing` of the painted frames, each keyed by its backdrop and
-        # changing its parts' keys (selection, band, bar); the backdrop
-        # `restore_key` this frame answered; and the parts the retained frame
-        # was captured under (`_capture_retained` copies only the ones that
-        # moved).
-        self._still_ring = _ui_draw.PaintRing()
+        # The desk home's still-backdrop frames (`_try_still_frame`): the
+        # keys its parts are named under in the band host's paints
+        # (`ui.held`: the backdrop, the selection, the shelf, the bar); the
+        # backdrop `restore_key` this frame answered; and the parts the
+        # retained frame was captured under (`_capture_retained` copies only
+        # the ones that moved).
+        self._stk = _Keyed()
+        self._slk = _Keyed()
+        self._shk = _Keyed()
+        self._brk = _Keyed()
         self._bd_now = None
         self._lib_parts = None
 
@@ -3583,23 +3588,28 @@ class LauncherHomeLayer:
         return alone is not None and alone()
 
     def _note_still(self, cv, parts, bar=None):
-        """Record this painted frame's parts in the ring, with the bar's key
-        (`shown_key`) its strip was drawn under, or with None that its
-        buffer holds something else."""
-        ring = self._still_ring
-        f = self.ws._frames_drawn
-        if parts is None or (ring.size and ring.frame(0) != f - 1):
-            ring.clear()                 # (another surface painted between)
-        if parts is None:
-            return
+        """Name this painted frame's parts in the band host's paint
+        (`ui.held`, the paint the band's pass began this frame): the
+        backdrop, the selection, the shelf, the bar's key (`shown_key`) its
+        strip was drawn under and the hint strip's. Answers whether every
+        buffer now holds every part named (`ui.held_all`)."""
         if bar is None:
             bar = self.ws.bar_layer.shown_key("home")
-        ring.note(f, parts[0], change=(parts[1], parts[2], bar, self._outside_key()))
+        self.grid.resume_band_host(cv)
+        _ui.held("still", self._stk.of(parts[0]))
+        _ui.held("sel", self._slk.of(parts[1]))
+        _ui.held("shelf", self._shk.of(parts[2]))
+        _ui.held("bar", self._brk.of(bar))
+        now = self._outside_key()
+        if now is not None:
+            _ui.held("hint", self._hk.of(now[0]))
+        return _ui.held_all()
 
     def _try_still_frame(self, cv, dt):
         """The desk home's frame over its still backdrop: the parts this
-        frame's buffer lacks put back over the wallpaper's own pixels, and
-        the bar. False when the frame must take another path."""
+        frame's buffer lacks (`ui.held` in the band host's paint) put back
+        over the wallpaper's own pixels, and the bar. False when the frame
+        must take another path."""
         ws = self.ws
         if (self._lib_unsupported or self._back_tip
                 or self._search_line() is not None):
@@ -3607,35 +3617,34 @@ class LauncherHomeLayer:
         parts = self._still_parts(cv, self._bd_now)
         if parts is None or not self._content_alone(dt):
             return False
-        n = _retained_n(cv)
-        ring = self._still_ring
-        if ring.size < n:
-            return False
-        f = ws._frames_drawn
-        base, sel, band = parts
         bar = ws.bar_layer.shown_key("home")
-        hint = self._outside_key()
-        sel_lag = band_lag = bar_lag = hint_lag = False
-        for k in range(1, n + 1):
-            if ring.frame(k - 1) != f - k or ring.key(k - 1) != base:
-                return False
-            c = ring.change(k - 1)
-            if c[0] != sel:
-                sel_lag = True
-            if c[1] != band:
-                band_lag = True
-            if c[2] != bar:
-                bar_lag = True
-            if c[3] != hint:
-                hint_lag = True
+        now = self._outside_key()
+        kb = self._stk.of(parts[0])
+        ks = self._slk.of(parts[1])
+        kd = self._shk.of(parts[2])
+        kr = self._brk.of(bar)
+        kh = self._hk.of(now[0])
         g = self.grid
+        g.begin_band_host(cv)
+        if not _ui.held("still", kb):
+            return False                 # (the buffer holds another backdrop)
+        # what the buffer this frame paints lacks, and what the buffer the
+        # last frame painted holds as this frame would draw it (§14.6),
+        # asked before anything draws through another host
+        sel_lag = not _ui.held("sel", ks)
+        band_lag = not _ui.held("shelf", kd)
+        bar_lag = not _ui.held("bar", kr)
+        hint_lag = not _ui.held("hint", kh)
+        last = _ui.held_last("still", kb)
+        rows = last and _ui.held_last("bar", kr)
+        sel_last = last and _ui.held_last("sel", ks)
+        band_last = last and _ui.held_last("shelf", kd)
+        hint_last = last and _ui.held_last("hint", kh)
         wm = ws.wm
         # A part the last frame painted as this one would is copied out of
         # its buffer (§14.6): whole rows where the bar there is this one's.
-        c = ring.change(0)
-        rows = c[2] == bar
-        lay_sel = sel_lag and not (c[0] == sel and self._copy_part(cv, self._sel_rect(), rows))
-        lay_band = band_lag and not (c[1] == band and self._copy_part(cv, g.band_rect(), rows))
+        lay_sel = sel_lag and not (sel_last and self._copy_part(cv, self._sel_rect(), rows))
+        lay_band = band_lag and not (band_last and self._copy_part(cv, g.band_rect(), rows))
         if bar_lag and rows and not (lay_sel or lay_band):
             for r in ws.wallpaper.bars():
                 if not self._copy_part(cv, r, True):
@@ -3647,7 +3656,7 @@ class LauncherHomeLayer:
         # the hint strip, where the buffer shows another selection's verbs:
         # copied where the last frame drew these, else drawn
         if (h[2] > 0 and h[3] > 0 and (hint_lag or _overlaps_any(laid, (h,)))
-                and not (c[3] == hint and not _overlaps_any(laid, (h,))
+                and not (hint_last and not _overlaps_any(laid, (h,))
                          and self._copy_part(cv, h, rows))):
             laid.append(h)
             ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
@@ -3659,8 +3668,7 @@ class LauncherHomeLayer:
         # above was put back over it.
         if bar_lag or _overlaps_any(laid, ws.wallpaper.bars()):
             ws.bar_layer._draw_status_strip("home")
-        self._note_still(cv, parts, bar)
-        if self._still_held(parts, n):
+        if self._note_still(cv, parts, bar):
             # every buffer holds this frame: the retained frame takes it once
             # nothing waits on the board (`capture_due`)
             key = self._retained_key(cv)
@@ -3724,21 +3732,6 @@ class LauncherHomeLayer:
             wm.hand_content_damage(cv, bx, by, bw, bh)
         return laid
 
-    def _still_held(self, parts, n):
-        """Whether the ring's last `n` entries are `parts`: each retained
-        buffer holds this frame."""
-        ring = self._still_ring
-        if not ring.size:
-            return False
-        hint = ring.change(0)[3]
-        for i in range(n):
-            if i >= ring.size or ring.key(i) != parts[0]:
-                return False
-            c = ring.change(i)
-            if c[0] != parts[1] or c[1] != parts[2] or c[3] != hint:
-                return False
-        return True
-
     def _still_debt(self):
         """Ask for the frame that brings one more buffer to this frame,
         while nothing moves and no press waits on it (as the windowed WM
@@ -3763,8 +3756,8 @@ class LauncherHomeLayer:
         cv = ws.sys_canvas
         if ws.menu_ui.put_home(cv, dt):
             # the system menu's frame of the home, washed: the buffers hold
-            # the scrim, no frame of the home's own
-            self._note_still(cv, None)
+            # the scrim, no frame of the home's own (no band paint names
+            # the home's parts in it)
             return
         # The board's motion verdict (a WM constant, §12's degradation order).
         wm = ws.wm
@@ -3788,9 +3781,8 @@ class LauncherHomeLayer:
             self._face_key(self._bd_now)
         if carousel and self._try_still_frame(cv, dt):
             return
-        if self._try_band_frame(cv, dt):    # the band's frame (#58/#66)
-            self._note_still(cv, None)
-            return
+        if self._try_band_frame(cv, dt):    # the band's frame (#58/#66): it names
+            return                          # the band and the hint strip alone
         # Retained-frame stamp (2026-07-27): a re-entry whose pixels are provably
         # identical to the captured frame presents it in one blit. Bookkeeping
         # matches a full paint exactly -- pixel-wise it IS one -- so the
@@ -3800,8 +3792,7 @@ class LauncherHomeLayer:
             if self._band_note(cv, dt) == -1 and self._bd_now is not None:
                 self._still_debt()
             parts = self._still_now(cv, dt)
-            self._note_still(cv, parts)
-            if parts is not None and self._still_ring.size < _retained_n(cv):
+            if parts is not None and not self._note_still(cv, parts):
                 self._still_debt()
             return
         # perf_capture (#66 instrument-before-cutting): time the home frame's
@@ -3834,11 +3825,11 @@ class LauncherHomeLayer:
         if end == -1 and self._bd_now is not None:
             self._still_debt()       # every buffer to this frame: the next step is a band frame
         parts = self._still_now(cv, dt)
-        self._note_still(cv, parts)
+        owed = parts is not None and not self._note_still(cv, parts)
         if not ws.menu_ui.holds_home():
             # (under the menu the retained frame stays the one its close stamps)
             self._capture_retained(cv, dt, parts)   # retain this frame for re-entry stamps
-        if parts is not None and self._still_ring.size < _retained_n(cv):
+        if owed:
             self._still_debt()
 
     def _still_now(self, cv, dt):

@@ -50,7 +50,8 @@ _ROWS = ("damage.all", "damage.again",
          "ui.table", "ui.scroll", "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover",
          "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
-         "ui.slots", "ui.slot", "ui.slot_next")
+         "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
+         "ui.held_all")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",

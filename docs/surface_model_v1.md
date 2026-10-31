@@ -894,17 +894,22 @@ frame, and a key press on the shelf, a tab switch or a fling's last frame
 paid it because the selection or the tab sat in the statics key the band
 frame gates on. #66 has the numbers.
 
-**The home keeps §4's per-buffer last-seen for its parts**
-(`LauncherHomeLayer._still_ring`, a `PaintRing` slot a painted frame): the backdrop's
-key, the selection's and the band's, recorded only for a frame whose pixels
-were the home's alone (`content_alone`: no overlay, splash, cursor or owed
-pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
-painted frames before this one all have entries under this frame's backdrop
-key, every buffer holds the backdrop, and a part whose key differs from any
-of theirs lags in the buffer this frame paints: it alone is put back over the
-backdrop and drawn; the bar's strip, outside every such rect, is drawn
-where the buffer's was drawn under another key (the ring keeps the bar's
-`shown_key` beside the parts) or a part put back meets it.
+**The home keeps §4's per-buffer last-seen for its parts** in the
+engine's kept ring, a slot a paint of the band's host (`ui.held`): each
+painted frame whose pixels were the home's alone (`content_alone`: no
+overlay, splash, cursor or owed pill over it, the home on top, nothing
+animating) names the backdrop's key, the selection's, the shelf's, the
+bar's `shown_key` and the hint strip's there (`_note_still`). Where the
+buffer this frame paints holds this frame's backdrop (the paint
+RETAINED_FRAMES back named it, the paints between the home's, one a
+frame), a part it holds under another key lags: it alone is put back over
+the backdrop and drawn, or copied out of the buffer the last frame painted
+where that frame named it as this one does (`ui.held_last`); the bar's
+strip, outside every such rect, is drawn where the buffer's was drawn
+under another key or a part put back meets it. A frame that paints the
+home otherwise names what it holds the same way (a full paint, the
+retained frame's stamp) or names nothing of it (the band frame, the
+menu's washed frame), and nothing it did not name is held.
 Where it can be had, the backdrop's pixels come from the wallpaper itself
 (`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
 plain fill); a cart wallpaper keeps the band frame, which draws the shelf's
@@ -912,12 +917,13 @@ band as an engine table of parts over the band's own ground.
 
 **A change leaves the other buffers lagging, and the home asks for the frames
 that bring them to it** while nothing moves and no press waits (as the
-windowed WM's `debt_owed` does). The retained re-entry frame is captured once
+windowed WM's `debt_owed` does), until every buffer holds every part the
+frame named (`ui.held_all`). The retained re-entry frame is captured once
 every buffer holds the frame, and copies only the parts that moved since the
 frame it holds (`_moved_rects`).
 
 **This is not a second invalidation mechanism.** Whether the home paints is
-still the gate's; the ring only says which of its parts the buffer lacks.
+still the gate's; the kept ring only says which of its parts the buffer lacks.
 Pinned by `tests/test_home_still.py`: a session of key presses, tab switches,
 a drag and a fling, and the buttons' focus, on one, two and three buffers
 presented in turn, the glass's every picture byte-equal to full repaints'.

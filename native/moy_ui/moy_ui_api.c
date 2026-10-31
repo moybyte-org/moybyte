@@ -4649,6 +4649,27 @@ static int kept_parts(const moy_ui_ctx_t *c) {
     return 1;
 }
 
+int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
+    if (c->kt_k < 1 || c->kt_n < 2) {
+        return 0;
+    }
+    const moy_ui_kept_t *p = &c->kt[kept_slot(c, 1)];
+    if (p->f != c->kt_f - 1 || !p->kept) {
+        return 0;
+    }
+    uint32_t h = hash(id.p, id.n, 0x6b657074u);
+    for (int j = 0; j < p->nh; j++) {
+        if (p->hid[j] == h) {
+            return p->hkey[j] == key;
+        }
+    }
+    return 0;
+}
+
+int moy_ui_api_held_all(const moy_ui_ctx_t *c) {
+    return c->kt_k > 0 && c->kt_n > 0 && c->kt[c->kt_ri].f == c->kt_f && kept_parts(c);
+}
+
 int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
     if (c->kf_i >= c->kf_n) {
         if (c->kf_held == MOY_UI_KF_HELD && c->kt_k > 0 && !kept_parts(c)) {

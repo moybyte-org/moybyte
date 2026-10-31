@@ -2779,6 +2779,24 @@ static mp_obj_t ui_api_held(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_obj, ui_api_held);
 
+// api_held_last(ctx, id, key) -> whether the buffer the last frame painted
+// holds part `id` as it named it under `key`
+static mp_obj_t ui_api_held_last(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_bool(moy_ui_api_held_last(ctx_of(ctx), sp,
+                                                (int32_t)mp_obj_get_int_truncated(key)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_last_obj, ui_api_held_last);
+
+// api_held_all(ctx) -> whether every buffer holds every part this frame named
+static mp_obj_t ui_api_held_all(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_held_all(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_held_all_obj, ui_api_held_all);
+
 // api_slots(ctx, cap, key) -> the slots the table drawn last keeps its
 // parts' faces in (moy_ui_api_slots)
 static mp_obj_t ui_api_slots(mp_obj_t ctx, mp_obj_t cap, mp_obj_t key) {
@@ -3838,6 +3856,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_floor), MP_ROM_PTR(&ui_api_table_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_held), MP_ROM_PTR(&ui_api_held_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_held_last), MP_ROM_PTR(&ui_api_held_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_held_all), MP_ROM_PTR(&ui_api_held_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slots), MP_ROM_PTR(&ui_api_faces_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slot), MP_ROM_PTR(&ui_api_face_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slot_next), MP_ROM_PTR(&ui_api_slot_next_obj) },

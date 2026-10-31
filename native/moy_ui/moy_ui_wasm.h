@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 41
+#define MOY_UI_WASM_ROWS 43
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -105,6 +105,11 @@ int32_t moy_ui_run_table_floor(void *target, int32_t out[4]);
 // Whether the buffer the frame paints holds part `id` under `key`
 // (moy_ui_api_held).
 int moy_ui_run_held(void *target, moy_ui_span_t id, int32_t key);
+// Whether the buffer the last frame painted holds part `id` under `key`
+// (moy_ui_api_held_last), and whether every buffer holds every part the
+// frame named (moy_ui_api_held_all).
+int moy_ui_run_held_last(void *target, moy_ui_span_t id, int32_t key);
+int moy_ui_run_held_all(void *target);
 // The faces the table drawn last keeps (moy_ui_api_slots), the slot of
 // one (moy_ui_api_slot) and the next part an idle frame draws the face of
 // (moy_ui_api_slot_next).
@@ -187,6 +192,9 @@ int32_t moy_ui_wasm_table_dist(void *e);
 int32_t moy_ui_wasm_table_floor(void *e, uint8_t *out, uint32_t cap);
 // ui_held answers moy_ui_run_held.
 int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key);
+// ui_held_last and ui_held_all answer moy_ui_run_held_last and _held_all.
+int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key);
+int32_t moy_ui_wasm_held_all(void *e);
 // ui_faces, ui_face and ui_slot_next answer moy_ui_run_slots, _face and
 // _slot_next.
 int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key);

@@ -228,7 +228,8 @@ enum {
     N_UI_SEG, N_UI_SWATCHES, N_UI_HINTS, N_UI_ICON, N_UI_PROGRESS, N_UI_TABLE, N_UI_SCROLL,
     N_UI_FIELD, N_UI_DIALOG, N_UI_TABS, N_UI_GRID, N_UI_CARD, N_UI_POPOVER, N_UI_MENU,
     N_UI_TOOL, N_UI_BAR, N_UI_RULE, N_UI_TEXT_VIEW, N_UI_TABLE_PART, N_UI_PART_AT, N_UI_SPLIT,
-    N_UI_TABLE_DIST, N_UI_TABLE_FLOOR, N_UI_HELD, N_UI_SLOTS, N_UI_SLOT, N_UI_FACE_NEXT,
+    N_UI_TABLE_DIST, N_UI_TABLE_FLOOR, N_UI_HELD, N_UI_SLOTS, N_UI_SLOT, N_UI_SLOT_NEXT,
+    N_UI_HELD_LAST, N_UI_HELD_ALL,
     N_COUNT
 };
 
@@ -247,7 +248,7 @@ static const char *const ROW_OF[N_COUNT] = {
     "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
     "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part", "ui.part_at",
     "ui.split", "ui.table_dist", "ui.table_floor", "ui.held", "ui.slots", "ui.slot",
-    "ui.slot_next",
+    "ui.slot_next", "ui.held_last", "ui.held_all",
 };
 
 static int16_t s_rows[N_COUNT];
@@ -443,6 +444,8 @@ int32_t moy_ui_wasm_held(void *, const uint8_t *, uint32_t, int32_t) UI_WEAK;
 int32_t moy_ui_wasm_slots(void *, int32_t, int32_t) UI_WEAK;
 int32_t moy_ui_wasm_slot(void *, const uint8_t *, uint32_t, int32_t, int32_t) UI_WEAK;
 int32_t moy_ui_wasm_slot_next(void *) UI_WEAK;
+int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t) UI_WEAK;
+int32_t moy_ui_wasm_held_all(void *) UI_WEAK;
 int32_t moy_ui_wasm_split(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t, const uint8_t *,
                           uint32_t, const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_field(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t, int32_t,
@@ -532,6 +535,8 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "ui_slots", FN(moy_ui_wasm_slots), "(ii)i", NULL },
     { "ui_slot", FN(moy_ui_wasm_slot), "(*~ii)i", NULL },
     { "ui_slot_next", FN(moy_ui_wasm_slot_next), "()i", NULL },
+    { "ui_held_last", FN(moy_ui_wasm_held_last), "(*~i)i", NULL },
+    { "ui_held_all", FN(moy_ui_wasm_held_all), "()i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {
