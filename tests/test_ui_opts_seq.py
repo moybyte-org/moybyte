@@ -58,6 +58,14 @@ TEXTS = ({"wrap": True, "lines": 2}, {"wrap": True}, {"align": "center"},
          {"tone": "dim"}, {"face": "mono", "tone": None}, {"tone": "bogus"},
          {"wrap": 0, "face": "title"}, {"inset": True}, {"align": "center", "inset": True},
          {"id": "x"}, {})
+# labels' override tables (the module reads each in one walk of its dict):
+# colours and flags, a None value, a key the engine does not read
+OVERS = ({"fill": 0x204060, "ink": 0x123456, "current": True},
+         {"border": 0x00ff00, "disabled": True, "steps": True, "ink": 0xff8000},
+         {"id": "row", "nav": False, "mark": True, "zz": 1, "ink": 0x00ffff},
+         {"wash": False, "lead": True, "hint": "h", "ink": 0xffffff},
+         {"ink": 0xff00ff, "fill": None, "bar": True},
+         {"gen": 3, "current": False, "border": 0xff00ff, "ink": 0x0000ff})
 SHORT = [False]
 OUT = [0] * 5
 
@@ -78,6 +86,9 @@ def page():
     for i in range(len(TEXTS)):
         ui.at(120, 4 + 12 * i, 110, 24)
         ui.label("a label long enough to wrap twice over", TEXTS[i])
+    for i in range(len(OVERS)):
+        ui.at(4, 4 + 18 * i, 100, 16)
+        ui.label(WORDS[i % 3], OVERS[i])
     ui.end()
     return out
 

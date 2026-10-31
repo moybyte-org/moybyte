@@ -2270,16 +2270,9 @@ static moy_ui_ctx_t *ctx_of(mp_obj_t o) {
     return c;
 }
 
-// A key of an override dict, or MP_OBJ_NULL where it is absent or None.
-static mp_obj_t over_key(mp_map_t *m, qstr k) {
-    mp_map_elem_t *e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(k), MP_MAP_LOOKUP);
-    return e == NULL || e->value == mp_const_none ? MP_OBJ_NULL : e->value;
-}
-
-// A colour key: a role by its token name, an RGB colour, or absent (an
-// unknown name too).
-static int32_t over_colour(mp_map_t *m, qstr k) {
-    mp_obj_t v = over_key(m, k);
+// A colour key's value (`over_vals`): a role by its token name, an RGB
+// colour, or absent (an unknown name too).
+static int32_t over_colour(mp_obj_t v) {
     if (v == MP_OBJ_NULL) {
         return MOY_UI_O_NONE;
     }
@@ -2295,44 +2288,113 @@ static int32_t over_colour(mp_map_t *m, qstr k) {
     return (int32_t)(mp_obj_get_int_truncated(v) & 0xffffff);
 }
 
-static int8_t over_flag(mp_map_t *m, qstr k) {
-    mp_obj_t v = over_key(m, k);
+static int8_t over_flag(mp_obj_t v) {
     return v == MP_OBJ_NULL ? -1 : (int8_t)mp_obj_is_true(v);
+}
+
+// The keys of the override table, in the order `over_vals` keeps them.
+enum {
+    OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
+    OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
+    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_COUNT
+};
+
+// A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
+static qstr over_qstr(mp_obj_t k) {
+    if (mp_obj_is_qstr(k)) {
+        return MP_OBJ_QSTR_VALUE(k);
+    }
+    if (mp_obj_is_str(k)) {
+        size_t n = 0;
+        const char *s = mp_obj_str_get_data(k, &n);
+        return qstr_find_strn(s, n);
+    }
+    return MP_QSTRnull;
+}
+
+static int over_slot(qstr q) {
+    switch (q) {
+        case MP_QSTR_fill: return OV_FILL;
+        case MP_QSTR_ink: return OV_INK;
+        case MP_QSTR_border: return OV_BORDER;
+        case MP_QSTR_id: return OV_ID;
+        case MP_QSTR_current: return OV_CURRENT;
+        case MP_QSTR_disabled: return OV_DISABLED;
+        case MP_QSTR_nav: return OV_NAV;
+        case MP_QSTR_mark: return OV_MARK;
+        case MP_QSTR_steps: return OV_STEPS;
+        case MP_QSTR_hint: return OV_HINT;
+        case MP_QSTR_wash: return OV_WASH;
+        case MP_QSTR_lead: return OV_LEAD;
+        case MP_QSTR_gen: return OV_GEN;
+        case MP_QSTR_part: return OV_PART;
+        case MP_QSTR_bar: return OV_BAR;
+        case MP_QSTR_axis: return OV_AXIS;
+        case MP_QSTR_snap: return OV_SNAP;
+        case MP_QSTR_whole: return OV_WHOLE;
+        case MP_QSTR_offset: return OV_OFFSET;
+        case MP_QSTR_spill: return OV_SPILL;
+        case MP_QSTR_across: return OV_ACROSS;
+        case MP_QSTR_at: return OV_AT;
+        case MP_QSTR_keep: return OV_KEEP;
+        case MP_QSTR_over: return OV_OVER;
+        default: return -1;
+    }
+}
+
+// Each key of the table's dict into its slot of `v` (MP_OBJ_NULL where it is
+// absent or None): one walk of the dict's entries, whatever keys the engine
+// reads -- a verb's table holds a few of them, and a lookup a key hashed
+// and probed every one.
+static void over_vals(mp_map_t *m, mp_obj_t *v) {
+    for (int i = 0; i < OV_COUNT; i++) {
+        v[i] = MP_OBJ_NULL;
+    }
+    for (size_t i = 0; i < m->alloc; i++) {
+        if (!mp_map_slot_is_filled(m, i)) {
+            continue;
+        }
+        int at = over_slot(over_qstr(m->table[i].key));
+        if (at >= 0 && m->table[i].value != mp_const_none) {
+            v[at] = m->table[i].value;
+        }
+    }
 }
 
 // The override table (§3) straight from the app's dict, as runtime/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
-    mp_map_t *m = mp_obj_dict_get_map(d);
+    mp_obj_t vals[OV_COUNT];
+    over_vals(mp_obj_dict_get_map(d), vals);
     moy_ui_over_none(out);
-    out->fill = over_colour(m, MP_QSTR_fill);
-    out->ink = over_colour(m, MP_QSTR_ink);
-    out->border = over_colour(m, MP_QSTR_border);
-    mp_obj_t v = over_key(m, MP_QSTR_id);
+    out->fill = over_colour(vals[OV_FILL]);
+    out->ink = over_colour(vals[OV_INK]);
+    out->border = over_colour(vals[OV_BORDER]);
+    mp_obj_t v = vals[OV_ID];
     if (v != MP_OBJ_NULL) {
         out->id = span_of(v);
     }
-    out->current = over_flag(m, MP_QSTR_current);
-    out->disabled = over_flag(m, MP_QSTR_disabled);
-    out->nav = over_flag(m, MP_QSTR_nav);
-    out->mark = over_flag(m, MP_QSTR_mark);
-    out->steps = over_flag(m, MP_QSTR_steps);
-    v = over_key(m, MP_QSTR_hint);
+    out->current = over_flag(vals[OV_CURRENT]);
+    out->disabled = over_flag(vals[OV_DISABLED]);
+    out->nav = over_flag(vals[OV_NAV]);
+    out->mark = over_flag(vals[OV_MARK]);
+    out->steps = over_flag(vals[OV_STEPS]);
+    v = vals[OV_HINT];
     if (v != MP_OBJ_NULL) {
         out->hint = span_of(v);
     }
-    mp_obj_t wash = over_key(m, MP_QSTR_wash);
-    mp_obj_t lead = over_key(m, MP_QSTR_lead);
+    mp_obj_t wash = vals[OV_WASH];
+    mp_obj_t lead = vals[OV_LEAD];
     if (wash != MP_OBJ_NULL || lead != MP_OBJ_NULL) {
         out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
         out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
     }
-    v = over_key(m, MP_QSTR_gen);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_GEN];
+    if (v != MP_OBJ_NULL) {
         out->gen = (int32_t)mp_obj_get_int_truncated(v);
         out->has_gen = 1;
     }
-    v = over_key(m, MP_QSTR_part);
+    v = vals[OV_PART];
     if (v != MP_OBJ_NULL) {
         size_t n = 0;
         mp_obj_t *wh = NULL;
@@ -2343,27 +2405,27 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
             out->part_h = (int16_t)mp_obj_get_int_truncated(wh[1]);
         }
     }
-    out->bar = over_flag(m, MP_QSTR_bar);
-    v = over_key(m, MP_QSTR_axis);
+    out->bar = over_flag(vals[OV_BAR]);
+    v = vals[OV_AXIS];
     if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
         size_t n = 0;
         const char *a = mp_obj_str_get_data(v, &n);
         out->axis_x = (int8_t)(n == 1 && a[0] == 'x');
     }
-    out->snap = (int8_t)(over_flag(m, MP_QSTR_snap) == 1);
-    out->whole = (int8_t)(over_flag(m, MP_QSTR_whole) == 1);
-    v = over_key(m, MP_QSTR_offset);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    out->snap = (int8_t)(over_flag(vals[OV_SNAP]) == 1);
+    out->whole = (int8_t)(over_flag(vals[OV_WHOLE]) == 1);
+    v = vals[OV_OFFSET];
+    if (v != MP_OBJ_NULL) {
         out->offset = (int32_t)mp_obj_get_int_truncated(v);
         out->has_offset = 1;
     }
-    v = over_key(m, MP_QSTR_spill);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_SPILL];
+    if (v != MP_OBJ_NULL) {
         mp_int_t sp = mp_obj_get_int_truncated(v);
         out->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
     }
-    v = over_key(m, MP_QSTR_across);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_ACROSS];
+    if (v != MP_OBJ_NULL) {
         size_t n = 0;
         mp_obj_t *r = NULL;
         mp_obj_get_array(v, &n, &r);
@@ -2373,17 +2435,17 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
             out->across_pitch = (int16_t)mp_obj_get_int_truncated(r[1]);
         }
     }
-    v = over_key(m, MP_QSTR_at);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_AT];
+    if (v != MP_OBJ_NULL) {
         out->at = (int16_t)mp_obj_get_int_truncated(v);
     }
-    v = over_key(m, MP_QSTR_keep);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_KEEP];
+    if (v != MP_OBJ_NULL) {
         out->keep = (int32_t)mp_obj_get_int_truncated(v);
         out->has_keep = 1;
     }
-    v = over_key(m, MP_QSTR_over);
-    if (v != MP_OBJ_NULL && v != mp_const_none) {
+    v = vals[OV_OVER];
+    if (v != MP_OBJ_NULL) {
         size_t n = 0;
         mp_obj_t *r = NULL;
         mp_obj_get_array(v, &n, &r);
@@ -2528,28 +2590,40 @@ static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
     if (!mp_obj_is_type(o, &mp_type_dict)) {
         return;
     }
+    // one walk of the dict's entries (`over_vals`): each key present, None too
     mp_map_t *m = mp_obj_dict_get_map(o);
-    mp_map_elem_t *wrap = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_wrap), MP_MAP_LOOKUP);
-    mp_map_elem_t *align = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_align), MP_MAP_LOOKUP);
-    mp_map_elem_t *tone = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_tone), MP_MAP_LOOKUP);
-    mp_map_elem_t *face = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_face), MP_MAP_LOOKUP);
-    mp_map_elem_t *inset = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_inset), MP_MAP_LOOKUP);
-    mp_map_elem_t *sunk = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_sunk), MP_MAP_LOOKUP);
-    if (wrap == NULL && align == NULL && tone == NULL && face == NULL && inset == NULL
-        && sunk == NULL) {
+    mp_obj_t wrap = MP_OBJ_NULL, align = MP_OBJ_NULL, tone = MP_OBJ_NULL, face = MP_OBJ_NULL;
+    mp_obj_t inset = MP_OBJ_NULL, sunk = MP_OBJ_NULL, nl = MP_OBJ_NULL;
+    for (size_t i = 0; i < m->alloc; i++) {
+        if (!mp_map_slot_is_filled(m, i)) {
+            continue;
+        }
+        mp_obj_t v = m->table[i].value;
+        switch (over_qstr(m->table[i].key)) {
+            case MP_QSTR_wrap: wrap = v; break;
+            case MP_QSTR_align: align = v; break;
+            case MP_QSTR_tone: tone = v; break;
+            case MP_QSTR_face: face = v; break;
+            case MP_QSTR_inset: inset = v; break;
+            case MP_QSTR_sunk: sunk = v; break;
+            case MP_QSTR_lines: nl = v; break;
+            default: break;
+        }
+    }
+    if (wrap == MP_OBJ_NULL && align == MP_OBJ_NULL && tone == MP_OBJ_NULL
+        && face == MP_OBJ_NULL && inset == MP_OBJ_NULL && sunk == MP_OBJ_NULL) {
         return;
     }
     int lines = 0;
-    if (wrap != NULL && mp_obj_is_true(wrap->value)) {
-        mp_map_elem_t *k = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_lines), MP_MAP_LOOKUP);
-        lines = k != NULL && mp_obj_is_true(k->value) ? (int)num(k->value) : 16;
+    if (wrap != MP_OBJ_NULL && mp_obj_is_true(wrap)) {
+        lines = nl != MP_OBJ_NULL && mp_obj_is_true(nl) ? (int)num(nl) : 16;
     }
-    int t = tone != NULL ? word_of(tone->value, tones, 4) : -1;
-    int al = align != NULL && word_of(align->value, centre, 1) == 0 ? 1
-             : sunk != NULL && mp_obj_is_true(sunk->value) ? 3
-             : inset != NULL && mp_obj_is_true(inset->value) ? 2 : 0;
+    int t = tone != MP_OBJ_NULL ? word_of(tone, tones, 4) : -1;
+    int al = align != MP_OBJ_NULL && word_of(align, centre, 1) == 0 ? 1
+             : sunk != MP_OBJ_NULL && mp_obj_is_true(sunk) ? 3
+             : inset != MP_OBJ_NULL && mp_obj_is_true(inset) ? 2 : 0;
     moy_ui_api_text(c, lines, al,
-                    t < 0 ? 0 : t, face != NULL ? word_of(face->value, faces, 7) : -1);
+                    t < 0 ? 0 : t, face != MP_OBJ_NULL ? word_of(face, faces, 7) : -1);
 }
 
 // api_label(ctx, cv, look, text, o): a dict `o` carries the text options too
