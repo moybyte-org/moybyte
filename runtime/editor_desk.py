@@ -255,7 +255,9 @@ class EditorDesk(Layer):
         area = self._area()
         u = self._unit()
         arr = self._arr
-        if arr is not None and arr.key == self.key and arr.area == area and arr.unit == u:
+        game = self.shows_game()
+        if (arr is not None and arr.key == self.key and arr.area == area and arr.unit == u
+                and arr.game == game):
             return arr
         got = self._warm.pop(self._warm_sig(self.key, area, u), None) if self._warm else None
         if got is not None:
@@ -267,13 +269,22 @@ class EditorDesk(Layer):
         return arr
 
     def _new_arrangement(self, key, area, u):
-        arr = P.Arrangement(key, area, u, self._blocks())
+        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game())
         arr.restore(self._saved().get(self._mem_key(arr)))
         return arr
 
+    def shows_game(self):
+        """Whether the workspaces hold the Game tab: not while the game
+        plays in a desk window of its own (the pause card's Play in a
+        window, owner 2026-10-31), when the panes left take its room; it
+        comes back when that window closes."""
+        win = getattr(self.ws.wm, "_wins", {}).get("desktop")
+        return win is None or not win.own
+
     def _warm_sig(self, key, area, u):
         cart = self.ws.cart or {}
-        return (key, area, u, self._blocks(), cart.get("path") or cart.get("title"))
+        return (key, area, u, self._blocks(), cart.get("path") or cart.get("title"),
+                self.shows_game())
 
     def warm_step(self):
         """On a quiet frame, one workspace not on show made ready as its first
@@ -331,8 +342,9 @@ class EditorDesk(Layer):
 
     def _mem_key(self, arr):
         cart = self.ws.cart or {}
-        return "%s|%s|%dx%d" % (cart.get("path") or cart.get("title") or "",
-                                arr.key, arr.area[2], arr.area[3])
+        return "%s|%s|%dx%d%s" % (cart.get("path") or cart.get("title") or "",
+                                  arr.key, arr.area[2], arr.area[3],
+                                  "" if arr.game else "|nogame")
 
     def _saved(self):
         got = self.ws.system.get("editor_panes", None)
@@ -980,13 +992,18 @@ class EditorDesk(Layer):
         if playing != self._was_playing:
             self._was_playing = playing
             self.paused = False
+            if not playing:
+                # every pane Play turned to its Game tab, shown or not (the
+                # game may have left the workspaces for a window of its own)
+                for pane, t in self._back_tab.items():
+                    self._tabs[pane] = t
+                self._back_tab.clear()
+                ws._dirty = True
+                return
             for _n, pane, _r in self._shown_panes():
                 if "game" in pane and len(pane) > 1:
-                    if playing:
-                        self._back_tab[pane] = self._tabs.get(pane, 0)
-                        self._tabs[pane] = pane.index("game")
-                    elif pane in self._back_tab:
-                        self._tabs[pane] = self._back_tab.pop(pane)
+                    self._back_tab[pane] = self._tabs.get(pane, 0)
+                    self._tabs[pane] = pane.index("game")
                     ws._dirty = True
 
     def undock(self):

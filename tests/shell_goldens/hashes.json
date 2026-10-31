@@ -279,7 +279,7 @@
     "web_console": "035c1cbfc2768ecc573a9db858fc15a9c6a89d461f7fae129d23bbeaed31398f"
   },
   "p4_1024x600_cs2_fs1_moy_menus": {
-    "pause": "baf7499135b234b046c34dad93404ff4540a2a7076ea346f1f511b101e336fed",
+    "pause": "dbaa27fe90135081b30bb73392bdf5c3fb09ab5fa1483d49ee7f9a1fc69316e7",
     "pause_options": "6e9f260c681815a52cf7ae26178b9266db4da48815ecd1768edc1bd7074fc791",
     "sysmenu": "818ae4f3306504225b2127a9befda9fb1d370201552e7b338dfe5170eef510b6"
   },
@@ -430,7 +430,7 @@
     "app_storybook": "dfa0eb6d23e30a2c11c8213b6cb455a80349bcd80133408a29e6ae36200a58ef",
     "desk": "b5d3d4dfcbecb2cc622a455966e5634198ab072848b871e4c9840de1951cd96c",
     "desk_window_calc": "d9199f6759a4772f85d7a795334fb79c072fc1b699dc2efbba3ef7e69bfe431b",
-    "desk_window_projects": "95ffb5daaaaba58107ce7b0714ea4c9cd3f0670cf45068e0aa52843cf29b0b41",
+    "desk_window_projects": "5feb0a1f853ee30cd1ed7c220d03536b6c523d20e5199dc8a93748242a72031d",
     "editor_blocks": "2a3143775f29d4c1beba5b03e55623f70864ada2bef7b199d20f96287fc59da7",
     "editor_cards": "a492d4e3e6164eac7749c936e8e3229406d708fb2cee2eabf66d626530c02ddc",
     "editor_code": "2a3143775f29d4c1beba5b03e55623f70864ada2bef7b199d20f96287fc59da7",
@@ -461,7 +461,7 @@
     "app_storybook": "b9cd639dc28e3e078c078d2dc6ac6cc87548722c71501810b7c49463c611955d",
     "desk": "957785500de3aee4ce17541040f71533f1b7e542c790407be8965aac089e31bf",
     "desk_window_calc": "5d362976fca2edfe5f870f15dba02e8896348d58a648059a32c0b1b9467160de",
-    "desk_window_projects": "1d5ee21e220497ff7152d39fbca1a5392b7ef2e96ddd3339a3987967cb8f9633",
+    "desk_window_projects": "2acbb397e484dc4668ee9d0bb88a23a6534d52092a940741e5163db35aa50ba1",
     "editor_blocks": "e77dc929ef8071e6d74b8e253d414a1033727ef01e96f7e1fe64fc673eec2d0f",
     "editor_cards": "a45aaa6263612c7375bace5e17933abf53b0f5c0e8387de0990aeca54880c45f",
     "editor_code": "e77dc929ef8071e6d74b8e253d414a1033727ef01e96f7e1fe64fc673eec2d0f",
@@ -492,7 +492,7 @@
     "app_storybook": "dc8cc9b42d7f50fb0c63573cba108dfa27f9eb8e4f0a67ee5e4a179cf3d1963c",
     "desk": "80864860d95d8c8991548b30cd0c39f92be6a00fc850bc6c9b25e3a3fc892b38",
     "desk_window_calc": "433bb09ec62aaf1c8c8ed3a120bba7cc0e6bfde66323b13fe74d6387dee14036",
-    "desk_window_projects": "d7d7f4a8aefbd2789ad96b87262d0ecff9ec032ef0f6cc32100c819508c97ca8",
+    "desk_window_projects": "c9559453ba04024ed972dc72029f4bc378790bf98176b923b6621a4b31ad0621",
     "editor_blocks": "0b8dbb4a909782f364440f3791925731c25fd01df29860900cfc9d1276e8d023",
     "editor_cards": "760c65e060b165855bb25a65060657f6b523cd0a5569d030ce6bcfc25f22ace6",
     "editor_code": "0b8dbb4a909782f364440f3791925731c25fd01df29860900cfc9d1276e8d023",

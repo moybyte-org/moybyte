@@ -209,10 +209,11 @@ class PauseMenu:
     Super holds the run (`Player.pause`: no tick, no draw, its clock and its
     music held) and a card centred on the glass names the game and offers
     Resume, Restart, Options and Quit; Esc, B or Super again resumes, and
-    the cart's next frame comes as if no time passed. On the desk, over a
-    game full screen or docked in the Editor's Run slot, Play in a window
-    follows Resume (owner, 2026-10-31): the run goes on in a desk window of
-    its own (`WindowedWM.play_in_window`). Options is the card's
+    the cart's next frame comes as if no time passed. On a board with a
+    desk, in both modes, over a game full screen or docked in the Editor's
+    Run slot, Play in a window follows Resume (owner, 2026-10-31): the run
+    goes on in a desk window of its own (`WindowedWM.play_in_window`); over
+    a game already in a window there is no such row. Options is the card's
     second page, the console's Volume (Esc goes back). The card is a
     popover of the public UI API's with nothing to hang from, holding a
     `ui.menu`, drawn on the system canvas over the frozen frame; the menu's

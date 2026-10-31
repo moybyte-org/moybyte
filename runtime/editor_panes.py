@@ -131,6 +131,30 @@ def is_pane(node):
     return node[0] not in ("h", "v")
 
 
+def without(node, content):
+    """`node` with the tab `content` taken out of it: a pane that held only
+    it goes, a split left one child is that child, and where the child that
+    went took the rest of its split, the last one left takes it. None where
+    nothing is left."""
+    if is_pane(node):
+        kept = tuple(c for c in node if c != content)
+        return kept or None
+    axis, kids, start = node
+    nk, ns = [], []
+    for k, st in zip(kids, start):
+        k = without(k, content)
+        if k is not None:
+            nk.append(k)
+            ns.append(st)
+    if not nk:
+        return None
+    if len(nk) == 1:
+        return nk[0]
+    if None not in ns:
+        ns[-1] = None
+    return (axis, tuple(nk), tuple(ns))
+
+
 def pane_min(pane, unit=1):
     """The least (w, h) a pane may take: the largest of its tabs'."""
     w = h = 0
@@ -182,13 +206,19 @@ class Arrangement:
     indices from the root). `place` lays it out; `drag` moves a divider;
     `reset` puts one (or all) back; `state`/`restore` are what the board
     remembers (per project, per workspace and per screen size, never in the
-    cart)."""
+    cart). `game` False is the workspace with no Game tab: the game plays
+    in a desk window of its own (`WindowedWM.play_in_window`), and the
+    panes left hold the room."""
 
-    def __init__(self, key, area, unit=1, blocks=False):
+    def __init__(self, key, area, unit=1, blocks=False, game=True):
         self.key = key
         self.area = tuple(area)
         self.unit = unit
-        self.root = tree(key, area[2], area[3], unit, blocks)
+        self.game = bool(game)
+        root = tree(key, area[2], area[3], unit, blocks)
+        if not game:
+            root = without(root, "game") or root
+        self.root = root
         self.sizes = {}
         self._start = {}
         self._min = None

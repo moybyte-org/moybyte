@@ -296,8 +296,10 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
 - **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen (on a
-  desk, in the workspace's Run slot or Game tab, and closing the Editor ends it,
-  §3's 2026-10-31 paragraph); exit returns to the Editor **on
+  desk, in the workspace's Run slot or Game tab, and closing the Editor ends it;
+  moved out with the pause menu's Play in a window it is a window of its own,
+  and the workspaces drop their Game tab until it closes, §3's 2026-10-31
+  paragraph); exit returns to the Editor **on
   the tab you were on**. Test-play is a round trip, not a
   context switch.
 - **B and Esc** back out one level: to wherever the Editor was opened
@@ -443,11 +445,12 @@ menu, the pause menu to the game). The pause menu holds the run — no tick, no 
 its `time()` and its music stopped where they are — and offers Resume, Restart (the
 same cart from the top, the same caller), Options (the console's Volume) and Quit
 (return to caller); Resume gives the cart its next frame as if no time passed.
-On the desk (`wm.mode` is `"desktop"`), over a game full screen or docked in
-the Editor's Run slot, the console's key opens the same menu, with **Play in a
-window** after Resume (owner, 2026-10-31): the run goes on where it stood in a
-desk window of its own (`WindowedWM.play_in_window`), whose maximise is the way
-back to full screen. A handheld, and a P4 in console mode, never offer it.
+On a board with a desk, in console mode and on the desk alike, the menu over a
+game full screen, or docked in the Editor's Run slot, has **Play in a window**
+after Resume (owner, 2026-10-31): the run goes on where it stood in a desk
+window of its own (`WindowedWM.play_in_window`; console mode gives the desk
+back first), whose maximise is the way back to full screen. Over a game
+already in a window the menu has no such row, and a handheld never offers it.
 
 Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
 mode. A **`textmode(True)` game** reaches its pause menu through the console key

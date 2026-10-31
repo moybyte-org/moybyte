@@ -581,6 +581,44 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
     assert ws.wm._focus == "desktop" and not ws.player.paused
 
 
+def _contents(d):
+    return [c for pane, _r, _p in d.panes() for c in pane]
+
+
+def test_a_game_moved_to_a_window_leaves_the_workspaces_until_it_closes(desk):
+    """While the game plays in a window of its own the Editor has no Game
+    tab: Code's right column holds the panes left in the Run slot's room,
+    and Art's Map pane is the Map alone; when that window closes the Game
+    tabs come back, Art's on the Map it showed before Play."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code: Run slot over the context pane
+    before = {pane: r for pane, r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)                       # Art: Map · Game
+    _tap(drv, 13, 1)                             # Play: the pane turns to Game
+    for _ in range(4):
+        drv.frame(DT)
+    assert d.tab_of(("map", "game")) == "game"
+    ws.system_key()
+    ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
+    for _ in range(3):
+        drv.frame(DT)
+    assert "game" not in _contents(d) and ("map",) in [p for p, _r, _x in d.panes()]
+    ws.wm._move_focus("menu")                    # the Editor takes the keys back
+    _tap(drv, ord("2"), 1)
+    assert "game" not in _contents(d)
+    after = {pane: r for pane, r, _p in d.panes()}
+    rest = ("sprites", "sounds", "maps", "log")
+    gx, gy, gw, _gh = before[("game",)]
+    assert after[rest][:3] == (gx, gy, gw), "the column's panes take the Run slot's room"
+    ws.wm.close_window_kind("desktop")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ("game",) in {pane for pane, _r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)
+    assert d.tab_of(("map", "game")) == "map"
+
+
 def test_play_selects_the_game_tab_and_stop_gives_the_map_back(desk):
     ws, drv = desk
     d = ws.editor_desk

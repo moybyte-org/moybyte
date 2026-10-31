@@ -545,9 +545,9 @@ def _choose(ws, row):
     ws.pause.choose(ws.pause.rows.index(row))
 
 
-def test_the_pause_card_offers_play_in_a_window_on_the_desk_alone(tmp_path):
-    """The desk's pause card has Play in a window; a handheld's has not, nor
-    has a P4's console mode, the handhelds' presentation (`wm.mode`)."""
+def test_the_pause_card_offers_play_in_a_window_on_a_board_with_a_desk(tmp_path):
+    """A board with a desk offers Play in a window over a full-screen game in
+    both modes, the desk's and console mode's; a handheld never does."""
     ws, drv = _game(tmp_path / "handheld")
     drv.system_key()
     assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS
@@ -565,7 +565,32 @@ def test_the_pause_card_offers_play_in_a_window_on_the_desk_alone(tmp_path):
     _frames(drv, 3)
     assert ws.wm.mode == "console"
     drv.system_key()
-    assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS
+    assert ws.pause.open and ws.pause.WINDOW in ws.pause.rows
+
+
+def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tmp_path):
+    """In console mode Play in a window goes back to the desk, its windows
+    where they were, and the running game stands in a window there, its run
+    going on: no restart, no full screen."""
+    ws, drv = _desk_game(tmp_path)
+    ws._exit_to_caller()
+    ws.open_app(ws._apps_by_id["calc"])          # a desk window to come back to
+    _frames(drv, 2)
+    ws.open_library()
+    assert select_on_home(ws, "Counter") is not None
+    ws.open()
+    _frames(drv, 3)
+    assert ws.wm.mode == "console" and "calc" in ws.wm._parked.kinds
+    drv.system_key()
+    n0 = ws.player.ns["n"]
+    _choose(ws, ws.pause.WINDOW)
+    _frames(drv, 3)
+    wm = ws.wm
+    assert wm.mode == "desktop" and not ws.pause.open and not ws.player.paused
+    assert ws.player.ns["n"] > n0, "the same run goes on"
+    win = wm._wins["desktop"]
+    assert not win.full() and win.content_rect()[1] > win.y and win.own
+    assert "calc" in wm._wins and wm._order[-1] == "desktop" and wm._focus == "desktop"
 
 
 def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_path):
@@ -596,3 +621,8 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     _frames(drv, 2)
     assert win.full() and wm._frame_buttons(win) == []
     assert ws.player.ns["n"] > n0 and ws.plays_fullscreen()
+    wm._toggle_max(win)
+    wm._minimize(win, True)
+    wm._minimize(win, False)                     # a restore lands on the card
+    assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS, \
+        "a windowed game goes full screen by its maximise alone"

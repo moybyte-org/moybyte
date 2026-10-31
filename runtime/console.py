@@ -363,13 +363,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from launcher_layer import (Launcher, Carousel, IconHome, LauncherHomeLayer,
                                 HomeWindowLayer, new_tile, NEW_TILE_TYPE,
-                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
+                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title,
+                                PROJECTS_VERB_SETS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, Carousel, IconHome,
                                         LauncherHomeLayer,
                                         HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                         PSEUDO_TILE_TYPES, HOME_TABS,
-                                        tab_count_title)
+                                        tab_count_title, PROJECTS_VERB_SETS)
 # The home's arrangements by the layout's `home` value
 # (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
@@ -2995,6 +2996,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             g = self.projects_grid = self._home_grid(
                 "carousel", self._launcher_items(self.carts.all, "make"))
             g.tab = "make"
+            g.verb_sets = PROJECTS_VERB_SETS   # Make's Play, its pane's rows
         else:
             self.set_home_tab("make", g)
         self.projects_layer._tab_focus = False

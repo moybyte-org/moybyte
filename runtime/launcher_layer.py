@@ -1493,9 +1493,11 @@ _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("search", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Duplicate"),
               "delete": ("X", "Delete"),
-              "favourite": ("F", "Add favourite"), "options": ("X", "Options")}
+              "favourite": ("F", "Add favourite"), "options": ("X", "Options"),
+              "window": ("P", "Play")}
 _UNFAVOURITE = "Remove favourite"   # the star's words on a card that wears it
-_VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
+_VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete",
+             "p": "window"}
 _FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
@@ -1516,6 +1518,8 @@ DETAILS_MIN = 280    # the narrowest details pane beside the hero, in glass
 # many rows as the widest of them wraps to, so the shelf stays put as the
 # selection moves.
 _DESK_VERB_SETS = (("play", "change", "copy"), ("change", "copy", "delete"))
+# ...and the desk's Projects window's, whose Make card has Play third
+PROJECTS_VERB_SETS = _DESK_VERB_SETS + (("change", "copy", "window", "delete"),)
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -1632,12 +1636,12 @@ def _desk_button_flow(verbs, kinds, widths, dw, u):
     return out
 
 
-def desk_button_span(dw, fs, u, bh):
+def desk_button_span(dw, fs, u, bh, sets=_DESK_VERB_SETS):
     """The pixels the desk pane keeps for its buttons under their first
-    row: as many as the widest card's (`_DESK_VERB_SETS`) rows take in a
-    pane `dw` wide, `bh` a button's height."""
+    row: as many as the widest card's (`sets`, a home's verb sets) rows
+    take in a pane `dw` wide, `bh` a button's height."""
     return max(b[2] * (bh + DESK_ROW_GAP // u) + b[5]
-               for vs in _DESK_VERB_SETS
+               for vs in sets
                for b in desk_button_layout(vs, dw, fs, u)[-1:])
 
 
@@ -1669,6 +1673,7 @@ class Carousel(Launcher):
     (`LauncherHomeLayer._backdrop_fill`) and paints the cards over it."""
 
     arrangement = "carousel"
+    verb_sets = _DESK_VERB_SETS     # the buttons its desk pane keeps rows for
 
     def __init__(self, items, layout=None, names=None):
         self.motion = "full"
@@ -1775,7 +1780,7 @@ class Carousel(Launcher):
         for _ in range(3):
             g = self._geom_desk_at(lay, reach, keys, span)
             dk = g[9]
-            got = desk_button_span(dk[2], lay.fs, dk[5][6], dk[5][4])
+            got = desk_button_span(dk[2], lay.fs, dk[5][6], dk[5][4], self.verb_sets)
             if got <= span:
                 break
             span = got
@@ -4375,7 +4380,7 @@ class LauncherHomeLayer:
 
     def _hint_keys(self, i):
         """The hint strip's keys, typed (an edge: a held key acts once):
-        C, /, N, Y and X the verbs it names, Q and E the tabs, F the
+        C, /, N, Y, X and P the verbs it names, Q and E the tabs, F the
         selected card's favourite star."""
         k = self.ws.input.last_key
         prev = self._kprev
@@ -4392,7 +4397,8 @@ class LauncherHomeLayer:
         if ch == _FAVOURITE_KEY:
             return self.toggle_favourite()
         v = _VERB_KEY.get(ch)
-        if v is None or not (v in self.zone_verbs() or v in self.card_verbs()):
+        if v is None or not (v in self.zone_verbs() or v in self.card_verbs()
+                             or (v == "window" and v in self._desk_verbs())):
             return False
         self._do_verb(v)
         return True
@@ -4826,9 +4832,20 @@ class LauncherHomeLayer:
             self.toggle_favourite()
         elif verb == "options":
             self.open_card_menu()
+        elif verb == "window":
+            ws.defer(self._play_window)
         else:
             ws.toggle_search()
         ws.mark_dirty()
+
+    def _play_window(self):
+        """Make's Play on the desk: the selected cart run in a desk window
+        with its strip, not full screen (`WindowedWM.play_in_window`)."""
+        sel = self.grid.selected()
+        if sel is None:
+            return
+        self.ws.open(sel)
+        self.ws.wm.play_in_window()
 
 
 class HomeWindowLayer(LauncherHomeLayer):
@@ -4858,6 +4875,16 @@ class HomeWindowLayer(LauncherHomeLayer):
     def _back(self):
         """B closes this window alone, as its title strip's X does."""
         self.ws.wm.close_window_kind(self.id)
+
+    def _desk_verbs(self):
+        """The home's buttons, and on Make a real card's Play third (owner,
+        2026-10-31): the game in a desk window, where a desk play is full
+        screen."""
+        out = LauncherHomeLayer._desk_verbs(self)
+        if self.grid.tab == "make" and "change" in out:
+            out = list(out)
+            out.insert(min(2, len(out)), "window")
+        return out
 
     def _wall(self):
         return None                           # the window lies on its panel

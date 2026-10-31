@@ -183,9 +183,10 @@ def _own(ws, grid):
 @pytest.mark.parametrize("size", [None, (360, 534)])
 def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
     """On Make the hero's filled button acts on the hero: CHANGE, with
-    DUPLICATE and DELETE beside it, every one of them at any width (a button
-    that does not fit wraps under, R5-02); NEW is the + tile's primary and
-    stays on the strip's N."""
+    DUPLICATE, PLAY (third: the cart in a desk window, owner 2026-10-31) and
+    DELETE beside it, every one of them at any width (a button that does not
+    fit wraps under, R5-02); NEW is the + tile's primary and stays on the
+    strip's N."""
     from runtime import ui_draw
     ws = _ws(tmp_path)
     win, grid = _projects(ws, size)
@@ -198,7 +199,8 @@ def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
         home = ws.projects_layer
         buttons = home._desk_buttons()
         assert [(v, k) for v, _r, k in buttons] == [
-            ("change", "primary"), ("copy", "normal"), ("delete", "danger")]
+            ("change", "primary"), ("copy", "normal"), ("window", "normal"),
+            ("delete", "danger")]
         pane = grid.plate_rect()
         for _v, r, _k in buttons:
             assert _inside(r, content) and _inside(r, pane), (r, pane)
@@ -233,14 +235,17 @@ def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
 
 def test_delete_stands_a_groups_gap_apart(tmp_path):
     """DEL is set apart from the verbs before it by a group's gap, wider
-    than the gap between Change and Duplicate (R5-15)."""
+    than the gap between Change and Duplicate (R5-15), and Play keeps the
+    plain gap after Duplicate."""
     ws = _ws(tmp_path)
     win, grid = _projects(ws)
     _own(ws, grid)
     ws.wm._install(win.ctx)
     try:
-        (_c, a, _k1), (_y, b, _k2), (_d, c, kind) = ws.projects_layer._desk_buttons()
-        assert kind == "danger" and a[1] == b[1] == c[1], "one row at the full size"
-        assert c[0] - (b[0] + b[2]) > b[0] - (a[0] + a[2]) > 0
+        (_c, a, _k1), (_y, b, _k2), (_p, p, _k3), (_d, c, kind) = \
+            ws.projects_layer._desk_buttons()
+        assert kind == "danger" and a[1] == b[1] == p[1] == c[1], "one row at the full size"
+        assert p[0] - (b[0] + b[2]) == b[0] - (a[0] + a[2]) > 0
+        assert c[0] - (p[0] + p[2]) > b[0] - (a[0] + a[2])
     finally:
         ws.wm._install(ws.wm._root_ctx)

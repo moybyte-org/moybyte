@@ -51,9 +51,11 @@ to whoever called it.
     Editor beside it is typed in — its pointer feed click-stripped so the
     background cart never eats editor taps. Only an explicit exit ends a run,
     and closing the Editor is one for its own playtest (owner, 2026-10-31); a
-    game the pause card's Play in a window moved out (`WindowedWM.play_in_window`)
-    is its own window and outlives the Editor. Play on the desk is full
-    screen with no window buttons (`docs/shell_layout_2026-10.md` §3).
+    game the pause card's Play in a window moved out (`WindowedWM.play_in_window`,
+    on every board with a desk, console mode included) is its own window,
+    outlives the Editor and takes the Game tab out of its workspaces while it
+    lasts. Play on the desk is full screen with no window buttons; Projects'
+    Play runs a Make card in a window (`docs/shell_layout_2026-10.md` §3).
     The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
     window gets back the mode it had, so a field in one never leaves a game
     beside it in text mode.
@@ -63,7 +65,8 @@ to whoever called it.
   dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
   2026-10-14): there is no project picker on any tier and no PROJECTS button
   on the Editor's bar (its X pops back to where it was opened from); Make's
-  verbs are ＋New / CHANGE / COPY / DEL (DEL, like every Delete of a cart, asks first:
+  verbs are ＋New / CHANGE / COPY / DEL, and in the desk's Projects window PLAY
+  (third, in a desk window) (DEL, like every Delete of a cart, asks first:
   `console_notices.DeleteConfirm`). The desk's
   PROJECTS is the same home in a window (`HomeWindowLayer`): the console
   home's design (hero, details, shelf) in the window's content rect whatever

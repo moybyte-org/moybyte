@@ -186,17 +186,23 @@ mode's games need it. Steam's Big Picture on a PC is the shape, from memory.
 
 **Games on the desk** (owner, 2026-10-31). Play is full screen, as Steam's
 Big Picture is: a game run from the desk opens as a window full screen with
-no row and no buttons, and the console's key opens its pause card. The
-card's **Play in a window**, offered only in desktop mode (`wm.mode`), never
-in console mode or on a handheld, moves the running game, its run untouched,
-into a normal desk window with its strip (minimise, maximise, close); that
-window's maximise gives it the glass again. It is the one way out of full
-screen, and the desk has no game icons. The Editor's playtest stands docked
-in its Run slot and is the Editor's: closing the Editor ends it, as the
-pause card's Quit does. The card offers Play in a window over it too, and a
-game moved out so is its own window, which outlives the Editor
+no row and no buttons, and the console's key opens its pause card. On every
+board with a desk (`wm.has_desk`), in both modes, the card over a game full
+screen offers **Play in a window**, which moves the running game, its run
+untouched, into a normal desk window with its strip (minimise, maximise,
+close); from console mode it goes back to the desk first, its windows as
+they were, the game's on top. A handheld never offers it, and the card over
+a game already in a window has no such row: that window's maximise alone
+gives it the glass again. The desk has no game icons; the other way into a
+window is the Projects window's **Play**, a Make card's third button, which
+runs the cart in a window from the start. The Editor's playtest stands
+docked in its Run slot and is the Editor's: closing the Editor ends it, as
+the pause card's Quit does. The card offers Play in a window over it too,
+and a game moved out so is its own window, which outlives the Editor; while
+it lasts the Editor's workspaces have no Game tab, the panes left taking its
+room, and when it closes the Game tab comes back
 (`WindowedWM.play_in_window`, the path an orphaned docked game takes back to
-its window).
+its window; `editor_panes.without`).
 
 **The way back** goes one level, wherever something is beneath the surface
 (owner, 2026-10-13; its shape 2026-10-18, `docs/look_2026-10.md` step 27a):
@@ -791,7 +797,7 @@ arrangement (step 18).
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
 | Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
-| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first) |
+| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first); in the desk's Projects window PLAY too, the third button, which runs the cart in a desk window (§3) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
 is Mine's, not Games'. **The selected card's verbs beyond its tap are one

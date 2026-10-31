@@ -4566,3 +4566,30 @@ def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, t
     # repeat that one (§14.6)
     assert drew["after"] >= 2
     assert drew["stacks"][1:] == ["repeat"] * 2, drew["stacks"]
+
+
+def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
+    """The desk's Projects on Make: a real card's third button is Play
+    (owner, 2026-10-31), and it runs the cart in a desk window with its
+    strip, where a desk play opens full screen."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open_projects()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("title") == "Star Catcher")
+    ws._dirty = True
+    for _ in range(3):
+        drv.frame(1 / 30)
+    lay = ws._content_layers["projects"]
+    got = []
+    assert ws.wm.in_window("projects", lambda: got.append(lay._desk_buttons()))
+    assert [v for v, _r, _k in got[0]][:3] == ["change", "copy", "window"]
+    lay._do_verb("window")
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ws.cart.get("title") == "Star Catcher" and not ws.player.paused
+    win = ws.wm._wins["desktop"]
+    assert not win.full() and win.own
+    assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]
+    assert ws.wm._focus == "desktop" and "projects" in ws.wm._wins

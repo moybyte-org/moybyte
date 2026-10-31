@@ -965,18 +965,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._on_nav()
         ws._dirty = True
 
-    def leave_console(self):
+    def leave_console(self, game=False):
         """The home's X: put the parked kinds back above the desk with the
         route's restore op (no process re-opens) and the window records with
         them. A record whose stamp was released re-renders once, the path a
         resize takes; one whose kind was re-opened in console mode re-renders
         once to show what that process holds now. The Editor's project is the
         workspace, and a run in console mode swaps it: a parked Editor whose
-        project went that way does not come back."""
+        project went that way does not come back. `game`: the pause card's
+        Play in a window, the game on the home going on above them, its
+        window made as a desk play's."""
         if self.mode != "console":
             return
         ws = self.ws
-        if self.stack.depth() > 1:
+        if self.stack.depth() > 1 and not game:
             ws.go_home()                  # what stood on the home leaves first
         p = self._parked or _Parked([], [], {}, None)
         self._parked = None
@@ -991,7 +993,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._drop_win(win)
                 if p.focus == "menu":
                     p.focus = p.order[-1] if p.order else None
-        self.stack.restore(["desk"] + kinds)
+        self.stack.restore(["desk"] + kinds + (["desktop"] if game else []))
         self._wins = p.wins
         self._kinds = kinds
         self._order = p.order
@@ -1703,23 +1705,35 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def offers_window(self):
         """Whether the pause card offers Play in a window (owner,
-        2026-10-31): on the desk, over a game that is full screen or docked
-        in the Editor's Run slot. Never in console mode, the handhelds'."""
+        2026-10-31): on a board with a desk, which this WM is, in both modes
+        -- over a game full screen (console mode's, standing on the home, or
+        a desk window's) or docked in the Editor's Run slot; never over one
+        already in a window. A handheld's WM has no desk and no such row."""
+        ws = self.ws
+        if self.mode == "console":
+            return (self.stack.depth() == 2 and self.stack.top() == "desktop"
+                    and not ws.app_window_canvas and ws.cart_error is None
+                    and not ws.player._is_tool)
         win = self._wins.get("desktop")
-        return (self.mode == "desktop" and win is not None and self._is_game(win)
+        return (win is not None and self._is_game(win)
                 and (win.saved is not None or win.docked is not None))
 
     def play_in_window(self):
         """The pause card's Play in a window: the running game, its run
         untouched, in a desk window of its own with its strip -- a full-screen
         one restored to the rect it opened at, a docked one given back its
-        window as an orphaned one is (`dock`). It is no Editor's playtest
-        from then on: closing the Editor leaves it, and its maximize is the
-        way back to full screen. False where nothing moved."""
+        window as an orphaned one is (`dock`); from console mode the desk
+        comes back first, its windows as they were, the game's window on
+        top. It is no Editor's playtest from then on: closing the Editor
+        leaves it, the Editor's workspaces drop its Game tab while it lasts,
+        and its maximize is the way back to full screen. False where nothing
+        moved."""
         if self.mode == "desktop":
             self._sync_windows()          # a run spawned this frame has its window
         if not self.offers_window():
             return False
+        if self.mode == "console":
+            self.leave_console(game=True)
         win = self._wins["desktop"]
         docked = win.docked is not None
         if docked:
@@ -1727,10 +1741,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         else:
             self._toggle_max(win)
         win.own = True
-        host = self._wins.get("menu")
-        if docked and host is not None:
-            self.ws.editor_app.zone_gen += 1  # its bar's Play again
-            self._prewarm(host)           # and its Run slot's still
+        self._editor_again()              # its workspaces without the game
         self._bring_forward("desktop")
         self.ws._dirty = True
         return True
@@ -1751,6 +1762,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._focus_win()
         return (self.mode == "desktop" and win is not None and not win.minimized
                 and win.docked is not None and self._is_game(win))
+
+    def _editor_again(self):
+        """The Editor's window drawn again where a game left its workspaces
+        or came back to them: its bar's Play or Stop, its Game tab."""
+        host = self._wins.get("menu")
+        if host is not None and not self.ws._editing_icons:
+            self.ws.editor_app.zone_gen += 1
+            self._prewarm(host)
 
     def _end_playtest(self):
         """Closing the Editor ends its playtest (owner, 2026-10-31), the
@@ -4654,8 +4673,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         focus back to the run CALLER's window when it's open (the Editor for a
         PLAY run) -- the launch-and-return contract, without collateral pops."""
         ws = self.ws
+        win = self._wins.get("desktop")
+        own = win is not None and win.own
         self._remove_kind("desktop")
         self._sync_windows()
+        if own:
+            self._editor_again()          # its Game tab back
         if (ws.returns.caller() == EDITOR
                 and "menu" in self._order):
             self._move_focus("menu")
