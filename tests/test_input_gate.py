@@ -343,3 +343,11 @@ def test_iter_is_one_run_of_the_rows_against_the_stored_baseline(tmp_path, fake,
     assert "Code               fling" in text and "key_held" not in text
     assert rc == 0
     shutil.rmtree(str(tmp_path / "it"))
+
+
+def test_a_row_neither_side_recorded_leaves_its_surface_to_the_rest():
+    assert g.verdict([None, None], [None])["verdict"] == "unrecorded"
+    rows = [{"surface": "Files", "input": "fling", "verdict": "pass"},
+            {"surface": "Files", "input": "ball_fast", "verdict": "unrecorded"},
+            {"surface": "Calc", "input": "ball_fast", "verdict": "unrecorded"}]
+    assert g.groups(rows) == {"Files": "pass", "Calc": "unrecorded"}

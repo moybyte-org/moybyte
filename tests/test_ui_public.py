@@ -918,8 +918,9 @@ def test_a_press_focuses_its_pane_and_a_split_without_focus_answers_none():
 def test_a_split_frame_is_the_focused_panes_where_nothing_else_moved():
     """The engine's split frame (docs/ui_blocks_2026-10.md §4.2): the pane a
     split's focus names, drawn alone where the gen the host gives is the
-    last frame's, the WM knew both frames' targets and the context holds
-    no input of its own; whole where a divider is held."""
+    last frame's, the WM knows this frame's target holds the page as the
+    last frame left it (whatever it knew of the last frame's) and the
+    context holds no input of its own; whole where a divider is held."""
     draw, st = _panes()
     r = _Run(draw)
     r.frame()
@@ -932,8 +933,7 @@ def test_a_split_frame_is_the_focused_panes_where_nothing_else_moved():
     assert list(out) == [10, 18, 60, 192], "the focused pane below its 8 rows"
     assert host.split_frame(6, True, 0, none, out) == whole, "the gen moved"
     assert host.split_frame(6, False, 0, none, out) == whole, "the WM knew nothing"
-    assert host.split_frame(6, True, 0, none, out) == whole, "...nor of the last"
-    assert host.split_frame(6, True, 0, none, out) == alone
+    assert host.split_frame(6, True, 0, none, out) == alone, "the WM's word is this frame's"
     assert host.split_frame(6, True, 0, (0, 0, 320, 240), out) == host.SPLIT_LAGS
     assert host.split_frame(None, True, 0, none, out) == whole
     r.frame(ptr=(73, 100, 7))                   # the first divider held

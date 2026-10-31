@@ -436,9 +436,10 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
 
 def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
     """Where what the console draws over the page after its pass meets
-    the log (the HUD's card, `overdrew`), a frame moves none of the
-    buffers it lies in: from the first frame it lies in one, the frames draw
-    whole, and every frame is a whole repaint's bytes."""
+    the log (the HUD's card, `overdrew`), no frame moves the buffers it
+    lies in: a frame that moves nothing draws what lies under it again
+    (its floor takes it), one that would move it draws whole, and every
+    frame is a whole repaint's bytes."""
     p = Pair(tmp_path, "console", 2)
     cx, top, _cw, _ch = p.a.app_content_rect()
     for ws in (p.a, p.b):
@@ -447,7 +448,7 @@ def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
             ui_draw.overdrew(cx + 100, top + 60, 60, 30)
         ws.perf_ui.draw = over
     _console_session(p)
-    assert not any(p.kinds[1:]), p.kinds
+    assert "shift" not in p.kinds[1:], p.kinds
 
 
 class _NoMark:

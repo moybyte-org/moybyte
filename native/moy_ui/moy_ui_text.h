@@ -12,8 +12,8 @@
 // past the view, and the caret -- in that order, each inside the row's band,
 // so a row draws alone.
 //
-// The colour runs are a syntax's (Python, Lua, JSON: each byte's class,
-// adjacent bytes of one class one run) or the text's own SGR escapes
+// The colour runs are a syntax's (Python, Lua, JSON, Markdown: each byte's
+// class, adjacent bytes of one class one run) or the text's own SGR escapes
 // (`ESC [ n m`: a terminal's colours, which take no column), each run in a
 // TONE the caller resolves from the theme (MOY_UI_TT_*).
 //
@@ -50,8 +50,11 @@ enum {
 };
 
 // What colours a row's text: none (one tone), a syntax, or SGR escapes.
+// The numbers are the public faces' (a syntax's index among their names):
+// a new one is appended.
 enum {
-    MOY_UI_SYN_NONE = 0, MOY_UI_SYN_PYTHON, MOY_UI_SYN_LUA, MOY_UI_SYN_JSON, MOY_UI_SYN_SGR
+    MOY_UI_SYN_NONE = 0, MOY_UI_SYN_PYTHON, MOY_UI_SYN_LUA, MOY_UI_SYN_JSON, MOY_UI_SYN_SGR,
+    MOY_UI_SYN_MARKDOWN, MOY_UI_SYN_N
 };
 
 // The view, as words (the Python face's array('i'), the verb's own): where

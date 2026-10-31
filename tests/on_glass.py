@@ -2504,8 +2504,15 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
     they took: the WiFi driver holds its allocation after the lease powers it
     down, and BLE once started stays up. A desk that has had either this boot
     (beyond what the board starts by itself) is refused with the reason,
-    never compared."""
+    never compared. So is a desk a cart has run on this boot (the kernel
+    Player's last run, `moy_play.info()`, or the sound's output started or
+    tried, `moy_audio.out()`): what a run starts keeps its internal RAM
+    after it."""
     assert board.pyval("__import__('moy_wasm').FORK", strict=True)
+    if board.pyval("__import__('moy_play').info() is not None "
+                   "or __import__('moy_audio').out()[0] in (1, 2)", strict=True):
+        pytest.skip("a cart has run this boot and what it started keeps its "
+                    "internal RAM; reboot the board and run the suite first")
     if board.pyval("bool(getattr(ws.wifi, 'driver_up', False))", strict=True):
         pytest.skip("the WiFi driver has run this boot and keeps its internal "
                     "RAM; reboot the board and run the suite first")

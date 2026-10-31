@@ -28,7 +28,9 @@ surfaces are on them. The plan that moves the surfaces, and its state, is
   2026-10-29).
 - Notes draws in the monospace face. A `.md` note's later form is a synced
   pair: the monospace source beside a proportional preview (owner,
-  2026-10-29).
+  2026-10-29). The source is coloured as Code colours a program (the
+  engine's `markdown` syntax), and on the desk it draws at 15 px where
+  Code stays at 11 (owner, 2026-10-30).
 
 ## 1. What the engine's pass costs
 
@@ -196,7 +198,9 @@ the table and its own scroll is still: R moves by nothing and the table's
 view moves inside it, a second move the host makes (`sh_in`, `sh_in_dy`
 in `moy_ui_api.c`'s `shift_plan`). The stops an app places round its table
 then keep their pixels on the table's frames. With no such page the
-table's view is R, and what lies outside it draws on every frame.
+table's view is R, and what lies outside it draws on every frame. A text
+view (§4.5) moves inside the page that holds it the same way (Notes'
+note among its tools and vault).
 
 The Blocks outline and Music's steps are tables of parts, each inside a
 page under a gen. The Blocks cursor's plate is a tool drawn in its part and
@@ -237,7 +241,10 @@ from the record: `AppHost.split_frame(gen, known, top, lag, out)`
   moves;
 - the last pass drew no popover and held no divider;
 - `gen`, what the app draws outside the pane, is the last frame's, and the
-  WM's word (`known`) says the target held the page on both frames.
+  WM's word (`known`) says the target holds the page as the last frame
+  left it. That word is the whole of it: what the WM paints over the page
+  (a full-screen window's row) is the WM's to keep in step, whatever
+  target the last frame drew into.
 
 It answers LAGS where the target lags outside that rect: the frame draws
 whole and changes the rect alone. Otherwise it answers WHOLE. The app's

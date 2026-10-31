@@ -643,6 +643,13 @@ class Player:
         self._pass = False
         self._broke = False
         self._over = _array("i", [0] * 4)
+        # What the painted frame `change_f` changed of the run's canvas, as
+        # its pass's plan said (`AppHost.change_box`): x0, y0, x1, y1, then
+        # the region R it drew no more than that inside (what lies outside R
+        # it drew whole), and 1 where known -- which the window's composite
+        # reads.
+        self.change = _array("i", [0] * 9)
+        self.change_f = -1
         self._cls = None
         self._bg = None
         self._bg_on = False
@@ -1650,10 +1657,16 @@ class Player:
 
     def _ui_close(self):
         """The app's pass is done: a frame whose pass a clear broke said so
-        as it drew (`_cart_cls`); the frame's change is the engine's."""
+        as it drew (`_cart_cls`); the frame's change is the engine's, and
+        what it changed of the canvas (`change`) its plan's."""
         self._pass = False
+        ch = self.change
+        self.change_f = _ui_draw.painted()
         if self._broke:
             _ui_draw._CHANGE[0] = None  # it drew whole from the clear on
+            ch[8] = 0
+        else:
+            ch[8] = 1 if self._uh.change_box(ch) else 0
 
     def ui_host(self, cv):
         """The run's app host whose pass draws on `cv` now, else None: an
@@ -1675,6 +1688,18 @@ class Player:
         o[1] = y
         o[2] = w
         o[3] = h
+        ch = self.change
+        if ch[8] and self.change_f == _ui_draw.painted():
+            if ch[2] <= ch[0] or ch[3] <= ch[1]:
+                ch[0] = x
+                ch[1] = y
+                ch[2] = x + w
+                ch[3] = y + h
+            else:
+                ch[0] = x if x < ch[0] else ch[0]
+                ch[1] = y if y < ch[1] else ch[1]
+                ch[2] = x + w if x + w > ch[2] else ch[2]
+                ch[3] = y + h if y + h > ch[3] else ch[3]
 
     def holds(self, cv):
         """Whether `cv`, the run's canvas, is one buffer only the run

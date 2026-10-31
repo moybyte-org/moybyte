@@ -849,10 +849,10 @@ paints, so a text view moves out of the last buffer only the bands its rows
 frames since drew); and `takes_lag(lag)`, whether this frame's draw
 repaints `lag`, what a direct render's target lags -- where it answers
 False the frame is not rendered straight into the root (the desk Editor's
-prompts draw their rows only into a buffer that lags nothing, and its Code,
-Blocks, Settings, Map and Sound panes repaint a lag inside the focused pane
-alone: a lag beyond it would draw the desk whole and leave the next buffer
-as far behind). The WM asks `HELD` and `takes_lag` before it installs the
+prompts copy a lag inside their pane from the buffer the last frame drew
+into before they draw their rows, and its Code, Blocks, Settings, Map and
+Sound panes repaint a lag inside the focused pane alone: a lag beyond the
+pane would draw the desk whole and leave the next buffer as far behind). The WM asks `HELD` and `takes_lag` before it installs the
 window's layout; a content whose answer depends on its layout answers in
 the one it drew in last (`EditorDesk._drew_in`). A content counts the
 WM's word only when its previous draw was one the WM spoke of too. A
@@ -941,7 +941,12 @@ function of while the dialog is up — the dialog itself, the canvas, the
 page's rect, the font scale and the look — and only from a frame whose page
 was still (its context owed no frame), with nothing animating, on a canvas
 that retains its pixels and draws into its whole buffer: a pane's viewport
-(the desk Editor's) draws the page every frame. One modal is up at a time,
+(the desk Editor's) draws the page every frame. A modal that can draw
+inside its card's band alone (`Hold.under`'s `left`: the sprite pickers)
+leaves the page and the card's edges as they lie where the buffer holds
+them as the frames before drew them under its key (`HOLD_LEFT`): each of
+the RETAINED_FRAMES painted frames before, alone on the glass, or in a
+window the WM's word (`window_frame` 2 and up), a pane's included. One modal is up at a time,
 so the holds share one layer of the canvas's size, kept across dialogs
 and freed by the Player's fit check after the home's retained frame
 (`docs/shell_layout_2026-10.md` §3). The Editor's Cart info

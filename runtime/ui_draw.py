@@ -1753,6 +1753,36 @@ def rows_drawn():
     _CHANGE[0] = _ROWS
 
 
+# The rect a painted frame's content drew inside alone (`drew_within`):
+# [the painted frame, x, y, w, h].
+_WITHIN = array("i", [-1, 0, 0, 0, 0])
+
+
+def drew_within(x, y, w, h):
+    """This painted frame drew nothing of its canvas outside (x, y, w, h)
+    (a modal inside its card's band over the page it left, `HOLD_LEFT`):
+    what a window's content says it changed (`within`)."""
+    t = _WITHIN
+    t[0] = _PAINT[0]
+    t[1] = x
+    t[2] = y
+    t[3] = w
+    t[4] = h
+
+
+def within(out):
+    """Whether this painted frame said what it drew inside alone
+    (`drew_within`): the rect into `out` (x, y, w, h)."""
+    t = _WITHIN
+    if t[0] != _PAINT[0]:
+        return False
+    out[0] = t[1]
+    out[1] = t[2]
+    out[2] = t[3]
+    out[3] = t[4]
+    return True
+
+
 def popover_band(card, cv, desk):
     """The rows of popover card `card` (x, y, w, h) its body lies in, as
     (x, y, w, h): the card's width, inside its inset top and foot, clear of
@@ -2208,6 +2238,13 @@ class AppHost:
         return _C.api_split_toward(self.ctx, x, y, dx, dy, out)
 
     @staticmethod
+    def within(out):
+        """Whether the content drew this frame inside one rect of its canvas
+        alone (`drew_within`: a modal's band over the page it left): the
+        rect into `out` (x, y, w, h)."""
+        return within(out)
+
+    @staticmethod
     def window(v):
         """The window word (`window_frame`) for the frames begun next, a
         content's relay of the WM's word for the part of its window it has
@@ -2219,6 +2256,16 @@ class AppHost:
         """The bounding rect of the floor the last pass drew (its rows
         frame's), into `out`, an array('i') of four: whether it drew one."""
         return _C.api_floor_box(self.ctx, out)
+
+    def change_box(self, out):
+        """What the frame begun last changed of its canvas, where its plan
+        made it a shift or rows frame: the rect its floor and its moves
+        span into `out[0:4]` as x0, y0, x1, y1 (all 0 where they span
+        nothing), and its region R, inside which alone it drew no more than
+        that, into `out[4:8]` (`moy_ui_api_change_box`); `out` an
+        array('i') of eight. False where the frame drew whole: what it
+        changed is not known."""
+        return self.shifting and _C.api_change_box(self.ctx, out)
 
     def resume(self, cv, th):
         """Point the verbs at this context again, on `cv` under theme `th`,
@@ -2442,8 +2489,9 @@ NO_WASH = {"wash": False}
 
 # What the page under a dialog draws this frame (`Hold.under`): put back
 # washed, the dialog drawn over it held; the last frame's, taken from its
-# buffer; or drawn.
-HOLD_PUT, HOLD_LAST, HOLD_DRAW = 0, 1, 2
+# buffer; drawn; or left, with the modal's card about it, where a window's
+# target holds both as the frames before drew them (`left`).
+HOLD_PUT, HOLD_LAST, HOLD_DRAW, HOLD_LEFT = 0, 1, 2, 3
 
 
 class Hold:
@@ -2493,15 +2541,21 @@ class Hold:
         self.begun = -1                 # the frame the dialog's host began ahead of the page
         self._gen = None
         self._same = False
+        self._drew = None               # the key the page was last drawn under (`under`)
+        self._drew_f = -1               # ... the painted frame that drew it
+        self._run_f = -1                # ... the first of the painted frames since under it
+        self._alone_f = -1              # ... the first since, each alone on the glass
 
     # -- the page held washed
 
-    def put(self, ws, cv, rect, key, dt=0):
+    def put(self, ws, cv, rect, key, dt=0, pages=True):
         """Put the held page back into `rect`: whether it was held under
-        `key` (else the frame draws the page)."""
+        `key` (else the frame draws the page). `pages` False: the page is
+        no verbs page, so one moving on its own (the modal's body coasting)
+        changes nothing of it (`Workstation._animating`'s word)."""
         held = ws.held_pages
         if (self.key is None or held[1] is not self or self.key != key
-                or ws._animating(dt)):
+                or ws._animating(dt, pages)):
             return False
         x, y, w, h = rect
         cv.blit_strip_rect(held[0], 0, 0, x, y, w, h)
@@ -2555,6 +2609,7 @@ class Hold:
         self.key = None
         self.snapped = False
         self._at.clear()
+        self._drew = None
 
     # -- the page kept as it was
 
@@ -2575,19 +2630,61 @@ class Hold:
 
     # -- a dialog's page: its first frame, its rows frames
 
-    def under(self, ws, key, rect, dt=0):
+    def under(self, ws, key, rect, dt=0, pages=True, left=False):
         """What the page in `rect` draws this frame under the dialog up,
         `key` what it is a function of (None with no dialog up): HOLD_PUT,
-        HOLD_LAST or HOLD_DRAW. The dialog's rows frame is asked first
-        (`rows_frame`)."""
+        HOLD_LAST or HOLD_DRAW; with `left`, HOLD_LEFT too, where the
+        modal then draws inside its card's band alone (`_left`). The
+        dialog's rows frame is asked first (`rows_frame`). `pages`:
+        `put`'s."""
         if key is None:
             if self.key is not None:
                 self.drop()
             return HOLD_DRAW
         cv = ws.sys_canvas
-        if self.put(ws, cv, rect, key, dt):
+        f = _PAINT[0]
+        left = left and self._left(ws, cv, key, f, dt, pages)
+        if self._drew != key:
+            self._run_f = self._alone_f = f
+        elif self._drew_f != f - 1 and self._drew_f != f:
+            self._alone_f = f
+        if not _PAINT[1] and self._drew_f != f:
+            self._alone_f = f + 1
+        self._drew = key
+        self._drew_f = f
+        if left:
+            if not _PF[_PF_WIN]:
+                rows_drawn()
+            return HOLD_LEFT
+        if self.put(ws, cv, rect, key, dt, pages):
             return HOLD_PUT
         return HOLD_LAST if self.last(ws, cv, rect, dt) else HOLD_DRAW
+
+    def _left(self, ws, cv, key, f, dt, pages):
+        """Whether this frame finds the page under `key`, and the modal over
+        it, in the buffer it paints already. A window's frame
+        (`window_frame`): 2, its target holds the window as its last draw
+        left it, and that draw drew them under `key`; 3, it holds it as the
+        frames RETAINED_FRAMES back left it but for their rows, and every
+        draw of them since before those frames was under `key` (a frame
+        between that repeats the last changes none of it). Else a frame alone on a canvas that
+        keeps its pixels (`painted_alone`), each of the RETAINED_FRAMES
+        painted frames before it having drawn them under `key`, alone too.
+        `key` names where the modal's card lies, so what the card draws
+        outside its band (its corners and drop, blended over the page) is
+        there as well."""
+        w = _PF[_PF_WIN]
+        if self._drew != key or w == 1 or ws._animating(dt, pages):
+            return False
+        if w == 2:
+            return True
+        n = getattr(cv, "RETAINED_FRAMES", 0)
+        if n < 1:
+            return False
+        if w:
+            return f - self._run_f >= n
+        return (bool(_PAINT[1]) and self._drew_f == f - 1 and _whole_retained(cv)
+                and f - self._alone_f >= n)
 
     def note(self):
         """The frame drew the dialog over the page held (put back, washed
@@ -2702,8 +2799,9 @@ class Hold:
 
 
 # -- text areas (native/moy_ui/moy_ui_text.h, `ui.text_view`) ----------------------------
-SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR = range(5)
-SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR}
+SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR, SYN_MARKDOWN = range(6)
+SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR,
+          "markdown": SYN_MARKDOWN}
 
 
 def text_words(syntax, words, tone):

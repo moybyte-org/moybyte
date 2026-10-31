@@ -2,15 +2,18 @@
 the pickers are up the page under them does not change but by the input
 that reaches them, so it is a modal's page, held (`ui_draw.Hold`): on the
 handheld's full screen a frame puts the page back as it was held and draws
-the pickers over it; inside the desk's Sprite pane the desk draws the pane
-alone (its own frames). The sheet in their part is one `blit_indices_scale`
+the pickers over it, or, where each buffer holds the page and the card as
+the frames before drew them, draws inside the card's band alone
+(`HOLD_LEFT`); inside the desk's Sprite pane the desk draws the pane alone
+(its own frames), and the pickers inside their band alone where the WM's
+word says the window's target holds them. The sheet in their part is one `blit_indices_scale`
 of the rows the body shows.
 
 Each case runs one session on two consoles: one as it ships, its root
 presenting one, two or three buffers in turn, and one that draws every
 frame whole; every presented picture of the first is held to the second's
-bytes, and the share of its frames that put the page back (the desk: drew
-the pane alone) is held above a floor (a mechanism that quietly never
+bytes, and the share of its frames that put the page back or left it (the
+desk: drew the pane alone) is held above a floor (a mechanism that quietly never
 engages fails)."""
 
 import pytest
@@ -74,11 +77,19 @@ def _console(path, desk, ships):
             ws.wm.CONTENT_RING = False
         hold = ws.paint_layer._hold
         put = hold.put
+        under = hold.under
 
-        def held(*a, put=put, took=ws.took):
-            took[0] = got = ships and put(*a)
+        def held(*a, put=put):
+            return ships and put(*a)
+
+        def kept(*a, under=under, took=ws.took):
+            got = under(*a)
+            took[0] = got in (ui_draw.HOLD_PUT, ui_draw.HOLD_LEFT)
             return got
         hold.put = held
+        hold.under = kept
+        if not ships:
+            hold._left = lambda *a: False
     ws.editor_app.set_tab("paint")
     ws.pointer.visible = False
     _fill(ws.paint.sheet)
@@ -279,9 +290,9 @@ def test_the_sprite_panes_layout_is_kept_whichever_input_is_in_use(tmp_path, mon
     pl = p.a.paint_layer
     draw = pl._draw_pickers
 
-    def drawn():
+    def drawn(*a):
         lays.append(pl.layout)
-        draw()
+        draw(*a)
     pl._draw_pickers = drawn
     for _ in range(4):
         p.frame()

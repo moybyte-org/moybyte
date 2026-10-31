@@ -230,11 +230,10 @@ typedef struct {
     // The panes the last pass's splits cut (moy_ui_api_split_frame): a pane
     // a later split cut again (`sp_cut`, a bit a pane) is no pane of its own;
     // `sp_cur` the one a split's focus names (-1 none), `sp_held` whether a
-    // divider was held. `sf_gen` the gen the last split frame was asked with,
-    // `sf_on` whether the WM knew that frame's target.
+    // divider was held. `sf_gen` the gen the last split frame was asked with.
     moy_ui_box_t sp_pane[MOY_UI_API_PANES];
     uint16_t sp_cut;
-    uint8_t sp_pn, sp_held, sf_on;
+    uint8_t sp_pn, sp_held;
     int8_t sp_cur;
     int32_t sf_gen;
     int16_t press_x, press_y, drag_y;   // drag_y: the drag's last place along its axis
@@ -433,11 +432,15 @@ typedef struct {
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
     uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
-    // R a page that holds the table carrying its rows (sh_in_id; tc_*): the
-    // table's view as the last frame drew it and its move inside R (the
-    // host's second shift_last; R itself moves by sh_dy, 0). A stop drawn
-    // in one of its parts moves with its row, so R's stops are matched with
-    // the last frame's past them (fl_ci, fl_pi: the next of each to match).
+    // R a page that holds the table carrying its rows, or a text view
+    // (sh_in_id; tc_*): the view as the last frame drew it and its move
+    // inside R (the host's second shift_last; R itself moves by sh_dy, 0).
+    // A stop drawn in one of its tables' parts moves with its row, so R's
+    // stops are matched with the last frame's past them (fl_ci, fl_pi: the
+    // next of each to match). sh_over: what the console drew over R after
+    // the passes whose pixels R keeps (the FPS chip), which the floor draws
+    // again; w 0: nothing.
+    moy_ui_box_t sh_over;
     uint32_t sh_in_id;
     moy_ui_box_t sh_in;
     int16_t sh_in_dy;
@@ -484,7 +487,13 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // region of its own -- a drag scrolls it and its release coasts, the wheel
 // steps it -- in ui.at's rect or stacked `rows` rows tall (0: the rest of
 // the page). Its rows are the lines `L` gives: whole lines cut at its
-// width, or wrapped there (`wrap`); in the mono face, coloured by `syntax`
+// width, or wrapped there (`wrap`); in the mono face (or `font`, a loaded
+// monospace font's id, where the caller gives one: 0 the mono role's; a
+// cart's code draws in petme128 whatever it names), on a paper where
+// `paper` is not -1 (the rect's ground in the `surface` token, its corners
+// that radius, the rows inset from its top and foot by the radius or the
+// text's inset, whichever is more, where the rect is that tall), coloured
+// by `syntax`
 // (MOY_UI_SYN_*: SGR escapes by default, a terminal's), numbered where
 // `gutter`, a caret at `caret_line`, `caret_col` (-1: none). An editor's
 // marks: a selection from (sel_r0, sel_c0) to (sel_r1, sel_c1) (sel_r0 -1:
@@ -522,11 +531,11 @@ enum {
     MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL,
     MOY_UI_TXO_SEL_R0, MOY_UI_TXO_SEL_C0, MOY_UI_TXO_SEL_R1, MOY_UI_TXO_SEL_C1,
     MOY_UI_TXO_ERR_LINE, MOY_UI_TXO_FIND_CI, MOY_UI_TXO_LEFT, MOY_UI_TXO_MARK,
-    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_LEN
+    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_PAPER, MOY_UI_TXO_LEN
 };
 // The options' defaults, in MOY_UI_TXO_* order: what a face that takes
 // fewer of them fills the rest with.
-#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1}
+#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1}
 // Answers 0, or MOY_UI_API_DEEP.
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
@@ -855,7 +864,7 @@ int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
 // owed and no page moves, the WM says the target holds the page as the last
 // frame left it (`known`), and `gen` -- what the context draws outside the
 // pane is a function of, MOY_UI_SPLIT_WHOLE where it changes on its own --
-// is the gen the last frame was asked with, on a frame the WM knew too.
+// is the gen the last frame was asked with.
 // `top`: the rows at the pane's top that the context's own pass draws (a
 // header), which the pane's frame leaves. Answers MOY_UI_SF_ALONE with the
 // pane's rect below `top` at out; MOY_UI_SF_LAGS with it where `lag` (x0,
@@ -935,6 +944,7 @@ enum {
     MOY_UI_KD_TABLE = 16,           // ...a placed table's rows, R its view
     MOY_UI_KD_AT = 32,              // ...holding a stop ui.at placed, which no move carries
     MOY_UI_KD_X = 64,               // ...a table whose rows lie side by side: `a` scrolls across
+    MOY_UI_KD_HELD = 128,           // ...a page drawn under the gen the last frame drew it under, still
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings
@@ -965,6 +975,15 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
 // The floor's bounding rect as the pass drew it, x, y, w, h on screen into
 // out: 1, or 0 where the pass drew whole (or drew no floor at all).
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
+// What the pass's shift or rows frame changed of its canvas -- its floor,
+// and the region it moved and the view moved inside it -- as x0, y0, x1, y1
+// into out[0..3] (all 0 where nothing), and the rect it changed nothing
+// else inside, x0, y0, x1, y1 into out[4..7]: R, which it draws through
+// the floor alone, or the page holding R where that page drew under the
+// gen it drew under the last frame, still and with no picture of no gen
+// (what it draws outside R draws as it did; a dialog's rows frame's: the
+// surface). 1, or 0 where the pass drew whole.
+int moy_ui_api_change_box(const moy_ui_ctx_t *c, int32_t out[8]);
 // A host's lag history (docs/scroll_and_text_2026-10.md §3.4): `slots`
 // slots of 2 + 2 * `bands` words, a frame's in slot f % slots -- the frame,
 // its kind (0 whole, 1 rows, 2 shift) and its floor's rows as `bands` pairs

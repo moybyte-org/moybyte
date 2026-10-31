@@ -72,11 +72,6 @@ _ON_VERBS = ("music",)
 # its pickers are up.
 _OWN_FRAMES = ("blocks", "cards", "code", "theme_config", "map", "music", "paint")
 
-# The Editor tabs drawn as one verbs page whose gen says what it shows: a
-# frame of the page may move its pixels or draw its changed rows alone (the
-# Code tab's and theme Config's, the text view's rows).
-_PAGES = ("cards", "blocks", "code", "theme_config")
-
 # The panes whose text view moves its rows on a frame that draws the desk
 # whole only because the buffer it paints lags outside the pane, where the
 # WM says the buffer `shift_last` reads holds the page as the last draw left
@@ -199,6 +194,7 @@ class EditorDesk(Layer):
         # (`vouched`: 2, 3 where the ring says the buffer this frame paints
         # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
+        self._within = array("i", [0] * 4)   # what the pane drew inside alone
         self._moves = None              # the pane whose text view moves on a whole frame
         self._clip = None               # the rect a frame of the Sound pane's own is clipped to
         # the layout the desk drew in last: its window's, which the WM has
@@ -570,21 +566,18 @@ class EditorDesk(Layer):
         layer = self.ws.layer_of(tab)
         if layer is None:
             return
-        if tab in _PAGES:
-            # the WM's word for the pane's frame (`window_frame`),
-            # which its page's shift and rows frames and its dialog's read:
-            # on a split frame the WM's own where it says the buffer
-            # `shift_last` reads holds the page as the last draw left it; a
-            # whole frame a window's, but for a text view's moves out of the
-            # last frame (`_TEXT_PANES`)
-            host = self._host
-            was = host.window(self._vouch if own and self._vouch >= 2 else 2 if moves else 1)
-            try:
-                self._in_pane(tab, r, layer.draw, dt)
-            finally:
-                host.window(was)
-            return
-        self._in_pane(tab, r, layer.draw, dt)
+        # the WM's word for the pane's frame (`window_frame`), which its
+        # page's shift and rows frames and the page held under its modal
+        # (`Hold`) read: on a split frame the WM's own where it says the
+        # buffer holds the window as the last draw left it; a whole frame a
+        # window's, but for a text view's moves out of the last frame
+        # (`_TEXT_PANES`)
+        host = self._host
+        was = host.window(self._vouch if own and self._vouch >= 2 else 2 if moves else 1)
+        try:
+            self._in_pane(tab, r, layer.draw, dt)
+        finally:
+            host.window(was)
 
     # -- drawing ------------------------------------------------------------------
 
@@ -641,8 +634,10 @@ class EditorDesk(Layer):
         """Whether this frame's draw repaints `lag` [x0, y0, x1, y1), what
         its target lags (a direct render's): a pane's own frames repaint a
         lag inside that pane; a prompt's rows need the desk as the last
-        draw left it, and a lag outside the pane would draw the desk whole
-        and leave the next buffer as far behind."""
+        draw left it, which the buffer the last frame drew into does, so a
+        lag inside the pane is copied from there (`_catch_up`); a lag
+        outside the pane would draw the desk whole and leave the next buffer
+        as far behind."""
         if lag[2] <= lag[0] or lag[3] <= lag[1]:
             return True
         ws = self.ws
@@ -655,12 +650,14 @@ class EditorDesk(Layer):
             ws.layout = was
 
     def _takes(self, lag):
-        if self._prompt() is not None:
-            return False
-        own = self._own_pane()
-        if own is None:
-            return False
-        b = own[3] if own[0] == "music" else own[4]
+        got = self._prompt()
+        if got is not None:
+            b = self._body(got[3], self._unit(), got[2])
+        else:
+            own = self._own_pane()
+            if own is None:
+                return False
+            b = own[3] if own[0] == "music" else own[4]
         return (lag[0] >= b[0] and lag[1] >= b[1] and lag[2] <= b[0] + b[2]
                 and lag[3] <= b[1] + b[3])
 
@@ -767,8 +764,12 @@ class EditorDesk(Layer):
             tab, layer, pane, r = got
             c = None
             data = layer.prompt_host()
-            known = self._known
-            lag = _NO_LAG
+            # the WM spoke; the prompt's rows draw alone where the buffer
+            # lags nothing (`_known`) or its lag is copied from the last
+            # frame's (`_catch_up`), and a frame that lags draws whole with
+            # its gen still the desk's, so the next may be rows
+            known = ret[0] != 0
+            lag = ret[1:]
             still = not ws._animating(dt)
         else:
             c, tab, pane, r, _body, _n = own
@@ -780,7 +781,6 @@ class EditorDesk(Layer):
                          or self._spills() or self._loupe is not None
                          or (c == "paint" and ws.paint_layer._host.tap == 2
                              and ws.paint_layer._host.tap_armed()))
-        self._known = False
         key = (c, tab, self._acts, self.key, self._focus.get(self.key, 0), self.grown, pane,
                r, self.placed()[0], cv.w, cv.h, look.look_gen, look.effective_font_scale(),
                look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"), data,
@@ -795,9 +795,11 @@ class EditorDesk(Layer):
             return False
         body = (b[0], b[1], b[2], b[3])
         x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
-        if v == host.SPLIT_LAGS:
-            # the buffer lags outside the pane: the frame draws whole, and
-            # what it changed is still the pane alone -- everything else
+        if v == host.SPLIT_LAGS or (got is not None and not self._known
+                                    and not self._catch_up(cv, lag)):
+            # the buffer lags outside the pane (a prompt's, anywhere): the
+            # frame draws whole, and what it changed is still the pane
+            # alone -- everything else
             # draws as the frame before showed it -- so the buffers behind
             # catch up rather than lag whole again; a text view moves its
             # rows out of the last frame all the same
@@ -836,7 +838,28 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
+            w = self._within
+            if self._host.within(w):
+                # it drew inside that rect of the pane alone (a modal's band
+                # over the page it left)
+                self._changed = [body[0] + w[0], body[1] + w[1], body[0] + w[0] + w[2],
+                                 body[1] + w[1] + w[3]]
+                return True
         self._changed = [x0, y0, x1, y1]
+        return True
+
+    def _catch_up(self, cv, lag):
+        """Copy `lag` [x0, y0, x1, y1) of the window's page, what the buffer
+        this frame paints lags, from the buffer the last frame drew into,
+        where the WM vouches that one holds the page as the last draw left
+        it (`vouched` 2 and up: a direct render's): whether it did."""
+        if self._vouch < 2 or lag[2] <= lag[0] or lag[3] <= lag[1]:
+            return False
+        vp = cv.viewport()
+        if not cv.shift_last(vp[0] + lag[0], vp[1] + lag[1], lag[2] - lag[0], lag[3] - lag[1],
+                             0, 0):
+            return False
+        cv.shift_fence()                # the rows frame draws over rows the copy wrote
         return True
 
     def draw(self, dt):

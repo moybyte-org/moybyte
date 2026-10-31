@@ -38,6 +38,10 @@ candidate's p90 may not exceed dev's).
            third run's median settles a noisy row; a near row is the one to
            re-run, and one still near after it does not hold
     fail   more than 1 ms over it
+    missing     one side has no number for the row
+    unrecorded  neither side has one (the bench records nothing there on
+                either image, as the T-Deck's ball_fast rows on the verbs
+                pages): shown, and left out of the surface's verdict
 
 A surface's verdict is its worst row's, a gate's per surface is its worst
 board's. A side with three runs or more whose p90s still spread more than
@@ -128,7 +132,7 @@ DRIFT_MS = 1.0         # the sentinel's median change past this: a fresh baselin
 SENTINEL_ROWS = 3
 STORE_ENV = "MOY_INPUT_GATE_STORE"
 STORE_DEFAULT = os.path.join("~", ".cache", "moybyte", "input_gate")
-RANK = {"pass": 0, "near": 1, "missing": 2, "fail": 3}
+RANK = {"unrecorded": -1, "pass": 0, "near": 1, "missing": 2, "fail": 3}
 
 
 def today():
@@ -474,6 +478,9 @@ def verdict(base, cand, tol=0.0, near=NEAR_MS, noise=NOISE_MS):
     """A row's verdict from each side's per-run p90s (None: no number)."""
     base = [v for v in base if v is not None]
     cand = [v for v in cand if v is not None]
+    if not base and not cand:
+        return {"verdict": "unrecorded", "base": None, "cand": None, "delta": None,
+                "noisy": []}
     if not base or not cand:
         return {"verdict": "missing", "base": _med(base) if base else None,
                 "cand": _med(cand) if cand else None, "delta": None, "noisy": []}
@@ -545,7 +552,7 @@ def groups(rows):
     out = {}
     for r in rows:
         v = r["verdict"]
-        if RANK[v] >= RANK.get(out.get(r["surface"]), -1):
+        if RANK[v] >= RANK.get(out.get(r["surface"]), -2):
             out[r["surface"]] = v
     return out
 

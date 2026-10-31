@@ -1452,6 +1452,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         else:
             root = glass.new_layer(glass.w // n, glass.h // n)
             root.set_font_scale(glass.font_scale)
+            # the meaning of blit_game the tier chose for the glass (a desk's
+            # composite fills no bezel: DeviceCanvas.letterbox_composite)
+            root.letterbox_composite = glass.letterbox_composite
         self._half = None if n == 1 else root
         self.render_scale = n
         if wm is not None and getattr(wm, "_root_canvas", None) is not None:
@@ -3509,6 +3512,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.tab_sel = old.tab_sel
         g.sel = old.sel
         g._scroll_to_sel()
+        old.release_faces()
         self.launcher = g
         self._dirty = True
 

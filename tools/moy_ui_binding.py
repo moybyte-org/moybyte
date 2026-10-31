@@ -139,8 +139,8 @@ class _Span(c.Structure):
 
 
 # moy_ui_api.h's MOY_UI_TXO_LEN and MOY_UI_TXO_DEFAULTS (tests/test_text_view.py pins both).
-_TXO_LEN = 17
-_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1)
+_TXO_LEN = 19
+_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1)
 
 
 _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
@@ -343,6 +343,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_change_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_lag_note", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_lag", [c.c_void_p, _I, _I, _I, _I, c.c_void_p, _I], _I),
     ("moy_ui_api_host_begin", [c.c_void_p, c.c_void_p, _Box, _I, _I, c.c_void_p, c.c_void_p],
@@ -1370,6 +1371,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
 
+    def api_change_box(ctx, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_change_box(p, (c.c_int32 * 8).from_buffer(out)))
+
     def api_lag_note(ctx, hist, bands, f, kind):
         p, _k = _ctx(ctx)
         slots = len(hist) // (2 + 2 * bands)
@@ -1646,7 +1651,7 @@ def binding():
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
               api_shift_plan, api_shift_break,
-              api_shift_drawn, api_band, api_floor, api_floor_box,
+              api_shift_drawn, api_band, api_floor, api_floor_box, api_change_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,
               api_host_whole,
               api_pop_box,

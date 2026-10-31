@@ -8,8 +8,9 @@ buffer holds another selection's.
 
 Each case runs a scripted session twice on one, two and three buffers
 presented in turn, as a board's framebuffers are: once as it ships, and
-once with every band path off (each frame a whole repaint), and holds the
-first's glass, picture by picture, to the second's bytes."""
+once with every band path and the kept faces off (each frame a whole
+repaint drawing every card), and holds the first's glass, picture by
+picture, to the second's bytes."""
 
 import pytest
 
@@ -63,6 +64,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
         monkeypatch.setattr(L, "_try_band_frame", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
+        monkeypatch.setattr(launcher_layer.Launcher, "_faces_for", lambda self, *a: None)
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts, **_TIERS[tier])
     for i in range(n):
@@ -117,7 +119,9 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     for _ in range(40):
         ws._dirty = True
         frame()
-    if not ref:
+    if not ref:                            # the faces an idle second draws
+        for _ in range(4):
+            ws.launcher.warm_faces(10 ** 6)
         # the band's frames, and the desk's still
         for name in ("_try_band_frame", "_try_still_frame"):
             def counted(cv, dt, real=getattr(ws.launcher_layer, name)):
@@ -316,13 +320,55 @@ def test_band_frames_follow_what_the_cards_show(tmp_path, monkeypatch, arrangeme
                                                 bufs):
     """Through a rename, a cover landing, a theme change and the focus
     leaving the cards for the tab row, every picture byte-equal to whole
-    repaints."""
+    repaints that draw every card, the cards out of their kept faces
+    (`launcher_layer._Faces`)."""
+    hits = [0]
+    real = launcher_layer._Faces.find
+
+    def find(self, i, it, cover):
+        j = real(self, i, it, cover)
+        hits[0] += j is not None
+        return j
+    monkeypatch.setattr(launcher_layer._Faces, "find", find)
     ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs,
                         session=_edits)
     assert stats["band"] * 4 > stats["frames"], stats      # (a rescan paints whole)
+    assert ws.launcher.faces_bytes() > 0 and hits[0] > 100, hits
 
 
 @pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])
 @pytest.mark.parametrize("arrangement", ["grid", "icons", "carousel"])
 def test_desk_band_frames_follow_what_the_cards_show(tmp_path, monkeypatch, arrangement, theme):
-    _parity(tmp_path, monkeypatch, "desk", arrangement, theme, 3, session=_edits)
+    ws, _stats = _parity(tmp_path, monkeypatch, "desk", arrangement, theme, 3, session=_edits)
+    assert (ws.launcher.faces_bytes() > 0) == (arrangement != "carousel")
+
+
+def test_kept_faces_are_released(tmp_path, monkeypatch):
+    """The faces' layer is owned: the fit check's release and leaving the
+    arrangement give it back."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "icons", "blocks", 2, False)
+    g = ws.launcher
+    lay = g._faces.lay
+    assert ws.launcher_layer.release_retained()
+    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    assert frame() is not None
+    assert g.faces_bytes() > 0
+    lay = g._faces.lay
+    ws.set_home_arrangement("grid")
+    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_idle_frames_draw_the_next_rows_faces(tmp_path, monkeypatch, arrangement):
+    """On frames nothing waits on the faces of the cells past the band's
+    edge are drawn, so the step that brings them in copies them."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    g = ws.launcher
+    shown = {i for i, _r in g._visible()}
+    for _ in range(12):
+        drv.frame(1 / 30)
+    kept = {k for k, j in g._faces.of.items() if g._faces.item[j] is not None}
+    assert kept - shown, (sorted(shown), sorted(kept))

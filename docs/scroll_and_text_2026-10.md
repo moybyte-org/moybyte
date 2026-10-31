@@ -580,27 +580,38 @@ whole.
 - *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
   verbs page every tick (`ui.bar`, `ui.page`, the hints, the sheet), and
   the handle draws the open note as a view (`ui.text_view("editor<n>",
-  ...)` at the note's rect, placed with `ui.at`) in the monospace face: the
-  note's source as written, a heading's `#`, a `[[link]]` and a `[ ]` box
-  in the text's colour. A tap finds its cell through the view
+  ...)` at the note's rect, placed with `ui.at`) in the monospace face (on
+  the desk its family's 15 px face, the view's `font`): the note's source
+  as written, coloured by the view's `markdown` syntax (its marks dim, a
+  heading, a task's box and a `[[link]]`'s name in the code tones). A tap finds its cell through the view
   (`ui_draw.text_at`); a box's brackets toggle it and a link opens its
   note from that cell (`EditorHandle.tap`). The Player begins the run's
   frame through its app host (`AppHost.run`, the host every shell app's
-  frames begin through), and the page, holding stops `ui.at` placed, is
-  not R: the view is. Before the frame begins the handle aims the view
+  frames begin through). The page carries a gen keyed on what it shows
+  beside the note (the tools' states, the foot's word, the desk's vault),
+  so R is the page, its placed stops lying still, and the view's move is a
+  second move inside it (`sh_in`, `sh_in_dy`), as a table of parts' is;
+  the handle hands the view its paper (`paper`, the sheet's corners), whose
+  bands draw through the frame's pieces. Before the frame begins the handle aims the view
   (`EditorHandle.aim`): a caret moved since its last draw lands the view
   only as far as its visual row needs (`ui_draw.text_reveal`, wrap-aware),
   and a `top` the editor moved lands there. A drag, a fling and the wheel
   scroll the view by pixels and a release coasts; Shift and the wheel,
   and the caret, move the unwrapped view sideways (`left`). So a key step,
   a typed key and a glide are the engine's shift and rows frames inside
-  the view, and the tools, the foot and the desk's vault draw every frame.
+  the page, and the tools, the foot and the desk's vault keep their pixels.
   The frame is whole where the run has no note open, where a declared
   `background` repaints the canvas, where the FPS chip drew over the view
-  (`Player.overdrew`), and from a cart's `cls` on (`moy_ui_api_shift_break`).
+  (`Player.overdrew`; over the page beside it, a frame that moves nothing
+  draws it again), where the pass draws the view outside the page the plan
+  named, and from a cart's `cls` on (`moy_ui_api_shift_break`).
   The cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other
   cart: the document, in that rect, this frame. On the desk the Player's
-  window composites the run's canvas whole each frame it draws.
+  window composites, of the run's canvas, only what the frame changed
+  (`Player.change`, from `moy_ui_api_change_box`: the view's floor and
+  moves) where the page holding the view drew under the gen it drew under
+  the last frame and covers the window (`MOY_UI_KD_HELD`) and the shown
+  ring vouches for the buffer; else the canvas whole.
 - *The Blocks outline and Music's steps* are tables of parts
   (`docs/ui_blocks_2026-10.md` §4.1): each row's cells are its key, the
   engine carries the rows that did not change and `ui.table_part` answers
@@ -746,9 +757,17 @@ band -- a row of cards side by side (`o.axis "x"`, the carousel's with
 `o.snap`) or the icons' rows -- hands it the scroll as `o.offset` and the
 cards' reach past their cells as `o.spill`, and draws each part the engine
 answers through `ui.table_part`, the focused card last. The engine says
-which cards show and where; the cards draw from their covers every frame
-(the kept faces of 2026-10-28, a layer of pre-drawn cards and the
-`moy_gfx.face` copy, were retired with the move). The band frame
+which cards show and where. A grid or icons card that wears no focus is
+drawn out of its KEPT FACE (`launcher_layer._Faces`, built 2026-10-28,
+retired with the move and brought back 2026-10-30 by #243's perf pass,
+the P4s' band frame having gone from a copy a card to a whole draw of
+each): its picture and rim drawn once, on an idle frame, into a slot of
+one owned layer, keyed on the item, its title, the cover object and the
+look's gen, and copied in one `moy_gfx.face` call, which over anything but
+the plain ground draws the pixels a corner covers in part as the card
+draws them, because they blend over what lies there. The layer goes back
+with `release_retained` and when the arrangement is left; the carousel's
+cards draw. The band frame
 (`launcher_layer._band_frame`, through `_try_band_frame`) runs on a drag,
 a fling and, on the fullscreen home, a key, repeat or ball step too: the
 backdrop goes back under the whole band in one copy (`fill`: the
@@ -780,10 +799,16 @@ its corners and drop), so what the body does not show of the sheet draws
 nowhere. While the pickers are up the page under them changes only by what
 their pass does to it (the size, a picked sprite), so it is a modal's page,
 held under one key (the sprite, its size, the sheet's gen, the look, the
-input's kind) by `ui_draw.Hold`: on a canvas that keeps its pixels a frame
-puts it back as it was held and draws the pickers over it. On the desk the
-pane draws through a viewport, which holds nothing, and the frame is the
-Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the pickers are up). The
+input's kind, the card's place) by `ui_draw.Hold`: on a canvas that keeps
+its pixels a frame puts it back as it was held and draws the pickers over
+it. Where the buffer a frame paints holds the page and the card as the
+frames before drew them under that key (`HOLD_LEFT`: each of the
+RETAINED_FRAMES painted frames before it, alone on the glass; in a window,
+the WM's word, `window_frame` 2 and up), the pickers draw inside the card's
+band alone, the card's corners and drop left as they lie, and say so
+(`ui_draw.drew_within`). On the desk the pane draws through a viewport, and
+the frame is the Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the
+pickers are up), which names that band as what it changed. The
 release of a press the engine may still activate (`AppHost.tap_armed`: no
 page's drag) draws the desk whole, since a pick changes the Sheet pane
 beside the pickers. A tapped tile is read from the sheet's part
@@ -1075,7 +1100,7 @@ each.** On the P4: the Code tab's and theme Config's find past the view
 and glyph cost, a kernel question, not a scroll one); the home's grid and
 icons on `bd` and picture themes (~30-55) and the carousel's key rows
 (~35-45, the settle frame's hero and details pane; the lever was the
-cards' kept faces, built 2026-10-28 and retired 2026-10-30, §9, and what the carousel's step
+grid's and icons' kept faces, §9, and what the carousel's step
 frame keeps over the target is its hero, its details pane and its band
 drawn in one frame -- #66 has the rows);
 Notes if the cart floor does not hold (~35-45; the lever is then the

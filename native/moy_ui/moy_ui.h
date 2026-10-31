@@ -545,6 +545,9 @@ int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int
 // gap's position the drag takes it to: its x across, else its y).
 int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, int hl, int held,
                    int at, int line);
+// A text view's paper: `b` filled in palette colour `ci`, its corners of
+// radius `r`, anti-aliased (the canvas's rrect), through the clip the row holds.
+void moy_ui_paper(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int ci);
 // Fill the parts of `in` that `out` does not cover.
 int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out, int ci);
 // A scrolling list: `count` rows of `items` (NUL-separated UTF-8 in `len`

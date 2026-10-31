@@ -41,8 +41,11 @@ handle alike, and reports whether it spent the pulses.
 **The document draws as a text view** (`ui.text_view`, the Code tab's): the
 monospace source, wrapped where the mode wraps prose, coloured by the C's
 highlight where it is a program or data. A Markdown note shows its source
-as typed; its checkboxes and `[[links]]` answer a tap, read off the line
-under it (`tap`). The view keeps its own scroll, its fling and glide, and
+as typed, coloured as Code colours a program (`syntax` "markdown": its
+marks dim, a heading's words, a task's box and a link's name in their
+tones), on the desk in the mono family's 15 px face (`Appearance.note_font`);
+its checkboxes and `[[links]]` answer a tap, read off the line under it
+(`tap`). The view keeps its own scroll, its fling and glide, and
 the record of the rows it drew, so a frame draws the rows that changed.
 """
 
@@ -89,6 +92,7 @@ _BURST_BREAK = ".,!?;:"   # a typing burst closes here (#111 phase 3)
 # (`ui.text_options`), and the text's inset from its left (moy_ui_api.c's
 # TEXT_PAD) at the scale.
 _TXO_CARET, _TXO_SEL, _TXO_LEFT, _TXO_GEN = _ui.TXO_CARET, _ui.TXO_SEL, _ui.TXO_LEFT, _ui.TXO_GEN
+_TXO_FONT, _TXO_PAPER = _ui.TXO_FONT, _ui.TXO_PAPER
 _TEXT_PAD = 8
 _VIEWS = [0]           # the handles made: each view's id is its own
 
@@ -174,10 +178,13 @@ class EditorHandle:
         syn = "plain"
         if self._mode == _modes.JSON:
             syn = "json"
+        elif self._mode == _modes.MD:
+            syn = "markdown"
         elif self._m.lang:
             syn = _modes.lang_for(self._name) or self._m.lang
         self._opt = _ui.text_options({"wrap": self._m.wrap, "syntax": syn})
         self._into = _array("i", [0, 0])
+        self._fm = [None, 0, 8, 10]  # look_gen, the view's font (0: mono's), its cell, line
         self._vr = [0, 0, 0, 0]
         self._top = -1
         self._left = 0
@@ -472,7 +479,7 @@ class EditorHandle:
     def draw(self, x, y, w, h, scale=1, r=0):
         """Render the document into `(x, y, w, h)` of the cart's canvas, on
         its paper (corners of radius `r`): one `ui.text_view` in the
-        monospace face, wrapped where the mode wraps prose, coloured where
+        monospace face (`_face`), wrapped where the mode wraps prose, coloured where
         the mode is a program's or data's. `scale` is the canvas's font
         scale's, which the view takes itself.
 
@@ -516,27 +523,22 @@ class EditorHandle:
         self._view_in(host, cv, th, x, y, w, h, r)
 
     def _view_in(self, host, cv, th, x, y, w, h, r):
-        """The paper and the view on it, in `host`'s pass: the paper's
-        bands above and under the view, as tall as the text's inset from
-        its sides (or its round corners, where taller), which they leave
-        whole (a shift frame moves the view's rows alone)."""
+        """The view on its paper (corners `r`), in `host`'s pass: the
+        view's `paper`, whose bands above and under its rows draw where the
+        frame's pieces reach them (a shift frame moves the rows alone).
+        `_vr` is the rows' rect: the paper less its bands, as tall as the
+        text's inset from its sides or its corners' radius, where taller."""
         self._vh = host
         s = getattr(cv, "font_scale", 1) or 1
         band = r if r > _TEXT_PAD * s else _TEXT_PAD * s
-        if 2 * band < h:
-            bg = th["surface"]
-            cv.clip(x, y, w, band)
-            cv.rrect(x, y, w, h, r, bg)
-            cv.clip(x, y + h - band, w, band)
-            cv.rrect(x, y, w, h, r, bg)
-            cv.clip()
-            y += band
-            h -= 2 * band
         v = self._vr
         v[0] = x
         v[1] = y
         v[2] = w
         v[3] = h
+        if 2 * band < h:
+            v[1] = y + band
+            v[3] = h - 2 * band
         ed = self.ed
         o = self._opt
         o[_TXO_CARET] = ed.row
@@ -555,6 +557,8 @@ class EditorHandle:
             ed.left = 0                 # wrapped prose never scrolls sideways
         o[_TXO_LEFT] = ed.left
         o[_TXO_GEN] = ed.edits + 1
+        o[_TXO_FONT] = self._face()[1]
+        o[_TXO_PAPER] = r
         if ed.left != self._left:
             # the columns scrolled across: every row changes
             self._left = ed.left
@@ -574,11 +578,11 @@ class EditorHandle:
 
     def _cols(self, cv, w):
         """The columns a row of the view shows (`ui.text_view`'s count:
-        the mono face's cell at the canvas's scale, the text's inset from
+        its face's cell at the canvas's scale (`_face`), the text's inset from
         the view's left and, wrapped, from its right): where a line that
         does not wrap pans sideways to keep the caret (`CodeEditor`)."""
         s = getattr(cv, "font_scale", 1) or 1
-        cell = _ui_draw.font("mono")[1] * s
+        cell = self._fm[2] * s
         pad = _TEXT_PAD * s * (2 if self._m.wrap else 1)
         return max(1, (w - pad) // max(1, cell))
 
@@ -726,9 +730,34 @@ class EditorHandle:
     def _lh(self):
         """A row's pitch as the view last drew: what an autoscroll's speed
         counts in."""
-        fid, _cell, line, _asc = _ui_draw.font("mono")
+        m = self._face()
         s = getattr(self._canvas, "font_scale", 1) or 1
-        return line * s if fid else 10 * s
+        return m[3] * s
+
+    def _face(self):
+        """`[look_gen, font, cell, line]`: the font the view draws in
+        (`ui.text_view`'s `font`: the look's `note_font`, the desk's 15 px
+        face; 0 the `mono` role's) and its cell and line, unscaled (a
+        petme128 line 10, the view's pitch); asked of the look once a look
+        generation."""
+        m = self._fm
+        look = getattr(self._host, "look", None)
+        gen = getattr(look, "look_gen", None)
+        if gen is None or m[0] != gen:
+            m[0] = gen
+            fid = look.note_font() if gen is not None else 0
+            info = _ui_draw.font_info(fid) if fid else None
+            if info is None:
+                fid = 0
+                mono, cell, line, _asc = _ui_draw.font("mono")
+                if not mono:
+                    line = 10
+            else:
+                cell, line = info[0], info[2]
+            m[1] = fid
+            m[2] = cell
+            m[3] = line
+        return m
 
     def autoscrolling(self):
         """Whether a middle-button autoscroll runs, and where its anchor is."""
