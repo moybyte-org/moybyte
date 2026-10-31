@@ -1,6 +1,7 @@
 """tools/input_gate.py: the input gate's verdicts, its like-for-like column,
-its baseline store and sentinel, and one board's gate played against saved
-bench rows with the flash and the bench faked.
+its baseline store, reuse and sentinel, the build of a stale image, and the
+gate played against saved bench rows on boards at once, with the build, the
+flash and the bench faked.
 
 The fixtures are four T-Deck runs cut from a real gate (dev against a
 candidate, two runs each): six rows, the Text console's and Code fling's
@@ -10,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import types
 
 import pytest
@@ -248,12 +250,17 @@ def test_compare_prints_the_table_and_writes_the_verdicts(tmp_path, capsys):
 # -- one board's gate, the flash and the bench faked ---------------------------------
 
 class _Img:
+    # worktrees whose images are older than their HEAD, until a build
+    stale_wts = set()
+
     def __init__(self, label, wt, board, need=True):
         self.label, self.wt, self.board = label, wt, board
         self.commit = "c0ffee" * 7 if label == "dev" else "beef" * 10
         self.key = self.commit[:12]
         self.sha256 = "0" * 64
         self.warnings = []
+        self.stale = ("%s's %s image is older than its HEAD" % (label, board)
+                      if wt in self.stale_wts else None)
 
     def meta(self):
         return {"label": self.label, "commit": self.commit, "key": self.key}
@@ -273,7 +280,7 @@ def fake(monkeypatch):
         label = "ui1" if name.startswith("ui1") else "dev"
         i = state["n"].get(label, 0)
         state["n"][label] = i + 1
-        src = g.load_run(os.path.join(FIX, "%s_tdeck_%d" % (label, i % 2 + 1)), board)
+        src = g.load_run(os.path.join(FIX, "%s_tdeck_%d" % (label, i % 2 + 1)), "tdeck")
         want = set(sel.planned(board, False))
         rows = []
         for k, r in src.items():
@@ -286,17 +293,28 @@ def fake(monkeypatch):
             json.dump(rows, f)
         return 0
 
+    builds = []
+
+    def build(wt, boards, log):
+        builds.append((wt, list(boards)))
+        if not state.get("build_fails"):
+            _Img.stale_wts.discard(wt)
+        return 1 if state.get("build_fails") else 0
+
+    _Img.stale_wts = set()
     monkeypatch.setattr(g, "Image", _Img)
     monkeypatch.setattr(g, "flash", flash)
     monkeypatch.setattr(g, "bench", bench)
+    monkeypatch.setattr(g, "build", build)
     monkeypatch.setattr(g, "say", lambda b, m: None)
-    return types.SimpleNamespace(calls=calls, state=state)
+    return types.SimpleNamespace(calls=calls, state=state, builds=builds)
 
 
 def _ctx(tmp_path, out, **kw):
     a = dict(store=str(tmp_path / "store"), only="Code,Theme Config text,Text console",
              inputs="", rows="", bench=ROOT, dev="/wt/dev", cand="/wt/ui1", cand_label=None,
-             out=str(tmp_path / out), runs=2, fresh_baseline=False, no_third=False,
+             out=str(tmp_path / out), runs=2, fresh_dev=False, sentinel=False, no_build=False,
+             no_third=False,
              drift=g.DRIFT_MS, sentinel_rows="", tol=0.0, near=g.NEAR_MS, noise=g.NOISE_MS)
     a.update(kw)
     return g.Ctx(types.SimpleNamespace(**a))
@@ -319,10 +337,20 @@ def test_a_first_gate_alternates_dev_and_the_candidate_then_reruns_the_near_rows
     assert len(st.runs("c0ffeec0ffee", "tdeck", g.today())) == 3
 
 
-def test_a_later_gate_the_same_day_reuses_the_baseline_after_a_sentinel(tmp_path, fake):
+def test_a_later_gate_reuses_the_stored_baseline_and_benches_only_the_candidate(
+        tmp_path, fake):
     g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
     del fake.calls[:]
     res = g.gate_board(_ctx(tmp_path, "r2", no_third=True), "tdeck")
+    assert fake.calls == ["ui1_tdeck_1", "ui1_tdeck_2"]
+    assert any("2 stored runs of %s, reused" % g.today() in h for h in res["head"])
+    assert len(res["rows"][0]["base_runs"]) == 2
+
+
+def test_a_gate_asked_for_the_sentinel_checks_a_reused_baseline_first(tmp_path, fake):
+    g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
+    del fake.calls[:]
+    res = g.gate_board(_ctx(tmp_path, "r2", no_third=True, sentinel=True), "tdeck")
     assert fake.calls == ["sentinel_tdeck_1", "ui1_tdeck_1", "ui1_tdeck_2"]
     sent = g.read_meta(str(tmp_path / "r2" / "sentinel_tdeck_1"))["requested"]
     assert sent == g.read_meta(str(tmp_path / "r2" / "ui1_tdeck_1"))["requested"]
@@ -334,12 +362,12 @@ def test_a_drifted_sentinel_stops_the_gate_and_asks_for_a_fresh_baseline(tmp_pat
     g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
     fake.state["slow"] = 3.0
     del fake.calls[:]
-    with pytest.raises(g.StepFailed, match="--fresh-baseline"):
-        g.gate_board(_ctx(tmp_path, "r2", no_third=True), "tdeck")
+    with pytest.raises(g.StepFailed, match="--fresh-dev"):
+        g.gate_board(_ctx(tmp_path, "r2", no_third=True, sentinel=True), "tdeck")
     assert fake.calls == ["sentinel_tdeck_1"]
-    # a fresh baseline retires the stored runs and benches dev again, alternating
+    # --fresh-dev retires the stored runs and benches dev again, alternating
     del fake.calls[:]
-    g.gate_board(_ctx(tmp_path, "r3", no_third=True, fresh_baseline=True), "tdeck")
+    g.gate_board(_ctx(tmp_path, "r3", no_third=True, fresh_dev=True), "tdeck")
     assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2"]
 
 
@@ -347,8 +375,7 @@ def test_a_gate_asking_for_rows_the_baseline_lacks_benches_dev_in_sequence(tmp_p
     g.gate_board(_ctx(tmp_path, "r1", no_third=True, only="Theme Config text"), "tdeck")
     del fake.calls[:]
     g.gate_board(_ctx(tmp_path, "r2", no_third=True, only="Theme Config text,Code"), "tdeck")
-    assert fake.calls == ["sentinel_tdeck_1", "dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2",
-                          "ui1_tdeck_2"]
+    assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2"]
     meta = g.read_meta(str(tmp_path / "r2" / "dev_tdeck_1"))
     assert {s for s, _ in map(tuple, meta["requested"])} == {"Code", "Code find",
                                                               "Code long line",
@@ -374,3 +401,121 @@ def test_a_row_neither_side_recorded_leaves_its_surface_to_the_rest():
             {"surface": "Files", "input": "ball_fast", "verdict": "unrecorded"},
             {"surface": "Calc", "input": "ball_fast", "verdict": "unrecorded"}]
     assert g.groups(rows) == {"Files": "pass", "Calc": "unrecorded"}
+
+
+# -- reuse across days, a stale image, boards at once ----------------------------------
+
+EARLIER = "2026-10-30"
+
+
+def _age_store(tmp_path, day=EARLIER):
+    """Today's stored runs become an earlier day's."""
+    base = tmp_path / "store" / ("c0ffee" * 7)[:12] / "tdeck"
+    os.rename(str(base / g.today()), str(base / day))
+
+
+def test_a_gate_reuses_an_earlier_days_baseline_and_says_which(tmp_path, fake):
+    g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
+    _age_store(tmp_path)
+    del fake.calls[:]
+    res = g.gate_board(_ctx(tmp_path, "r2"), "tdeck")
+    # the third run benches the candidate alone: an earlier day is not topped up
+    assert fake.calls == ["ui1_tdeck_1", "ui1_tdeck_2", "ui1_tdeck_3"]
+    assert any("2 stored runs of %s, reused" % EARLIER in h for h in res["head"])
+    assert any("keeps its %s runs" % EARLIER in h for h in res["head"])
+    st = g.Store(str(tmp_path / "store"))
+    assert st.dates("c0ffeec0ffee", "tdeck") == [EARLIER]
+    assert st.keys("tdeck") == ["c0ffeec0ffee"] and st.keys("tdeck", g.today()) == []
+
+
+def test_a_day_with_too_few_runs_falls_back_to_one_that_has_them(tmp_path, fake):
+    g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
+    _age_store(tmp_path)
+    g.gate_board(_ctx(tmp_path, "r2", no_third=True, runs=1, fresh_dev=True), "tdeck")
+    st = g.Store(str(tmp_path / "store"))
+    assert st.dates("c0ffeec0ffee", "tdeck") == [g.today(), EARLIER]
+    sel = g.Sel("Code,Theme Config text,Text console")
+    assert g.pick_baseline(st, "c0ffeec0ffee", "tdeck", sel, 1)[0] == g.today()
+    assert g.pick_baseline(st, "c0ffeec0ffee", "tdeck", sel, 2)[0] == EARLIER
+    assert g.pick_baseline(st, "c0ffeec0ffee", "tdeck", sel, 3) is None
+    del fake.calls[:]
+    g.gate_board(_ctx(tmp_path, "r3", no_third=True, runs=3), "tdeck")
+    assert fake.calls == ["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2", "ui1_tdeck_2",
+                          "dev_tdeck_3", "ui1_tdeck_3"]
+
+
+def test_a_stored_run_whose_row_is_invalid_does_not_count_for_it(tmp_path, fake):
+    g.gate_board(_ctx(tmp_path, "r1", no_third=True), "tdeck")
+    st = g.Store(str(tmp_path / "store"))
+    run = st.runs("c0ffeec0ffee", "tdeck", g.today())[0]
+    path = os.path.join(run, "tdeck_input.json")
+    with open(path) as f:
+        rows = json.load(f)
+    for r in rows:
+        if (r["surface"], r["input"]) == ("Code", "fling"):
+            n = len(ib.FIELDS)
+            k = ib.FIELDS.index("probe")
+            r["raw"] = [g.ABSENT if i % n == k else v for i, v in enumerate(r["raw"])]
+    with open(path, "w") as f:
+        json.dump(rows, f)
+    cov = g.coverage(st.runs("c0ffeec0ffee", "tdeck", g.today()), "tdeck")
+    assert cov[("Code", "fling")] == 1 and cov[("Code", "type")] == 2
+    del fake.calls[:]
+    g.gate_board(_ctx(tmp_path, "r2", no_third=True), "tdeck")
+    assert fake.calls[0] == "dev_tdeck_1"            # too few valid runs: dev is benched
+    # with one run asked for, the reused baseline leaves the invalid run's row out
+    res = g.gate_board(_ctx(tmp_path, "r3", no_third=True, runs=1), "tdeck")
+    row = next(r for r in res["rows"] if (r["surface"], r["input"]) == ("Code", "fling"))
+    assert row["verdict"] != "invalid"
+
+
+def test_a_stale_image_is_built_once_per_worktree_before_any_board_is_flashed(
+        tmp_path, fake, capsys):
+    _Img.stale_wts = {"/wt/ui1"}
+    rc = g.main(["gate", "--board", "tdeck,guition_s3", "--dev", "/wt/dev", "--cand", "/wt/ui1",
+                 "--only", "Code", "--store", str(tmp_path / "store"),
+                 "--out", str(tmp_path / "r1"), "--no-third"])
+    assert fake.builds == [("/wt/ui1", ["tdeck", "guition_s3"])]
+    assert rc in (0, 1) and "stopped" not in capsys.readouterr().out
+
+
+def test_a_failed_build_or_no_build_stops_that_board_and_says_why(tmp_path, fake, capsys):
+    _Img.stale_wts = {"/wt/ui1"}
+    fake.state["build_fails"] = True
+    rc = g.main(["gate", "--board", "tdeck", "--dev", "/wt/dev", "--cand", "/wt/ui1",
+                 "--only", "Code", "--store", str(tmp_path / "store"),
+                 "--out", str(tmp_path / "r1")])
+    out = capsys.readouterr().out
+    assert rc == 3 and "tdeck: stopped -- the build in /wt/ui1 left" in out
+    assert fake.calls == []
+    del fake.builds[:]
+    rc = g.main(["gate", "--board", "tdeck", "--dev", "/wt/dev", "--cand", "/wt/ui1",
+                 "--only", "Code", "--store", str(tmp_path / "store"),
+                 "--out", str(tmp_path / "r2"), "--no-build"])
+    out = capsys.readouterr().out
+    assert rc == 3 and fake.builds == [] and "--no-build: build it first" in out
+    # and the flash itself refuses a stale image
+    img = _Img("ui1", "/wt/ui1", "tdeck")
+    with pytest.raises(g.StepFailed, match="not measured"):
+        g.run_one("tdeck", img, str(tmp_path / "r3"), g.Sel("Code"), ROOT)
+    assert fake.calls == []
+
+
+def test_the_boards_run_at_once_and_print_in_the_order_named(tmp_path, fake, capsys):
+    both = threading.Barrier(2, timeout=5)
+
+    def at_once(b):
+        both.wait()                     # each board waits for the other: they overlap
+        return b
+
+    assert list(g.parallel(["tdeck", "guition_s3"], at_once).items()) == [
+        ("tdeck", "tdeck"), ("guition_s3", "guition_s3")]
+    rc = g.main(["gate", "--board", "guition_s3,tdeck", "--dev", "/wt/dev", "--cand", "/wt/ui1",
+                 "--only", "Code", "--store", str(tmp_path / "store"),
+                 "--out", str(tmp_path / "r1"), "--no-third"])
+    out = capsys.readouterr().out
+    assert rc in (0, 1)
+    assert out.index("guition_s3") < out.index("\ntdeck")
+    assert sorted(fake.calls) == sorted(["dev_tdeck_1", "ui1_tdeck_1", "dev_tdeck_2",
+                                         "ui1_tdeck_2", "dev_guition_s3_1", "ui1_guition_s3_1",
+                                         "dev_guition_s3_2", "ui1_guition_s3_2"])
