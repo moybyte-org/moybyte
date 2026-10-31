@@ -550,10 +550,14 @@ class DeviceCanvas:
     # board, a console's own where a process runs several.
     _owners = _OWNERS
     # What `shift_last` costs against the raster it saves: per mille of a
-    # row's raster each row it copies costs, so a shift frame whose floor
-    # leaves less than that much of R undrawn draws whole instead
-    # (`ui_draw._pays`). None where nobody measured it: it shifts.
+    # row's raster each row it copies costs, so a frame whose move leaves
+    # less than that much of R undrawn draws whole instead, and a text view
+    # moving inside a still page draws its rows instead (`host_pays`,
+    # `view_pays` in native/moy_ui/moy_ui_api.c). None where nobody measured
+    # it: it shifts. LAYER_SHIFT_COST: the same for this board's layers,
+    # whose shift is an in-place copy (`new_layer`).
     SHIFT_COST = None
+    LAYER_SHIFT_COST = None
     # The clears this canvas took (`cls`): an editor handle's rows read it
     # beside the gate counters, since a clear is no gated verb.
     clears = 0
@@ -2553,6 +2557,7 @@ class DeviceCanvas:
         own = 0 if owner is None else _owner_h(owner, self._owners)
         lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx, own))
         lay._owners = self._owners
+        lay.SHIFT_COST = self.LAYER_SHIFT_COST
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must

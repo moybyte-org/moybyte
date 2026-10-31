@@ -39,6 +39,10 @@ candidate's p90 may not exceed dev's).
            re-run, and one still near after it does not hold
     fail   more than 1 ms over it
     missing     one side has no number for the row
+    invalid     a run on either side whose probe read -1 on every painted
+                frame: the surface the bench drives was not up (its setup
+                did not open it), so its number times something else; no
+                verdict, and its surface does not pass
     unrecorded  neither side has one (the bench records nothing there on
                 either image, as the T-Deck's ball_fast rows on the verbs
                 pages): shown, and left out of the surface's verdict
@@ -132,7 +136,11 @@ DRIFT_MS = 1.0         # the sentinel's median change past this: a fresh baselin
 SENTINEL_ROWS = 3
 STORE_ENV = "MOY_INPUT_GATE_STORE"
 STORE_DEFAULT = os.path.join("~", ".cache", "moybyte", "input_gate")
-RANK = {"unrecorded": -1, "pass": 0, "near": 1, "missing": 2, "fail": 3}
+RANK = {"unrecorded": -1, "pass": 0, "near": 1, "missing": 2, "invalid": 2, "fail": 3}
+
+# What a probe reads where the surface it reads is not up (the Notes probe
+# with no note open).
+ABSENT = -1
 
 
 def today():
@@ -507,6 +515,16 @@ def probed(row):
     return any(raw[i * n + k] != ib.NONE_PROBE for i in range(len(raw) // n))
 
 
+def absent(row):
+    """Whether the row's probe read ABSENT on every painted frame: the
+    surface the bench drove was not up."""
+    raw = (row or {}).get("raw")
+    if not raw:
+        return False
+    k, n = ib.FIELDS.index("probe"), len(ib.FIELDS)
+    return all(raw[i * n + k] == ABSENT for i in range(len(raw) // n))
+
+
 def lfl_p90(row):
     """The row's gate p90 with its frames re-classed as if no probe read:
     after a release every painted frame coasts, after a step only the first
@@ -537,6 +555,11 @@ def compare(base_runs, cand_runs, tol=0.0, near=NEAR_MS, noise=NOISE_MS, keys=No
         row = {"surface": key[0], "input": key[1],
                "base_runs": [value(r) for r in b_rows], "cand_runs": [value(r) for r in c_rows]}
         row.update(verdict(row["base_runs"], row["cand_runs"], tol, near, noise))
+        gone = [side for side, rows in (("base", b_rows), ("cand", c_rows))
+                if any(absent(r) for r in rows)]
+        if gone:
+            row["absent"] = gone
+            row["verdict"] = "invalid"
         bp = [p for p in map(probed, b_rows) if p is not None]
         cp = [p for p in map(probed, c_rows) if p is not None]
         if bp and cp and any(bp) != any(cp):
@@ -595,6 +618,10 @@ def render(board, rows, base_label, cand_label, tol=0.0, head=None):
         if r.get("unstable"):
             note.append("unstable: " + ", ".join(base_label if s == "base" else cand_label
                                                  for s in r["unstable"]))
+        if r.get("absent"):
+            note.append("probe reads %d throughout on %s: the surface was not up" % (
+                ABSENT, ", ".join(base_label if s == "base" else cand_label
+                                  for s in r["absent"])))
         if "probe" in r:
             lf = r["lfl"]
             note.append("probe reads on %s only; like-for-like %s -> %s (%s %s)" % (

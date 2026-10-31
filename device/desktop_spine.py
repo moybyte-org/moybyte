@@ -316,6 +316,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # The fixed GAME canvas (#39): off-screen RGB565 over the same native
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
+        game.SHIFT_COST = sys_canvas.LAYER_SHIFT_COST     # it shifts in place, as a layer
     _census("splash")
     touch, pointer = wire_input.wire_pointer(inp, inputs, sys_canvas.w,
                                              sys_canvas.h)
@@ -350,7 +351,9 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         if gfx is None:
             return None
         own = 0 if owner is None else _owner_h(owner)
-        return DeviceCanvas(_LayerComp(int(w), int(h), gfx, own))
+        cv = DeviceCanvas(_LayerComp(int(w), int(h), gfx, own))
+        cv.SHIFT_COST = sys_canvas.LAYER_SHIFT_COST       # it shifts in place, as a layer
+        return cv
 
     ws.make_game_canvas = _mk_game_canvas
     # The runtime probe's lines go to the boot's own sink unless the board has
