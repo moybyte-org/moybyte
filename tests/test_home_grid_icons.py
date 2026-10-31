@@ -50,9 +50,13 @@ def _press(drv, name, frames=2):
 
 
 def _full_frame(ws, drv):
-    ws.launcher_layer._lib_key = None
+    """A whole paint of the home: no retained frame to stamp, no band frame."""
+    home = ws.launcher_layer
+    home._lib_key = None
+    home._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.frame(1 / 30)
+    del home._try_band_frame
 
 
 def test_a_layouts_home_picks_the_arrangement(tmp_path):
@@ -231,9 +235,9 @@ def test_a_drag_frame_equals_a_full_paint(tmp_path, arrangement, dx, dy):
     calls = [0]
     real = g.band_pass
 
-    def spy(*a):
+    def spy(*a, **k):
         calls[0] += 1
-        return real(*a)
+        return real(*a, **k)
 
     g.band_pass = spy
     b = g.band_rect()
@@ -247,11 +251,11 @@ def test_a_drag_frame_equals_a_full_paint(tmp_path, arrangement, dx, dy):
     assert g.dragging and g.scroll > 0 and calls[0] > 0
     partial = bytes(ws.sys_canvas._buf)
     scroll = g.scroll
-    ws.launcher_layer._full_streak = 0
-    g._region.invalidate()
+    ws.launcher_layer._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.touch_drag(x, y)
     drv.frame(1 / 30)
+    del ws.launcher_layer._try_band_frame
     assert g.scroll == scroll
     full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * 2 * ws.layout.cy
