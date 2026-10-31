@@ -157,6 +157,7 @@ class EditorHandle:
         self.history = History(self.ed, TextEditCodec())
         self.history.seed(files.history_ops(kind, self._name)[0] or [])
         self._burst = None           # text() at the live typing burst's start
+        self._moved = [None, -1, False]   # can_undo's: the burst, the edit it read, its answer
         self._badge = ""             # the gate's refusal, "" when clean
         self._unsaved = False
         self._edit_ms = None         # when the idle autosave window opened
@@ -338,9 +339,20 @@ class EditorHandle:
     def can_undo(self):
         # A still-open burst is undoable too: undo() closes it first, so the
         # skin's dimmed/lit UNDO has to agree with what a press actually does.
+        # The burst's text against the document's is read once an edit
+        # (`ed.edits`), not every painted frame that asks.
         if self.history.can_undo():
             return True
-        return self._burst is not None and self.ed.text() != self._burst
+        b = self._burst
+        if b is None:
+            return False
+        m = self._moved
+        e = self.ed.edits
+        if m[0] is not b or m[1] != e:
+            m[0] = b
+            m[1] = e
+            m[2] = self.ed.text() != b
+        return m[2]
 
     def can_redo(self):
         return self.history.can_redo()
