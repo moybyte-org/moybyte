@@ -325,23 +325,23 @@ def _settings_session(p):
 @pytest.mark.parametrize("cost", (None, 700, 1000))
 def test_a_canvas_whose_copy_costs_the_raster_draws_whole(tmp_path, cost):
     """A canvas declares what its `shift_last` costs against the raster it
-    saves (`SHIFT_COST`, the T-Deck's CPU copy beside the feeder): a frame
-    whose floor leaves too little of R undrawn to pay for the copy draws
-    whole, and every frame is still a whole repaint's bytes."""
+    saves (`SHIFT_COST`): a frame whose move leaves too little of R undrawn
+    to pay for the copy draws whole, a rows frame (which moves nothing)
+    draws its rows whatever the copy costs, and every frame is still a whole
+    repaint's bytes."""
     p = Pair(tmp_path / str(cost), "settings", 2)
     p.a.sys_canvas.SHIFT_COST = cost
     share = _settings_session(p)
+    assert share > 0
     if cost == 1000:
-        assert share == 0
-    else:
-        assert share > 0
+        assert "shift" not in p.kinds and "rows" in p.kinds, p.kinds
     if cost == 700:
         q = Pair(tmp_path / "free", "settings", 2)
         assert share < _settings_session(q)
 
 
 def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_path):
-    """A picture's rows cost more to draw than any copy (`ui_draw._pays`):
+    """A picture's rows cost more to draw than any copy (`host_pays`):
     My Art's drawings, dragged on a canvas whose copy costs a whole row's
     raster, still shift where the floor leaves a picture undrawn."""
     p = Pair(tmp_path, "myart", 2)
@@ -432,6 +432,27 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
         p.frame()
         p.frame(idle=True)
     assert p.kinds[1:] and set(p.kinds[1:]) == {"rows"}, p.kinds
+
+
+@pytest.mark.parametrize("cost", (None, 900))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_note_whose_view_costs_more_to_copy_than_draw_draws_its_rows(tmp_path, bufs, cost):
+    """Key steps past the foot of Notes' text view move the view inside its
+    page a row a step. Where the canvas's copy costs less than the view's
+    rows to draw (`SHIFT_COST` None: unknown) each such step is a shift
+    frame; where it costs about as much (a P4 window's in-place copy, 900)
+    the page holds still and the view's rows draw, every one -- and every
+    frame is a whole repaint's bytes."""
+    p = Pair(tmp_path, "notes", bufs)
+    p.a.sys_canvas.SHIFT_COST = cost
+    del p.kinds[:]
+    p.keys("down", 30)
+    p.settle(5)
+    moved = p.kinds[12:60]
+    if cost is None:
+        assert moved.count("shift") >= 20, p.kinds
+    else:
+        assert set(moved) == {"rows"}, p.kinds
 
 
 def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):

@@ -1099,9 +1099,12 @@ layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
 place on one buffer (`device/device_canvas.py`, the compositors in
 `native/moy_glass`). A canvas whose copy costs about what the raster it
 saves does declares it (`SHIFT_COST`, per mille of a row's raster a row it
-copies costs: the T-Deck's root), and a frame whose floor leaves too
-little of R undrawn to pay for the copy draws whole (`ui_draw._pays`);
-None, unmeasured, shifts.
+copies costs; a board's layers take its `LAYER_SHIFT_COST`: the P4s' window
+layers, copied in place through PSRAM, 900). A frame whose move leaves too
+little of R undrawn to pay for the copy draws whole, and a text view moving
+inside a still R whose copy costs more than its rows draws its rows instead
+(`host_pays`, `view_pays` in `native/moy_ui/moy_ui_api.c`); a rows frame
+moves nothing and pays. None, unmeasured, shifts.
 
 **One voucher per region.** Who says frame n-1 painted R whole: under the
 windowed WM the shown ring (`_shown`) for a window's content, never the

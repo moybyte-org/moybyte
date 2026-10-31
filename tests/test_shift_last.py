@@ -555,3 +555,25 @@ def test_the_boards_c_binding_runs_the_same_scenarios(tmp_path):
     host = _host_results()
     assert [r[:-1] for r in got if not r[0].startswith("banded")] == [r[:-1] for r in host]
     assert any(r[0].startswith("banded3") for r in got)
+
+
+def test_a_p4_window_layer_declares_its_in_place_copy_and_its_root_does_not():
+    """A layer shifts in place, a CPU copy through its board's memory: it
+    takes its board's `LAYER_SHIFT_COST` (the P4s': 900, about what the rows
+    it saves cost to draw), while the root's compositor copy stays
+    unmeasured (None); a board that measured nothing leaves its layers None
+    too."""
+    import importlib.util as ilu
+    from runtime import host_canvas
+    host_canvas.install()
+    spec = ilu.spec_from_file_location(
+        "p4_canvas_cost", Path(__file__).resolve().parent.parent / "device" / "p4_canvas.py")
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cv = mod.P4SystemCanvas(host_canvas.HostCompositor(320, 200), font_scale=1)
+    assert cv.SHIFT_COST is None
+    lay = cv.new_layer(64, 32)
+    assert lay.SHIFT_COST == 900 and lay.new_layer(8, 8).SHIFT_COST == 900
+    plain = host_canvas.HostCompositor(320, 200)
+    from device.device_canvas import DeviceCanvas
+    assert DeviceCanvas(plain).new_layer(8, 8).SHIFT_COST is None

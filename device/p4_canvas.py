@@ -66,6 +66,12 @@ class P4SystemCanvas(SystemCanvas):
     # _ppa: the one system canvas and its layers share the mode.
     _smooth = True
 
+    # A layer (a window's buffer, a run's canvas) shifts in place: a CPU copy
+    # through PSRAM that costs about what drawing the rows it saves does,
+    # measured as a text view's move inside a Notes window against drawing
+    # its rows. The root's 2D-DMA copy is unmeasured and shifts.
+    LAYER_SHIFT_COST = 900
+
     @classmethod
     def enable_ppa(cls):
         """Probe + register the P4 PPA once (run_desktop calls this after the

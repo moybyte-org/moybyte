@@ -1947,17 +1947,6 @@ def _rep_dirs(rw):
     return m
 
 
-def _pays(cv, p):
-    """Whether moving region R (plan `p`: its height p[3], the floor's rows
-    p[5], the rows of R's pictures the floor leaves p[6]) out of the last
-    frame costs canvas `cv` less than drawing what of R the floor does not:
-    its `SHIFT_COST` per mille of a plain row's raster each row it copies
-    costs, None where unknown (then it moves). A picture's rows cost more to
-    draw than any copy, so a move that leaves one undrawn pays."""
-    c = getattr(cv, "SHIFT_COST", None)
-    return c is None or p[6] > 0 or p[5] * 1000 + c * p[3] < 1000 * p[3]
-
-
 def steps_dead(rw, console=None):
     """Whether a held key's (or the ball's) steps `rw`, with no press
     beside them, would move nothing on the page whose frame `console` drew

@@ -446,6 +446,12 @@ typedef struct {
     uint32_t sh_in_id;
     moy_ui_box_t sh_in;
     int16_t sh_in_dy;
+    // sh_in_tv: the view moving inside R is a text view's. sh_view: the
+    // text view whose move inside R costs the canvas more to copy than its
+    // rows to draw (`view_pays`): R holds still and the view's rows are the
+    // floor, every one of them.
+    uint8_t sh_in_tv;
+    uint32_t sh_view;
     uint8_t fl_ci, fl_pi;
     // hover_off: no pointer held but one pressed over no stop
     // (`press_bare`, from its press to the next), and no stop under it this

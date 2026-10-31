@@ -583,6 +583,8 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     c->sh_dlg = 0;
     c->sh_in_id = 0;
     c->sh_in_dy = 0;
+    c->sh_in_tv = 0;
+    c->sh_view = 0;
     c->sh_over.w = 0;
     int p = c->in[MOY_UI_IN_PTR];
     int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
@@ -701,6 +703,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
         c->sh_in_id = in->id;
         c->sh_in = ip->b;
         c->sh_in_dy = (int16_t)idy;
+        c->sh_in_tv = !(in->kd & MOY_UI_KD_TABLE);
     }
     c->sh_id = r->id;
     c->sh_r = rp->b;
@@ -4221,8 +4224,10 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
             int fh = FADE_H * fs;
             floor_add(c, (rc_t){b.x, b.y + b.h - fh, b.x + b.w, b.y + b.h}, 1);
         }
-        if (t == NULL || !moy_ui_text_plan(t, v, s_trows, nrows, err, find)) {
-            floor_add(c, rc_of(b), 1);  // no record to say which rows moved: all of them
+        int planned = t != NULL && moy_ui_text_plan(t, v, s_trows, nrows, err, find);
+        if (!planned || c->sh_view == rid) {
+            // no record to say which rows moved, or a move drawn as rows: all of them
+            floor_add(c, rc_of(b), 1);
         } else {
             // each run of rows whose gen moved, one band
             for (int i = 0; i < nrows;) {
@@ -6390,9 +6395,20 @@ static int host_over_floor(moy_ui_ctx_t *c, int ox, int oy, int n) {
 // less than drawing what of R the floor does not: `cost` per mille of a
 // plain row's raster each row it copies costs (-1 unknown: it moves). A
 // picture's rows cost more to draw than any copy, so a move that leaves one
-// undrawn pays.
-static int host_pays(int cost, const int32_t *p) {
-    return cost < 0 || p[6] > 0 || p[5] * 1000 + cost * p[3] < 1000 * p[3];
+// undrawn pays. A rows frame moves nothing (at most the bands the rows
+// frames since drew, which a whole frame draws again too): it pays.
+static int host_pays(int cost, const int32_t *p, int moves) {
+    return cost < 0 || !moves || p[6] > 0 || p[5] * 1000 + cost * p[3] < 1000 * p[3];
+}
+
+// Whether moving the text view inside a still R (sh_in, by sh_in_dy) costs
+// the canvas less than drawing every row of the view: the move copies the
+// view's rows and leaves the band it uncovers and the two fades over the
+// view to draw. -1 unknown: it moves.
+static int view_pays(const moy_ui_ctx_t *c, int cost) {
+    int dy = c->sh_in_dy < 0 ? -c->sh_in_dy : c->sh_in_dy, h = c->sh_in.h;
+    int left = dy + 2 * FADE_H * c->fs;
+    return cost < 0 || left * 1000 + cost * h < 1000 * h;
 }
 
 static void host_move(int32_t *hp, int x, int y, int w, int h, int dy) {
@@ -6446,13 +6462,21 @@ static int host_plan(moy_ui_ctx_t *c, const int32_t *pf, int32_t *hp) {
     if (moy_ui_api_shift_plan(c, p) == MOY_UI_SHIFT_NONE) {
         return 0;
     }
+    if (c->sh_in_dy && c->sh_in_tv && !p[4] && !view_pays(c, cost)) {
+        // R holds still and the text view draws its rows in place of its move
+        c->sh_view = c->sh_in_id;
+        c->sh_in_id = 0;
+        c->sh_in_dy = 0;
+        c->sh_plan = MOY_UI_SHIFT_ROWS;
+        moy_ui_api_shift_plan(c, p);
+    }
     int got = MOY_UI_HB_SHIFT;
     if (p[7]) {
         if (!(hh & MOY_UI_HH_HELD)) {
             return 0;
         }
         got |= MOY_UI_HB_HELD;
-    } else if (!host_pays(cost, p)) {
+    } else if (!host_pays(cost, p, p[4] || c->sh_in_dy)) {
         return 0;
     }
     // Where the buffer this frame paints holds the page as the frames
