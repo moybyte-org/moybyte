@@ -2643,7 +2643,8 @@ class Hold:
             return HOLD_DRAW
         cv = ws.sys_canvas
         f = _PAINT[0]
-        left = left and self._left(ws, cv, key, f, dt, pages)
+        was = left
+        left = left and self._left(ws, cv, key, rect, f, dt, pages)
         if self._drew != key:
             self._run_f = self._alone_f = f
         elif self._drew_f != f - 1 and self._drew_f != f:
@@ -2652,6 +2653,11 @@ class Hold:
             self._alone_f = f + 1
         self._drew = key
         self._drew_f = f
+        if was and self.copies(cv) and f + 1 - self._alone_f < cv.RETAINED_FRAMES:
+            # a buffer the next frame paints does not hold the page and the
+            # card under `key` yet: that frame comes now, from this one
+            # (`_left`), not with the input that next reaches the modal
+            ws.request_frame()
         if left:
             if not _PF[_PF_WIN]:
                 rows_drawn()
@@ -2660,7 +2666,15 @@ class Hold:
             return HOLD_PUT
         return HOLD_LAST if self.last(ws, cv, rect, dt) else HOLD_DRAW
 
-    def _left(self, ws, cv, key, f, dt, pages):
+    def copies(self, cv):
+        """Whether the frame painted, alone on the glass, leaves the page
+        and the modal's card for the next frame to take from its buffer
+        (`_left`), where that frame draws under the same key: the page
+        then needs no hold (`keep`)."""
+        return (bool(_PAINT[1]) and not _PF[_PF_WIN] and _whole_retained(cv)
+                and (cv.RETAINED_FRAMES == 1 or getattr(cv, "copy_last", None) is not None))
+
+    def _left(self, ws, cv, key, rect, f, dt, pages):
         """Whether this frame finds the page under `key`, and the modal over
         it, in the buffer it paints already. A window's frame
         (`window_frame`): 2, its target holds the window as its last draw
@@ -2669,10 +2683,12 @@ class Hold:
         draw of them since before those frames was under `key` (a frame
         between that repeats the last changes none of it). Else a frame alone on a canvas that
         keeps its pixels (`painted_alone`), each of the RETAINED_FRAMES
-        painted frames before it having drawn them under `key`, alone too.
-        `key` names where the modal's card lies, so what the card draws
-        outside its band (its corners and drop, blended over the page) is
-        there as well."""
+        painted frames before it having drawn them under `key`, alone too;
+        or fewer of them, the frame before at least, where the canvas
+        copies `rect` (the page, the card inside it) out of the buffer that
+        frame painted (`copy_last`). `key` names where the modal's card
+        lies, so what the card draws outside its band (its corners and
+        drop, blended over the page) is there as well."""
         w = _PF[_PF_WIN]
         if self._drew != key or w == 1 or ws._animating(dt, pages):
             return False
@@ -2683,8 +2699,13 @@ class Hold:
             return False
         if w:
             return f - self._run_f >= n
-        return (bool(_PAINT[1]) and self._drew_f == f - 1 and _whole_retained(cv)
-                and f - self._alone_f >= n)
+        if not (_PAINT[1] and self._drew_f == f - 1 and _whole_retained(cv)):
+            return False
+        k = f - self._alone_f
+        if k >= n:
+            return True
+        cl = getattr(cv, "copy_last", None)
+        return k >= 1 and cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
 
     def note(self):
         """The frame drew the dialog over the page held (put back, washed

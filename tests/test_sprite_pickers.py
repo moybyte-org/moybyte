@@ -299,3 +299,29 @@ def test_the_sprite_panes_layout_is_kept_whichever_input_is_in_use(tmp_path, mon
     assert len(lays) == 4
     assert all(lay is lays[0] for lay in lays)
     assert all(p.alone), p.alone
+
+
+@pytest.mark.parametrize("bufs", (2, 3))
+def test_a_page_drawn_anew_is_taken_from_the_frame_before_while_the_input_rests(tmp_path, bufs):
+    """A frame that draws the page under the pickers anew (the size seg
+    changed it) holds none of it, and asks for the frames that bring each
+    buffer up to it: each takes the page and the card from the frame before
+    (`copy_last`) and draws inside the card's band (`HOLD_LEFT`)."""
+    p = Pair(tmp_path, False, bufs)
+    hold = p.a.paint_layer._hold
+    under = hold.under
+    got = []
+
+    def rec(*a, under=under, ws=p.a):
+        r = under(*a)
+        got.append((r, ws._frame_requested))
+        return r
+    hold.under = rec
+    p.key(mi.KEY_UP, 3)
+    del got[:]
+    p.key(mi.KEY_RIGHT)
+    p.frame()
+    assert p.a.paint.size == p.b.paint.size != 1
+    L, D = ui_draw.HOLD_LEFT, ui_draw.HOLD_DRAW
+    assert got[1:1 + bufs] == [(D, True)] + [(L, True)] * (bufs - 2) + [(L, False)], got
+    assert hold.key is None

@@ -825,15 +825,18 @@ class PaintLayer:
         sheet = pe.sheet if pe is not None else ws.project.sheet
         hold = self._hold
         if self._pop == "pickers" and pe is not None:
-            # the page under the pickers put back as it was held, where it
-            # was (a frame whose canvas keeps its pixels), else drawn and held;
-            # it is no verbs page, so the pickers' body coasting moves none of it
+            # the page under the pickers left or put back as it was held,
+            # where it was (a frame whose canvas keeps its pixels), else drawn,
+            # and held where the next frame cannot take it from this one; it
+            # is no verbs page, so the pickers' body coasting moves none of it
             key = self._pick_key(sheet)
             rect = self.layout.body_fill
+            cv = ws.sys_canvas
             how = hold.under(ws, key, rect, self._dt, False, True)
             if how == _ui_draw.HOLD_DRAW:
                 self._draw_look(sheet)
-                hold.keep(ws, ws.sys_canvas, rect, key, True, self._dt)
+                if not hold.copies(cv):
+                    hold.keep(ws, cv, rect, key, True, self._dt)
             self._draw_pickers(how == _ui_draw.HOLD_LEFT)
             return
         hold.under(ws, None, None, self._dt)
