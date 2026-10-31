@@ -19,7 +19,9 @@ the `web` extra in pyproject.toml. No browser is downloaded: never run
 `playwright install`.
 
 `serve` is `firmware/web_runner/serve.py` over this tree's dist, its flags
-passed through.
+passed through. A server of this tree's dist/ first names the newest commit to
+what it bakes that came after its build (`dist_behind`): nothing rebuilds it
+on a pull or a commit.
 
 The browser suites (`tests/web_e2e.py`) drive Chrome through
 `firmware/web_runner/browsershot.mjs` scenarios; this is the one-off look.
@@ -39,6 +41,36 @@ DIST = os.path.join(WEB, "dist")
 SERVE_PY = os.path.join(WEB, "serve.py")
 NO_DIST = ("no browser console in this tree (%s) -- firmware/web_runner/build.sh "
            "builds it" % os.path.relpath(DIST, ROOT))
+
+
+# What dist/ bakes: a commit under any of these after its build is code the
+# served console does not have.
+WEB_SOURCES = ("runtime", "device", "native", "system_carts", "firmware/web_runner")
+
+
+def dist_behind(dist=DIST, root=ROOT):
+    """The newest commit that changed what `dist` bakes since it was built,
+    as "<hash> <date>", else None (no build, no git, nothing newer). dist/ is
+    a build that nothing keeps in step with the tree: a page served from an
+    old one shows a console the tree no longer is."""
+    try:
+        built = int(os.path.getmtime(os.path.join(dist, "index.html")))
+        got = subprocess.run(
+            ["git", "-C", root, "log", "-1", "--format=%h %cs",
+             time.strftime("--since=%Y-%m-%d %H:%M:%S +0000", time.gmtime(built)),
+             "--"] + list(WEB_SOURCES), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return got.stdout.strip() or None
+
+
+def behind_note(dist=DIST, root=ROOT):
+    """The line a server of `dist` prints when the tree moved past it, else None."""
+    got = dist_behind(dist, root)
+    if got is None:
+        return None
+    return ("STALE: %s was built before %s changed what it bakes -- "
+            "firmware/web_runner/build.sh rebuilds it" % (os.path.relpath(dist, root), got))
 
 
 class WebError(RuntimeError):
