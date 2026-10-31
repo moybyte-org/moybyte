@@ -1522,7 +1522,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # ground under the WM's row otherwise, with the window's icon and title
     # at its head and minimise, restore and close at its right, drawn and
     # answered as every strip's. A game's window is the game alone, at the
-    # largest whole scale that leaves the corner's controls clear, on black.
+    # largest whole scale that leaves the corner's controls clear, on black;
+    # the player's window running a window-bound app cart (Notes) is an
+    # app's, under the WM's row (`_is_game`).
 
     def _row_h(self):
         """The full-screen row's height: the band's (a window's bar)."""
@@ -1538,7 +1540,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         is not the row (none for a game)."""
         full = self._root_canvas
         win.x, win.y, win.w, win.h = 0, 0, full.w, full.h
-        win.row = (0 if win.kind == "desktop" or self._band_is_row(win.kind)
+        win.row = (0 if self._is_game(win) or self._band_is_row(win.kind)
                    else self._row_h())
 
     def _on_row_head(self, win, px, py):
@@ -1546,7 +1548,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         WM draws it: the whole row above the content, or, where the app's
         band is the row, its head -- the icon and title left of the zone
         the band is lent (`band_span`)."""
-        if win.saved is None or win.kind == "desktop" \
+        if win.saved is None or self._is_game(win) \
                 or not (win.y <= py < win.y + self._row_h()):
             return False
         return bool(win.row) or px < self._full_slot(win)
@@ -1756,7 +1758,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         (`Player.pause`), and a restore lands on the pause menu, which gives
         the run back on Resume (the owner's D-25, 2026-10-19) -- unless the
         run was already held (the pause menu open), which stays its
-        holder's."""
+        holder's. A window-bound app cart's run (Notes) is held the same
+        way and simply goes on when it is shown: an app has no pause menu."""
         if win.minimized == bool(on):
             return
         win.minimized = bool(on)
@@ -1772,7 +1775,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         elif getattr(win, "held", False):
             win.held = False
             pause = getattr(self.ws, "pause", None)
-            if pause is not None:
+            if pause is not None and self._is_game(win):
                 pause.show()
             else:
                 player.resume()
@@ -4142,7 +4145,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
-        return (self.ws.show_fps and self.stack.top() == "desktop")
+        return (self.ws.show_fps and self.stack.top() == "desktop"
+                and not self.ws.app_window_canvas)
 
     def _draw_player_window(self, win, running, focused, dt, full=True,
                             defer=None):

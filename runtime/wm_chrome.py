@@ -135,6 +135,12 @@ class WindowChrome:
             self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
 
+    def _is_game(self, win):
+        """Whether `win` is a game's window: the player's, running a game.
+        The player's window running a window-bound app cart (Notes) is an
+        app window, full screen as every app's is: its row, its title."""
+        return win.kind == "desktop" and not self.ws.app_window_canvas
+
     def _full_chrome(self, win, focused, quiet):
         """A full-screen window's row on the root canvas: the band's ground
         and the row (`_paint_row`) where the row lies above the content, the
@@ -167,7 +173,7 @@ class WindowChrome:
         self.ws.icon_spec()               # the look's icon set, for the buttons
         btns = self._win_btns(win) | _ui_draw.FRAME_FULL
         rect = self._row_rect(win)
-        game = win.kind == "desktop"
+        game = self._is_game(win)
         if game:
             title = ""
         elif title is None:
