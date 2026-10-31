@@ -434,6 +434,39 @@ def test_play_runs_the_game_in_the_run_slot_and_stop_ends_it(desk):
     assert "desktop" not in ws.wm._wins
 
 
+def test_a_docked_game_moves_with_its_editor_window(desk):
+    """The Editor's content is stamped, not drawn, while its window is
+    dragged, so the docked playtest follows its host in the WM: it stands
+    where the Run slot is at every step, never where the slot was."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)                             # Ctrl+Enter: Play
+    for _ in range(4):
+        drv.frame(DT)
+    ws.wm.full_key()                             # the Editor restored: a window to drag
+    for _ in range(4):
+        drv.frame(DT)
+    menu, game = ws.wm._wins["menu"], ws.wm._wins["desktop"]
+
+    def off():
+        cx, cy = menu.content_rect()[:2]
+        return game.docked[0] - cx, game.docked[1] - cy, game.docked[2], game.docked[3]
+
+    held = off()
+    x0, y0 = menu.x + 200, menu.y + menu.title_h // 2
+    drv.touch(x0, y0)
+    drv.frame(DT)
+    for i in range(1, 6):
+        drv.touch_drag(x0 - 20 * i, y0 + 6 * i)
+        drv.frame(DT)
+        assert off() == held
+    drv.touch_up()
+    for _ in range(3):
+        drv.frame(DT)
+    assert (menu.x, menu.y) != (x0 - 200, y0 - menu.title_h // 2)
+    assert off() == held and (game.x, game.y) == game.docked[:2]
+
+
 def test_play_selects_the_game_tab_and_stop_gives_the_map_back(desk):
     ws, drv = desk
     d = ws.editor_desk

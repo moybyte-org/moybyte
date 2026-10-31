@@ -202,6 +202,8 @@ class _Win:
                                       # pane (the desk Editor's Run slot): no
                                       # frame and no strip; None: a window
         self.undock = None            # where it goes back to (x, y, w, h)
+        self.dock_off = None          # docked: its corner from its host's
+                                      # content corner, which it follows
         self.corner = 0               # full screen: where its controls start
         self.row = 0                  # full screen: the rows the WM's row takes
                                       # above the content (0 where the app's
@@ -1652,6 +1654,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if rect is None or rect is False:
             if win.docked is not None:
                 win.docked = None
+                win.dock_off = None
                 if win.undock is not None:
                     win.x, win.y, win.w, win.h = win.undock
                     win.undock = None
@@ -1665,6 +1668,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win.minimized:
             self._minimize(win, False)
         rect = tuple(rect)
+        host = self._wins.get("menu")
+        if host is not None:
+            hx, hy = host.content_rect()[:2]
+            win.dock_off = (rect[0] - hx, rect[1] - hy)
         if win.docked != rect:
             if win.docked is None:
                 win.undock = (win.x, win.y, win.w, win.h)
@@ -1681,13 +1688,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
-        desk's workspaces gets its window back."""
+        desk's workspaces gets its window back; one whose host moved moves
+        with it. The host's content is stamped, not drawn, while it moves,
+        so the game follows its host here rather than from the host's draw."""
         win = self._wins.get("desktop")
         if win is None or win.docked is None:
             return
         host = self._wins.get("menu")
         if host is not None and not host.minimized \
                 and self.ws.editor_layer() is self.ws.editor_desk:
+            off = win.dock_off
+            if off is not None:
+                hx, hy = host.content_rect()[:2]
+                d = win.docked
+                if d[0] != hx + off[0] or d[1] != hy + off[1]:
+                    self.dock("desktop", (hx + off[0], hy + off[1], d[2], d[3]))
             return
         self.dock("desktop", None)
 
