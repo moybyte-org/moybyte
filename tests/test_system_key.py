@@ -268,6 +268,30 @@ def test_restart_runs_the_cart_from_the_top(tmp_path):
     assert ws.screen == "desktop" and ws.player.ns["n"] <= 2
 
 
+def test_esc_over_an_editor_playtest_pauses_and_quit_returns_to_the_editor(tmp_path):
+    """Owner report 2026-10-31 (the browser's handheld): PLAY from the Star
+    Catcher Editor had no keyboard way out. The page sent Esc as the
+    console's key only for a cart that declares an `input` hint, and Star
+    Catcher declares none, so its Esc reached a driver that did nothing
+    over a game. Esc over a fullscreen game is the console's key, whatever
+    the cart declares: the pause menu, whose Quit returns to the Editor."""
+    ws = build_ws(tmp_path)
+    drv = make_drv(ws)
+    cart = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
+    ws.open_in_editor(cart)
+    _frames(drv, 3)
+    ws.editor_app.leave()               # the Editor's PLAY
+    _frames(drv, 3)
+    assert ws.plays_fullscreen() and ws.cart.get("input") is None
+    assert drv.takes_escape(), "the simulator hands Esc to the console in play"
+    drv.escape()
+    assert ws.pause.open and ws.player.paused
+    for _ in range(3):
+        _key(drv, "down")
+    _key(drv, "a")
+    assert not ws.pause.open and ws.screen == "menu", "Quit: back in the Editor"
+
+
 def test_quit_leaves_for_the_caller(tmp_path):
     ws, drv = _game(tmp_path)
     drv.system_key()

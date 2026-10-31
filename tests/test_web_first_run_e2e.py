@@ -129,6 +129,21 @@ def test_the_start_option_works_on_the_handheld_and_leaves_to_the_home(tmp_path,
     assert desk["screen"] == "desk", out[-2000:]
 
 
+def test_esc_over_a_handheld_playtest_pauses_and_quit_returns_to_the_editor(tmp_path, base):
+    """Owner report 2026-10-31: PLAY from the handheld Editor had no keyboard
+    way out. The page sent Esc as the console's key only for a cart with an
+    `input` hint, which Star Catcher has not; the console routes Esc now
+    (`ConsoleDriver.escape`), so over the game it opens the pause menu, and
+    its Quit (the fourth row) lands back in the Editor."""
+    got, out = _load(tmp_path, base, tmp_path / "chrome", "&edit=%s&tab=cards" % CART,
+                     "dark", "playtest", tier="handheld", steps=[
+                         {"click": [245, 13]}, {"wait": 1500},       # the bar's PLAY
+                         {"key": "Escape"}, {"wait": 600},
+                         {"key": "ArrowDown"}, {"key": "ArrowDown"}, {"key": "ArrowDown"},
+                         {"key": "Enter"}, {"wait": 900}])
+    assert (got["screen"], got["tab"]) == ("menu", "cards"), out[-2000:]
+
+
 def test_the_start_option_opens_the_visitors_edits(tmp_path, base):
     """An edited Star Catcher in the browser's store is what opens, never the
     seed again."""

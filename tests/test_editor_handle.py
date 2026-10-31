@@ -205,6 +205,27 @@ def test_a_blurred_handle_still_takes_a_key_the_skin_feeds_it(tmp_path):
     assert ed.text() == "ab"
 
 
+def test_a_key_the_handle_does_not_take_leaves_it_unedited(tmp_path):
+    """Esc reaches a focused handle first and falls through to the cart; it
+    left a typing burst open, so the note read as edited and its close
+    rewrote it unchanged -- a new mtime that moved it to the top of Notes'
+    newest-first vault (seen as a flaky Notes test under load)."""
+    carts = _doc(tmp_path, "kept", "same")
+    ws = build_ws(tmp_path)
+    assert ws.carts_root == carts
+    ed = _handle(ws, "kept")
+    assert ed.key(0x1B) is False
+    assert not ed.dirty(), "nothing was typed"
+    assert not ed.can_undo()
+    saved = []
+    ed.save = lambda soft=False: saved.append(soft) or (True, None)
+    ed.close()
+    assert saved == [], "an unedited note is not written on close"
+    ed = _handle(ws, "kept")
+    ed.key(ord("x"))
+    assert ed.dirty() is True, "a key the text takes still opens its burst"
+
+
 def test_delete_takes_the_character_after_the_caret(tmp_path):
     """A handle's Delete (Notes) is forward delete; Backspace goes back."""
     ws = build_ws(tmp_path)
@@ -312,18 +333,6 @@ def test_the_dirty_flag_tracks_the_edits_a_save_has_not_taken(tmp_path):
     assert ed.dirty() is True
     ed.save()
     assert ed.dirty() is False
-
-
-def test_a_key_the_text_does_not_take_leaves_the_document_clean(tmp_path):
-    """Esc (the note's way out) changes no text: it opens no typing burst, so
-    the handle is not dirty and closing it writes nothing -- a rewrite would
-    move the note to the top of the newest-first list."""
-    ws = build_ws(tmp_path)
-    ed = _handle(ws, "kept")
-    assert ed.key(0x1B) is False
-    assert ed.dirty() is False and not ed.can_undo()
-    ed.key(ord("x"))
-    assert ed.dirty() is True
 
 
 def test_a_read_only_store_keeps_the_text_and_reports_the_failure(tmp_path):

@@ -68,7 +68,8 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
       {"type":"mdown"|"mup","x":..,"y":..} -> the middle button (on_middle)
       a "down" with "mods" says the modifiers held as it went down
       {"type":"key","code":<ascii>}  -> typed key (on_key)
-      {"type":"esc"}                 -> close panel (on_esc)
+      {"type":"esc"}                 -> Esc (on_esc): a menu closes, a page
+                                        steps back, a fullscreen game pauses
       {"type":"full"}                -> F11 (on_full): a desk window full
                                         screen, and back
       {"type":"super"}               -> the system key (on_super): the system
