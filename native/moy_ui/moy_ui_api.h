@@ -86,7 +86,7 @@ typedef struct {
     int32_t began1;
     int16_t dy, mv_dy;
 } moy_ui_host_t;
-// One paint of a context (moy_ui_ctx_t's kt): the painted frame (-1:
+// One paint of a context (its kept ring, moy_ui_api.c's): the painted frame (-1:
 // none), whether it is the app's alone (`kept`: no key of its table was
 // negative), and its kept table (has_tbl), as moy_ui_api_table recorded it:
 // its id, key, columns' geometry, view, scroll, row height and count,
@@ -105,8 +105,8 @@ typedef struct {
 // slots they are kept under, the uses counted, the warm order's next step,
 // the parts it named this round (wn) and the table's rows it runs over
 // (r0 .. r1 showed, of rows, np parts each);
-// each slot's part key and last use (0: empty). In the context, so in the
-// memory its face gave it (PSRAM on a board), never the engine's statics.
+// each slot's part key and last use (0: empty). The engine's one record,
+// taken at the first moy_ui_api_slots (moy_ui_api.c's kept memory).
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
@@ -527,21 +527,20 @@ typedef struct {
     uint8_t was_fs, was_hint;
     moy_ui_host_t host;             // its app host's (moy_ui_api_host_begin)
     // What the paints this context began left in the buffers a canvas
-    // presents in turn, a slot a paint (newest at kt_ri, kt_n held): its
-    // kept table and the parts `held` named (moy_ui_api_held). kt_f is the
-    // frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is kept);
-    // kf the floor the kept table drawn last draws this frame, kf_i the next
-    // rect moy_ui_api_table_floor answers, kf_held whether every buffer
-    // holds the table as this frame draws it.
-    moy_ui_kept_t kt[MOY_UI_KEPT_RING];
-    uint8_t kt_ri, kt_n, kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np;
+    // presents in turn -- its kept table and the parts `held` named
+    // (moy_ui_api_held) -- lies in a ring the engine keeps for it outside
+    // the context from its first kept table or `held` on (moy_ui_api.c's
+    // kept memory), so a context that keeps nothing carries none. kt_f is
+    // the frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is
+    // kept); kf the floor the kept table drawn last draws this frame, kf_i
+    // the next rect moy_ui_api_table_floor answers, kf_held whether every
+    // buffer holds the table as this frame draws it.
+    uint8_t kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np;
     int32_t kt_f;
     moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
-    // 0: none), tp_np the parts a row of the table drawn last holds; and the
-    // record of them, which counts while the ticket is the engine's.
+    // 0: none), tp_np the parts a row of the table drawn last holds.
     uint32_t fc_id;
-    moy_ui_faces_t fc;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.

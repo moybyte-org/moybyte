@@ -486,3 +486,26 @@ def test_the_lua_face_keeps_faces(tmp_path):
     # the end, then row 1 before the start, nearest first
     assert pm[20] == 10 and pm[6:16] == [3, 4, 5, 6, 7, 8, 9, 10, 2, 1]
     ws.exit()
+
+
+def test_a_context_carries_no_kept_ring(th):
+    """The kept ring and the faces' record lie outside the context, in one
+    block the engine takes when a context first keeps (moy_ui_api.c's kept
+    memory): a context that never keeps -- most of an S3's eighteen --
+    carries neither (they came to about 2.3 KB each)."""
+    assert ui._C.api_size() < 6 * 1024
+
+
+def test_a_ring_given_up_for_another_context_draws_whole(th):
+    """The engine keeps the rings of the four contexts that kept last: a
+    fifth's takes the ring begun least recently, whose context then draws
+    its table whole, once, and keeps it again."""
+    rigs = [Rig(th, 1) for _ in range(5)]
+    _settle(rigs[0], 2)
+    assert rigs[0].frame()[0] == []
+    for rig in rigs[1:]:
+        _settle(rig, 2)
+        assert rig.frame()[0] == []
+    floor, _e, parts, _h = rigs[0].frame()
+    assert floor == [_VIEW] and parts == [0, 1, 2, 3, 4, 5]
+    assert rigs[0].frame()[0] == []

@@ -2,6 +2,14 @@
 
 #include <string.h>
 
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define KEPT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#else
+#include <stdlib.h>
+#define KEPT_ALLOC(n) malloc(n)
+#endif
+
 #include "moy_ui_api.h"
 #include "moy_canvas.h"
 #include "moy_theme.h"
@@ -240,8 +248,11 @@ size_t moy_ui_api_size(void) {
     return sizeof(moy_ui_ctx_t);
 }
 
+static void kept_drop(const moy_ui_ctx_t *c);
+
 void moy_ui_api_reset(moy_ui_ctx_t *c) {
     moy_ui_text_views_drop(c);
+    kept_drop(c);
     memset(c, 0, sizeof(*c));
     c->magic = MAGIC;
     c->fs = 1;
@@ -4411,45 +4422,119 @@ static void parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 
 // -- a kept table (o->keep) and the parts `held` names ------------------------------
 
-static int kept_slot(const moy_ui_ctx_t *c, int back) {
-    int i = c->kt_ri - back;
+// The engine's kept memory, one block taken at the first context that keeps
+// (PSRAM where the board has it: a static would hold it in internal SRAM
+// from boot, and a context's bytes would carry it whether it keeps or not):
+// a ring for each of the KEPT_OWNERS contexts that kept last, the one
+// begun least recently given up for another, and the faces' one record.
+#define KEPT_OWNERS 4
+
+typedef struct {
+    const moy_ui_ctx_t *owner;          // NULL: free
+    uint32_t used;                      // its last begin (kept_mem_t's count)
+    uint8_t ri, n;                      // the newest slot, the slots held
+    moy_ui_kept_t kt[MOY_UI_KEPT_RING];
+} kept_ring_t;
+
+typedef struct {
+    kept_ring_t ring[KEPT_OWNERS];
+    uint32_t used;
+    moy_ui_faces_t fc;
+} kept_mem_t;
+
+static kept_mem_t *s_kept;
+
+static kept_mem_t *kept_mem(void) {
+    if (s_kept == NULL) {
+        s_kept = (kept_mem_t *)KEPT_ALLOC(sizeof(kept_mem_t));
+        if (s_kept != NULL) {
+            memset(s_kept, 0, sizeof(*s_kept));
+        }
+    }
+    return s_kept;
+}
+
+// The ring the engine keeps for context c, else NULL; with `make` one taken
+// for it where it has none, holding the paint begun (kt_f) alone.
+static kept_ring_t *ring_of(const moy_ui_ctx_t *c, int make) {
+    kept_mem_t *m = make ? kept_mem() : s_kept;
+    if (m == NULL) {
+        return NULL;
+    }
+    kept_ring_t *old = &m->ring[0];
+    for (int i = 0; i < KEPT_OWNERS; i++) {
+        kept_ring_t *r = &m->ring[i];
+        if (r->owner == c) {
+            return r;
+        }
+        if (r->owner == NULL || (old->owner != NULL && r->used < old->used)) {
+            old = r;
+        }
+    }
+    if (!make) {
+        return NULL;
+    }
+    memset(old, 0, sizeof(*old));
+    old->owner = c;
+    old->used = ++m->used;
+    old->n = 1;
+    old->kt[0].f = c->kt_f;
+    old->kt[0].kept = 1;
+    return old;
+}
+
+// A context given up (its bytes reset): its ring goes back.
+static void kept_drop(const moy_ui_ctx_t *c) {
+    kept_ring_t *r = ring_of(c, 0);
+    if (r != NULL) {
+        memset(r, 0, sizeof(*r));
+    }
+}
+
+static int kept_slot(const kept_ring_t *r, int back) {
+    int i = r->ri - back;
     return i < 0 ? i + MOY_UI_KEPT_RING : i;
 }
 
 // The paint begun for frame f, `k` buffers presented in turn (0: none kept):
-// a slot of the ring, the one begun before it again where f is its frame
-// (a pass begun twice in one painted frame).
+// a slot of the context's ring where it has one, the one begun before it
+// again where f is its frame (a pass begun twice in one painted frame).
 static void kept_begin(moy_ui_ctx_t *c, int32_t f, int k) {
-    if (!c->kt_n || c->kt[c->kt_ri].f != f) {
-        c->kt_ri = (uint8_t)(c->kt_ri + 1 >= MOY_UI_KEPT_RING ? 0 : c->kt_ri + 1);
-        if (c->kt_n < MOY_UI_KEPT_RING) {
-            c->kt_n++;
+    c->kt_f = f;
+    c->kt_k = (uint8_t)(k < 0 ? 0 : k >= MOY_UI_KEPT_RING ? MOY_UI_KEPT_RING - 1 : k);
+    kept_ring_t *r = ring_of(c, 0);
+    if (r == NULL) {
+        return;
+    }
+    r->used = ++s_kept->used;
+    if (!r->n || r->kt[r->ri].f != f) {
+        r->ri = (uint8_t)(r->ri + 1 >= MOY_UI_KEPT_RING ? 0 : r->ri + 1);
+        if (r->n < MOY_UI_KEPT_RING) {
+            r->n++;
         }
     }
-    moy_ui_kept_t *p = &c->kt[c->kt_ri];
+    moy_ui_kept_t *p = &r->kt[r->ri];
     p->f = f;
     p->kept = 1;
     p->has_tbl = 0;
     p->nh = 0;
     p->over.w = 0;
-    c->kt_f = f;
-    c->kt_k = (uint8_t)(k < 0 ? 0 : k >= MOY_UI_KEPT_RING ? MOY_UI_KEPT_RING - 1 : k);
 }
 
 // The paint whose pixels the buffer this frame paints holds: kt_k back,
 // where the paints between were this context's, one a frame, and that one
 // the app's alone; else NULL.
-static const moy_ui_kept_t *kept_held(const moy_ui_ctx_t *c) {
+static const moy_ui_kept_t *kept_held(const moy_ui_ctx_t *c, const kept_ring_t *r) {
     int k = c->kt_k;
-    if (k < 1 || c->kt_n <= k) {
+    if (k < 1 || r->n <= k) {
         return NULL;
     }
     for (int b = 1; b <= k; b++) {
-        if (c->kt[kept_slot(c, b)].f != c->kt_f - b) {
+        if (r->kt[kept_slot(r, b)].f != c->kt_f - b) {
             return NULL;
         }
     }
-    const moy_ui_kept_t *p = &c->kt[kept_slot(c, k)];
+    const moy_ui_kept_t *p = &r->kt[kept_slot(r, k)];
     return p->kept ? p : NULL;
 }
 
@@ -4465,11 +4550,12 @@ static int kept_same(const moy_ui_kept_t *a, const moy_ui_kept_t *b) {
 }
 
 int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
-    if (c->kt_k < 1 || !c->kt_n) {
+    kept_ring_t *r = c->kt_k < 1 ? NULL : ring_of(c, 1);
+    if (r == NULL) {
         return 0;
     }
     uint32_t h = hash(id.p, id.n, 0x6b657074u);
-    moy_ui_kept_t *now = &c->kt[c->kt_ri];
+    moy_ui_kept_t *now = &r->kt[r->ri];
     int i = 0;
     while (i < now->nh && now->hid[i] != h) {
         i++;
@@ -4481,7 +4567,7 @@ int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
             now->nh++;
         }
     }
-    const moy_ui_kept_t *was = kept_held(c);
+    const moy_ui_kept_t *was = kept_held(c, r);
     if (was == NULL) {
         return 0;
     }
@@ -4530,15 +4616,15 @@ static int kept_merge(rc_t *f, int n, int rh, int sp, int xa) {
 }
 
 // A placed table of parts that keeps them (o->keep): this frame's paint of
-// it recorded, and the floor this frame draws planned from the paint the
+// it recorded in the context's ring r, and the floor this frame draws planned from the paint the
 // buffer holds (moy_ui_api_table_floor). `hv` the record of rows vis0 ..
 // vis0 + nk - 1, `np` parts a row (nk -1: too many to keep); `base` row
 // 0's start along the axis.
-static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uint32_t geo,
-                       moy_ui_box_t view, int32_t offset, int rh, int count, int cur, int at,
-                       int mark, int vis0, int nk, int np, const uint32_t *hv, int base, int sp,
-                       int xa) {
-    moy_ui_kept_t *now = &c->kt[c->kt_ri];
+static void kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, uint32_t id,
+                       uint32_t geo, moy_ui_box_t view, int32_t offset, int rh, int count,
+                       int cur, int at, int mark, int vis0, int nk, int np, const uint32_t *hv,
+                       int base, int sp, int xa) {
+    moy_ui_kept_t *now = &r->kt[r->ri];
     now->has_tbl = 1;
     now->id = id;
     now->key = o->keep;
@@ -4560,7 +4646,7 @@ static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uin
     if (o->keep < 0) {
         now->kept = 0;
     }
-    const moy_ui_kept_t *was = kept_held(c);
+    const moy_ui_kept_t *was = kept_held(c, r);
     rc_t vr = rc_of(view), f[16];
     int n = 0, whole = o->whole == 1 || was == NULL || !now->kept || nk < 0 || !was->has_tbl
                        || was->id != id || was->key != o->keep || was->geo != geo
@@ -4609,9 +4695,9 @@ static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uin
     // each, left it as this one does, with nothing over it
     // (one drawn over this paint: the frames after, which draw it again,
     // bring no buffer to the table alone)
-    int held = now->kept && c->kt_n >= c->kt_k, over = now->over.w > 0;
+    int held = now->kept && r->n >= c->kt_k, over = now->over.w > 0;
     for (int b = 1; held && b < c->kt_k; b++) {
-        const moy_ui_kept_t *p = &c->kt[kept_slot(c, b)];
+        const moy_ui_kept_t *p = &r->kt[kept_slot(r, b)];
         held = p->f == c->kt_f - b && p->kept && p->over.w <= 0 && kept_same(p, now);
     }
     c->kf_held = (uint8_t)(over ? MOY_UI_KF_OVER : held ? MOY_UI_KF_HELD : 0);
@@ -4624,15 +4710,16 @@ static void kept_table(moy_ui_ctx_t *c, const moy_ui_over_t *o, uint32_t id, uin
 // frame names them: the paints before this one, a buffer each, named each
 // under its key.
 static int kept_parts(const moy_ui_ctx_t *c) {
-    const moy_ui_kept_t *now = &c->kt[c->kt_ri];
-    if (!now->nh) {
-        return 1;
+    const kept_ring_t *r = ring_of(c, 0);
+    const moy_ui_kept_t *now = r != NULL ? &r->kt[r->ri] : NULL;
+    if (now == NULL || !now->nh) {
+        return 1;                       // (nothing named)
     }
-    if (!now->kept || c->kt_n < c->kt_k) {
+    if (!now->kept || r->n < c->kt_k) {
         return 0;
     }
     for (int b = 1; b < c->kt_k; b++) {
-        const moy_ui_kept_t *p = &c->kt[kept_slot(c, b)];
+        const moy_ui_kept_t *p = &r->kt[kept_slot(r, b)];
         if (p->f != c->kt_f - b || !p->kept) {
             return 0;
         }
@@ -4650,10 +4737,11 @@ static int kept_parts(const moy_ui_ctx_t *c) {
 }
 
 int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
-    if (c->kt_k < 1 || c->kt_n < 2) {
+    const kept_ring_t *r = c->kt_k < 1 ? NULL : ring_of(c, 0);
+    if (r == NULL || r->n < 2) {
         return 0;
     }
-    const moy_ui_kept_t *p = &c->kt[kept_slot(c, 1)];
+    const moy_ui_kept_t *p = &r->kt[kept_slot(r, 1)];
     if (p->f != c->kt_f - 1 || !p->kept) {
         return 0;
     }
@@ -4667,7 +4755,7 @@ int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
 }
 
 int moy_ui_api_held_all(const moy_ui_ctx_t *c) {
-    return c->kt_k > 0 && c->kt_n > 0 && c->kt[c->kt_ri].f == c->kt_f && kept_parts(c);
+    return c->kt_k > 0 && kept_parts(c);
 }
 
 int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
@@ -4688,36 +4776,41 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
 
 // -- the faces a table's parts keep drawn (moy_ui_api_slots) -------------------------
 
-// The engine keeps one context's faces at a time: the ticket it gave last
-// (s_fc_owner) names that context, whose record (its `fc`) counts.
+// The engine keeps one context's faces at a time, in its kept memory: the
+// ticket it gave last (s_fc_owner) names that context.
 static uint32_t s_fc_owner;
 static uint32_t s_fc_ids;
 
 static int faces_mine(const moy_ui_ctx_t *c) {
-    return c->fc_id != 0 && s_fc_owner == c->fc_id && c->fc.cap > 0;
+    return c->fc_id != 0 && s_fc_owner == c->fc_id && s_kept != NULL && s_kept->fc.cap > 0;
 }
 
 int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
     cap = cap < 0 ? 0 : cap > MOY_UI_FACE_SLOTS ? MOY_UI_FACE_SLOTS : cap;
+    kept_mem_t *m = cap > 0 ? kept_mem() : s_kept;
+    if (m == NULL) {
+        return 0;
+    }
+    moy_ui_faces_t *fc = &m->fc;
     if (c->fc_id == 0 || s_fc_owner != c->fc_id) {
         if (++s_fc_ids == 0) {
             s_fc_ids = 1;
         }
         c->fc_id = s_fc_ids;
         s_fc_owner = c->fc_id;
-        c->fc.cap = 0;
+        fc->cap = 0;
     }
-    if (c->fc.cap != cap || c->fc.key != key) {
-        c->fc.cap = (uint16_t)cap;
-        c->fc.key = key;
-        c->fc.tick = 0;
-        memset(c->fc.used, 0, sizeof(c->fc.used));
+    if (fc->cap != cap || fc->key != key) {
+        fc->cap = (uint16_t)cap;
+        fc->key = key;
+        fc->tick = 0;
+        memset(fc->used, 0, sizeof(fc->used));
     }
-    c->fc.w = c->fc.wn = 0;
-    c->fc.np = c->tp_np ? c->tp_np : 1;
-    c->fc.rows = c->tp_n;
-    c->fc.r0 = c->tp_v0;
-    c->fc.r1 = c->tp_id ? c->tp_e : c->tp_v0;
+    fc->w = fc->wn = 0;
+    fc->np = c->tp_np ? c->tp_np : 1;
+    fc->rows = c->tp_n;
+    fc->r0 = c->tp_v0;
+    fc->r1 = c->tp_id ? c->tp_e : c->tp_v0;
     return cap;
 }
 
@@ -4725,26 +4818,27 @@ int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mi
     if (!faces_mine(c)) {
         return -1;
     }
+    moy_ui_faces_t *fc = &s_kept->fc;
     uint32_t key = hash(name.p, name.n, 0x66616365u) ^ ((uint32_t)gen * 0x9e3779b1u);
-    if (++c->fc.tick == 0) {             // (the uses wrapped: every face forgotten)
-        memset(c->fc.used, 0, sizeof(c->fc.used));
-        c->fc.tick = 1;
+    if (++fc->tick == 0) {             // (the uses wrapped: every face forgotten)
+        memset(fc->used, 0, sizeof(fc->used));
+        fc->tick = 1;
     }
     int lru = 0;
-    for (int j = 0; j < c->fc.cap; j++) {
-        if (c->fc.used[j] && c->fc.pk[j] == key) {
-            c->fc.used[j] = c->fc.tick;
+    for (int j = 0; j < fc->cap; j++) {
+        if (fc->used[j] && fc->pk[j] == key) {
+            fc->used[j] = fc->tick;
             return j;
         }
-        if (c->fc.used[j] < c->fc.used[lru]) {
+        if (fc->used[j] < fc->used[lru]) {
             lru = j;
         }
     }
     if (!mint) {
         return -1;
     }
-    c->fc.pk[lru] = key;
-    c->fc.used[lru] = c->fc.tick;
+    fc->pk[lru] = key;
+    fc->used[lru] = fc->tick;
     return lru | MOY_UI_SLOT_MINT;
 }
 
@@ -4752,26 +4846,27 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     if (!faces_mine(c)) {
         return -1;
     }
-    int np = c->fc.np, shown = (c->fc.r1 - c->fc.r0) * np, n = c->fc.rows * np;
+    moy_ui_faces_t *fc = &s_kept->fc;
+    int np = fc->np, shown = (fc->r1 - fc->r0) * np, n = fc->rows * np;
     for (;;) {
-        int w = c->fc.w, p;
-        if (c->fc.wn >= c->fc.cap) {
+        int w = fc->w, p;
+        if (fc->wn >= fc->cap) {
             p = -1;                      // (as many as the slots: the round is over)
             w = shown + 2 * np;
         }
         if (w < shown) {
-            p = c->fc.r0 * np + w;
+            p = fc->r0 * np + w;
         } else if (w < shown + np) {
-            p = c->fc.r1 * np + (w - shown);
+            p = fc->r1 * np + (w - shown);
         } else if (w < shown + 2 * np) {
-            p = c->fc.r0 * np - 1 - (w - shown - np);
+            p = fc->r0 * np - 1 - (w - shown - np);
         } else {
-            c->fc.w = c->fc.wn = 0;      // (the next asks from the first again)
+            fc->w = fc->wn = 0;      // (the next asks from the first again)
             return -1;
         }
-        c->fc.w++;
+        fc->w++;
         if (p >= 0 && p < n) {
-            c->fc.wn++;
+            fc->wn++;
             return p;
         }
     }
@@ -5337,8 +5432,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
 #undef TC_CHANGED
     // a table that keeps its parts: its floor from the paint the buffer
     // holds; any other table's is its view
+    kept_ring_t *kr = NULL;
     int keeping = part && placed && kp != NULL && !disabled && o->has_keep && c->kt_k > 0
-                  && c->kt_n > 0 && c->kt[c->kt_ri].f == c->kt_f;
+                  && (kr = ring_of(c, 1)) != NULL;
     if (keeping) {
         // each part's record: a row's own, or with `across` each cell's
         int np = o->has_across ? nc : 1;
@@ -5371,7 +5467,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             q = e + 1;
         }
         int a0 = xa ? view.x : view.y;
-        kept_table(c, o, id, geo, view, offset, rh, count, cur, at, mark, vis0, nr, np, kh,
+        kept_table(c, kr, o, id, geo, view, offset, rh, count, cur, at, mark, vis0, nr, np, kh,
                    a0 + lead - offset, sp, xa);
     } else {
         c->kf[0] = view;
