@@ -40,90 +40,15 @@ def board():
 
 # The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
-# block at the end brings the radios up. Measured 2026-09-30 on a module-free
-# image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM. That image is board.toml's moy_wasm `take` turned to `deny`,
-# built from an EMPTY build dir: a configured one keeps the engine in its
-# module table and fails to link. The baseline is less EXFAT_SRAM, what FatFS's
-# exFAT build holds in internal SRAM at the idle desk (2026-10-05, the
-# same image and a fresh boot: 119955 free with it, 120523 without), so the
-# guard keeps measuring the engine's own cost.
-EXFAT_SRAM = 568
-# And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
-# panic wrapper in IRAM and its statics), which every console image carries
-# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
-# 2026-10-06 on this board, the internal heap an image that takes
-# the module has against the same tree denying it.
-# Plus the glass's statics (native/moy_glass: its tables' roots and the
-# present engine), 56 bytes of .dram0.bss by the link map against dev
-# 82144715, 2026-10-07.
-# And the links' statics (native/moy_net/moy_link.c: the link's ring header,
-# its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
-# 2026-10-07; the port's espnow module they replace held its ring in the heap.
-# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
-# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
-# Less what the kernel's audio gave back: the synth's
-# state moved from a static to its session's PSRAM (native/moy_audio), 9,824
-# bytes of .dram0.data and .bss by the link map against dev cafae3a2,
-# 2026-10-07.
-# Plus input's statics (native/moy_input: the kernel table's latches, the
-# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
-# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
-# 1180 bytes of .dram0 and .iram0 by the link map against dev 8ecf490a (the input task's
-# stack, 2560 bytes, replaces the poller thread's 5 KiB and NimBLE's host stack
-# is 2 KiB smaller: both are heap, which the guard measures), 2026-10-07.
-# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
-# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
-# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
-# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
-# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
-# clients, its keys and the trusted set, which are PSRAM), its slot's position
-# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
-# the objects' sizes, 2026-10-07.
-# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
-# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
-# 2026-10-07.
-# And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
-# its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
-# .bss by the objects' sizes, 2026-10-08.
-# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
-# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
-# of .bss by the object's size, 2026-10-08.
-# And the frame's (native/moy_kernel: the loop's, the reader's and the
-# ladder's statics and the VM-side stage table; the meters, the PERF window
-# and the line buffer are PSRAM), 392 bytes of idle internal heap measured
-# 2026-10-08 against the same tree's dev image on a fresh boot.
-# Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
-# their buffers (native/moy_alloc), 352 bytes of idle internal heap measured
-# 2026-10-08 against the same tree's image before the move, fresh boots.
-# And first light's (native/moy_kernel/moy_kernel.c: whether the kernel lit
-# the logo and when), the board's dev-channel words and the kernel's HITCH and
-# LOOP lines (their window is PSRAM), 260 bytes of idle internal heap measured
-# 2026-10-08 against the same tree before them, fresh boots.
-# And the cart path's statics (native/moy_play: the run's pointer, whose state
-# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
-# split, which replaced the binding's own), 8 bytes of internal heap by the
-# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
-# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
-# moy_path.c: the floor's view at 64 columns and its geometry's band and
-# scratch, the splash palette, the faces' lent scratch and the screens'
-# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
-# 2026-10-26; the scratch and the band themselves are PSRAM.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8 + 270
-# And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
-# (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
-# paints and marks, the theme's block-nearest tables, the RUN face's shape,
-# native/moy_app's theme row): 1272 bytes of .dram0 by the heap's start on the
-# Guition S3 against dev 64572552, 2026-10-18, whose objects this board's link
-# map holds at the same sizes. The look's corner and shadow caches and the UI
-# API's run context are PSRAM.
-LOOK_SRAM = 1272
-# And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
-# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
-# face's line cursor and the pointers to the block the views share, which
-# is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
-TEXT_SRAM = 44
-WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM - LOOK_SRAM - TEXT_SRAM, 81920)
+# block at the end brings the radios up. The baseline is (free, largest)
+# internal SRAM at the launcher on a fresh boot of a module-free image of the
+# same tree: board.toml's moy_wasm `take` turned to `deny`, built from an
+# EMPTY build dir (a configured one keeps the engine in its module table and
+# fails to link; a fresh `tools/worktree.py new` has one). Measured
+# 2026-10-31 on 1993fb0c, two fresh boots alike: 126791 free, 86016 largest;
+# the image with the engine read 125243 / 81920. A change that adds internal
+# statics re-measures it the same way.
+WASM_IDLE_BASELINE = (126791, 86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
