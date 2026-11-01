@@ -122,7 +122,7 @@ _PART = array("i", [0] * 4)
 _FLOOR = array("i", [0] * 4)            # a floor rect `table_floor` answers
 _FACE_GEN = [0]                         # the faces' keys (`ui.slots`), one per layer and look
 _FACE_SLOTS = 128                       # the slots the engine keeps at most (`ui.slots`)
-_FACES_BYTES = 1 << 20                  # the faces' layer at most: the slots a board's cards fit
+_FACES_BYTES = 192 << 10                # the faces' layer at most: the slots a board's cards fit
 _NO_KEYS = array("i", [-1, -1])         # a band paint that keeps nothing (`band_pass`)
 
 
