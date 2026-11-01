@@ -57,10 +57,6 @@ static volatile uint32_t s_submitted = 0;
 static volatile uint32_t s_done = 0;
 
 static volatile uint32_t s_timeouts = 0;
-// A rotate was asked for (the rotated compositor's): every fill is an SRM
-// scale from then on (ppa_fill_block, srm_fill_block); those fills.
-static bool s_rotates = false;
-static uint32_t s_srm_fills = 0;
 
 // A real op is microseconds; this is a bug fence, not a knob.
 #define PPA_FENCE_TIMEOUT_US 500000
@@ -317,74 +313,6 @@ static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_in
     return err;
 }
 
-// A fill as an SRM scale (ppa_fill_block, on a board whose SRM rotates its
-// frames): a 16 x 16 block of the colour scaled to w x h -- the SRM steps its
-// scale in sixteenths, so every whole size is exact, and bilinear over one
-// colour is that colour -- submitted, blocking, on the client the rotates use,
-// so no second client ever shares the engine with them. 1 once the block is
-// filled; 0 where the SRM did not take it (the caller's CPU fill draws it).
-static uint16_t s_fill_px[256] __attribute__((aligned(64)));
-static int srm_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, int w, int h,
-                          uint16_t c565) {
-    if (s_srm == NULL || w > 16 * 256 || h > 16 * 256) {
-        return 0;
-    }
-    for (int i = 0; i < 256; i++) {
-        s_fill_px[i] = c565;
-    }
-    esp_cache_msync(s_fill_px, sizeof(s_fill_px), ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-    // the out picture is the rows the block lands on, as srm_do scopes it
-    uint8_t *out = (uint8_t *)buf;
-    size_t out_len = len;
-    int out_h = dh, out_y = y;
-    if (((uintptr_t)buf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
-        out = (uint8_t *)buf + (size_t)y * (size_t)dw * 2u;
-        out_len = (size_t)h * (size_t)dw * 2u;
-        out_h = h;
-        out_y = 0;
-    }
-    ppa_srm_oper_config_t op = {
-        .in = {
-            .buffer = s_fill_px,
-            .pic_w = 16,
-            .pic_h = 16,
-            .block_w = 16,
-            .block_h = 16,
-            .block_offset_x = 0,
-            .block_offset_y = 0,
-            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-        },
-        .out = {
-            .buffer = out,
-            .buffer_size = (uint32_t)out_len,
-            .pic_w = (uint32_t)dw,
-            .pic_h = (uint32_t)out_h,
-            .block_offset_x = (uint32_t)x,
-            .block_offset_y = (uint32_t)out_y,
-            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-        },
-        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
-        .scale_x = (float)w / 16.0f,
-        .scale_y = (float)h / 16.0f,
-        .mirror_x = false,
-        .mirror_y = false,
-        .rgb_swap = false,
-        .byte_swap = false,
-        .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
-        .mode = PPA_TRANS_MODE_BLOCKING,
-    };
-    // the driver invalidates the out rows at submit: the CPU's lines in them
-    // reach memory first (srm_do says why)
-    esp_cache_msync(out, out_len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-    s_submitted++;
-    if (ppa_submit_srm(&op) != ESP_OK) {
-        s_submitted--;
-        return 0;
-    }
-    s_srm_fills++;
-    return 1;
-}
-
 // The kernel's scale (a run in the loop's foreground, native/moy_play): the
 // whole `src` picture, `scale` times, into `dst` at (dx, dy), blocking and
 // bilinear (the PPA's scaler). 0, or the driver's error; -1 before init.
@@ -444,7 +372,6 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
 //   frame, one game rect per quiet frame, and angle 0 to bring a ping-pong
 //   framebuffer up to date from its sibling.
 static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
-    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -863,7 +790,6 @@ static void rb_worker(void *arg) {
 }
 
 static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
-    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -1405,7 +1331,6 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_snap_stats_obj, moy_ppa_snap_stats);
 //   PPA has no nearest mode; crisp mode takes the paint-buffer path).
 //   Blocking unless `nb` (see rotate).
 static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
-    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -1688,16 +1613,14 @@ void moy_ppa_k_sync(void) {
     ppa_wait(0);
 }
 
-// stats() -> (submitted, done, timeouts, fills the SRM drew). timeouts
-// must stay 0.
+// stats() -> (submitted, done, timeouts). timeouts must stay 0.
 static mp_obj_t moy_ppa_stats(void) {
-    mp_obj_t t[4] = {
+    mp_obj_t t[3] = {
         mp_obj_new_int_from_uint(s_submitted),
         mp_obj_new_int_from_uint(s_done),
         mp_obj_new_int_from_uint(s_timeouts),
-        mp_obj_new_int_from_uint(s_srm_fills),
     };
-    return mp_obj_new_tuple(4, t);
+    return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_stats_obj, moy_ppa_stats);
 
@@ -1907,16 +1830,6 @@ static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, i
     if (s_fill == NULL || dw <= 0 || dh <= 0 || w <= 0 || h <= 0
         || x < 0 || y < 0 || x + w > dw || y + h > dh) {
         return 0;
-    }
-    // Never the fill client on a board whose SRM rotates its frames (the
-    // Guition P4's rotated compositor): it and the SRM's rotates, interleaved
-    // on every frame of the desk carousel's key steps, wedged the SRM for
-    // good about one key row in twenty, here and on dev -- every later fence
-    // timed out at PPA_FENCE_TIMEOUT_US and a blocking fill then held the
-    // task watchdog off (2026-11-01). Waiting out the rotates in flight
-    // first still wedged it. The fill is the SRM's own there.
-    if (s_rotates) {
-        return srm_fill_block(buf, len, dw, dh, x, y, w, h, (uint16_t)c565);
     }
     // The IDF's fill validator requires the out-picture buffer's ADDRESS *and*
     // SIZE to be cache-line aligned, and rejects the op otherwise. Surfaces that
