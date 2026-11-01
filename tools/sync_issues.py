@@ -255,7 +255,7 @@ BUILD = {
 AREA_ORDER = [
     "launcher", "editor", "wm", "player", "blocks", "carts", "apps",
     "audio", "input", "multiplayer", "webview", "ota", "perf",
-    "p4", "tdeck", "hardware", "ai", "tooling", "brand", "docs",
+    "p4", "tdeck", "hardware", "tooling", "brand", "docs", "charm",
 ]
 
 

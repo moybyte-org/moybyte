@@ -25,13 +25,13 @@ Labels are applied on four orthogonal axes plus a `tracker` marker.
 | `area:webview` | Device/host web view + draw-command transport |
 | `area:ota` | OTA firmware update pipeline & channels |
 | `area:perf` | Performance work (fps, frame budget, levers) |
-| `area:p4` | ESP32-P4 (Waveshare 7B) device target |
+| `area:p4` | ESP32-P4 device targets: the Waveshare 7B and the Guition 10.1″ |
 | `area:tdeck` | LilyGO T-Deck Plus device target |
 | `area:hardware` | Form factors, device tiers, external hardware (Lego) |
-| `area:ai` | AI helper / hint system |
 | `area:tooling` | Dev pipeline, build/test automation, repo tooling |
 | `area:brand` | Naming, trademark, brand identity |
 | `area:docs` | Documentation itself |
+| `area:charm` | Personality, delight, sound identity, mascot, celebrations |
 
 Add a new `area:*` only when a real subsystem has no home — and add it to `AREA_ORDER`
 in `tools/sync_issues.py` so it sorts where you expect in the dashboard.

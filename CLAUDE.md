@@ -41,7 +41,7 @@ made false, in place. The rest is `.claude/rules/docs.md`.
 | per-cart fps, frame budgets, the lever ledger | **#66** |
 | the P4 port, its transitions and image cost | **#58** |
 | cross-board strategy, A/B benches, ranked levers | `docs/perf_native_gap_v1.md` (**#77**) |
-| the Guition ports · Lua/moycore tier · crisp composite | **#202** · **#67** · **#204** |
+| the Lua/moycore tier | **#67** |
 | the compiled tier | **#158** |
 | a board's image headroom | the build prints it; nothing else is current |
 
@@ -98,8 +98,9 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
   legacy readers. The door a migration would use is `sweep_store`'s
   `prune_retired`, and the bar is its own (generation-gated, one small read
   warm) — the picture pass missed it and cost a Guition a 196-second boot.
-- `moybyte_console_plan_2026-07.md` is the current design doc; `docs/history/`
-  is history, not direction.
+- `moybyte_console_plan_2026-07.md` holds the positioning (§2), the canvas
+  contract (§4) and safety (§13); the rest of it is historical until the OS
+  design doc replaces it. `docs/history/` is history, not direction.
 
 ## Working here
 
