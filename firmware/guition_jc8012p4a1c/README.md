@@ -19,6 +19,12 @@ function. This directory owns what this glass decides: the panel define, the
 backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 `docs/board_ports_2026-08.md` carries the checklist this port walked.
 
+**Support level: beta, permanently (owner, 2026-11-01).** The glass scans
+portrait and the console runs landscape, so every frame pays a rotation, and
+everything runs a little slower here than on the Waveshare P4. That makes it
+a poor general console, but a good board for a single fullscreen app, such
+as a Home Assistant panel.
+
 ## What this glass decided (read before touching the board)
 
 - **The console runs LANDSCAPE, 1280×800, on glass that scans PORTRAIT** (owner
@@ -245,7 +251,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | Backlight | **GPIO23, active-high** (LEDC-capable) |
 | Touch | GSL3680 @ **0x40** on I2C0 **SDA=7 / SCL=8** (400kHz), **RST=22, INT=21** (INT held low through reset selects the address) |
 | C6 (WiFi/BLE) | ESP-Hosted SDIO: CLK18 CMD19 D0–D3 = 14–17, reset **GPIO54** — the Waveshare's wiring pin for pin |
-| Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Unwired, like the Waveshare's (#82) |
+| Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Wired, with the Waveshare's driver (#82): the codec answers and the stream runs with 0 underruns, but our unit has no speaker fitted, so nobody has heard it |
 | TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
 | Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`) |
@@ -322,5 +328,5 @@ for the C6/audio pins, which agree with the BSP.
    not stage a `c6` block in this board's manifest yet.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
-5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
-   Waveshare), backlight PWM (`moy_dsi`'s backlight entry, when wanted).
+5. BLE keyboard (unverified: nothing paired), audio by ear (no speaker on
+   our unit), backlight PWM (`moy_dsi`'s backlight entry, when wanted).

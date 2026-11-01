@@ -63,7 +63,7 @@ the whole lever existed for. Why, with numbers:
 
 Perf follow-ups still open: a PPA cover-crop for drags; the editor-tab /
 transition draw cost (dispatch-bound); the #113 Phase 5 Settings partial
-repaint. Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311),
+repaint. Also open: wired USB-HID keyboard/mouse/gamepad (#83),
 OTA/web-view wiring.
 
 ### Serial dev commands (the REPL-alive board's affordance)
