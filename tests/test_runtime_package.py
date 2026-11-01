@@ -16,12 +16,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_the_runtime_package_imports_in_a_fresh_interpreter():
-    # cwd first on sys.path, so a worktree imports its own runtime/ and not
-    # the one the shared venv's editable install maps.
-    r = subprocess.run(
-        [sys.executable, "-c",
-         "import runtime, os; print(os.path.dirname(runtime.__file__))"],
-        cwd=ROOT, capture_output=True, text=True, timeout=120)
+    # cwd first on sys.path, so a worktree imports its own runtime/; and the
+    # shared venv's editable finder dropped, or a submodule this checkout
+    # deleted would import from the main checkout's runtime/ (import_guard).
+    code = ("import sys; sys.path.insert(0, 'tests'); import import_guard; "
+            "sys.path.pop(0); import_guard.drop_foreign_editable_finders('.'); "
+            "import runtime, os; print(os.path.dirname(runtime.__file__))")
+    r = subprocess.run([sys.executable, "-c", code],
+                       cwd=ROOT, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
     assert os.path.realpath(r.stdout.strip()) == \
         os.path.realpath(os.path.join(ROOT, "runtime"))

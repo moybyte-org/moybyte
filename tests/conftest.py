@@ -157,6 +157,16 @@ class _DeviceModuleFinder(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, _DeviceModuleFinder())
 sys.meta_path.insert(0, _SharedRuntimeAliasFinder())
 
+# A module this checkout no longer has fails here as it fails in CI: neither
+# the shared venv's editable finder (which maps `runtime` to the MAIN
+# checkout) nor a stale build-staged copy may stand in for it
+# (tests/import_guard.py, pinned by tests/test_import_guard.py).
+import import_guard  # noqa: E402  (tests/ is on sys.path for its conftest)
+
+import_guard.drop_foreign_editable_finders(_REPO_ROOT)
+sys.meta_path.insert(2, import_guard.StagedCopyRefusal(
+    import_guard.staging_dirs(_REPO_ROOT)))
+
 
 def pytest_addoption(parser):
     """`--update-goldens` -- the explicit re-baseline switch for the shell
