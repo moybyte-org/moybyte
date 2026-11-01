@@ -194,6 +194,7 @@ def _methods():
 # imported by name -- or a carve that forgot this table -- fails here first.
 MIXINS = {
     "InputVerbs": "console_input",
+    "HomeVerbs": "console_home",
     "PerfMeters": "console_perf",
     "SettingsToggles": "console_settings",
     "SaveVerbs": "console_saves",
