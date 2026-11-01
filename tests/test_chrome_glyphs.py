@@ -1,5 +1,5 @@
 """The glyph vocabulary is data and its raster is one C body
-(docs/kernel_toolkit_2026-10.md §5).
+(docs/history/kernel_toolkit_2026-10.md §5).
 
 native/moy_ui/style.json's "glyphs" are the bitmaps runtime/chrome.py held,
 and native/moy_ui's raster derives each glyph's spans from its rows at draw

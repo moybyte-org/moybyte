@@ -1,4 +1,4 @@
-"""The one UI text path (native/moy_gfx/moy_text.h, docs/kernel_toolkit_2026-10.md
+"""The one UI text path (native/moy_gfx/moy_text.h, docs/history/kernel_toolkit_2026-10.md
 §4, §10 "one text path").
 
 * Text is measured in UTF-8 bytes and a truncation NEVER cuts a sequence: it

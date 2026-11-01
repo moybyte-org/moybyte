@@ -1,5 +1,5 @@
 {
-  "about": "The strings C draws (docs/kernel_toolkit_2026-10.md §2.3), English, one entry per string id. A format's conversions are part of its text: a language pack whose entry carries different conversions is refused for that id, which then reads English.",
+  "about": "The strings C draws (native/moy_ui/README.md), English, one entry per string id. A format's conversions are part of its text: a language pack whose entry carries different conversions is refused for that id, which then reads English.",
   "strings": {
     "menu.cart": "CART",
     "menu.delete_cart": "DELETE CART",

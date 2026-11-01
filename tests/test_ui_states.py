@@ -350,7 +350,7 @@ def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
 
 
 def test_the_toggle_is_a_chip_that_reads_switched_on():
-    """A kind added as data (sprint 6, docs/kernel_toolkit_2026-10.md §2.2):
+    """A kind added as data (sprint 6, native/moy_ui/README.md):
     chip's shape and chip's look, except ON, which is the theme's play green
     with light ink."""
     th = fixture_colors("machine")

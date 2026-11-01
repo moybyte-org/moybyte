@@ -1164,7 +1164,7 @@ def bench_popovers(b, out_path):
 
 
 def bench_repaint(b, surfaces, seconds, out_path):
-    """The widget A/B (docs/kernel_toolkit_2026-10.md §10): each surface open
+    """The widget A/B (docs/history/kernel_toolkit_2026-10.md §10): each surface open
     and repainted EVERY frame for `seconds`, painted-frame ms. Board-neutral,
     so the S3s take it with the P4s."""
     bench = Bench(b)

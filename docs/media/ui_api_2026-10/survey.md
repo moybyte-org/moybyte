@@ -10,7 +10,7 @@ The design built on it is `docs/ui_api_2026-10.md`. The owner's decisions of 202
 - **Focus belongs to each app** — no focus model in the toolkit; apps draw `focus_ring` themselves. `Hits` is pointer-only.
 - Compiled apps get nine `ui_*` rows in `native/moy_app/roles.json`.
 - moy-spec's SPEC.md has **no UI verbs**: carts get `btn`/`btnp`, `touch()`, `key`, `textmode`, and draw menus by hand.
-- Settled: no widget tree, no LVGL (`docs/surface_model_v1.md` §8; `docs/kernel_toolkit_2026-10.md` §1).
+- Settled: no widget tree, no LVGL (`docs/surface_model_v1.md` §8; `docs/history/kernel_toolkit_2026-10.md` §1).
 
 ## The survey
 

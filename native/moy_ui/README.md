@@ -1,7 +1,7 @@
 # moy_ui — the widget toolkit in C
 
-The toolkit's bodies in C, with style and strings as data
-(`docs/kernel_toolkit_2026-10.md`, #224), and the engine of the public UI
+The toolkit's bodies in C, with style and strings as data (#224 sprint 6;
+the design record is `docs/history/kernel_toolkit_2026-10.md`), and the engine of the public UI
 API (`docs/ui_api_2026-10.md`). `runtime/ui.py` (the verbs) and
 `runtime/ui_draw.py` (the rect-taking widgets the chrome keeps) are its
 Python faces, `native/moycore/moycore_ui.h` its Lua face and
@@ -27,10 +27,38 @@ Python faces, `native/moycore/moycore_ui.h` its Lua face and
 | `moy_ui_wasm.h`, `moy_ui_wasm.c` | the RUN sink and the RUN face: the run's one context over its snapshot, the verbs a Lua cart's `ui` calls and the `ui` rows a compiled app imports (roles.json's `ui` role) |
 | `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_look`, `theme_look_fields`, `theme_place`, `theme_block`, `theme_rgb`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed`, `theme_fonts`, `theme_sheets` and `theme_layout` face the loader, `sheet_check`, `sheet_load`, `sheet_clear`, `sheet_cells`, `sheet_set` and `sheet_caps` the role sheet, `font_load`, `font_free`, `font_reset`, `font_info` and `font_file` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_font` and `font` the font each role's text draws in, `print_font` the one a canvas's print draws in and `cart_text` the app-cart boundary (`docs/theming_2026-09.md` §4.7), `use_shape` installs a theme's shape, `buttons_set`, `buttons_clear` and `buttons_app` the live theme's button leaves and `button_style` resolves a button kind against them, `theme_reads` is the contrast floor, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame; `use_depth`, `frame_geom`, `frame_icon`, `frame_under`, `cast` and `bar_part` are the depth's; `api_size`, `api_begin` and the `api_` verbs are the public UI API's engine, `api_text_view`, `api_text_at` and `api_text_cover` the text view's verb, hit test and overlays, `text_words`, `text_runs` and `text_tones` its word table, colour runs and tones); its `s`, `str_set` and `str_reset` read and write the spine's string table |
 
-The strings C draws are the spine's (`native/moy_spine/moy_str.h`), not this
-module's: the kernel's floor draws them on an image with no toolkit.
+## Which edits are data, which need C
 
-Which edits are data and which need C is the design doc's §2.2.
+| a change | the edit |
+|---|---|
+| which token a widget state paints; a skin; a new kind that reuses a primitive's shape | data (`style.json`) |
+| a theme's colours | data (a theme package) |
+| a pad, an edge weight, a strip height, a label alignment | data (metrics); a size change moves goldens, deliberately |
+| a glyph's pixels; a new glyph | data (style's glyph vocabulary) |
+| a string C draws | data (strings, below) |
+| any layout; which widget a screen draws where; a string Python passes in | Python (the apps, their Layouts and the WMs) |
+| a new primitive shape, a new state, a new metric slot, a quirk, the hover and press rules, scroll physics, the text lane, a font format, theming's painter | C |
+
+## Strings as data (#135)
+
+The strings C draws are the spine's (`native/moy_spine/moy_str.h`), not this
+module's: the kernel's floor draws them on the Zero, which denies the toolkit.
+A string id is a dotted name (`fit.needs`, `recovery.title`); C reads
+`moy_str(id)` and formats with `moy_str_fmt`, and the Python face reads
+`ui.s(id)`. Each entry keeps its conversions in order (`%s`, `%u`, `%d`,
+`%08x`), and a language pack whose entry carries different ones is refused for
+that id, which then reads English: a pack is untrusted data, as a theme is.
+
+Every `moy_text` call carries its SOURCE (`native/moy_gfx/moy_text.h`):
+`TABLE` (a string id), `PY` (text a runtime passed in), `DATA` (a number or a
+user's text formatted into a table entry) or `LIT` (a literal in C). `LIT`
+never reaches the raster. The `PY` call sites are a ratchet that only comes
+down, each removed as its strings move into the table
+(`tests/test_ui_strings.py`, 2026-10-11): the menu rows, panel and strip
+titles, notices and toasts are Python-fed through moy_chrome's builders, and
+the sysmenu's rows and the runtime's notices already read the table.
+Glyph coverage is the font's (owner, 2026-10-11): the text call takes UTF-8
+and a font, so a font that covers Cyrillic is data.
 
 On the host the C is compiled once, into the host's one library
 (`runtime/host_native.py`) with the glass whose canvas rows its primitives

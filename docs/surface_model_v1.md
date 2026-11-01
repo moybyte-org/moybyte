@@ -1177,7 +1177,7 @@ painted frame.
 
 `runtime/console.py`'s frame gate and `wm_windowed`'s content freeze (§14.1)
 are Python, as the window managers are (sprint 7 does not run,
-`docs/kernel_toolkit_2026-10.md`).
+`docs/history/kernel_toolkit_2026-10.md`).
 
 ## 16. Amendment: the surface table is removed (2026-10-27)
 

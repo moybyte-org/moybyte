@@ -1,4 +1,4 @@
-"""The toolkit's style and strings are DATA (docs/kernel_toolkit_2026-10.md
+"""The toolkit's style and strings are DATA (docs/history/kernel_toolkit_2026-10.md
 §2): native/moy_ui/style.json holds what the twin's tables hold, the strings
 C draws are native/moy_spine/strings/en.json's and none is left a literal, and every theme key a style spec
 reads is in the token vocabulary the C resolution reads from.

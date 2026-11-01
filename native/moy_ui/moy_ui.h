@@ -1,5 +1,5 @@
 // moy_ui: the widget toolkit's bodies in C, with style and strings as data
-// (docs/kernel_toolkit_2026-10.md). This file is the style resolution: the
+// (docs/history/kernel_toolkit_2026-10.md). This file is the style resolution: the
 // kinds, the states, each kind's (field, ink, edge) in each state resolved
 // against a theme's token row, and each kind's metric slots.
 // The data is style.json's, generated into moy_ui_tables.c

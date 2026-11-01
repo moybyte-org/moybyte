@@ -1,4 +1,4 @@
-"""The oracle for native/moy_ui (docs/kernel_toolkit_2026-10.md §7): the
+"""The oracle for native/moy_ui (docs/history/kernel_toolkit_2026-10.md §7): the
 toolkit's Python bodies as they were before the crossing -- runtime/ui.py's
 style resolution, widgets, ScrollRegion and DragTap -- kept here as
 tests/spine_twin.py keeps the spine's. The fuzz in
@@ -25,7 +25,7 @@ def _fs(cv):
 def is_light(th):
     return bool(th.get('surface_light', False))
 
-# Edited with the text path (sprint 6 step 3, docs/kernel_toolkit_2026-10.md
+# Edited with the text path (sprint 6 step 3, docs/history/kernel_toolkit_2026-10.md
 # §4): text is measured in UTF-8 BYTES, whitespace is str.split()'s ASCII set,
 # and a truncation backs up to the last whole codepoint, ending its line. For
 # ASCII this is the old body exactly.

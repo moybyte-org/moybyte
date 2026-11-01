@@ -400,7 +400,7 @@ the module `moy_ufiles`). Every console takes it."""
 module = "moy_ui"
 why = """
 The widget toolkit's bodies in C with style and strings as data
-(docs/kernel_toolkit_2026-10.md), and the module `moy_ui` runtime/ui.py's face
+(docs/history/kernel_toolkit_2026-10.md), and the module `moy_ui` runtime/ui.py's face
 calls. Every console takes it."""
 
 [[native.shared.take]]

@@ -1,4 +1,4 @@
-// moy_text: the one UI text path (docs/kernel_toolkit_2026-10.md §4).
+// moy_text: the one UI text path (docs/history/kernel_toolkit_2026-10.md §4).
 //
 // Every UI string reaches the raster through here: the system canvases'
 // print (the print gate and the `text` kernel at every scale above 1), the

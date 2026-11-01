@@ -339,7 +339,7 @@ files by path."""
 [[native.shared.deny]]
 module = "moy_ui"
 why = """
-The widget toolkit (docs/kernel_toolkit_2026-10.md). This board runs no apps:
+The widget toolkit (docs/history/kernel_toolkit_2026-10.md). This board runs no apps:
 the browser it serves draws them."""
 
 [[native.shared.deny]]

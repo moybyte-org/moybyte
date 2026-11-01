@@ -1,5 +1,6 @@
-"""The strings C draws are data (docs/kernel_toolkit_2026-10.md §2.3, §10
-"strings are data"): native/moy_spine's table, read through moy_str.
+"""The strings C draws are data (native/moy_ui/README.md;
+docs/history/kernel_toolkit_2026-10.md §10, "strings are data"):
+native/moy_spine's table, read through moy_str.
 
 * A language pack is untrusted: an entry whose conversions differ from
   English's is refused and the id reads English.

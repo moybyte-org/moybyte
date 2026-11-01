@@ -35,7 +35,7 @@ tests/test_ui_public.py pins which. The rect algebra is `runtime/ui.py`'s.
 Design rules (deliberate, argued in the redesign thread):
 
   * IMMEDIATE MODE, and the bodies are C: each widget is one call into
-    native/moy_ui (docs/kernel_toolkit_2026-10.md), which draws into the
+    native/moy_ui (docs/history/kernel_toolkit_2026-10.md), which draws into the
     canvas's CANVAS row through the kernels the canvas verbs end in -- so it
     renders identically on the host, every board and the browser. No retained tree, no per-frame
     allocation beyond small tuples. tests/ui_twin.py keeps the Python bodies
@@ -405,7 +405,7 @@ def widget_state(on=False, hot=False, disabled=False, interact=None):
 # --- the style: data in native/moy_ui, resolved in C ---------------------------
 #
 # The look and the numbers are DATA: native/moy_ui/style.json, generated into
-# the C tables native/moy_ui resolves (docs/kernel_toolkit_2026-10.md §2). A
+# the C tables native/moy_ui resolves (docs/history/kernel_toolkit_2026-10.md §2). A
 # kind's (field, ink, edge) in each state is a chain of token specs resolved
 # against the theme's token row. Nothing in this module holds a colour or a
 # pad.

@@ -455,7 +455,7 @@ def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_toolkit_and_the_zero_denies_it(board):
-    """native/moy_ui is the widget toolkit (docs/kernel_toolkit_2026-10.md):
+    """native/moy_ui is the widget toolkit (docs/history/kernel_toolkit_2026-10.md):
     every console takes it; the Zero, which runs no apps, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])

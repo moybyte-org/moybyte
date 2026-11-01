@@ -6,7 +6,7 @@
 #   _recolour         the accent-and-tint derivation's tables (accents, tints, classes)
 #   generate_strings  the string table (strings/en.json)
 #   outputs           every generated file and its text (the drift test reads it)
-"""Write the toolkit's tables from their data (docs/kernel_toolkit_2026-10.md
+"""Write the toolkit's tables from their data (docs/history/kernel_toolkit_2026-10.md
 §2.1): native/moy_ui's `style.json` in, its `moy_ui_tables.h` and
 `moy_ui_tables.c` out, the seed theme packages (`themes/*.json`) embedded in
 them; native/moy_spine's `strings/en.json` in, its

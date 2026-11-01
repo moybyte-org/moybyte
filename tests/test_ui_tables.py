@@ -1,5 +1,5 @@
 """native/moy_ui's tables are generated from its data and committed
-(docs/kernel_toolkit_2026-10.md §2.1, §10 "style is data").
+(docs/history/kernel_toolkit_2026-10.md §2.1, §10 "style is data").
 
 * The drift test: tools/gen_ui_tables.py run over the tree's style.json and
   strings reproduces the committed moy_ui_tables.h/.c and

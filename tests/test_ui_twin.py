@@ -1,4 +1,4 @@
-"""The toolkit against its oracle (docs/kernel_toolkit_2026-10.md §7, §10).
+"""The toolkit against its oracle (docs/history/kernel_toolkit_2026-10.md §7, §10).
 
 `tests/ui_twin.py` is the toolkit's Python as it was before the crossing. Two
 nets hold the shipped toolkit (`runtime/ui.py` and what it calls) to it:
