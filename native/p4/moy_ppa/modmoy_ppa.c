@@ -57,6 +57,8 @@ static volatile uint32_t s_submitted = 0;
 static volatile uint32_t s_done = 0;
 
 static volatile uint32_t s_timeouts = 0;
+// fills handed back to the CPU because the engine was busy (ppa_fill_block)
+static uint32_t s_fill_declined = 0;
 
 // A real op is microseconds; this is a bug fence, not a knob.
 #define PPA_FENCE_TIMEOUT_US 500000
@@ -1613,14 +1615,16 @@ void moy_ppa_k_sync(void) {
     ppa_wait(0);
 }
 
-// stats() -> (submitted, done, timeouts). timeouts must stay 0.
+// stats() -> (submitted, done, timeouts, fills declined). timeouts must
+// stay 0.
 static mp_obj_t moy_ppa_stats(void) {
-    mp_obj_t t[3] = {
+    mp_obj_t t[4] = {
         mp_obj_new_int_from_uint(s_submitted),
         mp_obj_new_int_from_uint(s_done),
         mp_obj_new_int_from_uint(s_timeouts),
+        mp_obj_new_int_from_uint(s_fill_declined),
     };
-    return mp_obj_new_tuple(3, t);
+    return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_stats_obj, moy_ppa_stats);
 
@@ -1829,6 +1833,16 @@ static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, i
                           uint32_t c565) {
     if (s_fill == NULL || dw <= 0 || dh <= 0 || w <= 0 || h <= 0
         || x < 0 || y < 0 || x + w > dw || y + h > dh) {
+        return 0;
+    }
+    // Never beside another engine's work: a fill submitted while the SRM
+    // client's rotates (the rotated compositor's present) or a 2D-DMA copy
+    // are in flight wedged the SRM for good on the Guition P4 -- every later
+    // fence timed out at PPA_FENCE_TIMEOUT_US and a blocking fill then held
+    // the task watchdog off (the desk carousel's key steps, 2026-11-01). The
+    // caller's CPU fill draws it instead.
+    if (ppa_inflight() > 0 || s_fb_busy) {
+        s_fill_declined++;
         return 0;
     }
     // The IDF's fill validator requires the out-picture buffer's ADDRESS *and*
