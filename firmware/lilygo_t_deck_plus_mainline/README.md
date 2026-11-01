@@ -608,7 +608,7 @@ sprint 3's glass pass) implements the small interface `DeviceCanvas.__init__`
 and `moy_runtime.run_desktop` call — `size` / `framebuffer` / `back_buffer` /
 `gfx` / `flush` / `sync` — plus the one the diag layer probes for with
 `getattr` (`bounce_stats`). No new seam is invented
-(`docs/backend_contract_v1.md` L8: strategy stays the backend's). Its frame
+(`docs/surface_model_v1.md` L5: compositing strategy is the backend's). Its frame
 state machine is C over `moy_lcd`'s kernel transport (`moy_lcd_kwait`/`kkick`/
 `kship`), the same one the Guition runs over `moy_axs`: the ping-pong, the
 drain-swap-kick overlap and the meter forwarding. What is this board's is in

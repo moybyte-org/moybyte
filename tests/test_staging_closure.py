@@ -1,6 +1,6 @@
 """Every module a target freezes must be able to IMPORT on that target.
 
-This is `docs/backend_contract_v1.md` §8's never-built prerequisite, and it
+This is `docs/history/backend_contract_v1.md` §8's never-built prerequisite, and it
 exists because the tree has shipped this bug more than once in the same
 quarter:
 

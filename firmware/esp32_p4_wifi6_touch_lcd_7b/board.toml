@@ -67,7 +67,7 @@ why = """
 Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
 
 This board's build.sh used to carry a hand-written `for f in ...` list, which
-`docs/backend_contract_v1.md` §8 described as a denylist -- it never was one.
+`docs/history/backend_contract_v1.md` §8 described as a denylist -- it never was one.
 An allowlist asks "did somebody remember to add this?"; a denylist asks "is
 there a reason this must not cross?". The first question's wrong answer is
 silent, because every consumer in this tree is capability-gated.
