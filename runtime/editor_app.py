@@ -427,7 +427,7 @@ class EditorApp:
         self._drop_theme()
         if view == "code" and ws.cart is not None and not ws.code_sources():
             # A compiled cart that ships no `src/` has no Code tab: there is no
-            # text behind its main.wasm to show (docs/wasm_tier_plan_2026-09.md).
+            # text behind its main.wasm to show (native/moy_wasm/README.md).
             view = "cards"
         if view != self.tab and self.project is ws.project:
             # (#111) autosave-only: the OUTGOING tab still owes whatever it

@@ -28,7 +28,7 @@ plays the queue.
 
 ## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)
 
-A `"runtime": "wasm"` cart (docs/wasm_tier_plan_2026-09.md) runs on the SAME
+A `"runtime": "wasm"` cart (native/moy_wasm/README.md) runs on the SAME
 console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 `pmem_image`, `retarget`, `close` -- with libmoy's wasm import table
 (`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last

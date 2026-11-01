@@ -352,7 +352,7 @@ def test_every_native_take_names_a_module_and_says_why(board):
 
 
 # The WebAssembly tier ships on every console board or on none
-# (docs/wasm_tier_plan_2026-09.md), so its engine is the one shared module
+# (native/moy_wasm/README.md), so its engine is the one shared module
 # whose default "yes" is not enough: every board file decides it in writing.
 CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
 

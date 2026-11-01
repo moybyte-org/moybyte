@@ -329,7 +329,7 @@ def _compiled(cart):
     return (cart or {}).get("runtime") == "wasm"
 
 
-# A compiled cart bigger than this console can hold (docs/wasm_tier_plan_2026-09.md:
+# A compiled cart bigger than this console can hold (native/moy_wasm/README.md:
 # a cart above the floor is allowed, and a board that cannot fit it says so).
 # It is refused before it loads, on the runtime-missing panel's mechanism --
 # the run never starts and cart_error holds the text -- and the panel is drawn
@@ -352,7 +352,7 @@ _OUT_OF_MEMORY = "out of memory"
 # A compiled cart whose module does not run natively on this console -- none
 # for this chip and compiled-code format, one with no signature while the
 # owner has Unknown sources off, or one whose content is corrupt -- is never
-# refused for it (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+# refused for it (native/moy_wasm/README.md, "A cart survives its
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
 # slower, and INTERP_NOTICE is the short system NOTICE that says so
@@ -2240,7 +2240,7 @@ class Player:
 
     def _start_runtime(self, runtime, ns, src, t0, h0, t_pre):
         """Start a cart on a runtime other than the console's Python: `"lua"`
-        (#67) or `"wasm"` (docs/wasm_tier_plan_2026-09.md), through the factory
+        (#67) or `"wasm"` (native/moy_wasm/README.md), through the factory
         `ws.runtimes` maps it to -- moycore_glue's runs on every tier, and
         runtime/wasm_host.WasmHostRun for a compiled cart on the host. The cart gets the SAME make_api namespace a Python cart got
         (a Lua factory registers those callables as the cart's globals; a wasm
@@ -2612,7 +2612,7 @@ class Player:
         # from the traceback, mapped back through the nativize insert.
         if self._lua is not None and _compiled(ws.cart):
             # A trap: the run already cleared its canvas, and there is no
-            # source line to mark (docs/wasm_tier_plan_2026-09.md).
+            # source line to mark (native/moy_wasm/README.md).
             self.cart_error = _lua_err_text(exc)
             self.crash_file, self.crash_line = None, None
         elif self._lua is not None:

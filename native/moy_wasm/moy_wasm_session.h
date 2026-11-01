@@ -1,4 +1,4 @@
-// A cart's SESSION on the engine (docs/wasm_tier_plan_2026-09.md, phase 3):
+// A cart's SESSION on the engine (docs/history/wasm_tier_plan_2026-09.md, phase 3):
 // the C surface moycore -- the host half, which owns the console and the
 // import table -- drives a compiled cart through. Two engines implement it:
 // the boards' (modmoy_wasm.c beside this file, over WAMR) and the browser's
@@ -81,7 +81,7 @@ typedef struct {
 // in `err`; a file that cannot be read raises.
 //
 // `interp` is non-zero when `path` is a cart's own main.wasm, run on the
-// interpreter tier (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+// interpreter tier (native/moy_wasm/README.md, "A cart survives its
 // firmware", 2026-09-30): no moybyte.key section, no signature and no
 // Unknown sources check -- WAMR's bytecode validation is the sandbox, not
 // provenance -- and moy_wasm_session_lanes() reports 0 lanes for the

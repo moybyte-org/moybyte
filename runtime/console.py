@@ -900,7 +900,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # on the host and the browser, which keep the console's frame.
         self.front_bind = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
-        # The cart-runtime seam (#67, docs/wasm_tier_plan_2026-09.md): a
+        # The cart-runtime seam (#67, native/moy_wasm/README.md): a
         # manifest's "runtime" name -> factory(ns, src) returning a running cart
         # handle (.init/.update/.draw callables + .close()). build_workstation
         # maps "lua" to moycore_glue's run (over runtime/moycore.py) and "wasm"
@@ -2330,7 +2330,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.go_home()
             return True
         # A compiled cart has no source to open: its trap stays on the stop
-        # card, which offers no See why (docs/wasm_tier_plan_2026-09.md).
+        # card, which offers no See why (native/moy_wasm/README.md).
         if self.cart.get("runtime") == "wasm":
             return False
         err = self.cart_error or "crashed"

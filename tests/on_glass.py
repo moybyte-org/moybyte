@@ -2372,7 +2372,7 @@ def _wm_meters_measured(board, win):
     return seen
 
 
-# -- the WebAssembly engine (docs/wasm_tier_plan_2026-09.md, phase 1) --------
+# -- the WebAssembly engine (docs/history/wasm_tier_plan_2026-09.md, phase 1) --------
 #
 # native/moy_wasm on glass: the spike's 6502 core built by tools/wasm_module.py
 # for this board's chip with the pinned compilers, pushed into the board's
@@ -2781,7 +2781,7 @@ def wasm_low_water_with_radios_up(board, paths):
     return r["sram_before"], r["sram_min"], floor
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) -----------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------------
 #
 # A compiled cart run from the launcher: tests/fixtures/wasm/ built for this
 # board's chip by tools/wasm_cart.py (WAT assembled, the module compiled with
@@ -3318,7 +3318,7 @@ def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
     return notice
 
 
-# -- a cart too big for the board (docs/wasm_tier_plan_2026-09.md) --------------
+# -- a cart too big for the board (native/moy_wasm/README.md) --------------
 #
 # A compiled cart above what a board can fit is allowed, and the board refuses
 # it at launch with a plain notice -- never an error panel, never a crash. The
@@ -3457,7 +3457,7 @@ def _runs_on_interpreter(board, title, check=None, cause="missing"):
     notice (`runtime/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). Returns the notice (title, sub)."""
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line

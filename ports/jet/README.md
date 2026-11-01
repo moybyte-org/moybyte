@@ -1,6 +1,6 @@
 # The Jet carts — the compiled tier's showcases
 
-Two `"runtime": "wasm"` carts (docs/wasm_tier_plan_2026-09.md, "The showcase
+Two `"runtime": "wasm"` carts (docs/history/wasm_tier_plan_2026-09.md, "The showcase
 cart") rendered by [Jet](https://github.com/CubeCoders/Jet) — CubeCoders' MIT
 software rasteriser, which writes RGB565 into buffers the caller owns — each
 porting one of [JetExamples](https://github.com/CubeCoders/JetExamples)' own

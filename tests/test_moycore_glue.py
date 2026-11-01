@@ -167,7 +167,7 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_fill = None
         self.closes = 0
         self.wasm_open_err = None
-        # A retry (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+        # A retry (native/moy_wasm/README.md, "A cart survives its
         # firmware") calls wasm_open a second time; set this to a list to
         # answer each call in turn instead of the same wasm_open_err always.
         self.wasm_open_errs = None
@@ -1889,7 +1889,7 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
     """The engine's refusal for a module with no signature (Unknown sources
     off) is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). The cart plays; run.interp says so, and interp_cause says
     why -- "unsigned", so the Player's notice reads "isn't signed" rather
     than "needs an update"."""
@@ -2160,7 +2160,7 @@ def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_p
 
 def test_no_module_for_this_chip_sizes_against_main_wasm_instead(tmp_path):
     """No module for this chip: the cart plays on the interpreter instead of
-    refusing (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+    refusing (native/moy_wasm/README.md, "A cart survives its
     firmware"), so the fit check sizes against main.wasm itself, through the
     INTERPRETED rule (a real file, a real report, never the AOT one) rather
     than giving up."""

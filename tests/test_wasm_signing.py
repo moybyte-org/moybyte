@@ -192,7 +192,7 @@ def test_the_board_decides_the_switch_where_it_decides_the_signature():
 def test_only_tamper_evidence_stays_a_hard_refusal():
     """device.moycore_glue._AOT_TAMPER_EVIDENCE is the engine's own refusal
     text for a SIGNATURE that does not verify -- the one case a WasmRun does
-    not retry on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    not retry on the interpreter (native/moy_wasm/README.md, "A cart
     survives its firmware", 2026-09-30). "unsigned module" (no signature at
     all, the Unknown sources case) is deliberately NOT in that tuple: it is
     retried, never a panel."""

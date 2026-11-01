@@ -1,5 +1,5 @@
 """The compiled tier's Jet carts, Jet Teapot and ESP 88, on the host
-(ports/jet/README.md; docs/wasm_tier_plan_2026-09.md, "The showcase cart").
+(ports/jet/README.md; docs/history/wasm_tier_plan_2026-09.md, "The showcase cart").
 
 What is pinned here:
 

@@ -3,7 +3,7 @@
 `WasmHostRun(ws, ns, src)` runs the cart through `runtime/wasm_binding` --
 libmoy's wasm import table over WAMR built for Linux at the boards' pin, on
 moycore_run.c's console -- so the host is not a different program from the
-device (docs/wasm_tier_plan_2026-09.md: one engine, one import table, every
+device (native/moy_wasm/README.md: one engine, one import table, every
 tier; there is no wasmtime tier). Its frame is lua_ext's seam -- the snapshot
 in, the tick, quit, view and the audio queue out -- as the boards' glue runs
 it for a run the kernel's Player does not take.

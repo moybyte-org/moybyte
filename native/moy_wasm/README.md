@@ -1,7 +1,8 @@
 # moy_wasm — the WebAssembly cart tier's engine
 
-`docs/wasm_tier_plan_2026-09.md` is the plan; this is the module its phase 1
-built and its phase 3 opened to the Player. It is the ENGINE only: the vendored
+The compiled cart tier's engine; the decisions it rests on are below
+("Decisions the tier rests on"), its measurements #158, and the plan that built
+it `docs/history/wasm_tier_plan_2026-09.md`. It is the ENGINE only: the vendored
 WAMR runtime and the thread a module runs on. There are no verbs here and no
 import table — that is C in libmoy beside the Lua binding
 (`native/moycore/libmoy/moy_wasm.c`, vendored), hosted by moycore — so a module
@@ -10,7 +11,7 @@ moycore drives (see "A cart's session").
 
 | piece | where |
 |---|---|
-| the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork (the plan's "carried as a fork"), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
+| the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork ("Decisions" above), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
 | the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no WASI, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session, AOT or interpreted |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through -- the browser's engine (`native/moy_wasm_web`) implements it too |
@@ -21,6 +22,77 @@ moycore drives (see "A cart's session").
 Which boards take it is `board.toml` data: each console board's
 `[[native.shared.take]]` and the headless Zero's denial, each with its reason;
 `tests/test_board_toml.py` holds every board file to deciding.
+
+## Decisions the tier rests on
+
+Taken 2026-09-25 after three adversarial reviews (architecture, hardware,
+product), with the owner's later calls dated where they land.
+
+- **WebAssembly is the sealed tier.** The lineup is three instruction sets and
+  a browser; one `main.wasm` runs on all of them and a per-chip module is a
+  derived cache. Linear memory is bounded, the imports are the only capability
+  surface, there is no firmware symbol table to version, and the cart's memory
+  is one block its manifest sizes. The author's toolchain is clang. C apps as
+  ELF modules against a versioned OS interface are a tier too (owner,
+  2026-11-01; #227, #246): trusted native code behind Unknown sources, where
+  wasm stays the sealed one the store lists.
+- **A per-chip module is native code, trusted only by provenance.** The
+  sandbox is in the compiler's output, not the loader, so a board loads a
+  module only when its key matches and its signature verifies ("Provenance").
+  A module for another chip or format is never opened (the interpreter plays
+  the cart); a present signature that does not verify is refused.
+- **Signing is the default, not a lock (owner, 2026-09-29):** "Unknown
+  sources". The store compiles and signs what it lists, so its carts never
+  need the switch.
+- **A moy-spec binding, not a Moybyte runtime.** The import table is the verb
+  table, which is the spec's subject: SPEC.md §16, an optional binding beside
+  Lua (2026-09-30). A host without the tier refuses the runtime cleanly
+  (SPEC.md §3.1) and pays nothing.
+- **One engine, one import table, every tier.** The host runs the same C
+  binding over WAMR through ctypes, as it runs Lua (`runtime/moycore.py`); a
+  host and a device that disagree about a verb is what deleted lupa. There is
+  no wasmtime tier (the spike's runner stays an oracle in
+  `experiments/wasm_aot/doom/`). The browser adapts the same C thunks in
+  JavaScript (`native/moy_wasm_web`).
+- **The module shape is moycore's.** This module is the engine; the import
+  table is C in libmoy beside the Lua binding, hosted by moycore with its
+  snapshot-in, queue-out contract; the Player's runtime hook is a map of
+  runtime factories, so a missing runtime is an absent key.
+- **WAMR is a fork pinned by hash**, moybyte-org/wasm-micro-runtime over the
+  upstream 2.4.5 tag, holding the ESP32-S3 and ESP32-P4 platform work, vendored
+  as sources (no network fetch inside a build) with its compiler prebuilt. The
+  pin moves only for a security fix, an ESP-IDF bump or a feature the tier
+  needs, and a move rebuilds the compilers and every module and re-runs hello
+  and Doom on both chip families and Linux. Upstreaming is optional.
+- **How a host executes a module is host policy** (AOT, XIP, caches, an
+  interpreter) and never enters the spec. Every console board carries WAMR's
+  interpreter (owner, 2026-09-30), so no cart is refused for want of a module
+  ("The interpreter tier").
+- **A cart survives its firmware (owner, 2026-09-30, ESP 88).** A `.moy`
+  carries `main.wasm` and any number of compiled modules, each named for its
+  chip and format version (`tools/wasm_cart.py`'s `aot_name`); a console keeps
+  only its own (`tools/push_cart.py`'s `push_files`, `runtime/cart_index.py`),
+  and with none the cart plays on the interpreter. The key names a FORMAT
+  VERSION, never the fork commit ("Provenance"), so re-vendoring does not stale
+  an installed cart.
+- **Every console board, not two.** Each board takes or denies the module in
+  its `board.toml` with a reason. The Guition S3 is the floor board for memory.
+- **The floor defines a portable cart; a bigger cart is allowed and says so
+  (2026-09-26).** A cart within the floor board's share of the cart-runtime
+  reserve runs on every board; one above it is a warning at check time and
+  the fit notice on a board that cannot hold it ("A cart too big for the
+  board"), never an error panel. Raising what a board fits is kernel work, not
+  a per-cart exception; the larger reserve and module text in a flash
+  partition were measured and declined (2026-09-26, #158).
+- **Cart storage is the board's**: the store's card, or its internal volume
+  without one. Assets are read through the cart's own folder and nothing else.
+- **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
+  `writable` paths, kept beside the carts store in `written/<cart>/`
+  (`runtime/cart_files.py`) on every tier, untouched by an install, an update
+  or a push. A user's own files are a separate capability (#231).
+- **Doom lives in moybyte-org/carts, never in the firmware** (GPL glue,
+  2026-09-26; the WAD given away unmodified from that site, owner, 2026-10-03;
+  `THIRD_PARTY.md`). Which boards fit it is #158's.
 
 ## A run
 
@@ -198,7 +270,7 @@ overflow traps as "native stack overflow".
 ## A cart too big for the board
 
 A cart above the tier's floor is allowed, and a board that cannot fit it says
-so before anything loads (the plan's 2026-09-26 decision). The Player asks the
+so before anything loads (2026-09-26, "Decisions" above). The Player asks the
 runtime what the cart's load takes -- `moycore_glue.WasmRuntime.footprint`:
 the manifest's `memory`, this chip's module file as it sits in the store,
 through `footprint()` above -- and compares it with `mem()`'s PSRAM free total
@@ -278,8 +350,7 @@ reads the same header to write keys and to choose wamrc's flags, so a module
 it builds carries exactly the key this check wants.
 
 **The key names a compiled-code FORMAT VERSION, never the fork commit**
-(owner, 2026-09-30, ESP 88: docs/wasm_tier_plan_2026-09.md, "A cart survives
-its firmware"). `MOY_WASM_FORMAT_VERSION` is hand-bumped, only when a change
+(owner, 2026-09-30, ESP 88: "A cart survives its firmware" above). `MOY_WASM_FORMAT_VERSION` is hand-bumped, only when a change
 reaches what makes an old AOT module unsafe or wrong on a new runtime -- the
 vendored AOT loader and runtime ABI, or the pinned compiler --
 `wasm_format_version.json` names exactly which vendored files and compiler
@@ -355,7 +426,7 @@ setting on); `--unsigned` builds a module with no signature, and so does
 
 ### Unknown sources
 
-Signing is the default, not a lock (the plan's 2026-09-29 decision).
+Signing is the default, not a lock (owner, 2026-09-29).
 Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
 a module with **no** signature load AT FULL SPEED (native trust), so someone
 who rebuilds a cart from its source -- Doom from moybyte-org/carts, their
@@ -366,8 +437,8 @@ which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
 `verify_module` reads it on the MicroPython task before the runtime sees a
 byte, as it reads the signature.
 
-**With the setting off an unsigned module is IGNORED, not refused** (the plan's
-"A cart survives its firmware"): `WasmRun` catches
+**With the setting off an unsigned module is IGNORED, not refused**
+("A cart survives its firmware" above): `WasmRun` catches
 the engine's `refused: unsigned module` and retries the open on the
 interpreter, `main.wasm` itself, which needs neither signature nor switch, so
 the cart plays regardless -- natively when the switch is on, interpreted with

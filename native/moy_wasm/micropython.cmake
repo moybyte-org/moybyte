@@ -59,7 +59,7 @@ set(MOY_WAMR_SRCS
     ${MOY_WAMR_CORE}/shared/utils/runtime_timer.c
 )
 
-# Which of WAMR's two interpreters ships (docs/wasm_tier_plan_2026-09.md, "A
+# Which of WAMR's two interpreters ships (native/moy_wasm/README.md, "A
 # cart survives its firmware", 2026-09-30; the numbers are #158's): classic is
 # the default on every console board -- on the image-size budget every board
 # is picked against (the two P4s' headroom was the tightest), the fast

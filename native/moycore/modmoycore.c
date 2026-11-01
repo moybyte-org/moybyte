@@ -1420,7 +1420,7 @@ static int pm_alive(void)
     return g_pm_have;
 }
 
-// -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) -----------
+// -- the compiled cart (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------
 //
 // A "runtime": "wasm" cart runs on THIS console -- the same canvas, snapshot,
 // audio queue, pmem and flags a Lua cart has -- with libmoy's wasm binding
@@ -2032,7 +2032,7 @@ static void wasm_end(void)
 // palette blit must match. `allow_unsigned` is the owner's Unknown sources
 // setting: true lets an AOT module with no signature load
 // (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
-// main.wasm, run on the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A
+// main.wasm, run on the interpreter tier (native/moy_wasm/README.md, "A
 // cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
 // sources check, and `wasm_sha` is ignored. `writable` is the manifest's
 // "writable" entries joined by NUL characters (moy-spec SPEC.md 16.12; the

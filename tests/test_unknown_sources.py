@@ -1,4 +1,4 @@
-"""Settings -> UNKNOWN SOURCES (owner, 2026-09-29; docs/wasm_tier_plan_2026-09.md).
+"""Settings -> UNKNOWN SOURCES (owner, 2026-09-29; native/moy_wasm/README.md).
 
 The owner's switch for running a compiled cart whose module carries no
 signature -- a cart somebody rebuilt from its source, on their own console.
@@ -253,7 +253,7 @@ class _Interp:
     """A successful wasm run that landed on the interpreter -- what
     device/moycore_glue.WasmRun looks like once its own retry took over for
     an unsigned module (the switch off) or a stale/foreign one
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). Neither case reaches the Player as a failure any more; both
     look like this from here, a plain successful run with `.interp` set and
     `.interp_cause` naming which of the two it was."""

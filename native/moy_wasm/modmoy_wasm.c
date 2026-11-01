@@ -1,4 +1,4 @@
-// moy_wasm: the WebAssembly cart tier's ENGINE (docs/wasm_tier_plan_2026-09.md,
+// moy_wasm: the WebAssembly cart tier's ENGINE (docs/history/wasm_tier_plan_2026-09.md,
 // phase 1). The vendored WAMR runtime (wamr/, AOT only) and the thread a
 // module runs on -- nothing else. There are no verbs here: the import table is
 // C in libmoy beside the Lua binding, and moycore hosts it (phases 2 and 3).
@@ -860,7 +860,7 @@ int moy_wasm_session_lanes(void)
     // An interpreted session declines lanes the same way a one-core board
     // does (README.md): no sibling instance trick is attempted over the
     // interpreter's module, so a cart's par items run in declaration order
-    // on the calling core instead (docs/wasm_tier_plan_2026-09.md, "A cart
+    // on the calling core instead (native/moy_wasm/README.md, "A cart
     // survives its firmware", 2026-09-30).
     if (g_sess && g_sess->interp) {
         return 0;

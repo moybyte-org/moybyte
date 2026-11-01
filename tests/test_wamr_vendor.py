@@ -4,7 +4,7 @@ native/moy_wasm/wamr/ is the AOT-plus-interpreter subset of
 moybyte-org/wasm-micro-runtime (branch moybyte-2.4.5), copied by
 tools/vendor_wamr.py and stamped in
 native/moy_wasm/wamr_vendor.json. The runtime is carried as a fork pinned by
-hash (docs/wasm_tier_plan_2026-09.md), so a fix belongs in the fork and
+hash (native/moy_wasm/README.md), so a fix belongs in the fork and
 arrives here by re-vendoring; an edit made here survives only until the next
 re-vendor silently reverts it. These are the checks that make it loud.
 """

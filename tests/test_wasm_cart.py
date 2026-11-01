@@ -1,4 +1,4 @@
-"""The compiled-cart Player path on the host (docs/wasm_tier_plan_2026-09.md,
+"""The compiled-cart Player path on the host (docs/history/wasm_tier_plan_2026-09.md,
 phase 3): a `"runtime": "wasm"` cart through `ws.runtimes`, on the boards' own
 import table (libmoy's moy_wasm.c) over WAMR built for Linux at the boards' pin.
 
@@ -616,7 +616,7 @@ def test_the_sync_walk_leaves_the_module_home(tmp_path):
 
 # -- a cart this console cannot fit ---------------------------------------------
 #
-# docs/wasm_tier_plan_2026-09.md: a cart above the floor is allowed, and a
+# native/moy_wasm/README.md: a cart above the floor is allowed, and a
 # console that cannot fit it refuses at launch with a plain notice -- never an
 # error panel, never a crash. The host refuses by its configured limit
 # (wasm_host.MEMORY_LIMIT) with the boards' own footprint arithmetic.

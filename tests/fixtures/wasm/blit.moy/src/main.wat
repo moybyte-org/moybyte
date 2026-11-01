@@ -1,5 +1,5 @@
 ;; Blit Wasm: a full-frame palette blit every frame -- the compiled tier's
-;; per-board ceiling (docs/wasm_tier_plan_2026-09.md, phase 3; the measured
+;; per-board ceiling (docs/history/wasm_tier_plan_2026-09.md, phase 3; the measured
 ;; figure lives in native/moy_wasm/README.md).
 ;;
 ;; This file is the cart's SOURCE; main.wasm is built from it with

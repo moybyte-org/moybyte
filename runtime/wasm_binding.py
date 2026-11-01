@@ -1,4 +1,4 @@
-"""Build + load the host's libmoy WASM binding (docs/wasm_tier_plan_2026-09.md).
+"""Build + load the host's libmoy WASM binding (native/moy_wasm/README.md).
 
 The host runs a `"runtime": "wasm"` cart through the same C the boards run:
 libmoy's wasm binding (`native/moycore/libmoy/moy_wasm.c`, vendored) over the

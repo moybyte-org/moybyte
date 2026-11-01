@@ -81,7 +81,7 @@ targets.
 
 `native/moy_wasm/wamr/`
 
-The `moy_wasm` native module (issue #158, `docs/wasm_tier_plan_2026-09.md`)
+The `moy_wasm` native module (issue #158, `native/moy_wasm/README.md`)
 embeds the AOT half of the WebAssembly Micro Runtime, compiled into every
 console board's image (the headless Zero denies it).
 

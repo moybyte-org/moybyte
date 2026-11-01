@@ -337,7 +337,7 @@ directory stays /moy/update on the internal VFS either way."""
 [[native.shared.take]]
 module = "moy_wasm"
 why = """
-The WebAssembly cart tier's engine (docs/wasm_tier_plan_2026-09.md): the
+The WebAssembly cart tier's engine (native/moy_wasm/README.md): the
 vendored WAMR runtime, AOT only, and the thread a module runs on. The tier
 ships on every console board or on none, so this board takes it. Its internal
 SRAM is not the constraint the S3 boards' is; the on-glass suite runs the same

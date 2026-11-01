@@ -152,7 +152,7 @@ to whoever called it.
     (#108's comments hold that design discussion).
 - **Cart runtimes (#67): a manifest `"runtime"` other than python routes
   `Player.start` through `ws.runtimes`, a map of the runtimes this build carries**
-  -- `"lua"`, and `"wasm"` (a compiled cart, `docs/wasm_tier_plan_2026-09.md`,
+  -- `"lua"`, and `"wasm"` (a compiled cart, `native/moy_wasm/README.md`,
   on the same moycore console over the `native/moy_wasm` engine). A runtime a
   build lacks is an ABSENT KEY, and its carts open the runtime-missing panel.
   A compiled cart the console has no room for opens that same panel as a

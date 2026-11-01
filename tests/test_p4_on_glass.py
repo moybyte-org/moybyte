@@ -41,7 +41,7 @@ def board():
         b.drain(1.0)
 
 
-# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# The engine's idle cost (docs/history/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-30 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
@@ -159,7 +159,7 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
     on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) ---------------
 # Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
 # before the radio guards. The floors are this board's median drawn fps
 # measured on 2026-09-25, less a margin; the measurements are the owner's to
@@ -819,7 +819,7 @@ def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
     on_glass.a_stuck_run_is_ended(board, runtime)
 
 
-# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.
 

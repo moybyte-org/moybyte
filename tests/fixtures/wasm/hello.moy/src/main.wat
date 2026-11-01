@@ -1,5 +1,5 @@
 ;; Hello Wasm: the compiled-cart tier's first Player cart
-;; (docs/wasm_tier_plan_2026-09.md, phase 3).
+;; (docs/history/wasm_tier_plan_2026-09.md, phase 3).
 ;;
 ;; This file is the cart's SOURCE; main.wasm is built from it with
 ;; tools/wasm_cart.py and never committed. It exercises what makes the tier

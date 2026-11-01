@@ -1,6 +1,6 @@
 """The compiled-code FORMAT VERSION covers exactly what it says it covers.
 
-docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware" (2026-09-30,
+native/moy_wasm/README.md, "A cart survives its firmware" (2026-09-30,
 ESP 88): a module's key names MOY_WASM_FORMAT_VERSION
 (native/moy_wasm/moy_wasm_key.h), not the WAMR fork commit, so a re-vendor no
 longer stales every cart already installed on a board. The format is only

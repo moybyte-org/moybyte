@@ -12,7 +12,7 @@
 A per-architecture module is native code, so a board runs one only if its
 provenance key says which wasm it came from, which COMPILED-CODE FORMAT
 VERSION it was built against and with which compiler flags
-(docs/wasm_tier_plan_2026-09.md, native/moy_wasm/README.md). This tool is the
+(native/moy_wasm/README.md). This tool is the
 one place a key is written:
 
   1. hash the canonical .wasm (the key's `wasm` line);

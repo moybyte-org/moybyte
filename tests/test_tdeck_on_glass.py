@@ -38,7 +38,7 @@ def board():
         yield b
 
 
-# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# The engine's idle cost (docs/history/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. The baseline is (free, largest)
 # internal SRAM at the launcher on a fresh boot of a module-free image of the
@@ -96,7 +96,7 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
     on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) ---------------
 # Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
 # before the radio guards. The floors are this board's median drawn fps
 # less a margin -- the hello cart's measured on 2026-09-25, the blit fixture's
@@ -499,7 +499,7 @@ def test_perf_line_is_the_one_format(board):
     for name in ("wmr", "wmw", "wms", "ppa", "fence_ms", "gfence_ms"):
         assert got[name] is None, (name, got[name])
 
-# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again), and the WiFi driver
 # keeps its internal RAM for the rest of the boot; the second starts BLE, which
 # is off here until Settings asks for it, and stops it again.

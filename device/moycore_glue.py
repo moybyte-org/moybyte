@@ -587,7 +587,7 @@ class MoycoreRun:
                 self._run = 0
 
 
-# -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
+# -- the compiled cart (docs/history/wasm_tier_plan_2026-09.md, phase 3) ------------
 
 # The only two AOT refusals that are TAMPER EVIDENCE -- a module whose
 # signature bytes are present but do not verify -- and so stay a hard
@@ -616,7 +616,7 @@ def aot_path(cart_dir, main, chip, format):
     version sits: its `main` with `.wasm` replaced by `.<chip>.f<format>.aot`,
     in the cart's folder. `format` is normally `_moy_wasm.FORMAT`, this
     console's own. A cart may carry any number of these (one per chip and
-    format it has been built for, docs/wasm_tier_plan_2026-09.md, "A cart
+    format it has been built for, native/moy_wasm/README.md, "A cart
     survives its firmware") -- this names only the one THIS console would
     take; a name that does not exist is not this console's, and the cart
     plays on the interpreter instead of refusing. How a board finds the
@@ -924,7 +924,7 @@ class WasmRun(MoycoreRun):
             raise RuntimeError('refused: the manifest declares no "memory"')
         # A module for THIS console (chip + compiled-code format version) is
         # found by name, never opened to find out whether it matches
-        # (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+        # (native/moy_wasm/README.md, "A cart survives its firmware",
         # 2026-09-30): a stale or foreign one is simply the wrong file name,
         # so it is absent to this console, same as no module at all, and the
         # cart plays on the interpreter -- main.wasm itself, which needs
@@ -1108,7 +1108,7 @@ class WasmRuntime:
 
         The file is this console's own AOT module when the cart carries one;
         when it does not, the cart plays on the interpreter instead
-        (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"), and
+        (native/moy_wasm/README.md, "A cart survives its firmware"), and
         the fit check sizes against main.wasm itself with the INTERPRETED
         rule -- its pool is a different (measured) shape, and its module file
         is never freed back to the linear memory the way an AOT load's is

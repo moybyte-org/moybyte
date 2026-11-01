@@ -655,7 +655,7 @@ def _moy_descriptor(ws):
 def _moy_notes(folders, ws):
     """What a `moy push` of `folders` leaves slow here: a compiled cart with no
     module for this board's chip and format, which `moy push` cannot build --
-    it plays on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    it plays on the interpreter (native/moy_wasm/README.md, "A cart
     survives its firmware")."""
     chip = _moy_chip()
     fmt = _moy_format()

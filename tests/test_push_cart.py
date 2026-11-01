@@ -1140,7 +1140,7 @@ def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
 @needs_wamrc
 def test_a_module_for_another_chip_is_left_unpushed(monkeypatch, tmp_path):
     """A portable cart may carry a module per chip and format
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"); a push
+    (native/moy_wasm/README.md, "A cart survives its firmware"); a push
     takes only the one THIS board's chip wants and leaves every other one
     sitting in the host's cart folder, unpushed -- it is not this board's
     module to carry, and the push takes nothing out of the folder it reads."""

@@ -186,7 +186,7 @@ class DeviceBoot(BootCarts):
         the cart's whole frame inside libmoy, `_update` and `_draw` back to back
         in C, one upcall per frame instead of hundreds -- and moybyte's superset
         verbs ride it as registered trampolines. "wasm"
-        (docs/wasm_tier_plan_2026-09.md): the same console with libmoy's wasm
+        (native/moy_wasm/README.md): the same console with libmoy's wasm
         import table on it, and the moy_wasm engine running the cart's module.
         A runtime this build lacks is an absent key, and a cart naming it opens
         the Player's runtime-missing panel -- the graceful floor.

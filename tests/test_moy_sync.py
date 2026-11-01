@@ -1038,7 +1038,7 @@ def test_a_big_cover_crosses_in_parts_each_its_own_base64(tmp_path):
 
 
 def test_only_the_cover_crosses_as_bytes(tmp_path):
-    """A compiled module stays home (docs/wasm_tier_plan_2026-09.md), and a
+    """A compiled module stays home (native/moy_wasm/README.md), and a
     receiver refuses bytes under any other name."""
     root = _store(tmp_path)
     (root / "hop.moy" / "main.wasm").write_bytes(b"\0asm\1\0\0\0\xff")

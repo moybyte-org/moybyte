@@ -2,7 +2,7 @@
  * which hides them. Must precede every include. */
 #define _POSIX_C_SOURCE 200809L
 
-/* The host's WASM shim (docs/wasm_tier_plan_2026-09.md, phase 3), built into
+/* The host's WASM shim (docs/history/wasm_tier_plan_2026-09.md, phase 3), built into
  * the host's one library (runtime/host_native.py) wherever WAMR builds.
  *
  * A "runtime": "wasm" cart on the host runs through the SAME C the boards run:

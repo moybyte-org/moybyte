@@ -38,7 +38,7 @@ What it does differently, because a console is not a PC:
   * it installs only THIS console's compiled module (`main.<chip>.f<format>.aot`,
     tools/wasm_cart.py's `aot_name`) beside main.wasm; the other modules stream
     past unwritten. With none for this console the cart plays on the
-    interpreter (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware").
+    interpreter (native/moy_wasm/README.md, "A cart survives its firmware").
   * it streams. The release asset is a STORED zip (a carts repository builds
     it sorted and uncompressed), so its members are cut out of the socket as
     they pass, and an external file from its mirror goes straight to the store

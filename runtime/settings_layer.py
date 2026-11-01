@@ -171,7 +171,7 @@ SETTINGS_TOGGLES = (
     # play-then-read-diag.log workflow. Crash/cart-exit flushes stay
     # unconditional either way (the safety net).
     ("diag_sd", "DIAG SD LOG", False, "set_diag_sd", None, None),
-    # UNKNOWN SOURCES (owner, 2026-09-29, docs/wasm_tier_plan_2026-09.md): a
+    # UNKNOWN SOURCES (owner, 2026-09-29, native/moy_wasm/README.md): a
     # compiled cart whose module carries no signature may load -- a cart
     # somebody rebuilt from its source, on their own console. The module's
     # provenance key is still checked, and one whose signature is present but
