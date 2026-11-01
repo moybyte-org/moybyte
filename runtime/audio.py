@@ -27,7 +27,7 @@ fix a wrong-sounding cart in its sounds.json, never by touching libmoy locally
 (see native/moy_audio/libmoy/UPSTREAM.md -- fixes go upstream, `make
 vendor-libmoy` brings them back).
 
-See docs/audio_design_v04.md for the data-model design history.
+See docs/history/audio_design_v04.md for the data-model design history.
 """
 
 import math

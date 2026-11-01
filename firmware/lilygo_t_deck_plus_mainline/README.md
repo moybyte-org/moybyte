@@ -247,6 +247,17 @@ would be a teardown after the attach.
 
 #### `MODE = "audio"` (stage 5)
 
+The speaker is a MAX98357 class-D amp on I2S: BCK GPIO 7, WS GPIO 5, DOUT
+GPIO 6 (`MOY_AUDIO_I2S_*` in `mpconfigboard.h`, from LilyGO's `I2SPlay`
+example). I2S is its own peripheral, not the SPI host the panel and the card
+share, so audio takes no part in the bus rules below. The amp sits behind the
+board power rail with the panel (`BOARD_POWERON`, GPIO 10, driven high at
+boot), and it has no enable, SD-mode or gain pin; the ES7210 on the board is
+the microphone. So a panel that lights means the amp is powered, and silence is
+the output's start or its feed. The feed is the kernel's core-1 task, paced by
+the DMA drain (`native/moy_audio/moy_aud_out.c`'s header); nothing in the frame
+loop writes samples.
+
 A rising four-note phrase, the three starter SFX (coin / jump / thud), five
 seconds of music 0, then the first SFX at the console's level 0.
 
