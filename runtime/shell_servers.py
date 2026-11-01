@@ -57,7 +57,7 @@ _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
 class ThemeServer:
     """`theme.set` and `set_variant`: the look coordinates its caches, the
     shape and the wallpaper, so the verbs that change it are the
-    look's (docs/visual_identity_v1.md Section 4.3). The reads are the C token
+    look's (docs/history/visual_identity_v1.md Section 4.3). The reads are the C token
     table the look writes at every switch (`Appearance.publish`).
 
     A theme PICKER wants the OTHER themes' tokens too. That is not a role:

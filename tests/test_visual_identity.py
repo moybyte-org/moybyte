@@ -1,4 +1,4 @@
-"""Visual identity v1 "Open Machine" (docs/visual_identity_v1.md) -- Phase 1/2
+"""Visual identity v1 "Open Machine" (docs/history/visual_identity_v1.md) -- Phase 1/2
 vertical slice:
 
   * semantic theme roles (Section 4.3): theme_colors() resolves every role for

@@ -126,13 +126,13 @@ Nothing is pending the owner.
   (Day) or `dark` (Night).
 - **The editors are restyled in their layout** (owner, 2026-10-15): the
   tab row, UNDO, REDO and PLAY, and the playtest window (look steps 23 and
-  24). The Studio's panes (`docs/studio_2026-09.md`) were not built;
+  24). The Studio's panes (`docs/history/studio_2026-09.md`) were not built;
   the Editor's rules are `docs/media/look_2026-10/EDITOR_LAYOUT.md`.
 - **Code syntax colours are theme roles** (decided by the orchestrator
   under the owner's delegation, 2026-10-15): theming's `code_*` content
   roles (the mockups' `syn.*`) leave the content exemption, and the
   readability check holds each to 4.5:1 on the code surface (§6). This
-  reverses `docs/studio_2026-09.md` §5.1 and §8 and theming's
+  reverses `docs/history/studio_2026-09.md` §5.1 and §8 and theming's
   "syntax colours are content".
 - **The ricing themes are not built in** (owner, 2026-10-15): Luna, Coast,
   Pico, Bench and Adw are installable packages in the moybyte-org/carts
@@ -410,7 +410,7 @@ node tree that point releases then changed (§11).
 
 **The roles are the token row's** (`native/moy_ui/style.json`'s `tokens`:
 `panel`, `edge`, `title`, `title_ink`, `accent`, `hilite`, `dim` and the §4.3
-semantic roles of `docs/visual_identity_v1.md`, then the painter's roles
+semantic roles of `docs/history/visual_identity_v1.md`, then the painter's roles
 below, three of them the flags `surface_light`, `bar_light` and
 `band_light`). They are the names `theme()`, `ctx.theme.colors()` and a
 compiled app's `theme` imports answer; a role added later is appended to the
@@ -888,7 +888,7 @@ builds least:
   floor: `chrome.text_scale_floor` reads the same declared diagonal, with the
   same opt-in, and answers the font scale at which the `ui` font's ascent
   reaches `MIN_TEXT_MM`; the floor lifts the effective font scale and never the
-  setting. `docs/visual_identity_v1.md` §5.4 asks for on-glass font tests;
+  setting. `docs/history/visual_identity_v1.md` §5.4 asks for on-glass font tests;
   they were taken on the T-Deck and the Guition S3 (2026-10-13).
 - **Licence:** Tiny5 is OFL-1.1; `THIRD_PARTY.md` §3.1a carries its notice,
   its pinned source and what the conversion changed.

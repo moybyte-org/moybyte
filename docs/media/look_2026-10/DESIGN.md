@@ -231,7 +231,7 @@ with anti-aliasing.
 
 ## Moy and the icons
 
-**Moy** is the website's 16×16 (`docs/visual_identity_v1.md` §6.5), drawn
+**Moy** is the website's 16×16 (`docs/history/visual_identity_v1.md` §6.5), drawn
 as pixel art in every theme at whole scales: 16 px on the handheld's 22×20
 tile, 32 px on the desk's 36×34 button (`moy_mark.png`). Its outline is
 index 0, which needs GAPS 25.

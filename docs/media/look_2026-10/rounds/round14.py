@@ -20,7 +20,7 @@ three Art pictures.
 The resizable panes, on E-05's frame: dividers that move to any pixel,
 each panel at the largest whole zoom that fits and the rest its own
 ground, a divider stopping at its neighbour's minimum
-(`docs/studio_2026-09.md` §4.2): Art and Code with their dividers moved,
+(`docs/history/studio_2026-09.md` §4.2): Art and Code with their dividers moved,
 Code mid-drag at Run's minimum, the Map at its T-Deck minimum, and Art at
 800x480 mid-drag at Sprite's minimum.
 
@@ -464,7 +464,7 @@ def v2_touch(T):
 # ==========================================================================
 # resizable panes (MAXIMISE_VARIANTS.md, Resize): free dividers, whole-zoom
 # content, the leftover a margin of the pane's own ground; a divider stops
-# at its neighbour's minimum (docs/studio_2026-09.md §4.2). On E-05's frame.
+# at its neighbour's minimum (docs/history/studio_2026-09.md §4.2). On E-05's frame.
 # ==========================================================================
 HANDLE = (6, 36)     # a divider's handle as drawn; its touch target is 32 x 48
 TDECK_BAR = 26       # the handheld bar's height: a pane's tab bar at chrome scale 1

@@ -272,7 +272,7 @@ def moy_mark():
     big = PX.image(PX.icon("moy"), PAL, 4)
     out.rect(20, 250, 64, 64, "#ffffff")
     out.img.paste(big.convert("RGB"), (20, 250), big.split()[3])
-    out.text(100, 286, "docs/visual_identity_v1.md 6.5: outline 0 (black), body 13, feet and shade 2, "
+    out.text(100, 286, "docs/history/visual_identity_v1.md 6.5: outline 0 (black), body 13, feet and shade 2, "
              "sheen 6, eyes 7. Its outline is index 0, which an IconSheet keys clear (GAPS 18).",
              fs, "#4a4d5c")
     out.save("moy_mark", "Moy, the canonical pixel Moy: handheld bar (16 px) and desk button (32 px on "

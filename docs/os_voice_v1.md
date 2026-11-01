@@ -1,7 +1,9 @@
 # Moybyte OS voice v1 — how the machine talks
 
-**Status:** CHOSEN VOICE DIRECTION. Grows `docs/visual_identity_v1.md` §9
-("Voice and naming") from a seed into a working contract.
+**Status:** CHOSEN VOICE DIRECTION: the voice of the 2026-10 look
+(`docs/theme_and_shell_2026-11.md` §1.3, `docs/media/look_2026-10/DESIGN.md`).
+It grew from the draft identity's "Voice and naming"
+(`docs/history/visual_identity_v1.md` §9) into a working contract.
 
 **Scope:** every string the OS shows a kid — labels, toasts, errors, empty states,
 update screens, celebrations — plus the naming system and where personality is

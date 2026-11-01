@@ -14,7 +14,7 @@ pictures' pane sizes at 1024 x 600 and 800 x 480) and the one marked None
 takes what is left, so a bigger window gives the scrolling pane (Code, the
 Reference, Art's Map) the difference and the canvas and the game keep
 their zoom. A divider moves to any pixel and stops at its neighbour's
-minimum; the minimums are the T-Deck's (docs/studio_2026-09.md §4.2): the
+minimum; the minimums are the T-Deck's (docs/history/studio_2026-09.md §4.2): the
 game at 1x under its header, a canvas the T-Deck's page under its bar plus
 the header. A pane that scrolls has the floor that keeps its header.
 

@@ -843,7 +843,7 @@ _ICON_ART = {
 # (native/moy_ui/moy_theme.c), which validates them, walks `inherits` and
 # fills every role a package leaves unset from style.json's derivation rules.
 # The roles are style.json's `tokens`; their jobs are
-# docs/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
+# docs/history/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
 # RGB (`RGB | 0xrrggbb`, docs/history/look_2026-10.md step 5): `theme_colors` answers
 # the theme's own values, and `live_colors` the live theme's as the shell
 # draws them, each RGB role placed in the block at indices 64..127;

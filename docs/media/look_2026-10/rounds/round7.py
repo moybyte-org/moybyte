@@ -381,7 +381,7 @@ def icon_flash():
 
 
 # ==========================================================================
-# the Studio (docs/studio_2026-09.md's layout, drawn in this look)
+# the Studio (docs/history/studio_2026-09.md's layout, drawn in this look)
 # ==========================================================================
 SYN = {
     "moy-light": dict(bg="#ffffff", line="#f1effc", gutter="#6b7085", text="#15161d", com="#5f6478",

@@ -12,7 +12,7 @@ base, light) of the 16-colour base palette. The rules:
   the silhouette, and get no outline;
 - content sits in rows and columns 1-14, so the outline fits in 16.
 
-Moy is hand-drawn: the canonical Moy (docs/visual_identity_v1.md §6.5),
+Moy is hand-drawn: the canonical Moy (docs/history/visual_identity_v1.md §6.5),
 outlined in index 0. The sheet's clear pixel is CLEAR (16, a `.` in the
 file under its `clear 16` header), so index 0 draws black. Redo is undo's
 mirror.

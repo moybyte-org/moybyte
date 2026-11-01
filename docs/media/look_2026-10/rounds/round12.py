@@ -602,7 +602,7 @@ def code_panel(cv, T, x, y, w, h, first, cur, col, focus=True, sig=False, hints=
 
 def signature(cv, T, x, y):
     """The signature popover under `spr(`: the verb's arguments, its line,
-    and the cart's own sprites to pick from (docs/studio_2026-09.md §5.1)."""
+    and the cart's own sprites to pick from (docs/history/studio_2026-09.md §5.1)."""
     w, h = 300, 150
     M.soft(cv, T, x, y, w, h, 10, 0.8)
     cv.rrect(x, y, w, h, 10, T["raised"] if T["mode"] == "dark" else T["surface"])

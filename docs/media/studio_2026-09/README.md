@@ -1,6 +1,6 @@
 # Studio mockups (2026-09-29)
 
-The pictures behind `docs/studio_2026-09.md`: the middle-ground Studio the
+The pictures behind `docs/history/studio_2026-09.md`: the middle-ground Studio the
 owner settled on, drawn at the Waveshare P4's 1024×600 and the T-Deck's
 320×240, as the record an implementation is checked against.
 
