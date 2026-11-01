@@ -836,6 +836,7 @@ class Launcher:
                 else:
                     row.append("")
             rows.append(tuple(row))
+        rows = tuple(rows)              # (the table's memo knows it by identity)
         self._krows = rows
         self._krows_of = items
         self._kcols = ("",) * per

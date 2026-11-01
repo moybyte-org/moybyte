@@ -506,6 +506,31 @@ def _columns(columns):
     return b
 
 
+# The table drawn last's rows and columns where nothing can change them (a
+# tuple of tuples of str; a tuple): known again by identity, no memo scan.
+_TBL = [None, 0, None, None, None]
+
+
+def _rows_copy(rows):
+    """What the memo compares `rows` with to know them again: None for a
+    tuple of tuples of str, which nothing can change (known by identity
+    alone); else a copy, each row as its own type, so it compares equal."""
+    if type(rows) is _TUPLE:
+        for r in rows:
+            if type(r) is not _TUPLE:
+                break
+            for c in r:
+                if type(c) is not str:
+                    break
+            else:
+                continue
+            break
+        else:
+            return None
+        return tuple([r[:] for r in rows])
+    return [r[:] for r in rows]
+
+
 def table(label, columns, rows, cur, o=None):
     """A list in columns: `label` its caption (none where empty), `columns`
     the headers -- an empty first one makes column 0 the picture column,
@@ -539,17 +564,30 @@ def table(label, columns, rows, cur, o=None):
     current row's part its gen and marks belong to."""
     t = _T
     n = len(columns)
-    b = _memo_get(rows, n)
-    if b is None:
-        cells = []
-        for r in rows:
-            r = [str(c) for c in r][:n]
-            cells.extend(r)
-            cells.extend([""] * (n - len(r)))
-        copy = [r[:] for r in rows]     # each row as its own type, so it compares equal
-        b = _memo_put(rows, n, _cells(cells), tuple(copy) if type(rows) is tuple else copy)
-    return _C.api_table(t[0], t[1], t[2], label, _columns(columns), b,
-                        -1 if cur is None else cur, _over(o))
+    k = _TBL
+    if rows is k[0] and n == k[1]:
+        b = k[2]
+    else:
+        b = _memo_get(rows, n)
+        if b is None:
+            cells = []
+            for r in rows:
+                r = [str(c) for c in r][:n]
+                cells.extend(r)
+                cells.extend([""] * (n - len(r)))
+            b = _memo_put(rows, n, _cells(cells), _rows_copy(rows))
+        if type(rows) is _TUPLE and _rows_copy(rows) is None:
+            k[0] = rows
+            k[1] = n
+            k[2] = b
+    if columns is k[3]:
+        cb = k[4]
+    else:
+        cb = _columns(columns)
+        if type(columns) is _TUPLE:
+            k[3] = columns
+            k[4] = cb
+    return _C.api_table(t[0], t[1], t[2], label, cb, b, -1 if cur is None else cur, _over(o))
 
 
 def initial(rect, title, r=0):
