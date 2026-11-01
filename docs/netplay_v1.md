@@ -149,9 +149,12 @@ seconds. The P4 took `moybyte_patch_repr_c` and the probe re-read **1106 of 1106
 bit-identical**. Every board that can hold a link runs REPR_C; one that cannot
 take it cannot join a match.
 
-**Board scope is all three consoles**; the browser has no radio and is out. The
-S3 pair talks to its own silicon. The P4 has none of its own and reaches the C6
-over ESP-Hosted 2.12.12's custom RPC through `native/moy_c6` — seventeen
+**Board scope is three consoles**: the T-Deck, the Guition S3 and the
+Waveshare P4. The browser has no radio and is out, and the Guition P4's C6 runs
+Guition's factory slave with no ESP-NOW shim, so its link comes up inactive (its
+README). The S3 pair talks to its own silicon. The Waveshare P4 has none of its
+own and reaches the C6 over ESP-Hosted 2.12.12's custom RPC through
+`native/p4/moy_c6` — seventeen
 `esp_now_*` wrappers plus the rate lever, under the same link protocol the S3s
 run — against a shimmed C6 slave the console
 flashes itself over SDIO. One rule is load-bearing there: `WLAN.active(True)`

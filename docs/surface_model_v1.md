@@ -24,9 +24,9 @@ It does not supersede `shell_ux_v1.md` (what the UI does) or
 
 **How to use this doc:** this is the contract. A new backend implements §4 and its
 annex in §5; it does not invent a new invalidation mechanism (Law L10). A change
-to the model is a change to THIS file first, reviewed the same way. **Read §13
-before §5.4 or §6** — the web transport those sections describe no longer
-exists, and the amendment says what replaced it. §8 is the
+to the model is a change to THIS file first, reviewed the same way. §5.4 and §6
+record the web transport §13 retired; the wasm head is an ordinary raster tier.
+§8 is the
 graveyard — approaches already tried and buried with evidence; re-proposing one
 requires new evidence, not new enthusiasm. Performance statements in this doc are
 labeled **MEASURED** (with the source), **ESTIMATED** (arithmetic shown), or
@@ -58,11 +58,9 @@ The verdict, from the evidence accumulated across every target:
 
 ## 2. The Surface object
 
-**Removed (§16, 2026-10-27).** No code holds this object: the Python leaf
-(`runtime/surface.py`) went with the kernel's glass pass and the kernel's SURF
-table with §16, because nothing ever read a gen. The record below is the
-model's vocabulary, which §14's mechanisms and the backends' per-buffer state
-still follow in spirit.
+The Surface is the model's vocabulary, not an object in code: §14's mechanisms
+and the backends' per-buffer state follow the record below, and no tier holds
+one (§16, 2026-10-27: nothing ever read a gen, so the kernel's table went).
 
     sid          # stable identity, minted from the WM REGISTRY key; the row's key
     domain       # "system" | "game"
@@ -489,27 +487,23 @@ path, not just a correct steady state.**
 
 ## 7. The consolidation ledger
 
-What exists today → its disposition, **and the phase in which the old field
-is deleted** (an "absorbed" row with nothing deleted would make this model a
-seventh mechanism — the review's A9). Each deletion lands with a grep-test
-pinning the field's absence.
+The mechanisms the model found, and where each stands. No row waits on a
+deletion phase: Phase B retired with the web annex (§13), Phase C does not run
+(§9), and the registry the rows would have folded into is gone (§16).
 
-| mechanism | disposition | deleted |
-|---|---|---|
-| #44 `ws._dirty` frame gate (three legs: dirty / `_animating` / pointer) | **absorbed as §3's three producer classes** — the `_dirty` writes stay and become the Class A epoch signal | predicate re-expression in C; writes never |
-| the bar strip cache keyed on canvas identity (ui_damage §2.1's flagship bug) | **absorbed** by the bar Surface's gen — the identity key that caused the 72ms silent rebuild is deleted; the model's trophy case | B (web), C (device) |
-| `_content_static` by-name freeze + its exclusion lists | **absorbed** by §4 skip-draw + Class B declarations | C |
-| streak/sig family (`_win_sig`/`_stamp_streak`, `_chrome_sig/_streak`, `_chip_sig/_streak`, `_desk_sig/_streak`, `_bezel_key/_paints`) | **absorbed** by §4's per-buffer N-deep last-seen | C |
-| `FullscreenStackWM.draw_stack` memoized stack (#66) | **unchanged** — it IS the S3 compositor | never |
-| P4 `_BackdropLayer` + dirty-union + stamp-defer (#58) | **absorbed/renamed** — the P4 placement handler, via `end_frame()` | fields fold in C |
-| deflayer ship-once + `blit_layer_*` (#54/#43) | **split**: window-content use absorbed into surface content; **cart-level layers (scroll layers, terrain, bar strip) kept as-is** | window path in B |
-| `SurfaceDelta` deep-compare `{"same":1}` (#76) | **kept as the shipping safety net**; gen-compare added; deep-== demoted only after the L8 stream assertion catches a real bug in CI | after that, B+ |
-| `WsClientState` SURF cache + keyframe latch | **kept**; latch generalized into §5.4's keyframe-production verb | never |
-| `RecordingLayer.RECORD_ONLY` (#175 follow-on) | **kept, orthogonal** — raster-half elision, not invalidation | never |
-| `ViewCanvas` + `view` bracket (#175) | **generalized** into L4; wire op converges in B+ | B+ |
-| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**, and its ring is one body (§14.7): a content's frames are vouched for by ONE ring per region -- a window's by the windowed WM's shown ring (`_shown`, §14.3), a full-screen content's by its own `PaintRing` (`ui_draw`) -- never both | — |
-| `_cover_runs` / `_cover_gen`, `atlas_gen`, `sheet.gen` | **unchanged** — the L3 prior art | never |
-| `assets_json` memo key (wasm) | **unchanged** — serialization concern | never |
+| mechanism | where it stands |
+|---|---|
+| #44 `ws._dirty` frame gate (three legs: dirty / `_animating` / pointer) | §3's three producer classes: the `_dirty` writes are the Class A epoch signal; the predicate is Python (`runtime/console.py`), with the kernel epoch as one more leg (§15) |
+| the bar strip cache keyed on canvas identity (ui_damage §2.1's flagship bug) | the identity key behind the silent rebuild is gone; `tests/test_top_bar.py` pins the strip's rebuild budget |
+| `_content_static` by-name freeze + its exclusion lists | the windowed WM's own, under §14.1's focused-window content freeze |
+| streak/sig family (`_win_sig`/`_stamp_streak`, `_chrome_sig/_streak`, `_chip_sig/_streak`, `_desk_sig/_streak`, `_bezel_key/_paints`) | the windowed WM's per-buffer state, beside §14.3's shown ring |
+| `FullscreenStackWM.draw_stack` memoized stack (#66) | unchanged — it IS the S3 compositor |
+| P4 `_BackdropLayer` + dirty-union + stamp-defer (#58) | the windowed WM's, in Python; §14.4 holds the desk home's backdrop |
+| deflayer ship-once + `blit_layer_*` (#54/#43) | cart-level layers (scroll layers, terrain, bar strip) kept as-is; the window path's shipping retired with the web transport (§13) |
+| `SurfaceDelta`, `WsClientState`, `RecordingLayer.RECORD_ONLY`, `ViewCanvas` (#76, #175) | deleted with the web transport (§13) |
+| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**, and its ring is one body (§14.7): a content's frames are vouched for by ONE ring per region -- a window's by the windowed WM's shown ring (`_shown`, §14.3), a full-screen content's by its own `PaintRing` (`ui_draw`) -- never both |
+| `atlas_gen`, `sheet.gen` | unchanged — the L3 prior art |
+| `assets_json` memo key (wasm) | unchanged — serialization concern |
 
 ## 8. The graveyard — do not re-try without new evidence
 
@@ -553,33 +547,18 @@ pinning the field's absence.
   — designed out at review (§2): recreation aliases against persistent
   client caches into wrong `{"same":1}` replays.
 
-## 9. Phasing and gates
+## 9. Phasing, as it ended
 
-- **Phase A — name it (refactor + audit).** The surface registry (built as
-  the Python leaf `runtime/surface.py`, the kernel's table since §15); gens
-  from the one mint; Class A = observed `_dirty`
-  epoch + opt-in attribution; Class B registration seeded from the
-  `_animating`/`_content_static` lists; the **producer audit** (the ~179-site
-  list + the Class C handler inventory) is a named deliverable. Gates: host
-  goldens pixel-identical **including windowed sizes**; payload-shape tests
-  re-baselined knowingly; both L8 directions green **on the audited
-  screens**; S3 executed-path grep gate (§5.1).
-- **Phase B — web compositing (the payoff, gated).** FIRST: measure the wasm
-  window-move drag baseline (§5.4 — the recorded 25.8ms is a different frame
-  class). Then per-surface canvases + placement metadata + protocol version
-  bump + the keyframe-production verb; skip-draw for gen-clean surfaces; the
-  GC A/B. Gates: window-move drag at 60fps on the wasm desktop (falsified if
-  the baseline is already worker-bound — then the lever is skip-draw, not
-  placement); one phone-class device validates the N-canvas compositing;
-  device `surfaces_on` flips only after the on-glass bytes-AND-ms A/B.
-- **Phase C — P4 (consolidation, no perf claim).** Per-buffer N-deep
-  last-seens replace the streak/sig family (fields deleted + grep-tests);
-  chrome bands; Class B/C re-expression of `_content_static`. Gate: #156
-  on-glass suite green; drag fps not regressed, **the make-group window's
-  drag named explicitly**.
-- **Phase D — optional.** Per-surface scroll retention on web under §6's two
-  `scr` invariants; further convergence of the `view` bracket into placement
-  metadata.
+- **Phase A — name it.** Built: the surface registry as `runtime/surface.py`,
+  then the kernel's SURF table (§15), with the producer audit (§3). Nothing
+  ever read a gen, and §16 deleted the registry (2026-10-27); the producer
+  classes and the kernel epoch are what stays.
+- **Phase B — web compositing** and **Phase D — per-surface scroll retention
+  on web** retired with the web annex (§13, 2026-08-12).
+- **Phase C — P4 consolidation** was the kernel plan's sprint 7 (the window
+  managers), which does not run (`docs/native_kernel_2026-09.md` §10 question
+  8). The windowed WM's per-buffer state stays Python, and §14's mechanisms are
+  the desk's.
 
 ## 10. Non-goals
 
@@ -593,21 +572,15 @@ transport liveness — other specs.
 Resolved at review: chrome is a WM-owned band, not content (§5 preamble,
 was Q3); gen lifetime is the monotonic mint (§2, was Q4).
 
-1. Bar granularity: one surface, or zones (lent-left / OS-right) so a clock
-   tick doesn't re-ship the app's zone? (Lean: one surface; it's tiny.
-   Revisit only if the L8 perf counters show the bar dominating ships.)
-2. Desk icon column: own surface (lean — selection changes must not re-ship
-   a 1024×600 backdrop) or the wallpaper's.
-3. ~~The Phase B GC A/B's outcome~~ RESOLVED — see §5.4: both rationales were
+1. Bar granularity (one surface or zones) and 2. the desk icon column's
+   surface closed with the registry (§16): there is no surface to split.
+3. The Phase B GC A/B's outcome — RESOLVED in §5.4: both rationales were
    half-right (the 16KB trigger cliff vs the live-set-bound collect cost);
    neither is buried, the synthesis is the shipped policy.
-4. Phone-class N-canvas compositing (§5.4) — if it fails, the fallback is
-   the flat buffer with per-surface *replay* skipping only (keep the CPU
-   win, forfeit the compositor win). NOTE (gate 0 outcome): the falsification
-   clause effectively FIRED in reverse — skip-draw + the GC policy met the
-   60fps drag gate with the flat-buffer page (~2ms replay), so per-surface
-   canvases are no longer a wasm-tier lever; their remaining case is the
-   DEVICE transport's bytes (#153) and they proceed on that schedule.
+4. Phone-class N-canvas compositing — RESOLVED: skip-draw and the GC policy
+   met the wasm drag gate with the flat-buffer page, so per-surface canvases
+   are not a wasm-tier lever, and the device transport they were left for
+   retired with §13.
 
 ## 12. Review ledger (traceability)
 
@@ -665,17 +638,11 @@ discipline. A backend still implements §4 and invents no new invalidation
 mechanism; the wasm head complies as an ordinary raster tier, which is the
 point — it stopped being a special case.
 
-**This amendment kept `runtime/surface.py` (2026-08-12), and §15 moves it.**
-The registry (`Surface`/`SurfaceSet`, the monotonic mint, the epoch, the
-prefix-scoped sync) was reached only through `wm_windowed`'s
-`if not self._recording: return` guards, and nothing sets `_recording` any
-more — so on every shipping tier that code is inert from this stage on. It
-stayed because it was Phase A/C groundwork for the raster tiers, which this
-stage did not touch; what died was its recording DRIVER, not the model. The
-evidence Phase C wanted arrived as the kernel: the raster tiers' compositors
-cross to C and consume the gens there, so §15 gives the registry to the
-kernel and the glass pass of `docs/kernel_survival_2026-10.md` deletes the
-Python leaf.
+**This amendment kept `runtime/surface.py` (2026-08-12)** as Phase A/C
+groundwork for the raster tiers. It was reached only through `wm_windowed`'s
+`if not self._recording: return` guards, and nothing set `_recording` any more,
+so the registry was inert on every shipping tier; §15 moved it into the kernel
+and §16 deleted it.
 
 **What replaced the L8 stream-hash gate.** §5.4's accounting proved "every
 surface stream that changed was covered by a moved gen" — a pixel-less
@@ -1182,40 +1149,13 @@ outside its floor or reached into R outside it.
 
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
-§16 removes the table this amendment moved; the kernel epoch it adds stays.
-
 `docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
-`docs/kernel_survival_2026-10.md` §3.3 is the crossing that executes it. The
-model does not change; what moves is where the §2 object lives and through
-what a producer signals.
-
-**What moves.** The surface record, the registry, the one monotonic mint, the
-set-level epoch and the prefix-scoped sync are the kernel's: a handle table of
-kind SURF (the kernel doc's §4.3), rows allocated in PSRAM, reached from
-Python, Lua and wasm through the kernel's bindings. A producer signals through
-the row's handle — `touch` for an attributed Class A change, `move` for
-placement, `animating` for Class B, `epoch` for the un-attributed case — and a
-consumer reads `content_gen` folded with the epoch and compares it `!=`
-against its own last-seen. The Python leaf `runtime/surface.py` is deleted by
-the glass pass; the WM mints sids from its registry keys as before and holds
-handles instead of objects.
-
-**Why now, and at what scope.** The registry is inert on every shipping tier
-today: no canvas defines `begin_surface`, `wm_windowed`'s `_recording` is
-never set, and nothing reads a gen — the P4 desk's retained caches and streaks
-and the launcher's are the Python window managers' and stay theirs: §9's
-Phase C was the kernel plan's sprint 7 (the window managers), which does not
-run (`docs/native_kernel_2026-09.md` §10 question 8).
-So the glass pass ports the registry as it is, inert, plus the epoch fold, and
-no kernel compositor reads a gen in sprint 3; §7's ledger rows that fold
-fields "in C" mean Phase C, as they always did, and with it the per-buffer
-N-deep last-seen and the frame gate's predicate stay Python. Two things make the move worth doing now rather than then. From
-sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still holds
-for it — content-dirty exactly on the frames it renders — and there is no
-Python left to say so, so the producer signal has to be a kernel call. And
-from sprint 3 the kernel draws frames of its own under a Python window
-manager (the idle wake, the screensaver, the parked screen, the floor's
-text), which needs a signal in the other direction:
+`docs/kernel_survival_2026-10.md` §3.3 executed it. The model did not change:
+the registry moved into the kernel as a handle table of kind SURF, as inert as
+it had been in Python, and §16 deleted it (2026-10-27). What this amendment
+added, and what stays, is the KERNEL EPOCH. From sprint 3 the kernel draws
+frames of its own under a Python window manager (the idle wake, the screensaver, the
+parked screen, the floor's text), which needs a signal to the console:
 
     uint32_t moy_glass_kernel_epoch(void);   // moved by every frame the kernel drew itself
 
@@ -1231,17 +1171,13 @@ the annexes; and §8's graveyard, LVGL included — the kernel is code of our
 own, built for the host as much as for the boards, and carries no widget tree
 (L7); a backend still implements §4 and invents no invalidation mechanism
 (L10). The §8 ruling against per-object
-generation counters stands and is not touched by handles: a handle's
-generation is the table slot's and refuses a stale handle; a content gen is the
-mint's and is compared, never validated. L6's arithmetic holds on the S3
-because the `_dirty` writes are untouched and the frame gate folds them into
-one kernel call per painted frame. L8's two directions read the kernel's gens
-and counters on every tier.
+generation counters stands. L6's arithmetic holds on the S3 because the
+`_dirty` writes are untouched and the frame gate reads the epoch once per
+painted frame.
 
 `runtime/console.py`'s frame gate and `wm_windowed`'s content freeze (§14.1)
-are Python over the kernel's table: the window managers stay Python (sprint 7
-does not run, `docs/kernel_toolkit_2026-10.md`), so the predicate in C, the
-row §7 reserved for it, waits for whatever moves the window managers.
+are Python, as the window managers are (sprint 7 does not run,
+`docs/kernel_toolkit_2026-10.md`).
 
 ## 16. Amendment: the surface table is removed (2026-10-27)
 
