@@ -229,7 +229,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
-                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     return o != NULL ? o : &none;
 }
 
