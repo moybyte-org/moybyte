@@ -3768,11 +3768,11 @@ class LauncherHomeLayer:
 
     def capture_due(self):
         """Take the retained frame a still frame owed (`_cap_owed`) on an
-        idle frame, or at the start of the next painted one before anything
-        draws: every buffer held that frame when it was owed and still does
-        while no frame has painted since and its key holds. Dropped
-        otherwise; the next still frame that finds every buffer holding it
-        owes it again."""
+        idle frame: every buffer held that frame when it was owed and still
+        does while no frame has painted since and its key holds. Dropped
+        otherwise -- a painted frame never pays it, so a run of taps does
+        not; the next still frame that finds every buffer holding it owes
+        it again."""
         owed = self._cap_owed
         self._cap_owed = None
         ws = self.ws

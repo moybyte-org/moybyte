@@ -4917,8 +4917,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                         print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
-        if getattr(self.launcher_layer, "_cap_owed", None) is not None:
-            self.launcher_layer.capture_due()   # before anything draws
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.

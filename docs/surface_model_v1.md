@@ -1061,8 +1061,8 @@ drawing**, the lag it copies being the ring's own:
 - **the desk home's still frame** whose ring's last entry holds this
   frame's parts and bar: the rows its lagging parts span, whole. Its
   retained re-entry frame, which every buffer then holds, is captured on
-  the next idle frame or before the next painted one draws
-  (`capture_due`), so a held key's glide does not pay it.
+  the next idle frame (`capture_due`) and dropped by a painted one, so
+  neither a held key's glide nor a run of taps pays it.
 
 "The last frame held this one" is checkable: the last painted frame is the
 one before (`_painted_f`, the ring's entry for it), and nothing reported a
