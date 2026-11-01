@@ -12,65 +12,34 @@ measured record of what the port was verified against, kept because those are
 the numbers that justify this board's settings. The shared trees this build
 stages from are repo-root: `native/`, `patches/`, `device/`, `runtime/`.
 
-**Stage 1 — panel bring-up — was VERIFIED ON GLASS 2026-08-16.** Flashed to the
-owner's T-Deck and confirmed by eye: the eight colour bars and the checker came
-up on the first flash, no MADCTL adjustment needed. Read back over the REPL on
-the running board:
-
-    MicroPython v1.28.0 (MAINLINE, not the fork)   lvgl: absent
-    PANEL 320 x 240   byteswap True   MADCTL 0x68
-    full-screen bars() redraw + flush: 4811 us
-    image 1,704,976 B of the 5,242,880 B ota_0 slot
-
-So the ST7789 runs on mainline with no LVGL anywhere, which is the question that
-stage existed to answer. Each stage is one commit, and the commit message says
-what to look for -- flash the last good one to bisect.
-
-**ALL SIX STAGES ARE ON GLASS (owner, 2026-08-16).** Panel, touch, keyboard, SD,
-audio and the shared console all came up; carts run, with sound. The port works.
-What it was NOT was fast: it ran at roughly **half the fork's frame rate**, and
-the whole of the difference was one number --
-
-    fork      HITCH ... pump=3.8 ... raw(... flush=2.1)
-              PUMP pump=3.79 idle=0.00 gaps=0 feed=10.67 bands=5 fold=0
-    mainline  HITCH ... pump=0.0 ... raw(... flush=16.8 to 20.2)
-              (no PUMP line at all)
-
-    Brick Siege 26-27 fps (fork 51-54) | Brick Siege Lua 27 | Celeste 20-24
-    Sky Run 30 | Letter Blitz 21-33
-
--- because the flush was blocking and paid the whole 153,600 B transfer inside
-the frame. Worth being precise about which line said what, because the two
-`pump=` fields look alike and are not the same instrument: the `0.0` is
-**HITCH's** `pump=%.1f`, and this build emitted **no `PUMP` line whatever** --
-`_diag_pump` returns early unless `comp.bounce_flush`, and the loop here did not
-even import it. Both are fixed below, so **the `PUMP` line appearing at all is
-the first proof the overlap is in an image.**
-
-**The flush overlap has since been verified on glass** (the `PUMP` line flows,
-and the Bench referee put this build at or above the fork — see "the
-compositor" below for the numbers and what to watch if it regresses).
+**The port came up stage by stage on glass (owner, 2026-08-16)**: panel, touch,
+keyboard, SD, audio and the shared console, each one commit whose message says
+what to look for, so a misbehaviour bisects by flashing the last good one. The
+ST7789 runs on mainline with no LVGL anywhere, the question stage 1 existed to
+answer. The first console image ran at about half the fork's frame rate, and
+the whole difference was a blocking flush paying the full 153,600 B transfer
+inside the frame; stage 7's flush overlap fixed it. Two `pump=` fields look
+alike and are not one instrument: HITCH's `pump=%.1f`, and the `PUMP` line,
+which `_diag_pump` emits only when `comp.bounce_flush` is set, so **the `PUMP`
+line appearing at all is the proof the overlap is in an image.** The frame
+rates are #66's; "the compositor" below says what to watch if it regresses.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
-the same declaration the other two boards use, and the whole shared console
+the same declaration every board uses, and the whole shared console
 stages from here on. That is deliberate and it is explained in the file: the
 stage commits are bisect points, so consecutive images should differ by the
 subsystem under test and not also by a megabyte of frozen bytecode.
 
-### What it costs, against the build it replaces
+### What it replaced
 
-| | fork build (deleted 2026-08-17) | this build |
-|---|---|---|
-| app image | 5,052,032 B | **3,566,592 B** |
-| headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
-
-Same console, same baked browser bundle (572,693 B), same partition table —
-**1.42 MB less image, 29% smaller.** LVGL, `lcd_bus`, `st7789`, `task_handler`,
-`rgb_bus`, `spi3wire` and the fork's `i2c` are simply not in it; the panel is
-one 837-line C file. Both builds stamped OTA board id `tdeck` against a
-byte-identical partition table, so a payload from either installed into the
-other's inactive slot — which made the migration an OTA rather than a cable
-flash. The slots are 7 MiB since 2026-10-26 (the table's CSV,
+This build replaced the LVGL fork (deleted 2026-08-17) with the same console
+and the same baked browser bundle in a much smaller image: LVGL, `lcd_bus`,
+`st7789`, `task_handler`, `rgb_bus`, `spi3wire` and the fork's `i2c` are simply
+not in it, and the panel is one C file. Both builds stamped OTA board id
+`tdeck` against a byte-identical partition table, so a payload from either
+installed into the other's inactive slot — which made the migration an OTA
+rather than a cable flash. The build prints the image's headroom; nothing else
+is current. The slots are 7 MiB since 2026-10-26 (the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why).
 
 ---
@@ -314,7 +283,7 @@ The real thing: `moy_runtime.run_desktop()` over the shared boot spine
 (`runtime/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
 carts through `moycore`, OTA, and the browser console baked into the image.
 
-Boot is the same sequence the other two boards run, because it is the same
+Boot is the same sequence every console board runs, because it is the same
 code. What you should see:
 
 1. serial says `Moybyte boot: starting`, the panel lights on the **boot splash**
@@ -471,7 +440,7 @@ The board-authored modules, and what each is for:
 
 `build.sh` contains no `cp runtime/*.py` line and must never grow one. What
 crosses is declared in `board.toml` and staged by `tools/board_config.py`, the
-same mechanism the other two boards use, from two sources with two deliberately
+same mechanism every board uses, from two sources with two deliberately
 different strategies:
 
 | source | strategy | why |
@@ -832,16 +801,16 @@ Every one of these was learned by hanging or bricking a board.
 Each is one commit. The commit message says what it adds and what to look for
 on glass, so a misbehaviour can be bisected by flashing the last good one.
 
-| # | what | mode | image | state |
-|---|---|---|---|---|
-| 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | 1,704,976 B | **on glass 2026-08-16** |
-| 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | **on glass 2026-08-16** |
-| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
-| 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
-| 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
-| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
-| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,592 B | **on glass 2026-08-16** — `flush=` 16.8–20.2 → 2–4 ms, `PUMP` line present |
-| 8 | **The async layer copy** + the `DRAW2` line | `desktop` | — | `tdeck_panel.LAYER_COPY_ASYNC = True` ships; `DRAW2` is its meter |
+| # | what | mode | state |
+|---|---|---|---|
+| 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | **on glass 2026-08-16** |
+| 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | **on glass 2026-08-16** |
+| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 A/B | `keyboard` | **on glass 2026-08-16** |
+| 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | **on glass 2026-08-16** |
+| 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | **on glass 2026-08-16** |
+| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | **on glass 2026-08-16** — worked, at about half the fork's frame rate |
+| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | **on glass 2026-08-16** — the flush leaves the frame, `PUMP` line present |
+| 8 | **The async layer copy** + the `DRAW2` line | `desktop` | `LAYER_COPY_ASYNC = True` in `modules/moy_runtime.py` ships; `DRAW2` is its meter |
 
 ### What stage 7 measured
 
@@ -909,7 +878,8 @@ it should stay 0.
 
 ### Stage 8 — the async layer copy
 
-`tdeck_panel.LAYER_COPY_ASYNC = True` ships: `DeviceCanvas` predicts a
+`LAYER_COPY_ASYNC = True` in `modules/moy_runtime.py` ships (it sets
+`device_canvas.LAYER_COPY_ASYNC`): `DeviceCanvas` predicts a
 screen-wide layer restore from the previous frame and kicks it on the GDMA in
 `sync_back`, so `blit_window_from` only waits out the tail. That module carries
 the arming rule, why it is safe on this board and the one-flag revert; the
@@ -934,8 +904,8 @@ the reading is meaningless. A stale or torn backdrop is the one failure here
 that is a correctness bug rather than a speed one: `LAYER_COPY_ASYNC = False`
 and reflash.
 
-The stage-6 figure includes the 572,693 B baked browser bundle. Build on a tree
-with no `firmware/web_runner/dist` and the image is about 573 KB smaller, with
+The image includes the baked browser bundle. Build on a tree with no
+`firmware/web_runner/dist` and the image is that much smaller, with
 a warning — such an image serves a console only from a copy on its storage. The
 warning becomes a hard failure under `CI` (or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`),
 because a published image with no console is the whole bug the baking fixes.

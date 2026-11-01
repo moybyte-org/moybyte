@@ -6,16 +6,13 @@ tier next to the T-Deck pocket handheld. Mainline MicroPython v1.28.0
 our native modules via `USER_C_MODULES` — the build strategy both boards share
 now (this board had it first; the T-Deck's port copied it).
 
-Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
-console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
-colors (canonical RGB565 vs the T-Deck's byte-swapped wire order → `PAL565_WIRE`),
-flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
-both touch flips, `MOY_INPUT_TOUCH_FLIP_X/Y` in `mpconfigboard.h`), popup/wallpaper geometry all fixed on-glass. Play perf
-comes from three levers: the quiet-frame partial repaint
-(`WindowedWM.draw_stack`), the hardware-PPA game composite, and the
-async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
-`_BackdropLayer` retained backdrop cache gives ~15fps app-window drags. See #58
-for the living status.
+REPL, WiFi via the C6, GT911 touch, SD, the DSI panel and the console run on
+glass, the launcher under `WindowedWM`. Colours are canonical RGB565 (the
+T-Deck's byte-swapped wire order is `PAL565_WIRE`), the DPI scans out a
+`num_fbs` ping-pong, and the 180° panel mount takes both touch flips
+(`MOY_INPUT_TOUCH_FLIP_X/Y` in `mpconfigboard.h`). Play speed comes from the
+quiet-frame partial repaint (`WindowedWM.draw_stack`), the hardware-PPA game
+composite and the async-composite overlap; the numbers are #58's and #66's.
 
 **BLE-HID keyboard support is hardware-paired (2026-07-13).** The central is
 the kernel's (`native/moy_input/moy_hid.c` on NimBLE's host task,
@@ -56,15 +53,13 @@ record:
 lever long after it had been decided on glass (2026-07-27). Half of it shipped:
 the **triple framebuffer**, `efcf5d1`. The other half, the **double game
 canvas**, was reverted the day it was built — `26e1f9f`, whose verdict survives
-as a NOTE at the defer site in `moy_runtime.py`, which is the copy to read
+as a NOTE at the defer site in `device/p4_canvas.py`, which is the copy to read
 before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
 the whole lever existed for. Why, with numbers:
 `docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
 
-Perf follow-ups still open: a PPA cover-crop for drags; the editor-tab /
-transition draw cost (dispatch-bound); the #113 Phase 5 Settings partial
-repaint. Also open: wired USB-HID keyboard/mouse/gamepad (#83),
-OTA/web-view wiring.
+OTA is wired on this board like every other; wired USB-HID keyboard, mouse
+and gamepad is #83. Open performance work lives in #58 and #77.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 
@@ -169,7 +164,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
   integer-upscale composite the windowed presentation needs. `moy_web` is
   staged the same way: it is the **browser console baked into the image**
-  (~573KB of pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
+  (the pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
   `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
   a flashed board always serves a console current with its own firmware
   (`.claude/rules/web.md` carries the rule and what follows from it).
@@ -213,10 +208,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     whole shared console from `runtime/` as a **denylist** — everything crosses
     except the files that board file names, each with its reason, which is how
     `wm_windowed.py` and its halves come across here and are denied
-    on the S3 — plus `device_canvas`/`device_api`/`device_wifi`/`device_util`/
-    `moycore_glue`/`moy_ota`/`moy_webhost` and the `moybyte`
-    input package from the T-Deck modules tree (an **allowlist**, and it stays
-    one: that is a board tree whose default answer is "no"), and the generated
+    on the S3 — plus the device tier from `device/` (`[modules.device]`:
+    `device_canvas`, `device_api`, `p4_canvas`, `p4_desktop`, `desktop_spine`,
+    `moy_ota`, `moy_webhost` and the rest, an **allowlist**, and it stays one:
+    not every board drives every piece of that tree), and the generated
     `carts_data.py`. The stager prunes untracked strays it did not stage — the
     frozen manifest freezes this whole directory, so an unstaged module used to
     stay in the image indefinitely.
