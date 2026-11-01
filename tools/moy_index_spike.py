@@ -155,7 +155,7 @@ INDEX = Component(
 # The spine's part carries native/moy_app too: the app ABI's state reads the
 # spine's tables and settings rows. The user-files layer its files rows reach
 # is native/moy_store's, which the console hands moy_app by its verb table
-# (tools/moy_ufiles_binding.py) and the host's one library compiles as its own
+# (runtime/host/moy_ufiles_binding.py) and the host's one library compiles as its own
 # part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
@@ -218,7 +218,7 @@ def build_env(impl, bench=False, comp=INDEX):
 
 def host_library(impl="c", sanitize=False, comp=INDEX):
     """The host shared library for the C twin: the host's one library
-    (runtime/host_native.py), which carries every component; a sanitizer
+    (runtime/host/host_native.py), which carries every component; a sanitizer
     build is the component's alone, cached under .build/host_<component>.
     None where there is no C compiler."""
     from runtime import host_native, native_build

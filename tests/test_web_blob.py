@@ -419,7 +419,7 @@ def test_the_watch_list_is_derived_from_the_web_runner_board_file():
     for name in ("web_boot.py", "web_canvas.py"):
         assert "firmware/web_runner/" + name in watched
     # A denied module is not a source of this bundle, and the glob watched it.
-    assert "runtime/host_app.py" not in watched
+    assert "runtime/host/host_app.py" not in watched
 
 
 def test_a_stale_device_canvas_is_reported(tmp_path):

@@ -7,7 +7,7 @@ digests in tests/fixtures/userfiles_golden.json were made from the Python
 layer (runtime/moy_files.py and runtime/moy_file_ops.py) before it was
 deleted; each binding of the C must reproduce them:
 
-  * the C over the host's ctypes binding (tools/moy_ufiles_binding.py), the one
+  * the C over the host's ctypes binding (runtime/host/moy_ufiles_binding.py), the one
     the CPython console runs;
   * the C as the boards' module `moy_ufiles`, on the desktop MicroPython in
     the boards' object model (32-bit, REPR_C), each verb called over a pipe so

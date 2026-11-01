@@ -27,7 +27,7 @@ second Lua runtime deleted, −1,907 lines (2026-08-13) · both boards flashed a
 measured on glass (2026-08-13; the S3 is where it paid, celeste p50 30 → 43) ·
 `spr_batch`/`rect_batch`/`spans` deleted from the cart API (2026-08-14) · lupa
 deleted (2026-08-14) · the host raster binds libmoy — runtime/canvas.py deleted,
-`runtime/host_canvas.py` over `runtime/gfx_binding.py` (2026-08-15) · the §3.4
+`runtime/host/host_canvas.py` over `runtime/host/gfx_binding.py` (2026-08-15) · the §3.4
 sync RPC ships as `runtime/moy_sync.py` (2026-08-25).
 
 ## 2. The trace-vocabulary contract — the one rule that gates the next crossing

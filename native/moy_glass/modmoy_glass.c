@@ -1,6 +1,6 @@
 // moy_glass's MicroPython binding: the glass's tables (moy_buf.h, moy_canvas.h)
 // as the module `moy_glass`, the same names the host's ctypes
-// binding (runtime/glass_binding.py) gives CPython.
+// binding (runtime/host/glass_binding.py) gives CPython.
 //
 //   buf(nbytes, role, owner=0) -> Buf     a BUF row and its bytes
 //   Canvas(w, h, caps=0, owner=0)         a CANVAS row

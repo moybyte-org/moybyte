@@ -301,7 +301,7 @@ def test_custom_carries_the_look_and_rgb():
 # -- the app ABI ----------------------------------------------------------------------
 
 def test_a_run_grant_is_answered_the_nearest_index():
-    from tools import moy_app_binding, moy_spine_binding
+    from runtime import moy_app_binding, moy_spine_binding
     sp, m = moy_spine_binding.binding(), moy_app_binding.binding()
     if sp is None or m is None:
         pytest.skip("no C compiler: no host moy_app")

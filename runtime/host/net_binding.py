@@ -185,7 +185,7 @@ _SIGS = (
 )
 
 
-# This module's share of the host's one library (runtime/host_native.py).
+# This module's share of the host's one library (runtime/host/host_native.py).
 PART = native_build.Part("net", _SOURCES, (_NET, _SPINE, _STORE, _WEB), shim=_SHIM)
 
 

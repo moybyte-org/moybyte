@@ -389,7 +389,7 @@ partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
 Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
-(the kernel's /gpio route and portal over `runtime/net_binding.py`)
+(the kernel's /gpio route and portal over `runtime/host/net_binding.py`)
 and `tests/test_zero_update.py` (140-odd cases over the parsing, the refusals,
 the persisted shapes, the captive portal's packets, the browser-side queue, the
 update state machine and one whole first run end to end), plus

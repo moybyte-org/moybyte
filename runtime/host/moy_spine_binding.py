@@ -20,7 +20,7 @@ import sys
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
 
 import moy_index_spike  # noqa: E402
 

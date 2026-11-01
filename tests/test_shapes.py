@@ -3,7 +3,7 @@ step 6) against a reference written here in Python from the header's
 definitions: corner coverage, rounded rects in both corner kinds with rings
 and bevels, the masks, paints, soft and hard shadows, clipping, the camera,
 the radius clamps and the caches. The compiled kernel is reached through the
-host binding (runtime/gfx_binding.py); tests/test_gfx_binding.py runs the
+host binding (runtime/host/gfx_binding.py); tests/test_gfx_binding.py runs the
 same verbs through the board's compilation under a desktop MicroPython, and
 tests/test_device_canvas_parity.py through the canvas class.
 """

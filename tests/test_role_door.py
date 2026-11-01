@@ -127,7 +127,7 @@ print("DONE")
 
 
 def _host_log():
-    from tools import moy_app_binding, moy_spine_binding
+    from runtime import moy_app_binding, moy_spine_binding
     from runtime import moy_loop
     sp, ap = moy_spine_binding.binding(), moy_app_binding.binding()
     if sp is None or ap is None:

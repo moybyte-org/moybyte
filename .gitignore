@@ -60,7 +60,7 @@ _site/
 firmware/web_runner/shots/
 firmware/web_runner/shots-browser/
 
-# Host audio binding cache (runtime/audio_binding.py, #97 stage 0)
+# Host audio binding cache (runtime/host/audio_binding.py, #97 stage 0)
 /.build/
 # in-level "perf" variants of the PICO-8 corpus carts (tools/import_p8.py +
 # one wrapper each), measurement material -- the corpus itself is not ours

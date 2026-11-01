@@ -99,7 +99,7 @@ from .host_api import (ConsoleDriver, FakeWifi,  # noqa: E402,F401
 from .audio_session import PcmPump  # noqa: E402
 from .input import InputState  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 WIDTH, HEIGHT = 320, 240        # the fixed GAME canvas (the console spec)
 HOST_INPUTS = (("local", "keys"),)   # the inputs it declares (Workstation.use_inputs)
@@ -348,7 +348,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws.make_game_canvas = lambda w, h, owner=None: host_canvas.make_canvas(
         w, h, owner, owners)
     # ONE Lua runtime on the host, and it is the boards': device/moycore_glue.py
-    # over runtime/moycore.py, the C a board runs (moycore_lua.c) and the
+    # over runtime/host/moycore.py, the C a board runs (moycore_lua.c) and the
     # kernel's Player (moy_play.c) by ctypes. A "lua" cart with no binding opens
     # the Player's runtime-missing panel, exactly as a device build without the
     # module does. A "wasm" cart runs on runtime/wasm_binding: libmoy's import

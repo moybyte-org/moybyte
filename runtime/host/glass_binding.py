@@ -35,7 +35,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _GLASS = os.path.join(native_build.ROOT, "native", "moy_glass")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 # The toolkit (native/moy_ui) is compiled into this library: its primitives
-# draw into the canvas rows this library holds (tools/moy_ui_binding.py).
+# draw into the canvas rows this library holds (runtime/host/moy_ui_binding.py).
 _UI = os.path.join(native_build.ROOT, "native", "moy_ui")
 _GFX = os.path.join(native_build.ROOT, "native", "moy_gfx")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
@@ -119,12 +119,12 @@ def _part(ui_dir=None):
                                                   native_build.LIBMOY), shim=_SHIM)
 
 
-# This module's share of the host's one library (runtime/host_native.py).
+# This module's share of the host's one library (runtime/host/host_native.py).
 PART = _part()
 
 
 def build(verbose=False, ui_dir=None, cache=None):
-    """The library's path: the host's one (runtime/host_native.py). `ui_dir`
+    """The library's path: the host's one (runtime/host/host_native.py). `ui_dir`
     builds the glass ALONE over another copy of native/moy_ui
     (tests/test_ui_tables.py's edited style), into `cache`: a library of the
     test's own, which the console never loads."""

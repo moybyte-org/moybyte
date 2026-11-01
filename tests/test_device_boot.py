@@ -391,7 +391,7 @@ def test_the_seed_progress_bar_is_wired_into_the_store_call(monkeypatch):
 
 
 def test_a_build_without_moycore_says_absent_rather_than_failing(capsys, monkeypatch):
-    # The host has its moycore (runtime/moycore.py); a board built without
+    # The host has its moycore (runtime/host/moycore.py); a board built without
     # the native modules has none, which is this.
     monkeypatch.setitem(sys.modules, "moycore_glue", None)
     boot, _, _ = _boot()

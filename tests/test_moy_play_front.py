@@ -3,7 +3,7 @@
 `moy_play_front_frame` -- the run's input, its ticks, the chrome over it and
 the board's present, all C -- and the console's frame does not run until the
 run ends or needs it. A board's compositor gives the front its canvas and its
-present; here a buffer stands in for one (runtime/moy_play.py's `front_ops`),
+present; here a buffer stands in for one (runtime/host/moy_play.py's `front_ops`),
 and the run is the real host Player's over the real seed cart. What each check
 watches for:
 

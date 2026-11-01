@@ -135,7 +135,7 @@ NOT_OURS = (
     # crossed.
     "runtime/surface.py", "runtime/moy_glass.py",
     # The host's Lua twin, deleted by sprint 4's host pass (2026-10-09) when
-    # the host's Lua carts moved onto the boards' glue over runtime/moycore.py;
+    # the host's Lua carts moved onto the boards' glue over runtime/host/moycore.py;
     # the cart-path plan names it to say what crossed.
     "runtime/lua_host.py",
     # ...and the compositors' Python it crossed into native/moy_glass.
@@ -158,6 +158,12 @@ NOT_OURS = (
     # The skin catalog, deleted by sprint 6's step 2 when its deltas moved
     # into native/moy_ui/style.json; the plans name it to say what crossed.
     "runtime/skin.py", "skin.py",
+    # The host-only modules' paths before runtime/host/ (2026-11-02), as the
+    # VENDORED copies name them (native/moy_audio/libmoy/UPSTREAM.md from
+    # moy-spec, native/moy_wasm/README.md from the WAMR fork). A copy is fixed
+    # upstream and re-vendored, never edited here.
+    "runtime/audio_binding.py", "runtime/moyhost_wasm.c", "runtime/moycore.py",
+    "runtime/wasm_host.py", "runtime/wasm_binding.py",
 )
 
 

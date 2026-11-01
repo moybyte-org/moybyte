@@ -38,7 +38,7 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 #                            with "invalid command 'bdist_wheel'".
 # `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
 # needs pygame. Lua needs no extra: the host builds the boards' own vendored
-# Lua 5.4 + libmoy binding on demand (runtime/lua_binding.py -- the lupa extra
+# Lua 5.4 + libmoy binding on demand (runtime/host/lua_binding.py -- the lupa extra
 # was deleted 2026-08-14), so a C compiler is the requirement, same as host audio.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
@@ -49,7 +49,7 @@ setup:
 	$(PYTHON) -m pip install -e '.[dev,sim]'
 # THE HOST NEEDS A C COMPILER. Not for a nicety -- for the console. The host
 # draws on the same libmoy raster both boards run, ctypes-loaded from a .so this
-# builds (runtime/gfx_binding.py); the pure-Python raster that used to stand
+# builds (runtime/host/gfx_binding.py); the pure-Python raster that used to stand
 # behind it was deleted with runtime/canvas.py. So say it HERE, where the person
 # who can act on it is still watching, instead of letting them find out at the
 # first draw via `AttributeError: 'NoneType' object has no attribute 'mg_fill'`.
@@ -226,7 +226,7 @@ UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 # What both builds add to the port's flags. -ffp-contract=off compiles every
 # multiply-add UNFUSED, the rounding every other host compile of the same C
 # uses: the audio parity reference and the host binding pass it explicitly,
-# runtime/native_build.py's -std=c99 implies it. The unix port's own
+# runtime/host/native_build.py's -std=c99 implies it. The unix port's own
 # -std=gnu99 implies -ffp-contract=fast, which changes nothing where the
 # compiler's default target has no FMA instruction to fuse into (baseline
 # x86-64) and changes libmoy's samples by one LSB where it has one: the

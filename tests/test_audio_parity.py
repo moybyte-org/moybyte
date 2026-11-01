@@ -3,7 +3,7 @@
 Every tier compiles libmoy now -- moy-spec's own C implementation of SPEC.md 8,
 vendored into native/moy_audio/libmoy/: the boards and the web runner
 natively, and since moycore stage 0 the host sim too, through the ctypes .so
-runtime/audio_binding.py builds. The hand-maintained Python twin this suite
+runtime/host/audio_binding.py builds. The hand-maintained Python twin this suite
 was written to police is DELETED; what can drift now is only the binding
 itself -- a mangled verb argument, the bank's one JSON crossing, the render
 buffer -- so the strict pass compares the binding's output against an

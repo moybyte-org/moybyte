@@ -1,5 +1,5 @@
 // moy_input's MicroPython binding: the input table (moy_input.h) as the module
-// `moy_input`, the same names the host's ctypes binding (runtime/moy_input.py)
+// `moy_input`, the same names the host's ctypes binding (runtime/host/moy_input.py)
 // gives CPython.
 //
 //   NAMES, HOST_NAMES             the buttons, libmoy's order then the console's

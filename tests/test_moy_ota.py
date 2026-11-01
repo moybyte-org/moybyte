@@ -1,6 +1,6 @@
 """The updater on the host: `device/moy_ota.py`'s face over the kernel's
 updater and client (native/moy_net/moy_ota.c), run through
-runtime/net_binding.py against a scripted HTTP server on 127.0.0.1
+runtime/host/net_binding.py against a scripted HTTP server on 127.0.0.1
 (tests/ota_http.py) and the host's slot (moy_net_port.c: memory the tests read
 back, checked at close by its first byte).
 

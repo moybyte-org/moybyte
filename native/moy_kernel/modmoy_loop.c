@@ -1,5 +1,5 @@
 // moy_loop's MicroPython binding: the kernel's frame as the module `moy_loop`,
-// the same names runtime/moy_loop.py gives CPython.
+// the same names runtime/host/moy_loop.py gives CPython.
 //
 //   register(handle_input, handle_pointer, frame, words=None, service=None)
 //                      the console's upcalls, held as ROOT POINTERS (never in

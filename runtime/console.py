@@ -902,7 +902,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The cart-runtime seam (#67, native/moy_wasm/README.md): a
         # manifest's "runtime" name -> factory(ns, src) returning a running cart
         # handle (.init/.update/.draw callables + .close()). build_workstation
-        # maps "lua" to moycore_glue's run (over runtime/moycore.py) and "wasm"
+        # maps "lua" to moycore_glue's run (over runtime/host/moycore.py) and "wasm"
         # to runtime/wasm_host's; the device maps moycore_glue's. A runtime this build lacks is an
         # ABSENT KEY, and a cart naming it opens the error panel.
         self.runtimes = {}

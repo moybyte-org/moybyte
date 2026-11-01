@@ -1,8 +1,8 @@
 """"No C compiler" has to READ like a missing compiler (#28).
 
 Since runtime/canvas.py was deleted the host has no Python raster to fall back
-on: it draws on device_canvas.DeviceCanvas over runtime/gfx_binding.py, which
-ctypes-loads a library runtime/native_build.py compiles. So "no C compiler = no
+on: it draws on device_canvas.DeviceCanvas over runtime/host/gfx_binding.py, which
+ctypes-loads a library runtime/host/native_build.py compiles. So "no C compiler = no
 host console" stopped being a caveat and became the plain truth -- and what the
 user actually got was
 

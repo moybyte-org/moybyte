@@ -4,16 +4,16 @@ CPython runs a Lua cart through the C a board runs, not a twin of it: the VM
 is native/moycore/moycore_lua.c over moycore_run.c's console -- libmoy's verb
 table over the vendored Lua 5.4 with `LUA_32BITS`, the small-object pool, the
 layers, paint images and scenes in C -- and its frames are the kernel's Player
-(native/moy_play/moy_play.c). `runtime/moyhost_lua.c` is the binding's half
+(native/moy_play/moy_play.c). `runtime/host/moyhost_lua.c` is the binding's half
 (modmoycore.c's, on a board) and says what differs: plain C signatures, the
-audio sessions forwarded to runtime/audio_binding.py's library (`kernel`
+audio sessions forwarded to runtime/host/audio_binding.py's library (`kernel`
 wires them), and a paint image decoded by the Python codec where the C
 inflater is not in the build. Everything else -- the loop, the input tables,
 the glass, the shell's moy_ui -- is the host's one library
-(runtime/host_native.py), which this module loads as every binding does.
+(runtime/host/host_native.py), which this module loads as every binding does.
 
 ONE RUN AT A TIME, as on a board: a new HostLuaRun closes the one before it,
-and a closed run answers nothing. `runtime/moycore.py` is the module surface the
+and a closed run answers nothing. `runtime/host/moycore.py` is the module surface the
 boards' glue (device/moycore_glue.py) drives, over this.
 
 PIXELS ARE RGB565, as on both boards: the canvas's 64-entry wire table says
@@ -76,7 +76,7 @@ def _lua_names():
                   or n.endswith(".h"))
 
 
-# This module's share of the host's one library (runtime/host_native.py): the
+# This module's share of the host's one library (runtime/host/host_native.py): the
 # Lua run, the kernel's Player and the public UI API's Lua and RUN faces
 # (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_wasm.h).
 PART = native_build.Part("lua", list(_RASTER) + [
@@ -102,7 +102,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
                    _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI), shim=_SHIM)
 
 # ...and the compiled-cart run's, where WAMR builds for the host
-# (runtime/wasm_binding.wamr): runtime/moyhost_wasm.c over libmoy's wasm
+# (runtime/wasm_binding.wamr): runtime/host/moyhost_wasm.c over libmoy's wasm
 # binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
 # its written files.
 WASM_PART = native_build.Part("wasm", (
@@ -114,7 +114,7 @@ WASM_PART = native_build.Part("wasm", (
 
 
 def build(verbose=False):
-    """The host's one library (runtime/host_native.py); None with no C
+    """The host's one library (runtime/host/host_native.py); None with no C
     compiler. It carries the compiled-cart run where WAMR builds."""
     from . import host_native
     return host_native.build(verbose)
@@ -199,7 +199,7 @@ def _fn(lib, name):
 
 def kernel(d):
     """Wire the Player's audio forwarders to the host's audio library
-    (runtime/audio_binding.py, a library of its own: it is compiled
+    (runtime/host/audio_binding.py, a library of its own: it is compiled
     double-widened for the parity harness). Everything else the Player calls
     -- the loop's upcall counters, the input tables, the glass -- is in this
     same library. No audio library: a session is STALE, which is silence."""
@@ -282,7 +282,7 @@ class HostLuaRun:
             raise ValueError("host lua: the console is RGB565; an indexed canvas has no run")
         self.indexed = False
         # The snapshot and the audio queue: the caller's int32 arrays (the
-        # boards' glue owns them, runtime/moycore.py), or the run's own.
+        # boards' glue owns them, runtime/host/moycore.py), or the run's own.
         self.snap = (ctypes.c_int32 * SNAP_LEN)() if snap is None else \
             (ctypes.c_int32 * len(snap)).from_buffer(snap)
         self.aq = (ctypes.c_int32 * (1 + AQ_SLOTS * self.AUDIO_MAX))() if aq is None else \

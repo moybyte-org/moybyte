@@ -5,7 +5,7 @@
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
 native/moy_app builds, as Python loads it by ctypes from the host's one
-library (runtime/host_native.py; tools/moy_index_spike.py's SPINE part
+library (runtime/host/host_native.py; tools/moy_index_spike.py's SPINE part
 carries native/moy_app). The
 runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
@@ -29,7 +29,7 @@ import sys
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
 
 import moy_index_spike  # noqa: E402
 
@@ -55,7 +55,7 @@ _ENOSPC = 28
 
 
 # The role table: the served roles' rows are its own.
-with open(os.path.join(HERE, "..", "native", "moy_app", "roles.json")) as _f:
+with open(os.path.join(HERE, "..", "..", "native", "moy_app", "roles.json")) as _f:
     _TABLE = json.load(_f)["rows"]
 
 
@@ -240,7 +240,7 @@ def _str(o):
 
 def binding(sanitize=False):
     """The moy_app module over the host's one library, or None with no C
-    compiler. The library is the one tools/moy_spine_binding.py loads, so a
+    compiler. The library is the one runtime/host/moy_spine_binding.py loads, so a
     Settings it made is a pointer this one writes."""
     path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
     if path is None:
@@ -388,13 +388,16 @@ def binding(sanitize=False):
         def store_bind(self, root, readable, writable, no_store):
             """The user-files store the files and wallpaper rows reach (root
             None: none), and the `err` they answer with no store. The layer is
-            native/moy_store's (tools/moy_ufiles_binding.py), built at the
+            native/moy_store's (runtime/host/moy_ufiles_binding.py), built at the
             first bind of a root."""
             self._no_store = no_store
             if root is None:
                 _check(lib.moy_app_store_bind(self._p, None, b"", 0, 0, 0))
                 return
-            import moy_ufiles_binding
+            try:
+                import moy_ufiles_binding
+            except ImportError:
+                from runtime import moy_ufiles_binding
             rb = _str(str(root))
             parent = str(root).rsplit("/", 1)[0]
             moy_ufiles_binding.library().moy_fs_root((parent or str(root)).encode())
@@ -956,7 +959,7 @@ def binding(sanitize=False):
 
     def door_bind(on):
         """The shell rows' door: the kernel's ROLE upcall, the loop's own
-        library's moy_loop_role (runtime/moy_loop.py), or none."""
+        library's moy_loop_role (runtime/host/moy_loop.py), or none."""
         if not on:
             lib.moy_app_door_bind(None)
             return

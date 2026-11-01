@@ -5,7 +5,7 @@
   strings reproduces the committed moy_ui_tables.h/.c and
   native/moy_spine/moy_str_table.h/.c byte for byte.
 * The data test: a copy of style.json with one state's token, one metric and
-  one new kind changed, regenerated and built through runtime/native_build.py's
+  one new kind changed, regenerated and built through runtime/host/native_build.py's
   own path (the glass's library, as the host builds it), resolves the change where it was made and nowhere else -- so no
   value lives in a C body.
 """

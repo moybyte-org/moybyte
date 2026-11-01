@@ -961,7 +961,7 @@ class Wallpaper:
 
         `ws.make_game_canvas` has no such ambiguity: it is a backend attach
         point like `make_api`, `(w, h) -> an offscreen DeviceCanvas of that
-        size`, injected by all four heads (runtime/host_app.py, web_boot.py and
+        size`, injected by all four heads (runtime/host/host_app.py, web_boot.py and
         both boards' moy_runtime.py) and pinned as a service by
         tests/test_board_service_parity.py. Each head hands back a canvas over
         ITS OWN compositor -- HostCompositor, WebCompositor, an moy_alloc-backed

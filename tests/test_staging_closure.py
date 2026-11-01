@@ -583,11 +583,18 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     # HOST_ONLY carries names that are not runtime modules at all
     # (`simulate_desktop` is a tool); only the ones a denylist could stage are
     # the board file's business.
-    runtime_names = {p.stem for p in (ROOT / "runtime").rglob("*.py")}
-    for name in sorted(HOST_ONLY[target] & runtime_names):
+    # A module under runtime/host/ is denied by WHERE it lives (no board
+    # stages that folder); one anywhere else needs its own host-only denial,
+    # so moving it out of host/ without one goes red here.
+    src = ROOT / "runtime"
+    sources = board_config.shared_sources(src)
+    for name in sorted(HOST_ONLY[target] & {Path(n).stem for n in sources}):
+        if board_config.host_only(src, sources[name + ".py"]):
+            continue
         assert declared.get(name + ".py") == "host-only", (
-            "%s/board.toml does not deny %s.py as host-only -- the policy "
-            "table in this file says it must never be frozen there" % (target, name))
+            "%s/board.toml does not deny %s.py as host-only, and it does not "
+            "live in runtime/host/ -- the policy table in this file says it "
+            "must never be frozen there" % (target, name))
     for name in sorted(NEVER_ON_A_BOARD):
         assert name + ".py" in declared, (
             "%s/board.toml does not name %s.py at all. NEVER_ON_A_BOARD wants "
@@ -616,7 +623,7 @@ def test_every_board_toml_denial_is_explained_and_classified(target):
                 "%s/board.toml classes %s never-on-a-board but this file's "
                 "table does not carry it" % (target, name))
         if entry["kind"] != "never-on-a-board":
-            assert (ROOT / "runtime" / name).exists(), (
+            assert name in board_config.shared_sources(ROOT / "runtime"), (
                 "%s/board.toml denies %s, which is not a runtime module. Only "
                 "a never-on-a-board TRIPWIRE may name a file that is not there"
                 % (target, name))

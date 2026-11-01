@@ -7,7 +7,7 @@ the logs must be equal line for line (tests/test_gfx_binding.py's pattern):
 
   * the oracle, tests/app_twin.py over tests/spine_twin.py's Settings: what
     `Damage`, `Prefs`, `Clipboard` and system_api's policy did before step 4;
-  * the C over the host's ctypes binding (tools/moy_app_binding.py), the one
+  * the C over the host's ctypes binding (runtime/host/moy_app_binding.py), the one
     the CPython console runs;
   * the C as the boards' native module, on the desktop MicroPython in the
     boards' object model (32-bit, REPR_C), over its native moy_spine.
@@ -355,7 +355,7 @@ def _oracle():
 
 
 def test_the_host_binding_is_the_oracle():
-    from tools import moy_app_binding, moy_spine_binding
+    from runtime import moy_app_binding, moy_spine_binding
     sp, ap = moy_spine_binding.binding(), moy_app_binding.binding()
     if sp is None or ap is None:
         pytest.skip("no C compiler: no host moy_app")

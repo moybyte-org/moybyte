@@ -14,7 +14,7 @@ So the language a cart is written in decides which table renders its text.
 
 WHY THIS FILE EXISTS. `modmoy_gfx.c` claims the two are "pinned byte-identical
 by the text conformance scenes". They are byte-identical; the pinning was not
-real. The conformance scenes replay through `runtime/host_canvas.py` -> moy_gfx,
+real. The conformance scenes replay through `runtime/host/host_canvas.py` -> moy_gfx,
 which is handed font.py's blob -- so both sides of that comparison read the SAME
 table and a change to libmoy's copy could not move the hash. Nothing anywhere
 referenced `moy_font_data`.

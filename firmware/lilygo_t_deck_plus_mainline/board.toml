@@ -99,12 +99,9 @@ resolve on this target."""
 
 # -- host-only: real code, real purpose, impossible or wrong on a board ------
 
-[[modules.shared.deny]]
-file = "host_app.py"
-kind = "host-only"
-why  = """
-The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
-`build_workstation()`. It imports the host's world wholesale. Not a board."""
+# runtime/host/ never stages (tools/board_config.py HOST_ONLY_DIR): the host's
+# ctypes bindings, native build and simulator glue live there. What is denied
+# below is host-side code that sits beside the shared modules.
 
 [[modules.shared.deny]]
 file = "host_api.py"
@@ -118,108 +115,6 @@ about duplicate backends, it is about dead weight: nothing on a board
 constructs a fake service or a sim driver. host_api stays deliberately
 portable (the web runner freezes it for exactly those classes)."""
 
-[[modules.shared.deny]]
-file = "host_canvas.py"
-kind = "host-only"
-why  = """
-Runs the BOARDS' canvas class on CPython -- it builds `DeviceCanvas` over a
-ctypes compositor so the host stops having a second raster. The board has the
-real one; this is the adapter that exists only because CPython isn't one."""
-
-[[modules.shared.deny]]
-file = "net_binding.py"
-kind = "host-only"
-why  = """
-`moy_net` for CPython: compiles native/moy_net and dlopens it through ctypes.
-Here `moy_net` is a compiled-in usermod (native/.staged/moy_net)."""
-
-[[modules.shared.deny]]
-file = "moy_input.py"
-kind = "host-only"
-why  = """
-`moy_input` for CPython: compiles native/moy_input and dlopens it through
-ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
-
-[[modules.shared.deny]]
-file = "moy_play.py"
-kind = "host-only"
-why  = """
-`moy_play` for CPython: compiles native/moy_play's Player and dlopens it
-through ctypes. Here `moy_play` is the compiled-in `moy_play` usermod (native/.staged/moy_play)."""
-
-[[modules.shared.deny]]
-file = "moy_loop.py"
-kind = "host-only"
-why  = """
-`moy_loop` for CPython: compiles native/moy_kernel's frame loop and dlopens it
-through ctypes. Here `moy_loop` is part of the compiled-in `moy_kernel` usermod (native/.staged/moy_kernel)."""
-
-[[modules.shared.deny]]
-file = "glass_binding.py"
-kind = "host-only"
-why  = """
-`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
-ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
-
-[[modules.shared.deny]]
-file = "gfx_binding.py"
-kind = "host-only"
-why  = """
-`moy_gfx` for CPython: compiles its kernels with a C compiler found at
-runtime and dlopens it through ctypes. Here `moy_gfx` is a compiled-in usermod
-(native/.staged/moy_gfx). This is the host binding that would look MOST
-plausible to stage, being the host half of the very module device_canvas
-imports."""
-
-[[modules.shared.deny]]
-file = "lua_binding.py"
-kind = "host-only"
-why  = """
-ctypes over libmoy's Lua binding, compiled on demand -- the host's answer to
-the `moy_lua`/`moycore` usermods this board compiles in."""
-
-[[modules.shared.deny]]
-file = "audio_binding.py"
-kind = "host-only"
-why  = """
-`moy_audio` for CPython: ctypes over native/moy_audio and the vendored libmoy
-synth. Here `moy_audio` is the usermod, the kernel's audio."""
-
-[[modules.shared.deny]]
-file = "native_build.py"
-kind = "host-only"
-why  = """
-The shared compile-and-cache helper the three bindings above use: subprocess to
-a C compiler, a hash-keyed .so cache under .build/. There is no compiler on a
-board, and nothing to compile if there were."""
-
-[[modules.shared.deny]]
-file = "host_native.py"
-kind = "host-only"
-why  = """
-The host's one native library: every binding's C compiled together by
-native_build and ctypes-loaded once. A board links its modules into the image."""
-
-[[modules.shared.deny]]
-file = "moycore.py"
-kind = "host-only"
-why  = """
-`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
-over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
-
-
-[[modules.shared.deny]]
-file = "wasm_host.py"
-kind = "host-only"
-why  = """
-The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
-
-[[modules.shared.deny]]
-file = "wasm_binding.py"
-kind = "host-only"
-why  = """
-ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
-compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
 file = "input.py"
 kind = "host-only"
@@ -572,7 +467,7 @@ THE `make_api` (one body in the shared cart_api.py since 2026-08-17, so a cart
 cannot mean two things on any tier) and moycore's glue -- the run's buffers
 and asset texts handed to the C, the run handed to the kernel's Player
 (native/moy_play), which takes its frame, pmem persisted at the #66
-boundaries. The host runs the same file over runtime/moycore.py."""
+boundaries. The host runs the same file over runtime/host/moycore.py."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

@@ -2,7 +2,7 @@
 #   binding          the module: moy_ui's names over the host's one library
 """The toolkit's C (native/moy_ui) on the CPython host, by ctypes: the module
 `moy_ui` as the boards and the browser import it, name for name. Its C is
-in the host's one library (runtime/host_native.py) with the glass whose canvas
+in the host's one library (runtime/host/host_native.py) with the glass whose canvas
 rows its primitives draw into and the Lua and compiled runs whose `ui` reads
 the same state; runtime/__init__ registers this as `moy_ui`, so the host's
 toolkit is the C every image runs.
@@ -15,8 +15,9 @@ import sys
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-if os.path.dirname(HERE) not in sys.path:
-    sys.path.insert(0, os.path.dirname(HERE))
+_ROOT = os.path.dirname(os.path.dirname(HERE))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from runtime import glass_binding  # noqa: E402
 

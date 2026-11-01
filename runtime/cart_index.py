@@ -73,7 +73,7 @@ puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
-(runtime/host_app.py), the kernel's client on a board (device/wire_links.CartNet),
+(runtime/host/host_app.py), the kernel's client on a board (device/wire_links.CartNet),
 the page's fetch in the browser (firmware/web_runner/carts_link.py). A
 transport's `open(url)` answers an object with `status`, `length` (None when
 unknown), `readinto(buf)` and `close()`.

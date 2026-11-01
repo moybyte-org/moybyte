@@ -3,7 +3,7 @@ docs/history/kernel_survival_2026-10.md section 5).
 
   native()        the `moy_audio` module this tier has, or None: the usermod on
                   a board, in the browser and on the desktop MicroPython; on
-                  CPython the same C over ctypes (runtime/audio_binding.py)
+                  CPython the same C over ctypes (runtime/host/audio_binding.py)
   AudioSession    one owner's session: its handle, the bank model it plays, the
                   six SPEC.md 8.2 verbs addressed to it
   PcmPump         where no task feeds a speaker (the host, the browser): pulls

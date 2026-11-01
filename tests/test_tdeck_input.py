@@ -3,7 +3,7 @@ and raw-matrix modes, the one-shot keys the ASCII path queues, the GT911's
 INT gate and staging, and the mode switches between them.
 
 The drivers are the kernel's C (native/moy_input/moy_kbd.c and
-moy_touchdev.c), driven here through the host's binding (runtime/moy_input.py)
+moy_touchdev.c), driven here through the host's binding (runtime/host/moy_input.py)
 over recording I2C fakes; one `pass_()` is one pass of the input task, and the
 table is the real one, so every `held()`/`last_key` read after its
 `begin_frame` is what a cart would see. The board's WIRING of these drivers

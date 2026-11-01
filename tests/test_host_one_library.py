@@ -1,5 +1,5 @@
 """The host's native modules are ONE loaded library, as a board's are one image
-(runtime/host_native.py): the shell's `moy_ui`, a Lua run and a compiled run
+(runtime/host/host_native.py): the shell's `moy_ui`, a Lua run and a compiled run
 read the same theme, depth, fonts and cart-text boundary, so a public-UI page
 draws the same pixels in every runtime under a theme with depth.
 """
@@ -44,7 +44,7 @@ def test_the_shells_moy_ui_state_is_the_lua_runs():
     """The boundary the Player sets through the shell's module is the one the
     library a Lua run draws in reads (moy_ui_cart_text answers what it was)."""
     from runtime import lua_binding
-    from tools import moy_ui_binding
+    from runtime import moy_ui_binding
     ui = moy_ui_binding.binding()
     lib = lua_binding._lib()
     lib.moy_ui_cart_text.argtypes = [ctypes.c_int]

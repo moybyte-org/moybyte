@@ -84,7 +84,7 @@ TARGETS = {
                 "run_desktop"),
     "guition_p4": ("firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
                    "run_desktop"),
-    "host": ("runtime/host_app.py", "build_workstation"),
+    "host": ("runtime/host/host_app.py", "build_workstation"),
     # The wasm head is the third tier and wires the same console (moycore stage
     # 4), so it belongs in the table: it is the target most likely to be handed
     # a new service last. Only `boot()` is read -- web_boot also carries

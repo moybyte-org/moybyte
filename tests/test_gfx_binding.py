@@ -1,6 +1,6 @@
 """The host's RGB565 compositor, and its parity with the one on glass.
 
-`runtime/gfx_binding.py` exists so `device_canvas.py` -- the raster the boards
+`runtime/host/gfx_binding.py` exists so `device_canvas.py` -- the raster the boards
 and the browser run -- can run on the host too, which is what lets the two
 canvas implementations become one. That only holds if the two kernels agree
 BYTE FOR BYTE, so the important test here is not the unit ones: it is

@@ -12,7 +12,7 @@ below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
 and the cart's Lua VM -- its allocator and pool, open, load, frame and close
 -- is `moycore_lua.c`; neither includes anything of MicroPython.
 `modmoycore.c` binds them to buffers Python owns, and the host's two ctypes
-shims (`runtime/moyhost_lua.c`, `runtime/moyhost_wasm.c`) run the console's
+shims (`runtime/host/moyhost_lua.c`, `runtime/host/moyhost_wasm.c`) run the console's
 file. On a VM tier a run's frame is the kernel's Player's
 (`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
 plays the queue.
@@ -123,7 +123,7 @@ session callbacks, and nothing else does. `moycore.WASM` is 1 in both and 0 on
 the unix build, where `libmoy/moy_wasm.c` is an empty translation unit. The
 MicroPython surface is unconditional, because qstr scanning does not see those
 defines. `device/moycore_glue.py`'s `WasmRun` is the glue on every tier but the
-host, whose twin is `runtime/moyhost_wasm.c`.
+host, whose twin is `runtime/host/moyhost_wasm.c`.
 
 ## What it does NOT compile
 
@@ -424,7 +424,7 @@ again rather than a copy of it (#225): `moycore_layers.h` gives the prelude
 `__layer_canvas`, a `moy_canvas` over the layer's buffer (which `layer_bind`
 hands over from the `__layer_new` trampoline), and `__layer_verb`, which wraps
 a screen verb into a layer method that points `con->canvas` at that canvas for
-one protected call. The host's Lua shim (`runtime/moyhost_lua.c`) includes the
+one protected call. The host's Lua shim (`runtime/host/moyhost_lua.c`) includes the
 same header, so both Lua hosts draw into a layer through one body.
 
 ## Testing

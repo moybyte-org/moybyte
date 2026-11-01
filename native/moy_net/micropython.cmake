@@ -1,6 +1,6 @@
 # moy_net: the links: WiFi, the ESP-NOW link, the HTTP core, the webhost, the
 # sync RPC and the updater (docs/history/kernel_survival_2026-10.md section 6). Its
-# CPython face is runtime/net_binding.py over the same C.
+# CPython face is runtime/host/net_binding.py over the same C.
 #
 # The JSON scanner it reads a batch with is native/moy_spine/moy_json.c, and
 # the store it applies one into and pulls from is native/moy_store, which

@@ -63,7 +63,7 @@ holds the sessions (one per owner, only the FOCUSED one heard), the mix and
 the sample voice over libmoy; `moy_aud_out.c` is the board's speaker, started
 at the first focus. Every tier reaches it as the module `moy_audio`: the
 usermod on the boards, the browser and the desktop MicroPython, and on the
-host `runtime/audio_binding.py`, which compiles it with the DOUBLE-WIDENED
+host `runtime/host/audio_binding.py`, which compiles it with the DOUBLE-WIDENED
 libmoy (the parity harness's own recipe) into a hash-cached `.so` under
 `.build/host_audio/`. `runtime/audio_session.py` is the Python face
 (`AudioSession`, the per-frame `PcmPump` of the host and the browser). **No

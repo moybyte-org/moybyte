@@ -3,10 +3,10 @@ ctypes, as the module `moy_ufiles` the boards' modmoy_ufiles.c registers. The
 runtime package registers it under that name (runtime/__init__.py), so
 `moy_carts`' user-files names are the C every image runs.
 
-Its C is in the host's one library (runtime/host_native.py) where the
+Its C is in the host's one library (runtime/host/host_native.py) where the
 MicroPython tree has the inflater (lib/uzlib, `make unix-micropython`); the
 library is loaded the first time a name is used, not at import.
-tools/moy_app_binding.py hands this layer's verb table (`ops()`) to the files
+runtime/host/moy_app_binding.py hands this layer's verb table (`ops()`) to the files
 and wallpaper rows, so one process has one publish marker and one prune
 counter.
 
@@ -22,7 +22,7 @@ import os
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, ".."))
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = os.path.join(ROOT, "native", "moy_spine")
 PNG = os.path.join(ROOT, "native", "moy_png")
@@ -102,7 +102,7 @@ _SIGS = (
 
 
 def part():
-    """This layer's share of the host's one library (runtime/host_native.py)."""
+    """This layer's share of the host's one library (runtime/host/host_native.py)."""
     import sys
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)

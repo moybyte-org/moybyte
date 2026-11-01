@@ -236,7 +236,7 @@ static inline int mg_map_ok(int mw, int mh, size_t cells_len)
  * maps, and those are libmoy's. Each refuses what the guards above refuse,
  * borrows a moy_canvas for the one call and calls the spec's raster. The
  * usermod's wrappers (modmoy_gfx.c) and the host's ctypes binding
- * (runtime/gfx_binding.py) both call these, so the guards and the borrow are
+ * (runtime/host/gfx_binding.py) both call these, so the guards and the borrow are
  * one body; the arguments are the native verbs' own, in their order, with
  * the buffers' lengths beside them. `col` is a resolved pixel word; `lut` the
  * 64-entry table with pal already folded in (libmoy's store[], so pal[] stays

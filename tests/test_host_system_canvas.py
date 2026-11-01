@@ -1,6 +1,6 @@
 """The host's SYSTEM canvas, on the boards' raster (#161).
 
-`runtime/host_canvas.py` runs `DeviceCanvas` on CPython; `HostSystemCanvas` is
+`runtime/host/host_canvas.py` runs `DeviceCanvas` on CPython; `HostSystemCanvas` is
 the rest of what the shared console asks a system SURFACE for:
 
   * font_scale text and font-scale-carrying layers (#39/#73),

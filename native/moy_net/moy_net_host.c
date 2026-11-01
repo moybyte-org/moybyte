@@ -1,4 +1,4 @@
-// The host build's shim for runtime/net_binding.py: what moy_net.h keeps
+// The host build's shim for runtime/host/net_binding.py: what moy_net.h keeps
 // inline, exported for ctypes.
 
 #include "moy_net.h"

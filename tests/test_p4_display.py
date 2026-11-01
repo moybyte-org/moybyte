@@ -1,6 +1,6 @@
 """The P4s' compositors, EXECUTED: the Waveshare's -- the kernel's DSI
 engine (`native/moy_glass/moy_present.h`) through the host binding
-(`runtime/glass_binding.py`) -- and the Guition's rotated one
+(`runtime/host/glass_binding.py`) -- and the Guition's rotated one
 (`moy_glass.RotatedCompositor`, the same host binding).
 
 The Waveshare's is the async-overlap lever (#58) -- the deferred composite,
@@ -156,7 +156,7 @@ class FakeWS:
 @contextlib.contextmanager
 def p4_display(dsi, ppa, gfx=None):
     """The Waveshare's compositor -- the kernel's DSI engine through the host
-    binding (`runtime/glass_binding.py`) -- over stubbed native modules, as a
+    binding (`runtime/host/glass_binding.py`) -- over stubbed native modules, as a
     module with the board runtime's one name, `P4Compositor()`."""
     saved = sys.modules.get("moy_gfx")
     if gfx is None:

@@ -1,5 +1,5 @@
 // The glass on the host: its allocators over the C library, and the calls the
-// headers keep inline, for the ctypes binding (runtime/glass_binding.py) and the
+// headers keep inline, for the ctypes binding (runtime/host/glass_binding.py) and the
 // fuzz driver. Pixels come from calloc.
 
 #include <stdlib.h>

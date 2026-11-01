@@ -675,7 +675,7 @@ def test_the_engine_and_the_host_twin_share_one_statement_of_the_rule():
     engine = open(os.path.join(native, "moy_wasm", "modmoy_wasm.c"),
                   encoding="utf-8").read()
     assert "moy_wasm_file_block(" in engine and "hold / 32" not in engine
-    host = open(os.path.join(ROOT, "runtime", "moyhost_wasm.c"),
+    host = open(os.path.join(ROOT, "runtime", "host", "moyhost_wasm.c"),
                 encoding="utf-8").read()
     assert '#include "moy_wasm_footprint.h"' in host
 

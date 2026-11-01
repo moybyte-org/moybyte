@@ -279,7 +279,7 @@ def capture(slug):
             return None
         cv = ws.canvas                   # the cart's GAME canvas
         # indices_of is the exact reduction of the RGB565 canvas back to MOY64
-        # indices -- see runtime/host_canvas.py.
+        # indices -- see runtime/host/host_canvas.py.
         return cv.w, cv.h, host_canvas.indices_of(cv), crop
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

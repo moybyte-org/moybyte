@@ -94,7 +94,7 @@ native/moy_spine) on both object models, the ledger half still the Python
 CrashGuard.
 
 EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
-crosses): five more, one per twin -- input (runtime/moy_input.py), the glass
+crosses): five more, one per twin -- input (runtime/host/moy_input.py), the glass
 (native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
 (runtime/frame_loop.py), the links (native/moy_net, runtime/moy_sync.py
 and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
@@ -2011,7 +2011,12 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
                          ("@STAGE@", stage), ("@ROOT@", store), ("@REPO@", ROOT)):
         driver = driver.replace(token, repr(str(value)))
     script = work / "driver.py"
-    script.write_text((TWIN_SPINE if prelude is None else prelude) + driver)
+    head = TWIN_SPINE if prelude is None else prelude
+    if exe == sys.executable:
+        # CPython reaches the kernels through their ctypes faces, which live
+        # in runtime/host/; a VM has them compiled in.
+        head += "import sys\nsys.path.insert(0, %r)\n" % str(ROOT / "runtime" / "host")
+    script.write_text(head + driver)
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -2056,7 +2061,7 @@ def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
 # Every row of the app ABI's role table (native/moy_app/roles.json) driven
 # once through a context that holds every role, over a real Workstation and
 # its store, and the effect logged: the net sprint 5's steps swap the roles'
-# servers under. On CPython the Workstation is the host's (runtime/host_app.py);
+# servers under. On CPython the Workstation is the host's (runtime/host/host_app.py);
 # on the boards' object model it is the T-Deck's own desktop, booted by
 # moy_runtime.run_desktop over test_frame_alloc's fakes, seeded from the same
 # system carts. The driver counts every row it calls on the role objects

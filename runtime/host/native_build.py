@@ -1,6 +1,6 @@
 """Compile host libraries against vendored sources, cached by content hash.
 
-The host's one library (runtime/host_native.py) is every native module's
+The host's one library (runtime/host/host_native.py) is every native module's
 `Part` compiled together; the builds that differ from it on purpose -- a
 sanitizer build, the tick model at double precision, a test's edited style --
 are a part or a shim with other flags. Either way the differences are a
@@ -21,7 +21,7 @@ and the answer is the same sentence `explain_no_cc` prints.
 WHY THAT SENTENCE MATTERS MORE THAN IT USED TO. Until runtime/canvas.py was
 deleted the host had a pure-Python raster to fall back on, so "no compiler" cost
 you host audio and nothing else. It does not any more: the host draws on
-`device_canvas.DeviceCanvas` over `runtime/gfx_binding.py`, which ctypes-loads
+`device_canvas.DeviceCanvas` over `runtime/host/gfx_binding.py`, which ctypes-loads
 what this module builds. So no C compiler is now no host console -- and what a
 user actually SAW was `AttributeError: 'NoneType' object has no attribute
 'mg_fill'` out of a ctypes wrapper, four frames deep, naming nothing they could
@@ -56,7 +56,7 @@ except ImportError:             # no flock off POSIX: unique names still hold
     fcntl = None
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(_HERE, ".."))
+ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 
 # The vendored libmoy every host binding compiles against. One copy, in the
 # T-Deck's native tree, which is its canonical home for the boards too.
@@ -261,7 +261,7 @@ def read_sources_only(names, dirs):
 
 def build_parts(name, parts, cache_dir, cflags=None, link_flags=None, verbose=False):
     """Compile (or reuse) ONE library from several parts, each resolved in its
-    own directories: the host's one library (runtime/host_native.py) is every
+    own directories: the host's one library (runtime/host/host_native.py) is every
     native module's part. A file two parts read is one file -- the same name
     with other text in two parts is an error, never a silent pick -- and a
     translation unit two parts name is compiled once."""

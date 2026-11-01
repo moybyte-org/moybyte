@@ -4,7 +4,7 @@ Two ends, one wire shape, and no shared code between them on purpose -- the
 browser end is a queue and a cache (firmware/web_runner/gpio_link.py), the
 board end is the kernel webhost's /gpio route (native/moy_net/moy_gpio.c) over
 the board's allowlist table (MOY_NET_GPIO_PINS in the Zero's mpconfigboard.h),
-run here over runtime/net_binding.py with the host's stand-in pins. What holds
+run here over runtime/host/net_binding.py with the host's stand-in pins. What holds
 the ends together is the last test in this file, which drives a real batch out
 of one and into the other.
 

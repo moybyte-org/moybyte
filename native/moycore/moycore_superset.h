@@ -9,7 +9,7 @@
  *                       snapshot, `left` the press edge (cart_api.mouse)
  *
  * Included by modmoycore.c (the boards and the browser) and by
- * runtime/moyhost_lua.c (the host), and opened beside moycore_layers_open, so
+ * runtime/host/moyhost_lua.c (the host), and opened beside moycore_layers_open, so
  * the two Lua hosts answer these names with one body. The registration loops
  * skip them (runtime/lua_ext.py's NATIVE_NAMES): a trampoline registered over
  * them would shadow the C.

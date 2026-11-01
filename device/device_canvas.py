@@ -2767,7 +2767,7 @@ class SystemCanvas(DeviceCanvas):
     print through them), and the wallpaper's cover-crop composite.
 
     ONE body for the three tiers that subclass it. HostSystemCanvas
-    (runtime/host_canvas.py), WebSystemCanvas (firmware/web_runner) and
+    (runtime/host/host_canvas.py), WebSystemCanvas (firmware/web_runner) and
     P4SystemCanvas (the P4's moy_runtime) each carried a hand-copy of these
     methods, and two of the copies drifted on their own: the P4's print passed
     the window's logical size as the kernel stride (scaled text walked

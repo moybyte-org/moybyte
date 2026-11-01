@@ -70,7 +70,7 @@ _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
 # cannot find and reports it as a toolchain problem.
 _SRC_DIRS = (native_build.LIBMOY, _MOY_GFX)
 
-# This module's share of the host's one library (runtime/host_native.py),
+# This module's share of the host's one library (runtime/host/host_native.py),
 # whose flags make a libmoy pixel the boards' RGB565.
 PART = native_build.Part("gfx", _LIBMOY, _SRC_DIRS)
 
@@ -769,7 +769,7 @@ _TEXT = [None]
 
 
 def _text_fn():
-    """mg_text from the toolkit's library (runtime/glass_binding.py), which
+    """mg_text from the toolkit's library (runtime/host/glass_binding.py), which
     holds the loaded fonts and the print font (moy_text.h); this library's
     own copy of the text path would see neither. On a board the two modules
     are one image and share them."""

@@ -31,7 +31,7 @@ def test_the_options_are_the_headers():
     src = (ROOT / "native" / "moy_ui" / "moy_ui_api.h").read_text()
     body = src[src.index("MOY_UI_TXO_ROWS = 0"):src.index("MOY_UI_TXO_LEN")]
     names = re.findall(r"MOY_UI_TXO_([A-Z0-9_]+)", body)
-    from tools import moy_ui_binding
+    from runtime import moy_ui_binding
     assert len(names) == moy_ui_binding._TXO_LEN == len(ui._TXO)
     words = re.search(r"#define MOY_UI_TXO_DEFAULTS \{([^}]*)\}", src).group(1).split(",")
     want = tuple(ui_draw.SYN_SGR if w.strip() == "MOY_UI_SYN_SGR" else int(w) for w in words)

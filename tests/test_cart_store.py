@@ -828,7 +828,7 @@ def test_the_host_transport_reports_a_missing_file_and_a_cut_body(tmp_path, serv
 
 def _board_net(wifi=None, dial=None):
     """The board's transport (device/wire_links.CartNet) over the kernel's
-    client, the C run by runtime/net_binding.py."""
+    client, the C run by runtime/host/net_binding.py."""
     from runtime import net_binding
     net_binding.install()
     sys.path.insert(0, str(ROOT / "device"))

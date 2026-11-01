@@ -63,7 +63,7 @@ _SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
             "moy_input.h", "moy_ufiles.h")
 _LIB = [None]
 
-# This module's shares of the host's one library (runtime/host_native.py): the
+# This module's shares of the host's one library (runtime/host/host_native.py): the
 # Player's host half, a cart's written files, and -- where the desktop
 # MicroPython's tree has the inflater -- the C image decoder.
 PART = native_build.Part("play", _SOURCES, (_PLAY, _SPINE, _STORE, _APP, _INPUT), shim=_SHIM)
@@ -362,7 +362,7 @@ def files_live():
 
 # -- the Player (native/moy_play/moy_play.h), name for name with modmoy_play.c --
 #
-# In the host's one library (runtime/host_native.py), beside moycore_lua.c, as
+# In the host's one library (runtime/host/host_native.py), beside moycore_lua.c, as
 # on a board: a run's frame is the Lua run's. The handle is an int; a bad one
 # is RuntimeError("moy_play: ..."), as the module raises.
 

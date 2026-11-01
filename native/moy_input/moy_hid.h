@@ -7,7 +7,7 @@
 // arrives as a moy_hid_on_* call, every request it makes goes out through
 // moy_hid_ops_t, and a verb from the frame is posted to that task, so the
 // machine runs on one task and needs no lock but the report latch's. The host
-// drives the same machine over a fake stack (runtime/moy_input.py, the tests).
+// drives the same machine over a fake stack (runtime/host/moy_input.py, the tests).
 //
 // THE PROFILE (HOGP). A Boot Keyboard Input characteristic is preferred: the
 // host writes Protocol Mode = 0 and consumes only the fixed eight-byte boot

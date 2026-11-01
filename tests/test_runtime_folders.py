@@ -120,3 +120,14 @@ def test_the_package_path_spans_every_runtime_subfolder():
         os.path.realpath(base) for base, dirs, _ in os.walk(ROOT / "runtime")
         if "__pycache__" not in base}
     assert got == want
+
+
+def test_no_board_stages_a_module_from_runtime_host():
+    host = {p.name for p in (ROOT / "runtime" / "host").rglob("*.py")}
+    assert host, "runtime/host/ holds the host-only modules"
+    for toml in sorted((ROOT / "firmware").glob("*/board.toml")):
+        staged = board_config.staged_modules(toml.parent, root=ROOT)
+        assert not host & set(staged), (toml.parent.name, host & set(staged))
+        assert not host & set(board_config.denials(toml.parent)), (
+            "%s/board.toml denies a module runtime/host/ already keeps off "
+            "every board" % toml.parent.name)

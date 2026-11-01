@@ -81,7 +81,7 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 # -- the frame seam, once for both Lua tiers ---------------------------------
 #
 # The glue (device/moycore_glue.py, every tier's Lua cart and a board's
-# compiled one) and the host's compiled-cart runtime (runtime/wasm_host.py) do
+# compiled one) and the host's compiled-cart runtime (runtime/host/wasm_host.py) do
 # the same three things around every tick the kernel's Player does not run:
 # fill the snapshot slots libmoy reads, apply the cart's view() declaration,
 # and drain the audio queue through the api closures. They differ only in

@@ -3,7 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 /* The host's WASM shim (docs/history/wasm_tier_plan_2026-09.md, phase 3), built into
- * the host's one library (runtime/host_native.py) wherever WAMR builds.
+ * the host's one library (runtime/host/host_native.py) wherever WAMR builds.
  *
  * A "runtime": "wasm" cart on the host runs through the SAME C the boards run:
  * libmoy's wasm binding (native/moycore/libmoy/moy_wasm.c, the import table as
@@ -11,7 +11,7 @@
  * moycore_run.c), whose frames are the kernel's Player's (moy_play.c's wasm
  * row) as a Lua run's are, and WAMR itself, built for Linux from the fork the
  * boards vendor, at the commit native/moy_wasm/wamr_pin.h names
- * (runtime/wasm_binding.py fetches and builds it). The cart's written files
+ * (runtime/host/wasm_binding.py fetches and builds it). The cart's written files
  * are native/moy_store/moy_files.c's, as on a board. There is no second engine:
  * a host and a device that disagree about what a verb does is the disease the
  * Lua shim was written to end, and this is its twin.

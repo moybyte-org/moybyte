@@ -34,7 +34,8 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import glass_binding
-from tools import gen_ui_tables, moy_ui_binding
+from tools import gen_ui_tables
+from runtime import moy_ui_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unix_mp import require_unix_mp  # noqa: E402

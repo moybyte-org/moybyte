@@ -4,7 +4,7 @@ is held to.
 dg_cart.c renders the frame of every CRC_EVERY-th gametic at that tic and
 writes its CRC (the 320 x 200 indices, then the 768-byte palette) into pmem,
 so the frame at a gametic is the same on every host whatever the host's draw
-cadence. `host_crcs` runs the cart on the host twin (runtime/wasm_binding.py,
+cadence. `host_crcs` runs the cart on the host twin (runtime/host/wasm_binding.py,
 the boards' own import table over WAMR) and returns those CRCs;
 tests/test_doom_cart.py and the on-glass suites compare them.
 

@@ -25,7 +25,7 @@ SCREENS = ((320, 240), (480, 320), (1024, 600), (1280, 800), (37, 91))
 
 
 def _uf():
-    from tools import moy_ufiles_binding
+    from runtime import moy_ufiles_binding
     try:
         moy_ufiles_binding.library()
     except ImportError as exc:

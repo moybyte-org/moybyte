@@ -15,18 +15,18 @@ so a state one sets is the state every other reads. There is no state to copy
 across and no forwarder between libraries.
 
 Two parts are taken only where their prerequisites are: the compiled-cart run
-(runtime/moyhost_wasm.c and native/moy_wasm) where WAMR builds for the host
+(runtime/host/moyhost_wasm.c and native/moy_wasm) where WAMR builds for the host
 (runtime/wasm_binding.wamr), and the user-files layer and the C image decoder
 (native/moy_store's moy_ufiles, moy_img) where the desktop MicroPython's tree
 has the inflater (`make unix-micropython`). Without the latter a Lua run's
-paint image decodes through the Python codec (runtime/moyhost_lua.c), as it
+paint image decodes through the Python codec (runtime/host/moyhost_lua.c), as it
 always could.
 
 What stays a library of its own, each saying why in its module: the audio
-(runtime/audio_binding.py, compiled double-widened for the parity harness;
+(runtime/host/audio_binding.py, compiled double-widened for the parity harness;
 the Player reaches its sessions through hl_kernel's audio slots), and the
 builds that exist to be DIFFERENT from this one -- the tick model at double
-and fixed precision (runtime/moy_play.py), a sanitizer build
+and fixed precision (runtime/host/moy_play.py), a sanitizer build
 (tools/moy_index_spike.py), a style edited under test
 (glass_binding.build(ui_dir=...)) and a test's own harness.
 """
@@ -77,7 +77,7 @@ def parts(verbose=False):
     out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
     cflags, link = [], ["-lm"]
-    uf = _module("tools.moy_ufiles_binding")
+    uf = _module("runtime.moy_ufiles_binding")
     if os.path.isdir(uf.UZLIB):
         out += [uf.part(), _module("runtime.moy_play").IMG_PART]
         cflags.append("-DMOYHOST_IMG_C=1")

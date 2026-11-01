@@ -8,7 +8,7 @@ in a hand-maintained list:
   * `tools/gen_device_carts.py` -- CART_ORDER, the device launcher order
   * `tests/test_device_seed_parity.py` -- TITLE_TO_FOLDER
   * `firmware/web_runner/build.sh`  -- the browser bundle's roster
-  * (`runtime/host_app.py` -- the bare-name alias, which only Calc ever had)
+  * (`runtime/host/host_app.py` -- the bare-name alias, which only Calc ever had)
 
 FOUR of those five failed SILENTLY, and on device only. Forget CART_ORDER and
 the identity cart never seeds, so `is_app` never claims it, so the app is simply

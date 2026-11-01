@@ -5,8 +5,8 @@ libmoy's wasm binding (`native/moycore/libmoy/moy_wasm.c`, vendored) over the
 run's console (`native/moycore/moycore_run.c`), framed by the kernel's Player
 like a Lua run, and WAMR -- the fork the boards vendor, at the commit
 `native/moy_wasm/wamr_pin.h` names, built for Linux. There is no wasmtime tier
-and no second engine: the shim (`runtime/moyhost_wasm.c`) is compiled into
-the host's one library (`runtime/host_native.py`) wherever WAMR builds, and
+and no second engine: the shim (`runtime/host/moyhost_wasm.c`) is compiled into
+the host's one library (`runtime/host/host_native.py`) wherever WAMR builds, and
 this module is its compiled-cart half.
 
 WAMR IS FETCHED, NOT VENDORED, for the host: the boards compile an AOT-only
@@ -186,7 +186,7 @@ def vendored():
 
 def build(verbose=False):
     """The host library a compiled cart runs in: the host's one library
-    (runtime/host_native.py), which carries moyhost_wasm.c beside the Lua run
+    (runtime/host/host_native.py), which carries moyhost_wasm.c beside the Lua run
     and the kernel's Player wherever WAMR builds. Its path, or None with the
     reason in why_unavailable()."""
     if not vendored():

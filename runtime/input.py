@@ -1,4 +1,4 @@
-"""The host's input state: the one input table (runtime/moy_input.py) over the
+"""The host's input state: the one input table (runtime/host/moy_input.py) over the
 host's vocabulary.
 
 Edge-detected buttons plus the pointer, the same held / pressed / released

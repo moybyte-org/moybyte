@@ -19,7 +19,7 @@ paths:
 - **A worker that dies under xdist load is a native heap bug until shown
   otherwise: run it through `tools/asan_pytest.sh <pytest args>`.** It loads the
   host's one library built under AddressSanitizer (`MOYHOST_ASAN`,
-  `runtime/host_native.py`), so a write into a freed or overrun buffer stops at
+  `runtime/host/host_native.py`), so a write into a freed or overrun buffer stops at
   the access with where the memory was freed, serially and every time, instead
   of corrupting the heap for a later test to die on. CI does not run it.
 

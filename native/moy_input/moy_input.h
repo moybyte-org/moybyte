@@ -3,7 +3,7 @@
 //
 // One table body for every tier: the boards' kernel table (moy_input_kernel),
 // the tables the MicroPython binding (modmoy_input.c) and the host's ctypes
-// binding (runtime/moy_input.py) make, and the fuzzer's.
+// binding (runtime/host/moy_input.py) make, and the fuzzer's.
 //
 // THE BUTTONS are libmoy's moy_button order, then `home` and the console's own
 // six: bit i of every mask is MOY_INPUT_NAMES[i]. A table holds the first

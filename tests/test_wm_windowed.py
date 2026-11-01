@@ -207,7 +207,7 @@ def test_the_wasm_head_shares_the_same_two_meanings(tmp_path):
 # the next presentation cannot inherit the black desk by saying nothing.
 _CLEARS = True
 WINDOWED_INSTALLERS = {
-    "runtime/host_app.py": _CLEARS,
+    "runtime/host/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
     # ONE row for both P4 boards: they take one P4 tier body, which hands the
     # WM to the shared spine; the walk reads the canonical file, never the

@@ -152,7 +152,7 @@ void moy_shape_stats(uint32_t out[MOY_SHAPE_STATS]);
 void moy_shape_reset(int caches);
 
 // The canvas verbs' flat form, over a buffer with the canvas's camera and
-// clip (modmoy_gfx.c and runtime/gfx_binding.py call these, nothing between).
+// clip (modmoy_gfx.c and runtime/host/gfx_binding.py call these, nothing between).
 // opts: the corners (MOY_SHAPE_TL..BL), bit 4 stepped, bits 5-6 the mask,
 // bits 8-15 the ring's width. A NULL fill fills nothing.
 #define MOY_SHAPE_OPT_STEPPED 16

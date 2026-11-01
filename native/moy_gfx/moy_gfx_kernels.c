@@ -17,7 +17,7 @@
  * stands because "no float rewriting in a conformance-checked raster" is the
  * rule, not because of one call site.
  *
- * THE HOST INHERITS THE PRAGMA, deliberately. runtime/native_build.py builds
+ * THE HOST INHERITS THE PRAGMA, deliberately. runtime/host/native_build.py builds
  * the host bindings at -O2 and argues for it; this file overrides that for
  * itself, because the alternative is a knob whose two settings are two
  * compilations of one file. Nothing is risked by it: these loops are integer,

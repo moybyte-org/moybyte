@@ -1195,7 +1195,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_be
 // own memory. SPEC.md 4.1 bans load/loadstring/dofile for that reason; a
 // cart's source arriving here is the one door those bans do not cover. A chunk
 // that opens with ESC, as every binary one does, fails with Lua's own load
-// error (moycore_lua_exec). runtime/moyhost_lua.c's hl_exec is the host's
+// error (moycore_lua_exec). runtime/host/moyhost_lua.c's hl_exec is the host's
 // twin of this call.
 static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 {

@@ -515,7 +515,7 @@ def test_the_pre_kernel_guards_are_one_body():
         assert "static inline int %s(" % fn in header
     kernels = (NATIVE / "moy_gfx" / "moy_gfx_kernels.c").read_text(encoding="utf-8")
     usermod = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    binding = (Path("runtime") / "gfx_binding.py").read_text(encoding="utf-8")
+    binding = (Path("runtime") / "host" / "gfx_binding.py").read_text(encoding="utf-8")
     # tri/circ/circb/line, once.
     assert kernels.count("mg_solid_prologue(") == 4
     assert "mg_solid_prologue(" not in usermod, \
@@ -552,7 +552,7 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
                 Path("firmware/guition_jc8012p4a1c/modules/moy_runtime.py"),
                 Path("device/p4_canvas.py"),
                 Path("firmware/web_runner/web_canvas.py"),
-                Path("runtime/host_canvas.py")):
+                Path("runtime/host/host_canvas.py")):
         assert "def new_layer(" not in mod.read_text(encoding="utf-8"), \
             mod.name + ": grew a new_layer copy back; use the _make_layer hook"
 
@@ -572,10 +572,10 @@ def test_editor_cores_are_shared_single_source():
     """One canonical source (runtime/editors_*.py); neither backend redefines the
     shared cores."""
     runtime = _device_backend_src()
-    # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds
+    # The HOST canvas is the boards' own class now (runtime/host/host_canvas.py builds
     # `device_canvas.DeviceCanvas` on CPython), so "the host does not redefine the
     # cores" is checked where a redefinition could still be written.
-    host_canvas = Path("runtime/host_canvas.py").read_text(encoding="utf-8")
+    host_canvas = Path("runtime/host/host_canvas.py").read_text(encoding="utf-8")
     for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
         assert cls not in host_canvas, "host canvas redefines " + cls

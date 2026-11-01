@@ -1,10 +1,10 @@
 """`moycore` on CPython: the module surface the boards' glue drives
 (device/moycore_glue.py over native/moycore/modmoycore.c), by ctypes over the
-host's Lua run (runtime/lua_binding.py), so the host runs a Lua cart through
+host's Lua run (runtime/host/lua_binding.py), so the host runs a Lua cart through
 the same glue, the same C and the kernel's Player as a board. A VM's
 `import moycore` is the native module, which always wins over this file.
 
-The Lua half only: a compiled cart's run on the host is runtime/wasm_host.py's.
+The Lua half only: a compiled cart's run on the host is runtime/host/wasm_host.py's.
 Raises ImportError where the host cannot build the binding, as a build without
 the native module has none.
 """

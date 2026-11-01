@@ -1,7 +1,7 @@
 """The BLE HID keyboard central (native/moy_input/moy_hid.c), EXECUTED: the
 report decode and keymap, the level state with its one-frame make edges, and
 the scan / connect / pair / discover / subscribe machine, over a fake stack
-through the host's binding (runtime/moy_input.py's HidMachine). A board runs
+through the host's binding (runtime/host/moy_input.py's HidMachine). A board runs
 the same machine on NimBLE's host task (moy_ble_task.c); its wiring is pinned
 at the end, and the radio itself on glass."""
 

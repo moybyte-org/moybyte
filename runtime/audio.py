@@ -16,7 +16,7 @@ The PLAYING is the kernel's: native/moy_audio (sessions, the mix, the speaker)
 over vendored libmoy, reached through runtime/audio_session.py on every tier.
 
 THERE IS NO PYTHON SYNTH (#97, moycore stage 0). The host binds the vendored
-C itself (runtime/audio_binding.py, compiled DOUBLE-WIDENED, the parity
+C itself (runtime/host/audio_binding.py, compiled DOUBLE-WIDENED, the parity
 harness's recipe); without a C compiler the host has no audio module and plays
 nothing (owner decision 2026-08-11: no fallback, KISS). tests/test_audio_parity.py
 pins the binding against the reference render.

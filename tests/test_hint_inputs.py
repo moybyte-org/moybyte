@@ -291,7 +291,7 @@ def _declared(path, name):
 @pytest.mark.parametrize("path,name", [
     ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py", "INPUT_KINDS"),
     ("device/wire_input.py", "TOUCH_BLE_INPUTS"),
-    ("runtime/host_app.py", "HOST_INPUTS"),
+    ("runtime/host/host_app.py", "HOST_INPUTS"),
     ("firmware/web_runner/web_boot.py", "WEB_INPUTS"),
     ("firmware/web_runner/web_boot.py", "WEB_TOUCH_INPUTS"),
 ])

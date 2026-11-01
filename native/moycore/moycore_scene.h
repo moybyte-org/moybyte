@@ -20,7 +20,7 @@
  * frame that moves, removes or draws actors makes no crossing.
  *
  * Included by moycore_lua.c (the boards and the browser) and by
- * runtime/moyhost_lua.c (the host); each owns one moycore_scenes_t and its
+ * runtime/host/moyhost_lua.c (the host); each owns one moycore_scenes_t and its
  * allocator.
  */
 #ifndef MOYCORE_SCENE_H

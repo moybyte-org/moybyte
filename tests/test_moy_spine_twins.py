@@ -31,7 +31,8 @@ import pytest
 
 import vm_suite
 import spine_twin as moy_spine    # the oracle (tests/spine_twin.py)
-from tools import moy_index_spike, moy_spine_binding
+from tools import moy_index_spike
+from runtime import moy_spine_binding
 from unix_mp import find_unix_mp, require_unix_mp
 
 HERE = os.path.dirname(os.path.abspath(__file__))

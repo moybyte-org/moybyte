@@ -190,7 +190,7 @@ _SIGS = (
 _LIB = [None]
 
 
-# This module's share of the host's one library (runtime/host_native.py).
+# This module's share of the host's one library (runtime/host/host_native.py).
 PART = native_build.Part("input", ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
                                    "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
                                    "moy_hid.c"), (_INPUT, _SPINE), shim=_SHIM)

@@ -3,7 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 /* The host's Lua run and the kernel's Player, by ctypes
- * (runtime/lua_binding.py; docs/history/kernel_cartpath_2026-10.md §1).
+ * (runtime/host/lua_binding.py; docs/history/kernel_cartpath_2026-10.md §1).
  *
  * CPython gets the program the boards run, not a twin of it: the cart's VM is
  * native/moycore/moycore_lua.c over moycore_run.c's console -- the allocator,
@@ -14,12 +14,12 @@
  * only how the host talks to it: plain C signatures ctypes can call, buffers
  * the caller owns, and these seams:
  *
- *   - the audio sessions are runtime/audio_binding.py's library, a library of
+ *   - the audio sessions are runtime/host/audio_binding.py's library, a library of
  *     its own (compiled double-widened for the parity harness), so the
  *     Player's moy_aud_* calls forward to the function pointers hl_kernel
  *     hands over. Unset, a session is STALE (silence). Every other module the
  *     Player calls -- the loop's upcall books, the input tables, the glass --
- *     is in this same library (runtime/host_native.py), as on a board;
+ *     is in this same library (runtime/host/host_native.py), as on a board;
  *   - a paint image decodes through moy_img.c where the build has the
  *     desktop MicroPython's inflater (MOYHOST_IMG_C), else through the Python
  *     codec (runtime/moyimg.py, the reference moy_img.c is pinned to), handed

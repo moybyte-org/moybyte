@@ -32,7 +32,7 @@ import sys
 from . import native_build
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
+_ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 _AUDIO = os.path.join(_ROOT, "native", "moy_audio")
 _LIBMOY = os.path.join(_AUDIO, "libmoy")
 _SPINE = os.path.join(_ROOT, "native", "moy_spine")

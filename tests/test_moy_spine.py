@@ -3,7 +3,7 @@
 (tests/spine_twin.py), each test unchanged.
 
 `BINDINGS` names each implementation by its module: the Python oracle, and the
-C spine over the host's C ABI through ctypes (tools/moy_spine_binding.py).
+C spine over the host's C ABI through ctypes (runtime/host/moy_spine_binding.py).
 tests/test_moy_spine_twins.py runs this same file on the boards' VM over the
 native module. The semantic trace in tests/test_semantic_traces.py replays one
 session of this interface on every VM and pins the handle VALUES; this file
@@ -32,7 +32,7 @@ import json
 import pytest
 
 try:
-    from tools import moy_spine_binding
+    from runtime import moy_spine_binding
 except ImportError:         # the VM's run of this file has no tools/
     moy_spine_binding = None
 if moy_spine_binding is None:

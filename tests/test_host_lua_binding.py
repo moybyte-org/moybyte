@@ -5,7 +5,7 @@ A second embedding would be a different program from the one the boards run:
 single-precision, so doubles would be soft-float), integers that do not wrap at
 2^31 -- and golden-frame parity for float-heavy carts would be host-only.
 
-`runtime/lua_binding.py` closes that by giving CPython libmoy's own binding
+`runtime/host/lua_binding.py` closes that by giving CPython libmoy's own binding
 over the same vendored Lua 5.4, compiled the same way. This pins that it works
 and that the seams the boards depend on behave identically: a cart loads and
 `_init` runs, frames tick, the canvas changes with cart state, an input

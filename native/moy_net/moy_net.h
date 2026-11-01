@@ -1,7 +1,7 @@
 // moy_net: the links (docs/history/kernel_survival_2026-10.md section 6).
 //
 // One body for every tier: the boards, the browser, the unix port and
-// CPython (by ctypes, runtime/net_binding.py). The wire's pure half -- the
+// CPython (by ctypes, runtime/host/net_binding.py). The wire's pure half -- the
 // HTTP request parser and response head (moy_http.c), the sync batch's
 // envelope and root rule (moy_sync.c), the WiFi credential rules -- touches
 // no socket, radio or file, and fuzz_net.c runs it under the sanitizers; it

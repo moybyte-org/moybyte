@@ -5,7 +5,7 @@ The data half of the kernel's spine, in C (#224 sprint 2; the design record is
 `tests/spine_twin.py` is its Python oracle, call for call, and
 `tests/test_moy_spine.py` pins both. It is built the three ways
 `native/moy_index/` is (see its README), with no hook: every image, the
-desktop MicroPython and the CPython host (`tools/moy_spine_binding.py`, which
+desktop MicroPython and the CPython host (`runtime/host/moy_spine_binding.py`, which
 the `runtime` package registers as `moy_spine`) run it;
 `tools/moy_index_spike.py --component spine` runs its host suite and
 sanitizers.
@@ -20,7 +20,7 @@ sanitizers.
 | `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a Python module of that name on the path wins (how a suite runs the oracle on a VM). `Settings.set` encodes a value, marks the store dirty and flushes it through the rows' saver, the save hook behind a thunk; `kernel_settings(save, fresh)` is a view of the kernel's rows. It also exports the allocator and a Settings' C rows to `native/moy_app`'s binding |
 | `moy_str.h`, `moy_str.c` | the strings C draws, as data: `moy_str(id)` reads a language pack's entry or English, and a pack entry whose conversions differ from English's is refused (`native/moy_ui/README.md`). Here because every image links the spine and the kernel's floor draws these words with no toolkit; a pack's text lives in this file's own allocation (PSRAM on a board) |
 | `strings/en.json`, `moy_str_table.h`, `moy_str_table.c` | English for every string C draws, by dotted id; the pair GENERATED from it by `tools/gen_ui_tables.py` and committed (`tests/test_ui_tables.py` fails a stale pair) |
-| `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`tools/moy_spine_binding.py`) |
+| `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`runtime/host/moy_spine_binding.py`) |
 | `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |
 
 Every byte a component holds comes from the `moy_htab_mem_t` it is made with:

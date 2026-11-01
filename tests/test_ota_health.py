@@ -48,7 +48,7 @@ def _load_moy_ota():
 
 def _stage():
     """A verified image in the host's slot (native/moy_net/moy_ota.c over
-    runtime/net_binding.py), what a download or a copied image leaves for
+    runtime/host/net_binding.py), what a download or a copied image leaves for
     finish() to activate."""
     from runtime import net_binding as nb
 

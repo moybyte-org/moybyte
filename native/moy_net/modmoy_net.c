@@ -1,5 +1,5 @@
 // moy_net for MicroPython: the wire's pure half (moy_net.h) as the module the
-// boards and the browser import, name for name with runtime/net_binding.py.
+// boards and the browser import, name for name with runtime/host/net_binding.py.
 
 #include <stdio.h>
 #include <string.h>

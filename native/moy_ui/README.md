@@ -61,11 +61,11 @@ Glyph coverage is the font's (owner, 2026-10-11): the text call takes UTF-8
 and a font, so a font that covers Cyrillic is data.
 
 On the host the C is compiled once, into the host's one library
-(`runtime/host_native.py`) with the glass whose canvas rows its primitives
+(`runtime/host/host_native.py`) with the glass whose canvas rows its primitives
 draw into, the Lua run and the compiled-cart run, as on an image: the theme,
 depth, fonts and cart-text boundary the shell sets are the ones a Lua or
 compiled page's `ui` reads (`tests/test_host_one_library.py`).
-`tools/moy_ui_binding.py` is the module over ctypes.
+`runtime/host/moy_ui_binding.py` is the module over ctypes.
 A console takes the module in its `board.toml`; the Zero, which runs no apps,
 denies it.
 

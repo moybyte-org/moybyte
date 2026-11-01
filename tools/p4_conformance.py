@@ -438,7 +438,7 @@ def via_server(sock_path, cart, out):
 # words no palette index names, so a frame capture cannot carry them. Each
 # case instead draws through the board's own moy_gfx into a buffer of its own
 # over a fixed pattern and answers its CRC, beside the host binding's for the
-# same call (runtime/gfx_binding.py). One case per primitive; both sides blend
+# same call (runtime/host/gfx_binding.py). One case per primitive; both sides blend
 # in the high-byte-first order, the board's own put back after.
 SHAPE_W, SHAPE_H = 48, 32
 SHAPE_CASES = (

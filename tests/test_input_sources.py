@@ -11,7 +11,7 @@ poll erased every BLE keypress within a frame: held buttons died immediately,
 that board.
 
 Every behavioural test below runs against BOTH tiers' InputState. They are
-one table now (runtime/moy_input.py's InputTable) over two vocabularies -- the
+one table now (runtime/host/moy_input.py's InputTable) over two vocabularies -- the
 boards' sixteen names and the host's first eight -- and a tier that stopped
 being that table would be exactly the shape of failure `button_masks`'s
 docstring records: no crash, no failing test, no frame hash.
@@ -232,8 +232,8 @@ def test_no_source_mutator_writes_the_shared_union(tier):
     """The ratchet: a mirror into the shared union is two lines, and exactly
     the sort of line that comes back the next time someone wants a mid-frame
     read to be live."""
-    # One table for both tiers since sprint 3's carve: runtime/moy_input.py.
-    path = ROOT / "runtime" / "moy_input.py"
+    # One table for both tiers since sprint 3's carve: runtime/host/moy_input.py.
+    path = ROOT / "runtime" / "host" / "moy_input.py"
     src = path.read_text()
     body = src[src.index("class InputSource"):src.index("class InputTable")]
     assert "state._held" not in body, "the union mirror is back in InputSource"
