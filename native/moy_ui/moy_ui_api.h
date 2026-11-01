@@ -192,6 +192,13 @@ typedef struct {
     int8_t has_keep, whole;
     int32_t keep;
     int16_t over_x, over_y, over_w, over_h;
+    // `shift` (0 or 1): the app's ground is the same along the axis, so a
+    // frame whose buffer lacks the table at its scroll may move the view
+    // out of the buffer the last frame painted (moy_ui_api_table_shift);
+    // `fade` px of the view's end along the axis the app blends after its
+    // parts (a move carries blended pixels: they draw again).
+    int8_t shift;
+    int16_t fade;
     // A table of parts whose rows hold parts across (has_across): a row's
     // cells are its parts' keys, the first `across_first` px into the view
     // across the rows' axis, each `across_pitch` px on from the last; `at`
@@ -214,6 +221,8 @@ typedef struct {
 #define MOY_UI_O_WHOLE 65536        // and `whole`
 #define MOY_UI_O_ACROSS 131072      // and `across`, its two words (first, pitch) after the over's
 #define MOY_UI_O_AT 262144          // and `at`, its word after the across's
+#define MOY_UI_O_SHIFT 524288       // and `shift`
+#define MOY_UI_O_FADE 1048576       // and `fade`, its word after the at's
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -537,10 +546,13 @@ typedef struct {
     // buffer holds the table as this frame draws it; kf_copy the floor's
     // rects the buffer the last frame painted holds as this frame draws
     // them (a bit each), kf_took those the app copied out of it
-    // (moy_ui_api_table_copy), kf_ci the next one that answers.
-    uint8_t kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np, kf_copy, kf_took, kf_ci;
-    int32_t kt_f;
-    moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
+    // (moy_ui_api_table_copy), kf_ci the next one that answers; kf_sh the
+    // move of the view kf_sv by kf_shift along its axis out of the buffer
+    // the last frame painted (1 planned, 2 answered to the app:
+    // moy_ui_api_table_shift).
+    uint8_t kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np, kf_copy, kf_took, kf_ci, kf_sh;
+    int32_t kt_f, kf_shift;
+    moy_ui_box_t kf[MOY_UI_KEPT_FLOOR], kf_sv;
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
     // 0: none), tp_np the parts a row of the table drawn last holds.
     uint32_t fc_id;
@@ -852,6 +864,17 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]);
 // after the last. `back` gives the rect answered last back to the floor
 // (a canvas that could not copy it), answering 0.
 int32_t moy_ui_api_table_copy(moy_ui_ctx_t *c, int32_t out[4], int back);
+// The move of the kept table's view this frame makes out of the buffer the
+// last frame painted (o->shift; the buffer this frame paints lacks the
+// table at its scroll, the frame before this one painted it kept under
+// this key and geometry, at its own): the view into out[0..3] and the
+// move along its axis into out[4] (px, 0 where the scroll is the same:
+// the view copied), 1, for the app to make it (the canvas's shift_last,
+// then its fence) before the floor draws -- the band the move uncovers,
+// the parts that changed since that paint, what was drawn over it and
+// the fade; else 0. With `back` (the canvas could not move it) the floor
+// is the view whole, 0.
+int32_t moy_ui_api_table_shift(moy_ui_ctx_t *c, int32_t out[5], int back);
 // Whether the buffer this frame paints holds part `id` of the app's page
 // as a frame drew it under `key`: the buffers RETAINED_FRAMES back, the
 // frames between this context's paints, that paint the app's alone and

@@ -30,21 +30,26 @@ class Rig:
     """A kept row of parts on an app host over a canvas presenting `bufs`
     buffers in turn, one painted frame a call."""
 
-    def __init__(self, th, bufs, axis="x"):
+    def __init__(self, th, bufs, axis="x", shift=False, fade=0):
         self.th = th
         self.cv = make_system_canvas(320, 240)
         self.cv.RETAINED_FRAMES = bufs
         self.host = ui_draw.AppHost()
         self.n = 100
         self.axis = axis
+        self.shift = shift
+        self.fade = fade
+        self.moved = None             # the last frame's move: (view, px along the axis)
         self.r = array("i", [0] * 4)
 
     def frame(self, rows=_ROWS, cur=0, key=7, offset=0, over=None, whole=False, gen=0,
-              gap=False, named=(), copied=None, back=False):
+              gap=False, named=(), copied=None, back=False, cannot_move=False):
         """One painted frame: (the floor's rects, its end, the parts
         answered, what `held` answered for each of `named`). Given a list
         `copied`, the rects `table_copy` answers go in it first (`back`:
-        each given back, as a canvas that cannot copy does)."""
+        each given back, as a canvas that cannot copy does). The move
+        `table_shift` answers goes in `moved` (`cannot_move`: given back,
+        as a canvas that cannot move the view does)."""
         self.n += 2 if gap else 1
         ui_draw.paint_frame(self.n, True)
         self.host.whole()
@@ -55,7 +60,13 @@ class Rig:
         ui.table("", ("",), rows, cur, {"id": "t", "part": part, "axis": self.axis,
                                          "offset": offset, "keep": key, "spill": 4,
                                          "gen": gen, "current": False, "mark": False,
-                                         "over": over, "whole": whole})
+                                         "over": over, "whole": whole, "shift": self.shift,
+                                         "fade": self.fade})
+        d = ui.table_shift(self.r)
+        self.moved = None if d is None else (tuple(self.r), d)
+        if d is not None and cannot_move:
+            assert ui.table_shift(self.r, True) is None
+        assert ui.table_shift(self.r) is None     # (answered once a frame)
         if copied is not None:
             while ui.table_copy(self.r) > 0:
                 copied.append(tuple(self.r))
@@ -133,6 +144,89 @@ def test_scroll_key_gap_and_whole_draw_the_view_whole(th):
     assert rig.frame(key=-1)[0] == [_VIEW]      # keeps nothing...
     assert rig.frame()[0] == []                 # (the other buffer holds the table)
     assert rig.frame()[0] == [_VIEW]            # ...so the buffer it painted is unknown
+
+
+def _along(rect, axis):
+    """Rect `rect`'s span along `axis`: (start, end)."""
+    return (rect[0], rect[0] + rect[2]) if axis == "x" else (rect[1], rect[1] + rect[3])
+
+
+@pytest.mark.parametrize("bufs", [1, 2, 3])
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_a_scroll_moves_the_view_out_of_the_last_frames_buffer(th, bufs, axis):
+    """`ui.table_shift` (`o.shift`): a buffer that lacks the table at this
+    scroll, where the last frame painted it, moves the view out of that
+    buffer by the scrolls' difference and draws the band the move
+    uncovers -- never the view whole; on one buffer the move is in place.
+    The next buffer, lacking the scroll too, copies the view (a move of 0)
+    and draws nothing of it; once every buffer holds it, nothing moves."""
+    rig = Rig(th, bufs, axis=axis, shift=True)
+    _settle(rig, bufs + 1)
+    assert rig.moved is None
+    v0, v1 = _along(_VIEW, axis)
+    floor, end, parts, _h = rig.frame(offset=5)
+    assert rig.moved == (_VIEW, -5)
+    assert len(floor) == 1 and floor != [_VIEW]
+    a, b = _along(floor[0], axis)
+    assert b == v1 and v1 - 5 - 54 <= a <= v1 - 5     # (the strip, with the row it cuts)
+    assert parts and len(parts) < 6
+    for _ in range(bufs - 1):                           # the buffers behind: a copy each
+        floor, end, parts, _h = rig.frame(offset=5)
+        assert rig.moved == (_VIEW, 0) and floor == [] and parts == []
+    floor, end, parts, _h = rig.frame(offset=5)
+    assert rig.moved is None and floor == [] and end == 0
+    floor, end, parts, _h = rig.frame(offset=2)        # back: the strip at the start
+    assert rig.moved == (_VIEW, 3)
+    a, b = _along(floor[0], axis)
+    assert a == v0 and v0 + 3 <= b <= v0 + 3 + 54
+
+
+def test_a_move_the_canvas_cannot_make_draws_the_view_whole(th):
+    rig = Rig(th, 2, shift=True)
+    _settle(rig, 3)
+    floor, end, parts, _h = rig.frame(offset=5, cannot_move=True)
+    assert rig.moved == (_VIEW, -5) and floor == [_VIEW] and parts == [0, 1, 2, 3, 4, 5]
+    floor, end, parts, _h = rig.frame(offset=5)        # the other buffer: moved out of it
+    assert rig.moved == (_VIEW, 0) and floor == []
+
+
+def test_a_table_that_does_not_shift_draws_a_scroll_whole(th):
+    rig = Rig(th, 2)
+    _settle(rig, 3)
+    assert rig.frame(offset=5)[0] == [_VIEW] and rig.moved is None
+
+
+def test_a_moved_view_draws_what_changed_since_the_last_frame(th):
+    """The parts whose cells or focus changed since the last frame's paint,
+    and what was drawn over that paint (moved with it), draw beside the
+    band the move uncovers."""
+    rig = Rig(th, 2, shift=True)
+    _settle(rig, 3, over=(100, 30, 8, 13))
+    rows = [r[:] for r in _ROWS]
+    rows[1] = ["B"]
+    floor, end, parts, _h = rig.frame(rows=rows, cur=2, offset=5)
+    assert rig.moved == (_VIEW, -5)
+    xs = [_along(f, "x") for f in floor]
+    # part 1 (changed) and part 2 (the focus, with part 0 it left), moved by -5
+    assert any(a <= 55 and b >= 150 for a, b in xs)
+    # the stamp drawn over the last paint, at 95 now
+    assert any(a <= 95 and b >= 103 for a, b in xs)
+    assert set(parts) >= {0, 1, 2}
+    assert any(a <= 10 + 300 - 5 and b == 310 for a, b in xs)
+
+
+def test_a_moved_view_draws_its_fade_again(th):
+    rig = Rig(th, 2, axis="y", shift=True, fade=10)
+    _settle(rig, 3)
+    floor, end, parts, _h = rig.frame(offset=3)
+    assert rig.moved == (_VIEW, -3)
+    y0, y1 = _along(_VIEW, "y")
+    assert any(_along(f, "y")[0] <= y1 - 13 and _along(f, "y")[1] == y1 for f in floor)
+    rig.frame(offset=3)
+    rig.frame(offset=3)
+    floor, end, parts, _h = rig.frame(offset=0)        # back up: the stale fade moved up
+    assert rig.moved == (_VIEW, 3)
+    assert any(_along(f, "y")[0] <= y1 - 13 and _along(f, "y")[1] == y1 for f in floor)
 
 
 @pytest.mark.parametrize("bufs", [1, 2, 3])

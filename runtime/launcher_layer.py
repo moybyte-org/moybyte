@@ -404,7 +404,13 @@ class Launcher:
         self.floor = []               # the rects the band's frame draws (`band_floor`)
         self.copied = []              # ...and those it copied out of the last frame's buffer
         self._bo = {"id": "band", "part": [0, 0], "axis": "x", "snap": False, "offset": 0,
-                    "spill": 0, "gen": 0, "current": False, "mark": False}
+                    "spill": 0, "gen": 0, "current": False, "mark": False, "shift": False,
+                    "fade": 0}
+        self.flat = False             # the band's ground is one colour (a band frame may shift)
+        self.shifted = []             # the view a band frame moved out of the last frame's buffer
+        self._scv = None              # the canvas `_shift` and `_fence` are bound to
+        self._shift = None
+        self._fence = None
         self._shows = bytearray()     # the cards the engine says show (`Carousel`)
         if layout is None:
             # a bare Launcher(items) (unit construction); lazy, so there is
@@ -967,8 +973,34 @@ class Launcher:
         o["keep"] = key[1]
         o["whole"] = whole or not held
         o["over"] = over
+        hz = self.horizontal
+        # (a band frame over one colour may move the band out of the last
+        # frame's buffer; the handheld icons' fade blends the band's end)
+        o["shift"] = self.flat and not whole
+        o["fade"] = (0 if hz or c.desk or c.hints[3] <= 0 or self.wall_ink is not None
+                     else _FADE * self.layout.fs)
         rows = self._band_keys((n + per - 1) // per, per)
         _ui.table("", self._kcols, rows, sel // per, o)
+        sh = self.shifted
+        del sh[:]
+        r = _FLOOR
+        d = _ui.table_shift(r)
+        if d is not None:
+            # the view moved out of the last frame's buffer by the scroll's
+            # difference (`shift_last`, fenced before the floor draws over
+            # it); a canvas that cannot draws the view whole
+            if cv is not self._scv:
+                self._scv = cv
+                self._shift = getattr(cv, "shift_last", None)
+                self._fence = getattr(cv, "shift_fence", None)
+            sl = self._shift
+            if sl is None or not (sl(r[0], r[1], r[2], r[3], d, 0) if hz
+                                  else sl(r[0], r[1], r[2], r[3], 0, d)):
+                _ui.table_shift(r, True)
+            else:
+                sh.append((r[0], r[1], r[2], r[3]))
+                if self._fence is not None:
+                    self._fence()
         faces = self.face_key is not None and self._faces_for(
             cv, c.side, c.r, (c.cols + 2) * c.rows if self.horizontal else (c.rows + 2) * c.cols)
         if beside is not None:
@@ -981,7 +1013,6 @@ class Launcher:
         on = None
         i = _ui.table_part(r)
         side = c.side
-        hz = self.horizontal
         while i >= 0:
             # the part is a column of the shelf (a row of the icons): its
             # cards lie along it, a pitch apart, from where the engine put
@@ -2938,6 +2969,9 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
     for r in grid.copied:
         ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
         a += r[2] * r[3]
+    for r in grid.shifted:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
     whole = 2 * a > bw * bh             # (more than a step's cells: a scroll's, a jump's)
     if not moving:
         # (a moving frame notes no cover landing: the next frame scrolls
@@ -3443,6 +3477,7 @@ class LauncherHomeLayer:
             fill = self._backdrop_fill
         if self._search_line() is not None:
             return False
+        self.grid.flat = bd is not None and bd[0] == "bg"
         steps = (bd is not None and not self._lib_unsupported
                  and not (self._carousel() and self.grid.desk()))
         return _band_frame(self, cv, dt, self.grid, self.id, fill, self.strip,

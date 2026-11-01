@@ -205,17 +205,21 @@ def _over(o):
     whole = o.get("whole")
     across = o.get("across")
     at = o.get("at")
+    shift = o.get("shift")
+    fade = o.get("fade")
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
             or axis or snap or offset is not None or spill is not None or keep is not None
-            or ov is not None or whole or across is not None or at is not None):
+            or ov is not None or whole or across is not None or at is not None or shift
+            or fade):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
                  | (4096 if offset is not None else 0) | (8192 if spill is not None else 0)
                  | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
                  | (65536 if whole else 0) | (131072 if across is not None else 0)
-                 | (262144 if at is not None else 0))
+                 | (262144 if at is not None else 0) | (524288 if shift else 0)
+                 | (1048576 if fade else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -237,6 +241,8 @@ def _over(o):
         tail += _pack("<2i", int(across[0]), int(across[1]))
     if at is not None:
         tail += _pack("<i", int(at))
+    if fade:
+        tail += _pack("<i", int(fade))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -678,6 +684,32 @@ def table_copy(r, back=False):
         r[2] = a[2]
         r[3] = a[3]
     return v
+
+
+_TS = array("i", [0] * 5)               # table_shift's answer
+
+
+def table_shift(r, back=False):
+    """Before `table_copy` and `table_floor`: the move of the view of the
+    table drawn last (`o.shift`: the app's ground is the same along the
+    axis) out of the buffer the last frame painted, where the buffer this
+    frame paints lacks the table at its scroll and that frame painted it
+    kept under this key and geometry: the view written into `r` (four
+    words) and the move along its axis answered (px; 0 where the scroll
+    is the same: the view copied), for the app to make with the canvas's
+    `shift_last` and fence before the floor draws -- the band the move
+    uncovers, the parts that changed since that paint, what was drawn over
+    it, and `o.fade` px of the view's end. None where there is none.
+    `back` says the canvas could not move it: the floor is the view whole,
+    None."""
+    a = _TS
+    if not _C.api_table_shift(_T[0], a, back):
+        return None
+    r[0] = a[0]
+    r[1] = a[1]
+    r[2] = a[2]
+    r[3] = a[3]
+    return a[4]
 
 
 def held(id, key):

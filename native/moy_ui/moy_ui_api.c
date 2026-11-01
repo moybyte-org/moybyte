@@ -103,6 +103,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->has_across = 0;
     o->across_first = o->across_pitch = o->at = 0;
     o->over_x = o->over_y = o->over_w = o->over_h = 0;
+    o->shift = 0;
+    o->fade = 0;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -205,6 +207,12 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                 }
                 if ((fl & MOY_UI_O_AT) && n - at >= 4u) {
                     o->at = (int16_t)word(w + at, 0);
+                    at += 4u;
+                }
+                o->shift = (int8_t)((fl & MOY_UI_O_SHIFT) != 0);
+                if ((fl & MOY_UI_O_FADE) && n - at >= 4u) {
+                    int32_t fh = word(w + at, 0);
+                    o->fade = (int16_t)(fh < 0 ? 0 : fh > 4096 ? 4096 : fh);
                     at += 4u;
                 }
             }
@@ -4708,12 +4716,46 @@ static void kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, 
                        || was->n != count || was->k < 0 || was->np != np;
     // the parts across a row: from `across0` on the cross axis, a pitch apart
     int c0 = (xa ? view.y : view.x) + o->across_first, pitch = o->across_pitch;
-    int moved = !whole && (cur != was->cur || at != was->at || mark != was->mark);
+    // The buffer lacks the table (at this scroll): where the frame before
+    // this one painted it, the app's alone and kept under this key and
+    // geometry, and the app's ground is the same along the axis
+    // (o->shift), the view is moved out of that buffer by the scrolls'
+    // difference (moy_ui_api_table_shift) and the floor is what the move
+    // leaves to draw: the band it uncovers, the parts that changed since
+    // that paint or did not show in it, what was drawn over it (moved with
+    // it) and the fade at the view's end, whose blended pixels moved.
+    const moy_ui_kept_t *from = NULL;
+    int d = 0;
+    c->kf_sh = 0;
+    if (whole && o->whole != 1 && o->shift && now->kept && nk >= 0 && r->n >= 2 && c->kt_k >= 1) {
+        from = &r->kt[kept_slot(r, 1)];
+        d = from->off - offset;
+        int v0 = xa ? vr.x0 : vr.y0, v1 = xa ? vr.x1 : vr.y1;
+        if (from->f != c->kt_f - 1 || !from->kept || !from->has_tbl || from->id != id
+            || from->key != o->keep || from->geo != geo || !same_box(from->view, view)
+            || from->rh != rh || from->n != count || from->np != np || from->k < 0
+            || (d < 0 ? -d : d) >= v1 - v0) {
+            from = NULL;
+        }
+    }
+    const moy_ui_kept_t *ref = from != NULL ? from : was;
+    int moved = (from != NULL || !whole)
+                && (cur != ref->cur || at != ref->at || mark != ref->mark);
+    if (from != NULL) {
+        whole = 0;
+        int v0 = xa ? vr.x0 : vr.y0, v1 = xa ? vr.x1 : vr.y1;
+        int x0 = xa ? vr.y0 : vr.x0, x1 = xa ? vr.y1 : vr.x1;
+        if (d > 0) {
+            f[n++] = xa ? (rc_t){v0, x0, v0 + d, x1} : (rc_t){x0, v0, x1, v0 + d};
+        } else if (d < 0) {
+            f[n++] = xa ? (rc_t){v1 + d, x0, v1, x1} : (rc_t){x0, v1 + d, x1, v1};
+        }
+    }
     for (int i = vis0; !whole && i < vis0 + nk; i++) {
-        int r = i - was->r0;
+        int r = i - ref->r0;
         for (int j = 0; j < np; j++) {
-            int mk = moved && ((i == cur && j == at) || (i == was->cur && j == was->at));
-            if (!mk && r >= 0 && r < was->k && was->h[r * np + j] == hv[(i - vis0) * np + j]) {
+            int mk = moved && ((i == cur && j == at) || (i == ref->cur && j == ref->at));
+            if (!mk && r >= 0 && r < ref->k && ref->h[r * np + j] == hv[(i - vis0) * np + j]) {
                 continue;
             }
             if (n == 16) {
@@ -4730,14 +4772,31 @@ static void kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, 
             n += rc_cut(&f[n], vr);
         }
     }
-    if (!whole && was->over.w > 0 && n < 16) {
-        // what was drawn over the paint the buffer holds: the floor takes it
-        f[n] = rc_of(was->over);
+    if (!whole && ref->over.w > 0 && n < 16) {
+        // what was drawn over the paint the buffer holds (moved with it,
+        // out of the last frame's): the floor takes it
+        f[n] = rc_of(ref->over);
+        if (xa) {
+            f[n].x0 += d;
+            f[n].x1 += d;
+        } else {
+            f[n].y0 += d;
+            f[n].y1 += d;
+        }
+        n += rc_cut(&f[n], vr);
+    }
+    if (!whole && from != NULL && o->fade > 0 && n < 16) {
+        int v1 = xa ? vr.x1 : vr.y1, h = o->fade + (d < 0 ? -d : d);
+        f[n] = xa ? (rc_t){v1 - h, vr.y0, v1, vr.y1} : (rc_t){vr.x0, v1 - h, vr.x1, v1};
         n += rc_cut(&f[n], vr);
     }
     if (whole) {
         f[0] = vr;
         n = vr.x1 > vr.x0 && vr.y1 > vr.y0;
+    } else if (from != NULL) {
+        c->kf_sh = 1;
+        c->kf_shift = d;
+        c->kf_sv = view;
     }
     n = kept_merge(f, n, rh, sp, xa);
     c->kf_i = 0;
@@ -4746,7 +4805,7 @@ static void kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, 
         c->kf[i] = box_of(f[i]);
     }
     c->kf_copy = c->kf_took = c->kf_ci = 0;
-    if (o->whole != 1 && now->kept && nk > 0) {
+    if (o->whole != 1 && now->kept && nk > 0 && from == NULL) {
         kept_copy(c, r, now, f, n, hv, vis0, nk, np, base, rh, sp, xa, c0, pitch);
     }
     // every buffer holds it where the paints before this one, a buffer
@@ -4835,6 +4894,28 @@ int32_t moy_ui_api_table_copy(moy_ui_ctx_t *c, int32_t out[4], int back) {
     out[1] = b.y;
     out[2] = b.w;
     out[3] = b.h;
+    return 1;
+}
+
+int32_t moy_ui_api_table_shift(moy_ui_ctx_t *c, int32_t out[5], int back) {
+    if (back) {
+        if (c->kf_sh == 2) {
+            // the canvas could not move it: the view draws whole
+            c->kf[0] = c->kf_sv;
+            c->kf_n = 1;
+            c->kf_i = c->kf_copy = c->kf_took = c->kf_ci = c->kf_sh = 0;
+        }
+        return 0;
+    }
+    if (c->kf_sh != 1) {
+        return 0;
+    }
+    c->kf_sh = 2;
+    out[0] = c->kf_sv.x;
+    out[1] = c->kf_sv.y;
+    out[2] = c->kf_sv.w;
+    out[3] = c->kf_sv.h;
+    out[4] = c->kf_shift;
     return 1;
 }
 
@@ -5555,7 +5636,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     } else {
         c->kf[0] = view;
         c->kf_n = (uint8_t)(view.w > 0 && view.h > 0);
-        c->kf_i = c->kf_copy = c->kf_took = c->kf_ci = 0;
+        c->kf_i = c->kf_copy = c->kf_took = c->kf_ci = c->kf_sh = 0;
         c->kf_held = MOY_UI_KF_HELD;
     }
     int16_t tc_y0 = c->tc_y0;              // the last frame's, for the parts' stops

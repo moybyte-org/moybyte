@@ -766,8 +766,14 @@ the engine answers: the floor the buffer this frame paints lacks
 (`ui.table_floor`, the ground put back there) and the parts that meet it,
 each clipped to its floor rect, the focused card last. A grid or icons step
 draws the two cards the focus left and entered; a frame whose buffer holds
-the band draws nothing; a scroll, a key
-that moved or a buffer the engine cannot vouch for draws the band whole.
+the band draws nothing; a scroll over the home's one-colour ground
+(`Launcher.flat`, the wallpaper's restore key a colour: `o.shift`) moves
+the band out of the last frame's buffer by the scroll's difference
+(`ui.table_shift`, the canvas's `shift_last` and fence, §3.2's engines)
+and draws the row it uncovers, the two cards the focus moved between and
+the handheld icons' fade (`o.fade`), the next buffer copying the band (a
+move of 0); a scroll over a wallpaper, a key that moved or a buffer the
+engine cannot vouch for draws the band whole.
 The carousel's key holds its centre card, so its floor is nothing, the
 stamp or the band whole. A grid or icons card that wears no focus is
 drawn out of its KEPT FACE (built 2026-10-28, retired with the move and
@@ -892,6 +898,7 @@ Per canvas, then per source:
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
 | the debt copy of rows | roots with `copy_last` and a ring deeper than one | one persistent buffer (owes nothing) |
+| a kept table's move (the home's band) | a band over one colour, on a canvas with `shift_last` | a wallpaper under the band (its pixels would move); the canvas refusing (the Guition's root while a rotate is in flight): the band draws whole |
 
 Where a lever is `None` none of its bookkeeping runs: no ring entry is
 written for a shift that cannot happen, no widened set is built, no refill
