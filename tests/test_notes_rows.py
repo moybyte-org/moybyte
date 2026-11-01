@@ -1,22 +1,23 @@
-"""Notes' rows frames (docs/scroll_and_text_2026-10.md §5, §13's text view):
-a key typed into a note, a caret step, a selection grown and the frames a
-change owes after it draw the rows of the note that changed and the page's
-floor under them, never the page whole.
+"""Notes' frames on its text view (docs/scroll_and_text_2026-10.md §5): a
+key typed into a note, a caret step, a selection grown and the frames a
+change owes after it draw the rows of the note that changed, never the view
+whole.
 
-A frame whose view moved by whole rows -- a drag, a fling, the wheel, the
-trackball, a held key, the caret leaving the view -- shifts the rows the
-move keeps (`EditorHandle.rows_move`) and draws the rows it brings and the
+A frame whose view moved -- a drag, a fling, the wheel, the trackball, a
+held key, the caret leaving the view -- moves the rows the frame before drew
+(the engine's shift frame, R the view) and draws the rows it brings and the
 rows that changed.
 
 Each case runs one session on two consoles: one as it ships and one whose
-Player never begins a rows frame, so every frame draws whole; every
-presented picture of the first is held to the second's bytes, on one, two
-and three buffers presented in turn (the full-screen console) and on the
-desk, where the window composites what the frame changed. The share of
-painted frames that drew rows alone is held above a floor (L8's
+run's host never plans a frame, so every frame draws whole; every presented
+picture of the first is held to the second's bytes, on one, two and three
+buffers presented in turn (the full-screen console) and on the desk. The
+share of painted frames that drew rows alone is held above a floor (L8's
 silent-disable direction), and the engine's record audit fails a rows frame
 whose stops moved outside its floor.
 """
+
+from array import array
 
 import pytest
 
@@ -32,17 +33,34 @@ _BODY = "\n".join(
        for i in range(36)])
 
 
+_PATCH = [None]
+
+
+def _pin_clock():
+    """Every loaded runtime and device module reads the one clock. A module
+    takes `_ticks_ms` by name at its import, so this runs again once a
+    console is built: the windowed WM and the apps it loads come in then."""
+    import sys
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if (("/runtime/" in f or "/device/" in f) and hasattr(mod, "_ticks_ms")
+                and getattr(mod, "_ticks_ms") is not _now):
+            _PATCH[0].setattr(mod, "_ticks_ms", _now)
+
+
+def _now():
+    return _NOW[0]
+
+
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
     """One clock for both consoles, a frame's worth a frame: the idle save
     lands on the same frame of each."""
-    import sys
     from runtime import editor_handle, ticks  # noqa: F401 -- loaded, then patched
-    for mod in list(sys.modules.values()):
-        f = getattr(mod, "__file__", None) or ""
-        if "/runtime/" in f.replace("\\", "/") and hasattr(mod, "_ticks_ms"):
-            monkeypatch.setattr(mod, "_ticks_ms", lambda: _NOW[0])
+    _PATCH[0] = monkeypatch
+    _pin_clock()
     yield
+    _PATCH[0] = None
 
 
 @pytest.fixture(autouse=True)
@@ -65,8 +83,16 @@ def _console(tmp_path, name, ships, desk):
     moy_carts.save_file("docs", "alpha", _BODY, ws.carts_root)
     assert select_on_home(ws, "Notes") is not None
     ws.open()
+    _pin_clock()
     if not ships:
-        ws.player._rows_begin = lambda *a: None
+        # the run's host plans nothing: every frame draws whole
+        h = ws.player._uh
+        run = h.run
+
+        def whole(*a, **k):
+            h.whole()
+            return run(*a, **k)
+        h.run = whole
     return ws
 
 
@@ -83,14 +109,6 @@ class Pair:
         self.desk = desk
         root = self.a.sys_canvas
         root.RETAINED_FRAMES = bufs
-        self.whole = 0                  # the window's whole composites
-        if desk:
-            blit = self.a.wm._blit_game
-
-            def counted(*a, **k):
-                self.whole += 1
-                return blit(*a, **k)
-            self.a.wm._blit_game = counted
         self.held = [bytes(root._buf)]
         self.kinds = []
         for _ in range(4):
@@ -183,17 +201,56 @@ def test_typing_and_caret_steps_draw_rows_byte_for_byte(tmp_path, bufs):
         p.share(), p.kinds)
 
 
+def test_two_consoles_runs_are_two_lifetimes(tmp_path):
+    """Every case here drives two consoles in one process, and each console's
+    run is its own "cart" lifetime (device_canvas `_owners`): the second
+    console starting its run returns nothing the first's run draws into. One
+    lifetime for both would hand the first window canvas's pixels back at the
+    second start -- to the pool, which lends them to the second, or, with the
+    pool full, to the allocator, and the first run's next frame writes freed
+    memory."""
+    from runtime import glass_binding
+    a = _console(tmp_path, "ships", True, True)
+    cva = a._run_canvas
+    assert cva is not None and a.canvas is cva, "Notes on the desk draws its own canvas"
+    ha = cva._comp.buf_h
+    b = _console(tmp_path, "whole", False, True)
+    assert cva._comp._b.live, "the second console's run returned the first's canvas"
+    hb = b._run_canvas._comp.buf_h
+    assert hb != ha
+    assert glass_binding.row(ha)[3] != glass_binding.row(hb)[3], \
+        "two consoles' runs share one owner"
+
+
+def test_a_consoles_lifetimes_end_with_it(tmp_path):
+    """A console's own lifetimes end when it goes: an OWNER row is the
+    glass's, and a worker that built consoles by the hundred would fill the
+    table with lifetimes nothing ends. (The process's last
+    console stays reachable through module slots the next one takes over:
+    moy_loop's role door, chrome's theme reader.)"""
+    import gc
+    from runtime import glass_binding
+    a = _console(tmp_path, "ships", True, True)
+    h = a._run_canvas._comp.buf_h
+    owner = glass_binding.row(h)[3]
+    del a
+    b = _console(tmp_path, "whole", False, True)
+    gc.collect()
+    assert b._run_canvas._comp._b.live
+    with pytest.raises(ValueError):
+        glass_binding.row(h)
+    with pytest.raises(ValueError):
+        glass_binding.reclaim(owner)    # a lifetime that ended refuses
+
+
 @pytest.mark.parametrize("bufs", (1, 2, 3))
-def test_the_desk_draws_and_composites_rows_byte_for_byte(tmp_path, bufs):
-    """On the desk the window copies onto the glass what the frame changed
-    and what the buffer it paints lags, not the canvas."""
+def test_the_desk_draws_rows_byte_for_byte(tmp_path, bufs):
+    """On the desk the run's canvas is its window's own (`Player.holds`):
+    it holds the page as the run's last frame left it."""
     p = Pair(tmp_path, bufs, desk=True)
-    p.whole = 0
     _session(p)
     assert p.share() > 0.5, "Notes drew rows on %.2f of its painted frames: %r" % (
         p.share(), p.kinds)
-    assert p.whole < len(p.kinds) // 2, "the window composited %d of %d frames whole" % (
-        p.whole, len(p.kinds))
 
 
 def test_a_selection_undo_and_redo_stay_byte_for_byte(tmp_path):
@@ -233,29 +290,24 @@ def test_a_cart_that_clears_draws_whole(tmp_path):
     assert p.share() == 0, p.kinds
 
 
-def test_an_app_that_draws_its_note_alone_draws_rows_by_its_counters(tmp_path):
-    """On a canvas only its run draws (the desk's window), an app that draws
-    nothing but its note has its rows drawn where the canvas's counters say
-    nothing wrote it since the note's last draw."""
+def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
+    """An app whose pass draws nothing but its note has its frames planned
+    as any: the rows the note changed, drawn alone."""
     p = Pair(tmp_path, 1, desk=True)
-    drew = []
     for ws in (p.a, p.b):
         pl = ws.player
         ed = pl.ns["ed"]
-        if ws is p.b:
-            ed._frame = None             # the twin draws its note whole
-        x, y, w, h = ed._rect
+        sheet = tuple(pl.ns["sheet"])
 
-        def alone(ed=ed, x=x, y=y, w=w, h=h, ws=ws):
-            ed.draw(x, y, w, h)
-            if ws is p.a:
-                drew.append(ed.rows_only)
+        def alone(ed=ed, sheet=sheet):
+            ed.draw(*sheet)
         pl._draw = alone
     p.settle(2)
+    del p.kinds[:]
     p.typed("hello")
     p.keys("down", 2)
     p.settle()
-    assert sum(drew) > len(drew) // 2, drew
+    assert p.share() > 0.5, p.kinds
 
 
 # -- shift frames: the view moved ------------------------------------------------
@@ -275,7 +327,7 @@ def _drag(p, rows, steps, desk):
     over `steps` frames, then lifted: the view follows it."""
     for ws in (p.a, p.b):
         ws.pointer.hovers = False       # a finger, which pans; a mouse selects
-    lh = p.a.player.ns["ed"]._geom[3]
+    lh = p.a.player.ns["ed"]._lh()
     sh = p.a.player.ns["sheet"][3]
     d = rows * lh
     d = max(-sh * 7 // 10, min(sh * 7 // 10, d))     # the finger stays on the note
@@ -346,17 +398,23 @@ def _scrolled(p, desk=False):
 
 
 def _moves(p):
-    """Every rect the handle's move shifts, kept as the session runs."""
-    ed = p.a.player.ns["ed"]
+    """Every region a shift frame moves by a row's worth or less (x, y,
+    w, h, dy): the last of the moves its host made (the view's, inside the
+    page R that holds it), kept as the session runs."""
+    pl = p.a.player
+    h = pl._uh
+    run = h.run
     got = []
-    plan = ed.rows_move
 
-    def kept():
-        mv = plan()
-        if mv is not None:
-            got.append(tuple(mv))
-        return mv
-    ed.rows_move = kept
+    def kept(*a, **k):
+        r = run(*a, **k)
+        if h.shifting and h._dy:
+            hp = h._hp
+            n = hp[ui_draw._HP_N]
+            k = ui_draw._HP_MOVES + 5 * (n - 1)
+            got.append(tuple(hp[k:k + 5]))
+        return r
+    h.run = kept
     return got
 
 
@@ -367,13 +425,11 @@ def _check(p, moves):
         shifts, len(p.kinds), p.kinds)
     assert p.kinds.count(None) < len(p.kinds) // 8, p.kinds
     ed = p.a.player.ns["ed"]
-    x, y, w, h = ed._rect
-    r = ed._args[5]
+    sx, sy, sw, sh = p.a.player.ns["sheet"]
     for mx, my, mw, mh, dy in moves:
-        # the rows it moves lie inside the paper's straight sides, where
-        # they were and where they land
-        assert (mx, mw) == (x, w) and dy and mh > abs(dy)
-        assert my >= y + r and my + mh <= y + h - r, (moves, ed._rect, r)
+        # the region moved is the view, inside the paper's straight sides
+        assert (mx, my, mw, mh) == tuple(ed._vr) and dy and mh > abs(dy), (moves, ed._vr)
+        assert sx <= mx and mx + mw <= sx + sw and sy <= my and my + mh <= sy + sh
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
@@ -389,27 +445,24 @@ def test_scrolling_the_note_shifts_byte_for_byte(tmp_path, bufs):
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
-def test_the_desk_shifts_and_composites_byte_for_byte(tmp_path, bufs):
+def test_the_desk_shifts_byte_for_byte(tmp_path, bufs):
     """The desk: a finger's drag and fling, a mouse's wheel, the caret
-    leaving the view and a selection scrolled; the window composites what
-    each frame changed, the shifted rows with it."""
+    leaving the view and a selection scrolled."""
     p = Pair(tmp_path, bufs, desk=True)
     moves = _moves(p)
-    p.whole = 0
     _scrolled(p, True)
     _check(p, moves)
-    assert p.whole < len(p.kinds) // 4, "the window composited %d of %d frames whole" % (
-        p.whole, len(p.kinds))
+    assert moves
 
 
-def test_a_drag_on_the_note_pans_it(tmp_path):
-    """A press on the note and a drag from it pan the view by the rows the
-    finger moved."""
+def test_a_drag_on_the_note_scrolls_it_and_coasts(tmp_path):
+    """A press on the note and a drag from it scroll the view by the rows
+    the finger moved, and its release coasts on."""
     p = Pair(tmp_path, 1)
     ed = p.a.player.ns["ed"]
     _drag(p, 4, 4, False)
     assert p.a.player.cart_error is None, p.a.player.cart_error
-    assert ed.ed.top == 4
+    assert ed.ed.top > 4
 
 
 def _chip(p):

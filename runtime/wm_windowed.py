@@ -202,6 +202,11 @@ class _Win:
                                       # pane (the desk Editor's Run slot): no
                                       # frame and no strip; None: a window
         self.undock = None            # where it goes back to (x, y, w, h)
+        self.dock_off = None          # docked: its corner from its host's
+                                      # content corner, which it follows
+        self.own = False              # a game moved out by the pause card's
+                                      # Play in a window: never docked, and
+                                      # no Editor's playtest (it outlives one)
         self.corner = 0               # full screen: where its controls start
         self.row = 0                  # full screen: the rows the WM's row takes
                                       # above the content (0 where the app's
@@ -216,7 +221,9 @@ class _Win:
         # While buf is stale: [x0, y0, x1, y1, known], the part of it the
         # content changed since buf last held its page (known 0: unknown).
         self._lag = [0, 0, 0, 0, 0]
-        self._row_sig = None          # the full-screen row last painted over it
+        # the full-screen row last painted over it: w, h, title, buttons,
+        # look gen, font scale (`_row_note`)
+        self._row_sig = [None, None, None, None, None, None]
         self._row_moved = False       # ...and it differs from the one before
 
     def full(self):
@@ -958,18 +965,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._on_nav()
         ws._dirty = True
 
-    def leave_console(self):
+    def leave_console(self, game=False):
         """The home's X: put the parked kinds back above the desk with the
         route's restore op (no process re-opens) and the window records with
         them. A record whose stamp was released re-renders once, the path a
         resize takes; one whose kind was re-opened in console mode re-renders
         once to show what that process holds now. The Editor's project is the
         workspace, and a run in console mode swaps it: a parked Editor whose
-        project went that way does not come back."""
+        project went that way does not come back. `game`: the pause card's
+        Play in a window, the game on the home going on above them, its
+        window made as a desk play's."""
         if self.mode != "console":
             return
         ws = self.ws
-        if self.stack.depth() > 1:
+        if self.stack.depth() > 1 and not game:
             ws.go_home()                  # what stood on the home leaves first
         p = self._parked or _Parked([], [], {}, None)
         self._parked = None
@@ -984,7 +993,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._drop_win(win)
                 if p.focus == "menu":
                     p.focus = p.order[-1] if p.order else None
-        self.stack.restore(["desk"] + kinds)
+        self.stack.restore(["desk"] + kinds + (["desktop"] if game else []))
         self._wins = p.wins
         self._kinds = kinds
         self._order = p.order
@@ -1139,6 +1148,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         from the Editor) or "play" (the desk/home). Only the player window's
         DEFAULT size reads it; see _win_size."""
         self._play_intent = intent if intent == "dev" else "play"
+        win = self._wins.get("desktop")
+        if win is not None:
+            win.own = False               # a new run is its caller's again
 
     def _win_size(self, key, full, fs):
         """Default window OUTER size per window slot: on a desk, the apps the
@@ -1323,17 +1335,35 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         none of the row's band (`changed`), the row is the buffer's already
         (painted again, its controls would blend over themselves)."""
         if win.saved is not None and not win.row and win.kind != "desktop":
-            if not held:
-                self._paint_row(win, cv)
-                return
             t = self._full_title(win)
-            sig = (win.w, win.h, t, self._win_btns(win), self.ws.look.look_gen, self._fs())
-            if sig != win._row_sig:
-                win._row_sig = sig
+            if not held:
+                # painted over a whole draw: a held frame after it finds the
+                # row as this one painted it
+                self._row_note(win, t)
+                self._paint_row(win, cv, t)
+                return
+            if self._row_note(win, t):
                 win._row_moved = True     # the row's pixels are not the ones before
             elif kept and self._row_clear(win):
                 return
             self._paint_row(win, cv, t)
+
+    def _row_note(self, win, t):
+        """Record the full-screen row about to be painted over `win`, its
+        title `t`, in `win._row_sig`: whether it differs from the one last
+        painted."""
+        s = win._row_sig
+        w, h, b = win.w, win.h, self._win_btns(win)
+        g, fs = self.ws.look.look_gen, self._fs()
+        if s[0] == w and s[1] == h and s[2] == t and s[3] == b and s[4] == g and s[5] == fs:
+            return False
+        s[0] = w
+        s[1] = h
+        s[2] = t
+        s[3] = b
+        s[4] = g
+        s[5] = fs
+        return True
 
     def _row_clear(self, win, r=None):
         """Whether what the focused content's last draw changed (`changed`),
@@ -1500,7 +1530,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # ground under the WM's row otherwise, with the window's icon and title
     # at its head and minimise, restore and close at its right, drawn and
     # answered as every strip's. A game's window is the game alone, at the
-    # largest whole scale that leaves the corner's controls clear, on black.
+    # largest whole scale the glass holds, on black, with no buttons (owner,
+    # 2026-10-31: play is full screen, as Big Picture's); the player's
+    # window running a window-bound app cart (Notes) is an app's, under the
+    # WM's row (`_is_game`).
 
     def _row_h(self):
         """The full-screen row's height: the band's (a window's bar)."""
@@ -1516,7 +1549,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         is not the row (none for a game)."""
         full = self._root_canvas
         win.x, win.y, win.w, win.h = 0, 0, full.w, full.h
-        win.row = (0 if win.kind == "desktop" or self._band_is_row(win.kind)
+        win.row = (0 if self._is_game(win) or self._band_is_row(win.kind)
                    else self._row_h())
 
     def _on_row_head(self, win, px, py):
@@ -1524,7 +1557,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         WM draws it: the whole row above the content, or, where the app's
         band is the row, its head -- the icon and title left of the zone
         the band is lent (`band_span`)."""
-        if win.saved is None or win.kind == "desktop" \
+        if win.saved is None or self._is_game(win) \
                 or not (win.y <= py < win.y + self._row_h()):
             return False
         return bool(win.row) or px < self._full_slot(win)
@@ -1574,7 +1607,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _opens_full(self, kind):
         """Whether a window of `kind` opens full screen: as it was last left
         on this board, and the Editor so the first time, on a desk (E-04)."""
-        if kind == "desktop" or _layout_base.metric_class() != _layout_base.DESK:
+        if kind == "desktop":
+            # Play is full screen on the desk (owner, 2026-10-31): a desk
+            # play opens so, with no buttons; an Editor's playtest and a
+            # window-bound app cart open as windows.
+            return self._play_intent == "play" and not self.ws.app_window_canvas
+        if _layout_base.metric_class() != _layout_base.DESK:
             return False
         got = self.ws.system.get("win_full", None)
         if isinstance(got, dict) and kind in got:
@@ -1625,13 +1663,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         no strip, above the window it docks in: the desk Editor's Run slot
         and Game tab hold the playtest so (runtime/editor_desk.py). `rect`
         None gives the window back its place; False hides it, its run held,
-        as a minimise does. Whether there is such a window."""
+        as a minimise does. Whether there is such a window: a game moved
+        out to a window of its own (`play_in_window`) never docks."""
         win = self._wins.get(kind)
-        if win is None:
+        if win is None or win.own:
             return False
         if rect is None or rect is False:
             if win.docked is not None:
                 win.docked = None
+                win.dock_off = None
                 if win.undock is not None:
                     win.x, win.y, win.w, win.h = win.undock
                     win.undock = None
@@ -1645,6 +1685,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win.minimized:
             self._minimize(win, False)
         rect = tuple(rect)
+        host = self._wins.get("menu")
+        if host is not None:
+            hx, hy = host.content_rect()[:2]
+            win.dock_off = (rect[0] - hx, rect[1] - hy)
         if win.docked != rect:
             if win.docked is None:
                 win.undock = (win.x, win.y, win.w, win.h)
@@ -1659,15 +1703,106 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             order.append(kind)
         return True
 
+    def offers_window(self):
+        """Whether the pause card offers Play in a window (owner,
+        2026-10-31): on a board with a desk, which this WM is, in both modes
+        -- over a game full screen (console mode's, standing on the home, or
+        a desk window's) or docked in the Editor's Run slot; never over one
+        already in a window. A handheld's WM has no desk and no such row."""
+        ws = self.ws
+        if self.mode == "console":
+            return (self.stack.depth() == 2 and self.stack.top() == "desktop"
+                    and not ws.app_window_canvas and ws.cart_error is None
+                    and not ws.player._is_tool)
+        win = self._wins.get("desktop")
+        return (win is not None and self._is_game(win)
+                and (win.saved is not None or win.docked is not None))
+
+    def play_in_window(self):
+        """The pause card's Play in a window: the running game, its run
+        untouched, in a desk window of its own with its strip -- a full-screen
+        one restored to the rect it opened at, a docked one given back its
+        window as an orphaned one is (`dock`); from console mode the desk
+        comes back first, its windows as they were, the game's window on
+        top. It is no Editor's playtest from then on: closing the Editor
+        leaves it, the Editor's workspaces drop its Game tab while it lasts,
+        and its maximize is the way back to full screen. False where nothing
+        moved."""
+        if self.mode == "desktop":
+            self._sync_windows()          # a run spawned this frame has its window
+        if not self.offers_window():
+            return False
+        if self.mode == "console":
+            self.leave_console(game=True)
+        win = self._wins["desktop"]
+        docked = win.docked is not None
+        if docked:
+            self.dock("desktop", None)
+        else:
+            self._toggle_max(win)
+        win.own = True
+        self._editor_again()              # its workspaces without the game
+        self._bring_forward("desktop")
+        self.ws._dirty = True
+        return True
+
+    def game_full(self):
+        """Whether the focused desk window is a game full screen: a play
+        the console's key pauses, as in console mode."""
+        win = self._focus_win()
+        return (self.mode == "desktop" and win is not None and not win.minimized
+                and win.saved is not None and self._is_game(win))
+
+    def game_pauses(self):
+        """Whether the console's key opens the pause card on the desk: over
+        a game full screen, or docked in the Editor's Run slot, holding the
+        keys."""
+        if self.game_full():
+            return True
+        win = self._focus_win()
+        return (self.mode == "desktop" and win is not None and not win.minimized
+                and win.docked is not None and self._is_game(win))
+
+    def _editor_again(self):
+        """The Editor's window drawn again where a game left its workspaces
+        or came back to them: its bar's Play or Stop, its Game tab."""
+        host = self._wins.get("menu")
+        if host is not None and not self.ws._editing_icons:
+            self.ws.editor_app.zone_gen += 1
+            self._prewarm(host)
+
+    def _end_playtest(self):
+        """Closing the Editor ends its playtest (owner, 2026-10-31), the
+        way the pause card's Quit ends a run: the world released, its pmem
+        flushed, its window closed. A game moved to a window of its own, or
+        one the Editor did not run, goes on."""
+        ws = self.ws
+        win = self._wins.get("desktop")
+        if win is None or win.own or ws.returns.caller() != EDITOR:
+            return
+        pause = ws.pause
+        if pause.open and not pause.stopped:
+            pause.close()
+        ws._reset_canvas_state()
+        ws._exit_to_caller()
+
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
-        desk's workspaces gets its window back."""
+        desk's workspaces gets its window back; one whose host moved moves
+        with it. The host's content is stamped, not drawn, while it moves,
+        so the game follows its host here rather than from the host's draw."""
         win = self._wins.get("desktop")
         if win is None or win.docked is None:
             return
         host = self._wins.get("menu")
         if host is not None and not host.minimized \
                 and self.ws.editor_layer() is self.ws.editor_desk:
+            off = win.dock_off
+            if off is not None:
+                hx, hy = host.content_rect()[:2]
+                d = win.docked
+                if d[0] != hx + off[0] or d[1] != hy + off[1]:
+                    self.dock("desktop", (hx + off[0], hy + off[1], d[2], d[3]))
             return
         self.dock("desktop", None)
 
@@ -1721,7 +1856,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         (`Player.pause`), and a restore lands on the pause menu, which gives
         the run back on Resume (the owner's D-25, 2026-10-19) -- unless the
         run was already held (the pause menu open), which stays its
-        holder's."""
+        holder's. A window-bound app cart's run (Notes) is held the same
+        way and simply goes on when it is shown: an app has no pause menu."""
         if win.minimized == bool(on):
             return
         win.minimized = bool(on)
@@ -1737,7 +1873,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         elif getattr(win, "held", False):
             win.held = False
             pause = getattr(self.ws, "pause", None)
-            if pause is not None:
+            if pause is not None and self._is_game(win):
                 pause.show()
             else:
                 player.resume()
@@ -2220,11 +2356,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if win is not None and not win.minimized:
                     hole = self._game_rect(win)   # the game's frame comes next, opaque
             lay = w[0]
-            asb = getattr(root, "blit_strip_async", None)
             # Put back whole, it is the frame's last write there: the engine
             # copies it after the frame has drawn (`blit_strip_async`).
-            if not (hole is None and asb is not None and lay.w == r[2] and lay.h == r[3]
-                    and asb(lay, r[0], r[1])):
+            if not (hole is None and lay.w == r[2] and lay.h == r[3]
+                    and hasattr(root, "blit_strip_async")
+                    and root.blit_strip_async(lay, r[0], r[1])):
                 for b in _bands(r, hole):
                     root.blit_strip_rect(lay, r[0], r[1], b[0], b[1], b[2], b[3])
             self._pop_note(r)
@@ -2233,7 +2369,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if w[2] <= 0:
                 w[1] = None
                 w[3] = False
-        self.ws.bar_layer.redraw_tile("desk")   # the system button, as it now stands
+        if self.full_cover() < 0:               # a full-screen window covers the bar
+            self.ws.bar_layer.redraw_tile("desk")   # the system button, as it now stands
 
     def _pop_restore_slots(self, root, cur, ride):
         for i in range(2):
@@ -2255,17 +2392,29 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 s[2] = 0
                 s[3] = False
 
-    def _pop_capture(self, s):
-        """Snapshot the pixels under slot `s`'s rect from the root canvas."""
+    def _grown(self, s, i, w, h):
+        """Layer `s[i]` of the root's, at least `w` by `h`: a new one at the
+        larger of both sizes where it is smaller, the old one released."""
+        lay = s[i]
+        if lay is not None and lay.w >= w and lay.h >= h:
+            return lay
+        ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+        s[i] = None
+        self._release_layer(lay)
+        lay = s[i] = self._root_canvas.new_layer(max(w, ow), max(h, oh))
+        return lay
+
+    def _snap(self, s):
+        """Snapshot the pixels under slot `s`'s rect from the root canvas
+        (a popover's, or the riding scrim's)."""
         x, y, w, h = s[1]
-        lay = s[0]
-        if lay is None or lay.w < w or lay.h < h:
-            root = self._root_canvas
-            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-            self._release_layer(lay)
-            lay = s[0] = root.new_layer(max(w, ow), max(h, oh))
-        lay.blit_strip(self._root_canvas, -x, -y)
+        self._grown(s, 0, w, h).blit_strip(self._root_canvas, -x, -y)
         s[3] = True
+
+    def _pop_capture(self, s):
+        """Snapshot slot `s` (`_snap`), and note whether it lies over the
+        playtest's window."""
+        self._snap(s)
         # Whether the playtest's window repaints under it, read once here:
         # nothing moves a window while a popover is open (a tap outside
         # closes it), and a play frame allocates nothing.
@@ -2389,7 +2538,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._draw_player_window(game, False, self._focus == "desktop", 0,
                                      full=False, defer=False)
         if not w[3]:
-            self._pop_wash_capture(w)
+            self._snap(w)
             self._wash_focus()
         win = self._wash_win[0]
         if win is not None:
@@ -2471,7 +2620,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if r is not None:
                 _grow(self._pause_span, r[0], r[1], r[0] + r[2], r[1] + r[3])
             return
-        self._pop_wash_capture(w)
+        self._snap(w)
         w[2] = 0
         self._pause_owed = 0
 
@@ -2485,12 +2634,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ww[0] = None                  # it shows under the menu as it is
             return
         buf = win.buf
-        lay = ww[1]
-        if lay is None or lay.w < buf.w or lay.h < buf.h:
-            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-            self._release_layer(lay)
-            lay = ww[1] = self._root_canvas.new_layer(max(buf.w, ow), max(buf.h, oh))
-        lay.blit_strip(buf, 0, 0)
+        self._grown(ww, 1, buf.w, buf.h).blit_strip(buf, 0, 0)
         ww[0] = win
         ww[2] = win._buf_stale
         ww[3][:] = win._lag
@@ -2526,31 +2670,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         allocates nothing once minted; release_cache gives it back."""
         if not self._pop_rides() or self._pop_live():
             return
-        lay = self._pop_wash[0]
-        cw, ch = self.ws.layout.cw, self.ws.layout.ch
-        if lay is not None and lay.w >= cw and lay.h >= ch:
-            return
         try:
-            self._pop_wash_mint(cw, ch)
+            self._grown(self._pop_wash, 0, self.ws.layout.cw, self.ws.layout.ch)
         except Exception:  # noqa: BLE001 -- no room: the open mints it, or repaints
             pass
-
-    def _pop_wash_mint(self, ww, h):
-        w = self._pop_wash
-        lay = w[0]
-        ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-        self._release_layer(lay)
-        w[0] = None
-        lay = w[0] = self._root_canvas.new_layer(max(ww, ow), max(h, oh))
-        return lay
-
-    def _pop_wash_capture(self, w):
-        x, y, ww, h = w[1]
-        lay = w[0]
-        if lay is None or lay.w < ww or lay.h < h:
-            lay = self._pop_wash_mint(ww, h)
-        lay.blit_strip(self._root_canvas, -x, -y)
-        w[3] = True
 
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
@@ -2606,7 +2729,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._win_sig = None
                 self._desk_streak = 0
                 if (up and not ws._dirty and follows and self._scrim_rides()
-                        and getattr(self._root_canvas, "copy_last", None) is not None):
+                        and hasattr(self._root_canvas, "copy_last")):
                     self._wash_all = True
                 else:
                     ws._dirty = True
@@ -2639,7 +2762,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
         if (quiet and follows
-                and getattr(self._root_canvas, "copy_last", None) is not None):
+                and hasattr(self._root_canvas, "copy_last")):
             # The buffer this frame paints is owed the last change: the last
             # painted frame holds it, and every pixel but the game's is this
             # frame's. Copied whole (whole rows go to the GDMA; round the
@@ -2655,7 +2778,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         settled = not quiet and self._settled(still)
         if (follows and settled and (self._calm() or self._pop_holds_input())
                 and ("desktop" not in self._wins or self._game_held())
-                and getattr(self._root_canvas, "copy_last", None) is not None):
+                and hasattr(self._root_canvas, "copy_last")):
             self._repeating = same_pop
             self._wash_repeats = same_wash
         if pop and settled:
@@ -2727,7 +2850,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         if win.buf is not None and not win._buf_stale:
             return True
-        return (getattr(self._root_canvas, "copy_last", None) is not None
+        return (hasattr(self._root_canvas, "copy_last")
                 and ("desktop" not in self._wins or self._game_held()))
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------
@@ -2881,10 +3004,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self._backdrop is None:
             return
         rc = self._root_canvas
-        stamp = getattr(rc, "blit_strip_rect", None)
         ext = self._gesture_extent()
         n = self._retained_n()
-        if (stamp is None or self._union_disabled or ext is None
+        if (not hasattr(rc, "blit_strip_rect") or self._union_disabled or ext is None
                 or not self._gesture_hist):
             rc.blit_strip(self._backdrop, 0, 0)
             self._restored = None
@@ -2940,7 +3062,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if bx1 < x1:                                       # right strip
                 laid.append((bx1, by0, x1 - bx1, by1 - by0))
         for r in laid:
-            stamp(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
         self._restored = (x0, y0, x1 - x0, y1 - y0)
         return self._restored
@@ -3050,15 +3172,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         scale = max(1, min(cw // gw, ch // gh))
         ox = cx + (cw - gw * scale) // 2
         oy = cy + (ch - gh * scale) // 2
-        if win.saved is not None:
-            # Full screen: the largest whole scale that leaves the corner's
-            # controls clear, their row's height down from the top.
-            kx = win.corner
-            ky = cy + self._row_h()
-            while scale > 1 and ox + gw * scale > kx and oy < ky:
-                scale -= 1
-                ox = cx + (cw - gw * scale) // 2
-                oy = cy + (ch - gh * scale) // 2
         return (ox, oy, scale)
 
     def game_is_fullscreen(self):
@@ -3140,7 +3253,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if sc is gc:
             return
         if getattr(gc, "buf", None) is None \
-                and getattr(sc, "blit_game", None) is None:
+                and not hasattr(sc, "blit_game"):
             # Command-only game canvas (#175): the cart's frame is ALREADY in
             # the stream; the letterbox cls() below would wipe it, so bail.
             # Ask the question _blit_game asks -- a system canvas with a native
@@ -3458,8 +3571,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         viewport has to match win.buf exactly -- the layouts were built for that
         size, and a mismatch would lay the content out for the wrong surface."""
         root = self._root_canvas
-        sv = getattr(root, "set_viewport", None)
-        if sv is None:
+        if not hasattr(root, "set_viewport"):
             return False                      # web RecordingLayer: keep the stamp
         cx, cy, cw, ch = win.content_rect()
         if cw <= 0 or ch <= 0 or cw != win.buf.w or ch != win.buf.h:
@@ -3508,7 +3620,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._install(win.ctx, win)
         ws._sys_canvas = root                 # ...but paint on the framebuffer
         ws._surface_write(cx, cy)
-        sv(cx, cy, cw, ch)
+        root.set_viewport(cx, cy, cw, ch)
         _ui_draw.window_frame(pages)
         self._direct_root = True
         try:
@@ -4098,13 +4210,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                                or self._content_flinging()))
         if ((moving_this or scrolling_this)
                 and self._order and self._wins.get(self._order[-1]) is win):
-            asb = getattr(self._root_canvas, "blit_strip_async", None)
-            if asb is not None:
+            rc = self._root_canvas
+            if hasattr(rc, "blit_strip_async"):
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 cx, cy, _cw, _ch = win.content_rect()
                 _perf = getattr(self.ws, "perf_capture", False)
                 _t0 = _ticks_ms() if _perf else 0
-                if asb(win.buf, cx, cy):
+                if rc.blit_strip_async(win.buf, cx, cy):
                     if _perf:                 # the stamp's CPU share: its submit
                         self.ws._pf_wm_stamp = _ticks_ms() - _t0
                     return
@@ -4123,7 +4235,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
-        return (self.ws.show_fps and self.stack.top() == "desktop")
+        return (self.ws.show_fps and self.stack.top() == "desktop"
+                and not self.ws.app_window_canvas)
 
     def _draw_player_window(self, win, running, focused, dt, full=True,
                             defer=None):
@@ -4158,9 +4271,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 ws._perf_layer.draw(dt)   # game domain: inside the bracket (above)
             if use_view:
                 _view()
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
+        if gc is not self._fb_for:     # the parent's cached flush_batch probe
+            self._fb_for = gc
+            self._fb_fn = getattr(gc, "flush_batch", None)
+        if self._fb_fn is not None:
+            self._fb_fn()
         if use_view:
             if full and win.docked is None:
                 self._win_chrome(win, focused)
@@ -4175,7 +4290,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         src = self._view_src()
         if defer is None:
             defer = not full
-        if ws.app_window_canvas and running and self._player_rows(win, gc):
+        if (ws.app_window_canvas and running and ws.cart_frame is None
+                and self._player_rows(win, gc, ox, oy, scale)):
             if full and win.docked is None:
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
             return
@@ -4185,25 +4301,36 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if full and win.docked is None:
             self._win_chrome(win, focused)
 
-    def _player_rows(self, win, gc):
+    def _player_rows(self, win, gc, ox, oy, scale):
         """A window-bound app's frame through the shown ring: where its run
-        says what its draw changed of its canvas (`Player.change`, its
-        editor handle's rows and the floor under them,
-        docs/scroll_and_text_2026-10.md §5) and the ring vouches for the
-        buffer this frame paints, only that and what the buffer lags is
-        copied onto the glass. Records the frame's change either way;
-        whether it composited."""
+        says what its draw changed of its canvas (`Player.change`, the
+        rect its pass's shift or rows frame spans, inside a region that
+        holds the window's whole view) and the ring vouches for the buffer
+        this frame paints, only that and what the buffer lags is copied onto
+        the glass; else what it shows whole (`app_window_content`), one copy
+        at 1:1 (`blit_game` crops the canvas first). Records the frame's change either way; whether
+        it composited."""
         ws = self.ws
         p = ws.player
         ch = p.change
         f = ws._frames_drawn
         own = self._own
         ok = self._shown_ok(win)
-        if (not ch[4] or p.change_f != f
-                or getattr(self._root_canvas, "blit_strip_rect", None) is None):
+        cx, cy, _cw, _ch = win.content_rect()
+        cw, chh = self.app_window_content()     # what of the canvas the window shows
+        root = self._root_canvas
+        if (scale != 1 or ox != cx or oy != cy or cw > gc.w or chh > gc.h
+                or not hasattr(root, "blit_strip_rect")):
             own[4] = 0
             self._shown_note(win, f, ok, False)
             return False
+        if (not ch[8] or p.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
+                or ch[6] < cw or ch[7] < chh):
+            own[4] = 0
+            self._shown_note(win, f, ok, False)
+            root.blit_strip_rect(gc, cx, cy, cx, cy, cw, chh)
+            self._win_touched = True
+            return True
         own[0] = ch[0]
         own[1] = ch[1]
         own[2] = ch[2]
@@ -4216,8 +4343,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         sc[3] = ch[3]
         if not ok or not self._shown_chain(win, f, sc):
             self._shown_note(win, f, ok, False)
-            return False
-        cx, cy, cw, chh = win.content_rect()
+            root.blit_strip_rect(gc, cx, cy, cx, cy, cw, chh)
+            self._win_touched = True
+            return True
         x0 = sc[0] if sc[0] > 0 else 0
         y0 = sc[1] if sc[1] > 0 else 0
         x1 = sc[2] if sc[2] < cw else cw
@@ -4238,9 +4366,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         desktop (the web console) there is no framebuffer to copy into: ship the
         game frame as ONE scaled self-contained spr instead (the same move as
         FullscreenStackWM._composite_via_spr)."""
-        bg = getattr(sc, "blit_game", None)
-        if bg is not None:
-            bg(gc, ox, oy, scale, defer, src)
+        if hasattr(sc, "blit_game"):
+            sc.blit_game(gc, ox, oy, scale, defer, src)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
@@ -4546,8 +4673,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         focus back to the run CALLER's window when it's open (the Editor for a
         PLAY run) -- the launch-and-return contract, without collateral pops."""
         ws = self.ws
+        win = self._wins.get("desktop")
+        own = win is not None and win.own
         self._remove_kind("desktop")
         self._sync_windows()
+        if own:
+            self._editor_again()          # its Game tab back
         if (ws.returns.caller() == EDITOR
                 and "menu" in self._order):
             self._move_focus("menu")
@@ -4581,6 +4712,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 ws.look.save_icons()
             else:
                 ws.editor_app.save_current()      # the Editor's active tab
+        if kind == "menu" and not ws._editing_icons:
+            self._end_playtest()              # its playtest goes with it
         if kind == "desktop":
             self.close_player()
         else:

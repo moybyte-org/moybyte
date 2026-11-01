@@ -279,32 +279,73 @@ def test_a_restored_editor_stays_restored(tmp_path):
     assert not ws.wm._wins["menu"].full()
 
 
-@pytest.mark.parametrize("size,scale", [((1024, 600), 2), ((1280, 800), 3), ((800, 480), 1)])
-def test_a_full_screen_game_is_the_largest_scale_clear_of_the_corner(tmp_path, size, scale):
-    """A playing game's window full screen: the game alone at the largest
-    whole scale that leaves the corner's controls clear, on black; no
-    row. At 800 x 480 the 2x game would run under the controls, so it is
-    1x."""
+@pytest.mark.parametrize("size,scale", [((1024, 600), 2), ((1280, 800), 3), ((800, 480), 2)])
+def test_a_desk_play_is_full_screen_the_game_alone(tmp_path, size, scale):
+    """Play on the desk is full screen (owner, 2026-10-31): the game alone
+    at the largest whole scale the glass holds, on black, with no row and
+    no window buttons; a tap in the corner is the game's, never a
+    control's."""
     ws = _desk(tmp_path, size)
     open_cart(ws, "Star Catcher")
+    _frames(ws, 4)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert win.full() and win.row == 0
+    ox, oy, s = wm._player_view(win)
+    assert s == scale
+    assert wm._strip_buttons(win) == []
+    gw, gh = ws.canvas.w * s, ws.canvas.h * s
+    sc = wm._root_canvas
+    for x, y in ((2, 2), (size[0] - 3, 2), (2, size[1] - 3),
+                 (ox - 1 if ox else 0, size[1] // 2)):
+        if not (ox <= x < ox + gw and oy <= y < oy + gh):
+            assert _px(sc, x, y) == 0, (x, y)
+    _tap(ws, _drv(ws), size[0] - 8, 8)
+    assert win.full() and "desktop" in wm._wins
+
+
+def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
+    """Notes runs in the player's window but is an app: full screen it takes
+    the row an app's window takes -- its icon, its title, the corner's
+    controls -- over content that fills the glass under the row, and wears
+    no game's FPS chip."""
+    ws = _desk(tmp_path)
+    open_cart(ws, "Notes")
+    _frames(ws)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert ws.app_window_canvas and not win.full()
+    drv = _drv(ws)
+    _tap(ws, drv, *_centre(_btn(ws, win, "max")))
+    assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
+    assert win.row == wm._row_h() == 40
+    assert win.content_rect() == (0, 40, 1024, 560)
+    assert wm.app_window_content() == (1024, 560)       # the content reaches the glass's foot
+    assert wm._player_view(win) == (0, 40, 1)
+    assert wm._full_title(win).startswith("Notes")
+    names = [n for n, _r in wm._strip_buttons(win)]
+    assert names[:3] == ["close", "max", "min"]
+    ws.show_fps = True
+    assert not wm._fps_chip_on()
+    # the row is the WM's: its head drags, the content under it does not
+    assert wm._on_row_head(win, 20, 20) and not wm._on_row_head(win, 20, 60)
+    _tap(ws, drv, *_centre(_btn(ws, win, "max")))
+    assert not win.full() and win.row == 0
+
+
+def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path):
+    """Minimised, an app cart's run is held as a game's is, and shown again
+    it goes on: the pause menu a game's restore lands on (D-25) is a game's."""
+    ws = _desk(tmp_path)
+    open_cart(ws, "Notes")
     _frames(ws)
     wm = ws.wm
     win = wm._wins["desktop"]
     wm._toggle_max(win)
-    _frames(ws, 4)
-    assert win.full() and win.row == 0
-    ox, oy, s = wm._player_view(win)
-    assert s == scale
-    gw, gh = ws.canvas.w * s, ws.canvas.h * s
-    corner = [r for _n, r in wm._strip_buttons(win)]
-    kx = min(r[0] for r in corner)
-    assert ox + gw <= kx or oy >= wm._row_h()
-    sc = wm._root_canvas
-    # black round the game, but under the corner's controls
-    for x, y in ((2, 2), (2, size[1] - 3), (ox - 1 if ox else 0, size[1] // 2)):
-        if not (ox <= x < ox + gw and oy <= y < oy + gh):
-            assert _px(sc, x, y) == 0, (x, y)
-    # the controls answer over the black
-    drv = _drv(ws)
-    _tap(ws, drv, *_centre(_btn(ws, win, "max")))
-    assert not win.full()
+    _frames(ws)
+    wm._minimize(win, True)
+    _frames(ws)
+    assert ws.player.paused and win.held
+    wm._minimize(win, False)
+    _frames(ws)
+    assert not ws.pause.open and not ws.player.paused and win.full()

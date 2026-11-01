@@ -69,7 +69,14 @@ def _load_moy_runtime():
     spec = importlib.util.spec_from_file_location(
         "moy_runtime", FW / "modules" / "moy_runtime.py")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # its board-only imports (tdeck_input) sit beside it: on the path here, not
+    # by whichever other file happened to put them there first
+    fw_modules = str(FW / "modules")
+    sys.path.insert(0, fw_modules)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(fw_modules)
     return module
 
 

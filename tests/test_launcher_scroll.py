@@ -197,10 +197,10 @@ def test_drag_never_launches_the_pressed_card(tmp_path):
     assert ws.screen == "launcher"                       # release after a drag: no run
 
 
-def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
-    """The drag fast path (#58/#66): once the statics streak is armed, mid-drag
+def test_a_band_frame_is_pixel_faithful(tmp_path):
+    """The band frame (#58/#66): once the statics streak is armed, mid-drag
     frames skip the wallpaper + tab row (the ~100ms of a full home repaint on
-    glass) and repaint only the carousel band + bar -- and the composed frame
+    glass) and draw only the carousel band's table pass + bar -- and the composed frame
     must be byte-identical to a FULL repaint of the same state."""
     from runtime import host_app
 
@@ -230,14 +230,15 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     lastx -= 9
     drv.touch_drag(lastx, cy)                 # one more eligible drag frame
     drv.frame(1 / 30)
-    assert calls[0] == n_mid                  # partial: wallpaper NOT redrawn
+    assert calls[0] == n_mid                  # band frame: wallpaper NOT redrawn
     partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
     # Force the FULL path for the identical state and compare the pixels.
-    ws.launcher_layer._full_streak = 0
+    ws.launcher_layer._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.touch_drag(lastx, cy)                 # same pos: scroll unchanged
     drv.frame(1 / 30)
+    del ws.launcher_layer._try_band_frame
     assert calls[0] == n_mid + 1              # the forced frame went FULL
     assert ws.launcher.scroll == scroll
     full = bytes(ws.sys_canvas._buf)

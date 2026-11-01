@@ -228,8 +228,6 @@ class BlockEditorUI:
         # Block editor (#29 Part 2): a BlockEditor over the cart's block program +
         # the structured-outline UI state. `blocks_ed` is built lazily on first open.
         self.blocks_ed = None         # BlockEditor while menu_view == "blocks"
-        self.blk_top = 0              # first outline row scrolled into view
-        self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         self.blk_slot = 0             # which slot of the selected block is highlighted
         self.blk_menu = None          # active insert menu state dict, or None
         self.blk_status = None        # last block-editor SAVE result text
@@ -239,12 +237,7 @@ class BlockEditorUI:
         self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
-        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
-        # buffer `shift_last` reads holds it as the last draw left it, 1 a
-        # window's frame drawn whole, 0 none (the handheld)
-        self.vouch = 0
-        self._held = _ui_draw.HeldPage()   # the page under blk_kbd (`_draw_blk_kbd`)
-        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
+        self._hold = _ui_draw.Hold()      # the page under blk_kbd (`_draw_blk_kbd`)
         self._kbd_gen = 0             # what the prompt draws besides its field's text
 
     def page(self):
@@ -259,11 +252,8 @@ class BlockEditorUI:
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive layout from the live system-canvas size + the
-        effective font scale (mirrors Workstation._relayout), and re-clamp the
-        outline scroll if an editor is already open."""
+        effective font scale (mirrors Workstation._relayout)."""
         self.block_layout = BlockLayout(w, h, fs, chrome_scale=cs)
-        if self.blocks_ed is not None:
-            self._blk_reveal()
 
     # -- Blocks + Scene side-by-side workspace (#93/#85) ----------------------
 
@@ -367,7 +357,6 @@ class BlockEditorUI:
         # SAVE/graduate refuse to overwrite the diverged main.py (see save_blocks).
         self.blk_graduated = bool(ws.project.cart.get("graduated"))
         self.blocks_ed = BlockEditor(_blocks_mod, prog)
-        self.blk_top = 0
         self.blk_slot = 0
         self.blk_menu = None
         if self.blk_graduated:
@@ -414,22 +403,12 @@ class BlockEditorUI:
     # device-friendly interaction. The vocabulary/compiler is Part 1's blocks module;
     # the BlockEditor core (runtime/editors.py) owns the tree edits, this owns the UI.
 
-    def _blk_reveal(self):
-        """Keep the block cursor inside the visible outline window (scrolloff). The
-        window height is the layout's reflowed row count (#39 step 2)."""
-        be = self.blocks_ed
-        if be is None:
-            return
-        nrows = self.block_layout.rows
-        self.blk_top = self._clamp_scroll(self.blk_top, be.cur, nrows, len(be.rows))
-
     def _blk_move_cursor(self, d):
         be = self.blocks_ed
         if be is None:
             return
         be.move(d)
         self.blk_slot = 0          # a new selection resets the slot highlight
-        self._blk_reveal()
 
     def _blk_a(self):
         """The A/primary action in the outline: open the insert menu on a `+` row,
@@ -443,7 +422,6 @@ class BlockEditorUI:
             if be.at_insert():
                 if be.complete_move():
                     self.blk_slot = 0
-                    self._blk_reveal()
                     self.blk_status = "MOVED"
                 else:
                     self.blk_status = "CAN'T MOVE THERE"
@@ -513,12 +491,10 @@ class BlockEditorUI:
         elif item == _ACT_DUP:
             if be.duplicate() is not None:
                 self.blk_slot = 0
-                self._blk_reveal()
                 self.blk_status = "DUPLICATED"
         elif item == _ACT_PASTE:
             if be.paste() is not None:
                 self.blk_slot = 0
-                self._blk_reveal()
                 self.blk_status = "PASTED"
             else:
                 self.blk_status = "CAN'T PASTE HERE"
@@ -534,7 +510,6 @@ class BlockEditorUI:
         self.blk_menu = None
         if be.undo():
             self.blk_slot = 0
-            self._blk_reveal()
             self.blk_status = "UNDO"
         else:
             self.blk_status = "NOTHING TO UNDO"
@@ -547,7 +522,6 @@ class BlockEditorUI:
         self.blk_menu = None
         if be.redo():
             self.blk_slot = 0
-            self._blk_reveal()
             self.blk_status = "REDO"
         else:
             self.blk_status = "NOTHING TO REDO"
@@ -673,7 +647,6 @@ class BlockEditorUI:
         be.insert_block(type_id)
         self.blk_slot = 0
         self.blk_menu = None
-        self._blk_reveal()
 
     # -- custom blocks (#48: My Blocks / procedures) -------------------------
     def _blk_insert_call(self, name):
@@ -683,7 +656,6 @@ class BlockEditorUI:
             be.insert_call(name)
         self.blk_slot = 0
         self.blk_menu = None
-        self._blk_reveal()
 
     def _blk_new_proc(self):
         """Create a fresh custom block and open the name prompt so the kid names it
@@ -694,7 +666,6 @@ class BlockEditorUI:
             return
         pd = be.new_proc("block")
         self.blk_menu = None
-        self._blk_reveal()
         self._blk_open_kbd("proc", var=_blocks_mod.proc_name(pd), proc=pd,
                            slot_target=None)
 
@@ -729,7 +700,6 @@ class BlockEditorUI:
         elif item == _PROC_DEL:
             if be.delete_proc(pd):
                 self.blk_slot = 0
-                self._blk_reveal()
                 self.blk_status = "BLOCK DELETED"
 
     # -- slot editors --------------------------------------------------------
@@ -792,7 +762,7 @@ class BlockEditorUI:
         entry.open(text, seed, guard=True)
         host = _ui_draw.AppHost()
         host.key = seed                # the byte that opened it types nothing
-        host.held = self._rows.ok
+        host.held = self._hold.ok
         self._kbd_gen += 1
         fields["gen"] = self._kbd_gen
         fields["kind"] = kind
@@ -1161,7 +1131,7 @@ class BlockEditorUI:
         if i.pressed("a"):
             self._blk_a()
             if self.blk_kbd is not None and not moved:
-                self._held.opened(ws)            # a slot's prompt over the page as it was
+                self._hold.opened(ws)            # a slot's prompt over the page as it was
         elif i.pressed("run"):
             self.save_blocks()
         else:
@@ -1188,97 +1158,47 @@ class BlockEditorUI:
                     and not isinstance(cur, bool):
                 self._blk_bump_number(b, slot["name"], -1)
 
-    def _outline_drag(self, px, py):
-        """A held vertical drag on the outline scrolls it one row per row-height
-        of travel (the Settings-rows drag contract: must start on the rows, may
-        continue past the edge). Keyboard nav re-clamps around the cursor as
-        before -- the drag just moves the window."""
-        ws = self.ws
-        lay = self.block_layout
-        be = self.blocks_ed
-        if not ws.pointer.down or be is None or self.blk_kbd is not None \
-                or self.blk_menu is not None:
-            self._dragv = None
-            return
-        if self._dragv is None:
-            area = (lay.x0, lay.y0, lay.outline_w, lay.rows * lay.row_h)
-            if len(be.rows) <= lay.rows or not _in(px, py, area):
-                return
-            self._dragv = py
-            return
-        was = self.blk_top
-        self._dragv, self.blk_top = _ui_draw.row_drag(
-            self._dragv, py, max(1, lay.row_h), self.blk_top,
-            max(0, len(be.rows) - lay.rows))
-        if self.blk_top != was:
-            ws._dirty = True
-
     def _blocks_pointer(self, px, py, click):
-        """A pointer sample on the tab, in SYSTEM coords: the outline's taps
-        and drags are this method's and a prompt's taps its own; the rest
-        are the page's verbs (the bar's first)."""
+        """A pointer sample on the tab, in SYSTEM coords: a prompt's taps
+        are its own; the rest are the page's verbs (the bar's first), the
+        outline's drag and fling its table's and its taps `_blk_tap_row`."""
         ws = self.ws
-        lay = self.block_layout
-        # A press the page took stays the page's until its release, wherever
-        # the finger goes: a release it never saw would hold its tap for good.
-        page = self._page
-        held = page is not None and page.host.hold
-        if (self.blk_kbd is None
-                and (self.blk_menu is not None or held
-                     or not _in(px, py, lay.area()) and self._dragv is None)):
-            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
-                return
-            if self.page().point(px, py, click, ws.pointer.down):
-                ws._dirty = True
-            return
         if self.blk_kbd is not None:
             if self.blk_kbd["host"].point(px, py, click, ws.pointer.down):
                 ws._dirty = True
             return
-        self._outline_drag(px, py)         # held drag scrolls the outline
-        if not click:
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return
-        if ws.bar_layer.handle_bar_tap("menu", px, py):
-            return
+        if self.page().point(px, py, click, ws.pointer.down):
+            ws._dirty = True
+
+    def _blk_tap_row(self, ridx, px, again):
+        """A tap on outline row `ridx` at x `px` (the page's table answers
+        it): a first selects the row and the slot tapped, so the next tap
+        edits that argument; `again`, a tap on the selected row, acts on it
+        (insert / edit) -- the A action. While a block moves, a tap re-homes
+        the cursor, and on an insert point drops the block there."""
         be = self.blocks_ed
-        if be is None:
+        lay = self.block_layout
+        if be is None or not 0 <= ridx < len(be.rows):
             return
-        # Tap a row in the outline: select it (and on a block, advance the slot
-        # highlight / open the insert menu on a `+` row -- a tap == the A action).
-        if _in(px, py, lay.area()):
-            ridx = self.blk_top + (py - lay.y0) // lay.row_h
-            if 0 <= ridx < len(be.rows):
-                if be.moving():
-                    # MOVE mode (#93): a single tap on an insert point drops the block
-                    # there; a tap on a block just re-homes the cursor.
-                    be.cur = ridx
-                    self.blk_slot = 0
-                    self._blk_reveal()
-                    if be.rows[ridx].kind == "insert":
-                        self._blk_a()
-                elif ridx == be.cur:
-                    # Second tap: edit the tapped slot directly (tap the 2nd arg to
-                    # edit the 2nd arg), Scratch-style -- fall back to the highlighted
-                    # slot when the tap missed a value (e.g. on the block's name).
-                    row = be.rows[ridx]
-                    if row.kind == "block" and not row.is_else:
-                        row_x = lay.x0 + row.depth * lay.indent
-                        si = self._blk_slot_at_x(row.block, row_x, px)
-                        if si is not None:
-                            self.blk_slot = si
-                    self._blk_a()                # a second tap acts (insert / edit)
-                else:
-                    # First tap: select the block AND highlight whichever slot was
-                    # tapped, so the very next tap edits that argument.
-                    be.cur = ridx
-                    self.blk_slot = 0
-                    row = be.rows[ridx]
-                    if row.kind == "block" and not row.is_else:
-                        row_x = lay.x0 + row.depth * lay.indent
-                        si = self._blk_slot_at_x(row.block, row_x, px)
-                        if si is not None:
-                            self.blk_slot = si
-                    self._blk_reveal()
+        row = be.rows[ridx]
+        if be.moving():
+            be.cur = ridx
+            self.blk_slot = 0
+            if row.kind == "insert":
+                self._blk_a()
+            return
+        if not again:
+            be.cur = ridx
+            self.blk_slot = 0
+        if row.kind == "block" and not row.is_else:
+            si = self._blk_slot_at_x(row.block, lay.x0 + row.depth * lay.indent, px)
+            if si is not None:
+                self.blk_slot = si
+        if again:
+            self._blk_a()
+        self.ws._dirty = True
 
     def _blk_num_to_block(self):
         """From the number pad, switch to dropping a reporter BLOCK into the slot
@@ -1299,33 +1219,25 @@ class BlockEditorUI:
         rect, the bar's strip, and an entry prompt over them."""
         ws = self.ws
         k = self.blk_kbd
-        held = self._held
+        hold = self._hold
         if k is not None and self._page is not None:
             self._page.forget()             # a prompt over the page: the next frame draws it whole
-        if k is None:
-            if held.key is not None:
-                held.drop()
-        elif self.prompt_rows(dt):
+        if k is not None and self.prompt_rows(dt):
             return
-        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(k), dt):
+        how = hold.under(ws, None if k is None else self._held_key(k), self._page_rect(), dt)
+        if how == _ui_draw.HOLD_PUT:
             ws.bar_layer._draw_status_strip("menu")
             self._draw_blk_kbd(True, dt)
-            held.note()
+            hold.note()
             return
-        if k is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
-            if self.vouch:
-                _ui_draw.window_frame(self.vouch)
-            try:
-                self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
-            finally:
-                if self.vouch:
-                    _ui_draw.window_frame(0)
+        if how == _ui_draw.HOLD_DRAW:
+            self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
         ws.bar_layer._draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)
-            held.note()
+            hold.note()
         else:
-            held.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
+            hold.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
 
     def prompt_host(self):
         """The open prompt's host (`ui_draw.AppHost`), None where none is up."""
@@ -1336,25 +1248,17 @@ class BlockEditorUI:
         """Begin the open prompt's frame ahead of the page under it, once a
         painted frame: where it is a dialog's rows frame (its field typed
         into, its focus moved, the page held as the frames before left it:
-        `ui_draw.DialogRows`), draw the prompt's changed rows alone and
+        `ui_draw.Hold.rows_frame`), draw the prompt's changed rows alone and
         answer True; else the frame draws the page and the prompt as ever."""
         k = self.blk_kbd
-        if k is None:
-            return False
         ws = self.ws
-        rows = self._rows
-        if rows.begun == _ui_draw.painted():
-            return False
-        self._held.ask(ws, ws.sys_canvas, self._held_key(k), dt)
-        lay = self.block_layout
-        rows.gen(k["gen"])
-        if not rows.begin(k["host"], ws.sys_canvas, ws.theme_colors,
-                          (lay.cx, lay.cy, lay.cw, lay.ch),
-                          _layout_base.metric_class() == _layout_base.DESK):
+        if k is None or not self._hold.rows_frame(
+                ws, self._held_key(k), k["gen"], k["host"], self._page_rect(),
+                _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
         ws.bar_layer._draw_status_strip("menu")
         self._draw_blk_kbd(True, dt)
-        self._held.note()
+        self._hold.note()
         return True
 
     def _page_rect(self):
@@ -1375,7 +1279,7 @@ class BlockEditorUI:
         digit pad; the T-Deck's keys are its hint strip's, where a touch
         glass and the desk add Cancel and OK. On the SYSTEM canvas: the
         game canvas is a hidden buffer on a bigger glass (#85/#93). `held`:
-        the page under it was put back washed (`HeldPage`), else it was
+        the page under it was put back washed (`ui_draw.Hold`), else it was
         drawn this frame and is washed and held here."""
         ws = self.ws
         k = self.blk_kbd
@@ -1384,17 +1288,14 @@ class BlockEditorUI:
         host = k["host"]
         desk = _layout_base.metric_class() == _layout_base.DESK
         lay = self.block_layout
-        if self._rows.take():
-            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
-        else:
-            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        self._hold.dialog(host, ws.sys_canvas, ws.theme_colors, self._page_rect(), desk)
         num = kind == "num"
         to_block = num and k.get("allow_block")
         keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
                 + ("cancel", "Cancel"))
         _strip(ws, lay, keys, desk)
         if not held:
-            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
+            self._hold.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
                             self._page is None or self._page.host.still(), dt)
         tdeck = _ui.input_kind() == "tdeck"
         o = k.get("o")

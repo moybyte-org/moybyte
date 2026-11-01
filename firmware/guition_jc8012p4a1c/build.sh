@@ -47,6 +47,10 @@ moybyte_setup_idf esp32p4 \
 #     bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
 moybyte_patch_p4_dsi_underrun
 
+# 2a') The P4 SRM macro-block-order bypass (shared lib, both P4 boards): the
+#     DIG-734 deadlock this board's rotated present hit (the lib says why).
+moybyte_patch_p4_ppa_srm_mb_order
+
 # 2b) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.
 moybyte_idf_component esp_lcd

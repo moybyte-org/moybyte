@@ -125,6 +125,83 @@ def test_the_symbol_palette_types_the_keys_the_keyboard_lacks(tmp_path):
     assert con.ed.text() == con._symbols()[0]
 
 
+def test_the_log_is_a_text_view_that_scrolls_back_and_coasts(tmp_path):
+    """The log draws through `ui.text_view`: it starts at its foot, a drag
+    scrolls it back by pixels and its release coasts on, and it stays where
+    it was left while no rows come."""
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    con = _run(ws, "many.py", "for i in range(60):\n    print('row %d' % i)\n"
+                              "def _update(dt):\n    input('> ')\n")
+    _frame(ws, 4)
+    cx, top, _cw, _ch = ws.app_content_rect()
+    x, y = cx + 40, top + 24
+
+    def first():
+        return ui_draw.text_at(con._host, "log", x, y)[0]
+
+    foot = first()
+    assert foot > 30, "the log does not start at its foot"
+    con._pointer(x, y, True, True)
+    _frame(ws)
+    for k in range(1, 9):
+        con._pointer(x, y + 14 * k, False, True)
+        _frame(ws)
+    con._pointer(x, y + 112, False, False)
+    _frame(ws)
+    let_go = first()
+    assert let_go < foot, "the drag did not scroll the log back"
+    _frame(ws, 3)
+    assert first() < let_go, "the release did not coast"
+    _frame(ws, 60)
+    held = first()
+    _frame(ws, 4)
+    assert first() == held
+
+
+def test_the_windowed_log_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch):
+    """On the desk tier the console is the player's window: a finger
+    dragged down its log through the WM's pointer scrolls it back, and the
+    release coasts on frames no input brings, each painted by the gate."""
+    import sys
+    from runtime import host_app
+    from ws_helpers import build_desktop_ws
+    now = [100000]
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if "/runtime/" in f and hasattr(mod, "_ticks_ms"):
+            monkeypatch.setattr(mod, "_ticks_ms", lambda: now[0])
+    ws = build_desktop_ws(tmp_path)
+    con = _run(ws, "many.py", "for i in range(80):\n    print('row %d' % i)\n"
+                              "def _update(dt):\n    input('> ')\n")
+    drv = host_app.ConsoleDriver(ws)
+
+    def frame():
+        now[0] += 33
+        k = ws._frames_drawn
+        drv.frame(DT)
+        return ws._frames_drawn != k
+
+    for _ in range(6):
+        frame()
+    win = ws.wm._wins[ws.wm._order[-1]]
+    foot = con.top
+    assert foot > 30, "the log does not start at its foot"
+    x, y = win.x + win.w // 2, win.y + win.title_h + 60
+    drv.touch(x, y)
+    frame()
+    for k in range(1, 7):
+        drv.touch_drag(x, y + 40 * k)
+        frame()
+    drv.touch_up()
+    frame()
+    let_go = con.top
+    assert let_go < foot, "the drag did not scroll the log back"
+    painted = [frame() for _ in range(4)]
+    assert con.top < let_go, "the release did not coast"
+    assert all(painted), painted
+
+
 def test_the_x_exits_and_flushes_nothing(tmp_path):
     """A script has no document, so leaving writes nothing: the exit is the
     OS bar's X (a script is tool-shaped), and the vault is untouched."""

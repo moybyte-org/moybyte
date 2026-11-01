@@ -26,6 +26,7 @@ typedef struct {
 
 static glass_t G;
 static uint16_t s_block[MOY_CANVAS_BLOCK];   // the theme's block, wire order
+static uint16_t s_nowhere[1];                // where a canvas whose row went draws
 
 int moy_glass_ready(void) {
     return G.bufs != NULL;
@@ -295,11 +296,33 @@ int moy_buf_set_holder(uint32_t h, uint32_t holder) {
     return MOY_GLASS_OK;
 }
 
+// Every canvas pointed at BUF row `h` draws nowhere from now on: the row's
+// pixels go back to the allocator or the pool, and the pool lends them to the
+// next buffer of their size. One pixel of capacity clips every draw away, as
+// a released layer's canvas does (device_canvas._NO_PIXELS).
+static void unpoint(uint32_t h) {
+    if (G.canvases == NULL) {
+        return;
+    }
+    for (uint32_t s = 0; s < moy_htab_slots(G.canvases); s++) {
+        if (!moy_htab_live(G.canvases, s)) {
+            continue;
+        }
+        moy_canvas_row_t *c = moy_htab_row(G.canvases, s);
+        if (c->buf == h) {
+            c->px = s_nowhere;
+            c->cap = 1u;
+            c->buf = 0u;
+        }
+    }
+}
+
 int moy_buf_release(uint32_t h) {
     moy_buf_row_t *r;
     if (moy_buf_get(h, &r) != MOY_HTAB_OK || r->role == MOY_ROLE_POOL) {
         return MOY_GLASS_STALE;
     }
+    unpoint(h);
     if (r->owner != 0u) {
         moy_owner_row_t *o;
         if (moy_owner_get(r->owner, &o) == MOY_HTAB_OK && o->loans) {

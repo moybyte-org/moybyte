@@ -4,7 +4,7 @@ The gap was the tracker's last unchecked box ("Multi-file editing (holds one
 `cart["src"]` buffer only)"), and SPEC.md 4's `sources` is what made it bite: a
 PICO-8 port arrives as `p8.lua`, `main.lua` and one file per PICO-8 tab, so two
 thirds of the code a person opens the cart to read was reachable only through
-the Config tab's ADVANCED row -- which opens a file in the shell's TEXT handle,
+the Config tab's Files -- which opens a file in the shell's TEXT handle,
 where there is no PLAY, no journal and no crash-to-code. A crash reported at
 `p8.lua:412:` threw the kid at a tab that could not show line 412.
 
@@ -318,7 +318,7 @@ def test_the_scripts_menu_lists_each_script_and_its_size(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# NEW SCRIPT: the one door that adds a file (Config -> ADVANCED)
+# NEW SCRIPT: the one door that adds a file (Config -> Files)
 # ---------------------------------------------------------------------------
 
 def test_add_source_creates_the_file_and_lists_it_after_the_rest(tmp_path):
@@ -407,7 +407,7 @@ def test_new_script_refuses_a_taken_name_and_an_unusable_one(tmp_path):
 
 def test_a_projects_own_script_routes_to_the_code_tab_not_the_text_handle(
         tmp_path):
-    """The ADVANCED row's router (docs/text_editing_2026-09.md step 5) sent any
+    """The Config tab's Files router (docs/text_editing_2026-09.md step 5) sent any
     non-main file through the text handle. A cart's own SCRIPT belongs on the
     Code tab now -- that is where PLAY, the journal and crash-to-code are."""
     ws = _ws_with(tmp_path, _multi(tmp_path))

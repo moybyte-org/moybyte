@@ -1,14 +1,16 @@
-"""The TextView (native/moy_ui/moy_ui_text.h; docs/scroll_and_text_2026-10.md
-§5): the Code tab's and theme Config's rows drawn in C, one call a frame,
-and only the rows that changed.
+"""The text view (native/moy_ui/moy_ui_text.h, `ui.text_view`;
+docs/scroll_and_text_2026-10.md §5): the Code tab's and theme Config's rows,
+the desk's made code and an app's terminal, drawn in C through the verb, and
+only the rows that changed.
 
-Each session runs on two consoles fed the same input: one as it ships, and
-one whose Code tab draws its rows as the Python did before they crossed into
-C (`tests/text_twin.py`), whole, every frame -- on one, two and three buffers
-presented in turn as a board's are. Every presented picture of the first is
-held to the second's bytes, so the C is the Python's pixel for pixel and
-every rows and shift frame is a whole repaint's; the share of floor frames
-is held above a floor, so the mechanism cannot silently stop."""
+Each Code session runs on two consoles fed the same input: one as it ships,
+and one whose Code tab draws every frame whole (its host never shifts) -- on
+one, two and three buffers presented in turn as a board's are. Every
+presented picture of the first is held to the second's bytes, so every rows
+and shift frame is a whole repaint's; the share of floor frames is held
+above a floor, so the mechanism cannot silently stop. The C's colour runs
+are held to the Python highlighter's (`tests/text_twin.py`), and the Code
+tab's pixels at rest to the goldens (tests/test_shell_goldens.py)."""
 
 import re
 from pathlib import Path
@@ -16,37 +18,40 @@ from pathlib import Path
 import pytest
 
 import text_twin
-from runtime import code_layer, host_app, moy_input, ui, ui_draw
+from runtime import appearance, code_layer, host_app, moy_input, ui, ui_draw
 from ws_helpers import no_unlock_banner, quiesce
 
 _C = ui_draw._C
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_the_view_words_are_the_headers():
-    """ui_draw's TV_* and the binding's are moy_ui_text.h's MOY_UI_TV_*."""
-    src = (ROOT / "native" / "moy_ui" / "moy_ui_text.h").read_text()
-    body = src[src.index("MOY_UI_TV_X = 0"):src.index("MOY_UI_TV_LEN")]
-    names = []
-    for n in re.findall(r"MOY_UI_TV_([A-Z0-9_]+)", body):
-        if n not in names:
-            names.append(n)
-    tones = ui_draw.TT_N
-    assert "MOY_UI_TT_DIM, MOY_UI_TT_N" in src and src.count("MOY_UI_TT_") > tones
-    want = []
-    for n in names:
-        if n == "KEY":
-            break
-        want.append(n)
-    assert want[-1] == "TONE0"
-    assert [getattr(ui_draw, "TV_" + n) for n in want] == list(range(len(want)))
-    rest = names[names.index("KEY"):]
-    assert [getattr(ui_draw, "TV_" + n) for n in rest] == list(
-        range(ui_draw.TV_TONE0 + tones, ui_draw.TV_TONE0 + tones + len(rest)))
-    assert ui_draw.TV_LEN == ui_draw.TV_TONE0 + tones + len(rest)
+def test_the_options_are_the_headers():
+    """ui.text_view's options and the host binding's defaults are
+    moy_ui_api.h's MOY_UI_TXO_*."""
+    src = (ROOT / "native" / "moy_ui" / "moy_ui_api.h").read_text()
+    body = src[src.index("MOY_UI_TXO_ROWS = 0"):src.index("MOY_UI_TXO_LEN")]
+    names = re.findall(r"MOY_UI_TXO_([A-Z0-9_]+)", body)
     from tools import moy_ui_binding
-    assert (moy_ui_binding._TV_TOP, moy_ui_binding._TV_LINES) == (ui_draw.TV_TOP,
-                                                                  ui_draw.TV_LINES)
+    assert len(names) == moy_ui_binding._TXO_LEN == len(ui._TXO)
+    words = re.search(r"#define MOY_UI_TXO_DEFAULTS \{([^}]*)\}", src).group(1).split(",")
+    want = tuple(ui_draw.SYN_SGR if w.strip() == "MOY_UI_SYN_SGR" else int(w) for w in words)
+    assert want == moy_ui_binding._TXO_DEFAULTS
+
+
+def test_the_syntaxes_are_named_alike_in_every_face():
+    """A syntax's name is its MOY_UI_SYN_* number's place among the names,
+    in the Python face, the Lua face and ui_draw's table alike."""
+    head = (ROOT / "native" / "moy_ui" / "moy_ui_text.h").read_text()
+    body = head[head.index("MOY_UI_SYN_NONE = 0"):head.index("MOY_UI_SYN_N\n")]
+    syns = re.findall(r"MOY_UI_SYN_([A-Z]+)", body)
+    lua = (ROOT / "native" / "moycore" / "moycore_ui.h").read_text()
+    names = re.search(r"syn\[\] = \{([^}]*)\}", lua).group(1)
+    names = tuple(n.strip().strip('"') for n in names.split(","))
+    assert names == ui._SYNTAXES
+    assert len(names) == len(syns)
+    for i, name in enumerate(names[1:], 1):
+        assert syns[i] == name.upper()
+        assert ui_draw.SYNTAX[name] == i
 
 
 # -- the runs ------------------------------------------------------------------------
@@ -107,6 +112,71 @@ def test_sgr_escapes_take_no_column():
     assert [(r[2], r[3]) for r in runs] == [(0, 0), (1, 7), (4, 0), (6, 2)]
 
 
+def _md_runs(line):
+    """The C's Markdown runs as (text, tone name)."""
+    w = _C.text_runs(line, ui_draw.SYN_MARKDOWN)
+    b = line.encode()
+    names = ("text", "keyword", "string", "number", "comment", "builtin")
+    return [(b[w[k]:w[k + 1]].decode(), names[w[k + 3]]) for k in range(0, len(w), 4)]
+
+
+def test_the_markdown_runs_colour_a_notes_marks():
+    """A note's source, coloured as Code colours a program: its marks dim
+    (the comment's tone), a heading's words in the number's, a task's open
+    box in the keyword's (the seed themes' accent) and a ticked one in the
+    string's with its words dim, a link's name in the builtin's (their
+    blue). Each run is the line's own, read with nothing past it."""
+    want = {
+        "## Plan [[x]]": [("##", "comment"), (" Plan [[x]]", "number")],
+        "#": [("#", "comment")],
+        "#hashtag": [("#hashtag", "text")],
+        "####### seven": [("####### seven", "text")],
+        "- [ ] buy [[Milk]]": [("- ", "comment"), ("[ ]", "keyword"), (" buy ", "text"),
+                               ("[[", "comment"), ("Milk", "builtin"), ("]]", "comment")],
+        "  * [x] done **now**": [("  ", "text"), ("* ", "comment"), ("[x]", "string"),
+                                 (" done **now**", "comment")],
+        "- [X]": [("- ", "comment"), ("[X]", "string")],
+        "- [y] odd": [("- ", "comment"), ("[y] odd", "text")],
+        "12. step `x = 1` **b**": [("12. ", "comment"), ("step ", "text"), ("`", "comment"),
+                                   ("x = 1", "text"), ("`", "comment"), (" ", "text"),
+                                   ("**", "comment"), ("b", "text"), ("**", "comment")],
+        "> quote - no": [("> ", "comment"), ("quote - no", "text")],
+        "---": [("---", "comment")],
+        "* * *": [("* * *", "comment")],
+        "see [[open": [("see ", "text"), ("[[", "comment"), ("open", "builtin")],
+        "a `b": [("a ", "text"), ("`", "comment"), ("b", "text")],
+        "é [[ü]]": [("é ", "text"), ("[[", "comment"), ("ü", "builtin"), ("]]", "comment")],
+        "-x and 1.5": [("-x and 1.5", "text")],
+        "": [],
+    }
+    for line, runs in want.items():
+        assert _md_runs(line) == runs, line
+    # a wrapped row's runs are its line's up to the row's end
+    line = "- [ ] call [[Ana]] today"
+    whole = _md_runs(line)
+    for end in range(len(line) + 1):
+        part = _md_runs(line[:end])
+        got = "".join(t for t, _ in part)
+        assert got == line[:end]
+        for (t, tone), (wt, wtone) in zip(part[:-1], whole):
+            assert (t, tone) == (wt, wtone), line[:end]
+
+
+def test_a_note_draws_at_15_px_on_the_desk_alone(tmp_path):
+    """The note's face (`Appearance.note_font`, a text view's `font`): the
+    mono family's 15 px regular on the desk, the mono role's own (0) on the
+    handheld; the desk's Code keeps the mono role."""
+    desk = _console(tmp_path / "desk", True)
+    fid = desk.look.note_font()
+    assert fid and fid != ui_draw.font("mono")[0]
+    assert ui_draw.font_info(fid)[0] > ui_draw.font("mono")[1]
+    names = {v: k[1] for k, v in appearance._FONTS.items()}
+    assert names[fid] == "jbmono-15-400-4.fnt"
+    assert names[ui_draw.font("mono")[0]] == "jbmono-11-400-2.fnt"
+    hand = _console(tmp_path / "hand", False)
+    assert hand.look.note_font() == 0
+
+
 # -- two consoles, one drawing the Python's whole ------------------------------------
 
 def _console(tmp_path, windowed):
@@ -124,16 +194,22 @@ def _console(tmp_path, windowed):
     return ws
 
 
+def _whole(host):
+    """`host`'s frames draw whole: it never plans a shift or rows frame."""
+    def shift(_cv, _th):
+        host.shifting = False
+    host._shift = shift
+
+
 class Pair:
     """The session on both consoles, frame by frame: `a` as it ships, `b`
-    drawing the Code tab's rows as the Python did, whole; `a`'s buffers
-    presented in turn."""
+    drawing the Code tab's rows whole; `a`'s buffers presented in turn."""
 
     def __init__(self, tmp_path, bufs, windowed):
         self.a = _console(tmp_path / "ships", windowed)
-        self.b = _console(tmp_path / "python", windowed)
-        text_twin.install(self.b.code_layer)
-        text_twin.install(self.b.theme_config_layer)
+        self.b = _console(tmp_path / "whole", windowed)
+        _whole(self.b.code_layer._host)
+        _whole(self.b.theme_config_layer._host)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -158,7 +234,7 @@ class Pair:
                     ws._dirty = True
                 ws.pointer.visible = False
                 k = ws._frames_drawn
-                ws.code_layer.text_kind = ws.theme_config_layer.text_kind = None
+                ws.code_layer._host.shifting = ws.theme_config_layer._host.shifting = False
                 drv.frame(1 / 30)
                 ws.painted = ws._frames_drawn != k
             a, b = self.a, self.b
@@ -166,14 +242,14 @@ class Pair:
             if not a.painted:
                 continue
             self.n += 1
-            self.kinds.append(a.code_layer.text_kind or a.theme_config_layer.text_kind)
+            self.kinds.append(a.code_layer._host.shifting or a.theme_config_layer._host.shifting)
             ra = self.root(a)
             shot, want = bytes(ra._buf), bytes(self.root(b)._buf)
             if shot != want:
                 w = ra.w
                 at = next(i for i in range(0, len(shot), 2) if shot[i:i + 2] != want[i:i + 2]) // 2
-                raise AssertionError("frame %d (%s, %d buffers) differs from the Python's at "
-                                     "(%d, %d)" % (self.n, a.code_layer.text_kind, self.bufs,
+                raise AssertionError("frame %d (%s, %d buffers) differs from a whole draw at "
+                                     "(%d, %d)" % (self.n, self.kinds[-1], self.bufs,
                                                    at % w, at // w))
             self.held.append(shot)
             if self.bufs > 1:
@@ -206,7 +282,7 @@ class Pair:
         self.frame(2)
 
     def floors(self):
-        return sum(1 for k in self.kinds if k in ("rows", "shift"))
+        return sum(1 for k in self.kinds if k)
 
 
 _BS = 8
@@ -224,6 +300,28 @@ def _code(p, title="Star Catcher"):
     p.frame(6, force=True)
 
 
+def _fling(p):
+    """A finger dragged up the code and let go: the view follows it by
+    pixels and coasts on after the release; a key brings the caret back."""
+    a = p.a.editor
+    lay = p.a.code_layout
+    x, y = lay.x0 + 60, lay.y0 + 8 * lay.lh
+    top = a.top
+    p.both("touch", x, y)
+    p.frame()
+    for k in range(1, 7):
+        p.both("touch_drag", x, y - k * lay.lh)
+        p.frame()
+    p.both("touch_up")
+    p.frame()
+    let_go = a.top
+    assert let_go > top, "the drag did not scroll the code"
+    p.frame(4)
+    assert a.top > let_go, "the release did not coast"
+    p.frame(40)
+    p.key(moy_input.KEY_DOWN)                   # the caret, out of view, brings it back
+
+
 def _session(p):
     """Typing, caret moves, a held key, a selection and a paste, a long
     line scrolled across, find past the view, completion and the crash
@@ -237,6 +335,8 @@ def _session(p):
     p.key(moy_input.KEY_LEFT)
     p.held_key(moy_input.KEY_DOWN, 30)          # a held key: the view scrolls
     p.held_key(moy_input.KEY_UP, 12)
+    if not p.windowed:
+        _fling(p)                               # a drag scrolls, its release coasts
     p.held_key(_BS, 10)                         # Backspace held
     p.key(moy_input.KEY_DOWN, mods=moy_input.SHIFT)     # a selection
     p.key(moy_input.KEY_DOWN, mods=moy_input.SHIFT)
@@ -291,6 +391,90 @@ def test_the_code_tab_draws_the_pythons_pixels(tmp_path, bufs, windowed):
     p = Pair(tmp_path, bufs, windowed)
     _session(p)
     assert p.floors() >= 0.6 * len(p.kinds), p.kinds
+
+
+@pytest.mark.parametrize("windowed", (False, True))
+def test_a_key_step_past_the_foot_lands_as_one_shift(tmp_path, windowed):
+    """The editor's top, moved by a key past the view's foot, lands in the
+    key's own frame as a shift (`ui_draw.text_aim` before the
+    frame begins): no glide frames follow it, and it draws the Python's
+    pixels."""
+    p = Pair(tmp_path, 2, windowed)
+    _code(p)
+    a = p.a.editor
+    p.run("ws.editor.row = ws.editor.top + ws.editor.ROWS - 1; ws.mark_dirty()")
+    p.frame(4)
+    top = a.top
+    p.both("key_down", moy_input.KEY_DOWN, 0)
+    p.frame()
+    landed = a.top
+    assert landed > top, "the key's frame did not show the caret's line"
+    assert p.kinds[-1], "the key's frame drew whole"
+    assert p.a.code_layer._host.still(), "the view glides on after the key"
+    p.both("key_up", moy_input.KEY_DOWN, 0)
+    p.frame(2)
+    assert a.top == landed
+
+
+def test_a_held_keys_steps_draw_each_row_once(tmp_path):
+    """A held key's steps past the foot: each frame's floor is the row the
+    move uncovered and the rows the caret left and entered, in touching
+    pieces. The view grounds them under one fill and lays out a row that
+    crosses from one piece into the next once (it was a row twice and a
+    page ground under the view's own: 16 fills and up to 21 texts a frame).
+    A dearer step needs a reason before this budget moves."""
+    p = Pair(tmp_path, 1, False)
+    _code(p)
+    p.run("ws.editor.row = ws.editor.top + ws.editor.ROWS - 1; ws.mark_dirty()")
+    p.frame(4)
+    cv = p.root(p.a)
+    got = []
+    for _ in range(10):
+        cv.gate_counts_reset()
+        p.both("key_down", moy_input.KEY_DOWN, 0)
+        p.frame()
+        assert p.kinds[-1], "the step's frame drew whole"
+        got.append(tuple(cv.gate_counts()[:2]))
+        p.both("key_up", moy_input.KEY_DOWN, 0)
+        p.frame()
+    budget = [(9, 10), (9, 14), (9, 14), (9, 16), (9, 16), (9, 14), (9, 12), (9, 10), (9, 10),
+              (9, 9)]
+    over = [(i, g, b) for i, (g, b) in enumerate(zip(got, budget)) if g[0] > b[0] or g[1] > b[1]]
+    assert not over, "steps drew more (fills, texts) than their budget: %r" % (over,)
+
+
+@pytest.mark.parametrize("bufs", (2, 3))
+def test_a_whole_frame_mid_drag_leaves_each_buffer_one_catch_up(tmp_path, bufs):
+    """On the desk, a frame that draws the Editor whole mid-drag (here the
+    pane's own key moved) leaves the buffers behind it lagging the whole
+    desk. Each catches up in a whole frame that changed the pane alone, and
+    the pane's frames are its own again: one whole frame never becomes a
+    gesture of them. The code moves its rows on every frame after the one
+    whose key moved, the catch-ups too."""
+    p = Pair(tmp_path, bufs, True)
+    _code(p)
+    d = p.a.editor_desk
+    whole = []
+    draw = d._draw
+
+    def counted(dt):
+        whole.append(p.n)
+        draw(dt)
+    d._draw = counted
+    cx, cy, cw, ch = p.a.wm._wins["menu"].content_rect()
+    x, y = cx + cw // 5, cy + 3 * ch // 5
+    p.both("touch", x, y)
+    p.frame()
+    p.both("touch_drag", x, y - 20)
+    p.frame()
+    del whole[:]
+    d._surround = p.b.editor_desk._surround = None
+    n = len(p.kinds)
+    for k in range(2, 14):
+        p.both("touch_drag", x, y - 20 * k)
+        p.frame()
+    assert whole == list(range(n, n + bufs)), whole
+    assert not p.kinds[n] and all(p.kinds[n + 1:]), p.kinds[n:]
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
@@ -443,8 +627,9 @@ def test_a_terminal_appends_follows_and_scrolls(th, bufs):
 def test_a_line_added_below_the_view_draws_no_history(th):
     """While the view is scrolled up, a line added below it draws none of the
     history the view shows: the frame's text is the page's title and the
-    input line, drawn every frame outside the region, and the foot's row
-    under the fade, which the rows' growth moved."""
+    input line, drawn every frame outside the region, and the rows under
+    the foot's fade, which the rows' growth moved -- two where the view
+    stands part way down a row, three colour runs each."""
     r = TermRig(th, 1)
     r.app.add(30)
     for _ in range(40):
@@ -460,7 +645,7 @@ def test_a_line_added_below_the_view_draws_no_history(th):
     r.texts.clear()
     r.app.add()
     r.frame()
-    assert r.texts[-1] <= 4, r.texts
+    assert r.texts[-1] <= 2 + 2 * 3, r.texts
 
 
 def _cart_pixels(ws):
@@ -533,21 +718,68 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
     assert py[129][1][1] < py[69][1][1], "the drag did not scroll it back"
 
 
-@pytest.mark.parametrize("first", (0, 7, 95))
-def test_the_desks_read_only_code_draws_the_pythons_pixels(tmp_path, first):
-    """`CodeLayer.draw_lines` (the desk's made code): numbered from the
-    line it starts at, cut at its width, the Python's pixels."""
-    ws = _console(tmp_path, False)
-    ws.open_in_editor([c for c in ws.carts.all if c.get("title") == "Star Catcher"][0])
-    ws.editor_app.set_tab("code")
-    lines = ["v%d = %d  # a line of made code, longer than the rect is wide" % (i, i)
-             for i in range(120)]
-    cv = ws.sys_canvas
-    shots = []
-    for twin in (False, True):
-        if twin:
-            text_twin.install(ws.code_layer)
-        cv.cls(0)
-        rows = ws.code_layer.draw_lines(lines, first, (12, 30, 250, 150))
-        shots.append((rows, bytes(cv._buf)))
-    assert shots[0] == shots[1]
+# -- a note's caret revealed (ui_draw.text_reveal, Notes' EditorHandle.aim) ----------
+
+
+class Note:
+    """A wrapped note on the verb, its caret where the test puts it."""
+
+    def __init__(self):
+        self.lines = ["Line %d of the note, with words enough to wrap past the edge" % i
+                      for i in range(40)]
+        self.caret = (0, 0)
+        self.out = None
+
+    def draw(self, cv):
+        ui.page("Note")
+        self.out = ui.text_view("note", self.lines, {"rows": 8, "wrap": True,
+                                                     "syntax": "plain", "caret": self.caret})
+        ui.end()
+
+
+class NoteRig(TermRig):
+    def __init__(self, th, bufs=1):
+        TermRig.__init__(self, th, bufs)
+        self.app = Note()
+
+    def reveal(self, line, col):
+        got = [ui_draw.text_reveal(h, "note", self.app.lines, line, col)
+               for h in (self.a, self.b)]
+        assert got[0] == got[1]
+        return got[0]
+
+    def ends(self):
+        """The (line, column) the view's top and foot pixel rows show, as
+        its last pass drew it."""
+        got = [ui_draw.text_at(self.a, "note", 40, y) for y in range(240)]
+        shown = [g for g in got if g is not None]
+        return shown[0], shown[-1]
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_caret_revealed_moves_the_view_only_as_far_as_its_row(th, bufs):
+    """A wrapped note's caret, put on a row under the view, brings the view
+    down until that row is its last, as the frame's shift; a caret it shows
+    already moves nothing; a line asked for first (col -1) shows its first
+    row at the top; and a caret above the view brings its row to the top.
+    Every frame is a whole draw's."""
+    r = NoteRig(th, bufs)
+    for _ in range(3):
+        r.frame()
+    assert r.app.out[0] == 0
+    n = len(r.app.lines[4])
+    r.app.caret = (4, n)                # the last row of line 4: just under the view
+    assert r.reveal(4, n)
+    r.frame()
+    assert r.kinds[-1] == "shift", r.kinds
+    top, foot = r.ends()
+    assert foot[0] == 4 and foot[1] > 40, "its row, line 4's second, is the view's last"
+    assert top[0] > 0
+    assert not r.reveal(4, n), "a caret the view shows moves nothing"
+    r.frame()
+    assert r.reveal(20, -1)             # line 20 first
+    r.frame()
+    assert r.ends()[0][0] == 20 and r.ends()[0][1] < 40 and r.app.out[0] == 20
+    assert r.reveal(2, 0)               # a caret above: its row at the top
+    r.frame()
+    assert r.ends()[0][0] == 2 and r.ends()[0][1] < 40

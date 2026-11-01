@@ -35,11 +35,11 @@ The two-domain seam (#39) as it runs on both P4 boards:
 """
 
 try:
-    from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
+    from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp, _IN_PLACE,
                                _ST_N_FILL, _ST_N_TEXT, _room)
     from device_util import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host package lane
-    from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
+    from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp, _IN_PLACE,
                                       _ST_N_FILL, _ST_N_TEXT, _room)
     from device.device_util import _ticks_ms, _ticks_diff
 
@@ -74,10 +74,12 @@ class P4SystemCanvas(SystemCanvas):
             import moy_ppa
             if moy_ppa.init():
                 cls._ppa = moy_ppa
+                _IN_PLACE[0] = getattr(moy_ppa, "shift_in", None)
                 return True
         except Exception as exc:  # noqa: BLE001 -- any failure -> CPU kernel
             print("Moybyte P4 PPA unavailable:", exc)
         cls._ppa = None
+        _IN_PLACE[0] = None
         return False
 
     def __init__(self, comp, font_scale=1):

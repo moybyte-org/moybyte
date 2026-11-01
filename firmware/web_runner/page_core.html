@@ -443,7 +443,7 @@ var pH={};
 // Kept for the browser: what it never delivers (Ctrl+W/T/N, Ctrl+Tab and
 // their Shift twins), and what this page leaves to it (reload, the address
 // bar, the developer tools). The console's key from the page is also a tap on
-// the burger button and Esc during play (the `super` event).
+// the burger button (the `super` event) and Esc during play.
 var MAC=/Mac|iP(hone|ad|od)/.test(navigator.platform||""),MODK={Control:1,Shift:2,Alt:4,Meta:8,OS:8};
 var KC={Enter:13,Backspace:8,Tab:9,Delete:127,ArrowLeft:272,ArrowRight:273,ArrowUp:274,ArrowDown:275};
 // AltGr (a layout's third level: @ on a German Q) is Ctrl+Alt to a browser,
@@ -456,10 +456,11 @@ function kept(e,c){var l=e.key.toLowerCase();if(c==261||c==268)return true;
 return (e.ctrlKey||e.metaKey)&&(l=="r"||l=="l"||(e.shiftKey&&(l=="i"||l=="j")));}
 cv.addEventListener("keydown",function(e){
 if(e.key=="Escape"){
-// In play (INPUT set), Esc is the system key -- the pause menu, the
-// p8-web-player expectation -- since a page rarely sees the Super key; on a
-// system surface it closes and steps back.
-send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
+// The console routes Esc (ConsoleDriver.escape): over a fullscreen game it is
+// the console's key -- the pause menu, the p8-web-player expectation -- since a
+// page rarely sees the Super key; on a system surface it closes and steps back.
+// INPUT is the cart's input HINT, absent on most carts, so it cannot say "in play".
+send({type:"esc"});e.preventDefault();return;}
 if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
 var c=kcode(e);if(c===null||kept(e,c))return;
 if(!e.repeat)send({type:"kd",code:c,mods:kmods(e)});e.preventDefault();});

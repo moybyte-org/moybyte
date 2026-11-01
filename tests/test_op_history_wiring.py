@@ -11,7 +11,7 @@ commit re-baselines the History, so the two never double-count a stroke)."""
 from pathlib import Path
 
 from blocks_helpers import go_to_insert
-from ws_helpers import build_ws_with_cart, select_on_home
+from ws_helpers import build_ws_with_cart, select_on_home, step_card
 from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -511,10 +511,9 @@ def _make_ws_with_config_cart(tmp_path, title="Cfg"):
 
 def test_config_adjust_bar_undo_reverts_field(tmp_path):
     ws = _make_ws_with_config_cart(tmp_path)
-    ws.cards_layer.msel = 0
     assert ws.config.get("spd", 3) == 3
 
-    ws.adjust(1)
+    step_card(ws, 1)
     assert ws.config["spd"] == 4
 
     assert ws.history.undo() is True             # the bar UNDO reverts the field
@@ -528,8 +527,7 @@ def test_config_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_config_cart(tmp_path)
     assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
-    ws.cards_layer.msel = 0
-    ws.adjust(1)
+    step_card(ws, 1)
     assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
     assert ws.history.undo() is True
@@ -540,9 +538,7 @@ def test_config_commit_embeds_ops_in_journal(tmp_path):
     from runtime import moy_journal
     ws = _make_ws_with_config_cart(tmp_path)
     path = ws.cart["path"]
-    ws.cards_layer.msel = 0
-    ws.adjust(1)
-    ws.adjust(1)
+    step_card(ws, 2)
 
     ws._save_config()
 

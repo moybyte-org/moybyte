@@ -163,19 +163,3 @@ def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
     ws.crash_popup = "TypeError: unsupported types for __add__"
     _frame(ws)
     assert counter.n["dialog"] == 0 and ("Stopped",) in opened
-
-
-# ------------------------------------------------------------- the config tab
-
-def _cards_ws(tmp_path, **kw):
-    ws = _editor(tmp_path, "cards", **kw)
-    ws.project.cart["edit"] = [
-        {"key": "lives", "type": "int", "min": 1, "max": 9, "step": 1},
-        {"key": "bg", "type": "choice", "display": "bg-thumbs",
-         "choices": ["night", "stripes", "indigo"]},
-        {"key": "mode", "type": "choice", "display": "choice-icons",
-         "choices": [0, 1], "icons": ["close", "run"]},
-    ]
-    ws.cards_layer.mtop = 0
-    ws.cards_layer.msel = 0
-    return ws

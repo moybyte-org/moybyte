@@ -42,7 +42,7 @@ def test_make_api_base_keyset_identical_and_wifi_is_conditional():
     assert base - with_wifi == set()
 
 
-def test_host_and_device_make_api_keysets_match_except_wifi():
+def test_host_and_device_make_api_keysets_match_except_wifi(monkeypatch):
     # host == device contract: identical base names, and `wifi` injected the same
     # way (only when a non-None backend is passed). Compare the key-sets directly.
     import importlib.util
@@ -58,6 +58,9 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
     fw = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules" / "moy_runtime.py"
+    # its board-only imports (tdeck_input) sit beside it: on the path here, not
+    # by whichever other file happened to put them there first
+    monkeypatch.syspath_prepend(str(fw.parent))
     spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)

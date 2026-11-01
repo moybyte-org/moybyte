@@ -75,8 +75,6 @@ def test_charging_stale_samples_a_zero_delta_kills_the_fling():
 
 
 def test_banked_time_measures_the_true_finger_speed():
-    from runtime import ui_draw
-
     smooth = _region()          # a backend that samples every frame
     smooth.drag_start(500)
     p = 500
@@ -93,7 +91,8 @@ def test_banked_time_measures_the_true_finger_speed():
     # charging one frame's dt to a GAP-frame delta would do.
     assert gappy._vel < smooth._vel * 1.05
     assert gappy._vel > smooth._vel * 0.75
-    assert gappy._vel >= ui_draw.ScrollRegion.MIN_FLING
+    gappy.drag_end()
+    assert gappy.flinging, "its release flings"
 
 
 def test_a_finger_that_really_stops_still_reads_as_a_stop():

@@ -742,7 +742,7 @@ check plus a case per leg of the gate.
 surface-granularity freeze breaks is a surface that animates without
 signalling: it silently stops moving. The 2026-07-27 audit found the feared
 case does not exist here — **both carets, the code editor's and the editor
-handle's, are deliberately SOLID** (`runtime/editor_handle.py` paints its caret
+handle's, are deliberately SOLID** (both are `ui.text_view`'s `caret`, drawn
 unconditionally). A blinking caret added later without a Class B declaration is
 exactly how this freeze breaks.
 
@@ -849,10 +849,10 @@ paints, so a text view moves out of the last buffer only the bands its rows
 frames since drew); and `takes_lag(lag)`, whether this frame's draw
 repaints `lag`, what a direct render's target lags -- where it answers
 False the frame is not rendered straight into the root (the desk Editor's
-prompts draw their rows only into a buffer that lags nothing, and its Code,
-Blocks, Settings, Map and Sound panes repaint a lag inside the focused pane
-alone: a lag beyond it would draw the desk whole and leave the next buffer
-as far behind). The WM asks `HELD` and `takes_lag` before it installs the
+prompts copy a lag inside their pane from the buffer the last frame drew
+into before they draw their rows, and its Code, Blocks, Settings, Map and
+Sound panes repaint a lag inside the focused pane alone: a lag beyond the
+pane would draw the desk whole and leave the next buffer as far behind). The WM asks `HELD` and `takes_lag` before it installs the
 window's layout; a content whose answer depends on its layout answers in
 the one it drew in last (`EditorDesk._drew_in`). A content counts the
 WM's word only when its previous draw was one the WM spoke of too. A
@@ -891,32 +891,39 @@ The desk's console home is a still backdrop under three parts that change:
 the hero with its details pane (the selection), the shelf's band and the
 bar. A full paint draws the backdrop whole; on the P4 that is a third of the
 frame, and a key press on the shelf, a tab switch or a fling's last frame
-paid it because the selection or the tab sat in the statics key the drag
-partial gates on. #66 has the numbers.
+paid it because the selection or the tab sat in the statics key the band
+frame gates on. #66 has the numbers.
 
-**The home keeps §4's per-buffer last-seen for its parts**
-(`LauncherHomeLayer._still_ring`, a `PaintRing` slot a painted frame): the backdrop's
-key, the selection's and the band's, recorded only for a frame whose pixels
-were the home's alone (`content_alone`: no overlay, splash, cursor or owed
-pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
-painted frames before this one all have entries under this frame's backdrop
-key, every buffer holds the backdrop, and a part whose key differs from any
-of theirs lags in the buffer this frame paints: it alone is put back over the
-backdrop and drawn; the bar's strip, outside every such rect, is drawn
-where the buffer's was drawn under another key (the ring keeps the bar's
-`shown_key` beside the parts) or a part put back meets it.
+**The home keeps §4's per-buffer last-seen for its parts** in the
+engine's kept ring, a slot a paint of the band's host (`ui.held`): each
+painted frame whose pixels were the home's alone (`content_alone`: no
+overlay, splash, cursor or owed pill over it, the home on top, nothing
+animating) names the backdrop's key, the selection's, the shelf's, the
+bar's `shown_gen` and the hint strip's there (`_note_still`). Where the
+buffer this frame paints holds this frame's backdrop (the paint
+RETAINED_FRAMES back named it, the paints between the home's, one a
+frame), a part it holds under another key lags: it alone is put back over
+the backdrop and drawn, or copied out of the buffer the last frame painted
+where that frame named it as this one does (`ui.held_last`); the bar's
+strip, outside every such rect, is drawn where the buffer's was drawn
+under another key or a part put back meets it. A frame that paints the
+home otherwise names what it holds the same way (a full paint, the
+retained frame's stamp) or names nothing of it (the band frame, the
+menu's washed frame), and nothing it did not name is held.
 Where it can be had, the backdrop's pixels come from the wallpaper itself
 (`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
-plain fill); a cart wallpaper keeps the drag partial and its band copy.
+plain fill); a cart wallpaper keeps the band frame, which draws the shelf's
+band as an engine table of parts over the band's own ground.
 
 **A change leaves the other buffers lagging, and the home asks for the frames
 that bring them to it** while nothing moves and no press waits (as the
-windowed WM's `debt_owed` does). The retained re-entry frame is captured once
+windowed WM's `debt_owed` does), until every buffer holds every part the
+frame named (`ui.held_all`). The retained re-entry frame is captured once
 every buffer holds the frame, and copies only the parts that moved since the
 frame it holds (`_moved_rects`).
 
 **This is not a second invalidation mechanism.** Whether the home paints is
-still the gate's; the ring only says which of its parts the buffer lacks.
+still the gate's; the kept ring only says which of its parts the buffer lacks.
 Pinned by `tests/test_home_still.py`: a session of key presses, tab switches,
 a drag and a fling, and the buttons' focus, on one, two and three buffers
 presented in turn, the glass's every picture byte-equal to full repaints'.
@@ -928,8 +935,8 @@ change while it stays up; a frame that types into it or moves its focus
 paid the page and its wash anyway, and on the T-Deck the two were most of
 the frame. #66 has the numbers.
 
-**A modal keeps the page under it washed** (`ui_draw.HeldPage`): the first
-frame draws the page and washes it (`HeldPage.wash` over
+**A modal keeps the page under it washed** (`ui_draw.Hold`, one per modal):
+the first frame draws the page and washes it (`Hold.wash` over
 `ui_draw.wash_page`, the toolkit's own rule: the surface less the page's
 hint band at its foot), the wash storing each pixel to the held layer as
 it lands (`moy_shape_shadow_io`) and the rest of the page's rect copied
@@ -940,18 +947,26 @@ function of while the dialog is up — the dialog itself, the canvas, the
 page's rect, the font scale and the look — and only from a frame whose page
 was still (its context owed no frame), with nothing animating, on a canvas
 that retains its pixels and draws into its whole buffer: a pane's viewport
-(the desk Editor's) draws the page every frame. One modal is up at a time,
+(the desk Editor's) draws the page every frame. A modal that can draw
+inside its card's band alone (`Hold.under`'s `left`: the sprite pickers)
+leaves the page and the card's edges as they lie where the buffer holds
+them as the frames before drew them under its key (`HOLD_LEFT`): each of
+the RETAINED_FRAMES painted frames before, alone on the glass, or the
+frame before at least where the canvas copies the page's rect out of the
+buffer it painted (`copy_last`), or in a window the WM's word
+(`window_frame` 2 and up), a pane's included. One modal is up at a time,
 so the holds share one layer of the canvas's size, kept across dialogs
 and freed by the Player's fit check after the home's retained frame
 (`docs/shell_layout_2026-10.md` §3). The Editor's Cart info
-dialog and Blocks' entry prompts hold their page; the pause and stop cards
-hold the run's frame washed beside the frame `_keep_under` keeps for the
-resumed game, whose layer is kept across cards and freed by the fit check
-the same way; where the game's frame is the system canvas (the handheld)
-an idle frame mints both, so no card's first frame does.
+dialog and Blocks' entry prompts hold their page (`Hold.under`); the pause
+and stop cards hold the run's frame washed beside the frame the same hold
+keeps as the game left it for the resumed game (`Hold.snap`), in a second
+shared layer kept across cards and freed by the fit check the same way
+(`ui_draw.held_layer`); where the game's frame is the system canvas (the
+handheld) an idle frame mints both, so no card's first frame does.
 
 **A dialog's first frame takes the page from the last frame where it can**
-(`HeldPage.shown`, `opened`, `last`): where the frame before drew the page
+(`Hold.shown`, `opened`, `last`): where the frame before drew the page
 with no dialog up, still and alone on the glass (no banner, overlay,
 cursor or pill over it, nothing animating), and the input that opened the
 dialog changed nothing else in the page -- A on a Blocks slot with no move
@@ -972,18 +987,19 @@ hold, so the menu's close stamps the one from before it.
 
 **A frame that only types into the dialog or moves its focus puts nothing
 back** (a dialog's rows frame, §14.7): the Editor's dialogs begin their
-frame ahead of the page (`ui_draw.DialogRows`), and where the engine
+frame ahead of the page (`Hold.rows_frame`), and where the engine
 licenses one and every buffer holds the page as the frames before left
 it -- each of the RETAINED_FRAMES painted frames before drew the same
-dialog over the hold, alone on the glass (`HeldPage.note`, `rows`) -- the
+dialog over the hold, alone on the glass (`Hold.note`, `rows`) -- the
 dialog draws its changed rows and the page stays as it is. On the desk the
 window's buffer is the hold: while a pane's tab has a prompt up the desk
 Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),
 and a frame whose buffer holds the desk as its last draw left it, with no
 input the desk took itself (a press, a chord) and no look, size, layout or
-bar key moved, draws the prompt's rows alone; the stamp copies them, and
-the full-screen row over the band stays as the buffer holds it
-(`WindowedWM._row_over`).
+bar key moved, is the prompt pane's split frame
+(`docs/ui_blocks_2026-10.md` §4.2) and draws the prompt's rows alone; the
+stamp copies them, and the full-screen row over the band stays as the
+buffer holds it (`WindowedWM._row_over`).
 
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by
@@ -1045,8 +1061,8 @@ drawing**, the lag it copies being the ring's own:
 - **the desk home's still frame** whose ring's last entry holds this
   frame's parts and bar: the rows its lagging parts span, whole. Its
   retained re-entry frame, which every buffer then holds, is captured on
-  the next idle frame or before the next painted one draws
-  (`capture_due`), so a held key's glide does not pay it.
+  the next idle frame (`capture_due`) and dropped by a painted one, so
+  neither a held key's glide nor a run of taps pays it.
 
 "The last frame held this one" is checkable: the last painted frame is the
 one before (`_painted_f`, the ring's entry for it), and nothing reported a
@@ -1089,9 +1105,14 @@ layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
 place on one buffer (`device/device_canvas.py`, the compositors in
 `native/moy_glass`). A canvas whose copy costs about what the raster it
 saves does declares it (`SHIFT_COST`, per mille of a row's raster a row it
-copies costs: the T-Deck's root), and a frame whose floor leaves too
-little of R undrawn to pay for the copy draws whole (`ui_draw._pays`);
-None, unmeasured, shifts.
+copies costs; a board's layers take its `LAYER_SHIFT_COST`, which each P4
+board's `moy_runtime` sets: a layer moves in place, on the Waveshare through
+the 2D-DMA (`moy_ppa.shift_in`), on the Guition, whose rotate holds that
+engine, on the CPU). A frame whose move leaves too
+little of R undrawn to pay for the copy draws whole, and a text view moving
+inside a still R whose copy costs more than its rows draws its rows instead
+(`host_pays`, `view_pays` in `native/moy_ui/moy_ui_api.c`); a rows frame
+moves nothing and pays. None, unmeasured, shifts.
 
 **One voucher per region.** Who says frame n-1 painted R whole: under the
 windowed WM the shown ring (`_shown`) for a window's content, never the

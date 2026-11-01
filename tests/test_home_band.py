@@ -1,23 +1,20 @@
-"""The home's band frames (`launcher_layer._drag_partial`,
-docs/scroll_and_text_2026-10.md §9): a key, repeat or trackball step on
-the grid and the icons repaints the two cells whose focus moved, a scroll on
-the plain ground (`bg`) shifts the band and repaints the strip it exposed,
-a baked backdrop (`bd`) or a picture keeps the band's repaint, and the
-handheld carousel's settle frame repaints the band and the hint strip, not
-the home. The grid's and the icons' cards come out of their kept faces
-(`launcher_layer._Faces`), each drawn once into a slot of one layer and
-copied, the rows under a card's corners drawn over a backdrop, which goes
-back under the whole band in one copy.
+"""The home's band frames (`launcher_layer._band_frame`): a drag, a fling,
+a key, repeat or trackball step, a settle draw the band alone, its
+arrangement's table of parts (`Launcher.band_pass`, `Carousel.band_pass`)
+over the backdrop put back under it -- the plain ground (`bg`), a baked
+backdrop (`bd`) or a picture -- and the parts outside the band the
+selection changes (the hint strip, the icons' caption band) where the
+buffer holds another selection's.
 
 Each case runs a scripted session twice on one, two and three buffers
 presented in turn, as a board's framebuffers are: once as it ships, and
-once with every partial path and the kept faces off (each frame a whole
+once with every band path and the kept faces off (each frame a whole
 repaint drawing every card), and holds the first's glass, picture by
 picture, to the second's bytes."""
 
 import pytest
 
-from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui_draw
+from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui, ui_draw
 from ws_helpers import cover_bytes, no_unlock_banner, quiesce
 
 
@@ -65,7 +62,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     L = launcher_layer.LauncherHomeLayer
     if ref:
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
-        monkeypatch.setattr(L, "_try_drag_partial", lambda self, cv, dt: False)
+        monkeypatch.setattr(L, "_try_band_frame", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
         monkeypatch.setattr(launcher_layer.Launcher, "_faces_for", lambda self, *a: None)
     carts = str(tmp_path / "carts")
@@ -124,9 +121,9 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         frame()
     if not ref:                            # the faces an idle second draws
         for _ in range(4):
-            ws.launcher.warm_faces(10 ** 6)
-        # the band's frames: the drag partial's and the desk's still
-        for name in ("_try_drag_partial", "_try_still_frame"):
+            ws.launcher.mint_faces(10 ** 6)
+        # the band's frames, and the desk's still
+        for name in ("_try_band_frame", "_try_still_frame"):
             def counted(cv, dt, real=getattr(ws.launcher_layer, name)):
                 r = real(cv, dt)
                 if r:
@@ -193,8 +190,7 @@ def _session(ws, drv, frame):
 
 
 def _edits(ws, drv, frame):
-    """What a card's kept face is drawn from changing under the band's
-    frames: steps, a cart renamed, a cover landing on a card the band
+    """What a card is drawn from changing under the band's frames: steps, a cart renamed, a cover landing on a card the band
     shows, the theme changed and back, and the keys going up to the tab
     row and down again (the selected card loses its focus and gets it
     back), with steps between."""
@@ -303,8 +299,7 @@ def test_desk_band_frames_are_whole_repaints(tmp_path, monkeypatch, arrangement,
 def test_band_frames_under_the_cursor_are_whole_repaints(tmp_path, monkeypatch, arrangement,
                                                          theme, bufs):
     """The cursor's stamp, over the band, is repainted where each buffer
-    holds it, through steps, the shift, the kept faces and the copies out
-    of the last buffer."""
+    holds it, through steps and drags."""
     _ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs, True)
     assert stats["band"] * 2 > stats["frames"], stats
 
@@ -321,19 +316,20 @@ def test_band_frames_over_covers_are_whole_repaints(tmp_path, monkeypatch, arran
 @pytest.mark.parametrize("bufs", [1, 2, 3])
 @pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])
 @pytest.mark.parametrize("arrangement", ["grid", "icons"])
-def test_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, theme, bufs):
-    """The cards' kept faces (`launcher_layer._Faces`) through a rename, a
-    cover landing, a theme change and the focus leaving the cards for the
-    tab row: every picture byte-equal to whole repaints that draw every
-    card, and the faces kept."""
+def test_band_frames_follow_what_the_cards_show(tmp_path, monkeypatch, arrangement, theme,
+                                                bufs):
+    """Through a rename, a cover landing, a theme change and the focus
+    leaving the cards for the tab row, every picture byte-equal to whole
+    repaints that draw every card, the cards out of their kept faces
+    (`ui.slot`)."""
     hits = [0]
-    real = launcher_layer._Faces.find
+    real = ui.slot
 
-    def find(self, i, it, cover):
-        j = real(self, i, it, cover)
-        hits[0] += j is not None
+    def slot(name, gen=0, mint=False):
+        j = real(name, gen, mint)
+        hits[0] += 0 <= j < ui.SLOT_MINT
         return j
-    monkeypatch.setattr(launcher_layer._Faces, "find", find)
+    monkeypatch.setattr(launcher_layer._ui, "slot", slot)
     ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs,
                         session=_edits)
     assert stats["band"] * 4 > stats["frames"], stats      # (a rescan paints whole)
@@ -342,9 +338,9 @@ def test_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, th
 
 @pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])
 @pytest.mark.parametrize("arrangement", ["grid", "icons", "carousel"])
-def test_desk_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, theme):
-    ws, stats = _parity(tmp_path, monkeypatch, "desk", arrangement, theme, 3, session=_edits)
-    assert ws.launcher.faces_bytes() > 0
+def test_desk_band_frames_follow_what_the_cards_show(tmp_path, monkeypatch, arrangement, theme):
+    ws, _stats = _parity(tmp_path, monkeypatch, "desk", arrangement, theme, 3, session=_edits)
+    assert (ws.launcher.faces_bytes() > 0) == (arrangement != "carousel")
 
 
 def test_kept_faces_are_released(tmp_path, monkeypatch):
@@ -352,17 +348,16 @@ def test_kept_faces_are_released(tmp_path, monkeypatch):
     arrangement give it back."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "icons", "blocks", 2, False)
     g = ws.launcher
-    lay = g._faces.lay
+    lay = g._face_lay
     assert ws.launcher_layer.release_retained()
-    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+    assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
     ws.launcher_layer.handle_input(_Key("down"))
     ws.mark_dirty()
     assert frame() is not None
     assert g.faces_bytes() > 0
-    lay = g._faces.lay
+    lay = g._face_lay
     ws.set_home_arrangement("grid")
-    assert g._faces is None and len(lay._buf) == 2   # (the released view)
-
+    assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
 
 
 @pytest.mark.parametrize("arrangement", ["grid", "icons"])
@@ -375,5 +370,133 @@ def test_idle_frames_draw_the_next_rows_faces(tmp_path, monkeypatch, arrangement
     shown = {i for i, _r in g._visible()}
     for _ in range(12):
         drv.frame(1 / 30)
-    kept = {k for k, j in g._faces.of.items() if g._faces.item[j] is not None}
-    assert kept - shown, (sorted(shown), sorted(kept))
+    assert _kept(g) - shown, (sorted(shown), sorted(_kept(g)))
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_round_with_every_face_drawn_ends_the_asking(tmp_path, monkeypatch, arrangement):
+    """Once a round of the idle frames' minting finds every face it
+    names drawn, the next idle frames ask the engine for none, until the
+    band's table is drawn again."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    g = ws.launcher
+    for _ in range(60):                    # (the idle frames: the covers land, the faces drawn)
+        drv.frame(1 / 30)
+    while g.mint_faces(10 ** 6):
+        pass
+    asked = []
+    real = ui.slot_next
+    monkeypatch.setattr(ui, "slot_next", lambda: asked.append(1) or real())
+    assert not g.mint_faces() and not asked
+    ws.launcher_layer.handle_input(_Key("right"))
+    ws.mark_dirty()
+    frame()
+    g.mint_faces()
+    assert asked
+
+
+def _kept(g):
+    """The cards whose faces the engine holds as they are now."""
+    g._host.resume(g._face_geo[0], g.theme)
+    out = set()
+    for k, it in enumerate(g.items):
+        cover = g.cover_ready(it, g._fdiv)
+        if cover is not False and ui.slot(g._face_name(k), 0 if cover is None else cover.serial,
+                                          False) >= 0:
+            out.add(k)
+    return out
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_paint_draws_no_face(tmp_path, monkeypatch, arrangement):
+    """A step that brings in cards no slot holds draws them as they are:
+    a paint never draws a face into a slot (which would evict another
+    as it goes); the idle frames draw them."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False, n=120)
+    g = ws.launcher
+    L = launcher_layer.Launcher
+    painting = [0]
+    drawn = [0, 0]
+    real_pass, real_face = L.band_pass, L._draw_face
+
+    def band_pass(self, *a, **k):
+        painting[0] += 1
+        try:
+            return real_pass(self, *a, **k)
+        finally:
+            painting[0] -= 1
+
+    def draw_face(self, *a, **k):
+        drawn[1 if painting[0] else 0] += 1
+        return real_face(self, *a, **k)
+    monkeypatch.setattr(L, "band_pass", band_pass)
+    monkeypatch.setattr(L, "_draw_face", draw_face)
+    for _ in range(30):
+        ws.launcher_layer.handle_input(_Key("down"))
+        ws.mark_dirty()
+        frame()
+        for _ in range(3):
+            drv.frame(1 / 30)
+    assert drawn[1] == 0 and drawn[0] > 0, drawn
+    assert g.faces_bytes() > 0
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_cover_landing_keeps_the_frames_damage(tmp_path, monkeypatch, arrangement):
+    """A step whose pass a cover landed in (the band noted again under the
+    new cover gen) hands what it drew as its damage, and owes the frame
+    that brings the other buffer to it: the note says this buffer holds
+    the band whole under a key the other's paint is not under."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    L = launcher_layer.Launcher
+    real = L.repaint_band
+    land = [False]
+
+    def repaint_band(self, *a, **k):
+        end = real(self, *a, **k)
+        if land[0]:
+            ws.covers.gen += 1             # (a cover decoded while the cards drew)
+        return end
+    monkeypatch.setattr(L, "repaint_band", repaint_band)
+    hits = []
+    real_damage = ws.wm.hand_content_damage
+    monkeypatch.setattr(ws.wm, "hand_content_damage",
+                        lambda cv, *r: (hits.append(r), real_damage(cv, *r)))
+    asked = [0]
+    real_ask = ws.request_frame
+    monkeypatch.setattr(ws, "request_frame", lambda: (asked.__setitem__(0, asked[0] + 1),
+                                                       real_ask()))
+    land[0] = True
+    del hits[:]
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    frame()
+    assert hits, "the frame's drawn rects were not handed as damage"
+    assert asked[0] > 0
+
+
+def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
+    """A step that drew its cells alone leaves the other buffer behind and
+    asks for no frame from inside its draw (a rolling ball's next step
+    would wait on it): the frame is owed to an idle frame, which asks for
+    it, and that frame brings the buffer level by copying the cards the
+    step drew out of the buffer it drew them in (`ui.table_copy`)."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "grid", "blocks", 2, False)
+    layer = ws.launcher_layer
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    n = ws._frames_drawn
+    drv.frame(1 / 30)
+    assert ws._frames_drawn == n + 1
+    assert layer._debt_owed + 1 == ws._frames_drawn
+    assert not ws._frame_requested
+    drew = list(ws.launcher.floor)
+    assert drew and not ws.launcher.copied
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert layer._debt_owed is None
+    assert ws._frames_drawn == n + 2       # the owed frame, then quiet
+    assert ws.launcher.floor == [] and sorted(ws.launcher.copied) == sorted(drew)

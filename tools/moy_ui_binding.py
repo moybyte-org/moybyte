@@ -138,9 +138,9 @@ class _Span(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
 
 
-# The TextView's view words this face writes (moy_ui_text.h's MOY_UI_TV_*;
-# runtime/ui_draw.py's TV_* names them all, tests/test_text_view.py pins both).
-_TV_TOP, _TV_LINES = 13, 45
+# moy_ui_api.h's MOY_UI_TXO_LEN and MOY_UI_TXO_DEFAULTS (tests/test_text_view.py pins both).
+_TXO_LEN = 19
+_TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1)
 
 
 _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
@@ -148,11 +148,6 @@ _LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
 
 class _Lines(c.Structure):
     _fields_ = [("src", c.c_void_p), ("n", c.c_int32), ("get", _LINE_FN)]
-
-
-class _TRow(c.Structure):
-    _fields_ = [("p", c.c_void_p), ("n", c.c_uint32), ("a", c.c_uint32), ("b", c.c_uint32),
-                ("ca", c.c_int32), ("line", c.c_int32)]
 
 
 class _Depth(c.Structure):
@@ -219,7 +214,6 @@ _DRAW_SIGS = (
     ("moy_ui_label_paint", [c.POINTER(_Sink), _Box, _Span, _I, _I, c.c_void_p], _I),
     ("moy_ui_bar_rect", [_Box, _I, _I, _I, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_scrollbar", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I], _I),
-    ("moy_ui_scroll_cues", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_fill_uncovered", [c.POINTER(_Sink), _Box, _Box, _I], _I),
     ("moy_ui_fade", [c.POINTER(_Sink), _Box, _I, _I, _I, _I], _I),
     ("moy_ui_list", [c.POINTER(_Sink), _Box, _I, c.c_char_p, _Z, _I, _I, _I, _I, _I,
@@ -254,6 +248,7 @@ _DRAW_SIGS = (
     ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,
                        c.POINTER(_Box)], _I),
     ("moy_ui_month_h", [_I, _I, _I], _I),
+    ("moy_ui_modal_band", [_I, _I], _I),
     ("moy_ui_modal", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
     ("moy_ui_perf", [c.POINTER(_Sink), _I, _I, _I, c.POINTER(c.c_int16), _I, _I, _Span, _I,
                      _I, _I, c.POINTER(_Box)], _I),
@@ -289,6 +284,7 @@ _DRAW_SIGS = (
     ("moy_ui_scroll_tick", [c.c_void_p, c.c_float, c.c_void_p, c.c_int32, c.c_int32], _I),
     ("moy_ui_scroll_glide_to", [c.c_void_p, c.c_int32, c.c_int32, _I, c.c_int32, c.c_int32],
      None),
+    ("moy_ui_scroll_fling", [c.c_void_p, c.c_int32, c.c_float], None),
     ("moy_ui_scroll_step", [c.c_void_p, c.c_int32, c.c_int32, c.c_int32, c.c_int32,
                             c.c_int32], c.c_int32),
     ("moy_ui_scroll_land", [c.c_void_p, c.c_void_p], _I),
@@ -321,9 +317,15 @@ _DRAW_SIGS = (
                              c.c_void_p], None),
     ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p,
                          c.c_void_p], None),
+    ("moy_ui_api_part_at", [c.c_void_p, c.POINTER(c.c_int32)], _I),
+    ("moy_ui_api_split", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, _I, c.c_void_p,
+                          c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_split_at", [c.c_void_p, _I, _I], _I),
+    ("moy_ui_api_split_frame", [c.c_void_p, c.c_int32, _I, _I, _I, c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_split_toward", [c.c_void_p, _I, _I, _I, _I, c.c_void_p], _I),
     ("moy_ui_api_table", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                           c.c_int32, c.c_void_p, c.c_void_p], None),
-    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
+    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], c.c_int32),
     ("moy_ui_api_field", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, _Z, _Z, c.c_void_p],
      c.c_int32),
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
@@ -335,34 +337,52 @@ _DRAW_SIGS = (
     ("moy_ui_api_moving", [c.c_void_p], _I),
     ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
     ("moy_ui_api_shift_plan", [c.c_void_p, c.c_void_p], _I),
-    ("moy_ui_api_shift_arm", [c.c_void_p], None),
-    ("moy_ui_api_shift_rows", [c.c_void_p, c.c_void_p, _I, c.c_void_p], _I),
-    ("moy_ui_api_floor_take", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], _I),
     ("moy_ui_api_shift_break", [c.c_void_p], None),
     ("moy_ui_api_shift_drawn", [c.c_void_p, c.POINTER(_I)], _I),
     ("moy_ui_api_band", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_change_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_lag_note", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_lag", [c.c_void_p, _I, _I, _I, _I, c.c_void_p, _I], _I),
+    ("moy_ui_api_host_begin", [c.c_void_p, c.c_void_p, _Box, _I, _I, c.c_void_p, c.c_void_p],
+     _I),
+    ("moy_ui_api_host_arm", [c.c_void_p], _I),
+    ("moy_ui_api_host_whole", [c.c_void_p], None),
+    ("moy_ui_api_keys_back", [c.c_void_p], None),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
-                              c.c_void_p, c.c_void_p], None),
+                              c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
+    ("moy_ui_api_text_at", [c.c_void_p, _Span, _I, _I, c.c_void_p], _I),
+    ("moy_ui_api_text_cover", [c.c_void_p, _Span, _I, _I], None),
+    ("moy_ui_api_text_aim", [c.c_void_p, _Span, _I, _I], _I),
+    ("moy_ui_api_text_reveal", [c.c_void_p, _Span, c.c_void_p, _I, _I], _I),
     ("moy_ui_text_tones", [c.c_void_p], None),
     ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_text_words_reset", [], None),
-    ("moy_ui_text_size", [], c.c_size_t),
     ("moy_ui_text_runs", [c.c_char_p, c.c_size_t, _I, c.c_void_p, _I], _I),
-    ("moy_ui_text_rows", [c.c_void_p], _I),
-    ("moy_ui_text_reset", [c.c_void_p], None),
-    ("moy_ui_text_plan", [c.c_void_p, c.c_void_p, c.c_void_p, _I, _Span, _Span], _I),
-    ("moy_ui_text_draw", [c.c_void_p, c.POINTER(_Sink), c.c_void_p, c.c_void_p, _I, _Span,
-                          _Span, _I], _I),
     ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
     ("moy_ui_api_audit", [_I], c.c_uint32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_table_dist", [c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_floor", [c.c_void_p, c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_copy", [c.c_void_p, c.c_void_p, c.c_int], c.c_int32),
+    ("moy_ui_api_table_shift", [c.c_void_p, c.c_void_p, c.c_int], c.c_int32),
+    ("moy_ui_api_held", [c.c_void_p, _Span, c.c_int32], _I),
+    ("moy_ui_api_held_last", [c.c_void_p, _Span, c.c_int32], _I),
+    ("moy_ui_api_held_all", [c.c_void_p], _I),
+    ("moy_ui_api_slots", [c.c_void_p, c.c_int32, c.c_int32], c.c_int32),
+    ("moy_ui_api_slot", [c.c_void_p, _Span, c.c_int32, _I], c.c_int32),
+    ("moy_ui_api_slot_next", [c.c_void_p], c.c_int32),
+    ("moy_ui_api_block_set", [_Span, c.c_int, c.c_uint32], c.c_int),
+    ("moy_ui_api_block_gen", [_Span], c.c_int32),
+    ("moy_ui_api_block_since", [_Span, c.c_int32], c.c_uint32),
+    ("moy_ui_api_block_key", [_Span], c.c_int32),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -393,6 +413,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_tap_armed", [c.c_void_p], _I),
     ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
+    ("moy_ui_api_lost", [c.c_void_p], _I),
 )
 
 
@@ -401,7 +422,14 @@ class _Over(c.Structure):
     _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
                 ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
                 ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8),
-                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8)]
+                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8),
+                ("has_gen", c.c_int8), ("gen", c.c_int32), ("has_part", c.c_int8),
+                ("part_w", c.c_int16), ("part_h", c.c_int16), ("bar", c.c_int8),
+                ("axis_x", c.c_int8), ("snap", c.c_int8), ("has_offset", c.c_int8),
+                ("offset", c.c_int32), ("spill", c.c_int16), ("has_keep", c.c_int8), ("whole", c.c_int8),
+                ("keep", c.c_int32), ("over_x", c.c_int16), ("over_y", c.c_int16),
+                ("over_w", c.c_int16), ("over_h", c.c_int16), ("has_across", c.c_int8),
+                ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16)]
 
 
 class _Line(c.Structure):
@@ -422,6 +450,17 @@ def _check(rc):
         raise MemoryError("moy_ui: no memory for the looks")
     if rc != OK:
         raise ValueError("moy_ui: bad argument")
+
+
+DEEP = -(1 << 31)                       # moy_ui_api.h's MOY_UI_API_DEEP
+
+
+def _nested(v):
+    """A verb that opens a nest: its answer, or RuntimeError where
+    MOY_UI_API_NEST were open already (modmoy_ui.c's `nested`)."""
+    if v == DEEP:
+        raise RuntimeError("moy_ui: nested too deep")
+    return v
 
 
 def binding():
@@ -650,13 +689,6 @@ def binding():
         _check(lib.moy_ui_scrollbar(c.byref(s), box_of(view), int(content), int(offset),
                                     1 if horizontal else 0, s.fs, int(bar_w)))
 
-    def scroll_cues(cv, up, dn, can_up, can_dn, ci):
-        if not (can_up or can_dn):
-            return
-        _check(lib.moy_ui_scroll_cues(c.byref(sink(cv, None)), int(up[0]), int(up[1]),
-                                      int(dn[0]), int(dn[1]), 1 if can_up else 0,
-                                      1 if can_dn else 0, int(ci)))
-
     def fill_uncovered(cv, inner, outer, ci):
         _check(lib.moy_ui_fill_uncovered(c.byref(sink(cv, None)), box_of(inner),
                                          box_of(outer), int(ci)))
@@ -822,6 +854,9 @@ def binding():
     def month_h(weeks, fs, desk):
         return int(lib.moy_ui_month_h(int(weeks), int(fs), int(desk)))
 
+    def modal_band(fs, desk):
+        return int(lib.moy_ui_modal_band(int(fs), 1 if desk else 0))
+
     def modal(cv, look, rect, fs, desk):
         t, keep = span("")
         _check(lib.moy_ui_modal(c.byref(sink(cv, look)), box_of(rect), t, int(fs), int(desk), 0))
@@ -931,10 +966,10 @@ def binding():
         lib.moy_ui_cell_art(r4(rect), int(fs), opt(pad, DEFAULT), int(caption_h), out)
         return tuple(out)
 
-    for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
+    for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock, modal, month_h, perf,
+              scrim, tile, unlock, modal, modal_band, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):
@@ -977,6 +1012,9 @@ def binding():
         lib.moy_ui_scroll_glide_to(_buf(st), int(offset), int(target), 1 if slide else 0,
                                    int(content), int(extent))
 
+    def scroll_fling(st, offset, vel):
+        lib.moy_ui_scroll_fling(_buf(st), int(offset), float(vel))
+
     def scroll_step(st, offset, n, size, content, extent):
         return int(lib.moy_ui_scroll_step(_buf(st), int(offset), int(n), int(size),
                                           int(content), int(extent)))
@@ -998,7 +1036,7 @@ def binding():
         return bool(tapped)
 
     for f in (scroll_stop, scroll_drag_start, scroll_drag_move, scroll_drag_end,
-              scroll_tick, scroll_glide_to, scroll_step, scroll_land, dragtap):
+              scroll_tick, scroll_glide_to, scroll_fling, scroll_step, scroll_land, dragtap):
         setattr(m, f.__name__, f)
 
     # -- the public UI API -----------------------------------------------------
@@ -1146,7 +1184,7 @@ def binding():
             keep = c.create_string_buffer(b"", 1)
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
-        lib.moy_ui_api_scroll(p, c.byref(s), t, ov)
+        _nested(lib.moy_ui_api_scroll(p, c.byref(s), t, ov))
 
     def api_field(ctx, cv, look, label, buf, n, o):
         p, _k = _ctx(ctx)
@@ -1165,7 +1203,7 @@ def binding():
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
         b = bytes(buttons)
-        return int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov))
+        return _nested(int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov)))
 
     def api_wash(ctx, cv, look):
         p, _k = _ctx(ctx)
@@ -1185,7 +1223,7 @@ def binding():
             keep = c.create_string_buffer(b"", 1)
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
-        return int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov))
+        return _nested(int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov)))
 
     def api_menu(ctx, cv, look, label, items, icons, o):
         p, _k = _ctx(ctx)
@@ -1305,6 +1343,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_moving(p))
 
+    def api_busy(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_owes(p) or lib.moy_ui_api_moving(p))
+
     def api_offset(ctx, x, y):
         p, _k = _ctx(ctx)
         return int(lib.moy_ui_api_offset(p, int(x), int(y)))
@@ -1316,21 +1358,6 @@ def binding():
         p, _k = _ctx(ctx)
         w = (c.c_int32 * 8).from_buffer(out)
         return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
-
-    def api_shift_arm(ctx):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_shift_arm(p)
-
-    def api_shift_rows(ctx, rects, n, out):
-        p, _k = _ctx(ctx)
-        r = (c.c_int32 * max(1, 4 * int(n))).from_buffer(rects)
-        w = (c.c_int32 * 8).from_buffer(out)
-        return int(lib.moy_ui_api_shift_rows(p, c.addressof(r), int(n), c.addressof(w)))
-
-    def api_floor_take(ctx, cv, look, x, y, w, h):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_floor_take(p, c.byref(sink(cv, look)), int(x), int(y),
-                                              int(w), int(h)))
 
     def api_shift_break(ctx):
         p, _k = _ctx(ctx)
@@ -1357,15 +1384,44 @@ def binding():
             return None
         return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
 
-    def api_floor_into(ctx, out):
-        p, _k = _ctx(ctx)
-        n = len(out) // 4
-        v = (c.c_int32 * max(4, 4 * n)).from_buffer(out)
-        return int(lib.moy_ui_api_floor(p, v, n))
-
     def api_floor_box(ctx, out):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
+
+    def api_change_box(ctx, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_change_box(p, (c.c_int32 * 8).from_buffer(out)))
+
+    def api_lag_note(ctx, hist, bands, f, kind):
+        p, _k = _ctx(ctx)
+        slots = len(hist) // (2 + 2 * bands)
+        lib.moy_ui_api_lag_note(p, (c.c_int32 * len(hist)).from_buffer(hist), slots,
+                                int(bands), int(f), int(kind))
+
+    def api_lag(hist, bands, f, n, out):
+        slots = len(hist) // (2 + 2 * bands)
+        return int(lib.moy_ui_api_lag((c.c_int32 * len(hist)).from_buffer(hist), slots,
+                                      int(bands), int(f), int(n),
+                                      (c.c_int32 * len(out)).from_buffer(out), len(out) // 2))
+
+    def api_host_begin(ctx, inp, rect, flags, fs, pf, hp):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_host_begin(p, (c.c_int32 * len(inp)).from_buffer(inp),
+                                             box_of(rect), int(flags), int(fs),
+                                             (c.c_int32 * len(pf)).from_buffer(pf),
+                                             (c.c_int32 * len(hp)).from_buffer(hp)))
+
+    def api_host_arm(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_host_arm(p))
+
+    def api_host_whole(ctx):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_host_whole(p)
+
+    def api_keys_back(ctx):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_keys_back(p)
 
     def api_pop_box(ctx, out):
         p, _k = _ctx(ctx)
@@ -1392,6 +1448,89 @@ def binding():
     def api_table_pics(ctx, cv, look):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_table_pics(p, c.byref(sink(cv, look)))
+
+    def api_table_dist(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_table_dist(p))
+
+    def api_table_part(ctx, cv, look, r):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 8).from_buffer(r)
+        return int(lib.moy_ui_api_table_part(p, c.byref(sink(cv, look)), c.addressof(v)))
+
+    def api_table_floor(ctx, r):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4).from_buffer(r)
+        return int(lib.moy_ui_api_table_floor(p, c.addressof(v)))
+
+    def api_table_copy(ctx, r, back):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4).from_buffer(r)
+        return int(lib.moy_ui_api_table_copy(p, c.addressof(v), 1 if back else 0))
+
+    def api_table_shift(ctx, r, back):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 5).from_buffer(r)
+        return int(lib.moy_ui_api_table_shift(p, c.addressof(v), 1 if back else 0))
+
+    def api_held(ctx, id_, key):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return bool(lib.moy_ui_api_held(p, t, int(key)))
+
+    def api_held_last(ctx, id_, key):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return bool(lib.moy_ui_api_held_last(p, t, int(key)))
+
+    def api_held_all(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_held_all(p))
+
+    def api_slots(ctx, cap, key):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_slots(p, int(cap), int(key)))
+
+    def api_slot(ctx, name, gen, mint):
+        p, _k = _ctx(ctx)
+        t, keep = span(name)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return int(lib.moy_ui_api_slot(p, t, int(gen), 1 if mint else 0))
+
+    def api_slot_next(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_slot_next(p))
+
+    def _block(name):
+        t, keep = span(name)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return t, keep
+
+    def api_block_set(name, field, value):
+        t, _keep = _block(name)
+        return bool(lib.moy_ui_api_block_set(t, int(field), int(value) & 0xffffffff))
+
+    def api_block_gen(name):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_gen(t))
+
+    def api_block_since(name, gen):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_since(t, int(gen)))
+
+    def api_block_key(name):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_key(t))
 
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
@@ -1428,6 +1567,40 @@ def binding():
         out = (c.c_int32 * 5)()
         lib.moy_ui_api_part(p, c.byref(s), t, int(w), int(h), ov, out)
         return tuple(out)
+
+    def api_split(ctx, cv, look, id_, sizes, n, mins, opt, out):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        sv = (c.c_int32 * len(sizes)).from_buffer(sizes)
+        mv = None if mins is None else (c.c_int32 * len(mins)).from_buffer(mins)
+        ov = (c.c_int32 * len(opt)).from_buffer(opt)
+        wv = (c.c_int32 * len(out)).from_buffer(out)
+        return int(lib.moy_ui_api_split(p, c.byref(sink(cv, look)), t, c.addressof(sv), int(n),
+                                        None if mv is None else c.addressof(mv),
+                                        c.addressof(ov), c.addressof(wv)))
+
+    def api_split_at(ctx, x, y):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_split_at(p, int(x), int(y)))
+
+    def api_split_frame(ctx, words, out):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 8).from_buffer(words)
+        return int(lib.moy_ui_api_split_frame(p, v[0], v[1], v[2], v[3],
+                                              c.addressof(v) + 16,
+                                              (c.c_int32 * 4).from_buffer(out)))
+
+    def api_split_toward(ctx, x, y, dx, dy, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_split_toward(p, int(x), int(y), int(dx), int(dy),
+                                                (c.c_int32 * 4).from_buffer(out)))
+
+    def api_part_at(ctx):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 2)()
+        if not lib.moy_ui_api_part_at(p, v):
+            return None
+        return (v[0], v[1])
 
     def api_focus(ctx, id_=None):
         p, _k = _ctx(ctx)
@@ -1466,21 +1639,22 @@ def binding():
         p, _k = _ctx(ctx)
         lib.moy_ui_api_at(p, int(x), int(y), int(w), int(h))
 
+    def api_lost(ctx):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_lost(p))
+
     def api_dup(ctx):
         p, _k = _ctx(ctx)
         d = lib.moy_ui_api_dup(p)
         return None if d is None else d.decode("utf-8", "replace")
 
 
-    # -- TextView (native/moy_ui/moy_ui_text.h) ------------------------------------
-    def text_size():
-        return int(lib.moy_ui_text_size())
-
+    # -- text views (native/moy_ui/moy_ui_text.h, ui.text_view) ---------------------
     def text_words(syn, words, tone):
         b = bytes(words)
         _check(lib.moy_ui_text_words(int(syn), b, len(b), int(tone)))
 
-    def api_text_view(ctx, cv, look, id, lines, opt, o):
+    def api_text_view(ctx, cv, look, id, lines, opt, o, err=None, find=None, into=None):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
         sp, keep = span(id)
@@ -1498,12 +1672,58 @@ def binding():
             return c.addressof(b[0])
         fn = _LINE_FN(get)
         L = _Lines(None, len(lines), fn)
-        w = (c.c_int32 * 7)(*[int(v) for v in opt])
+        w = (c.c_int32 * _TXO_LEN)(*_TXO_DEFAULTS)
+        for i, v in enumerate(list(opt)[:_TXO_LEN]):
+            w[i] = int(v)
         ob, okeep = _over(o)
+        e, ek = span(err or "")
+        f, fk = span(find or "")
+        marks = (_Span * 2)(e, f)
         out = (c.c_int32 * 2)()
-        lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w), ob,
-                                 c.addressof(out))
+        _nested(lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w),
+                                         c.addressof(marks), ob, c.addressof(out)))
+        if into is not None:
+            into[0] = out[0]
+            into[1] = out[1]
+            return into
         return (out[0], out[1])
+
+    def api_text_at(ctx, id_, px, py):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        out = (c.c_int32 * 2)()
+        if not lib.moy_ui_api_text_at(p, t, int(px), int(py), c.addressof(out)):
+            return None
+        return (out[0], out[1])
+
+    def api_text_cover(ctx, id_, y0, y1):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        lib.moy_ui_api_text_cover(p, t, int(y0), int(y1))
+
+    def api_text_aim(ctx, id_, line, lines):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        return bool(lib.moy_ui_api_text_aim(p, t, int(line), int(lines)))
+
+    def api_text_reveal(ctx, id_, lines, line, col):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        bufs = {}
+
+        def get(_src, i, n):
+            if not 0 <= i < len(lines):
+                n[0] = 0
+                return None
+            b = bufs.get(i)
+            if b is None:
+                raw = _b(lines[i])
+                b = bufs[i] = (c.create_string_buffer(raw, len(raw)), len(raw))
+            n[0] = b[1]
+            return c.addressof(b[0])
+        fn = _LINE_FN(get)
+        L = _Lines(None, len(lines), fn)
+        return bool(lib.moy_ui_api_text_reveal(p, t, c.byref(L), int(line), int(col)))
 
     def text_tones(tones):
         t = (c.c_int16 * 6)(*[-1 if v is None else int(v) for v in list(tones)[:6]])
@@ -1516,68 +1736,34 @@ def binding():
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
-    def _tv_rows(view, lines):
-        v = (c.c_int32 * len(view)).from_buffer(view)
-        v[_TV_LINES] = len(lines)
-        n = min(256, int(lib.moy_ui_text_rows(c.addressof(v))))
-        rows = (_TRow * max(1, n))()
-        keep = []
-        top = v[_TV_TOP]
-        for i in range(n):
-            k = top + i
-            r = rows[i]
-            r.line = k
-            if 0 <= k < len(lines):
-                b = _b(lines[k])
-                buf = c.create_string_buffer(b, len(b))
-                keep.append(buf)
-                r.p = c.addressof(buf)
-                r.n = r.b = len(b)
-            else:
-                r.p = None
-        return v, rows, n, keep
-
-    def text_plan(state, view, lines, err, find):
-        v, rows, n, _keep = _tv_rows(view, lines)
-        e, ek = span(err)
-        f, fk = span(find)
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        return bool(lib.moy_ui_text_plan(c.addressof(st), c.addressof(v), c.addressof(rows), n,
-                                         e, f))
-
-    def text_draw(state, cv, look, view, lines, err, find, whole):
-        s = sink(cv, look)
-        v, rows, n, _keep = _tv_rows(view, lines)
-        e, ek = span(err)
-        f, fk = span(find)
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        return int(lib.moy_ui_text_draw(c.addressof(st), c.byref(s), c.addressof(v),
-                                        c.addressof(rows), n, e, f, 1 if whole else 0))
-
-    def text_reset(state):
-        st = (c.c_uint8 * len(state)).from_buffer(state)
-        lib.moy_ui_text_reset(c.addressof(st))
-
-    for f in (api_text_view, text_tones, text_size, text_words, text_runs, text_plan, text_draw, text_reset):
+    for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, api_text_reveal,
+              text_tones, text_words, text_runs):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_moved, api_moving, api_offset, api_fades,
-              api_shift_plan, api_shift_arm, api_shift_rows, api_floor_take, api_shift_break,
-              api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
+              api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
+              api_shift_plan, api_shift_break,
+              api_shift_drawn, api_band, api_floor, api_floor_box, api_change_box,
+              api_lag_note, api_lag, api_host_begin, api_host_arm,
+              api_host_whole, api_keys_back,
               api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,
-              api_table_rows, api_table_pics,
+              api_table_rows, api_table_pics, api_table_part, api_table_dist,
+              api_table_floor, api_table_copy, api_table_shift, api_held, api_held_last,
+              api_held_all,
+              api_slots, api_slot, api_slot_next,
+              api_block_set, api_block_gen, api_block_since, api_block_key,
               api_grid,
-              api_card, api_part, api_popover, api_menu, api_menu_danger,
+              api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
+              api_split_toward, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
-              api_dup):
+              api_dup, api_lost):
         setattr(m, f.__name__, f)
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs

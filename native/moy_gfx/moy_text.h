@@ -139,8 +139,18 @@ typedef struct {
 
 // Fill a rect into a target: camera-offset, clipped to the clip and the
 // buffer, as the canvas's rect and the draw gates fill (the toolkit's
-// primitives draw their fields and glyphs with it).
+// primitives draw their fields and glyphs with it). A block of the DMA
+// fill's least size or more goes to the board's DMA fill where it has one.
 void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col);
+
+// A board's DMA fill: fills block (x, y, w, h) of the RGB565 buffer `px`
+// (`cap` pixels, `dw` wide) and answers 1, or answers 0 and the CPU fills
+// it. moy_target_dma(fn, least) lends it every block of `least` pixels or
+// more (the P4's PPA, native/p4/moy_ppa, as the canvas's `ppa_fill` takes
+// its big rects); NULL takes it back. A board without one fills on the CPU.
+typedef int (*moy_target_dma_fn)(uint16_t *px, size_t cap, int dw, int x, int y, int w, int h,
+                                 uint16_t col);
+void moy_target_dma(moy_target_dma_fn fn, int least);
 
 // Draw `s` (n bytes) at (x, y), the line's top left, in `col` at `scale`.
 // With maxw >= 0 the text fits the box: it truncates to what fits in maxw

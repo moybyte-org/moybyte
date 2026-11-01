@@ -63,7 +63,7 @@ def _desk(path, cart, key, tab, ships, window=False):
     ws.editor_app.set_tab(tab)
     ws.pointer.visible = False
     if not ships:
-        d._pane_rows = lambda own, dt: False
+        d._split_frame = lambda dt, got, own: False
     return ws, drv
 
 

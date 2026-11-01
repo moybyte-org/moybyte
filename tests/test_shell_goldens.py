@@ -735,6 +735,8 @@ def _surface_plan(ws, cfg):
         plan.append(("app_" + surface, enter))
     # Notes with a note open: its page of tools, the note in the look
     plan.append(("app_notes_note", lambda: ws.player.ns["_open"](NOTES_VAULT[0][0])))
+    # ...and a program open: the same tools and Run
+    plan.append(("app_notes_script", lambda: ws.player.ns["_open"](NOTES_VAULT[1][0])))
 
     def park():
         ws.system.set("web_pin", GOLDEN_PIN)
@@ -859,7 +861,7 @@ def _menus_plan(ws, cfg):
             ws.system_key()
             assert ws.pause.open
             if options:
-                ws.pause.choose(2)
+                ws.pause.choose(ws.pause.rows.index("Options"))
         return enter
 
     return [("sysmenu", sysmenu), ("pause", pause(False)), ("pause_options", pause(True))]
@@ -989,7 +991,7 @@ def surface_names(config_name):
             names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
-    names += ["app_notes_note"]
+    names += ["app_notes_note", "app_notes_script"]
     names += ["web_console"]
     return names
 

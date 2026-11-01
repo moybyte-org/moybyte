@@ -33,6 +33,16 @@ origin, runs `tools/preflight.sh`, merges `--no-ff dev`, bumps
 device somewhere is offered the build, so it stays a separate, deliberate
 keystroke.
 
+**Master can carry commits dev lacks** (a fix made there, a Pages change),
+and then the merge conflicts and `tools/release.py` stops mid-merge. v0.15
+(2026-10-28) hit this with two such commits that dev already carried in a
+newer form: the resolution was dev's side of each file, after which the
+merged tree must equal dev's but for `device/moy_ota.py`. Check that with
+`git diff dev` before finishing. Cut from a worktree on master
+(`tools/worktree.py new rel`, then check out master there), never in the
+shared checkout. After the push, watch the CI run on master: preflight is
+not the whole of it (CLAUDE.md, "push anything").
+
 **`NAME` is the release** (`MAJOR.MINOR`; a third component only for a pure fix
 release): the tag, the manifest `label`, the string on the kid's update screen.
 `FIRMWARE_VERSION` is an opaque monotonic counter the device compares with `>`

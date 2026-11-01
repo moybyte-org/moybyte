@@ -237,6 +237,27 @@ def _theme_shape_back():
     _theme_reset()
 
 
+@pytest.fixture(autouse=True)
+def _console_state_fresh():
+    """The toolkit's per-console state (the painted frame, what was drawn
+    over it, the windowed WM's word, the host holding the keys) is one per
+    process, as the console is one per board, and every workstation a test
+    builds counts its frames from 0. A frame number a test left behind
+    names a frame of the next test's: the FPS chip one drew over frame 2
+    read as drawn over the next one's page at frame 2, whose frame then drew
+    whole, so a draw budget or a shift frame's kind held only on the workers
+    no such test had run on. Each test starts with a fresh process's
+    (`ui_draw.console_reset`)."""
+    try:
+        from runtime import ui_draw
+    except ImportError:
+        yield
+        return
+    ui_draw.console_reset()
+    yield
+    ui_draw.console_reset()
+
+
 # What `_cover_budget_unbounded` raises the cover slice to: every cover builds
 # inside the frame that asks for it.
 COVER_SLICE_UNBOUNDED = 10 ** 9

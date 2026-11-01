@@ -114,8 +114,11 @@ def _drag_home(ws, drv, root):
     for _ in range(80):
         drv.frame(1 / 30)
     quiesce(ws)
+    home = ws.launcher_layer
+    home._try_band_frame = lambda cv, dt: False
     ws.mark_dirty()
     drv.frame(1 / 30)
+    del home._try_band_frame
     assert root.damage == [], "a full home paint describes nothing"
     gx, gy, gw, gh = ws.layout.lib_grid
     cx, cy = gx + gw - 10, gy + gh // 2
@@ -132,13 +135,13 @@ def _drag_home(ws, drv, root):
     return noted
 
 
-def test_the_fullscreen_home_hands_its_band_on_a_drag_partial(tmp_path):
+def test_the_fullscreen_home_hands_its_band_on_a_band_frame(tmp_path):
     ws = build_ws_with_shelf(tmp_path, 14)
     root = _Root(ws.sys_canvas)
     drv = make_drv(ws)
     noted = _drag_home(ws, drv, root)
     band = ws.launcher.band_rect()
-    assert noted[-1] == [band], "the partial's band is the frame's damage"
+    assert noted[-1] == [band], "the band frame's band is the frame's damage"
 
 
 def test_the_console_mode_home_hands_its_band_too(tmp_path):

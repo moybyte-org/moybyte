@@ -15,9 +15,10 @@
 # (`files.list()`, `files.new_name()`, `files.rename()`, `files.duplicate()`,
 # `files.delete()`, `files.badge()`) and `open_editor(name)` -- a handle onto
 # one note, over the console's own editor. The editor is not in this file: the
-# text, the caret, wrap, undo, the clipboard, Select and the Markdown (headings,
-# checkboxes, `[[links]]`, `![[drawings]]`) all live in the shell and are drawn
-# through the handle, the way `make_layer` hands a cart the layer engine. This
+# text, the caret, wrap, undo, the clipboard, Select, the Markdown taps
+# (a `[ ]` box toggles, a `[[link]]` opens its note) and running a program
+# (`ed.run()` on a `.py` or `.lua`, and back here when it ends) all live in the shell and
+# are drawn through the handle, the way `make_layer` hands a cart the layer engine. This
 # file is the page: the list, the tools and where the note goes, drawn with the
 # public UI API (`ui`), which moves focus, keys and taps for it.
 #
@@ -31,8 +32,10 @@ SIDE = 268             # the vault's column on the desk, from the window's conte
 FOOT = 31              # the desk window's foot
 ICON = {"MD": "notes", "TXT": "doc", "JSON": "doc", "PY": "code", "LUA": "code"}
 # The note's tools: Select toggles a selection that a drag or a roll grows.
+# A program's add Run, which saves it and runs it, and comes back here after.
 TOOLS = (("select", "Select"), ("copy", "Copy\tCtrl+C"), ("cut", "Cut\tCtrl+X"),
          ("paste", "Paste\tCtrl+V"))
+RUN_TOOLS = TOOLS + (("run", "Run"),)
 KEY_DEL, KEY_BS, KEY_ESC, KEY_DUP, KEY_CR, KEY_LF = 0x7F, 0x08, 0x1B, 0x04, 0x0D, 0x0A
 
 NO_STORE = ("Notes keep to a card;", "put one in to start.")
@@ -53,12 +56,15 @@ DIM_O = {"tone": "dim"}
 FIELD_O = {"id": "Name", "hint": "my note"}
 WRAP_O = {"wrap": True, "tone": "dim"}
 WASH_O = {"wash": True}
-# The page's gen: bumped when what the page shows beside the note changes,
-# so a frame that changes the note alone draws its rows alone.
-PAGE_O = {"gen": 0}
+# The note's page: its own id, so the list's page keeps none of its scroll
+# (closing a note opens the list's page anew, on the current row), and its
+# gen, bumped when what the page shows beside the note changes, so a frame
+# that changes the note alone draws its rows alone.
+PAGE_O = {"id": "note", "gen": 0}
 _shows = [None] * 11   # what the page showed beside the note last frame
 
 ed = None              # the open note's editor handle (None: the list)
+tools = TOOLS          # the open note's tools: RUN_TOOLS on a program
 names = None           # the vault, newest first (None: no storage)
 rows = None            # the vault's table rows: New note, then a note each
 caption = ""           # "8 notes"
@@ -153,9 +159,10 @@ def _open(name):
 
 
 def _show(handle):
-    global ed
+    global ed, tools
     _close()
     ed = handle
+    tools = RUN_TOOLS if ed.can_run() else TOOLS
     ed.focus()                          # the handle takes the keyboard
     prefs.set("last", ed.name())
     _refresh(ed.name())
@@ -187,7 +194,11 @@ def _answer():
     what, asking = asking, None
     name = typed.strip()
     if what == "new":
+        # Made is written: the vault lists the note and stands on its row,
+        # so the desk's column never reopens the note that was open before.
         got, err = files.new_name(name or None)
+        if err is None:
+            got, err = files.save_text(got, "")
         if err is None:
             _open(got)
     elif what == "rename" and name and _row() is not None:
@@ -217,10 +228,6 @@ def _update(dt):
     k = keyp()
     if not k:
         return
-    if ed is not None:
-        if k == KEY_ESC or btnp("b"):
-            _close()
-        return
     if asking is not None:
         if k == KEY_ESC:
             asking = None
@@ -228,8 +235,13 @@ def _update(dt):
             _answer()                   # Enter makes
         elif k == KEY_BS and not typed:
             asking = None               # backspacing off the start backs out
+        _hand_keys()
         return
     if menu:
+        return
+    if ed is not None:
+        if k == KEY_ESC or btnp("b"):
+            _close()
         return
     if k in (KEY_DEL, KEY_BS):
         _trash()
@@ -257,6 +269,17 @@ def _draw():
     else:
         _list_page(x, y, w, h)
     _tapping()
+    _hand_keys()
+
+
+def _hand_keys():
+    """The open note holds the keyboard unless a dialog or a row's menu is
+    up over it: those take the keys, and a mouse's click on their buttons,
+    which a focused handle would claim over its note."""
+    if ed is not None:
+        want = asking is None and not menu
+        if ed.focused() != want:
+            ed.focus(want)
 
 
 # -- the handheld's pages -------------------------------------------------------
@@ -364,7 +387,7 @@ def _dialog():
                   ("Cancel", "Make" if asking == "new" else "Rename"))
     typed, done = ui.field("", typed, NAME_MAX, FIELD_O)
     if asking == "new":
-        ui.label("End the name with .py or .lua to make a program.", WRAP_O)
+        ui.label("End the name with .py or .lua to make a program you can Run.", WRAP_O)
     ui.dialog()
     if p == 1 or done:
         _answer()
@@ -388,10 +411,11 @@ def _note_page(x, y, w, h):
     foot = 34
     _sheet(x + 6, y + 3, w - 12, h - foot - 5, 8 * FS)
     fy = y + h - foot + 1
-    for i in range(len(TOOLS)):
+    for i in range(len(tools)):
         ui.at(x + 6 + i * 46, fy, 42, 32)
         _tool(i)
-    ui.at(x + w - 120, fy + 5, 114, 22)
+    sx = max(x + w - 120, x + 6 + len(tools) * 46)
+    ui.at(sx, fy + 5, x + w - 6 - sx, 22)
     ui.info("", _status(), STATUS_O)
     ui.end()
 
@@ -419,7 +443,7 @@ def _seen(i, v):
 
 
 def _tool(i):
-    icon, label = TOOLS[i]
+    icon, label = tools[i]
     off = (icon in ("copy", "cut") and not ed.has_selection()) or \
         (icon == "paste" and not ed.can_paste())
     if ui.tool(icon, label, TOOL_O[1 if icon == "select" and ed.selecting() else 0][1 if off else 0]):
@@ -429,6 +453,8 @@ def _tool(i):
             ed.copy()
         elif icon == "cut":
             ed.cut()
+        elif icon == "run":
+            ed.run()
         else:
             ed.paste()
 
@@ -503,6 +529,11 @@ def _desk(x, y, w, h):
         for i in range(len(TOOLS)):
             ui.at(tx + 96 + 40 * i, y + 8, 36, 36)
             _tool(i)
+        if len(tools) > len(TOOLS):
+            ui.at(tx + 262, y + 14, 1, 24)
+            ui.rule()
+            ui.at(tx + 272, y + 8, 36, 36)
+            _tool(len(TOOLS))
         ui.at(px, y + 8, x + w - px - 2, 36)
         ui.info("", ed.badge() or _mode(), MODE_O)
         ui.at(px, y + 52, x + w - px, 1)
@@ -526,7 +557,7 @@ def _desk(x, y, w, h):
 
 def _tapping():
     global paging
-    if ed is None or not sheet[2]:
+    if ed is None or asking is not None or menu or not sheet[2]:
         return
     t = touch()
     if t is None:

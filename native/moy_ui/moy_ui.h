@@ -29,7 +29,11 @@
 #include "moy_text.h"
 #include "moy_ui_tables.h"
 
-enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4 };
+// MOY_UI_DEEP: a nest opened past moy_ui_api.h's MOY_UI_API_NEST.
+enum {
+    MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4,
+    MOY_UI_DEEP = 5
+};
 
 typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 
@@ -482,6 +486,7 @@ enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
     MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024, MOY_UI_F_WRAP = 2048,
+    MOY_UI_F_PART = 4096, MOY_UI_F_BAR = 8192,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other
@@ -533,9 +538,16 @@ int moy_ui_bar_rect(moy_ui_box_t view, int content, int offset, int horizontal, 
                     int bar_w, moy_ui_box_t *out);
 int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int offset,
                      int horizontal, int fs, int bar_w);
-// The overflow chevrons, '^' above and 'v' below.
-int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, int can_up,
-                       int can_dn, int ci);
+// A split's divider in its gap `b` (ui.split): `across` the gap stands
+// between panes side by side (else between panes stacked), its handle a
+// pill `hw` across and `hl` along (0: none) in the `border` token, centred,
+// and where `held` a line `line` across in the `value` token at `at` (the
+// gap's position the drag takes it to: its x across, else its y).
+int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, int hl, int held,
+                   int at, int line);
+// A text view's paper: `b` filled in palette colour `ci`, its corners of
+// radius `r`, anti-aliased (the canvas's rrect), through the clip the row holds.
+void moy_ui_paper(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int ci);
 // Fill the parts of `in` that `out` does not cover.
 int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out, int ci);
 // A scrolling list: `count` rows of `items` (NUL-separated UTF-8 in `len`
@@ -729,6 +741,10 @@ void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
 // the content; a target where the offset is ends any glide. Stops a fling.
 void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, int slide,
                             int32_t content, int32_t extent);
+// Add `vel` px/ms to the fling, begun from `offset` where none coasts (a
+// momentum that is not a drag's release: the trackball's coast); stops a
+// glide.
+void moy_ui_scroll_fling(moy_ui_scroll_t *s, int32_t offset, float vel);
 // Move the glide's target `n` steps of `size` (from the target while a glide
 // is live, else from `offset`); answers the target.
 int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
@@ -823,6 +839,8 @@ typedef struct {
 } moy_ui_tgeo_t;
 // The NUL-separated fields of `p` in n bytes (a trailing NUL ends the last).
 int moy_ui_fields(const uint8_t *p, size_t n);
+// The first NUL in [p, e), else e (a word at a time).
+const uint8_t *moy_ui_nul(const uint8_t *p, const uint8_t *e);
 // The geometry of a table of columns `cols` over every row's `cells` (both
 // NUL-separated, the cells row by row): the columns after the first text
 // column take their widest cell, right-aligned; it takes the rest, and where
@@ -832,7 +850,9 @@ int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols
                      const uint8_t *cells, size_t cells_n, int fs, int desk, moy_ui_tgeo_t *g);
 // The header row in box b, and one row of `cells` (that row's alone): its
 // marks by flags' F_ON (current), F_FOCUS and F_DISABLED, the picture column's
-// icon by name (moy_ui_icon_slot, else the glyph table's), the first text
+// icon by name (moy_ui_icon_slot, else the glyph table's; none with F_PART,
+// where the column is the app's part), with F_BAR the cursor bar (the
+// `value` token, 2 px of the scale) at the row's left, the first text
 // column cut with an ellipsis where the font has one.
 int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
                       const uint8_t *cols, size_t cols_n, int fs, int desk);

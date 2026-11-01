@@ -234,23 +234,23 @@ default.
 
 | surface | scrolls through | drag/fling | key, repeat, ball steps |
 |---|---|---|---|
-| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
+| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards and its file list, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
-| the Code tab, theme Config text, Notes, the fields, the text console | `TextView` (§5) over a `ScrollRegion` in visual rows | the view's region | a caret move reveals through `glide_to`; a page key is `step` |
+| the Code tab, theme Config text, the desk's made code, the text console's log | `ui.text_view` (§5): the nest's `moy_ui_scroll_t`, in visual rows | the engine's drag-tap; the fling | the editor's `top`, moved to keep its caret in view, lands the view there in that frame (`ui_draw.text_aim`); a fling and the wheel glide |
+| Notes | `ui.text_view` (§5), placed in its page with `ui.at` | the engine's drag-tap; the fling | the caret's row lands in view in that frame (`ui_draw.text_reveal`) |
+| the fields | one row in the verbs engine | -- | -- |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
-The Blocks outline and Music's steps scroll in Python by whole rows
-(`blk_top` and `block_editor_ui._outline_drag`; `MusicPage._window`, which
-keeps the cursor in the middle), their rows the page's own pixels among its
-verbs. A key step or a scroll there is a rows frame the page asks its
-`AppHost` for (`AppHost.rows`, §5): the rows it changed, the rows moved out
-of the last frame by the rows they scrolled. Config's cards are a verbs
+The Blocks outline and Music's steps are tables of parts
+(`docs/ui_blocks_2026-10.md` §4.1): the engine's region, drag, fling and
+reveal, their rows carried in C, and the page holding each table the
+region R its frames move the table inside. Config's cards are a verbs
 page (`editor_settings.SettingsPage`) whose gen makes a key step the
-engine's rows frame; `cards_layer`'s own loop and `mtop` draw a broken
-manifest and the file list. Carts are out: a
+engine's rows frame; its broken-manifest page (`ui.empty`) and its file
+list (a placed `ui.table`) are verbs pages too. Carts are out: a
 cart's `btn`/`btnp` and its own scrolling are the cart's (L9); Notes is a
-system cart on the verbs engine whose text is the shell's `EditorHandle`,
-and §5 says what it gets.
+system cart on the verbs engine whose note is a text view drawn by the
+shell's `EditorHandle`, and §5 says what it gets.
 
 ### 2.5 The browser
 
@@ -303,10 +303,12 @@ key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
-fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `TextView`
-own one; the home's `_still_ring` (§14.4) is one whose change is its
-parts' keys and the bar's. The one-body guard is a grep: no other list of painted frames
-in `runtime/` or `native/moy_ui/`.
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` owns one.
+An app's page keeps the same slots in its context, the engine's
+(`moy_ui_host_t`, read by `moy_ui_api_host_begin`), so its begin is one
+C call; the home names its parts per buffer in its band host's paints
+there (`ui.held`, the engine's kept ring: §9 and §14.4). The one-body guard is a grep: no other list of
+painted frames in `runtime/`.
 
 ### 3.2 The backend verb: `shift_last`
 
@@ -448,7 +450,7 @@ WM's ring vouches, as windowed.
 
 ### 3.5 Text contents and the home
 
-The same record, two more speakers. A `TextView` (§5) reports its change as
+The same record, two more speakers. A text view (§5) reports its change as
 a translation of the text rect by k visual rows plus the rows it edited and
 the caret's; a home arrangement (§9) as a translation of its band plus the
 cells whose selection changed. Each draws its lag from the record: rows are
@@ -472,7 +474,7 @@ paint re-arms the ring.
 
 ## 5. Text editors: the edited line and the caret
 
-**One body: `TextView`**, a verb of the C UI library (`native/moy_ui`) and
+**One body: the text view**, `ui.text_view`, a verb of the C UI library (`native/moy_ui`) and
 part of the app-facing `ui` API (`docs/ui_api_2026-10.md`), not an Editor
 helper: an app that wants a text area -- a chat log, a terminal -- calls the
 same verb in Python, Lua or a compiled app and gets the same rows, its look
@@ -480,12 +482,17 @@ from the theme like every other part and changed per call through the
 API's overrides (§3 there). The shell's editors are its first callers. It
 is the view of a text buffer
 in **visual rows** -- a wrapped paragraph's rows, a code line's one row --
-with the first visible row, the rows' pitch, the caret, the selection, and a
-`PaintRing`. The Code tab (`CodeLayer`, which the theme Config text extends
-as `ConfigLayer`), the editor handle (`EditorHandle`, which the Player makes
-for Notes), the verbs' fields and the text console draw their rows through
-it. The buffer stays where it is (`CodeEditor`, the handle's document, the
-console's ring), and what changed is the view's to find: it keeps each
+with the first visible row, the rows' pitch, the caret, the selection; its
+scroll is its region's, kept by the context as every page's, and its record
+is kept by its id (`MOY_UI_TEXT_VIEWS` of them, every context's together,
+the least recently drawn given up first). What draws through it: the Code
+tab (`CodeLayer`, which the theme Config text extends as `ConfigLayer`),
+the desk's made code (`editor_parts.made`) and the text console's log
+(`TextConsole`) and Notes' note (`EditorHandle`), each with one
+`ui.text_view` call a frame. The verbs' fields and the console's prompt
+line are drawn by their own. The buffer stays where it is
+(`CodeEditor`, the console's ring), and what changed is the view's to find:
+it keeps each
 visible row's gen -- a hash of what the row draws: its text, its line's
 number where a gutter shows it, and its marks (the current row, the
 caret's column, the selection's span, the find matches, an error) -- and a
@@ -500,10 +507,14 @@ in P4 on 2026-10-28). By cause, those rows are:
   §14.1's invariant, so the two rows are the whole change);
 - **a scroll** by k rows is a translation of the text rect by k pitches plus
   the k exposed rows. `ui.text_view` is a scroll region of the verbs
-  engine: a drag scrolls it by pixels, its release coasts, and a view that
-  `follow`s its foot glides there when lines come, every frame of which is
-  a translation. The Code tab still pans by whole lines
-  (`CodeLayer._code_drag`), each a translation.
+  engine: a drag scrolls it by pixels, its release coasts and the wheel
+  glides it, every frame of which is a translation; a view that `follow`s
+  its foot glides there when lines come, and so to a `top` it is given. A
+  host that aims the view before its frame begins (`ui_draw.text_aim`)
+  lands it in that frame, one translation: the Code tab's `top` its editor
+  moved (a caret kept in view, a typed line, find, Go to) and the console's
+  new foot; `ui_draw.text_reveal` lands it only as far as a (line, column)
+  needs to show, wrap-aware (Notes' caret).
 
 **What draws the whole view**, named so none is inferred: a horizontal
 scroll (the Code tab's `ed.left` moves every row); a gutter width change
@@ -513,20 +524,25 @@ page change, and its p90 is priced as one in §15); and a buffer replaced.
 **Overlays over the text rect** -- the Code tab's completion popup, its
 crash popup, the jump and files overlays, the tool row, the autoscroll
 mark -- are rows: the rows an overlay covered last frame (its card and the
-shadow round it), moved by this frame's translation, join the floor, and
-the overlay draws over the frame's rows. On the desk a popover, a tooltip,
-a loupe or a divider's flash over the panes draws the next frame whole.
+shadow round it, `ui_draw.text_cover`), moved by this frame's translation,
+join the floor, and the overlay draws over the frame's rows. On the desk a
+popover, a tooltip, a loupe or a divider's flash over the panes draws the
+next frame whole.
 
-`TextView.plan(cv, ...)` asks the voucher whether the buffer `shift_last`
-reads holds R as the view drew it last -- the view's own `PaintRing` on the
-full-screen tier, and in a desk pane the Editor's word from the WM
-(`EditorDesk.vouched`: the window's buffer holds its last draw) -- and the
-record which rows moved; R's pixels then always come from that buffer
-(`shift_last` by the scroll, by 0 on a rows frame: translations never
-compose; where the WM's word is that the buffer the frame paints holds R as
-the frames `RETAINED_FRAMES` back left it -- a direct render's, 3 -- a rows
-frame moves only the bands the rows frames since drew), and `draw` draws
-the floor's rows, each whole and alone: its ground, the current mark, the
+The view's host (`AppHost.begin`, one `moy_ui_api_host_begin`) asks the
+voucher whether the buffer `shift_last` reads holds the page as the frame
+before drew it -- the host's ring in its context on the full-screen tier, and in a desk pane the WM's word
+handed down by the Editor (`EditorDesk.vouched`, `window_frame`) -- and the
+engine plans the frame (`moy_ui_api_shift_plan`); R's pixels then always
+come from that buffer (`shift_last` by the scroll, by 0 on a rows frame:
+translations never compose; where the WM's word is that the buffer the
+frame paints holds the page as the frames `RETAINED_FRAMES` back left it --
+a direct render's, 3 -- a rows frame moves only the band the rows frames
+since drew, `moy_ui_api_lag`). In the pass the view plans its rows against
+its record (`moy_ui_text_plan`): the rows whose gen moved join the floor, a
+run of them one band, and a floor too broken up to hold draws the pass
+whole (`moy_ui_api_shift_break`). The floor's rows draw each whole and
+alone: its ground, the current mark, the
 gutter number, an error's underline, the selection, the find matches, the
 text in its colour runs (tokenized in C for those rows only), the fade, the
 caret. An error's underline reaches the row after where the glyph box fills
@@ -541,12 +557,18 @@ whole.
 
 **Each editor, what it keeps and what it drops.**
 
-- *The Code tab* draws its rows, and the desk's read-only code
-  (`draw_lines`), through the view, and loses its whole-pane loop; the status band and the bar strip are outside the text
-  rect and draw as today (the strip through the WM's bar word,
-  `strip_moved`). Its drag pans by whole lines (`CodeLayer._code_drag`),
-  each a shift frame; panning by pixels through a `ScrollRegion`, as
-  `ui.text_view` scrolls, is not built for it.
+- *The Code tab* draws its rows through the view (`ui.text_view("code",
+  ...)` on its own host's page, R): its marks are the view's options
+  (`sel`, `err`, `find`, `left`, `mark`), its taps find their cell through
+  the view (`ui_draw.text_at`), and the wheel and a drag scroll the view by
+  pixels, a release coasting. `ed.top` reads back the first line the view
+  showed; a `top` the editor moved since lands the view there in that
+  frame (`ui_draw.text_aim`, before the host's frame begins).
+  The status band, the tools and the symbol keys are outside R and draw
+  every frame; the bar strip draws through the WM's bar word
+  (`strip_moved`). On the desk the Code pane is one of the panes whose
+  frames are their own (`_OWN_FRAMES`, a verbs page). The desk's read-only
+  made code is a view too (`editor_parts.made`, on the desk's verbs).
 - *The theme Config text* is the Code tab's class and takes all of it;
   `ThemeDoc.follow` runs before the draw as today.
 - *The fields* (`ui.field`: Settings' name, Cart info's, Blocks' prompts,
@@ -557,81 +579,58 @@ whole.
   dialog skips the put-back and draws the dialog's rows alone.
 - *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
   verbs page every tick (`ui.bar`, `ui.page`, the hints, the sheet), and
-  the page's ground fills the cart's canvas before the handle draws, so
-  rows in the handle alone save nothing. Notes takes the floor as a host's
-  rows frame. Its page and its vault table carry a gen (`PAGE_O`, moved
-  when the tools, the foot's word or the vault change). At begin the Player
-  asks the handle the rows its next draw changes (`EditorHandle.rows_plan`:
-  each visual row's laid line, caret cell and selection against the last
-  draw's, the bands of rows that differ; an embed or a new look is the
-  whole document). A view moved by whole lines -- a drag, a fling, the
-  wheel, the trackball, the caret leaving it -- is a **shift frame**: the
-  handle finds the k visual rows the move brings each row by (from the
-  lines its first row moved), compares row i with the last draw's row
-  i + k, and names the rect whose rows it keeps (`EditorHandle.rows_move`:
-  the rows that lie, before and after, inside the paper's straight sides,
-  clear of its round corners), which the Player moves by k rows
-  (`shift_last`) before the pass; the bands are then the rows the move
-  brings, the rows it does not keep, and the rows whose line or marks
-  changed. The Player adds what the buffer it draws into lags (its
-  `PaintRing`: on a glass of two or three buffers the floors the frames
-  since changed, else -- and after a frame that shifted -- the last
-  frame's page moved over with `shift_last`), and the engine plans the
-  frame (`moy_ui_api_shift_rows`): R is the page under its gen, which may
-  hold stops `ui.at` placed since nothing moves, and the floor is those
-  rects and what begin's input changes, under a hover over no stop or a
-  press that went down on none, held or let go; a rows frame begin planned of its own
-  (the desk's vault table) gives way to it. The cart's
-  pass runs under the floor, the page's ground filling it alone; the handle
-  takes each band into the floor over the ground (`moy_ui_api_floor_take`),
-  papers it and draws its rows, with the row above where a link's underline
-  reaches into it. Where no floor is drawn and the canvas is one buffer
-  only the run draws, the handle draws its rows when the canvas's gate
-  counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) and its clears show nothing
-  else wrote it since its last draw -- otherwise whole. A `cls` under a
-  floor breaks the frame (`moy_ui_api_shift_break`: the pass draws whole
-  from there), as does a handle that finds it must draw whole after all
-  (it takes its whole rect into the floor first), and a declared
-  `background` draws every frame whole. The handle the run draws is the one
-  it has open: a note closed for another draws nothing (`EditorHandle.live`).
-  The FPS chip, drawn over the page after its pass, is what the frame
-  changed there too, and the next frame's floor (`Player.overdrew`); the
-  run's page is then alone on the glass but for it. The
-  cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart
-  (render the document into that rect, this frame): a cart that `cls()`es
-  and calls it gets the whole document. What a frame changed of the canvas
-  is the floor's bounding rect and the rect the move shifted
-  (`Player.change`); the Player's window on
-  the desk copies it and the shown ring's lag onto the glass
-  (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
-  the last phase (§15 P8), priced honestly, and §15 says what it costs if
-  the cart floor does not hold.
-- *The Blocks outline and Music's steps* are rows a shell page draws itself
-  among its verbs, and the page asks for the same frame from its
-  `AppHost` (`AppHost.rows`): where the last frame it drew differs from
-  this one only by the cursor and a whole-row scroll, the rects of the rows
-  that changed and the region the scroll moves, which the host moves out
-  of the last frame (`shift_last`) before the engine plans the floor
-  (`moy_ui_api_shift_rows`); a page with rows of its own takes no plan the
-  engine makes without them (`own_rows`). The Blocks page takes each run of
-  rows its floor reaches into the floor (`floor_take`) and draws them
-  clipped to it. Its cursor plate and insert button are one placed stop
-  (`Row`), whose bands take the gap pixel either side where the plate
-  reaches past its box: a stop `ui.at` placed both frames that moved where
-  the floor holds both its boxes floors nothing more, so a step is the
-  cursor's two rows; a prompt over the page makes the next frame whole
-  (`BlocksPage.forget`). Music's page
-  keeps what each shown row held, so an edit of one step is that row's
-  frame too; its rows draw their verbs first and their own pixels (the
-  cursor bar, the meters, which overlap no verb) after, and the rows and
-  the pad the floor misses are kept as the last frame drew them
-  (`ui.keep`).
-- *The text console* (`runtime/text_console.py`) draws through the view for
-  its scrollback rows and its prompt line; a script that prints appends
-  rows, a translation of the scrollback by the rows appended plus those
-  rows. Its frame cadence is the script's (a cart's loop), and both boards
-  measure it under target; it takes the view for the one body, not for a
-  row it needs.
+  the handle draws the open note as a view (`ui.text_view("editor<n>",
+  ...)` at the note's rect, placed with `ui.at`) in the monospace face (on
+  the desk its family's 15 px face, the view's `font`): the note's source
+  as written, coloured by the view's `markdown` syntax (its marks dim, a
+  heading, a task's box and a `[[link]]`'s name in the code tones). A tap finds its cell through the view
+  (`ui_draw.text_at`); a box's brackets toggle it and a link opens its
+  note from that cell (`EditorHandle.tap`). The Player begins the run's
+  frame through its app host (`AppHost.run`, the host every shell app's
+  frames begin through). The page carries a gen keyed on what it shows
+  beside the note (the tools' states, the foot's word, the desk's vault),
+  so R is the page, its placed stops lying still, and the view's move is a
+  second move inside it (`sh_in`, `sh_in_dy`), as a table of parts' is;
+  the handle hands the view its paper (`paper`, the sheet's corners), whose
+  bands draw through the frame's pieces. Before the frame begins the handle aims the view
+  (`EditorHandle.aim`): a caret moved since its last draw lands the view
+  only as far as its visual row needs (`ui_draw.text_reveal`, wrap-aware),
+  and a `top` the editor moved lands there. A drag, a fling and the wheel
+  scroll the view by pixels and a release coasts; Shift and the wheel,
+  and the caret, move the unwrapped view sideways (`left`). So a key step,
+  a typed key and a glide are the engine's shift and rows frames inside
+  the page, and the tools, the foot and the desk's vault keep their pixels.
+  The frame is whole where the run has no note open, where a declared
+  `background` repaints the canvas, where the FPS chip drew over the view
+  (`Player.overdrew`; over the page beside it, a frame that moves nothing
+  draws it again), where the pass draws the view outside the page the plan
+  named, and from a cart's `cls` on (`moy_ui_api_shift_break`).
+  The cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other
+  cart: the document, in that rect, this frame. On the desk the Player's
+  window composites, of the run's canvas, only what the frame changed
+  (`Player.change`, from `moy_ui_api_change_box`: the view's floor and
+  moves) where the page holding the view drew under the gen it drew under
+  the last frame and covers the window (`MOY_UI_KD_HELD`) and the shown
+  ring vouches for the buffer; else the canvas whole.
+- *The Blocks outline and Music's steps* are tables of parts
+  (`docs/ui_blocks_2026-10.md` §4.1): each row's cells are its key, the
+  engine carries the rows that did not change and `ui.table_part` answers
+  the rest, which the page draws clipped to their cells. Each page carries
+  a gen keyed on what it shows beside its table (the head, Music's pad, the
+  foot), so R is the page, its placed stops lying still, and the table's
+  move is a second move inside it (`sh_in`, `sh_in_dy`): the page beside
+  the table keeps its pixels on the table's frames. The Blocks cursor's
+  plate and insert button are a tool drawn in the cursor's part, its slot
+  the table's gen; under a prompt the page draws whole until a frame
+  draws it with the prompt gone (`BlocksPage.forget`).
+- *The text console* (`runtime/text_console.py`) draws its scrollback
+  through the view (`ui.text_view("log", ..., {"follow": True})`, an echoed
+  line's prompt and answer in SGR's dim and value); its prompt line is drawn
+  by its own. A script that prints appends rows, and a view at its foot
+  lands at the new foot (`ui_draw.text_aim`); a drag scrolls the log back by pixels and its
+  release coasts. Its frame cadence is the script's (a cart's loop), and
+  both boards measure it under target; it takes the view for the one body,
+  not for a row it needs.
 
 **The cost** of a keystroke becomes the row's raster (one row of glyphs,
 ~0.3-0.5 ms on the P4 at the mono font, a few hundred µs on the T-Deck) and
@@ -751,41 +750,70 @@ the panes otherwise.
 
 ## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 
-**The grid and icons arrangements** (`Launcher`, `IconHome`) repaint the
-whole home every painted frame (97-123 ms on the P4, 80-102 on the T-Deck),
-while the carousel repaints a band and shifts the rest (24-27 on the
-T-Deck's same inputs, 33-57 on the P4's). The same path reaches them, with
-two changes and one honest limit:
+**The grid, icons and carousel arrangements** (`Launcher`, `IconHome`,
+`Carousel`) draw their band as an engine table of parts that keeps its
+parts (2026-10-30, #243 step 7; kept since 2026-10-31,
+`docs/ui_api_2026-10.md` §2, A kept table): `Launcher.band_pass` opens a
+`ui.table` with `o.part` over the band -- a row of cards side by side
+(`o.axis "x"`, the carousel's with `o.snap`) or the icons' rows -- hands
+it the scroll as `o.offset`, the cards' reach past their cells as
+`o.spill`, each row's cards' keys as its cells across (`_band_keys`,
+`o.across`), the focused card as the current row's part (`o.at`) and gen,
+the cursor's stamp as `o.over` and as
+`o.keep` what every card is a function of beside its row (`_band_key`: the
+statics, the cover gen and the carousel's centre card), and draws what
+the engine answers: the floor the buffer this frame paints lacks
+(`ui.table_floor`, the ground put back there) and the parts that meet it,
+each clipped to its floor rect, the focused card last. A grid or icons step
+draws the two cards the focus left and entered; a frame whose buffer holds
+the band draws nothing; a scroll over the home's one-colour ground
+(`Launcher.flat`, the wallpaper's restore key a colour: `o.shift`) moves
+the band out of the last frame's buffer by the scroll's difference
+(`ui.table_shift`, the canvas's `shift_last` and fence, §3.2's engines)
+and draws the row it uncovers, the two cards the focus moved between and
+the handheld icons' fade (`o.fade`), the next buffer copying the band (a
+move of 0); a scroll over a wallpaper, a key that moved or a buffer the
+engine cannot vouch for draws the band whole.
+The carousel's key holds its centre card, so its floor is nothing, the
+stamp or the band whole. A grid or icons card that wears no focus is
+drawn out of its KEPT FACE (built 2026-10-28, retired with the move and
+brought back 2026-10-30 by #243's perf pass, the P4s' band frame having
+gone from a copy a card to a whole draw of each; its record moved into
+the engine 2026-10-31): its picture and rim drawn once into a slot of one
+owned layer (`Launcher._faces_for`, `(cols + 2) * rows` slots of the
+shelf, `(rows + 2) * cols` of the icons) and copied in one
+`moy_gfx.face` call, which over anything but the plain ground draws the
+pixels a corner covers in part as the card draws them, because they
+blend over what lies there. The engine keeps which card's face each slot
+holds (`ui.slots` on the band's table, keyed on the look's gen, the plain
+ground, the font scale and the layer; `ui.slot` per card, named by its
+cell -- path, title, kind -- and its cover decode's serial) and answers
+the slot to stamp from or none. A paint never draws a face: a card no
+slot holds is drawn as it is, so a step that brings in a cold row evicts
+nothing as it goes (2026-10-31). An idle frame draws the faces `ui.slot_next` names
+(`Launcher.mint_faces`: the band's cards, then the rows past either end,
+nearest first, as many as the slots -- the band's and a row past either
+end at least, and what 192 KB of layer holds of them, `Launcher._face_cap`:
+61 on the T-Deck's icons, the band's 36 on the Guition S3's, whose step
+frames grow with the slots -- 36: 68 ms, 64: 71, 128: 79 on its icons'
+key_20, 2026-11-01), about 4 ms of them a frame, the walk itself held
+to that (a round of 128 asks is 10 ms on an S3), so a step copies the
+row it brings in and a scroll back passes rows whose faces stayed. The layer goes back with
+`release_retained` and when the arrangement is left; the carousel's
+cards draw. The band frame (`launcher_layer._band_frame`, through
+`_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a
+key, repeat or ball step too, where the buffer this frame paints holds the
+band and the frame round it under this frame's statics (`ui.held("band",
+...)`); the parts outside the band a selection changes (the hint strip,
+the icons' caption band) are named with `ui.held` too and drawn where that
+buffer holds another selection's. The floor's end says whether every
+buffer holds the frame: the home then owes the retained frame's capture to
+an idle frame, or asks for the frame that brings the next buffer to it.
+The carousel's card sizes and the desk shelf's are the carousel's own
+geometry, the engine answering which cards show.
 
-- **a selection step is two cells**: the drag fast path
-  (`_try_drag_partial`) runs on a key, repeat or ball step too, its floor
-  the cells whose selection changed, and on a glide the band's translation
-  plus the cells exposed;
-- **the band shifts only on a plain ground**: `Launcher.draw_shift` repaints
-  the band whole today because the cards lie on the wallpaper, and the
-  wallpaper's restorer puts a baked backdrop (`bd`) or a picture back at
-  glass coordinates -- they stay put while the cards move. Only the plain
-  fill (`bg`) moves with the cards, and there the band is a translation.
-  On a `bd` or picture theme the band repaint stays, its cards out of their
-  KEPT FACES (`launcher_layer._Faces`, 2026-10-28): a card that wears no
-  focus is drawn once into a slot of one owned layer -- its picture and
-  rim, keyed on the item, its title, the cover object it was drawn from and
-  the look's gen -- and copied; over anything but the plain ground a
-  corner's partly covered pixels blend over what lies under them, so the
-  copy is `moy_gfx.face` (`mg_face`, `moy_shape.h`), which draws those
-  pixels as the cover or the title tile and the edge ring draw them and
-  copies the rest, one call a card. The desk shelf's cards take the same
-  faces; the handheld carousel's change size with the offset and draw. A
-  paint draws no face: idle frames draw them, the band's cards' and then
-  the row past either end of the band (`Launcher.warm_faces`), and a paint
-  copies the cards that have one and draws the rest, so a home's first
-  paint costs what it did and a step copies the row it brings in. The
-  backdrop goes back under the whole band in one copy and the pictures
-  paint over it: its cut round the cards cost more in calls than the bytes
-  it saved (a block that big is the P4s' 2D-DMA's, `FBCPY_MIN_PX`).
-
-The desk home's still ring (§14.4) keeps the parts' keys; it is a
-`PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
+The desk home's still frames (§14.4) name the backdrop's, the hero's,
+the shelf's and the bar's keys in the band host's paints (`ui.held`). The PROJECTS window is a `Carousel` in a window
 (`HomeWindowLayer`) and speaks the record through the WM like any windowed
 content. The carousel's settle frame (the selection changes when the row is
 still: the hero and details pane repaint) is the carousel's key-row p90 on
@@ -801,19 +829,26 @@ source pixel) of the source rect the body shows, clipped to the part inside
 the card's band (`ui_draw.popover_band`: the card less its inset, clear of
 its corners and drop), so what the body does not show of the sheet draws
 nowhere. While the pickers are up the page under them changes only by what
-their pass does to it (the size, a picked sprite), so a frame whose buffer
-holds that page draws the pickers' body alone, clipped to the band
-(`PaintLayer._pick_held`): on the full-screen tier where each of the
-RETAINED_FRAMES frames before drew the pickers over the same page under
-one key (the sprite, its size, the sheet's gen, the look, the input's kind,
-the card), with nothing over it; on the desk as the Sprite pane's own
-frame (§15 P5's `_OWN_FRAMES`, while the pickers are up), where the WM
-vouches for the buffer and the lag it names lies inside the band or each
-frame it holds since drew that page. The release of a press the engine
-may still activate (`AppHost.tap_armed`: no page's drag) draws the desk
-whole, since a pick changes the Sheet pane beside the pickers. The
-popover's body is an overlay to the engine, drawn whole over the page, so
-its scroll moves no pixels (no shift frame); the two-axis region this
+their pass does to it (the size, a picked sprite), so it is a modal's page,
+held under one key (the sprite, its size, the sheet's gen, the look, the
+input's kind, the card's place) by `ui_draw.Hold`. Where the buffer a
+frame paints holds the page and the card as the frames before drew them
+under that key (`HOLD_LEFT`; docs/surface_model_v1.md
+§14.5 says when), the pickers draw inside the card's band alone, the card's
+corners and drop left as they lie, and say so (`ui_draw.drew_within`). A frame that draws the page anew asks for
+the frames that bring each buffer up to it while the input rests
+(`ws.request_frame`), so the next input's first frame draws the band
+alone; it holds the page in the hold's layer only where the next frame
+cannot take it from this one (`Hold.copies`: a frame not alone on the
+glass, a canvas of one buffer or with no `copy_last`), and a frame there
+puts it back as it was held and draws the pickers over it. On the desk the pane draws through a viewport, and
+the frame is the Sprite pane's own (§15 P5's `_OWN_FRAMES`, while the
+pickers are up), which names that band as what it changed. The
+release of a press the engine may still activate (`AppHost.tap_armed`: no
+page's drag) draws the desk whole, since a pick changes the Sheet pane
+beside the pickers. A tapped tile is read from the sheet's part
+(`ui.part_at`). The popover's body is an overlay to the engine, drawn
+whole over the page, so its scroll moves no pixels (no shift frame); the two-axis region this
 section once named was not built, so a sheet wider than the body (a large
 font scale on a handheld) shows only the columns its row holds.
 
@@ -864,11 +899,12 @@ Per canvas, then per source:
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
-| a page's own rows frame (`AppHost.rows`) | the Blocks outline and Music's steps, a frame whose only change is the cursor or a whole-row scroll (and on Music a step's value) | an edit the head or foot shows, a press, a floor past three fifths of the page |
+| a table of parts moving inside its page | the Blocks outline and Music's steps: a drag, a fling, a key step, a changed row, the page under its gen | an edit the head or foot shows (the page's gen moves), a prompt over the page, a floor past three fifths of the page |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
 | the debt copy of rows | roots with `copy_last` and a ring deeper than one | one persistent buffer (owes nothing) |
+| a kept table's move (the home's band) | a band over one colour, on a canvas with `shift_last` | a wallpaper under the band (its pixels would move); the canvas refusing (the Guition's root while a rotate is in flight): the band draws whole |
 
 Where a lever is `None` none of its bookkeeping runs: no ring entry is
 written for a shift that cannot happen, no widened set is built, no refill
@@ -879,7 +915,8 @@ is queued. The host runs every mechanism under test as an emulated tier
 
 - A cart's own scrolling, and every Lua and compiled cart: a cart may read
   `btn` in its draw and its `cls` writes past any floor; the Player
-  composites a declared rect at most (§5, Notes, whose pass is shell code).
+  composites its canvas whole (§5; Notes' pass is shell code, its note a
+  text view).
 - An overshoot or a rubber band at the clamp: the fling hard-stops, as #113
   v1 did (owner, 2026-10-27).
 - A replay of the app's pass (§3.3): no host has a re-run hook and the
@@ -1078,8 +1115,8 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 | **P2 repeat and the ball** | `begin_frame(now)`, the repeat counts, the typing-level slot, the page's `e.repeat` dropped, the ball as counts, `BALL_COAST`; then the owner's hand trial | T-Deck, host | P1c, P1d | T-Deck `ball_fast` rows 13-27 of 30 → 30 of 30 within one glide; held keys move on every surface (none today); P4 held-key rows (Code, Notes, Music ~11 Hz with no delay) repeat at the rate |
 | **P3 fields and dialogs** (Editor sequence begins) | the field's row; the held page's put-back skipped on rows frames; Blocks' prompts, Cart info, Settings' name, Notes' name field | P4, T-Deck | P6 | P4 Blocks prompts 123 → ~14-20, Cart info fields 86 → ~14-20; T-Deck fields 19-25 → ~12-15 |
 | **P4 the Code tab and theme Config** | `TextView` in visual rows, the whole-draw triggers, overlays as rows, the pixel drag | P4, T-Deck | P6 | P4 Code key steps 86 → ~14-18, typing 86-92 → ~14-18, held 84 → ~14-18, drag 57-82 → ~17-22, fling 87-105 → ~17-22, find 104 → ~50-60 (a find past the view is a whole view under direct render); theme Config keys and typing 91-94 → ~14-18, fling 121 → ~17-22; T-Deck Code type 40 → ~25-40 (its p90 is two outliers P0's tool must name before P4 prices them), drag 24 → ~14-17, find 68 → ~25-45, theme Config 12-15 → ~9-11 |
-| **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as their pages' own rows frames (`AppHost.rows`) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
-| **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
+| **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as tables of parts moving inside their pages (`docs/ui_blocks_2026-10.md` §4.1) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
+| **P6 the home and PROJECTS** | steps on `_try_band_frame` (then `_try_drag_partial`), two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
 | **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
 | **P7b the pickers** (Editor sequence) | the picker on the kernel; its body alone over the page it holds (§9) | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
 | **P8 Notes** | the handle's rows at begin, the cart's pass under the floor, the counters' licence, the Player's declared rect through the shown ring | P4, T-Deck | -- | P4 Notes 59-93 → ~22-28 with the cart floor (~35-45 without it: content 33 stays and only the composite shrinks); T-Deck 21-23 → ~15-19 |
@@ -1099,7 +1136,7 @@ each.** On the P4: the Code tab's and theme Config's find past the view
 and glyph cost, a kernel question, not a scroll one); the home's grid and
 icons on `bd` and picture themes (~30-55) and the carousel's key rows
 (~35-45, the settle frame's hero and details pane; the lever was the
-cards' kept faces, built 2026-10-28, §9, and what the carousel's step
+grid's and icons' kept faces, §9, and what the carousel's step
 frame keeps over the target is its hero, its details pane and its band
 drawn in one frame -- #66 has the rows);
 Notes if the cart floor does not hold (~35-45; the lever is then the
@@ -1140,7 +1177,7 @@ cart's to set.
    pickers lay out, focus and draw through the engine, as the apps do.
    Their look does not change: the Editor goldens stay byte-identical, and
    a detail the engine cannot draw extends the engine.
-6. `TextView` is a public `ui` verb, consistent with the rest of the API,
+6. The text area is a public `ui` verb (`ui.text_view`), consistent with the rest of the API,
    so any app (a chat app, a terminal) gets a text area and restyles it
    through the theme and the per-call overrides.
 
@@ -1180,7 +1217,7 @@ gen-licensed writes, and the clip-ignoring ops are listed as breaks
 every whole-draw trigger and the overlays as rows (§5). S1-S8: the T-Deck
 draws everything outside R; one voucher per region; rows after the fence;
 the picker kernel; the held page's put-back skipped; the dt word; the
-host's cursor hidden; the names (`AppHost.owed`, `_try_drag_partial`, no
+host's cursor hidden; the names (`AppHost.owed`, `_try_band_frame`, no
 fade is captured, no table clock).
 
 Where the design differs from a review's fix: M7 asked for the floor as

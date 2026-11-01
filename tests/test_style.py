@@ -247,16 +247,15 @@ _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
 # packages name is frozen (docs/theming_2026-09.md §4.3), so a part outlives
 # its last surface. `row_cta` was the old Storybook's NEW row, `row_list` the
 # power popover's level line (its rows are Settings' sliders since look step 33),
-# `row_menu` the kernel's system menu's rows (the look's card since step 33).
-_UNASKED_PARTS = ("row_cta", "row_list", "row_menu")
+# `row_menu` the kernel's system menu's rows (the look's card since step 33),
+# `row_chrome` the Config tab's own card rows (its cards are the Settings
+# page's on the verbs, `editor_settings.SettingsPage`).
+_UNASKED_PARTS = ("row_chrome", "row_cta", "row_list", "row_menu")
 
-_FROZEN_HATCH = {
-    "cards_layer.py": (3,
-        "the bad-card warning frame, and the two choice-cell palettes: a chosen "
-        "swatch is literal black + literal yellow (which is NOT `accent` on "
-        "slate), and the bg-thumb cell must paint NO field because its picture "
-        "is drawn BEFORE the frame"),
-}
+# No surface keeps a hand-built triple: the last three, the Config tab's own
+# card drawer (its bad-card frame and its two choice-cell palettes), retired
+# with the drawer.
+_FROZEN_HATCH = {}
 
 
 def _is_catalog_call(node):
@@ -354,15 +353,11 @@ def test_the_colors_hatch_is_pinned_site_by_site():
         assert len(why) > 40, name
 
 
-def test_the_hatch_that_moved_now_names_a_kind_instead():
-    """The other half of the count, and the reason it cannot pass vacuously: the
-    ten sites #207 moved did not merely lose a literal, they NAME a catalog
-    kind. Deleting the moves shrinks the hatch count above and fails here.
-
-    This floor counts the shape the sites have TODAY (`row(kind="row_menu")`).
-    They spent one landing passing `state_colors(...)` through `colors=` instead,
-    because `row`/`cell` had no `kind=`; giving them one is what turned each of
-    these call sites into one word."""
+def test_no_surface_names_a_shell_kind():
+    """The ten sites #207 moved off hand-built triples named a catalog kind
+    (`row(kind="row_menu")`); every one of them has since moved onto the
+    public UI verbs, the Config tab's own card drawer last. A surface naming
+    a shell kind again draws a row the verbs already draw."""
     named = {}
     for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
         if path.name == "ui.py":
@@ -370,10 +365,7 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
         k = _named_kinds(path)
         if k:
             named[path.name] = len(k)
-    assert named == {
-        "cards_layer.py": 2,            # the cards and the ADVANCED row
-    }, named
-    assert sum(named.values()) == 2
+    assert named == {}, named
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -439,7 +431,7 @@ _PRE_207_TRIPLES = {
         lambda th: (None, th["ink_dim"], None),
     ("row_list", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_chrome", ui_draw.REST):  # cards_layer (a card)
+    ("row_chrome", ui_draw.REST):  # the Config tab's old card row
         lambda th: (None, th["ink"] if th.get("bar_light", False)
                     else th["chrome_ink"], None),
     ("row_chrome", ui_draw.ON):

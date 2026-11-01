@@ -216,7 +216,7 @@ def _draw():
     assert drv.in_text_mode() is False
 
 
-def test_textmode_in_both_make_api_namespaces():
+def test_textmode_in_both_make_api_namespaces(monkeypatch):
     # host == device contract: `textmode` is a base verb in BOTH backends' namespace
     # (so a cart authored once runs identically). Loads the device moy_runtime under
     # CPython the way the spike/parity tests do.
@@ -233,6 +233,9 @@ def test_textmode_in_both_make_api_namespaces():
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
     fw = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules" / "moy_runtime.py"
+    # its board-only imports (tdeck_input) sit beside it: on the path here, not
+    # by whichever other file happened to put them there first
+    monkeypatch.syspath_prepend(str(fw.parent))
     spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)

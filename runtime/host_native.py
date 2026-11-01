@@ -53,6 +53,11 @@ CFLAGS = native_build.BASE_CFLAGS + [
     "-Werror=implicit-function-declaration",
 ]
 
+# MOYHOST_ASAN=1 builds the one library under AddressSanitizer (a library of
+# its own content hash): the process then runs with libasan preloaded
+# (tools/asan_pytest.sh runs pytest so).
+ASAN = ["-fsanitize=address", "-fno-omit-frame-pointer", "-g"]
+
 _PATH = [None]
 
 
@@ -91,6 +96,9 @@ def build(verbose=False):
     compiler. A process asks once; every binding loads what this answers."""
     if _PATH[0] is None:
         ps, cflags, link = parts(verbose)
+        if os.environ.get("MOYHOST_ASAN"):
+            cflags = cflags + ASAN
+            link = link + ASAN
         _PATH[0] = native_build.build_parts("moyhost", ps, CACHE, cflags=CFLAGS + cflags,
                                             link_flags=link, verbose=verbose) or False
     return _PATH[0] or None

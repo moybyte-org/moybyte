@@ -16,6 +16,13 @@ paths:
   executed in `tests/test_tdeck_input.py`, the device make_api in
   `tests/test_device_make_api.py`.
 
+- **A worker that dies under xdist load is a native heap bug until shown
+  otherwise: run it through `tools/asan_pytest.sh <pytest args>`.** It loads the
+  host's one library built under AddressSanitizer (`MOYHOST_ASAN`,
+  `runtime/host_native.py`), so a write into a freed or overrun buffer stops at
+  the access with where the memory was freed, serially and every time, instead
+  of corrupting the heap for a later test to die on. CI does not run it.
+
 - **The hosted console has a CI net, and its skips have TEETH.**
   The `tests/test_web_*_e2e.py` suites (sync, persist, p8, update, store, wasm) are
   the only checks that drive the wasm head in real headless Chrome; all are

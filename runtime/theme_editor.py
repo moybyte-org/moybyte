@@ -58,6 +58,7 @@ try:
     from editor_map import checker as _checker
     from moy_input import CTRL as _CTRL
     from theme_custom import dumps as _dumps
+    from widgets import _in
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import iconsets as _iconsets
     from runtime import ui as _ui
@@ -71,6 +72,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editor_map import checker as _checker
     from runtime.moy_input import CTRL as _CTRL
     from runtime.theme_custom import dumps as _dumps
+    from runtime.widgets import _in
 
 TAB_CONFIG = "theme_config"
 TAB_SPRITES = "theme_sprites"
@@ -1358,12 +1360,12 @@ class SpritesLayer:
                 ws.mark_dirty()
                 return True
             for (slot, _g, tool), r in zip(TOOLS, lay.tools):
-                if _hit(px, py, r):
+                if _in(px, py, r):
                     doc.pe.set_tool(tool)
                     ws.mark_dirty()
                     return True
             for i in range(16):
-                if _hit(px, py, lay.swatch(i)):
+                if _in(px, py, lay.swatch(i)):
                     doc.pe.color = i
                     ws.mark_dirty()
                     return True
@@ -1373,7 +1375,7 @@ class SpritesLayer:
                 if s >= len(_iconsets.SLOTS):
                     break
                 x, y = lay.slot_cell(k)
-                if _hit(px, py, (x, y, lay.pitch, lay.pitch_y)):
+                if _in(px, py, (x, y, lay.pitch, lay.pitch_y)):
                     doc.select(s)
                     return True
             if lay.page_xy is not None and not lay.desk and py >= lay.legend[1] - 4 \
@@ -1391,10 +1393,6 @@ class SpritesLayer:
             self._release(doc)
             ws.mark_dirty()
         return True
-
-
-def _hit(px, py, r):
-    return r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]
 
 
 def _line(x0, y0, x1, y1):

@@ -29,8 +29,8 @@ path rather than a bar tap, #111; run_code stays PLAY's own explicit-run entry p
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
-code-UI state (the keyboard edge tracker _ekey, the drag-scroll origin _drag, the
-text view _tv). ws.nav (the trackball-caret handler, called by both the host
+code-UI state (the keyboard edge tracker _ekey, and the host whose page draws the
+rows through `ui.text_view`). ws.nav (the trackball-caret handler, called by both the host
 + device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
 + the MicroPython-safe syntax highlighter live here (single source; console.py imports
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
@@ -49,6 +49,13 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+# the text view's syntaxes by the highlighter's language (ui.text_options's)
+_SYNTAX = {"plain": 0, "python": 1, "lua": 2, "json": 3}
+# ...and the words of its packed options the Code tab writes each frame
+_TXO_GUTTER, _TXO_SYNTAX, _TXO_CARET, _TXO_SEL = (_ui.TXO_GUTTER, _ui.TXO_SYNTAX, _ui.TXO_CARET,
+                                                  _ui.TXO_SEL)
+_TXO_ERR, _TXO_FIND_CI, _TXO_LEFT, _TXO_TOP = (_ui.TXO_ERR, _ui.TXO_FIND_CI, _ui.TXO_LEFT,
+                                               _ui.TXO_TOP)
 # The overlays' fields, lines and keys (`_draw_tools`): the keys every
 # board has, by action, Shift+Enter its own.
 _FIND_FIELD = {"id": "find", "hint": "Find"}
@@ -211,10 +218,9 @@ def draw_symbol_keys(cv, th, syms, x0, y, cell, h, fs, rects=None, w=None):
 
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
-# A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and returns a
-# per-character list of MOY64 palette indices, so the code view draws colored runs
-# without any re/tokenize dependency (those are heavy/absent on the device). Token
-# classes map to:
+# The token classes (their MOY64 palette indices name them) and the words each
+# language colours, installed into the text view's C highlight
+# (native/moy_ui/moy_ui_text.c) below:
 _HL_TEXT = 6        # light_grey -- identifiers, operators, punctuation (default)
 _HL_KEYWORD = 12    # blue
 _HL_STRING = 11     # green
@@ -249,78 +255,15 @@ _HL_LANG_BUILTINS = (
     "round", "sqrt", "bool",
 )
 _HL_BUILTINS = tuple(_CART_VERBS) + _HL_LANG_BUILTINS
-# The classes in the TextView's tone order (moy_ui_text.h's MOY_UI_TT_*), and
+# The classes in the text view's tone order (moy_ui_text.h's MOY_UI_TT_*), and
 # each language's words in it: the builtins, then the keywords over them.
 _HL_CLASSES = (_HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN)
 for _lang, _kw in (("python", _HL_KEYWORDS), ("lua", _HL_LUA_KEYWORDS)):
     _ui_draw.text_words(_lang, _HL_BUILTINS, _HL_CLASSES.index(_HL_BUILTIN))
     _ui_draw.text_words(_lang, _kw, _HL_CLASSES.index(_HL_KEYWORD))
-_C_TEXT_DRAW = _ui_draw._C.text_draw
 # What a popover's shadow reaches past its card, at the font scale: the rows
 # under it draw again the frame after.
 _POP_PAD = 32
-
-
-def _is_alpha(ch):
-    return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
-
-
-def _highlight(line, lua=False):
-    """Return a list of palette indices, one per character of `line` (#24).
-    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython.
-    `lua` (#67 Phase 5) switches the comment marker (`--`; `#` is Lua's length
-    operator, NOT a comment) and the keyword set; strings/numbers/cart-verb
-    builtins scan identically in both languages."""
-    n = len(line)
-    out = [_HL_TEXT] * n
-    i = 0
-    keywords = _HL_LUA_KEYWORDS if lua else _HL_KEYWORDS
-    while i < n:
-        ch = line[i]
-        if (lua and ch == "-" and i + 1 < n and line[i + 1] == "-") or \
-                (not lua and ch == "#"):       # comment to end of line
-            while i < n:
-                out[i] = _HL_COMMENT
-                i += 1
-            break
-        if ch == '"' or ch == "'":             # string literal (single line)
-            q = ch
-            out[i] = _HL_STRING
-            i += 1
-            while i < n:
-                out[i] = _HL_STRING
-                if line[i] == "\\" and i + 1 < n:   # escape: consume next char too
-                    i += 1
-                    out[i] = _HL_STRING
-                    i += 1
-                    continue
-                if line[i] == q:
-                    i += 1
-                    break
-                i += 1
-            continue
-        if "0" <= ch <= "9":                   # number literal
-            while i < n and (("0" <= line[i] <= "9") or line[i] == "." or line[i] == "x"):
-                out[i] = _HL_NUMBER
-                i += 1
-            continue
-        if _is_alpha(ch):                      # identifier / keyword / builtin
-            j = i
-            while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
-                j += 1
-            word = line[i:j]
-            if word in keywords:
-                cl = _HL_KEYWORD
-            elif word in _HL_BUILTINS:
-                cl = _HL_BUILTIN
-            else:
-                cl = _HL_TEXT
-            while i < j:
-                out[i] = cl
-                i += 1
-            continue
-        i += 1                                 # operator / punctuation / space
-    return out
 
 
 class CodeLayer:
@@ -357,14 +300,24 @@ class CodeLayer:
         self.ws = ws
         self._NAMES = names
         self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
-        self._drag = None             # last pointer pos during a code-view drag-scroll
-        self._tv = _ui_draw.TextView()    # the code's rows (docs/scroll_and_text_2026-10.md §5)
-        self._r = [0, 0, 0, 0]        # ...their rect R
-        self._made = None             # the desk's read-only code (draw_lines)
+        # The code's rows: `ui.text_view` on this host's page (its context
+        # keeps the view's scroll and record, docs/scroll_and_text_2026-10.md
+        # §5), the buffer it shows, and the first line the view showed last,
+        # which `ed.top` reads back: a `top` moved since is the editor's.
+        self._host = _ui_draw.AppHost()
+        self._ed = None
+        self._r = (0, 0, 0, 0)        # ...the rows' rect R, as the view drew last
+        self._top = -1
+        # the view's options, packed once and written in place each frame
+        self._view = _ui.text_options({"gutter": True, "syntax": "python", "mark": True})
         self._pop = _array("i", [0, 0, 0, 0])    # a popover's card, as its pass drew it
-        self.text_kind = None         # what the last draw of the rows was: whole, rows, shift
-        self.vouch = 0                # a desk pane's word for its buffer (EditorDesk.vouched)
         self._t = None                # per-draw tone map (set by _draw_code)
+        self._tk = [None, -1, None]   # ...made once a theme and look gen
+        self._rr = [0, 0, 0, 0]       # R, the code's rows' rect, each draw
+        self._left = 0                # the first column the view drew
+        self._into = _array("i", [0, 0])   # the view's answer: no tuple a frame
+        self._st = [-1, -1, -1, -1, -1, -1, -1, b""]   # the status line, made once a change
+        self._sb = [None, None, None]     # the band, its text, and the band left of the text
         self._stop_host = None        # the stopped line's popover's UI context
         self._stop_card = None        # and the card its last pass drew
         # -- #89 additions: selection / tools / find / gutter -----------------
@@ -377,6 +330,9 @@ class CodeLayer:
         self._gutter = True           # the line-number gutter, on by default (look 2026-10, D-03.1)
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
+        # find_count's key (the editor, its edits, the query, the case), the
+        # caret its answer is for, the answer, each line's matches and their sum
+        self._fk = [None, -1, None, None, -1, -1, (0, 0), [], 0]
         self._find_ci = True          # case-insensitive find (the default)
         self._find_anchor = None      # where the incremental search re-runs from
         # -- #89 autocomplete + jump-to-symbol popups -------------------------
@@ -461,7 +417,7 @@ class CodeLayer:
                 ay = self._mouse.anchor_y
                 _ui_draw.autoscroll_mark(ws.sys_canvas, ws.theme_colors, self._mouse.anchor_x,
                                          ay, s)
-                self._tv.cover(ay - 7 * s, ay + 7 * s)
+                _ui_draw.text_cover(self._host, "code", ay - 7 * s, ay + 7 * s)
         finally:
             _ui_draw.print_font(was)
         # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + X (no SAVE,
@@ -527,14 +483,22 @@ class CodeLayer:
         return True
 
     def _wheel(self, i):
-        """The wheel scrolls the code three lines a notch, Shift's sideways."""
-        wy, wx = getattr(i, "wheel_y", 0), getattr(i, "wheel_x", 0)
-        ed = self.ws.editor
-        if not (wx or wy) or ed is None:
+        """The wheel scrolls the code three lines a notch: the text view's
+        region takes it, wherever over the tab the pointer rests, and glides.
+        Shift's, or a wheel across, moves the editor's columns."""
+        wx = getattr(i, "wheel_x", 0)
+        wy = getattr(i, "wheel_y", 0)
+        if not (wx or wy):
             return
+        ed = self.ws.editor
         if getattr(i, "mods", 0) & _SHIFT:
             wx, wy = wx + wy, 0
-        ed.scroll(3 * wy, 3 * wx)
+        if wx and ed is not None:
+            ed.scroll(0, 3 * wx)
+        if wy:
+            r = self._r
+            self._host.point(r[0] + r[2] // 2, r[1] + r[3] // 2, False)
+            self._host.wheel(0, wy)
         self.ws.mark_dirty()
 
     def stop_autoscroll(self):
@@ -553,9 +517,18 @@ class CodeLayer:
         self._mid = mid
 
     def _cell(self, px, py, lay, ed):
-        """The document cell (row, col) under (px, py) in the code area."""
+        """The document cell (row, col) under (px, py): the text view's,
+        and off its rows (a drag past its edge) the lines on from them."""
+        got = _ui_draw.text_at(self._host, "code", px, py)
+        if got is not None:
+            return got
         col = (px - self._text_x0(lay, ed)) // lay.cell
         return ed.top + (py - self._y0(lay)) // lay.lh, ed.left + max(0, col)
+
+    def _place(self, px, py, lay, ed, select=False):
+        """The caret to the cell under (px, py) (`CodeEditor.place`)."""
+        row, col = self._cell(px, py, lay, ed)
+        ed.place(col - ed.left, row - ed.top, select)
 
     def handle_pointer(self, px, py, click):
         # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
@@ -621,19 +594,18 @@ class CodeLayer:
             else:
                 self._mouse.release(ed)
             ws.mark_dirty()
-        elif ed is not None and _in(px, py, lay.code_area()):
+        elif ed is not None and (self._host.hold or _in(px, py, lay.code_area())):
             if self._select_mode:
                 self._select_pointer(px, py, click, lay, ed)   # drag = extend selection
             else:
-                self._code_drag(px, py)                  # drag pans the viewport
+                # a drag scrolls the view and its release coasts (the text
+                # view's region); a tap places the caret
+                if self._host.point(px, py, click, ws.pointer.down):
+                    ws.mark_dirty()
                 if click:
-                    tx0 = self._text_x0(lay, ed)
-                    col = (px - tx0) // lay.cell
-                    if col < 0:
-                        col = 0                           # a tap in the gutter -> column 0
-                    ed.place(col, (py - self._y0(lay)) // lay.lh)
+                    self._place(px, py, lay, ed)
         else:
-            self._drag = None
+            self._host.point(px, py, False)
         return True
 
     # -- input ---------------------------------------------------------------
@@ -835,17 +807,12 @@ class CodeLayer:
         # anchor). Release ends the gesture. A plain tap (press+release, no move)
         # just moves the caret -- exactly a non-select tap.
         ws = self.ws
-        tx0 = self._text_x0(lay, ed)
-        col = (px - tx0) // lay.cell
-        if col < 0:
-            col = 0
-        row = (py - self._y0(lay)) // lay.lh
         if click:
-            ed.place(col, row)                 # collapse + move the caret here
+            self._place(px, py, lay, ed)       # collapse + move the caret here
             ed.begin_select()
             self._sel_drag = True
         elif self._sel_drag and ws.pointer.down:
-            ed.place(col, row, select=True)    # extend to the finger
+            self._place(px, py, lay, ed, True)     # extend to the finger
         elif not ws.pointer.down:
             self._sel_drag = False
         ws.mark_dirty()
@@ -904,18 +871,57 @@ class CodeLayer:
         q = self._find_q
         if ed is None or not q:
             return 0, 0
-        if self._find_ci:
+        k = self._fk                    # the last count, made once an edit, query and caret
+        ci = self._find_ci
+        if ci:
             q = q.lower()
-        n = cur = 0
-        for r in range(len(ed.lines)):
-            line = ed.lines[r].lower() if self._find_ci else ed.lines[r]
+        if k[0] is not ed or k[1] != ed.edits or k[2] != q or k[3] != ci:
+            # each line's matches, counted once an edit, query and case: by
+            # str.count where no match can overlap the next (no border of
+            # the query is also its head), else one find at a time
+            k[0] = ed
+            k[1] = ed.edits
+            k[2] = q
+            k[3] = ci
+            k[4] = -1
+            over = False
+            for b in range(1, len(q)):
+                if q[:b] == q[-b:]:
+                    over = True
+                    break
+            per = []
+            for line in ed.lines:
+                if ci:
+                    line = line.lower()
+                if over:
+                    m = 0
+                    at = line.find(q)
+                    while at >= 0:
+                        m += 1
+                        at = line.find(q, at + 1)
+                    per.append(m)
+                else:
+                    per.append(line.count(q))
+            k[7] = per
+            k[8] = sum(per)
+        row, col = ed.row, ed.col
+        if k[4] == row and k[5] == col:
+            return k[6]
+        k[4] = row
+        k[5] = col
+        per = k[7]
+        cur = 0
+        for r in range(min(row, len(per))):
+            cur += per[r]
+        if row < len(ed.lines):
+            line = ed.lines[row].lower() if ci else ed.lines[row]
             at = line.find(q)
-            while at >= 0:
-                n += 1
-                if (r, at) <= (ed.row, ed.col):
-                    cur = n
+            while 0 <= at <= col:
+                cur += 1
                 at = line.find(q, at + 1)
-        return (cur or (1 if n else 0)), n
+        n = k[8]
+        k[6] = (cur or (1 if n else 0)), n
+        return k[6]
 
     def overlay_step(self, d):
         """Up or down (the arrows, the T-Deck's trackball) in an open
@@ -1106,7 +1112,12 @@ class CodeLayer:
         # largest line number + one separating cell, so it stays readable at 320x240.
         if not self._gutter or ed is None:
             return 0
-        return len(str(len(ed.lines))) + 1
+        n = len(ed.lines)
+        d = 1
+        while n >= 10:                  # its digits, counted: no str a frame
+            n //= 10
+            d += 1
+        return d + 1
 
     def _text_x0(self, lay, ed):
         return lay.x0 + self._gutter_cols(ed) * lay.cell
@@ -1120,7 +1131,7 @@ class CodeLayer:
             return
         target = max(4, lay.cols - self._gutter_cols(ed))
         rows = max(1, lay.rows - self._top_rows(lay))
-        if (ed.COLS, ed.ROWS) != (target, rows):
+        if ed.COLS != target or ed.ROWS != rows:
             ed.set_view_size(target, rows)
 
     def _top_rows(self, lay):
@@ -1133,137 +1144,23 @@ class CodeLayer:
         """Where the code's first line draws: under the find strip, open."""
         return lay.y0 + self._top_rows(lay) * lay.lh
 
-    def _code_drag(self, px, py):
-        # Touch/mouse drag inside the code area pans the viewport (content follows
-        # the finger): drag down -> see earlier lines, drag right -> see left text.
-        # SYSTEM coords + layout cell/line height (#39 step 2).
-        ws = self.ws
-        ed = ws.editor
-        lay = ws.code_layout
-        if ed is None or not ws.pointer.down or not _in(px, py, lay.code_area()):
-            self._drag = None
-            return
-        if self._drag is None:
-            self._drag = (px, py, 0, 0)
-            return
-        self._drag = _ui_draw.pan_drag(self._drag, ed, px, py, lay.cell, lay.lh)
-
     # -- draw ----------------------------------------------------------------
-
-    # The syntax colours are the theme's CONTENT roles (`code_*`, style.json's
-    # theme section): the highlighter tags each char with its class (the _HL_*
-    # indices above), and runs remap through the theme's roles at draw time
-    # (per RUN, not per char -- the _hl memo stays untouched). The default
-    # derivation gives a light surface deep, §4.2-friendly hues (black text,
-    # deep teal keywords, dark green strings, brown numbers, dim warm comments,
-    # dark purple cart verbs) and a dark one the classes' own colours.
-    # The map is rebuilt only when the content dict changes (one shared dict
-    # per theme and variant), so a draw allocates nothing.
-    _hl_src = None
-    _hl_val = None
-
-    def _hl_map(self):
-        c = self.ws.look.content_colors()
-        if c is not self._hl_src:
-            m = {_HL_TEXT: c["code_text"], _HL_KEYWORD: c["code_keyword"],
-                 _HL_STRING: c["code_string"], _HL_NUMBER: c["code_number"],
-                 _HL_COMMENT: c["code_comment"], _HL_BUILTIN: c["code_builtin"]}
-            self._hl_val = None
-            for k, v in m.items():
-                if k != v:
-                    self._hl_val = m
-                    break
-            self._hl_src = c
-        return self._hl_val
 
     def _tones(self):
         """Per-draw color roles from the theme tokens, on every tier: the
-        code surface and its chrome in the theme's roles, the caret in its
-        accent as an ink (`ink_accent`, held at 3:1 on the code surface).
-        The syntax remap is the theme's `code_*` content roles (`_hl_map`).
-        sel (#89): the selection tint (drawn BEHIND the text), and the dim
-        gutter number ink."""
-        th = self.ws.theme_colors
-        return _as_theme({"bg": th["surface"], "caret": th["ink_accent"],
-                          "sym_bg": th["surface_alt"], "sym_edge": th["border"],
-                          "sym_ink": th["ink"], "hl": self._hl_map(),
-                          "sel": th["hilite"],
-                          "gutter": th["ink_dim"], "gutter_cur": th["ink"]})
-
-    def draw_lines(self, lines, first, rect):
-        """Lines of code read only in `rect` from line `first`, numbered, in
-        the Code tab's mono font and colours: the desk's made code
-        (`editor_parts.made`). The rows it shows."""
+        code surface and the chrome round its rows in the theme's roles (the
+        rows' own are the text view's, `ui.text_view`)."""
         ws = self.ws
-        cv = ws.sys_canvas
         th = ws.theme_colors
-        lay = ws.code_layout
-        cell, lh = lay.cell, lay.lh
-        x, y, w, h = rect
-        gc = len(str(len(lines))) + 1
-        rows = max(1, h // lh)
-        cols = max(1, (w - gc * cell) // cell)
-        tv = self._made
-        if tv is None:
-            tv = self._made = _ui_draw.TextView()
-        v = tv.v
-        self._view_of(v, lay, (x, y, w, rows * lh), x, -1, gc, cols, first, 0)
-        v[_ui_draw.TV_CARET_ROW] = v[_ui_draw.TV_ERR_ROW] = v[_ui_draw.TV_SEL_R0] = -1
-        v[_ui_draw.TV_FLAGS] = 0
-        v[_ui_draw.TV_GUT] = v[_ui_draw.TV_GUT_CUR] = th["ink_dim"]
-        shown = [ln[:cols] for ln in lines[first:first + rows]]
-        was = _ui_draw.print_font(_ui_draw.font("mono")[0])
-        cv.clip(x, y, w, h)
-        try:
-            v[_ui_draw.TV_TOP] = 0
-            v[_ui_draw.TV_NUM0] = first
-            tv.kind = "whole"
-            _C_TEXT_DRAW(tv.state, cv, _ui_draw._look(th), v, shown, None, None, True)
-        finally:
-            cv.clip()
-            _ui_draw.print_font(was)
-        return rows
-
-    def _view_of(self, v, lay, r, tx, mark, gc, cols, top, left):
-        """The view words every Code tab view shares: R `r`, the mono face's
-        metrics, the gutter and text origin `tx`, the current mark's left
-        `mark` (-1 none), `gc` gutter columns, `cols` columns from line
-        `top`, column `left`; the colours the theme's."""
-        t = self._tones()
-        th = self.ws.theme_colors
-        hl = t["hl"]
-        v[0] = r[0]
-        v[1] = r[1]
-        v[2] = r[2]
-        v[3] = r[3]
-        v[_ui_draw.TV_LH] = lay.lh
-        v[_ui_draw.TV_CELL] = lay.cell
-        v[_ui_draw.TV_TEXT_H] = lay.text_h
-        v[_ui_draw.TV_FS] = lay.fs
-        v[_ui_draw.TV_FONT] = _ui_draw.font("mono")[0]
-        v[_ui_draw.TV_TX] = tx
-        v[_ui_draw.TV_MARK] = mark
-        v[_ui_draw.TV_GUTTER] = gc
-        v[_ui_draw.TV_COLS] = cols
-        v[_ui_draw.TV_TOP] = top
-        v[_ui_draw.TV_OFF] = 0
-        v[_ui_draw.TV_LEFT] = left
-        lang = self._lang()
-        v[_ui_draw.TV_SYNTAX] = _ui_draw.SYNTAX.get(lang, _ui_draw.SYN_PYTHON)
-        v[_ui_draw.TV_BG] = t["bg"]
-        v[_ui_draw.TV_CARET] = t["caret"]
-        v[_ui_draw.TV_SEL] = t["sel"]
-        v[_ui_draw.TV_GUT] = t["gutter"]
-        v[_ui_draw.TV_GUT_CUR] = t["gutter_cur"]
-        v[_ui_draw.TV_VALUE] = th["value"]
-        v[_ui_draw.TV_ERR] = self._NAMES["red"]
-        for i in range(6):
-            cl = _HL_CLASSES[i]
-            v[_ui_draw.TV_TONE0 + i] = hl.get(cl, cl) if hl else cl
-        v[_ui_draw.TV_TONE0 + 6] = th["value"]
-        v[_ui_draw.TV_TONE0 + 7] = self._NAMES["red"]
-        v[_ui_draw.TV_TONE0 + 8] = th["ink_dim"]
-        v[_ui_draw.TV_KEY] = self.ws.look.look_gen
+        gen = ws.look.look_gen
+        k = self._tk
+        if k[0] is th and k[1] == gen:
+            return k[2]                         # a painted frame makes no map
+        k[0] = th
+        k[1] = gen
+        k[2] = t = _as_theme({"bg": th["surface"], "sym_bg": th["surface_alt"],
+                              "sym_edge": th["border"], "sym_ink": th["ink"]})
+        return t
 
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
@@ -1279,55 +1176,77 @@ class CodeLayer:
         lay = ws.code_layout
         ed = ws.editor
         t = self._t = self._tones()
-        # The text's rows are the TextView's (docs/scroll_and_text_2026-10.md
-        # §5): R, from under the find strip across the content, the code's
-        # rows tall. A frame whose buffer holds the last frame's R moves
-        # those pixels by the scroll and draws only the rows that changed;
-        # everything outside R draws every frame.
         if ed is None:
             cv.cls(t["bg"])
         else:
             self._apply_gutter(lay, ed)          # #89: narrow ed.COLS while the gutter is on
-            tv = self._tv
-            v = tv.v
-            r = self._r
+            r = self._rr                     # R: the view's rect, made once
             r[0] = lay.cx
             r[1] = self._y0(lay)
             r[2] = lay.cw
             r[3] = ed.ROWS * lay.lh
-            self._view_of(v, lay, r, lay.x0, lay.mark_x, self._gutter_cols(ed), ed.COLS,
-                          ed.top, ed.left)
-            v[_ui_draw.TV_CARET_ROW] = ed.row
-            v[_ui_draw.TV_CARET_COL] = ed.col
-            b = ed.selection_bounds()
-            if b is None:
-                v[_ui_draw.TV_SEL_R0] = -1
-            else:
-                v[_ui_draw.TV_SEL_R0] = b[0]
-                v[_ui_draw.TV_SEL_C0] = b[1]
-                v[_ui_draw.TV_SEL_R1] = b[2]
-                v[_ui_draw.TV_SEL_C1] = b[3]
-            errrow = ws.code_err_row
-            v[_ui_draw.TV_ERR_ROW] = -1 if errrow is None else errrow
-            v[_ui_draw.TV_FIND_CI] = 1 if self._find_ci else 0
-            v[_ui_draw.TV_FLAGS] = _ui_draw.TVF_FADE
-            err = ws.code_err or None
-            find = self._find_q if (self._find_open and self._find_q) else None
-            lines = ed.lines
-            if tv.plan(cv, lines, err, find, self.vouch):
-                self._ground_around(cv, r, t["bg"])
-                tv.draw(cv, _ui_draw._look(ws.theme_colors), lines, err, find, True)
-            else:
-                cv.cls(t["bg"])                  # full-screen editor
-                tv.draw(cv, _ui_draw._look(ws.theme_colors), lines, err, find, False)
-            self.text_kind = tv.kind
-            if self.wants_tools() and self._tools_open:
-                tb = self._toolbar_rect(lay)
-                tv.cover(tb[1], tb[1] + tb[3])
+            self._ground_around(cv, r, t["bg"])
+            self._rows(cv, r, ed)
         if lay.status_band is not None and ed is not None:
             self._draw_status(cv, lay, ed)
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
+
+    def _rows(self, cv, r, ed):
+        """The code's rows in R, `r`: one `ui.text_view` on this layer's
+        host, a page of R (docs/scroll_and_text_2026-10.md §5). A frame
+        whose buffer holds the last frame's R moves those pixels by the
+        view's scroll and draws only the rows that changed; the view keeps
+        the scroll -- a drag, its coast, the wheel -- and a `top` the editor
+        moved since its last draw (a key, find, Go to) glides it there."""
+        ws = self.ws
+        host = self._host
+        self._r = r
+        if ed is not self._ed:
+            self._ed = ed                       # another buffer: a fresh view
+            self._top = -1
+            host.reset()
+        o = self._view
+        o[_TXO_GUTTER] = 1 if self._gutter else 0
+        o[_TXO_SYNTAX] = _SYNTAX.get(self._lang(), 4)
+        o[_TXO_CARET] = ed.row
+        o[_TXO_CARET + 1] = ed.col
+        b = ed.selection_bounds() if ed.sel is not None else None
+        k = _TXO_SEL
+        if b is None:
+            o[k] = o[k + 2] = -1
+            o[k + 1] = o[k + 3] = 0
+        else:
+            o[k] = b[0]
+            o[k + 1] = b[1]
+            o[k + 2] = b[2]
+            o[k + 3] = b[3]
+        row = ws.code_err_row
+        o[_TXO_ERR] = -1 if row is None else row
+        q = self._find_q if self._find_open and self._find_q else None
+        o[_TXO_FIND_CI] = 1 if q and self._find_ci else 0
+        o[_TXO_LEFT] = ed.left
+        top = ed.top
+        o[_TXO_TOP] = top if top != self._top else -1
+        if top != self._top and self._top >= 0:
+            # the editor moved its top (a key, a typed line, Go to): the
+            # view lands there as this frame's shift
+            _ui_draw.text_aim(host, "code", top, len(ed.lines))
+        if ed.left != self._left:
+            # the columns scrolled across: every row changes, so the frame
+            # draws whole rather than first moving the last frame's pixels
+            self._left = ed.left
+            host.whole()
+        host.begin(cv, ws.theme_colors, r, _desk(), False, True)   # elsewhere
+        _ui.at(r[0], r[1], r[2], r[3])
+        got = _ui.text_view("code", ed.lines, o, None if row is None else ws.code_err or "",
+                            q, self._into)
+        ed.top = self._top = got[0]
+        if self.wants_tools() and self._tools_open:
+            tb = self._toolbar_rect(ws.code_layout)
+            _ui_draw.text_cover(host, "code", tb[1], tb[1] + tb[3])
+        if not host.still():
+            ws.request_frame()
 
     def _ground_around(self, cv, r, bg):
         """The code surface's ground outside R, which a floor frame leaves as
@@ -1343,41 +1262,47 @@ class CodeLayer:
         if x + w < cw:
             cv.rect(x + w, y, cw - x - w, h, bg)
 
-    def cover(self, box, pad=0):
-        """An overlay drew over the code's rows this frame, its `box` and
-        `pad` round it: the next frame draws those rows again."""
-        if box is not None and box[2] > 0 and box[3] > 0:
-            self._tv.cover(box[1] - pad, box[1] + box[3] + pad)
-
-    def redraw(self):
-        """Something drew over the code's rows before this frame's draw: it
-        draws them whole."""
-        self._tv.reset()
-
-    def covered_by(self, host, also=False):
-        """The desk drew over its panes this frame (`also`: a loupe, a
-        divider's flash), or `host`'s pass drew a popover or a tooltip: the
-        next frame draws every row again."""
-        if also or _ui_draw._C.api_pop_box(host.ctx, self._pop):
-            self._tv.cover(-32768, 32767)
-
     def _covered(self, host, fs):
         """The popover `host`'s pass drew, and the shadow round it, over the
-        code's rows (`cover`)."""
+        code's rows: the view's next frame draws them again."""
         b = self._pop
-        if _ui_draw._C.api_pop_box(host.ctx, b):
-            self.cover(b, _POP_PAD * fs)
+        if host.popped(b) and b[2] > 0 and b[3] > 0:
+            pad = _POP_PAD * fs
+            _ui_draw.text_cover(self._host, "code", b[1] - pad, b[1] + b[3] + pad)
 
     def _draw_status(self, cv, lay, ed):
         """Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1"
         strip, the band across the content and its text on the code's
         column."""
         ws = self.ws
-        issues = "1 issue" if ws.code_err else "No issues"
-        _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
-        _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, (_status_line(
-            ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
-             str(len(ed.lines)) + " lines", issues), lay.status_text[2], lay.fs),))
+        st = self._st
+        err = 1 if ws.code_err else 0
+        n = len(ed.lines)
+        room = lay.status_text[2]
+        gen = ws.look.look_gen
+        if (st[0] != ed.row or st[1] != ed.col or st[2] != n or st[3] != err
+                or st[4] != room or st[5] != lay.fs or st[6] != gen):
+            st[0] = ed.row
+            st[1] = ed.col
+            st[2] = n
+            st[3] = err
+            st[4] = room
+            st[5] = lay.fs
+            st[6] = gen
+            st[7] = _status_line(
+                ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
+                 str(n) + " lines", "1 issue" if err else "No issues"),
+                room, lay.fs).encode("utf-8")
+        # the band's ground left of its text, then the text on its own
+        # ground: the band whole, its every pixel drawn once
+        sb = self._sb
+        if sb[0] is not lay.status_band or sb[1] is not lay.status_text:
+            b = sb[0] = lay.status_band
+            t = sb[1] = lay.status_text
+            sb[2] = (b[0], b[1], t[0] - b[0], b[3]) if t[0] > b[0] else None
+        if sb[2] is not None:
+            _ui_draw.status_row(cv, ws.theme_colors, sb[2], ())
+        _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, st[7])
 
     def _btn_spec(self, label, glyph):
         """The face spec for one chip: the chrome glyph KIND when this button has

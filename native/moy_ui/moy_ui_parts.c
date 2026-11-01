@@ -1779,15 +1779,23 @@ int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, 
         if (y < t->cy0 || y >= t->cy1) {
             continue;
         }
-        // a row mostly lies over a few colours: each mixed once
+        // a row mostly lies over a few colours, and over text over two by
+        // turns, its ground and its ink: the last two met are kept mixed
         uint16_t *row = &t->px[(size_t)y * (size_t)t->dw];
-        uint16_t from = row[x0], to = mix(from, g, k);
+        uint16_t f0 = row[x0], t0 = mix(f0, g, k), f1 = f0, t1 = t0;
         for (int x = x0; x < x1; x++) {
-            if (row[x] != from) {
-                from = row[x];
-                to = mix(from, g, k);
+            uint16_t p = row[x];
+            if (p == f0) {
+                row[x] = t0;
+            } else if (p == f1) {
+                row[x] = t1;
+            } else {
+                f1 = f0;
+                t1 = t0;
+                f0 = p;
+                t0 = mix(p, g, k);
+                row[x] = t0;
             }
-            row[x] = to;
         }
     }
     d.row->st[MOY_ST_N_FILL]++;
@@ -2268,13 +2276,45 @@ static moy_ui_span_t field_at(const uint8_t *p, size_t n, int i) {
     return option(all, i);
 }
 
+// The first NUL in [p, e), else e. A table's cells are kilobytes a frame,
+// and the C library's memchr is the S3's ROM one, a byte loop (it was the
+// hottest code of the home's band frame on the T-Deck): this reads a word
+// at a time and looks at its bytes only in the word that holds a NUL.
+typedef uint32_t __attribute__((may_alias)) word_alias_t;
+
+const uint8_t *moy_ui_nul(const uint8_t *p, const uint8_t *e) {
+    while (p < e && ((uintptr_t)p & 3u) != 0) {
+        if (*p == 0) {
+            return p;
+        }
+        p++;
+    }
+    while (e - p >= 4) {
+        uint32_t v = *(const word_alias_t *)p;   // (aligned: a load, never a memcpy call)
+        if (((v - 0x01010101u) & ~v & 0x80808080u) != 0) {
+            break;                      // (a NUL in this word)
+        }
+        p += 4;
+    }
+    while (p < e && *p != 0) {
+        p++;
+    }
+    return p;
+}
+
 // The fields of `p` (NUL-separated in n bytes, a trailing NUL ending the last).
 int moy_ui_fields(const uint8_t *p, size_t n) {
     int k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += p[i] == 0;
+    const uint8_t *q = p, *e = p + n;
+    while (q < e) {
+        const uint8_t *z = moy_ui_nul(q, e);
+        if (z == e) {
+            return k + 1;               // (the last field has no NUL after it)
+        }
+        k++;
+        q = z + 1;
     }
-    return n && p[n - 1] != 0 ? k + 1 : k;
+    return k;
 }
 
 int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols, size_t cols_n,
@@ -2444,9 +2484,12 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
             }
         }
     }
+    if ((flags & MOY_UI_F_BAR) && !(flags & MOY_UI_F_DISABLED)) {
+        moy_target_fill(&d.t, b.x, b.y, 2 * d.fs, b.h, pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)));
+    }
     pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
     int first = g->pic ? 1 : 0;
-    if (g->pic) {
+    if (g->pic && !(flags & MOY_UI_F_PART)) {
         moy_ui_span_t name = field_at(cells, cells_n, 0);
         int side = g->w[0];
         moy_ui_box_t ib = {g->x[0], (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,

@@ -55,6 +55,20 @@ more; the bar's clock turning its minute is an event of its own, one frame.
 Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
+Then the home, idle: the launcher's input and frame path with nothing pressed
+paints nothing and allocates nothing. Then its carousel gliding a card and
+back: a moving frame (the band's table pass) allocates under a ceiling,
+HOME_BAND_FRAME, not yet nothing, and the carousel at rest allocates nothing.
+
+THE CLOCK. The console's frame is handed one slot of the T-Deck's 60 fps cap as
+its dt, whatever the frame cost (the driver's FRAME_S), and an input is given a
+fixed number of frames. A glide, a coast and a swipe's release velocity then
+take the same frames on a machine of any speed, so a check that counts which
+frames moved, shifted or rested counts the same everywhere. The bar's wall
+clock is held at one minute, so its turning lands on no measured frame. The
+idle and typing windows alone are timed (WINDOW_MS), for the periodic work they
+take in.
+
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
 gc_free charge each block to the Python line running (the code state's ip,
@@ -334,13 +348,14 @@ DONE = _thread.allocate_lock()
 DONE.acquire()
 
 
-def _frames(loop, ms, held):
+def _frames(loop, ms, held, least=0):
+    """What each loop frame allocates, over `ms` and at least `least` frames."""
     import fake_machine
     fake_machine.KBD[0] = 0x02 if held else 0      # "w": the up button
     from gc import mem_alloc
     out = []
     t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+    while time.ticks_diff(time.ticks_ms(), t0) < ms or len(out) < least:
         a = mem_alloc()
         loop.step()
         out.append(mem_alloc() - a)
@@ -375,27 +390,33 @@ def measure(loop):
     gc.collect()
     gc.disable()
     info["diag"] = bool(getattr(ws, "diag_live", False))
-    info["idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     _frames(loop, 100, True)             # the press edge itself may allocate
-    info["held"] = _frames(loop, @WINDOW_MS@, True)
+    info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     notes(loop, info)
+    code(loop, info)
     apps(loop, info)
     achievements(loop, info)
+    home(loop, info)
+    editor(loop, info)
+    panes(loop, info)
+    row_of_parts(loop, info)
     print("RESULT " + json.dumps(info))
 
 
-def _typing(loop, ms):
+def _typing(loop, ms, least=0):
     """Notes' note typed into, one key every fourth frame, handed to its
     editor handle as shell_bench's typing hands it (the edit is the
-    document's, outside the frame measured): what each frame allocates."""
+    document's, outside the frame measured): what each frame allocates,
+    over `ms` and at least `least` frames."""
     from gc import mem_alloc
     keys = b"the quick brown fox jumps over the lazy dog "
     fed = loop.ws.player._focus_editor
     out = []
     n = 0
     t0 = time.ticks_ms()
-    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+    while time.ticks_diff(time.ticks_ms(), t0) < ms or n < least:
         if n % 4 == 0:
             fed.key(keys[(n // 4) % len(keys)])
         n += 1
@@ -435,14 +456,160 @@ def notes(loop, info):
     gc.collect()
     gc.disable()
     d0 = ws._frames_drawn
-    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False)
+    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     d1 = ws._frames_drawn
     info["notes_text0"] = len(ws.player._focus_editor.text())
-    info["notes_typing"] = _typing(loop, @WINDOW_MS@)
+    info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
     info["notes_typing_drawn"] = ws._frames_drawn - d1
     info["notes_text"] = len(ws.player._focus_editor.text())
     gc.enable()
+    notes_swiped(loop, info)
+
+
+def notes_swiped(loop, info):
+    """The note swiped up and down its long text: what each frame of the
+    drag and of the coast after it allocates, whether it drew and whether it
+    shifted."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    fed = ws.player._focus_editor
+    fed.set_text("\n".join("Line %d of a long note, with words enough to wrap past the "
+                           "edge of the paper" % i for i in range(120)))
+    fed.save()
+    for _ in range(60):
+        loop.step()
+    x, y, w, h = ws.player.ns["sheet"]
+    out = []
+    for rep in range(4):
+        y0, y1 = (y + h * 3 // 4, y + h // 4) if rep % 2 == 0 else (y + h // 4, y + h * 3 // 4)
+        moy_loop.swipe(x + w // 2, y0, x + w // 2, y1, 12)
+        gc.collect()
+        gc.disable()
+        for _ in range(40):
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            if rep:
+                out.append((mem_alloc() - m, ws._frames_drawn - d0,
+                            ws.frame_change == "shift"))
+        gc.enable()
+    info["notes_swipe"] = out
+
+
+def code(loop, info):
+    """The Editor's Code tab, a `ui.text_view`: typed into (a key every
+    fourth frame, the edit the editor's, outside the frame measured), then
+    its view sent down the file and back by the wheel, which glides it. What each frame allocates, and what the tab's draw does: its
+    text view's pass (`_rows`) and the rest of it but the status line,
+    which a moved caret makes again."""
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    ed = None
+    for cart in ws.carts.all:            # a cart whose code the Editor opens
+        ws.open_in_editor(cart)
+        ws.set_menu_view("code")
+        ed = ws.editor
+        if ed is not None:
+            break
+        ws.exit()
+    info["code_cart"] = cart.get("title")
+    ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
+                          for i in range(120)))
+    ed.row = 5
+    ed.col = 0
+    for _ in range(60):
+        loop.step()
+    info["code_top"] = ws.wm.top_kind()
+    cl = ws.code_layer
+    acc = [0, 0, 0, 0, 0]               # rows bytes, rows calls, draw bytes, status bytes, draws
+    rows = cl._rows
+    draw = cl._draw_code
+    status = cl._draw_status
+
+    def _rows(cv, r, e):
+        m = mem_alloc()
+        rows(cv, r, e)
+        acc[0] += mem_alloc() - m
+        acc[1] += 1
+
+    def _draw():
+        m = mem_alloc()
+        draw()
+        acc[2] += mem_alloc() - m
+        acc[4] += 1
+
+    def _status(cv, lay, e):
+        m = mem_alloc()
+        status(cv, lay, e)
+        acc[3] += mem_alloc() - m
+
+    cl._rows = _rows
+    cl._draw_code = _draw
+    cl._draw_status = _status
+    keys = b"score = score + 1  "
+
+    def typing(ms):
+        out = []
+        n = 0
+        t0 = time.ticks_ms()
+        # the window's frames, not only its milliseconds: a loaded host
+        # (preflight's xdist) fits fewer frames into the same time
+        while time.ticks_diff(time.ticks_ms(), t0) < ms or n < @MIN_FRAMES@:
+            if n % 4 == 0:
+                ed.key(keys[(n // 4) % len(keys)])
+                ws.mark_dirty()
+            n += 1
+            a = mem_alloc()
+            loop.step()
+            out.append(mem_alloc() - a)
+        return out
+
+    def take():
+        got = list(acc)
+        for i in range(len(acc)):
+            acc[i] = 0
+        return got
+
+    typing(1000)                         # the first keys' edges, settled
+    gc.collect()
+    gc.disable()
+    take()
+    info["code_typing"] = typing(@WINDOW_MS@)
+    info["code_typing_acc"] = take()
+    gc.enable()
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    take()
+    out = []
+
+    class _Wheel:
+        wheel_x = 0
+        wheel_y = 0
+        mods = 0
+    wheel = _Wheel()
+    for notches in (6, -6) * 4:
+        wheel.wheel_y = notches          # the wheel, which glides the view
+        cl._wheel(wheel)
+        for _ in range(40):
+            a = mem_alloc()
+            loop.step()
+            out.append(mem_alloc() - a)
+    info["code_glide"] = out
+    info["code_glide_acc"] = take()
+    gc.enable()
+    del cl._rows
+    del cl._draw_code
+    del cl._draw_status
+    ws.exit()
+    for _ in range(30):
+        loop.step()
 
 
 class _Resp:
@@ -557,12 +724,182 @@ def apps(loop, info):
     ui.card = card
 
 
-def achievements(loop, info):
-    """Settings' Achievements page, idle at its top, then swiped to its end
-    and idle there: what each idle frame allocates."""
+def editor(loop, info):
+    """The Editor's table of parts (docs/ui_blocks_2026-10.md section 4.1):
+    the Blocks outline grown to 40 rows, its cursor walked a row a frame
+    (the move handed in between frames, as a key's edit is) and its rows
+    swiped and coasting: what each frame and the page's draw allocate."""
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    banner = ws._toast_until
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    for tab in ("blocks",):
+        ws.set_menu_view(tab)
+        bu = ws.block_ui
+        be = bu.blocks_ed
+        while len(be.rows) < 40:
+            be.rows.append(be.rows[-1])
+        be._hist.gen += 1
+        be.cur = 0
+        move = bu._blk_move_cursor
+        ws.mark_dirty()
+        for _ in range(60):
+            loop.step()
+        info[tab + "_view"] = ws.menu_view
+        # the page's own draw, measured apart from the Editor's frame around it
+        import editor_blocks
+        page = editor_blocks.BlocksPage
+        drew = [0]
+        draw = page.draw
+
+        def counted(self, cv, th, rect, desk):
+            m0 = mem_alloc()
+            draw(self, cv, th, rect, desk)
+            drew[0] += mem_alloc() - m0
+        page.draw = counted
+        gc.collect()
+        gc.disable()
+        walk = []
+        for d in (1,) * 24 + (-1,) * 24:
+            move(d)
+            ws.mark_dirty()
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            walk.append((mem_alloc() - m, ws._frames_drawn - d0))
+        gc.enable()
+        info[tab + "_walk"] = walk
+        info[tab + "_page"] = drew[0]
+        drag = []
+        for rep in range(2):
+            y0, y1 = (H * 3 // 4, H // 3) if rep % 2 == 0 else (H // 3, H * 3 // 4)
+            moy_loop.swipe(W // 4, y0, W // 4, y1, 25)
+            gc.collect()
+            gc.disable()
+            for _ in range(30):
+                d0 = ws._frames_drawn
+                p0 = drew[0]
+                loop.step()
+                drag.append((drew[0] - p0, ws._frames_drawn - d0,
+                             ws.frame_change == "shift"))
+            gc.enable()
+        page.draw = draw
+        info[tab + "_drag"] = drag
+        info[tab + "_banner"] = ws._toast_until != banner
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+
+
+def panes(loop, info):
+    """ui.split's moving frames (docs/ui_blocks_2026-10.md section 4.2): on
+    an app host of its own, a divider pressed, dragged 40 px and let go, then
+    a tap on a part in the second pane (ui.part_at): what the split
+    allocates each frame, and what part_at does."""
+    from gc import mem_alloc
+    from array import array
+    import ui
+    import ui_draw
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    sizes = array("i", [100, 0])
+    out = array("i", [0] * 12)
+    o = {"drag": True, "focus": 0, "gap": 6, "mins": (40, 40)}
+    steps = ([(None, 0, False, False)] * 3 + [(103, 50, True, True)]
+             + [(103 + 2 * k, 50, False, True) for k in range(1, 21)]
+             + [(143, 50, False, False)] + [(None, 0, False, False)] * 2
+             + [(200, 50, True, True), (200, 50, False, False), (None, 0, False, False)])
+    split = []
+    at = []
+    gc.collect()
+    gc.disable()
+    for x, y, click, down in steps:
+        if x is not None:
+            host.point(x, y, click, down)
+        host.begin(cv, th, (0, 0, W, 100))
+        ui.at(0, 0, W, 100)
+        m = mem_alloc()
+        o["focus"] = ui.split("panes", "x", sizes, o, out)
+        split.append(mem_alloc() - m)
+        ui.at(out[4], out[5], out[6], out[7])
+        st = ui.part("cell")[4]
+        m = mem_alloc()
+        got = ui.part_at()
+        at.append((mem_alloc() - m, st & ui.ACTIVATED != 0, got is not None))
+        ui.end()
+    gc.enable()
+    info["split"] = split
+    info["split_sizes"] = list(sizes)
+    info["split_focus"] = o["focus"]
+    info["part_at"] = at
+    ws.mark_dirty()
+    for _ in range(10):
+        loop.step()
+
+
+def row_of_parts(loop, info):
+    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
+    section 4.1): on an app host of its own, a drag across it, its fling
+    and its glide to a part's centre, each part drawn at its distance
+    (ui.table_dist): what the table, its parts and their distances
+    allocate each frame."""
+    from gc import mem_alloc
+    from array import array
+    import ui
+    import ui_draw
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    rows = [["a"], ["b"], ["c"], ["d"], ["e"], ["f"], ["g"]]
+    o = {"id": "row", "part": (60, 60), "axis": "x", "snap": True}
+    r = array("i", [0] * 4)
+    steps = ([(None, 0, False, False)] * 3 + [(W - 40, 40, True, True)]
+             + [(W - 40 - 12 * k, 40, False, True) for k in range(1, 16)]
+             + [(W - 220, 40, False, False)] + [(None, 0, False, False)] * 40)
+    row = []
+    cur = 0
+    gc.collect()
+    gc.disable()
+    for x, y, click, down in steps:
+        if x is not None:
+            host.point(x, y, click, down)
+        host.begin(cv, th, (0, 0, W, 100))
+        m = mem_alloc()
+        ui.at(0, 0, W, 100)
+        was = cur
+        cur = ui.table("", ("",), rows, cur, o)[0]
+        i = ui.table_part(r)
+        while i >= 0:
+            d = ui.table_dist()
+            cv.rect(r[0] + 2, r[1] + 2, r[2] - 4, r[3] - 4 - ((d * d) >> 16), 9 + i)
+            i = ui.table_part(r)
+        row.append((mem_alloc() - m, cur != was))
+        ui.end()
+    gc.enable()
+    info["row_of_parts"] = row
+    info["row_of_parts_cur"] = cur
+    ws.mark_dirty()
+    for _ in range(10):
+        loop.step()
+
+
+def achievements(loop, info):
+    """Settings' Achievements page, idle at its top, then swiped to its end
+    and idle there: what each idle frame allocates. The page shows three
+    badges set for it, and the run's own go back after: a badge the run had
+    earned and the page's set lacks would be earned again by the next
+    scenario's open, its banner over the frames that scenario measures."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    earned = ws.ach.unlocked
     ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
     ws.open_settings()
     # the rows page swiped, its pictures met once: what each frame of a drag
@@ -607,18 +944,88 @@ def achievements(loop, info):
         gc.enable()
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
     ws._exit_settings()
+    ws.ach.unlocked = earned
     for _ in range(30):
         loop.step()
 
 
+def home(loop, info):
+    """The home with nothing pressed: what each frame paints and allocates."""
+    ws = loop.ws
+    for _ in range(60):
+        loop.step()
+    info["home_top"] = ws.wm.top_kind()
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    info["home_idle_drawn"] = ws._frames_drawn - d0
+    gc.enable()
+    # A card right, then back, BAND_STEPS frames each (the move the home's
+    # left and right keys make, `nav2d`): the carousel glides, its moving
+    # frames the band's (the table pass over its ground), then rests. A
+    # frame's allocation and whether it drew.
+    g = ws.launcher
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    band = []
+    drew = []
+    for k in range(@BAND_MOVES@):
+        g.nav2d(1 if k % 2 == 0 else -1, 0)
+        ws.mark_dirty()
+        for _ in range(@BAND_STEPS@):
+            n = ws._frames_drawn
+            a = gc.mem_alloc()
+            loop.step()
+            band.append(gc.mem_alloc() - a)
+            drew.append(ws._frames_drawn != n)
+    info["home_band"] = band
+    info["home_band_drew"] = drew
+    info["home_band_drawn"] = ws._frames_drawn - d0
+    gc.enable()
+    for _ in range(60):
+        loop.step()
+
+
+# The console's clock as the measurement drives it: one slot of the T-Deck's
+# 60 fps cap a frame, whatever the frame cost. A glide, a fling and a swipe's
+# release velocity then run the same frames on any machine: on the loop's own
+# clock a loaded machine's longer frames run them in fewer frames and a fast
+# machine's in more.
+FRAME_S = 1 / 60
+
+
+class _HeldClock:
+    """The bar's wall clock, held at the minute the run began. A minute
+    turning re-sets the bar's text on the next frame that draws it (about
+    1.6 KB), at a moment of the wall clock, which the frames measured do not
+    run on: a home band frame it fell on read over HOME_BAND_FRAME."""
+
+    def __init__(self):
+        self.lt = time.localtime()
+
+    def localtime(self):
+        return self.lt
+
+
 class _Loop:
     """The kernel's loop as the measurement drives it: one step a frame over
-    the console the board's run_desktop handed it."""
+    the console the board's run_desktop handed it, the console's frame
+    handed FRAME_S as its dt, the bar's clock held (_HeldClock)."""
 
     def __init__(self, desktop):
         import moy_loop
-        self.ws = desktop.ws
+        import bar_layer
+        ws = self.ws = desktop.ws
         self.step = moy_loop.step
+        frame = ws.frame
+
+        def _frame(dt):
+            frame(FRAME_S)
+        ws.frame = _frame
+        bar_layer.time = _HeldClock()
+        ws.bar_layer._clock_at = -1      # read the held clock from the next frame
 
 
 def main():
@@ -665,6 +1072,22 @@ MANIFEST = {"format": "moy-1", "title": "Frame Probe", "runtime": "wasm",
 # (3 s) fall inside it.
 WINDOW_MS = 4500
 
+# ...and the frames each takes in at least, whatever the machine's load. A
+# window's power is its frame count -- an allocation on one frame in eight
+# nets 16 bytes x frames / 8 against SLACK -- and a loaded machine (xdist
+# beside the rest of the suite) fits a third of the frames into the same
+# milliseconds, so it runs its windows longer instead: about what the loop
+# paces into WINDOW_MS on a machine to itself, as CI's serial run has it.
+MIN_FRAMES = 150
+
+# The home band's moves, the frames each is given, and the frames at the end
+# of each that are still: the slide (MOY_UI_SLIDE_MS, 200 ms) draws 13 frames
+# at the driver's FRAME_S and the selection settles on the third after it,
+# so a move is still from its 17th frame.
+BAND_MOVES = 6
+BAND_STEPS = 40
+BAND_REST = 16
+
 
 def _stage(dest, exe, apps=False):
     sys.path.insert(0, str(ROOT / "tools"))
@@ -708,6 +1131,8 @@ def _stage(dest, exe, apps=False):
     (cart / "config.json").write_text("{}")
     shutil.copytree(ROOT / "system_carts" / "moybyte.notes.moy",
                     dest / "carts" / "moybyte.notes.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.star_catcher.moy",
+                    dest / "carts" / "moybyte.star_catcher.moy")
     if apps:
         for app in ("appearance", "storybook", "get_carts", "my_art"):
             shutil.copytree(ROOT / "system_carts" / ("moybyte.%s.moy" % app),
@@ -769,7 +1194,10 @@ def _run(tmp_path):
     _stage(tmp_path, exe, apps=True)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
-                      .replace("@WINDOW_MS@", str(WINDOW_MS)))
+                      .replace("@WINDOW_MS@", str(WINDOW_MS))
+                      .replace("@MIN_FRAMES@", str(MIN_FRAMES))
+                      .replace("@BAND_MOVES@", str(BAND_MOVES))
+                      .replace("@BAND_STEPS@", str(BAND_STEPS)))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
@@ -778,7 +1206,9 @@ def _run(tmp_path):
                                 stdin=subprocess.PIPE, stdout=out,
                                 stderr=subprocess.STDOUT)
         try:
-            proc.wait(timeout=240)
+            # a hang's guard: the run is its frames, about two minutes on a
+            # machine to itself and twice that beside a full load
+            proc.wait(timeout=600)
         finally:
             if proc.poll() is None:
                 proc.kill()
@@ -870,6 +1300,38 @@ def test_notes_typing_allocates_nothing(result):
     _assert_quiet(info["notes_typing"], "Notes typed into", text, minute=True)
 
 
+def test_a_notes_swipe_shifts_and_allocates_only_the_fingers_answers(result):
+    """Notes' note swiped and coasting (its `ui.text_view`): its frames
+    shift, and a frame of the drag or the coast allocates no more than the
+    finger's answers (the cart's `touch()`), but for each swipe's press,
+    whose tap reads the line under the finger (`EditorHandle.tap`)."""
+    info, text = result
+    swipe = info["notes_swipe"]
+    drawn = [d for d in swipe if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (len(shifted), len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER * 4]
+    assert len(over) <= 3, over[:10]           # the three swipes measured: a press each
+    assert all(d[0] <= ANSWER * 8 for d in over), over
+
+
+def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding(result):
+    """The Code tab draws through `ui.text_view` on every painted frame: its
+    text view's pass allocates nothing, typed into or gliding, and the rest
+    of its draw nothing but the status line a moved caret makes again. (A
+    frame of the Editor also pays its bar's strip, which every tab draws.)"""
+    info, text = result
+    assert info["code_top"] == "menu", info["code_top"]
+    for what in ("typing", "glide"):
+        rows, calls, drew, status, draws = info["code_%s_acc" % what]
+        assert calls > 20 and draws > 20, "Code %s: %d text view passes" % (what, calls)
+        assert rows == 0, "Code %s: its text view's passes allocated %d bytes over %d" % (
+            what, rows, calls)
+        assert drew - status == 0, (
+            "Code %s: its draws allocated %d bytes over %d, the status line aside"
+            % (what, drew - status, draws))
+
+
 # -- the desk Editor's Code pane -----------------------------------------------
 #
 # Not a play frame, but the same bill: on the Waveshare P4 a drag in the desk
@@ -932,6 +1394,41 @@ def test_the_achievements_page_allocates_nothing(result, key):
     _assert_quiet(info[key], key, text)
 
 
+def test_the_home_idle_paints_nothing_and_allocates_nothing(result):
+    """The launcher's input path runs every frame whether or not it paints:
+    a key probe that holds a generator makes its closure cells each call."""
+    info, text = result
+    assert info["home_top"] == "launcher", text[-3000:]
+    assert info["home_idle_drawn"] == 0, info["home_idle_drawn"]
+    _assert_quiet(info["home_idle"], "the home idle", text, minute=True)
+
+
+# What one moving frame of the T-Deck home's carousel may allocate: a
+# ceiling, not zero. The band's table pass and the frame around it allocate
+# 1.1-2.8 KB a moving frame (2026-10-30; the private band path before it
+# allocated 0.5-2.8 KB on the same driver), and no frame of the home's is
+# pinned at zero until what allocates is found by line.
+HOME_BAND_FRAME = 3 * 1024
+
+
+def test_a_home_band_frame_allocates_under_its_ceiling(result):
+    """A card right and back again on the home: the carousel glides, each
+    moving frame its band's table pass over the ground, and no frame
+    allocates more than HOME_BAND_FRAME; a still frame allocates nothing.
+    Each move is BAND_STEPS frames on the driver's frame clock, so which
+    frames move is the same on a machine of any speed."""
+    info, text = result
+    band = info["home_band"]
+    assert len(band) == BAND_MOVES * BAND_STEPS, len(band)
+    assert info["home_band_drawn"] > 20, (info["home_band_drawn"], len(band))
+    assert max(band) <= HOME_BAND_FRAME, ("a band frame's allocation", band)
+    assert band.count(0) > len(band) // 2, ("the still frames allocate", band)
+    # the last BAND_REST frames of each move: the carousel at rest
+    rest = [k for k in range(len(band)) if k % BAND_STEPS >= BAND_STEPS - BAND_REST]
+    assert not any(info["home_band_drew"][k] for k in rest), info["home_band_drew"]
+    _assert_quiet([band[k] for k in rest], "the home band at rest", text)
+
+
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
 ANSWER = 32
 # A Settings frame's own answers: the strings and tuples its rows show, read
@@ -989,10 +1486,11 @@ def test_an_app_drag_frame_allocates_only_its_moved_answers(result, app):
 #   Code pane's symbol keys included) until the debounce closed the burst.
 # * Each visible line printed its highlight runs as slices of the line, and
 #   looked its runs up under a fresh (language, line) key: ~200 bytes a line,
-#   every line, every frame.
+#   every line, every frame. The rows are the text view's now, planned and
+#   drawn in C inside `ui.text_view`.
 #
-# Both are measured here on the board-model MicroPython, over the modules
-# themselves: they allocate nothing.
+# The first is measured here on the board-model MicroPython, over the module
+# itself: it allocates nothing.
 
 BURST_DRIVER = r'''
 import sys, gc
@@ -1030,43 +1528,6 @@ while n < 50:
 print("RESULT", idle, typed, gc.mem_alloc() - m0)
 '''
 
-RUNS_DRIVER = r'''
-import sys, gc
-sys.path.insert(0, @RUNTIME@)
-from array import array
-import moy_ui
-
-# The Code tab's text view planning a frame: its rows' gens against its
-# record, every frame, the view scrolled a row each time.
-st = bytearray(moy_ui.text_size())
-v = array("i", [0] * @TV_LEN@)
-v[2] = 320
-v[3] = 200
-v[4] = 10           # lh
-v[5] = 8            # cell
-v[6] = 8            # text_h
-v[7] = 1            # fs
-v[11] = 4           # gutter
-v[12] = 38          # cols
-v[16] = 3           # the caret's row
-v[18] = -1          # no selection
-v[22] = -1          # no error
-v[24] = 1           # python
-lines = ["x = %d + y  # a line of a long cart" % i for i in range(400)]
-for i in range(3):
-    moy_ui.text_plan(st, v, lines, None, None)
-gc.collect()
-gc.disable()
-n = 0
-m0 = gc.mem_alloc()
-while n < 40:
-    v[13] = n
-    moy_ui.text_plan(st, v, lines, None, "cart")
-    n += 1
-print("RESULT", gc.mem_alloc() - m0)
-'''
-
-
 def _mp_result(tmp_path, driver, why):
     exe = require_unix_mp(board_model=True, why=why)
     script = tmp_path / "driver.py"
@@ -1087,10 +1548,53 @@ def test_the_bar_undo_read_allocates_nothing_through_a_typing_burst(tmp_path):
     assert spent == 0, "50 bar undo reads through a typing burst allocated %d bytes" % spent
 
 
-def test_the_code_tabs_rows_plan_without_allocating(tmp_path):
-    from runtime import ui_draw
-    spent, = _mp_result(
-        tmp_path, RUNS_DRIVER.replace("@TV_LEN@", str(ui_draw.TV_LEN)),
-        "The Code tab's text view plans every painted Code frame; only "
-        "the board-model MicroPython measures what it allocates.")
-    assert spent == 0, "40 planned Code frames allocated %d bytes" % spent
+def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
+    """The Blocks outline, a table of parts: a frame whose cursor moved a
+    row draws, and the page's draw allocates no more than the table's
+    answer; a swipe's frames shift, and the page's draw in each
+    allocates no more than that."""
+    info, text = result
+    tab = "blocks"
+    assert info.get(tab + "_view") == tab, text[-3000:]
+    # An unlock banner is up for a span of the WALL clock, and no frame under
+    # it shifts: one armed while these frames ran makes the count below
+    # depend on the machine's speed.
+    assert not info[tab + "_banner"], "a badge was earned while the outline was measured"
+    walk = info[tab + "_walk"]
+    assert sum(1 for d in walk if d[1]) > len(walk) // 2, (tab, walk)
+    # The page's draw allocates no more than the table's answer a frame
+    # (the Editor's frame around it is not the table's to pin).
+    assert info[tab + "_page"] <= ANSWER * len(walk), (tab, info[tab + "_page"], walk)
+    drawn = [d for d in info[tab + "_drag"] if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(shifted) > len(drawn) // 2, (tab, len(shifted), len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER]
+    assert len(over) <= 1, (tab, over)
+
+
+def test_a_row_of_parts_allocates_nothing(result):
+    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
+    section 4.1): no frame of a drag across it, its fling and its glide to a
+    part's centre allocates, its parts and their distances included, past
+    the first, which makes its rows' cells once, but the answer of a frame
+    whose current row moved."""
+    info, text = result
+    assert info.get("row_of_parts_cur", 0) > 0, text[-3000:]
+    row = info["row_of_parts"][1:]
+    assert all(b == 0 for b, moved in row if not moved), info["row_of_parts"]
+    assert all(b <= ANSWER for b, moved in row if moved), info["row_of_parts"]
+
+
+def test_a_splits_divider_drag_allocates_nothing(result):
+    """ui.split (docs/ui_blocks_2026-10.md section 4.2): no frame of a
+    divider's press, drag and let-go allocates, the drag lands in `sizes`,
+    and ui.part_at answers a tap on a part in a pane, allocating its
+    answer alone on the frame it answers."""
+    info, text = result
+    assert info.get("split_sizes") == [140, info["split_sizes"][1]], text[-3000:]
+    assert info["split"] == [0] * len(info["split"]), info["split"]
+    assert info["split_focus"] == 1, "the tap in the second pane focused it"
+    at = info["part_at"]
+    assert any(act and got for _b, act, got in at), at
+    assert all(b == 0 for b, _act, got in at if not got), at
+    assert all(b <= ANSWER for b, _act, got in at if got), at

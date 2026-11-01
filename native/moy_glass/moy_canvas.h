@@ -67,7 +67,10 @@ int moy_canvas_new(uint32_t *h, uint16_t w, uint16_t h_px, uint32_t caps,
                    uint32_t owner);
 int moy_canvas_get(uint32_t h, moy_canvas_row_t **row);
 // Draw into `px` (cap pixels): a compositor's back buffer after a swap, or a
-// layer's own pixels. `buf` names the BUF row they are, or 0.
+// layer's own pixels. `buf` names the BUF row they are, or 0. When that row is
+// released -- by its holder or by its owner's reclaim or end -- the canvas
+// draws nowhere (one pixel of capacity, which clips every draw) until it is
+// pointed again.
 int moy_canvas_point(uint32_t h, uint16_t *px, uint32_t cap, uint32_t buf);
 int moy_canvas_release(uint32_t h);
 

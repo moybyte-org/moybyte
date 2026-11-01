@@ -121,6 +121,9 @@ moybyte_patch_import_cache
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 #    the MIPI-DSI bridge-underrun ISR. No DSI peripheral, no panel.
 #
+# DECLINED moybyte_patch_p4_ppa_srm_mb_order -- an ESP32-P4 silicon patch: the
+#    PPA SRM engine's macro-block-order bypass. No PPA.
+#
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.

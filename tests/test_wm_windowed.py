@@ -89,7 +89,8 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     drv.frame(1 / 30)
     sc = ws.sys_canvas
     desk = bytes(sc._buf)
-    ws.open()                                    # a cart, in a player WINDOW
+    ws.open()                                    # a cart, full screen...
+    ws.wm.play_in_window()                       # ...then in a player WINDOW
     for _ in range(3):
         drv.frame(1 / 30)
     assert ws.cart_error is None, ws.cart_error
@@ -511,6 +512,7 @@ def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
         ws._leave_menu()                          # PLAY from the Editor
     else:
         ws.open()
+        ws.wm.play_in_window()
     drv.frame(1 / 30)
     wm = ws.wm
     win = wm._wins["desktop"]
@@ -589,6 +591,7 @@ def test_a_trimmed_game_window_shows_nothing_beneath(tmp_path, size):
     owner's "celeste is transparent on the borders", 2026-10-20)."""
     ws = _trim_desk(tmp_path)
     ws.open()
+    ws.wm.play_in_window()
     _settle(ws)
     wm = ws.wm
     win = wm._wins["desktop"]
@@ -909,7 +912,10 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     assert names == ["close", "max", "min"]
     ws.go_home()
     ws.open_desk()                              # a player WINDOW needs the desk (#105)
-    ws.open()                                   # run a cart
+    ws.open()                                   # run a cart: full screen, no buttons
+    drv.frame(1 / 30)
+    assert ws.wm._strip_buttons(ws.wm._wins["desktop"]) == []
+    ws.wm.play_in_window()                      # the pause card's way into a window
     drv.frame(1 / 30)
     names = [n for n, _r in ws.wm._strip_buttons(ws.wm._wins["desktop"])]
     assert names == ["close", "max", "min"]
@@ -923,6 +929,7 @@ def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
     drv = _drv(ws)
     ws.open_desk()
     ws.open()
+    ws.wm.play_in_window()
     drv.frame(1 / 30)
     win = ws.wm._wins["desktop"]
     mn = dict(ws.wm._strip_buttons(win))["min"]
@@ -952,6 +959,7 @@ def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path
     ws.open_desk()
     ws.wm.set_play_intent(intent)
     ws.open()
+    ws.wm.play_in_window()
     drv.frame(1 / 30)
     win = ws.wm._wins["desktop"]
     cx, cy, cw, ch = win.content_rect()
@@ -1170,6 +1178,7 @@ def test_a_window_over_the_game_takes_the_game_off_the_quiet_stack(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()
+    ws.wm.play_in_window()
     drv.frame(1 / 30)
     ws.open_settings()
     drv.frame(1 / 30)
@@ -1320,6 +1329,7 @@ def _game_and_settings(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()
+    ws.wm.play_in_window()
     drv.frame(1 / 30)
     ws.open_settings()
     drv.frame(1 / 30)
@@ -1386,6 +1396,7 @@ def test_a_cart_keeps_its_own_text_mode_across_focus(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()
+    ws.wm.play_in_window()
     drv.frame(1 / 30)
     ws.input.text_mode = True                  # what the cart's textmode(True) writes
     ws.open_settings()
@@ -1661,7 +1672,14 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     ws = _ws(tmp_path)
     _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
-    ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
+    sc = ws.sys_canvas
+
+    class _NoRectStamp(type(sc)):
+        @property
+        def blit_strip_rect(self):           # absent, as hasattr asks it
+            raise AttributeError("blit_strip_rect")
+
+    sc.__class__ = _NoRectStamp
     # Shrunk, so the rubber rect stays on the glass: the window opens in
     # the work area right of the icon column, near the desk's right edge.
     win, cw, ch = _engage_resize(ws, drv, dx=-60)
@@ -3026,6 +3044,7 @@ def _popover_desk(tmp_path, game=False):
     if game:
         select_on_home(ws, "Star Catcher")
         ws.open()
+        ws.wm.play_in_window()
     for _ in range(20):
         _quiesce(ws)
         ws._confetti_until = ws._egg_until = 0
@@ -4341,9 +4360,10 @@ def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
     assert len(ring.settle(drv)) <= 2
 
 
-def _pause_desk(tmp_path, ride=True):
-    """A playtest of Star Catcher in its window on the desk, drawing the same
-    frame every tick, under the default look; triple-buffered, current."""
+def _pause_desk(tmp_path, ride=True, window=True):
+    """A playtest of Star Catcher in its window on the desk (`window`, else
+    full screen as a desk play opens), drawing the same frame every tick,
+    under the default look; triple-buffered, current."""
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
     drv = _drv(ws)
     ws.bar_layer._clock_text = lambda: "00:00"
@@ -4351,6 +4371,8 @@ def _pause_desk(tmp_path, ride=True):
     ws.open_desk()
     select_on_home(ws, "Star Catcher")
     ws.open()
+    if window:
+        ws.wm.play_in_window()
     player = ws._content_layers["desktop"]
 
     def still_game(dt):
@@ -4381,30 +4403,34 @@ def _pause_key(ws, name):
         ws.mark_dirty()
 
 
-def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
-    """Over a playtest paused in its window: the open, each move and the
-    Options page are the popover's frames alone, the close puts the
-    snapshot back under the resumed game's quiet frames, and after each
-    step every buffer holds the bytes the whole-repaint path leaves."""
-    ws, drv, ring = _pause_desk(tmp_path / "ride")
-    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+@pytest.mark.parametrize("window", [True, False])
+def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path, window):
+    """Over a playtest paused in its window, or a desk play paused full
+    screen: the open, each move and the Options page are the popover's
+    frames alone, the close puts the snapshot back under the resumed game's
+    quiet frames, and after each step every buffer holds the bytes the
+    whole-repaint path leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride", window=window)
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False, window=window)
     copies = []
     real = ws.sys_canvas.copy_last
     ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
-    steps = (lambda w: w.pause.show(),
-             lambda w: _pause_key(w, "down"),
-             lambda w: _pause_key(w, "down"),
-             lambda w: _pause_key(w, "a"),          # Options: a card of its own size
-             lambda w: _pause_key(w, "b"),          # back to the menu
-             lambda w: _pause_key(w, "up"),
-             lambda w: setattr(w, "_dirty", True),  # a whole frame under it...
-             lambda w: _pause_key(w, "down"))       # ...and the next move still rides
+    # full screen the card has Play in a window, one more row above Options
+    down = 2 if window else 3
+    steps = ((lambda w: w.pause.show(),)
+             + (lambda w: _pause_key(w, "down"),) * down
+             + (lambda w: _pause_key(w, "a"),          # Options: a card of its own size
+                lambda w: _pause_key(w, "b"),          # back to the menu
+                lambda w: _pause_key(w, "up"),
+                lambda w: setattr(w, "_dirty", True),  # a whole frame under it...
+                lambda w: _pause_key(w, "down")))      # ...and the next move still rides
+    whole = len(steps) - 2
     for i, step in enumerate(steps):
         step(ws)
         step(ref)
         stacks = ring.settle(drv, 12)
         rring.settle(rdrv, 12)
-        assert stacks and set(stacks) == ({"full"} if i == 6 else {"pop"}), (i, stacks)
+        assert stacks and set(stacks) == ({"full"} if i == whole else {"pop"}), (i, stacks)
         for a, b in zip(ring.bufs, rring.full(rdrv)):
             assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
     # each riding step's later frames copy the last one's buffer (§14.6)
@@ -4540,3 +4566,30 @@ def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, t
     # repeat that one (§14.6)
     assert drew["after"] >= 2
     assert drew["stacks"][1:] == ["repeat"] * 2, drew["stacks"]
+
+
+def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
+    """The desk's Projects on Make: a real card's third button is Play
+    (owner, 2026-10-31), and it runs the cart in a desk window with its
+    strip, where a desk play opens full screen."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open_projects()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("title") == "Star Catcher")
+    ws._dirty = True
+    for _ in range(3):
+        drv.frame(1 / 30)
+    lay = ws._content_layers["projects"]
+    got = []
+    assert ws.wm.in_window("projects", lambda: got.append(lay._desk_buttons()))
+    assert [v for v, _r, _k in got[0]][:3] == ["change", "copy", "window"]
+    lay._do_verb("window")
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ws.cart.get("title") == "Star Catcher" and not ws.player.paused
+    win = ws.wm._wins["desktop"]
+    assert not win.full() and win.own
+    assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]
+    assert ws.wm._focus == "desktop" and "projects" in ws.wm._wins

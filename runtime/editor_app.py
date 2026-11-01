@@ -1294,11 +1294,14 @@ class EditorApp:
         return True
 
     def playing(self):
-        """Whether a playtest runs in its own window beside the Editor (the
-        desk): Play then reads Stop, with Restart beside it (D-23)."""
+        """Whether a playtest runs beside the Editor (the desk): Play then
+        reads Stop, with Restart beside it (D-23). A game moved to a window
+        of its own (the pause card's Play in a window) is no playtest."""
         wm = self.ws.wm
-        return bool(getattr(wm, "desk_open", lambda: False)()
-                    and "desktop" in getattr(wm, "_wins", {}))
+        if not getattr(wm, "desk_open", lambda: False)():
+            return False
+        win = getattr(wm, "_wins", {}).get("desktop")
+        return win is not None and not win.own
 
     def owe_restart(self, tab):
         """E-02: a map, scene or code edit (`tab`) waits for the next Play;

@@ -41,7 +41,7 @@ memory and compositors); this doc cites, it does not copy.
 | L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §5, §12 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
-| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
+| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs full screen (owner, 2026-10-31, §3), an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
 | L18 | **On a board with a desk the Editor is a window** (owner, 2026-10-20): a Make pick, CHANGE or NEW from the console-mode home gives console mode back to the desk and opens the Editor there in a window, and closing that window gives the glass back to the console-mode home on the tab and card it came from, unless a window the desk did not have then is open on it (R5-05); a board with no desk opens it fullscreen | §3, §12 |
 
 ## 2. What exists, read against this doc
@@ -184,6 +184,26 @@ playtest running in a window is ended first, as closing its window ends it
 (owner, 2026-10-13: the simplest to build): the cart slot is one and console
 mode's games need it. Steam's Big Picture on a PC is the shape, from memory.
 
+**Games on the desk** (owner, 2026-10-31). Play is full screen, as Steam's
+Big Picture is: a game run from the desk opens as a window full screen with
+no row and no buttons, and the console's key opens its pause card. On every
+board with a desk (`wm.has_desk`), in both modes, the card over a game full
+screen offers **Play in a window**, which moves the running game, its run
+untouched, into a normal desk window with its strip (minimise, maximise,
+close); from console mode it goes back to the desk first, its windows as
+they were, the game's on top. A handheld never offers it, and the card over
+a game already in a window has no such row: that window's maximise alone
+gives it the glass again. The desk has no game icons; the other way into a
+window is the Projects window's **Play**, a Make card's third button, which
+runs the cart in a window from the start. The Editor's playtest stands
+docked in its Run slot and is the Editor's: closing the Editor ends it, as
+the pause card's Quit does. The card offers Play in a window over it too,
+and a game moved out so is its own window, which outlives the Editor; while
+it lasts the Editor's workspaces have no Game tab, the panes left taking its
+room, and when it closes the Game tab comes back
+(`WindowedWM.play_in_window`, the path an orphaned docked game takes back to
+its window; `editor_panes.without`).
+
 **The way back** goes one level, wherever something is beneath the surface
 (owner, 2026-10-13; its shape 2026-10-18, `docs/look_2026-10.md` step 27a):
 the back chevron at the head of the bar's `zone`, or the `close` widget's X
@@ -202,7 +222,7 @@ resize takes. There is no allocation-retry hook. The home's `_lib_cache`
 lives across switches (the home is console mode's root and hot on return)
 and is released by the same fit-check path after the stamps, and after it
 the layers a modal keeps what lies under it in, kept across modals: a
-dialog's held page (`ui_draw.HeldPage`) and the frame under the pause card. The Waveshare
+dialog's held page and the frame under the pause card (`ui_draw.Hold`). The Waveshare
 P4's off-heap PSRAM is unmeasured: `tools/mem_census.py p4 offheap` runs
 before step 1 commits and its numbers go to #58.
 
@@ -474,7 +494,7 @@ surfaces only, a running app keeping today's top strip — is declined (§15).
 | app carts (Python, `type: app`) | nothing breaks: `bar_h()` stays; `content_rect()` is the verb to move to; `docs/app_api_v1.md` says so in place |
 | shipped apps | read the content rect through their layouts (step 3 is byte-identical under the top bar) |
 | compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
-| games | untouched: the Player surface is the cart's; no mode draws a bar over a game; the windowed player window keeps #178's two sizes |
+| games | untouched: the Player surface is the cart's; no mode draws a bar over a game; on the desk a play opens full screen and the Editor's playtest docks (§3), and a game moved to a window keeps the size it opened at (#178) |
 | versioning | `docs/app_api_v1.md` stays v1: one additive verb; the role table's generation moves as any row addition does |
 
 ## 8. Popovers and components
@@ -777,7 +797,7 @@ arrangement (step 18).
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
 | Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
-| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first) |
+| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first); in the desk's Projects window PLAY too, the third button, which runs the cart in a desk window (§3) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
 is Mine's, not Games'. **The selected card's verbs beyond its tap are one
@@ -821,7 +841,7 @@ the details where the height holds both at a hero no smaller, and a short
 one drops the details' facts, then their metadata
 (`Carousel._geom_desk`). Its backdrop is the panel field rather than the
 wallpaper, so an idle window draws nothing, and its drag rides
-`_drag_partial` and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
+the band frame (`_band_frame`) and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
 the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
 While search is open the handheld's hint strip reads "Search: " and the
@@ -834,7 +854,7 @@ glass's foot and a tap on it closes search (design review R5-04).
 card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
 move the carousel by a card with the drag's glide (the handheld's 6-frame
 slide), run through the same `flinging` path as a touch fling
-(`_drag_partial`), so a held key is one continuous motion; up moves focus to
+(`_band_frame`), so a held key is one continuous motion; up moves focus to
 the tabs in the bar, where left/right move the focus along them and the
 bar's items beside them, enter opens the focused one and down returns (§8); the trackball is the same
 four directions and its click is enter. On the desk a key or a
@@ -849,8 +869,8 @@ Open, New, or Change on Make), X for the card's list and the tabs'
 shoulders. Under touch there is no strip, and the home lays out in its
 height too; a long press opens the card's list.
 
-**Damage first.** The fullscreen home's band frame (`_drag_partial`) hands
-the rects it changed -- the band, or a step's cards and hint strip -- to
+**Damage first.** The fullscreen home's band frame (`_band_frame`) hands
+the rects it changed -- its kept table's floor, and a step's hint strip -- to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
 nothing handed while an overlay, the cursor or an owed LOADING pill also
 drew), so a moving home frame on the Guition P4 rotates the band, not the

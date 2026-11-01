@@ -2074,24 +2074,48 @@ def a_stuck_run_with_the_vm_down_is_ended(board):
     line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
     assert line is not None and "force" in line, line
     board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    n0 = len(board.lines)
+    ended = False
     try:
         line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
         assert line is not None and title in line, line
         assert board.wait_line("STOP running", 60) is not None, "the run never started"
         said = board.wait_line("PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)
         assert said is not None and "stuck: one frame ran over 2 s" in said, said
-        assert board.wait_line("STOP refused or raised", 10) is not None
+        # (the stop's line can share the stuck line's burst: read from it)
+        assert _said_since(board, n0, "STOP refused or raised", 10), "the stop never said it raised"
         board.ser.write(b"\x03")
         board.ser.flush()
-        assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+        ended = _said_since(board, n0, "STOP 1/1 ended", 30)
+        assert ended, "the run never ended"
         _desk_back(board)
         info = board.pyval("__import__('moy_play').info()", strict=True)
         assert info[12] is True and info[14] is True, info
         print("\nSTUCK down: %s" % said.strip())
         return said
     finally:
+        if not ended and not _said_since(board, n0, "STOP 1/1 ended", 0):
+            # a failure above left the run stopped with no VM: a Ctrl-C
+            # ends it and brings one back, or nothing after answers
+            board.ser.write(b"\x03")
+            board.ser.flush()
+            board.wait_line("STOP 1/1 ended", 30)
+            _desk_back(board)
         board.pyval("__import__('moy_play').watch(0)", strict=True)
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
+def _said_since(board, n0, needle, timeout):
+    """Whether a line the board said since line `n0` of its transcript holds
+    `needle`, waiting up to `timeout` s for one."""
+    import time
+    end = time.time() + timeout
+    while True:
+        if any(needle in ln for ln in board.lines[n0:]):
+            return True
+        if time.time() >= end:
+            return False
+        board.drain(0.2)
 
 
 def mem_reports_the_heap(board):
@@ -2504,8 +2528,19 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
     they took: the WiFi driver holds its allocation after the lease powers it
     down, and BLE once started stays up. A desk that has had either this boot
     (beyond what the board starts by itself) is refused with the reason,
-    never compared."""
+    never compared. So is a desk a cart has run on this boot (the kernel
+    Player's last run, `moy_play.info()`, or the sound's output started or
+    tried, `moy_audio.out()`): what a run starts keeps its internal RAM
+    after it."""
     assert board.pyval("__import__('moy_wasm').FORK", strict=True)
+    # a board built without sound (the Guition S3) has no moy_audio: its sound
+    # never started, which is absence, not an error
+    board.pyexec("try:\n    ws._g['_snd'] = __import__('moy_audio').out()[0] in (1, 2)\n"
+                 "except ImportError:\n    ws._g['_snd'] = False", strict=True)
+    if board.pyval("__import__('moy_play').info() is not None "
+                   "or ws._g['_snd']", strict=True):
+        pytest.skip("a cart has run this boot and what it started keeps its "
+                    "internal RAM; reboot the board and run the suite first")
     if board.pyval("bool(getattr(ws.wifi, 'driver_up', False))", strict=True):
         pytest.skip("the WiFi driver has run this boot and keeps its internal "
                     "RAM; reboot the board and run the suite first")

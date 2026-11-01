@@ -68,8 +68,8 @@ _EXT_BADGE = {".py": "PY", ".lua": "LUA"}
 
 
 # A file whose NAME decides, whatever its extension. A cart's manifest and
-# config are the shipped entries: they are the two files a project's ADVANCED
-# row will offer, and reading them as anything but JSON would let a kid save a
+# config are the shipped entries: they are the two files a project's Files
+# (the Config tab's) will offer, and reading them as anything but JSON would let a kid save a
 # cart that no longer loads.
 BY_NAME = {
     "manifest.json": JSON,

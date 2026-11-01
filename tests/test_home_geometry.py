@@ -441,9 +441,11 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
 def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, theme,
                                                                       mode):
     """The PROJECTS window's shelf caption stands as far under the details
-    block at the narrow size as at the full one, its wrapped buttons
+    block at a narrow size as at the full one, its wrapped buttons
     included, and the height the window has spare goes under the shelf
-    (design review R5-08)."""
+    (design review R5-08). The narrow size is one whose height holds Make's
+    four buttons wrapped (Play the third, 2026-10-31); a shorter window
+    splits what it has (`_geom_desk_at`)."""
     ws = _ws(tmp_path, DESK, theme, mode)
     ui_draw.input_kind("keys")
     ws.open_desk()
@@ -451,7 +453,7 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
     _frame(ws)
     win = ws.wm._wins["projects"]
     gaps = []
-    for size in (None, (360, 534)):
+    for size in (None, (480, 534)):
         if size is not None:
             ws.wm._resize_window(win, *size)
             _frame(ws)

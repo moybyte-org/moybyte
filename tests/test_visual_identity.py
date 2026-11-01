@@ -112,17 +112,12 @@ def test_base_tier_editors_follow_the_theme(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("edit"))
     ws.change_selected()
-    t = ws.cards_layer._tones()
-    assert t["body"] == ws.theme_colors["surface"]  # themed in dark too
-    assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]
+    assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]  # dark
     ws.look.set_theme_variant("light")
-    t = ws.cards_layer._tones()
-    assert t["body"] == ws.theme_colors["surface"]  # themed on light
-    assert t["head"] == ws.theme_colors["ink"] == 0
     # The code editor gets exactly a light-and-dark pair on the base tier.
     tc = ws.code_layer._tones()
     assert tc["bg"] == ws.theme_colors["surface"]
-    assert tc["hl"] is not None                     # the light syntax set
+    assert ws.look.content_colors()["code_keyword"] is not None   # the light syntax set
 
 
 def test_bar_icons_get_plateless_light_variants(tmp_path):

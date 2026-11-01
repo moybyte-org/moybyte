@@ -298,10 +298,11 @@ def test_carousel_moving_frame_keeps_the_wallpaper_still(tmp_path):
     assert calls[0] == 0                      # ...and the band never shifted
     partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
-    ws.launcher_layer._full_streak = 0        # force the FULL path, same state
+    ws.launcher_layer._try_band_frame = lambda cv, dt: False   # the FULL path, same state
     ws.mark_dirty()
     drv.touch_drag(lastx, cy)                 # same pos: scroll unchanged
     drv.frame(1 / 30)
+    del ws.launcher_layer._try_band_frame
     assert walls[0] == n + 1
     assert ws.launcher.scroll == scroll
     full = bytes(ws.sys_canvas._buf)
@@ -343,19 +344,16 @@ def test_carousel_moving_frame_restores_the_band_in_one_copy(tmp_path, monkeypat
 
 # -- the web transport (#113 Phase 6: the scr op) ----------------------------
 
-def test_shelf_blit_arms_in_a_window(tmp_path):
-    """The desk's PROJECTS window drag must actually SHIFT, not repaint every
-    card (on-glass P4 regression, 2026-07-25).
+def test_a_window_drag_takes_the_band_frame(tmp_path):
+    """The desk's PROJECTS window drag draws its band alone, not the window
+    (on-glass P4 regression, 2026-07-25: ~73ms a frame drawn whole).
 
     `WindowedWM._install` swaps a window's layout context in to draw its
     content and swaps the ROOT context back afterwards -- for both card
-    models, so
-    `Launcher.set_layout` runs several times per frame (measured: 1040 calls in
-    4 idle seconds). It used to `invalidate()` the paint ring on every call, so
-    the ring was ALWAYS empty here, blit_shift never returned a shift, and each
-    drag frame fell back to repainting the whole band: ~73ms a frame on glass
-    versus ~28ms once the shift arms. The ring's KEY (which carries the surface
-    geometry) is what guards a layout change now, not an eager invalidate."""
+    models, so `Launcher.set_layout` runs several times per frame. The band's
+    record is its kept table's, in the band host's context, which a layout
+    swap never touches; the band's key (which carries the surface geometry)
+    is what guards a layout change."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
@@ -365,110 +363,41 @@ def test_shelf_blit_arms_in_a_window(tmp_path):
                                     windowed=True)
     drv = host_app.ConsoleDriver(ws)
     ws.open_projects()
-    for _ in range(80):                      # settle covers; arm streak + ring
+    for _ in range(80):                      # settle covers
         drv.frame(1 / 30)
     win = ws.wm._wins["projects"]
-    grid = ws.projects_grid
-
-    # The ring must be non-empty AFTER a frame -- the bug left it wiped.
-    assert grid._region.ring.size, "the paint ring never survives a frame"
-
-    shifts = [0]
-    ring = grid._region.ring
-    orig = ring.held
-
-    def spy(cv, frame_no):
-        r = orig(cv, frame_no)
-        if r is not None:
-            shifts[0] += 1
-        return r
-
-    ring.held = spy
-
+    home = ws.projects_layer
+    took = []
+    real = home._try_band_frame
+    home._try_band_frame = lambda cv, dt: took.append(real(cv, dt)) or took[-1]
     lay = win.ctx.layout                     # window-local grid geometry
     gx, gy, gw, gh = lay.lib_grid
     ox, oy = win.x + 1, win.y + 1 + win.title_h
     cx, cy = ox + gx + gw - 12, oy + gy + gh // 2
     _drag_frames(drv, cx, cy, 10)
-    assert grid.dragging
-    assert shifts[0] > 0, "no drag frame used the scroll-as-blit path"
+    assert ws.projects_grid.dragging
+    assert sum(took) > 5, "no drag frame took the band frame"
     drv.touch_up()
     drv.frame(1 / 30)
 
 
-def test_set_layout_keeps_the_paint_ring(tmp_path):
-    """Re-applying a layout must not wipe the ring (that is the whole bug);
-    a paint recorded under DIFFERENT geometry must still be unmatchable via
-    the key."""
+def test_set_layout_keeps_the_bands_record(tmp_path):
+    """Re-applying a layout must not void the band's record: a frame after it
+    with nothing changed draws no part of the band. A paint recorded under
+    DIFFERENT geometry is still unmatchable: the statics key carries the
+    grid rect."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
     ws.set_home_arrangement("grid")
     for _ in range(60):
+        ws._dirty = True
         drv.frame(1 / 30)
     grid = ws.launcher
-    region = grid._region
-    ring = region.ring
-    assert ring.size
-    before = [(ring.frame(i), ring.offset(i), ring.key(i)) for i in range(ring.size)]
     grid.set_layout(grid.layout)             # the per-frame context swap
-    assert [(ring.frame(i), ring.offset(i), ring.key(i)) for i in range(ring.size)] == before, \
-        "set_layout wiped the ring"
-    # ... but the geometry IS pinned: the statics key carries the grid rect.
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert grid.floor == [], "set_layout voided the band's record"
     key = ws.launcher_layer._statics_key(ws.sys_canvas)
     assert grid.band_rect() in key
-
-
-# -- the shared streak-advance body (#209 W3) --------------------------------
-
-def _streak_layers(tmp_path):
-    """The two home layers that keep a consecutive-full-paint streak: the
-    fullscreen home and the home window. Same helper, own `_statics_key`/
-    `_statics`/`_full_streak` each."""
-    ws = _ws_with_carts(tmp_path, 0)
-    ws.projects_grid = ws._home_grid("grid", [])
-    return ws, (ws.launcher_layer, ws.projects_layer)
-
-
-def test_advance_streak_counts_up_to_the_retained_horizon(tmp_path):
-    """An unchanged statics key advances the streak by one per full paint and
-    STOPS at `_retained_n(cv)` -- the horizon `_try_drag_partial` gates on."""
-    from runtime import launcher_layer
-
-    ws, layers = _streak_layers(tmp_path)
-    cv = ws.sys_canvas
-    cap = launcher_layer._retained_n(cv)
-    for layer in layers:
-        key = layer._statics_key(cv)
-        layer._statics, layer._full_streak = key, 0
-        for expected in range(1, cap + 1):
-            launcher_layer._advance_streak(layer, cv)
-            assert (layer._statics, layer._full_streak) == (key, expected)
-        launcher_layer._advance_streak(layer, cv)      # already at the horizon
-        assert layer._full_streak == cap
-
-
-def test_advance_streak_restarts_on_a_changed_key(tmp_path):
-    """A changed key adopts it and restarts the streak at ONE -- a streak
-    carried across a statics change is what lets a partial repaint over a
-    framebuffer holding the OLD chrome."""
-    from runtime import launcher_layer
-
-    ws, layers = _streak_layers(tmp_path)
-    cv = ws.sys_canvas
-    for layer in layers:
-        for stale in (None, ("some", "other", "state")):
-            layer._statics, layer._full_streak = stale, 5
-            launcher_layer._advance_streak(layer, cv)
-            assert layer._statics == layer._statics_key(cv)
-            assert layer._full_streak == 1
-
-
-def test_the_streak_advance_has_exactly_one_body():
-    """#209 W3: this bookkeeping stood in three copies, which is the shape
-    surface_model_v1.md §14.2 names as the silent-cache family. A fourth copy
-    must not grow back beside the helper."""
-    src = (ROOT / "runtime" / "launcher_layer.py").read_text()
-    assert src.count("_full_streak += 1") == 1
-    assert src.count("_advance_streak(self, cv)") >= 3

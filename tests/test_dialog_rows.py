@@ -5,7 +5,7 @@ over a held page it repaints the dialog's changed rows and leaves the page
 as it is -- no put back on the handheld, no Editor under it on the desk.
 
 Each session runs on two consoles fed the same input: one as it ships, and
-one whose dialogs never take a rows frame (`DialogRows.ok` False: the page
+one whose dialogs never take a rows frame (`Hold.ok` False: the page
 put back, or the desk Editor drawn, and the dialog drawn whole, every
 frame), on one, two and three buffers presented in turn as a board's are.
 Every presented picture of the first is held to the second's bytes, what
@@ -50,17 +50,17 @@ class Pair:
     drawing every dialog whole; `a`'s buffers presented in turn."""
 
     def __init__(self, tmp_path, monkeypatch, bufs, windowed):
-        real = ui_draw.DialogRows.ok
+        real = ui_draw.Hold.ok
         self.a = _console(tmp_path / "ships", windowed)
         self.b = _console(tmp_path / "whole", windowed)
         b = self.b
 
         def ok(rows, plan):
-            return False if rows.held.ws_of is b else real(rows, plan)
+            return False if rows.ws_of is b else real(rows, plan)
         for ws in (self.a, self.b):
             for layer in (ws.block_ui, ws.cards_layer):
-                layer._held.ws_of = ws
-        monkeypatch.setattr(ui_draw.DialogRows, "ok", ok)
+                layer._hold.ws_of = ws
+        monkeypatch.setattr(ui_draw.Hold, "ok", ok)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs

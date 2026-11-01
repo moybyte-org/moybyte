@@ -12,7 +12,7 @@ for the rules.
 | touch an ESP32-P4 board | that board's README, then `native/p4/` | the panel is a board DEFINE (`MOY_DSI_PANEL_*`); compositors `native/moy_glass/moy_present_*.c`, PPA canvas `device/p4_canvas.py`, P4 tier `device/p4_desktop.py` over `device/desktop_spine.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once"; `tests/moy_flush_harness/` compiles it with no board |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
-| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too |
+| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too. A surface scrolls and draws text through the public verbs (`ui.scroll`, `ui.text_view`) and gets its fast frames from the engine: a surface with its own scroll state or frame path is the duplication the owner chose to fold back (2026-10-29, after v0.15.1), never a pattern to copy |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in moy-spec | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
 | touch a compiled (wasm) cart or the tier | `docs/wasm_tier_plan_2026-09.md`, then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
 | touch `native/moy_wasm/` | its README | VENDORED from our WAMR fork (`make vendor-wamr`, pin in `native/moy_wasm/wamr_pin.h`): fix the fork and re-vendor, never edit the copy; a board TAKES or denies it in board.toml |
@@ -23,7 +23,7 @@ for the rules.
 | edit any document | `.claude/rules/docs.md` (loads with any `.md`) | `tools/check_docs.py` resolves paths and pins duplication, but cannot see a sentence go FALSE |
 | open, close or comment on an issue | the `issues` skill | `make sync-issues` after every issue mutation |
 | cut a release / push to master | the `release` skill | the merge into master IS the release; never push to master anything a board can run |
-| push anything | `tools/preflight.sh` | **`make test` is not the CI job**: preflight adds the steps that compare DERIVED artifacts (the baked web blob, moy-spec's `runner/`, `ports/p8`) to their sources, in CI's order. moy-spec has its own, whose wasm half runs in a PINNED emscripten container (emcc is not byte-reproducible across versions) |
+| push anything | `tools/preflight.sh` | **`make test` is not the CI job**: preflight adds the steps that compare DERIVED artifacts (the baked web blob, moy-spec's `runner/`, `ports/p8`) to their sources, in CI's order. moy-spec has its own, whose wasm half runs in a PINNED emscripten container (emcc is not byte-reproducible across versions). Preflight runs pytest under xdist and CI runs it serially, so a timing-sensitive pin can pass in one and fail in the other: `test_notes_typing_allocates_nothing` did, and v0.15 shipped with it red (fixed in b0d015bb). Check the CI run, not only preflight |
 
 **Four rules that outrank anything below.** Host and device are ONE codebase, not
 a port — a drawing change lands in the one canvas class or the "one cart, every

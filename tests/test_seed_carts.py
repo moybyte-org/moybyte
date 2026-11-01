@@ -331,10 +331,9 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
     ws._open_menu()
-    rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
+    pet = [f for f in ws.cart["edit"] if f["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    assert len(pet["f"]["choices"]) == 3
+    assert len(pet["choices"]) == 3
     cx, cy = settings_tile(ws, "pet", 2)
     ws.pointer.place(cx, cy)
     ws.pointer.click = True
@@ -408,10 +407,9 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
     ws._open_menu()
-    rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
+    pet = [f for f in ws.cart["edit"] if f["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    assert len(pet["f"]["choices"]) == 2
+    assert len(pet["choices"]) == 2
     cx, cy = settings_tile(ws, "pet", 1)
     ws.pointer.place(cx, cy)
     ws.pointer.click = True

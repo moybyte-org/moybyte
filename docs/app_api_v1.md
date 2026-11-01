@@ -163,11 +163,11 @@ An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
 2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
 `slider`, `list`, `group`, `info`, `link`, `cycle`, `seg`, `swatches`,
 `hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `popover`, `menu`, `tabs`,
-`grid`, `card`, `part`, `focus`, `keys_taken`, `at`) and its rect algebra
+`grid`, `card`, `part`, `part_at`, `split`, `focus`, `keys_taken`, `at`) and its rect algebra
 (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
-`panel`, `toolbar`, `dialog`, `text_field`, `scroll_cues`), the marks
+`panel`, `toolbar`, `dialog`, `text_field`), the marks
 (`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
 moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
 An app on the verbs sets `UI = True` and draws them into the frame its

@@ -211,6 +211,8 @@ class SpineVerbs:
         Editor, a surface's own id otherwise, None for anything without one."""
         if caller is None:
             return None
+        if isinstance(caller, str):
+            return caller                  # already a kind (`_return_to_runner`)
         if caller is self.editor_app:
             return EDITOR
         kind = getattr(caller, "id", None)
@@ -236,6 +238,14 @@ class SpineVerbs:
         # (see Player.release_world's docstring for the measured mechanism).
         self.player.release_world()
         self.pause.dismiss()           # a stop card goes with its run
+        ran = self._script_return
+        if ran is not None:
+            # A script an editor handle ran: back into the cart that ran it,
+            # whose own caller (and `_project_return`) this run left alone.
+            self._script_return = None
+            self.returns.spend()
+            self._return_to_runner(ran)
+            return
         back = self._project_return
         self._project_return = None
         # A run's caller is SPENT by its return. Leaving it set is what wedged

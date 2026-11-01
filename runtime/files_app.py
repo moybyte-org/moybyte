@@ -508,7 +508,7 @@ class FilesAppLayer(ListShellApp):
         if kind is None:
             # A project's own text file. It opens through that project's
             # EDITOR (`nav.edit_file`), never straight into the handle: the
-            # Config tab's ADVANCED row is the same door, and going through it
+            # Config tab's Files is the same door, and going through it
             # is what keeps the loader in the loop -- the return re-reads the
             # folder, so a manifest JSON mode was allowed to write invalid is
             # re-validated where the kid can see it.

@@ -176,16 +176,6 @@ def test_is_light_gate():
     assert not ui_draw.is_light({"surface_light": False, "ink": 0})
 
 
-def test_scroll_cues_draw_what_can_move():
-    cv = _cv()
-    ui_draw.scroll_cues(cv, (10, 10), (10, 100), True, False, 7)
-    # '^' drew at (10,10); 'v' suppressed at (10,100).
-    assert any(cv.pix(10 + dx, 10 + dy) == 7
-               for dx in range(8) for dy in range(8))
-    assert not any(cv.pix(10 + dx, 100 + dy) == 7
-                   for dx in range(8) for dy in range(8))
-
-
 def _drag(ws, layer_pointer, x, y0, y1, steps=6):
     """Feed a held vertical drag through a layer's pointer handler."""
     ws.pointer.down = True
@@ -197,9 +187,11 @@ def _drag(ws, layer_pointer, x, y0, y1, steps=6):
 
 
 def test_blocks_outline_drag_scrolls(tmp_path):
-    """A held drag on the Blocks outline scrolls blk_top when rows overflow."""
+    """A held drag on the Blocks outline scrolls its table when rows
+    overflow."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
     for i, it in enumerate(ws.launcher.items):
         if it.get("path"):
             ws.launcher.sel = i
@@ -215,10 +207,20 @@ def test_blocks_outline_drag_scrolls(tmp_path):
     # Guarantee overflow: pad the program past one screen of rows.
     while len(be.rows) <= lay.rows + 3:
         be.rows.append(be.rows[-1])
+    be._hist.gen += 1
+    for _ in range(3):
+        drv.frame(1 / 30)
     x = lay.x0 + 4
-    y0 = lay.y0 + lay.rows * lay.row_h - 4
-    _drag(ws, bu._blocks_pointer, x, y0, y0 - 4 * lay.row_h)
-    assert bu.blk_top > 0
+    y = lay.y0 + lay.rows * lay.row_h - 4
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for _ in range(6):
+        y -= lay.row_h
+        drv.touch_drag(x, y)
+        drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ui_draw._C.api_offset(bu.page().host.ctx, x, lay.y0 + 2) > 0
 
 
 def test_scroll_region_clamps_and_shows():

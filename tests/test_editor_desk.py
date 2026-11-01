@@ -247,6 +247,72 @@ def test_a_divider_dragged_by_the_pointer_lays_out_on_release(desk):
     assert d.panes()[0][1][2] == w - 100
 
 
+def _glass(ws):
+    return bytes(ws.glass_canvas.to_rgb888())
+
+
+def _shows_what_a_whole_repaint_shows(ws, drv):
+    """The frames after an input, with no input of their own, leave the
+    glass as a whole repaint of the same state draws it."""
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    got = _glass(ws)
+    ws._dirty = True
+    ws.wm._win_sig = None                        # every window and the desk drawn again
+    for _ in range(3):
+        drv.frame(DT)
+    return got == _glass(ws)
+
+
+@pytest.mark.parametrize("fast", (False, True), ids=("press-then-release", "one-frame-click"))
+def test_a_header_tools_tap_shows_with_no_input_after_it(desk, fast):
+    """The panes' headers are the desk's verbs pass, drawn after the panes'
+    bodies: a tap a header answers (a tab, a tool, Grow) changes what the
+    bodies drew, and the pass owes the frame that shows it (the AppHost's
+    `owed`), never the next input."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("4"), 1)                       # World: the Scene's zoom in its header
+    n = next(i for i, p in enumerate(d.panes()) if "scene" in p[0])
+    for _ in range(3):
+        drv.frame(DT)
+    zoom = ws.scene_ui.scene_zoom
+    bx, by, bw, bh = d._host.box("pane %d scene:zoom" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert ws.scene_ui.scene_zoom != zoom and shows
+    bx, by, bw, bh = d._host.box("pane %d grow" % n)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    if not fast:
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    shows = _shows_what_a_whole_repaint_shows(ws, drv)
+    assert d.grown == d.panes()[n][0] and shows
+
+
+def test_a_divider_dragged_shows_its_layout_with_no_input_after_it(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    (_p, (x, y, w, h), _path), = [p for p in d.panes() if p[0] == ("code",)]
+    gx, gy = x + w + 3, y + h // 2
+    drv.touch(gx, gy)
+    drv.frame(DT)
+    drv.touch_drag(gx - 100, gy)
+    drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    assert d.panes()[0][1][2] == w - 100
+    assert _shows_what_a_whole_repaint_shows(ws, drv)
+
+
 def test_a_grown_pane_takes_the_workspace_and_esc_gives_it_back(desk):
     ws, drv = desk
     d = ws.editor_desk
@@ -410,6 +476,8 @@ def test_the_wheel_scrolls_the_code_pane_past_its_caret_and_a_key_brings_it_back
     assert ed.top + ed.ROWS == len(ed.lines), "the last line is shown"
     assert (ed.row, ed.col) == (0, 0), "the caret stays"
     _tap(drv, ord("x"))
+    for _ in range(30):                         # the view glides back to the caret
+        drv.frame(DT)
     assert ed.top <= ed.row < ed.top + ed.ROWS and ed.lines[0].startswith("x")
 
 
@@ -430,6 +498,125 @@ def test_play_runs_the_game_in_the_run_slot_and_stop_ends_it(desk):
     for _ in range(3):
         drv.frame(DT)
     assert "desktop" not in ws.wm._wins
+
+
+def test_a_docked_game_moves_with_its_editor_window(desk):
+    """The Editor's content is stamped, not drawn, while its window is
+    dragged, so the docked playtest follows its host in the WM: it stands
+    where the Run slot is at every step, never where the slot was."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)                             # Ctrl+Enter: Play
+    for _ in range(4):
+        drv.frame(DT)
+    ws.wm.full_key()                             # the Editor restored: a window to drag
+    for _ in range(4):
+        drv.frame(DT)
+    menu, game = ws.wm._wins["menu"], ws.wm._wins["desktop"]
+
+    def off():
+        cx, cy = menu.content_rect()[:2]
+        return game.docked[0] - cx, game.docked[1] - cy, game.docked[2], game.docked[3]
+
+    held = off()
+    x0, y0 = menu.x + 200, menu.y + menu.title_h // 2
+    drv.touch(x0, y0)
+    drv.frame(DT)
+    for i in range(1, 6):
+        drv.touch_drag(x0 - 20 * i, y0 + 6 * i)
+        drv.frame(DT)
+        assert off() == held
+    drv.touch_up()
+    for _ in range(3):
+        drv.frame(DT)
+    assert (menu.x, menu.y) != (x0 - 200, y0 - menu.title_h // 2)
+    assert off() == held and (game.x, game.y) == game.docked[:2]
+
+
+def test_closing_the_editor_ends_its_playtest(desk):
+    """Closing the Editor closes its playtest (owner, 2026-10-31), the way
+    the pause card's Quit ends a run: its world released, its pmem
+    flushed, its window gone."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)
+    for _ in range(4):
+        drv.frame(DT)
+    assert ws.wm._wins["desktop"].docked
+    released = []
+    orig = ws.player.release_world
+    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert released and "desktop" not in ws.wm._wins
+    assert not ws.wm.stack.has("desktop") and "menu" not in ws.wm._wins
+
+
+def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
+    """The pause card's Play in a window takes the docked playtest out of
+    the Run slot into a window of its own, its run going on; that window
+    is no playtest of the Editor's, and closing the Editor leaves it
+    running, framed and focused."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)
+    _tap(drv, 13, 1)
+    for _ in range(4):
+        drv.frame(DT)
+    game = ws.wm._wins["desktop"]
+    assert game.docked and ws.wm._focus == "desktop"
+    ws.system_key()                              # Super over the docked game
+    assert ws.pause.open and ws.pause.WINDOW in ws.pause.rows
+    ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
+    for _ in range(3):
+        drv.frame(DT)
+    assert game.docked is None and not game.minimized and not ws.player.paused
+    assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed
+    assert not ws.editor_app.playing(), "the Editor's Play is Play again"
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ws.wm.window_kinds() == ["desktop"] and ws.wm._wins["desktop"] is game
+    assert game.docked is None and not game.minimized
+    assert ws.wm._focus == "desktop" and not ws.player.paused
+
+
+def _contents(d):
+    return [c for pane, _r, _p in d.panes() for c in pane]
+
+
+def test_a_game_moved_to_a_window_leaves_the_workspaces_until_it_closes(desk):
+    """While the game plays in a window of its own the Editor has no Game
+    tab: Code's right column holds the panes left in the Run slot's room,
+    and Art's Map pane is the Map alone; when that window closes the Game
+    tabs come back, Art's on the Map it showed before Play."""
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code: Run slot over the context pane
+    before = {pane: r for pane, r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)                       # Art: Map · Game
+    _tap(drv, 13, 1)                             # Play: the pane turns to Game
+    for _ in range(4):
+        drv.frame(DT)
+    assert d.tab_of(("map", "game")) == "game"
+    ws.system_key()
+    ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
+    for _ in range(3):
+        drv.frame(DT)
+    assert "game" not in _contents(d) and ("map",) in [p for p, _r, _x in d.panes()]
+    ws.wm._move_focus("menu")                    # the Editor takes the keys back
+    _tap(drv, ord("2"), 1)
+    assert "game" not in _contents(d)
+    after = {pane: r for pane, r, _p in d.panes()}
+    rest = ("sprites", "sounds", "maps", "log")
+    gx, gy, gw, _gh = before[("game",)]
+    assert after[rest][:3] == (gx, gy, gw), "the column's panes take the Run slot's room"
+    ws.wm.close_window_kind("desktop")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ("game",) in {pane for pane, _r, _p in d.panes()}
+    _tap(drv, ord("3"), 1)
+    assert d.tab_of(("map", "game")) == "map"
 
 
 def test_play_selects_the_game_tab_and_stop_gives_the_map_back(desk):
@@ -654,6 +841,42 @@ def test_the_sounds_list_adds_a_sound_and_plays_one(desk):
     assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
 
 
+def test_the_song_pane_edits_the_songs_slots_and_plays_it(desk):
+    """Owner report 2026-10-31: the desk had no way to edit or play a song --
+    its Song pane was a row of track numbers. It is the song
+    (EDITOR_LAYOUT.md's Sound workspace): its slots, a tap on one edits the
+    song there, its sound steps back and forward, a slot is added and
+    deleted, and the song plays and stops."""
+    ws, drv, d, me, S = _sound(desk)
+    pat = me.cur_track().pattern
+    n = len(pat)
+
+    def press(id):
+        bx, by, bw, bh = d._host.box(id)
+        _click(drv, bx + bw // 2, by + bh // 2)
+
+    assert all(d._host.box("slot %d" % k) is not None for k in range(min(n, 8)))
+    press("slot 0")
+    assert me.view == me.SONG_VIEW and me.slot == 0
+    press("song add")
+    assert len(pat) == n + 1 and me.slot == 1
+    was = pat[1]
+    hi = len(me.bank.sfx) - 1
+    press("song slot+" if was < hi else "song slot-")
+    assert pat[1] == (was + 1 if was < hi else was - 1), "the slot's sound stepped"
+    assert d._host.box("slot 1") is not None, "the new slot shows"
+    press("song del")
+    assert len(pat) == n
+    press("song play")
+    assert ws.music_ui.music_preview == ("song", me.track_idx)
+    press("song play")
+    assert ws.music_ui.music_preview is None
+    me.undo()                                    # the delete
+    me.undo()                                    # the sound's step
+    pat = me.cur_track().pattern
+    assert len(pat) == n + 1 and pat[1] == was, "each edit is an undo step"
+
+
 def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     ws, drv, d, me, S = _sound(desk)
     S.open_rename(d)
@@ -691,6 +914,28 @@ def test_a_blocks_carts_code_workspace_shows_the_palette_and_the_made_code(block
     be = ws.block_ui.blocks_ed
     assert Parts.made_lines(be) == B.compile_blocks(be.program).rstrip("\n").split("\n")
     assert d._host.box("palette blocks") is not None
+
+
+def test_the_made_code_is_a_text_view_the_wheel_scrolls(blocks_desk):
+    """The made code draws through `ui.text_view` on the desk's verbs: its
+    rows answer a hit test, and the wheel over it scrolls it by pixels."""
+    from runtime import ui_draw, editor_parts as Parts
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    lines = len(Parts.made_lines(ws.block_ui.blocks_ed))
+    pane, r = next((p, r) for p, r, _p in d.panes() if p == ("made",))
+    x, y, w, h = d._body(r, d._unit(), pane)
+    px, py = x + 60, y + 20
+    first = ui_draw.text_at(d._host, "made", px, py)
+    assert first is not None and first[0] == 0
+    ox, oy = d._origin()
+    drv.hover(ox + px, oy + py)
+    drv.wheel(0, 3)
+    for _ in range(20):
+        drv.frame(DT)
+    got = ui_draw.text_at(d._host, "made", px, py)
+    assert lines > h // ws.code_layout.lh, "the made code fits its pane: nothing to scroll"
+    assert got[0] > 0, "the wheel did not scroll the made code"
 
 
 def test_a_palette_pick_puts_its_block_at_the_cursor_and_the_made_code_follows(blocks_desk):
@@ -893,7 +1138,7 @@ def _code_ready(ws, drv):
     for _ in range(4):
         drv.frame(DT)
     d = ws.editor_desk
-    _tab, _layer, _pane, b = d._code_pane()
+    b = d._own_pane()[4]
     return d, (b[0], b[1], b[0] + b[2], b[1] + b[3])
 
 
@@ -932,7 +1177,7 @@ def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
         drv.key_up(code)
         drv.frame(DT)
     shown = bytes(ws.glass_canvas._buf)
-    d._code_key = None                          # the next frame draws whole
+    d._surround = None                          # the next frame draws whole
     ws._dirty = True
     drv.frame(DT)
     assert d.changed() == [0, 0, ws.sys_canvas.w, ws.sys_canvas.h]
@@ -986,7 +1231,7 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
             root._comp.last = shot
             root._buf[:] = held[-2]
     for ws in (a, b):
-        ws.editor_desk._code_key = None         # a whole frame
+        ws.editor_desk._surround = None         # a whole frame
         ws._dirty = True
     frame()
     got = []

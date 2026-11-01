@@ -802,7 +802,7 @@ The kind that arrives with `open_editor()` may be one you were never granted —
 a person chose that file, not your cart. One of them is a whole PROJECT:
 `project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
 `config.json`, the main program), reached only through the Config tab's
-ADVANCED row so the cart loader re-reads the folder afterwards. You still just
+Files so the cart loader re-reads the folder afterwards. You still just
 draw it; nothing about the handle changes.
 
 Everything else is on the handle you get back:
@@ -823,6 +823,7 @@ Everything else is on the handle you get back:
 | `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
 | `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
 | `ed.dirty()` | are there edits no save has taken yet |
+| `ed.can_run()` / `ed.run()` | is the document a program (`.py` / `.lua`), and RUN it: saved first, then run on the console's script screen, the way Files runs one. When it ends the console opens your cart again on the same document, the caret and the scroll where they were — `open_editor()` in `_init` hands it back. `run()` answers False when there is nothing to run, and `badge()` says why a run could not start |
 | `ed.text()` / `ed.set_text(s)` | the whole document as one string |
 | `ed.caret()` | `(row, col)` — for a "Ln 3, Col 12" strip |
 | `ed.scroll(rows, cols)` | pan the view without moving the caret |

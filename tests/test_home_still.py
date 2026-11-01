@@ -33,7 +33,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
     if ref:
         L = launcher_layer.LauncherHomeLayer
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
-        monkeypatch.setattr(L, "_try_drag_partial", lambda self, cv, dt: False)
+        monkeypatch.setattr(L, "_try_band_frame", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     font_scale=1, windowed=True, panel_diagonal_in=7.0)
@@ -160,8 +160,9 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
     # a still frame draws the bar's strip only where its buffer lacks it
     assert calls["strip"] < calls["still"] // 2, calls
     # ...and a part the last frame painted as this one would is copied from
-    # its buffer (§14.6): each press's later frames
-    assert len(copied) >= 8, len(copied)
+    # its buffer (§14.6): each press's later frames (one buffer holds the
+    # last frame's paint itself: nothing lags that it drew)
+    assert len(copied) >= 8 if bufs > 1 else not copied, len(copied)
 
 
 def _changes(shots):

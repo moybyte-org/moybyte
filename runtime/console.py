@@ -246,15 +246,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
-# The "Make it mine" config-card editor surface (#3/#15 -- see cards_layer.py).
-# cards_layer.py is the single source of the card geometry constants (_CARD_*);
-# the ones tests resolve as console._X are imported back here. CART STATE stays
-# on Workstation: ws.config / ws.apply / ws.adjust; CardsLayer mutates ws.config
-# in place + dispatches through them.
+# The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
+# STATE stays on Workstation: ws.config / ws.apply; the tab's page mutates
+# ws.config in place.
 try:
-    from cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
+    from cards_layer import CardsLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
+    from runtime.cards_layer import CardsLayer
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
@@ -365,13 +363,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from launcher_layer import (Launcher, Carousel, IconHome, LauncherHomeLayer,
                                 HomeWindowLayer, new_tile, NEW_TILE_TYPE,
-                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
+                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title,
+                                PROJECTS_VERB_SETS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, Carousel, IconHome,
                                         LauncherHomeLayer,
                                         HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                         PSEUDO_TILE_TYPES, HOME_TABS,
-                                        tab_count_title)
+                                        tab_count_title, PROJECTS_VERB_SETS)
 # The home's arrangements by the layout's `home` value
 # (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
@@ -415,9 +414,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # a tool through the bar X; the #71 BACKSPACE pause is retired, do not
 # reintroduce it.
 try:
-    from player import (Player, BAR_TYPES, SCRIPT_TYPE)
+    from player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE)
+    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
 
 # The TEXT CONSOLE (text_console.py): the surface a `type: "script"` cart runs
 # on -- scrollback + prompt, drawn by the shell as the run's `_draw` so a
@@ -1044,8 +1043,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._text_request = None
         # The project a text run must return INTO (open_project_file): set with
         # the request, popped by _exit_to_caller, which re-reads the folder on
-        # the way back so the loader sees what was written.
+        # the way back so the loader sees what was written; HOME ends it.
         self._project_return = None
+        # A RUN an editor handle asked for (`ask_run`): the handle, parked
+        # until the frame that asked is drawn (`_run_asked`).
+        self._editor_run = None
+        # The cart a script run from its editor handle must return INTO
+        # (`_return_to_runner`): (cart, kind, name, mode, where its view
+        # stood, the cart's own caller kind), popped by _exit_to_caller.
+        self._script_return = None
         # Where an Editor the console-mode home handed to the desk goes back
         # to when its window closes (`open_in_editor`, `editor_closed`):
         # (tab, the card's path, the desk's windows then), or None.
@@ -1100,7 +1106,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The trackball's steps where a surface takes the keys (`ball`): its
         # source, the pulses toward a step on each axis and when the last
         # came, the click's press held now, and the coast (BALL_COAST): its
-        # direction, velocity in steps/ms and the part of a step it owes.
+        # direction, and its motion, a fling on the toolkit's scroller
+        # (COAST_UNIT a step) with the steps it has delivered.
         self._ball_src = None
         self._ball_ax = self._ball_ay = 0
         self._ball_at = 0
@@ -1109,8 +1116,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._ball_down = None
         self._coast, self._coast_rate = _ball_coast()
         self._coast_dir = None
-        self._coast_v = self._coast_acc = 0.0
-        self._coast_at = self._ball_rate_at = 0
+        self._coast_r = _ui_draw.ScrollRegion()
+        self._coast_r.set((0, 0, 0, 0), 1 << 24)
+        self._coast_got = 0
+        self._coast_fed = False
+        self._ball_rate_at = 0
         self.ball_owed = False        # a press is held or a coast moves: `ball` runs next frame
         self.ball_stepped = 0         # every step a roll delivered (the bench's count)
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
@@ -1215,8 +1225,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
-        # the layer a modal's held page lies in, and its holder (ui_draw.HeldPage)
-        self.held_pages = [None, None]
+        # the layers a modal's hold keeps what is under it in, and their
+        # holders (ui_draw.Hold, `held_layer`)
+        self.held_pages = [None, None, None, None]
         self.confirm = DeleteConfirm(self)   # the question before a cart is deleted
         self._marks_held = False      # a modal turned the focus marks off
         # Reboot hook: the device injects a callable (machine.reset via the OTA
@@ -1449,6 +1460,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         else:
             root = glass.new_layer(glass.w // n, glass.h // n)
             root.set_font_scale(glass.font_scale)
+            # the meaning of blit_game the tier chose for the glass (a desk's
+            # composite fills no bezel: DeviceCanvas.letterbox_composite)
+            root.letterbox_composite = glass.letterbox_composite
         self._half = None if n == 1 else root
         self.render_scale = n
         if wm is not None and getattr(wm, "_root_canvas", None) is not None:
@@ -1532,7 +1546,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                               str(name), mode)
         # Back to whoever asked, not home: Files opened this, so its X returns
         # to the shelf the person was standing on, and the Editor's Config tab
-        # (step 5's ADVANCED row) gets back the tab it left.
+        # (step 5's Files) gets back the tab it left.
         caller = (self.editor_app if self.wm.top_is("menu")
                   else self._apps_by_id.get(self.wm.top_kind()))
         if not self._open_workspace(cart):
@@ -1543,7 +1557,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_project_file(self, cart, name, mode=None):
         """Open one of a PROJECT's own files in the text app -- the Config tab's
-        ADVANCED row, and the Files router's door for a project file reached
+        Files, and the Files router's door for a project file reached
         from the PROJECTS root (step 5 of docs/text_editing_2026-09.md).
 
         It goes through the EDITOR, not straight into the handle, and that is
@@ -1903,7 +1917,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         elif m.open and m.widget == "menu":
             m.close()
             self.popover_touch()
-        elif self.plays_fullscreen():
+        elif self.plays_fullscreen() or self._game_pauses():
             p.show()
         else:
             self.toggle_sysmenu()
@@ -1917,9 +1931,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
 
     def plays_fullscreen(self):
-        """A game runs fullscreen, live: what Super pauses."""
+        """A game runs fullscreen, live: what Super pauses -- in console
+        mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool and not self.wm.desk_open())
+                and not self.player._is_tool
+                and (not self.wm.desk_open() or self.wm.game_full()))
+
+    def _game_pauses(self):
+        """The desk's other play Super pauses: the game docked in the
+        Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
+        gp = getattr(self.wm, "game_pauses", None)
+        return (gp is not None and self.wm.top_is_player() and self.cart_error is None
+                and not self.player._is_tool and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -2449,7 +2472,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
-        self.cards_layer.reset()      # fresh card selection/scroll for the new cart
+        self.cards_layer.reset()      # no file list or dialog carried to the new cart
         self.editor = None
         self.code_file = None         # a new cart opens on ITS main file, never on
                                       # the name the last one was left showing
@@ -2674,9 +2697,55 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.run(self.project, caller)
         return (True, "")
 
+    def ask_run(self, handle):
+        """RUN the script an editor handle holds (`EditorHandle.run`), as a
+        deferred transition (`defer`): the asking cart is mid-frame, and its
+        window is still to be drawn from the world the run replaces."""
+        self._editor_run = handle
+        self.defer(self._run_asked)
+
+    def _run_asked(self):
+        """Start the run `ask_run` parked: the script runs down Files' path
+        (`run_script`), and its exit comes back into the cart that asked, on
+        the same document (`_return_to_runner`). A refusal before the world
+        changed is the handle's badge; one after it (the workspace would not
+        open) goes straight back. Nothing runs when the asking run is over."""
+        ed = self._editor_run
+        self._editor_run = None
+        if ed is None or ed not in self.player._editors:
+            return
+        back = (self.cart, ed.kind, ed.name(), ed.mode(), ed._where(),
+                self.returns.caller())
+        ok, why = self.run_script(ed.kind, ed.name())
+        if ok:
+            self._script_return = back
+        elif ed in self.player._editors:
+            ed._refuse(why)
+        else:
+            self._return_to_runner(back)
+
+    def _return_to_runner(self, back):
+        """Come back from a script an editor handle ran to the cart that ran
+        it: that cart started again with the document parked as its request
+        (what its `open_editor()` answers), the caret and the view's top line
+        and column put back (`EditorHandle._put`), and the cart's own caller
+        restored, so leaving it still lands where it would have (Files' shelf,
+        the Config tab, home). A list the cart keeps on the document's row
+        shows that row: a placed table opens on its current row."""
+        cart, kind, name, mode, where, caller = back
+        self._text_request = (kind, name, mode)
+        if not self._open_workspace(cart):
+            self._text_request = None
+            self._go_home_or_back()
+            return
+        self.run(self.project, caller)
+        for ed in self.player._editors:
+            if ed.kind == kind and ed.name() == name:
+                ed._put(where)
+
     def open_image(self, name, kind=None, cart=None):
         """Open a PICTURE in Paint -- the ONE image door, taken by the Files
-        router and by the Editor's ADVANCED files row alike (#108).
+        router and by the Config tab's Files alike (#108).
 
         `cart` names a project whose OWN image this is (`images/<name>.moyimg`,
         or its `cover.png`): Paint then reads and writes it on that project's
@@ -2927,6 +2996,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             g = self.projects_grid = self._home_grid(
                 "carousel", self._launcher_items(self.carts.all, "make"))
             g.tab = "make"
+            g.verb_sets = PROJECTS_VERB_SETS   # Make's Play, its pane's rows
         else:
             self.set_home_tab("make", g)
         self.projects_layer._tab_focus = False
@@ -3223,13 +3293,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # was, and nothing below changes for it. A PICO-8 port is not: it arrives as
     # p8.lua (the generated layer), main.lua (the game) and one file per PICO-8
     # tab, and until now the two thirds of it that are not main.lua were
-    # reachable only through the Config tab's ADVANCED row -- which opens them
+    # reachable only through the Config tab's Files -- which opens them
     # in the text handle, where there is no PLAY, no journal and no
     # crash-to-code. A crash reported at `p8.lua:412:` threw the kid at a tab
     # that could not show line 412.
     #
     # There is deliberately NO create verb here. The file list is a list; the
-    # one door that adds a script is the Config tab's ADVANCED row, where a
+    # one door that adds a script is the Config tab's Files, where a
     # project's own folder already lives (docs/text_editing_2026-09.md step 5).
 
     def code_sources(self):
@@ -3308,6 +3378,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # outlived its journey here would drag an unrelated later exit into
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.
         self.returns.take_back()
+        self._script_return = None
+        self._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
@@ -3506,8 +3578,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.tab_sel = old.tab_sel
         g.sel = old.sel
         g._scroll_to_sel()
-        self.launcher = g
         old.release_faces()
+        self.launcher = g
         self._dirty = True
 
     def set_home_tab(self, tab, grid=None):
@@ -3644,43 +3716,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             carts = keep
         return [new_tile()] + list(carts)
 
-    def adjust(self, d):
-        # Config mutation stays on Workstation (ws.config is the single source of cart
-        # state); the CARD selection lives on cards_layer, so read msel from there.
-        fields = self.cart.get("edit") or []
-        if self.cards_layer.msel >= len(fields):
-            return                     # the ADVANCED row: a door, not a stepper
-        f = fields[self.cards_layer.msel]
-        # #94: a malformed field definition (bad type, min>max, missing/empty
-        # choices, ...) must not crash left/right stepping -- this is the ONE
-        # call site draw()'s try/except doesn't cover (a d-pad press routes
-        # here directly, not through _draw_cards). _validate_field is the same
-        # check cards_layer uses to swap the card for an inline "!" message; a
-        # kid who navigated onto that card with up/down just can't step it.
-        if self.cards_layer._validate_field(f):
-            return
-        key = f["key"]
-        cur = self.config.get(key, f.get("default"))
-        try:
-            if f["type"] == "int":
-                v = int(cur) + d * f.get("step", 1)
-                if "min" in f:
-                    v = max(f["min"], v)
-                if "max" in f:
-                    v = min(f["max"], v)
-                self.config[key] = v
-                self.project.record_config(key, cur, v)   # #111 phase 4
-            elif f["type"] == "choice":
-                ch = f["choices"]
-                idx = ch.index(cur) if cur in ch else 0
-                v = ch[(idx + d) % len(ch)]
-                self.config[key] = v
-                self.project.record_config(key, cur, v)   # #111 phase 4
-        except (TypeError, ValueError, KeyError):  # noqa: BLE001 -- a bad current
-            # value (e.g. a non-numeric default some other bug left behind) must
-            # not crash the frame loop either; the -/+ just becomes a no-op.
-            pass
-
     def _leave_or_home(self, leave):
         """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by
         several menu_view input branches (theme/map/music/the default card editor)
@@ -3702,7 +3737,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # content layer is at the bottom and always consumes.
         i = self.input
         # Whether a change was reported since the last painted frame, before
-        # this input's own (`HeldPage.opened`).
+        # this input's own (`Hold.opened`).
         self._dirty_in = self._dirty or self._press_owed
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
@@ -4037,6 +4072,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     BALL_TURN = 4           # pulses a step across a roll takes while it rolls
     BALL_ROLLING_MS = 150   # a roll stops this long after its axis's last pulse
     BALL_IDLE_MS = 300      # a pause this long forgets a partial step
+    # A step's length on the coast's scroller: the scroller's fling rests
+    # below MOY_UI_STOP_VEL (moy_ui.h, 0.02 a ms), a step a second here.
+    COAST_UNIT = 20
 
     def ball_steps(self):
         """Whether the trackball is the W A S D of the surface that holds
@@ -4095,27 +4133,26 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 src = self._ball_src = self.input.source("ball")
             src.set_button("run", True)
             self._ball_down = "run"
-        if self._coast_v:
+        r = self._coast_r
+        if r.flinging:
             self._ball_coast_tick(self.ball_steps())
-        self.ball_owed = self._ball_down is not None or bool(self._coast_v)
+        self.ball_owed = self._ball_down is not None or r.flinging
         return took
 
     def _ball_coast_tick(self, on):
-        """A coasting roll's steps this frame: its velocity over the time
-        since the last, decaying as a fling does (`ScrollRegion.FRICTION`);
-        off a surface that steps, or below a step a second, it stops."""
-        now = _ticks_ms()
-        ms = max(0, _ticks_diff(now, self._coast_at))
-        self._coast_at = now
-        v = self._coast_v * _ui_draw.ScrollRegion.FRICTION ** ms
-        if not on or v < 0.001:
-            self._coast_v = self._coast_acc = 0.0
+        """A coasting roll's steps this frame: its fling on the toolkit's
+        scroller advanced by the loop's dt (none the frame a roll fed it),
+        decaying as a page's fling does; off a surface that steps, or below
+        a step a second, it stops."""
+        r = self._coast_r
+        if not on:
+            r.stop()
             return
-        self._coast_v = v
-        self._coast_acc += v * ms
-        k = int(self._coast_acc)
-        if k:
-            self._coast_acc -= k
+        r.tick(0.0 if self._coast_fed else self._frame_dt_ms)
+        self._coast_fed = False
+        k = r.offset // self.COAST_UNIT - self._coast_got
+        if k > 0:
+            self._coast_got += k
             self._ball_steps(self._coast_dir, k, coast=False)
 
     def _ball_roll(self, dx, dy):
@@ -4169,12 +4206,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             ms = max(1, _ticks_diff(now, self._ball_rate_at))
             self._ball_rate_at = now
             keep = max(1, self._coast_rate * ms // 1000)
+            r = self._coast_r
             if name != self._coast_dir:
-                self._coast_v = self._coast_acc = 0.0
+                r.stop()
             if k > keep:
                 self._coast_dir = name
-                self._coast_v += (k - keep) * self._coast / 1000.0
-                self._coast_at = now
+                if not r.flinging:
+                    r.offset = self._coast_got = 0
+                r.fling((k - keep) * self._coast * self.COAST_UNIT / 1000.0)
+                self._coast_fed = True
                 k = keep
         self.input.add_steps(name, k)
         self.ball_stepped += k
@@ -4556,9 +4596,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def release_held(self):
         """Free one of the layers a modal holds what is under it in -- a
-        dialog's page (`ui_draw.HeldPage`), the frame under the pause card --
+        page held washed, the frame under the pause card (`ui_draw.Hold`) --
         the fit check's last releases: True when there was one."""
-        return _ui_draw.release_held(self) or self.pause.release_under()
+        return _ui_draw.release_held(self)
 
     def request_frame(self):
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
@@ -4869,14 +4909,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                             break
                     if getattr(self.launcher_layer, "_cap_owed", None) is not None:
                         self.launcher_layer.capture_due()
+                    if getattr(self.launcher_layer, "_debt_owed", None) is not None:
+                        self.launcher_layer.debt_due()   # (a step's buffer behind)
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
                     if not self._idle_warned:
                         self._idle_warned = True
                         print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
-        if getattr(self.launcher_layer, "_cap_owed", None) is not None:
-            self.launcher_layer.capture_due()   # before anything draws
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.
@@ -5002,9 +5042,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _ui_draw.marks(_modal is None)
         _stack = self.wm.draw_stack()               # memoized (Stage 6c) -- no per-frame alloc
         # The content's own ring vouches for its buffers where it is alone on
-        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4).
-        _ui_draw.paint_frame(self._frames_drawn,
-                             self.wm.CONTENT_RING and self.wm.content_alone(), self)
+        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4), or alone
+        # but for the FPS chip, which names where it drew (`overdrew`).
+        _ring = self.wm.CONTENT_RING
+        _alone = _ring and self.wm.content_alone()
+        _ui_draw.paint_frame(self._frames_drawn, _alone, self,
+                             not _alone and _ring and self.show_fps
+                             and self.wm.content_alone(_SIG_FPS))
         for layer in _stack:
             if _modal is not None and layer.id in _modal:
                 _ui_draw.marks(True)

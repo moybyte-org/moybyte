@@ -1,4 +1,4 @@
-// TextView (moy_ui_text.h): a text area in visual rows, its record and its
+// A text view (moy_ui_text.h): a text area in visual rows, its record and its
 // rows drawn.
 
 #include <string.h>
@@ -41,6 +41,8 @@ typedef struct {
     } word[WORD_MAX];
     uint8_t slot[WORD_SLOTS];   // word index + 1, 0 empty
     uint16_t pool_n, words;
+    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
+    uint32_t used;
 } text_mem_t;
 
 static text_mem_t *s_mem;
@@ -63,6 +65,48 @@ moy_ui_trow_t *moy_ui_text_scratch(void) {
 uint32_t *moy_ui_text_breaks(void) {
     text_mem_t *m = mem();
     return m != NULL ? m->starts : NULL;
+}
+
+moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
+    text_mem_t *m = make ? mem() : s_mem;
+    if (m == NULL || owner == NULL) {
+        return NULL;
+    }
+    moy_ui_tview_t *old = &m->views[0];
+    for (int i = 0; i < MOY_UI_TEXT_VIEWS; i++) {
+        moy_ui_tview_t *w = &m->views[i];
+        if (w->owner == owner && w->id == id) {
+            if (make) {
+                w->used = ++m->used;
+            }
+            return w;
+        }
+        if (w->owner == NULL || (old->owner != NULL && w->used < old->used)) {
+            old = w;
+        }
+    }
+    if (!make) {
+        return NULL;
+    }
+    memset(old, 0, sizeof(*old));
+    old->owner = owner;
+    old->id = id;
+    old->used = ++m->used;
+    old->over0 = old->over1 = 0;
+    moy_ui_text_reset(&old->t);
+    return old;
+}
+
+void moy_ui_text_views_drop(const void *owner) {
+    text_mem_t *m = s_mem;
+    if (m == NULL) {
+        return;
+    }
+    for (int i = 0; i < MOY_UI_TEXT_VIEWS; i++) {
+        if (m->views[i].owner == owner) {
+            memset(&m->views[i], 0, sizeof(m->views[i]));
+        }
+    }
 }
 
 static uint32_t word_hash(const uint8_t *p, size_t n) {
@@ -319,6 +363,122 @@ static void runs_json(runs_t *r, const uint8_t *p, uint32_t n) {
     }
 }
 
+// A line of Markdown as typed (a note's source; Notes' editor handle): its
+// marks dim, in the comment's tone -- a heading's `#`s, a list's bullet or
+// number, a quote's `>`, a rule, a `[[link]]`'s brackets, a code span's
+// backticks and `**` -- a heading's words in the number's, a task's open
+// box `[ ]` in the keyword's (the seed themes' accent), a ticked one `[x]`
+// in the string's and its words dim, and a link's name in the builtin's
+// (their blue). Read left to right with nothing looked for past the line's
+// end, so a wrapped row's runs are its line's up to it: an unclosed link or
+// code span runs to the line's end, as an unclosed string does.
+#define MD_MARK MOY_UI_TT_COMMENT
+#define MD_HEAD MOY_UI_TT_NUMBER
+#define MD_OPEN MOY_UI_TT_KEYWORD
+#define MD_DONE MOY_UI_TT_STRING
+#define MD_LINK MOY_UI_TT_BUILTIN
+
+// Whether p[i, n) is a rule: three or more of one of `-`, `*` and `_`, with
+// only spaces between.
+static int md_rule(const uint8_t *p, uint32_t i, uint32_t n) {
+    uint8_t c = p[i];
+    if (c != '-' && c != '*' && c != '_') {
+        return 0;
+    }
+    int k = 0;
+    for (; i < n; i++) {
+        if (p[i] == c) {
+            k++;
+        } else if (p[i] != ' ') {
+            return 0;
+        }
+    }
+    return k >= 3;
+}
+
+static void runs_markdown(runs_t *r, const uint8_t *p, uint32_t n) {
+    uint32_t i = 0, j;
+    while (i < n && (p[i] == ' ' || p[i] == '\t')) {
+        i++;
+    }
+    run_to(r, MOY_UI_TT_TEXT, i);
+    if (i == n) {
+        return;
+    }
+    // a heading: one to six `#` and a space, or the line's end
+    for (j = i; j < n && p[j] == '#'; j++) {
+    }
+    if (j > i && j - i <= 6 && (j == n || p[j] == ' ')) {
+        run_to(r, MD_MARK, j);
+        run_to(r, MD_HEAD, n);
+        return;
+    }
+    if (md_rule(p, i, n)) {
+        run_to(r, MD_MARK, n);
+        return;
+    }
+    // a quote's `>`s, then a list item's bullet or number and its space
+    while (i < n && p[i] == '>') {
+        i += i + 1 < n && p[i + 1] == ' ' ? 2 : 1;
+        run_to(r, MD_MARK, i);
+    }
+    j = i;
+    if (j + 1 < n && (p[j] == '-' || p[j] == '*' || p[j] == '+') && p[j + 1] == ' ') {
+        j += 2;
+    } else {
+        while (j < n && is_digit(p[j])) {
+            j++;
+        }
+        j = j > i && j - i <= 9 && j + 1 < n && (p[j] == '.' || p[j] == ')') && p[j + 1] == ' '
+                ? j + 2 : i;
+    }
+    if (j > i) {
+        run_to(r, MD_MARK, j);
+        i = j;
+        // a task's box, then a space or the line's end
+        if (i + 2 < n && p[i] == '[' && p[i + 2] == ']' && (i + 3 == n || p[i + 3] == ' ')) {
+            uint8_t b = p[i + 1];
+            if (b == ' ') {
+                run_to(r, MD_OPEN, i + 3);
+                i += 3;
+            } else if (b == 'x' || b == 'X') {
+                run_to(r, MD_DONE, i + 3);
+                run_to(r, MD_MARK, n);
+                return;
+            }
+        }
+    }
+    // the line's words: links, code spans and `**`
+    while (i < n) {
+        uint8_t c = p[i];
+        if (c == '[' && i + 1 < n && p[i + 1] == '[') {
+            run_to(r, MD_MARK, i + 2);
+            for (j = i + 2; j < n && !(p[j] == ']' && j + 1 < n && p[j + 1] == ']'); j++) {
+            }
+            run_to(r, MD_LINK, j);
+            i = j < n ? j + 2 : n;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        if (c == '`') {
+            for (j = i + 1; j < n && p[j] != '`'; j++) {
+            }
+            run_to(r, MD_MARK, i + 1);
+            run_to(r, MOY_UI_TT_TEXT, j);
+            i = j < n ? j + 1 : n;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        if (c == '*' && i + 1 < n && p[i + 1] == '*') {
+            i += 2;
+            run_to(r, MD_MARK, i);
+            continue;
+        }
+        i++;
+        run_to(r, MOY_UI_TT_TEXT, i);
+    }
+}
+
 // An SGR escape at p[i] (`ESC [ params final`): where it ends; 0 where
 // none starts there.
 static uint32_t sgr_at(const uint8_t *p, uint32_t n, uint32_t i, int *tone) {
@@ -402,6 +562,9 @@ static void runs_of(const uint8_t *p, uint32_t n, int syntax, run_fn fn, void *c
             break;
         case MOY_UI_SYN_SGR:
             runs_sgr(&r, p, n);
+            break;
+        case MOY_UI_SYN_MARKDOWN:
+            runs_markdown(&r, p, n);
             break;
         default:
             run_to(&r, MOY_UI_TT_TEXT, n);
@@ -658,10 +821,6 @@ static uint32_t view_key(const int32_t *v) {
 
 // -- the record --------------------------------------------------------------------------
 
-size_t moy_ui_text_size(void) {
-    return sizeof(moy_ui_text_t);
-}
-
 void moy_ui_text_reset(moy_ui_text_t *t) {
     t->magic = MOY_UI_TEXT_MAGIC;
     t->key = 0;
@@ -731,9 +890,10 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
         int k = v[MOY_UI_TV_TOP] + i - t->top;    // its index in the record
         int same = k >= 0 && k < t->rows && t->gen[k] == t->ngen[i]
                    && t->gen2[k] == t->ngen2[i];
-        // a row the record holds cut (R's edge cut it) is drawn again
+        // a row the record holds cut (R's edge cut it) is drawn again where
+        // the move brings in what the edge cut; left where it was, it holds
         int old_y = ry + k * lh - t->off;
-        if (same && (old_y < ry || old_y + lh > ry + h)) {
+        if (same && dy != 0 && (old_y < ry || old_y + lh > ry + h)) {
             same = 0;
         }
         if (dy != 0 && y < band1 && y1 > band0) {
@@ -786,6 +946,7 @@ typedef struct {
     const moy_ui_sink_t *s;
     const int32_t *v;
     int fs, scale;
+    int grounded;               // R's ground is filled already: a row fills none of its own
     // the run printer's state
     const uint8_t *p;
     int left, cols, tx0, y;
@@ -943,7 +1104,9 @@ static void draw_row(dr_t *d, const int32_t in[4], const moy_ui_trow_t *r,
     int gc = v[MOY_UI_TV_GUTTER], cols = v[MOY_UI_TV_COLS], left = v[MOY_UI_TV_LEFT];
     int tx = v[MOY_UI_TV_TX], tx0 = tx + gc * cell;
     if (v[MOY_UI_TV_FLAGS] & MOY_UI_TVF_GROUND) {
-        rect(d, v[MOY_UI_TV_X], y, v[MOY_UI_TV_W], lh, v[MOY_UI_TV_BG]);
+        if (!d->grounded) {
+            rect(d, v[MOY_UI_TV_X], y, v[MOY_UI_TV_W], lh, v[MOY_UI_TV_BG]);
+        }
         // the error's underline of the row above, where it reaches this row,
         // under this row's marks as a whole draw lays it
         if (above != NULL && above->p != NULL && above->line == v[MOY_UI_TV_ERR_ROW]
@@ -1081,14 +1244,24 @@ int moy_ui_text_paint(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
                   && t->want_rows == n;
     int lh = v[MOY_UI_TV_LH], drawn = 0;
     int cy = d.t.cam_y;
+    // every row drawn where the clip lets it: R's ground is one fill, under
+    // the rows as their own would lie (they cover R)
+    if (!planned && (v[MOY_UI_TV_FLAGS] & MOY_UI_TVF_GROUND) && clip) {
+        rect(&d, v[MOY_UI_TV_X], v[MOY_UI_TV_Y], v[MOY_UI_TV_W], v[MOY_UI_TV_H],
+             v[MOY_UI_TV_BG]);
+        d.grounded = 1;
+    }
     for (int i = 0; i < n && rin[1] < rin[3]; i++) {
         if (planned && (i >= MOY_UI_TEXT_ROWS || !floor_has(t, i))) {
             continue;
         }
         int y = v[MOY_UI_TV_Y] + i * lh - v[MOY_UI_TV_OFF];
         // a row the clip leaves out draws nothing (an error's underline
-        // reaches the row after: the band is a row and its leak)
-        if (y - cy >= rin[3] || y - cy + lh + d.fs <= rin[1]) {
+        // reaches the row after: the error row's band is a row and its leak)
+        int leak = rows[i].p != NULL && v[MOY_UI_TV_ERR_ROW] >= 0
+                   && rows[i].line == v[MOY_UI_TV_ERR_ROW]
+                   && v[MOY_UI_TV_TEXT_H] + d.fs > lh ? d.fs : 0;
+        if (y - cy >= rin[3] || y - cy + lh + leak <= rin[1]) {
             continue;
         }
         draw_row(&d, rin, &rows[i], i > 0 ? &rows[i - 1] : NULL, y, err, find);
@@ -1131,10 +1304,3 @@ void moy_ui_text_note(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, i
     t->want = 0;
 }
 
-int moy_ui_text_draw(moy_ui_text_t *t, const moy_ui_sink_t *s, int32_t *v,
-                     const moy_ui_trow_t *rows, int n, moy_ui_span_t err, moy_ui_span_t find,
-                     int whole) {
-    int drawn = moy_ui_text_paint(t, s, v, rows, n, err, find, whole);
-    moy_ui_text_note(t, v, rows, n, err, find);
-    return drawn;
-}

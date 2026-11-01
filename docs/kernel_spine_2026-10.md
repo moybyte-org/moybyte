@@ -160,6 +160,7 @@ order.
     int moy_settings_set(moy_settings_t *, const char *key, size_t key_len, const char *json, size_t len);
     int moy_settings_delete(moy_settings_t *, const char *key, size_t key_len);
     uint32_t moy_settings_dirty(const moy_settings_t *);   // changes since clean
+    uint32_t moy_settings_gen(const moy_settings_t *);     // changes ever: `rows.gen()`
     void moy_settings_clean(moy_settings_t *);
     size_t moy_settings_dump(const moy_settings_t *, char *out, size_t cap);
 

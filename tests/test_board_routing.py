@@ -976,3 +976,17 @@ def test_moycore_hardware_learned_constraints_pinned():
     #    4.5ms of celeste's S3 render, and the shim nil-guards the names, so
     #    losing them costs performance silently.
     assert "__moy_map_masked" in mod and "__moy_map_flags" in mod
+
+
+def test_each_p4_board_says_what_its_layers_in_place_shift_costs():
+    """A layer's in-place shift costs what the board's engine for it costs
+    (the Waveshare's 2D-DMA, the Guition's CPU behind its rotate), so each
+    P4 board's runtime names its own LAYER_SHIFT_COST and hands it to the
+    shared P4 body, which gives it to the system canvas its layers come
+    from; measured in #58."""
+    body = (_REPO / "device" / "p4_desktop.py").read_text()
+    assert "sys_canvas.shift_costs(None, layer_shift_cost)" in body
+    for board in ("esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c"):
+        src = (_REPO / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+        assert re.search(r"^LAYER_SHIFT_COST = \d+$", src, re.M), board
+        assert "layer_shift_cost=LAYER_SHIFT_COST" in src, board

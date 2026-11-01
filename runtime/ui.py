@@ -4,6 +4,7 @@
 #   page                     a page and its rows; label, button, toggle, slider, list after it
 #   table                    a list in columns; scroll, field, dialog, popover, menu after it
 #   grid                     a grid of cards the app draws into; card
+#   split                    panes, a divider between them; part_at beside it
 #   band                     the rows a shift frame draws; card_clip, keep beside it
 #   focus                    focus, moved or read; keys_taken, at
 """The public UI API (docs/ui_api_2026-10.md): the verbs every app and cart
@@ -27,7 +28,8 @@ system menu, the pause menu);
 `tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
 the app draws (Appearance's); `empty` an empty page, `tool` an icon button
 in an app's tool row, `bar` the title and tools an app lends its bar and
-`rule` a divider (the apps' restyle's).
+`rule` a divider (the apps' restyle's); `split` cuts panes with dividers
+the pointer drags, and `part_at` says where the pointer is in a part.
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -192,10 +194,32 @@ def _over(o):
     wash = o.get("wash")
     lead = o.get("lead")
     gen = o.get("gen")
+    part = o.get("part")
+    bar = o.get("bar")
+    axis = o.get("axis") == "x"
+    snap = o.get("snap")
+    offset = o.get("offset")
+    spill = o.get("spill")
+    keep = o.get("keep")
+    ov = o.get("over")
+    whole = o.get("whole")
+    across = o.get("across")
+    at = o.get("at")
+    shift = o.get("shift")
+    fade = o.get("fade")
     flags = None
-    if wash is not None or lead is not None or gen is not None:
+    if (wash is not None or lead is not None or gen is not None or part is not None or bar
+            or axis or snap or offset is not None or spill is not None or keep is not None
+            or ov is not None or whole or across is not None or at is not None or shift
+            or fade):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
-                 | (4 if gen is not None else 0))
+                 | (4 if gen is not None else 0) | (16 if part is not None else 0)
+                 | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
+                 | (4096 if offset is not None else 0) | (8192 if spill is not None else 0)
+                 | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
+                 | (65536 if whole else 0) | (131072 if across is not None else 0)
+                 | (262144 if at is not None else 0) | (524288 if shift else 0)
+                 | (1048576 if fade else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -203,6 +227,22 @@ def _over(o):
     if gen is not None:
         g = int(gen) & 0xffffffff
         tail += _pack("<i", g - 0x100000000 if g & 0x80000000 else g)
+    if part is not None:
+        tail += _pack("<2i", int(part[0]), int(part[1]))
+    if offset is not None:
+        tail += _pack("<i", int(offset))
+    if spill is not None:
+        tail += _pack("<i", int(spill))
+    if keep is not None:
+        tail += _pack("<i", int(keep))
+    if ov is not None:
+        tail += _pack("<4i", int(ov[0]), int(ov[1]), int(ov[2]), int(ov[3]))
+    if across is not None:
+        tail += _pack("<2i", int(across[0]), int(across[1]))
+    if at is not None:
+        tail += _pack("<i", int(at))
+    if fade:
+        tail += _pack("<i", int(fade))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -219,7 +259,8 @@ def _hint(b):
 
 def page(title, o=None):
     """A page filling the app's surface (or `at`'s rect) under `title`, its
-    rows stacking from the top: the content rect `(x, y, w, h)`."""
+    rows stacking from the top: the content rect `(x, y, w, h)`. Its id is
+    its title, or `o.id` where two pages share one."""
     t = _T
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
 
@@ -315,23 +356,42 @@ def link(label, value="", o=None):
 
 # The encodings verbs made lately, so a frame that hands a verb the same
 # options draws without building them again: by identity, and for a mutable
-# sequence also by a copy an edit no longer equals (a tuple is its own).
+# sequence also by a copy an edit no longer equals (a tuple is its own). The
+# slot each kind (a table's column count, a verb's options, the columns) hit
+# last is tried first: a frame asks for the same few in the same order, and a
+# board pays a scan of the slots in bytecode.
 _MEMO = 24
 _memo_k = [None] * _MEMO
 _memo_c = [None] * _MEMO
 _memo_v = [None] * _MEMO
 _memo_at = [0]
+_memo_hint = {}
+
+
+def _memo_hit(i, items, kind):
+    c = _memo_c[i]
+    if c is None or c == items:
+        v = _memo_v[i]
+        if v[0] == kind:
+            return v[1]
+    return None
 
 
 def _memo_get(items, kind):
     k = _memo_k
+    j = _memo_hint.get(kind, -1)
+    if j >= 0 and k[j] is items:
+        c = _memo_c[j]
+        if c is None or c == items:
+            v = _memo_v[j]
+            if v[0] == kind:
+                return v[1]
     for i in range(_MEMO):
         if k[i] is items:
-            c = _memo_c[i]
-            if c is None or c == items:
-                v = _memo_v[i]
-                if v[0] == kind:
-                    return v[1]
+            v = _memo_hit(i, items, kind)
+            if v is not None:
+                _memo_hint[kind] = i
+                return v
     return None
 
 
@@ -452,27 +512,88 @@ def _columns(columns):
     return b
 
 
+# The table drawn last's rows and columns where nothing can change them (a
+# tuple of tuples of str; a tuple): known again by identity, no memo scan.
+_TBL = [None, 0, None, None, None]
+
+
+def _rows_copy(rows):
+    """What the memo compares `rows` with to know them again: None for a
+    tuple of tuples of str, which nothing can change (known by identity
+    alone); else a copy, each row as its own type, so it compares equal."""
+    if type(rows) is _TUPLE:
+        for r in rows:
+            if type(r) is not _TUPLE:
+                break
+            for c in r:
+                if type(c) is not str:
+                    break
+            else:
+                continue
+            break
+        else:
+            return None
+        return tuple([r[:] for r in rows])
+    return [r[:] for r in rows]
+
+
 def table(label, columns, rows, cur, o=None):
     """A list in columns: `label` its caption (none where empty), `columns`
     the headers -- an empty first one makes column 0 the picture column,
     its cells icon names -- and `rows` each a sequence of cells. The current
     row `cur` (from 0, -1 none) follows the focus; the columns between the
     first text column and the last, then the last, drop where it would show
-    fewer than eleven characters. `(cur, opened)`, `opened` True the frame
-    the current row is opened (Enter on it, or a tap on it again)."""
+    fewer than eleven characters. It opens on the current row: placed by
+    `at`, on its first frame; stacked, on its page's first frame where it
+    holds the focus or nothing does, in that frame. `(cur, opened)`, `opened` True the
+    frame the current row is opened (Enter on it, or a tap on it again).
+    `o.part = (w, h)` makes it a table of parts: rows `h` tall, column 0 a
+    cell `w` wide the app draws into through `table_part` (the whole row
+    where there is one column), each row's cells its key, so a frame that
+    moves it carries the rows whose cells did not change. `o.bar` marks
+    the current row with a bar at its left edge, `o.current = False` draws
+    no current mark. `o.axis = "x"` lays a table of parts' rows side by
+    side, each `w` wide and `h` tall (0: the view's), scrolled across;
+    `o.snap` puts row 0 at the view's centre and rests the view on a row's
+    centre; `o.offset` is the app's own scroll (a drag, a step or the wheel
+    move it no more); `o.spill` is the room a part may draw past its cell
+    on every side (`table_dist` says where each part lies). `o.keep = key`
+    keeps a placed table of parts' parts across frames: `key` what every
+    part is a function of beside its row's cells (negative: this frame's
+    paint keeps nothing), and a frame draws only what the buffer it paints
+    lacks (`table_floor`); `o.whole = True` draws its view whole (the app
+    drew its ground anew); `o.over = (x, y, w, h)` is what the frame draws
+    over the table after its pass (a cursor). `o.across = (first, pitch)`
+    makes each row's cells its parts across, the first `first` px into the
+    view across the rows' axis and each `pitch` on from the last, so a kept
+    table draws the parts that changed, not their rows; `o.at` is the
+    current row's part its gen and marks belong to."""
     t = _T
     n = len(columns)
-    b = _memo_get(rows, n)
-    if b is None:
-        cells = []
-        for r in rows:
-            r = [str(c) for c in r][:n]
-            cells.extend(r)
-            cells.extend([""] * (n - len(r)))
-        copy = [tuple(r) for r in rows]
-        b = _memo_put(rows, n, _cells(cells), tuple(copy) if type(rows) is tuple else copy)
-    return _C.api_table(t[0], t[1], t[2], label, _columns(columns), b,
-                        -1 if cur is None else cur, _over(o))
+    k = _TBL
+    if rows is k[0] and n == k[1]:
+        b = k[2]
+    else:
+        b = _memo_get(rows, n)
+        if b is None:
+            cells = []
+            for r in rows:
+                r = [str(c) for c in r][:n]
+                cells.extend(r)
+                cells.extend([""] * (n - len(r)))
+            b = _memo_put(rows, n, _cells(cells), _rows_copy(rows))
+        if type(rows) is _TUPLE and _rows_copy(rows) is None:
+            k[0] = rows
+            k[1] = n
+            k[2] = b
+    if columns is k[3]:
+        cb = k[4]
+    else:
+        cb = _columns(columns)
+        if type(columns) is _TUPLE:
+            k[3] = columns
+            k[4] = cb
+    return _C.api_table(t[0], t[1], t[2], label, cb, b, -1 if cur is None else cur, _over(o))
 
 
 def initial(rect, title, r=0):
@@ -480,6 +601,209 @@ def initial(rect, title, r=0):
     `title`'s initial on the colour block that stays the cart's, as the
     home's cards draw it (`ui_draw.initial_cover`)."""
     _D.initial_cover(_T[1], rect, r, title)
+
+
+_TP = array("i", [0] * 8)               # table_part's answer: the cell, what shows of it
+
+
+def table_part(r):
+    """The next part of the table drawn last (one given `o.part`) the frame
+    draws: its row (from 0), its cell's x, y, w and h written into `r` (an
+    `array("i")` of four), the canvas clipped to what shows of the cell and
+    the ids of verbs drawn in it scoped by its row, until the next call;
+    -1 after the last, the clip put back and the table's fades drawn over
+    the parts. A frame drawn whole answers every row that shows; a shift
+    frame only the rows that entered and those whose cells or marks
+    changed, so what an app draws in a row's part is a function of that
+    row's cells."""
+    t = _T
+    a = _TP
+    cv = t[1]
+    if a[6]:
+        cv.clip()                       # the part before's clip, put back
+        a[6] = 0
+    i = _C.api_table_part(t[0], t[1], t[2], a)
+    if i < 0:
+        a[6] = 0
+        return i
+    r[0] = a[0]
+    r[1] = a[1]
+    r[2] = a[2]
+    r[3] = a[3]
+    cv.clip(a[4], a[5], a[6], a[7])
+    return i
+
+
+def table_dist():
+    """The part `table_part` answered last: its cell's centre's distance
+    from the view's centre along the table's axis, in 256ths of a row,
+    negative before it (above it, or on its left); 0 where no part is
+    open. A carousel scales each card by it."""
+    return _C.api_table_dist(_T[0])
+
+
+_TF = array("i", [0] * 4)               # table_floor's answer
+
+
+def table_floor(r):
+    """The table drawn last, where it keeps its parts (`o.keep`): the next
+    rect of its view this frame draws (its floor) written into `r` (an
+    `array("i")` of four), 1, for the app to put its own ground back there
+    before its parts draw; `table_part` then answers the parts that meet
+    the floor, each clipped to the rect it meets. After the last, 0 where
+    every buffer the canvas presents holds the table as this frame draws
+    it, -1 where one lags (the frame owes the next), -2 where they hold it
+    but for what was drawn over it (`o.over`). A frame whose buffer holds
+    the table's paint under its key at its scroll draws the parts whose
+    cells, gen or marks changed since and what was drawn over that paint;
+    any other frame draws the view whole. A table that keeps nothing
+    answers its view, then 0."""
+    a = _TF
+    v = _C.api_table_floor(_T[0], a)
+    if v > 0:
+        r[0] = a[0]
+        r[1] = a[1]
+        r[2] = a[2]
+        r[3] = a[3]
+    return v
+
+
+def table_copy(r, back=False):
+    """Before `table_floor`: the next rect of the floor of the table drawn
+    last that the buffer the last frame painted holds as this frame draws
+    it (every part meeting it unchanged since that paint, nothing drawn
+    over it there) written into `r`, 1, for the app to copy out of that
+    buffer (the canvas's `copy_last`); the floor and the parts then pass it
+    by. 0 after the last. `back` gives the rect answered last back to the
+    floor (the canvas could not copy it) and answers 0."""
+    a = _TF
+    v = _C.api_table_copy(_T[0], a, back)
+    if v > 0:
+        r[0] = a[0]
+        r[1] = a[1]
+        r[2] = a[2]
+        r[3] = a[3]
+    return v
+
+
+_TS = array("i", [0] * 5)               # table_shift's answer
+
+
+def table_shift(r, back=False):
+    """Before `table_copy` and `table_floor`: the move of the view of the
+    table drawn last (`o.shift`: the app's ground is the same along the
+    axis) out of the buffer the last frame painted, where the buffer this
+    frame paints lacks the table at its scroll and that frame painted it
+    kept under this key and geometry: the view written into `r` (four
+    words) and the move along its axis answered (px; 0 where the scroll
+    is the same: the view copied), for the app to make with the canvas's
+    `shift_last` and fence before the floor draws -- the band the move
+    uncovers, the parts that changed since that paint, what was drawn over
+    it, and `o.fade` px of the view's end. None where there is none.
+    `back` says the canvas could not move it: the floor is the view whole,
+    None."""
+    a = _TS
+    if not _C.api_table_shift(_T[0], a, back):
+        return None
+    r[0] = a[0]
+    r[1] = a[1]
+    r[2] = a[2]
+    r[3] = a[3]
+    return a[4]
+
+
+def held(id, key):
+    """Whether the buffer this frame paints holds part `id` of the page as
+    a frame drew it under `key` (an int): the buffers the canvas presents
+    in turn, the frames between this page's, and that frame the app's
+    alone (its kept table's key not negative). Names `id` under `key` for
+    this frame, whose pass draws the part where it answers False."""
+    return _C.api_held(_T[0], id, key)
+
+
+SLOT_MINT = 0x10000                     # `face`'s answer: draw the face into the slot first
+
+
+def slots(cap, key):
+    """The table drawn last keeps its parts' faces drawn: each part drawn
+    once into a square slot of a layer the app owns (`cap` of them; 0
+    none), then stamped from it. `key` (an int) is what every face is
+    drawn under beside its part's own content -- the look, the slot's
+    size, the layer: another key or `cap` forgets every face. The engine
+    keeps one such record, held by the context that asked last. Answers
+    the slots kept (at most 128)."""
+    return _C.api_slots(_T[0], cap, key)
+
+
+def slot(name, gen=0, mint=False):
+    """The face of a part drawn from what `name` (a str, its content) and
+    `gen` (an int, a generation of it the name does not carry: its
+    picture's) name: the slot holding it, to stamp; else with `mint` the
+    slot to draw it into (the one stamped least recently) | `SLOT_MINT`,
+    the app drawing the face there and then stamping it; else -1, the part
+    drawn as it is."""
+    return _C.api_slot(_T[0], name, gen, mint)
+
+
+def slot_next():
+    """The next part whose face a frame nothing waits on draws (its key
+    handed to `face` with `mint`): the parts of the rows the table drawn
+    last showed, then of the row past its end, then of the row before its
+    start, no more of them than the slots kept (a round's minting never
+    takes the slot of a part it named); -1 after the last, and the order starts again (as `faces`
+    starts it)."""
+    return _C.api_slot_next(_T[0])
+
+
+def block_set(block, field, value):
+    """Field `field` (0 .. 31) of block `block` (a str, its id) set to
+    `value` through the engine -- an int as it is, None as a value of its
+    own, anything else by its hash -- so the change is known as it is made:
+    True where the field changed (a block of fields the state a part shows
+    lies in: a bar's)."""
+    if value is None:
+        v = 0x3fffffff
+    elif isinstance(value, int):
+        v = value
+    else:
+        v = hash(value)
+    return _C.api_block_set(block, field, v)
+
+
+def block_gen(block):
+    """Block `block`'s generation: moved by every change, 0 where no field
+    was ever set."""
+    return _C.api_block_gen(block)
+
+
+def block_since(block, gen):
+    """The fields of block `block` set to another value after generation
+    `gen` (`block_gen`), a bit each: what a part drawn at `gen` draws
+    again."""
+    return _C.api_block_since(block, gen)
+
+
+def block_key(block):
+    """What block `block`'s fields show, hashed: a key that matches again
+    once every field is back to a value it had."""
+    return _C.api_block_key(block)
+
+
+def held_last(id, key):
+    """Whether the buffer the last frame painted holds part `id` of the
+    page as that frame named it under `key` (`held`): the frame before
+    this one, this page's and the app's alone -- for a part the app copies
+    out of that buffer. Names nothing."""
+    return _C.api_held_last(_T[0], id, key)
+
+
+def held_all():
+    """Whether every buffer the canvas presents holds every part this
+    frame named (`held`) as it names it: the paints before this one, a
+    buffer each, this page's, one a frame, each naming each part under the
+    same key -- whether or not a kept table was drawn. False where the
+    canvas keeps nothing."""
+    return _C.api_held_all(_T[0])
 
 
 def table_rows():
@@ -507,23 +831,26 @@ def scroll(id=None, o=None):
     _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
 
 
-_TXO = array("i", [0] * 7)              # text_view's options (moy_ui_api.h's MOY_UI_TXO_*)
-_SYNTAXES = ("plain", "python", "lua", "json", "sgr")
+# text_view's options packed (moy_ui_api.h's MOY_UI_TXO_*): the words of
+# `text_options`'s array, which an app that draws a view every frame keeps
+# and writes in place.
+TXO_ROWS, TXO_WRAP, TXO_SYNTAX, TXO_FOLLOW, TXO_GUTTER, TXO_CARET = 0, 1, 2, 3, 4, 5
+TXO_SEL, TXO_ERR, TXO_FIND_CI, TXO_LEFT, TXO_MARK, TXO_GEN, TXO_TOP = 7, 11, 12, 13, 14, 15, 16
+TXO_FONT, TXO_PAPER = 17, 18
+TXO_LEN = 19
+_TXO = array("i", [0] * TXO_LEN)        # the dict form's, packed each call
+_SYNTAXES = ("plain", "python", "lua", "json", "sgr", "markdown")
 
 
-def text_view(id, lines, o=None):
-    """A text area of `lines` (a list of str), its own scroll region: a drag
-    scrolls it and its release coasts, the wheel steps it. In `at`'s rect,
-    else stacked `o`'s `rows` rows tall (the rest of the page where none).
-    `o`: `wrap` (long lines break at the view's width, else they are cut),
-    `syntax` ("sgr", the default: a terminal's `ESC [ n m` colours, which take
-    no column; "plain", "python", "lua", "json"), `follow` (a view at its foot
-    when lines are added glides to the new foot: a log, a terminal),
-    `gutter` (line numbers), `caret` (a line and column: an input line's).
-    In the mono face; only the rows that changed draw. Answers the first
-    line shown and the rows shown."""
-    t = _T
-    opt = _TXO
+def text_options(o=None, opt=None):
+    """`text_view`'s options dict `o` packed into `opt` (an array('i') of
+    TXO_LEN words; a new one where None), which it answers: the TXO_*
+    words, a caret and a selection their line and column words in turn
+    (-1 none), `syntax` its index in ("plain", "python", "lua", "json",
+    "sgr", "markdown"), `top` -1 for none, `font` 0 for none, `paper` -1 for none. The error's words and the find query are
+    not words: `text_view` takes them beside the packed form."""
+    if opt is None:
+        opt = array("i", [0] * TXO_LEN)
     o = o or {}
     opt[0] = int(o.get("rows", 0) or 0)
     opt[1] = 1 if o.get("wrap") else 0
@@ -537,7 +864,71 @@ def text_view(id, lines, o=None):
         opt[6] = int(caret[1])
     else:
         opt[5] = opt[6] = -1
-    return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o))
+    sel = o.get("sel")
+    if sel:
+        opt[7] = int(sel[0])
+        opt[8] = int(sel[1])
+        opt[9] = int(sel[2])
+        opt[10] = int(sel[3])
+    else:
+        opt[7] = opt[9] = -1
+        opt[8] = opt[10] = 0
+    err = o.get("err")
+    opt[11] = int(err[0]) if err else -1
+    find = o.get("find")
+    opt[12] = 1 if find and find[1] else 0
+    opt[13] = int(o.get("left", 0) or 0)
+    opt[14] = 1 if o.get("mark") else 0
+    opt[15] = int(o.get("lines_gen", 0) or 0)
+    top = o.get("top")
+    opt[16] = -1 if top is None else int(top)
+    opt[17] = int(o.get("font", 0) or 0)
+    paper = o.get("paper")
+    opt[18] = -1 if paper is None else int(paper)
+    return opt
+
+
+def text_view(id, lines, o=None, err=None, find=None, into=None):
+    """A text area of `lines` (a list of str), its own scroll region: a drag
+    scrolls it and its release coasts, the wheel steps it. In `at`'s rect,
+    else stacked `o`'s `rows` rows tall (the rest of the page where none).
+    `o`: `wrap` (long lines break at the view's width, else they are cut),
+    `syntax` ("sgr", the default: a terminal's `ESC [ n m` colours, which take
+    no column; "plain", "python", "lua", "json", "markdown": a note's
+    source, its marks dim), `follow` (a view at its foot
+    when lines are added glides to the new foot: a log, a terminal),
+    `gutter` (line numbers), `caret` (a line and column: an input line's).
+    In the mono face; only the rows that changed draw. Answers the first
+    line shown and the rows shown.
+
+    The Python face's own, an editor's (the Code tab's): `sel` (line,
+    column, line, column: a selection's two ends), `err` (a line and the
+    error's words: underlined, its words after it), `find` (a query and
+    whether it matches across case: its matches marked), `left` (the
+    columns cut off at the left), `mark` (the current line's mark),
+    `lines_gen` (a number naming the lines' content, so a wrapped view
+    counts its rows once a gen), `top` (a line the view glides to show
+    first), `font` (a loaded monospace font's id the rows draw in, in
+    place of the mono face: the shell's, as `ui_draw.font` answers one),
+    `paper` (the radius of the corners of a paper under the rows: `at`'s
+    rect filled in the surface colour, the rows inset from its top and foot
+    by the radius or the text's inset, whichever is more; a frame that keeps
+    the rect's pixels draws none of it) and `into` (an array('i') of two the answer is written into and
+    handed back, so a frame makes no tuple).
+
+    `o` may be the options packed instead (`text_options`), which a frame
+    reads as they are: the error's words `err`, the find query `find` and
+    `into` then come beside it, and no override applies."""
+    t = _T
+    if type(o) is array:
+        return _C.api_text_view(t[0], t[1], t[2], id, lines, o, None, err, find, into)
+    o = o or {}
+    opt = text_options(o, _TXO)
+    err = o.get("err")
+    find = o.get("find")
+    return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o),
+                            err[1] if err else None, find[0] if find else None,
+                            o.get("into"))
 
 
 def field(label, text, max=32, o=None):
@@ -771,6 +1162,87 @@ def part(id, w=0, h=0, o=None):
     PRESSED 4, HOVER 8. The app draws into the rect after."""
     t = _T
     return _C.api_part(t[0], t[1], t[2], id, w, h, _over(o))
+
+
+# ui.split's words (moy_ui_api.h's MOY_UI_SPO_*, MOY_UI_SPLIT_*): kept, so a
+# split's frame makes nothing.
+_SPLIT_MAX = 16
+_SP_OPT = array("i", [0] * 9)
+_SP_SIZES = array("i", [0] * _SPLIT_MAX)
+_SP_MINS = array("i", [0] * _SPLIT_MAX)
+_SP_OUT = array("i", [0] * (4 * _SPLIT_MAX + 4))
+_SP_HIT = ("hit", 4, "handle", 6)
+LIVE, LET_GO = 1, 2                     # ui.split's drag bits (its out's last word)
+
+
+def split(id, dir, sizes, o, out):
+    """Panes: `at`'s rect (else the page's, from its next row down) cut
+    along `dir` ("x": left to right, "y": top to bottom) into one pane a
+    size of `sizes` (a list or `array("i")`), the last taking what is
+    left, `o["gap"]` pixels apart. Writes each pane's x, y, w, h into `out`
+    (4 words a pane, then 4: the divider held or let go this frame, -1
+    none; where its drag takes its gap; the side it stopped at, -1 none, 0
+    the pane before at its minimum, 1 the pane after; LIVE and LET_GO).
+
+    `o["focus"]`, the focused pane (-1 none), makes focus move between the
+    panes as it does between groups: answered as moved by a press in
+    another pane or the focus moving into one (else -1 is answered).
+    `o["drag"]` makes each gap a divider the engine keeps by `id`: a press
+    on it (`o["hit"]`, (across, along), centred; the gap's where absent)
+    holds it, a drag past `o["slop"]` moves its line (`o["line"]` across)
+    and the release writes the two sizes beside it back into `sizes`,
+    neither under its minimum (`o["mins"]`). Its handle is `o["handle"]`
+    (across, along), the gap and six gaps where absent."""
+    t = _T
+    n = len(sizes)
+    sz = _SP_SIZES
+    for i in range(n):
+        sz[i] = sizes[i]
+    opt = _SP_OPT
+    for i in range(9):
+        opt[i] = 0
+    opt[0] = 1 if dir == "y" else 0
+    mins = None
+    if o:
+        if o.get("drag"):
+            opt[0] |= 4
+        f = o.get("focus")
+        if f is not None:
+            opt[0] |= 2
+            opt[2] = f
+        opt[1] = o.get("gap", 0)
+        opt[3] = o.get("slop", 0)
+        opt[8] = o.get("line", 0)
+        h = _SP_HIT
+        for k in (0, 2):
+            v = o.get(h[k])
+            if v is not None:
+                opt[h[k + 1]] = v[0]
+                opt[h[k + 1] + 1] = v[1]
+        m = o.get("mins")
+        if m is not None:
+            mins = _SP_MINS
+            for i in range(n):
+                mins[i] = m[i]
+    w = _SP_OUT
+    cur = _C.api_split(t[0], t[1], t[2], id, sz, n, mins, opt, w)
+    if w[4 * n + 3] & 3 == 3:
+        for i in range(n):
+            if sizes[i] != sz[i]:
+                sizes[i] = sz[i]
+    for i in range(4 * n + 4):
+        out[i] = w[i]
+    return cur
+
+
+def part_at():
+    """Where the pointer is inside the part answered last this frame, as
+    `(x, y)` from its top-left: where the tap that activated it was
+    released, else where the pointer is while it presses or hovers the
+    part; None otherwise (a key activated it, the pointer is off it). A
+    press held on a part with no page under it, or with `nav` off, stays
+    its own through a drag."""
+    return _C.api_part_at(_T[0])
 
 
 FOCUS, ACTIVATED, PRESSED, HOVER = 1, 2, 4, 8

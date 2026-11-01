@@ -1150,7 +1150,7 @@ def save_manifest_meta(cart_dir, title=None, author=None):
 # The one door that ADDS a script to a cart (#89). Deliberately narrow, and
 # deliberately not on the Code tab: the file switcher there is a switcher, and
 # a console for eight-year-olds does not want a New File button two taps from
-# every cart. This is reached from the Config tab's ADVANCED row, which is
+# every cart. This is reached from the Config tab's Files, which is
 # where a project's own folder already lives (docs/text_editing_2026-09.md
 # step 5) -- and it is offered only where a second script would actually RUN.
 

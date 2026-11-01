@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 32
+#define MOY_UI_WASM_ROWS 43
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -53,7 +53,9 @@ enum {
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a
-// moy_ui.h code negated; an answer is written at `out`.
+// moy_ui.h code negated (-MOY_UI_DEEP: a scroll, text view, dialog or
+// popover opened with MOY_UI_API_NEST open already); an answer is written at
+// `out`.
 int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]);
 int moy_ui_run_label(void *target, moy_ui_span_t text, const moy_ui_over_t *o);
 int moy_ui_run_button(void *target, moy_ui_span_t label, int kind, const moy_ui_over_t *o,
@@ -66,6 +68,13 @@ int moy_ui_run_list(void *target, moy_ui_span_t label, const uint8_t *items, siz
                     int32_t cur, const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_part(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o,
                     int32_t out[5]);
+// Where the pointer is inside the part answered last (moy_ui_api_part_at):
+// 1 with x, y at out, else 0.
+int moy_ui_run_part_at(void *target, int32_t out[2]);
+// The panes (moy_ui_api_split): the focused pane at *cur, the panes' rects
+// and the drag's words at out, a divider let go after a drag writing `sizes`.
+int moy_ui_run_split(void *target, moy_ui_span_t id, int32_t *sizes, int n, const int32_t *mins,
+                     const int32_t *opt, int32_t *out, int32_t *cur);
 int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_run_keys_taken(void *target);
 void moy_ui_run_at(void *target, int x, int y, int w, int h);
@@ -83,6 +92,30 @@ int moy_ui_run_progress(void *target, moy_ui_span_t label, int32_t v, int32_t hi
 int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, size_t cols_n,
                      const uint8_t *cells, size_t cells_n, int32_t cur, const moy_ui_over_t *o,
                      int32_t out[2]);
+// The next part of the table drawn last (moy_ui_api_table_part): its row,
+// -1 after the last; the cell and what shows of it at out, the run's canvas
+// clipped to what shows until the next call (its clip put back then).
+int moy_ui_run_table_part(void *target, int32_t out[8]);
+// The part answered last's distance from its view's centre, in 256ths of a
+// row (moy_ui_api_table_dist).
+int32_t moy_ui_run_table_dist(void *target);
+// The next rect of the floor of the table drawn last (moy_ui_api_table_floor)
+// at out: 1, then 0, -1 or -2 after the last.
+int32_t moy_ui_run_table_floor(void *target, int32_t out[4]);
+// Whether the buffer the frame paints holds part `id` under `key`
+// (moy_ui_api_held).
+int moy_ui_run_held(void *target, moy_ui_span_t id, int32_t key);
+// Whether the buffer the last frame painted holds part `id` under `key`
+// (moy_ui_api_held_last), and whether every buffer holds every part the
+// frame named (moy_ui_api_held_all).
+int moy_ui_run_held_last(void *target, moy_ui_span_t id, int32_t key);
+int moy_ui_run_held_all(void *target);
+// The faces the table drawn last keeps (moy_ui_api_slots), the slot of
+// one (moy_ui_api_slot) and the next part an idle frame draws the face of
+// (moy_ui_api_slot_next).
+int32_t moy_ui_run_slots(void *target, int32_t cap, int32_t key);
+int32_t moy_ui_run_slot(void *target, moy_ui_span_t name, int32_t gen, int mint);
+int32_t moy_ui_run_slot_next(void *target);
 int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o);
 int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
                          const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]);
@@ -149,13 +182,46 @@ int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t 
 int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8_t *cols,
                           uint32_t cn, const uint8_t *cells, uint32_t en, int32_t cur,
                           const uint8_t *o, uint32_t on, uint8_t *out, uint32_t cap);
-// ui_text_view: its lines NUL-separated, its options the MOY_UI_TXO_* words
+// ui_table_part answers the next part's row of the table drawn last (from
+// 0; -1 after the last) and writes its cell's x, y, w and h at `out`.
+int32_t moy_ui_wasm_table_part(void *e, uint8_t *out, uint32_t cap);
+// ui_table_dist answers moy_ui_run_table_dist.
+int32_t moy_ui_wasm_table_dist(void *e);
+// ui_table_floor answers moy_ui_run_table_floor, its rect's x, y, w and h
+// at `out`.
+int32_t moy_ui_wasm_table_floor(void *e, uint8_t *out, uint32_t cap);
+// ui_held answers moy_ui_run_held.
+int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key);
+// ui_held_last and ui_held_all answer moy_ui_run_held_last and _held_all.
+int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key);
+int32_t moy_ui_wasm_held_all(void *e);
+// ui_faces, ui_face and ui_slot_next answer moy_ui_run_slots, _face and
+// _slot_next.
+int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key);
+int32_t moy_ui_wasm_slot(void *e, const uint8_t *name, uint32_t n, int32_t gen, int32_t mint);
+int32_t moy_ui_wasm_slot_next(void *e);
+// ui_part_at answers 1 where the pointer is inside the part answered last
+// and writes its x and y from the part's top-left at `out`, else 0.
+int32_t moy_ui_wasm_part_at(void *e, uint8_t *out, uint32_t cap);
+// ui_split: the panes' sizes as little-endian words (written back where a
+// divider is let go after a drag), their minimums (length 0: none) and the
+// MOY_UI_SPO_* words; writes each pane's x, y, w, h and then the
+// MOY_UI_SPLIT_OUT words at `out`, and answers the focused pane (-1 none),
+// or -0x100 less a MOY_UI_* code where it fails (a bad block: -0x101).
+int32_t moy_ui_wasm_split(void *e, const uint8_t *id, uint32_t n, uint8_t *sizes, uint32_t sn,
+                          const uint8_t *mins, uint32_t mn, const uint8_t *opt, uint32_t on,
+                          uint8_t *out, uint32_t cap);
+// ui_text_view: its lines NUL-separated, its options the first of the MOY_UI_TXO_* words
 // (little-endian i32s); writes the first line shown and the rows shown at
 // `out`.
 int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint8_t *lines,
                               uint32_t ln, const uint8_t *opt, uint32_t optn, const uint8_t *o,
                               uint32_t on, uint8_t *out, uint32_t cap);
 // ui_scroll with an id of length 0 ends the region.
+//
+// ui_scroll, ui_text_view, ui_dialog and ui_popover each open a nest: one
+// opened with MOY_UI_API_NEST open already opens none, draws nothing and
+// answers -MOY_UI_DEEP (-5).
 int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *o, uint32_t on);
 // ui_field edits the `len` bytes at buf (its room `cap`): the new length,
 // plus 0x10000 the frame Enter is pressed in it.

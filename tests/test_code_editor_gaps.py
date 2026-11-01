@@ -437,6 +437,32 @@ def test_find_bar_type_and_navigate(tmp_path):
     assert not cl._find_open
 
 
+def test_find_counts_once_an_edit_query_and_caret(tmp_path):
+    """The find's matches are found once an edit and query, and counted to
+    the caret once a caret: a painted frame that changes none of them reads
+    the last count back, and any edit (typed, joined, a new text) finds them
+    again."""
+    ws = _ws(tmp_path)
+    _enter_code(ws)
+    ed = ws.editor
+    ed.set_text("alpha beta alpha\nbeta alpha")
+    cl = ws.code_layer
+    cl._find_q = "alpha"
+    first = cl.find_count()
+    assert first == (1, 3)
+    assert cl.find_count() is first                # nothing moved: the same answer
+    ed.row, ed.col = 1, 0
+    assert cl.find_count() == (2, 3)
+    ed.row, ed.col = 0, 0
+    ed.key(ord("a"))                               # "aalpha ...": counted again, still three
+    assert ed.edits and cl.find_count() == (1, 3)
+    ed.set_text("alpha")
+    assert cl.find_count() == (1, 1)
+    ed.lines.append("alpha")                       # not an edit the editor saw...
+    ed.dirty = True                                # ...until it is marked
+    assert cl.find_count() == (1, 2)
+
+
 def test_tool_palette_indent_outdent(tmp_path):
     ws = _ws(tmp_path)
     drv = _enter_code(ws)
@@ -923,7 +949,8 @@ def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, var
     _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
     t = _ws.code_layer._tones()
     bg = lum(t["bg"])
-    for role, v in (("caret", t["caret"]), ("value", _ws.theme_colors["value"])):
+    for role, v in (("caret", _ws.theme_colors["ink_accent"]),     # the text view's caret
+                    ("value", _ws.theme_colors["value"])):
         fg = lum(v)
         ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
         assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))
@@ -1019,3 +1046,80 @@ def test_the_symbol_keys_follow_the_last_input(tmp_path):
     assert lay.symbols and lay.sym_h > 0 and lay.rows < keys_rows
     assert ws.editor.ROWS == lay.rows
     ui_draw.input_kind("keys")
+
+
+def test_find_count_is_the_matches_at_or_before_the_caret(tmp_path):
+    """find_count's kept counts answer what a scan of every match does --
+    overlapping ones included ("aa" three times in "aaaa"), across case
+    where the find ignores it -- at any caret."""
+    import random
+    ws = _ws(tmp_path)
+    _enter_code(ws)
+    ed = ws.editor
+    cl = ws.code_layer
+    rnd = random.Random(7)
+    for _ in range(60):
+        lines = ["".join(rnd.choice("aAb ") for _ in range(rnd.randrange(0, 12)))
+                 for _ in range(rnd.randrange(1, 6))]
+        ed.set_text("\n".join(lines))
+        cl._find_q = rnd.choice(("a", "aa", "aba", "Ab", "b a"))
+        cl._find_ci = rnd.random() < 0.5
+        for _ in range(4):
+            ed.row = rnd.randrange(len(lines))
+            ed.col = rnd.randrange(len(lines[ed.row]) + 1)
+            q = cl._find_q.lower() if cl._find_ci else cl._find_q
+            n = cur = 0
+            for r, line in enumerate(lines):
+                line = line.lower() if cl._find_ci else line
+                at = line.find(q)
+                while at >= 0:
+                    n += 1
+                    if (r, at) <= (ed.row, ed.col):
+                        cur = n
+                    at = line.find(q, at + 1)
+            assert cl.find_count() == ((cur or (1 if n else 0)), n), (lines, cl._find_q)
+
+
+def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch):
+    """The text view's coast asks for its own frames from the draw: a
+    release that flings the code paints frame after frame with no input
+    while the view moves, and once it rests the gate paints nothing."""
+    import sys
+    now = [100000]
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if "/runtime/" in f and hasattr(mod, "_ticks_ms"):
+            monkeypatch.setattr(mod, "_ticks_ms", lambda: now[0])
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("\n".join("line %d = %d" % (i, i * 7) for i in range(300)))
+
+    ws._toast_until = 0                # no unlock banner: the gate is the view's
+
+    def frame():
+        now[0] += 33
+        ws.pointer.visible = False
+        k = ws._frames_drawn
+        drv.frame(DT)
+        return ws._frames_drawn != k
+
+    for _ in range(4):
+        frame()
+    x, y, w, h = ws.code_layout.code_area()
+    cx, y0 = x + w // 2, y + h * 3 // 4
+    drv.touch(cx, y0)
+    frame()
+    for k in range(1, 5):
+        drv.touch_drag(cx, y0 - 30 * k)
+        frame()
+    drv.touch_up()
+    frame()
+    let_go = ws.editor.top
+    tops, painted = [], []
+    for _ in range(120):
+        painted.append(frame())
+        tops.append(ws.editor.top)
+    assert tops[3] > let_go, "the release did not coast"
+    assert all(painted[:4]), painted[:4]
+    rest = tops.index(tops[-1])
+    assert not any(painted[rest + 3:]), "the gate paints a view at rest"

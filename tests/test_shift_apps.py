@@ -2,8 +2,8 @@
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
 Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
 list of projects, Storybook's stories and Appearance's rows,
-dragged, flung and stepped through by keys, on one, two and three buffers
-presented in turn.
+dragged, flung and stepped through by keys, and the text console typed into,
+on one, two and three buffers presented in turn.
 
 Each case runs the same session on two consoles: one as it ships, its
 frames free to shift (the content's own ring vouching, §3.4), and one whose
@@ -19,7 +19,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import host_app, moy_carts, ui_draw
-from ws_helpers import no_unlock_banner, quiesce, seed_stories
+from ws_helpers import no_unlock_banner, quiesce, seed_stories, select_on_home
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -83,17 +83,32 @@ def _settle_mtimes(root):
                 os.utime(os.path.join(dirpath, f), (1700000000 + n, 1700000000 + n))
 
 
-def _console(tmp_path, app, ships):
+# the text console's script: a log longer than its view, and a line that
+# answers each line typed
+_LOG_SCRIPT = ("for i in range(40):\n    print('row %d of the log, a little longer' % i)\n"
+               "def _update(dt):\n"
+               "    s = input('> ')\n"
+               "    if s is not None:\n"
+               "        print('you said', s)\n")
+
+
+def _console(tmp_path, app, ships, desk=False):
     import json
     from runtime import cart_index as ci
     root = tmp_path / ("ships" if ships else "whole")
-    ws = host_app.build_workstation(str(root / "carts"))
+    if desk:
+        # a desk: what the console runs presents in its window
+        ws = host_app.build_workstation(str(root / "carts"), sys_size=(1024, 600),
+                                        windowed=True)
+    else:
+        ws = host_app.build_workstation(str(root / "carts"))
     ws.bar_layer._clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
     if not ships:
         ws.wm.CONTENT_RING = False
+        ws.player.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -103,6 +118,18 @@ def _console(tmp_path, app, ships):
         ws.open_settings()
         if app != "settings":
             ws.settings_layer.open_page(app)
+    elif app == "console":
+        stored = moy_carts.save_file("docs", "log.py", _LOG_SCRIPT, ws.carts_root)
+        ok, why = ws.run_script("docs", stored)
+        assert ok, why
+    elif app == "notes":
+        moy_carts.save_file("docs", "alpha", _NOTE, ws.carts_root)
+        assert select_on_home(ws, "Notes") is not None
+        ws.open()
+        drv = host_app.ConsoleDriver(ws)
+        for _ in range(4):
+            drv.frame(_DT)
+        ws.player.ns["_open"]("alpha")
     elif app == "myart":
         for i in range(18):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
@@ -147,9 +174,9 @@ class Pair:
     """The session on both consoles, frame by frame; the first's buffers
     presented in turn, `bufs` of them."""
 
-    def __init__(self, tmp_path, app, bufs):
-        self.a = _console(tmp_path, app, True)
-        self.b = _console(tmp_path, app, False)
+    def __init__(self, tmp_path, app, bufs, desk=False):
+        self.a = _console(tmp_path, app, True, desk)
+        self.b = _console(tmp_path, app, False, desk)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -205,10 +232,15 @@ class Pair:
         that took the keys. The second console's held steps are never dead,
         so where the first's dead-step rule takes a step out its frame must
         show the same."""
-        st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3), False])
+        st = self._state.get(id(ws))
+        if st is None:
+            # a console's first pass starts from a fresh process's state,
+            # not the one the other console's pass left
+            ui_draw.console_reset()
+            st = self._state[id(ws)] = [None, list(ui_draw._PAINT), False, ui_draw._PF[:]]
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
+        ui_draw._PF[:] = st[3]
         ui_draw._EDGE[0] = st[2]
         twin = ws is self.b
         if twin:
@@ -222,6 +254,7 @@ class Pair:
                 ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
             st[0] = ui_draw._KEYS_HOST[0]
             st[1] = list(ui_draw._PAINT)
+            st[3] = ui_draw._PF[:]
             st[2] = ui_draw._EDGE[0]
 
     def both(self, verb, *args):
@@ -292,23 +325,23 @@ def _settings_session(p):
 @pytest.mark.parametrize("cost", (None, 700, 1000))
 def test_a_canvas_whose_copy_costs_the_raster_draws_whole(tmp_path, cost):
     """A canvas declares what its `shift_last` costs against the raster it
-    saves (`SHIFT_COST`, the T-Deck's CPU copy beside the feeder): a frame
-    whose floor leaves too little of R undrawn to pay for the copy draws
-    whole, and every frame is still a whole repaint's bytes."""
+    saves (`SHIFT_COST`): a frame whose move leaves too little of R undrawn
+    to pay for the copy draws whole, a rows frame (which moves nothing)
+    draws its rows whatever the copy costs, and every frame is still a whole
+    repaint's bytes."""
     p = Pair(tmp_path / str(cost), "settings", 2)
     p.a.sys_canvas.SHIFT_COST = cost
     share = _settings_session(p)
+    assert share > 0
     if cost == 1000:
-        assert share == 0
-    else:
-        assert share > 0
+        assert "shift" not in p.kinds and "rows" in p.kinds, p.kinds
     if cost == 700:
         q = Pair(tmp_path / "free", "settings", 2)
         assert share < _settings_session(q)
 
 
 def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_path):
-    """A picture's rows cost more to draw than any copy (`ui_draw._pays`):
+    """A picture's rows cost more to draw than any copy (`host_pays`):
     My Art's drawings, dragged on a canvas whose copy costs a whole row's
     raster, still shift where the floor leaves a picture undrawn."""
     p = Pair(tmp_path, "myart", 2)
@@ -318,6 +351,125 @@ def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_pa
     p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch // 2)
     p.settle()
     assert p.share() > 0
+
+
+def _console_session(p):
+    """The text console: a prompt typed, a line entered and answered, the
+    prompt typed again on the frames after that move of the log, and the
+    log dragged back and coasting."""
+    cx, top, _cw, _ch = p.a.app_content_rect()
+    del p.kinds[:]
+
+    def typed(text):
+        for ch in text:
+            p.both("key_down", ord(ch), 0)
+            p.frame()
+            p.both("key_up", ord(ch), 0)
+            p.frame()
+    typed("hello\r")
+    typed("ok")
+    p.drag(cx + 40, top + 30, 100)
+    for _ in range(6):
+        p.frame()
+
+
+@pytest.mark.parametrize("desk", (False, True))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
+    """The text console under the FPS chip (`overdrew`), whose log the
+    chip misses: a typed prompt's frames draw its rows alone -- on two and
+    three buffers moving nothing where the buffer the frame paints holds the
+    log (`moy_ui_api_lag`), the frames after a move of it too -- the entered
+    line's move of the log and a drag of it are shift frames (on a desk the
+    drag's finger lies outside the log, so its frames draw rows), and every
+    frame is a whole repaint's bytes. On a desk the run's canvas is its
+    window's own (`Player.holds`), which holds the log whatever the glass's
+    buffers do."""
+    p = Pair(tmp_path, "console", bufs, desk)
+    assert p.a.show_fps
+    if desk:
+        assert p.a.player.holds(p.a.canvas)
+    _console_session(p)
+    k = p.kinds
+    assert k[:10] + k[12:16] == ["rows"] * 14, k
+    assert k[10] == "shift", k
+    assert set(k[17:]) == {"rows" if desk else "shift"}, k
+
+
+_NOTE = "\n".join(["# Plans", "", "- [ ] buy milk"]
+                  + ["Line %d of the note, with words enough to wrap past the edge of the paper"
+                     % i for i in range(60)])
+
+
+@pytest.mark.parametrize("desk", (False, True))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, bufs, desk):
+    """Notes' note is a text view in the app's pass (`EditorHandle.draw`): a
+    fling of it coasts on frames the console paints with no input, each a
+    shift frame, and a key typed into it draws the rows it changed, never
+    the page whole -- every frame a whole repaint's bytes. (The first key
+    brings the caret, left at the top, back into view: a jump past the
+    view's height, which draws whole.)"""
+    p = Pair(tmp_path, "notes", bufs, desk)
+    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    if desk:
+        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+        sx += ox
+        sy += oy
+    for ws in (p.a, p.b):
+        ws.pointer.hovers = False       # a finger, which flings; a mouse selects
+    del p.kinds[:]
+    p.drag(sx + sw // 2, sy + sh * 4 // 5, -sh // 2, steps=2)
+    k = len(p.kinds)
+    p.settle(60)
+    coast = p.kinds[k:]
+    assert len(coast) >= 4 and coast[:4] == ["shift"] * 4, p.kinds
+    top = p.a.player.ns["ed"].ed.top
+    assert top > 0, top
+    del p.kinds[:]
+    for ch in "hello":
+        p.both("type_char", ord(ch))
+        p.frame()
+        p.frame(idle=True)
+    assert p.kinds[1:] and set(p.kinds[1:]) == {"rows"}, p.kinds
+
+
+@pytest.mark.parametrize("cost", (None, 900))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_note_whose_view_costs_more_to_copy_than_draw_draws_its_rows(tmp_path, bufs, cost):
+    """Key steps past the foot of Notes' text view move the view inside its
+    page a row a step. Where the canvas's copy costs less than the view's
+    rows to draw (`SHIFT_COST` None: unknown) each such step is a shift
+    frame; where it costs about as much (a P4 window's in-place copy, 900)
+    the page holds still and the view's rows draw, every one -- and every
+    frame is a whole repaint's bytes."""
+    p = Pair(tmp_path, "notes", bufs)
+    p.a.sys_canvas.SHIFT_COST = cost
+    del p.kinds[:]
+    p.keys("down", 30)
+    p.settle(5)
+    moved = p.kinds[12:60]
+    if cost is None:
+        assert moved.count("shift") >= 20, p.kinds
+    else:
+        assert set(moved) == {"rows"}, p.kinds
+
+
+def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
+    """Where what the console draws over the page after its pass meets
+    the log (the HUD's card, `overdrew`), no frame moves the buffers it
+    lies in: a frame that moves nothing draws what lies under it again
+    (its floor takes it), one that would move it draws whole, and every
+    frame is a whole repaint's bytes."""
+    p = Pair(tmp_path, "console", 2)
+    cx, top, _cw, _ch = p.a.app_content_rect()
+    for ws in (p.a, p.b):
+        def over(ws=ws):
+            ws.canvas.rect(cx + 100, top + 60, 60, 30, 3)
+            ui_draw.overdrew(cx + 100, top + 60, 60, 30)
+        ws.perf_ui.draw = over
+    _console_session(p)
+    assert "shift" not in p.kinds[1:], p.kinds
 
 
 class _NoMark:

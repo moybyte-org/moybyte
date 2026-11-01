@@ -503,15 +503,16 @@ def test_ball_coast_ships_off_and_carries_a_fast_roll_on_when_set(tmp_path, monk
     assert ws._coast == 0
     ws._ball_rate_at = t[0] - 100
     ws._ball_steps("right", 6)                  # 60 a second
-    assert got == [("right", 6)] and not ws._coast_v
+    assert got == [("right", 6)] and not ws._coast_r.flinging
     ws._coast, ws._coast_rate = 100, 20
     got.clear()
     ws._ball_rate_at = t[0]
     t[0] += 100
     ws._ball_steps("right", 6)                  # 2 a 100 ms at 20/s; 4 over
     assert got == [("right", 2)]
-    assert ws._coast_v == pytest.approx(0.4)
+    assert ws._coast_r._vel / ws.COAST_UNIT == pytest.approx(0.4)    # steps a ms
     per = []
+    ws._frame_dt_ms = 33.0                      # the loop's dt, which the coast takes
     for _ in range(400):
         t[0] += 33
         got.clear()
@@ -520,8 +521,9 @@ def test_ball_coast_ships_off_and_carries_a_fast_roll_on_when_set(tmp_path, monk
         if not ws.ball_owed:
             break
     assert not ws.ball_owed, "the coast comes to rest"
-    assert per[0] > 0 and sum(per) > 10, per
-    assert per[0] > max(per[len(per) // 2:]), "it decays"
+    assert per[0] == 0, "the frame a roll feeds it, the coast does not move"
+    assert per[1] > 0 and sum(per) > 10, per
+    assert per[1] > max(per[len(per) // 2:]), "it decays"
 
 
 def test_a_ble_keyboards_held_key_repeats_as_typing_and_its_arrow_as_steps():

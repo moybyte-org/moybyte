@@ -5,13 +5,13 @@
 #   Launcher.nav2d              cell navigation
 #   Launcher.pointer_frame      one pointer sample over the cells
 #   Launcher.cover_specs        every cover the next full draw needs
-#   Launcher.draw_shift         a band frame: the band shifted on a plain ground, cells repainted
+#   Launcher.band_pass          the band as a table of parts, on its own app host
 #   Carousel                    the home's row: the centre card scaled by its distance
 #   Carousel.anim_frame         the fling, the glide to the centre, the settle
-#   Carousel.draw_shift         the moving frame: the wallpaper restored around the cards
+#   Carousel.band_pass          the row as a table of parts side by side, the wallpaper around the cards
 #   IconHome                    the icons arrangement: tiles that scroll down, a caption band
 #   LauncherHomeLayer           the home: wallpaper, the cells, the bar's tabs, the hints
-#   _drag_partial               the band frame: a drag, a fling, a step, a settle
+#   _band_frame                 the band frame: a drag, a fling, a step, a settle
 #   LauncherHomeLayer.draw      the home frame
 #   LauncherHomeLayer.zone_tap  the tabs in the bar's zone
 #   HomeWindowLayer             the home in a desktop-mode window (PROJECTS)
@@ -59,6 +59,8 @@ grid's own `zone_gen` (bumped whenever its `sel` or `items` changes) is the
 grid's.
 """
 
+
+from array import array
 
 try:
     import ui as _ui
@@ -111,6 +113,17 @@ _COVER_SIDE = 128
 _COVER_BASE = 1
 _COVER_HALF = 2
 _UNSET = -2147483648      # a look leaf the theme leaves silent
+
+# The band's table of parts (`Launcher.band_pass`): its one column, a part;
+# a row's one cell; the part's cell `table_part` answers.
+_PART_COL = ("",)
+_ROW_CELL = ("",)
+_PART = array("i", [0] * 4)
+_FLOOR = array("i", [0] * 4)            # a floor rect `table_floor` answers
+_FACE_GEN = [0]                         # the faces' keys (`ui.slots`), one per layer and look
+_FACE_SLOTS = 128                       # the slots the engine keeps at most (`ui.slots`)
+_FACES_BYTES = 192 << 10                # the faces' layer at most: the slots a board's cards fit
+_NO_KEYS = array("i", [-1, -1])         # a band paint that keeps nothing (`band_pass`)
 
 
 def _cover_scale(side, w, h):
@@ -309,105 +322,6 @@ class _Cells:
         self.desk = desk
 
 
-class _Faces:
-    """The cards' faces kept drawn (docs/scroll_and_text_2026-10.md §9): one
-    layer of `cap` square slots stacked down, each a card's picture and rim
-    drawn once at the arrangement's card side `side` (the square frame's
-    margin `m` round it), so a band paint stamps a card in one copy where it
-    drew it. A slot is the face of the item it holds (compared `is`), under
-    that item's title and the cover it was drawn from (`is`: a landing or an
-    eviction is another object); `key` is what every face is a function of
-    beside them -- the look's generation, the ground's colour where the
-    ground is one plain colour (else None: the corners are the backdrop's)
-    and the side. `of` maps an item's index to its slot, a hint a list
-    change outdates. The layer is owned: `release` gives it back."""
-
-    def __init__(self, cv, key, side, m, cap):
-        self.key = key
-        self.cv = cv
-        self.side = side
-        self.m = m
-        self.s = side + 2 * m
-        self.cap = cap
-        self.lay = cv.new_layer(self.s, self.s * cap)
-        self.item = [None] * cap
-        self.title = [None] * cap
-        self.cover = [None] * cap
-        self.fill = [None] * cap      # a title tile's (block, letter's rects)
-                                      # (`ui_draw.initial_parts`)
-        self.div = 1                  # the cover decode, corners and ring a paint's
-        self.stepped = False          # faces are drawn with (`_faces_for`)
-        self.ring = None
-        self.used = [-1] * cap
-        self.built = [0] * cap        # the painted frame each slot was drawn by (after)
-        self.of = {}
-        self.tick = 0
-        self.kept = False
-        self.held = None
-
-    def nbytes(self):
-        return self.s * self.s * self.cap * 2
-
-    def release(self):
-        lay = self.lay
-        self.lay = None
-        if lay is not None:
-            rel = getattr(lay, "release", None)
-            if rel is not None:
-                rel()
-        self.item = self.title = self.cover = self.fill = None
-        self.of = {}
-
-    def find(self, i, it, cover):
-        """The slot holding item `it`'s face (index `i`) drawn from `cover`
-        under its title, else None; `held` the slot holding another face of
-        it, or None."""
-        self.tick += 1
-        items = self.item
-        j = self.of.get(i)
-        if j is None or items[j] is not it:
-            j = None
-            for q in range(self.cap):
-                if items[q] is it:
-                    j = q
-                    break
-        self.held = j
-        if j is not None and self.title[j] == it.get("title") and self.cover[j] is cover:
-            self.used[j] = self.tick
-            self.of[i] = j
-            return j
-        return None
-
-    def slot(self, i, it, cover):
-        """The slot holding item `it`'s face drawn from `cover` under its
-        title, at index `i`; `kept` says whether it is drawn (False: the
-        caller draws it into the slot answered, the least recently
-        stamped)."""
-        got = self.find(i, it, cover)
-        self.kept = got is not None
-        if got is not None:
-            return got
-        items = self.item
-        j = self.held
-        if j is None:
-            used = self.used
-            j = 0
-            for q in range(1, self.cap):
-                if used[q] < used[j]:
-                    j = q
-            old = items[j]
-            if old is not None:
-                for k in list(self.of):
-                    if self.of[k] == j:
-                        del self.of[k]
-        items[j] = it
-        self.title[j] = it.get("title")
-        self.cover[j] = cover
-        self.used[j] = self.tick
-        self.of[i] = j
-        return j
-
-
 class Launcher:
     """The home's grid arrangement (docs/look_2026-10.md step 33): a shelf
     of cards, each cart's whole cover at a clean scale with the card radius
@@ -466,16 +380,40 @@ class Launcher:
         self.plays_for = None         # optional cart -> its play record (ws.carts.plays)
         self.today_for = None         # optional () -> today as YYYYMMDD, 0 unknown
         self._card_clip = None        # the clip cards draw in while a draw runs
+        self.restore_whole = False    # a band's backdrop goes back in one copy (the home's)
         self.face_key = None          # (look gen, plain ground or None): the cards'
-                                      # faces are kept (`_Faces`); None: drawn
+                                      # faces are kept (`_faces_for`); None: drawn
         self.frame_no = 0             # the painted frame a paint is (the home's)
-        self._faces = None
+        self._face_lay = None         # the faces' layer: square slots stacked down
+        self._face_geo = None         # ...the canvas, card side, margin and slots it is for
+        self._face_fill = None        # ...each slot's title tile (block, letter's rects)
+        self._face_of = None          # the face_key the engine's key (`_fkey`) is of
+        self._fkey = 0
+        self._fdiv = 0                # the cover decode, corners and ring a paint's
+        self._fstepped = False        # faces are drawn with (`_faces_for`)
+        self._fring = None
         self._faces_off = False       # a canvas whose layers hold no pixels
-        self.restore_whole = False    # a band's backdrop goes back in one copy
+        self._faces_done = False      # a round of `mint_faces` found every face drawn
         self._c = None                # the cells laid out, and what for
         self._c_key = None
         self._show = None             # the cells the band shows (`_shown`), and what for
         self._show_key = None
+        self._host = None             # the band's app host (`band_pass`)
+        self._rows = []               # its table's rows
+        self._krows = []              # ...as their cards' keys, and the list they are of
+        self._krows_of = None
+        self._kcols = ()              # ...and their columns, one a card across
+        self.floor = []               # the rects the band's frame draws (`band_floor`)
+        self.copied = []              # ...and those it copied out of the last frame's buffer
+        self._bo = {"id": "band", "part": [0, 0], "axis": "x", "snap": False, "offset": 0,
+                    "spill": 0, "gen": 0, "current": False, "mark": False, "shift": False,
+                    "fade": 0}
+        self.flat = False             # the band's ground is one colour (a band frame may shift)
+        self.shifted = []             # the view a band frame moved out of the last frame's buffer
+        self._scv = None              # the canvas `_shift` and `_fence` are bound to
+        self._shift = None
+        self._fence = None
+        self._shows = bytearray()     # the cards the engine says show (`Carousel`)
         if layout is None:
             # a bare Launcher(items) (unit construction); lazy, so there is
             # no launcher_layer<->console module-load cycle
@@ -846,6 +784,12 @@ class Launcher:
         the selection, whose card wears the ring."""
         return self.sel
 
+    def band_key(self):
+        """What the band's every card is a function of beside the look, the
+        covers and its row's cards (`band_pass`'s key): nothing; the
+        selection's card is its row's gen."""
+        return None
+
     def cover_specs(self):
         """Every (cart, div) cover the next full draw requests: each card's
         whole cover at its clean side's decode."""
@@ -855,179 +799,341 @@ class Launcher:
 
     # -- the draw -------------------------------------------------------------
 
-    def draw(self, cv, sheet_for=None):
-        """The band's cells over the backdrop the home drew (a full paint's),
-        clipped to the band."""
-        self._paint(cv, sheet_for)
+    def draw(self, cv, sheet_for=None, key=_NO_KEYS, over=None, beside=None):
+        """The band's cells over the backdrop the home drew (a full paint's):
+        the band's table drawn whole (`band_pass`); the floor's end."""
+        return self.band_pass(cv, sheet_for, None, key, True, over, beside)
 
-    def draw_shift(self, cv, sheet_for, delta, damage, fill, plain=False, cells=(),
-                   last=False):
-        """A frame of the band whose buffer holds it `delta` px back along
-        the scroll axis -- or, with `last`, whose last frame's buffer does
-        (`shift_last` moves it across into this one) -- with `cells`
-        (indices) whose focus changed since and `damage` (rects over the
-        band since: the cursor's stamps). On a plain ground (`plain`: the
-        home's `bg` fill, which moves with the cards) the band's pixels shift
-        and the exposed strip, the cells and the damage are repainted; on a
-        backdrop that stays at glass coordinates (a baked backdrop, a
-        picture, a cart's frame) a moved band is repainted whole over `fill`,
-        and a still one repaints its cells and its damage. The rects whose
-        pixels changed."""
-        bx, by, bw, bh = self.band_rect()
-        rects = []
-        if delta or last:
-            dx, dy = (-delta, 0) if self.horizontal else (0, -delta)
-            if (not plain or abs(delta) >= (bw if self.horizontal else bh)
-                    or (last and not cv.shift_last(bx, by, bw, bh, dx, dy))):
-                self.repaint_band(cv, sheet_for, fill)
-                rects.append((bx, by, bw, bh))
-                return rects
-            if last:
-                cv.shift_fence()                 # the rows below are drawn after it lands
-            else:
-                cv.scroll_rect(bx, by, bw, bh, dx, dy)
-            if delta and self.horizontal:        # the strip the move exposed
-                rects.append((bx + bw - delta, by, delta, bh) if delta > 0
-                             else (bx, by, -delta, bh))
-            elif delta:
-                rects.append((bx, by + bh - delta, bw, delta) if delta > 0
-                             else (bx, by, bw, -delta))
-        for i in cells:
-            r = self.reach_rect(i)
-            if r is not None:
-                rects.append(r)
-        for d in damage:
-            rects.append(d)
-            if delta:
-                rects.append((d[0] - delta, d[1], d[2], d[3]) if self.horizontal
-                             else (d[0], d[1] - delta, d[2], d[3]))
-        out = []
-        for r in rects:
-            x0, y0 = max(bx, r[0]), max(by, r[1])
-            x1, y1 = min(bx + bw, r[0] + r[2]), min(by + bh, r[1] + r[3])
-            if x1 > x0 and y1 > y0:
-                r = (x0, y0, x1 - x0, y1 - y0)
-                self._fill_around(cv, fill, r)
-                self._paint(cv, sheet_for, r)
-                out.append(r)
-        return [(bx, by, bw, bh)] if delta or last else out
+    def repaint_band(self, cv, sheet_for, fill, key=_NO_KEYS, over=None, beside=None, need=False):
+        """A band frame: the band's table (`band_pass`), the ground put back
+        by `fill(cv, rect)` under what its floor draws."""
+        return self.band_pass(cv, sheet_for, fill, key, False, over, beside, need)
 
-    def repaint_band(self, cv, sheet_for, fill):
-        self._fill_around(cv, fill, self.band_rect())
-        self._paint(cv, sheet_for)
+    def _band_host(self):
+        """The band's app host (`ui_draw.AppHost`): the context its table
+        is drawn in, made once."""
+        h = self._host
+        if h is None:
+            h = self._host = _ui_draw.AppHost()
+        return h
 
-    def _fill_around(self, cv, fill, r):
-        """Put the ground back in rect `r` but under the cells' pictures,
-        which paint opaque but for their corners' rows (a cover, a title
-        tile, "+ New"'s page): on a backdrop that stays put that is most of
-        a band's restore on the plain ground. A backdrop that is copied
-        back (`restore_whole`) goes back over all of `r` in one copy, and
-        the pictures paint over it."""
-        if self.restore_whole:
-            fill(cv, r)
-            return
-        c = self._cells()
-        fs = self.layout.fs
-        sel = self.sel if self._focused(True) else -1
-        rects = [r]
-        for i, t in self._shown()[0]:
-            g = c.grow if i == sel else 0
-            k = (c.r + g if c.r else 0) + 2 * fs + 1
-            h = t[3] + 2 * g - 2 * k
-            if h > 0:
-                rects = _cut(rects, (t[0] - g, t[1] - g + k, t[2] + 2 * g, h))
-        for q in rects:
-            fill(cv, q)
+    def _band_rows(self, n):
+        """The band table's rows, `n` of them (the shelf's columns, the
+        icons' rows), each one cell: kept while `n` is."""
+        rows = self._rows
+        if len(rows) != n:
+            rows = self._rows = [_ROW_CELL] * n
+        return rows
 
-    def _paint(self, cv, sheet_for, r=None):
-        """The cells clipped to the band, or to its part `r`, where only the
-        cells reaching into `r` draw, in the order a whole paint draws them
-        (the focused one last), and the fade over them."""
-        c = self._cells()
-        b = c.band if r is None else r
-        clip = getattr(cv, "clip", None)
-        if clip is not None:
-            self._card_clip = b
-            clip(*b)
-        sel = self.sel
-        x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
-        vis, reach, body = self._shown()
+    def _band_keys(self, n, per):
+        """The band table's rows as their cards' keys, `n` rows of `per`
+        cards across: each cell names what its card is drawn from (the
+        item, its title, its kind), so a card that changed draws again.
+        Made again only for another list or another `per`; the columns
+        (`per` empty headers) with them."""
         items = self.items
-        faces = None
-        if clip is not None and self.face_key is not None:
-            faces = self._faces_for(cv, c.side, c.r, (c.rows + 2) * c.cols
-                                    if not self.horizontal else (c.cols + 2) * c.rows)
-        on = None
-        for k in range(len(vis)):
-            i, t = vis[k]
-            if r is not None:
-                q = reach[k] if i == sel else body[k]
-                if q[0] >= x1 or q[0] + q[2] <= x0 or q[1] >= y1 or q[1] + q[3] <= y0:
-                    continue
-            if i == sel:
-                on = t
-                continue
-            if faces is None:
-                self._draw_cell(cv, items[i], t, False, c)
-            else:
-                self._stamp_cell(cv, items[i], i, t, c, b, faces)
-        if on is not None:
-            if faces is None or self._focused(True):
-                self._draw_cell(cv, items[sel], on, True, c)
-            else:
-                self._stamp_cell(cv, items[sel], sel, on, c, b, faces)
-        self._fade(cv, c)
-        if clip is not None:
-            self._card_clip = None
-            clip()
+        rows = self._krows
+        if self._krows_of is items and len(rows) == n and len(self._kcols) == per:
+            return rows
+        rows = []
+        for i in range(n):
+            row = []
+            for k in range(i * per, (i + 1) * per):
+                if k < len(items):
+                    it = items[k]
+                    row.append("%s\x1f%s\x1f%s" % (it.get("path"), it.get("title"),
+                                                    it.get("type")))
+                else:
+                    row.append("")
+            rows.append(tuple(row))
+        rows = tuple(rows)              # (the table's memo knows it by identity)
+        self._krows = rows
+        self._krows_of = items
+        self._kcols = ("",) * per
+        return rows
 
-    # -- the kept faces -------------------------------------------------------
+    def begin_band_host(self, cv):
+        """Begin this painted frame's paint on the band's host, drawing
+        nothing: the parts the home names there (`ui.held`) are then
+        asked for, the band's pass beginning it again."""
+        host = self._band_host()
+        host.whole()
+        host.begin(cv, self.theme, self.band_rect(), self.desk(), False, True)
+
+    def resume_band_host(self, cv):
+        """Point the verbs at the band's host again, beginning nothing:
+        the parts named in the paint this frame began there."""
+        self._band_host().resume(cv, self.theme)
+
+    def _begin_band(self, cv, b, desk, key, need, over=None):
+        """Begin the band's frame on its host: whether the buffer this frame
+        paints holds the band as a frame drew it under `key` (`ui.held`);
+        None, with the frame ended, where `need` asks for that and it does
+        not."""
+        host = self._band_host()
+        host.whole()
+        host.begin(cv, self.theme, b, desk, False, True)   # its keys are the home's
+        # (a stamp drawn over the frame round the band: no later frame of
+        # the band's puts that buffer's frame back)
+        held = _ui.held("band", key[0] if over is None or (
+            b[0] <= over[0] and over[0] + over[2] <= b[0] + b[2]
+            and b[1] <= over[1] and over[1] + over[3] <= b[1] + b[3]) else -1)
+        if need and not held:
+            _ui.end()
+            return None
+        return held
+
+    def band_floor(self, cv, fill, copy=True):
+        """The floor of the band's table (`ui.table_floor`): each rect the
+        frame draws, kept in `floor`, its ground put back by `fill` where
+        given; then the floor's end. With `copy`, first the rects the
+        buffer the last frame painted holds as this frame draws them
+        (`ui.table_copy`), copied out of it (`copy_last`) into `copied`:
+        the double buffer's catch-up of a step costs a copy, not its
+        cards."""
+        fl = self.floor
+        del fl[:]
+        cp = self.copied
+        del cp[:]
+        r = _FLOOR
+        cl = getattr(cv, "copy_last", None) if copy else None
+        if cl is not None:
+            while _ui.table_copy(r) > 0:
+                if not cl(r[0], r[1], r[2], r[3]):
+                    _ui.table_copy(r, True)  # (drawn: the floor answers it)
+                    break
+                cp.append((r[0], r[1], r[2], r[3]))
+        v = _ui.table_floor(r)
+        while v > 0:
+            q = (r[0], r[1], r[2], r[3])
+            fl.append(q)
+            if fill is not None:
+                fill(cv, q)
+            v = _ui.table_floor(r)
+        return v
+
+    def _in_floor(self, x0, y0, x1, y1):
+        """Rect (x0, y0)-(x1, y1) cut to the floor rect it meets (a card's
+        reach meets one at most), or None."""
+        for q in self.floor:
+            a = x0 if x0 > q[0] else q[0]
+            b = y0 if y0 > q[1] else q[1]
+            c = x1 if x1 < q[0] + q[2] else q[0] + q[2]
+            d = y1 if y1 < q[1] + q[3] else q[1] + q[3]
+            if c > a and d > b:
+                return (a, b, c - a, d - b)
+        return None
+
+    def band_pass(self, cv, sheet_for, fill, key=_NO_KEYS, whole=True, over=None, beside=None,
+                  need=False, note=False):
+        """The band as a table of parts that keeps its parts (`ui.table`
+        with `o.part` and `o.keep`, its rows the shelf's columns side by
+        side, or the icons' rows, each row's cell its cards' keys): on the
+        band's own app host, the scroll the home's (`o.offset`), no mark of
+        the table's, `key` the frame round the band's key (`ui.held`) and
+        what every card is a function of beside its row (`o.keep`,
+        `_band_key`), `over` the cursor's stamp. The engine answers the floor
+        the buffer this frame paints lacks (`band_floor`: the ground put
+        back by `fill` under it; None: a full paint drew it, and `whole`
+        draws the band whole) and the parts that meet it, each clipped to
+        its floor rect, a column's (a row's) cards drawn in it; the focused
+        card after them all, its growth and ring over its neighbours'.
+        `beside(cv, whole)` draws the parts outside the band, before the
+        floor's end is read. `note`: the home put the band there whole by
+        other means (the retained frame's stamp), so nothing draws and the
+        record says the buffer holds it. Answers the floor's end, or None
+        where `need` and the buffer does not hold the band under `key`."""
+        c = self._cells()
+        b = c.band
+        held = self._begin_band(cv, b, c.desk, key, need, over)
+        if held is None:
+            return None
+        _ui.at(b[0], b[1], b[2], b[3])
+        n = len(self.items)
+        per = c.rows if self.horizontal else c.cols
+        o = self._bo
+        p = o["part"]
+        if self.horizontal:
+            p[0] = c.px
+            p[1] = 0
+            o["offset"] = self.scroll - (c.x0 - b[0])
+        else:
+            p[0] = 0
+            p[1] = c.py
+            o["offset"] = self.scroll - (c.y0 - b[1])
+        o["axis"] = "x" if self.horizontal else "y"
+        sp = o["spill"] = c.grow + _ui_draw.mark_reach("card") + 2
+        sel = self.sel
+        # the cards across a row: the first's offset into the band, the pitch
+        a = o.get("across")
+        if a is None:
+            a = o["across"] = [0, 0]
+        a[0] = c.y0 - b[1] if self.horizontal else c.x0 - b[0]
+        a[1] = c.py if self.horizontal else c.px
+        o["at"] = sel % per
+        o["gen"] = 1 if self._focused(True) else 0
+        o["keep"] = key[1]
+        o["whole"] = whole or not held
+        o["over"] = over
+        hz = self.horizontal
+        # (a band frame over one colour may move the band out of the last
+        # frame's buffer; the handheld icons' fade blends the band's end)
+        o["shift"] = self.flat and not whole
+        o["fade"] = (0 if hz or c.desk or c.hints[3] <= 0 or self.wall_ink is not None
+                     else _FADE * self.layout.fs)
+        rows = self._band_keys((n + per - 1) // per, per)
+        _ui.table("", self._kcols, rows, sel // per, o)
+        sh = self.shifted
+        del sh[:]
+        r = _FLOOR
+        d = _ui.table_shift(r)
+        if d is not None:
+            # the view moved out of the last frame's buffer by the scroll's
+            # difference (`shift_last`, fenced before the floor draws over
+            # it); a canvas that cannot draws the view whole
+            if cv is not self._scv:
+                self._scv = cv
+                self._shift = getattr(cv, "shift_last", None)
+                self._fence = getattr(cv, "shift_fence", None)
+            sl = self._shift
+            if sl is None or not (sl(r[0], r[1], r[2], r[3], d, 0) if hz
+                                  else sl(r[0], r[1], r[2], r[3], 0, d)):
+                _ui.table_shift(r, True)
+            else:
+                sh.append((r[0], r[1], r[2], r[3]))
+                if self._fence is not None:
+                    self._fence()
+        faces = self.face_key is not None and self._faces_for(cv, c.side, c.r, self._face_cap(c))
+        if beside is not None:
+            beside(cv, whole or not held)
+        end = self.band_floor(cv, fill, not note)
+        if note:
+            del self.floor[:]
+        r = _PART
+        items = self.items
+        on = None
+        i = _ui.table_part(r)
+        side = c.side
+        while i >= 0:
+            # the part is a column of the shelf (a row of the icons): its
+            # cards lie along it, a pitch apart, from where the engine put
+            # it, drawn in its reach inside the floor rect it meets
+            x = r[0] if hz else c.x0
+            y = c.y0 if hz else r[1]
+            q = self._in_floor(r[0] - sp, r[1] - sp, r[0] + r[2] + sp, r[1] + r[3] + sp)
+            for k in range(i * per, min(n, (i + 1) * per)):
+                t = (x, y, side, side)
+                if hz:
+                    y += c.py
+                else:
+                    x += c.px
+                if k == sel:
+                    on = q
+                    continue
+                if (q is None or t[0] - sp >= q[0] + q[2] or t[0] + c.px + sp <= q[0]
+                        or t[1] - sp >= q[1] + q[3] or t[1] + c.py + sp <= q[1]):
+                    continue               # (its reach lies outside the floor)
+                if faces:
+                    self._stamp_cell(cv, items[k], k, t, c, q)
+                else:
+                    self._draw_cell(cv, items[k], t, False, c)
+            i = _ui.table_part(r)
+        if on is not None:
+            # the focused card last, over its neighbours' reach
+            cv.clip(on[0], on[1], on[2], on[3])
+            if not faces or self._focused(True):
+                self._draw_cell(cv, items[sel], self._cell_rect(c, sel), True, c)
+            else:
+                self._stamp_cell(cv, items[sel], sel, self._cell_rect(c, sel), c, on)
+            cv.clip()
+        for q in self.floor:
+            cv.clip(q[0], q[1], q[2], q[3])
+            self._fade(cv, c)
+        cv.clip()
+        _ui.end()
+        return end
+
+    def _cell_rect(self, c, i):
+        """Cell `i`'s card rect at the current scroll (`cell_of`'s)."""
+        row, col = self.cell_of(i)
+        if self.horizontal:
+            return (c.x0 + col * c.px - self.scroll, c.y0 + row * c.py, c.side, c.side)
+        return (c.x0 + col * c.px, c.y0 + row * c.py - self.scroll, c.side, c.side)
+
+    def _face_cap(self, c):
+        """The slots the cards' faces lie in (`_faces_for`): the band's
+        cards and a row past either end at least, and as many as
+        `_FACES_BYTES` holds of them up to the engine's `_FACE_SLOTS`, so the
+        faces of the rows a scroll passes stay drawn (an idle frame draws
+        them outward from the band, `mint_faces`)."""
+        least = (c.cols + 2) * c.rows if self.horizontal else (c.rows + 2) * c.cols
+        s = c.side + 2 * (0 if c.r else self.layout.fs - 1)
+        most = min(_FACE_SLOTS, _FACES_BYTES // (2 * s * s))
+        return least if least > most else most
 
     def _faces_for(self, cv, side, r, cap):
-        """The faces (`_Faces`) this paint stamps its cards from on canvas
-        `cv`, `cap` of them, minted for cards of `side` with corners `r`
-        where the home keeps them (`face_key`), else None: the cards draw.
-        A canvas whose layer holds no pixels forfeits them."""
+        """Whether this paint stamps its cards from their kept faces
+        (`ui.slots` on the table just drawn: the engine keeps which card's
+        face each slot holds), `cap` of them on canvas `cv`, drawn for
+        cards of `side` with corners `r`, where the home keeps them
+        (`face_key`): the faces' layer made for them, each slot the card's
+        square and the square frame's margin round it. A canvas whose layer
+        holds no pixels forfeits them."""
         key = self.face_key
         if key is None or self._faces_off:
-            return None
+            return False
         m = 0 if r else self.layout.fs - 1
-        f = self._faces
-        if f is not None and f.cv is cv and f.side == side and f.m == m and f.cap == cap:
-            if f.key != key:
-                f.key = key
-                for j in range(f.cap):
-                    f.item[j] = None
-                    f.used[j] = -1
-                f.of = {}
-        else:
+        g = self._face_geo
+        if (self._face_lay is None or g[0] is not cv or g[1] != side or g[2] != m
+                or g[3] != cap):
             self.release_faces()
+            s = side + 2 * m
             try:
-                f = self._faces = _Faces(cv, key, side, m, cap)
+                self._face_lay = cv.new_layer(s, s * cap)
             except Exception:  # noqa: BLE001 -- a recording canvas: draw the cards
-                self._faces = None
                 self._faces_off = True
-                return None
+                return False
+            self._face_geo = (cv, side, m, cap)
+            self._face_fill = [None] * cap
+            self._face_of = None
+        if self._face_of is not key:
+            # (another layer or look: every face is drawn again)
+            self._face_of = key
+            _FACE_GEN[0] = self._fkey = (_FACE_GEN[0] + 1) & 0x3fffffff
+        _ui.slots(cap, self._fkey)
+        self._faces_done = False         # (the table drawn: its rows to name again)
         # what every face of this paint is drawn with, read once a paint
-        f.div = self._face_div(side)
-        f.stepped = bool(_ui_draw.depth()[4])
-        f.ring = self._face_ring()
-        return f
+        self._fdiv = self._face_div(side)
+        self._fstepped = bool(_ui_draw.depth()[4])
+        self._fring = self._face_ring()
+        return True
 
     def release_faces(self):
         """Give the faces' layer back (the fit check's release, a layout
         change, an arrangement left): True when there was one."""
-        f = self._faces
-        if f is None:
+        lay = self._face_lay
+        if lay is None:
             return False
-        self._faces = None
-        f.release()
+        self._face_lay = None
+        self._face_fill = None
+        rel = getattr(lay, "release", None)
+        if rel is not None:
+            rel()
         return True
 
     def faces_bytes(self):
         """The faces' layer's bytes, 0 where none is kept."""
-        f = self._faces
-        return 0 if f is None else f.nbytes()
+        if self._face_lay is None:
+            return 0
+        g = self._face_geo
+        s = g[1] + 2 * g[2]
+        return s * s * g[3] * 2
+
+    def _face_name(self, i):
+        """Card `i`'s cell in the band table's rows (`_band_keys`): what its
+        face is drawn from beside its cover."""
+        per = len(self._kcols)
+        return self._krows[i // per][i % per]
 
     def _face_div(self, n):
         """The decode a card of side `n` draws its cover from."""
@@ -1074,48 +1180,49 @@ class Launcher:
         else:
             self._draw_title_tile(cv, it, pic, r)
 
-    def _stamp_cell(self, cv, it, i, t, c, b, faces):
+    def _stamp_cell(self, cv, it, i, t, c, b):
         """An unfocused cell, its card out of its kept face (`_stamp_face`)
         and its title, which lies on the ground."""
-        self._stamp_face(cv, it, i, t, c.r, b, faces)
+        self._stamp_face(cv, it, i, t, c.r, b)
         if self._titled(c):
             self._draw_title(cv, it, t[0] + t[2] // 2, t[1] + c.title_dy, c.title_w, False)
 
-    def _stamp_face(self, cv, it, i, t, r, b, faces, plain=True):
+    def _stamp_face(self, cv, it, i, t, r, b, plain=True):
         """Card `it` (index `i`) over `t`, corners `r`, out of its kept face
-        (`faces`), clipped to `b`:
-        the face drawn into its slot where the slot is stale, then copied --
+        (`ui.slot`), clipped to `b`: copied from the slot holding the card
+        as it is now --
         whole on a plain ground, which the slot's corners were drawn over;
         over a backdrop, as where the corners lie over anything but the
         plain ground (not `plain`: the shelf's shadows), a corner's partly
         covered pixels blend over what lies under them, and are drawn as the
         card draws them (`DeviceCanvas.face`, a cover's and a title tile's;
         the "+ New" page's rows under its corners from its own draw,
-        clipped)."""
+        clipped). A card no slot holds is drawn as it is: a paint never
+        draws a face, so a step that brings in a cold row evicts nothing
+        (the idle frames' `mint_faces` draws them)."""
         x, y, n, _n = t
-        cover = self._cover_of(it, faces.div)
-        j = faces.find(i, it, cover)
-        if j is None:
-            # no face of it yet: drawn as a paint without faces draws it,
-            # and an idle frame draws its face (`warm_faces`)
+        cover = self._cover_of(it, self._fdiv)
+        new = it.get("type") in PSEUDO_TILE_TYPES
+        j = _ui.slot(self._face_name(i), 0 if cover is None else cover.serial, False)
+        if j < 0:
+            cv.clip(b[0], b[1], b[2], b[3])
             self._face(cv, it, t, r, cover)
             return
-        m = faces.m
-        s = faces.s
-        lay = faces.lay
-        new = it.get("type") in PSEUDO_TILE_TYPES
-        if (faces.key[1] is None or not plain) and (r or new):
+        m = self._face_geo[2]
+        s = self._face_geo[1] + 2 * m
+        lay = self._face_lay
+        if (self.face_key[1] is None or not plain) and (r or new):
             if m == 0 and r and not new and 2 * r < n:
-                fill = faces.fill[j]
+                fill = self._face_fill[j]
                 if cover is not None or fill is not None:
                     # the face copied, its corners' partly covered pixels
                     # drawn over what is there: one call (`DeviceCanvas.face`)
                     if cover is None:
                         cv.face(lay, j * s, x, y, n, n, None, 0, 0, 0, fill[0], fill[1], r,
-                                faces.stepped, faces.ring)
+                                self._fstepped, self._fring)
                     else:
                         cv.face(lay, j * s, x, y, n, n, cover.pix, cover.w, cover.w,
-                                cover.h, None, None, r, faces.stepped, faces.ring)
+                                cover.h, None, None, r, self._fstepped, self._fring)
                     return
             # the "+ New" page's frame runs round its corners: its rows
             # under them drawn from its own draw, the rest copied
@@ -1142,105 +1249,75 @@ class Launcher:
                             y1 if y1 > by0 else by0, y + n + m if y + n + m < by1 else by1)
             cv.clip(b[0], b[1], b[2], b[3])
 
-    def _draw_face(self, faces, j, it, r, cover, new, frame=0):
-        """Card `it`'s face drawn into slot `j` on painted frame `frame`
-        (or after it), over the plain ground where the faces have one, and
-        what its corners are drawn from kept beside it (a title tile's block
-        and letter)."""
-        faces.built[j] = frame
-        s = faces.s
-        m = faces.m
-        n = faces.side
-        lay = faces.lay
+    def _draw_face(self, j, it, r, cover, new):
+        """Card `it`'s face drawn into slot `j`, over the plain ground where
+        the faces have one, and what its corners are drawn from kept beside
+        it (a title tile's block and letter)."""
+        g = self._face_geo
+        n = g[1]
+        m = g[2]
+        s = n + 2 * m
+        lay = self._face_lay
         sy = j * s
         lay.clip(0, sy, s, s)
-        flat = faces.key[1]
+        flat = self.face_key[1]
         if flat is not None:
             lay.rect(0, sy, s, s, flat)
         self._face(lay, it, (m, sy + m, n, n), r, cover)
         lay.clip()
-        faces.fill[j] = None if cover is not None or new else \
+        self._face_fill[j] = None if cover is not None or new else \
             _ui_draw.initial_parts(lay, it.get("title") or "", n, n)
 
-    def warm_faces(self, ms=4):
-        """On a frame nothing waits on: draw the faces of the cards the band
-        shows, then of the row (or column) past either end of it, whose
-        covers are decoded or known absent, for about `ms` -- a paint copies
-        what has a face and draws the rest, so a step copies the row it
-        brings in. True where one was drawn."""
-        f = self._faces
+    def mint_faces(self, ms=4):
+        """On a frame nothing waits on: draw the faces the engine names
+        next (`ui.slot_next`: the cards the band shows, then the rows past
+        either end of it, nearest first) whose covers are decoded or known absent, for
+        about `ms` -- a step then copies the row it brings in -- the walk
+        itself held to `ms` too, the next such frame going on from where
+        it stopped (a key between two frames waits on neither). True where
+        one was drawn. A round that found every face drawn ends the asking
+        until the band's table is drawn again (`_faces_for`)."""
+        if self._faces_done:
+            return False
+        g = self._face_geo
         ready = self.cover_ready
-        if f is None or f.lay is None or self.face_key is None or ready is None:
+        if (self._face_lay is None or self.face_key is None or ready is None
+                or self._host is None or self._krows_of is not self.items):
             return False
-        order = self._warm_order(f)
-        if not order:
-            return False
+        c = self._cells()
+        if c.side != g[1] or (0 if c.r else self.layout.fs - 1) != g[2]:
+            return False                 # (the faces are another layout's)
+        self._host.resume(g[0], self.theme)
         items = self.items
+        sel = self.sel if self._focused(True) else -1
         r = self._face_r()
         t0 = _ticks_ms()
         done = 0
-        for i in order:
-            if i < 0 or i >= len(items):
-                continue
-            it = items[i]
-            new = it.get("type") in PSEUDO_TILE_TYPES
-            cover = None if new else ready(it, f.div)
-            if cover is False:
-                continue                 # its cover lands first: the draw path takes it
-            j = f.slot(i, it, cover)
-            if f.kept:
-                continue
-            self._draw_face(f, j, it, r, cover, new, self.frame_no + 1)
-            done += 1
+        owed = False                     # a part whose cover has yet to land
+        i = _ui.slot_next()
+        while i >= 0:
+            if i < len(items) and i != sel:
+                it = items[i]
+                new = it.get("type") in PSEUDO_TILE_TYPES
+                cover = None if new else ready(it, self._fdiv)
+                if cover is False:       # (its cover lands first: the paint takes it)
+                    owed = True
+                else:
+                    j = _ui.slot(self._face_name(i), 0 if cover is None else cover.serial,
+                                 True)
+                    if j >= _ui.SLOT_MINT:
+                        self._draw_face(j - _ui.SLOT_MINT, it, r, cover, new)
+                        done += 1
             if _ticks_diff(_ticks_ms(), t0) >= ms:
-                break
+                return done > 0          # (the round goes on from here next time)
+            i = _ui.slot_next()
+        if not done and not owed:
+            self._faces_done = True
         return done > 0
-
-    def _warm_order(self, f):
-        """The cells whose faces an idle frame draws, in the order it draws
-        them: the band's, then the row past each end; None where the faces
-        are another layout's."""
-        c = self._cells()
-        if c.side != f.side or (0 if c.r else self.layout.fs - 1) != f.m:
-            return None
-        vis = self._shown()[0]
-        if not vis:
-            return None
-        per = c.rows if self.horizontal else c.cols
-        lo, hi = vis[0][0], vis[-1][0]
-        sel = self.sel if self._focused(True) else -1
-        return ([i for i, _t in vis if i != sel] + list(range(hi + 1, hi + 1 + per))
-                + list(range(lo - 1, lo - 1 - per, -1)))
 
     def _face_r(self):
         """The corners a face is drawn with."""
         return self._cells().r
-
-    def landed_cells(self, since):
-        """The cells the band shows whose card a paint now draws otherwise
-        than painted frame `since` drew it, after covers landed: its face
-        drawn after that frame or its cover changed since, and the focused
-        card, which draws itself; None where the faces cannot say, or where
-        so many changed that the band repaints."""
-        f = self._faces
-        ready = self.cover_ready
-        if f is None or f.lay is None or ready is None or self.face_key is None:
-            return None
-        out = []
-        items = self.items
-        sel = self.sel
-        for i, _t in self._visible():
-            it = items[i]
-            j = f.of.get(i)
-            if i == sel or j is None or f.item[j] is not it or f.built[j] > since:
-                out.append(i)
-                continue
-            cover = None if it.get("type") in PSEUDO_TILE_TYPES else ready(it, f.div)
-            if f.cover[j] is not (None if cover is False else cover):
-                out.append(i)
-        # past a third of them the band in one paint costs less than a
-        # paint a cell, each copying the faces its neighbours reach into
-        return None if 3 * len(out) > len(self._visible()) else out
 
     def _face_rows(self, cv, it, t, r, cover, x0, x1, y0, y1):
         """Card `it`'s face over `t` drawn in rows [y0, y1) of columns
@@ -1496,9 +1573,11 @@ _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("search", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Duplicate"),
               "delete": ("X", "Delete"),
-              "favourite": ("F", "Add favourite"), "options": ("X", "Options")}
+              "favourite": ("F", "Add favourite"), "options": ("X", "Options"),
+              "window": ("P", "Play")}
 _UNFAVOURITE = "Remove favourite"   # the star's words on a card that wears it
-_VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
+_VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete",
+             "p": "window"}
 _FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
@@ -1519,6 +1598,8 @@ DETAILS_MIN = 280    # the narrowest details pane beside the hero, in glass
 # many rows as the widest of them wraps to, so the shelf stays put as the
 # selection moves.
 _DESK_VERB_SETS = (("play", "change", "copy"), ("change", "copy", "delete"))
+# ...and the desk's Projects window's, whose Make card has Play third
+PROJECTS_VERB_SETS = _DESK_VERB_SETS + (("change", "copy", "window", "delete"),)
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -1635,12 +1716,12 @@ def _desk_button_flow(verbs, kinds, widths, dw, u):
     return out
 
 
-def desk_button_span(dw, fs, u, bh):
+def desk_button_span(dw, fs, u, bh, sets=_DESK_VERB_SETS):
     """The pixels the desk pane keeps for its buttons under their first
-    row: as many as the widest card's (`_DESK_VERB_SETS`) rows take in a
-    pane `dw` wide, `bh` a button's height."""
+    row: as many as the widest card's (`sets`, a home's verb sets) rows
+    take in a pane `dw` wide, `bh` a button's height."""
     return max(b[2] * (bh + DESK_ROW_GAP // u) + b[5]
-               for vs in _DESK_VERB_SETS
+               for vs in sets
                for b in desk_button_layout(vs, dw, fs, u)[-1:])
 
 
@@ -1672,6 +1753,7 @@ class Carousel(Launcher):
     (`LauncherHomeLayer._backdrop_fill`) and paints the cards over it."""
 
     arrangement = "carousel"
+    verb_sets = _DESK_VERB_SETS     # the buttons its desk pane keeps rows for
 
     def __init__(self, items, layout=None, names=None):
         self.motion = "full"
@@ -1778,7 +1860,7 @@ class Carousel(Launcher):
         for _ in range(3):
             g = self._geom_desk_at(lay, reach, keys, span)
             dk = g[9]
-            got = desk_button_span(dk[2], lay.fs, dk[5][6], dk[5][4])
+            got = desk_button_span(dk[2], lay.fs, dk[5][6], dk[5][4], self.verb_sets)
             if got <= span:
                 break
             span = got
@@ -2188,11 +2270,12 @@ class Carousel(Launcher):
     def paint_key(self):
         """What the band's pixels depend on besides the offset and the
         statics: the selection, the motion (a card at rest wears its mark),
-        the centre card's title and star (its caption's line is laid out
-        once a card and a play record, `_draw_caption`)."""
+        whether the tabs or the bar hold the focus (the mark goes), the
+        centre card's title and star (its caption's line is laid out once a
+        card and a play record, `_draw_caption`)."""
         it = self.items[self.nearest()] if self.items else None
         f = self.favorite_for
-        return (self._sel, self.moving, it and it.get("title"),
+        return (self._sel, self.moving, self.tab_focus, it and it.get("title"),
                 it is not None and f is not None and bool(f(it)))
 
     def favorite_rect(self, i):
@@ -2219,26 +2302,82 @@ class Carousel(Launcher):
             out.append((it, _COVER_BASE))
         return out
 
-    def draw(self, cv, sheet_for=None):
+    def draw(self, cv, sheet_for=None, key=_NO_KEYS, over=None, beside=None):
         if self.desk():
             self._paint_details(cv)
-        self._paint(cv, sheet_for, self.band_rect())
+        return self.band_pass(cv, sheet_for, None, key, True, over, beside)
 
-    def draw_shift(self, cv, sheet_for, delta, damage, fill, plain=False, cells=()):
-        """A frame of the band. Its pixels cannot shift: a card's size is a
-        function of its distance from the centre, so the band is repainted
-        whole -- `fill` restores the ground around the cards, then the cards
-        -- whatever the ring offers to shift, where anything moved. The
-        rects repainted."""
-        if not (delta or cells or damage):
-            return ()
-        self.repaint_band(cv, sheet_for, fill)
-        return (self.band_rect(),)
+    def repaint_band(self, cv, sheet_for, fill, key=_NO_KEYS, over=None, beside=None, need=False,
+                     marks=False, whole=False):
+        """A band frame: the row (`band_pass`) over the ground `fill` puts
+        back around its cards, every card's corner rows with `marks` (the
+        buffer may hold the focus mark on another card)."""
+        return self.band_pass(cv, sheet_for, fill, key, whole, over, beside, need, marks)
 
-    def repaint_band(self, cv, sheet_for, fill, marks=False):
+    def band_key(self):
+        return self.paint_key()
+
+    def band_pass(self, cv, sheet_for, fill, key=_NO_KEYS, whole=True, over=None, beside=None,
+                  need=False, marks=False, note=False):
+        """The row as a table of parts side by side that keeps them
+        (`ui.table` with `o.axis` "x" and `o.keep`) on the band's own app
+        host, the scroll the home's (`o.offset`): on the handheld under
+        `o.snap`, row 0 at the centre at scroll 0, each part room past its
+        cell for the card its distance from the centre grows (`o.spill`);
+        on the desk the shelf's cards one size from its margin. A card's
+        size is a function of its distance from the centre, and what the
+        centre card shows is in `key` (`band_key`), so the engine's floor
+        is the band whole or what was drawn over it (`over`, the cursor),
+        or nothing. In each floor rect the ground goes back round the
+        cards (`fill`; None: a full paint drew it) and the cards the engine
+        says show draw in the order the row paints them (`_paint`).
+        `beside`, `note` and the answer are `Launcher.band_pass`'s."""
         band = self.band_rect()
-        self._fill_around_cards(cv, fill, band, marks)
-        self._paint(cv, sheet_for, band)
+        g = self._geom()
+        n = len(self.items)
+        held = self._begin_band(cv, band, g[9] is not None, key, need, over)
+        if held is None:
+            return None
+        _ui.at(band[0], band[1], band[2], band[3])
+        o = self._bo
+        p = o["part"]
+        p[0] = g[3]
+        p[1] = 0
+        o["axis"] = "x"
+        if g[9] is None:
+            o["snap"] = True
+            o["offset"] = self.scroll
+            o["spill"] = self._big()
+        else:
+            o["snap"] = False
+            o["offset"] = self.scroll - g[9][4]
+            o["spill"] = g[3]
+        o["keep"] = key[1]
+        o["whole"] = whole or not held
+        o["over"] = over
+        _ui.table("", _PART_COL, self._band_rows(n), self.nearest(), o)
+        if beside is not None:
+            beside(cv, whole or not held)
+        end = self.band_floor(cv, None, not note)
+        if note:
+            del self.floor[:]
+        shows = self._shows
+        if len(shows) != n:
+            shows = self._shows = bytearray(n)
+        else:
+            for k in range(n):
+                shows[k] = 0
+        r = _PART
+        i = _ui.table_part(r)
+        while i >= 0:
+            shows[i] = 1
+            i = _ui.table_part(r)
+        for q in self.floor:
+            if fill is not None:
+                self._fill_around_cards(cv, fill, q, marks)
+            self._paint(cv, sheet_for, q)
+        _ui.end()
+        return end
 
     def _fill_around_cards(self, cv, fill, r, marks=False):
         """Restore rect `r`'s backdrop except where a card lies: every card
@@ -2302,6 +2441,7 @@ class Carousel(Launcher):
             return self._paint_hh(cv, sheet_for, r)
         g = self._geom()
         left, vis = self._shelf()
+        shows = self._shows
         if r[0] < left:
             r = (left, r[1], max(0, r[0] + r[2] - left), r[3])
         clip = getattr(cv, "clip", None)
@@ -2311,18 +2451,12 @@ class Carousel(Launcher):
         self._draw_shelf_caption(cv)
         c = self.nearest()
         moving = self.moving
-        for _i, t in vis:
-            _ui_draw.cast(cv, self.theme, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
-        side = g[2]
-        faces = None
-        if clip is not None and self.face_key is not None:
-            faces = self._faces_for(cv, side, self._corner_r(side), g[1][2] // g[3] + 3)
-        cr = self._corner_r(side)
         for i, t in vis:
-            if faces is None or (i == c and not moving):
+            if shows[i]:
+                _ui_draw.cast(cv, self.theme, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
+        for i, t in vis:
+            if shows[i]:
                 self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
-            else:
-                self._stamp_face(cv, self.items[i], i, t, cr, r, faces, False)
         if clip is not None:
             self._card_clip = None
             clip()
@@ -2341,39 +2475,14 @@ class Carousel(Launcher):
     def _face_ring(self):
         return None
 
-    def _warm_order(self, f):
-        """The desk shelf's cards but the selection's at rest, then the one
-        past each end; None off the desk."""
-        g = self._geom()
-        if g[9] is None or f.side != g[2]:
-            return None
-        _left, vis = self._shelf()
-        if not vis:
-            return None
-        c = self.nearest()
-        moving = self.moving
-        idx = sorted(i for i, _t in vis if not (i == c and not moving))
-        lo = min(i for i, _t in vis)
-        hi = max(i for i, _t in vis)
-        return idx + [hi + 1, lo - 1]
-
-    def _face_r(self):
-        return self._corner_r(self._geom()[2])
-
-    def landed_cells(self, since):
-        """A landing repaints the band: its cards' sizes move with it."""
-        return None
-
     def _shelf(self):
         """(left, cards) of the desk's shelf: it starts at its margin
-        `left`, where a card scrolled past it is cut, and at rest one the
-        scroll left across it is not shown; `cards` the (index, rect) it
+        `left`, where a card scrolled across it is cut, moving or at rest,
+        as the band's right edge cuts one; `cards` the (index, rect) it
         shows."""
         g = self._geom()
         left = g[1][0] + g[9][4] - g[5]
-        moving = self.moving
-        return left, [e for e in self._visible()
-                      if ((e[1][0] + e[1][2] > left) if moving else (e[1][0] >= left))]
+        return left, [e for e in self._visible() if e[1][0] + e[1][2] > left]
 
     def _draw_shelf_caption(self, cv):
         """The shelf's caption over its first card: the tab and its count,
@@ -2428,13 +2537,17 @@ class Carousel(Launcher):
         c = self.nearest()
         th = self.theme
         vis = self._visible()
+        shows = self._shows
         for i, t in vis:
+            if not shows[i]:
+                continue
             if i == c:
                 _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD)
             else:
                 _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
         for i, t in vis:
-            self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
+            if shows[i]:
+                self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
         if self.items:
             self._draw_caption(cv, self.items[c])
         if clip is not None:
@@ -2652,11 +2765,12 @@ class IconHome(Launcher):
         return [(it, _COVER_HALF) for it in self.items
                 if it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES]
 
-    def draw(self, cv, sheet_for=None):
-        self._paint(cv, sheet_for)
+    def draw(self, cv, sheet_for=None, key=_NO_KEYS, over=None, beside=None):
+        end = self.band_pass(cv, sheet_for, None, key, True, over, beside)
         c = self._cells()
         if c.caption is not None:
             self._draw_caption_band(cv, c)
+        return end
 
     def _draw_caption_band(self, cv, c):
         """The handheld's caption band: on the home's ground under a
@@ -2740,34 +2854,6 @@ def _dim_of(ws):
     return (_ground_of(ws), (pct * 255 + 50) // 100)
 
 
-def _retained_n(cv):
-    """The canvas's physical-buffer rotation -- the staleness horizon the
-    drag-partial streaks must respect (a back buffer on an N-buffer root is N
-    frames stale). Parameterized for the P4 triple-framebuffer render overlap
-    (#58); FLOORED at 2 so the host's single persistent buffer keeps today's
-    conservative gates (behavior-identical at N<=2). Mirrors
-    WindowedWM._retained_n."""
-    n = getattr(cv, "RETAINED_FRAMES", 1)
-    return n if n > 2 else 2
-
-
-def _advance_streak(layer, cv):
-    """Advance (or restart) a grid layer's consecutive-full-paint streak --
-    the gate `_try_drag_partial` reads, so a partial only runs once every
-    retained framebuffer already holds this frame's statics. A full paint
-    under an unchanged `_statics_key` counts up to `_retained_n(cv)`; a
-    changed key restarts at one. ONE body for the home shelf and the Editor
-    picker (#209): repeated invalidation logic is the family
-    surface_model_v1.md §14.2 names as the silent-cache bug."""
-    key = layer._statics_key(cv)
-    if key == layer._statics:
-        if layer._full_streak < _retained_n(cv):
-            layer._full_streak += 1
-    else:
-        layer._statics = key
-        layer._full_streak = 1
-
-
 def _cursor_stamp(ws):
     """The cursor sprite's footprint on the system canvas this frame, or None
     when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
@@ -2778,17 +2864,6 @@ def _cursor_stamp(ws):
         return None
     fs = ws.look.font_scale
     return (p.x, p.y, 8 * fs, 13 * fs)
-
-
-def _paint_continuity(layer, ws):
-    """Re-arm a grid layer's streak from zero when other surfaces painted
-    since its last draw: the retained ping-pong buffers hold foreign pixels
-    after a visit elsewhere, and a streak carried across it would let a
-    partial repaint over the PREVIOUS screen's chrome in the second buffer."""
-    nf = ws._frames_drawn
-    if layer._last_pf is not None and nf != layer._last_pf + 1:
-        layer._full_streak = 0
-    layer._last_pf = nf
 
 
 def _statics_base(ws, cv, grid):
@@ -2819,113 +2894,63 @@ def _band_alone(ws, dt, kind, calm=False):
     return not (ws._deferred and ws._toast_owed())
 
 
-def _note_band(layer, cv, dt, grid, vouch, statics=None, outside=None, calm=False,
-               key=None, region=None):
-    """Record this painted frame of `grid`'s band in its paint ring: the
-    selection, the statics, the cover gen and (where the home `vouch`es for
-    its own buffers) what its parts outside the band show, and the cursor's
-    stamp; the frame vouches only where the band was the home's alone."""
+class _Keyed:
+    """An int that names a value a frame keys what it draws on (a kept
+    table's `o.keep`, a part `ui.held` names): the same while the value
+    compares equal to the one before, another once it does not."""
+
+    def __init__(self):
+        self.v = None
+        self.n = 0
+
+    def of(self, v):
+        if v != self.v:
+            self.v = v
+            self.n = (self.n + 1) & 0x3fffffff
+        return self.n
+
+
+def _band_key(layer, cv, dt, grid, vouch, calm=False):
+    """The band's keys (`band_pass`'s `key`): what the frame round the band
+    is drawn under (the statics, `_statics_key`) and what the band table's
+    every card is a function of beside its row (`o.keep`: the statics, the
+    cover gen and the arrangement's own, `band_key`) -- both -1, this
+    frame's paint keeping nothing, where the home `vouch`es for its buffers
+    and the band is not its alone on the glass (`_band_alone`)."""
     ws = layer.ws
-    if statics is None:
-        statics = layer._statics_key(cv)
-    (region or grid._scroll_region()).note_painted(
-        ws._frames_drawn,
-        (grid.paint_key() if key is None else key, statics, ws.covers.gen,
-         (outside or layer._outside_key()) if vouch else None),
-        _cursor_stamp(ws), _band_alone(ws, dt, layer.id, calm) if vouch else True)
+    k = layer._keys
+    layer._keyed_gen = gen = ws.covers.gen
+    if vouch and not _band_alone(ws, dt, layer.id, calm):
+        k[0] = k[1] = -1
+        return k
+    k[0] = layer._sk.of(layer._statics_key(cv))
+    k[1] = layer._bk.of((k[0], gen, grid.band_key()))
+    return k
 
 
-def _last_band(region, cv, f, statics, gen, bx, by, bw, bh):
-    """True where the last frame painted the band alone under these statics
-    and cover gen, its stamp inside the band, and the canvas moves a rect of
-    its buffer into this one (`shift_last`): the paint ring's newest slot is
-    that frame's. Else None."""
-    if getattr(cv, "shift_last", None) is None or getattr(cv, "RETAINED_FRAMES", 1) < 2:
-        return None
-    ring = region.ring
-    if ring.frame(0) != f - 1 or not ring.whole(0):
-        return None
-    k = ring.key(0)
-    st = ring.stamp(0)
-    if (k is None or k[1] != statics or k[2] != gen
-            or (st is not None and not (bx <= st[0] and st[0] + st[2] <= bx + bw
-                                        and by <= st[1] and st[1] + st[3] <= by + bh))):
-        return None
-    return True
-
-
-def _copy_from_last(layer, cv, region, grid, key, delta, cells, stamp, outside):
-    """The rects of the home a band frame lacks, copied out of the buffer
-    the last frame drew into where that frame painted the home alone in
-    this frame's state (surface model §14.6) -- a board's other buffers
-    brought to a step: the band where it moved (one copy on a P4's GDMA, a
-    row copy on an S3, in place of a shift and its exposed strip), else the
-    cells whose focus moved and the stamp, and the parts outside the band
-    (`outside`). The rects copied, or None where the canvas cannot (the
-    caller draws them)."""
-    cl = getattr(cv, "copy_last", None)
-    if cl is None or getattr(cv, "RETAINED_FRAMES", 1) < 2:
-        return None
-    ring = region.ring
-    if (ring.frame(0) != layer.ws._frames_drawn - 1 or not ring.whole(0)
-            or ring.stamp(0) is not None or ring.offset(0) != region.offset
-            or ring.key(0) != key):
-        return None
-    if delta or isinstance(grid, Carousel):
-        rects = [grid.band_rect()]
-    else:
-        rects = []
-        for i in cells:
-            r = grid.reach_rect(i)
-            if r is not None:
-                rects.append(r)
-        if stamp is not None:
-            rects.append(stamp)
-    if outside:
-        rects.extend(layer._outside_rects())
-    for r in rects:
-        if not cl(r[0], r[1], r[2], r[3]):
-            return None
-    return rects
-
-
-def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False, plain=False,
-                  steps=False):
+def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False):
     """The home layers' band frame (#113, #58/#66), ONE body for the home and
-    the home window: once every retained framebuffer holds this frame's
-    static chrome (`_retained_n` prior full paints under an unchanged
-    statics key -- the ping-pong stale-by-N rule), a frame whose change is
-    the cards' band repaints the band's lag and the bar strip alone.
-
-    The band's paint ring (`ScrollRegion`'s `PaintRing`) says what the
-    buffer this frame paints holds of the band: the offset, the focused
-    cell, the cursor's stamp and the parts outside the band of the frame
-    that painted it last. Its grid's `draw_shift` takes the difference: on a
-    plain ground (`plain`) the band shifts and the exposed strip and the
-    cells whose focus moved repaint, on a backdrop that stays put a moved
-    band repaints whole and a still one its cells; the carousel's band
-    repaints whole. Where the ring vouches for nothing a moving band
-    repaints whole.
+    the home window: a frame whose change is the cards' band draws the band
+    alone -- its kept table of parts (`repaint_band`: the engine draws what
+    the buffer this frame paints lacks of it, over the ground `fill(cv,
+    rect)` puts back) -- and the bar strip, where that buffer holds the
+    band and the frame round it under this frame's key (`ui.held`).
 
     Without `steps` only a drag or a fling takes the path (the home window,
     the desk's carousel, whose selection lies outside the band); with it any
     frame does -- a key, a repeat or a trackball step, a settle -- and the
     parts outside the band a selection changes (the hint strip, the icons'
-    caption band) repaint where the buffer holds another selection's.
+    caption band) are drawn again where the buffer holds another
+    selection's (`_beside`).
 
-    `fill(cv, rect)` paints the band backdrop the owner would paint under the
-    cards; `strip` is the bar strip's kind; `timed` records the home diag's
+    `strip` is the bar strip's kind; `timed` records the home diag's
     `ws._pf_home` split under perf_capture. Returns False when the frame
     must be painted in full."""
     ws = layer.ws
     moving = grid.dragging or grid.flinging
     if not (moving or steps):
         return False
-    if (getattr(cv, "RETAINED_FRAMES", 0) < 1
-            or layer._full_streak < _retained_n(cv)):
-        return False
-    statics = layer._statics
-    if statics != layer._statics_key(cv):
+    if getattr(cv, "RETAINED_FRAMES", 0) < 1:
         return False
     # Anything animating over the surface (toast/confetti/splash/live
     # wallpaper) moves pixels outside the band -> full frames.
@@ -2938,80 +2963,43 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False, plain=Fal
     fs = ws.look.font_scale
     p = ws.pointer
     if p is not None and getattr(p, "visible", False):
-        # The composited cursor must land fully inside the repainted band,
+        # The composited cursor must land fully inside the redrawn band,
         # or its previous stamp would ghost on the untouched chrome.
         if not (bx <= p.x and p.x + 8 * fs <= bx + bw
                 and by <= p.y and p.y + 13 * fs <= by + bh):
             return False
-    region = grid._scroll_region()
-    ring = region.ring
-    e = ring.held(cv, ws._frames_drawn)
-    landed = False                      # covers landed since: the cells they changed
-    if e is not None:
-        k = ring.key(e)
-        st = ring.stamp(e)
-        if (k is None or k[1] != statics
-                or (st is not None and not (bx <= st[0] and st[0] + st[2] <= bx + bw
-                                            and by <= st[1] and st[1] + st[3] <= by + bh))):
-            e = None                    # (a stamp outside the band: ghosts on the chrome)
-        elif k[2] != ws.covers.gen:
-            # covers landed since: the cells whose card the buffer holds
-            # otherwise (the faces say which), else the band
-            landed = grid.landed_cells(ring.frame(e)) if steps else None
-            if landed is None:
-                e = None
-                landed = steps
-    if e is None and not (moving or landed):
-        return False
     _t0 = _ticks_ms() if timed and getattr(ws, "perf_capture", False) else None
-    sheet = ws.covers.sheet_icon
-    out = layer._outside_key() if steps else None
-    now = grid.paint_key()
-    if e is None:
-        grid.repaint_band(cv, sheet, fill)
-        drew = ((bx, by, bw, bh),)
-        if steps:
-            drew += layer._paint_outside(cv, None, out)
-    else:
-        was = k[0]
-        delta = region.offset - ring.offset(e)
-        cells = () if was == now else (was, now)
-        if landed:
-            cells = cells + tuple(landed)
-        drew = None
-        if steps and (delta or cells or st is not None or k[3] != out):
-            drew = _copy_from_last(layer, cv, region, grid, (now, statics, ws.covers.gen, out),
-                                   delta, cells, st, k[3] != out)
-        if drew is None:
-            if (delta and plain and not isinstance(grid, Carousel)
-                    and _last_band(region, cv, ws._frames_drawn, statics, ws.covers.gen,
-                                   bx, by, bw, bh)):
-                # A moved band on the plain ground, out of the last frame's
-                # buffer (`shift_last`): by the last frame's delta, with the
-                # cells whose focus moved since it and its stamp.
-                st0 = ring.stamp(0)
-                was0 = ring.key(0)[0]
-                drew = grid.draw_shift(cv, sheet, region.offset - ring.offset(0),
-                                       () if st0 is None else (st0,), fill, True,
-                                       () if was0 == now else (was0, now), True)
-            else:
-                drew = grid.draw_shift(cv, sheet, delta, () if st is None else (st,), fill,
-                                       plain, cells)
-            if steps and k[3] != out:
-                drew = tuple(drew) + layer._paint_outside(cv, k[3], out)
-    # Re-pin the cover gen POST-draw: a cover landing during the card draw
-    # is in these pixels, so the recorded key must carry the new gen.
-    _note_band(layer, cv, dt, grid, steps, statics, out, True, now, region)
+    end = grid.repaint_band(cv, ws.covers.sheet_icon, fill,
+                            _band_key(layer, cv, dt, grid, steps, True), _cursor_stamp(ws),
+                            layer._beside if steps else None, True)
+    if end is None:
+        return False
+    # The rects drawn are the frame's damage (read before a landing's note
+    # empties the floor); the bar strip carries its own word.
+    a = 0
+    for r in grid.floor:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
+    for r in grid.copied:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
+    for r in grid.shifted:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
+    whole = 2 * a > bw * bh             # (more than a step's cells: a scroll's, a jump's)
+    if not moving:
+        # (a moving frame notes no cover landing: the next frame scrolls
+        # the band and draws it whatever its key)
+        whole = layer._band_landed(cv, dt, steps) or whole
     _t1 = _ticks_ms() if _t0 is not None else None
     ws.bar_layer._draw_status_strip(strip)
-    # The rects repainted are the frame's damage; the bar strip carries its
-    # own word.
-    for r in drew:
-        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+    if steps:
+        for r in layer._beside_drew:
+            ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
     if _t0 is not None:
         ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
     if steps and not moving:
-        layer._band_settle(cv, region)
+        layer._band_settle(end, whole)
     return True
 
 
@@ -3037,13 +3025,19 @@ class LauncherHomeLayer:
         self._tab_at = None           # the tab the keys are on, on the tab row
         self._on_bar = False          # the keys are on the home's bar (BarLayer.focus_enter)
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
-        # The band frame's bookkeeping (`_drag_partial`; #58/#66: a FULL home
-        # repaint stacks megabytes of writes on a board). A frame whose change
-        # is the cards' band, the hint strip and the bar skips the wallpaper:
-        # the streak counts consecutive FULL paints with identical statics, so
-        # a band frame only runs once every retained framebuffer holds them.
-        self._full_streak = 0
-        self._statics = None
+        # The band frame's keys (`_band_frame`; #58/#66: a FULL home repaint
+        # stacks megabytes of writes on a board): the band table's
+        # (`_band_key`), the hint strip's and the caption band's (`_beside`),
+        # and the rects `_beside` drew.
+        self._sk = _Keyed()
+        self._bk = _Keyed()
+        self._keys = array("i", [-1, -1])
+        self._keyed_gen = -1          # the cover gen `_band_key` keyed the band under
+        self._hk = _Keyed()
+        self._ck = _Keyed()
+        self._beside_drew = []
+        # what the hint strip's key was made of, and the key (`_outside_key`)
+        self._ok = [None, None, None, None, None, None, None, None]
         self._search_kprev = 0        # keyboard edge detect while typing a search query
         self._kprev = 0               # ...and for the carousel home's hint keys
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
@@ -3061,14 +3055,8 @@ class LauncherHomeLayer:
         self._lib_cache = None        # cv.new_layer sized to the canvas
         self._lib_key = None          # _retained_key at capture
         self._cap_owed = None         # (frame, key, parts) a still frame owes
+        self._debt_owed = None        # the frame a step left a buffer behind (`debt_due`)
         self._lib_unsupported = False # web RecordingLayer: no pixels to copy
-        # Paint-continuity guard for the ping-pong trust (#113's stale-by-2
-        # rule): if OTHER surfaces painted since our last draw, the retained
-        # buffers hold foreign pixels and the partial/streak machinery must
-        # re-arm from zero. Without this, a re-entry inherited streak=2 from
-        # the previous visit and the first drag partially repainted over the
-        # PREVIOUS screen's chrome in the second buffer.
-        self._last_pf = None
         # The wallpaper under the carousel band, captured on every full paint
         # right after the wallpaper drew: a moving frame restores the band's
         # backdrop from it (the cards lie on the wallpaper, so the band cannot
@@ -3076,13 +3064,15 @@ class LauncherHomeLayer:
         # the theme, the wallpaper and the band rect.
         self._band_bg = None          # cv.new_layer sized to the band
         self._band_key = None
-        # The desk home's still-backdrop frames (`_try_still_frame`): a
-        # `PaintRing` of the painted frames, each keyed by its backdrop and
-        # changing its parts' keys (selection, band, bar); the backdrop
-        # `restore_key` this frame answered; and the parts the retained frame
-        # was captured under (`_capture_retained` copies only the ones that
-        # moved).
-        self._still_ring = _ui_draw.PaintRing()
+        # The desk home's still-backdrop frames (`_try_still_frame`): the
+        # keys its parts are named under in the band host's paints
+        # (`ui.held`: the backdrop, the selection, the shelf, the bar); the
+        # backdrop `restore_key` this frame answered; and the parts the
+        # retained frame was captured under (`_capture_retained` copies only
+        # the ones that moved).
+        self._stk = _Keyed()
+        self._slk = _Keyed()
+        self._shk = _Keyed()
         self._bd_now = None
         self._lib_parts = None
 
@@ -3236,8 +3226,9 @@ class LauncherHomeLayer:
             self._button_focus = None
             return False
         k = min(k, len(buttons) - 1)
-        if not (any(i.steps(n) for n in ("left", "right", "up", "down"))
-                or any(i.pressed(n) for n in ("a", "run", "b", "home"))):
+        if not (i.steps("left") or i.steps("right") or i.steps("up") or i.steps("down")
+                or i.pressed("a") or i.pressed("run") or i.pressed("b")
+                or i.pressed("home")):
             return False                     # the strip's letters still act
         up, down = self._button_rows_apart(buttons, k)
         if i.steps("left"):
@@ -3266,32 +3257,39 @@ class LauncherHomeLayer:
         Library panel fill/header/footer) is a pure function of: the shared
         base plus the wallpaper, the search field and the keys a modal's hint
         strip names (`modal_keys`). A key change forces full paints until the
-        streak re-arms."""
+        streak re-arms. Where the keys are -- the tab row, the bar, a card --
+        is not in it: the tabs are the bar's, which a band frame draws, the
+        hint strip names the tab row's keys under its own key (`_outside_key`)
+        and the selected card wears the focus as its part's gen."""
         ws = self.ws
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id, modal_keys(ws),
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
-            self.grid.tab, self._tab_focus, self._tab_at, self._button_focus,
-            self._on_bar, self.grid.arrangement,
+            self.grid.tab, self._button_focus, self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
-    def _retained_key(self, cv):
+    def _retained_key(self, cv, statics=None):
         """Everything the WHOLE home frame's pixels are a pure function of: the
-        chrome statics plus the grid's dynamics (selection, scroll offset, the
-        cover-cache generation, trackball hover, per-item titles, favorites)
-        and the bar's own pixel key (`shown_key` -- clock minute, wifi state,
-        the look; reusing it means the bar's cache discipline IS this cache's
-        discipline). Anything that draws a pixel of the home frame and is NOT
-        derivable from this tuple is a staleness bug -- the silent-cache family
+        chrome statics (`statics`, where the caller made them this frame)
+        plus the grid's dynamics (selection, scroll
+        offset as it was set -- its clamp is a function of the statics' band
+        and item count -- the cover-cache generation, trackball hover, the
+        items and the titles they carry (the list, never mutated, and the
+        roster's count of titles taken in place), the settings rows'
+        generation for the favorites and the play records) and the bar's own
+        pixel key (`shown_key` -- clock minute, wifi state, the look; reusing
+        it means the bar's cache discipline IS this cache's discipline).
+        Anything that draws a pixel of the home frame and is NOT derivable
+        from this tuple is a staleness bug -- the silent-cache family
         surface_model_v1.md §14.2 documents -- so additions to the home draw
         must extend this key."""
         ws = self.ws
-        return (self._statics_key(cv), self.grid.sel, self.grid.scroll,
-                ws.covers.gen, self._lhover,
-                tuple(it.get("title") for it in self.grid.items),
-                ws.system.text("favorites"), ws.system.text("plays"),
-                ws.bar_layer.shown_key("home"))
+        g = self.grid
+        return (self._statics_key(cv) if statics is None else statics, g.sel,
+                g._scroll, ws.covers.gen, self._lhover, g.items,
+                ws.carts.titled, ws.system.gen(), ws.bar_layer.shown_key("home"),
+                self._tab_keys, self._tab_at, self._on_bar)
 
     def _try_stamp_retained(self, cv, dt):
         """Present the retained home frame when nothing it depends on changed:
@@ -3331,7 +3329,7 @@ class LauncherHomeLayer:
             return
         g = self._grid_or_none()
         if g is not None and not g.moving and ws.screen == self.id:
-            g.warm_faces()               # (only under the home: a face is the home's)
+            g.mint_faces()               # (only under the home: a face is the home's)
         cache = self._lib_cache
         try:
             if cache is None or cache.w != cv.w or cache.h != cv.h:
@@ -3431,7 +3429,7 @@ class LauncherHomeLayer:
             return
         if parts is None and self._carousel():
             parts = self._still_parts(cv, ws.wallpaper.restore_key(True))
-        bar = ws.bar_layer.shown_key("home")
+        bar = ws.bar_layer.shown_gen("home")
         try:
             cache = self._lib_cache
             lp = self._lib_parts
@@ -3475,16 +3473,15 @@ class LauncherHomeLayer:
         """Whether the home shows the carousel (else the grid arrangement)."""
         return isinstance(self.grid, Carousel)
 
-    def _try_drag_partial(self, cv, dt):
-        """The home's band frame (`_drag_partial`), timed for the home
+    def _try_band_frame(self, cv, dt):
+        """The home's band frame (`_band_frame`), timed for the home
         diag's HITCH split: only once the band's backdrop holds this frame's
         wallpaper, every arrangement's cards lying on it. Any frame takes it
         -- a step, a settle -- where the wallpaper puts its own pixels back
         (the hint strip lies on it) on a canvas that keeps them (not a
         recording root, `_lib_unsupported`), but on the desk's carousel, whose
-        selection is the hero beside the band (`_try_still_frame`); the band
-        shifts where the ground is the plain fill. Never under touch's
-        search line, which lies in the band."""
+        selection is the hero beside the band (`_try_still_frame`). Never
+        under touch's search line, which lies in the band."""
         bd = self._bd_now
         if bd is not None:
             fill = self.ws.wallpaper.restorer(cv, bd)
@@ -3494,11 +3491,11 @@ class LauncherHomeLayer:
             fill = self._backdrop_fill
         if self._search_line() is not None:
             return False
+        self.grid.flat = bd is not None and bd[0] == "bg"
         steps = (bd is not None and not self._lib_unsupported
                  and not (self._carousel() and self.grid.desk()))
-        return _drag_partial(self, cv, dt, self.grid, self.id, fill, self.strip,
-                             timed=True, plain=bd is not None and bd[0] == "bg",
-                             steps=steps)
+        return _band_frame(self, cv, dt, self.grid, self.id, fill, self.strip,
+                           timed=True, steps=steps)
 
     def _face_key(self, bd):
         """What the cards' kept faces (`Launcher._faces_for`) are drawn
@@ -3513,73 +3510,131 @@ class LauncherHomeLayer:
         g = self.grid
         g.frame_no = ws._frames_drawn
         g.restore_whole = True
-        g.face_key = None if self._lib_unsupported else (
-            ws.look.look_gen, bd[1] if bd is not None and bd[0] == "bg" else None,
-            ws.layout.fs)
+        if self._lib_unsupported:
+            g.face_key = None
+            return
+        gen = ws.look.look_gen
+        flat = bd[1] if bd is not None and bd[0] == "bg" else None
+        fs = ws.layout.fs
+        k = g.face_key
+        if k is None or k[0] != gen or k[1] != flat or k[2] != fs:
+            g.face_key = (gen, flat, fs)     # (kept while it holds: a frame allocates nothing)
 
     def _outside_key(self):
         """What the home's parts outside the band show of the selection:
-        the hint strip its verbs and its star (`_hint_groups`), the handheld
-        icons' caption band its cart and the day its line counts from."""
+        the hint strip its verbs and its star (`_hint_groups`), or the tab
+        row's keys while the tab row has them (`_draw_hints`), the handheld
+        icons' caption band its cart and the day its line counts from. The
+        hint strip's is made again only where what it is made of moved: the
+        grid's selection or items (its `zone_gen`), its tab, the favourites
+        (the settings rows' generation), the tab row's keys and the store's
+        `can_manage`."""
         g = self.grid
-        it = self.favourable()
-        hint = (self.zone_verbs(), it is not None and self.ws.carts.is_favorite(it))
+        ws = self.ws
+        m = self._ok
+        zg = g.zone_gen
+        sg = ws.system.gen()
+        tk = bool(self._tab_keys)
+        cm = getattr(ws, "can_manage", True)
+        if not (m[1] == zg and m[0] is g and m[2] == g.tab and m[3] == sg and m[4] == tk
+                and m[5] == cm and m[6] is g.favorite_for):
+            it = self.favourable()
+            m[7] = (self.zone_verbs(), it is not None and ws.carts.is_favorite(it), tk)
+            m[0] = g
+            m[1] = zg
+            m[2] = g.tab
+            m[3] = sg
+            m[4] = tk
+            m[5] = cm
+            m[6] = g.favorite_for
+        hint = m[7]
         if isinstance(g, IconHome) and g._cells().caption is not None:
             return (hint, (g.sel, g.today()))
         return (hint, None)
 
-    def _outside_rects(self):
-        """The rects of the parts outside the band `_paint_outside` paints."""
+    def _beside(self, cv, whole, draw=True):
+        """The parts outside the band a selection changes (the hint strip,
+        the handheld icons' caption band), inside the band's frame: each
+        named under its key (`ui.held`) and drawn where the buffer this
+        frame paints holds another selection's, or `whole`; their rects in
+        `_beside_drew`. With `draw` False they are only named (a frame
+        that drew them by other means)."""
+        drew = self._beside_drew
+        del drew[:]
         g = self.grid
-        out = []
-        h = g.foot()[5]
-        if h[2] > 0 and h[3] > 0:
-            out.append(h)
-        if isinstance(g, IconHome) and g._cells().caption is not None:
-            out.append(g._cells().caption)
-        return out
-
-    def _paint_outside(self, cv, was=None, now=None):
-        """Repaint the parts outside the band whose key differs from `was`
-        (the buffer's; None: every part) over the wallpaper's own pixels --
-        the hint strip, the handheld icons' caption band -- and answer their
-        rects."""
-        g = self.grid
+        now = self._outside_key()
         if now is None:
-            now = self._outside_key()
-        out = ()
-        h = g.foot()[5]
-        if (was is None or was[0] != now[0]) and h[2] > 0 and h[3] > 0:
-            self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
-            self._draw_home_chrome(cv)
-            out = (h,)
-        if now[1] is not None and (was is None or was[1] != now[1]):
-            c = g._cells()
-            g._draw_caption_band(cv, c)
-            out += (c.caption,)
-        return out
-
-    def _band_settle(self, cv, region):
-        """After a band frame with nothing moving: where every buffer holds
-        this frame (the ring's last RETAINED_FRAMES paints alike, with no
-        cursor), the retained frame is owed to an idle frame
-        (`capture_due`); else the frame that brings one more buffer to it is
-        asked for, while nothing moves and no press waits (`_still_debt`)."""
-        ring = region.ring
-        k = getattr(cv, "RETAINED_FRAMES", 0)
-        if not ring.whole(0) or ring.stamp(0) is not None:
             return
-        f0 = ring.frame(0)
-        k0 = ring.key(0)
-        o0 = ring.offset(0)
-        for i in range(1, k):
-            if (ring.frame(i) != f0 - i or not ring.whole(i) or ring.key(i) != k0
-                    or ring.offset(i) != o0 or ring.stamp(i) is not None):
+        kh = self._hk.of(now[0])
+        held = _ui.held("hint", kh)
+        # where the last frame's buffer holds the frame round the band and
+        # the part as this frame draws them, the part is copied out of it
+        cl = (getattr(cv, "copy_last", None)
+              if draw and not whole and _ui.held_last("band", self._keys[0]) else None)
+        if draw and (whole or not held):
+            h = g.foot()[5]
+            if h[2] > 0 and h[3] > 0:
+                if not (cl is not None and _ui.held_last("hint", kh)
+                        and cl(h[0], h[1], h[2], h[3])):
+                    self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
+                    self._draw_home_chrome(cv)
+                drew.append(h)
+        if now[1] is not None:
+            kc = self._ck.of(now[1])
+            held = _ui.held("caption", kc)
+            if draw and (whole or not held):
+                c = g._cells()
+                r = c.caption
+                if not (cl is not None and _ui.held_last("caption", kc)
+                        and cl(r[0], r[1], r[2], r[3])):
+                    g._draw_caption_band(cv, c)
+                drew.append(r)
+
+    def _name_beside(self, cv, whole):
+        """`_beside` naming the parts a whole paint drew."""
+        self._beside(cv, whole, False)
+
+    def _band_settle(self, end, whole=True):
+        """After a band frame with nothing moving, by its floor's end
+        (`ui.table_floor`): where every buffer holds this frame, the
+        retained frame is owed to an idle frame (`capture_due`); where one
+        lags behind a frame that drew the band `whole` (more than half of
+        it: a scroll's, a jump's, a cover's landing), the frame that brings
+        one more buffer to it is asked for, while nothing moves and no
+        press waits (`_still_debt`). Behind a step that drew its cells
+        alone, that frame is owed to an idle frame (`debt_due`): a frame
+        between two steps of a rolling ball would only delay the second,
+        and the next step's floor takes what that buffer lacks."""
+        if end == 0:
+            # (the statics this frame's band key was made of: `_band_key`)
+            key = self._retained_key(self.ws.sys_canvas, self._sk.v)
+            if key != self._lib_key:
+                self._cap_owed = (self.ws._frames_drawn, key, None)
+        elif end == -1:
+            if whole:
                 self._still_debt()
-                return
-        key = self._retained_key(cv)
-        if key != self._lib_key:
-            self._cap_owed = (self.ws._frames_drawn, key, None)
+            else:
+                self._debt_owed = self.ws._frames_drawn
+
+    def _band_note(self, cv, dt, vouch=True):
+        """A frame that put the band there by other means (the retained
+        frame's stamp, a still frame that drew no band): the band's kept
+        table and the parts beside it noted as this frame holds them."""
+        g = self.grid
+        return g.band_pass(cv, self.ws.covers.sheet_icon, None, _band_key(self, cv, dt, g, vouch),
+                           True, _cursor_stamp(self.ws), self._name_beside if vouch else None,
+                           note=True)
+
+    def _band_landed(self, cv, dt, vouch=True):
+        """After a pass that drew the band: where a cover landed while it
+        drew (the cover gen moved from the one its key holds), the cards
+        drew it, so the band is noted again under the key the new gen is
+        in: the buffer then holds the band whole under that key. Answers
+        whether it noted."""
+        if self.ws.covers.gen != self._keyed_gen:
+            self._band_note(cv, dt, vouch)
+            return True
+        return False
 
     # -- the desk home's still-backdrop frame ------------------------------
     #
@@ -3609,16 +3664,14 @@ class LauncherHomeLayer:
                 self._on_bar, self._back_tip)
         items = g.items
         it = items[g.nearest()] if items else None
-        st = ws.system
-        fav = st.text("favorites")
-        plays = st.text("plays")
+        rows = ws.system.gen()
         gen = ws.covers.gen
         sel = g.statics_sel()
         return (base,
                 (g.tab, sel, it, it and it.get("title"), it and it.get("description"),
-                 gen, fav, plays, self._button_focus, g.today()),
+                 gen, rows, self._button_focus, g.today()),
                 (g.tab, sel, gen, self._lhover, tuple(i.get("title") for i in items),
-                 fav, plays, g.scroll, g.moving))
+                 rows, g.scroll, g.moving))
 
     def _sel_rect(self):
         """The desk home's hero and details pane with all they cast (the
@@ -3673,23 +3726,28 @@ class LauncherHomeLayer:
         return alone is not None and alone()
 
     def _note_still(self, cv, parts, bar=None):
-        """Record this painted frame's parts in the ring, with the bar's key
-        (`shown_key`) its strip was drawn under, or with None that its
-        buffer holds something else."""
-        ring = self._still_ring
-        f = self.ws._frames_drawn
-        if parts is None or (ring.size and ring.frame(0) != f - 1):
-            ring.clear()                 # (another surface painted between)
-        if parts is None:
-            return
+        """Name this painted frame's parts in the band host's paint
+        (`ui.held`, the paint the band's pass began this frame): the
+        backdrop, the selection, the shelf, the bar's key (`shown_gen`) its
+        strip was drawn under and the hint strip's. Answers whether every
+        buffer now holds every part named (`ui.held_all`)."""
         if bar is None:
-            bar = self.ws.bar_layer.shown_key("home")
-        ring.note(f, parts[0], change=(parts[1], parts[2], bar, self._outside_key()))
+            bar = self.ws.bar_layer.shown_gen("home")
+        self.grid.resume_band_host(cv)
+        _ui.held("still", self._stk.of(parts[0]))
+        _ui.held("sel", self._slk.of(parts[1]))
+        _ui.held("shelf", self._shk.of(parts[2]))
+        _ui.held("bar", bar)
+        now = self._outside_key()
+        if now is not None:
+            _ui.held("hint", self._hk.of(now[0]))
+        return _ui.held_all()
 
     def _try_still_frame(self, cv, dt):
         """The desk home's frame over its still backdrop: the parts this
-        frame's buffer lacks put back over the wallpaper's own pixels, and
-        the bar. False when the frame must take another path."""
+        frame's buffer lacks (`ui.held` in the band host's paint) put back
+        over the wallpaper's own pixels, and the bar. False when the frame
+        must take another path."""
         ws = self.ws
         if (self._lib_unsupported or self._back_tip
                 or self._search_line() is not None):
@@ -3697,62 +3755,58 @@ class LauncherHomeLayer:
         parts = self._still_parts(cv, self._bd_now)
         if parts is None or not self._content_alone(dt):
             return False
-        n = _retained_n(cv)
-        ring = self._still_ring
-        if ring.size < n:
-            return False
-        f = ws._frames_drawn
-        base, sel, band = parts
-        bar = ws.bar_layer.shown_key("home")
-        hint = self._outside_key()
-        sel_lag = band_lag = bar_lag = hint_lag = False
-        for k in range(1, n + 1):
-            if ring.frame(k - 1) != f - k or ring.key(k - 1) != base:
-                return False
-            c = ring.change(k - 1)
-            if c[0] != sel:
-                sel_lag = True
-            if c[1] != band:
-                band_lag = True
-            if c[2] != bar:
-                bar_lag = True
-            if c[3] != hint:
-                hint_lag = True
+        bar = ws.bar_layer.shown_gen("home")
+        now = self._outside_key()
+        kb = self._stk.of(parts[0])
+        ks = self._slk.of(parts[1])
+        kd = self._shk.of(parts[2])
+        kr = bar
+        kh = self._hk.of(now[0])
         g = self.grid
+        g.begin_band_host(cv)
+        if not _ui.held("still", kb):
+            return False                 # (the buffer holds another backdrop)
+        # what the buffer this frame paints lacks, and what the buffer the
+        # last frame painted holds as this frame would draw it (§14.6),
+        # asked before anything draws through another host
+        sel_lag = not _ui.held("sel", ks)
+        band_lag = not _ui.held("shelf", kd)
+        bar_lag = not _ui.held("bar", kr)
+        hint_lag = not _ui.held("hint", kh)
+        last = _ui.held_last("still", kb)
+        rows = last and _ui.held_last("bar", kr)
+        sel_last = last and _ui.held_last("sel", ks)
+        band_last = last and _ui.held_last("shelf", kd)
+        hint_last = last and _ui.held_last("hint", kh)
         wm = ws.wm
         # A part the last frame painted as this one would is copied out of
         # its buffer (§14.6): whole rows where the bar there is this one's.
-        c = ring.change(0)
-        rows = c[2] == bar
-        lay_sel = sel_lag and not (c[0] == sel and self._copy_part(cv, self._sel_rect(), rows))
-        lay_band = band_lag and not (c[1] == band and self._copy_part(cv, g.band_rect(), rows))
+        lay_sel = sel_lag and not (sel_last and self._copy_part(cv, self._sel_rect(), rows))
+        lay_band = band_lag and not (band_last and self._copy_part(cv, g.band_rect(), rows))
         if bar_lag and rows and not (lay_sel or lay_band):
             for r in ws.wallpaper.bars():
                 if not self._copy_part(cv, r, True):
                     break
             else:
                 bar_lag = False
-        laid = self._lay_parts(cv, lay_sel, lay_band, sel_lag)
+        laid = self._lay_parts(cv, dt, lay_sel, lay_band, sel_lag)
         h = g.foot()[5]
         # the hint strip, where the buffer shows another selection's verbs:
         # copied where the last frame drew these, else drawn
         if (h[2] > 0 and h[3] > 0 and (hint_lag or _overlaps_any(laid, (h,)))
-                and not (c[3] == hint and not _overlaps_any(laid, (h,))
+                and not (hint_last and not _overlaps_any(laid, (h,))
                          and self._copy_part(cv, h, rows))):
             laid.append(h)
             ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
             self._draw_home_chrome(cv)
             wm.hand_content_damage(cv, h[0], h[1], h[2], h[3])
-        _note_band(self, cv, dt, g, True)
+        if not lay_band:
+            self._band_note(cv, dt)      # (the buffer holds the band as it is)
         # A strip this buffer holds under this key stays, unless a part
         # above was put back over it.
         if bar_lag or _overlaps_any(laid, ws.wallpaper.bars()):
             ws.bar_layer._draw_status_strip("home")
-        # The drag partial's streak counts whole frames under one statics
-        # key: a selection painted here is not one of them.
-        self._full_streak = 0
-        self._note_still(cv, parts, bar)
-        if self._still_held(parts, n):
+        if self._note_still(cv, parts, bar):
             # every buffer holds this frame: the retained frame takes it once
             # nothing waits on the board (`capture_due`)
             key = self._retained_key(cv)
@@ -3762,13 +3816,22 @@ class LauncherHomeLayer:
             self._still_debt()
         return True
 
+    def debt_due(self):
+        """Ask, on an idle frame, for the frame a step owed (`_band_settle`)
+        where no frame has painted since it and nothing moves."""
+        owed = self._debt_owed
+        self._debt_owed = None
+        ws = self.ws
+        if owed is not None and owed + 1 == ws._frames_drawn and not self.grid.moving:
+            ws.mark_dirty()
+
     def capture_due(self):
         """Take the retained frame a still frame owed (`_cap_owed`) on an
-        idle frame, or at the start of the next painted one before anything
-        draws: every buffer held that frame when it was owed and still does
-        while no frame has painted since and its key holds. Dropped
-        otherwise; the next still frame that finds every buffer holding it
-        owes it again."""
+        idle frame: every buffer held that frame when it was owed and still
+        does while no frame has painted since and its key holds. Dropped
+        otherwise -- a painted frame never pays it, so a run of taps does
+        not; the next still frame that finds every buffer holding it owes
+        it again."""
         owed = self._cap_owed
         self._cap_owed = None
         ws = self.ws
@@ -3783,15 +3846,14 @@ class LauncherHomeLayer:
         which holds it as this frame would draw it (§14.6) -- its whole rows
         with `rows`: what else they hold, the backdrop and the bar, is this
         frame's there too. False where the canvas cannot copy."""
-        cl = getattr(cv, "copy_last", None)
         if rows:
             r = (0, r[1], cv.w, r[3])
-        if cl is None or not cl(r[0], r[1], r[2], r[3]):
+        if not hasattr(cv, "copy_last") or not cv.copy_last(r[0], r[1], r[2], r[3]):
             return False
         self.ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
         return True
 
-    def _lay_parts(self, cv, sel_lag, band_lag, marks):
+    def _lay_parts(self, cv, dt, sel_lag, band_lag, marks):
         """Put the lagging parts back over the backdrop and draw them; the
         rects laid. `marks`: the buffer may hold the focus mark on another
         card."""
@@ -3810,26 +3872,12 @@ class LauncherHomeLayer:
             cv.clip()
             wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
         if band_lag:
-            g.repaint_band(cv, ws.covers.sheet_icon, fill, marks)
+            g.repaint_band(cv, ws.covers.sheet_icon, fill, _band_key(self, cv, dt, g, True),
+                           _cursor_stamp(ws), None, False, marks, True)
             bx, by, bw, bh = g.band_rect()
             laid.append((bx, by, bw, bh))
             wm.hand_content_damage(cv, bx, by, bw, bh)
         return laid
-
-    def _still_held(self, parts, n):
-        """Whether the ring's last `n` entries are `parts`: each retained
-        buffer holds this frame."""
-        ring = self._still_ring
-        if not ring.size:
-            return False
-        hint = ring.change(0)[3]
-        for i in range(n):
-            if i >= ring.size or ring.key(i) != parts[0]:
-                return False
-            c = ring.change(i)
-            if c[0] != parts[1] or c[1] != parts[2] or c[3] != hint:
-                return False
-        return True
 
     def _still_debt(self):
         """Ask for the frame that brings one more buffer to this frame,
@@ -3853,13 +3901,10 @@ class LauncherHomeLayer:
         (Layout.grid_bottom)."""
         ws = self.ws
         cv = ws.sys_canvas
-        _paint_continuity(self, ws)           # foreign paints void the buffers
         if ws.menu_ui.put_home(cv, dt):
             # the system menu's frame of the home, washed: the buffers hold
-            # the scrim, no frame of the home's own
-            self._full_streak = 0
-            self._note_still(cv, None)
-            self.grid._scroll_region().ring.clear()
+            # the scrim, no frame of the home's own (no band paint names
+            # the home's parts in it)
             return
         # The board's motion verdict (a WM constant, §12's degradation order).
         wm = ws.wm
@@ -3877,25 +3922,24 @@ class LauncherHomeLayer:
         if self.grid.flinging:
             ws.request_frame()
         self._bd_now = ws.wallpaper.restore_key(True)
-        self._face_key(self._bd_now)
+        if carousel:
+            self.grid.restore_whole = True
+        else:
+            self._face_key(self._bd_now)
         if carousel and self._try_still_frame(cv, dt):
             return
-        if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
-            self._note_still(cv, None)
-            return
+        if self._try_band_frame(cv, dt):    # the band's frame (#58/#66): it names
+            return                          # the band and the hint strip alone
         # Retained-frame stamp (2026-07-27): a re-entry whose pixels are provably
         # identical to the captured frame presents it in one blit. Bookkeeping
-        # matches a full paint exactly -- pixel-wise it IS one -- so the scroll
-        # ring and the drag partial's streak stay honest.
+        # matches a full paint exactly -- pixel-wise it IS one -- so the
+        # band's record stays honest.
         # (under the menu's hold the retained frame is the one before it)
         if not ws.menu_ui.holds_home() and self._try_stamp_retained(cv, dt):
-            _note_band(self, cv, dt, self.grid, True)
-            _advance_streak(self, cv)
-            if self._full_streak < getattr(cv, "RETAINED_FRAMES", 1) and self._bd_now is not None:
+            if self._band_note(cv, dt) == -1 and self._bd_now is not None:
                 self._still_debt()
             parts = self._still_now(cv, dt)
-            self._note_still(cv, parts)
-            if parts is not None and self._still_ring.size < _retained_n(cv):
+            if parts is not None and not self._note_still(cv, parts):
                 self._still_debt()
             return
         # perf_capture (#66 instrument-before-cutting): time the home frame's
@@ -3908,14 +3952,15 @@ class LauncherHomeLayer:
         # The hint strip and the cells' band (docs/shell_layout_2026-10.md
         # §12) over the wallpaper; the cards draw inside the band.
         self._draw_home_chrome(cv)
-        self._face_key(ws.wallpaper.restore_key(True))
-        self.grid.draw(cv, ws.covers.sheet_icon)
+        if not carousel:                      # (a carousel's cards draw: no faces)
+            self._face_key(ws.wallpaper.restore_key(True))
+        # (the band's kept table records this paint: the cursor's stamp about
+        # to land on top in it, and the parts beside the band named)
+        end = self.grid.draw(cv, ws.covers.sheet_icon, _band_key(self, cv, dt, self.grid, True),
+                             _cursor_stamp(ws), self._name_beside)
+        self._band_landed(cv, dt)
         if carousel and self.grid.desk():
             self._draw_details(cv)
-        # #113: record this full paint in the band's paint ring (offset + the
-        # state the pixels depend on + the cursor stamp about to land on top),
-        # so a band frame can shift and repaint only what moved.
-        _note_band(self, cv, dt, self.grid, True)
         _t2 = _ticks_ms() if _t0 is not None else None
         ws.bar_layer._draw_status_strip("home")
         if self._back_tip:
@@ -3924,16 +3969,14 @@ class LauncherHomeLayer:
             _t3 = _ticks_ms()
             ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
-        # A FULL paint landed in the current framebuffer.
-        _advance_streak(self, cv)
-        if self._full_streak < getattr(cv, "RETAINED_FRAMES", 1) and self._bd_now is not None:
-            self._still_debt()       # every buffer to the statics: the next step is a band frame
+        if end == -1 and self._bd_now is not None:
+            self._still_debt()       # every buffer to this frame: the next step is a band frame
         parts = self._still_now(cv, dt)
-        self._note_still(cv, parts)
+        owed = parts is not None and not self._note_still(cv, parts)
         if not ws.menu_ui.holds_home():
             # (under the menu the retained frame stays the one its close stamps)
             self._capture_retained(cv, dt, parts)   # retain this frame for re-entry stamps
-        if parts is not None and self._still_ring.size < _retained_n(cv):
+        if owed:
             self._still_debt()
 
     def _still_now(self, cv, dt):
@@ -4424,7 +4467,7 @@ class LauncherHomeLayer:
 
     def _hint_keys(self, i):
         """The hint strip's keys, typed (an edge: a held key acts once):
-        C, /, N, Y and X the verbs it names, Q and E the tabs, F the
+        C, /, N, Y, X and P the verbs it names, Q and E the tabs, F the
         selected card's favourite star."""
         k = self.ws.input.last_key
         prev = self._kprev
@@ -4441,7 +4484,8 @@ class LauncherHomeLayer:
         if ch == _FAVOURITE_KEY:
             return self.toggle_favourite()
         v = _VERB_KEY.get(ch)
-        if v is None or not (v in self.zone_verbs() or v in self.card_verbs()):
+        if v is None or not (v in self.zone_verbs() or v in self.card_verbs()
+                             or (v == "window" and v in self._desk_verbs())):
             return False
         self._do_verb(v)
         return True
@@ -4875,9 +4919,20 @@ class LauncherHomeLayer:
             self.toggle_favourite()
         elif verb == "options":
             self.open_card_menu()
+        elif verb == "window":
+            ws.defer(self._play_window)
         else:
             ws.toggle_search()
         ws.mark_dirty()
+
+    def _play_window(self):
+        """Make's Play on the desk: the selected cart run in a desk window
+        with its strip, not full screen (`WindowedWM.play_in_window`)."""
+        sel = self.grid.selected()
+        if sel is None:
+            return
+        self.ws.open(sel)
+        self.ws.wm.play_in_window()
 
 
 class HomeWindowLayer(LauncherHomeLayer):
@@ -4894,7 +4949,7 @@ class HomeWindowLayer(LauncherHomeLayer):
     wallpaper (the desk shows its own around the window), so nothing in it
     animates and an idle window draws nothing. The WM retains the window's
     buffer, so it keeps no retained frame of its own; a drag rides the
-    shared `_drag_partial` and the WM's content-gesture path."""
+    shared `_band_frame` and the WM's content-gesture path."""
 
     id = "projects"
     strip = "projects"
@@ -4907,6 +4962,16 @@ class HomeWindowLayer(LauncherHomeLayer):
     def _back(self):
         """B closes this window alone, as its title strip's X does."""
         self.ws.wm.close_window_kind(self.id)
+
+    def _desk_verbs(self):
+        """The home's buttons, and on Make a real card's Play third (owner,
+        2026-10-31): the game in a desk window, where a desk play is full
+        screen."""
+        out = LauncherHomeLayer._desk_verbs(self)
+        if self.grid.tab == "make" and "change" in out:
+            out = list(out)
+            out.insert(min(2, len(out)), "window")
+        return out
 
     def _wall(self):
         return None                           # the window lies on its panel
@@ -4924,9 +4989,9 @@ class HomeWindowLayer(LauncherHomeLayer):
         """The band's backdrop: the window's panel."""
         cv.rect(r[0], r[1], r[2], r[3], self.ws.theme_colors["panel"])
 
-    def _try_drag_partial(self, cv, dt):
-        return _drag_partial(self, cv, dt, self.grid, self.id, self._panel_fill,
-                             self.strip)
+    def _try_band_frame(self, cv, dt):
+        return _band_frame(self, cv, dt, self.grid, self.id, self._panel_fill,
+                           self.strip)
 
     def _outside_key(self):
         return None
@@ -4935,7 +5000,6 @@ class HomeWindowLayer(LauncherHomeLayer):
         ws = self.ws
         cv = ws.sys_canvas
         grid = self.grid
-        _paint_continuity(self, ws)           # foreign paints void the buffers
         th = ws.theme_colors
         grid.motion = getattr(ws.wm, "HOME_MOTION", "full")
         grid.scale = getattr(ws.wm, "HOME_SCALE", HOME_SCALE_HH)
@@ -4945,13 +5009,13 @@ class HomeWindowLayer(LauncherHomeLayer):
         grid.anim_frame(dt)
         if grid.flinging:
             ws.request_frame()
-        if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#113)
+        if self._try_band_frame(cv, dt):    # drag-scroll fast path (#113)
             return
         cv.cls(th["panel"])
         self._draw_home_chrome(cv)
-        grid.draw(cv, ws.covers.sheet_icon)
+        grid.draw(cv, ws.covers.sheet_icon, _band_key(self, cv, dt, grid, False),
+                  _cursor_stamp(ws))
+        self._band_landed(cv, dt, False)
         if grid.desk():
             self._draw_details(cv)
-        _note_band(self, cv, dt, grid, False)
         ws.bar_layer._draw_status_strip(self.strip)
-        _advance_streak(self, cv)

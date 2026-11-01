@@ -425,6 +425,7 @@ class ProjectStore:
             return False
         if t is not None:
             cart["title"] = t             # in-RAM sync (always)
+            ws.carts.titled += 1
         if a is not None:
             cart["author"] = a
         if not ws.can_manage:

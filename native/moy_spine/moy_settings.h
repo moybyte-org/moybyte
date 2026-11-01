@@ -78,6 +78,10 @@ int moy_settings_flush(moy_settings_t *s);
 
 // The changes since the store was last clean.
 uint32_t moy_settings_dirty(const moy_settings_t *s);
+// The changes since the store was made -- each set, delete and load one,
+// clean or not, wrapping: a reader keyed on what the rows hold compares
+// this, not the rows' text.
+uint32_t moy_settings_gen(const moy_settings_t *s);
 void moy_settings_clean(moy_settings_t *s);
 
 uint32_t moy_settings_count(const moy_settings_t *s);

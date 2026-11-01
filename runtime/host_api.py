@@ -419,17 +419,20 @@ class ConsoleDriver:
         return self.ws.pause.open or self.ws.confirm.open or self.ws.sysmenu.open
 
     def takes_escape(self):
-        """Esc is the console's: a menu shows, Settings or a registered app is
-        the fullscreen surface (its Esc is the bar's back), or the focused
-        desk window shows its back chevron."""
+        """Esc is the console's: a menu shows, a game plays fullscreen (its
+        Esc is the console's key), Settings or a registered app is the
+        fullscreen surface (its Esc is the bar's back), or the focused desk
+        window shows its back chevron."""
         ws = self.ws
-        return (self.menu_open() or ws.screen == "settings"
+        return (self.menu_open() or ws.plays_fullscreen() or ws.screen == "settings"
                 or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
                 or (ws.windowed_chrome and ws.wm.focus_has_back()))
 
     def escape(self):
         """Esc: the pause menu steps back (Options to its menu, the menu to
-        the game), the system menu closes; Settings and a registered app go
+        the game), the system menu closes; over a fullscreen game it is the
+        console's key (docs/shell_ux_v1.md §9a), the pause menu, whatever the
+        cart declared and whoever ran it; Settings and a registered app go
         back one level, as the bar's chevron and B do, and so does a desk
         window's app with a page open (its title strip's chevron); the
         Editor steps back (its one bar has no chevron), and on a desk a
@@ -442,6 +445,8 @@ class ConsoleDriver:
         elif ws.sysmenu.open:
             ws.sysmenu.close()
             ws.popover_touch()
+        elif ws.plays_fullscreen():
+            ws.system_key()
         elif ws.screen == "settings":
             ws.settings_layer.back()
         elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:

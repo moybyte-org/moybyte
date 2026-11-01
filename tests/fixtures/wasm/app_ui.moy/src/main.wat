@@ -10,7 +10,11 @@
 ;; 2 volume, 3 the theme row (from 0), 4 saves, 5 keys taken, 6 the swatch's
 ;; state, 7 the focused id's length, 8 the last row answer that failed,
 ;; negated (0: none), 9 a hash of the page's rows 40 to 159 (every eighth
-;; frame), which a board's run is held to the host's by.
+;; frame), which a board's run is held to the host's by, 10 the focused pane
+;; (from 0), 11 the first pane's size, 12 where a tap activated the second
+;; pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on it
+;; last was while pressed (the same; the part's nav is off, so a held press
+;; stays its own).
 (module
   (import "moy" "rect" (func $rect (param i32 i32 i32 i32 i32)))
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
@@ -66,6 +70,18 @@
   (import "moybyte.app" "ui_rule" (func $ui_rule (result i32)))
   (import "moybyte.app" "ui_text_view" (func $ui_text_view
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_table_part" (func $ui_table_part (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_part_at" (func $ui_part_at (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_table_dist" (func $ui_table_dist (result i32)))
+  (import "moybyte.app" "ui_table_floor" (func $ui_table_floor (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_held" (func $ui_held (param i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slots" (func $ui_slots (param i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slot" (func $ui_slot (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slot_next" (func $ui_slot_next (result i32)))
+  (import "moybyte.app" "ui_held_last" (func $ui_held_last (param i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_held_all" (func $ui_held_all (result i32)))
+  (import "moybyte.app" "ui_split" (func $ui_split
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -77,14 +93,48 @@
   (data (i32.const 1104) "Moy\00Night\00Berry")
   (data (i32.const 1136) "swatch")
   (data (i32.const 1152) "Save")
+  ;; the parts' table: its one column (a part), its rows' cells, and its
+  ;; override block -- id "parts", no hint, the flags (wash absent, part,
+  ;; bar) and the part's width 0 and rows 17 tall
+  (data (i32.const 1200) "\00")
+  (data (i32.const 1208) "a\00b\00c\00")
+  (data (i32.const 1216) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\05\00\00\00"
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "parts\ff\ff\ff\ff\38\00\00\00\00\00\00\00\11\00\00\00")
+
+;; the panes: their id, the part's in the second, and at 2300 their sizes,
+  ;; at 2308 their minimums, at 2320 the split's words (drag and focus, a gap
+  ;; of 6, the focused pane written each frame)
+  (data (i32.const 1300) "panes")
+  (data (i32.const 1310) "cell")
+  ;; the cell's override block: nav off (a held press stays the part's)
+  (data (i32.const 1320) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "\00\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff")
+  (data (i32.const 2300) "\50\00\00\00\00\00\00\00\28\00\00\00\28\00\00\00")
+  (data (i32.const 2320) "\06\00\00\00\06\00\00\00")
+
+  ;; the row of parts: its rows' cells, and its override block -- id "row",
+  ;; no hint, the flags (wash absent, part, axis "x", snap) and its parts 30
+  ;; wide and 26 tall
+  (data (i32.const 2600) "a\00b\00c\00d\00e\00")
+  (data (i32.const 2620) "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\03\00\00\00"
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "row\ff\ff\ff\ff\18\0c\00\00\1e\00\00\00\1a\00\00\00")
 
   ;; 2048: the page's rect (16 bytes); 2064: the part's (20); 2096: the
-  ;; focused id (32).
+  ;; focused id (32); 2200: the table's answers (8); 2208: a part's cell (16);
+  ;; 2400: the panes' rects and the divider's words (48); 2460: the second
+  ;; pane's part (20); 2490: where the pointer is in it (8); 2700: the row
+  ;; of parts' answers (8); 2710: a part's cell (16).
   (global $sound (mut i32) (i32.const 1))
   (global $vol (mut i32) (i32.const 5))
   (global $cur (mut i32) (i32.const 1))
   (global $saves (mut i32) (i32.const 0))
   (global $frames (mut i32) (i32.const 0))
+  (global $pane (mut i32) (i32.const 0))
+  (global $tap (mut i32) (i32.const 0))
+  (global $held (mut i32) (i32.const 0))
+  (global $xcur (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 8.
   (func $ok (param $r i32)
@@ -117,7 +167,8 @@
   (func (export "_update") (param $dt f32))
 
   (func (export "_draw")
-    (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32)
+    (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32) (local $i i32)
+    (local $d i32)
     (call $ok (call $ui_page (i32.const 1024) (i32.const 7) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_label (i32.const 1040) (i32.const 5) (i32.const 0) (i32.const 0)))
@@ -141,9 +192,62 @@
     (if (call $ui_button (i32.const 1152) (i32.const 4) (i32.const 1) (i32.const 0)
                          (i32.const 0))
       (then (global.set $saves (i32.add (global.get $saves) (i32.const 1)))))
+    (call $ok (call $ui_at (i32.const 230) (i32.const 2) (i32.const 80) (i32.const 34)))
+    (call $ok (call $ui_table (i32.const 0) (i32.const 0) (i32.const 1200) (i32.const 1)
+                              (i32.const 1208) (i32.const 6) (i32.const 1)
+                              (i32.const 1216) (i32.const 57) (i32.const 2200) (i32.const 8)))
+    (block $parts
+      (loop $next
+        (local.set $i (call $ui_table_part (i32.const 2208) (i32.const 16)))
+        (br_if $parts (i32.lt_s (local.get $i) (i32.const 0)))
+        (call $rect (i32.add (i32.load (i32.const 2208)) (i32.const 4))
+                    (i32.add (i32.load (i32.const 2212)) (i32.const 3))
+                    (i32.const 20)
+                    (i32.sub (i32.load (i32.const 2220)) (i32.const 6))
+                    (i32.add (i32.const 9) (local.get $i)))
+        (br $next)))
     (if (i32.eqz (i32.and (global.get $frames) (i32.const 7)))
       (then (drop (call $pmem (i32.const 9) (call $hash (i32.const 40) (i32.const 120))
                         (i32.const 1)))))
+    (call $ok (call $ui_at (i32.const 200) (i32.const 182) (i32.const 110) (i32.const 28)))
+    (call $ok (call $ui_table (i32.const 0) (i32.const 0) (i32.const 1200) (i32.const 1)
+                              (i32.const 2600) (i32.const 10) (global.get $xcur)
+                              (i32.const 2620) (i32.const 55) (i32.const 2700) (i32.const 8)))
+    (global.set $xcur (i32.load (i32.const 2700)))
+    (block $row
+      (loop $more
+        (local.set $i (call $ui_table_part (i32.const 2710) (i32.const 16)))
+        (br_if $row (i32.lt_s (local.get $i) (i32.const 0)))
+        (local.set $d (call $ui_table_dist))
+        (call $rect (i32.add (i32.load (i32.const 2710)) (i32.const 3))
+                    (i32.add (i32.load (i32.const 2714)) (i32.const 2))
+                    (i32.sub (i32.load (i32.const 2718)) (i32.const 6))
+                    (i32.sub (i32.sub (i32.load (i32.const 2722)) (i32.const 4))
+                             (i32.shr_s (i32.mul (local.get $d) (local.get $d)) (i32.const 16)))
+                    (i32.add (i32.const 9) (local.get $i)))
+        (br $more)))
+    (call $ok (call $ui_at (i32.const 10) (i32.const 214) (i32.const 180) (i32.const 20)))
+    (i32.store (i32.const 2328) (global.get $pane))
+    (global.set $pane (call $ui_split (i32.const 1300) (i32.const 5) (i32.const 2300) (i32.const 8)
+                                      (i32.const 2308) (i32.const 8) (i32.const 2320)
+                                      (i32.const 36) (i32.const 2400) (i32.const 48)))
+    (call $ok (global.get $pane))
+    (call $ok (call $ui_at (i32.load (i32.const 2416)) (i32.load (i32.const 2420))
+                           (i32.load (i32.const 2424)) (i32.load (i32.const 2428))))
+    (call $ok (call $ui_part (i32.const 1310) (i32.const 4) (i32.const 0) (i32.const 0)
+                             (i32.const 1320) (i32.const 36) (i32.const 2460) (i32.const 20)))
+    (if (i32.and (i32.load (i32.const 2476)) (i32.const 2))
+      (then (if (call $ui_part_at (i32.const 2490) (i32.const 8))
+        (then (global.set $tap
+          (i32.add (i32.add (i32.mul (i32.load (i32.const 2490)) (i32.const 256))
+                            (i32.load (i32.const 2494)))
+                   (i32.const 1)))))))
+    (if (i32.and (i32.load (i32.const 2476)) (i32.const 4))
+      (then (if (call $ui_part_at (i32.const 2490) (i32.const 8))
+        (then (global.set $held
+          (i32.add (i32.add (i32.mul (i32.load (i32.const 2490)) (i32.const 256))
+                            (i32.load (i32.const 2494)))
+                   (i32.const 1)))))))
     (local.set $f (call $ui_focus (i32.const 0) (i32.const 0) (i32.const 2096) (i32.const 32)))
     (global.set $frames (i32.add (global.get $frames) (i32.const 1)))
     (drop (call $pmem (i32.const 0) (global.get $frames) (i32.const 1)))
@@ -153,4 +257,9 @@
     (drop (call $pmem (i32.const 4) (global.get $saves) (i32.const 1)))
     (drop (call $pmem (i32.const 5) (call $ui_keys_taken) (i32.const 1)))
     (drop (call $pmem (i32.const 6) (i32.load (i32.const 2080)) (i32.const 1)))
-    (drop (call $pmem (i32.const 7) (local.get $f) (i32.const 1)))))
+    (drop (call $pmem (i32.const 7) (local.get $f) (i32.const 1)))
+    (drop (call $pmem (i32.const 10) (global.get $pane) (i32.const 1)))
+    (drop (call $pmem (i32.const 11) (i32.load (i32.const 2300)) (i32.const 1)))
+    (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))
+    (drop (call $pmem (i32.const 13) (global.get $held) (i32.const 1)))
+    (drop (call $pmem (i32.const 14) (global.get $xcur) (i32.const 1)))))

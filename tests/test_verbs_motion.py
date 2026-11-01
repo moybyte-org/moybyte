@@ -51,6 +51,10 @@ class Page:
             ui.page("Table")
             ui.at(10, 30, 300, 180)
             self.cur, _opened = ui.table("", ("Name", "N"), CELLS, self.cur)
+        elif self.kind == "stacked":
+            ui.page("Stacked")
+            ui.label("Above the table")
+            self.cur, _opened = ui.table("", ("Name", "N"), CELLS, self.cur)
         else:
             ui.page("Rows")
             if self.kind == "scroll":
@@ -103,6 +107,42 @@ def _ready(p, n=3):
     for _ in range(n):
         p.frame()
     return p
+
+
+def test_a_table_opens_on_its_current_row(th):
+    """A placed table's FIRST frame shows the row the app made current, at
+    once: an app started again on the row it left (Notes back from a Run)
+    shows that row, not the table's top."""
+    p = Page(th, "table")
+    p.cur = 30
+    p.frame()
+    at = p.offset()
+    assert at > 0, "the table opened at its top, row 30 out of sight"
+    assert not p.host.moving, "a jump, not a glide"
+    for _ in range(3):
+        p.frame()
+    assert p.offset() == at and p.cur == 30, "and it stays there"
+    top = Page(th, "table")
+    top.frame()
+    assert top.offset() == 0, "row 0 current: the top, as before"
+
+
+def test_a_stacked_table_opens_its_page_on_its_current_row_in_that_frame(th):
+    """On its page's first frame a stacked table's current row shows in THAT
+    frame: the page moves before the rows draw, and what was drawn above at
+    the top is painted over -- the frame is the one a whole redraw at that
+    scroll paints, with nothing owed after it."""
+    p = Page(th, "stacked")
+    p.cur = 30
+    p.frame()
+    at = p.offset()
+    assert at > 0, "the page opened at its top, row 30 out of sight"
+    assert not p.host.moving and not p.host.owes(), "no next frame to finish it"
+    first = p.pixels()
+    p.host.whole()
+    p.frame()
+    assert p.offset() == at and p.cur == 30
+    assert p.pixels() == first, "the moved frame is the one a whole redraw paints"
 
 
 @pytest.mark.parametrize("kind", ("page", "scroll", "table"))

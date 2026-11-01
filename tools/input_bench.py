@@ -15,6 +15,8 @@
 #   Surface                  a scrolling or text surface: setup, probe, inputs
 #   surfaces                 every surface, on the boards that have it
 #   run_surface              a surface's rows, its setup and teardown
+#   selected                 what --only / --inputs / --rows pick
+#   planned                  the rows a selection plays on a board
 #   report                   a run's rows as markdown, the furthest over 33 ms first
 #   main                     the CLI
 """Every scrolling and text surface, under every input a board has, timed as
@@ -25,7 +27,10 @@ presented frames.
     python3 tools/input_bench.py --board p4 --out DIR --only home --theme blocks   # a backdrop
     python3 tools/input_bench.py --board p4 --out DIR --only home --theme picture  # a picture
     python3 tools/input_bench.py --board tdeck --out DIR --split      # PERF DIAG lines, apart
+    python3 tools/input_bench.py --board p4 --out DIR --rows "Code:fling,Text console:drag"
     python3 tools/input_bench.py --report DIR/p4_input.json [--reanalyse]
+
+`tools/input_gate.py` runs this against a dev image for a surface's gate.
 
 The design this measures is docs/scroll_and_text_2026-10.md; §14 says what
 the tool is for. Numbers live in #66.
@@ -44,9 +49,10 @@ plus its key event, a typed character its byte as the key level while down
 
 **A scratch project.** Every row that types, pastes, finds, draws or edits
 runs on `Bench Scratch` (a copy of Star Catcher) or `Bench Scratch Blocks` (a
-copy of Coin Quest), which the bench makes at setup; the long note, the
-console script and My Art's drawings are `Bench Scratch` too. A seed cart is never opened for
-writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
+copy of Coin Quest), which the bench makes fresh at setup, first removing any
+an earlier run left (so the paste rows never grow the document a later run
+types into); the long note, the console script and My Art's drawings are
+`Bench Scratch` too. A seed cart is never opened for writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
 the note, the script and every doc the run made, and puts back the home's
 arrangement and tab, the theme's text and a `--theme` run's theme or wallpaper, the console's name, the clipboard,
 full-screen windows, PERF DIAG, and every wrapper; it leaves the board on
@@ -67,10 +73,12 @@ first frame after a key, a roll or a typed key), `coast` (after a release,
 the view moving), `glide` (after a step, the view moving), `settle` (the
 rest: the paints and copies a press costs after the view stopped). The gate
 is the p90 of the presented interval over live, coast and glide: from the
-previous presentation where the frames ran back to back, else from where
-the frame's own loop began (its start less the loop's measured share before
-a frame), so a press frame after idle loops is its upcalls, its paint and
-its present, never the pacing sleep before it; each class has its own p90. `first3` is the max
+previous presentation where the frames ran back to back, else from the top
+of the frame's own loop (`top`, read from the kernel's loop clock), so a
+press frame after idle loops is its inputs, its upcalls, its paint and its
+present, never the pacing sleep before it; each class has its own p90. The
+rule is `RULE`, which each row records: tools/input_gate.py never gates a
+row against one analysed under another. `first3` is the max
 of the first three presented intervals of every gesture (the press frame is
 its own gate). Per press: `lat` (the input to its first presentation) and
 `calm` (to its last frame before the next input: the debt and the refill).
@@ -118,8 +126,13 @@ COIN = "Coin Quest"
 DEVICE = r"""
 import time, array
 _T = time.ticks_us
+_M = time.ticks_ms
 _D = time.ticks_diff
-_NS = 18
+_NS = 19
+try:
+    from moy_loop import frame_at as _FA
+except ImportError:
+    _FA = None
 
 class _IB:
     pass
@@ -296,6 +309,7 @@ def _fr(dt):
     if not ib.on:
         return ib.of(dt)
     a = _T()
+    ta = _FA() if _FA is not None else None
     if ib.dfr >= 0:
         # the last frame's show waited for this loop's pre-frame hook
         ib.rec[ib.dfr * _NS + 12] = _D(a, ib.t0)
@@ -354,6 +368,16 @@ def _fr(dt):
         fc = getattr(ws, 'frame_change', None)
         rec[i + 16] = 1 if (ib.shifted or fc == 'shift') else 2 if fc == 'rows' else 0
         rec[i + 17] = pl
+        # the top of this frame's loop, from the kernel's ms clock: the run's
+        # zero sits on a ms edge (_ib_arm), so the top lies in a known ms of
+        # the run; its middle, never past the frame's own start
+        v = -1
+        if ta is not None:
+            lo = _D(ta, ib.m0) * 1000
+            if rec[i] - 1000000 <= lo <= rec[i]:
+                hi = lo + 999 if lo + 999 < rec[i] else rec[i]
+                v = (lo + hi) // 2
+        rec[i + 18] = v
         ib.n += 1
     ib.le = _D(_T(), ib.t0)
     return r
@@ -466,7 +490,12 @@ def _ib_arm(ev, probe, ms, null=False):
         elif ib.ks is None:
             ib.ks = _s
     ib.done = False
+    # the run's zero on an edge of the ms clock the kernel's loop keeps
+    m = _M()
+    while _M() == m:
+        _T()
     ib.t0 = _T()
+    ib.m0 = _M()
     ib.end = ms
     ib.on = True
 
@@ -539,6 +568,16 @@ def _ib_editor(title, tab=None, ws_key=None):
         ws.editor_app.set_tab(tab)
     ws.mark_dirty()
 
+def _ib_window():
+    # the Editor a window, whatever this board last left it as (`win_full`):
+    # the window is the WM's once a frame drew it, so this is a step after
+    # _ib_editor; "Code full screen" is the rows that take it full (_ib_full)
+    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    if _w is not None and getattr(_w, 'full', None) is not None and _w.full():
+        ws.wm.bring_forward('menu')
+        ws.wm.full_key()
+        ws.mark_dirty()
+
 def _ib_focus(tab):
     # the keys on the desk pane that shows `tab`, found in the arrangement
     # of the window the desk drew in
@@ -582,8 +621,11 @@ def _ib_picker():
     return (_s[0] + _ox, _s[1] + _oy, _s[2] - _s[0], _s[3] - _s[1])
 
 def _ib_full():
+    # the window full screen (never a toggle: _ib_window left it a window)
+    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
     f = getattr(ws.wm, 'full_key', None)
-    if f is not None:
+    if f is not None and not (_w is not None and getattr(_w, 'full', None) is not None
+                              and _w.full()):
         f()
         ws.mark_dirty()
 """
@@ -612,6 +654,25 @@ if _ib is not None:
     ws._ib = None
 """
 
+# The scratch content an earlier run left (one stopped before its cleanup, or
+# one whose cleanup found the content already there), removed before the
+# snapshot: every run starts on fresh copies, and the cleanup removes them.
+SCRATCH_RESET = r"""
+import os as _os
+_ib_desk()
+for _c in [c for c in ws.carts.all if c.get('title') in (%r, %r)]:
+    ws.carts.delete(_c)
+for _k in ('docs', 'drawings'):
+    for _n in (ws.carts_store.list_files(_k, ws.carts_root) or ()):
+        if not _n.startswith(%r):       # the note, the script, the drawings
+            continue
+        for _f in (ws.carts_store.file_path, ws.carts_store.history_path):
+            try:
+                _os.remove(_f(_k, _n, ws.carts_root))
+            except OSError:
+                pass
+"""
+
 # What the run found at setup, to put back (`SNAPSHOT`) and the putting back
 # (`CLEANUP`), each step on its own so one that fails does not keep the rest.
 SNAPSHOT = r"""
@@ -628,6 +689,7 @@ _cl = getattr(ws, 'clipboard', None)
 _ib_s['clip'] = _cl.text() if _cl is not None else None
 _ib_s['full'] = set(k for k, w in (getattr(ws.wm, '_wins', None) or {}).items()
                     if getattr(w, 'full', None) is not None and w.full())
+_ib_s['win_full'] = ws.system.get('win_full', None)
 """
 
 SCRATCH_MAKE = r"""
@@ -758,6 +820,8 @@ CLEANUP_STEPS = (
     "    if getattr(_w, 'full', None) is not None and _w.full() and _k not in ws._ib_s['full']:\n"
     "        ws.wm.bring_forward(_k)\n"
     "        ws.wm.full_key()",
+    "if ws._ib_s.get('win_full') is not None and ws.system.get('win_full', None) != ws._ib_s['win_full']:\n"
+    "    ws.system.set('win_full', ws._ib_s['win_full'])",
     "_ib_desk()",
     "for _c in [c for c in ws.carts.all if c.get('path') not in ws._ib_s['carts']]:\n"
     "    ws.carts.delete(_c)",
@@ -968,13 +1032,32 @@ def build_plan(name, surf, rect, matrix):
 # -- the numbers -------------------------------------------------------------------
 
 FIELDS = ("t0", "t1", "total", "content", "stamp", "windows", "home", "other", "present",
-          "copy", "fence", "probe", "show", "deferred", "flushes", "span", "kind", "prev")
+          "copy", "fence", "probe", "show", "deferred", "flushes", "span", "kind", "prev",
+          "top")
 NONE_PROBE = -99999
+# A row recorded before `top` holds the first 18 fields a frame, and is gated
+# under the interval rule of its day (`rule` absent): rows of two rules never
+# compare (tools/input_gate.py).
+LEGACY_NF = 18
+RULE = 2
+NO_TOP = -1
 
 
-def frames_of(raw):
-    n = len(raw) // len(FIELDS)
-    return [dict(zip(FIELDS, raw[i * len(FIELDS):(i + 1) * len(FIELDS)])) for i in range(n)]
+def frames_of(raw, nf=None):
+    """The frames of a row's `raw`, `nf` fields each (a row's own `nf`;
+    LEGACY_NF for a row that has none)."""
+    nf = nf or len(FIELDS)
+    n = len(raw) // nf
+    out = []
+    for i in range(n):
+        f = dict(zip(FIELDS, raw[i * nf:(i + 1) * nf]))
+        f.setdefault("top", -1)
+        out.append(f)
+    return out
+
+
+def row_nf(row):
+    return (row or {}).get("nf") or LEGACY_NF
 
 
 def presented(fr, tail=None):
@@ -1013,12 +1096,16 @@ def classes(fr, pres, marks):
     probed = any(f["probe"] != NONE_PROBE for f in fr)
     # A frame whose loop came right after the last painted one presents
     # `pres - pres_prev` after it. One after idle loops starts its interval
-    # where its own loop began: its start less the loop's own share before a
-    # frame (its upcalls and present wait), the median of that share where
-    # frames ran back to back, so the idle loops' pacing sleep is left out.
+    # at the top of its own loop (`top`: the kernel's clock where the loop
+    # woke), so its inputs, upcalls and present stage count and the idle
+    # loops' pacing sleep does not; a row recorded without `top` starts it
+    # at the frame's own start. Never a share borrowed from other frames:
+    # the gap between back-to-back frames holds their pacing sleep and the
+    # last frame's present wait, and which frames ran back to back is the
+    # image's frame mix, so a share taken from them moved every after-idle
+    # frame of a row with it (a P4 grid key_steps whose worst frame matched
+    # dev's read 6 ms over it).
     cont = [i > 0 and abs(f["prev"] - fr[i - 1]["t1"]) < 1000 for i, f in enumerate(fr)]
-    pre = [(f["t0"] - f["prev"]) / 1000.0 for i, f in enumerate(fr) if cont[i]]
-    up = statistics.median(pre) if pre else 0.0
     out = []
     mi = -1
     first_of = {}
@@ -1034,7 +1121,8 @@ def classes(fr, pres, marks):
         if cont[i]:
             iv = pres[i] - prev
         else:
-            iv = pres[i] - max(prev if prev is not None else 0.0, f["t0"] / 1000.0 - up)
+            top = f["top"] if f["top"] != NO_TOP and f["top"] <= f["t0"] else f["t0"]
+            iv = pres[i] - max(prev if prev is not None else 0.0, top / 1000.0)
         moved = (f["probe"] != NONE_PROBE and i > 0 and fr[i - 1]["probe"] != NONE_PROBE
                  and f["probe"] != fr[i - 1]["probe"])
         if m[1] == "touch":
@@ -1051,12 +1139,16 @@ def classes(fr, pres, marks):
     return out
 
 
-def analyse(raw, plan_d, tail=None, steps=None, rect=None, px=False, axis="v"):
-    """A row's numbers from its frames (`raw`, FIELDS each) and its plan's
-    marks, segments and releases (`plan_d`, as `Bench.play` keeps them)."""
-    fr = frames_of(raw)
+def analyse(raw, plan_d, tail=None, steps=None, rect=None, px=False, axis="v", nf=None):
+    """A row's numbers from its frames (`raw`, `nf` fields each: FIELDS) and
+    its plan's marks, segments and releases (`plan_d`, as `Bench.play` keeps
+    them). `rule` is RULE where the frames carry their loop's top."""
+    nf = nf or len(FIELDS)
+    fr = frames_of(raw, nf)
     marks = [tuple(m) for m in plan_d["marks"]]
     out = {"painted": len(fr), "gestures": len(marks)}
+    if nf == len(FIELDS):
+        out["rule"] = RULE
     if not fr:
         return out
     pres = presented(fr, tail)
@@ -1237,17 +1329,17 @@ def expected(row, null_row, board):
     ph, kind = phase_of(row["surface"], row["input"], board)
     if ph is None:
         return None
-    fr = frames_of(row.get("raw") or [])
+    fr = frames_of(row.get("raw") or [], row_nf(row))
     if not fr:
         return None
     a = analyse(row["raw"], row["plan"], row.get("tail"), px=row.get("px", False),
-                axis=row.get("axis", "v"))
+                axis=row.get("axis", "v"), nf=row_nf(row))
     pres = presented(fr, row.get("tail"))
     cl = classes(fr, pres, [tuple(m) for m in row["plan"]["marks"]])
     pass_by = {}
     home = row["surface"].startswith("home")
     if null_row is not None and null_row.get("raw"):
-        nf = frames_of(null_row["raw"])
+        nf = frames_of(null_row["raw"], row_nf(null_row))
         npres = presented(nf, null_row.get("tail"))
         ncl = classes(nf, npres, [tuple(m) for m in null_row["plan"]["marks"]])
         for c in ("live", "coast", "glide", "settle"):
@@ -1356,6 +1448,9 @@ class Bench:
                 json.dump(self.rows, f)
 
     def setup(self, theme=None):
+        slug = SCRATCH.lower().replace(" ", "_")      # the store's name for the title
+        self.ex(SCRATCH_RESET % (SCRATCH, SCRATCH + " Blocks", slug),
+                settle=0.5, strict=True)
         self.ex(SNAPSHOT, strict=True)
         if theme == "picture":
             # a picture wallpaper the size of the glass, over the theme in
@@ -1443,14 +1538,14 @@ class Bench:
         row = {"surface": surf.name, "input": inp, "board": self.board,
                "windowed": self.windowed, "api_offset": self.offset, "speaks": self.speaks, "rect": rect,
                "axis": surf.axis, "px": surf.px, "plan": plan_d, "tail": tail,
-               "raw": got["raw"]}
+               "raw": got["raw"], "nf": len(FIELDS)}
         row.update(analyse(got["raw"], plan_d, tail, got["steps"] if ball else None,
                            rect, surf.px, surf.axis))
         if self.null:
             ng = self.play(plan, probe, null=True)
             if ng is not None:
                 nrow = {"surface": surf.name, "input": inp, "plan": plan_d,
-                        "tail": ng["tail"], "raw": ng["raw"], "rect": rect,
+                        "tail": ng["tail"], "raw": ng["raw"], "nf": len(FIELDS), "rect": rect,
                         "axis": surf.axis, "px": surf.px}
                 row["null"] = nrow
         ex = expected(row, row.get("null"), self.board)
@@ -1533,6 +1628,7 @@ def _app(app):
 
 def _ed(title, tab=None, key=None):
     return [("_ib_editor(%r, %r, %r)" % (title, tab, key), 4.0),
+            ("_ib_window()", 1.0),
             ("_ib_focus(%r)" % tab, 1.0)]
 
 
@@ -1546,11 +1642,48 @@ _FIND = ("ws.code_layer._find_open or ws.code_layer._toggle_find()\n"
 _UNFIND = "ws.code_layer._find_open and ws.code_layer._toggle_find()"
 _EDPROBE = "ws.editor.top * 100000 + ws.editor.row * 1000 + ws.editor.col"
 _FULL = [("_ib_full()", 1.5)]
+# The sound under the Music tab grown to 32 steps in memory (never saved), so
+# its rows scroll; put back after.
+_MUSIC32 = ("_me = ws.music_ui.musicedit\n_s = _me.cur_sfx()\nws._ib_n0 = len(_s.steps)\n"
+            "_s.steps[ws._ib_n0:] = [[36 + _i % 12, _i % 8, 1 + _i % 7] for _i in range(32 - ws._ib_n0)]\n"
+            "_me.step = 0\nws.mark_dirty()", 1.0)
+_MUSIC0 = ("_me = ws.music_ui.musicedit\n_s = _me.cur_sfx()\n"
+           "del _s.steps[getattr(ws, '_ib_n0', len(_s.steps)):]\n_me.step = 0\nws.mark_dirty()")
 CODE_RECT = (0.02, 0.18, 0.58, 0.62)
 LEFT_PANE = (0.01, 0.17, 0.59, 0.71)
 RIGHT_PANE = (0.385, 0.17, 0.6, 0.71)
 PICKER = (0.055, 0.27, 0.285, 0.33)
-_NOTES = [("_ib_desk()", 1.0), ("@run Notes", 4.0),
+# The Notes the image ships, whichever image ran last: the boot seeds a
+# built-in only over an OLDER one, so after a newer image a dev image runs the
+# store's newer Notes against its own runtime, which it may not open a note
+# in. Where the store's version is not the image's, the folder is seeded
+# again from the image's roster (its manifest and the manifest's backup
+# gone, the seed rewrites it whole) and the catalogue read again.
+NOTES_OWN = r"""
+def _ib_own(title):
+    import moy_seed as _ms
+    try:
+        import carts_data as _cd
+    except ImportError:
+        return None
+    ros = getattr(_cd, 'CARTS_Z', None)
+    if not ros or not _ms.is_packed(ros):
+        return None
+    for e in ros:
+        if e[0] != title:
+            continue
+        d = _ms.cart_path(ws.carts_root, _ms.cart_folder(title, _ms.BUILTIN_NS))
+        if _ms._cart_version(d) == int(e[1]):
+            return int(e[1])
+        for f in ('/manifest.json', '/manifest.json.bak'):
+            _ms._remove(d + f)
+        _ms.seed_packed([e], ws.carts_root)
+        ws.carts.apply(ws.carts.store.call(lambda: _mc.catalogue(ws.carts_root)))
+        return int(e[1])
+_ib_own('Notes')
+"""
+
+_NOTES = [(NOTES_OWN, 1.0), ("_ib_desk()", 1.0), ("@run Notes", 4.0),
           ("ws._ib_last = ws.player.ns['prefs'].get('last')\n"
            "ws.player.ns['_open'](ws._ib_note)\nws.mark_dirty()", 2.0)]
 _NOTES_OUT = ("_p = ws.player.ns['prefs']\n"
@@ -1632,9 +1765,20 @@ def surfaces():
         inputs=("type", "type_fast"), text={"type": ("helpers", 10),
                                             "type_fast": ("more_helpers", 20)},
         teardown="ws.cards_layer.prompt and ws.cards_layer._close_prompt()"))
+    s.append(Surface("Pause card", [("_ib_desk()", 1.0), ("@run Star Catcher", 4.0),
+                                    ("ws.pause.show()\nws.mark_dirty()", 1.5)],
+                     "ws.pause.sel", inputs=("key_steps", "key_20"),
+                     teardown="ws.pause.open and ws.pause.close()\nws.exit()"))
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
+    # the same over 32 steps; "v" walks the steps' cursor, so its rows scroll
+    s.append(Surface("Music steps 32", _ed(SCRATCH, "music", "sound") + [_MUSIC32], axis="h",
+                     keys=("right", "left"), rect=LEFT_PANE, teardown=_MUSIC0,
+                     inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
+    s.append(Surface("Music steps v", _ed(SCRATCH, "music", "sound") + [_MUSIC32],
+                     "ws.music_ui.musicedit.step", rect=LEFT_PANE, teardown=_MUSIC0,
+                     inputs=("key_steps", "key_held", "key_20")))
     s.append(Surface("Sprite pickers", _ed(SCRATCH, "paint", "art") + [
         ("ws.paint_layer._open_pickers()\nws.mark_dirty()", 1.5)],
         rect="picker", teardown="ws.paint_layer._pop = False\nws.mark_dirty()"))
@@ -1647,7 +1791,7 @@ def surfaces():
                      rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.exit()"))
     s.append(Surface("Text console", [("_ib_desk()", 1.0),
                                       ("ws.run_script('docs', ws._ib_script)", 4.0)],
-                     "ws.script_console.back", inputs=("fling", "drag", "type", "type_fast",
+                     "ws.script_console.top", inputs=("fling", "drag", "type", "type_fast",
                                                        "ball_slow"),
                      teardown="ws.exit()"))
     return s
@@ -1666,8 +1810,8 @@ def _rect(bench, surf):
         v = bench.val("ws.projects_grid._region.view")
         return (x + v[0], y + v[1], v[2], v[3]) if v else (x, y, w, h)
     if r == "pane":
-        b = bench.val("(lambda d, c: c and c[3])(ws.editor_desk, ws.editor_desk is not None "
-                      "and ws.editor_desk.active() and ws.editor_desk._code_pane())")
+        b = bench.val("(lambda d, c: c and c[4])(ws.editor_desk, ws.editor_desk is not None "
+                      "and ws.editor_desk.active() and ws.editor_desk._own_pane())")
         if b:
             return (x + b[0] + b[2] // 16, y + b[1] + b[3] // 16, b[2] * 7 // 8, b[3] * 7 // 8)
         r = CODE_RECT                   # a handheld's Editor: the code fills the content
@@ -1788,13 +1932,58 @@ def reanalyse(path):
     for r in rows:
         if not r.get("raw"):
             continue
-        r.update(analyse(r["raw"], r["plan"], r.get("tail"),
-                         r.get("steps"), r.get("rect"), r.get("px", False), r.get("axis", "v")))
+        r.update(analyse(r["raw"], r["plan"], r.get("tail"), r.get("steps"), r.get("rect"),
+                         r.get("px", False), r.get("axis", "v"), nf=row_nf(r)))
         ex = expected(r, r.get("null"), r.get("board", ""))
         if ex is not None:
             r["expected"] = ex
     with open(path, "w") as f:
         json.dump(rows, f)
+
+
+def selected(only=(), inputs=(), rows=None):
+    """The surfaces `--only` (lower-case substrings), `--inputs` and `--rows`
+    pick, each with the inputs it plays (None: every one it takes)."""
+    for surf in surfaces():
+        if only and not any(o in surf.name.lower() for o in only):
+            continue
+        want = list(inputs) or None
+        if rows:
+            if surf.name not in rows:
+                continue
+            want = [i for i in rows[surf.name] if not inputs or i in inputs]
+            if not want:
+                continue
+        yield surf, want
+
+
+def planned(board, windowed, only=(), inputs=(), rows=None):
+    """The (surface, input) rows a run with that selection plays on `board`:
+    `selected` less what `run_surface` skips there."""
+    out = []
+    for surf, want in selected(only, inputs, rows):
+        if surf.where in ("desk", "full") and not windowed:
+            continue
+        for inp in surf.inputs:
+            if want and inp not in want:
+                continue
+            if inp.startswith("ball") and board not in MATRIX_BOARDS:
+                continue
+            out.append((surf.name, inp))
+    return out
+
+
+def parse_rows(spec):
+    """`SURFACE:INPUT,...` as {surface: [input, ...]}, in the order given."""
+    rows = {}
+    for item in spec.split(","):
+        if not item.strip():
+            continue
+        surf, sep, inp = item.rpartition(":")
+        if not sep or not surf.strip() or not inp.strip():
+            raise SystemExit("--rows: %r is not SURFACE:INPUT" % item)
+        rows.setdefault(surf.strip(), []).append(inp.strip())
+    return rows
 
 
 def main():
@@ -1803,6 +1992,9 @@ def main():
     ap.add_argument("--out", help="the run's directory (its rows: BOARD_input.json)")
     ap.add_argument("--only", default="", help="surface names, comma separated (substring)")
     ap.add_argument("--inputs", default="", help="input names, comma separated")
+    ap.add_argument("--rows", default="",
+                    help="exact rows, comma separated SURFACE:INPUT (a gate's re-run); "
+                         "with --only/--inputs, a row runs when it is in both")
     ap.add_argument("--no-null", action="store_true", help="skip the null-floor plays")
     ap.add_argument("--split", action="store_true",
                     help="each surface's long drag under PERF DIAG instead: LOOP/PUMP/PERF")
@@ -1826,15 +2018,14 @@ def main():
     b = P4Board(_port(a.board), board_dir=board_dirs()[a.board])
     only = [x.strip().lower() for x in a.only.split(",") if x.strip()]
     inputs = [x.strip() for x in a.inputs.split(",") if x.strip()]
+    rows = parse_rows(a.rows)
     bench = None
     try:
         bench = Bench(b, a.board, path, null=not a.no_null)
         bench.setup(a.theme)
-        for surf in surfaces():
-            if only and not any(o in surf.name.lower() for o in only):
-                continue
+        for surf, want in selected(only, inputs, rows):
             print("== %s" % surf.name, flush=True)
-            run_surface(bench, surf, inputs, a.split)
+            run_surface(bench, surf, want, a.split)
     finally:
         if bench is not None:
             bench.cleanup()

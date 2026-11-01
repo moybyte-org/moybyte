@@ -8,9 +8,11 @@
 handheld's tab and the desk Editor's Settings pane alike.
 
 The cards are one group: an `int` card a slider whose value stands at its
-right, a two-way `choice` a toggle, a `sprite-tiles` choice a row of the
-sprites to pick from (a part: left and right step it, a tap takes a tile),
-any other choice a cycle. Then This project: Cart info and Files, the doors
+right, a two-way `choice` a toggle (a `choice-icons` one too: its two
+icons are off and on), a `sprite-tiles` or `bg-thumbs` choice and a
+`choice-icons` one of three or more a row of the pictures to pick from (a
+part: left and right step it, a tap takes a tile), any other choice a
+cycle. Then This project: Cart info and Files, the doors
 the tab already had (`CardsLayer`'s dialog and its file list). A card's
 label is its `card` text up to its value, as a kid reads it ("Run at").
 A change is the config's and the undo history's, as a stepper's was
@@ -147,10 +149,12 @@ class SettingsPage:
             return
         ch = f["choices"]
         idx = ch.index(cur) if cur in ch else 0
-        if f.get("display") in ("sprite-tiles", "choice-icons", "bg-thumbs"):
+        disp = f.get("display")
+        two = len(ch) == 2 and not f.get("names")
+        if disp in ("sprite-tiles", "bg-thumbs") or (disp == "choice-icons" and not two):
             self._tiles_row(cv, th, f, label, idx, desk, tap)
             return
-        if len(ch) == 2 and not f.get("names"):
+        if two:
             on = ui.toggle(label, idx == 1, {"id": key})
             if on != (idx == 1):
                 self._set(f, ch[1 if on else 0])
