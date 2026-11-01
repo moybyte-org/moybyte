@@ -83,7 +83,9 @@ def _native_ui():
 
 moy_ui = _native_ui()
 
-from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
+from .editors_code import CodeEditor  # noqa: E402
+from .editors_paint_map import PaintEditor  # noqa: E402
+from .editors_sheet import SpriteSheet  # noqa: E402
 from .input import InputState  # noqa: E402
 from .moy_image import Image  # noqa: E402
 

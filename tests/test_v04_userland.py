@@ -1749,7 +1749,7 @@ def test_background_declares_color_and_image_backdrops():
     # #63 fast-by-default: background(x) declares the backdrop ONCE; the api's
     # _moy_restore_bg hook repaints it (a color cls, or a baked full-screen layer)
     # so a naive cart never writes a per-frame cls/backdrop blit.
-    from runtime import host_app, palette
+    from runtime import host_app
     cv = Canvas(64, 48)
     api = host_app.make_api(cv, StubInput(), {})
     red = chrome.color("red")
@@ -1778,7 +1778,7 @@ def test_background_declares_color_and_image_backdrops():
 def test_player_restores_declared_background_each_frame(tmp_path):
     # The Player calls the restore hook BEFORE the cart's frame, so a cart with
     # background() and NO cls still gets a clean backdrop every frame.
-    from runtime import host_app, palette
+    from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     # A GAME: it owns all 320x240, so pixel (0, 0) is the cart's. An app runs with
     # the bar over that row. Which cart sorts first is alphabetical, so say "game".
