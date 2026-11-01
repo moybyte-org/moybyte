@@ -6,7 +6,7 @@ This is what `runtime/app_context.py`'s `Damage`, `Surface`, `Theme` and
 `Prefs`, `runtime/widgets.py`'s `Clipboard`, the ArtworkService's open picture
 and `runtime/system_api.py`'s grant policy did before sprint 5 steps 4 to 6
 moved them to C, reshaped only where the design moved the line
-(docs/kernel_appabi_2026-10.md section 2): a grant table keyed by the app's id,
+(native/moy_app/README.md): a grant table keyed by the app's id,
 the role mask checked on every call, the damage flags the frame gate takes, each
 grant's surface row and the pointer it is offset from, the live token table
 under its generation, Paint's open picture in its settings rows, a clipboard of

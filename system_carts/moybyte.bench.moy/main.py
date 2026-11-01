@@ -233,7 +233,7 @@ ROLE_REPS = 5
 
 
 def _role_row():
-    """The app ABI's role row (docs/kernel_appabi_2026-10.md section 9): two
+    """The app ABI's role row (docs/history/kernel_appabi_2026-10.md section 9): two
     role reads -- the clipboard's `seq()`, a C row over a grant, and
     `theme.colors()`, the frame path's commonest, a C row and the dict of its
     generation -- against the attribute hop each replaced (`seq` and the token

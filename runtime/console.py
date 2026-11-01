@@ -4767,7 +4767,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # A store session a role opened and left open (`files.begin`, the C
         # row's count; `carts.begin`, the handle's) ends here, at the next
         # frame: it holds no gate, so this is bookkeeping, never a flush held
-        # off (docs/kernel_appabi_2026-10.md section 2.6).
+        # off (native/moy_app/README.md).
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:

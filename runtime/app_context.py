@@ -42,7 +42,7 @@ the roles above (`tests/test_app_context.py` holds it).
 
 Every context holds a GRANT (`ctx.grant`): a row of native/moy_app's grant
 table, keyed by the app's id, carrying its role mask, its files kind and its
-prefs namespace (docs/kernel_appabi_2026-10.md section 2.2). Every role object
+prefs namespace (native/moy_app/README.md). Every role object
 is native/moy_app's over that grant, one method per row of
 `native/moy_app/roles.json`: a C row reads the kernel's state (the damage
 flags, the grant's surface row, the live token table, the settings rows, Paint's

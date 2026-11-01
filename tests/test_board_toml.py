@@ -442,7 +442,7 @@ def test_every_console_takes_the_player_and_the_zero_denies_it(board):
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
     """native/moy_app is the app ABI's kernel half
-    (docs/kernel_appabi_2026-10.md): every console takes it; the Zero, which
+    (docs/history/kernel_appabi_2026-10.md): every console takes it; the Zero, which
     runs no apps, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])

@@ -1,4 +1,4 @@
-"""The ROLE door (docs/kernel_appabi_2026-10.md section 2.1): the upcall that
+"""The ROLE door (native/moy_app/README.md): the upcall that
 carries arguments, a compiled app's one way to a role row.
 
 One script drives `moy_app_role` over a grant -- the C rows it runs itself,

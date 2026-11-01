@@ -118,8 +118,7 @@ class StoreHandle:
         flash-backed boards it is a passthrough."""
         return self.ws._with_sd(fn)
 
-    # A role's session (`carts.begin`/`end`, docs/kernel_appabi_2026-10.md
-    # section 2.6) is bookkeeping and nothing else: it holds no gate, because
+    # A role's session (`carts.begin`/`end`, native/moy_app/README.md) is bookkeeping and nothing else: it holds no gate, because
     # every op takes the gate around itself (`call`). The console ends any
     # left open at the frame's end and at a run's end (`end_all`); the files
     # role's sessions are the C rows' own, ended there too.

@@ -1206,8 +1206,7 @@ def a_quiet_console_collects_its_garbage(board):
 
 
 def a_leaked_session_leaves_the_panel_flushing(board):
-    """The bus rule of the app ABI's sessions (docs/kernel_appabi_2026-10.md
-    section 2.6): on the T-Deck the card shares the panel's SPI host, and the
+    """The bus rule of the app ABI's sessions (native/moy_app/README.md): on the T-Deck the card shares the panel's SPI host, and the
     gate that drains the flush is held only around one store op, never by a
     session. A files session begun and never ended, with a store op inside it,
     must leave the panel presenting every repaint, and the next frame ends it."""
@@ -2028,8 +2027,7 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
 
 
 def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
-    """Only the launcher comes back after a stop (docs/kernel_appabi_2026-10.md
-    section 5): the same cart `vmstop force` stops the VM for from the shelf,
+    """Only the launcher comes back after a stop (native/moy_app/README.md): the same cart `vmstop force` stops the VM for from the shelf,
     started the way Storybook's and Get Carts' PLAY start it (a workspace and
     a run whose caller is a live Python surface), keeps the VM, and the run
     names the reason "place"."""
@@ -2838,7 +2836,7 @@ APP_UI = ("app_ui", "App UI Wasm")
 
 
 def wasm_app_push(board, board_dir):
-    """The compiled app fixtures (docs/kernel_appabi_2026-10.md section 4),
+    """The compiled app fixtures (docs/history/kernel_appabi_2026-10.md section 4),
     built for this board's chip and pushed as wasm_<name>.moy: App Roles Wasm,
     the same module with no permission (App Short Wasm), and App Shell Wasm,
     which imports a shell-served row, and App UI Wasm, which draws the

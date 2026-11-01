@@ -1,7 +1,7 @@
 ;; App Shell Wasm: a compiled app that imports a row the Python console serves
-;; (theme_set_variant: the look's switch, docs/kernel_appabi_2026-10.md
-;; section 2.4). It never calls it; importing it is what keeps the VM up for
-;; its runs, and the VM-free verdict names the import.
+;; (theme_set_variant: the look's switch, a shell-served row:
+;; native/moy_app/README.md). It never calls it; importing it is what keeps
+;; the VM up for its runs, and the VM-free verdict names the import.
 ;;
 ;; This file is the cart's SOURCE; main.wasm is built from it with
 ;; tools/wasm_cart.py and never committed.

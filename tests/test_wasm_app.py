@@ -1,4 +1,4 @@
-"""A compiled app reaching its roles through imports (docs/kernel_appabi_2026-10.md
+"""A compiled app reaching its roles through imports (docs/history/kernel_appabi_2026-10.md
 section 4): the app ABI's import adapter (native/moy_app/moy_app_wasm.h) on
 the host's WAMR, the load's grant check and the VM-free verdict's clauses.
 

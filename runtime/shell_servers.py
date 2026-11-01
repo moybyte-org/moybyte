@@ -10,7 +10,7 @@
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
 """The console's servers for the app ABI's rows it serves (native/moy_app/
-roles.json's "shell" rows, docs/kernel_appabi_2026-10.md section 2.1): the
+roles.json's "shell" rows, native/moy_app/README.md): the
 verbs whose state is the Python console's -- the look, the live cart list, the
 wallpaper cart, the achievements, the routes, Get Carts' transport. The files
 role and the wallpaper's copy are C over the user-files layer

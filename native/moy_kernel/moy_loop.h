@@ -153,7 +153,7 @@ enum {
 // a MOY_UP_* failure.
 typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 
-// THE ROLE DOOR (docs/kernel_appabi_2026-10.md section 2.1): the upcall that
+// THE ROLE DOOR (native/moy_app/README.md): the upcall that
 // carries arguments. A compiled app's call of a role row the Python console
 // serves: the calling grant, the row (native/moy_app/roles.json's index), the
 // row's arguments packed in `arg` (n bytes, native/moy_app/moy_app.h's field

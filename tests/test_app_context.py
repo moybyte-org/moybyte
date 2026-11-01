@@ -593,7 +593,7 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
 
 
 def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
-    """The bus rule (docs/kernel_appabi_2026-10.md section 2.6): on the
+    """The bus rule (native/moy_app/README.md): on the
     T-Deck the card shares the panel's SPI host, and the gate that drains the
     flush is held only around one store op. This is the host's model of it: a
     gate held while `_with_sd` runs a cart-store op (the files rows take the

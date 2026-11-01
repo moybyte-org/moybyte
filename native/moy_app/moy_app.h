@@ -1,4 +1,4 @@
-// The app ABI's kernel half (docs/kernel_appabi_2026-10.md): the grants, the
+// The app ABI's kernel half (docs/history/kernel_appabi_2026-10.md): the grants, the
 // grant policy, and the roles served in C. roles.json beside this file is the
 // role table; a C row there is a function here, and tests/test_moy_app.py holds
 // the two equal.
@@ -443,7 +443,7 @@ int moy_app_table_role(uint32_t row);
 int moy_app_table_c_row(uint32_t row);
 const char *moy_app_table_name(uint32_t row);
 
-// A compiled app's way to any row (docs/kernel_appabi_2026-10.md section 2.1):
+// A compiled app's way to any row (native/moy_app/README.md):
 // the grant first, table row `row`, its arguments packed in `arg` (n bytes)
 // and its answer written into `ans` (cap bytes). It answers >= 0, the row's
 // number or the length of the text or blob written, or a MOY_APP_* code
