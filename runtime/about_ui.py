@@ -3,7 +3,7 @@
 #   wrap_lines          paragraphs broken into lines a width wide, in the ui face
 #   LicencesPage        Settings' Licences: the parts and their licences, a licence's text
 #   AboutCard           the system menu's About: Moy, the version, the board, two rows
-"""About on the console (docs/look_2026-10.md step 32): the system menu's
+"""About on the console (docs/history/look_2026-10.md step 32): the system menu's
 About card and Settings' Licences page, on the public UI API's verbs.
 
 * Licences is a page of Settings (its About group's last row): Moybyte's
@@ -111,7 +111,7 @@ def wrap_lines(paras, w):
 
 # The list's override table, the handheld's page and the desk's scroll region
 # alike: the parts this image holds never change while it runs, so its gen
-# never moves (docs/scroll_and_text_2026-10.md §3.3).
+# never moves (docs/history/scroll_and_text_2026-10.md §3.3).
 _LIST_PAGE = {"gen": 0}
 
 

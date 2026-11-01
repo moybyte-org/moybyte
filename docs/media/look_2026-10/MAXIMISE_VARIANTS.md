@@ -7,7 +7,7 @@ tools in the shell bar, and **V2**, a maximised app full screen. **The owner
 chose V2 as amended (2026-10-21, decision E-05)**, for every app: its V2
 part below is the design; the title strip and V1 are not chosen and keep
 their pictures. The last part, **Resize**, is the owner's chosen way to size
-the panes (R-01), and the places it meets `docs/studio_2026-09.md`.
+the panes (R-01), and the places it meets `docs/history/studio_2026-09.md`.
 `rounds/round14.py` draws every picture (`draw.py`), and
 `editor_maximise_compare.png` stacks the three Art workspaces.
 
@@ -104,7 +104,7 @@ title strip. The app's own **row** is the top 40 px: the icon and the name
 in the title slot, the app's tools (the Editor's workspaces, undo, redo and
 the 170 px Play slot, labelled), then **minimise, restore and close** in
 the top-right corner, exactly as on every desk window: the WM draws them
-and answers them (`docs/studio_2026-09.md` S3). Restore leaves full screen
+and answers them (`docs/history/studio_2026-09.md` S3). Restore leaves full screen
 and puts the window back in its place on the desk.
 
 **Nothing reveals the bar** while an app is full screen: no edge dwell and
@@ -131,7 +131,7 @@ event carries its modifiers, and Super acts on its release).
 The owner asked (2026-10-21) for panes the user can size, to suit a screen
 and a taste, and chose this one of three ways (R-01, with the reviewers'
 fixes; snapping dividers and size presets were not drawn). It follows
-`docs/studio_2026-09.md` §4.2–4.4 and S5–S7. Pictures, on the title-strip
+`docs/history/studio_2026-09.md` §4.2–4.4 and S5–S7. Pictures, on the title-strip
 frame, Moy Day:
 `moy-light_desktop_editor-resize-{art,code,code-drag,art-min,art-800x480}.png`.
 
@@ -196,7 +196,7 @@ frame, Moy Day:
   second mechanism. The grip's 28 px hit is under the desk's 32 px floor,
   and should grow to it.
 
-### Where `docs/studio_2026-09.md` and the Workspaces design disagreed
+### Where `docs/history/studio_2026-09.md` and the Workspaces design disagreed
 
 The owner took each proposal (2026-10-21), with S3 reworded; the studio
 doc says the decided rule in place.

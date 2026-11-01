@@ -83,7 +83,7 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
-// chrome's (docs/theming_2026-09.md section 4.1), in role-id order.
+// chrome's (docs/theme_and_shell_2026-11.md §3.1), in role-id order.
 static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
     "panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
     "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim",

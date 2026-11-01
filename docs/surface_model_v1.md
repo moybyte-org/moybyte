@@ -11,7 +11,7 @@ of six, at *surface* granularity) and refuses everything that review killed
 (fine-grained damage, inferred static content). That doc was archived 2026-08-27
 and its still-binding kernel folded in as **§14**, so live code cites this file.
 It does not supersede `shell_ux_v1.md` (what the UI does) or
-`visual_identity_v1.md` (how it looks); it governs **how pixels reach glass**.
+`theme_and_shell_2026-11.md` (how it looks); it governs **how pixels reach glass**.
 
 **How to use this doc:** this is the contract. A new backend implements §4 and its
 annex in §5; it does not invent a new invalidation mechanism (Law L10). A change
@@ -264,7 +264,7 @@ shell's own draws on this tier change when a restyle changes them, once and
 named, gated by the suite, the roster and `tools/p4_bench.py --board tdeck
 --repaint` within its thresholds (amended 2026-10-11 for theming's phase 2b,
 which moved the T-Deck editors' frozen dark literals onto the theme's tokens;
-`docs/theming_2026-09.md` §9).
+`docs/history/theming_2026-09.md` §9).
 
 **A compiled cart's frame reaches the flush from the cart's own memory and
 adds nothing to the contract.** The game composite on a banded board is a
@@ -822,7 +822,7 @@ the trust `note_damage` already places in the WM (§5.2). On the rotated
 compositor the window's damage is that change rect, not the window.
 
 **An app on the verbs draws every frame it draws straight into the glass**
-(`WindowedWM._speaks`: its pages' frames say what they change, docs/scroll_and_text_2026-10.md §8)
+(`WindowedWM._speaks`: its pages' frames say what they change, docs/history/scroll_and_text_2026-10.md §8)
 when its window is focused and on top with nothing over it: its press,
 drag, coast, key and glide frames, each with no desk restore and no
 chrome, since a page moving on its own (`ws.ui_moving`) changes its
@@ -912,7 +912,7 @@ buffer it painted (`copy_last`), or in a window the WM's word
 (`window_frame` 2 and up), a pane's included. One modal is up at a time,
 so the holds share one layer of the canvas's size, kept across dialogs
 and freed by the Player's fit check after the home's retained frame
-(`docs/shell_layout_2026-10.md` §3). The Editor's Cart info
+(`docs/theme_and_shell_2026-11.md` §8.1). The Editor's Cart info
 dialog and Blocks' entry prompts hold their page (`Hold.under`); the pause
 and stop cards hold the run's frame washed beside the frame the same hold
 keeps as the game left it for the resumed game (`Hold.snap`), in a second
@@ -1039,7 +1039,7 @@ scrim's ride copying, every buffer then byte-equal to whole repaints) and
 §14.3 to §14.6 bring a lagging buffer to the glass by drawing what it lacks
 or copying what the last frame painted. A scrolling page moves: frame n
 draws the same rows as frame n-1, moved, plus a band. The shift frame is that
-change spoken as a record (`docs/scroll_and_text_2026-10.md` §3 is the
+change spoken as a record (`docs/history/scroll_and_text_2026-10.md` §3 is the
 design; this is the contract): what a frame changed is ROWS (rects the draw
 repainted), or one region R TRANSLATED by Δ -- the pixels moved, the |Δ|
 rows the move uncovered drawn, and rows beside them.

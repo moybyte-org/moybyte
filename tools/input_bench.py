@@ -6,7 +6,7 @@
 #   build_plan               the named inputs, at the rate a hand makes them
 #   -- the numbers           FIELDS, presented, classes
 #   analyse                  a row's numbers: the gates, the first three, the finger
-#   -- the arithmetic        docs/scroll_and_text_2026-10.md §14's terms
+#   -- the arithmetic        docs/history/scroll_and_text_2026-10.md §14's terms
 #   phase_of                 which phase reaches a row, and the frame it makes
 #   expected                 §14's arithmetic for a row, from its null-floor pass
 #   Bench                    one board's run: install, scratch, rows, cleanup
@@ -32,7 +32,7 @@ presented frames.
 
 `tools/input_gate.py` runs this against a dev image for a surface's gate.
 
-The design this measures is docs/scroll_and_text_2026-10.md; §14 says what
+The design this measures is docs/theme_and_shell_2026-11.md; §14 says what
 the tool is for. Numbers live in #66.
 
 **Input on wall-clock time.** The console plays a schedule against its own
@@ -1248,7 +1248,7 @@ def _finger(fr, plan_d, axis):
 
 # -- the arithmetic ----------------------------------------------------------------
 
-# docs/scroll_and_text_2026-10.md §14's terms that are not this run's to
+# docs/history/scroll_and_text_2026-10.md §14's terms that are not this run's to
 # measure: the design's configuration and #113's verb costs, (low, high) ms.
 DIRECT_STAMP = 1.1
 SHIFT_MS = {"p4": (0.04, 0.04), "s3": (4.3, 5.0), "one": (0.0, 0.0)}

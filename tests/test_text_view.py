@@ -1,5 +1,5 @@
 """The text view (native/moy_ui/moy_ui_text.h, `ui.text_view`;
-docs/scroll_and_text_2026-10.md §5): the Code tab's and theme Config's rows,
+docs/history/scroll_and_text_2026-10.md §5): the Code tab's and theme Config's rows,
 the desk's made code and an app's terminal, drawn in C through the verb, and
 only the rows that changed.
 

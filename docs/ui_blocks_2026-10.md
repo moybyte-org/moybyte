@@ -137,7 +137,7 @@ or wasm row. They fall into three kinds:
   parts. They gain their Lua and wasm rows as they are. A toast is a non-stop
   overlay, not a popover.
 - **Frame-path tools.** `band` (the shift floor; it has no callers),
-  `card_clip` and `keep` (`docs/scroll_and_text_2026-10.md` designs them).
+  `card_clip` and `keep` (`docs/theme_and_shell_2026-11.md` designs them).
   `band` is deleted. The other two go only when their callers move.
 - **One-caller parts.**
   - `month` is called by `popover.py`, and `tile` by `achievements_ui.py`.

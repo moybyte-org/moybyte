@@ -1,4 +1,4 @@
-"""`tools/look_shots.py`, the 2026-10 look's review kit (docs/look_2026-10.md
+"""`tools/look_shots.py`, the 2026-10 look's review kit (docs/history/look_2026-10.md
 step 1): every scene `docs/media/look_2026-10/index.txt` names has a shell
 setup, and a scene renders from the real shell and pairs with its mockup."""
 

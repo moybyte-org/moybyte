@@ -1,4 +1,4 @@
-"""The TEXT CONSOLE -- a script's screen (step 6 of docs/text_editing_2026-09.md).
+"""The TEXT CONSOLE -- a script's screen (step 6 of docs/theme_and_shell_2026-11.md §10).
 
 A script is a cart with no folder, and this is the surface it runs on: a
 bounded scrollback that `print()` appends to, and a prompt line the shared
@@ -42,7 +42,7 @@ Nothing grows: the oldest row is overwritten, and a resize does not reflow rows
 that are already in the ring (a terminal does not either) -- new writes take
 the new width.
 
-The log draws through `ui.text_view` (docs/scroll_and_text_2026-10.md §5): a
+The log draws through `ui.text_view` (docs/history/scroll_and_text_2026-10.md §5): a
 drag scrolls it by pixels and its release coasts, and while it shows its foot
 new rows glide it down to the new foot; scrolled up, it stays where it is.
 
@@ -428,7 +428,7 @@ class TextConsole:
 
     def draw(self):
         """The run's draw hook: the whole console, on whatever surface the
-        Player bound for this script (docs/look_2026-10.md step 33): the code
+        Player bound for this script (docs/history/look_2026-10.md step 33): the code
         surface, the scrollback in the code face, what was typed in `value`,
         the prompt line on a band at the foot with the caret in `accent` --
         or, after the script ended, that it did -- and the hint strip under

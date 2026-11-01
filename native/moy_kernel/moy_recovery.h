@@ -1,4 +1,4 @@
-// moy_recovery: the kernel's own screens (docs/look_2026-10.md step 33,
+// moy_recovery: the kernel's own screens (docs/history/look_2026-10.md step 33,
 // GAPS 55).
 //
 // THE FLOOR comes up when the VM fails to start (its first heap area is not

@@ -579,7 +579,7 @@ def test_rescan_loads_no_cart_whole_and_the_open_path_rehydrates_it(tmp_path):
     assert cart["src"].startswith("def _draw") and cart["lazy"] is False
 
 
-# -- the play records (docs/look_2026-10.md step 18) ---------------------------
+# -- the play records (docs/history/look_2026-10.md step 18) ---------------------------
 
 def _real(ws, n=1):
     return [c for c in ws.carts.all if c.get("path")][:n]

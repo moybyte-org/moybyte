@@ -70,7 +70,7 @@ int moy_ui_danger_ink(void);
 // A kind's own states (rest, hover, hot) whose (field, ink) misses the
 // contrast floor take its floor forms (style.json's "floors"), in order.
 
-// -- button kinds (docs/look_2026-10.md step 10) -------------------------------------
+// -- button kinds (docs/history/look_2026-10.md step 10) -------------------------------------
 //
 // `button(kind=...)`'s names are style.json's button_kinds, each drawn as a
 // style kind. The live theme's `buttons[kind]` and `app_buttons[app][kind]`
@@ -107,7 +107,7 @@ const int16_t *moy_ui_sprite_slots(int look);
 
 // -- the theme's shape: surfaces, metrics, text effects ----------------------------
 //
-// A SURFACE (docs/theming_2026-09.md §4.4) is one line of text in a theme,
+// A SURFACE (docs/theme_and_shell_2026-11.md §3.4) is one line of text in a theme,
 // compiled once by the loader (moy_theme.c) into a record: an edge, a fill and
 // its two colours, an optional border and an optional shadow. A colour is a
 // TERM: a palette index (0-63), a token of the look's row
@@ -162,7 +162,7 @@ void moy_ui_shape_clear(moy_ui_shape_t *sh);
 // (style.json's theme.chain) reaches, here, once.
 int moy_ui_shape_use(const moy_ui_shape_t *sh);
 const moy_ui_shape_t *moy_ui_shape(void);
-// The font each role's text draws in (docs/theming_2026-09.md §4.7), the
+// The font each role's text draws in (docs/theme_and_shell_2026-11.md §3.7), the
 // roles in style.json's theme.font_roles order: `key` and `op` are the
 // faces a button kind's `font` leaf names (a theme's buttons[kind].font),
 // `result` a display's large figure. A role draws in petme128 until a font
@@ -195,7 +195,7 @@ int64_t moy_ui_print_font(uint32_t font);
 // shape: NULL / 0 where it names none.
 const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state);
 int moy_ui_shape_effect(const moy_ui_shape_t *sh, int part, int state, int *role);
-// The readability check of a pattern fill (docs/theming_2026-09.md §7): each
+// The readability check of a pattern fill (docs/theme_and_shell_2026-11.md §6): each
 // part and state of `sh` whose surface is a dither or a pinstripe, its label's
 // ink in `look` against both of the pattern's colours on theme.contrast. The
 // first `cap` (part, state) pairs that miss go to `out`; answers how many miss.
@@ -245,7 +245,7 @@ int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
 // A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
 int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
                       int scale);
-// The live theme's icon set for the parts the C draws (docs/look_2026-10.md
+// The live theme's icon set for the parts the C draws (docs/history/look_2026-10.md
 // step 16): its mask files at 16 and 24 px (0 where it has none, the whole
 // set off when both are) and the glyph codes of close, maximize and
 // minimize, by MOY_UI_FB_*. runtime/iconsets.py installs it at a look change.
@@ -275,7 +275,7 @@ uint32_t moy_ui_icon_font(int size24);
 // `slot`, the largest that `b` holds, centred, else glyph `glyph` at the
 // font scale `fs`. 1 when drawn.
 int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs);
-// An icon mask through a sink (docs/look_2026-10.md step 16): the glyph at
+// An icon mask through a sink (docs/history/look_2026-10.md step 16): the glyph at
 // index byte `code` of font `font` (an icon set's file, tools/make_icons.py;
 // moy_text_glyph, never decoded as text) at (x, y), the top left of its
 // square, blended in colour index `ci` at scale 1. MOY_UI_BAD for a font that
@@ -285,7 +285,7 @@ int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int
 void moy_ui_count_call(void);
 uint32_t moy_ui_calls(void);
 
-// -- depth (moy_ui_depth.c, docs/look_2026-10.md step 6) -------------------------
+// -- depth (moy_ui_depth.c, docs/history/look_2026-10.md step 6) -------------------------
 //
 // The theme's look as the shapes draw it: radii, the shadow and the edges,
 // resolved once per theme and mode (moy_ui_depth_use) and read by the window
@@ -524,7 +524,7 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
 // centred vertically. Answers the drawn width.
 int moy_ui_label(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink, int align);
 
-// What a label meets (moy_text.h's paint, docs/look_2026-10.md step 4): `bg`
+// What a label meets (moy_text.h's paint, docs/history/look_2026-10.md step 4): `bg`
 // the colour index the caller has filled the whole box with (-1: not known,
 // the glyph lane reads), and a shadow in colour index `shadow` (-1: none) at
 // `shadow_a` (1..255) of the coverage, (dx, dy) pixels at the font scale
@@ -611,7 +611,7 @@ int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, in
 // A theme part's id by name, or -1.
 int moy_ui_part(const char *name, size_t n);
 
-// -- window frames (docs/theming_2026-09.md §4.5) ---------------------------------------
+// -- window frames (docs/theme_and_shell_2026-11.md §3.5) ---------------------------------------
 //
 // A window's decoration in the built-in style the installed shape chooses
 // (style.json's theme.frames), with its title alignment and button order.
@@ -622,7 +622,7 @@ int moy_ui_part(const char *name, size_t n);
 // theme names are painted in place of the style's own; the title takes
 // `window.title`'s text effect. The role sheet's `window` 9-slice replaces
 // the ring's top row and the strip, and a title button's sprite its surface
-// and glyph (docs/theming_2026-09.md §4.6). States are MOY_THEME_S_ACTIVE /
+// and glyph (docs/theme_and_shell_2026-11.md §3.6). States are MOY_THEME_S_ACTIVE /
 // _INACTIVE.
 enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK = 3 };
 // What a full-screen row draws in maximise's place (moy_ui_icon_button's id;
@@ -630,7 +630,7 @@ enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK
 #define MOY_UI_FB_RESTORE 4
 // A frame's optional buttons (`btns`): a minimise, and the back chevron at
 // the head of the strip, before the icon and the title, that a window whose
-// app has opened a page of it shows (docs/look_2026-10.md step 27a).
+// app has opened a page of it shows (docs/history/look_2026-10.md step 27a).
 // MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
 // content stands in from its sides by the foot (the game window's matte,
 // WindowChrome._win_edge), so the body paints those columns too, as it
@@ -665,7 +665,7 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
 // app's colour of the look's `tiles` (step 26b), or with MOY_THEME_NONE the
 // tile's own fill.
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
-// What a modal dims under it (docs/look_2026-10.md, D-01): box `b` washed in
+// What a modal dims under it (docs/history/look_2026-10.md, D-01): box `b` washed in
 // the look's `scrim` colour at its alpha (black at 40% where it is silent).
 int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b);
 // The scrim over the pixels of `src` instead of the sink's, each result
@@ -772,7 +772,7 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
                          int32_t slop, float dt_ms, int32_t *offset, int32_t content,
                          int32_t *tx, int32_t *ty);
 
-// -- the parts (moy_ui_parts.c; docs/look_2026-10.md step 12) --------------------------
+// -- the parts (moy_ui_parts.c; docs/history/look_2026-10.md step 12) --------------------------
 //
 // The rows the public UI API's verbs draw (docs/ui_api_2026-10.md): a label
 // and, at the right, a value of one KIND -- an info's text, a link's text and

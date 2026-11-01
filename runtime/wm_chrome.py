@@ -485,7 +485,7 @@ class WindowChrome:
         minimize on every window, a running game's too (`_minimize` holds
         its run while it is hidden), so every frame has one control set; and
         the back chevron while its app has a page of it open
-        (docs/look_2026-10.md step 27a), which the chrome's freeze signature
+        (docs/history/look_2026-10.md step 27a), which the chrome's freeze signature
         carries."""
         if win.kind == "desktop":
             return _ui_draw.FRAME_MIN
@@ -776,7 +776,7 @@ class WindowChrome:
         self._draw_look_chips(sc, th, fs, line_h)
 
     def _draw_look_chips(self, sc, th, fs, line_h):
-        """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):
+        """The taskbar chips as the look's tabs (docs/history/look_2026-10.md step 14):
         the window's icon (in `_win_icon`'s order) then its title, the
         focused window's chip raised under the current mark, another open
         window's in the dim ink. The focused chip's content takes the ink the

@@ -6,7 +6,7 @@ thorough test of "does the shell still draw the night colorway at 1x". What
 they cannot see is everything below, and it is most of what this object does:
 
   * **a switch moves `look_gen`.** Every cache whose pixels read the look
-    folds that one integer (docs/theming_2026-09.md §6), so a switch that
+    folds that one integer (docs/theme_and_shell_2026-11.md §5), so a switch that
     forgot to publish would leave the launcher painting the old colorway until
     something else happened to dirty it, which no single-frame hash would
     catch. tests/test_theme_look_gen.py walks every cache it reaches.
@@ -127,7 +127,7 @@ def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
 def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
     """Both home layers' statics keys (one shared base, `_statics_base`) fold
     `look_gen`, and no key in the shell reads a theme dict's or an icon
-    sheet's identity (docs/theming_2026-09.md §6: a freed object's id() is
+    sheet's identity (docs/theme_and_shell_2026-11.md §5: a freed object's id() is
     reused)."""
     ws = build_ws(tmp_path)
     for f in sorted(ROOT.joinpath("runtime").glob("*.py")):
@@ -249,7 +249,7 @@ def test_the_font_scale_lands_on_the_root_canvas_not_a_window_buffer(tmp_path):
     assert ws.look.effective_font_scale() == 3
 
 
-# -- wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) ---------------
+# -- wallpaper: the theme's (D6, docs/theme_and_shell_2026-11.md §3.9) ---------------
 
 def test_wallpaper_options_are_the_wallpaper_carts(tmp_path):
     ws = build_ws(tmp_path)

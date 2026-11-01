@@ -1,5 +1,5 @@
 """NOTES -- the console's one text app, and it is a CART (step 3 of
-docs/text_editing_2026-09.md), on the public UI API's verbs (docs/look_2026-10.md
+docs/theme_and_shell_2026-11.md §10), on the public UI API's verbs (docs/history/look_2026-10.md
 step 31, docs/media/look_2026-10/APPS_RESTYLE.md's Notes).
 
 The page is `system_carts/moybyte.notes.moy/main.py`: the vault as a table, a

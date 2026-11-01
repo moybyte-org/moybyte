@@ -1,4 +1,4 @@
-"""The bar widgets' popovers (docs/shell_layout_2026-10.md §8, the look's
+"""The bar widgets' popovers (docs/theme_and_shell_2026-11.md §8.6, the look's
 step 33): each a component the popover (`widgets.Popup`) holds, hung from
 its widget on every glass in the system's flat card with no wash (D-01),
 its content on the public UI API's verbs.

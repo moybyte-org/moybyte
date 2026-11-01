@@ -1,7 +1,7 @@
 # Appearance mockups (2026-10-14)
 
 The pictures behind theming phase 6's Appearance page
-(`docs/theming_2026-09.md` §4.10 and §9, phase 6). **Every file is a
+(`docs/history/theming_2026-09.md` §4.10 and §9, phase 6). **Every file is a
 hand-drawn mockup, not an engine render**, drawn by `mockups.py` here
 (`.venv/bin/python docs/media/theming_2026-09/appearance/mockups.py`): MOY64
 only, Tiny5 and petme128, the real 16×16 system icons, the D1 parts. The

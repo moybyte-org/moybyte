@@ -15,7 +15,7 @@ from runtime import host_app
 
 
 # The fixture theme packages (tests/fixtures/themes/<name>.moy): the seeds
-# the 2026-10 look deleted (docs/look_2026-10.md step 27), each standalone
+# the 2026-10 look deleted (docs/history/look_2026-10.md step 27), each standalone
 # with no look of its own (so the default's, flat: step 33), for the tests
 # that draw a palette theme or a frame style; `mint`, a colours-only package.
 FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
@@ -123,7 +123,7 @@ def build_desktop_ws(tmp_path, **kw):
 
 def select_on_home(ws, title):
     """Bring the cart titled `title` up on the home -- the tab that holds it
-    (Games, Mine or Apps, docs/shell_layout_2026-10.md §12), then its card --
+    (Games, Mine or Apps, docs/theme_and_shell_2026-11.md §8.10), then its card --
     and return it; None when no tab holds it. A list a test set on the
     launcher itself is searched first."""
     for i, c in enumerate(ws.launcher.items):
@@ -278,7 +278,7 @@ def select_first_game(ws):
 
 
 def wallpaper_on_store(carts, wp_id):
-    """The store a kid's wallpaper pick leaves (docs/theming_2026-09.md D6):
+    """The store a kid's wallpaper pick leaves (docs/theme_and_shell_2026-11.md D6):
     `custom`, the default seed's look naming `wp_id` (None: NONE), its fonts
     beside it, and the `theme` row on it -- what the next boot shows."""
     import json

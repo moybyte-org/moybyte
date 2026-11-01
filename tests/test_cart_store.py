@@ -1714,7 +1714,7 @@ def _theme_shelf():
 
 
 def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
-    """docs/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
+    """docs/history/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
     removing the active theme falls back to the default seed."""
     import moy_ui
     from runtime import chrome

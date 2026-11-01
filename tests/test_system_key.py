@@ -1,4 +1,4 @@
-"""Super, Esc, the system menu and the pause menu (docs/look_2026-10.md step
+"""Super, Esc, the system menu and the pause menu (docs/history/look_2026-10.md step
 25a; docs/shell_ux_v1.md, the system key).
 
   * Super (the `start` button on a board -- a keyboard's GUI key, a T-Deck's

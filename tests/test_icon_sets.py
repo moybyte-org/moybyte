@@ -1,4 +1,4 @@
-"""The icon sets (docs/look_2026-10.md step 16, runtime/iconsets.py): the
+"""The icon sets (docs/history/look_2026-10.md step 16, runtime/iconsets.py): the
 masks every smooth set fills from its sources, the pixel set and its swap,
 Moy's outline, the slots past 0x7f, and the bar, the tabs and a depth
 frame's title buttons drawing the theme's set. The Editor's theme mode,
@@ -19,7 +19,7 @@ def _ws(tmp_path, **kw):
     return ws
 
 
-# --- the icon sets (docs/look_2026-10.md step 16) ---------------------------------
+# --- the icon sets (docs/history/look_2026-10.md step 16) ---------------------------------
 
 import importlib  # noqa: E402
 import json  # noqa: E402
@@ -112,7 +112,7 @@ def test_a_tier_freezes_the_seed_sets_at_its_sizes():
     make_icons = importlib.import_module("tools.make_icons")
     meta = json.loads((ICONS / "set.json").read_text())
     assert meta["tiers"]["handheld"] == ["default-16"]
-    # the desk's tiles draw the 20-pixel size (docs/look_2026-10.md step 25)
+    # the desk's tiles draw the 20-pixel size (docs/history/look_2026-10.md step 25)
     assert meta["tiers"]["desktop"] == ["default-16", "default-20", "default-24"]
     lines = "\n".join(make_icons.module_lines("handheld"))
     assert "'default-16.fnt'" in lines and "'system_icons.moygfx'" in lines

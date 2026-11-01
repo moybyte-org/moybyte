@@ -73,7 +73,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # destinations, so they're never highlighted; so is PLAY (None). There is no way to
 # another project on the bar: the Editor's X backs out one level, to wherever it
 # was opened from -- the home's Make tab is the one projects list
-# (docs/shell_layout_2026-10.md §12).
+# (docs/theme_and_shell_2026-11.md §8.10).
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
 # an idle-typing debounce commits mid-edit, and every hard exit (PLAY, a

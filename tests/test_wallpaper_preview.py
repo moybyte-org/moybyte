@@ -255,7 +255,7 @@ def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     assert ws.canvas is ws._run_canvas             # ...and the bind survived
 
 
-# -- a wallpaper per glass (docs/look_2026-10.md step 28) ---------------------
+# -- a wallpaper per glass (docs/history/look_2026-10.md step 28) ---------------------
 
 def test_a_per_glass_preview_is_the_glass_frame_and_gives_its_canvas_back(
         tmp_path):

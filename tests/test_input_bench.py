@@ -1,5 +1,5 @@
 """tools/input_bench.py: the merged measuring tool of
-docs/scroll_and_text_2026-10.md §14, its host-side numbers and its console
+docs/history/scroll_and_text_2026-10.md §14, its host-side numbers and its console
 half, driven here on a host console under a clock this test moves.
 
 The console half is the code the boards run: it plays a schedule on

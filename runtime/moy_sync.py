@@ -116,7 +116,7 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     where its module was put (native/moy_wasm/README.md). The binary
     files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
     BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
-    `*.moygfx` (BINARY_SUFFIXES; docs/theming_2026-09.md §9 phase 6 step 2):
+    `*.moygfx` (BINARY_SUFFIXES; docs/history/theming_2026-09.md §9 phase 6 step 2):
     as base64, `"b"` where text rides as `"t"`.
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB

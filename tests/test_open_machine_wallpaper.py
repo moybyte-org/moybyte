@@ -13,7 +13,7 @@ def test_open_machine_wallpaper_is_static_moy64_cart(tmp_path):
                            font_scale=2, windowed=True)
 
     assert "moybyte.open_machine" in ws.look.wallpaper_options()
-    # A pick is a change to the theme (docs/theming_2026-09.md D6): `custom`
+    # A pick is a change to the theme (docs/theme_and_shell_2026-11.md D6): `custom`
     # names the cart, and the desk shows it from the next frame.
     assert ws.look.select_wallpaper("moybyte.open_machine") == 0
     ws.look.tick(0.0)

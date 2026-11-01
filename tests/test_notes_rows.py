@@ -1,4 +1,4 @@
-"""Notes' frames on its text view (docs/scroll_and_text_2026-10.md §5): a
+"""Notes' frames on its text view (docs/history/scroll_and_text_2026-10.md §5): a
 key typed into a note, a caret step, a selection grown and the frames a
 change owes after it draw the rows of the note that changed, never the view
 whole.

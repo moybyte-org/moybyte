@@ -97,7 +97,7 @@ class _Card:
         self.title = doc["title"] or "Untitled"
         self.sub = "%d slide%s" % (k, "" if k == 1 else "s")
         self.status = None            # the desk foot's words, made when first focused
-        # the card's gen (docs/scroll_and_text_2026-10.md §3.3): its picture
+        # the card's gen (docs/history/scroll_and_text_2026-10.md §3.3): its picture
         # is its story's first slide, made again with the card
         _Card._gen += 1
         self.o = {"id": "Story " + entry["name"], "gen": _Card._gen}
@@ -332,7 +332,7 @@ class StorybookAppLayer(ListShellApp):
                                       self._surf.windowed(), self._surf.chrome_scale())
         self.page = "stories"
         # the stories region's override table: its gen moves with the cards
-        # (docs/scroll_and_text_2026-10.md §3.3)
+        # (docs/history/scroll_and_text_2026-10.md §3.3)
         self._stories_o = {"gen": 0}
         self._clip = array("i", [0, 0, 0, 0])   # a card's picture's clip (`ui.card_clip`)
         self.stories = []             # [{"name", "doc"}], newest first

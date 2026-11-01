@@ -17,7 +17,7 @@
 `WindowedWM` presents the SAME everything-is-a-process shell as an OS desktop,
 Picotron-style (owner direction, 2026-07-08):
 
-  * two modes, `mode` (docs/shell_layout_2026-10.md §3): DESKTOP mode is the
+  * two modes, `mode` (docs/theme_and_shell_2026-11.md §8.1): DESKTOP mode is the
     DESKTOP root (live wallpaper + the ONE full-width OS bar) beneath the
     process windows; CONSOLE mode is the fullscreen tier's presentation over
     the home, the desk's windows parked outside the back-stack until the
@@ -459,7 +459,7 @@ def _grow(c, x0, y0, x1, y1):
 
 
 class _PopoverUnderLayer(Layer):
-    """A popover frame's first half (docs/shell_layout_2026-10.md §8): put
+    """A popover frame's first half (docs/theme_and_shell_2026-11.md §8.6): put
     back the pixels a closed (or moved) popover covered, from the snapshot
     taken when it opened -- before the player window repaints over them."""
 
@@ -491,8 +491,8 @@ class _PopoverOverLayer(Layer):
 
 
 class WindowedWM(WindowChrome, FullscreenStackWM):
-    """The TWO-MODE presentation of the back-stack (docs/shell_layout_2026-10.md
-    §3): in DESKTOP mode the DESK (stack kind "desk") is the floor --
+    """The TWO-MODE presentation of the back-stack (docs/theme_and_shell_2026-11.md
+    §8.1): in DESKTOP mode the DESK (stack kind "desk") is the floor --
     wallpaper + system icons + taskbar, every process above it a floating
     window; in CONSOLE mode this tier presents FULLSCREEN exactly like the
     small tiers (the home and everything opened from it own the whole
@@ -515,7 +515,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         FullscreenStackWM.__init__(self, ws)
         if ws._sys_canvas is None:
             raise ValueError("WindowedWM needs a distinct (big) system canvas")
-        # THE MODE (docs/shell_layout_2026-10.md §3): "desktop" -- the desk
+        # THE MODE (docs/theme_and_shell_2026-11.md §8.1): "desktop" -- the desk
         # and its windows -- or "console", FullscreenStackWM's presentation
         # over the home. Every tier-sensitive branch reads it, never the stack
         # shape. Console until the boot's open_desk; the desk's PLAY enters
@@ -629,7 +629,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._wash_seq_f = 0
         self._wash_repeats = False
         self._pop_wash_f = -1         # the frame whose wash was a copy
-        # THE POPOVER ON THE QUIET STACK (docs/shell_layout_2026-10.md §8): a
+        # THE POPOVER ON THE QUIET STACK (docs/theme_and_shell_2026-11.md §8.6): a
         # frame whose only change is the popover's -- it opened, a row moved,
         # it closed -- draws the popover's rect alone over the retained frame
         # and hands that rect as the frame's damage; with a playtest the
@@ -919,7 +919,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._mode_switch = False
             self.ws.bar_layer.invalidate()      # the home's X follows the floor
 
-    # -- the two modes (docs/shell_layout_2026-10.md §3) ----------------------
+    # -- the two modes (docs/theme_and_shell_2026-11.md §8.1) ----------------------
 
     def floor(self):
         """Console mode's home has the desk beneath it (the X shows there);
@@ -1262,7 +1262,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _clear_of_subject(self, x, y, w, h, fs):
         """A new window's place kept clear of the wallpaper's subject
-        (`Wallpaper.subject`, docs/theming_2026-09.md §4.9): where the
+        (`Wallpaper.subject`, docs/theme_and_shell_2026-11.md §3.9): where the
         window at (x, y) would cover it, the nearest place beside, above or
         under it, 8 pixels clear at the font scale, that holds the whole
         window in the work area (`_work_rect`, clear of the icon column);
@@ -2045,7 +2045,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._cache_gen = self.content_gen
         self._cache_sig = sig
 
-    # -- the popover on the quiet stack (docs/shell_layout_2026-10.md §8) -------
+    # -- the popover on the quiet stack (docs/theme_and_shell_2026-11.md §8.6) -------
 
     def _pop_rides(self):
         """True where a popover change paints its rect alone: desktop mode on
@@ -2696,7 +2696,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         stack (just the player window; see _PlayerWindowLayer), with the
         popover's two halves around it while one is open or owed. A still
         frame whose only change is the popover's takes the popover's layers
-        alone (docs/shell_layout_2026-10.md §8). Everything else falls through
+        alone (docs/theme_and_shell_2026-11.md §8.6). Everything else falls through
         to the full memoized stack, and every full paint leaves a debt so every
         retained buffer carries the change before partial frames resume."""
         ws = self.ws
@@ -3713,7 +3713,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         where it lies now, with nothing over it, as this frame will hold it
         (the shown ring's word for frame n-1, and this frame's): a page of
         its content may then move that frame's pixels (`shift_last`) rather
-        than draw them (docs/scroll_and_text_2026-10.md §3.1, one voucher
+        than draw them (docs/history/scroll_and_text_2026-10.md §3.1, one voucher
         per region)."""
         if not self._shown_ok(win):
             return False

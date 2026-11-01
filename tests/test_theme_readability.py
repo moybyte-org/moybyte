@@ -1,5 +1,5 @@
 """The readability floor over what the toolkit actually draws
-(docs/theming_2026-09.md §7): `theme.pairs` holds an ink to its backgrounds
+(docs/theme_and_shell_2026-11.md §6): `theme.pairs` holds an ink to its backgrounds
 at `contrast`, and the seeds clear it (tests/test_theme_loader.py). These
 pin that the pairs are the ones the widgets and the frame paint with, and
 that every seed in both variants reads through the real C resolution:
@@ -110,7 +110,7 @@ def test_every_seed_reads_every_kind(seed, variant):
 def test_every_seed_reads_every_button_kind(seed, variant):
     """Each button kind's ink on its field, in every state but disabled,
     through the live placement and the seed's own button leaves
-    (docs/look_2026-10.md step 10): a derived ink that misses the floor took
+    (docs/history/look_2026-10.md step 10): a derived ink that misses the floor took
     its kind's floor form, and no seed's `buttons` reads under it. `on` is
     the current mark, never the ON look (step 11)."""
     live = live_colors(seed, variant)
@@ -336,7 +336,7 @@ def _install(name, surfaces, colors=None, look=None):
 
 
 def _black_and_white():
-    """The palette Contrast had before its look (docs/look_2026-10.md step
+    """The palette Contrast had before its look (docs/history/look_2026-10.md step
     26c): black panels, white ink and edges, yellow accent."""
     th = dict(theme_colors("night"))
     th.update(panel=0, edge=7, chrome_ink=7, accent=10, shade_dark=7, ink=7)

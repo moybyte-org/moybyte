@@ -165,7 +165,7 @@ def wifi_is_off_at_rest(board):
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
     """A tap on the bar's wifi widget opens Settings' WIFI panel -- the one
     wifi implementation -- as a popover hung from the widget, in console mode
-    and desktop mode alike (docs/shell_layout_2026-10.md §8, look step 33),
+    and desktop mode alike (docs/theme_and_shell_2026-11.md §8.6, look step 33),
     holding the radio; closing the popover lets the radio go."""
     _home_desk(board)
     cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
@@ -289,7 +289,7 @@ def _home_desk(board):
         board.drain(1.0)
 
 
-# The painter (docs/theming_2026-09.md §4.4): tests/test_ui_painter.py's
+# The painter (docs/theme_and_shell_2026-11.md §3.4): tests/test_ui_painter.py's
 # scenes without text, each (surface, metrics, rect) on a 16x12 canvas
 # cleared to 9, as one installed package's `desk` surface.
 PAINTER_SCENES = (
@@ -371,7 +371,7 @@ def painter_matches_host(board):
                        strict=True) == moy_ui.theme_shape(name)[2]
 
 
-# -- the sprite lane (docs/theming_2026-09.md §4.6) -------------------------------
+# -- the sprite lane (docs/theme_and_shell_2026-11.md §3.6) -------------------------------
 
 SPRITE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "fixtures", "themes", "sprig.moy", "parts.moygfx")
@@ -539,7 +539,7 @@ def picker_kernel_matches_sspr(board):
     """The picker kernel (moy_gfx.blit_indices_scale, this board's C) draws
     sspr's pixels on glass at every scale, state and colorkey of the cases,
     and its frames are the host's: the scaled lane is one body on every tier
-    (docs/scroll_and_text_2026-10.md §13)."""
+    (docs/history/scroll_and_text_2026-10.md §13)."""
     from runtime import host_canvas
     host_canvas.install()
     env = {}
@@ -556,7 +556,7 @@ def picker_kernel_matches_sspr(board):
     assert [crc for _, crc in got] == [crc for _, crc in want]
 
 
-# shift_last and copy_last_into on the live root (docs/scroll_and_text_2026-10.md
+# shift_last and copy_last_into on the live root (docs/history/scroll_and_text_2026-10.md
 # §3.2, §13): a pattern frame presented, then the verb into the next one,
 # held to a reference the snippet builds from row slices. Everything runs
 # inside one `py` exchange, between two of the console's frames; the desk is
@@ -749,7 +749,7 @@ def sheet_corpus(n, seed=11):
     return out
 
 
-# -- the font lane (docs/theming_2026-09.md §4.7) ---------------------------------
+# -- the font lane (docs/theme_and_shell_2026-11.md §3.7) ---------------------------------
 
 FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures", "fonts", "sample6x9.fnt")
@@ -845,7 +845,7 @@ def fonts_match_host(board, n=48):
     assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
 
 
-# -- the glyph lane (docs/look_2026-10.md step 4) ---------------------------------
+# -- the glyph lane (docs/history/look_2026-10.md step 4) ---------------------------------
 
 # A fuzzed run of prints and labels in version 2 fonts, `glyph_cases(make, out,
 # sources)`: `make(w, h, fs)` a system canvas, `out(i, bytes)` each case's
@@ -960,7 +960,7 @@ def _glyph_run():
     assert list(got) == want
 
 
-# -- the theme layout (docs/shell_layout_2026-10.md §5) ---------------------------
+# -- the theme layout (docs/theme_and_shell_2026-11.md §8.3) ---------------------------
 
 def layout_corpus(n, seed=5):
     """Theme packages around `layout`: §5's fuzz cases (a string for bars,
@@ -1055,7 +1055,7 @@ def _custom_digest(src, accents, tints):
 
 
 def theme_custom_matches_host(board):
-    """Every seed x accent (presets too) x tint (docs/theming_2026-09.md §4.10): this
+    """Every seed x accent (presets too) x tint (docs/theme_and_shell_2026-11.md §3.10): this
     board's moy_ui writes `custom`'s theme.json byte for byte as the host's
     does, each seed's answers digested on the board."""
     import binascii
@@ -1104,7 +1104,7 @@ def known_look(board, theme="moy", variant="dark"):
 
 
 def the_theme_font_is_installed(board):
-    """The live theme's faces (docs/theming_2026-09.md §4.7) are what this
+    """The live theme's faces (docs/theme_and_shell_2026-11.md §3.7) are what this
     board's shell draws in: each role holds the face `appearance.role_fonts`
     names on the host for the same theme, variant and metric class, loaded
     once, and the print font is `ui`'s. Read under `known_look`: a saved
@@ -1129,7 +1129,7 @@ def the_theme_font_is_installed(board):
 
 
 def the_font_set_is_the_tiers(board, tier):
-    """The image carries its tier's font set (docs/look_2026-10.md step 3):
+    """The image carries its tier's font set (docs/history/look_2026-10.md step 3):
     the faces set.json names for `tier`, each byte for byte the host's, with
     its family's licence, and each one loads and measures as on the host."""
     import binascii
@@ -1481,7 +1481,7 @@ def _clear_to_console(board, clear):
     """`clear` ws.exit()s to shut what the tour left open, then -- on the
     windowed tier, the only one that clears -- the desk's PLAY: a launcher
     run goes fullscreen from console mode's home and exits back to it
-    (docs/shell_layout_2026-10.md §3), whatever windows are left parked."""
+    (docs/theme_and_shell_2026-11.md §8.1), whatever windows are left parked."""
     for _ in range(clear):
         board.cmd("py ws.exit()", wait_for="PY")
         board.drain(0.5)

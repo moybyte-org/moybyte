@@ -1,4 +1,4 @@
--- The public UI API's Appearance verbs (docs/look_2026-10.md step 20) as a
+-- The public UI API's Appearance verbs (docs/history/look_2026-10.md step 20) as a
 -- Lua app: a tab row and a grid of cards whose pictures the app draws.
 -- look_py.moy and tests/fixtures/wasm/app_look.moy draw the same page with
 -- the same calls, and tests/test_ui_parts.py holds the three to the same

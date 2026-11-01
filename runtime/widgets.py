@@ -21,7 +21,7 @@ that don't belong to any one surface Layer or the router:
   * `Pmem`         -- a cart's persistent 256x uint32 memory (TIC-80 pmem()).
   * `Actor`/`Scenes` -- a cart's placed-actor scenes (#85): read-only data rows +
                       the scene()/load_scene() accessor over the .moyscene blobs.
-  * `Popup`        -- the one popover (#52, docs/shell_layout_2026-10.md §8): the
+  * `Popup`        -- the one popover (#52, docs/theme_and_shell_2026-11.md §8.6): the
                       system menu's rows, or a bar widget's component.
   * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
@@ -626,7 +626,7 @@ class SceneWorld:
                 a.y < b.y + 8 and b.y < a.y + 8)
 
 
-# --- the popover (#52; docs/shell_layout_2026-10.md §8) ----------------------
+# --- the popover (#52; docs/theme_and_shell_2026-11.md §8.6) ----------------------
 # The ONE popover: a panel anchored to a bar widget's cell, opening into the
 # content side of its bar, drawn ON TOP of whatever screen is up, with its OWN
 # open/selected state. Its contents are either ROWS -- the system menu, its
@@ -653,7 +653,7 @@ DANGER_ICON = "trash"
 
 
 class Popup:
-    """The popover (#52, docs/shell_layout_2026-10.md §8): owns open/closed, what
+    """The popover (#52, docs/theme_and_shell_2026-11.md §8.6): owns open/closed, what
     it holds (rows or a component) and the cursor; dismisses on an outside tap,
     B or ESC. Backend-agnostic -- the host and the device drive it through the
     same indexed canvas. `widget` names the bar widget it hangs from."""

@@ -1,4 +1,4 @@
-"""A theme with no look (docs/look_2026-10.md step 33): a colours-only
+"""A theme with no look (docs/history/look_2026-10.md step 33): a colours-only
 package, Mint (tests/fixtures/themes/mint.moy), takes the default look's
 geometry and marks flat -- no shadow, no backdrop -- and every colour the
 look would set from its own roles; scenes `*fallback*` in

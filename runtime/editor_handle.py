@@ -7,7 +7,7 @@
 """The EDITOR HANDLE -- the console's text editor, drawn by a CART (#181, #112).
 
 Notes is the one text app and it is a cartridge
-(docs/text_editing_2026-09.md). The engine it needs -- the `CodeEditor`
+(docs/theme_and_shell_2026-11.md §10). The engine it needs -- the `CodeEditor`
 buffer, undo through the op-history, the clipboard, wrap, the per-mode
 highlight and save gate, the Markdown rendering -- stays in the shell and
 crosses to the cart as a HANDLE, exactly the way `make_layer` hands out the
@@ -479,7 +479,7 @@ class EditorHandle:
 
     def run(self):
         """RUN the document as a script, the way Files' RUN does
-        (`Workstation.run_script`, docs/text_editing_2026-09.md's Scripts).
+        (`Workstation.run_script`, docs/theme_and_shell_2026-11.md §10's Scripts).
         Saved first when it has edits, written even when it does not parse:
         a syntax error is the script console's to show. The run starts once
         this frame is drawn (`Workstation.ask_run`), and when it ends the console
@@ -561,7 +561,7 @@ class EditorHandle:
         app's page, whose frames the engine plans: a fling, a glide or the
         caret's step moves the rows the frame before drew and draws the ones
         it brings, and a typed key draws the rows it changed
-        (docs/scroll_and_text_2026-10.md §5). Drawn outside one (a Lua
+        (docs/history/scroll_and_text_2026-10.md §5). Drawn outside one (a Lua
         cart's `_draw`), the handle's own host draws it whole.
 
         Also where the idle autosave lands: the shipped notebook has always

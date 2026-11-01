@@ -26,7 +26,7 @@
 // Row 0 is petme128, libmoy's compiled-in copy, byte-identical to
 // runtime/font.py's (SPEC.md §6 requires it, and the spec's text scenes hold
 // it). A theme font is another row: moy_font_load checks a font file
-// (docs/theming_2026-09.md §4.7 has the format) and copies it into a buffer
+// (docs/theme_and_shell_2026-11.md §3.7 has the format) and copies it into a buffer
 // the row owns, and its id names the slot and the slot's generation, so an id
 // outlives its font only as a refusal.
 
@@ -43,7 +43,7 @@ enum { MOY_TEXT_LEFT = 0, MOY_TEXT_CENTER = 1, MOY_TEXT_RIGHT = 2 };
 #define MOY_TEXT_CELL 8         // petme128's advance and height, in pixels
 #define MOY_TEXT_ASCENT 7       // petme128's baseline: its capitals' rows
 
-// The font file (docs/theming_2026-09.md §4.7 has both versions). Version 1:
+// The font file (docs/theme_and_shell_2026-11.md §3.7 has both versions). Version 1:
 // a 16-byte header, the advance table padded to 4 bytes, the glyphs in one
 // box of at most 16x16 at 1 bpp. Version 2: a 16-byte header, the byte
 // index, an 8-byte record a glyph (its own box, bearing and advance), the
@@ -107,7 +107,7 @@ void moy_text_vm_stop(void);
 int moy_font_info(uint32_t font, moy_font_info_t *out);
 
 // THE PRINT FONT: the font a canvas's print draws in (the print gate and the
-// `text` op; docs/theming_2026-09.md §4.7). Petme128 until the shell names
+// `text` op; docs/theme_and_shell_2026-11.md §3.7). Petme128 until the shell names
 // one, and again while a cart's code runs and once the font is freed; the
 // Lua C API and libmoy's moy_print never read it. moy_text_print_font_use
 // installs `font` (0 for petme128) and answers the one it replaced, or
@@ -124,7 +124,7 @@ int moy_text_wire_swapped(void);
 
 // The version 2 glyphs drawn since boot: out[0] those that read nothing (from
 // a ramp, or 1 bpp opaque ink), out[1] those that read the target (the glyph
-// lane's op count, docs/look_2026-10.md step 4).
+// lane's op count, docs/history/look_2026-10.md step 4).
 void moy_text_lanes(uint32_t out[2]);
 
 // Where text lands: an RGB565 buffer `dw` pixels wide holding `cap` pixels,
@@ -162,7 +162,7 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw);
 
-// How the text meets what is under it (docs/look_2026-10.md step 4). A
+// How the text meets what is under it (docs/history/look_2026-10.md step 4). A
 // version 2 font's 2 and 4 bpp coverage blends its ink into the target: by
 // default it reads each partly covered pixel and blends over it. With `bg`
 // the caller holds that every pixel of the box (bx, by, bw, bh, in the

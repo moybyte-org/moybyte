@@ -1,4 +1,4 @@
-"""The content rect (docs/shell_layout_2026-10.md §7, §13 steps 3 and 3b).
+"""The content rect (docs/history/shell_layout_2026-10.md §7, §13 steps 3 and 3b).
 
 `layout_base.place_bar` is where the host's bar sits on every surface, and
 `content_of` / `BarLayer.bar_rects` are the one author of what that leaves:
@@ -96,7 +96,7 @@ def test_bar_and_content_partition_the_canvas(tmp_path, size, edge):
     ws.place_bar(edge)
     bl = ws.bar_layer
     # a tool on a game canvas of its own keeps the compact band over the
-    # game's rows (docs/look_2026-10.md step 33), no partition of the glass
+    # game's rows (docs/history/look_2026-10.md step 33), no partition of the glass
     tool = ("tool",) if bl.tool_band() is None else ()
     for where in ("home", "picker", "settings", "menu", "app") + tool:
         cv = bl._bar_canvas(where)

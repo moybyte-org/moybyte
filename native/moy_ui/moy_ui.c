@@ -21,7 +21,7 @@ typedef struct {
 } look_t;
 
 // One row of the live theme's button leaves: row 0 its `buttons`, a later
-// row an `app_buttons` app's (docs/look_2026-10.md step 10).
+// row an `app_buttons` app's (docs/history/look_2026-10.md step 10).
 typedef struct {
     char app[MOY_THEME_MAPNAME_MAX + 1];
     int32_t v[MOY_THEME_BTN_KINDS][MOY_THEME_BTN_LEAVES];
@@ -255,7 +255,7 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
     return MOY_UI_OK;
 }
 
-// -- button kinds (docs/look_2026-10.md step 10) ------------------------------------
+// -- button kinds (docs/history/look_2026-10.md step 10) ------------------------------------
 
 // The `button` fields' leaves, in style.json's theme.look.button order.
 enum { BL_FILL = 0, BL_INK, BL_BORDER_W, BL_BORDER_C, BL_SHAPE, BL_R, BL_FONT, BL_BEVEL };
@@ -438,7 +438,7 @@ void moy_ui_shape_clear(moy_ui_shape_t *sh) {
 }
 
 // Fill each state a part leaves unnamed from its chain, so a draw reads one
-// entry (docs/theming_2026-09.md §5: resolved at install, never at draw).
+// entry (docs/theme_and_shell_2026-11.md §4: resolved at install, never at draw).
 static void fill_chains(moy_ui_shape_t *sh) {
     for (int p = 0; p < MOY_THEME_PARTS; p++) {
         for (int st = 0; st < MOY_THEME_STATES; st++) {

@@ -879,7 +879,7 @@ class PaintLayer:
         _checker(cv, x, y, w, h, s, greys[0], greys[1])
 
     def _draw_look(self, sheet):
-        """The sprite tab in the theme's roles (docs/look_2026-10.md step 24):
+        """The sprite tab in the theme's roles (docs/history/look_2026-10.md step 24):
         the grid on the grey checker where a pixel is clear, the ring cursor,
         the current mark on the tool and the colour, and the column's parts as
         the theme's buttons with its icons."""

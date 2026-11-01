@@ -1,5 +1,5 @@
 """The owner's 2026-10-19 calls on the themes and the chrome (design review
-round 3, docs/look_2026-10.md's Decisions), held in the parts that draw
+round 3, docs/history/look_2026-10.md's Decisions), held in the parts that draw
 them; the modals' scrim is tests/test_modal_scrim.py's.
 
   * D-05: an empty field shows its hint in the disabled ink, a typed one

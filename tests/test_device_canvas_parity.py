@@ -771,7 +771,7 @@ def test_text_bytes_parity():
 
 
 def test_text_in_an_anti_aliased_print_font_parity():
-    """A 2 bpp print font blends (the glyph lane, docs/look_2026-10.md step
+    """A 2 bpp print font blends (the glyph lane, docs/history/look_2026-10.md step
     4): both sides draw the same words over a mixed background, camera and
     clip on, and some are no palette colour."""
     import moy_ui
@@ -1101,7 +1101,7 @@ def _words_in(c, words):
 
 
 def test_cover_draws_a_rounded_scaled_sub_rect_on_every_lane():
-    """`DeviceCanvas.cover` -- a home card (docs/look_2026-10.md step 17): a
+    """`DeviceCanvas.cover` -- a home card (docs/history/look_2026-10.md step 17): a
     sub-rect of a picture scaled to the card as `blit565_resize` samples it,
     the corners anti-aliased over what is under them (moy_shape's coverage,
     the picture at `co` fifteenths) or stepped, camera and clip honoured. The

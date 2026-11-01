@@ -1,4 +1,4 @@
-"""The TEXT CONSOLE and the vault that holds scripts (docs/text_editing_2026-09.md
+"""The TEXT CONSOLE and the vault that holds scripts (docs/history/text_editing_2026-09.md
 step 6, Part A).
 
 A script is a cart with NO FOLDER -- a bare `.py`/`.lua` file beside the notes --

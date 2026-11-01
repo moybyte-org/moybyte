@@ -145,7 +145,7 @@ def test_wallpaper_choice_persists_across_reboot(tmp_path):
     ws.look.tick(0.0)
     ws.look.commit()
     chosen = ws.look.wallpaper_id
-    # It lands in the theme, `custom` (docs/theming_2026-09.md D6), and the
+    # It lands in the theme, `custom` (docs/theme_and_shell_2026-11.md D6), and the
     # theme row names it; there is no wallpaper row.
     stored = moy_carts.load_system(carts_dir)
     assert stored.get("theme") == "custom" and "wallpaper" not in stored
@@ -486,7 +486,7 @@ def test_settings_panel_keeps_the_freed_dock_band_as_its_bottom_inset(tmp_path):
 
 def test_only_make_manages_carts(tmp_path):
     """Cart management (create/copy/delete) is the Make tab's
-    (docs/shell_layout_2026-10.md §12); the tabs that play carry none of it
+    (docs/theme_and_shell_2026-11.md §8.10); the tabs that play carry none of it
     but an empty Mine's "+ New"."""
     ws = _ws(tmp_path)
     for tab in ("games", "mine", "apps"):
@@ -533,7 +533,7 @@ def test_the_make_tabs_new_card_starts_a_project(tmp_path):
 
 def test_play_reaches_the_tabbed_home_in_console_mode(tmp_path):
     """The desk's PLAY enters console mode, whose root is the home with its
-    four tabs (docs/shell_layout_2026-10.md §3, §12)."""
+    four tabs (docs/theme_and_shell_2026-11.md §8.1, §8.10)."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True, panel_diagonal_in=7.0)
@@ -664,7 +664,7 @@ def test_launcher_draws_the_strip_and_no_in_cart_bar(tmp_path):
 def test_a_game_shows_no_bar_playing_or_stopped(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
     canvas with NO chrome at all, and a run that stops shows the stop card, the
-    pause card's sibling (docs/look_2026-10.md step 33), never a bar. (Exit while
+    pause card's sibling (docs/history/look_2026-10.md step 33), never a bar. (Exit while
     playing a game is the pause menu's Quit, not a bar tap.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
@@ -1315,11 +1315,11 @@ def test_a_pointer_nothing_has_touched_is_dead_until_a_real_event(monkeypatch):
     assert d.live()
 
 
-# -- the bar widgets' popovers in console mode (docs/shell_layout_2026-10.md §8) --
+# -- the bar widgets' popovers in console mode (docs/theme_and_shell_2026-11.md §8.6) --
 
 def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):
     """The clock, wifi and battery hang their popover from their widget in
-    console mode too (docs/look_2026-10.md step 33): nothing is pushed, the
+    console mode too (docs/history/look_2026-10.md step 33): nothing is pushed, the
     widget tapped again, B or HOME closes it, the calendar pages by left and
     right and opens on today, Wi-Fi's lease goes with its card, and the
     system menu stays the popup it is."""

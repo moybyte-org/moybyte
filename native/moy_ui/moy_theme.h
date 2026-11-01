@@ -1,4 +1,4 @@
-// moy_theme: the theme loader (docs/theming_2026-09.md §3-§5, §7). A theme
+// moy_theme: the theme loader (docs/theme_and_shell_2026-11.md §2-§4, §6). A theme
 // is a theme.json, untrusted data: this file parses it with a strict JSON
 // reader of its own, refuses what it cannot read, clamps and drops what it
 // can, and flattens a theme into the live token row the toolkit's looks
@@ -17,7 +17,7 @@
 // the package, read by the font loader, moy_text.h), `sprites` and `icons`
 // (a .moygfx file of the package each: the role sheet the primitives draw
 // sprites from, and the bar's icon sheet) and `layout` (its `bars`:
-// docs/shell_layout_2026-10.md §5, each capped and clamped here and the
+// docs/theme_and_shell_2026-11.md §8.3, each capped and clamped here and the
 // required widgets checked on the data). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
 // and noted. A reader refuses any `format` but its own (a format-1 package
@@ -239,7 +239,7 @@ int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
 // name's and a text's longest, texts, the first button leaf: the bindings' check.
 extern const int moy_theme_look_dims[10];
 
-// Whether theme `name`'s window frame is its look's (docs/look_2026-10.md
+// Whether theme `name`'s window frame is its look's (docs/history/look_2026-10.md
 // step 6): the nearest package of its chain that carries a `look` or names a
 // frame style carries a look and names none.
 int moy_theme_look_frames(const char *name, size_t n);
@@ -249,7 +249,7 @@ int moy_theme_look_frames(const char *name, size_t n);
 // that does not resolve) has both.
 int moy_theme_modes(const char *name, size_t n);
 
-// -- RGB (docs/look_2026-10.md step 5) ------------------------------------------
+// -- RGB (docs/history/look_2026-10.md step 5) ------------------------------------------
 //
 // A colour value's RGB565 word (canonical order), its WCAG luminance (x10000,
 // moy_theme_lum's scale, on the RGB565 it shows as) and its nearest MOY64
@@ -287,7 +287,7 @@ int moy_theme_fonts(const char *name, size_t n,
 int moy_theme_sheets(const char *name, size_t n,
                      char out[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1]);
 
-// -- the sprite sheet (docs/theming_2026-09.md §4.6) ------------------------------
+// -- the sprite sheet (docs/theme_and_shell_2026-11.md §3.6) ------------------------------
 //
 // A sheet is user data in the cart sheet's hex format: a line is a row of up
 // to MOY_THEME_SHEET_W hex digits, one nibble a pixel (a short line's rest is
@@ -338,7 +338,7 @@ const char *moy_theme_probe_font(int role);
 const char *moy_theme_probe_sheet(int key);
 extern const size_t moy_theme_pkg_bytes;
 
-// Accent and tint (docs/theming_2026-09.md §4.10): every colour role of a
+// Accent and tint (docs/theme_and_shell_2026-11.md §3.10): every colour role of a
 // source's two resolved rows (moy_theme_resolve's, [MOY_THEME_DARK] and
 // [MOY_THEME_LIGHT]) derived from an accent, an index of moy_theme_accents,
 // MOY_THEME_ACCENTS plus one of moy_theme_presets (each row its value in
@@ -378,7 +378,7 @@ extern const int moy_theme_custom_dims[5];
 // names, and each font X.fnt's licence text X.txt): its bytes and *len, or NULL.
 const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len);
 
-// Compile one surface's text (docs/theming_2026-09.md §4.4) into *out.
+// Compile one surface's text (docs/theme_and_shell_2026-11.md §3.4) into *out.
 // MOY_THEME_OK, or -1 for text the grammar does not take; *notes gets
 // MOY_THEME_N_CLAMPED for an index clamped to 0..63.
 int moy_theme_surface(const char *s, size_t n, moy_ui_surface_t *out, uint8_t *notes);

@@ -383,7 +383,7 @@ def test_projects_opens(board):
 
 
 def test_play_parks_the_windows_and_the_back_brings_them_back(board):
-    """Console mode on glass (docs/shell_layout_2026-10.md §3): the desk's
+    """Console mode on glass (docs/theme_and_shell_2026-11.md §8.1): the desk's
     PLAY parks the open windows and truncates the route to the home; the
     home's back, tapped where the bar draws it, puts every window back; the
     HOME key shows the desktop and brings the windows back."""

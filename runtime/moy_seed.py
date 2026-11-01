@@ -387,7 +387,7 @@ def is_packed(seed):
 # Beeper are the 2026-09-07 deletions: the spreadsheet app, and the audio demo
 # whose verbs the cart API now shows off instead. Writer is the same day's: the
 # notebook app is gone and Notes -- a CART over the shell's editor handle --
-# is the one text app (docs/text_editing_2026-09.md).
+# is the one text app (docs/theme_and_shell_2026-11.md §10).
 RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
            "Sheets", "Beeper", "Writer")
 # Generation 5 is #162's rename: every built-in moved from `<slug>.moy` into

@@ -63,7 +63,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # are `.moy` FOLDERS, each shown as ONE item and opened as a project.
 PROJECTS = "projects"
 # The store's theme packages: a theme is data the Appearance app picks,
-# never a project the Editor opens (docs/theming_2026-09.md §9 phase 6).
+# never a project the Editor opens (docs/history/theming_2026-09.md §9 phase 6).
 THEMES = "themes"
 ART = "art"
 MUSIC = "music"
@@ -229,7 +229,7 @@ class FilesAppLayer(ListShellApp):
 
     PICTURE_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
     DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # the kinds the router opens
-    # A vault SCRIPT is a PROGRAM, so RUN leads (docs/text_editing_2026-09.md
+    # A vault SCRIPT is a PROGRAM, so RUN leads (docs/history/text_editing_2026-09.md
     # step 6). OPEN stays beside it: a script is still text, and editing it is
     # the other thing you do with one.
     SCRIPT_ACTIONS = ("RUN", "OPEN", "NAME", "COPY", "DEL")
@@ -274,7 +274,7 @@ class FilesAppLayer(ListShellApp):
         self._focused = None          # the focused id as the last frame left it
         self._key = 0
         # The lists' override tables and what their gens were moved for
-        # (docs/scroll_and_text_2026-10.md §3.3): a gen moves exactly when
+        # (docs/history/scroll_and_text_2026-10.md §3.3): a gen moves exactly when
         # what its list draws does, so a frame that only scrolls or steps
         # moves the last frame's rows.
         self._files_o = {"id": "files", "gen": 0}
@@ -425,7 +425,7 @@ class FilesAppLayer(ListShellApp):
 
     def route(self, name, kind=None, cart=None):
         """Open `name` by WHAT IT IS, in the order
-        docs/text_editing_2026-09.md fixes:
+        docs/theme_and_shell_2026-11.md §10 fixes:
 
             a `.moy` folder      the project Editor, never a listing
             a cart's main file   that cart's Editor, on the Code tab

@@ -1,4 +1,4 @@
-"""The windowed WM's records and direct render (docs/scroll_and_text_2026-10.md
+"""The windowed WM's records and direct render (docs/history/scroll_and_text_2026-10.md
 §7, §8; docs/surface_model_v1.md §14.3, §14.6, §14.7): on a desk, an app on
 the public UI API's verbs draws every frame it draws straight into the glass,
 its pages shift where the shown ring vouches for the buffer the last frame
@@ -677,7 +677,7 @@ VERBS_APPS = ("files_app", "getcarts_app", "storybook_app", "appearance_app",
 
 
 def test_no_verbs_app_marks_its_page_after_the_pass():
-    """docs/scroll_and_text_2026-10.md §7: an answer that changed what the
+    """docs/history/scroll_and_text_2026-10.md §7: an answer that changed what the
     pass drew before it owes the next frame through the app's host
     (`AppHost.again`); a mark of the page from its draw is a ratchet."""
     import ast
@@ -780,7 +780,7 @@ def test_the_debt_is_paid_while_the_window_buffer_lags(tmp_path, bufs, refill):
 
 
 def test_a_frame_whose_change_is_the_window_repaints_no_desk_or_chrome(tmp_path):
-    """docs/scroll_and_text_2026-10.md §8: on the desk with the cursor
+    """docs/history/scroll_and_text_2026-10.md §8: on the desk with the cursor
     hidden, the press, drag, coast, key and glide frames of an app on the
     verbs each draw straight into the glass (an engagement count per frame
     class) and lay no desk and no chrome; the debt that follows copies the

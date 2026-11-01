@@ -46,7 +46,7 @@ BASE_H = 240
 # `bar_layer._STATUS_H` is this number.
 BAR_ROWS = 18
 
-# The METRIC CLASSES (docs/look_2026-10.md step 9): the glass a shell lays
+# The METRIC CLASSES (docs/history/look_2026-10.md step 9): the glass a shell lays
 # out on, each with its named sizes in glass pixels at chrome size 1. The
 # handheld's are the 320x240 numbers every formula in the tree was written
 # at; the desk's are the 1024x600 and 1280x800 desk's (the 2026-10 look's
@@ -169,7 +169,7 @@ def bar_rows(cs):
 
 
 # The bars in force on every surface that has them (bars are global,
-# docs/shell_layout_2026-10.md §7): the theme layout as `shell_layout.resolve`
+# docs/theme_and_shell_2026-11.md §8.5): the theme layout as `shell_layout.resolve`
 # left it, each (edge, size, left, center, right, texts) with `size` in
 # logical rows. `place_bars` is the one writer.
 DEFAULT_BARS = (("top", BAR_ROWS, ("zone",), ("chips",),

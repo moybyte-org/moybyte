@@ -456,7 +456,7 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# the VAULT holds more than notes (docs/text_editing_2026-09.md)
+# the VAULT holds more than notes (docs/theme_and_shell_2026-11.md §10)
 # ---------------------------------------------------------------------------
 
 def test_the_vault_lists_every_file_it_holds_under_its_whole_name(tmp_path):

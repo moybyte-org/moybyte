@@ -1,4 +1,4 @@
-"""The old look's last surfaces in the 2026-10 look (docs/look_2026-10.md
+"""The old look's last surfaces in the 2026-10 look (docs/history/look_2026-10.md
 step 33, GAPS 49-54): the stop card's rows by the run's kind, the month from
 a date, a dialog's captioned fields and its Enter, the flat toast and card,
 the loading pill, the bar widgets' popovers, the saver and the text console.

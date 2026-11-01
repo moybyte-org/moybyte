@@ -1,4 +1,4 @@
-"""The Editor's theme mode (docs/look_2026-10.md step 33, GAPS 56;
+"""The Editor's theme mode (docs/history/look_2026-10.md step 33, GAPS 56;
 runtime/theme_editor.py).
 
 * The door: Appearance's last row, Edit theme…, makes `custom` from a seed

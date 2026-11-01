@@ -1,4 +1,4 @@
-"""The scroll model on the verbs engine's nests (docs/scroll_and_text_2026-10.md
+"""The scroll model on the verbs engine's nests (docs/history/scroll_and_text_2026-10.md
 §2.1, §7): a page, a `ui.scroll` region and a placed `ui.table`'s rows each
 carry a `moy_ui_scroll_t`, so a touch drag let go at speed coasts and a key
 step glides, on the frames' injected clock (`ui_draw.frame_dt`, the input's

@@ -1,4 +1,4 @@
-"""A field's row and a dialog's rows frames (docs/scroll_and_text_2026-10.md
+"""A field's row and a dialog's rows frames (docs/history/scroll_and_text_2026-10.md
 §5, P3; docs/surface_model_v1.md §14.5 and §14.7): a key typed into a
 field repaints the field's row and its caret, not the page; under a dialog
 over a held page it repaints the dialog's changed rows and leaves the page

@@ -1,4 +1,4 @@
-"""The glyph lane (docs/look_2026-10.md step 4, native/moy_gfx/moy_text.h's
+"""The glyph lane (docs/history/look_2026-10.md step 4, native/moy_gfx/moy_text.h's
 paint): a version 2 font's 1, 2 and 4 bpp coverage blended into RGB565.
 
 * A Python reference blends every glyph over what is under it, channel by

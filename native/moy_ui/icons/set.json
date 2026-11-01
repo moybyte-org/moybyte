@@ -1,5 +1,5 @@
 {
- "about": "The icon sets tools/make_icons.py builds (docs/look_2026-10.md step 16): a smooth set's masks, a font file per layer and size, slot n at byte `first` + n; a board takes its tier's files and the pixel set.",
+ "about": "The icon sets tools/make_icons.py builds (docs/history/look_2026-10.md step 16): a smooth set's masks, a font file per layer and size, slot n at byte `first` + n; a board takes its tier's files and the pixel set.",
  "built_with": {
   "resvg-py": "0.5.0"
  },

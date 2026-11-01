@@ -30,7 +30,7 @@ module lists differ by exactly those files, and by nothing else."""
 [panel]
 # The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203),
 # declared 2026-09-06, and what makes this board a DESK
-# (`layout_base.class_of`, docs/look_2026-10.md step 9): its chrome lays out
+# (`layout_base.class_of`, docs/history/look_2026-10.md step 9): its chrome lays out
 # on the desk's metrics -- a 40px bar, 28px list rows, 44px title strips, the
 # handheld's 16px icons at 32 -- at chrome size 1 and font scale 1
 # (`FONT_SCALE`, owner call 2026-07-12: the 7" panel fits CONTENT, not

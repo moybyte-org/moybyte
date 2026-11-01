@@ -336,7 +336,7 @@ class GetCartsAppLayer(ListShellApp):
         self._ui = ctx.ui
         self.names = names
         # the shelf region's override table and the cards' gens
-        # (docs/scroll_and_text_2026-10.md §3.3)
+        # (docs/history/scroll_and_text_2026-10.md §3.3)
         self._shelf_o = {"gen": 0}
         self._shelf_rows = None
         self._shelf_n = -1
@@ -1326,7 +1326,7 @@ class GetCartsAppLayer(ListShellApp):
         elif shown in BLOCKED:
             o["tone"] = "danger"
         o["icon"] = genre_icon(row["cart"])
-        # the card's gen (docs/scroll_and_text_2026-10.md §3.3): it moves with
+        # the card's gen (docs/history/scroll_and_text_2026-10.md §3.3): it moves with
         # the card made again, and its cover's coming tells the two apart
         self._card_gen += 2
         o["gen"] = self._card_gen

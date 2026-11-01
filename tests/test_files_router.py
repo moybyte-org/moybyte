@@ -1,4 +1,4 @@
-"""The Files ROUTER (step 2 of docs/text_editing_2026-09.md): an item opens by
+"""The Files ROUTER (step 2 of docs/theme_and_shell_2026-11.md §10): an item opens by
 WHAT IT IS -- a `.moy` folder is a project, a cart's main file is code, an
 image is Paint, anything else textual is a page in its mode -- and the carts
 root sits on the Files shelf beside the user-files kinds.

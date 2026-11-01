@@ -52,7 +52,7 @@ class SettingsPage:
         self._focus = None
         self._count = (None, 0)         # (the cart's path, its files)
         # the page's override table: its gen moves with what the page shows
-        # (docs/scroll_and_text_2026-10.md §3.3), so a frame that only moves
+        # (docs/history/scroll_and_text_2026-10.md §3.3), so a frame that only moves
         # the focus or the scroll draws the rows it changed
         self._o = {"gen": 0}
         self._shows = None

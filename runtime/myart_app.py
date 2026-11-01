@@ -451,7 +451,7 @@ class MyArtAppLayer:
             return c[2]
         cards = []
         for name in self.drawings:
-            # the card's gen (docs/scroll_and_text_2026-10.md §3.3), set as
+            # the card's gen (docs/history/scroll_and_text_2026-10.md §3.3), set as
             # the grid draws it
             o = {"id": self._card_id(name), "gen": 0}
             if name == self.wallpaper:

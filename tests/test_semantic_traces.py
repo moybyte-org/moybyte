@@ -2312,7 +2312,7 @@ def roles_trace(ws):
     say("engine", type(i.runtimes()).__name__, i.memory() is None or len(i.memory()) == 2,
         i.fit("wasm", 0, 0, False), len(i.chip()))
 
-    # -- the Appearance page's rows (docs/theming_2026-09.md §9 phase 6 step 7)
+    # -- the Appearance page's rows (docs/history/theming_2026-09.md §9 phase 6 step 7)
     t = ctx.theme
     ch = t.choices()
     say("choices", ch["theme"], ch["variant"], ch["frame"], ch["tint"],

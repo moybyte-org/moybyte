@@ -1,4 +1,4 @@
-"""A theme's backdrop (docs/look_2026-10.md step 7, docs/media/look_2026-10/GAPS.md
+"""A theme's backdrop (docs/history/look_2026-10.md step 7, docs/media/look_2026-10/GAPS.md
 gap 9): `backdrop.home` and `backdrop.desk`, read by the loader
 (native/moy_ui/moy_theme.c, moy_theme_backdrop) and rasterised by
 native/moy_gfx/moy_backdrop.c into the one wallpaper bake (runtime/wallpaper.py).

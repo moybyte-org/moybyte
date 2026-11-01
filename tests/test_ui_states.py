@@ -9,7 +9,7 @@ from runtime.chrome import THEME_VARIANTS
 from ws_helpers import fixture_colors
 
 # The palette themes whose states these resolve: the seeds of MOY64 colours
-# docs/look_2026-10.md step 27 deleted, as fixture packages
+# docs/history/look_2026-10.md step 27 deleted, as fixture packages
 # (tests/fixtures/themes/), in their old seed order; `moy`'s, `blocks`' and
 # `contrast`'s RGB roles are tests/test_theme_rgb.py's and its goldens'.
 THEME_NAMES = ("night", "indigo", "berry", "forest", "slate", "machine",

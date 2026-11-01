@@ -757,7 +757,7 @@ def _remote_state(ws):
             st["desk"] = bool(desk()) if desk is not None else None
             st["order"] = list(getattr(wm, "_order", ()) or ())
             st["focus"] = getattr(wm, "_focus", None)
-            # Console mode's parked window slots (docs/shell_layout_2026-10.md §3).
+            # Console mode's parked window slots (docs/theme_and_shell_2026-11.md §8.1).
             parked = getattr(wm, "_parked", None)
             st["parked"] = list(parked.order) if parked is not None else []
             wins = {}

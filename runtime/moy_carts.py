@@ -689,7 +689,7 @@ def _load(path, whole, folder=None):
             return None
         if broken:
             # A manifest a kid BROKE does not take the project off the shelf
-            # (step 5 of docs/text_editing_2026-09.md). JSON mode writes an
+            # (step 5 of docs/theme_and_shell_2026-11.md §10). JSON mode writes an
             # invalid document on a hard exit by design, so this is the reload
             # that design implies: the cart comes back on format defaults,
             # carrying `broken`, and the Editor opens it on the Config tab with
@@ -816,7 +816,7 @@ def _load(path, whole, folder=None):
             # vocabulary; makes the block editor read-only. Default False (absent =
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(ven.get("graduated", False)),
-            # A wallpaper that draws per glass (docs/theming_2026-09.md §4.9):
+            # A wallpaper that draws per glass (docs/theme_and_shell_2026-11.md §3.9):
             # at the glass's W and H around the shell's quiet rectangles,
             # rather than a 320x240 frame cover-cropped onto it.
             "glass": ven.get("glass") is True,
@@ -1151,7 +1151,7 @@ def save_manifest_meta(cart_dir, title=None, author=None):
 # deliberately not on the Code tab: the file switcher there is a switcher, and
 # a console for eight-year-olds does not want a New File button two taps from
 # every cart. This is reached from the Config tab's Files, which is
-# where a project's own folder already lives (docs/text_editing_2026-09.md
+# where a project's own folder already lives (docs/history/text_editing_2026-09.md
 # step 5) -- and it is offered only where a second script would actually RUN.
 
 def multi_script(cart):
@@ -1967,7 +1967,7 @@ def delete(cart):
 
 
 def save_package(path, files, remove=(), fresh=False):
-    """Publish a theme package's folder (`custom`, docs/theming_2026-09.md
+    """Publish a theme package's folder (`custom`, docs/history/theming_2026-09.md
     §9 phase 6 step 5): each of `files` (name -> bytes) written whole, each
     of `remove` deleted. `fresh` empties the folder first, so a package
     replaced by another keeps nothing of the one before."""
@@ -1982,7 +1982,7 @@ def save_package(path, files, remove=(), fresh=False):
 
 def rename_package(path, dest, files, replace=False):
     """A theme package's folder `path` moved to `dest` by one rename (NAME…,
-    docs/theming_2026-09.md §9 phase 6 step 8), then each of `files` written
+    docs/history/theming_2026-09.md §9 phase 6 step 8), then each of `files` written
     whole into it. A folder at `dest` is replaced only with `replace`
     (`adopt`'s aside-and-remove), else OSError(EEXIST)."""
     if _exists(dest):

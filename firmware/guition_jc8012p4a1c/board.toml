@@ -32,7 +32,7 @@ wrong on the S3 boards."""
 # declared 2026-09-06 on the owner's verdict from the desk (the handheld-sized
 # buttons were "too tiny" on a 10.1" that is touch-only; legibility was never
 # the problem, tap size was), and what makes this board a DESK
-# (`layout_base.class_of`, docs/look_2026-10.md step 9): the desk's metrics
+# (`layout_base.class_of`, docs/history/look_2026-10.md step 9): the desk's metrics
 # draw the handheld's 16px icons at 32, 5.4mm at ~150 PPI, over
 # `chrome.MIN_TAP_MM`, so the floor is 1 and every glyph stays at font
 # scale 1.

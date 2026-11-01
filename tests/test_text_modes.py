@@ -1,4 +1,4 @@
-"""The editor MODE table (step 2 of docs/text_editing_2026-09.md): what a
+"""The editor MODE table (step 2 of docs/theme_and_shell_2026-11.md §10): what a
 file's name says about how it is edited, and the two surfaces that ask it --
 the Editor's Code tab and the shell's text page."""
 

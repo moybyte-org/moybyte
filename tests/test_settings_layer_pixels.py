@@ -25,7 +25,7 @@ matters most here is the same one that file discovered: at 320x240 / font
 scale 1 the shell takes frozen branches, so a widget change is only visible on
 the other rows.
 
-Settings is a page of the public UI API's verbs (docs/look_2026-10.md step
+Settings is a page of the public UI API's verbs (docs/history/look_2026-10.md step
 19), so its shots are the PAGE (`SettingsLayer._draw_page`, the bar left out)
 with focus on each row in turn -- the page scrolled to it -- and each panel's
 page; the full screen with its bar is `test_shell_goldens.py`'s `settings`

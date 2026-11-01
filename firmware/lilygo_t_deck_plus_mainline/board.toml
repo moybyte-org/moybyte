@@ -390,7 +390,7 @@ baud = 115200
 # (tools/board_config.py INPUT_PARAMS; native/moy_input/moy_input.h has the
 # defaults and what each means): repeat_delay_ms, repeat_rate_ms, ball_coast,
 # ball_coast_rate. The trackball's coast ships at 0, no momentum
-# (docs/scroll_and_text_2026-10.md §17): a hand trial sets it here.
+# (docs/theme_and_shell_2026-11.md §1.4): a hand trial sets it here.
 ball_coast = 0
 
 # ---------------------------------------------------------------------------

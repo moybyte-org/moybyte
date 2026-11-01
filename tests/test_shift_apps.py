@@ -1,4 +1,4 @@
-"""Shift frames in the shipped apps (docs/scroll_and_text_2026-10.md §3.3,
+"""Shift frames in the shipped apps (docs/history/scroll_and_text_2026-10.md §3.3,
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
 Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
 list of projects, Storybook's stories and Appearance's rows,
@@ -585,7 +585,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
     p.settle()
 
 
-# The Editor's tabs on the verbs (docs/scroll_and_text_2026-10.md §15 P5).
+# The Editor's tabs on the verbs (docs/history/scroll_and_text_2026-10.md §15 P5).
 # A cart's picker of pictures (Hop Quest's, Moy Night's) is a part with no
 # gen: its page draws whole, and its frames are held to a whole draw's alone.
 EDITOR_TABS = ("editor cards Coin Quest", "editor cards Bench", "editor cards Hop Quest",

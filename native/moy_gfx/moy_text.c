@@ -167,7 +167,7 @@ static int font_check2(const uint8_t *src, size_t n) {
     return MOY_FONT_OK;
 }
 
-// Check a font file (moy_text.h; docs/theming_2026-09.md §4.7 has the format).
+// Check a font file (moy_text.h; docs/theme_and_shell_2026-11.md §3.7 has the format).
 // Every field is read a byte at a time, so `src` may sit at any address.
 static int font_check(const uint8_t *src, size_t n) {
     if (n > MOY_FONT_BYTES) {

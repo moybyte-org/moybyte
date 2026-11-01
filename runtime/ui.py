@@ -1252,7 +1252,7 @@ UP = -2                                 # ui.bar's answer: the bar's way back
 def band(r=None):
     """The rows of the page being laid out that this frame draws, as
     `(x, y, w, h)` in the page's coordinates (y from its rows' top): on a
-    shift frame (docs/scroll_and_text_2026-10.md §3.3) only those whose
+    shift frame (docs/history/scroll_and_text_2026-10.md §3.3) only those whose
     pixels the frame before left wrong, else what shows of the page. An app
     that loops over many rows or cards skips the ones it lies outside of,
     and passes `keep` for each it skips; None where no page is open. Given

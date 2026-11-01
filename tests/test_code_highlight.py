@@ -226,7 +226,7 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
 
 
 def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
-    """Code syntax colours are theme roles (docs/look_2026-10.md, the
+    """Code syntax colours are theme roles (docs/history/look_2026-10.md, the
     decisions): Moy's Day draws the targets' set, each placed in the live
     block the canvas draws through."""
     from runtime import chrome

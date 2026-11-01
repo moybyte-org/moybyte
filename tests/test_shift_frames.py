@@ -1,4 +1,4 @@
-"""Shift frames in the verbs engine (docs/scroll_and_text_2026-10.md §3.3,
+"""Shift frames in the verbs engine (docs/history/scroll_and_text_2026-10.md §3.3,
 §13): a frame whose change is one page's scroll plus rows the engine knows
 of moves the last frame's pixels of that page (a canvas's `shift_last`) and
 draws only its floor -- the band the move exposed, the rows whose marks

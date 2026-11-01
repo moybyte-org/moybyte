@@ -1,4 +1,4 @@
-"""The image's font set (docs/look_2026-10.md step 3): the faces
+"""The image's font set (docs/history/look_2026-10.md step 3): the faces
 tools/make_font.py builds, each a font file `NAME.fnt` (NAME is
 FAMILY-SIZE-WEIGHT-BPP) whose licence `NAME.txt` is its family's.
 
@@ -23,7 +23,7 @@ desk's) into its wasm, icon sets included.
 """
 
 # The face each type role takes under a theme's look `fam` (a family of the
-# set; docs/look_2026-10.md step 26a), as (size, weight, bpp) on the
+# set; docs/history/look_2026-10.md step 26a), as (size, weight, bpp) on the
 # handheld's metrics and on the desk's, DESIGN.md's Type: `ui` the status,
 # hint and row face (and the desk's keycap legends), `title` a bar's page
 # title on the handheld and a window's on the desk, `caption` the handheld's

@@ -11,7 +11,7 @@ the page and its pickers are fullscreen pages) and 1024x600 (the Waveshare P4
 as shipped, chrome 2x, font 1x: Appearance is a window, pickers are
 popovers).
 
-`derive()` below is the colour derivation of `docs/theming_2026-09.md` §4.10
+`derive()` below is the colour derivation of `docs/theme_and_shell_2026-11.md` §3.10
 written out in Python: every derived look in these pictures is computed by
 it, not picked by hand, and it reports the readability pairs it was held to.
 """
@@ -42,7 +42,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__fi
 
 
 # ==========================================================================
-# the derivation (docs/theming_2026-09.md §4.10)
+# the derivation (docs/theme_and_shell_2026-11.md §3.10)
 # ==========================================================================
 def _lin(v):
     v /= 255.0
@@ -53,7 +53,7 @@ def _lin(v):
 LUM = [round(10000 * (0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)))
        for r, g, b in MOY64]
 FLOOR = 30          # theme.contrast x 10
-RGB = 0x1000000     # a colour value at or above: RGB | 0xrrggbb (docs/look_2026-10.md step 5)
+RGB = 0x1000000     # a colour value at or above: RGB | 0xrrggbb (docs/history/look_2026-10.md step 5)
 
 
 def _lin_c(v):

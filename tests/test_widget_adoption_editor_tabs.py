@@ -125,7 +125,7 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
 
 
 def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
-    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/look_2026-10.md
+    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/history/look_2026-10.md
     step 33): a row per entry, the picked one focused, and no toolkit row."""
     from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
@@ -152,7 +152,7 @@ def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
 
 
 def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
-    """See why's popover (docs/look_2026-10.md step 33): `ui.popover`, hung
+    """See why's popover (docs/history/look_2026-10.md step 33): `ui.popover`, hung
     under the stopped line, never the old dialog shell."""
     from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))

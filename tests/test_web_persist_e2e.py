@@ -165,7 +165,7 @@ def _host_theme(tmp_path):
 
 
 def test_a_theme_exports_and_imports_as_a_zip(tmp_path, monkeypatch):
-    """A theme package travels as a cart does (docs/theming_2026-09.md §9
+    """A theme package travels as a cart does (docs/history/theming_2026-09.md §9
     phase 6 step 8), but lands under its own name: the loader takes a theme
     only from `<name>.moy`. Into a fresh profile it keeps its name and
     resolves to the rows it had, its sheets byte for byte; into the same

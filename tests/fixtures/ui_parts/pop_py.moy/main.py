@@ -1,4 +1,4 @@
-# The public UI API's popover (docs/look_2026-10.md step 24) as a Python
+# The public UI API's popover (docs/history/look_2026-10.md step 24) as a Python
 # app: a button opens a popover hung under it, holding a seg and a button
 # that closes it. pop_lua.moy and tests/fixtures/wasm/app_pop.moy draw the
 # same page with the same calls, and tests/test_ui_parts.py holds the three

@@ -8,7 +8,7 @@
 #   ConfigLayer           the Config tab: theme.json in the Code tab's view, json mode
 #   SpritesLayout         the Sprites tab's geometry, a handheld's and a desk pane's
 #   SpritesLayer          the Sprites tab: the open slot at its zoom, the sheet, the palette
-"""The Editor's theme mode (docs/look_2026-10.md step 33, GAPS 56): a theme
+"""The Editor's theme mode (docs/history/look_2026-10.md step 33, GAPS 56): a theme
 package opened in the console's Editor with two tabs and nothing a cart has
 -- no Code, Blocks, Map, Music and no Play: an edit applies live, so there is
 nothing to run. Appearance's Edit theme… opens it (`Appearance.edit_file`,

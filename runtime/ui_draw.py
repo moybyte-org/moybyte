@@ -161,7 +161,7 @@ _HERO = [0]
 
 def font(role="ui"):
     """(font, w, line, ascent): the font the toolkit's `role` text draws in
-    (docs/theming_2026-09.md §4.7; roles `ui`, `title`, `mono`, `caption`),
+    (docs/theme_and_shell_2026-11.md §3.7; roles `ui`, `title`, `mono`, `caption`),
     its glyph box's width, its line advance and its baseline, unscaled.
     Petme128's, (0, 8, 8, 7), until a font is installed for the role.
     `hero` is the handheld home's title face where one is installed
@@ -233,7 +233,7 @@ def print_width(s, scale=1):
 
 
 def cart_text(on):
-    """The app-cart boundary (docs/theming_2026-09.md §4.7): on while a
+    """The app-cart boundary (docs/theme_and_shell_2026-11.md §3.7): on while a
     cart's code runs, so its `print` and its `ui` draw in petme128 whatever
     the theme names; off puts the shell's fonts back. Answers whether it
     was on."""
@@ -253,8 +253,8 @@ def theme_fonts(name):
 
 
 def theme_sheets(name):
-    """(sprites, icons): theme `name`'s sheet files (docs/theming_2026-09.md
-    §4.6) along its `inherits`, None where none names one."""
+    """(sprites, icons): theme `name`'s sheet files (docs/theme_and_shell_2026-11.md
+    §3.6) along its `inherits`, None where none names one."""
     return _C.theme_sheets(name)
 
 
@@ -283,14 +283,14 @@ def sheet_caps():
 
 def theme_layout(name):
     """(refused, bars): theme `name`'s layout along its `inherits`, as the
-    loader checked it (docs/shell_layout_2026-10.md §5); refused when the
+    loader checked it (docs/theme_and_shell_2026-11.md §8.3); refused when the
     default's stands in. A bar is (edge, size, left, center, right, texts)."""
     return _C.theme_layout(name)
 
 
 def theme_home(name):
-    """The home's arrangement in theme `name`'s layout (docs/shell_layout_2026-10.md
-    §12): "carousel" (the default), "grid" or "icons"."""
+    """The home's arrangement in theme `name`'s layout (docs/theme_and_shell_2026-11.md
+    §8.10): "carousel" (the default), "grid" or "icons"."""
     return _C.theme_home(name)
 
 
@@ -320,7 +320,7 @@ def theme_custom(source, accent, tint):
     """(rc, bytes): `custom`'s theme.json derived from `source` (a seed's
     name or a stored package's bytes), `accent` (an accent's A or a
     preset's dark value, None for the source's own) and `tint` (a tint's name, None for none);
-    docs/theming_2026-09.md §4.10."""
+    docs/theme_and_shell_2026-11.md §3.10."""
     return _C.theme_custom(source, accent, tint)
 
 
@@ -331,7 +331,7 @@ def theme_accents():
 
 def theme_presets():
     """((name, dark, light), ...): the accent presets, style.json's, each
-    picked by its dark value (docs/look_2026-10.md step 27)."""
+    picked by its dark value (docs/history/look_2026-10.md step 27)."""
     return _C.theme_presets()
 
 
@@ -740,7 +740,7 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     _C.button(cv, look, rect, kid, flags, act, label, gid, _CONTENT, row)
 
 
-# -- button kinds (docs/look_2026-10.md step 10) ----------------------------------
+# -- button kinds (docs/history/look_2026-10.md step 10) ----------------------------------
 
 BUTTON_KINDS = []                     # the theme model's kind names, in its order
 for _n in _C.theme_look_fields()[0]:
@@ -1299,7 +1299,7 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
 
 # --- the theme's shape ---------------------------------------------------------
 # A theme's surfaces, corner radius, pressed-label offset and text effects
-# (docs/theming_2026-09.md §4.2-§4.4), resolved once in C and drawn by every
+# (docs/theme_and_shell_2026-11.md §3.2-§3.4), resolved once in C and drawn by every
 # primitive, one for the process.
 
 _PART_ID = {}
@@ -1319,7 +1319,7 @@ def use_shape(name):
 def pattern_unreadable(th):
     """The installed shape's dither and pinstripe surfaces whose label ink
     misses the contrast floor against either colour in theme `th`, as
-    (part, state) pairs (docs/theming_2026-09.md §7). A miss never refuses a
+    (part, state) pairs (docs/theme_and_shell_2026-11.md §6). A miss never refuses a
     theme."""
     return _C.pattern_unreadable(_look(th))
 
@@ -1338,7 +1338,7 @@ def paint(cv, th, rect, part, state=REST):
 
 # --- window frames ---------------------------------------------------------------
 # The window decoration and the bar's band in the frame style the theme
-# chooses (docs/theming_2026-09.md §4.5): the styles are C, a theme only picks
+# chooses (docs/theme_and_shell_2026-11.md §3.5): the styles are C, a theme only picks
 # one, its title alignment and its button order.
 
 FRAME_BUTTONS = ("close", "max", "min", "back")     # MOY_UI_FB_*
@@ -1370,7 +1370,7 @@ def frame_icon(rect, title_h, btns=0):
     return _C.frame_icon(rect, title_h, int(btns))
 
 
-# --- depth: the theme's radii, shadow and edges (docs/look_2026-10.md step 6) ---
+# --- depth: the theme's radii, shadow and edges (docs/history/look_2026-10.md step 6) ---
 #
 # Installed with the theme and its mode (`use_depth`); a theme with no `look`
 # takes the default's, flat, and a theme whose chain names a frame style nearer than its look
@@ -1494,7 +1494,7 @@ def scrim(cv, th, rect, src=None, also=None):
 
 
 def bar_part(cv, th, part, rect, on=0, fill=None):
-    """A bar part of the live theme's look (docs/look_2026-10.md step 14):
+    """A bar part of the live theme's look (docs/history/look_2026-10.md step 14):
     a desk or handheld bar's band (`on` the band's BAND_* side), the system
     button's tile (`on`: its menu is open), a desk chip's field (`on`: the
     focused window's) or a desk icon's tile (step 25, BAR_TILE; `fill`, a
@@ -1576,7 +1576,7 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, select
     content keeps its own ink. `flat` draws the theme's ring as the focus
     mark, counted, whatever its style: a mark that moves with every focus
     step and must not lift or shadow its neighbours (the home's grid and
-    icons, docs/look_2026-10.md step 33)."""
+    icons, docs/history/look_2026-10.md step 33)."""
     if flat:
         ring = True
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
@@ -2509,7 +2509,7 @@ class Hold:
 
     A frame whose input only typed into the dialog's field or moved its
     focus puts nothing back (a dialog's rows frame:
-    docs/scroll_and_text_2026-10.md §5): the dialog's frame begins ahead
+    docs/history/scroll_and_text_2026-10.md §5): the dialog's frame begins ahead
     of the page (`rows_frame`), and where its host allows it (`ok`, the
     host's `held`) the dialog draws its changed rows alone. That is where
     every buffer holds the page as the frames before left it (`rows`: each
@@ -3146,7 +3146,7 @@ _MAX_RETAINED = 3
 
 class PaintRing:
     """What the last painted frames left of one region in the buffers a
-    canvas presents in turn (docs/scroll_and_text_2026-10.md §3.1): a slot
+    canvas presents in turn (docs/history/scroll_and_text_2026-10.md §3.1): a slot
     per painted frame -- its number, the canvas it drew on, its key (what
     the pixels are a function of besides the region's own state, compared
     `==`, and an object compared `is`: a theme), the region's offset, a

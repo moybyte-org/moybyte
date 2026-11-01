@@ -593,7 +593,7 @@ class EditorDesk(Layer):
 
     # -- drawing ------------------------------------------------------------------
 
-    # -- a prompt's rows (docs/scroll_and_text_2026-10.md §5) -----------------------
+    # -- a prompt's rows (docs/history/scroll_and_text_2026-10.md §5) -----------------------
     #
     # While a pane's tab has a prompt up (the Blocks entry prompts, Cart info,
     # New script) the desk under it does not change but by input that reaches
@@ -690,7 +690,7 @@ class EditorDesk(Layer):
         else:
             cv.clip(*self._clip)
 
-    # -- a pane's own frames (docs/scroll_and_text_2026-10.md §15 P5) -------------
+    # -- a pane's own frames (docs/history/scroll_and_text_2026-10.md §15 P5) -------------
     #
     # While the focused pane shows Blocks, Settings, the Code tab, theme
     # Config, the Map or the Sound pane, the desk speaks the shown protocol:

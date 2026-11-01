@@ -116,7 +116,7 @@ left:
 
 - **Every golden row draws through the toolkit, the T-Deck's 320×240 included.**
   The frozen 320×240 branches (`_base`) retired with theming phase 3 step 4
-  (`docs/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
+  (`docs/history/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
   from the formulas every tier runs, so a widget or a layout formula change
   moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
   coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.

@@ -1,4 +1,4 @@
-"""RGB colours and the look (docs/look_2026-10.md step 5).
+"""RGB colours and the look (docs/history/look_2026-10.md step 5).
 
 * A role takes "#rrggbb" (RGB | 0xrrggbb in the row) beside a MOY64 index;
   what is no colour is dropped and noted, an index still clamps.
@@ -124,7 +124,7 @@ def test_the_live_row_content_look_and_swatches_fit_the_block(seed, variant):
 def test_every_seed_reads_in_both_modes():
     """Every pair; and the code roles (the bits past the plate's) in the
     2026-10 look's seeds, the older ones' syntax colours reported until
-    step 27 retires them (docs/look_2026-10.md step 23)."""
+    step 27 retires them (docs/history/look_2026-10.md step 23)."""
     import os
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "native", "moy_ui", "style.json")) as f:

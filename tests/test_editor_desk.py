@@ -1,4 +1,4 @@
-"""The desk Editor's workspaces (docs/look_2026-10.md step 30;
+"""The desk Editor's workspaces (docs/history/look_2026-10.md step 30;
 docs/media/look_2026-10/EDITOR_LAYOUT.md and MAXIMISE_VARIANTS.md's Resize):
 the starting arrangements at both desk sizes, the free dividers and their
 minimums, what the board remembers, and the desk Editor driven through the

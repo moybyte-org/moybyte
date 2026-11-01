@@ -1,4 +1,4 @@
-"""Tests for the home's carousel (docs/shell_layout_2026-10.md §12): one row of
+"""Tests for the home's carousel (docs/theme_and_shell_2026-11.md §8.10): one row of
 square cards that slides sideways under the tab row, the card at the centre
 larger, on EVERY tier (the 320x240 baseline included). With more carts than fit
 the band, touch drag / a fling / keyboard nav must reveal the last cart, the
@@ -506,7 +506,7 @@ def test_cursor_delta_is_faster_and_accelerates():
     assert C._cursor_delta(8) >= 320 // 3
 
 
-# -- the handheld home (docs/look_2026-10.md step 17) ---------------------------
+# -- the handheld home (docs/history/look_2026-10.md step 17) ---------------------------
 
 def test_the_handheld_hero_keeps_its_gap_to_the_neighbours(tmp_path):
     """A hero twice its neighbours, every gap the same, the card half the
@@ -717,7 +717,7 @@ def test_a_card_shows_its_whole_cover_at_a_clean_scale(tmp_path, monkeypatch):
     assert [d[4] for d in drawn] == [128, 64]
 
 
-# -- the desk home (docs/look_2026-10.md step 18) ---------------------------------
+# -- the desk home (docs/history/look_2026-10.md step 18) ---------------------------------
 
 def _desk_home(tmp_path):
     from runtime import host_app

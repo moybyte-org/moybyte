@@ -1,10 +1,10 @@
 """Window frame styles (native/moy_ui/moy_ui_draw.c's moy_ui_frame,
-docs/theming_2026-09.md §4.5): the `frame` key, each style inside the WM's
+docs/theme_and_shell_2026-11.md §3.5): the `frame` key, each style inside the WM's
 footprint, the button layout the hit-test reads, and the bar's band.
 
 Classic is the frame the WM drew in Python. The palette theme these draw
 under is the `night` fixture package (tests/fixtures/themes/, the seed
-docs/look_2026-10.md step 27 deleted) with the frame each test names: a
+docs/history/look_2026-10.md step 27 deleted) with the frame each test names: a
 frame style nearer than the look it takes, so the frame is the style's.
 """
 
@@ -156,7 +156,7 @@ def test_the_band(frame, style):
     assert cv.gate_counts()[0] == (2 if style == "win9x" else 1)
 
 
-# -- the depth's window parts (docs/look_2026-10.md step 13) ------------------
+# -- the depth's window parts (docs/history/look_2026-10.md step 13) ------------------
 
 @pytest.fixture
 def looked():
@@ -261,7 +261,7 @@ def test_a_theme_naming_a_frame_style_keeps_its_frame():
         ui_draw.use_depth(None, False)
 
 
-# -- the desk's tiles (docs/look_2026-10.md step 25) --------------------------
+# -- the desk's tiles (docs/history/look_2026-10.md step 25) --------------------------
 
 def _rgb(hexs):
     return ui_draw._C.theme_rgb(0x1000000 | int(hexs, 16))[0]

@@ -1519,7 +1519,7 @@ def _turn_off_by_its_button(ws):
 
 def test_the_page_always_shows_the_address_and_the_pin(tmp_path, monkeypatch):
     """The look's type fits the address and the pin beside the code, so the
-    page shows them always (docs/look_2026-10.md step 33), the pin large."""
+    page shows them always (docs/history/look_2026-10.md step 33), the pin large."""
     from runtime import ui
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()

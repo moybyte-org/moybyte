@@ -13,7 +13,7 @@
 // -- the font text draws in ---------------------------------------------------------
 //
 // A primitive's text reads the metrics of the font that draws it
-// (docs/theming_2026-09.md §4.7): its role's (moy_ui_font_use), and
+// (docs/theme_and_shell_2026-11.md §3.7): its role's (moy_ui_font_use), and
 // petme128's on a compiled run's canvas and on the game canvas, which a theme
 // does not reach. With petme128 every width is 8 px a byte and every line 8
 // rows, at the scale.
@@ -179,7 +179,7 @@ static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci)
     text_paint(d, s, n, x, y, ci, NULL);
 }
 
-// A label in the part's effect (docs/theming_2026-09.md §4.3): `shadow` is
+// A label in the part's effect (docs/theme_and_shell_2026-11.md §3.3): `shadow` is
 // the label once more in the effect's colour one pixel down and right,
 // under it; `emboss` is that up and left in the effect's colour and down and
 // right in the label's own.
@@ -226,7 +226,7 @@ static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scal
                                                    d->row->pal[moy_ui_pidx(ci)], scale);
 }
 
-// -- sprites (docs/theming_2026-09.md §4.6) ---------------------------------------
+// -- sprites (docs/theme_and_shell_2026-11.md §3.6) ---------------------------------------
 //
 // A cell of the theme's role sheet into a box at `scale`, each slot resolved
 // through the look's table (moy_ui_sprite_slots): a glyph cell centred in the
@@ -1420,7 +1420,7 @@ int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, in
 
 // -- window frames ------------------------------------------------------------------------
 //
-// Classic is D1's frame (docs/theming_2026-09.md §1): a one-pixel ring and
+// Classic is D1's frame (docs/theme_and_shell_2026-11.md §1.1): a one-pixel ring and
 // the strip's bottom line in shade_dark, a hard black shadow, the strip with
 // the app's identity stripe at its left and the title beside it, and a square
 // close. The other styles draw in the same footprint (moy_ui.h).
@@ -1487,7 +1487,7 @@ static void frame_box(int style, int fs, int th, int *bw, int *bh, int *gap) {
     (void)th;
 }
 
-// The depth's window parts (docs/look_2026-10.md step 13), in proportion to
+// The depth's window parts (docs/history/look_2026-10.md step 13), in proportion to
 // the 44-row header the look is drawn at: the title 16 in, after the line
 // icon's 20-pixel slot and a 10-pixel gap where win.icon is on; minimize,
 // maximize and close as 28-pixel title buttons on a 34-pixel pitch, close's

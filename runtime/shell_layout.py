@@ -1,5 +1,5 @@
 """The composer: a theme's `layout` resolved for this tier, glass and mode
-(docs/shell_layout_2026-10.md §9, §10).
+(docs/theme_and_shell_2026-11.md §8.7, §8.8).
 
 The C loader (native/moy_ui/moy_theme.c) has already capped, clamped and
 checked the data, and resolved it along `inherits` (`moy_ui.theme_layout`).

@@ -1,4 +1,4 @@
-"""A system modal dims what it covers (docs/look_2026-10.md, D-01): the
+"""A system modal dims what it covers (docs/history/look_2026-10.md, D-01): the
 system menu over the handheld home and over the desk, and the pause menu
 over a game. The scrim is drawn once a frame over pixels that frame painted,
 so it never darkens twice: frames while a modal is open are identical, the

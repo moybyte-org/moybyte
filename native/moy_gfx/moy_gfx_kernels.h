@@ -311,7 +311,7 @@ void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh,
 
 /* Scale an RGB565 sw x sh source to a tw x th rect at (dx, dy), nearest-
  * neighbour at any ratio, up or down, in one call: a home card's cover at its
- * distance-from-centre scale (docs/shell_layout_2026-10.md section 12). Opaque.
+ * distance-from-centre scale (docs/theme_and_shell_2026-11.md §8.10). Opaque.
  * The target column i samples source column (i * sx + sx / 2) >> 16 with
  * sx = (sw << 16) / tw, rows alike -- tests/test_gfx_binding.py holds the
  * Python statement of it. The clip rect is intersected with the buffer; a
@@ -411,7 +411,7 @@ void mg_text_font(uint16_t *dst, size_t dcap, int dw,
                   const mg_font_t *f, int scale,
                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
-/* The glyph lane's ink (docs/look_2026-10.md step 4): `col` at a weight for
+/* The glyph lane's ink (docs/history/look_2026-10.md step 4): `col` at a weight for
  * each coverage value of a `bpp`-bit glyph, 0 (none) to 256 (all of it), and
  * `col` over a known solid background at each of those weights, the ramp.
  * mg_ink builds both: `alpha` (0..256, 256 opaque) scales every weight, and

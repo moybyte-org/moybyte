@@ -1,5 +1,5 @@
 """A held key repeats at the input layer, and the trackball's steps are counts
-(docs/scroll_and_text_2026-10.md §2.2, §2.3).
+(docs/theme_and_shell_2026-11.md §9.2, §9.3).
 
 The table (native/moy_input/moy_input.c, through the host's binding) repeats
 a held button and a source's typing level on the clock `begin_frame` is

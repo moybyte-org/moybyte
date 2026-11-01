@@ -1,4 +1,4 @@
-"""One projects list (docs/shell_layout_2026-10.md §12, the owner's rulings of
+"""One projects list (docs/theme_and_shell_2026-11.md §8.10, the owner's rulings of
 2026-10-14): the home's Make tab is the only list of projects. There is no
 project picker on any tier and no PROJECTS button on the Editor's bar; the
 Editor's X backs out one level, to wherever it was opened from. In desktop

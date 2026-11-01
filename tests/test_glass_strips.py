@@ -1,4 +1,4 @@
-"""The shell's half of the rotated compositor's rects (docs/shell_layout_2026-10.md
+"""The shell's half of the rotated compositor's rects (docs/history/shell_layout_2026-10.md
 §13 step 2): the bar strips it presents are a rect list the shell publishes on
 relayout, each repaint that changes a strip's pixels says so, and the
 fullscreen home's drag partial hands its band as the frame's damage.

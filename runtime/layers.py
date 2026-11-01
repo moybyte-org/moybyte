@@ -338,7 +338,7 @@ class _PerfLayer(Layer):
 
 
 class _PauseLayer(Layer):
-    """The pause menu's layer (docs/look_2026-10.md step 25a): its card over
+    """The pause menu's layer (docs/history/look_2026-10.md step 25a): its card over
     the frozen game, drawn on the system canvas; it takes every key and tap
     while it shows, and clears the game pointer's tap so the held cart never
     sees one."""
@@ -391,7 +391,7 @@ class _ConfirmLayer(Layer):
 
 
 class _SysMenuLayer(Layer):
-    """The popover layer (#52, docs/shell_layout_2026-10.md §8): the ONE modal
+    """The popover layer (#52, docs/theme_and_shell_2026-11.md §8.6): the ONE modal
     panel a bar widget opens -- the system menu's rows, or a component. Rows:
     Up/Down move (skipping headers), Enter/A/RUN select (close-on-select). A
     component takes the keys itself, every key while it is typing. B, STOP,

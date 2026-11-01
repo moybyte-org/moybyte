@@ -951,7 +951,7 @@ export function cartBase(name, author = "local") {
 // A theme package in an archive's entries (`top` its folder, or null), or
 // null: {name, file}, the name its folder must have and its theme.json's
 // entry name. The loader takes a theme only from `<name>.moy` whose
-// theme.json says `name` (docs/theming_2026-09.md §3), so a theme lands under
+// theme.json says `name` (docs/theme_and_shell_2026-11.md §2), so a theme lands under
 // its own name, never under the author-part base a cart takes. `name` is
 // theme.json's when it is the grammar's, else the folder's stem in it.
 export function themeOf(entries, top) {

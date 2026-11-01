@@ -1,4 +1,4 @@
-// The theme's depth (moy_ui.h, docs/look_2026-10.md step 6): its look's
+// The theme's depth (moy_ui.h, docs/history/look_2026-10.md step 6): its look's
 // radii, shadow and edges, installed once per theme and mode, and the window
 // frame, its shadow and its outline's fringe and a card's shadow drawn with
 // them through moy_shape (native/moy_gfx/moy_shape.h).
@@ -1009,7 +1009,7 @@ int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
     return MOY_UI_OK;
 }
 
-// -- the bars' parts (docs/look_2026-10.md step 14) --------------------------------
+// -- the bars' parts (docs/history/look_2026-10.md step 14) --------------------------------
 
 // A band's fill and its line on the edge facing the content (`side`, a
 // MOY_UI_BAND_*), solid over whatever backdrop or wallpaper is under it.

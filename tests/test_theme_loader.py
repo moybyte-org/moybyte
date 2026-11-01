@@ -1,4 +1,4 @@
-"""The theme loader (native/moy_ui/moy_theme.c, docs/theming_2026-09.md §3-§5,
+"""The theme loader (native/moy_ui/moy_theme.c, docs/theme_and_shell_2026-11.md §2-§4,
 §7): format 1, read by C every image runs, from bytes a kid may have typed.
 
 * Round trip: every seed in both variants, flattened, dumped as a package that
@@ -11,7 +11,7 @@
 * Readability: the seeds clear the floor; a pair under it sets its bit.
 * Metrics and text effects: the default sets every metric; a theme's are
   clamped, inherited and noted like its colours.
-* Surfaces: the grammar (docs/theming_2026-09.md §4.4) compiles what it
+* Surfaces: the grammar (docs/theme_and_shell_2026-11.md §3.4) compiles what it
   takes into the record the painter reads and refuses the rest; a package's
   surfaces are keyed by part and state, capped, inherited and noted.
 * A fuzz: mutated seed bytes never crash the reader and never yield a row
@@ -50,7 +50,7 @@ FLAGS = {r for v in ("dark", "light", "both") for r, x in TH["derive"][v]
 OK, BIG, SYNTAX, NEWER, NAME, TAKEN, CHAIN = range(7)
 N_CLAMPED, N_UNKNOWN, N_DROPPED = 1, 2, 4
 # The readability report: a bit per pair, the current plate's past them, then
-# one per code role (theme.code, docs/look_2026-10.md step 23).
+# one per code role (theme.code, docs/history/look_2026-10.md step 23).
 PAIRS = len(TH["pairs"])
 CODE_BITS = ((1 << len(TH["code"]["roles"])) - 1) << (PAIRS + 1)
 # The seeds that hold the code roles to theme.code's floor: the 2026-10
@@ -238,7 +238,7 @@ def test_readability_reports_and_never_refuses():
 @pytest.mark.parametrize("seed", CODE_READ)
 def test_the_looks_seeds_hold_the_code_roles_to_their_floor(seed, light):
     """Code syntax colours are theme roles, each 4.5:1 or better on the code
-    surface (docs/look_2026-10.md, the decisions)."""
+    surface (docs/history/look_2026-10.md, the decisions)."""
     assert TH["code"]["contrast"] == 45 and TH["code"]["bg"] == "surface"
     assert set(TH["code"]["roles"]) <= set(TH["content"])
     _row_, bad, rc = _row(seed, light)
@@ -368,12 +368,12 @@ def test_the_part_list_is_the_kinds_then_the_chrome_and_the_doc_lists_it():
     kinds = list(STYLE["kinds"]) + [k for k in STYLE["metrics"] if k not in STYLE["kinds"]]
     assert list(moy_ui.parts()) == kinds + TH["parts"]
     assert list(moy_ui.theme_states()) == STYLE["states"] + TH["states"]
-    with open(os.path.join(ROOT, "docs", "theming_2026-09.md")) as f:
+    with open(os.path.join(ROOT, "docs", "theme_and_shell_2026-11.md")) as f:
         doc = f.read()
-    sec = doc[doc.index("### 4.3 Parts"):doc.index("### 4.4")]
+    sec = doc[doc.index("### 3.3 Parts"):doc.index("### 3.4")]
     listed = set(re.findall(r"`([a-z_.]+)`", sec))
     missing = [p for p in moy_ui.parts() if p not in listed]
-    assert not missing, "docs/theming_2026-09.md §4.3 does not list %s" % missing
+    assert not missing, "docs/theme_and_shell_2026-11.md §3.3 does not list %s" % missing
 
 
 # -- the chain, over a copy whose seeds chain -----------------------------------
@@ -447,7 +447,7 @@ def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
         assert rc == CHAIN and row == night
 
 
-# -- the layout (docs/shell_layout_2026-10.md §5, §9) -----------------------------
+# -- the layout (docs/theme_and_shell_2026-11.md §8.3, §8.7) -----------------------------
 
 LAY = TH["layout"]
 # The default seed's (Moy's) bar.
@@ -467,8 +467,8 @@ def _lay(name, bars, **kw):
 
 
 def test_the_home_rides_the_layout_carousel_by_default():
-    # `home` names the home's arrangement (docs/shell_layout_2026-10.md
-    # §12): every seed's is the carousel; a package sets it with its bars;
+    # `home` names the home's arrangement (docs/theme_and_shell_2026-11.md
+    # §8.10): every seed's is the carousel; a package sets it with its bars;
     # an unknown name is noted and the default stands; a non-string dropped.
     assert LAY["homes"][0] == "carousel"
     for name in TH["seeds"]:
@@ -485,7 +485,7 @@ def test_the_home_rides_the_layout_carousel_by_default():
 
 def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
     """...but Moy, Blocks and Contrast, whose looks carry the 2026-10 bar
-    (docs/look_2026-10.md steps 14, 26b and 26c): the Moy button first,
+    (docs/history/look_2026-10.md steps 14, 26b and 26c): the Moy button first,
     the status at the right."""
     for name in TH["seeds"]:
         if name not in ("moy", "blocks", "contrast"):
@@ -665,12 +665,12 @@ def _corpus(n):
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
                                 "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
-    # The look (docs/look_2026-10.md step 5): every field type, paints, maps,
+    # The look (docs/history/look_2026-10.md step 5): every field type, paints, maps,
     # both variants' objects.
     seeds.append(_src("fz", colors={"dark": {"panel": "#102030", "accent": "#ffc23d"},
                                     "light": {"surface": "#FFFFFF", "ink": 0}},
                       look=LOOK_SAMPLE))
-    # The layout cases (docs/shell_layout_2026-10.md §5): a string for bars,
+    # The layout cases (docs/theme_and_shell_2026-11.md §8.3): a string for bars,
     # five bars, two on one edge, a size of 0 and of 10000, an unknown
     # widget, a 200-character text, no menu, `zone` in a vertical bar only.
     req = ["menu", "zone", "close"]

@@ -98,8 +98,8 @@ def test_button_press_triggers_exactly_one_redraw(tmp_path):
 
 
 def test_a_glide_draws_until_the_row_rests_then_idles(tmp_path):
-    """A right press glides the home's row a card (docs/shell_layout_2026-10.md
-    §12): it draws every frame of the motion, then nothing once it rests."""
+    """A right press glides the home's row a card (docs/theme_and_shell_2026-11.md
+    §8.10): it draws every frame of the motion, then nothing once it rests."""
     ws, drv = _static_launcher(tmp_path)
     _settle(ws, drv)
     before = ws._frames_drawn

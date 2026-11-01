@@ -706,7 +706,7 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
 # -- ctx.theme -----------------------------------------------------------------
 
 def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
-    """The DARK/LIGHT half of the theme (visual_identity_v1 4.3). Three things
+    """The DARK/LIGHT half of the theme (docs/history/visual_identity_v1.md §4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
     reads -- follows; the app's colour dict is a new one, rebuilt at the
     table's new generation; and the choice reaches system.json or it is gone

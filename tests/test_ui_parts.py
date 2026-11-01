@@ -1,4 +1,4 @@
-"""The public UI API's parts (docs/look_2026-10.md step 12; the verbs are
+"""The public UI API's parts (docs/history/look_2026-10.md step 12; the verbs are
 docs/ui_api_2026-10.md §1's): a test per kind under the engine, and one parts
 page drawn by a Python, a Lua and a compiled app to the same pixels.
 
@@ -1008,7 +1008,7 @@ def test_the_parts_page_answers_its_script(parts_runs):
     assert s[13][P_FOCUS] == len("Level") and s[14][P_LEVEL] == 2, "left steps the level"
 
 
-# -- an icon on a row, and a progress bar (docs/look_2026-10.md step 19) --------------
+# -- an icon on a row, and a progress bar (docs/history/look_2026-10.md step 19) --------------
 
 def _row_page(before):
     """One group of one link, `before()` called just ahead of it."""
@@ -1141,7 +1141,7 @@ def test_progress_clamps_its_value():
 
 
 # -- a list in columns, a scroll region, a field, a dialog and an icon on a
-# button (docs/look_2026-10.md step 21) ------------------------------------------------
+# button (docs/history/look_2026-10.md step 21) ------------------------------------------------
 
 HEAD = 18                            # a table's header row (`value_row`'s `head`)
 
@@ -2048,7 +2048,7 @@ def test_the_look_page_answers_its_script(look_runs):
     assert s[0][L_LEFT] > 0
 
 
-# -- a popover (docs/look_2026-10.md step 24) ------------------------------------------
+# -- a popover (docs/history/look_2026-10.md step 24) ------------------------------------------
 
 
 def _popover_page(shown, at=None, w=160):
@@ -2214,7 +2214,7 @@ def test_the_popover_page_answers_its_script(pop_runs):
     assert s[6][Q_UNDER] == 1, "the link under it takes input again"
 
 
-# -- a menu (docs/look_2026-10.md step 25a) ---------------------------------------------
+# -- a menu (docs/history/look_2026-10.md step 25a) ---------------------------------------------
 
 _PAUSE_ITEMS = ("Resume", "Restart", "Options", "Quit")
 _PAUSE_ICONS = ("play", "rotate", "settings", "close")
@@ -2431,7 +2431,7 @@ def test_the_menu_page_answers_its_script(menu_runs):
     assert s[7][M_SYS] == 2, "the page's menu takes input again"
 
 
-# -- the apps' restyle (docs/look_2026-10.md step 31): tools, the app's bar, a
+# -- the apps' restyle (docs/history/look_2026-10.md step 31): tools, the app's bar, a
 # -- rule, the override keys wash and lead ---------------------------------------------
 
 

@@ -9,8 +9,9 @@ affordance left to keep), and §9 (tools/apps run with a minimal bar; text-mode 
 exit via the new `quit()` cart verb). It remains the "what the user experiences"; the
 "how" docs beneath it are
 implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
-`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
-`docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
+`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`, and
+`shell_architecture_v1.md`, superseded; `runtime/system_api.py` is the authority
+on the cart API's trust level). The shipped module
 map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
 `Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
@@ -83,7 +84,7 @@ never special-cases "was I launched from the editor?", the Editor never special-
 slideshow, the web view) costs nothing.
 
 *(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**, a row of
-the stop card since docs/look_2026-10.md step 33. A cart that fails to start
+the stop card since docs/history/look_2026-10.md step 33. A cart that fails to start
 or raises mid-frame stops under the stop card, whose See why exits into the
 Editor's Code tab with the caret on the crashing line, the inline marker set,
 and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
@@ -131,19 +132,19 @@ window never closes another, but for the Editor's own playtest, which ends
 with it: the 2026-10-31 paragraph below). The P4 device port of this tier rides #58.)*
 
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
-`docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
+`docs/theme_and_shell_2026-11.md` §8.1: the windowed tier BOOTS onto the
 **desktop** — wallpaper + a static icon column (PLAY, PROJECTS — the home in
 a window, on Make — then every app on the home's Apps tab, Notes and any
 installed app cart among them) + the one OS bar with taskbar chips — desktop mode's floor:
 everything opened there is a window, and the desk bar draws no X (nothing is
 beneath it). The **PLAY icon** enters console mode: the desk's windows wait
 parked, off the back-stack, and the fullscreen **home** shows — the same
-home every board has (`docs/shell_layout_2026-10.md` §12: its Games / Mine /
+home every board has (`docs/theme_and_shell_2026-11.md` §8.10: its Games / Mine /
 Apps / Make tabs, the Games tab holding no app): a tap runs a game
 FULLSCREEN exactly like the small tiers (the pause menu's Quit exits back to the
-home), and a tap on the Make tab and a card's CHANGE open the Editor
-fullscreen, as there. The home's X — B from a keyboard — is the way back to
-the desk, its windows where they were. The Player tier only ever gets the
+home), and the Editor, from Make or CHANGE, is a desk window
+(`docs/theme_and_shell_2026-11.md` L18). The bar's back — B or Esc from a
+keyboard — is the way back to the desk, its windows where they were. The Player tier only ever gets the
 home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
@@ -161,7 +162,7 @@ memory remain open on #178.)*
 Picture: no window buttons during play, and the pause menu's **Play in a
 window** (§9a) is the one way into a window. **Closing the Editor closes its
 playtest**; a game the kid moved out with Play in a window is its own window
-and stays open. `docs/shell_layout_2026-10.md` §3, "Games on the desk",
+and stays open. `docs/theme_and_shell_2026-11.md` §8.1, "Games on the desk",
 holds the rule.)*
 
 ---
@@ -181,15 +182,15 @@ door — no setting, no mode:
   cart opens the app). Every cart type, no per-device default, no type
   dispatch. The fourth tab, **Make**, is the one list of projects (owner,
   2026-10-14) and a tap there EDITS (owner, 2026-10-13) — the one tab whose
-  tap makes rather than plays (`docs/shell_layout_2026-10.md` §12).
-- **The home is a carousel** (2026-10, `docs/shell_layout_2026-10.md` §12):
+  tap makes rather than plays (`docs/theme_and_shell_2026-11.md` §8.10).
+- **The home is a carousel** (2026-10, `docs/theme_and_shell_2026-11.md` §8.10):
   one row of cover cards slides sideways under the tab row, the centre card
   larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
   `ui.DragTap` machine the Settings rows ride too), so a scroll can never
   launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
   included. A layout may pick another arrangement (`home`): the **grid**, a
   shelf of cards in the rows the glass holds that scrolls LEFT-RIGHT, or the
-  **icons**, tiles that scroll down (`docs/look_2026-10.md` step 33).
+  **icons**, tiles that scroll down (`docs/history/look_2026-10.md` step 33).
 - **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
@@ -231,9 +232,9 @@ every screen a kid starts on.
 ## 5. The zoned top bar — the macOS menu-bar model
 
 The default layout is a single OS-owned 18px top bar with two zones; a theme's
-layout places the same widgets in bars on any edge (`docs/shell_layout_2026-10.md`
-§4). This is the #46 bar, re-framed: it stopped being a hardcoded strip of mode
-buttons and became an OS shell with an app-populated region.
+layout places the same widgets in bars on any edge (`docs/theme_and_shell_2026-11.md`
+§8.2). It is the #46 bar as an OS shell with an app-populated region, not a
+hardcoded strip of mode buttons.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
   Editor loads its tab ladder + PLAY here (§6, no SAVE -- #111); the home puts
@@ -242,8 +243,7 @@ buttons and became an OS shell with an app-populated region.
   the OS owns the zone's existence and bounds.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
   opening its component (the WIFI panel, the calendar, the power rows) as a popover
-  in desktop mode and fullscreen in console mode (`docs/shell_layout_2026-10.md`
-  §8). Apps cannot draw here; the right zone is how the OS stays present
+  hung from it, in both modes (`docs/theme_and_shell_2026-11.md` §8.6). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
   320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
@@ -281,7 +281,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   tool row (#90/#91/#92): the sprite painter has PICO-8's row (pen, fill, shape,
   select, stamp) with stroke-level undo/redo, and its operations
   (copy/flip/rotate/shift/mirror/clear, on the selection or the whole sprite)
-  under a more menu and PICO-8's keys (`docs/look_2026-10.md` step 24); the map editor has
+  under a more menu and PICO-8's keys (`docs/history/look_2026-10.md` step 24); the map editor has
   per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
   whose last rung is an OVERVIEW -- each cell a solid block of its tile's dominant
   colour, because no tile can be drawn below 8px, at 4-7px per cell: the whole map
@@ -313,7 +313,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 - **On a desk** the Editor shows several of these at once, as five
   workspaces (Settings, Code, Art, World, Sound) whose dividers move, one
   pane at a time where the glass holds none of them
-  (`runtime/editor_desk.py`, `docs/look_2026-10.md` step 30).
+  (`runtime/editor_desk.py`, `docs/history/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
@@ -398,9 +398,9 @@ bar (one screen stack, no windows) the way back is the **back chevron** at
 the head of the bar's zone, after the Moy button: the bar draws it wherever
 there is somewhere to go back to and its layout places no `close` widget
 (`BarLayer.draws_back`; the shipped themes place none, a theme without a
-look keeps the X, `docs/shell_layout_2026-10.md` §9). The chevron, Esc and B
+look keeps the X, `docs/theme_and_shell_2026-11.md` §8.7). The chevron, Esc and B
 do the same thing, and on an app's first page they leave it
-(`Workstation.app_back`; docs/look_2026-10.md step 27a). On the desk the X
+(`Workstation.app_back`; docs/history/look_2026-10.md step 27a). On the desk the X
 lives only in a window's title strip and closes the window.
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
@@ -430,7 +430,7 @@ launcher or Editor.
 
 Every device has one key the console keeps for itself, in every input mode, and no
 cart ever reads it. It is the `start` button (`Workstation.system_key`,
-`docs/look_2026-10.md` step 25a), and each input spells it once:
+`docs/history/look_2026-10.md` step 25a), and each input spells it once:
 
 | input | the console key |
 |---|---|
@@ -482,10 +482,10 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 Settings carries the WIFI row and panel (scan/pick/password/connect/forget over
 the injected wifi service), and because Settings is an app, wifi setup works
 while a game keeps running. The panel is the one wifi implementation: the bar's
-wifi widget opens it as a popover in desktop mode and as the Settings page
-opened at it in console mode (`docs/shell_layout_2026-10.md` §8). The look —
-themes, their Day and Night modes, the semantic colour roles — is
-`docs/look_2026-10.md`'s.
+wifi widget opens it as a popover in both modes, and an app that asks for the
+Wi-Fi page gets Settings' page in console mode (`docs/theme_and_shell_2026-11.md`
+§8.6). The look — themes, their Day and Night modes, the semantic colour roles —
+is `docs/theme_and_shell_2026-11.md` §2-§6's.
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
@@ -569,9 +569,11 @@ clean its boundaries are.
 archived under `docs/history/` — `shell_ux_technical_plan_v1.md` (the staged migration
 that shipped the 2026-07 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
 that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
-its per-surface `make_system_api` track remains open) — plus
-`docs/shell_architecture_v1.md` (privileged system carts §2 + the layered compositor
-§3), which stays current.
+its per-surface `make_system_api` track remains open) and `shell_architecture_v1.md`
+(privileged system carts and the layered compositor; superseded, and
+`runtime/system_api.py` is the authority on the cart API's trust level). Beside
+this doc, `docs/theme_and_shell_2026-11.md` is the contract for the theme
+format, the bars and modes, the home, scrolling and the text files.
 
 Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
 `runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`,

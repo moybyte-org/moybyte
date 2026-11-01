@@ -282,7 +282,7 @@ def chrome_scale_choices(w, floor):
                  if s >= floor and int(w) // s >= MIN_CHROME_W)
 
 
-# The text-size floor (docs/theming_2026-09.md §4.7), #203's twin for text: the
+# The text-size floor (docs/theme_and_shell_2026-11.md §3.7), #203's twin for text: the
 # smallest a theme font's ascent may be ON GLASS. A CONFIGURATION number, read
 # off the same declared diagonal as the tap floor and with the same opt-in. It
 # is the smallest text the owner has kept at 1x: Tiny5's six rows on the 7"
@@ -319,7 +319,7 @@ class Layout(LayoutBase):
     The T-Deck's 320x240 is laid out by the same formulas as every canvas. The editors' geometry is their own `*Layout`'s.
 
     `font_w` and `line_h` are the `ui` font's glyph-box width and line advance
-    at `fs` (docs/theming_2026-09.md §4.7: 8 and 8 for petme128), so callers
+    at `fs` (docs/theme_and_shell_2026-11.md §3.7: 8 and 8 for petme128), so callers
     center and space text that the SystemCanvas renders at `fs`.
 
     TWO scales, since #203: `fs` sizes TEXT and `cs` (>= fs, equal by default)
@@ -409,7 +409,7 @@ class Layout(LayoutBase):
         self.bar_stride = stride
         edge = 2 * cs                                 # margin from the canvas edges
 
-        # -- the bars (docs/shell_layout_2026-10.md §4): every bar this surface
+        # -- the bars (docs/theme_and_shell_2026-11.md §8.2): every bar this surface
         # takes, packed into cells once here (shell_layout.pack) -- the rects
         # the bar layer draws and hit-tests, each in its own bar's coordinates.
         # The named rects below are views of the first bar that places each
@@ -838,13 +838,13 @@ _ICON_ART = {
 
 
 # --- Panel THEMES ----------------------------------------------------------
-# A theme is a data package (docs/theming_2026-09.md): the seeds are
+# A theme is a data package (docs/theme_and_shell_2026-11.md): the seeds are
 # native/moy_ui/themes/*.json, embedded in the image and read by the C loader
 # (native/moy_ui/moy_theme.c), which validates them, walks `inherits` and
 # fills every role a package leaves unset from style.json's derivation rules.
 # The roles are style.json's `tokens`; their jobs are
-# docs/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
-# RGB (`RGB | 0xrrggbb`, docs/look_2026-10.md step 5): `theme_colors` answers
+# docs/history/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
+# RGB (`RGB | 0xrrggbb`, docs/history/look_2026-10.md step 5): `theme_colors` answers
 # the theme's own values, and `live_colors` the live theme's as the shell
 # draws them, each RGB role placed in the block at indices 64..127;
 # `surface_light`, `bar_light` and `band_light` are presentation flags
@@ -941,7 +941,7 @@ def _row(name, light):
 
 def theme_modes(name):
     """The modes theme `name` has, of THEME_VARIANTS: the ones its package
-    declares (`"modes"`, docs/theming_2026-09.md §3), both where it is
+    declares (`"modes"`, docs/theme_and_shell_2026-11.md §2), both where it is
     silent."""
     if not theme_known(name):
         name = DEFAULT_THEME
@@ -1058,7 +1058,7 @@ def look_fields():
 
 
 class Live:
-    """The live theme's colours as the shell draws them (docs/look_2026-10.md
+    """The live theme's colours as the shell draws them (docs/history/look_2026-10.md
     step 5): `tokens` and `content` with each RGB role placed in the block
     (`block`, `used` of its 64 RGB565 words, indices 64..), `near` each
     token's nearest MOY64 index (what theme(), a compiled app and a cart
@@ -1076,7 +1076,7 @@ class Live:
 # editor's clear pixels and its colour 0; the black keyline its cursor's ring
 # goes round; the white that strokes colour 0 and rings the colour in use.
 # The black and the white are also a desk label's over a wallpaper, its
-# shadow and its ink (docs/look_2026-10.md step 25).
+# shadow and its ink (docs/history/look_2026-10.md step 25).
 FIXED = (RGB | 0x6e6e78, RGB | 0x9a9aa4, RGB | 0x000000, RGB | 0xffffff)
 
 
