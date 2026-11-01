@@ -5013,18 +5013,25 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     moy_ui_faces_t *fc = &s_kept->fc;
     int np = fc->np, shown = (fc->r1 - fc->r0) * np, n = fc->rows * np;
     for (;;) {
-        int w = fc->w, p;
+        int w = fc->w, p = -1;
         if (fc->wn >= fc->cap) {
-            p = -1;                      // (as many as the slots: the round is over)
-            w = shown + 2 * np;
-        }
-        if (w < shown) {
+            w = -1;                      // (as many as the slots: the round is over)
+        } else if (w < shown) {
             p = fc->r0 * np + w;
-        } else if (w < shown + np) {
-            p = fc->r1 * np + (w - shown);
-        } else if (w < shown + 2 * np) {
-            p = fc->r0 * np - 1 - (w - shown - np);
         } else {
+            // the rows past either end, nearest first: past the end, then
+            // before the start (its parts from its last), each a row
+            // further out than the last
+            int q = w - shown, d = q / (2 * np), j = q % np;
+            if (fc->r1 + d >= fc->rows && fc->r0 - 1 - d < 0) {
+                w = -1;                  // (no row further out on either side)
+            } else if ((q / np) % 2) {
+                p = fc->r0 - 1 - d >= 0 ? (fc->r0 - d) * np - 1 - j : -1;
+            } else {
+                p = fc->r1 + d < fc->rows ? (fc->r1 + d) * np + j : -1;
+            }
+        }
+        if (w < 0) {
             fc->w = fc->wn = 0;      // (the next asks from the first again)
             return -1;
         }

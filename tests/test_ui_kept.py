@@ -475,8 +475,10 @@ def test_faces_keep_a_slot_a_part_and_reuse_the_least_recently_stamped(th):
 
 def test_slot_next_names_the_parts_shown_then_the_rows_past_either_end(th):
     """`ui.slot_next`: the parts of the rows the table showed, then the
-    row past its end, then the row before its start, nearest first; -1,
-    and the order starts again."""
+    rows past either end, nearest first -- the row past its end, the row
+    before its start, the next past each -- as many as the slots; -1, and
+    the order starts again. A table whose rows run out on one side goes on
+    along the other."""
     rig = Rig(th, 2, axis="y")
     rows = [["a%d" % i, "b%d" % i, "c%d" % i] for i in range(20)]
     _faces_frame(rig, th, 30, 1, rows, offset=30)       # rows 3 .. 8 show (60 tall)
@@ -485,8 +487,17 @@ def test_slot_next_names_the_parts_shown_then_the_rows_past_either_end(th):
     while i >= 0:
         got.append(i)
         i = ui.slot_next()
-    assert got == list(range(9, 27)) + [27, 28, 29] + [8, 7, 6]
+    assert got == (list(range(9, 27)) + [27, 28, 29] + [8, 7, 6] + [30, 31, 32]
+                   + [5, 4, 3])                         # (30 slots: the round stops)
     assert ui.slot_next() == 9                          # (again from the first)
+    _faces_frame(rig, th, 60, 1, rows, offset=30)
+    got = []
+    i = ui.slot_next()
+    while i >= 0:
+        got.append(i)
+        i = ui.slot_next()
+    assert got == (list(range(9, 27)) + [27, 28, 29] + [8, 7, 6] + [30, 31, 32]
+                   + [5, 4, 3] + [33, 34, 35] + [2, 1, 0] + list(range(36, 60)))
     _faces_frame(rig, th, 30, 1, rows[:2])
     got = []
     i = ui.slot_next()

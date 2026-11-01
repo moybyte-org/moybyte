@@ -791,8 +791,11 @@ cell -- path, title, kind -- and its cover decode's serial) and answers
 the slot to stamp from or none. A paint never draws a face: a card no
 slot holds is drawn as it is, so a step that brings in a cold row evicts
 nothing as it goes (2026-10-31). An idle frame draws the faces `ui.slot_next` names
-(`Launcher.mint_faces`: the band's cards, then the row past either end),
-so a step copies the row it brings in. The layer goes back with
+(`Launcher.mint_faces`: the band's cards, then the rows past either end,
+nearest first, as many as the slots -- the band's and a row past either
+end at least, and what a megabyte of layer holds of them,
+`Launcher._face_cap`), so a step copies the row it brings in and a
+scroll back passes rows whose faces stayed. The layer goes back with
 `release_retained` and when the arrangement is left; the carousel's
 cards draw. The band frame (`launcher_layer._band_frame`, through
 `_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a

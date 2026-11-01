@@ -121,6 +121,8 @@ _ROW_CELL = ("",)
 _PART = array("i", [0] * 4)
 _FLOOR = array("i", [0] * 4)            # a floor rect `table_floor` answers
 _FACE_GEN = [0]                         # the faces' keys (`ui.slots`), one per layer and look
+_FACE_SLOTS = 128                       # the slots the engine keeps at most (`ui.slots`)
+_FACES_BYTES = 1 << 20                  # the faces' layer at most: the slots a board's cards fit
 _NO_KEYS = array("i", [-1, -1])         # a band paint that keeps nothing (`band_pass`)
 
 
@@ -1001,8 +1003,7 @@ class Launcher:
                 sh.append((r[0], r[1], r[2], r[3]))
                 if self._fence is not None:
                     self._fence()
-        faces = self.face_key is not None and self._faces_for(
-            cv, c.side, c.r, (c.cols + 2) * c.rows if self.horizontal else (c.rows + 2) * c.cols)
+        faces = self.face_key is not None and self._faces_for(cv, c.side, c.r, self._face_cap(c))
         if beside is not None:
             beside(cv, whole or not held)
         end = self.band_floor(cv, fill, not note)
@@ -1058,6 +1059,17 @@ class Launcher:
         if self.horizontal:
             return (c.x0 + col * c.px - self.scroll, c.y0 + row * c.py, c.side, c.side)
         return (c.x0 + col * c.px, c.y0 + row * c.py - self.scroll, c.side, c.side)
+
+    def _face_cap(self, c):
+        """The slots the cards' faces lie in (`_faces_for`): the band's
+        cards and a row past either end at least, and as many as
+        `_FACES_BYTES` holds of them up to the engine's `_FACE_SLOTS`, so the
+        faces of the rows a scroll passes stay drawn (an idle frame draws
+        them outward from the band, `mint_faces`)."""
+        least = (c.cols + 2) * c.rows if self.horizontal else (c.rows + 2) * c.cols
+        s = c.side + 2 * (0 if c.r else self.layout.fs - 1)
+        most = min(_FACE_SLOTS, _FACES_BYTES // (2 * s * s))
+        return least if least > most else most
 
     def _faces_for(self, cv, side, r, cap):
         """Whether this paint stamps its cards from their kept faces
@@ -1258,8 +1270,8 @@ class Launcher:
 
     def mint_faces(self, ms=4):
         """On a frame nothing waits on: draw the faces the engine names
-        next (`ui.slot_next`: the cards the band shows, then the row past
-        either end of it) whose covers are decoded or known absent, for
+        next (`ui.slot_next`: the cards the band shows, then the rows past
+        either end of it, nearest first) whose covers are decoded or known absent, for
         about `ms` -- a step then copies the row it brings in. True where
         one was drawn. A round that found every face drawn ends the asking
         until the band's table is drawn again (`_faces_for`)."""
