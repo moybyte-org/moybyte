@@ -1272,7 +1272,9 @@ class Launcher:
         """On a frame nothing waits on: draw the faces the engine names
         next (`ui.slot_next`: the cards the band shows, then the rows past
         either end of it, nearest first) whose covers are decoded or known absent, for
-        about `ms` -- a step then copies the row it brings in. True where
+        about `ms` -- a step then copies the row it brings in -- the walk
+        itself held to `ms` too, the next such frame going on from where
+        it stopped (a key between two frames waits on neither). True where
         one was drawn. A round that found every face drawn ends the asking
         until the band's table is drawn again (`_faces_for`)."""
         if self._faces_done:
@@ -1306,8 +1308,8 @@ class Launcher:
                     if j >= _ui.SLOT_MINT:
                         self._draw_face(j - _ui.SLOT_MINT, it, r, cover, new)
                         done += 1
-                        if _ticks_diff(_ticks_ms(), t0) >= ms:
-                            return True
+            if _ticks_diff(_ticks_ms(), t0) >= ms:
+                return done > 0          # (the round goes on from here next time)
             i = _ui.slot_next()
         if not done and not owed:
             self._faces_done = True

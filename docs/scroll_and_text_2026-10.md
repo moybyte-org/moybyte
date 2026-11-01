@@ -794,8 +794,9 @@ nothing as it goes (2026-10-31). An idle frame draws the faces `ui.slot_next` na
 (`Launcher.mint_faces`: the band's cards, then the rows past either end,
 nearest first, as many as the slots -- the band's and a row past either
 end at least, and what a megabyte of layer holds of them,
-`Launcher._face_cap`), so a step copies the row it brings in and a
-scroll back passes rows whose faces stayed. The layer goes back with
+`Launcher._face_cap`), about 4 ms of them a frame, the walk itself held
+to that (a round of 128 asks is 10 ms on an S3), so a step copies the
+row it brings in and a scroll back passes rows whose faces stayed. The layer goes back with
 `release_retained` and when the arrangement is left; the carousel's
 cards draw. The band frame (`launcher_layer._band_frame`, through
 `_try_band_frame`) runs on a drag, a fling and, on the fullscreen home, a
