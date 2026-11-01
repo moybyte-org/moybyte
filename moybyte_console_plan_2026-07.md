@@ -468,13 +468,13 @@ Offline by default; local sharing first; no accounts for local use; no child rea
 ```text
 low  (default): graphics, input, sound, local_storage
 high (parent-gated): radio_send, radio_receive, local_web_server, wifi_internet,
-                     ai_helper, sensor_read, actuator_write, raw_files, advanced_system
+                     sensor_read, actuator_write, raw_files, advanced_system
 ```
 Wallpapers/widgets cannot silently use the network. Received carts are quarantined until accepted. Parent can restore defaults / system carts.
 
-### 13.3 AI helper (#8, OPEN, parent-gated)
+### 13.3 AI helper (#8, closed 2026-11-01)
 
-AI understands *cartridges and customization*, not only game code. Allowed: explain this error · suggest one small change · make this wallpaper more fun · turn this pet into a game idea · summarize my project for a parent. **Not** allowed by default: open-ended child chat · AI companion behavior · raw internet · unrestricted image gen · unapproved sharing. Architecture: device → parent-approved gateway → LLM → **schema-checked** structured response → device. AI returns structured assets/hints, never freeform control of the system.
+Not part of the OS (owner, 2026-11-01): an AI helper is bad for learning to program.
 
 ---
 
@@ -520,7 +520,6 @@ M7  Voxel bake-to-sprite in the sprite pipeline                               (#
 5. **Rich web-view 3D scope (EXPLORATION, §10.3)** — if/when, and only in the fenced "device-as-server" form.
 6. **Lua second cart type timing (#11)** — gated on a real `.tic`/Lua source-compat goal.
 7. **Lego/modules scope (#9)** and **BLE input (#26)** — the Hardware Lab surface.
-8. **AI helper (#8)** — gateway and provider.
 
 ---
 
