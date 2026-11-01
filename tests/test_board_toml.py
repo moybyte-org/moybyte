@@ -415,7 +415,7 @@ def test_every_board_decides_the_wasm_engine(board):
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_board_decides_the_kernel_entry(board):
     """Taking native/moy_kernel hands app_main to the kernel
-    (docs/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
+    (docs/history/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
     with a serial-only floor (docs/kernel_survival_2026-10.md section 6.5)."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
@@ -468,7 +468,7 @@ def test_every_console_takes_the_toolkit_and_the_zero_denies_it(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
-    """The spine is native on every image (docs/kernel_spine_2026-10.md): no
+    """The spine is native on every image (docs/history/kernel_spine_2026-10.md): no
     board declares a twin hook for it, and no image freezes a Python spine
     (the twin is the suites' oracle, tests/spine_twin.py)."""
     assert "MOY_SPINE_IMPL" not in board_config.impls(BOARDS[board])

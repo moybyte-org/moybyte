@@ -387,7 +387,7 @@ calls. Every console takes it."""
 module = "moy_kernel"
 why = """
 The kernel's entry, crash record and recovery floor
-(docs/kernel_spine_2026-10.md §6-§8): taking it is what makes the kernel own
+(native/moy_kernel/moy_kernel.c's header): taking it is what makes the kernel own
 app_main. Every console takes it; what is this board's is in mpconfigboard.h --
 the panel module's four entry points the floor draws through, and the AXS15231
 touch, polled from C as the floor's input beside serial."""

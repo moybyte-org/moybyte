@@ -1,5 +1,5 @@
 # moy_spine for the unix and webassembly ports: the twin of micropython.cmake.
-# The spine is native on every image (docs/kernel_spine_2026-10.md); its
+# The spine is native on every image (docs/history/kernel_spine_2026-10.md); its
 # handle table, moy_htab.c, is the one moy_index takes its slots from too.
 
 MOY_SPINE_DIR := $(USERMOD_DIR)

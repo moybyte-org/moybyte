@@ -1,5 +1,5 @@
 // moy_kernel: the kernel's entry, the VM service, the crash intake and the
-// recovery floor (docs/kernel_spine_2026-10.md §6-§8, #224 sprint 2).
+// recovery floor (moy_crash.h, moy_recovery.h; #224 sprint 2).
 //
 // THE ENTRY. micropython.cmake defines MICROPY_ESP_IDF_ENTRY, which renames the
 // port's app_main, so this file's runs instead (the embed decision,

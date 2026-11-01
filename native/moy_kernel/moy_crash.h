@@ -1,13 +1,34 @@
-// moy_crash: the crash record and the boot decision (docs/kernel_spine_2026-10.md
-// §6, §8). Portable C: the board build compiles it into the kernel, and the
-// host compiles it for tests/test_moy_kernel.py through ctypes, so nothing here
-// may name the IDF or MicroPython.
+// moy_crash: the crash record and the boot decision. Portable C: the board
+// build compiles it into the kernel, and the host compiles it for
+// tests/test_moy_kernel.py through ctypes, so nothing here may name the IDF or
+// MicroPython.
 //
-// THE RECORD is one 128-byte struct. The panic wrapper (moy_kernel.c) fills it
-// in RTC memory, which a panic, both watchdogs and a software reset keep; the
-// next boot's intake adds the reset reason, copies it to NVS and clears the
-// RTC copy. `crc` covers every byte after itself, so a record is either whole
-// or absent: power-on garbage, or a wrapper that died half-way, reads as none.
+// THE RECORD is one 128-byte struct (64 held neither the backtrace nor the
+// text). The panic wrapper (moy_kernel.c, -Wl,--wrap=esp_panic_handler, in
+// IRAM, writing only RTC memory) fills it in RTC_NOINIT memory -- LP SRAM on
+// the P4s, static-asserted -- which a panic, both watchdogs and a software
+// reset keep; power-on and brownout do not, and leave only the reset reason.
+// It reads the task name, the uptime and the text only while the flash cache
+// is on, so a panic inside a flash operation still leaves PC, cause, address
+// and backtrace. The next boot's intake adds the reset reason, copies it to
+// NVS (every board's table has an nvs partition, so no core-dump partition)
+// and clears the RTC copy. `crc` covers every byte after itself, so a record
+// is either whole or absent: power-on garbage, or a wrapper that died
+// half-way, reads as none. A VM that dies with the board up is recorded by the
+// VM service; a hang is the task watchdog's panic (moy_kernel.c).
+//
+// SHOWN after the reboot: the console's first painted frame
+// (device_boot.boot_ok) takes the record once and the notice banner names what
+// was running and why it stopped; the dev channel's `state` carries it as
+// `crash`, Settings' diagnostics row shows it, and the recovery screen
+// (moy_recovery.h) shows it when the console cannot come up.
+//
+// THE STRIKE LEDGER is CrashGuard: runtime/crash_guard.py the reference,
+// native/moy_spine/moy_ledger.c under moy_spine.CrashGuard on the native
+// spine's consoles, over the settings rows (tests/test_ledger_twin.py holds the
+// two to the same answers and bytes). Its armed id is mirrored here per role
+// at `arm` (moy_crash.arm(role, id)) and cleared at the heal and the release,
+// which is how a record names what was running.
 //
 // THE BOOT STATE (moy_kstate_t) sits beside it in RTC memory: the boot
 // sequence, the VM starts since the console last proved itself (`unproven`),
@@ -96,6 +117,10 @@ enum {
 // Dev-only one-shots, armed over the dev channel for the gate.
 enum { MOY_TEST_NONE = 0, MOY_TEST_VM_START, MOY_TEST_HEAP };
 
+// Four starts in a row with no boot_ok send the next boot to the recovery
+// screen. Four, not three: a wallpaper that kills the board strikes out in the
+// ledger after three boots and the fourth boots without it (#160), so the
+// guard trips only once the ledger has had its turn.
 #define MOY_BOOT_LOOP_STARTS 4
 
 typedef struct {

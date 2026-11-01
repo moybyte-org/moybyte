@@ -20,7 +20,7 @@
 """Sprint 1a's harness: the store's index built as the C twin for every target,
 and the numbers the kernel's language was decided on (#224; the decision is
 docs/native_kernel_2026-09.md section 5, C). Sprint 2 generalised it to a second
-component, the kernel's spine (native/moy_spine, docs/kernel_spine_2026-10.md):
+component, the kernel's spine (native/moy_spine, docs/history/kernel_spine_2026-10.md):
 `--component spine` runs `host` and `sanitize` for it, with its own host
 library, fuzz driver and tests; `sizes`, `bench` and `ci-time` stay the
 index's, because the spine has no Python twin an image could take instead.

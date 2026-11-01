@@ -1,6 +1,7 @@
 # moy_spine — the kernel's spine, native
 
-The data half of the spine `docs/kernel_spine_2026-10.md` designs, in C:
+The data half of the kernel's spine, in C (#224 sprint 2; the design record is
+`docs/history/kernel_spine_2026-10.md`):
 `tests/spine_twin.py` is its Python oracle, call for call, and
 `tests/test_moy_spine.py` pins both. It is built the three ways
 `native/moy_index/` is (see its README), with no hook: every image, the

@@ -1,5 +1,5 @@
 """The kernel spine's interface, pinned once for every binding: the C spine
-(native/moy_spine, docs/kernel_spine_2026-10.md) and its Python oracle
+(native/moy_spine, docs/history/kernel_spine_2026-10.md) and its Python oracle
 (tests/spine_twin.py), each test unchanged.
 
 `BINDINGS` names each implementation by its module: the Python oracle, and the

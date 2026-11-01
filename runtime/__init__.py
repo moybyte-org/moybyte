@@ -14,7 +14,7 @@ import sys as _sys
 
 
 def _native_spine():
-    """The kernel's spine is C on every tier (docs/kernel_spine_2026-10.md):
+    """The kernel's spine is C on every tier (docs/history/kernel_spine_2026-10.md):
     on the CPython host it is native/moy_spine in the host's one library
     (runtime/host_native.py) over ctypes
     (`tools/moy_spine_binding.py`), registered as `moy_spine` and

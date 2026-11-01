@@ -3,7 +3,7 @@
 //
 // runtime/moy_spine.py's AppRegistry, BackStack, Returns and Leases are the
 // interface and the reference; this header is their native form
-// (docs/kernel_spine_2026-10.md section 3). Each holds KINDS, never objects: a
+// (docs/history/kernel_spine_2026-10.md section 3). Each holds KINDS, never objects: a
 // kind is 1 .. MOY_ID_MAX bytes of any value, an app id or a back-stack kind,
 // compared bytewise (the bindings pass a str's UTF-8). The bindings map the
 // codes below to the exceptions the Python twin raises.

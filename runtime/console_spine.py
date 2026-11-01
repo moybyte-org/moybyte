@@ -1,4 +1,4 @@
-"""The kernel spine's half of the Workstation (docs/kernel_spine_2026-10.md):
+"""The kernel spine's half of the Workstation (docs/history/kernel_spine_2026-10.md):
 the run and exit verbs, app registration and resolution, the WiFi lease and
 the settings wiring, as a mixin over `self`.
 
