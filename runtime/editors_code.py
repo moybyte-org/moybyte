@@ -293,9 +293,6 @@ class CodeEditor:
         self.col = max(0, min(len(self.lines[self.row]), self.left + col))
         self._scroll()
 
-    def visible_lines(self):
-        return self.lines[self.top:min(len(self.lines), self.top + self.ROWS)]
-
     # -- text selection + clipboard (#89) ------------------------------------
     # A selection is the span between the anchor (self.sel = (row, col), set when a
     # range op begins) and the live caret; None means nothing is selected. The

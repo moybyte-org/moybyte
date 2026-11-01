@@ -48,7 +48,6 @@ FORWARDS = {
         "web_console_url": "url",            # dev_channel's `web`
         "park_web_console": "park",          # layers.py's contract comment
         "stop_web_console": "stop",          # the Guition on-glass suite (serial)
-        "unpark_web_console": "unpark",      # tests
         "webhost_serving": "serving",        # settings_layer, tools/push_cart_wifi
         "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
         "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi

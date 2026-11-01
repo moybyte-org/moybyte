@@ -692,7 +692,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._init_perf()
         self._init_overlays()
         # The compositor/router layer stack (docs/history/shell_layers_refactor_v1.md). Built
-        # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
+        # once here; the WM's visible_stack()/draw_stack() z-order + gate them per frame.
         self._build_layers()
 
     def _init_canvases(self, comp, canvas, sys_canvas, font_scale,
@@ -1412,17 +1412,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # The overlay/visible/draw stacks are now built + MEMOIZED by the WM (Stage 6c,
     # wm.py) -- rebuilt only on a back-stack push/pop, a menu_view tab switch, or an
     # overlay-gate/splash flip, so a static top-of-stack allocates no per-frame list
-    # (the #66 perf-recovery win). These stay as the tested ws. entry points; frame()
-    # walks self.wm.draw_stack() and handle_input/pointer walk the cached reversed
-    # visible stack (wm.visible_stack_rev()) directly, so the hot path never allocates.
+    # (the #66 perf-recovery win). frame() walks self.wm.draw_stack() and
+    # handle_input/pointer walk the cached reversed visible stack
+    # (wm.visible_stack_rev()) directly, so the hot path never allocates.
     def _overlay_stack(self):
         return self.wm.overlay_stack()
-
-    def _visible_stack(self):
-        return self.wm.visible_stack()
-
-    def _draw_stack(self):
-        return self.wm.draw_stack()
 
     @property
     def sys_canvas(self):
@@ -1741,10 +1735,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def stop_web_console(self):
         """`web.stop()` -- the Guition on-glass suite's serial vocabulary."""
         return self.web.stop()
-
-    def unpark_web_console(self):
-        """`web.unpark()` -- the tests."""
-        return self.web.unpark()
 
     def webhost_serving(self):
         """`web.serving()` -- settings_layer, tools/push_cart_wifi.py."""

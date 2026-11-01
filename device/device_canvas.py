@@ -475,7 +475,7 @@ _PAL_IDENTITY = bytes(range(64))
 # table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
 # (this class writes them), 64..127 this block (native/moy_glass writes it into
 # every row; pal() never remaps it). `_CMASK[0]` is what a colour index is
-# masked with: 127, or 63 while a cart's code runs (`set_cart`), so a cart's
+# masked with: 127, or 63 while a cart's code runs (`ui_draw.cart_text`), so a cart's
 # colour stays its index modulo 64.
 _BLOCK = _glass_mod.block_view()
 _CMASK = _glass_mod.cmask()
@@ -490,10 +490,6 @@ def set_block(words):
         wire[i] = w if PAL565_WIRE is PAL565 else (((w & 0xFF) << 8) | (w >> 8))
     _glass_mod.block(wire)
 
-
-def set_cart(on):
-    """The cart boundary: while on, a colour index is masked to 0..63."""
-    _glass_mod.cart(on)
 _PALT_OPAQUE = bytes(64)
 
 
