@@ -1,4 +1,4 @@
-// The glass's canvases (docs/kernel_survival_2026-10.md §3.1).
+// The glass's canvases (#224 sprint 3; their buffers are moy_buf.h's).
 //
 // A canvas is a row of kind CANVAS: where it draws (the pixels, their capacity,
 // the BUF row they are when they are one), its size and stride, its owner, the

@@ -68,7 +68,7 @@ def test_a_handle_is_kind_slot_and_generation(sp):
 
 
 # The kinds of moy_htab.h, one per client table: sprint 3's carve added all
-# but APP (docs/kernel_survival_2026-10.md section 3.1), and its audio pass
+# but APP (native/moy_glass/moy_buf.h), and its audio pass
 # CLIP, the sample voice's clips.
 KINDS = {"GRANT": 12, "APP": 1, "BUF": 2, "CANVAS": 3, "SURF": 4, "OWNER": 5, "SRC": 6,
          "PEER": 7, "AUDIO": 8, "CLIP": 9}

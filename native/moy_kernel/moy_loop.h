@@ -1,5 +1,5 @@
-// moy_loop: the console's frame, the kernel's (docs/kernel_survival_2026-10.md
-// §7.1). One function, every tier: a board's VM service calls moy_loop_run()
+// moy_loop: the console's frame, the kernel's (#224 sprint 3). One function,
+// every tier: a board's VM service calls moy_loop_run()
 // where the port would enter its REPL, the browser's worker and the host call
 // moy_loop_step() once a frame, and Python is what the frame calls UP into.
 //
@@ -14,9 +14,9 @@
 //   services) -> pace -> account (PERF, the stage meters' window) -> the
 //   watchdog feed -> the pacing sleep.
 //
-// The kernel's own draws (the HUD) land inside the frame upcall, through the
-// canvas the console hands them, before its end_frame: the P4's last-write
-// rule (#58).
+// Draws over the console (the perf HUD, runtime/perf_hud.py) land inside the
+// frame upcall, through the system canvas, before its end_frame: the P4's
+// last-write rule (#58).
 //
 // WHAT RUNS IT. A tier gives the loop its stages as an ops table (every entry
 // optional: a stage with no op is never metered, so it reads as absent, not
@@ -25,6 +25,28 @@
 // console's boot registered, cleared when the VM goes, and refused while none
 // runs. The loop's state is one static struct, so the task or thread that
 // calls step() may change between any two frames.
+//
+// WHY IT IS SAFE (2026-10-07). A VM cannot tear itself down with its own
+// frames under a loop, so on a board moy_loop_run is the OUTERMOST frame of
+// the VM service task: the console's Python boot registers the upcalls and
+// RETURNS, the service calls moy_loop_run() where mp_task would enter its REPL,
+// and the loop calls Python back on the same task. No Python frame is below
+// the loop, so the teardown list runs with nothing of the loop's on the stack.
+// Across a soft reset's window a small kernel task, moy_loop_task (internal
+// stack, the VM's core), drives the frame, so the glass keeps presenting while
+// the VM restarts. A VM STOP is not that window: the VM service task itself,
+// never deleted, steps the loop with no VM until the stop's run ends, and
+// moy_loop_task is not created. So the loop adds no task while the VM runs,
+// and the kernel holds no more internal SRAM stopped than running; and both
+// tasks that may drive the loop have internal stacks, so an internal-flash
+// write from the loop needs no deferral. In the browser and on the host each
+// frame is one moy_loop_step of the DRIVER tier (moy_loop.drive: no stages but
+// the clock, the three console upcalls, an upcall's exception handed back to
+// the harness), under runtime/host_api.py's ConsoleDriver.frame.
+//
+// THE PUMP is FramePump in C: the clamped dt, the cadence debt, the
+// sleep-overshoot slack against the 10 ms FreeRTOS tick, and the published
+// slot the stage budgets are cut from (moy_loop_pump, moy_loop_pace).
 //
 // UPCALLS ARE COUNTED BY CLASS, per frame and in total: CONSOLE is the draw
 // stack's three and the console's dev words; APP an app's hooks; DRIVER a

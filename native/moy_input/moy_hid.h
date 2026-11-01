@@ -1,7 +1,7 @@
 // moy_hid: the BLE HID keyboard central's protocol -- scan, connect, pair,
 // discover the HID service, subscribe to its keyboard input reports, decode
 // them into the kernel table's "ble" source -- as a state machine over events,
-// with no radio in it (docs/kernel_survival_2026-10.md section 4.2).
+// with no radio in it (docs/history/kernel_survival_2026-10.md section 4.2).
 //
 // moy_ble_task.c drives it from NimBLE's host task: every GAP and GATT event
 // arrives as a moy_hid_on_* call, every request it makes goes out through

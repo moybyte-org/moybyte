@@ -42,7 +42,13 @@ bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms, uint32_t *f
 void moy_kernel_test_restart(int test);
 void moy_kernel_test_crash(bool abort_not_fault);
 
-// kstop: N soft resets of the VM service, counted (the dev channel's word).
+// kstop: N soft resets of the VM service, counted (the dev channel's word),
+// heapcaps printed before and after each. Test-only, never in a kid's
+// vocabulary: the executable guard that a teardown leaves the kernel's drivers
+// alive, with moy_loop_task presenting across each window. `kstop N stop` runs
+// N real VM stops instead, each printing a third line, `KSTOP i/n down`, with
+// the heaps read while no VM runs and the route and lease set before the stop
+// read back (`route=kstop lease=dev`); the start after it is a RETURN start.
 // When the kernel lit the glass with the logo, ms after power-on; 0: it did not.
 uint32_t moy_kernel_lit_ms(void);
 void moy_kernel_kstop(int n);

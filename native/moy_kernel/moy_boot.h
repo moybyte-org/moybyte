@@ -1,4 +1,4 @@
-// moy_boot: the kernel's first light (docs/kernel_survival_2026-10.md §7.4,
+// moy_boot: the kernel's first light (docs/history/kernel_survival_2026-10.md §7.4,
 // the owner's answer 9 in §13). Before any VM exists the kernel brings the
 // panel up, draws the boot logo into framebuffer 0 and lights the glass; the
 // console's themed boot screen follows once Python is up.

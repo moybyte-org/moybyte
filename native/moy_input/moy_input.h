@@ -1,5 +1,5 @@
 // moy_input: the merged input table every surface reads, its sources and the
-// pointer (docs/kernel_survival_2026-10.md section 4.1).
+// pointer (docs/history/kernel_survival_2026-10.md section 4.1).
 //
 // One table body for every tier: the boards' kernel table (moy_input_kernel),
 // the tables the MicroPython binding (modmoy_input.c) and the host's ctypes

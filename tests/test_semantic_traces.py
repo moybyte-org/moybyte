@@ -1248,7 +1248,7 @@ def test_spine_trace_holds_over_the_native_spine(tmp_path):
 # -- the survival set's traces (#224, sprint 3) ----------------------------------
 #
 # Sprint 3's carve pins each subsystem's twin before anything crosses
-# (docs/kernel_survival_2026-10.md section 2 item 8): input (a scripted event
+# (docs/history/kernel_survival_2026-10.md section 2 item 8): input (a scripted event
 # stream -> the merged table's masks for players 0 and 1 and the union, and the
 # pointer, per frame), the glass (a draw script -> the frame's hash, the buffer
 # rows by owner and origin, the pool), the loop (twenty frames -> the stage
@@ -2028,7 +2028,7 @@ def test_survival_trace_is_the_interface_on_every_vm(name, tmp_path):
     exe = require_unix_mp(
         "moy_gfx",
         why="The survival set's twins on the VM a board runs, before sprint 3 "
-            "crosses them (docs/kernel_survival_2026-10.md section 2 item 8).")
+            "crosses them (docs/history/kernel_survival_2026-10.md section 2 item 8).")
     mp = _survival_trace(name, exe, tmp_path, "micropython")
     assert mp == want, "MicroPython diverges: " + _first_difference(mp, want)
     board = find_unix_mp("moy_gfx", board_model=True)

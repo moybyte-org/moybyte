@@ -5,7 +5,7 @@
 #   verify_sig                       does a signature sign the payload (the reference)
 """The firmware's identity and the updater's Python face.
 
-The updater is the kernel's (native/moy_net/moy_ota.c, docs/kernel_survival_2026-10.md
+The updater is the kernel's (native/moy_net/moy_ota.c, docs/history/kernel_survival_2026-10.md
 section 6.3): the streaming HTTP(S) client with redirects, the manifest's
 signature under the keys below, the stream into the inactive app slot or the
 companion C6, and the image checked whole before anything can boot it. What

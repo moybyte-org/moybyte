@@ -22,7 +22,7 @@
 #define HAVE_MDNS 0
 #endif
 
-// The driver's life (docs/kernel_survival_2026-10.md section 6.1): one
+// The driver's life (docs/history/kernel_survival_2026-10.md section 6.1): one
 // station, brought up the first time a holder of the spine's lease asks and
 // stopped when the last lets go. Its state is written by the event task's
 // handlers and read by anyone, a word at a time under the latch.

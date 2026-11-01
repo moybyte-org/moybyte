@@ -1,6 +1,6 @@
 // moy_input's drivers: the T-Deck keyboard and the touch controllers, each
 // writing the kernel's input table from the input task, never a Python object
-// (docs/kernel_survival_2026-10.md section 4.2).
+// (docs/history/kernel_survival_2026-10.md section 4.2).
 //
 // A driver's protocol is pure C over moy_i2c_t, so the host runs it against a
 // fake bus (runtime/moy_input.py's driver bindings, tests/test_tdeck_input.py)

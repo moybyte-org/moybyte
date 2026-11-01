@@ -211,7 +211,7 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_spine" \
         "${USERMODS_DIR}/moy_spine"
 
-  # Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2): the
+  # Sprint 3's kernel modules (docs/history/kernel_survival_2026-10.md section 2): the
   # glass, input, the links and the kernel's frame (moy_kernel's portable
   # half: the module `moy_loop`, whose driver tier the worker's frame steps),
   # sprint 4's Player (the module `moy_play`), sprint 5's app ABI

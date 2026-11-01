@@ -1,4 +1,4 @@
-"""The links' and input's drivers call no Python (docs/kernel_survival_2026-10.md
+"""The links' and input's drivers call no Python (docs/history/kernel_survival_2026-10.md
 sections 6.9 and 4.7): what runs on the WiFi task, or below the VM between frames, is C that
 names nothing of the VM's, so a VM stop or a soft reset cannot leave it calling
 into a heap that is gone. And the console images leave the port's espnow

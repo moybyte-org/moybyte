@@ -516,7 +516,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     return L.role(grant, row, arg, n, ans, cap);
 }
 
-// -- HITCH and LOOP (docs/kernel_survival_2026-10.md §7.3) ----------------------------
+// -- HITCH and LOOP (docs/history/kernel_survival_2026-10.md §7.3) --------
 //
 // Under PERF DIAG, from the stage meters: HITCH names every stage of one frame
 // whose work (`ms`) ran past MOY_LOOP_HITCH_MS, LOOP the average frame of the

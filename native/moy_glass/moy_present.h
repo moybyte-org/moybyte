@@ -1,4 +1,4 @@
-// Present: the compositors' frame state machines (docs/kernel_survival_2026-10.md
+// Present: the compositors' frame state machines (docs/history/kernel_survival_2026-10.md
 // §3.4, docs/surface_model_v1.md §4).
 //
 // The ENGINE owns the frame state -- which buffer is drawn into, which ships,

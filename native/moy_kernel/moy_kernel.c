@@ -745,7 +745,7 @@ static void k_state(const k_floor_t *k) {
 }
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
-// The floor's `update` word (docs/kernel_survival_2026-10.md section 6.3): the
+// The floor's `update` word (docs/history/kernel_survival_2026-10.md section 6.3): the
 // kernel's updater with no VM. `update` checks this build's channel for this
 // board and says what it offers; `update install` installs it and restarts
 // into it. A URL after either names another manifest -- typed at the serial,
@@ -1086,7 +1086,7 @@ __attribute__((weak)) void moy_net_vm_stop(void) {
 }
 
 // The kernel's internal volume, where the image has it (native/moy_store).
-// The kernel's PLAIN web-console screen (docs/kernel_survival_2026-10.md §13
+// The kernel's PLAIN web-console screen (docs/history/kernel_survival_2026-10.md §13
 // answer 8): while no VM runs and the web console serves, the address to open,
 // drawn through the floor's raster into the panel's framebuffer 0. The themed
 // screen is the console's while its VM runs. Answers whether it drew.
@@ -1158,7 +1158,7 @@ extern bool moy_kvol_vm_mount(void) __attribute__((weak));
 // moy_alloc's registry: the buffers the swept VM's views named.
 extern void moy_alloc_vm_swept(void) __attribute__((weak));
 
-// kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
+// kstop N (native/moy_kernel/moy_kernel.h): the VM service's soft reset,
 // N times with the kernel's drivers alive, each one's heaps printed before the
 // teardown and after it. Test-only: the dev channel's word, never a kid's.
 static int s_kstop_n;

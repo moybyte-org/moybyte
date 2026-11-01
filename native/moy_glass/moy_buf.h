@@ -1,5 +1,5 @@
-// The glass's off-heap buffers and their owners (docs/kernel_survival_2026-10.md
-// §3.1, §3.2).
+// The glass's off-heap buffers and their owners (#224 sprint 3). Canvases are
+// moy_canvas.h's rows over these.
 //
 // Every buffer a canvas draws into or reads from outside the VM's heap is a row
 // of kind BUF: its bytes, its ROLE (what it is for), its ORIGIN (where its
@@ -21,6 +21,14 @@
 // no owner (the system canvas, the paint buffers, the bar's strip cache) and
 // the pool's free rows are the kernel's; rows on loan to a cart-class owner are
 // cart memory, counted against what a cart has and gone with the run.
+//
+// WHAT IS A ROW: every off-heap buffer a canvas holds -- the game and system
+// canvases, a cart's small canvas, layers, the pool, bakes, scratches (the
+// view's, the fold's snapshot), the bar's strip cache,
+// every window buffer the P4 desk mints, and the rotated compositor's two
+// paint buffers, held for the console's life. The DSI scan buffers are
+// moy_dsi's own. A kinded table holds 256 rows; FULL on BUF is a loud
+// MemoryError in the binding, never a silent fallback.
 //
 // Every byte of the tables comes from the moy_htab_mem_t the glass is made
 // with (PSRAM on a board), every pixel byte from its moy_glass_px_t.

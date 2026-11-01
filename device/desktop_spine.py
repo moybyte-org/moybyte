@@ -73,7 +73,7 @@ class Desktop:
         the glass over its compositor), and the three console upcalls, the
         console's dev words and the services' Python half are registered as
         root pointers. The VM service runs the loop once main.py returns, as
-        this task's outermost frame (docs/kernel_survival_2026-10.md 7.1).
+        this task's outermost frame (docs/history/kernel_survival_2026-10.md 7.1).
 
         What each upcall carries beyond the console's own entry is the Python
         half of a stage the kernel cannot do for a VM object: the canvases

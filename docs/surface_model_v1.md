@@ -1150,7 +1150,7 @@ outside its floor or reached into R outside it.
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
 `docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
-`docs/kernel_survival_2026-10.md` §3.3 executed it. The model did not change:
+`docs/history/kernel_survival_2026-10.md` §3.3 executed it. The model did not change:
 the registry moved into the kernel as a handle table of kind SURF, as inert as
 it had been in Python, and §16 deleted it (2026-10-27). What this amendment
 added, and what stays, is the KERNEL EPOCH. From sprint 3 the kernel draws

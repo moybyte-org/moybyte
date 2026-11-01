@@ -1945,8 +1945,7 @@ class DevChannel:
             moy_kernel.test(parts[1] if len(parts) > 1 else "vm_start")
             return
         if cmd == "kstop":
-            # DEV, the kernel's teardown guard (#224, docs/kernel_survival_2026-10.md
-            # §7.5): `kstop N` runs the VM service's soft reset N times with the
+            # DEV, the kernel's teardown guard (#224, native/moy_kernel/moy_kernel.h): `kstop N` runs the VM service's soft reset N times with the
             # kernel's drivers alive, the console booting between, and prints a
             # KSTOP line of the heaps before and after each teardown.
             try:

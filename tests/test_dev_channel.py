@@ -1644,7 +1644,7 @@ def test_heapcaps_is_a_dev_channel_word(capsys):
 
 
 def test_each_subsystem_registers_its_words():
-    """The words are registered per subsystem (docs/kernel_survival_2026-10.md
+    """The words are registered per subsystem (docs/history/kernel_survival_2026-10.md
     section 2 item 3), so a pass edits its own table and never the reader's."""
     from runtime import devch_audio, devch_input, devch_links
     assert sorted(devch_input.WORDS) == ["drag", "swipe", "tap"]

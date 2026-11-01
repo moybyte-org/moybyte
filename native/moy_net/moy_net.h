@@ -1,4 +1,4 @@
-// moy_net: the links (docs/kernel_survival_2026-10.md section 6).
+// moy_net: the links (docs/history/kernel_survival_2026-10.md section 6).
 //
 // One body for every tier: the boards, the browser, the unix port and
 // CPython (by ctypes, runtime/net_binding.py). The wire's pure half -- the

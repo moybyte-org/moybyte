@@ -416,7 +416,7 @@ def test_every_board_decides_the_wasm_engine(board):
 def test_every_board_decides_the_kernel_entry(board):
     """Taking native/moy_kernel hands app_main to the kernel
     (docs/history/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
-    with a serial-only floor (docs/kernel_survival_2026-10.md section 6.5)."""
+    with a serial-only floor (docs/history/kernel_survival_2026-10.md section 6.5)."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
     assert "moy_kernel" in takes or "moy_kernel" in denies, (
@@ -995,7 +995,7 @@ def test_every_console_board_imports_its_frozen_modules_first():
         assert fake_sys.path == [".frozen", "", "/lib"], (d.name, fake_sys.path)
 
 
-# Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2 item 6):
+# Sprint 3's kernel modules (docs/history/kernel_survival_2026-10.md section 2 item 6):
 # every board decides each in writing, and every console takes all three.
 @pytest.mark.parametrize("board", sorted(BOARDS))
 @pytest.mark.parametrize("module", ("moy_glass", "moy_input", "moy_net"))

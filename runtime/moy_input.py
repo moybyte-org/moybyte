@@ -15,7 +15,7 @@
 #   typed                        the byte a key event types
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
-(docs/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
+(docs/history/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
 native module (native/moy_input/modmoy_input.c), which always wins over this
 file; CPython has no such module, so this is what it finds.
 

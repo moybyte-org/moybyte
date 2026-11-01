@@ -422,7 +422,7 @@ runtime would be flash spent in both OTA slots for code nothing calls."""
 [[native.shared.take]]
 module = "moy_kernel"
 why = """
-The kernel's entry, crash record and recovery floor (native/moy_kernel/moy_kernel.c's header): the kernel is the entry on every target (docs/kernel_survival_2026-10.md
+The kernel's entry, crash record and recovery floor (native/moy_kernel/moy_kernel.c's header): the kernel is the entry on every target (docs/history/kernel_survival_2026-10.md
 section 6.5). This board has no panel, so its floor is serial only -- `retry`,
 `safe`, `repl`, `state` -- and with nobody at the serial it takes SAFE after
 MOY_KERNEL_IDLE_SAFE_MS (mpconfigboard.h). main.py proves the boot as soon as the
@@ -431,20 +431,20 @@ VM reaches it, so a Ctrl-C at any point lands at the REPL, as before."""
 [[native.shared.deny]]
 module = "moy_glass"
 why = """
-The glass's canvas rows, buffer table and present (docs/kernel_survival_2026-10.md
+The glass's canvas rows, buffer table and present (docs/history/kernel_survival_2026-10.md
 section 3): this board has no panel to present to."""
 
 [[native.shared.deny]]
 module = "moy_input"
 why = """
-The merged input table and its drivers (docs/kernel_survival_2026-10.md section
+The merged input table and its drivers (docs/history/kernel_survival_2026-10.md section
 4): this board has no keyboard, touch or pointer of its own; the input a paired
 browser takes is the browser's."""
 
 [[native.shared.take]]
 module = "moy_net"
 why = """
-The links (docs/kernel_survival_2026-10.md section 6): the webhost and the sync
+The links (docs/history/kernel_survival_2026-10.md section 6): the webhost and the sync
 RPC this board serves are what the module is for. It is the batch codec and
 the HTTP parser and response writer the webserver, the sync stack and the GPIO
 routes import; its JSON scanner is moy_store's, which this board takes."""

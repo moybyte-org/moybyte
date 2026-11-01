@@ -1,5 +1,5 @@
 // moy_ota: the updater and the streaming HTTP(S) client under it
-// (docs/kernel_survival_2026-10.md section 6.3).
+// (docs/history/kernel_survival_2026-10.md section 6.3).
 //
 // One body on every tier. The pure half -- a URL, a response head, SHA-256,
 // the manifest's RSA signature, its canonical text and the policy -- reads

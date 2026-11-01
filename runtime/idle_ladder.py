@@ -1,6 +1,6 @@
-"""The idle ladder's console half (docs/kernel_survival_2026-10.md section 7.2,
-section 13 answers 1 and 7): the Settings rows that set its rungs, and the
-screensaver its SAVER rung shows.
+"""The idle ladder's console half (native/moy_kernel/moy_idle.h; the owner's
+answers 1 and 7 in docs/history/kernel_survival_2026-10.md section 13): the
+Settings rows that set its rungs, and the screensaver its SAVER rung shows.
 
 The ladder itself is the kernel's (native/moy_kernel/moy_idle.c): it decides
 when the screen dims, when the saver comes and when the light goes off, it

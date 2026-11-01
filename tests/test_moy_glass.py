@@ -1,4 +1,4 @@
-"""The glass (native/moy_glass, docs/kernel_survival_2026-10.md section 3):
+"""The glass (native/moy_glass, docs/history/kernel_survival_2026-10.md section 3):
 its tables through the host's ctypes binding, the fuzz walk under the
 sanitizers, and the draw gates on the VM a board runs -- C objects that check
 their canvas's row by slot and generation before every op.

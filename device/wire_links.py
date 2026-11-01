@@ -1,5 +1,5 @@
 """The links' provider: everything the console reaches the outside through,
-constructed in one place for every console board (docs/kernel_survival_2026-10.md
+constructed in one place for every console board (docs/history/kernel_survival_2026-10.md
 section 2 item 1).
 
 `build_desktop` (device/desktop_spine.py) calls `wire_links` once, after the

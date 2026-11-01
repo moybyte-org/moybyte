@@ -1384,7 +1384,7 @@ def display_underruns_are_zero(board):
 
 def internal_flash_commits_under_a_cart(board, title="Star Catcher", n=10):
     """Ten commits to the kernel's internal volume under a running cart
-    (docs/kernel_survival_2026-10.md section 6.9): a flash write turns the
+    (docs/history/kernel_survival_2026-10.md section 6.9): a flash write turns the
     cache off on both cores, so the panel feeder pauses for it (moy_kvfs.c
     waits the frame in flight out first) -- on a banded panel the feeder's
     timeouts and errors stay where they were; on a DSI panel the scan-out
@@ -1870,7 +1870,7 @@ def _kstop_after(line):
 
 def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N`: N soft resets of the VM with the kernel's drivers alive
-    (docs/kernel_survival_2026-10.md section 7.5). With the VM down, PSRAM free
+    (native/moy_kernel/moy_kernel.h). With the VM down, PSRAM free
     and its largest block hold flat across the cycles: whatever a VM left
     behind would compound into a boot that runs out (the Guition S3 stranded
     a cover's bytes and its decode scratch, 46,456 B a cycle, until the

@@ -1,5 +1,5 @@
 """Audio sessions, as Python reaches the kernel's (native/moy_audio/moy_aud.h;
-docs/kernel_survival_2026-10.md section 5).
+docs/history/kernel_survival_2026-10.md section 5).
 
   native()        the `moy_audio` module this tier has, or None: the usermod on
                   a board, in the browser and on the desktop MicroPython; on
