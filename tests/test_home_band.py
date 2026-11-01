@@ -373,6 +373,29 @@ def test_idle_frames_draw_the_next_rows_faces(tmp_path, monkeypatch, arrangement
     assert _kept(g) - shown, (sorted(shown), sorted(_kept(g)))
 
 
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_a_round_with_every_face_drawn_ends_the_asking(tmp_path, monkeypatch, arrangement):
+    """Once a round of the idle frames' minting finds every face it
+    names drawn, the next idle frames ask the engine for none, until the
+    band's table is drawn again."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    g = ws.launcher
+    for _ in range(60):                    # (the idle frames: the covers land, the faces drawn)
+        drv.frame(1 / 30)
+    while g.mint_faces(10 ** 6):
+        pass
+    asked = []
+    real = ui.slot_next
+    monkeypatch.setattr(ui, "slot_next", lambda: asked.append(1) or real())
+    assert not g.mint_faces() and not asked
+    ws.launcher_layer.handle_input(_Key("right"))
+    ws.mark_dirty()
+    frame()
+    g.mint_faces()
+    assert asked
+
+
 def _kept(g):
     """The cards whose faces the engine holds as they are now."""
     g._host.resume(g._face_geo[0], g.theme)

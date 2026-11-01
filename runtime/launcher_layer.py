@@ -391,6 +391,7 @@ class Launcher:
         self._fstepped = False        # faces are drawn with (`_faces_for`)
         self._fring = None
         self._faces_off = False       # a canvas whose layers hold no pixels
+        self._faces_done = False      # a round of `mint_faces` found every face drawn
         self._c = None                # the cells laid out, and what for
         self._c_key = None
         self._show = None             # the cells the band shows (`_shown`), and what for
@@ -1057,6 +1058,7 @@ class Launcher:
             self._face_of = key
             _FACE_GEN[0] = self._fkey = (_FACE_GEN[0] + 1) & 0x3fffffff
         _ui.slots(cap, self._fkey)
+        self._faces_done = False         # (the table drawn: its rows to name again)
         # what every face of this paint is drawn with, read once a paint
         self._fdiv = self._face_div(side)
         self._fstepped = bool(_ui_draw.depth()[4])
@@ -1228,7 +1230,10 @@ class Launcher:
         next (`ui.slot_next`: the cards the band shows, then the row past
         either end of it) whose covers are decoded or known absent, for
         about `ms` -- a step then copies the row it brings in. True where
-        one was drawn."""
+        one was drawn. A round that found every face drawn ends the asking
+        until the band's table is drawn again (`_faces_for`)."""
+        if self._faces_done:
+            return False
         g = self._face_geo
         ready = self.cover_ready
         if (self._face_lay is None or self.face_key is None or ready is None
@@ -1243,21 +1248,26 @@ class Launcher:
         r = self._face_r()
         t0 = _ticks_ms()
         done = 0
+        owed = False                     # a part whose cover has yet to land
         i = _ui.slot_next()
         while i >= 0:
             if i < len(items) and i != sel:
                 it = items[i]
                 new = it.get("type") in PSEUDO_TILE_TYPES
                 cover = None if new else ready(it, self._fdiv)
-                if cover is not False:   # (its cover lands first: the paint takes it)
+                if cover is False:       # (its cover lands first: the paint takes it)
+                    owed = True
+                else:
                     j = _ui.slot(self._face_name(i), 0 if cover is None else cover.serial,
                                  True)
                     if j >= _ui.SLOT_MINT:
                         self._draw_face(j - _ui.SLOT_MINT, it, r, cover, new)
                         done += 1
                         if _ticks_diff(_ticks_ms(), t0) >= ms:
-                            break
+                            return True
             i = _ui.slot_next()
+        if not done and not owed:
+            self._faces_done = True
         return done > 0
 
     def _face_r(self):
