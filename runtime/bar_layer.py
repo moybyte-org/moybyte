@@ -284,6 +284,7 @@ class BarLayer:
         self._need = _KEY_ALL
         # Each `where`'s frame key, filled in place (_fill_key).
         self._keys = {}
+        self._shown_at = {}           # where -> [shown_gen, its fields, as a tuple]
         # The keys on the bar (`focus_enter`): the `where` whose bar holds
         # them, the item index, what the keys came from ("tabs": the home's
         # tab row, "page": the surface under the bar) and the focused item
@@ -666,6 +667,7 @@ class BarLayer:
         if key is None:
             key = self._keys[where] = [None] * _KEY_N
         self._fill_key(key, where, cv, self._shown(where))
+        self._note_shown(where, key)
         if hasattr(cv, "_lr"):
             # The canvas is itself a RecordingLayer (a windowed-WM window buffer on
             # the web console): a strip cache NESTED in a recorded layer can't ship
@@ -716,16 +718,46 @@ class BarLayer:
         Editor's zone."""
         return self._need if where == "menu" else self._need & ~_KEY_UNDO
 
+    def shown_gen(self, where):
+        """An int that moves whenever what `where`'s bars draw does
+        (`_cart_bar_key` narrowed to their fields): the key a part named
+        per buffer folds (`ui.held`) -- the same int, the same fields.
+        Each ask, and the bar's own draw, fills the fields again into the
+        one list the draw keeps; the int moves only where a field did."""
+        return self._shown_now(where)[0]
+
     def shown_key(self, where):
-        """`_cart_bar_key` narrowed to what `where`'s bars draw, the fields
-        a skipped one leaves None: the key a cache over a whole frame that
-        includes the bar folds."""
+        """Those fields as a tuple, a field a skipped bar leaves None: the
+        key a cache over a whole frame that includes the bar folds, which
+        a state left and come back to matches again. Made only when a
+        field moved."""
+        return self._shown_now(where)[2]
+
+    def _shown_now(self, where):
         game = self._zone_is_game(where)
         cv = self._bar_canvas(where, game)
         self._key_fields(self._packed(where, game))
-        key = [None] * _KEY_N
+        key = self._keys.get(where)
+        if key is None:
+            key = self._keys[where] = [None] * _KEY_N
         self._fill_key(key, where, cv, self._shown(where))
-        return tuple(key)
+        return self._note_shown(where, key)
+
+    def _note_shown(self, where, key):
+        """`where`'s record [gen, fields, their tuple] as `key` fills it:
+        the generation moved and the tuple made again where a field
+        differs from the last fill's."""
+        s = self._shown_at.get(where)
+        if s is None:
+            s = self._shown_at[where] = [0, [None] * _KEY_N, None]
+        prev = s[1]
+        for i in range(_KEY_N):
+            if prev[i] != key[i]:
+                prev[:] = key
+                s[0] = (s[0] + 1) & 0x3fffffff
+                s[2] = tuple(key)
+                break
+        return s
 
     def _draw_bar(self, cv, slots, rect, key, fields, i):
         """Bar `i`'s strip at `rect` on `cv`, from the slot that holds it for

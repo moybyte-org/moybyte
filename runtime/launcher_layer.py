@@ -2978,6 +2978,8 @@ class LauncherHomeLayer:
         self._hk = _Keyed()
         self._ck = _Keyed()
         self._beside_drew = []
+        # what the hint strip's key was made of, and the key (`_outside_key`)
+        self._ok = [None, None, None, None, None, None, None, None]
         self._search_kprev = 0        # keyboard edge detect while typing a search query
         self._kprev = 0               # ...and for the carousel home's hint keys
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
@@ -3013,7 +3015,6 @@ class LauncherHomeLayer:
         self._stk = _Keyed()
         self._slk = _Keyed()
         self._shk = _Keyed()
-        self._brk = _Keyed()
         self._bd_now = None
         self._lib_parts = None
 
@@ -3213,19 +3214,22 @@ class LauncherHomeLayer:
     def _retained_key(self, cv, statics=None):
         """Everything the WHOLE home frame's pixels are a pure function of: the
         chrome statics (`statics`, where the caller made them this frame)
-        plus the grid's dynamics (selection, scroll offset, the cover-cache
-        generation, trackball hover, the items and the titles they carry
-        (the list, never mutated, and the roster's count of titles taken in
-        place), the settings rows' generation for the favorites and the play
-        records) and the bar's own pixel key (`shown_key` -- clock minute, wifi state,
-        the look; reusing it means the bar's cache discipline IS this cache's
-        discipline). Anything that draws a pixel of the home frame and is NOT
-        derivable from this tuple is a staleness bug -- the silent-cache family
+        plus the grid's dynamics (selection, scroll
+        offset as it was set -- its clamp is a function of the statics' band
+        and item count -- the cover-cache generation, trackball hover, the
+        items and the titles they carry (the list, never mutated, and the
+        roster's count of titles taken in place), the settings rows'
+        generation for the favorites and the play records) and the bar's own
+        pixel key (`shown_key` -- clock minute, wifi state, the look; reusing
+        it means the bar's cache discipline IS this cache's discipline).
+        Anything that draws a pixel of the home frame and is NOT derivable
+        from this tuple is a staleness bug -- the silent-cache family
         surface_model_v1.md §14.2 documents -- so additions to the home draw
         must extend this key."""
         ws = self.ws
-        return (self._statics_key(cv) if statics is None else statics, self.grid.sel,
-                self.grid.scroll, ws.covers.gen, self._lhover, self.grid.items,
+        g = self.grid
+        return (self._statics_key(cv) if statics is None else statics, g.sel,
+                g._scroll, ws.covers.gen, self._lhover, g.items,
                 ws.carts.titled, ws.system.gen(), ws.bar_layer.shown_key("home"),
                 self._tab_keys, self._tab_at, self._on_bar)
 
@@ -3367,7 +3371,7 @@ class LauncherHomeLayer:
             return
         if parts is None and self._carousel():
             parts = self._still_parts(cv, ws.wallpaper.restore_key(True))
-        bar = ws.bar_layer.shown_key("home")
+        bar = ws.bar_layer.shown_gen("home")
         try:
             cache = self._lib_cache
             lp = self._lib_parts
@@ -3461,11 +3465,30 @@ class LauncherHomeLayer:
         """What the home's parts outside the band show of the selection:
         the hint strip its verbs and its star (`_hint_groups`), or the tab
         row's keys while the tab row has them (`_draw_hints`), the handheld
-        icons' caption band its cart and the day its line counts from."""
+        icons' caption band its cart and the day its line counts from. The
+        hint strip's is made again only where what it is made of moved: the
+        grid's selection or items (its `zone_gen`), its tab, the favourites
+        (the settings rows' generation), the tab row's keys and the store's
+        `can_manage`."""
         g = self.grid
-        it = self.favourable()
-        hint = (self.zone_verbs(), it is not None and self.ws.carts.is_favorite(it),
-                bool(self._tab_keys))
+        ws = self.ws
+        m = self._ok
+        zg = g.zone_gen
+        sg = ws.system.gen()
+        tk = bool(self._tab_keys)
+        cm = getattr(ws, "can_manage", True)
+        if not (m[1] == zg and m[0] is g and m[2] == g.tab and m[3] == sg and m[4] == tk
+                and m[5] == cm and m[6] is g.favorite_for):
+            it = self.favourable()
+            m[7] = (self.zone_verbs(), it is not None and ws.carts.is_favorite(it), tk)
+            m[0] = g
+            m[1] = zg
+            m[2] = g.tab
+            m[3] = sg
+            m[4] = tk
+            m[5] = cm
+            m[6] = g.favorite_for
+        hint = m[7]
         if isinstance(g, IconHome) and g._cells().caption is not None:
             return (hint, (g.sel, g.today()))
         return (hint, None)
@@ -3646,16 +3669,16 @@ class LauncherHomeLayer:
     def _note_still(self, cv, parts, bar=None):
         """Name this painted frame's parts in the band host's paint
         (`ui.held`, the paint the band's pass began this frame): the
-        backdrop, the selection, the shelf, the bar's key (`shown_key`) its
+        backdrop, the selection, the shelf, the bar's key (`shown_gen`) its
         strip was drawn under and the hint strip's. Answers whether every
         buffer now holds every part named (`ui.held_all`)."""
         if bar is None:
-            bar = self.ws.bar_layer.shown_key("home")
+            bar = self.ws.bar_layer.shown_gen("home")
         self.grid.resume_band_host(cv)
         _ui.held("still", self._stk.of(parts[0]))
         _ui.held("sel", self._slk.of(parts[1]))
         _ui.held("shelf", self._shk.of(parts[2]))
-        _ui.held("bar", self._brk.of(bar))
+        _ui.held("bar", bar)
         now = self._outside_key()
         if now is not None:
             _ui.held("hint", self._hk.of(now[0]))
@@ -3673,12 +3696,12 @@ class LauncherHomeLayer:
         parts = self._still_parts(cv, self._bd_now)
         if parts is None or not self._content_alone(dt):
             return False
-        bar = ws.bar_layer.shown_key("home")
+        bar = ws.bar_layer.shown_gen("home")
         now = self._outside_key()
         kb = self._stk.of(parts[0])
         ks = self._slk.of(parts[1])
         kd = self._shk.of(parts[2])
-        kr = self._brk.of(bar)
+        kr = bar
         kh = self._hk.of(now[0])
         g = self.grid
         g.begin_band_host(cv)

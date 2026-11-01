@@ -795,7 +795,7 @@ class EditorDesk(Layer):
                              and ws.paint_layer._host.tap_armed()))
         key = (c, tab, self._acts, self.key, self._focus.get(self.key, 0), self.grown, pane,
                r, self.placed()[0], cv.w, cv.h, look.look_gen, look.effective_font_scale(),
-               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"), data,
+               look.effective_chrome_scale(), ws.bar_layer.shown_gen("menu"), data,
                self._flash, self.part_state.get("code more"),
                self.part_state.get("head more"))
         if key != self._surround:

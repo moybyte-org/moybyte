@@ -899,7 +899,7 @@ engine's kept ring, a slot a paint of the band's host (`ui.held`): each
 painted frame whose pixels were the home's alone (`content_alone`: no
 overlay, splash, cursor or owed pill over it, the home on top, nothing
 animating) names the backdrop's key, the selection's, the shelf's, the
-bar's `shown_key` and the hint strip's there (`_note_still`). Where the
+bar's `shown_gen` and the hint strip's there (`_note_still`). Where the
 buffer this frame paints holds this frame's backdrop (the paint
 RETAINED_FRAMES back named it, the paints between the home's, one a
 frame), a part it holds under another key lags: it alone is put back over
