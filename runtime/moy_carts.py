@@ -222,15 +222,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 _write_bytes)
 
 
-def load_image(path, name):
-    """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
-    None."""
-    try:
-        return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
-    except OSError:
-        return None
-
-
 def load_cover(path):
     """The cart at `path`'s cover.png bytes, or None -- no file, or one larger
     than any cover can be (cover_png.MAX_BYTES). The shelf reads covers through

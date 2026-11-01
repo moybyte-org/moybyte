@@ -659,15 +659,6 @@ def _print_scaled(cv, s, x, y, c, mult=2):
     cv.print_scaled(s, x, y, c, sc)
 
 
-def _text_w(cv, s, mult=1):
-    """The on-screen width of `s` printed at `mult` x the canvas font scale, as
-    the text path measures it in the print font (`ui.print_width`)."""
-    fs = getattr(cv, "font_scale", 1)
-    if fs < 1:
-        fs = 1
-    return _ui_draw.print_width(s, fs * max(1, int(mult)))
-
-
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
 #
 # Under a theme that names no icon set the top bar's chrome controls are 16x16

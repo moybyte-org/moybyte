@@ -61,17 +61,6 @@ def hush():
         na.hush()
 
 
-def probe_line():
-    """The kernel's AUDIORATE line when it has a new one, else None."""
-    na = native()
-    if na is None:
-        return None
-    try:
-        return na.probe()
-    except Exception:  # noqa: BLE001 -- a meter never breaks the frame
-        return None
-
-
 class AudioSession:
     """One owner's session over `bank` (the AudioBank the Music editor edits in
     place; a change of its `rev` reaches the kernel at the next verb)."""
