@@ -55,11 +55,3 @@ def _since_ms(start):
     Player's `cart_start_ms` stamp, on every tier and every runtime."""
     return _ticks_diff(_ticks_ms(), start)
 
-
-def _sleep_ms(ms):
-    # The trio's sleeping sibling: MicroPython's sleep_ms, host-shimmed the
-    # same way.
-    try:
-        time.sleep_ms(ms)
-    except AttributeError:
-        time.sleep(ms / 1000.0)

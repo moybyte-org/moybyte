@@ -27,7 +27,7 @@ sys.path.insert(0, _ROOT + "/device")
 
 import moy_gfx
 import moy_runtime as m
-from editors import SpriteSheet
+from editors_sheet import SpriteSheet
 
 
 class FakeComp:

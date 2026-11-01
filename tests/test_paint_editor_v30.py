@@ -5,7 +5,7 @@ These build the SAME shared console the device runs (runtime.host_app) and drive
 it through ConsoleDriver -- mouse == touch, arrows == trackball -- so the drag
 stroke is exercised through the real pointer/input path (the same handle_pointer
 the device loop calls), not by poking the editor directly. The editor/sheet logic
-lives in runtime.editors, shared with the frozen device modules.
+lives in runtime.editors_paint_map and runtime.editors_sheet, shared with the frozen device modules.
 """
 
 from pathlib import Path
@@ -43,13 +43,15 @@ def _open_paint(ws):
 # -- Part B: larger sprites (PaintEditor logic) ------------------------------
 
 def test_paint_editor_default_is_8x8():
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
+    from runtime.editors_sheet import SpriteSheet
     pe = PaintEditor(SpriteSheet())
     assert pe.size == 1 and pe.dim == 8
 
 
 def test_cycle_size_steps_1_2_3():
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
+    from runtime.editors_sheet import SpriteSheet
     pe = PaintEditor(SpriteSheet())
     assert pe.size == 1
     pe.cycle_size(); assert pe.size == 2 and pe.dim == 16
@@ -60,7 +62,8 @@ def test_cycle_size_steps_1_2_3():
 def test_2x2_writes_the_four_constituent_sheet_tiles():
     # A 2x2 sprite at top-left tile n spans tiles n, n+1, n+cols, n+cols+1; painting
     # the 16x16 region must land pixels in all four (TIC-80 multi-tile layout).
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
+    from runtime.editors_sheet import SpriteSheet
     cols = SpriteSheet.SPEC_COLS
     sh = SpriteSheet()
     pe = PaintEditor(sh)
@@ -81,8 +84,9 @@ def test_2x2_writes_the_four_constituent_sheet_tiles():
 def test_size_clamps_near_sheet_edge():
     # A 3x3 sprite whose origin sits one tile from the right edge can't fit; size
     # shrinks so the span never reads out of bounds.
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
     # spec=False: a 2x2 sheet exists here precisely to be too small for a 3x3
+    from runtime.editors_sheet import SpriteSheet
     # sprite -- it is a clamp fixture, not a cart sheet (editors_sheet, SPEC.md 3.2).
     sh = SpriteSheet(cols=2, rows=2, spec=False)  # only a 2x2 tile sheet
     pe = PaintEditor(sh)
@@ -99,7 +103,7 @@ def test_size_clamps_near_sheet_edge():
 # -- Part B: spr() draws the multi-tile span ---------------------------------
 
 def test_tile_span_image_covers_the_block():
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     sh = SpriteSheet()
     sh.pset(0, 0, 5)
     sh.pset(15, 15, 6)                            # bottom-right pixel of a 2x2 block
@@ -112,7 +116,7 @@ def test_tile_span_image_covers_the_block():
 def test_spr_with_wh_span_blits_a_16x16_image():
     # The cart-facing spr(n, x, y, w=2, h=2) builds a 16x16 image from the sheet.
     from runtime import host_app
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
     calls = []
 
@@ -241,7 +245,7 @@ def test_save_persists_a_2x2_sprite(tmp_path):
     # survive. There's no SAVE button (#111) -- ws.save_sprites is the hard-commit
     # verb every exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     from runtime import host_app, moy_carts
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_paint(ws)
@@ -582,7 +586,7 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
 
     # The resized map serializes at the new dims and round-trips through map.moymap
     # (SAVE writes exactly this blob), so a cart reloads the grown grid + content.
-    from runtime.editors import TileMap
+    from runtime.editors_sheet import TileMap
     reloaded = TileMap.from_hex(ws.tilemap.to_hex())
     assert (reloaded.w, reloaded.h) == (ws.tilemap.w, ws.tilemap.h)
     assert reloaded.mget(0, 0) == 3

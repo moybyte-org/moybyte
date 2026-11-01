@@ -26,7 +26,7 @@ from ws_helpers import shelf, select_on_home  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import blocks              # noqa: E402
-from runtime.editors import BlockEditor  # noqa: E402
+from runtime.editors_block import BlockEditor  # noqa: E402
 
 mk = blocks.make_block
 

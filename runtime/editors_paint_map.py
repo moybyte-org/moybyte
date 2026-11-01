@@ -11,8 +11,7 @@
 #   MapEditor.flood          flood fill on the map
 #   MapEditor.paste          stamp the clipboard
 """PaintEditor (#4) + MapEditor (#32) -- pixel-paint state over a sheet tile
-and tile-placement state over a TileMap. Split out of editors.py (which
-re-exports them).
+and tile-placement state over a TileMap.
 
 Undo/redo runs on the shared #111 op-history core (runtime/op_history.py): each
 editor keeps ONE `History` per open sheet/map over a small OpCodec, replacing the

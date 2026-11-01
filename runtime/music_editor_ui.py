@@ -15,9 +15,11 @@ not reset musicedit/music_preview (blocks/map's go_home does reset their
 active editor). Ctrl+Z/Ctrl+Y walk the editor's undo (`_music_input`)."""
 
 try:
-    from editors import MusicEditor, KeyEdge
+    from editors_music import MusicEditor
+    from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import MusicEditor, KeyEdge
+    from runtime.editors_music import MusicEditor
+    from runtime.editors_base import KeyEdge
 try:
     from audio import MusicTrack, SFX
 except ImportError:  # pragma: no cover - host fallback when not yet aliased

@@ -6,7 +6,7 @@
 #   MusicEditor.duplicate_sfx     a whole sound or track appended as a copy
 #   MusicEditor._snapshot         what one undo step records
 """MusicEditor (#50/#92) -- the tracker-style step editor over a cart's
-AudioBank. Split out of editors.py (which re-exports it); undo/redo rides the
+AudioBank; undo/redo rides the
 shared #111 op-history core (runtime/op_history.py)."""
 
 try:

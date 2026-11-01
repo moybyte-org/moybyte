@@ -331,10 +331,9 @@ class FullscreenStackWM:
     # composite at the domain boundary); input routing walks it top -> bottom so the
     # overlay that owns the event claims it before the content underneath.
     #
-    # The whole point of Stage 6c: this used to be rebuilt from scratch on EVERY access
-    # (_visible_stack/_draw_stack each allocated a fresh [content] + overlays list, walked
-    # THRICE per frame -- ~9 fresh lists/frame even during play). Now it is memoized and
-    # rebuilt ONLY on a real change, so a static top-of-stack allocates zero new lists.
+    # The stack is memoized and rebuilt ONLY on a real change, so a static
+    # top-of-stack allocates zero new lists (built per access, the three walks a
+    # frame cost ~9 fresh lists even during play).
 
     def _overlay_sig(self):
         """A cheap, allocation-free signature (int bitmask) of the splash state + which

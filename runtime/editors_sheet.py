@@ -1,6 +1,5 @@
-"""The indexed sprite/tile asset models, split out of editors.py (which
-re-exports them): _SheetSprite (the blittable view), SpriteSheet (8x8 tile
-sheet + PICO-8 __gfx__-style hex, #4 storage), IconSheet (16x16 tiles -- the
+"""The indexed sprite/tile asset models: _SheetSprite (the blittable view),
+SpriteSheet (8x8 tile sheet + PICO-8 __gfx__-style hex, #4 storage), IconSheet (16x16 tiles -- the
 editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
 #32 storage). Pure logic over two imports: binascii (every target ships it,
 and it is what keeps the hex codecs off the interpreter) and

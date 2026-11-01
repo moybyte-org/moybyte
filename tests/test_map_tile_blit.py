@@ -29,7 +29,7 @@ TIERS = ((320, 240, 1), (480, 320, 1), (800, 480, 3), (1024, 600, 2))
 def _cart(name="moybyte.brick_siege"):
     """A real seed cart's sheet + tilemap: drawn art and a drawn level, which
     is what a parity claim about tile pixels needs."""
-    from runtime.editors import SpriteSheet, TileMap
+    from runtime.editors_sheet import SpriteSheet, TileMap
     folder = CARTS / (name + ".moy")
     sheet = SpriteSheet.from_hex((folder / "sprites.moygfx").read_text())
     tm = TileMap.from_hex((folder / "map.moymap").read_text())
@@ -88,7 +88,7 @@ def test_every_detail_rung_is_a_whole_tile_multiple():
     wrong spacing -- silently, and only on that rung. A new zoom size is the
     change that would do it, so the ladder is checked, not assumed."""
     from runtime import map_editor_ui as M
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     for w, h, fs in TIERS:
         for cell in M.MapLayout(w, h, fs).zooms:
             if cell == M._MV_OVERVIEW:
@@ -99,7 +99,7 @@ def test_every_detail_rung_is_a_whole_tile_multiple():
 
 def test_the_window_is_the_pixels_the_per_cell_blit_drew():
     from runtime import map_editor_ui as M
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     rungs = [c for c in M.MapLayout(1024, 600, 2).zooms if c != M._MV_OVERVIEW]
     assert len(rungs) >= len(M._MV_ZOOMS)
     for cell in rungs:

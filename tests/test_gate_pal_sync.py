@@ -6,7 +6,7 @@ glass's and the walk checks the gates draw it untouched)
 incrementally (one poke per remap, one slice-copy per reset) instead of
 re-deriving all 64 entries per call -- that rebuild was ~80% of a pal() body,
 and the celeste shim calls pal() every frame (attribution:
-experiments/state_verb_cost/bench.py). The invariant that makes the fast path
+#192, a791c33). The invariant that makes the fast path
 safe: after ANY state mutation, _gate_pal[i] == PAL565_WIRE[_pal_map[i]] for
 all i -- exactly what the cold rebuild (_sync_gate_pal) computes. This test
 drives a seeded random walk over every mutating verb and re-derives the table

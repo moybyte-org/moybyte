@@ -22,7 +22,7 @@ all back and re-exports under the pre-extraction `console.X` names, so every cal
 test is unchanged.
 
 Canonical home is runtime/; build.sh stages a copy into the firmware modules/ tree so
-the device freezes it (same pattern as editors.py). It depends only on leaf modules --
+the device freezes it (same pattern as the editor cores). It depends only on leaf modules --
 editors/widgets + the surface geometry constants from bar_layer/settings_layer/
 code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
@@ -458,22 +458,14 @@ class Layout(LayoutBase):
         self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
-    def row_band(self, rect):
-        """The fs-tall band inside a chrome-scaled row (#203) -- where the row's
-        own hand-tuned content sits, so a bottom-anchored mark (the wifi list's
-        signal bars) still lands beside the label instead of at the floor of a
-        box the tap-target floor made taller. The IDENTITY at cs == fs."""
-        d = self.row_text_dy
-        return (rect[0], rect[1] + d, rect[2], rect[3] - 2 * d)
-
     def tap_box(self, rect, base_w, base_h):
         """The fs-sized DRAWING box centred inside a cs-sized TAP TARGET (#203).
 
         `rect` is a button the chrome scale grew from a `base_w` x `base_h` design
         box; what goes inside it -- a 12px glyph, a `mini_btn` label, a badge
         count -- is still font-sized, and drawn at the button's origin it lands in
-        the corner rather than under the finger. This is `row_band` for a BUTTON:
-        the same content, moved to the middle. The IDENTITY at cs == fs, where the
+        the corner rather than under the finger: the same content, moved to the
+        middle. The IDENTITY at cs == fs, where the
         rect already is exactly this box."""
         bw, bh = base_w * self.fs, base_h * self.fs
         return (rect[0] + (rect[2] - bw) // 2, rect[1] + (rect[3] - bh) // 2,
@@ -657,15 +649,6 @@ def _print_scaled(cv, s, x, y, c, mult=2):
         cv.print(s, x, y, c, 1)
         return
     cv.print_scaled(s, x, y, c, sc)
-
-
-def _text_w(cv, s, mult=1):
-    """The on-screen width of `s` printed at `mult` x the canvas font scale, as
-    the text path measures it in the print font (`ui.print_width`)."""
-    fs = getattr(cv, "font_scale", 1)
-    if fs < 1:
-        fs = 1
-    return _ui_draw.print_width(s, fs * max(1, int(mult)))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------

@@ -4,7 +4,7 @@
 #   CodeEditor                   the text buffer, its caret, selection and view
 #   TextMouse                    a mouse over a text editor: clicks, selection, autoscroll
 """CodeEditor -- editable text buffer + cursor (the on-device code editor, #3).
-Split out of editors.py (which re-exports it); pure logic, dependency-free."""
+Pure logic, dependency-free."""
 
 
 def _is_word_char(ch):
@@ -292,9 +292,6 @@ class CodeEditor:
         self.row = max(0, min(len(self.lines) - 1, self.top + row))
         self.col = max(0, min(len(self.lines[self.row]), self.left + col))
         self._scroll()
-
-    def visible_lines(self):
-        return self.lines[self.top:min(len(self.lines), self.top + self.ROWS)]
 
     # -- text selection + clipboard (#89) ------------------------------------
     # A selection is the span between the anchor (self.sel = (row, col), set when a

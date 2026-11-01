@@ -224,7 +224,7 @@ def test_textmode_in_both_make_api_namespaces(monkeypatch):
     from runtime import host_app
 
     SYSTEM_CARTS = ROOT / "system_carts"
-    for name in ("editors", "audio", "console"):
+    for name in ("audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

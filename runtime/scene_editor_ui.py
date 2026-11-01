@@ -38,9 +38,11 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
-    from editors import SceneEditor, KeyEdge
+    from editors_scene import SceneEditor
+    from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SceneEditor, KeyEdge
+    from runtime.editors_scene import SceneEditor
+    from runtime.editors_base import KeyEdge
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane

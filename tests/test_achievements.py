@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
-# host_app registers the bare `audio`/`editors` module aliases that console.py
+# host_app registers the bare `audio`/`editors_*` module aliases that console.py
 # imports (its frozen device names), so import it BEFORE console.
 from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402

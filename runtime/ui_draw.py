@@ -207,14 +207,6 @@ def print_font(fid=None):
     return _C.print_font(fid)
 
 
-def line_dy(dy, fs=1, role="ui"):
-    """A text line's top offset `dy` at font scale `fs`, written for
-    petme128's 7-row ascent, kept where it centres the line for `role`'s
-    font: moved up by half the ascent that font adds. A shorter ascent keeps
-    the offset as written, so it is the identity under petme128 and Tiny5."""
-    return dy - max(0, (_C.font(role)[3] - 7) * fs) // 2
-
-
 def print_cut(s, maxw, scale=1):
     """`print_fit`, never empty for a non-empty `s`: a box too narrow for one
     character still shows the first."""
@@ -1739,13 +1731,6 @@ def painted():
     return _PAINT[0]
 
 
-def painted_alone():
-    """Whether the frame the console paints shows its content alone on a
-    canvas whose content vouches for its own buffers (`paint_frame`): no
-    overlay, cursor or toast over it, on the fullscreen tier."""
-    return _PAINT[1]
-
-
 def rows_drawn():
     """The frame painted drew its content's changed rows alone, as a
     surface that keeps its own frames says (the sprite pickers over the
@@ -2673,7 +2658,7 @@ class Hold:
         frames RETAINED_FRAMES back left it but for their rows, and every
         draw of them since before those frames was under `key` (a frame
         between that repeats the last changes none of it). Else a frame alone on a canvas that
-        keeps its pixels (`painted_alone`), each of the RETAINED_FRAMES
+        keeps its pixels (`paint_frame`'s `alone`), each of the RETAINED_FRAMES
         painted frames before it having drawn them under `key`, alone too;
         or fewer of them, the frame before at least, where the canvas
         copies `rect` (the page, the card inside it) out of the buffer that
@@ -3159,11 +3144,11 @@ class PaintRing:
     painted the region whole under this key into the buffer `shift_last`
     reads, so a shift brings n-1 to n. `held` names the paint the buffer a
     frame draws into holds, RETAINED_FRAMES back. Under the windowed WM the
-    shown ring vouches for the buffer instead (one voucher per region) and
-    the content's ring answers only `vouch_key`. A ScrollRegion keeps one
-    of these; an app's page (`AppHost`) keeps its slots in its context
-    (moy_ui_api_host_begin), and the home's band and the desk home's still
-    frames name their parts in the band host's paints there (`ui.held`)."""
+    shown ring vouches for the buffer instead (one voucher per region). A
+    ScrollRegion keeps one of these; an app's page (`AppHost`) keeps its
+    slots in its context (moy_ui_api_host_begin), and the home's band and
+    the desk home's still frames name their parts in the band host's paints
+    there (`ui.held`)."""
 
     def __init__(self, n=_MAX_RETAINED):
         self.n = n
@@ -3224,18 +3209,6 @@ class PaintRing:
 
     def stamp(self, back=0):
         return self._stamp[self._slot(back)]
-
-    def vouch_key(self, key=None, obj=None):
-        """True when the newest frame painted the region whole under `key`
-        (and `obj`), whatever buffer it drew into and whenever: where
-        another ring vouches that the buffer `shift_last` reads holds that
-        frame's region (the windowed WM's shown ring), else None."""
-        if not self.size:
-            return None
-        i = self._i
-        if not self._whole[i] or self._obj[i] is not obj or self._key[i] != key:
-            return None
-        return True
 
     def change(self, back=0):
         return self._change[self._slot(back)]

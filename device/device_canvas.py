@@ -472,7 +472,7 @@ _PAL_IDENTITY = bytes(range(64))
 # table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
 # (this class writes them), 64..127 this block (native/moy_glass writes it into
 # every row; pal() never remaps it). `_CMASK[0]` is what a colour index is
-# masked with: 127, or 63 while a cart's code runs (`set_cart`), so a cart's
+# masked with: 127, or 63 while a cart's code runs (`ui_draw.cart_text`), so a cart's
 # colour stays its index modulo 64.
 _BLOCK = _glass_mod.block_view()
 _CMASK = _glass_mod.cmask()
@@ -487,10 +487,6 @@ def set_block(words):
         wire[i] = w if PAL565_WIRE is PAL565 else (((w & 0xFF) << 8) | (w >> 8))
     _glass_mod.block(wire)
 
-
-def set_cart(on):
-    """The cart boundary: while on, a colour index is masked to 0..63."""
-    _glass_mod.cart(on)
 _PALT_OPAQUE = bytes(64)
 
 
@@ -967,7 +963,7 @@ class DeviceCanvas:
         # remap, one slice-copy per real reset) instead of the 64-iteration
         # rebuild _sync_gate_pal does: the celeste shim calls pal() reset every
         # frame and pal-sandwiches around tinted draws, and the rebuild was ~80%
-        # of a 5us pal() body (unix-MP attribution, experiments/state_verb_cost;
+        # of a 5us pal() body (unix-MP attribution, #192 and a791c33;
         # the trampoline crossing itself measured 0.07us -- the cost was always
         # this body). Invariant: _gate_pal mirrors _pal_map after every mutation;
         # tests/test_gate_pal_sync.py pins it against the full rebuild.

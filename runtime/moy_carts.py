@@ -5,7 +5,7 @@
 #   encode_cover               128x128 indices -> cover.png bytes
 #   load_images                a cart's paint-image assets
 #   load_scenes                a cart's scene assets
-#   -- sibling stores          load_artwork, save_artwork
+#   -- sibling stores          load_artwork
 #   -- the document codec      encode_text, decode_text
 #   -- the catalogue           PAYLOADS, entry, load, catalogue, scan
 #   -- manifest metadata       save_manifest_meta, add_source, compile_check
@@ -222,15 +222,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 _write_bytes)
 
 
-def load_image(path, name):
-    """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
-    None."""
-    try:
-        return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
-    except OSError:
-        return None
-
-
 def load_cover(path):
     """The cart at `path`'s cover.png bytes, or None -- no file, or one larger
     than any cover can be (cover_png.MAX_BYTES). The shelf reads covers through
@@ -425,8 +416,8 @@ def save_scene(cart, name, text):
 # --- sibling stores ----------------------------------------------------------
 #
 # System-state documents live BESIDE the carts dir (one level up from `root`), so
-# they aren't tied to any single cart: artwork/notes/sheets, the shared sprite
-# sheet, the system icon theme, wifi/system/achievements JSON. The path formula,
+# they aren't tied to any single cart: the wallpaper's artwork copy, the shared
+# sprite sheet, the system icon theme, wifi/system/achievements JSON. The path formula,
 # the read-or-None, and the ensure-dirs + atomic write are each written ONCE here;
 # the per-store `X_path`/`load_X`/`save_X` wrappers keep their public names (and
 # any store-specific parse/sanitize logic).
@@ -486,10 +477,6 @@ def _write_sibling(root, name, text):
 
 def load_artwork(root=CARTS_DIR):
     return _read_sibling(root, ARTWORK_NAME)
-
-
-def save_artwork(text, root=CARTS_DIR):
-    _write_sibling(root, ARTWORK_NAME, text)
 
 
 # --- the document codec ---

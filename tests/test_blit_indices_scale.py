@@ -16,7 +16,7 @@ import random
 import pytest
 
 from runtime import host_canvas
-from runtime.editors import SpriteSheet
+from runtime.editors_sheet import SpriteSheet
 
 W, H = 160, 120
 

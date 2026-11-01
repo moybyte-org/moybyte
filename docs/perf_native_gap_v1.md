@@ -269,9 +269,11 @@ The mechanism was checked directly rather than inferred:
 number of distinct names in the hot set, and shows a set that fits the
 reachable slots at ~0.55–0.7 µs a lookup on the S3s (0.34 on the P4) and one
 that overflows them at ~1.2 µs (0.66); at 512 the 160-name set no longer
-overflows. The `experiments/state_verb_cost`
-README had recorded exactly this thrash as an unproven hypothesis a month
-earlier.
+overflows. A unix-MP attribution of `pal()` (2026-08-12, `a791c33`) had
+recorded exactly this thrash as an unproven hypothesis a month earlier: the
+same body cost ~1 µs a call split into two small functions and ~5 µs as one
+large one, whichever piece was removed to make it small, so a unix-MP
+microbench of a LARGE function is not evidence until glass agrees.
 
 ### READ 2026-09-23 — what is left in `mp_map_lookup` is the kid idiom, not a knob
 

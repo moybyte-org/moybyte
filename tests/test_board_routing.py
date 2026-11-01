@@ -569,7 +569,7 @@ def test_paint_image_assets_wired_device_and_carts():
 
 
 def test_editor_cores_are_shared_single_source():
-    """One canonical file (runtime/editors.py); neither backend redefines the
+    """One canonical source (runtime/editors_*.py); neither backend redefines the
     shared cores."""
     runtime = _device_backend_src()
     # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds

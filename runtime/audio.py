@@ -1,6 +1,6 @@
 """Backend-agnostic audio core shared by the host and device consoles (#16).
 
-Like runtime/editors.py, this is pure logic -- no I/O, no hardware, no canvas --
+Like the editor cores (runtime/editors_*.py), this is pure logic -- no I/O, no hardware, no canvas --
 so the *same* file backs the host reference (imported as runtime.audio) and the
 MicroPython device port (frozen as the top-level module `audio`, staged by
 build.sh).

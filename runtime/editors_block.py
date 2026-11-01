@@ -6,8 +6,7 @@
 #   BlockEditor.set_slot     write a slot value
 #   -- music / sound editor  MusicEditor
 """BlockEditor (#29 Part 2) -- the structured-outline block program + cursor
-(+ BlockRow / _clone_tree). Split out of editors.py (which re-exports them);
-history via the shared editors_base discipline."""
+(+ BlockRow / _clone_tree); history via the shared editors_base discipline."""
 
 try:
     from op_history import History, OpHistoryMixin

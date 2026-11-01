@@ -20,7 +20,7 @@ Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer`
 injected callables) -- no console module-level constants or
 NAMES -- so this file is a dependency-free leaf: console.py imports it, it imports
 nothing back (no circular import), and both the host and the device freeze the
-identical source (build.sh stages it into modules/ like editors.py).
+identical source (build.sh stages it into modules/ like the editor cores).
 """
 
 

@@ -693,7 +693,7 @@ class Launcher:
     def _shown(self):
         """([(index, card rect)], [the reach rect of each], [the rect each
         draws in without the focus]) of the cells the band shows
-        (`_visible`, `reach_rect`), kept for the cells, the scroll, the list
+        (`_visible`), kept for the cells, the scroll, the list
         and the focus mark's reach they were laid out at."""
         c = self._cells()
         s = self.scroll
@@ -748,16 +748,6 @@ class Launcher:
                 (reach if g == m else body).append((x0, y0, x1 - x0, y1 - y0))
         return self._show
 
-    def reach_rect(self, i):
-        """Everything cell `i` draws at the current scroll, focused or not --
-        its card grown by focus and ringed, its title under it -- or None
-        where it lies outside the band: the rect a change of the cell's focus
-        repaints."""
-        vis, reach, _body = self._shown()
-        for k in range(len(vis)):
-            if vis[k][0] == i:
-                return reach[k]
-        return None
 
     def tile_at(self, px, py):
         """The cell whose card or title lies under (px, py) in the band."""

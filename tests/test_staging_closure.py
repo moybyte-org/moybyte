@@ -697,7 +697,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     # store host and /gpio over its webhost.
     assert "moy_webserver.py" not in staged
     for name in ("console.py", "wm.py", "wm_windowed.py", "device_canvas.py",
-                 "launcher_layer.py", "editors.py",
+                 "launcher_layer.py", "editors_code.py",
                  "cart_api.py", "device_boot.py", "blocks.py"):
         assert name not in staged, (
             "the Zero stages %s -- it has no glass and runs no carts; if that "
