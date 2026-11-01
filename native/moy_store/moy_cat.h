@@ -1,4 +1,4 @@
-// The catalogue (docs/kernel_store_2026-10.md section 6): the shelf's scan of
+// The catalogue (docs/history/kernel_store_2026-10.md section 6): the shelf's scan of
 // a store root, one cart's entry read again, and the cart verbs that work on a
 // whole folder.
 //

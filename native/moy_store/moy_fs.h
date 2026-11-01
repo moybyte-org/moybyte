@@ -1,5 +1,5 @@
 // The store's crash-safe write and its file verbs, over moy_vol
-// (docs/kernel_store_2026-10.md section 5).
+// (docs/history/kernel_store_2026-10.md section 5).
 //
 // runtime/moy_fs.py is the reference and its header the crash-safety story;
 // this is that story on the medium, byte for byte: the marker line

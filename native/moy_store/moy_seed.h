@@ -1,4 +1,4 @@
-// The seed (docs/kernel_store_2026-10.md section 7): a built-in from the
+// The seed (docs/history/kernel_store_2026-10.md section 7): a built-in from the
 // packed roster written into a store root.
 //
 // runtime/moy_seed.py's `seed_builtins` is the reference, file for file and

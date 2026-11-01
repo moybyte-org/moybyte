@@ -325,7 +325,7 @@ ever needs a push path is a new decision, not a flip of this one."""
 [[native.shared.take]]
 module = "moy_sd"
 why = """
-The card driver under the store's own card volume (docs/kernel_store_2026-10.md
+The card driver under the store's own card volume (docs/history/kernel_store_2026-10.md
 slice 8): `moy_sd.mmc` brings the TF card up on SDMMC slot 0 (GPIO39-44, LDO4
 powered; slot 1 is the C6's) once and never tears it down, and
 native/moy_store's card -- the kernel's FATFS and read cache -- reads it

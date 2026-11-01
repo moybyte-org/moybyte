@@ -1,4 +1,4 @@
-"""The store's crash-safe write in C (native/moy_store, docs/kernel_store_2026-10.md
+"""The store's crash-safe write in C (native/moy_store, docs/history/kernel_store_2026-10.md
 section 5), held to runtime/moy_fs.py, which CPython keeps as its twin.
 
   * the power-cut matrix: every scripted write sequence on oofatfs over a RAM
@@ -268,7 +268,7 @@ def test_the_vm_store_is_the_native_one_and_answers_as_the_twin(tmp_path):
     exe = require_unix_mp(
         "moy_store",
         why="the store's file verbs on the VM a board runs, over the native "
-            "module (docs/kernel_store_2026-10.md section 10, slice 2).")
+            "module (docs/history/kernel_store_2026-10.md section 10, slice 2).")
     vm = _vm_session([exe], tmp_path / "vm")
     cp = _vm_session([sys.executable], tmp_path / "cpython")
     assert vm[0] == "native True" and cp[0] == "native False"

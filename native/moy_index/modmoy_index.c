@@ -10,7 +10,7 @@
 // emptied (tests/test_moy_index_twins.py).
 //
 // A path is a str; a handle is an int, and one outside 1 .. 2**30 - 1 names
-// no row. The table's memory is PSRAM on a board (docs/kernel_store_2026-10.md
+// no row. The table's memory is PSRAM on a board (docs/history/kernel_store_2026-10.md
 // section 9), malloc elsewhere, and none of it is the gc heap's: an Index frees
 // its table in __del__.
 

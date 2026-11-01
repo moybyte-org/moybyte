@@ -5,7 +5,7 @@
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
 //
-// THE BORROW (docs/kernel_store_2026-10.md section 3). moy_vol_at resolves a
+// THE BORROW (native/moy_store/moy_vol.h). moy_vol_at resolves a
 // path through MicroPython's mount table to the VM's own instance: a VfsFat's
 // FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout this file
 // mirrors stops matching), or POSIX under a VfsPosix at "/". A sector read

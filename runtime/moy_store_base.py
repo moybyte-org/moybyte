@@ -179,7 +179,7 @@ def files_root(root):
 
 
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and
-# nowhere else (docs/kernel_store_2026-10.md section 4): a store that shards its
+# nowhere else (native/moy_index/moy_index.h): a store that shards its
 # root or keeps a cart elsewhere changes these and no caller.
 # tests/test_store_paths.py fails any other module that composes one.
 CART_EXT = ".moy"
@@ -208,7 +208,7 @@ def cart_path(root, folder):
 # A cart's id is `<author>.<name>` (#162): the folder is the id and the
 # extension. The built-ins' author is BUILTIN_NS; a cart a kid makes takes its
 # author from the Settings field USER_NS_KEY, which is USER_NS until profiles
-# exist (docs/kernel_store_2026-10.md section 12).
+# exist (docs/history/kernel_store_2026-10.md section 12).
 BUILTIN_NS = "moybyte"
 USER_NS = "local"
 USER_NS_KEY = "author"

@@ -62,8 +62,7 @@ store that cannot be written raises OSError, ENOSPC when it is full (an index
 with no free row is full too); a cart folder that will not read is None, as it
 always was, so one bad folder never takes the shelf down.
 
-A row's key is its root's id and its folder name (docs/kernel_store_2026-10.md
-section 4), never a path: the index's ABI compares keys bytewise and is the
+A row's key is its root's id and its folder name (native/moy_index/moy_index.h), never a path: the index's ABI compares keys bytewise and is the
 same for both. Roots are the index's table of ROOTS, a store's id its slot
 plus one, taken the first time a call names the store; when every slot is
 taken, the root named longest ago gives its slot up and every row it held is

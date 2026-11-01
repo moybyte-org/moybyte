@@ -2,7 +2,7 @@
 
 The handle table `runtime/moy_index.py` defines, as a C ABI (`moy_index.h`) and
 its C twin (`moy_index.c`): sprint 1a's component, and since sprint 1b's slice 1
-(`docs/kernel_store_2026-10.md` §4, §10) the index every image runs -- the
+(`native/moy_index/moy_index.h`; `docs/history/kernel_store_2026-10.md` §10) the index every image runs -- the
 boards and the browser freeze no `moy_index.py`. Its rows and its root table
 (`moy_index_root`: up to eight store roots, a key being the root's id byte and
 the cart's folder) are PSRAM on a board. `runtime/moy_index.py` stays the host's:

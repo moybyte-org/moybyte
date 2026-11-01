@@ -1,6 +1,6 @@
 # moy_store — the store, native
 
-The store in C (`docs/kernel_store_2026-10.md`; #224), linked by every image:
+The store in C (`docs/history/kernel_store_2026-10.md`; #224), linked by every image:
 the boards, the browser and the desktop MicroPython. `runtime/moy_fs.py`,
 `runtime/moy_carts.py` and `runtime/moy_store_base.py` delegate to it wherever
 the module imports; CPython (the simulator, the tools, the tests) keeps the

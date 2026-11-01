@@ -1,12 +1,23 @@
-// The volume seam (docs/kernel_store_2026-10.md section 3): one interface over
-// the file-system libraries an image already links -- oofatfs on a card,
-// littlefs2 on internal flash, POSIX on the host and in the browser.
+// The volume seam: one interface over the file-system libraries an image
+// already links -- oofatfs on a card, littlefs2 on internal flash, POSIX on the
+// host and in the browser -- called at the library level, never through the
+// VFS's object API (which allocates on the gc heap and raises through nlr).
 //
-// A volume is a library and the one instance of it that owns a path. Until a
-// volume is the kernel's, the store BORROWS the VM's instance for the length of
-// a call: the host's moy_vol_at resolves a path through MicroPython's mount
-// table to a VfsFat's FATFS or a VfsLfs2's lfs2_t, and the pointer never
-// outlives the call.
+// A volume is a library and the ONE instance of it that owns a path, never a
+// second copy (2026-10-06). The kernel owns the consoles' instances: the card's
+// FATFS over a native block device (moy_card.c), which Python mounts at /sd so
+// VfsFat and the store share it, and the internal flash's lfs2_t (moy_kvfs.c),
+// which Python reaches through the kernel's KVfs. A volume the kernel does not
+// own, the store BORROWS for the length of a call: moy_vol_at resolves a path
+// through MicroPython's mount table to a VfsFat's FATFS, a VfsLfs2's lfs2_t
+// (its private layout checked on every resolve, the guard on a tag bump) or
+// VfsPosix, and the pointer never outlives the call. The store's code is the
+// same over a borrowed and an owned instance.
+//
+// ESP-IDF's VFS was REJECTED (2026-10-06): its fatfs and oofatfs both define a
+// global f_open, so one image cannot link both; IDF builds fatfs without
+// relative paths (FF_FS_RPATH 0), which the scan's moy_vol_enter stands on; and
+// IDF ships no littlefs.
 //
 // Every call returns 0 or an errno value (MicroPython's numbering, which is
 // Linux's; a POSIX volume hands back its C library's own, as VfsPosix does).

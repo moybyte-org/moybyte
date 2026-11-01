@@ -1,5 +1,5 @@
 """The native store's catalogue and JSON scanner (native/moy_store/moy_cat.c,
-native/moy_spine/moy_json.c; docs/kernel_store_2026-10.md sections 6 and 10,
+native/moy_spine/moy_json.c; docs/history/kernel_store_2026-10.md sections 6 and 10,
 slice 3) held to their twins: the desktop MicroPython, whose moy_carts reads
 through the C, against CPython over runtime/moy_carts.py.
 
@@ -111,7 +111,7 @@ def _vm():
     return require_unix_mp(
         "moy_store",
         why="the catalogue on the VM a board runs, through the native store "
-            "(docs/kernel_store_2026-10.md section 10, slice 3).")
+            "(docs/history/kernel_store_2026-10.md section 10, slice 3).")
 
 
 def _both(ops, tmp):

@@ -1,4 +1,4 @@
-"""The index's root table (docs/kernel_store_2026-10.md section 4), pinned once
+"""The index's root table (native/moy_index/moy_index.h), pinned once
 for every binding: the Python twin, the C twin through ctypes, and -- by
 test_the_roots_hold_on_the_vm -- this same file on the boards' VM over the
 native module and the Python one.

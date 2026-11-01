@@ -34,7 +34,7 @@ The interface, which the native index exposes call for call:
   rows(rid) -> [h]        the live rows of root `rid`, in slot order
 
 A store key is its root's id as one character, then the cart's folder name
-(docs/kernel_store_2026-10.md section 4); the table compares keys as it would
+(native/moy_index/moy_index.h); the table compares keys as it would
 any string, and only the root calls read that first character.
 
 A handle that is not an int raises TypeError; an int that names no live row

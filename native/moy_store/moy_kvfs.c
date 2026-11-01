@@ -1,5 +1,5 @@
 // The internal flash volume, the kernel's (docs/kernel_survival_2026-10.md
-// section 6.6, docs/kernel_store_2026-10.md section 3): one lfs2_t over the
+// section 6.6, native/moy_store/moy_vol.h): one lfs2_t over the
 // "vfs" partition with C callbacks over esp_partition, its config and caches
 // in kernel memory, mounted at the kernel's first ask and kept across every
 // VM. Python reaches it through `KVfs`, a VFS type of the kernel's that the

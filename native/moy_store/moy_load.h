@@ -1,4 +1,4 @@
-// Loading a cart (docs/kernel_store_2026-10.md section 7): its entry and
+// Loading a cart (docs/history/kernel_store_2026-10.md section 7): its entry and
 // every payload's bytes, read from inside its folder into one PSRAM arena.
 //
 // runtime/moy_carts.py's `_load(path, whole=True)` is the reference: the

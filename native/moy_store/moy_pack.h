@@ -1,4 +1,4 @@
-// A cart as it travels (docs/kernel_store_2026-10.md section 8; #127, #122):
+// A cart as it travels (docs/history/kernel_store_2026-10.md section 8; #127, #122):
 // the `.moy` archive and adopt, which moves a staged cart into its place on
 // the shelf. The wire's skip rule it packs by is moy_fs.h's.
 //

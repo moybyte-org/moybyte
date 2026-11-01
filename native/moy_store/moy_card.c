@@ -1,4 +1,4 @@
-// The card volume, owned (docs/kernel_store_2026-10.md section 1, slice 8):
+// The card volume, owned (native/moy_store/moy_vol.h):
 // the store's own FATFS over a native block device with a read cache, which
 // Python mounts at /sd, so VfsFat and the store share one instance and every
 // sector FatFS is handed comes through here.
