@@ -5052,6 +5052,8 @@ typedef struct {
 } block_t;
 static block_t s_blocks[MOY_UI_BLOCKS];
 static uint32_t s_block_tick;
+static uint32_t s_block_gen;            // one count for every block: a block taken anew
+                                        // sets its fields past any generation a part kept
 
 // The block `id` names; with `make`, one taken for it (the free one, else
 // the one set longest ago) where none holds it.
@@ -5086,7 +5088,7 @@ int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value) {
         return 0;
     }
     b->v[field] = value;
-    b->g[field] = ++b->gen;
+    b->g[field] = b->gen = ++s_block_gen;
     return 1;
 }
 
@@ -5098,11 +5100,12 @@ int32_t moy_ui_api_block_gen(moy_ui_span_t id) {
 uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen) {
     const block_t *b = block_of(id, 0);
     uint32_t m = 0;
-    if (b != NULL) {
-        for (int i = 0; i < MOY_UI_BLOCK_FIELDS; i++) {
-            if (b->g[i] > (uint32_t)gen) {
-                m |= 1u << i;
-            }
+    if (b == NULL) {
+        return ~0u;                     // (no block: nothing is known of its fields)
+    }
+    for (int i = 0; i < MOY_UI_BLOCK_FIELDS; i++) {
+        if (b->g[i] > (uint32_t)gen) {
+            m |= 1u << i;
         }
     }
     return m;
