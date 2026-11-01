@@ -142,8 +142,10 @@ left:
   effects), installed with the theme, and `tests/test_style.py` holds the style
   tables and the `colors=` hatch.
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
-  roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
-  `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
+  roles as an ALLOWLIST (`native/moy_app/roles.json` is the table); never
+  grantable: `artwork`, `carts`, `damage`, `install`, `notify`, `surface`,
+  `wallpaper`. `clipboard` comes with the clipboard permission, and `ui` goes to
+  every app. **An ungranted verb is ABSENT, not
   stubbed** (`system_carts/moybyte.notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives

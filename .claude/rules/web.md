@@ -279,8 +279,7 @@ nor those docs will warn you about:
   entirely** (`createImageBitmap` + `getImageData`, then read the low bits in JS)
   and that is exactly what was DECLINED: it would be a second reader of one
   format, the same shape as the hand-copied converter, and it does not generalise
-  to a board. Measured on a real MicroPython: 40ms to read a `.p8.png`, 13ms to
-  write a small cart, ~360ms for Celeste. Rules the tests pin: the **zoom hint is
+  to a board. Rules the tests pin: the **zoom hint is
   unconditional** here (`p8_writer.P8_CROP`, canvas `128x128`) because on the web
   that footgun would fire on every import; the PNG validation is **explicit**
   because the frozen build is opt=3, which strips the converter's own asserts;
@@ -297,9 +296,9 @@ nor those docs will warn you about:
   because unlike `os.path.basename` a regex engine and a str method **cannot be
   injected from out here**. `tests/test_p8_micropython.py` is the lane that found
   them and `tests/test_p8_import_vendor.py` scans a re-vendored file for the six
-  statically. **Memory is the other tier fact**: a real BBS cart needs ~8MB of
-  MicroPython heap to import (the fixture fits in 2MB); the browser gives the VM
-  16MB, so that is headroom here and the bar a device leg has to clear.
+  statically. **Memory is the other tier fact**: a real BBS cart needs several
+  times the fixture's MicroPython heap to import; the browser gives the VM 16MB,
+  and that import is the bar a device leg has to clear.
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.

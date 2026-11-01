@@ -51,11 +51,11 @@ the Python twin along. **Editing a vendored file in place is a red test** —
 `tests/test_libmoy_vendor.py` hashes every one against the manifest, and also
 diffs against a sibling checkout when it sits at the pinned commit, so both
 "someone patched the copy" and "someone patched upstream without re-vendoring"
-fail on the same day rather than at the next re-vendor. The #167 3D verbs took the other route
-— `moy_gfx` re-implements `moy_canvas.c`'s geometry line-for-line — and that is
-only safe because the conformance goldens pin every pixel; §8.3 deliberately
-exempts audio from pixel conformance, so there is no golden to catch a drifting
-twin.
+fail on the same day rather than at the next re-vendor. The #167 3D verbs
+(`tri`/`sspr`/`tline`) take the same route: `moy_gfx` calls into vendored libmoy
+(`native/moy_gfx/libmoy_kernels.c`), never a transcription of it (the
+`rendering.md` rule). Audio has even less room for a twin: §8.3 exempts it from
+pixel conformance, so no golden would catch one drifting.
 
 **The Python twin synth is DEAD (moycore stage 0, 2026-08-11), and the
 playing is the kernel's (sprint 3, 2026-10-07).** `native/moy_audio/moy_aud.h`
