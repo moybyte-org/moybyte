@@ -57,7 +57,9 @@ static volatile uint32_t s_submitted = 0;
 static volatile uint32_t s_done = 0;
 
 static volatile uint32_t s_timeouts = 0;
-// fills handed back to the CPU because the engine was busy (ppa_fill_block)
+// A rotate was asked for (the rotated compositor's): no fill is the PPA's
+// from then on (ppa_fill_block); the fills handed back to the CPU for it.
+static bool s_rotates = false;
 static uint32_t s_fill_declined = 0;
 
 // A real op is microseconds; this is a bug fence, not a knob.
@@ -374,6 +376,7 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
 //   frame, one game rect per quiet frame, and angle 0 to bring a ping-pong
 //   framebuffer up to date from its sibling.
 static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
+    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -792,6 +795,7 @@ static void rb_worker(void *arg) {
 }
 
 static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
+    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -1333,6 +1337,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_snap_stats_obj, moy_ppa_snap_stats);
 //   PPA has no nearest mode; crisp mode takes the paint-buffer path).
 //   Blocking unless `nb` (see rotate).
 static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
+    s_rotates = true;
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -1835,13 +1840,14 @@ static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, i
         || x < 0 || y < 0 || x + w > dw || y + h > dh) {
         return 0;
     }
-    // Never beside another engine's work: a fill submitted while the SRM
-    // client's rotates (the rotated compositor's present) or a 2D-DMA copy
-    // are in flight wedged the SRM for good on the Guition P4 -- every later
+    // Never on a board whose SRM rotates its frames (the Guition P4's
+    // rotated compositor): its fill client and the SRM's rotates, the two
+    // interleaved on every frame of the desk carousel's key steps, wedged the
+    // SRM for good about one key row in twenty, here and on dev -- every later
     // fence timed out at PPA_FENCE_TIMEOUT_US and a blocking fill then held
-    // the task watchdog off (the desk carousel's key steps, 2026-11-01). The
-    // caller's CPU fill draws it instead.
-    if (ppa_inflight() > 0 || s_fb_busy) {
+    // the task watchdog off (2026-11-01). Waiting out the rotates in flight
+    // first still wedged it; the caller's CPU fill never has.
+    if (s_rotates) {
         s_fill_declined++;
         return 0;
     }
