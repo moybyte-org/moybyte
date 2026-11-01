@@ -195,6 +195,7 @@ def _methods():
 MIXINS = {
     "InputVerbs": "console_input",
     "HomeVerbs": "console_home",
+    "TextVerbs": "console_text",
     "PerfMeters": "console_perf",
     "SettingsToggles": "console_settings",
     "SaveVerbs": "console_saves",

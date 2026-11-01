@@ -10,8 +10,10 @@ that claims them), the pointer router (`handle_pointer`, which publishes the
 game-space pointer and routes taps through the same stack, and its staleness
 clock `_tick_pointer_dt`), directional input (`nav`), the trackball as
 W A S D (`ball_steps`/`ball` and the roll/coast steppers under them), the
-bar's key routing (`bar_where`/`_bar_keys`/`bar_open_x`), the caret step and
-`focused_cart_editor`. A mixin of `Workstation`; the state it reads is
+bar's key routing (`bar_where`/`_bar_keys`/`bar_open_x`), the caret step,
+the per-frame keyboard mode (`_menu_keys`, a menu over a text surface taking
+the keys as a list does; `_sync_cart_text_mode`, a running cart's text mode
+on the keyboard) and `focused_cart_editor`. A mixin of `Workstation`; the state it reads is
 created in console.py's `_init_state`.
 """
 
@@ -610,6 +612,44 @@ class InputVerbs:
         self.nav(dx, dy)
         i.spend_edges()
         return True
+
+    def _menu_keys(self):
+        """A menu over a text surface takes the keys as a list does: while
+        the pause menu, the delete confirm or the system menu shows on the
+        handheld, the keyboard is out of text mode, so the T-Deck's W A S D
+        step its rows (moy_kbd.c, THE MOVE KEYS) and K is its back. The
+        surface's text mode comes back as the menu closes, unless what the
+        menu did set a mode of its own (a row that opened another surface)."""
+        over = not self.windowed_chrome and self._modal_layer() is not None
+        if over == self._menu_over:
+            return
+        self._menu_over = over
+        if over:
+            self._text_back = None
+            if self.input.text_mode:
+                self._set_text_mode(False)
+                self._text_back = self._text_sets
+        elif self._text_back is not None:
+            if self._text_back == self._text_sets:
+                self._set_text_mode(True)
+            self._text_back = None
+
+    def _sync_cart_text_mode(self):
+        # Cart text input (#38/#42): a RUNNING cart opts into text-keyboard mode by
+        # calling textmode(True) (make_api), which sets input.text_mode. Games leave it
+        # off (the default) and keep the raw/game keyboard so a held direction keeps
+        # firing btn(). When a cart asks for text mode we flip the keyboard to clean
+        # 1-byte ASCII (set_game_mode(False)) so key()/keyp() yield typeable bytes;
+        # when it turns text mode back off we restore game mode. Idempotent (the
+        # keyboard's set_game_mode only talks to the HW on a real transition), called
+        # each running-cart frame so a mid-cart textmode() toggle takes effect. No-op
+        # on the host (no keyboard) -- there the same flag gates type_char routing in
+        # ConsoleDriver. On older keyboard firmware set_game_mode(True) is a no-op
+        # (stays ASCII) and the hold-latch fallback applies, so this is safe.
+        want_text = bool(getattr(self.input, "text_mode", False))
+        kb = self.keyboard
+        if kb is not None:
+            kb.set_game_mode(not want_text)
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""
