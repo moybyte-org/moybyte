@@ -92,7 +92,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime.cart_verbs import CART_VERBS as _CART_VERBS
 
-# The console-wide editor MODE table (docs/text_editing_2026-09.md): this tab
+# The console-wide editor MODE table (docs/theme_and_shell_2026-11.md §10): this tab
 # edits a cart's MAIN file, so its language and its parse gate are the `code`
 # mode's, asked here rather than re-derived.
 try:
@@ -301,7 +301,7 @@ class CodeLayer:
         self._NAMES = names
         self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         # The code's rows: `ui.text_view` on this host's page (its context
-        # keeps the view's scroll and record, docs/scroll_and_text_2026-10.md
+        # keeps the view's scroll and record, docs/history/scroll_and_text_2026-10.md
         # §5), the buffer it shows, and the first line the view showed last,
         # which `ed.top` reads back: a `top` moved since is the editor's.
         self._host = _ui_draw.AppHost()
@@ -408,7 +408,7 @@ class CodeLayer:
         if self._mouse.armed and ws.editor is not None:
             self._mouse.autoscroll(ws.editor, self._px, self._py, dt, ws.code_layout.lh)
         # The code and its popup are laid out in the `mono` font's cells, so
-        # they print in it (docs/theming_2026-09.md §4.7).
+        # they print in it (docs/theme_and_shell_2026-11.md §3.7).
         was = _ui_draw.print_font(_ui_draw.font("mono")[0])
         try:
             self._draw_code()
@@ -431,7 +431,7 @@ class CodeLayer:
                                            # the run, hung under its line
 
     def _draw_crash_popup(self):
-        """See why's popover (docs/look_2026-10.md step 33): hung under the
+        """See why's popover (docs/history/look_2026-10.md step 33): hung under the
         line that stopped the run, after the gutter (the caret already sits
         on it), "Stopped on this line", the error in the code face, and that
         the first edit closes it; a tap anywhere, Esc (Mic on the T-Deck)
@@ -1194,7 +1194,7 @@ class CodeLayer:
 
     def _rows(self, cv, r, ed):
         """The code's rows in R, `r`: one `ui.text_view` on this layer's
-        host, a page of R (docs/scroll_and_text_2026-10.md §5). A frame
+        host, a page of R (docs/history/scroll_and_text_2026-10.md §5). A frame
         whose buffer holds the last frame's R moves those pixels by the
         view's scroll and draws only the rows that changed; the view keeps
         the scroll -- a drag, its coast, the wheel -- and a `top` the editor

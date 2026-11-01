@@ -17,7 +17,7 @@ and both draw paths call ws.wallpaper.draw(dt).
 Boundary (single source of truth): this component owns only the RENDERING + the
 COMPILED cache -- a chosen wallpaper-type cart compiled into its OWN namespace and run
 (_draw, optionally _update) as the backdrop, the theme's picture (its `images`
-file, docs/theming_2026-09.md §4.9) or a picture cart's read to the glass's
+file, docs/theme_and_shell_2026-11.md §3.9) or a picture cart's read to the glass's
 size and drawn 1:1, or the theme's `desktop` fill.
 The CHOICE + the picker/query API are the LOOK's (appearance.py, #209 landing
 D): ws.look.wallpaper_id (a cart's id, ws.look.PICTURE, or None for the fill),
@@ -29,8 +29,8 @@ its self.ws back-ref; the pmem building block for the wallpaper's own namespace
 is imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
 
-A wallpaper cart PER GLASS (`"moybyte": {"glass": true}`, docs/theming_2026-09.md
-§4.9) draws on the system canvas itself: W and H are the glass's, `QUIET` holds
+A wallpaper cart PER GLASS (`"moybyte": {"glass": true}`, docs/theme_and_shell_2026-11.md
+§3.9) draws on the system canvas itself: W and H are the glass's, `QUIET` holds
 the shell's quiet rectangles for the surface it draws behind, and the
 `SUBJECT` it declares is `self.subject`, which the windowed WM's default
 placement keeps clear of. Any other wallpaper draws its 320x240 frame on the
@@ -253,7 +253,7 @@ class Wallpaper:
         # so coming back to the same picture is a re-bake, not a re-resample.
         self.release_picture_bake()
 
-    # -- the picture (docs/theming_2026-09.md §4.9, #186) ---------------------
+    # -- the picture (docs/theme_and_shell_2026-11.md §3.9, #186) ---------------------
     #
     # The theme's picture, or a picture cart's for this glass, read from its
     # file a row at a time straight into ONE screen-sized buffer, resampled as
@@ -603,8 +603,8 @@ class Wallpaper:
 
     def bars(self):
         """The bars' quiet rectangles on the system canvas: every band of the
-        glass outside the layout's content rect (docs/shell_layout_2026-10.md
-        §7: a bar may sit on any edge)."""
+        glass outside the layout's content rect (docs/theme_and_shell_2026-11.md
+        §8.5: a bar may sit on any edge)."""
         ws = self.ws
         sc = ws.sys_canvas
         lay = getattr(ws, "layout", None)
@@ -740,7 +740,7 @@ class Wallpaper:
                 print("Moybyte picture error:", _err_text(exc))
         if self._wp_draw is not None:
             # A wallpaper is a cart: petme128 and its colours modulo 64 while its
-            # code runs (the app-cart boundary, docs/theming_2026-09.md §4.7); the
+            # code runs (the app-cart boundary, docs/theme_and_shell_2026-11.md §3.7); the
             # fill below is the shell's.
             was = _cart_text(True)
             try:

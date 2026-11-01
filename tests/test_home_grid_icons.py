@@ -1,4 +1,4 @@
-"""The home's grid and icons arrangements (docs/look_2026-10.md step 33),
+"""The home's grid and icons arrangements (docs/history/look_2026-10.md step 33),
 the layout's `home: grid` and `home: icons`.
 
 The grid is a shelf of cards -- the cover at a clean scale, its title under

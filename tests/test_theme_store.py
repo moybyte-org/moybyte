@@ -1,4 +1,4 @@
-"""Theme packages in the store (docs/theming_2026-09.md §9, phase 6 step 2).
+"""Theme packages in the store (docs/history/theming_2026-09.md §9, phase 6 step 2).
 
 A theme is a cart folder, `<name>.moy`, whose manifest says `"type":
 "theme"` and `"runtime": "theme"`: data the loader validates, never a cart

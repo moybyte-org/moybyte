@@ -1,5 +1,5 @@
-"""The home's tab row (owner calls 2026-10-27, docs/shell_layout_2026-10.md
-§8): where the bar holds the tabs, the tabs and the bar's items are one row
+"""The home's tab row (owner calls 2026-10-27, docs/theme_and_shell_2026-11.md
+§8.6): where the bar holds the tabs, the tabs and the bar's items are one row
 in screen order -- left and right walk all of them and stop at its ends, up
 stays, down goes to the cards. The walk moves a focus; confirm opens the tab
 the focus is on and takes the keys to its cards; a tap opens a tab at once.

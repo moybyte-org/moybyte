@@ -1,5 +1,5 @@
-"""The keys reach the bar (owner call 2026-10-26, docs/shell_layout_2026-10.md
-§8): up past the top of the surface under a bar walks focus onto the bar's
+"""The keys reach the bar (owner call 2026-10-26, docs/theme_and_shell_2026-11.md
+§8.6): up past the top of the surface under a bar walks focus onto the bar's
 items, left and right walk them, confirm opens one as a tap does, down and
 back come off it. On the home the bar's items and its tabs are one row
 (tests/test_home_tab_row.py).

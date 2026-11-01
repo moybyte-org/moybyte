@@ -1,4 +1,4 @@
-"""The windowed tier's two modes (docs/shell_layout_2026-10.md §3): DESKTOP
+"""The windowed tier's two modes (docs/theme_and_shell_2026-11.md §8.1): DESKTOP
 mode -- the desk, wallpaper + icons + windows -- and CONSOLE mode -- the home
 and everything fullscreen above it -- and the one way between them (the desk's
 PLAY icon in, the home's X out)."""

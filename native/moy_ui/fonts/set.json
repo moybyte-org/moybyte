@@ -1,5 +1,5 @@
 {
- "about": "The font set tools/make_font.py builds (docs/look_2026-10.md step 3). A board takes its tier's faces; FAMILY.txt is each family's licence.",
+ "about": "The font set tools/make_font.py builds (docs/history/look_2026-10.md step 3). A board takes its tier's faces; FAMILY.txt is each family's licence.",
  "built_with": {
   "freetype2": "2.14.3",
   "raqm": "0.10.5"

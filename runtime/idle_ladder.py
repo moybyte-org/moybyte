@@ -146,7 +146,7 @@ class Saver:
         return True
 
     def _cover(self, cv, cart):
-        """The saver in every theme (docs/look_2026-10.md step 33): on black,
+        """The saver in every theme (docs/history/look_2026-10.md step 33): on black,
         the cart's cover at its largest whole scale in a 1 px frame, its
         title in the title face under it, the clock small in the corner; a
         cart with no cover is its title alone."""

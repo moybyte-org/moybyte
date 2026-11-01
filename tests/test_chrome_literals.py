@@ -1,4 +1,4 @@
-"""The chrome-literal ratchet (docs/theming_2026-09.md §9, phase 2a).
+"""The chrome-literal ratchet (docs/history/theming_2026-09.md §9, phase 2a).
 
 A theme reaches a pixel only through a role. Every `NAMES["..."]` colour
 literal in a `runtime/` module is a pixel no theme reaches, and every

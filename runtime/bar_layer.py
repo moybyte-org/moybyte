@@ -7,7 +7,7 @@
 #   BarLayer._draw_bar        one bar's cached strip at its rect
 #   BarLayer.redraw_clock     repaint just the clock cell
 #   BarLayer.handle_bar_tap   the bars' tap slice, shared by every surface
-"""The shell's bars (#46; docs/shell_layout_2026-10.md §4, §7): every bar the
+"""The shell's bars (#46; docs/theme_and_shell_2026-11.md §8.2, §8.5): every bar the
 theme's layout resolves to, on any edge, each a cached strip of widget cells
 (`shell_layout.pack`), extracted from Workstation (runtime/console.py) as its
 own surface -- docs/history/shell_layers_refactor_v1.md.
@@ -197,7 +197,7 @@ def _band_part():
 class BarLayer:
     """The shell's bars (#46), migrated out of Workstation as its own surface
     (docs/history/shell_layers_refactor_v1.md Phase 2): every bar of the
-    resolved layout (docs/shell_layout_2026-10.md §4), each a row of widget
+    resolved layout (docs/theme_and_shell_2026-11.md §8.2), each a row of widget
     cells packed at relayout (`shell_layout.pack`) -- the OS widgets (`menu`,
     `close`, `clock`, `wifi`, `battery`, `title`, `text`, `separator`) drawn by
     the bar itself through the kernel's cell painter, the taskbar `chips` by the
@@ -408,7 +408,7 @@ class BarLayer:
             return False
         # A tool's strip is the look's bar on the system canvas: the one
         # every app shows where that canvas is the game's
-        # (docs/look_2026-10.md step 27a), else the compact band over the
+        # (docs/history/look_2026-10.md step 27a), else the compact band over the
         # game's top rows (`tool_band`, step 33); in a desk window, the
         # game canvas's.
         return ws.sys_canvas is not ws.canvas and self.tool_band() is None
@@ -1089,7 +1089,7 @@ class BarLayer:
                 zone = self.past_back(zone, game)
             owner.draw_zone(cv, zone)
 
-    # -- the way back (docs/look_2026-10.md step 27a) --------------------------
+    # -- the way back (docs/history/look_2026-10.md step 27a) --------------------------
     #
     # Back goes one level; a window's X closes it. A bar shows the way back
     # wherever there is somewhere to go (`_way_back`): as the back chevron at
@@ -1320,7 +1320,7 @@ class BarLayer:
         _ch.replay(mp.chrome_strip_cell(name, r, cs, dy, s, across), cv, ws)
 
     def _paint_look_cell(self, cv, where, name, r, text, bar, across):
-        """One OS widget's cell under the theme's look (docs/look_2026-10.md
+        """One OS widget's cell under the theme's look (docs/history/look_2026-10.md
         step 14): the system button is the pixel Moy on its tile, open while
         the system menu shows; the status glyphs, the clock and the strings
         draw in the bar's ink, centred across the bar."""
@@ -1480,7 +1480,7 @@ class BarLayer:
         """Paint the handheld home's backdrop under its bar where the look
         draws the bar with no band (`hhbar.style` none) and the home's
         ground is a backdrop of its own, not the `desktop` colour a band
-        would fill (Blocks' sunflower; docs/look_2026-10.md step 26b): the
+        would fill (Blocks' sunflower; docs/history/look_2026-10.md step 26b): the
         screen's surface at (x, y) of `cv`, inside its clip. True when
         painted; no wallpaper is under a bar here."""
         ws = self.ws
@@ -1881,7 +1881,7 @@ class BarLayer:
         else:
             ws.ach_ui._clock_taps = 0            # any other bar tap resets the run
         # The ≡, the clock, wifi and battery open their component
-        # (docs/shell_layout_2026-10.md §8): the system menu as the popup it
+        # (docs/theme_and_shell_2026-11.md §8.6): the system menu as the popup it
         # is, the rest a popover hung from the widget, in both modes -- wifi's
         # the Settings WIFI panel, the one wifi implementation. Consumed, so a tap never
         # leaks to the lent zone.
@@ -1890,7 +1890,7 @@ class BarLayer:
             return True
         # The X, where a layout places `close` (spec Section 9): tap to EXIT the active surface toward
         # its mode's root. On the home it leaves console mode for the desk beneath
-        # (docs/shell_layout_2026-10.md §3); where the home is the floor it draws no X
+        # (docs/theme_and_shell_2026-11.md §8.1); where the home is the floor it draws no X
         # and is not tested. A running TOOL (Part 4) pops to its RUN caller (spec
         # Section 6's test-play round trip -- go_home for a launcher-launched tool, but
         # the Editor tab if a tool is ever PLAYed from the editor); every other taskbar

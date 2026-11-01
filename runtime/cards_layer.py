@@ -120,7 +120,7 @@ class _Prompt:
 
 
 
-# The project's files (step 5 of docs/text_editing_2026-09.md) are reached from
+# The project's files (step 5 of docs/theme_and_shell_2026-11.md §10) are reached from
 # the Config tab rather than the Files app because the loader has to stay in the
 # loop -- what it opens is reached through the Editor, which re-reads the folder
 # on the way back (Workstation.open_project_file).

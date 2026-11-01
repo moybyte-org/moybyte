@@ -119,7 +119,7 @@ typedef struct moy_app moy_appabi_t;
 
 // What an app's surface row holds: where it draws, at what size and scales,
 // whether it is a window on the desk, the content rect the host's strip leaves
-// a running app (docs/shell_layout_2026-10.md §7), and its origin on the glass
+// a running app (docs/theme_and_shell_2026-11.md §8.5), and its origin on the glass
 // (what the pointer is offset by).
 typedef struct {
     uint32_t canvas;            // the CANVAS row it draws on (native/moy_glass), or 0
@@ -241,7 +241,7 @@ int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]);
 
 // -- theme ----------------------------------------------------------------------------
 
-// The token vocabulary (docs/theming_2026-09.md section 4.1): role ids 0 ..
+// The token vocabulary (docs/theme_and_shell_2026-11.md §3.1): role ids 0 ..
 // MOY_APP_TOKENS - 1, their names, and which are flags (true/false) rather
 // than MOY64 indices. token_of: the id of a name, or -1.
 const char *moy_app_token_name(int role);
@@ -250,7 +250,7 @@ int moy_app_token_of(const char *name, size_t n);
 
 // The look's writes: the live theme (its name, its variant and every token,
 // MOY_TOKEN_ABSENT for a role it does not set), as the shell draws it (a
-// colour of the theme's block at 64..127, docs/look_2026-10.md step 5) and,
+// colour of the theme's block at 64..127, docs/history/look_2026-10.md step 5) and,
 // in `near` (NULL: the same), each role's nearest MOY64 index, which a RUN
 // grant and a compiled app are answered: a cart's colours are MOY64. It
 // bumps the generation. OK, or BAD for a name over MOY_APP_NAME_MAX bytes.

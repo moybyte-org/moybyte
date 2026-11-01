@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The console's font set: TrueType outlines pre-rasterised at fixed sizes
 into font files, format version 2 (native/moy_gfx/moy_text.h has the format,
-docs/theming_2026-09.md §4.7 its rules, docs/look_2026-10.md step 3 the set).
+docs/theme_and_shell_2026-11.md §3.7 its rules, docs/history/look_2026-10.md step 3 the set).
 
 FreeType through Pillow, hinted, one size of one weight a file, as
 docs/media/look_2026-10/mockups.py rasterises its target pictures: a glyph's
@@ -367,7 +367,7 @@ def build_set(quiet=False):
                        "chars": "calc" if calc else "full", "bytes": len(data)}
         if notes and not quiet:
             print("%s: %s" % (name, "; ".join(notes)))
-    meta = {"about": "The font set tools/make_font.py builds (docs/look_2026-10.md step 3). "
+    meta = {"about": "The font set tools/make_font.py builds (docs/history/look_2026-10.md step 3). "
                      "A board takes its tier's faces; FAMILY.txt is each family's licence.",
             "built_with": versions(),
             "families": {f: {"source": s["source"], "ttf": s["ttf"], "sha256": s["sha256"],

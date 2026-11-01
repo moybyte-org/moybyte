@@ -123,7 +123,7 @@ def test_scan_skips_corrupt_cart(tmp_path):
     assert all(t not in ("B2",) for t in titles)
     # A cart with no runnable SOURCE is still dropped; a cart whose manifest is
     # merely UNPARSEABLE is RECOVERED instead (step 5 of
-    # docs/text_editing_2026-09.md) -- it stays on the shelf under its folder
+    # docs/theme_and_shell_2026-11.md §10) -- it stays on the shelf under its folder
     # name, carrying the reason, so the kid can reach the file that broke it.
     assert sorted(titles) == ["Good", "broken1", "broken3"]
     for bad in (bad1, bad3):
@@ -169,7 +169,7 @@ def test_cart_that_raises_in_update_shows_error_panel(tmp_path):
 
 
 def _see_why(ws):
-    """The stop card a run that stopped leaves (docs/look_2026-10.md step
+    """The stop card a run that stopped leaves (docs/history/look_2026-10.md step
     33), then its See why: the crash-to-code throw."""
     ws.frame(1 / 30)
     p = ws.pause

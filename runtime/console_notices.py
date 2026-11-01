@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
-# (docs/look_2026-10.md step 25a).
+# (docs/history/look_2026-10.md step 25a).
 _LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
               "menu.favourite_add": "Add favourite",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
@@ -205,7 +205,7 @@ class Notices:
 
 
 class PauseMenu:
-    """The pause menu (docs/look_2026-10.md step 25a): over a fullscreen game
+    """The pause menu (docs/history/look_2026-10.md step 25a): over a fullscreen game
     Super holds the run (`Player.pause`: no tick, no draw, its clock and its
     music held) and a card centred on the glass names the game and offers
     Resume, Restart, Options and Quit; Esc, B or Super again resumes, and
@@ -969,13 +969,13 @@ class SystemMenuUI:
             _ui.at(strip[0], strip[1], strip[2], strip[3])
             _ui.hints(m.comp.keys())
 
-    # -- the 2026-10 look's card (docs/look_2026-10.md step 25a) ----------------
+    # -- the 2026-10 look's card (docs/history/look_2026-10.md step 25a) ----------------
 
     def scrims(self):
         """Whether a system modal's scrim is up: this menu or a card's menu,
         ABOUT, the pause menu, the delete confirm. A bar widget's popover (the calendar, Wi-Fi,
         power) hangs from its widget as an app's picker does, and dims
-        nothing (docs/look_2026-10.md, D-01)."""
+        nothing (docs/history/look_2026-10.md, D-01)."""
         ws = self.ws
         m = ws.sysmenu
         return (m.open and m.comp is None) or ws._about or ws.pause.open \

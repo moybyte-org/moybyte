@@ -184,7 +184,7 @@ def files_root(root):
 # tests/test_store_paths.py fails any other module that composes one.
 CART_EXT = ".moy"
 
-# A theme's name, the loader's grammar (docs/theming_2026-09.md §3): 1 to
+# A theme's name, the loader's grammar (docs/theme_and_shell_2026-11.md §2): 1 to
 # THEME_NAME_MAX of a-z, 0-9, `_` and `-`, starting with a letter or a digit.
 # A theme package's folder is `<name>.moy`.
 THEME_NAME_MAX = 24

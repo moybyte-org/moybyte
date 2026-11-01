@@ -1,6 +1,6 @@
 # Theming mockups (2026-09-27)
 
-The pictures behind `docs/theming_2026-09.md` §1: the look the owner chose
+The pictures behind `docs/theme_and_shell_2026-11.md` §1.1: the look the owner chose
 (D1) and the home (D7), next to the shell as it rendered before. They are
 kept so a later implementation can be compared against what was decided.
 

@@ -1455,7 +1455,7 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
 
 def test_bar_wifi_icon_opens_the_wifi_panel_as_a_popover(tmp_path):
     """On the desk the bar's wifi widget opens the Settings WIFI panel as a
-    popover over whatever runs (docs/shell_layout_2026-10.md §8): the game
+    popover over whatever runs (docs/theme_and_shell_2026-11.md §8.6): the game
     keeps its slot, no Settings window opens."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -2517,7 +2517,7 @@ def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):
     assert tuple(got) == TWO_WINDOWS
 
 
-# -- console mode as WM state (docs/shell_layout_2026-10.md §3, step 1) ---------
+# -- console mode as WM state (docs/theme_and_shell_2026-11.md §8.1, step 1) ---------
 #
 # The desk's PLAY enters console mode: the windows park outside the back-stack,
 # the route truncates to its root and the home presents fullscreen; the home's X
@@ -2949,7 +2949,7 @@ def test_home_on_the_fullscreen_tier_is_unchanged(tmp_path):
     assert ws.wm.stack.kinds() == ["launcher"]
 
 
-# -- the popover (docs/shell_layout_2026-10.md §8, step 6) ----------------------
+# -- the popover (docs/theme_and_shell_2026-11.md §8.6, step 6) ----------------------
 #
 # One popover at a time, anchored at the widget's cell, closed by a tap outside,
 # B, ESC or HOME. A change that stays inside it -- open, a row moved, close --
@@ -3421,7 +3421,7 @@ def test_the_fit_check_releases_a_closed_popovers_snapshots(tmp_path):
 
 
 def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
-    """docs/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
+    """docs/history/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
     Star Catcher" (a hyphen where the title face has no dot), and under the
     look's depth a chip names the app alone."""
     ws = _ws(tmp_path)
@@ -3465,7 +3465,7 @@ def test_while_a_playtest_runs_play_reads_stop_and_restart(tmp_path):
     assert "desktop" not in ws.wm._wins and not app.playing()
 
 
-# -- the desk and windows (docs/look_2026-10.md step 25) ----------------------
+# -- the desk and windows (docs/history/look_2026-10.md step 25) ----------------------
 
 def _moy_desk(tmp_path, variant="light"):
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
@@ -3563,7 +3563,7 @@ def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypa
 
 
 def test_blocks_tiles_are_each_apps_colour_and_their_icons_the_tile_ink(tmp_path):
-    """Blocks' `tiles` (docs/look_2026-10.md step 26b) name an app by its
+    """Blocks' `tiles` (docs/history/look_2026-10.md step 26b) name an app by its
     icon slot, Paint's `artwork` by `paint`; each tile is that colour inside
     the ink outline, its icon in `tile_ink`, and an app the map leaves out
     keeps the raised fill."""
@@ -3738,7 +3738,7 @@ def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
     assert inks["Files"] == th["chrome_ink_dim"]
 
 
-# -- the wallpaper's subject (docs/look_2026-10.md step 28) -------------------
+# -- the wallpaper's subject (docs/history/look_2026-10.md step 28) -------------------
 
 def _overlaps(a, b):
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
@@ -3836,7 +3836,7 @@ def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
 
 
 # -- every edge and corner resizes; a full-screen row's drag restores --------
-# (docs/shell_layout_2026-10.md §3, owner 2026-10-23)
+# (docs/theme_and_shell_2026-11.md §8.1, owner 2026-10-23)
 
 from runtime.wm_chrome import RZ_L, RZ_R, RZ_T, RZ_B   # noqa: E402
 

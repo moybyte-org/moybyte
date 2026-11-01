@@ -4,7 +4,7 @@ Anti-aliased type, smooth shapes and soft depth in the chrome; pixel art in
 the content (covers, sprites, carts) and in Moy. `draw.py` draws every
 picture that `index.txt` lists, through `mockups.py` and `rounds/`;
 `THEMES.md` holds the theme model; `GAPS.md` is what the engine lacks;
-`docs/look_2026-10.md` orders the build.
+`docs/history/look_2026-10.md` orders the build.
 
 ## Decisions (owner, 2026-10-15)
 

@@ -10,7 +10,7 @@ handheld, the new parts, and the owner's decisions of the same day.
 `rounds/round12.py` draws every picture named here (`draw.py`), with Sky
 Run's code, sheet, map and scene and Coin Quest's blocks; the sound bank
 past Sky Run's two effects is illustrative. It is the target of step 30
-of `docs/look_2026-10.md`; `docs/studio_2026-09.md` is the earlier design
+of `docs/history/look_2026-10.md`; `docs/studio_2026-09.md` is the earlier design
 it builds on.
 
 ## The owner's decisions (2026-10-21)

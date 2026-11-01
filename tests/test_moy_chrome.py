@@ -74,7 +74,7 @@ def test_the_strip_draws_in_the_inks_the_theme_names(ws):
     """A role may be an index of the shell's block (64-127: a theme's RGB
     colour), and the strip's cells draw in exactly the role they name -- the
     title, the clock and the menu glyph the bar's bright ink (the clock's
-    since docs/look_2026-10.md step 27a, the title's beside it) -- for
+    since docs/history/look_2026-10.md step 27a, the title's beside it) -- for
     every theme and mode. (The inks were masked to 6 bits, so Moy's,
     Blocks' and Contrast's Calc bar on a handheld drew another colour.)"""
     placed = 0

@@ -1,4 +1,4 @@
--- The public UI API's restyle verbs (docs/look_2026-10.md step 31) as a Lua
+-- The public UI API's restyle verbs (docs/history/look_2026-10.md step 31) as a Lua
 -- app: a verb, three tools (one current, one disabled), a rule and the bar's
 -- title and tools. restyle_py.moy and
 -- tests/fixtures/wasm/app_restyle.moy draw the same page with the same calls,

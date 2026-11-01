@@ -532,7 +532,7 @@ def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
 
 
 def test_a_tinted_cover_is_made_from_the_base_and_leaves_with_it(tmp_path, monkeypatch):
-    """`tinted` (docs/look_2026-10.md step 15): the whole BASE with a colour
+    """`tinted` (docs/history/look_2026-10.md step 15): the whole BASE with a colour
     over it, made by the canvas's tint and kept in the decodes' LRU -- asked
     twice it is the same picture, and the diet that drops the decodes frees
     it too. Before the BASE lands there is none."""

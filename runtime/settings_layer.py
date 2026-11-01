@@ -6,7 +6,7 @@
 #   SettingsLayer.open_bluetooth     the Bluetooth keyboard picker
 #   SettingsLayer.draw               the Settings app
 """The Settings app (#28/#39/#53): the console's AGGREGATOR, a page of rows
-in captioned groups (docs/look_2026-10.md step 19) drawn with the public UI
+in captioned groups (docs/history/look_2026-10.md step 19) drawn with the public UI
 API's verbs (`runtime/ui.py`, docs/ui_api_2026-10.md) and nothing else: the
 engine owns focus, navigation, activation and the page's scroll; this layer
 owns what each row shows and does.
@@ -387,7 +387,7 @@ class SettingsLayer:
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
-        # About's pages (docs/look_2026-10.md step 32): Achievements, and
+        # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
         self.page = None              # "achievements", "licences" or None
         self._ach_n = -1              # the badges the Achievements row last said
@@ -398,7 +398,7 @@ class SettingsLayer:
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
-        # The rows page's gen (docs/scroll_and_text_2026-10.md §3.3), moved by
+        # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
         # `_poll` when a value it shows moves: the override table the page is
         # given, kept, its gen updated in place.
         self._gen = 0
@@ -1065,7 +1065,7 @@ class SettingsLayer:
         # hand-spliced FRAMESKIP/PERF DIAG rows were.
         rows = self._SETTINGS_ROWS + tog
         if ws.look.layout_choices() or ws.look.layout_theme() is not None:
-            # LAYOUT (docs/shell_layout_2026-10.md §11): after FONT SIZE, and
+            # LAYOUT (docs/theme_and_shell_2026-11.md §8.9): after FONT SIZE, and
             # only where a package's layout differs from the theme's.
             i = rows.index(("font_scale", "FONT SIZE", "font")) + 1
             rows = rows[:i] + (("layout_theme", "LAYOUT", "layout"),) + rows[i:]
@@ -1318,7 +1318,7 @@ class SettingsLayer:
 
     def _value(self, key, kind):
         """What row `key` of `kind` shows this frame, read before the page is
-        drawn: the page's gen moves when one does (docs/scroll_and_text_2026-10.md
+        drawn: the page's gen moves when one does (docs/history/scroll_and_text_2026-10.md
         §3.3), so a frame that shifts the rows never keeps one gone stale. The
         Name field's text is its own (None): typing draws its row."""
         ws = self.ws

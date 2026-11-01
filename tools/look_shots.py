@@ -29,7 +29,7 @@ plus OUT/index.txt, which is what a reviewer reads: per scene, the target's
 description, what the render stands in with, and the plan steps still to land.
 
 A scene is BUILT when the shell holds its theme and every step of
-`docs/look_2026-10.md` that targets it carries a "Landed YYYY-MM-DD" mark.
+`docs/history/look_2026-10.md` that targets it carries a "Landed YYYY-MM-DD" mark.
 Until then it is rendered as the nearest current screen and marked "not
 built yet" with what is missing; a scene whose theme the shell does not hold
 (the ricing themes, step 29) is listed and skipped, unless `--unheld` draws
@@ -40,7 +40,7 @@ FILTER keeps the scene it names, else the scenes whose name contains it
 `--step N` keeps the scenes step N targets. `--theme`/`--variant` render
 every kept scene in that theme instead of its own. `--parts` draws the
 handheld Settings and Appearance scenes with the public UI API's parts sheet
-(tests/fixtures/ui_parts/parts_app.py, docs/look_2026-10.md step 12) in
+(tests/fixtures/ui_parts/parts_app.py, docs/history/look_2026-10.md step 12) in
 place of the shell's screens, which have not moved onto the verbs yet.
 
 The handheld scenes draw the T-Deck's own keys (`HANDHELD_INPUT`), the desk
@@ -112,7 +112,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOCKUPS = os.path.join(ROOT, "docs", "media", "look_2026-10")
-PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
+PLAN = os.path.join(ROOT, "docs", "history", "look_2026-10.md")
 
 # The theme a scene names none of is drawn with, and a target theme the
 # shell does not hold (the ricing themes, step 29) is drawn with, in the
@@ -120,7 +120,7 @@ PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
 DEFAULT = "moy"
 
 # Steps whose target is every PNG, and each theme's own steps, by
-# `theme-mode` first, then by theme (docs/look_2026-10.md).
+# `theme-mode` first, then by theme (docs/history/look_2026-10.md).
 EVERY = ("14", "27")
 THEME_STEPS = {"moy-dark": ("26a",), "moy": (), "blocks": ("26b",),
                "contrast": ("26c",),
@@ -4033,7 +4033,7 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
         "if it is RGB565",
         "quantisation, real data (the seed carts' own code, art and titles), "
         "or a deviation",
-        "the step's commit names with its reason (docs/look_2026-10.md, "
+        "the step's commit names with its reason (docs/history/look_2026-10.md, "
         "Review).",
         "A NOT BUILT YET scene is the nearest current screen: its 'missing' "
         "lines say what",

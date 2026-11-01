@@ -6,7 +6,7 @@
 #   AppearanceAppLayer._walls_page   the wallpapers: tabs over a grid of cards
 #   AppearanceAppLayer._name_dialog  NAME: custom kept as a theme of its own
 #   AppearanceAppLayer._preview      a theme's card picture: its colours
-"""The Appearance page (docs/look_2026-10.md step 20), drawn with the public
+"""The Appearance page (docs/history/look_2026-10.md step 20), drawn with the public
 UI API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
 The themes are a grid of cards (`ui.grid`, `ui.card`), each picture the
@@ -189,7 +189,7 @@ def _index(v):
 
 
 def _edit_theme():
-    """The door to the Editor's theme mode (docs/look_2026-10.md step 33)."""
+    """The door to the Editor's theme mode (docs/history/look_2026-10.md step 33)."""
     return "Edit theme\u2026" if ui.has_symbols() else "Edit theme..."
 
 
@@ -205,7 +205,7 @@ class _Built:
     made = 0                       # the last one's gen: each made is another
 
     def __init__(self):
-        # its gen (docs/scroll_and_text_2026-10.md §3.3): what the rows, the
+        # its gen (docs/history/scroll_and_text_2026-10.md §3.3): what the rows, the
         # cards and the wallpapers' cards show is a function of it
         _Built.made += 1
         self.gen = _Built.made
@@ -289,7 +289,7 @@ class AppearanceAppLayer:
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
     # CAPABILITY, not a core role: this app and the two that copy a drawing
     # into it (Paint, Files) are its only consumers. A pick is a change to
-    # the theme (docs/theming_2026-09.md D6), so it lands in `custom`.
+    # the theme (docs/theme_and_shell_2026-11.md D6), so it lands in `custom`.
     NEEDS = ("surface", "theme", "damage", "wallpaper", "nav")
     UI = True
 

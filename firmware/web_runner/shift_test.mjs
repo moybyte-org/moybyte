@@ -3,7 +3,7 @@
 // buffer, so the shift is in place, and it must move the pixels the boards'
 // and the host's do -- every sign of the move, a rect clipped at each edge --
 // held to the per-pixel reference tests/test_shift_last.py states
-// (docs/scroll_and_text_2026-10.md §3.2). The web canvas names no last frame's
+// (docs/theme_and_shell_2026-11.md §9.6). The web canvas names no last frame's
 // buffer, so copy_last_into is absent.
 //
 // Run from firmware/web_runner, against dist/. tests/test_web_shift.py runs it.

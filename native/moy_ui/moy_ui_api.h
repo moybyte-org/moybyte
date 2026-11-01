@@ -152,7 +152,7 @@ enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_
 // popover washing what it covers, a dialog over a page washed already where
 // clear; bit 1: lead, a table whose first row is a verb; bit 2: gen, a word
 // follows: the stop's content generation, §3.3 of
-// docs/scroll_and_text_2026-10.md; bit 3: wash not given, bit 0 then
+// docs/theme_and_shell_2026-11.md; bit 3: wash not given, bit 0 then
 // ignored). A wasm app hands it over as a pointer and its length.
 enum {
     MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
@@ -474,7 +474,7 @@ typedef struct {
     // the one tool lent as words, not an icon (Paint's zoom chip), and its place
     char bar_chip[MOY_UI_API_CHIP];
     int8_t bar_chip_at;
-    // A shift frame (docs/scroll_and_text_2026-10.md §3.3): the region R that
+    // A shift frame (docs/history/scroll_and_text_2026-10.md §3.3): the region R that
     // moved (its keep's id and its box as the last frame drew it), the move
     // (dy, the shift_last a host makes: -1 x what the scroll moved), the plan
     // (MOY_UI_SHIFT_*) and whether R draws a fade at its head; then the
@@ -612,7 +612,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // view before its frame begins (moy_ui_api_text_aim) lands it there instead,
 // as that frame's shift. A frame draws only the rows that changed and
 // moves the rest, as a scroll region's floor (§3.3 of
-// docs/scroll_and_text_2026-10.md). out: the first line shown and the rows
+// docs/theme_and_shell_2026-11.md). out: the first line shown and the rows
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
 // the end are cut.
 //
@@ -1114,7 +1114,7 @@ int moy_ui_api_lost(moy_ui_ctx_t *c);
 // where ui.end drew a tooltip.
 int moy_ui_api_pop_box(const moy_ui_ctx_t *c, int32_t out[4]);
 
-// -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
+// -- shift frames (docs/history/scroll_and_text_2026-10.md §3.3) ---------------------------
 //
 // A frame whose change is one region R's scroll plus rows the engine knows
 // of draws R's rows only where they changed: its host moves the pixels the
@@ -1186,7 +1186,7 @@ int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
 // (what it draws outside R draws as it did; a dialog's rows frame's: the
 // surface). 1, or 0 where the pass drew whole.
 int moy_ui_api_change_box(const moy_ui_ctx_t *c, int32_t out[8]);
-// A host's lag history (docs/scroll_and_text_2026-10.md §3.4): `slots`
+// A host's lag history (docs/history/scroll_and_text_2026-10.md §3.4): `slots`
 // slots of 2 + 2 * `bands` words, a frame's in slot f % slots -- the frame,
 // its kind (0 whole, 1 rows, 2 shift) and its floor's rows as `bands` pairs
 // y0, y1 in order (an empty pair, 0 0, unused; past `bands`, the nearest

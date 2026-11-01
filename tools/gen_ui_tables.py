@@ -415,7 +415,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_CODE_CONTRAST %d" % th["code"]["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
-         "// The sheets a package may name (docs/theming_2026-09.md \u00a74.6), the",
+         "// The sheets a package may name (docs/theme_and_shell_2026-11.md \u00a73.6), the",
          "// cart sheet's hex format: a line a row of up to MOY_THEME_SHEET_W nibbles,",
          "// at most each sheet's rows. The role sheet's cells, in pixels, reach",
          "// MOY_THEME_SPRITE_ROWS rows: what the loader keeps.",
@@ -455,7 +455,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_FRAMES %d" % len(th["frames"]),
          "#define MOY_THEME_ALIGNS %d" % len(th["title_aligns"]),
          "#define MOY_THEME_FRAME_BUTTONS %s" % _c_str(th["frame_buttons"]),
-         "// A layout (docs/shell_layout_2026-10.md \u00a75): its bars' edges, their",
+         "// A layout (docs/theme_and_shell_2026-11.md \u00a78.3): its bars' edges, their",
          "// slots and the widget catalogue; the caps and the size clamp.",
          "#define MOY_THEME_BARS %d  // one per edge" % len(lay["edges"]),
          "#define MOY_THEME_SLOTS %d" % len(lay["slots"]),
@@ -768,7 +768,7 @@ def _sublist(seq, part):
 
 
 def _look(th, roles):
-    """The look model's tables (docs/look_2026-10.md step 5, THEMES.md's
+    """The look model's tables (docs/history/look_2026-10.md step 5, THEMES.md's
     theme model): every field, its leaves, their kinds, ranges and
     defaults, the enum names and the object groups."""
     lk = th["look"]
@@ -810,7 +810,7 @@ def _look(th, roles):
     def term(v):
         return "INT32_MIN" if v is None else "%d" % v
 
-    h = ["// The look (docs/look_2026-10.md step 5): the theme model's fields, each",
+    h = ["// The look (docs/history/look_2026-10.md step 5): the theme model's fields, each",
          "// one or more leaves; a leaf's kind, its range (an enum's first name and",
          "// count), its default (MOY_THEME_NONE: silent, the renderer derives it).",
          "#define MOY_THEME_LEAVES %d" % len(leaves),
@@ -867,7 +867,7 @@ def _look(th, roles):
          "extern const moy_theme_field_t moy_theme_btn_fields[%d];" % len(btn),
          "#define MOY_THEME_BTN_FIELDS %d" % len(btn),
          "extern const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES];",
-         "// RGB colours (docs/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
+         "// RGB colours (docs/history/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
          "// WCAG luminance (x10000, as moy_theme_lum) of an RGB565 channel.",
          "extern const uint32_t moy_theme_moy64[64];",
          "extern const uint16_t moy_theme_lin5[32], moy_theme_lin6[64];"]
@@ -923,9 +923,9 @@ def _look(th, roles):
 
 
 def _recolour(th, roles, flags):
-    """The accent-and-tint derivation's tables (docs/theming_2026-09.md
-    §4.10, moy_theme_derive): the accents, the presets (an accent in a dark
-    and a light value, docs/look_2026-10.md step 27), the tints' ramps and
+    """The accent-and-tint derivation's tables (docs/theme_and_shell_2026-11.md
+    §3.10, moy_theme_derive): the accents, the presets (an accent in a dark
+    and a light value, docs/history/look_2026-10.md step 27), the tints' ramps and
     the role classes its steps rewrite."""
     lum = _luminance()
     rc = th["recolour"]
@@ -967,7 +967,7 @@ def _recolour(th, roles, flags):
     dims = [(role(r), role(f), [role(b) for b in bgs]) for r, f, bgs in rc["dim_ink"]]
     if any(not 1 <= len(b) <= 3 for _r, _f, b in dims):
         raise SystemExit("theme.recolour.dim_ink: one to three backgrounds each")
-    h = ["// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the",
+    h = ["// Accent and tint (docs/theme_and_shell_2026-11.md §3.10, moy_theme_derive): the",
          "// accents [A, deep], the presets [dark, light] (an accent index past",
          "// MOY_THEME_ACCENTS names one), the tints' ramps ([0] the length, then",
          "// dark to light), and the role classes, each 0xff past its end.",

@@ -70,7 +70,7 @@ def _carts(tmp_path):
 def _wallpaper(tmp_path, slug, src, title=None):
     """A wallpaper cart in the store, chosen as the backdrop the next boot
     restores: what a kid's earlier Appearance pick left, `custom` naming it
-    (docs/theming_2026-09.md D6)."""
+    (docs/theme_and_shell_2026-11.md D6)."""
     carts = _carts(tmp_path)
     d = Path(carts) / (slug + ".moy")
     d.mkdir(parents=True, exist_ok=True)

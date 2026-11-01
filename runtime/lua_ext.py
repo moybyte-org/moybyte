@@ -551,7 +551,7 @@ end
 
 PRELUDE_EDITOR = """
 do
-  -- The EDITOR HANDLE (#112, docs/text_editing_2026-09.md) for Lua carts. Same
+  -- The EDITOR HANDLE (#112, docs/theme_and_shell_2026-11.md §10) for Lua carts. Same
   -- route as a layer: an int handle Python-side, a wrapper table here, and only
   -- numbers and strings across the boundary. The two verbs that answer a PAIR
   -- -- tap and save -- encode it as one comma-joined string and split it here,

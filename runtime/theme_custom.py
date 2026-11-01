@@ -1,4 +1,4 @@
-"""`custom`: the theme a change in Appearance makes (docs/theming_2026-09.md
+"""`custom`: the theme a change in Appearance makes (docs/history/theming_2026-09.md
 §9 phase 6 step 5, §4.9, §4.10).
 
 The look (`appearance.Appearance.change`) holds one `Custom` while `custom`

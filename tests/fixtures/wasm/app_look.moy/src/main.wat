@@ -1,4 +1,4 @@
-;; App Look Wasm: the public UI API's Appearance verbs (docs/look_2026-10.md
+;; App Look Wasm: the public UI API's Appearance verbs (docs/history/look_2026-10.md
 ;; step 20) as a compiled app, through the `ui` rows it imports from module
 ;; "moybyte.app": a tab row and a grid of cards whose pictures the app draws.
 ;; tests/fixtures/ui_parts/look_py.moy and look_lua.moy draw the same page

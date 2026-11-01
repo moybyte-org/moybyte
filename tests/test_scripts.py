@@ -1,4 +1,4 @@
-"""SCRIPTS and the TEXT CONSOLE (step 6 of docs/text_editing_2026-09.md).
+"""SCRIPTS and the TEXT CONSOLE (step 6 of docs/theme_and_shell_2026-11.md §10).
 
 A script is a cart with NO FOLDER: a bare `.py`/`.lua` file in the vault that
 RUN wraps in a manifest synthesized on the fly. Two halves, both driven through

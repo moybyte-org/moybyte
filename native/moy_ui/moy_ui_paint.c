@@ -1,4 +1,4 @@
-// The surface painter (moy_ui.h, docs/theming_2026-09.md §4.4): a compiled
+// The surface painter (moy_ui.h, docs/theme_and_shell_2026-11.md §3.4): a compiled
 // surface into a box, through the target every primitive fills through.
 //
 // Order: the shadow (the box's last MOY_UI_SHADOW columns and rows, a hard

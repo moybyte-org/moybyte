@@ -127,7 +127,7 @@ registers, each with a job:
 
 ### 3.1 ENGRAVED — the machine's controls
 
-Sentence case, as the 2026-10 look sets it (`docs/look_2026-10.md`), **three
+Sentence case, as the 2026-10 look sets it (`docs/history/look_2026-10.md`), **three
 words or fewer**, no terminal punctuation. This is text stamped on the machine:
 verbs, labels, settings rows, tab names, status pills.
 

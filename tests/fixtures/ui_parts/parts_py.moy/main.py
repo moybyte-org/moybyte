@@ -1,4 +1,4 @@
-# The public UI API's parts page (docs/look_2026-10.md step 12), as a Python
+# The public UI API's parts page (docs/history/look_2026-10.md step 12), as a Python
 # app. parts_lua.moy and tests/fixtures/wasm/app_parts.moy draw the same page
 # with the same calls, and tests/test_ui_parts.py holds the three to the same
 # pixels. Into pmem: 0 frames, 1 the link's activations, 2 the size (from 0),

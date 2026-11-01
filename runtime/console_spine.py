@@ -135,7 +135,7 @@ class SpineVerbs:
             self.artwork.sync_wallpaper()
         # The theme brings the wallpaper (`Appearance.theme_wallpaper`); a SAFE
         # start (the kernel's recovery screen) runs no wallpaper cart.
-        # A stored name no theme has (a seed step 27 of docs/look_2026-10.md
+        # A stored name no theme has (a seed step 27 of docs/history/look_2026-10.md
         # deleted, a package since removed) reads as absent: the default, in
         # its own mode, with nothing rewritten.
         name = self.system.get("theme", self.look.theme_name)
@@ -228,7 +228,7 @@ class SpineVerbs:
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. A registered APP is the
         third (Files opening a note in the Notes cart, step 3 of
-        docs/text_editing_2026-09.md): it pops back to that app's own surface,
+        docs/theme_and_shell_2026-11.md §10): it pops back to that app's own surface,
         on the shelf the person was standing on. Any other caller (the launcher
         home root, or None) pops all the way home. A PROJECT FILE edit (step 5)
         is the Editor arm with a reload in front of it -- see

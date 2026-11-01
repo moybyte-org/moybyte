@@ -6,7 +6,7 @@ The injection is permission-gated: a cart whose manifest grants "network" gets a
 `wifi` name in its namespace; a normal cart does NOT (sandbox preserved). These
 tests pin that gate, the FakeWifi behavior, persistence + reload, and who holds
 the radio. Setting a network up is Settings' WIFI panel, the one wifi
-implementation (docs/shell_layout_2026-10.md §8).
+implementation (docs/theme_and_shell_2026-11.md §8.6).
 """
 
 import sys

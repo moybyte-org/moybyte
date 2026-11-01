@@ -1,5 +1,5 @@
-"""The surface painter (native/moy_ui/moy_ui_paint.c, docs/theming_2026-09.md
-§4.2-§4.4) on the host's canvas, pixel for pixel.
+"""The surface painter (native/moy_ui/moy_ui_paint.c, docs/theme_and_shell_2026-11.md
+§3.2-§3.4) on the host's canvas, pixel for pixel.
 
 A theme with surfaces is installed beside the seeds and its shape made the
 toolkit's (`ui_draw.use_shape`); the colours are the default theme's (night,

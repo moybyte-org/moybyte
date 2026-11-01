@@ -1,4 +1,4 @@
-"""Layout reads line metrics (docs/theming_2026-09.md §4.7, phase 4 step 2).
+"""Layout reads line metrics (docs/theme_and_shell_2026-11.md §3.7, phase 4 step 2).
 
 The toolkit's text and the shell's layouts read the metrics of the font each
 role draws in, not an 8px cell. With petme128 those metrics ARE the cell, so

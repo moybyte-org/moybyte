@@ -407,7 +407,7 @@ def test_new_script_refuses_a_taken_name_and_an_unusable_one(tmp_path):
 
 def test_a_projects_own_script_routes_to_the_code_tab_not_the_text_handle(
         tmp_path):
-    """The Config tab's Files router (docs/text_editing_2026-09.md step 5) sent any
+    """The Config tab's Files router (docs/history/text_editing_2026-09.md step 5) sent any
     non-main file through the text handle. A cart's own SCRIPT belongs on the
     Code tab now -- that is where PLAY, the journal and crash-to-code are."""
     ws = _ws_with(tmp_path, _multi(tmp_path))

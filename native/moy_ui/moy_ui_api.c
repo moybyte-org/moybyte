@@ -21,7 +21,7 @@
 #define POPOVER_SALT 0x27d4eb2fu
 #define NO_PAGE 0xffu
 // A fade's rows at the scale: its first two barely tint, so ten read as
-// D-09's eight (docs/look_2026-10.md).
+// D-09's eight (docs/history/look_2026-10.md).
 #define FADE_H 10
 
 // A stop's flags.
@@ -1519,7 +1519,7 @@ static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
     return place_row(c, h, stacked, 1);
 }
 
-// -- the floor (docs/scroll_and_text_2026-10.md §3.3) ---------------------------------
+// -- the floor (docs/history/scroll_and_text_2026-10.md §3.3) ---------------------------------
 //
 // On a shift frame a host has moved the pixels the last frame drew in R by
 // the scroll's move, and the pass draws only what that leaves wrong: the
@@ -6970,7 +6970,7 @@ int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {
     return k != NULL ? k->a : -1;
 }
 
-// -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
+// -- shift frames (docs/history/scroll_and_text_2026-10.md §3.3) ---------------------------
 
 int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[8]) {
     out[0] = c->sh_r.x;
@@ -7251,7 +7251,7 @@ static void host_move_rect(int32_t *hp, int ox, int oy, int x0, int y0, int x1, 
     }
 }
 
-// The shift frame the frame begun may be (docs/scroll_and_text_2026-10.md
+// The shift frame the frame begun may be (docs/history/scroll_and_text_2026-10.md
 // §3.3): the engine licenses it from the input it applied and the gens the
 // last pass drew, the ring vouches that the frame before drew the page
 // whole into the buffer the canvas's move reads, and the canvas moves that

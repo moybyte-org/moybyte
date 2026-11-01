@@ -1,7 +1,7 @@
 /* moy_backdrop: a theme's backdrop rasterised (docs/media/look_2026-10/GAPS.md
  * gap 9) -- the shapes the loader reads from a theme's `backdrop.home` and
  * `backdrop.desk` (native/moy_ui/moy_theme.c, moy_theme_backdrop), drawn over
- * the surface's fill into the one wallpaper bake (docs/theming_2026-09.md D6),
+ * the surface's fill into the one wallpaper bake (docs/theme_and_shell_2026-11.md D6),
  * or straight onto a canvas, clipped, where no bake is kept.
  *
  * A record, little-endian, one per shape:

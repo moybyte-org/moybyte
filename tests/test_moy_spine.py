@@ -210,7 +210,7 @@ def test_remove_takes_one_kind_and_never_the_root(sp):
 
 
 def test_restore_puts_parked_kinds_back_above_the_root(sp):
-    """The route's restore op (docs/shell_layout_2026-10.md §3): the stack
+    """The route's restore op (docs/theme_and_shell_2026-11.md §8.1): the stack
     becomes the root and the kinds given, whatever stood above the root
     before, and a refused list changes nothing."""
     st = sp.BackStack()

@@ -169,7 +169,7 @@ def _label(m, cv, th, c):
 
 # The widgets whose bodies the theme's look draws (a button, a chip, a row,
 # a cell, a tab row, a list) left the fuzz when every theme took one
-# (docs/look_2026-10.md step 33): the twin draws them as a theme with no
+# (docs/history/look_2026-10.md step 33): the twin draws them as a theme with no
 # look did; their op budgets below are the look's.
 WIDGETS = {
     "label": _label, "status_row": _status_row,

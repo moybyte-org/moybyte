@@ -1,4 +1,4 @@
-"""Licences (docs/look_2026-10.md step 32): the texts the console carries and
+"""Licences (docs/history/look_2026-10.md step 32): the texts the console carries and
 Settings' page that shows them."""
 
 import subprocess

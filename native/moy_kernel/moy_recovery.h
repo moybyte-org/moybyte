@@ -1,5 +1,5 @@
 // moy_recovery: the kernel's own screens (docs/kernel_spine_2026-10.md §7,
-// docs/look_2026-10.md step 33, GAPS 55).
+// docs/history/look_2026-10.md step 33, GAPS 55).
 //
 // What the kernel draws when the console cannot come up -- the recovery
 // floor -- and while no VM runs and the web console serves: in the 2026-10

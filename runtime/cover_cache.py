@@ -16,7 +16,7 @@ host. What is cached is ONE decoded picture per cover, the BASE: its 128 x 128
 pixels as RGB565 in the system canvas's byte order, which the picker's shelf
 draws at a whole-number scale through `DeviceCanvas.blit565` and the home's
 carousel at any ratio through `DeviceCanvas.blit565_resize`
-(docs/theming_2026-09.md, P8: one cached base size per cover, scaled at draw,
+(docs/history/theming_2026-09.md, P8: one cached base size per cover, scaled at draw,
 no per-size variants). Two other decodes of the same file exist, each for one
 consumer:
 
@@ -347,7 +347,7 @@ class CoverCache:
     def tinted(self, cart, c, alpha):
         """The cart's BASE cover with colour `c` over it at `alpha` (0..255,
         `DeviceCanvas.tint565`): a dimmed neighbour's card
-        (docs/look_2026-10.md step 15), made once from the BASE and kept in
+        (docs/history/look_2026-10.md step 15), made once from the BASE and kept in
         the same LRU as the decodes, so every drop path (the diet, a re-scan,
         eviction) frees it. None until the BASE has landed, or where the cart
         has no cover."""

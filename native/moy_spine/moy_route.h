@@ -102,7 +102,7 @@ int moy_back_goto(moy_back_t *b, const char *kind, size_t n, int *answer);
 int moy_back_remove(moy_back_t *b, const char *kind, size_t n, int *removed);
 // The stack becomes the root and then `kinds[0 .. n)`, bottom to top -- the
 // restore op that puts parked kinds back without re-opening any
-// (docs/shell_layout_2026-10.md §3). OK; BAD for a kind that is empty, too
+// (docs/theme_and_shell_2026-11.md §8.1). OK; BAD for a kind that is empty, too
 // long, the root or repeated; FULL past MOY_BACK_DEPTH. Nothing changes
 // unless it answers OK.
 int moy_back_restore(moy_back_t *b, const moy_kind_t *kinds, uint32_t n);

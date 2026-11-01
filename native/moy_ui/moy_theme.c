@@ -235,7 +235,7 @@ static int name_ok(const char *s, int n, int over) {
     return 1;
 }
 
-// -- colours and the look (docs/look_2026-10.md step 5) ------------------------
+// -- colours and the look (docs/history/look_2026-10.md step 5) ------------------------
 
 // One scalar of a value: what it was, its number (iv, and hundredths in fix)
 // or its string (s, cut at its size; over set when it did not fit).
@@ -1589,7 +1589,7 @@ static int each_part(rd_t *r, moy_theme_pkg_t *out, int part, int unused) {
     return keyed(r, out, moy_theme_state_names, MOY_THEME_STATES, each_state, part);
 }
 
-// -- surfaces: the grammar (docs/theming_2026-09.md §4.4) ------------------------
+// -- surfaces: the grammar (docs/theme_and_shell_2026-11.md §3.4) ------------------------
 //
 //   surface := clause { "," clause }
 //   clause  := EDGE | "fill" C | ("dither" | "pinstripe" | "gradient") C "/" C
@@ -1775,7 +1775,7 @@ static int each_surface(rd_t *r, moy_theme_pkg_t *out, int part, int unused) {
     }
 }
 
-// -- the layout (docs/shell_layout_2026-10.md §5, §9) ------------------------------
+// -- the layout (docs/theme_and_shell_2026-11.md §8.3, §8.7) ------------------------------
 
 // One bar as written, before the layout's caps: its strings by position, ""
 // where one was dropped, so the strings after it keep their widgets.
@@ -2800,7 +2800,7 @@ const char *moy_theme_probe_sheet(int key) {
     return s_probe->sheet[key];
 }
 
-// -- RGB, the block and the look's resolution (docs/look_2026-10.md step 5) --------
+// -- RGB, the block and the look's resolution (docs/history/look_2026-10.md step 5) --------
 
 static uint16_t s_live[MOY_THEME_BLOCK];    // the live theme's block, canonical RGB565
 static int s_live_n;
@@ -3234,7 +3234,7 @@ int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
     return (int)k;
 }
 
-// -- whose window frame (docs/look_2026-10.md step 6) ------------------------------
+// -- whose window frame (docs/history/look_2026-10.md step 6) ------------------------------
 
 typedef struct {
     int done, frames;
@@ -3273,7 +3273,7 @@ int moy_theme_modes(const char *name, size_t n) {
     return m;
 }
 
-// -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
+// -- accent and tint: every colour role derived (docs/theme_and_shell_2026-11.md §3.10) ----
 
 int moy_theme_reads(int32_t a, int32_t b) {
     int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);

@@ -15,7 +15,7 @@ PaintDocument holds one drawing's indices and the marks that change them;
 ArtworkService, which Paint builds over its own roles, owns the open picture
 (persisting it) and the wallpaper copy (the ``Wallpaper`` slot). Publishing a
 drawing through the slot (copied into the theme as its picture,
-docs/theming_2026-09.md §4.9) or into a project as ``images/bg.moyimg`` is
+docs/theme_and_shell_2026-11.md §3.9) or into a project as ``images/bg.moyimg`` is
 runtime/picture_copies.py's, which Files and My Art use too. The app is
 runtime/paint_app.py; the drawings' page is runtime/myart_app.py.
 

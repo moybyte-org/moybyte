@@ -52,7 +52,7 @@ console publishes while it is down, and the state the frame keeps to compare
 the next with. So a drag frame is held to one answer a card it drew and four
 more; the bar's clock turning its minute is an event of its own, one frame.
 
-Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
+Then Settings' Achievements page (docs/history/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
 Then the home, idle: the launcher's input and frame path with nothing pressed
@@ -1439,7 +1439,7 @@ SETTINGS_FRAME = 1024
 @pytest.mark.parametrize("app", ("getcarts", "myart"))
 def test_an_app_drag_is_shift_frames(result, app):
     """The drag frames of an app whose shelf carries its gens shift
-    (docs/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
+    (docs/history/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
     slots and the floor's rects are kept, so the budget the test below holds
     every drawn frame to holds the shift frames."""
     info, text = result

@@ -470,7 +470,7 @@ def _room(obj):
 
 _PAL_IDENTITY = bytes(range(64))
 
-# THE SHELL'S BLOCK (docs/look_2026-10.md step 5): the live theme's RGB
+# THE SHELL'S BLOCK (docs/history/look_2026-10.md step 5): the live theme's RGB
 # colours, colour indices 64..127, in this build's wire order. A canvas row's
 # table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
 # (this class writes them), 64..127 this block (native/moy_glass writes it into
@@ -2407,7 +2407,7 @@ class DeviceCanvas:
         """Place a w x h picture of RGB565 words (this canvas's byte order,
         as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any
         ratio, opaque, camera and clip honoured. One kernel call: the home's
-        cards at their scale (docs/shell_layout_2026-10.md §12)."""
+        cards at their scale (docs/theme_and_shell_2026-11.md §8.10)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2724,7 +2724,7 @@ class DeviceCanvas:
         (`_IN_PLACE`) where it takes the move, the CPU's otherwise. A queued copy is
         fenced by shift_fence(), and by anything that reads or presents this
         buffer; until then the caller writes no row the shift writes
-        (docs/scroll_and_text_2026-10.md §3.2)."""
+        (docs/theme_and_shell_2026-11.md §9.6)."""
         self.flush_batch()
         cs = self._comp_shift
         if cs is not None:

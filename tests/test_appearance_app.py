@@ -1,4 +1,4 @@
-"""The Appearance page (docs/look_2026-10.md step 20), drawn with the public
+"""The Appearance page (docs/history/look_2026-10.md step 20), drawn with the public
 UI API's verbs: the theme cards and the rows, every row changed by keys
 alone and by a tap, the wallpapers' page (tabs over cards), NAME's dialog,
 the tap floor, the scroll to the focus, a settled page painting nothing, and
@@ -199,7 +199,7 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
 
 
 def test_code_font_sets_the_code_tabs_face_and_font_keeps_it(tmp_path):
-    """CODE FONT (docs/look_2026-10.md step 23): the `mono` role's preset,
+    """CODE FONT (docs/history/look_2026-10.md step 23): the `mono` role's preset,
     JetBrains Mono where the image carries the font set; FONT changes the
     `ui` and `title` faces and keeps it."""
     ws = _ws(tmp_path)
@@ -259,7 +259,7 @@ def _faces():
     (DESK, {"ui": "inter-15-500-4.fnt", "title": "inter-15-600-4.fnt",
             "caption": "inter-12-600-4.fnt", "hero": "inter-15-600-4.fnt"})])
 def test_moy_draws_inter_by_night_and_day_sans_by_day(tmp_path, kw, faces):
-    """Moy's look sets `fam` per mode (docs/look_2026-10.md steps 26a and
+    """Moy's look sets `fam` per mode (docs/history/look_2026-10.md steps 26a and
     27): Night's type roles take Inter and Day's Day Sans (IBM Plex Sans,
     renamed), each at the metric class's sizes (fontset.ROLES; the desk
     home's title is the `title` face), and mono stays JetBrains Mono."""
@@ -284,7 +284,7 @@ def test_moy_draws_inter_by_night_and_day_sans_by_day(tmp_path, kw, faces):
      ("atkinson-22-500-4.fnt", "atkinson-24-500-4.fnt", "atkinson-44-700-4.fnt"))])
 @pytest.mark.parametrize("variant", ["light", "dark"])
 def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, calc, variant):
-    """Blocks' look sets `fam` and moves the weight steps (docs/look_2026-10.md
+    """Blocks' look sets `fam` and moves the weight steps (docs/history/look_2026-10.md
     step 26b: `w_semi` 700, `w_bold` 800), so its semibold roles take
     Atkinson Bold and the hero ExtraBold, in its one mode whichever the
     Mode row holds; Calc's keys and result take its Calc faces."""
@@ -306,7 +306,7 @@ def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, calc, var
      ("atkinson-26-600-4.fnt", "atkinson-28-600-4.fnt", "atkinson-50-700-4.fnt"))])
 @pytest.mark.parametrize("variant", ["light", "dark"])
 def test_contrast_draws_atkinson_larger_and_heavier(tmp_path, kw, faces, calc, variant):
-    """Contrast's look moves every weight step a step up (docs/look_2026-10.md
+    """Contrast's look moves every weight step a step up (docs/history/look_2026-10.md
     step 26c: `w_med` 600, `w_semi` 700, `w_bold` 800) and sizes its titles
     and Calc's faces (`sizes.hh`, `sizes.dk`), in either mode."""
     from runtime import appearance

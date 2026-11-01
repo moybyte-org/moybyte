@@ -1,4 +1,4 @@
-# The public UI API's Files verbs (docs/look_2026-10.md step 21) as a Python
+# The public UI API's Files verbs (docs/history/look_2026-10.md step 21) as a Python
 # app: a list in columns, a scroll region, a field, an icon on a button and a
 # dialog. files_lua.moy and tests/fixtures/wasm/app_files.moy draw the same
 # page with the same calls, and tests/test_ui_parts.py holds the three to the

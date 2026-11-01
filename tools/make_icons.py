@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The console's icon sets (docs/look_2026-10.md step 16): the pixel set and
+"""The console's icon sets (docs/history/look_2026-10.md step 16): the pixel set and
 the smooth sets' masks, built from their sources in native/moy_ui/icons/.
 
 Every set fills the slots of `pixel/slots.txt`.
@@ -205,7 +205,7 @@ def build_all():
     for tier, sizes in SIZES.items():
         tiers[tier] = sorted(k for k, v in table.items()
                              if v["set"] in frozen and v["size"] in sizes)
-    meta = {"about": "The icon sets tools/make_icons.py builds (docs/look_2026-10.md "
+    meta = {"about": "The icon sets tools/make_icons.py builds (docs/history/look_2026-10.md "
                      "step 16): a smooth set's masks, a font file per layer and size, "
                      "slot n at byte `first` + n; a board takes its tier's files and "
                      "the pixel set.",

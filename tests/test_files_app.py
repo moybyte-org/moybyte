@@ -1,4 +1,4 @@
-"""The Files system app (#108, docs/look_2026-10.md step 21): the places and
+"""The Files system app (#108, docs/history/look_2026-10.md step 21): the places and
 a place's files in columns, drawn with the public UI API's verbs; its verbs
 (rename in a dialog, copy, trash, restore, and emptying the Trash, which asks
 first), the copy-on-use reuse actions, and Paint's shared OPEN picker and

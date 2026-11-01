@@ -194,7 +194,7 @@ class HostCompositor:
     def shift_last(self, x, y, w, h, dx, dy):
         """The rect of the buffer the last frame drew into, moved by (dx, dy)
         inside it, into the one this frame draws into (moy_gfx's shift_rect);
-        in place on the one buffer (docs/scroll_and_text_2026-10.md §3.2)."""
+        in place on the one buffer (docs/theme_and_shell_2026-11.md §9.6)."""
         src = self.last
         gfx_binding.shift_rect(self._buf, self._buf if src is None else src, self._w,
                                x, y, w, h, dx, dy)

@@ -419,7 +419,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 // theme_look's (dark, light) and backdrops theme_backdrop's ((dark home, dark
 // desk), (light home, light desk)), modes theme_modes'. On a refusal every
 // field after notes is None.
-// -- the look and RGB (docs/look_2026-10.md step 5) ---------------------------
+// -- the look and RGB (docs/history/look_2026-10.md step 5) ---------------------------
 
 static mp_obj_t ints(const int32_t *v, int n) {
     mp_obj_t t = mp_obj_new_tuple(n, NULL);
@@ -1905,7 +1905,7 @@ static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 5, 5, ui_frame_band);
 
-// -- depth (moy_ui.h, docs/look_2026-10.md step 6) -------------------------------
+// -- depth (moy_ui.h, docs/history/look_2026-10.md step 6) -------------------------------
 
 static mp_obj_t depth_tuple(void) {
     const moy_ui_depth_t *d = moy_ui_depth();

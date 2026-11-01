@@ -32,7 +32,7 @@ to whoever called it.
   - **`Player` has zero knowledge of who launched it.** `run(cart)` plays until
     exit and returns to the CALLER — launcher→launcher, Editor-PLAY→the same tab.
     A run that stops opens the **stop card**, the pause card's sibling
-    (docs/look_2026-10.md step 33): its See why is the crash-to-code throw,
+    (docs/history/look_2026-10.md step 33): its See why is the crash-to-code throw,
     and with no open cart, or for a compiled (`"runtime": "wasm"`) cart's
     trap, which has no source line, it offers Restart and Home alone.
   - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
@@ -45,7 +45,7 @@ to whoever called it.
     The visible/draw stack is memoized (zero per-frame list churn, #66).
   - **`WindowedWM` is host/P4 only and deliberately NOT staged to the S3.**
     Windows exist only in DESKTOP mode (`wm.mode`,
-    `docs/shell_layout_2026-10.md` §3); console mode parks them outside the
+    `docs/theme_and_shell_2026-11.md` §8.1); console mode parks them outside the
     back-stack and presents every kind fullscreen, and every tier-sensitive
     branch reads the mode, never the stack shape.
   - **Input focus is decoupled from the back-stack**: clicking a window or its chip
@@ -57,12 +57,12 @@ to whoever called it.
     on every board with a desk, console mode included) is its own window,
     outlives the Editor and takes the Game tab out of its workspaces while it
     lasts. Play on the desk is full screen with no window buttons; Projects'
-    Play runs a Make card in a window (`docs/shell_layout_2026-10.md` §3).
+    Play runs a Make card in a window (`docs/theme_and_shell_2026-11.md` §8.1).
     The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
     window gets back the mode it had, so a field in one never leaves a game
     beside it in text mode.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
-  (`docs/shell_layout_2026-10.md` §12) has four tabs, and a tap on Games, Mine or
+  (`docs/theme_and_shell_2026-11.md` §8.10) has four tabs, and a tap on Games, Mine or
   Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
   dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
   2026-10-14): there is no project picker on any tier and no PROJECTS button
@@ -86,7 +86,7 @@ to whoever called it.
   `18 * cs` as its top or `h` as its floor; the bar's own rects (right zone,
   lent zone, the fixed game-canvas cluster) are BAR coordinates, which
   `BarLayer.handle_bar_tap` translates a tap into. Bars are global
-  (docs/shell_layout_2026-10.md §7): `tests/test_content_rect.py` moves the bar
+  (docs/theme_and_shell_2026-11.md §8.5): `tests/test_content_rect.py` moves the bar
   to the bottom and fails a surface that stayed behind.
 - **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, its
   metric class's bar (`layout_base.bar_rows`): 18px × the CHROME scale on a
@@ -94,7 +94,7 @@ to whoever called it.
   a board declared a panel diagonal small enough that a 16px icon falls under
   `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
   — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
-  its unit of 2 at chrome size 1 (docs/look_2026-10.md step 9). RIGHT
+  its unit of 2 at chrome size 1 (docs/history/look_2026-10.md step 9). RIGHT
   zone = OS status (clock/wifi/batt). The LEFT zone opens with the **back
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
   gets its X instead): one level back, as Esc and B (`ws.app_back` for a
@@ -142,7 +142,7 @@ to whoever called it.
     ONE decoded 128x128 base in RAM (and its 64x64 half) and draws it scaled --
     the shelf at a whole-number scale, the carousel's cards at any ratio through
     `blit565_resize`, one call a card -- with no per-size variants
-    (docs/theming_2026-09.md P8). **Do not re-add cover
+    (docs/history/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
   - **A FILE's DELETE moves it to `files/trash/`, restorable, and never confirms**; emptying
     the Trash is Files' one verb that asks first (a `ui.dialog`). A CART has no
@@ -244,7 +244,7 @@ and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
   deadlines from the arm site; `_animating` and both WMs read plain ints and never
   call into `ach`/`ach_ui`.
 - **A look change is `ws.look.look_gen`, never an identity** — every cache whose
-  pixels read the look folds that one int (`docs/theming_2026-09.md` §6), set by
+  pixels read the look folds that one int (`docs/theme_and_shell_2026-11.md` §5), set by
   `Appearance.publish()`; a new cache that reads a role and keys on a dict's or
   a sheet's `id()` goes stale on an in-place edit. `ws.theme_colors` is the flat
   kernel attribute `set_theme` assigns; the token dicts are shared, read-only.

@@ -1,6 +1,6 @@
 // moy_scr: a whole screen drawn with no canvas -- fills, rounded rects, the
 // outline faces (moy_path.h) and Moy's pixel art -- into an RGB565
-// framebuffer, turned a quarter where the panel is (docs/look_2026-10.md
+// framebuffer, turned a quarter where the panel is (docs/history/look_2026-10.md
 // step 33, GAPS 55).
 //
 // The kernel draws its screens through it before any VM exists (first

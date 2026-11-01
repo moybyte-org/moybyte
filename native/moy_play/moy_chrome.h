@@ -121,7 +121,7 @@ const char *moy_chrome_say_text(int say);
 // The band every other bar starts with: `light` is a light band (a window's
 // toolbar under a light theme, or a light theme's bar).
 void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light);
-// One bar widget's cell (docs/shell_layout_2026-10.md §4), at (x, y, w, h)
+// One bar widget's cell (docs/theme_and_shell_2026-11.md §8.2), at (x, y, w, h)
 // of its strip and chrome scale `cs` (0: the canvas's own): `menu`, `close`,
 // `wifi` (`s` its glyph's kind), `battery`, `clock` (`s` "HH:MM"; on a side
 // bar, `across`, two lines in the cell from (x, y)), `title` (`s` cut to the

@@ -184,7 +184,7 @@ def test_blit_shift_rejects_a_full_view_shift_and_invalidate_clears():
 
 
 
-# -- the PaintRing (docs/scroll_and_text_2026-10.md §3.1) ----------------------
+# -- the PaintRing (docs/history/scroll_and_text_2026-10.md §3.1) ----------------------
 
 class _Cv3:
     RETAINED_FRAMES = 3
@@ -265,8 +265,8 @@ def _drag_frames(drv, cx, cy, steps, step_px=9):
 
 
 def test_carousel_moving_frame_keeps_the_wallpaper_still(tmp_path):
-    """The home's cards lie on its wallpaper (docs/shell_layout_2026-10.md
-    §12), so a moving frame never shifts the band -- the wallpaper would
+    """The home's cards lie on its wallpaper (docs/theme_and_shell_2026-11.md
+    §8.10), so a moving frame never shifts the band -- the wallpaper would
     slide with the cards. It restores the wallpaper around the cards and
     paints them, and the composed screen is byte-identical to a FULL repaint
     of the same state (the night sky is no flat fill: a slid backdrop would

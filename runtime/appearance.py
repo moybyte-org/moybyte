@@ -17,10 +17,10 @@ Every verb that changes how the desktop looks: the panel theme and its
 dark/light variant, the system font scale, the desktop wallpaper and the
 icon sheets. Two axes plus a backdrop plus the bar art, which until this landing were five unrelated stretches of the kernel that
 happened to share a Settings screen. And `custom`, the theme a change makes
-(`change`, docs/theming_2026-09.md §9 phase 6 step 5): the one write path of
+(`change`, docs/history/theming_2026-09.md §9 phase 6 step 5): the one write path of
 the Appearance rows, applied once a frame (`tick`) and written once the
 changes settle or at an exit (`commit`), through Paint's mechanism (#108).
-And Edit theme… (`edit_file`, step 6 and docs/look_2026-10.md step 33):
+And Edit theme… (`edit_file`, step 6 and docs/history/look_2026-10.md step 33):
 custom opened in the Editor's theme mode (runtime/theme_editor.py), whose
 saves of its theme.json and its pixel tiles come through the look's writes,
 the loader installing them at the next frame. And NAME… (`name_custom`,
@@ -34,7 +34,7 @@ verbs through `ctx.theme` / `ctx.wallpaper` like any other app.
 ## The wallpaper is the theme's, shown by a coordinator
 
 The wallpaper is a key of the active theme (`wallpapers` names a cart,
-`images` a picture in its folder; docs/theming_2026-09.md D6), so a theme
+`images` a picture in its folder; docs/theme_and_shell_2026-11.md D6), so a theme
 switch brings it and a pick is a change to the theme, landing in `custom`;
 there is no setting beside it. Showing one crosses four owners: it asks the
 ROSTER for the wallpaper carts and rehydrates the chosen one out of the #66
@@ -60,7 +60,7 @@ holds the flat field the frame path reads.
 from native/moy_app's token-table generation, which every write of the live
 look moves (a switch, a variant, an install, an icon sheet). Every cache whose
 pixels read the look folds it into its key and REPLACES its entry when it
-moves (docs/theming_2026-09.md §6); none keys on a dict's or a sheet's
+moves (docs/theme_and_shell_2026-11.md §5); none keys on a dict's or a sheet's
 identity. The token dicts are shared and read-only: `chrome.theme_colors`
 hands out one per (theme, variant) until an install drops them.
 
@@ -248,7 +248,7 @@ class Appearance:
     # opens indented, half again its minified size.
     max_chars = 2 * _THEME_BYTES
 
-    # -- the wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) --------
+    # -- the wallpaper: the theme's (D6, docs/theme_and_shell_2026-11.md §3.9) --------
     #
     # The desk and the home draw a wallpaper-type cart as a live backdrop (the
     # Picotron model: a wallpaper is a fullscreen cart, compiled into its own
@@ -332,7 +332,7 @@ class Appearance:
         # `load_icon_sheet` at the end of the boot wiring; None falls back to the
         # kernel's _glyph.
         self.icon_sheet = None
-        # The theme's sheets (docs/theming_2026-09.md §4.6): what the loaded
+        # The theme's sheets (docs/theme_and_shell_2026-11.md §3.6): what the loaded
         # role sheet is of, and the theme's pixel tiles (its `icons` sheet, in
         # the pixel set's shape) with the slots its look draws from them
         # (`icons.pixel_slots`: a bytearray of SLOTS flags, None for none), each
@@ -343,7 +343,7 @@ class Appearance:
         self._pixel_imgs = {}
         self._pixel_gen = -1
         self._crcs = {}                 # package_rows's sheet digests, see _sheet_crc
-        # The shell layout (docs/shell_layout_2026-10.md §9-§11): the bars as
+        # The shell layout (docs/theme_and_shell_2026-11.md §8.7-§8.9): the bars as
         # this tier, glass and mode resolved them, what the composer noted,
         # and the loader's answers per package (cleared by a theme switch).
         self.bars = _shell_layout.FALLBACK
@@ -356,7 +356,7 @@ class Appearance:
         # surface -> [theme, variant, look_gen, records]: `backdrop`'s answers
         self._backdrops = {}
         self.icons = None               # the live look's icon set, (kind, set, swap): publish()
-        # The store's theme packages (docs/theming_2026-09.md §9 phase 6 step
+        # The store's theme packages (docs/history/theming_2026-09.md §9 phase 6 step
         # 2): stem -> folder, as of the roster generation `_pkg_gen`; the
         # bytes the install slot holds when a store package filled it (None
         # for an install from bytes, `install_theme`); the packages whose
@@ -565,7 +565,7 @@ class Appearance:
                     ws.carts.reslim(cart)
         ws._dirty = True
 
-    # -- custom: a change to the theme (docs/theming_2026-09.md §9 phase 6
+    # -- custom: a change to the theme (docs/history/theming_2026-09.md §9 phase 6
     #    step 5, §4.10) -----------------------------------------------------
 
     def change(self, kind, value):
@@ -710,7 +710,7 @@ class Appearance:
     _FONT_VALUES = {"tiny5": {"ui": "tiny5.fnt", "title": "tiny5.fnt"},
                     PETME128: {"ui": PETME128, "title": PETME128}}
     # The CODE FONT row's presets: the `mono` role's file. JetBrains Mono is
-    # the font set's (docs/look_2026-10.md step 3), on the images that carry it.
+    # the font set's (docs/history/look_2026-10.md step 3), on the images that carry it.
     CODE_FONTS = (PETME128, "jbmono")
     _CODE_FONT_VALUES = {PETME128: PETME128, "jbmono": "jbmono-11-400-2.fnt"}
 
@@ -1679,7 +1679,7 @@ class Appearance:
         forget_themes()
         self.set_theme(self.theme_name, persist=False)
 
-    # -- the shell layout (docs/shell_layout_2026-10.md §9-§11) ---------------
+    # -- the shell layout (docs/theme_and_shell_2026-11.md §8.7-§8.9) ---------------
 
     def layout_theme(self):
         """The `layout_theme` row, read strictly: the name of a theme (a
@@ -1780,7 +1780,7 @@ class Appearance:
         """Load theme `name`'s font files, install each for its role and the
         `ui` role's as the print font, free every font no role keeps, and
         take the text-size floor the `ui` font asks of this board's glass
-        (`chrome.text_scale_floor`; docs/theming_2026-09.md §4.7). Where
+        (`chrome.text_scale_floor`; docs/theme_and_shell_2026-11.md §3.7). Where
         the theme's look in the live variant sets a family (`fam`), each
         role of `fontset.ROLES` and `fontset.CALC_ROLES` takes that family's
         face for the metric class over the fonts its chain names, unless the
@@ -1837,7 +1837,7 @@ class Appearance:
         return changed
 
     def _install_sheets(self, name):
-        """Load theme `name`'s sheets (docs/theming_2026-09.md §4.6): its
+        """Load theme `name`'s sheets (docs/theme_and_shell_2026-11.md §3.6): its
         role sheet (`sprites`) for every sprite part, and its pixel tiles
         (`icons`, the pixel set's shape) for the slots its look's
         `icons.pixel_slots` names. Read from the package's folder once per

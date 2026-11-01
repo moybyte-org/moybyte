@@ -155,7 +155,7 @@ import moy_app as _moy_app
 
 
 # The marker permission the console's TEXT APP claims its cart with -- the
-# `.md`/`.json`/`.txt` door the Files router opens (docs/text_editing_2026-09).
+# `.md`/`.json`/`.txt` door the Files router opens (docs/theme_and_shell_2026-11.md §10).
 # Not a permission the grant policy maps, so it grants nothing; it only says
 # which cart this is, the way a shipped app claims its cart by title +
 # `APP_PERM`.
@@ -170,8 +170,8 @@ def is_text_app(cart):
 
 def draws_in_look(cart):
     """True for a built-in app cart (system_carts/, its folder `moybyte.*`):
-    its code runs outside the app-cart boundary (docs/theming_2026-09.md
-    §4.7), so its `ui` page and its editor handle draw in the theme's
+    its code runs outside the app-cart boundary (docs/theme_and_shell_2026-11.md
+    §3.7), so its `ui` page and its editor handle draw in the theme's
     colours and faces as the shell's own apps do. A copy is a kid's cart,
     inside the boundary like any other."""
     if not cart or cart.get("type") != "app":
@@ -338,7 +338,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
     if "files" in roles:
         ns["files"] = ScopedFiles(ctx.files, kind)
         if editor is not None:
-            # The editor handle (docs/text_editing_2026-09.md step 3). The cart
+            # The editor handle (docs/history/text_editing_2026-09.md step 3). The cart
             # passes a NAME and never a kind: with one it edits an item of the
             # kind it was granted; with none it picks up whatever document the
             # console was already asked to open, which may be another kind

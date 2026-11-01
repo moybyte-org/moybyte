@@ -1,5 +1,5 @@
 """`shift_last` and `copy_last_into`, EXECUTED on every canvas
-(docs/scroll_and_text_2026-10.md §3.2, §11, §13).
+(docs/history/scroll_and_text_2026-10.md §3.2, §11, §13).
 
 `shift_last(x, y, w, h, dx, dy)` moves the rect of the buffer the last
 presented frame drew into by (dx, dy) inside the rect, into the buffer this

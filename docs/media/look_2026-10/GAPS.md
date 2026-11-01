@@ -20,8 +20,8 @@ carousel frame.
 - **Shape:** roles take `#rrggbb`; the loader quantises each to RGB565 into
   indices 64–127, which only the shell names. A cart's colour stays `& 63`,
   so cart pixels cannot change. `moy_theme.c`'s three clamps to 63 move,
-  `PAL565` grows to 128 entries in every copy, `docs/theming_2026-09.md`
-  §4.10's derivation and §7's readability check run on RGB, and the package
+  `PAL565` grows to 128 entries in every copy, `docs/theme_and_shell_2026-11.md`
+  §3.10's derivation and §7's readability check run on RGB, and the package
   `format` is bumped.
 - **Roles:** the mockups' names are vocabulary, not new roles: `bg`,
   `text`, `line`, `dim`, `danger` and `sel` (`selection`) map onto roles
@@ -67,7 +67,7 @@ carousel frame.
   `tools/p4_conformance.py` case and goldens. **Frame:** a full desk of text
   is about 80 KB of PSRAM traffic over unknown pixels, under a millisecond
   on the P4; on the S3 boards a string stays one call. A chrome text lane is
-  gated on an S3 A/B (`docs/theming_2026-09.md` §4.7).
+  gated on an S3 A/B (`docs/theme_and_shell_2026-11.md` §3.7).
 
 **4. The font set.**
 
@@ -133,7 +133,7 @@ day. **Frame:** none.
   thousandths of the surface, each with a paint and an alpha. A record is a
   few bytes; the seed themes' lists are 22–57 bytes.
 - **No new buffer:** the shapes draw into the one wallpaper bake
-  (`docs/theming_2026-09.md` D6), and the home's band copy is filled from
+  (`docs/theme_and_shell_2026-11.md` D6), and the home's band copy is filled from
   it as now. A malformed list reads as no backdrop; the loader caps shapes
   and colours and clamps coordinates, fuzzed with `tests/test_theme_loader.py`'s
   corpus.
@@ -314,7 +314,7 @@ mixed toward white, computed at load. **Cost:** 0.5 day.
 
 **30. A dock:** a floating, inset, centred, rounded bottom bar with launcher
 tiles and a running dot per open app; the inset, centring and radius are
-new layout fields (`docs/shell_layout_2026-10.md`). **Cost:** 2–3 days.
+new layout fields (`docs/theme_and_shell_2026-11.md`). **Cost:** 2–3 days.
 
 Live blur behind moving windows is declined: every window move on the P4
 desk would recompose it.

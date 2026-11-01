@@ -9,7 +9,7 @@ distributed-state problem, and the two-writer collision it exists to prevent is
 simply designed out instead: while a browser is editing this store, nothing on
 the glass can be editing it too, because the glass is showing this screen.
 
-The screen is a page (docs/look_2026-10.md step 33) and deliberately
+The screen is a page (docs/history/look_2026-10.md step 33) and deliberately
 nothing else:
 
   * THE QR CODE, which is the feature, on its white quiet zone. The address

@@ -54,7 +54,7 @@ class FullscreenStackWM:
     back-stack `screen` projects onto (`self.stack`, moy_spine.BackStack). One instance
     per Workstation, built in `Workstation.__init__`."""
 
-    # The home carousel's motion verdict (docs/shell_layout_2026-10.md §12),
+    # The home carousel's motion verdict (docs/theme_and_shell_2026-11.md §8.10),
     # a per-board constant: a board whose drag frames do not fit its budget
     # degrades down this order, only as far as its measurement says (#66) --
     # "full" (the centre card scales with its distance from the centre, in
@@ -69,7 +69,7 @@ class FullscreenStackWM:
     # through Settings instead.
     HIDDEN_APPS = ("appearance", "myart")
     # A content's own paint ring vouches for what the buffers hold of it
-    # (docs/scroll_and_text_2026-10.md §3.4): the full-screen stack repaints
+    # (docs/history/scroll_and_text_2026-10.md §3.4): the full-screen stack repaints
     # everything around it, so a frame that moves its pixels shifts out of
     # the frame before. The windowed WM's shown ring is its windows' voucher.
     CONTENT_RING = True
@@ -159,12 +159,12 @@ class FullscreenStackWM:
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
         return self.stack.top() == "desktop"
 
-    # -- the two modes (docs/shell_layout_2026-10.md §3) ----------------------
+    # -- the two modes (docs/theme_and_shell_2026-11.md §8.1) ----------------------
 
     has_desk = False                   # capability probe: only WindowedWM has a desk
     mode = "console"                   # this WM has console mode alone
 
-    # What a theme's bars may place here (docs/shell_layout_2026-10.md §10):
+    # What a theme's bars may place here (docs/theme_and_shell_2026-11.md §8.8):
     # per mode, the widgets this WM has a value for, and the edges a bar may
     # take. The composer (shell_layout.resolve) drops the rest. `chips` (the
     # taskbar's window chips) has no value in console mode.

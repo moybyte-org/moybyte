@@ -156,7 +156,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     ws.look.tick(0.0)                          # the change shows at the next frame
     assert ws.look.wallpaper_id == "moybyte.wallpaper" == ws.look.PICTURE
     ws.look.commit()
-    # The picture is the theme's: copied into `custom` (docs/theming_2026-09.md D6).
+    # The picture is the theme's: copied into `custom` (docs/theme_and_shell_2026-11.md D6).
     assert moy_carts.load_system(carts)["theme"] == "custom"
     pic = Path(carts) / "custom.moy" / "desk.moyimg"
     assert pic.read_bytes() == moy_carts.load_artwork(carts).encode()

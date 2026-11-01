@@ -19,11 +19,11 @@
 -- docs/history/shell_layers_refactor_v1.md (Move 1b).
 
   * `Launcher`     -- the selection model (items/sel/scroll/nav) and the
-                      `grid` arrangement's draw (docs/look_2026-10.md step
+                      `grid` arrangement's draw (docs/history/look_2026-10.md step
                       33): a shelf of cover cards in the rows the glass
                       holds, scrolling sideways. Its instance is ws.launcher
                       in the home's `grid` arrangement.
-  * `Carousel`     -- the home's row (docs/shell_layout_2026-10.md §12): the
+  * `Carousel`     -- the home's row (docs/theme_and_shell_2026-11.md §8.10): the
                       same selection model over one row of square cover cards,
                       the centre card larger by a function of its distance
                       from the centre; on the desk's metrics the selected
@@ -41,7 +41,7 @@
                       ws._launcher_items builds) and their input. A tap on the
                       centre card is the active tab's (ws.launch_selected).
   * `HomeWindowLayer` -- the "projects" content Layer: the SAME home in a
-                      desktop-mode window (docs/shell_layout_2026-10.md §12, the
+                      desktop-mode window (docs/theme_and_shell_2026-11.md §8.10, the
                       desk's PROJECTS): the console home's design over
                       ws.projects_grid, laid out in the window's content
                       rect, opened on its Make tab.
@@ -273,7 +273,7 @@ def _hint_strip(lay, keys, desk):
     return (lay.cx, lay.cy + lay.ch - h, lay.cw, h)
 
 
-# The grid arrangement's shelf (docs/look_2026-10.md step 33): on the
+# The grid arrangement's shelf (docs/history/look_2026-10.md step 33): on the
 # handheld at the font scale, on the desk in glass pixels at the target's
 # 1x -- the margin the first column stands in from the glass's edge, the
 # least and the most gap a column takes, the shelf's top under the bar, the
@@ -323,7 +323,7 @@ class _Cells:
 
 
 class Launcher:
-    """The home's grid arrangement (docs/look_2026-10.md step 33): a shelf
+    """The home's grid arrangement (docs/history/look_2026-10.md step 33): a shelf
     of cards, each cart's whole cover at a clean scale with the card radius
     and its title under it cut to the card's width, in as many rows as the
     glass holds under the bar (two on the T-Deck, three on the desk),
@@ -502,7 +502,7 @@ class Launcher:
 
     def quiet(self):
         """The rectangles a per-glass wallpaper keeps its subject out of
-        (docs/theming_2026-09.md §4.9): the cells' band and the hint strip."""
+        (docs/theme_and_shell_2026-11.md §3.9): the cells' band and the hint strip."""
         c = self._cells()
         return (c.band, c.hints)
 
@@ -1523,7 +1523,7 @@ def _cover_div_for(side):
     return _COVER_BASE if side > _COVER_SIDE // 2 else _COVER_HALF
 
 
-# The home's tabs (docs/shell_layout_2026-10.md §12), in tab-row order, and
+# The home's tabs (docs/theme_and_shell_2026-11.md §8.10), in tab-row order, and
 # the noun the bar's title counts each in.
 HOME_TABS = (("games", "Games"), ("mine", "Mine"), ("apps", "Apps"),
              ("make", "Make"))
@@ -1535,7 +1535,7 @@ _TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
 # The handheld hero's scale the home is laid out for: a board's verdict
 # (FullscreenStackWM.HOME_SCALE) draws it at most this large.
 HOME_SCALE_HH = 2.0
-# The handheld home (docs/look_2026-10.md step 17): each card shows its
+# The handheld home (docs/history/look_2026-10.md step 17): each card shows its
 # whole cover at a clean scale (`_clean_side`), a neighbour at half the
 # cover's side and the hero at twice that, a gap between cards, the corners
 # of a neighbour 7/10 of the hero's.
@@ -1732,7 +1732,7 @@ def tab_count_title(tab, n):
 
 
 class Carousel(Launcher):
-    """The home's carousel (docs/shell_layout_2026-10.md §12, the 2026-10
+    """The home's carousel (docs/theme_and_shell_2026-11.md §8.10, the 2026-10
     look's steps 17 and 18), on the class in force. On the handheld one row
     of square cover cards slides sideways, the card at the centre larger: a
     card's size is a function of its distance from the centre and of
@@ -1796,7 +1796,7 @@ class Carousel(Launcher):
         return self._g
 
     def _geom_hh(self, lay, reach, keys=True):
-        """The handheld home's geometry (docs/look_2026-10.md step 17), the
+        """The handheld home's geometry (docs/history/look_2026-10.md step 17), the
         same tuple with its foot: no tab row (the tabs are the bar's), the
         hero twice a neighbour's side, its title and its metadata under it
         and the hint strip along the content's foot (none with no `keys`: touch
@@ -1867,7 +1867,7 @@ class Carousel(Launcher):
         return g
 
     def _geom_desk_at(self, lay, reach, keys, brows):
-        """The desk home's geometry (docs/look_2026-10.md step 18), the same
+        """The desk home's geometry (docs/history/look_2026-10.md step 18), the same
         tuple with its foot (the hint strip) and the desk's own: the hero at
         the top left, the details pane beside it, the shelf under them
         bleeding off the right edge, its caption over it. The desk lays out
@@ -1983,7 +1983,7 @@ class Carousel(Launcher):
         return None if dk is None else dk[0]
 
     def quiet(self):
-        """The home's quiet rectangles (docs/theming_2026-09.md §4.9), which
+        """The home's quiet rectangles (docs/theme_and_shell_2026-11.md §3.9), which
         a per-glass wallpaper keeps its subject out of: on the handheld the
         title and the metadata, a column as wide as the hero and half a
         neighbour each side, and the hint strip; on the desk the hero and
@@ -2525,7 +2525,7 @@ class Carousel(Launcher):
             self._card_frame(cv, hero)
 
     def _paint_hh(self, cv, sheet_for, r):
-        """The handheld home's band (docs/look_2026-10.md step 17): every
+        """The handheld home's band (docs/history/look_2026-10.md step 17): every
         card's shadow, the hero's (the card nearest the centre) at the
         theme's size and the others' smaller, in motion as at rest; the
         cards, smallest first, the hero last and at rest lifted by the
@@ -2665,7 +2665,7 @@ class Carousel(Launcher):
 
 
 class IconHome(Launcher):
-    """The home's icons arrangement (docs/look_2026-10.md step 33): each
+    """The home's icons arrangement (docs/history/look_2026-10.md step 33): each
     cart's icon -- its cover's reduction -- in a tile with the card radius,
     as many columns as the glass holds across, scrolling down; focus grows
     a tile and rings it flat, as the shelf's does. On the handheld no tile
@@ -2816,7 +2816,7 @@ def _wall_ink(ws):
     """(white, black) where the home lies on a wallpaper -- a cart or a
     picture, pixels the theme does not know -- else None: its text is then
     white over a black shadow, as the desk's labels are
-    (docs/look_2026-10.md steps 25 and 28)."""
+    (docs/history/look_2026-10.md steps 25 and 28)."""
     if ws.look.wallpaper_id is None:
         return None
     black, white = ws.look.live.fixed[2:]
@@ -3949,8 +3949,8 @@ class LauncherHomeLayer:
         ws.wallpaper.draw(dt, home=True, quiet=self._quiet(ws))
         self._capture_band_backdrop(cv, dt)
         _t1 = _ticks_ms() if _t0 is not None else None
-        # The hint strip and the cells' band (docs/shell_layout_2026-10.md
-        # §12) over the wallpaper; the cards draw inside the band.
+        # The hint strip and the cells' band (docs/theme_and_shell_2026-11.md
+        # §8.10) over the wallpaper; the cards draw inside the band.
         self._draw_home_chrome(cv)
         if not carousel:                      # (a carousel's cards draw: no faces)
             self._face_key(ws.wallpaper.restore_key(True))
@@ -4937,7 +4937,7 @@ class LauncherHomeLayer:
 
 class HomeWindowLayer(LauncherHomeLayer):
     """The "projects" content Layer: the home in a desktop-mode window, the
-    desk's PROJECTS (docs/shell_layout_2026-10.md §12). The same tabs,
+    desk's PROJECTS (docs/theme_and_shell_2026-11.md §8.10). The same tabs,
     sources, taps and verbs over its own card model, ws.projects_grid, a
     `Carousel` whatever the fullscreen home's arrangement, opened on Make:
     the console home's design (step 18) laid out in the window's content

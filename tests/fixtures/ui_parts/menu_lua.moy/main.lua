@@ -1,4 +1,4 @@
--- The public UI API's menu (docs/look_2026-10.md step 25a) as a Lua app: a
+-- The public UI API's menu (docs/history/look_2026-10.md step 25a) as a Lua app: a
 -- card centred on the page (a popover with nothing to hang from) holding a
 -- header row, a menu of four and its hints, then a captioned menu stacked on
 -- the page. menu_py.moy and tests/fixtures/wasm/app_menu.moy draw the same

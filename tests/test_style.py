@@ -16,7 +16,7 @@
    typo'd kind cannot silently fall back to the row palette.
 
 4. **A restyle beyond colours is a theme's shape.** `outline` is a seed theme
-   (docs/theming_2026-09.md §9, phase 3 step 4): its surfaces restyle the
+   (docs/history/theming_2026-09.md §9, phase 3 step 4): its surfaces restyle the
    shipped widgets on every variant, with no code of its own.
 """
 
@@ -244,7 +244,7 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
 # is a red test in three places.
 _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
 # Kinds no surface asks for that stay in the table: the part list theme
-# packages name is frozen (docs/theming_2026-09.md §4.3), so a part outlives
+# packages name is frozen (docs/theme_and_shell_2026-11.md §3.3), so a part outlives
 # its last surface. `row_cta` was the old Storybook's NEW row, `row_list` the
 # power popover's level line (its rows are Settings' sliders since look step 33),
 # `row_menu` the kernel's system menu's rows (the look's card since step 33),

@@ -4,7 +4,7 @@
 #   AchievementsPage._cards     the grids' rows as the page draws them, made on a change
 #   AchievementsPage._popover   a badge opened: its tile, name, how and the day it was found
 #   unlock_banner               the system's unlock banner over any surface (GAPS 47)
-"""Achievements on the console (#21, docs/look_2026-10.md step 32): the
+"""Achievements on the console (#21, docs/history/look_2026-10.md step 32): the
 hidden Easter eggs, Settings' Achievements page and the unlock banner.
 
 The achievement CORE is `widgets.Achievements` on the Workstation (`ws.ach`),
@@ -293,7 +293,7 @@ class AchievementsPage:
         fs = self.ws.layout.fs if not desk else 1
         po = self._page_o
         if not desk:
-            # the page's rows (docs/scroll_and_text_2026-10.md §3.3): what
+            # the page's rows (docs/history/scroll_and_text_2026-10.md §3.3): what
             # they show moves only with the cards made again
             self._cards(rect[2], desk, fs)
         x, y, w, h = _ui.page("", None if desk else po)

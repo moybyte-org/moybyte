@@ -1,4 +1,4 @@
-;; App Pop Wasm: the public UI API's popover (docs/look_2026-10.md step 24)
+;; App Pop Wasm: the public UI API's popover (docs/history/look_2026-10.md step 24)
 ;; as a compiled app, through the `ui` rows it imports from module
 ;; "moybyte.app": a button opens a popover hung under it, holding a seg and a
 ;; button that closes it. tests/fixtures/ui_parts/pop_py.moy and pop_lua.moy

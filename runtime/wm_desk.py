@@ -33,7 +33,7 @@ def _set(v):
 
 
 def _tile_fill(tiles, key):
-    """Desk key `key`'s colour of a look's `tiles` (docs/look_2026-10.md
+    """Desk key `key`'s colour of a look's `tiles` (docs/history/look_2026-10.md
     step 26b), which names an app by its icon slot (Paint's `artwork` is the
     `paint` tile), or None."""
     slot = _iconsets.slot_of(key)
@@ -228,7 +228,7 @@ class _BackdropLayer(Layer):
         self.ws.bar_layer._draw_status_strip("desk")
 
     def quiet(self):
-        """The desk's quiet rectangles (docs/theming_2026-09.md §4.9): the
+        """The desk's quiet rectangles (docs/theme_and_shell_2026-11.md §3.9): the
         bars and the icon column, its tiles and labels as one rectangle per
         column. Built when the desk cache is lost, never per frame."""
         cols = {}
@@ -255,7 +255,7 @@ class _BackdropLayer(Layer):
     # (the _chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag
     # backdrop capture, so the drag cache carries them for free. Under a
-    # theme's look the column is the look's (docs/look_2026-10.md step 25:
+    # theme's look the column is the look's (docs/history/look_2026-10.md step 25:
     # `_look_rects`, `_draw_look_icons`); without one, tiles and label pills
     # in the theme's shape.
 
@@ -302,7 +302,7 @@ class _BackdropLayer(Layer):
         return self._look_rects(self._icon_catalog(), box, fs, dx, dy, dw, dh)
 
     def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
-        """The column under a look (docs/look_2026-10.md step 25): `box`
+        """The column under a look (docs/history/look_2026-10.md step 25): `box`
         tiles on the class's pitch, their centres 54 of the tile's 44 in from
         the desk's edge or further where a label needs it, each label under
         its tile, 2 of the 44 below it, as wide as the column: nearer its own

@@ -5,7 +5,7 @@ Eight classes -- `chrome.Layout`, `chrome.CodeLayout` and the six editor
 layouts (cards/paint/map/music/scene/block) -- subclass it. Each lays out
 every canvas, the T-Deck's 320x240 included, through the same formulas: the
 frozen 320x240 branch they once kept (`_base`) retired with theming phase 3
-step 4 (docs/theming_2026-09.md §9), and this file holds that retirement:
+step 4 (docs/history/theming_2026-09.md §9), and this file holds that retirement:
 
   * no layout carries a `_base` attribute, and no module reads one;
   * no other shared module re-declares the 320x240 default size.

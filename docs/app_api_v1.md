@@ -87,13 +87,13 @@ roles it declared:
 |---|---|---|
 | `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
 | `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
-| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
+| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
 | `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made with a files kind (a user app's) reaches that kind alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
 | `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
 | `ctx.notify` | achievement events | `achieve()` |
-| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theming_2026-09.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
+| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
 | `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()` |
@@ -195,7 +195,7 @@ shipped apps, through the same assertion).
 Two things follow for an app author:
 
 - **Lay out in the content rect.** The bar may sit on any edge the console's
-  layout puts it (docs/shell_layout_2026-10.md §7); the host paints over its
+  layout puts it (docs/theme_and_shell_2026-11.md §8.5); the host paints over its
   band and swallows taps inside it, so `handle_pointer` never sees one. Your
   layout's `cx, cy, cw, ch` is the rest of your surface — the whole of it in a
   window, where the WM's title strip is outside your buffer.
@@ -376,7 +376,7 @@ an `app` block, a regenerated `app_decls.py` and a firmware build.
 ### Crash isolation: three strikes (#160)
 
 The Player turns a cart exception into the stop card (its See why opens the
-code on the line; docs/look_2026-10.md step 33). What it cannot catch is a cart that does not
+code on the line; docs/history/look_2026-10.md step 33). What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
 itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
 `system.json` BEFORE the cart's code is compiled and clears it after three
@@ -405,7 +405,7 @@ resolution is by REGISTERED ID, so no app holds a reference to another app's
 class and a build without the target degrades to a status line. IPC beyond
 "open that, pointed here" is still out.
 
-The Files ROUTER (docs/text_editing_2026-09.md) is the seam's second customer,
+The Files ROUTER (docs/theme_and_shell_2026-11.md §10) is the seam's second customer,
 and it added verbs that are all "open that, pointed here":
 `nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
 the project Editor, `nav.open_text(name, kind, mode)` opens a document on

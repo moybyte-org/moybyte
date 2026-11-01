@@ -805,7 +805,7 @@ def _parked_desk(tmp_path):
 def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
     """A compiled cart that does not fit gets back the parked window stamps,
     oldest first and one at a time, and stops releasing once it fits
-    (docs/shell_layout_2026-10.md §3); the released window re-renders once
+    (docs/theme_and_shell_2026-11.md §8.1); the released window re-renders once
     when the desk comes back."""
     _binding_or_skip()
     ws, wins = _parked_desk(tmp_path)

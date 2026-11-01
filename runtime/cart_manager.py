@@ -82,7 +82,7 @@ class CartManager:
     # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
     # capped most-recently-run path list, newest first. Cart identity is the
     # store PATH (stable across a rename/rescan, unlike an in-memory dict).
-    # `plays` (docs/look_2026-10.md step 18) maps a path to [count, day]: how
+    # `plays` (docs/history/look_2026-10.md step 18) maps a path to [count, day]: how
     # many times it was run and the day of the last run as YYYYMMDD, 0 where
     # the board had no wall clock. A value of any other shape reads as absent.
 
@@ -249,7 +249,7 @@ class CartManager:
         """Re-read ONE cart from the store in place, fat or not -- what puts the
         loader back in the loop after something edited a project's own files
         (`Workstation._return_to_project`, step 5 of
-        docs/text_editing_2026-09.md). `rehydrate` cannot serve: it is a no-op on
+        docs/theme_and_shell_2026-11.md §10). `rehydrate` cannot serve: it is a no-op on
         the fat cart the Editor is holding, which is exactly the case here.
 
         `broken` is popped first because it is the one key `load()` omits when

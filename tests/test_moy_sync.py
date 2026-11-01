@@ -998,7 +998,7 @@ _THEME = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
 
 
 def test_a_theme_packages_fonts_and_sheets_cross_as_their_bytes(tmp_path):
-    """A theme package crosses as a cart does (docs/theming_2026-09.md §9
+    """A theme package crosses as a cart does (docs/history/theming_2026-09.md §9
     phase 6 step 2): its theme.json and manifest as text, a font and a sheet
     as bytes (BINARY_SUFFIXES, the rule's four copies), byte-equal."""
     import shutil

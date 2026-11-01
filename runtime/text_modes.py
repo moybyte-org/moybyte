@@ -147,7 +147,7 @@ def is_whole_name(filename):
 
 def is_script(filename):
     """True when `filename` is a SCRIPT -- a bare `.py`/`.lua` file, which is a
-    cart with no folder (docs/text_editing_2026-09.md). The store owns the
+    cart with no folder (docs/theme_and_shell_2026-11.md §10). The store owns the
     extension set, the way `is_image` asks it for the drawings kind's."""
     return bool(_store.script_ext(filename))
 

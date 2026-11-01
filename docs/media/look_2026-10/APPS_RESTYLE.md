@@ -26,7 +26,7 @@ the two differed on Storybook, the functional one decided.
   can use it as its wallpaper or put it in a story, not draw on it.
 - **Wallpapers.** A wallpaper cart may carry one image per screen size,
   so a desk and a handheld each show a picture made for it
-  (`docs/theming_2026-09.md`'s Wallpapers).
+  (`docs/theme_and_shell_2026-11.md`'s Wallpapers).
 - **Moybyte fields, not moy-spec.** moy-spec is the game console spec: an
   app feature such as the story document or a wallpaper's sizes is
   Moybyte's, in Moybyte-side fields (`docs/moy_cart_api.md`).
@@ -37,7 +37,7 @@ the two differed on Storybook, the functional one decided.
 
 - **A page, the app bar, a way back.** `ui.page(title)` under the handheld
   bar (Moy, ‹, the title, then status); ‹, B and Esc step back one page
-  (`docs/look_2026-10.md` step 27a). Paint, Notes and Storybook lend the
+  (`docs/history/look_2026-10.md` step 27a). Paint, Notes and Storybook lend the
   bar their undo, redo, zoom and Present after the title, as the editors
   do (**GAPS 37**); on the desk those live in the window's tool row. The
   bar's status is true: with no link, Wi-Fi shows `wifi_off`.

@@ -194,7 +194,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio_session import native as _audio_native
 
-# The cart-facing text editor (docs/text_editing_2026-09.md step 3). Imported
+# The cart-facing text editor (docs/history/text_editing_2026-09.md step 3). Imported
 # here rather than reached through the shell for the same reason as the module
 # above: it is a leaf over the Files role and the cart's canvas.
 try:
@@ -573,7 +573,7 @@ class Player:
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
         self._script = False          # a `type: "script"` run: the shell's text console
-                                      # is its screen (docs/text_editing_2026-09.md)
+                                      # is its screen (docs/theme_and_shell_2026-11.md §10)
         self._free = False            # a `"fps": "free"` game: unpaced, real dt (SPEC 5)
         # USER APP state (#181), all per-run and all reset in start():
         self._app_layout = None       # the cart's `_layout(w, h, fs)`, when it opted into
@@ -1417,7 +1417,7 @@ class Player:
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
         self._is_tool = cart is not None and cart.get("type") in BAR_TYPES
-        # A SCRIPT (docs/text_editing_2026-09.md): a cart with no folder whose
+        # A SCRIPT (docs/theme_and_shell_2026-11.md §10): a cart with no folder whose
         # screen is the shell's text console. Tool-shaped -- one unpaced tick
         # per loop frame, the minimal bar's X to leave. Its responsive bind is
         # below, WITH the app one: `release_run_canvas` sits between here and
@@ -1584,7 +1584,7 @@ class Player:
         handle open and drawn, the engine may plan it a shift frame -- its
         text view's fling, glide or a keyed step moved out of the frame
         before, or its changed rows drawn alone
-        (docs/scroll_and_text_2026-10.md §5). Any other run draws whole."""
+        (docs/history/scroll_and_text_2026-10.md §5). Any other run draws whole."""
         ctx, a, cv = self._ui
         host = self._uh
         inp = ws.input
@@ -2085,7 +2085,7 @@ class Player:
         ws._exit_to_caller()
         return True
 
-    # -- the pause menu's hold (docs/look_2026-10.md step 25a) -----------------
+    # -- the pause menu's hold (docs/history/look_2026-10.md step 25a) -----------------
 
     @property
     def paused(self):
@@ -2282,7 +2282,7 @@ class Player:
                 # window stamps oldest-first, then the home's retained frame
                 # and a dialog's held page -- one at a time, until the check
                 # passes or nothing is left
-                # (docs/shell_layout_2026-10.md §3).
+                # (docs/theme_and_shell_2026-11.md §8.1).
                 while (fit is not None and not _fits(fit)
                        and ws.wm.release_cache()):
                     fit = _cart_fit(make, cart)
@@ -2293,7 +2293,7 @@ class Player:
             # one its `ui` reads the theme from (moy_app_wasm.h).
             self._wasm_bind(ws.cart)
             # The cart's code loads and inits inside the app-cart boundary, as
-            # a Python cart's exec and _init do (docs/theming_2026-09.md §4.7).
+            # a Python cart's exec and _init do (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(True)
             try:
                 lua = make(ns, src)
@@ -2403,7 +2403,7 @@ class Player:
             if gp is not None:
                 fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
             # The cart's code prints and measures in petme128, whatever the
-            # theme names (docs/theming_2026-09.md §4.7).
+            # theme names (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(not self._look)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window

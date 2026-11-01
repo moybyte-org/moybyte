@@ -42,7 +42,7 @@ def _metrics(j):
 # Kinds the style gained after the crossing: data with no Python body behind
 # them, so the twin has no table for them.
 ADDED_KINDS = ("toggle",)
-# Metrics likewise: the parts' (docs/look_2026-10.md step 12), whose slots are
+# Metrics likewise: the parts' (docs/history/look_2026-10.md step 12), whose slots are
 # moy_ui_tables.h's MOY_UI_M_GROUP_* and MOY_UI_M_VALUE_ROW_*.
 ADDED_METRICS = ("group", "value_row")
 
@@ -191,7 +191,7 @@ def test_each_entry_keeps_its_conversions_in_order():
         assert all(c in ("%s", "%u", "%d", "%08x") for c in convs), (sid, convs)
 
 
-# -- button kinds (docs/look_2026-10.md step 10) -----------------------------------
+# -- button kinds (docs/history/look_2026-10.md step 10) -----------------------------------
 
 KINDS = ("normal", "primary", "tonal", "danger", "toggle")
 

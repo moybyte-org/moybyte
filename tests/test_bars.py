@@ -1,4 +1,4 @@
-"""Bars on any edge (docs/shell_layout_2026-10.md §4, §7, §13 step 5).
+"""Bars on any edge (docs/history/shell_layout_2026-10.md §4, §7, §13 step 5).
 
 Every resolved bar is drawn as its own cached strip at its rect, its cells
 packed once per relayout (`shell_layout.pack`), its taps routed by the bar
@@ -276,7 +276,7 @@ def test_a_window_keeps_its_band_on_top_under_a_bottom_bar(tmp_path):
     assert lay.bars[0][1] == (0, 0, lay.w, lay.status_h)
 
 
-# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+# -- the 2026-10 look's bar (docs/history/look_2026-10.md step 14) --------------------
 
 def _looked_ws(tmp_path, variant="light", desk=False):
     if desk:
@@ -295,7 +295,7 @@ def _names_of(packed):
 def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
     """Moy's layout: the Moy button first, its tile's cell, then the chips
     (desk) and the zone; Wi-Fi, battery and the clock at the right, no X
-    (docs/look_2026-10.md step 27a);
+    (docs/history/look_2026-10.md step 27a);
     the handheld bar 28 rows (`hhbar.h`), the desk's 40, and the same on a
     theme with no look, which takes Moy's flat."""
     ws = _looked_ws(tmp_path, desk=desk)

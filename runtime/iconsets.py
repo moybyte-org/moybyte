@@ -1,4 +1,4 @@
-"""The icon sets (docs/look_2026-10.md step 16, docs/media/look_2026-10/GAPS.md
+"""The icon sets (docs/history/look_2026-10.md step 16, docs/media/look_2026-10/GAPS.md
 18 and 25): what a theme's `icons` names and how an icon of it draws.
 
 A theme's look sets `icons.kind` (`pixel` or `smooth`), `icons.set` and, for

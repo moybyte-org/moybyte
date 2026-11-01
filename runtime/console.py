@@ -355,7 +355,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import system_api
 
 
-# The home (docs/shell_layout_2026-10.md §12, see launcher_layer.py): its
+# The home (docs/theme_and_shell_2026-11.md §8.10, see launcher_layer.py): its
 # Carousel (the instance is ws.launcher, the single source everything reads) +
 # LauncherHomeLayer (the "launcher" content Layer -- the tab row, the carousel
 # and their input), and HomeWindowLayer, the same home in a desk window. The
@@ -372,7 +372,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         PSEUDO_TILE_TYPES, HOME_TABS,
                                         tab_count_title, PROJECTS_VERB_SETS)
 # The home's arrangements by the layout's `home` value
-# (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
+# (docs/theme_and_shell_2026-11.md §8.10); an unknown one is the carousel.
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 # The layers that draw a menu holding the keys (`Workstation._modal_layer`):
 # the system menu's own, and a desk popover frame's that paints it alone.
@@ -633,7 +633,7 @@ def keep_splash(th):
 
 
 def draw_splash(cv, frac=None, status=None, pal=None):
-    """Paint the boot splash (docs/look_2026-10.md step 33): Moy at a whole
+    """Paint the boot splash (docs/history/look_2026-10.md step 33): Moy at a whole
     scale over the `moybyte` wordmark on the theme's ground, and with
     `frac` (0..1) a track under it, with `status` a line in the dim ink.
     Drawn on the SYSTEM canvas so it fills the real panel.
@@ -1209,7 +1209,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # is no screen it could otherwise report to.
         self._notice = None            # (title, sub, kind) while up
         self._notice_until = 0
-        # The popover (#52, docs/shell_layout_2026-10.md §8): ONE Popup owns
+        # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is
         # open) or a bar widget's component. `_about` is a tiny dismissible
@@ -1222,7 +1222,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # toggle_sysmenu() + the sysmenu Popup + _about flag stay here (tested ws.
         # surface); the menu just delegates item-building/drawing to this.
         self.menu_ui = SystemMenuUI(self)
-        # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
+        # The pause menu over a fullscreen game (docs/history/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
         # the layers a modal's hold keeps what is under it in, and their
@@ -1401,8 +1401,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     @property
     def windowed_chrome(self):
-        """True in DESKTOP mode (the windowed WM's desk, docs/shell_layout_2026-10.md
-        §3): in-window app bars suppress the OS widgets, and the bar's wifi
+        """True in DESKTOP mode (the windowed WM's desk, docs/theme_and_shell_2026-11.md
+        §8.1): in-window app bars suppress the OS widgets, and the bar's wifi
         icon deep-links to the Settings window. False in console mode -- on
         every board, a P4 included -- where the fullscreen chrome rules apply
         verbatim."""
@@ -1529,7 +1529,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_text_cart(self, name, kind=None, mode=None):
         """RUN the text app on one document -- the Files router's door for
-        anything textual (docs/text_editing_2026-09.md).
+        anything textual (docs/theme_and_shell_2026-11.md §10).
 
         The text app is a CART, claimed by the `editor` marker permission
         (`system_api.is_text_app`), so this is an ordinary launch with the
@@ -1558,7 +1558,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def open_project_file(self, cart, name, mode=None):
         """Open one of a PROJECT's own files in the text app -- the Config tab's
         Files, and the Files router's door for a project file reached
-        from the PROJECTS root (step 5 of docs/text_editing_2026-09.md).
+        from the PROJECTS root (step 5 of docs/theme_and_shell_2026-11.md §10).
 
         It goes through the EDITOR, not straight into the handle, and that is
         the whole point of the door: the project is opened first and returned to
@@ -2045,9 +2045,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._press_taken = True
 
     def widget_tap(self, widget):
-        """A bar widget's tap (docs/shell_layout_2026-10.md §8): the system
+        """A bar widget's tap (docs/theme_and_shell_2026-11.md §8.6): the system
         menu is the popup it is; another widget opens its component in a
-        popover hung from it, in both modes (docs/look_2026-10.md step 33)."""
+        popover hung from it, in both modes (docs/history/look_2026-10.md step 33)."""
         if widget == "menu":
             self.toggle_sysmenu()
         else:
@@ -2307,7 +2307,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True         # the transition's result must paint
 
     def _crash_to_code(self):
-        """The stop card's See why (docs/look_2026-10.md step 33): the code
+        """The stop card's See why (docs/history/look_2026-10.md step 33): the code
         editor on the line that stopped the run, the popover saying what
         stopped it hung under the line (the crash-to-code throw,
         now a row of the card). Returns True when it navigated; False (no
@@ -2576,7 +2576,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def app_back(self, app=None):
         """Back one level on registered `app` (None: the one on top) -- the
-        bar's chevron, Esc and B (docs/look_2026-10.md step 27a): the app's
+        bar's chevron, Esc and B (docs/history/look_2026-10.md step 27a): the app's
         own `back()` steps back a page of it and answers True; on its first
         page (False, or an app with no pages) the app is left for whoever
         opened it, committed first as the bar's exit always was."""
@@ -2614,7 +2614,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if (selected or {}).get("broken"):
             # A cart whose manifest will not parse cannot be RUN -- it has no
             # main, no fps and no permissions. A tap opens it where it can be
-            # fixed instead (step 5 of docs/text_editing_2026-09.md): the
+            # fixed instead (step 5 of docs/theme_and_shell_2026-11.md §10): the
             # Editor's Config tab, which shows the break and offers the file.
             self.open_in_editor(selected)
             return
@@ -2629,7 +2629,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def run_script(self, kind, name):
         """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
-        with NO FOLDER (step 6 of docs/text_editing_2026-09.md).
+        with NO FOLDER (step 6 of docs/theme_and_shell_2026-11.md §10).
 
         The file is read through the store, wrapped in a manifest synthesized
         HERE and written nowhere -- no folder is created, nothing is saved --
@@ -2820,7 +2820,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def launch_selected(self, grid=None):
         """The home's tap on `grid`'s selected card (the home's, ws.launcher,
-        by default), by tab (docs/shell_layout_2026-10.md §12): Games and
+        by default), by tab (docs/theme_and_shell_2026-11.md §8.10): Games and
         Mine RUN it, Apps opens the app (`open` dispatches an app's cart to
         it), Make opens it in the Editor (`open_in_editor`: a window of its
         own on a board with a desk, from console mode too). The "+ New"
@@ -2954,7 +2954,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_library(self):
         """The desk's PLAY icon: console mode over the home
-        (docs/shell_layout_2026-10.md §3). The WM ends a running playtest
+        (docs/theme_and_shell_2026-11.md §8.1). The WM ends a running playtest
         and parks the desk's windows, and go_home lands on the home without
         touching them. On a console-only WM it is go_home."""
         self._editor_from = None
@@ -2977,7 +2977,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # -- the home in a window (the desk's PROJECTS) --------------------------
 
     def open_projects(self):
-        """The desk's PROJECTS (docs/shell_layout_2026-10.md §12): the home in a
+        """The desk's PROJECTS (docs/theme_and_shell_2026-11.md §8.10): the home in a
         window on its Make tab, the console home's design (a `Carousel`: the
         hero, its details, the shelf) whatever the fullscreen home's
         arrangement. Its card model is minted on the first open; a later
@@ -3300,7 +3300,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     #
     # There is deliberately NO create verb here. The file list is a list; the
     # one door that adds a script is the Config tab's Files, where a
-    # project's own folder already lives (docs/text_editing_2026-09.md step 5).
+    # project's own folder already lives (docs/history/text_editing_2026-09.md step 5).
 
     def code_sources(self):
         """The scripts the Code tab can open, in load order. One entry for a
@@ -3370,7 +3370,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         the desk in desktop mode, closing what stood above it. Every leaving
         surface is persisted first. In console mode a parked Editor that still
         holds the workspace is not torn down -- go_home touches no parked
-        window (docs/shell_layout_2026-10.md §3)."""
+        window (docs/theme_and_shell_2026-11.md §8.1)."""
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.close_popover()
@@ -3460,7 +3460,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _launcher_items(self, carts, tab=None):
         """The home's `tab` (the active one by default) over `carts`
-        (docs/shell_layout_2026-10.md §12), the four without overlap:
+        (docs/theme_and_shell_2026-11.md §8.10), the four without overlap:
 
           games  the installed carts that play -- the seeds and the store's --
                  that are not the kid's own (`CartManager.is_own`), not a
@@ -3472,7 +3472,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
         WALLPAPERS play in none of the first three: they are a backdrop chosen
         in Settings (Make lists them). THEMES are in none of the four: a theme
-        is data the Appearance app picks (docs/theming_2026-09.md §9 phase 6
+        is data the Appearance app picks (docs/history/theming_2026-09.md §9 phase 6
         step 2). An empty Mine holds
         one "+ New" card. No "+ New" on a read-only store (#151: the web
         runner's can_manage=False, where project management is out of scope)."""
@@ -3548,8 +3548,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return _today_ymd(self)
 
     def _home_grid(self, arrangement, items):
-        """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
-        §12): the Carousel (the home window's, always), the shelf grid or
+        """The home's card model for `arrangement` (docs/theme_and_shell_2026-11.md
+        §8.10): the Carousel (the home window's, always), the shelf grid or
         the icon grid."""
         cls = _HOME_CLASSES.get(arrangement, Carousel)
         g = cls(items, self.layout, NAMES)
@@ -5042,7 +5042,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _ui_draw.marks(_modal is None)
         _stack = self.wm.draw_stack()               # memoized (Stage 6c) -- no per-frame alloc
         # The content's own ring vouches for its buffers where it is alone on
-        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4), or alone
+        # a full-screen tier (docs/history/scroll_and_text_2026-10.md §3.4), or alone
         # but for the FPS chip, which names where it drew (`overdrew`).
         _ring = self.wm.CONTENT_RING
         _alone = _ring and self.wm.content_alone()
