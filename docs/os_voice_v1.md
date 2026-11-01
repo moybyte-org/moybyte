@@ -129,7 +129,7 @@ registers, each with a job:
 
 ### 3.1 ENGRAVED — the machine's controls
 
-Sentence case, as the 2026-10 look sets it (`docs/history/look_2026-10.md`), **three
+Sentence case, as the 2026-10 look sets it (`docs/media/look_2026-10/DESIGN.md`), **three
 words or fewer**, no terminal punctuation. This is text stamped on the machine:
 verbs, labels, settings rows, tab names, status pills.
 
@@ -182,8 +182,8 @@ Mechanical rules any string can be checked against:
 1. **Register check first.** Is it a control (ENGRAVED), an explanation (Spoken),
    a name (Named), or a feeling (Moy)? Mixed-register strings
    (`CODE LOCKED -- can't blockify`) get split or rewritten, not joined with `--`.
-2. **Say the fix, not the fault.** `COULD NOT CONNECT` → `That password didn't
-   work.` + `TRY AGAIN`. Every failure surface has exactly one primary next
+2. **Say the fix, not the fault.** `Could not connect` → `That password didn't
+   work.` + `Try again`. Every failure surface has exactly one primary next
    action, and it's a verb.
 3. **The banned words** in kid-project contexts: *error, failed, invalid, wrong,
    illegal, fatal, warning*. A kid's code is never "failed"; it *stopped*, or it
@@ -191,22 +191,22 @@ Mechanical rules any string can be checked against:
    editor*, where they are honest tool output — PICO-8 doctrine — but the shell's
    own framing never uses these words.)
 4. **The "yet" doctrine.** Empty states and first failures point forward:
-   `NOTHING HERE YET` (already shipped, already right), `NO GAMES YET`,
-   `That didn't run yet.` The word "yet" is our house style for potential.
-5. **Exclamation budget: milestones only.** `UPDATED!`, `YOU LEVELED UP TO
-   CODE!`, achievement banners. Never on errors (`OOPS! IT CRASHED` spends
-   excitement on a bad moment), never on ordinary confirmations (`SAVED`, calm).
-6. **`...` means in progress** (`SCANNING...`, `FLASHING...`) and nothing else.
-7. **The refusal idiom is `CAN'T <verb> <here/that>`** — the shipped `CAN'T SAVE
-   HERE` family is honest, short, and kid-readable; keep it as the standard
-   ENGRAVED refusal. If the reason matters, a Spoken line explains beneath it.
+   `Nothing here yet`, `No games yet`, `That didn't run yet.` The word "yet" is our house style for potential.
+5. **Exclamation budget: milestones only.** `Updated!`, `You leveled up to
+   code!`, achievement banners. Never on errors (the old `OOPS! IT CRASHED`
+   spent excitement on a bad moment), never on ordinary confirmations
+   (`Saved`, calm).
+6. **`...` means in progress** (`Scanning...`, `Flashing...`) and nothing else.
+7. **The refusal idiom is `Can't <verb> <here/that>`** — the `Can't save here`
+   family is honest, short, and kid-readable; it is the standard ENGRAVED
+   refusal. If the reason matters, a Spoken line explains beneath it.
 8. **No engagement language, ever**: streaks, daily rewards, trending, likes,
    "come back tomorrow". (Already law in visual_identity §9; restated because
    voice is where it would leak in.)
-9. **Two-tier screens are fine**: loud ENGRAVED headers over quiet lowercase
-   metadata (`channel: stable`, `rebooting...`) — the OTA screen already does
-   this well; the lowercase tier reads as the machine's small print and is the
-   *only* sanctioned lowercase.
+9. **Two-tier screens are fine**: short ENGRAVED headers over quiet lowercase
+   metadata (`channel: stable`, `rebooting...`), as the OTA screen draws it;
+   the lowercase tier reads as the machine's small print and is the *only*
+   text that starts in lower case.
 10. **Read it in a kid's voice out loud.** If it sounds like a school report
     ("assessment", "incorrect"), a casino ("reward unlocked"), or a lawyer
     ("are you sure you want to permanently"), rewrite it.
@@ -224,12 +224,12 @@ and no alarm. The panel states the fact in Spoken register, Moy looks puzzled,
 and the one action is the door:
 
 ```text
-current:  OOPS! THIS CART CRASHED          proposed:  Your game stopped.
-          TAP CODE TO FIX IT                          [Moy, puzzled]
-                                                      TAP CODE TO SEE WHY
+was:  OOPS! THIS CART CRASHED          is:  Your game stopped.
+      TAP CODE TO FIX IT                    [Moy, puzzled]
+                                            See why
 ```
 
-"SEE WHY" beats "FIX IT": it frames the code tab as the place where the answer
+"See why" beats "fix it": it frames the code tab as the place where the answer
 lives (intrigue-first, per shell_ux) rather than presuming the kid broke
 something. Inside the editor, the error popup shows the honest one-line reason
 and the caret is already on the line — the machinery is shipped; the voice just
@@ -240,9 +240,9 @@ warmth belongs — Playdate doctrine — but our machine keeps it short and stat
 the retry:
 
 ```text
-SAVE FAILED            →  CAN'T SAVE — TAP TO TRY AGAIN
-COULD NOT CONNECT      →  That password didn't work.  TRY AGAIN
-UPDATE FAILED          →  Update didn't finish. Nothing changed.  TRY AGAIN
+SAVE FAILED            →  Can't save
+COULD NOT CONNECT      →  That password didn't work.  Try again
+UPDATE FAILED          →  Update didn't finish. Nothing changed.
 ```
 
 (`Nothing changed.` is load-bearing: the rollback design means a failed update
@@ -258,12 +258,12 @@ against the surface, not a copywriting task.
 
 Celebration is real but scarce, and it marks *capability*, not compliance:
 
-- **Graduation** (`YOU LEVELED UP TO CODE!`) is the ceiling — full banner, Moy
+- **Graduation** (`You leveled up to code!`) is the ceiling — full banner, Moy
   delighted, exclamation point. It celebrates becoming *more* of a maker.
 - **Achievements** keep their Title-Case whimsy (`Lift Off!`) under the one-line
   `You found a badge!` banner (a secret's `You found a secret!`). Never for
   showing up — only for doing, and once: a badge found again says nothing.
-- Ordinary success is calm: `SAVED`, not `SAVED!` — a workshop where every glue
+- Ordinary success is calm: `Saved`, not `Saved!` — a workshop where every glue
   joint gets applause is exhausting. Confetti-tier moments per Playdate: rare,
   physical, earned.
 
@@ -275,14 +275,14 @@ word — it's a deliberate mapping that mirrors the product journey:
 | Word | When | Example surfaces |
 |---|---|---|
 | **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, Cart info, the system menu's Delete cart, the stop card |
-| **project** | The *same* cartridge while open in the Studio — yours, in progress | the home's Make tab (`N PROJECTS`), `YOUR PROJECTS`, MAKE captions |
-| **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs |
+| **project** | The *same* cartridge while open in the Studio — yours, in progress | the home's Make tab (`N projects`), `Your projects`, Make captions |
+| **game** | Only cartridges that are actually games (attach-to-game flows, `No games yet`) | Files app verbs |
 | **app** | System tools (Files, Paint, Settings) | Docs, taskbar |
 
 A cartridge *becomes* a project when you open it and goes back to being a
 cartridge on the shelf — that's the See→Play→Open→Change story told through
-nouns. What's forbidden is crossing the map (a Make tab that says "DELETE CART"
-next to "N PROJECTS").
+nouns. What's forbidden is crossing the map (a Make tab that says "Delete cart"
+next to "N projects").
 
 Auto-names stay boring on purpose (`New Cart`, `drawings_2`) — boring defaults
 invite renaming; a cute auto-name colonizes the kid's naming moment.
@@ -299,23 +299,28 @@ issue; noted here so the voice owns the moment when it's built.)
 
 ## 9. Rewrite table — the audit's strings under the laws
 
-All rows below are SHIPPED (2026-07-23) unless noted:
+The audit's strings (2026-07-23) and what each is under the laws, in the
+2026-10 look's sentence case (§3.1):
 
-| Where | Was | Voiced (as shipped) |
+| Where | Was | Voiced |
 |---|---|---|
-| Crash panel | `OOPS! THIS CART CRASHED` / `TAP CODE TO FIX IT` | `Your game stopped.` + `TAP CODE TO SEE WHY` (Moy puzzled art still open, §11.2) |
-| Code-editor crash popup | `OOPS! IT CRASHED` / `TAP TO CLOSE` | `Stopped on this line.` / `TAP TO CLOSE` |
+| Crash panel | `OOPS! THIS CART CRASHED` / `TAP CODE TO FIX IT` | `Your game stopped.` + `See why` (Moy's puzzled art is §11.2's question) |
+| Code-editor crash popup | `OOPS! IT CRASHED` / `TAP TO CLOSE` | `Stopped on this line.` |
 | Calc ÷0 | `OOPS` | kept — this one is perfect |
-| Save failure | `SAVE FAILED` (+ variants) | `CAN'T SAVE` (retry is automatic — the debounce autosave fires again, so no false `TAP TO TRY AGAIN` promise) |
-| Sprite share / send | `GET FAILED` / `PUT FAILED` / `FILE FAILED` | `CAN'T GET` / `CAN'T PUT` / `CAN'T SEND` |
+| Save failure | `SAVE FAILED` (+ variants) | `Can't save` (retry is automatic — the debounce autosave fires again, so no false `Try again` promise) |
+| Sprite share / send | `GET FAILED` / `PUT FAILED` / `FILE FAILED` | `Can't get` / `Can't put` / `Can't send` |
 | WiFi bad password | `COULD NOT CONNECT` | `That password didn't work.` when a password was typed; `Couldn't connect.` for open/saved networks (an open network's failure isn't a password's fault) |
-| OTA failure | `UPDATE FAILED` | `Update didn't finish.` / `Nothing changed.` + `B = BACK` (back *is* the retry path — the UPDATE row re-arms the check; no separate retry action exists to promise) |
-| Block editor mixed casing | `MOVED` vs `can't move there` | one register: the whole lowercase status set unified into ENGRAVED (`CAN'T MOVE THERE`, `COPY A BLOCK FIRST`, `TAP A + SPOT`, `BLOCK DELETED`, …); `CODE LOCKED -- can't blockify` → `CODE LOCKED` |
-| Undo split | `NOTHING TO UNDO` vs `nothing to undo` | `NOTHING TO UNDO` everywhere |
-| Delete confirm | `DELETE? TAP AGAIN` | kept where a button arms (Storybook TEAR OUT, Paint's NEW, Get Carts' REMOVE) — the two-tap *is* our "are you sure"; deleting a cart, from every route, asks in a dialog instead: "Delete <title>?", "This can't be undone.", Cancel and Delete (owner, 2026-10-20) |
-| Empty grid | `NOTHING HERE YET` | kept — the "yet" doctrine's model string (block menus' `(nothing here)` joined it) |
+| OTA failure | `UPDATE FAILED` | `Update didn't finish.` / `Nothing changed.` + `B = Back` (back *is* the retry path — the Update row re-arms the check; no separate retry action exists to promise) |
+| Block editor mixed casing | `MOVED` vs `can't move there` | one register: the whole status set ENGRAVED (`Can't move there`, `Copy a block first`, `Tap a + spot`, `Block deleted`, …); `CODE LOCKED -- can't blockify` → `Code locked` |
+| Undo split | `NOTHING TO UNDO` vs `nothing to undo` | `Nothing to undo` everywhere |
+| Delete confirm | `DELETE? TAP AGAIN` | kept where a button arms (Storybook's Tear out, Paint's New, Get Carts' Remove) — the two-tap *is* our "are you sure"; deleting a cart, from every route, asks in a dialog instead: "Delete <title>?", "This can't be undone.", Cancel and Delete (owner, 2026-10-20) |
+| Empty grid | `NOTHING HERE YET` | `Nothing here yet` — the "yet" doctrine's model string (block menus' `(nothing here)` joined it) |
 | About panel | `MOYBYTE CONSOLE` | `moybyte` (lowercase wordmark law) |
 | Launcher captions | `Open or create a project` | kept — already correct Spoken register |
+
+The block editor's status set, the update screen and the graduation banner
+draw their strings in capitals in code (`CAN'T MOVE THERE`, `B = BACK`,
+`LEVELED UP TO CODE`); the sentence-case forms above are the voice.
 
 ## 10. Non-goals
 
@@ -337,8 +342,6 @@ All rows below are SHIPPED (2026-07-23) unless noted:
    did run.) Test both with kids alongside the visual-identity comprehension tasks.
 2. Moy's puzzled expression on the crash panel needs art and a restraint check on
    the 320×240 tier — does the face fit without stealing the line number?
-3. Whether the Spoken register survives Petme128 at 320×240 in practice — the
-   sentence-case strings must be tested on the T-Deck panel before the register
-   is applied broadly (same gate as visual_identity §11.5).
-4. `TAP CODE TO SEE WHY` vs `TAP CODE TO FIX IT` — intrigue vs agency; another
-   cheap comprehension test.
+3. Settled by the 2026-10 look (2026-10-15): sentence case draws in the
+   look's anti-aliased UI fonts on every tier, the T-Deck's 320×240 included.
+4. Settled: `See why` (intrigue) over `Fix it` (agency) on the crash panel.
