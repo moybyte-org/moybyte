@@ -1,16 +1,7 @@
 # Surface model v1 — the presentation contract for every backend
 
-**Status: v1.3 LOCKED (2026-10-07) — v1.1 plus the STAGE-4 AMENDMENT (§13),
-which retires the web annex, the 2026-08-27 FOLD (§14), which absorbs the
-archived predecessor and changes no part of the model, and the 2026-10-07
-KERNEL AMENDMENT (§15), which moves the Surface's home and its mint into the
-native kernel and changes no law, the 2026-10-27 REMOVAL (§16) of the
-surface table that nothing read, and the 2026-10-27 SHIFT FRAME (§14.7), the
-change record a content's frame may be, which adds no invalidation mechanism.** Written, then put
-through the parallel adversarial architecture + perf review passes
-(verdicts: **LOCK AFTER FIXES** / **PERF CASE STANDS WITH FIXES**); all twenty
-findings are folded into this revision — **§12 is the finding-by-finding
-traceability ledger.**
+**State: settled (2026-10-27).** The amendments (§13–§16) are dated where
+they land; §12 is the review ledger the contract was locked against.
 **Tracks:** #73/#105 (windowed WM), #58 (P4 port), #175/#176 (web runner), #113
 (scroll), #163 (grid kernels), #76/#153 (web deltas).
 **Relation to prior docs:** this is the successor that
@@ -62,7 +53,7 @@ The Surface is the model's vocabulary, not an object in code: §14's mechanisms
 and the backends' per-buffer state follow the record below, and no tier holds
 one (§16, 2026-10-27: nothing ever read a gen, so the kernel's table went).
 
-    sid          # stable identity, minted from the WM REGISTRY key; the row's key
+    sid          # stable identity: the WM's key for the window
     domain       # "system" | "game"
     w, h         # CONTENT size — the surface's local coordinate space
     x, y, scale, z   # PLACEMENT — WM-owned; content code never reads or writes it
@@ -71,8 +62,8 @@ one (§16, 2026-10-27: nothing ever read a gen, so the kernel's table went).
     animating    # this surface repaints without any bump while true (§3 class B)
 
 
-**sid rules (the make-group lesson).** sids are minted from the WM's registry
-keys, **never from content kinds** — the shipped `key == win.kind` comparison
+**sid rules (the make-group lesson).** A sid is the WM's key for its window,
+**never a content kind** — the `key == win.kind` comparison
 silently never matched for the shared "make" group (window key `"make"`,
 content kind `"picker"`), which disabled its drag content-freeze everywhere
 (`wm_windowed.py`, the identity-resolution fix). sids are world-qualified: the
@@ -160,22 +151,20 @@ playhead, OTA progress, and every paint stroke — the review's top finding.
 `ws._dirty = True` writes, *observed, not rewritten*: an un-attributed dirty
 is a **global** change — the whole frame repaints — safe, never wrong, merely
 unprofitable. Per-surface attribution is **opt-in
-per site**, added only where audited, so shared `*_layer.py` code stays S3-safe. The audit
-is a named Phase A deliverable — there are **about 135 raw `_dirty = True`
-sites across 31 files** (2026-10-07; the 2026-07 review counted ~179 across
-22, as ui_damage §0.2.7 had), several
-firing from async contexts (wifi scan, bluetooth, OTA `download_step`) where
-"the active surface" would mis-attribute. "Mechanical migration" is hereby
-retracted; un-audited sites stay global-epoch forever and are still correct.
+per site**, added only where audited, so shared `*_layer.py` code stays
+S3-safe. Attribution is never mechanical: there were about 135 raw
+`_dirty = True` sites across 31 files on 2026-10-07, several firing from
+async contexts (wifi scan, bluetooth, OTA `download_step`) where "the active
+surface" would mis-attribute. An un-audited site stays a global epoch and is
+correct.
 
 **Class B — declared animating surfaces.** Sources that repaint although
 nothing marks dirty, today enumerated by the `_animating` predicate and
 excluded **by name** in `_content_static`: the live wallpaper, the music
 preview's playhead, the bluetooth panel's async scan/pair states, the update
 screen's progress, splash/confetti/toast/egg overlays, and the running cart.
-Each declares `Surface.animating = True` while its animation is live — the
-by-name lists become the seed of the registration and are then **deleted**
-(§7). An animating surface needs no bumps and is never skipped. A verbs page
+An animating surface needs no bumps and is never skipped; the by-name lists
+are the declaration (no Surface object holds a flag, §16). A verbs page
 moving on its own -- a fling's coast, a glide to a step's target -- declares
 itself through the engine (`moy_ui_api_moving`, `ws.ui_moving` for the gate).
 
@@ -302,9 +291,10 @@ through §4's `end_frame()`. Its last-seen state is per-buffer N-deep (§4) —
 the streak/sig fields are absorbed and deleted (§7). **Buffer ownership:**
 `moy_alloc` has no `free()`, and resize/relayout rebuild window
 buffers today — Surface buffers are minted with an owner, reused per slot,
-never evict-and-reallocate. Phase C claims **no perf change** — the gate is
-"drag fps not regressed" on the #156 on-glass suite, **naming the make-group
-window's drag explicitly** (the last silent-disable bug lived exactly there).
+never evict-and-reallocate. A change to this backend's mechanisms is gated
+on "drag fps not regressed" on the #156 on-glass suite, **naming the
+make-group window's drag explicitly** (the last silent-disable bug lived
+exactly there).
 Games: fullscreen in console mode; windowed via the PPA upscale composite
 (PPA is upscale-only — §8).
 
@@ -336,8 +326,8 @@ game canvas, and the opaque rects the shell draws over it are declared as in
 ### 5.3 Host sim — reference implementation
 
 pygame; buffers are cheap, so this backend implements the contract in its
-plainest form and serves as the test bed: golden pixel-parity before/after
-Phase A **including windowed-size goldens** (the 320×240 goldens
+plainest form and serves as the test bed: golden pixel-parity across a
+change to the model **including windowed-size goldens** (the 320×240 goldens
 structurally cannot catch windowed-tier staleness — ui_damage §0.2.4), and
 both L8 directions live here (pixel-hash harness mode; the
 placement-only-frame zero-ship assertion).
@@ -488,8 +478,9 @@ path, not just a correct steady state.**
 ## 7. The consolidation ledger
 
 The mechanisms the model found, and where each stands. No row waits on a
-deletion phase: Phase B retired with the web annex (§13), Phase C does not run
-(§9), and the registry the rows would have folded into is gone (§16).
+deletion: web compositing retired with the web annex (§13), the P4
+consolidation is cancelled (§9), and the surface table the rows would have
+folded into is gone (§16).
 
 | mechanism | where it stands |
 |---|---|
@@ -547,18 +538,15 @@ deletion phase: Phase B retired with the web annex (§13), Phase C does not run
   — designed out at review (§2): recreation aliases against persistent
   client caches into wrong `{"same":1}` replays.
 
-## 9. Phasing, as it ended
+## 9. How the phases ended
 
-- **Phase A — name it.** Built: the surface registry as `runtime/surface.py`,
-  then the kernel's SURF table (§15), with the producer audit (§3). Nothing
-  ever read a gen, and §16 deleted the registry (2026-10-27); the producer
-  classes and the kernel epoch are what stays.
-- **Phase B — web compositing** and **Phase D — per-surface scroll retention
-  on web** retired with the web annex (§13, 2026-08-12).
-- **Phase C — P4 consolidation** was the kernel plan's sprint 7 (the window
-  managers), which does not run (`docs/history/native_kernel_2026-09.md` §10 question
-  8). The windowed WM's per-buffer state stays Python, and §14's mechanisms are
-  the desk's.
+The surface table was built (`runtime/surface.py`, then the kernel's SURF
+table, §15) and deleted when nothing had read a gen (§16, 2026-10-27); the
+producer classes and the kernel epoch are what stays. Web compositing and
+per-surface scroll retention on web retired with the web annex (§13,
+2026-08-12). The P4 consolidation would have been the kernel's sprint 7, which
+is cancelled (owner, 2026-11-01, #246): the windowed WM's per-buffer state is
+Python, and §14's mechanisms are the desk's.
 
 ## 10. Non-goals
 
@@ -588,19 +576,19 @@ Arch review (verdict LOCK AFTER FIXES) → folded: A1 three-legged gate → §3
 rewritten as three producer classes; A2 gen lifetime/sid aliasing → §2
 monotonic mint + sid rules; A3 per-buffer last-seen + `end_frame()` → §4;
 A4 wire compat self-contradiction + wrong wire shape → §6 versioned break +
-corrected shapes; A5 Phase A S3 gate + non-mechanical migration → §2 leaf
-module, §3 Class A epoch rule, §5.1/§9 gate rewording; A6 delta safety net +
+corrected shapes; A5 the S3 gate + non-mechanical migration → §3 Class A
+epoch rule, §5.1 gate wording; A6 delta safety net +
 pixel-less L8 → §5.4 + L8 per-tier; A7 drop-recovery → §5.4 keyframe verb +
 §6 scr invariant (b); A8 chrome/overlays/cursor → §5 preamble, §3 Class B/C
-+ cursor note; A9 ledger deletions → §7 rebuilt with delete-phases +
++ cursor note; A9 ledger deletions → §7, each row's standing +
 grep-tests; A10 resize/L1, frameskip/L9, Stage 9 re-partition, windowed
 goldens, P4 buffer ownership → L1, L9, §2, §5.3/§9, §5.2.
 
 Perf review (verdict STANDS WITH FIXES) → folded: F1 drag claim/baseline →
-§5.4 PREDICTED + Phase B baseline-first gate + skip-draw stated; F2 Phase D
-drop hazard → §6 invariant (b); F3 device wrong-tier arithmetic → §5.4
+§5.4 PREDICTED + the web baseline-first gate + skip-draw stated; F2 the web
+scroll retention's drop hazard → §6 invariant (b); F3 device wrong-tier arithmetic → §5.4
 device bullet rewritten + bytes-AND-ms gate; F4 L8 perf direction → L8 +
-Phase C make-group gate; F5 producer audit / "mechanical" retracted → §3;
+the make-group drag gate (§5.2); F5 producer audit / "mechanical" retracted → §3;
 F6 S3 gate wording + arithmetic → L6/§5.1; F7 GC contradiction → §5.4 A/B;
 F8 L8 cost/per-tier definition → L8; F9 compositor memory/"for free" →
 §5.4 ESTIMATED + phone gate + banked 8× blit win; F10 number wording →
