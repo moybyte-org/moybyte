@@ -1,4 +1,4 @@
-"""The toolkit's style as data, and the outline seed theme.
+"""The toolkit's style as data.
 
 1. **The style IS the shipped pixels.** The widgets hardcode no colour or pad;
    native/moy_ui resolves them from native/moy_ui/style.json, and every kind
@@ -15,9 +15,11 @@
    directions -- and so are the kinds a surface asks the catalog for, so a
    typo'd kind cannot silently fall back to the row palette.
 
-4. **A restyle beyond colours is a theme's shape.** `outline` is a seed theme
-   (docs/history/theming_2026-09.md §9, phase 3 step 4): its surfaces restyle the
-   shipped widgets on every variant, with no code of its own.
+4. **A restyle beyond colours is a theme's shape** (its surfaces, frame and
+   text effects: docs/theme_and_shell_2026-11.md §3.3-§3.5), never code; the
+   shape is held by tests/test_theme_loader.py. The `outline` seed that showed it
+   here was deleted with the other old seeds (docs/history/look_2026-10.md
+   step 27).
 """
 
 import ast
@@ -465,7 +467,3 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
     # without its "what it replaced" row is a colour nobody checked.
     assert {k for k, _s in _PRE_207_TRIPLES} == set(_SHELL_KINDS)
 
-
-# =============================================================================
-# 4. the outline seed: a restyle in the theme's shape
-# =============================================================================
