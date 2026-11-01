@@ -189,11 +189,27 @@ def _methods():
                 yield fn
 
 
+# The mixins Workstation lists as bases, by module. A new one is a deliberate
+# edit here: the ratchets below walk exactly these, so a base that was not
+# imported by name -- or a carve that forgot this table -- fails here first.
+MIXINS = {
+    "InputVerbs": "console_input",
+    "PerfMeters": "console_perf",
+    "SettingsToggles": "console_settings",
+    "SaveVerbs": "console_saves",
+    "Notices": "console_notices",
+    "SpineVerbs": "console_spine",
+}
+
+
 def test_the_ratchet_sees_every_mixin():
-    """The walk covers the four mixins console.py names as bases; a fifth
-    that was not imported by name would be silently skipped."""
+    """The walk covers exactly the mixins console.py names as bases, each
+    from the module MIXINS pins."""
+    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
+    bases = {b.id for b in _workstation().bases if isinstance(b, ast.Name)}
+    assert _mixin_modules(tree, bases) == MIXINS
     names = [c.name for c in _workstation_classes()]
-    assert names[0] == "Workstation" and len(names) >= 5, names
+    assert names == ["Workstation"] + sorted(MIXINS), names
 
 
 def _statements(fn):

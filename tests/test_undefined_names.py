@@ -25,7 +25,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets = sorted((ROOT / "modules").glob("device_*.py"))
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
-        "console.py", "console_perf.py", "console_settings.py", "console_saves.py",
+        "console.py", "console_input.py", "console_perf.py", "console_settings.py", "console_saves.py",
         "console_notices.py", "wm_desk.py", "wm_chrome.py",
         "project.py", "player.py", "editor_app.py", "wm.py", "perf_hud.py", "update_ui.py",
         "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",

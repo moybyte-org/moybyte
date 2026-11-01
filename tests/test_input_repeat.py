@@ -493,11 +493,11 @@ def test_ball_coast_ships_off_and_carries_a_fast_roll_on_when_set(tmp_path, monk
     """BALL_COAST 0 (the shipped value) delivers every step as a step; set,
     the steps a roll makes over BALL_COAST_RATE a second become a coast that
     keeps stepping after the roll and decays to rest."""
-    from runtime import console
+    from runtime import console_input
     from test_trackball_keys import _home
     ws, _drv = _home(tmp_path)
     t = [100000]
-    monkeypatch.setattr(console, "_ticks_ms", lambda: t[0])
+    monkeypatch.setattr(console_input, "_ticks_ms", lambda: t[0])
     got = []
     ws.input.add_steps = lambda name, k: got.append((name, k))
     assert ws._coast == 0
