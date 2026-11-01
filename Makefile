@@ -52,7 +52,7 @@ setup:
 # builds (runtime/gfx_binding.py); the pure-Python raster that used to stand
 # behind it was deleted with runtime/canvas.py. So say it HERE, where the person
 # who can act on it is still watching, instead of letting them find out at the
-# first draw via `AttributeError: 'NoneType' object has no attribute 'hg_fill'`.
+# first draw via `AttributeError: 'NoneType' object has no attribute 'mg_fill'`.
 # Non-fatal on purpose: the venv and the deps are installed and useful either
 # way, and firmware work needs the ESP-IDF toolchain rather than this one.
 	@$(PYTHON) -m runtime.native_build || { \

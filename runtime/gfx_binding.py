@@ -1,12 +1,12 @@
 # Map (grep -n a name to jump there):
-#   build          the host library: moy_gfx's compositor, libmoy and the shim
+#   build          the host library: moy_gfx's kernels and libmoy
 #   _buf           a buffer's ctypes view and its capacity, shared, never copied
 #   fill           the compositor's verbs, in the native module's argument order
 #   rrect          the 2026-10 look's shapes: corners, rings, paints, shadows
 #   path_fill      filled paths and the outline faces (moy_path.c)
 #   text           petme128 and the theme fonts through moy_text
 #   sspr           the libmoy bridge verbs (sprites, maps, lines)
-"""moy_gfx's compositor surface, on CPython, over `moyhost_gfx.c`.
+"""moy_gfx's compositor surface, on CPython, over its own kernels.
 
 `device_canvas.py` is the raster on the boards and in the browser, and it
 reaches its kernel through a lazy `import moy_gfx`. This module is that kernel
@@ -22,14 +22,14 @@ one exists here (so a verb the canvas calls and this surface lacks fails on the
 day it is added, not at a call site months later), and it drives its op script
 through both this binding and the REAL native module, comparing byte for byte.
 
-TWO C PREFIXES, AND THE DIFFERENCE MATTERS. `mg_*` is
-`native/moy_gfx/moy_gfx_kernels.c` -- the compositor, ONE copy, linked by this
-shim and compiled into the MicroPython usermod. `hg_*` is `moyhost_gfx.c`, and
-after the extraction it holds only what is genuinely host-side: the libmoy
-bridge verbs (whose marshalling differs from the usermod's because ctypes and
-MicroPython hand over arguments differently) and the layer restore's engine,
-which refuses. A new compositor loop belongs in the kernels file, where it
-gets an `mg_` name and both tiers get it at once.
+NO HOST SHIM. Every symbol called here is the usermod's own C: `mg_*` is
+`native/moy_gfx/moy_gfx_kernels.c` (the compositor, the libmoy bridge verbs
+and the layer restore), compiled here beside libmoy and into the MicroPython
+usermod, whose wrappers only marshal arguments into the same functions. A new
+verb's body belongs in the kernels file, where it gets an `mg_` name and both
+tiers get it at once. The layer restore's engine, which on a board is GDMA, is
+here one of the two the kernels define for every tier: mg_copy_none (the
+synchronous path a board takes when its driver declines) or mg_copy_now.
 
 BUFFERS. The native module takes MicroPython buffer objects and derives their
 capacity through `moy_gfx_buf_w`; ctypes hands over a bare pointer, so capacity
@@ -47,19 +47,16 @@ import os
 
 from . import host_native, native_build
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SHIM = os.path.join(_HERE, "moyhost_gfx.c")
-
 # The native module's own directory, searched alongside the vendored libmoy one:
 # the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
 # usermod that also compiles it.
 _MOY_GFX = os.path.dirname(native_build.LIBMOY)
 
-# The sources compiled beside the shim. The first three are vendored libmoy --
+# The sources compiled. The vendored libmoy ones are there because
 # blit_batch, blit_map and the shape verbs are not pure compositing, they draw
-# SPRITES, and sprites are libmoy's. The last two are moy_gfx's own compositor,
-# out of the native module's directory: the SAME FILE the boards build, which is
-# the whole point of the extraction. read_sources() searches both directories
+# SPRITES, and sprites are libmoy's. The moy_gfx ones come out of the native
+# module's directory: the SAME FILES the boards build, which is the whole
+# point. read_sources() searches both directories
 # and refuses a name that appears in each, so this cannot silently pick up a
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
@@ -75,7 +72,7 @@ _SRC_DIRS = (native_build.LIBMOY, _MOY_GFX)
 
 # This module's share of the host's one library (runtime/host_native.py),
 # whose flags make a libmoy pixel the boards' RGB565.
-PART = native_build.Part("gfx", _LIBMOY, _SRC_DIRS, shim=_SHIM)
+PART = native_build.Part("gfx", _LIBMOY, _SRC_DIRS)
 
 _LIB = [None]
 
@@ -140,33 +137,36 @@ _SIGS = (
     ("moy_path_wire_swapped", [_I], None),
     # The boot splash (native/moy_gfx/moy_scr.c).
     ("moy_splash_buf", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _I, _P, _Z], _I),
-    # ...and the host-side rest.
-    ("hg_lr_size", [], _Z),
-    ("hg_lr_engine", [_I], None),
-    ("hg_lr_init", [_P, _I], None),
-    ("hg_lr_kick", [_P, _P, _Z], _I),
-    ("hg_lr_drain", [_P, _I], None),
-    ("hg_lr_blit", [_P, _P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, _I], None),
-    ("hg_lr_meter", [_P, _P, _I], None),
-    ("hg_blit_batch", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
+    # The layer restore (moy_gfx_kernels.h's mg_lr_*), its engine one of the
+    # two every tier has (mg_copy_none / mg_copy_now), passed by address.
+    ("mg_lr_size", [], _Z),
+    ("mg_lr_init", [_P, ctypes.c_bool], None),
+    ("mg_lr_kick", [_P, _P, _P, _Z], ctypes.c_bool),
+    ("mg_lr_drain", [_P, _P], None),
+    ("mg_lr_forget", [_P, _P], None),
+    ("mg_lr_blit", [_P, _P, _P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, ctypes.c_bool],
+     None),
+    ("mg_lr_meter", [_P, _P, ctypes.c_bool], None),
+    # The libmoy bridge (moy_gfx_kernels.c): the verbs that draw shapes,
+    # sprites and maps, the same functions the usermod's wrappers call.
+    # device_canvas calls circ/circb/line DIRECTLY (guarded only on the kernel
+    # existing), and reaches tri/sspr/tline through getattr with a Python
+    # fallback. Implemented alike, because "optional" there means "the board
+    # would be slower", not "the host may diverge".
+    ("mg_blit_quads", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
                        _I, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
+    ("mg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
                      _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
-    # The solid-colour libmoy verbs: device_canvas calls circ/circb/line
-    # DIRECTLY (guarded only on the kernel existing), and reaches tri/sspr/
-    # tline through getattr with a Python fallback. Implemented alike, because
-    # "optional" there means "the board would be slower", not "the host may
-    # diverge" -- a Python lane here would be the per-platform difference this
-    # whole exercise removes.
-    ("hg_line", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_circ", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_circb", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
-                _I], None),
-    ("hg_sspr", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
-                 _P, _P, _I, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_tline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
-                  _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_line", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_circ", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_circb", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I],
+     None),
+    ("mg_sspr", [_P, _Z, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                 _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
+    ("mg_tline", [_P, _Z, _I, _P, _Z, _I, _I, _P, _Z, _I, _I,
+                  _I, _I, _I, _I, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32,
+                  ctypes.c_int32, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
 )
 
 
@@ -184,7 +184,7 @@ def _lib():
             _LIB[0] = False
         else:
             d = native_build.load_cdll(path, _SIGS)
-            if d.hg_lr_size() > LR_SIZE:
+            if d.mg_lr_size() > LR_SIZE:
                 raise RuntimeError("gfx_binding: LR_SIZE is short of mg_lrestore_t")
             _LIB[0] = d
     return _LIB[0] or None
@@ -550,43 +550,54 @@ def blit_window(dst, dw, dh, src, src_w, sx, sy):
 LR_SIZE = 64
 
 
+def _engine():
+    """The address of the host's copy engine (see layer_engine)."""
+    name = "mg_copy_now" if _ENGINE_NOW[0] else "mg_copy_none"
+    return ctypes.addressof(ctypes.c_char.in_dll(_lib(), name))
+
+
+_ENGINE_NOW = [False]
+
+
 def layer_init(state, async_ok):
     arr, _ = _buf(state)
-    _lib().hg_lr_init(ctypes.cast(arr, _P), 1 if async_ok else 0)
+    _lib().mg_lr_init(ctypes.cast(arr, _P), bool(async_ok))
 
 
 def layer_kick(state, back):
     sarr, _ = _buf(state)
     darr, dcap = _buf(back)
-    return bool(_lib().hg_lr_kick(ctypes.cast(sarr, _P), ctypes.cast(darr, _P), dcap))
+    return bool(_lib().mg_lr_kick(ctypes.cast(sarr, _P), _engine(),
+                                  ctypes.cast(darr, _P), dcap))
 
 
 def layer_drain(state, forget=False):
     arr, _ = _buf(state)
-    _lib().hg_lr_drain(ctypes.cast(arr, _P), 1 if forget else 0)
+    f = _lib().mg_lr_forget if forget else _lib().mg_lr_drain
+    f(ctypes.cast(arr, _P), _engine())
 
 
 def layer_blit(state, dst, dw, dh, src, src_w, src_h, cam_x, cam_y, edited):
     sarr, _ = _buf(state)
     darr, dcap = _buf(dst)
     rarr, scap = _rbuf(src)
-    _lib().hg_lr_blit(ctypes.cast(sarr, _P), ctypes.cast(darr, _P), dcap, int(dw),
-                      int(dh), ctypes.cast(rarr, _P), scap, int(src_w), int(src_h),
-                      int(cam_x), int(cam_y), 1 if edited else 0)
+    _lib().mg_lr_blit(ctypes.cast(sarr, _P), _engine(), ctypes.cast(darr, _P), dcap,
+                      int(dw), int(dh), ctypes.cast(rarr, _P), scap, int(src_w),
+                      int(src_h), int(cam_x), int(cam_y), bool(edited))
 
 
 def layer_engine(now):
     """The host's copy engine: NONE (False, the default: every copy refused, as
     on a tier with no DMA) or NOW (True: the copy lands as it starts), which a
     test drives the predicted path with. Host only."""
-    _lib().hg_lr_engine(1 if now else 0)
+    _ENGINE_NOW[0] = bool(now)
 
 
 def layer_meter(state, zero=False):
     """(us, trips, async_ok) of a canvas's restore; `zero` zeroes the time."""
     arr, _ = _buf(state)
     out = (ctypes.c_uint32 * 3)()
-    _lib().hg_lr_meter(ctypes.cast(arr, _P), out, 1 if zero else 0)
+    _lib().mg_lr_meter(ctypes.cast(arr, _P), out, bool(zero))
     return out[0], out[1], bool(out[2])
 
 
@@ -625,7 +636,7 @@ def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt,
     ptarr = None
     if palt is not None:
         ptarr, _ = _rbuf(palt)
-    _lib().hg_blit_batch(
+    _lib().mg_blit_quads(
         ctypes.cast(darr, _P), dcap, int(dw), int(dh),
         ctypes.c_void_p(ctypes.cast(qarr, _P).value + off * 2), int(n),
         ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
@@ -638,7 +649,7 @@ def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt,
 def line(dst, dw, dh, x0, y0, x1, y1, col, cam_x=0, cam_y=0,
          cx0=0, cy0=0, cx1=None, cy1=None):
     darr, dcap = _buf(dst)
-    _lib().hg_line(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_line(ctypes.cast(darr, _P), dcap, int(dw),
                    int(x0), int(y0), int(x1), int(y1), int(col) & 0xFFFF,
                    int(cam_x), int(cam_y), int(cx0), int(cy0),
                    int(dw) if cx1 is None else int(cx1),
@@ -648,7 +659,7 @@ def line(dst, dw, dh, x0, y0, x1, y1, col, cam_x=0, cam_y=0,
 def circ(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
          cx0=0, cy0=0, cx1=None, cy1=None):
     darr, dcap = _buf(dst)
-    _lib().hg_circ(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_circ(ctypes.cast(darr, _P), dcap, int(dw),
                    int(cx), int(cy), int(r), int(col) & 0xFFFF,
                    int(cam_x), int(cam_y), int(cx0), int(cy0),
                    int(dw) if cx1 is None else int(cx1),
@@ -658,7 +669,7 @@ def circ(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
 def circb(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
           cx0=0, cy0=0, cx1=None, cy1=None):
     darr, dcap = _buf(dst)
-    _lib().hg_circb(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_circb(ctypes.cast(darr, _P), dcap, int(dw),
                     int(cx), int(cy), int(r), int(col) & 0xFFFF,
                     int(cam_x), int(cam_y), int(cx0), int(cy0),
                     int(dw) if cx1 is None else int(cx1),
@@ -668,7 +679,7 @@ def circb(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
 def tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, col, cam_x=0, cam_y=0,
         cx0=0, cy0=0, cx1=None, cy1=None):
     darr, dcap = _buf(dst)
-    _lib().hg_tri(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_tri(ctypes.cast(darr, _P), dcap, int(dw),
                   int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
                   int(col) & 0xFFFF, int(cam_x), int(cam_y),
                   int(cx0), int(cy0),
@@ -784,7 +795,7 @@ def text(dst, dw, dh, s, x, y, color, font, first, scale,
 
     Sixteen positional arguments and no defaults, because the native op takes
     exactly sixteen: a default here would let a call that TypeErrors on a board
-    quietly work on the host, which is the divergence this shim exists to
+    quietly work on the host, which is the divergence this binding exists to
     remove. `dh` is accepted and unused, like the native's (rows come from the
     buffer capacity) -- dropping it from the signature would be the tidier order
     the sspr note warns about.
@@ -813,7 +824,7 @@ def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy,
     # Argument ORDER is the native module's, not a tidier one. It reads oddly --
     # the sheet before its own source rect, the palette after the flip -- and
     # the first draft here "improved" it, which the parity test caught as a
-    # TypeError from the device side. The shim's whole job is that
+    # TypeError from the device side. The binding's whole job is that
     # device_canvas cannot tell which module it got.
     darr, dcap = _buf(dst)
     sharr, _ = _rbuf(sheet)
@@ -821,13 +832,13 @@ def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy,
     ptarr = None
     if palt is not None:
         ptarr, _ = _rbuf(palt)
-    _lib().hg_sspr(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
-                   int(sx), int(sy), int(sw), int(sh), int(dx), int(dy),
-                   int(ddw), int(ddh),
+    _lib().mg_sspr(ctypes.cast(darr, _P), dcap, int(dw),
                    ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                   int(sx), int(sy), int(sw), int(sh), int(dx), int(dy),
+                   int(ddw), int(ddh), int(ck), int(flip),
                    ctypes.cast(lutarr, _P),
                    ctypes.cast(ptarr, _P) if ptarr is not None else None,
-                   int(ck), int(flip), int(cam_x), int(cam_y),
+                   int(cam_x), int(cam_y),
                    int(cx0), int(cy0),
                    int(dw) if cx1 is None else int(cx1),
                    int(dh) if cy1 is None else int(cy1))
@@ -843,14 +854,14 @@ def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
     ptarr = None
     if palt is not None:
         ptarr, _ = _rbuf(palt)
-    _lib().hg_tline(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
-                    int(x0), int(y0), int(x1), int(y1),
-                    int(u), int(v), int(du), int(dv),
+    _lib().mg_tline(ctypes.cast(darr, _P), dcap, int(dw),
                     ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
                     ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                    int(x0), int(y0), int(x1), int(y1),
+                    int(u), int(v), int(du), int(dv), int(ck),
                     ctypes.cast(lutarr, _P),
                     ctypes.cast(ptarr, _P) if ptarr is not None else None,
-                    int(ck), int(cam_x), int(cam_y), int(cx0), int(cy0),
+                    int(cam_x), int(cam_y), int(cx0), int(cy0),
                     int(dw) if cx1 is None else int(cx1),
                     int(dh) if cy1 is None else int(cy1))
 
@@ -864,7 +875,7 @@ def blit_map(dst, dw, dh, dsx, dsy, cells, mw, mh, mx, my, rw, rh,
     ptarr = None
     if palt is not None:
         ptarr, _ = _rbuf(palt)
-    _lib().hg_blit_map(
+    _lib().mg_blit_map(
         ctypes.cast(darr, _P), dcap, int(dw), int(dsx), int(dsy),
         ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
         int(mx), int(my), int(rw), int(rh),

@@ -14,8 +14,8 @@ add_library(usermod_moy_gfx INTERFACE)
 # that calls them. Listing them here as well would define every symbol twice.
 # That file's header explains why the pragma cannot live in the vendored copies.
 #
-# moy_gfx_kernels.c is the COMPOSITOR (the loops runtime/moyhost_gfx.c also
-# links, so there is one copy); it carries its own -O3 pragma. moy_text.c is
+# moy_gfx_kernels.c is the COMPOSITOR and the libmoy bridge (the host's
+# runtime/gfx_binding.py links the same file); it carries its own -O3 pragma. moy_text.c is
 # the one UI text path, over its rasterizer; moy_backdrop.c a theme's
 # backdrop; moy_shape.c the 2026-10 look's shapes and shadows; moy_scr.c a
 # whole screen with no canvas (the boot splash, the kernel's screens); moy_path.c

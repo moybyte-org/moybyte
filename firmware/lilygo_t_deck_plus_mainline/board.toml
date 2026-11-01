@@ -164,7 +164,7 @@ ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
 file = "gfx_binding.py"
 kind = "host-only"
 why  = """
-`moy_gfx` for CPython: compiles `moyhost_gfx.c` with a C compiler found at
+`moy_gfx` for CPython: compiles its kernels with a C compiler found at
 runtime and dlopens it through ctypes. Here `moy_gfx` is a compiled-in usermod
 (native/.staged/moy_gfx). This is the host binding that would look MOST
 plausible to stage, being the host half of the very module device_canvas

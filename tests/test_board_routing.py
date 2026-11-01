@@ -506,25 +506,34 @@ def test_the_pre_kernel_guards_are_one_body():
     board never did, so a zero-height canvas drew nothing here and fourteen
     pixels on glass, and no test could see it. The clamping branches are exactly
     the ones the conformance goldens never reach, so the only defence is that
-    there is nothing to diverge -- mg_solid_prologue / mg_map_ok / mg_is_moy_sheet
-    in moy_gfx_kernels.h, called by both."""
+    there is nothing to diverge: the libmoy bridge verbs are bodies in
+    moy_gfx_kernels.c (mg_line ... mg_blit_quads), the usermod's wrappers only
+    marshal into them, and the host's ctypes binding calls the same functions
+    with no shim of its own."""
     header = (NATIVE / "moy_gfx" / "moy_gfx_kernels.h").read_text(encoding="utf-8")
     for fn in ("mg_solid_prologue", "mg_map_ok"):
         assert "static inline int %s(" % fn in header
-    surfaces = {
-        "modmoy_gfx.c": (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8"),
-        "moyhost_gfx.c": (Path("runtime") / "moyhost_gfx.c").read_text(encoding="utf-8"),
-    }
-    for name, src in surfaces.items():
-        # tri/circ/circb/line, both sides.
-        assert src.count("mg_solid_prologue(") == 4, (
-            "%s: the solid-verb prologue is written out again" % name)
-        # tline/blit_map on both sides (the device adds DrawCtx.set_map_src).
-        assert src.count("mg_map_ok(") >= 2, (
-            "%s: the map-cells guard is written out again" % name)
+    kernels = (NATIVE / "moy_gfx" / "moy_gfx_kernels.c").read_text(encoding="utf-8")
+    usermod = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    binding = (Path("runtime") / "gfx_binding.py").read_text(encoding="utf-8")
+    # tri/circ/circb/line, once.
+    assert kernels.count("mg_solid_prologue(") == 4
+    assert "mg_solid_prologue(" not in usermod, \
+        "modmoy_gfx.c: a solid verb's body is written out again"
+    # tline/blit_map (the usermod's one is DrawCtx.set_map_src's registration).
+    assert kernels.count("mg_map_ok(") == 2
+    assert usermod.count("mg_map_ok(") <= 1, \
+        "modmoy_gfx.c: the map-cells guard is written out again"
+    for src in (kernels, usermod):
         assert "MOY_MAP_MAX" not in src, (
-            "%s: the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
-            "before mw * mh can overflow" % name)
+            "the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
+            "before mw * mh can overflow")
+    for fn in ("mg_line", "mg_circ", "mg_circb", "mg_tri", "mg_sspr", "mg_tline",
+               "mg_blit_map", "mg_blit_quads"):
+        assert usermod.count(fn + "(") >= 1, "modmoy_gfx.c does not call " + fn
+        assert '("%s",' % fn in binding, "gfx_binding does not call " + fn
+    assert not (Path("runtime") / "moyhost_gfx.c").exists(), \
+        "a host shim is back: its verbs belong in moy_gfx_kernels.c"
 
 
 def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():

@@ -69,6 +69,136 @@ void mg_shape(uint16_t *dst, size_t cap, int dw, int kind,
     }
 }
 
+/* ---- the libmoy bridge ------------------------------------------------- */
+/* The solid verbs: one colour, index 0 of a one-entry table. */
+
+void mg_line(uint16_t *dst, size_t cap, int dw, int x0, int y0, int x1, int y1,
+             int col, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
+    moy_line(&c, x0, y0, x1, y1, 0);
+}
+
+void mg_circ(uint16_t *dst, size_t cap, int dw, int ccx, int ccy, int r, int col,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    if (r < 0) return;
+    if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
+    moy_circ(&c, ccx, ccy, r, 0);
+}
+
+void mg_circb(uint16_t *dst, size_t cap, int dw, int ccx, int ccy, int r, int col,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    if (r < 0) return;
+    if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
+    moy_circb(&c, ccx, ccy, r, 0);
+}
+
+void mg_tri(uint16_t *dst, size_t cap, int dw, int x1, int y1, int x2, int y2,
+            int x3, int y3, int col, int cam_x, int cam_y,
+            int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
+    moy_tri(&c, x1, y1, x2, y2, x3, y3, 0);
+}
+
+/* The sheet verbs: a full table and the transparency mask. */
+
+void mg_sspr(uint16_t *dst, size_t cap, int dw,
+             const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+             int sx, int sy, int sw, int sh, int dx, int dy, int ddw, int ddh,
+             int ck, int flip, const uint16_t *lut, const uint8_t *palt,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    moy_sheet s;
+    if (dw <= 0 || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0) return;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_canvas(&c, dst, dw, cap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&s, (uint8_t *)sheet);
+    moy_sspr(&c, &s, sx, sy, sw, sh, dx, dy, ddw, ddh, ck, flip);
+}
+
+void mg_tline(uint16_t *dst, size_t cap, int dw,
+              const uint8_t *cells, size_t cells_len, int mw, int mh,
+              const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+              int x0, int y0, int x1, int y1, int32_t u, int32_t v,
+              int32_t du, int32_t dv, int ck,
+              const uint16_t *lut, const uint8_t *palt,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    moy_sheet s;
+    moy_map m;
+    if (dw <= 0 || !mg_map_ok(mw, mh, cells_len)) return;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_canvas(&c, dst, dw, cap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&s, (uint8_t *)sheet);
+    moy_map_init(&m, (uint8_t *)cells, mw, mh);
+    /* libmoy takes (canvas, SHEET, MAP, ...) here, where map_draw takes
+     * (canvas, MAP, SHEET, ...): both are pointers, so backwards compiles
+     * cleanly and draws garbage. */
+    moy_tline(&c, &s, &m, x0, y0, x1, y1, u, v, du, dv, ck);
+}
+
+void mg_blit_map(uint16_t *dst, size_t cap, int dw, int dsx, int dsy,
+                 const uint8_t *cells, size_t cells_len, int mw, int mh,
+                 int mx, int my, int rw, int rh,
+                 const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+                 const uint16_t *lut, const uint8_t *palt, int ck, int scale,
+                 int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    moy_sheet s;
+    moy_map m;
+    if (dw <= 0 || rw <= 0 || rh <= 0 || !mg_map_ok(mw, mh, cells_len)) return;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    /* Camera ZERO on purpose: the caller resolved the region's screen
+     * position into dsx/dsy (the destination may be a hidden cache layer,
+     * where a camera means nothing), so a second one would double it. */
+    mg_canvas(&c, dst, dw, cap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&s, (uint8_t *)sheet);
+    moy_map_init(&m, (uint8_t *)cells, mw, mh);
+    moy_map_draw(&c, &m, &s, mx, my, rw, rh, dsx, dsy, ck, scale);
+}
+
+void mg_blit_quads(uint16_t *dst, size_t cap, int dw, int dh,
+                   const int16_t *quads, int n,
+                   const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+                   const uint16_t *lut, const uint8_t *palt, int key, int scale,
+                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    moy_sheet s;
+    if (dw <= 0 || dh <= 0 || n <= 0) return;
+    if (scale < 1) scale = 1;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    /* ONE canvas for the whole batch, which is the point of the verb. The
+     * camera goes in the CANVAS rather than being subtracted per item: moy_spr
+     * applies it, and its fast path hoists it out of the pixel loop. */
+    mg_canvas(&c, dst, dw, cap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&s, (uint8_t *)sheet);
+    for (int i = 0; i < n; i++) {
+        const int16_t *it = quads + (size_t)i * 4u;   /* (tile, x, y, flip) */
+        /* moy_spr refuses an out-of-range tile itself (SPEC.md: a blank tile
+         * is legal, a bad id is not an error). */
+        moy_spr(&c, &s, it[0], it[1], it[2], key, scale, it[3]);
+    }
+}
+
 /* ---- fill ------------------------------------------------------------- */
 
 void mg_fill(uint16_t *px, size_t cap, int npix, int color)
@@ -1080,4 +1210,17 @@ void mg_lr_blit(mg_lrestore_t *s, const mg_copy_engine_t *e,
     mg_blit_window(dst, dcap, dw, dh, src, scap, sw, cam_x, cam_y);
     if (e->now_us) s->us += e->now_us() - t0;
     lr_arm(s, src, scap, sw, dw, dh, cam_x, cam_y);
+}
+
+size_t mg_lr_size(void)
+{
+    return MG_LR_SIZE;
+}
+
+void mg_lr_meter(mg_lrestore_t *s, uint32_t out[3], bool zero)
+{
+    out[0] = s->us;
+    out[1] = s->trips;
+    out[2] = s->async_ok;
+    if (zero) s->us = 0;
 }

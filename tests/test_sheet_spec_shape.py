@@ -236,18 +236,18 @@ def test_libmoy_and_the_c_gate_pin_the_same_shape():
     assert got == {"MOY_SHEET_COLS": str(SHEET_COLS), "MOY_SHEET_ROWS": str(SHEET_ROWS)}
 
 
-def test_both_c_twins_still_gate_every_sheet_reading_verb():
-    # The PREDICATE is single-source now (mg_is_moy_sheet in
-    # native/moy_gfx/moy_gfx_kernels.h, which both surfaces include), so the two
-    # can no longer disagree about what a moy sheet IS. What is still per-file is
-    # the CALL SITES -- each sheet-reading verb marshals its own arguments and
-    # has to remember to ask -- and losing the gate on one tier is how that stays
-    # undetectable.
+def test_every_sheet_reading_verb_is_gated():
+    # The PREDICATE is single-source (mg_is_moy_sheet in
+    # native/moy_gfx/moy_gfx_kernels.h), and so are the verbs that ask it: the
+    # kernels' mg_blit_map, mg_blit_quads, mg_sspr and mg_tline, which the
+    # usermod's wrappers and the host's binding both call. What stays in the
+    # usermod is blit_batch's tuple form (its own marshalling, so its own
+    # gate) and set_batch_src, a REGISTRATION (not mid-frame), which raises
+    # instead of declining.
     dev = (ROOT / "native/moy_gfx"
            / "modmoy_gfx.c").read_text(encoding="utf-8")
-    host = (ROOT / "runtime/moyhost_gfx.c").read_text(encoding="utf-8")
-    # blit_map, blit_batch, sspr, tline -- plus set_batch_src on the device, which
-    # is a REGISTRATION (not mid-frame) and therefore raises instead of declining.
-    assert dev.count("if (!mg_is_moy_sheet(") == 5
+    kernels = (ROOT / "native/moy_gfx"
+               / "moy_gfx_kernels.c").read_text(encoding="utf-8")
+    assert kernels.count("if (!mg_is_moy_sheet(") == 4
+    assert dev.count("if (!mg_is_moy_sheet(") == 2
     assert "set_batch_src: not a moy sheet" in dev
-    assert host.count("if (!mg_is_moy_sheet(") == 4

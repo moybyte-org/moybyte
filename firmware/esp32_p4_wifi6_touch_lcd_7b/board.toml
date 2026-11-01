@@ -145,7 +145,7 @@ ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
 file = "gfx_binding.py"
 kind = "host-only"
 why  = """
-`moy_gfx` for CPython: compiles `moyhost_gfx.c` and dlopens it via ctypes. Here
+`moy_gfx` for CPython: compiles its kernels and dlopens them via ctypes. Here
 `moy_gfx` is a compiled-in usermod (native/.staged/moy_gfx)."""
 
 [[modules.shared.deny]]

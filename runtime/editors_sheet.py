@@ -21,7 +21,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # every sheet-READING verb refuses anything else and draws NOTHING --
 # blit_map (map), blit_batch (spr/spr_batch), sspr, tline. The gate is
 # `mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h -- ONE predicate, which
-# both the usermod and runtime/moyhost_gfx.c include; set_batch_src is the one
+# the kernels' sheet verbs call (mg_sspr/mg_tline/mg_blit_map/mg_blit_quads,
+# which the usermod and the host's binding both run); set_batch_src is the one
 # that raises instead.
 #
 # Declining silently is the RIGHT call for a draw verb: throwing mid-frame takes

@@ -46,8 +46,8 @@
 #pragma GCC optimize("O3")
 #endif
 
-// The COMPOSITOR, which this file and runtime/moyhost_gfx.c both run and used
-// to both CONTAIN: fill/fill_rect/blit565/blit565_scale/blit_window/
+// The COMPOSITOR, which this file and the host's ctypes binding both run and
+// once both CONTAINED: fill/fill_rect/blit565/blit565_scale/blit_window/
 // scroll_rect/blit_indices(_scale)/text plus the fill-run and libmoy-bridge helpers.
 // One copy now; that header says why, and why nothing may be forked back in
 // here. INCLUDED AFTER THE PRAGMA on purpose -- its mg_fill_run and canvas
@@ -242,24 +242,11 @@ static mp_obj_t moy_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
     mp_int_t scale = mp_obj_get_int(a[18]);
     int cx0 = mp_obj_get_int(a[19]), cy0 = mp_obj_get_int(a[20]);
     int cx1 = mp_obj_get_int(a[21]), cy1 = mp_obj_get_int(a[22]);
-    if (dw <= 0 || rw <= 0 || rh <= 0 || !mg_map_ok((int)mw, (int)mh, cb.len))
-        return mp_const_none;
-    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
-    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
-    {
-        moy_canvas c;
-        moy_sheet sh;
-        moy_map m;
-        mg_canvas(&c, dst, dw, dcap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
-        moy_sheet_init(&sh, (uint8_t *)sb.buf);
-        moy_map_init(&m, (uint8_t *)cb.buf, (int)mw, (int)mh);
-        // Camera is ZERO here on purpose: the caller has already resolved the
-        // region's screen position into dsx/dsy (this destination may be a
-        // hidden cache layer rather than the framebuffer, where a camera would
-        // mean nothing), so applying one again would double the offset.
-        moy_map_draw(&c, &m, &sh, (int)mx, (int)my, (int)rw, (int)rh,
-                     (int)dsx, (int)dsy, (int)ck, (int)scale);
-    }
+    mg_blit_map(dst, dcap, (int)dw, (int)dsx, (int)dsy,
+                (const uint8_t *)cb.buf, cb.len, (int)mw, (int)mh,
+                (int)mx, (int)my, (int)rw, (int)rh,
+                (const uint8_t *)sb.buf, sb.len, (int)sheetw, (int)sheeth,
+                lut, palt, (int)ck, (int)scale, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 23, 23, moy_gfx_blit_map);
@@ -320,6 +307,15 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     int cy0 = mp_obj_get_int(a[14]);
     int cx1 = mp_obj_get_int(a[15]);
     int cy1 = mp_obj_get_int(a[16]);
+    if (qitems != NULL) {
+        // The hot shape: the walk is the kernels' (mg_blit_quads), the one
+        // body the host's binding calls too.
+        mg_blit_quads(dst, dcap, (int)dw, (int)dh, qitems, (int)n_items,
+                      (const uint8_t *)sb.buf, sb.len, (int)sheetw, (int)sheeth,
+                      lut, palt, (int)key, (int)scale, (int)cam_x, (int)cam_y,
+                      cx0, cy0, cx1, cy1);
+        return mp_const_none;
+    }
     if (dw <= 0 || dh <= 0) return mp_const_none;
     if (scale < 1) scale = 1;
     if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
@@ -345,23 +341,14 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
                        cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_sheet_init(&sh, (uint8_t *)sb.buf);
         for (size_t i = 0; i < n_items; i++) {
-            mp_int_t tid, ix, iy, flip;
-            if (qitems != NULL) {
-                const int16_t *it = qitems + i * 4u;   // (tile, x, y, flip) quad
-                tid = it[0];
-                ix = it[1];
-                iy = it[2];
-                flip = it[3];
-            } else {
-                size_t ilen;
-                mp_obj_t *ielem;
-                mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
-                if (ilen < 3) continue;
-                tid = mp_obj_get_int(ielem[0]);
-                ix = mp_obj_get_int(ielem[1]);
-                iy = mp_obj_get_int(ielem[2]);
-                flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
-            }
+            size_t ilen;
+            mp_obj_t *ielem;
+            mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
+            if (ilen < 3) continue;
+            mp_int_t tid = mp_obj_get_int(ielem[0]);
+            mp_int_t ix = mp_obj_get_int(ielem[1]);
+            mp_int_t iy = mp_obj_get_int(ielem[2]);
+            mp_int_t flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
             // moy_spr refuses an out-of-range tile itself (SPEC.md: a blank tile
             // is legal, a bad id is not an error), so no guard is needed here.
             moy_spr(&c, &sh, (int)tid, (int)ix, (int)iy,
@@ -620,12 +607,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_blit_obj, 10, 10, moy_g
 
 // layer_meter(state[, zero]) -> (us, trips, async_ok); `zero` zeroes the time.
 static mp_obj_t moy_gfx_layer_meter(size_t n_args, const mp_obj_t *a) {
-    mg_lrestore_t *s = lr_of(a[0]);
-    mp_obj_t t[3] = { mp_obj_new_int_from_uint(s->us), mp_obj_new_int_from_uint(s->trips),
-                      mp_obj_new_bool(s->async_ok) };
-    if (n_args > 1 && mp_obj_is_true(a[1])) {
-        s->us = 0;
-    }
+    uint32_t m[3];
+    mg_lr_meter(lr_of(a[0]), m, n_args > 1 && mp_obj_is_true(a[1]));
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(m[0]), mp_obj_new_int_from_uint(m[1]),
+                      mp_obj_new_bool(m[2]) };
     return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_meter_obj, 1, 2, moy_gfx_layer_meter);
@@ -690,13 +675,13 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_obj, 5, 5, moy_gfx_copy)
 // clipped pixel put). The clip rect is intersected with the buffer so a bad
 // coordinate clips rather than overrunning.
 
-// The clip clamp (mg_clip), the libmoy bridge (mg_canvas / mg_canvas_solid /
-// mg_is_moy_sheet) and the PRE-KERNEL GUARDS (mg_solid_prologue / mg_map_ok)
-// used to be written here and again in runtime/moyhost_gfx.c. They are
-// moy_gfx_kernels.h's now -- one definition, both surfaces. That header carries
-// the reasoning that used to live in this block, including the `dh` decision
-// the two sides once disagreed about; a libmoy struct that grows a field is
-// edited THERE and both tiers accept it.
+// The libmoy bridge verbs (line/circ/circb/tri/sspr/tline/blit_map and
+// blit_batch's quad walk) are moy_gfx_kernels.c's: the wrappers here only
+// marshal, and the host's ctypes binding calls the same functions. The guards
+// they run (mg_clip, mg_solid_prologue, mg_map_ok, mg_is_moy_sheet) and the
+// canvas borrow (mg_canvas / mg_canvas_solid) are moy_gfx_kernels.h's, which
+// carries their reasoning, including the `dh` decision the two sides once
+// disagreed about.
 
 // fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
 // -- the #163 span batch WITHOUT a DrawCtx (#167).
@@ -780,12 +765,8 @@ static mp_obj_t moy_gfx_tri(size_t n_args, const mp_obj_t *a) {
     // The colour arrives already resolved to a 565 word, so the canvas gets a
     // one-entry table and index 0 -- libmoy writes store[col & 63] per span and
     // does not care that the other 63 slots are the same word.
-    {
-        moy_canvas c;
-        if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
-                               &cx0, &cy0, &cx1, &cy1)) return mp_const_none;
-        moy_tri(&c, (int)x1, (int)y1, (int)x2, (int)y2, (int)x3, (int)y3, 0);
-    }
+    mg_tri(dst, cap, (int)dw, (int)x1, (int)y1, (int)x2, (int)y2, (int)x3, (int)y3,
+           col, (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tri_obj, 16, 16, moy_gfx_tri);
@@ -823,19 +804,10 @@ static mp_obj_t moy_gfx_sspr(size_t n_args, const mp_obj_t *a) {
     mp_int_t cam_x = mp_obj_get_int(a[18]), cam_y = mp_obj_get_int(a[19]);
     int cx0 = mp_obj_get_int(a[20]), cy0 = mp_obj_get_int(a[21]);
     int cx1 = mp_obj_get_int(a[22]), cy1 = mp_obj_get_int(a[23]);
-    if (dw <= 0 || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0) return mp_const_none;
-    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
-    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_sspr (#97).
-    {
-        moy_canvas c;
-        moy_sheet s;
-        mg_canvas(&c, dst, dw, cap, lut, palt,
-                       cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_sheet_init(&s, (uint8_t *)sheet);
-        moy_sspr(&c, &s, (int)sx, (int)sy, (int)sw, (int)sh,
-                 (int)dx, (int)dy, (int)ddw, (int)ddh, (int)ck, (int)flip);
-    }
+    mg_sspr(dst, cap, (int)dw, sheet, sb.len, (int)sheetw, (int)sheeth,
+            (int)sx, (int)sy, (int)sw, (int)sh, (int)dx, (int)dy, (int)ddw, (int)ddh,
+            (int)ck, (int)flip, lut, palt, (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_sspr_obj, 24, 24, moy_gfx_sspr);
@@ -876,24 +848,14 @@ static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
     mp_int_t cam_x = mp_obj_get_int(a[20]), cam_y = mp_obj_get_int(a[21]);
     int cx0 = mp_obj_get_int(a[22]), cy0 = mp_obj_get_int(a[23]);
     int cx1 = mp_obj_get_int(a[24]), cy1 = mp_obj_get_int(a[25]);
-    if (dw <= 0 || !mg_map_ok((int)mw, (int)mh, cb.len)) return mp_const_none;
-    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
-    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_tline (#97). The hand transcription this replaces passed
     // every conformance scene on the HOST and failed provisional_tline on the
     // board by 2773 pixels -- which is the whole argument for calling the
     // spec's raster instead of keeping a copy of it in step by hand.
-    {
-        moy_canvas c;
-        moy_sheet s;
-        moy_map m;
-        mg_canvas(&c, dst, dw, cap, lut, palt,
-                       cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_sheet_init(&s, (uint8_t *)sheet);
-        moy_map_init(&m, (uint8_t *)cells, (int)mw, (int)mh);
-        moy_tline(&c, &s, &m, (int)x0, (int)y0, (int)x1, (int)y1,
-                  u, v, du, dv, (int)ck);
-    }
+    mg_tline(dst, cap, (int)dw, cells, cb.len, (int)mw, (int)mh,
+             sheet, sb.len, (int)sheetw, (int)sheeth,
+             (int)x0, (int)y0, (int)x1, (int)y1, u, v, du, dv, (int)ck,
+             lut, palt, (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tline_obj, 26, 26, moy_gfx_tline);
@@ -1200,17 +1162,12 @@ static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
     int cx1 = mp_obj_get_int(a[11]);
     int cy1 = mp_obj_get_int(a[12]);
     (void)dh;
-    if (r < 0) return mp_const_none;
     // libmoy's moy_circ (#97). It walks the half-width as an integer rather
     // than calling sqrt per row -- which is where the 8.4x came from when that
     // algorithm was first adopted by hand here (10,880us -> 1,297us on a P4).
     // This is the same code, now as a call rather than a copy of it.
-    {
-        moy_canvas c;
-        if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
-                               &cx0, &cy0, &cx1, &cy1)) return mp_const_none;
-        moy_circ(&c, (int)cx, (int)cy, (int)r, 0);
-    }
+    mg_circ(dst, cap, (int)dw, (int)cx, (int)cy, (int)r, col,
+            (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_circ_obj, 13, 13, moy_gfx_circ);
@@ -1234,16 +1191,11 @@ static mp_obj_t moy_gfx_circb(size_t n_args, const mp_obj_t *a) {
     int cx1 = mp_obj_get_int(a[11]);
     int cy1 = mp_obj_get_int(a[12]);
     (void)dh;
-    if (r < 0) return mp_const_none;
     // libmoy's moy_circb (#97) -- the midpoint error term, eight octant points
     // per step. A fill and an outline are different rasterizations, which is
     // why the spec keeps them as separate verbs.
-    {
-        moy_canvas c;
-        if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
-                               &cx0, &cy0, &cx1, &cy1)) return mp_const_none;
-        moy_circb(&c, (int)cx, (int)cy, (int)r, 0);
-    }
+    mg_circb(dst, cap, (int)dw, (int)cx, (int)cy, (int)r, col,
+             (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_circb_obj, 13, 13, moy_gfx_circb);
@@ -1270,12 +1222,8 @@ static mp_obj_t moy_gfx_line(size_t n_args, const mp_obj_t *a) {
     (void)dh;
     // libmoy's moy_line (#97): Bresenham, with its axis-aligned and
     // wholly-visible fast paths -- the shapes carts actually draw most.
-    {
-        moy_canvas c;
-        if (!mg_solid_prologue(&c, dst, dw, cap, col, cam_x, cam_y,
-                               &cx0, &cy0, &cx1, &cy1)) return mp_const_none;
-        moy_line(&c, (int)x0, (int)y0, (int)x1, (int)y1, 0);
-    }
+    mg_line(dst, cap, (int)dw, (int)x0, (int)y0, (int)x1, (int)y1, col,
+            (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_line_obj, 14, 14, moy_gfx_line);

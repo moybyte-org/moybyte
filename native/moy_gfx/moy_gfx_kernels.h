@@ -10,7 +10,7 @@
  * blit_window, scroll_rect and shift_rect, copy_block, blit_indices and its scaled source-rect form
  * (the sprite pickers'), the system-font (scale > 1) text rasterizer, and
  * the one-byte-a-pixel ops Paint's drawings are marked with (ifill, iline,
- * icopy, iflood). These loops were once written twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
+ * icopy, iflood). These loops were once written twice (a host shim and modmoy_gfx.c) and had already drifted; this file is
  * the one copy.
  *
  * WHY IT MATTERS MORE THAN A TIDY-UP. The goldens
@@ -177,7 +177,7 @@ static inline void mg_canvas_solid(moy_canvas *c, uint16_t *dst, int dw,
 
 /* ---- the PRE-KERNEL GUARDS, once ---------------------------------------
  *
- * These ran twice -- modmoy_gfx.c and moyhost_gfx.c -- and drifted, in exactly
+ * These ran twice -- modmoy_gfx.c and a host shim -- and drifted, in exactly
  * the way that arrangement drifts. `dh` IS DELIBERATELY NOT TESTED: the board
  * marks the argument `(void)dh` and takes its row count from the buffer
  * capacity, which is the only number that can be trusted, while the host used
@@ -230,6 +230,53 @@ static inline int mg_map_ok(int mw, int mh, size_t cells_len)
     return mw > 0 && mh > 0 && mw <= MOY_MAP_MAX && mh <= MOY_MAP_MAX
            && (size_t)(mw * mh) <= cells_len;
 }
+
+/* ---- the libmoy bridge (moy_gfx_kernels.c) ---------------------------- */
+/* The verbs that are not pure compositing: they draw shapes, sprites and
+ * maps, and those are libmoy's. Each refuses what the guards above refuse,
+ * borrows a moy_canvas for the one call and calls the spec's raster. The
+ * usermod's wrappers (modmoy_gfx.c) and the host's ctypes binding
+ * (runtime/gfx_binding.py) both call these, so the guards and the borrow are
+ * one body; the arguments are the native verbs' own, in their order, with
+ * the buffers' lengths beside them. `col` is a resolved pixel word; `lut` the
+ * 64-entry table with pal already folded in (libmoy's store[], so pal[] stays
+ * identity), `palt` the 64-byte transparency mask or NULL. */
+void mg_line(uint16_t *dst, size_t cap, int dw, int x0, int y0, int x1, int y1,
+             int col, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+void mg_circ(uint16_t *dst, size_t cap, int dw, int ccx, int ccy, int r, int col,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+void mg_circb(uint16_t *dst, size_t cap, int dw, int ccx, int ccy, int r, int col,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+void mg_tri(uint16_t *dst, size_t cap, int dw, int x1, int y1, int x2, int y2,
+            int x3, int y3, int col, int cam_x, int cam_y,
+            int cx0, int cy0, int cx1, int cy1);
+void mg_sspr(uint16_t *dst, size_t cap, int dw,
+             const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+             int sx, int sy, int sw, int sh, int dx, int dy, int ddw, int ddh,
+             int ck, int flip, const uint16_t *lut, const uint8_t *palt,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+/* u/v/du/dv are 16.16 fixed point. */
+void mg_tline(uint16_t *dst, size_t cap, int dw,
+              const uint8_t *cells, size_t cells_len, int mw, int mh,
+              const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+              int x0, int y0, int x1, int y1, int32_t u, int32_t v,
+              int32_t du, int32_t dv, int ck,
+              const uint16_t *lut, const uint8_t *palt,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+/* The camera is the caller's: the region's screen position arrives resolved
+ * in (dsx, dsy). */
+void mg_blit_map(uint16_t *dst, size_t cap, int dw, int dsx, int dsy,
+                 const uint8_t *cells, size_t cells_len, int mw, int mh,
+                 int mx, int my, int rw, int rh,
+                 const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+                 const uint16_t *lut, const uint8_t *palt, int ck, int scale,
+                 int cx0, int cy0, int cx1, int cy1);
+/* blit_batch's walk: n (tile, x, y, flip) int16 quads, one canvas for all. */
+void mg_blit_quads(uint16_t *dst, size_t cap, int dw, int dh,
+                   const int16_t *quads, int n,
+                   const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+                   const uint16_t *lut, const uint8_t *palt, int key, int scale,
+                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
 /* ---- the compositor loops (moy_gfx_kernels.c) ------------------------- */
 
@@ -535,5 +582,9 @@ void mg_lr_blit(mg_lrestore_t *s, const mg_copy_engine_t *e,
                 uint16_t *dst, size_t dcap, int dw, int dh,
                 const uint16_t *src, size_t scap, int sw, int sh,
                 int cam_x, int cam_y, bool edited);
+/* The state's size in bytes, for a caller that places it. */
+size_t mg_lr_size(void);
+/* The meters: out = (us, trips, async_ok); `zero` zeroes the time. */
+void mg_lr_meter(mg_lrestore_t *s, uint32_t out[3], bool zero);
 
 #endif /* MOY_GFX_KERNELS_H */

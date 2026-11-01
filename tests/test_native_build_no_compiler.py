@@ -78,7 +78,7 @@ def test_the_warning_goes_to_stderr_not_the_console(capsys):
 def _build_gfx(**kw):
     """Ask for the real host gfx build, whatever the environment allows."""
     from runtime import gfx_binding, host_native
-    return native_build.build_parts("moyhost_gfx", [gfx_binding.PART],
+    return native_build.build_parts("gfx_t", [gfx_binding.PART],
                                     str(ROOT / ".build" / "t"),
                                     cflags=host_native.CFLAGS, **kw)
 
