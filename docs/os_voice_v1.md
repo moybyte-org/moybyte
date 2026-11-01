@@ -3,16 +3,6 @@
 **Status:** CHOSEN VOICE DIRECTION. Grows `docs/visual_identity_v1.md` §9
 ("Voice and naming") from a seed into a working contract.
 
-**Implementation status (2026-07-23):** the §9 rewrite table is SHIPPED in the
-runtime (host-tested, full suite green): crash panel + crash-to-code popup
-reworded, the `* FAILED` status family retired for the `CAN'T <verb>` idiom
-(save/get/put/send/connect), WiFi failure is password-aware Spoken register, the
-OTA error screen states `Nothing changed.`, the block editor's lowercase status
-register is fully unified into ENGRAVED, and the About panel uses the lowercase
-wordmark. As-built deviations from the table are noted inline below. Still open:
-Moy's puzzled crash expression (§11.2), the first-boot hello (§8), and on-panel
-legibility checks for the Spoken strings (§11.3).
-
 **Scope:** every string the OS shows a kid — labels, toasts, errors, empty states,
 update screens, celebrations — plus the naming system and where personality is
 allowed to live. Kid cartridges keep their own voices. The developer docs
@@ -137,11 +127,12 @@ registers, each with a job:
 
 ### 3.1 ENGRAVED — the machine's controls
 
-ALL-CAPS, **three words or fewer**, no terminal punctuation. This is text stamped
-on the machine: verbs, labels, settings rows, tab names, status pills.
+Sentence case, as the 2026-10 look sets it (`docs/look_2026-10.md`), **three
+words or fewer**, no terminal punctuation. This is text stamped on the machine:
+verbs, labels, settings rows, tab names, status pills.
 
 ```text
-PLAY   CHANGE   MAKE   SAVED   TAP AGAIN TO DELETE   WIFI
+Play   Change   Make   Saved   Delete   Wi-Fi
 ```
 
 ENGRAVED text never forms a sentence. The moment a string needs a verb *and* an

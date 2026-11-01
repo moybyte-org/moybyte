@@ -23,7 +23,7 @@ drawings the Files app owns.
 
 | door | path | what opens |
 |---|---|---|
-| make a game | Launcher → cart → EDIT → tab ladder | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
+| make a game | home → Make → a project → the Editor's tabs | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
 | write | Launcher → Notes | the vault as a table (New note first, then each file's kind icon and its name: a note's bare, another file's with its extension), New note → a name in a dialog, one file open with Select, Copy, Cut and Paste at its foot (and Run on a `.py` or `.lua`) and undo and redo in the bar (docs/media/look_2026-10/APPS_RESTYLE.md's Notes) |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
@@ -46,9 +46,10 @@ the loader), and the app-return (`ws.returns.back()`) for a jump into another
 app's own surface (Paint, a project's Editor) -- popped by
 `Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
-**Modes** are the only thing that differs per file: Markdown (wrap, headings and
-checkboxes rendered, `[[note]]` tappable, `![[drawing]]` inline), code (the
-per-runtime highlighter and parse gate), JSON (pretty-printed at indent 2 on
+**Modes** are the only thing that differs per file. Every file draws as its
+monospace source in `ui.text_view` (`runtime/editor_handle.py`): Markdown wraps
+and is coloured as syntax (285b5d1e), its checkboxes and `[[note]]` links still
+answering a tap; code (the per-runtime highlighter and parse gate), JSON (pretty-printed at indent 2 on
 open, saved as shown; soft save refuses an invalid document; a hard exit writes
 it with an INVALID badge and the loader re-validates on the next open), plain
 text.
@@ -109,8 +110,8 @@ TOOLBAR -- SELECT, COPY, CUT, PASTE, UNDO, REDO -- carrying the Code tab's own
 labels and its `select_sticky` gesture, because it is the row a kid's hand has
 already learned. On the P4 and the Guitions long-form typing goes
 through a BLE keyboard or the phone's keyboard in the web view; on glass they
-read, tick checkboxes, make short edits and use the Config cards. No on-screen
-QWERTY is planned.
+read, tick checkboxes, make short edits and use the Config cards. An on-screen
+keyboard is #239.
 
 ## The six steps, each shippable alone
 

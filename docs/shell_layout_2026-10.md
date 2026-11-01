@@ -131,8 +131,9 @@ memory and compositors); this doc cites, it does not copy.
   `Carousel`, minted on the desk's first PROJECTS (step 7c, L17).
   `sspr` (`device/device_canvas.py`) scales INDEX sheets; the
   arbitrary-ratio RGB565 blit is `moy_gfx.blit565_resize` (step 7a).
-- **One cart runs at a time** (#73): moycore's single run slot
-  (`docs/kernel_toolkit_2026-10.md` §6). **Per-frame allocation is gated**
+- **One cart at a time is not a rule** (owner, 2026-11-01): moycore's run
+  slot (`docs/kernel_toolkit_2026-10.md` §6) is a mechanism, and background
+  services and several processes are the direction. **Per-frame allocation is gated**
   (`tests/test_frame_alloc.py`).
 - **Persisted choices** are rows of `ws.system` (`runtime/system_store.py`);
   a Settings row per choice in `runtime/settings_layer.py`. **Format 1**
@@ -738,12 +739,9 @@ step 14). The reader is strict: a name that is not installed reads as absent
 (`None`); there is no legacy shape, so the store rule costs nothing
 (CLAUDE.md, 2026-09-07). `set_theme` writes `theme` and `theme_variant` and
 nothing else, which is why the pick survives a switch: it is stored beside
-the theme, not in it. A layout the user edits is the theme's own: EDIT
-TASKBAR (theming phase 6's last step, deferrable) edits the live bar, writes
-the edited bars into the theme's `layout`, making the theme `custom` first
-when it is a seed or an installed package, and clears this row, so what was
-edited is what shows; until it lands a layout is edited through Appearance's
-Edit theme…, the Editor's theme mode (`docs/look_2026-10.md` step 33).
+the theme, not in it. A layout the user edits is the theme's own: it is
+edited through Appearance's Edit theme…, the Editor's theme mode
+(`docs/look_2026-10.md` step 33).
 
 **Precedence, in one function.** `Appearance.layout()` (`runtime/appearance.py`,
 `ws.look`) resolves the picked package's `bars` if the row is set and

@@ -33,10 +33,11 @@ and the touchscreen taps.
 Each hat has a `+` **add a block** row inside it. Put the cursor on a `+` row and
 press **A** (or tap it twice) to open the insert menu:
 
-`PICK A KIND` (a category) -> `PICK A BLOCK` (a block in that category).
+`Pick a kind` (a category) -> `Pick a block` (a block in that category).
 
-The categories are: **When...**, **Control**, **Draw**, **Buttons**, **Variables**,
-**Math**, **Sound**.
+The categories, in `CATEGORY_ORDER` (`runtime/blocks.py`), are: **When...**,
+**Control**, **Sprite**, **Looks**, **Draw**, **Buttons**, **Variables**,
+**Lists**, **Math**, **Sound**, **My Blocks**.
 
 ## Step 1 -- Make the variables
 

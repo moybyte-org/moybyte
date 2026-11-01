@@ -35,21 +35,24 @@ manager.
 
 ---
 
-## 1. One console, three presentations
+## 1. One console, several presentations
 
-Three tiers run the **same functionality**:
+Each board.toml names its tier (`[board] tier`), and the tier decides the
+presentation; CLAUDE.md lists the boards:
 
-| Tier | Screen | Presentation |
+| Tier | Boards | Presentation |
 |---|---|---|
-| LilyGO T-Deck (ESP32-S3) | 320×240 handheld | one app fullscreen at a time |
-| WebView (#22/#41) | whatever the browser gives | whichever model fits the viewport |
-| ONE (ESP32-P4, #58) | 1024×600 desktop-ish | windows, several apps at once |
+| handheld | `tdeck`, `guition_s3` | one app fullscreen at a time |
+| desktop | `p4`, `guition_p4` | windows, several apps at once |
+| browser | `firmware/web_runner/` | the handheld's or the desk's arrangement, whichever fits the viewport |
+| headless | `xiao_zero` | no screen (#41) |
 
-The ONLY difference between tiers is UI presentation — screen size and window model.
-No tier has a feature the others lack; no tier has its own shell logic. This is the
-existing host == device discipline plus the #39 responsive-layout discipline, extended
-one level up: not just "the same pixels reflow," but "the same *apps* present
-differently." A kid who learns the console on the T-Deck already knows the P4.
+No tier has its own shell logic. This is the existing host == device discipline
+plus the #39 responsive-layout discipline, extended one level up: not just "the
+same pixels reflow," but "the same *apps* present differently." A kid who learns
+the console on the T-Deck already knows the P4. Tiers may differ in features
+where the hardware does (owner, 2026-11-01): capture is the P4's, through its
+H.264 encoder (#126).
 
 ---
 
@@ -125,8 +128,7 @@ from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
 and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another, but for the Editor's own playtest, which ends
-with it: the 2026-10-31 paragraph below). One cart still runs at a time (#73's multi-cart
-boundary). The P4 device port of this tier rides #58.)*
+with it: the 2026-10-31 paragraph below). The P4 device port of this tier rides #58.)*
 
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
 `docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
@@ -477,30 +479,13 @@ is a taskbar app, so it exits via the bar's back, so its password field's BACKSP
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
 
-*(Status 2026-07-08: implemented — Settings carries a WIFI row + panel
-(scan/pick/password/connect/forget over the injected wifi service), and because
-Settings is an app, wifi setup works while a game keeps running. The panel is
-the one wifi implementation: the bar's wifi widget opens it as a popover in
-desktop mode and as the Settings page opened at it in console mode
-(`docs/shell_layout_2026-10.md` §8; the wifi tool cart was deleted for it on
-2026-10-14). Settings also
-gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
-the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
-surface / ink / focus / play / author / danger etc., resolved for every theme
-with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
-the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
-grape identity, green PLAY / orange authoring / yellow focus. The default is
-Moy's Day, the 2026-10 look, since `docs/look_2026-10.md` step 27 (2026-10-18),
-which deleted `night` and `machine` with the other old seeds. 2026-07-23: every theme family ships a **dark AND a
-light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
-`theme_variant`), and the tokens now reach the whole system: the OS bar,
-Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
-the windowed-WM strips/chips, and the editor tabs on every tier, the 320×240
-one included (its frozen dark literals retired with theming's phase 2b,
-2026-10-11). Bar icons derive plate-free
-light-mode sprites at draw time (`Workstation._bar_image`), so wifi/battery
-read on a light band. See docs/visual_identity_v1.md §4.3 for the role
-contract.)*
+Settings carries the WIFI row and panel (scan/pick/password/connect/forget over
+the injected wifi service), and because Settings is an app, wifi setup works
+while a game keeps running. The panel is the one wifi implementation: the bar's
+wifi widget opens it as a popover in desktop mode and as the Settings page
+opened at it in console mode (`docs/shell_layout_2026-10.md` §8). The look —
+themes, their Day and Night modes, the semantic colour roles — is
+`docs/look_2026-10.md`'s.
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement

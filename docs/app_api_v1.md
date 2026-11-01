@@ -160,11 +160,8 @@ now.
 ## What an app draws with
 
 An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
-2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
-`slider`, `list`, `group`, `info`, `link`, `cycle`, `seg`, `swatches`,
-`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `popover`, `menu`, `tabs`,
-`grid`, `card`, `part`, `part_at`, `split`, `focus`, `keys_taken`, `at`) and its rect algebra
-(`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
+2026-10-15): `runtime/ui.py`'s verbs (the list is that doc's §1) and its
+rect algebra (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
 `panel`, `toolbar`, `dialog`, `text_field`), the marks
@@ -395,10 +392,10 @@ it boots without those writes is in `runtime/crash_guard.py`.
 
 ## Non-goals (v1)
 
-- Kid-installed NATIVE apps -- a `runtime/` module in an image the kid did not
-  build. `register_app` is a shell seam and stays one. What #181 asked for is
-  covered by the USER APPS section above: the cart IS the app.
 - Multiple instances of one app.
+
+Native apps are the direction (owner, 2026-11-01): C apps as ELF modules
+loaded on demand (#227).
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
 anyway: `files_app` reached straight into the notebook app's layer across five

@@ -6,7 +6,7 @@ adversarial architecture pass and a performance/hardware pass the same day
 FIXES**); **§14 records each finding and where it landed**. Rev 3
 (2026-10-11) re-reads §2, §8 and §9 against what kernel sprint 6 built, rules
 on §12's questions and plans phases 1-4 as steps. The owner's decisions are in
-§1; where a phase stands is #224's.
+§1.
 **Depends on:** `docs/kernel_toolkit_2026-10.md` (sprint 6 of
 `docs/native_kernel_2026-09.md`: the toolkit's bodies in C, with style as
 data; the window managers stay Python; §8 maps every theming piece onto it).

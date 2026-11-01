@@ -7,9 +7,8 @@ console API — it supersedes the legacy `.moyproj` SDK API in
 the old parallel SDK.
 
 **Source of truth (keep this doc in sync with them):** the API namespace is built by
-`make_api()` in `runtime/host_app.py` (host reference) and the identical
-`make_api()` in `firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py`
-(device). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
+the one `make_api()` in `runtime/cart_api.py`, the same function on every tier
+(`runtime/host_app.py` and `device/device_api.py` re-export it). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
 it through `runtime/host_canvas.py`); the palette in
 `runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
@@ -127,10 +126,7 @@ logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
 The few Lua-specific notes:
 
 - `touch()` returns **multiple values**, not a tuple:
-  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer). Lua carts
-  had **no** pointer at all until 2026-09-12: the snapshot slot libmoy reads was
-  never written on either Lua tier, so `touch()` answered nil everywhere while
-  the Python twin of the same cart had one.
+  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer).
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
   `lay:map(...)`, `lay:rect(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.

@@ -660,8 +660,8 @@ def test_a_hover_owes_a_frame_only_over_a_stop():
 
 # The shell's app modules and system carts not yet moved onto the verbs: each
 # screen step that restyles an app takes it off (docs/look_2026-10.md 19-24;
-# steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a),
-# and step 27 holds the list empty.
+# steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a);
+# the editors and Paint's layer stay on it.
 NOT_MOVED = frozenset((
     "runtime/block_editor_ui.py",
     "runtime/code_layer.py",

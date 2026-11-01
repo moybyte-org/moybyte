@@ -28,8 +28,9 @@ be tried on a real board before it is anyone's default. GitHub still shows
   opinionated (see `moybyte_console_plan_2026-07.md` §2 — "learn to make"); a
   quick design conversation saves you from building something we can't merge.
 - **Carts:** carts you author are **yours** — license them however you like.
-  A community gallery is planned (#122); until then, share them in an issue
-  or your own repo.
+  To offer one for the console, see
+  [moybyte-org/carts](https://github.com/moybyte-org/carts) (#230); a store for
+  user carts is #122.
 
 ## Developer Certificate of Origin (DCO)
 
