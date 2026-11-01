@@ -6,7 +6,6 @@ This module also carried the pre-#111 history pair -- `UndoStack` and
 `UndoRedoMixin` -- until 2026-08-18: every editor core had moved onto the
 op-history `History` (and its `OpHistoryMixin` facade, runtime/op_history.py),
 leaving the pair with no importer but its own unit tests. Git history has it.
-editors.py re-exports this, so `from editors import KeyEdge` is unchanged.
 Dependency-free (freezes cleanly on CPython + MicroPython)."""
 
 

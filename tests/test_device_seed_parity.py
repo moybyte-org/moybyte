@@ -48,9 +48,9 @@ TITLE_TO_FOLDER = _gdc.title_to_folder(str(SYSTEM_CARTS))
 
 def _load_moy_runtime():
     # Mirror tests/test_device_make_api.py::_load_moy_runtime: the device does
-    # `from editors import ...` / `from audio import ...` / `from console import ...`,
-    # frozen from runtime/ (editors + audio first -- console imports both).
-    for name in ("editors", "audio", "console"):
+    # `from audio import ...` / `from console import ...`, frozen from runtime/
+    # (audio first -- console imports it).
+    for name in ("audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

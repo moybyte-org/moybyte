@@ -34,7 +34,7 @@ TIERS = ((320, 240, 1), (480, 320, 1), (800, 480, 3), (1024, 600, 2))
 def _sheet(pixels=None):
     """A fixture sheet -- spec=False: nothing here draws, tile_color only counts
     indices (see editors_sheet's SPEC.md 3.2 note)."""
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     sh = SpriteSheet(cols=4, rows=4, spec=False)
     if pixels:
         for (n, lx, ly), c in pixels.items():
@@ -110,7 +110,7 @@ def test_tile_color_memo_is_dropped_by_an_edit_to_a_DIFFERENT_tile():
 
 def _shipped_maps():
     """(cart folder name, w, h) for every seed cart that ships a tilemap."""
-    from runtime.editors import TileMap
+    from runtime.editors_sheet import TileMap
     out = []
     for d in sorted(CARTS.glob("*.moy")):
         f = d / "map.moymap"
@@ -542,7 +542,7 @@ def test_a_map_resize_refits_the_overview_cell(tmp_path):
 
 
 def test_overview_is_the_only_sub_tile_rung(tmp_path):
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     ws, _drv = _open_map(tmp_path, "Sky Run")
     for idx in range(len(ws.map_ui.layout.zooms)):
         ws.map_ui.map_zoom = idx

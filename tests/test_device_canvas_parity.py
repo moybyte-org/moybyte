@@ -61,7 +61,7 @@ from runtime import font as _host_font  # noqa: E402
 from runtime import gfx_binding  # noqa: E402
 from runtime import host_canvas  # noqa: E402
 from runtime import palette  # noqa: E402
-from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.editors_sheet import SpriteSheet, TileMap  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
@@ -443,7 +443,7 @@ class _FakeComp:
 def _load_device_canvas():
     # Inject the fake framebuf, then load moy_runtime's DeviceCanvas under CPython.
     sys.modules["framebuf"] = _FakeFramebuf()
-    for name in ("editors", "audio", "console"):
+    for name in ("editors_sheet", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -460,9 +460,9 @@ def _load_device_canvas():
     spec = importlib.util.spec_from_file_location("device_canvas", DEV / "device_canvas.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    # SpriteSheet lives in editors (the shared core); expose it for the parity
+    # SpriteSheet lives in editors_sheet (the shared core); expose it for the parity
     # tests that build sheets against the device canvas.
-    m.SpriteSheet = sys.modules["editors"].SpriteSheet
+    m.SpriteSheet = sys.modules["editors_sheet"].SpriteSheet
     return m
 
 
@@ -919,7 +919,7 @@ def _tilemap_scene(c, sheet, tm):
 
 def test_map_camera_clip_matches_host():
     m, host, dev = _both()
-    # Build a sheet + tilemap (both sides share editors.py classes).
+    # Build a sheet + tilemap (both sides share editors_sheet classes).
     # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
     # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
     # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both

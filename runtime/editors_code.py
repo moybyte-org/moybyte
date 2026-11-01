@@ -4,7 +4,7 @@
 #   CodeEditor                   the text buffer, its caret, selection and view
 #   TextMouse                    a mouse over a text editor: clicks, selection, autoscroll
 """CodeEditor -- editable text buffer + cursor (the on-device code editor, #3).
-Split out of editors.py (which re-exports it); pure logic, dependency-free."""
+Pure logic, dependency-free."""
 
 
 def _is_word_char(ch):

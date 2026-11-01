@@ -26,13 +26,12 @@ petme128 font) and persists through an injected cart store + make_api, so the
 host sim and the T-Deck render the SAME pixels from this one file.
 
 Canonical home is runtime/; build.sh stages a copy into the firmware modules/
-tree so the device freezes it (same pattern as editors.py). Keep it dependency-
+tree so the device freezes it (same pattern as the editor cores). Keep it dependency-
 free apart from the shared editor cores below.
 """
 
-# The cores the shell itself needs, from their own modules: importing the
-# `editors` umbrella would pull every editor core into a start that may never
-# open the Editor.
+# The cores the shell itself needs, each from its own module, so a start that
+# never opens the Editor loads none of the others.
 try:
     from editors_code import CodeEditor
     from editors_sheet import _SheetSprite

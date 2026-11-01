@@ -462,7 +462,7 @@ def test_graduated_blocks_tab_has_no_history(tmp_path):
 
 
 def blocks_snapshot(be):
-    from runtime.editors import _clone_tree
+    from runtime.editors_block import _clone_tree
     return _clone_tree(be.program)
 def test_music_commit_embeds_ops_in_journal(tmp_path):
     from runtime import moy_journal

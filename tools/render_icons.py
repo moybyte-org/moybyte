@@ -18,7 +18,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-# console.py uses bare `editors`/`audio`/`blocks` names (its frozen device names);
+# console.py uses bare `editors_*`/`audio`/`blocks` names (its frozen device names);
 # host_app registers those aliases, so import it first.
 from tools import pngwrite  # noqa: E402
 from runtime import host_app  # noqa: F401,E402

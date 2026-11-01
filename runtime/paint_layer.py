@@ -41,13 +41,16 @@ try:
     import ui as _ui              # frozen on device
     import ui_draw as _ui_draw
     from editor_map import checker as _checker, checker_quads as _checker_quads
+    from editors_paint_map import PaintEditor, _pe_line
+    from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
     from runtime.editor_map import checker as _checker, checker_quads as _checker_quads
+    from runtime.editors_paint_map import PaintEditor, _pe_line
+    from runtime.editors_base import KeyEdge
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from array import array
-from editors import PaintEditor, KeyEdge, _pe_line
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,

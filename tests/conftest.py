@@ -5,7 +5,7 @@ Several test files put the firmware staging tree
 (device) on sys.path to import the
 AUTHORED device modules (moy_webhost, device canvas parity, diag, ...). That
 same directory also holds BUILD-STAGED copies of the shared runtime/ sources
-(console.py, editors.py, web_view.py, web_view_page.py, ... -- gitignored,
+(console.py, editors_code.py, web_view.py, web_view_page.py, ... -- gitignored,
 re-staged by every firmware build), and both the device modules and the shared
 modules themselves import each other bare-first (the device freeze has no
 `runtime` package). So once the staging dir is on sys.path, the FIRST bare

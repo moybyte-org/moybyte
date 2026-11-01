@@ -25,7 +25,8 @@ def _pe(cols=16, rows=16):
     # spec=False: a PaintEditor scratch sheet, not a cart sheet. The editor is
     # tile-count agnostic and nothing here draws through libmoy, so a half-height
     # sheet keeps these fixtures small -- see editors_sheet's SPEC.md 3.2 note.
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
+    from runtime.editors_sheet import SpriteSheet
     return PaintEditor(SpriteSheet(cols=cols, rows=rows, spec=False))
 
 

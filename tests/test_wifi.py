@@ -49,7 +49,7 @@ def test_host_and_device_make_api_keysets_match_except_wifi(monkeypatch):
     from runtime import host_app
 
     # Load the device moy_runtime under CPython (mirrors the spike test loader).
-    for name in ("editors", "audio", "console"):
+    for name in ("audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

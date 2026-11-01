@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import blocks  # noqa: E402
 from runtime import moy_carts  # noqa: E402
-from runtime.editors import BlockEditor  # noqa: E402
+from runtime.editors_block import BlockEditor  # noqa: E402
 
 mk = blocks.make_block
 

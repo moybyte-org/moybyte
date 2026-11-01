@@ -8,7 +8,7 @@
 cart's block program, its insert menu, and the number/name/text prompts.
 
 Two layers, the same split as the console's other sub-editors:
-  * BlockEditor (runtime/editors.py) -- the pure tree-edit core: flattens the
+  * BlockEditor (runtime/editors_block.py) -- the pure tree-edit core: flattens the
     program into cursor-addressable rows, inserts/deletes/moves blocks, sets
     slot values. No canvas, no input.
   * BlockEditorUI (here) -- the UI: the outline's taps, drags and keys, the
@@ -34,8 +34,14 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-from editors import (BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree,
-                     text_key as _text_key)
+try:
+    from editors_block import BlockEditor, _clone_tree
+    from editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
+                              text_key as _text_key)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors_block import BlockEditor, _clone_tree
+    from runtime.editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
+                                      text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -401,7 +407,7 @@ class BlockEditorUI:
     # + the `+` insert points between them); A inserts (at an insert point) or steps
     # through / edits the selected block's slots. No dragging -- the decided
     # device-friendly interaction. The vocabulary/compiler is Part 1's blocks module;
-    # the BlockEditor core (runtime/editors.py) owns the tree edits, this owns the UI.
+    # the BlockEditor core (runtime/editors_block.py) owns the tree edits, this owns the UI.
 
     def _blk_move_cursor(self, d):
         be = self.blocks_ed

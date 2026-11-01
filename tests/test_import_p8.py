@@ -54,7 +54,7 @@ import import_p8  # noqa: E402
 import p8_fixture  # noqa: E402
 from runtime import moy_carts  # noqa: E402
 from runtime.audio import AudioBank, note_to_freq  # noqa: E402
-from runtime.editors import SpriteSheet  # noqa: E402
+from runtime.editors_sheet import SpriteSheet  # noqa: E402
 
 # PICO-8's synth is key_to_freq(k) = 440 * 2^((k-33)/12), so ITS pitch 33 is
 # A4. Written out here as Hz so the expectations below are notes, not indices.

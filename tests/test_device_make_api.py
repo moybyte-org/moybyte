@@ -7,7 +7,7 @@ board freezes them as and then execs the board's `moy_runtime.py`, so
 here with stub canvases: the spr() dispatch (sheet tile / Image / span /
 flip), map/mget/mset over an injected TileMap, and the tile cache a sprite
 edit must bust. The editor-core tests beside them exercise the canonical
-`runtime/editors.py` the same way.
+`runtime/editors_*.py` cores the same way.
 """
 
 import importlib.util
@@ -23,7 +23,7 @@ DEVICE = Path("device")
 # The by-path `device_api` the last _load_moy_runtime executed: the make_api
 # these tests drive. Kept here rather than read back from sys.modules, because
 # the loaders below RESTORE sys.modules once the board module has executed --
-# a bare-name `device_canvas`/`editors` left registered is what a later
+# a bare-name `device_canvas` left registered is what a later
 # suite's `isinstance`/`type(...) is` check against the package's class trips
 # over.
 _DEVICE_API = None
@@ -44,35 +44,23 @@ def _swap_back(saved):
 
 
 def _editor_class(name):
-    """An editor core, from its canonical source.
-
-    The fork's moy_runtime re-exported these (`from editors import ...`) and the
-    tests reached through it. The mainline port does not: the board gets
-    `editors.py` as a STAGED shared module, so "is it wired" is a staging
-    question, asked by test_editor_cores_are_staged_to_the_board below, and
-    "does it work" is asked of the canonical file.
-    """
-    spec = importlib.util.spec_from_file_location("editors", Path("runtime") / "editors.py")
-    mod = importlib.util.module_from_spec(spec)
-    saved = {}
-    _swap_in(saved, "editors", mod)
-    try:
-        spec.loader.exec_module(mod)
-    finally:
-        _swap_back(saved)
-    return getattr(mod, name)
+    """An editor core, from its canonical source: the board gets the
+    `editors_*` cores as STAGED shared modules, so "is it wired" is a staging
+    question and "does it work" is asked of the canonical file."""
+    mod = {"CodeEditor": "editors_code", "PaintEditor": "editors_paint_map",
+           "SpriteSheet": "editors_sheet", "TileMap": "editors_sheet"}[name]
+    return getattr(importlib.import_module("runtime." + mod), name)
 
 
 def _load_moy_runtime():
     global _DEVICE_API
     saved = {}
-    # moy_runtime does `from editors import ...` and `from console import ...`; the
-    # device freezes build-staged copies of runtime/{editors,audio,console}.py as
-    # top-level modules. Register those same canonical files so the device module
-    # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui #32
-    # / music_editor_ui #50 / perf_hud #43/#44] + audio first -- console imports
-    # all of them).
-    for name in ("editors", "block_editor_ui", "map_editor_ui", "scene_editor_ui",
+    # moy_runtime does `from console import ...`; the device freezes
+    # build-staged copies of runtime/*.py as top-level modules. Register those
+    # same canonical files so the device module loads under CPython (the editor
+    # UIs [block_editor_ui #29 Part 2 / map_editor_ui #32 / music_editor_ui #50
+    # / perf_hud #43/#44] + audio first -- console imports all of them).
+    for name in ("block_editor_ui", "map_editor_ui", "scene_editor_ui",
                  "music_editor_ui",
                  "perf_hud", "update_ui", "achievements_ui",
                  "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
@@ -247,7 +235,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     # (#32): mget/mset round-trip through it, and map() forwards to canvas.map with
     # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
     _load_moy_runtime()               # registers device_api, the make_api home
-    from editors import TileMap
+    TileMap = _editor_class("TileMap")
     sheet = _editor_class('SpriteSheet')(4, 4, spec=False)      # small fixture, not a cart sheet
     tm = TileMap(3, 3)
     mapped = []

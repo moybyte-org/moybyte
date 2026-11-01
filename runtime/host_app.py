@@ -12,15 +12,11 @@ import os
 import shutil
 import sys
 
-# console.py uses `from editors import ...` and `from audio import ...` (its frozen
-# device names). Register the canonical runtime/editors.py and runtime/audio.py under
-# those bare names so console.py imports them on the host too.
+# The shell imports `audio`, `blocks` and the editor cores by their frozen device
+# names (console.py, chrome.py, code_layer.py). Register the canonical runtime/
+# modules under those bare names so they import on the host too.
 from . import audio as _audio
 from . import blocks as _blocks
-from . import editors as _editors
-sys.modules.setdefault("editors", _editors)
-# ...and the cores the shell imports from their own modules (console.py,
-# chrome.py, code_layer.py: the umbrella stays out of the shell's start).
 from . import editors_base as _editors_base
 from . import editors_code as _editors_code
 from . import editors_sheet as _editors_sheet
@@ -33,8 +29,9 @@ sys.modules.setdefault("audio", _audio)
 sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
 # block_editor_ui.py / map_editor_ui.py / music_editor_ui.py are the block/map/
 # music editors' UI (issues #29 Part 2 / #32 / #50, extracted from console.py);
-# each does `from editors import ...` (needs the alias above, music_editor_ui.py
-# also does `from audio import ...`, needs the alias above too) and console.py
+# each imports its editor core (`editors_block`/`editors_paint_map`/
+# `editors_music`, bare or under `runtime.`; music_editor_ui.py also does
+# `from audio import ...`, which needs the alias above) and console.py
 # does `from block_editor_ui import BlockEditorUI, ...` / `from map_editor_ui
 # import MapEditorUI, ...` / `from music_editor_ui import MusicEditorUI, ...`
 # (their own frozen device names), so they need the same bare-name aliasing --

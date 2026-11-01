@@ -30,7 +30,7 @@ under test proves nothing about the class under test.
 import pytest
 
 from runtime import host_canvas
-from runtime.editors import SpriteSheet, TileMap
+from runtime.editors_sheet import SpriteSheet, TileMap
 from runtime.moy_image import Image
 from runtime.palette import MOY64
 

@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def _me(w=10, h=10):
     # spec=False: a MapEditor fixture sheet, not a cart sheet -- nothing here
     # draws, only tile ids are placed (see editors_sheet's SPEC.md 3.2 note).
-    from runtime.editors import MapEditor, TileMap, SpriteSheet
+    from runtime.editors_paint_map import MapEditor
+    from runtime.editors_sheet import TileMap, SpriteSheet
     return MapEditor(TileMap(w, h), SpriteSheet(cols=16, rows=16, spec=False))
 
 

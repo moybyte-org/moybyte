@@ -44,7 +44,7 @@ def _pin_clock(ws, drv):
 # -- IconSheet (16x16 tiles) ------------------------------------------------
 
 def test_icon_sheet_is_16x16():
-    from runtime.editors import IconSheet
+    from runtime.editors_sheet import IconSheet
     s = IconSheet()
     assert s.TILE == 16
     assert (s.cols, s.rows) == (8, 4)           # 32 slots = 128x64 px
@@ -60,7 +60,7 @@ def test_icon_sheet_is_16x16():
 def test_icon_sheet_kgfx_roundtrips_for_16x16():
     """The flat .moygfx hex format serializes/parses a 128x64 (16x16-tile) sheet just
     like an 8x8 SpriteSheet -- one nibble per pixel, h rows of w nibbles."""
-    from runtime.editors import IconSheet
+    from runtime.editors_sheet import IconSheet
     s = IconSheet()
     s.tset(0, 1, 2, 9)                           # paint a pixel in tile 0
     s.tset(31, 15, 15, 11)                       # ... and the last tile's corner

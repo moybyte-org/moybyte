@@ -22,7 +22,7 @@ all back and re-exports under the pre-extraction `console.X` names, so every cal
 test is unchanged.
 
 Canonical home is runtime/; build.sh stages a copy into the firmware modules/ tree so
-the device freezes it (same pattern as editors.py). It depends only on leaf modules --
+the device freezes it (same pattern as the editor cores). It depends only on leaf modules --
 editors/widgets + the surface geometry constants from bar_layer/settings_layer/
 code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.

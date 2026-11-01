@@ -5,7 +5,7 @@ behavior is covered by the editor test suites over the #111 op-history core.
 (The UndoStack half this file also pinned was deleted 2026-08-18 with its
 class -- no editor had used it since #111.)"""
 
-from runtime.editors import KeyEdge
+from runtime.editors_base import KeyEdge
 
 
 # -- KeyEdge -----------------------------------------------------------------

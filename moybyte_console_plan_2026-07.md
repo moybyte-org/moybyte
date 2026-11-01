@@ -63,7 +63,7 @@ Picotron and TIC-80 remain the north-star references for *grammar* (everything-i
 
 v0.4 described *one* device. v0.5's central architectural claim is:
 
-> **One console, N backends. A tier is a backend port, not a fork.** The shared `console` / `editors` / `moy_carts` modules, the cart format, and the **320×240 indexed MOY64 canvas contract** are identical across every tier. Only the display / input / storage / transport backend differs. **The cart contract is the portability guarantee — the technical promise everything else rests on.**
+> **One console, N backends. A tier is a backend port, not a fork.** The shared `console` / `editors_*` / `moy_carts` modules, the cart format, and the **320×240 indexed MOY64 canvas contract** are identical across every tier. Only the display / input / storage / transport backend differs. **The cart contract is the portability guarantee — the technical promise everything else rests on.**
 
 ---
 
@@ -200,7 +200,7 @@ MicroPython runtime  (device backend: DeviceCanvas + make_api + TrackBall/Touch/
    ↓
 Shared console  (host == device, staged into firmware at build)
    - console.py     Launcher + Pointer + Workstation + top bar + mode switching
-   - editors.py     CodeEditor / SpriteSheet / PaintEditor / IconSheet
+   - editors_*.py   CodeEditor / SpriteSheet / PaintEditor / IconSheet
    - moy_carts.py   the .moy store (scan/load/save/create/dup/del/seed)
    ↓
 Cartridge userland  (.moy: games, wallpapers, widgets, tools, lessons)
@@ -344,7 +344,7 @@ One 18px bar: icon-only mode switchers (home/edit/paint/map/blocks) on the left,
 
 The web view (#22/#41) is not just for play. Because keyboard-less tiers (Zero, and a D-pad Player) can't comfortably author on-device, **authoring for those tiers happens through the web view**, where the phone/PC supplies a real keyboard and a big screen.
 
-> **DECIDED direction — remote the *same* editor, don't fork it.** The browser is a thin terminal: the device runs the real `editors.py`, streams it over the #22 draw-command protocol, and the browser sends keystrokes back. **One editor codebase** — preserving host==device. (The rejected alternative — a separate JS editor in the browser — means maintaining two editors and syncing their features + file formats forever.)
+> **DECIDED direction — remote the *same* editor, don't fork it.** The browser is a thin terminal: the device runs the real editor cores (`editors_*.py`), streams it over the #22 draw-command protocol, and the browser sends keystrokes back. **One editor codebase** — preserving host==device. (The rejected alternative — a separate JS editor in the browser — means maintaining two editors and syncing their features + file formats forever.)
 >
 > The one detail to nail under this: what resolution the editor renders at when remoted to a phone viewport vs. running native on the One's panel.
 

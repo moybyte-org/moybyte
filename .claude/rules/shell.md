@@ -116,8 +116,11 @@ to whoever called it.
   `Workstation.system_key`; the T-Deck's is Mic); BACKSPACE is a plain key with
   no hold gesture, so a `textmode(True)` game needs no exit of its own. Tools
   and apps leave by the bar's back. `docs/shell_ux_v1.md` §9 and §9a.
-- `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
-  `IconSheet` (16×16 icon tiles: the shell's baked bar icons and a theme's own pixel tiles). (frozen as `editors`)
+- `runtime/editors_*.py` — the editor cores, one module per editor:
+  `CodeEditor` (`editors_code`), `SpriteSheet` / `TileMap` / `IconSheet` (16×16
+  icon tiles: the shell's baked bar icons and a theme's own pixel tiles;
+  `editors_sheet`), `PaintEditor` (`editors_paint_map`). Each is frozen under
+  its own name.
 - **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo
   journal; the #108 user-files layer beside it is native/moy_store's
   `moy_ufiles`, which `moy_carts` names reach and the files role's C rows
