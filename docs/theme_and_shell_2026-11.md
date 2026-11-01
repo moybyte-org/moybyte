@@ -1471,7 +1471,7 @@ thing in both modes; what differs is only the container a component opens in
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status), headed by the back chevron where the bar has a way back and no `close` | the surface's zone generation | the chevron: the way back; the rest the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
 | `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
-| `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8.6): the Settings panel as a popover in desktop mode, the Settings page scrolled to it in console mode | 16×16 / 16×16 |
+| `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8.6): the Settings panel as a popover hung from the widget, in both modes | 16×16 / 16×16 |
 | `battery` | the battery glyph | the level bucket | the power component: Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings (owner, 2026-10-13) | 16×16 / 16×16 |
 | `chips` | the taskbar's window chips (desktop mode) | `_chip_sig` | focus, minimise, restore as today | one chip 24×16, flexes / icon chips 16×16 each |
 | `text` | a theme string, 1 to 24 characters | constant | — | fit / fit |
@@ -1743,7 +1743,7 @@ the container's business, not the component's.
 
 | anchor | component | navigation inside |
 |---|---|---|
-| `menu` | the system menu's rows, as today | rows |
+| `menu` | the system menu's rows | rows |
 | `clock` | the month calendar, today marked; left/right page months | a 7-column grid; the day cursor is display only |
 | `wifi` | the Settings WIFI panel's rows, the one implementation (owner, 2026-10-13: the `moybyte.wifi.moy` tool cart goes, `docs/history/shell_layout_2026-10.md` §13 step 6) — its radio lease is released whenever the container closes, a tap outside included | rows; picking one runs the password step in the same container |
 | `battery` | Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings — one implementation, the popover a container for it | rows |

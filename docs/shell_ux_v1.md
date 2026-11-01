@@ -9,8 +9,9 @@ affordance left to keep), and §9 (tools/apps run with a minimal bar; text-mode 
 exit via the new `quit()` cart verb). It remains the "what the user experiences"; the
 "how" docs beneath it are
 implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
-`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
-`docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
+`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`, and
+`shell_architecture_v1.md`, superseded; `runtime/system_api.py` is the authority
+on the cart API's trust level). The shipped module
 map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
 `Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
@@ -141,9 +142,9 @@ parked, off the back-stack, and the fullscreen **home** shows — the same
 home every board has (`docs/theme_and_shell_2026-11.md` §8.10: its Games / Mine /
 Apps / Make tabs, the Games tab holding no app): a tap runs a game
 FULLSCREEN exactly like the small tiers (the pause menu's Quit exits back to the
-home), and a tap on the Make tab and a card's CHANGE open the Editor
-fullscreen, as there. The home's X — B from a keyboard — is the way back to
-the desk, its windows where they were. The Player tier only ever gets the
+home), and the Editor, from Make or CHANGE, is a desk window
+(`docs/theme_and_shell_2026-11.md` L18). The bar's back — B or Esc from a
+keyboard — is the way back to the desk, its windows where they were. The Player tier only ever gets the
 home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
@@ -232,8 +233,8 @@ every screen a kid starts on.
 
 The default layout is a single OS-owned 18px top bar with two zones; a theme's
 layout places the same widgets in bars on any edge (`docs/theme_and_shell_2026-11.md`
-§8.2). This is the #46 bar, re-framed: it stopped being a hardcoded strip of mode
-buttons and became an OS shell with an app-populated region.
+§8.2). It is the #46 bar as an OS shell with an app-populated region, not a
+hardcoded strip of mode buttons.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
   Editor loads its tab ladder + PLAY here (§6, no SAVE -- #111); the home puts
@@ -242,8 +243,7 @@ buttons and became an OS shell with an app-populated region.
   the OS owns the zone's existence and bounds.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
   opening its component (the WIFI panel, the calendar, the power rows) as a popover
-  in desktop mode and fullscreen in console mode (`docs/theme_and_shell_2026-11.md`
-  §8.6). Apps cannot draw here; the right zone is how the OS stays present
+  hung from it, in both modes (`docs/theme_and_shell_2026-11.md` §8.6). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
   320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
@@ -482,10 +482,10 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 Settings carries the WIFI row and panel (scan/pick/password/connect/forget over
 the injected wifi service), and because Settings is an app, wifi setup works
 while a game keeps running. The panel is the one wifi implementation: the bar's
-wifi widget opens it as a popover in desktop mode and as the Settings page
-opened at it in console mode (`docs/theme_and_shell_2026-11.md` §8.6). The look —
-themes, their Day and Night modes, the semantic colour roles — is
-`docs/history/look_2026-10.md`'s.
+wifi widget opens it as a popover in both modes, and an app that asks for the
+Wi-Fi page gets Settings' page in console mode (`docs/theme_and_shell_2026-11.md`
+§8.6). The look — themes, their Day and Night modes, the semantic colour roles —
+is `docs/theme_and_shell_2026-11.md` §2-§6's.
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
@@ -569,9 +569,11 @@ clean its boundaries are.
 archived under `docs/history/` — `shell_ux_technical_plan_v1.md` (the staged migration
 that shipped the 2026-07 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
 that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
-its per-surface `make_system_api` track remains open) — plus
-`docs/shell_architecture_v1.md` (privileged system carts §2 + the layered compositor
-§3), which stays current.
+its per-surface `make_system_api` track remains open) and `shell_architecture_v1.md`
+(privileged system carts and the layered compositor; superseded, and
+`runtime/system_api.py` is the authority on the cart API's trust level). Beside
+this doc, `docs/theme_and_shell_2026-11.md` is the contract for the theme
+format, the bars and modes, the home, scrolling and the text files.
 
 Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
 `runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`,

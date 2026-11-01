@@ -405,7 +405,7 @@ resolution is by REGISTERED ID, so no app holds a reference to another app's
 class and a build without the target degrades to a status line. IPC beyond
 "open that, pointed here" is still out.
 
-The Files ROUTER (docs/theme_and_shell_2026-11.md §10) is the seam's second customer,
+The Files ROUTER (docs/theme_and_shell_2026-11.md §10.2) is the seam's second customer,
 and it added verbs that are all "open that, pointed here":
 `nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
 the project Editor, `nav.open_text(name, kind, mode)` opens a document on
