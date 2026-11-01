@@ -966,7 +966,7 @@ class DeviceCanvas:
         # remap, one slice-copy per real reset) instead of the 64-iteration
         # rebuild _sync_gate_pal does: the celeste shim calls pal() reset every
         # frame and pal-sandwiches around tinted draws, and the rebuild was ~80%
-        # of a 5us pal() body (unix-MP attribution, experiments/state_verb_cost;
+        # of a 5us pal() body (unix-MP attribution, #192 and a791c33;
         # the trampoline crossing itself measured 0.07us -- the cost was always
         # this body). Invariant: _gate_pal mirrors _pal_map after every mutation;
         # tests/test_gate_pal_sync.py pins it against the full rebuild.
