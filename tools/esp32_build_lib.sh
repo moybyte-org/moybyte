@@ -328,6 +328,24 @@ moybyte_patch_p4_dsi_underrun() {
   fi
 }
 
+# The ESP32-P4 SRM macro-block-order patch (both P4 boards, marker-guarded
+# like the DSI one because the IDF checkout is shared): ESP-IDF's DIG-734
+# workaround, backported from release/v5.5 (1b13ef0498) and extended to
+# 90/270 rotations. The SRM's macro-block reorder deadlocks against the 2D-DMA
+# RX FIFO when an operation's last transfer unit is smaller than the FIFO:
+# the TX channel delivers the whole input, the RX FIFO fills and never drains,
+# no EOF comes, and every later PPA transaction queues behind it -- the
+# Guition P4's 500ms present-fence timeouts and the watchdog reset after them
+# (a 1280x258 block turned 270 into the portrait scan buffer, caught on glass
+# 2026-11-01). The patch bypasses the reorder for exactly those operations.
+moybyte_patch_p4_ppa_srm_mb_order() {
+  local f="${IDF_DIR}/components/esp_driver_ppa/src/ppa_srm.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: the SRM engine's macro-block reorder" "${f}"; then
+    echo "== applying P4 PPA SRM macro-block-order bypass (DIG-734)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_ppa_srm_mb_order_bypass.patch"
+  fi
+}
+
 # PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
 # 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
 # for verified flash vendor IDs (0xC8/0x20) and otherwise returns

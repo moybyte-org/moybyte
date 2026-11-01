@@ -86,6 +86,18 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   count that retires it, flagged completions, the two band flags — read the
   stalls, because a retired pipeline and a picture that never qualified both
   answer −1).
+  **A rotate whose last transfer unit is smaller than the 2D-DMA FIFO skips
+  the SRM's macro-block reorder** (`patches/p4_ppa_srm_mb_order_bypass.patch`,
+  both P4 boards, 2026-11-01): with the reorder on, such a rotate deadlocks
+  the engine against the RX FIFO — the TX channel has delivered every input
+  byte, the RX FIFO sits full, no EOF ever comes — and every later PPA
+  transaction queues behind it: the 500ms present-fence timeouts and the
+  watchdog reset after them, on the desk carousel's key rows. The wedged
+  rotate caught on glass was a 1280×258 block turned 270°: its last unit
+  across the OUTPUT is 2 pixels wide, so ESP-IDF's own DIG-734 test
+  (release/v5.5, which measures the input block only) passes it, and the
+  patch measures the turned block too. The bypass is per rotate, not
+  always on, because it costs the engine time on every rotate that takes it.
   A frame's quietness is the canvas's word (`P4SystemCanvas._gates_unchanged`):
   the two native gate counters plus the surface's own CLEAR count, because a
   `cls` is the one whole-surface write the gates cannot see (moy_ppa.fill on

@@ -249,9 +249,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   source — never seen by the S3 scan — plus the kernel's DSI compositors
   (`native/moy_glass/moy_present.h`: `moy_glass.DsiCompositor` and
   `RotatedCompositor`, over the modules each board passes in), `device/p4_canvas.py` and
-  `device/p4_desktop.py` over `device/desktop_spine.py`. The P4's one silicon
-  patch is `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
-  `moybyte_patch_p4_dsi_underrun`. Status and numbers: #58, #202.
+  `device/p4_desktop.py` over `device/desktop_spine.py`. The P4's silicon
+  patches are `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
+  `moybyte_patch_p4_dsi_underrun` and `patches/p4_ppa_srm_mb_order_bypass.patch`
+  (the SRM deadlock a rotate with a sub-FIFO last unit hits) behind
+  `moybyte_patch_p4_ppa_srm_mb_order`. Status and numbers: #58, #202.
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the

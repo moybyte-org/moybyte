@@ -59,6 +59,10 @@ moybyte_setup_idf esp32p4
 #     this directory's patches/ until 2026-09-06; it lives in patches/p4_*.patch now.
 moybyte_patch_p4_dsi_underrun
 
+# 2b) The P4 SRM macro-block-order bypass (shared lib, both P4 boards): the
+#     DIG-734 deadlock the Guition P4's rotated present hit (the lib says why).
+moybyte_patch_p4_ppa_srm_mb_order
+
 # 2c) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
