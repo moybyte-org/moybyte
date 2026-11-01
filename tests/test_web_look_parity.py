@@ -79,7 +79,8 @@ def _web_glass(name):
 def test_the_console_boards_are_found():
     names = sorted(b.name for b in CONSOLES)
     assert names == ["esp32_p4_wifi6_touch_lcd_7b", "guition_jc3248w535",
-                     "guition_jc8012p4a1c", "lilygo_t_deck_plus_mainline"], names
+                     "guition_jc8012p4a1c", "lilygo_t_deck_plus_mainline",
+                     "m5stack_core2"], names
 
 
 @pytest.mark.parametrize("arrangement", sorted(ARRANGEMENTS))

@@ -175,7 +175,7 @@ def test_the_p4s_build_one_at_a_time_and_the_s3s_together(bench):
     # The barrier breaks unless both S3 builds are in it at once.
     steps = FakeSteps(s3_barrier=threading.Barrier(2, timeout=5))
     assert run_pass(bench, steps, "--all") == 0
-    assert steps.peak == {"esp32p4": 1, "esp32s3": 2}
+    assert steps.peak == {"esp32p4": 1, "esp32s3": 2, "esp32": 1}
 
 
 def test_each_step_gets_the_resolved_port_and_the_suite_its_variable(bench):

@@ -1,0 +1,548 @@
+#  Moybyte board definition -- M5Stack Core2 (v1.1) on MAINLINE MicroPython
+#  =========================================================================
+#
+#  The first classic-ESP32 board (ESP32-D0WDQ6-V3, 16MB flash, 8MB quad PSRAM,
+#  CH9102 USB-UART), with the Faces Bottom3 and the Faces Gamepad3 on its
+#  M5-Bus. Its glass is the T-Deck's geometry -- 320x240 landscape SPI, the
+#  SD card on the panel's SPI host -- so it is the T-Deck's tier and takes the
+#  T-Deck's panel module (`firmware/lilygo_t_deck_plus_mainline/native/moy_lcd`)
+#  with its own board facts in mpconfigboard.h, rather than a copy of it.
+#
+#  What is this board's own: the AXP2101 power IC that gates the panel rail,
+#  the backlight and the speaker (`native/moy_core2`), the FT6336U touch, the
+#  gamepad on the internal I2C bus, and a UART console. Read `README.md` in this
+#  directory first.
+
+[board]
+name    = "m5stack_core2"
+chip    = "esp32"
+ota     = "core2"           # the board id inside a signed OTA manifest (#53)
+tier    = "handheld"
+tier_why = """
+320x240, ONE canvas: the system surface IS the game surface, the T-Deck's
+arrangement, so `wm.FullscreenStackWM` is its window manager and the windowed
+desktop tier is denied below. No [panel] block, for the T-Deck's reason (its
+board.toml carries the 2026-09-06 arithmetic): this glass is 2.0" at 320x240,
+denser than the T-Deck's, which makes that verdict stronger, not weaker."""
+
+# ---------------------------------------------------------------------------
+
+[modules]
+dest = "modules"
+
+# `modules/` is BUILD OUTPUT plus a handful of board-authored files, and
+# `freeze()` in the generated manifest freezes the whole DIRECTORY -- not the
+# list build.sh copied. So a shared module that stops being staged keeps being
+# frozen forever on any tree that has built before. The stager PRUNES: any
+# untracked `.py` in `modules/` that this file does not stage and `keep` does
+# not name is deleted, loudly, at the top of every build.
+prune = true
+keep  = [
+  # Generated later in build.sh, into the same directory.
+  "carts_data.py",   # tools/gen_device_carts.py, from system_carts/
+  "fonts_data.py",   # tools/make_font.py, the tier's font set
+  "_ota_build.py",   # the OTA channel/version/label/board stamp (#53)
+]
+
+[modules.shared]
+source   = "runtime"
+strategy = "denylist"
+why = """
+Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
+
+WHY THE WHOLE CONSOLE STAGES FROM STAGE 2, before anything runs it. This port
+lands in six commits (panel, touch, keyboard, SD, audio, console) so the owner
+can bisect a hardware misbehaviour by flashing the last good one. That only
+works if consecutive images differ by the THING UNDER TEST -- an image that
+also grew a megabyte of frozen console between two flashes makes "stage 4 broke
+it" ambiguous. Frozen bytecode nothing imports costs flash and nothing else, so
+the module set is settled once, here, and the later stages add native modules
+and board code against a fixed baseline. It also means the declaration is
+written once instead of edited five times, which is the drift it exists to
+prevent.
+
+An allowlist asks "did somebody remember to add this?", so a new shared module
+is invisible to a board until a human edits a shell script; a denylist asks "is
+there a reason this must not cross?", which is a question with an answer someone
+can check. The bug is never loud when it happens, because every consumer in this
+tree is capability-gated. `tests/test_staging_closure.py` derives this board's
+frozen set from THIS FILE and asserts every import of every staged module can
+resolve on this target."""
+
+# -- host-only: real code, real purpose, impossible or wrong on a board ------
+
+[[modules.shared.deny]]
+file = "host_app.py"
+kind = "host-only"
+why  = """
+The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
+`build_workstation()`. It imports the host's world wholesale. Not a board."""
+
+[[modules.shared.deny]]
+file = "host_api.py"
+kind = "host-only"
+why  = """
+The HOST side of the cart-API backend: FakeWifi (the recordable service
+fake) and ConsoleDriver (the sim/web per-frame driver). Since
+2026-08-17 make_api itself is ONE body in the shared `cart_api.py` (which DOES
+stage here) and host_api merely re-exports it -- so this denial is no longer
+about duplicate backends, it is about dead weight: nothing on a board
+constructs a fake service or a sim driver. host_api stays deliberately
+portable (the web runner freezes it for exactly those classes)."""
+
+[[modules.shared.deny]]
+file = "host_canvas.py"
+kind = "host-only"
+why  = """
+Runs the BOARDS' canvas class on CPython -- it builds `DeviceCanvas` over a
+ctypes compositor so the host stops having a second raster. The board has the
+real one; this is the adapter that exists only because CPython isn't one."""
+
+[[modules.shared.deny]]
+file = "net_binding.py"
+kind = "host-only"
+why  = """
+`moy_net` for CPython: compiles native/moy_net and dlopens it through ctypes.
+Here `moy_net` is a compiled-in usermod (native/.staged/moy_net)."""
+
+[[modules.shared.deny]]
+file = "moy_input.py"
+kind = "host-only"
+why  = """
+`moy_input` for CPython: compiles native/moy_input and dlopens it through
+ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
+
+[[modules.shared.deny]]
+file = "moy_play.py"
+kind = "host-only"
+why  = """
+`moy_play` for CPython: compiles native/moy_play's Player and dlopens it
+through ctypes. Here `moy_play` is the compiled-in `moy_play` usermod (native/.staged/moy_play)."""
+
+[[modules.shared.deny]]
+file = "moy_loop.py"
+kind = "host-only"
+why  = """
+`moy_loop` for CPython: compiles native/moy_kernel's frame loop and dlopens it
+through ctypes. Here `moy_loop` is part of the compiled-in `moy_kernel` usermod (native/.staged/moy_kernel)."""
+
+[[modules.shared.deny]]
+file = "glass_binding.py"
+kind = "host-only"
+why  = """
+`moy_glass` for CPython: compiles native/moy_glass and dlopens it through
+ctypes. Here `moy_glass` is a compiled-in usermod (native/.staged/moy_glass)."""
+
+[[modules.shared.deny]]
+file = "gfx_binding.py"
+kind = "host-only"
+why  = """
+`moy_gfx` for CPython: compiles `moyhost_gfx.c` with a C compiler found at
+runtime and dlopens it through ctypes. Here `moy_gfx` is a compiled-in usermod
+(native/.staged/moy_gfx). This is the host binding that would look MOST
+plausible to stage, being the host half of the very module device_canvas
+imports."""
+
+[[modules.shared.deny]]
+file = "lua_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's Lua binding, compiled on demand -- the host's answer to
+the `moy_lua`/`moycore` usermods this board compiles in."""
+
+[[modules.shared.deny]]
+file = "audio_binding.py"
+kind = "host-only"
+why  = """
+`moy_audio` for CPython: ctypes over native/moy_audio and the vendored libmoy
+synth. Here `moy_audio` is the usermod, the kernel's audio."""
+
+[[modules.shared.deny]]
+file = "native_build.py"
+kind = "host-only"
+why  = """
+The shared compile-and-cache helper the three bindings above use: subprocess to
+a C compiler, a hash-keyed .so cache under .build/. There is no compiler on a
+board, and nothing to compile if there were."""
+
+[[modules.shared.deny]]
+file = "host_native.py"
+kind = "host-only"
+why  = """
+The host's one native library: every binding's C compiled together by
+native_build and ctypes-loaded once. A board links its modules into the image."""
+
+[[modules.shared.deny]]
+file = "moycore.py"
+kind = "host-only"
+why  = """
+`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
+over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
+
+
+[[modules.shared.deny]]
+file = "wasm_host.py"
+kind = "host-only"
+why  = """
+The host's compiled-cart runner, over `wasm_binding`. The device's is moycore's wasm half, driven by moycore_glue.py over the moy_wasm engine."""
+
+[[modules.shared.deny]]
+file = "wasm_binding.py"
+kind = "host-only"
+why  = """
+ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
+compiled on demand -- no compiler, git or cmake on a board."""
+[[modules.shared.deny]]
+file = "input.py"
+kind = "host-only"
+why  = """
+The host's `InputState`: the host's eight names over the input table. A board
+reads the kernel's table (`moy_input.kernel()`, all fifteen names), and the
+scripted-input suite already learned what freezing both costs: staging
+runtime/input.py made it compare the host against the host."""
+
+# -- never on a board: importing it RAISES, which reads as a missing feature --
+
+[[modules.shared.deny]]
+file = "palette.py"
+kind = "never-on-a-board"
+why  = """
+Builds MOY64's indices 16-63 with CPython's `colorsys` at IMPORT time, and
+MicroPython has none. VERIFIED ON P4 GLASS 2026-08-15 against firmware built
+before it was unstaged: `import colorsys`, `import palette` and `import canvas`
+all raise ImportError, and the consequence is visible one level up --
+`wallpaper._ensure_preview()` returns False and the Appearance screen's
+cart-wallpaper panel drew its black fill and nothing else, on both boards, for
+as long as it had existed. A module that raises on import is WORSE than one
+that is missing, because every caller here is guarded, so it surfaces as a
+feature that quietly does not exist. `device_canvas.PAL565` is the baked twin
+this board reads instead."""
+
+[[modules.shared.deny]]
+file = "canvas.py"
+kind = "never-on-a-board"
+why  = """
+TRIPWIRE -- this file no longer exists. `runtime/canvas.py` was the pure-Python
+indexed raster, deleted 2026-08-15 when the host moved onto
+`device_canvas.DeviceCanvas` like every other tier. The entry stays because a
+denylist tolerates naming a file that is not there, and if this name comes back
+it should be by decision."""
+
+# -- tier: real on this repo's OTHER presentation tier, wrong on this one -----
+
+[[modules.shared.deny]]
+file = "wm_windowed.py"
+kind = "tier"
+why  = """
+The Picotron-style WINDOWED desktop (#73/#105): the desk world, WM title
+strips, drag/resize, per-window layout contexts, the taskbar. It is the P4's
+and the host's presentation tier. This board is 320x240 and runs
+`wm.FullscreenStackWM`, so the windowed WM is not a feature it lacks -- it is a
+tier it is not."""
+
+[[modules.shared.deny]]
+file = "wm_desk.py"
+kind = "tier"
+why  = """
+The windowed WM's two halves that live in their own files: the desk root
+layer (wallpaper + bar + icon column and its retained-backdrop cache) and the
+`WindowChrome` mixin (title strips, grip, taskbar chips). Only `wm_windowed.py`
+imports either, so with it denied above they would freeze bytes nothing
+imports."""
+
+[[modules.shared.deny]]
+file = "wm_chrome.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the other half of the windowed WM, imported only by
+`wm_windowed.py`."""
+
+[[modules.shared.deny]]
+file = "editor_desk.py"
+kind = "tier"
+why  = """
+The desk Editor: the maximised Editor's workspaces and panes on a DESK metric
+class (`layout_base.DESK`, a declared glass of 5" or more). This board is a
+handheld, so `Workstation.editor_desk` never imports it and its bytes would
+freeze unused."""
+
+# -- no consumer here yet ----------------------------------------------------
+
+[[modules.shared.deny]]
+file = "web_input.py"
+kind = "no-consumer"
+why  = """
+The transport-neutral half of the old web view: browser event batches ->
+InputState/Pointer. It survived the 2026-08 streaming sunset because the plan's
+§3.4 sync/controller RPC speaks the same `{"events":[...]}` format -- but that
+RPC is not built, and today the only importer is the wasm head's `web_boot.py`.
+FLIP THIS the day a board grows a consumer."""
+
+# -- staged under another name -----------------------------------------------
+
+[[modules.shared.rename]]
+file = "font.py"
+as   = "moy_font.py"
+why  = """
+The petme128 8x8 glyph blob (#62). It stages as `moy_font` because that is the
+name `device_canvas` imports before it will use the native `moy_gfx.text`
+kernel -- so device text rasterizes from the SAME bytes the host draws from,
+which is what makes pixel parity a fact rather than a hope."""
+
+# ---------------------------------------------------------------------------
+
+[flash]
+# Read by tools/board_flash.py. The merged image flashes at the classic
+# ESP32's bootloader offset 0x1000; otadata (0x1d000, the S3 boards' table) is
+# erased first so the bootloader boots ota_0. esptool's default reset reaches
+# the ROM loader through the CH9102's DTR/RTS auto-reset circuit.
+image          = "dist/core2/moybyte_core2.bin"
+offset         = "0x1000"
+baud           = 921600
+otadata_offset = "0x1d000"
+otadata_size   = "0x2000"
+
+[image]
+# The OTA-slot headroom this board's app image keeps, browser console baked in
+# (docs/native_kernel_2026-09.md section 6.1).
+headroom_floor_kib = 512
+
+[serial]
+# The console is UART0 behind a CH9102 (1a86:55d4) with the classic
+# auto-reset wiring: EN = RTS low while DTR high, IO0 = the reverse. Both lines
+# DEASSERTED (False) is the resting state that resets nothing, and the open
+# order the Waveshare P4's CH343 needed (P4Board raises DTR, drops RTS, then
+# DTR) is what keeps the open from pulsing EN. Not attach-only: a reset is an
+# RTS pulse, as on the P4.
+dtr         = false
+rts         = false
+attach_only = false
+usb         = "1a86:55d4"
+# A UART drops what its ring cannot take, so the chunk and the recv window are
+# the P4's -- the board's 4 KB stdin ring (moybyte_patch_stdin_ring) bounds
+# what may be in flight.
+chunk       = 1024
+window      = 3072
+
+[monitor]
+baud = 115200
+
+# ---------------------------------------------------------------------------
+
+[input]
+# The input table's parameters (tools/board_config.py INPUT_PARAMS). Stock.
+
+# ---------------------------------------------------------------------------
+
+[native]
+dest = "native/.staged"
+
+[native.shared]
+source   = "native"
+why = """
+The C-module twin of [modules.shared], one tier down and for the same reason
+(#161): the shared native list used to be a hand-written line in each build.sh
+-- an allowlist, whose wrong answer is silent -- and which modules a board
+compiles in is a per-board DECISION that belongs beside the Python one. Every
+directory under native/ with a micropython.cmake crosses unless denied here;
+tools/board_config.py stage-native stages the copies and generates the
+.staged/micropython.cmake include list that the board's tracked
+native/micropython.cmake pulls in.
+
+This board denies NOTHING: it drives every shared module plus the T-Deck's
+moy_lcd (included from that board's tree by native/micropython.cmake, never
+staged or copied) and its own native/moy_core2. moy_flush registers no
+MicroPython module; it is the banded-flush engine moy_lcd runs on."""
+
+[[native.shared.deny]]
+module = "moy_wasm"
+why = """
+The WebAssembly cart tier's engine. A compiled cart's module is AOT code for
+one chip, signed against that chip's provenance key (moy_wasm_key.h), and the
+key, the module build (tools/wasm_module.py) and the store's per-chip modules
+name esp32s3 and esp32p4 only: this chip has no target to run. Taking the tier
+here is adding an `esp32` target to that whole pipeline, its own piece of
+work; until then a compiled cart on this board is one the shelf says it cannot
+run."""
+
+[[native.shared.take]]
+module = "moy_play"
+why = """
+The kernel's Player (docs/kernel_cartpath_2026-10.md): the tick model, the
+runtime map and the VM-free rule, and the module `moy_play`. Every console
+takes it."""
+
+[[native.shared.take]]
+module = "moy_app"
+why = """
+The app ABI's kernel half (docs/kernel_appabi_2026-10.md): the grants, the
+grant policy and the roles served in C, and the module `moy_app`; and the
+user-files layer the files role is served over (native/moy_store/moy_ufiles.h,
+the module `moy_ufiles`). Every console takes it."""
+
+[[native.shared.take]]
+module = "moy_ui"
+why = """
+The widget toolkit's bodies in C with style and strings as data
+(docs/kernel_toolkit_2026-10.md), and the module `moy_ui` runtime/ui.py's face
+calls. Every console takes it."""
+
+[[native.shared.take]]
+module = "moy_kernel"
+why = """
+The kernel's entry, crash record and recovery floor
+(docs/kernel_spine_2026-10.md §6-§8): taking it is what makes the kernel own
+app_main. Every console takes it; what is this board's is in mpconfigboard.h --
+the panel module's four entry points the floor draws through, serial being its
+only input."""
+
+[[native.shared.take]]
+module = "moy_glass"
+why = """
+The glass's native home (docs/kernel_survival_2026-10.md section 3): canvas
+rows, the buffer table, the pool and present. It compiles to nothing until pass
+1 of sprint 3 gives it its sources; it is taken now so that pass changes no
+build list. Every console takes it."""
+
+[[native.shared.take]]
+module = "moy_input"
+why = """
+Input's native home (docs/kernel_survival_2026-10.md section 4): the merged
+table, its sources and the drivers below them. It compiles to nothing until
+pass 2 of sprint 3 gives it its sources; every console takes it."""
+
+[[native.shared.take]]
+module = "moy_net"
+why = """
+The links' native home (docs/kernel_survival_2026-10.md section 6): WiFi, the
+link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
+nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
+takes it."""
+
+
+# ---------------------------------------------------------------------------
+
+[modules.device]
+source   = "device"
+why = """
+The second staging source, and the one that must STAY an allowlist -- the same
+call the P4's board file makes, for the same reason.
+
+`runtime/` is a shared tree by definition, so a denylist over it is safe: the
+default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
+tier (repo root since the fork's deletion, 2026-08-17 -- the "shared device
+tree" #161 Phase 4/5 called the right end state), and it stays an allowlist
+because not every board drives every piece of it: this board has no BLE, the
+P4 has no SD or I2S, and an allowlist is where that difference is written down
+per board rather than discovered as a frozen module nothing imports.
+
+Each module named below is board-agnostic by construction, with its
+hardware-specific inputs passed as constructor arguments and its optional
+native modules imported inside a guard.
+
+The groups below are ordered by the BRING-UP STAGE that first needed them, and
+each says which. The whole list is present from stage 2 (see the shared section
+for why the module set is settled before the console runs)."""
+[[modules.device.group]]
+files = ["boot_shell.py"]
+why = """
+The boot shell's mode ladder, which `modules/moybyte_shell.py` on this board is
+now three declarations over: the board's name, the modes it has, and the module
+its smokes live in. It was ~20 lines written once per board and byte-identical
+after normalising those three, so the ONE-STRING rule, the self-terminating
+smokes and the keep-the-REPL guards now land once instead of four times."""
+
+[[modules.device.group]]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
+why = """
+The console desktop's boot spine: ONE `build_desktop` (the boot order and the
+service set every console board wires) and ONE hand-over of the console to
+the kernel's frame loop. The four boards' `run_desktop`s
+carried the same imports, the same frame-loop construction,
+the same `ws.*` service assignments and the same hook names in fifty-four
+byte-identical lines each; a board now passes its hardware -- compositor,
+canvas, inputs, keyboard, store, constants -- and takes the rest.
+
+The spine constructs each subsystem through its provider: wire_input.py (the
+pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
+(the radio link, the updaters, Get Carts' network, the web console). Audio has
+no provider: the kernel's moy_audio needs no construction at boot."""
+
+[[modules.device.group]]
+files = ["mem_census.py"]
+why = """
+The memory census the spine marks its boot steps into: inert unless the flash
+root holds `/mem_census` (written by `tools/mem_census.py`), which arms the
+boot trace and the import timer. The spine imports it, so every board that
+takes the spine takes it."""
+
+[[modules.device.group]]
+files = ["device_util.py", "device_canvas.py"]
+why = """
+STAGE 2 (touch). The drawing backend: `DeviceCanvas` (the RGB565 raster every
+tier now runs, palette resolved at draw time) and the `_ticks_*`/`_diag_note`
+leaf helpers it and everything else import. The FT6336U touch and the
+gamepad drivers are the kernel's (native/moy_input).
+
+`device_canvas` picks its wire palette by PROBING for `moy_dsi`, and getting
+that right is what makes this board's colours correct with no code of its own:
+`moy_dsi` is the P4's DPI panel and does not exist here, so `PAL565_WIRE`
+resolves to the byte-SWAPPED `PAL565_SW` -- which is exactly what
+`native/moy_lcd` wants, since it stores RGB565 high byte first for the panel's
+wire order (`moy_lcd.BYTE_SWAP`)."""
+
+[[modules.device.group]]
+files = ["moybyte_sd.py"]
+why = """
+STAGE 4 (SD). The mount lifecycle for a card that SHARES SPI2 with the panel:
+`with_sd_live` attaches through the native `moy_sd` module to the host
+`moy_lcd.init()` already initialised (`sdspi_host_init_device`, no bus re-init)
+and keeps the card RESIDENT for the session, because tearing the sdspi device
+down between ops corrupts the shared bus and silent-hangs the next panel flush.
+
+Its legacy `machine.SDCard` paths are dead here as on the T-Deck, and nothing
+on this board calls them."""
+
+[[modules.device.group]]
+files = ["device_api.py", "moycore_glue.py"]
+why = """
+STAGE 6 (console). The cart NAMESPACE's device home: `device_api` re-exports
+THE `make_api` (one body in the shared cart_api.py since 2026-08-17, so a cart
+cannot mean two things on any tier) and moycore's glue -- the run's buffers
+and asset texts handed to the C, the run handed to the kernel's Player
+(native/moy_play), which takes its frame, pmem persisted at the #66
+boundaries. The host runs the same file over runtime/moycore.py."""
+
+[[modules.device.group]]
+files = ["device_wifi.py"]
+why = "STAGE 6. The WLAN service the console's Settings WIFI panel and the OTA check ride."
+
+
+[[modules.device.group]]
+files = ["device_diag.py", "moybyte_diag.py"]
+why = """
+STAGE 6. The serial diagnostics (`PERF`/`HITCH`/`LOOP`/`I2CSTAT`/...) and the
+offline RAM ring that flushes to SD. This board's diag ring matters more than
+the P4's for one reason: the P4 can be ASKED a question over its live serial RX
+and this board's is dead under the desktop, so a status nobody recorded is a
+status nobody can get."""
+
+[[modules.device.group]]
+files = ["moy_ota.py", "moy_ota_health.py"]
+why = """
+STAGE 6. The OTA updater (#53). Board-agnostic: its update directory is a
+constructor argument and its identity comes from the generated `_ota_build.py`.
+The updater itself is the kernel's (native/moy_net/moy_ota.c: the streaming
+HTTP(S) client the updater and Get Carts fetch through, the signature, the
+slot); moy_ota.py is its Settings face and the identity, moy_ota_health.py the
+boot verdict and the rollback confirm the frame loop drives."""
+
+
+[[modules.device.group]]
+files = ["moy_webhost.py"]
+why = """
+STAGE 6. The web console's Settings contract over the kernel's webhost
+(native/moy_net/moy_webhost.c: the listener, the baked bundle, the store's
+pulls and the sync apply, polled with no Python), and the routes the console
+answers: PLAY ON DEVICE and the firmware hand-off."""
+

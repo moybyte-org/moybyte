@@ -1,0 +1,14 @@
+# Moybyte M5Stack Core2 partition table -- 16MB flash, dual-OTA (#53).
+#
+# The S3 boards' table, offset for offset: the classic ESP32's bootloader sits
+# at 0x1000 rather than 0x0, but it ends below the table at 0x8000 on both, so
+# the same numbers hold, and with them the #168 size guard's slot arithmetic
+# and the otadata at 0x1D000 that board.toml's [flash] erases first.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x14000,
+otadata,  data, ota,     0x1D000,  0x2000,
+phy_init, data, phy,     0x1F000,  0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x700000,
+ota_1,    app,  ota_1,   0x720000, 0x700000,
+vfs,      data, fat,     0xE20000, 0x1E0000,
