@@ -929,7 +929,9 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // another value after a generation (what a strip drawn at it draws again;
 // every field of a block the engine does not hold), and its key is what
 // every field shows, hashed (a key that matches again once every field is
-// back). MOY_UI_BLOCKS blocks, by id; one more takes the one set longest
+// back). MOY_UI_BLOCKS blocks, by id, in memory taken at the first set
+// (PSRAM on a board; a set that cannot have it answers a change, and the
+// block reads as not held); one more takes the one set longest
 // ago, whose fields are then set past any generation a part kept.
 #define MOY_UI_BLOCKS 16
 #define MOY_UI_BLOCK_FIELDS 32

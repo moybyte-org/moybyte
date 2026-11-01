@@ -5050,14 +5050,26 @@ typedef struct {
     uint32_t v[MOY_UI_BLOCK_FIELDS];    // each field's value...
     uint32_t g[MOY_UI_BLOCK_FIELDS];    // ...and the generation that set it (0: unset)
 } block_t;
-static block_t s_blocks[MOY_UI_BLOCKS];
+static block_t *s_blocks;               // MOY_UI_BLOCKS of them, PSRAM on a board,
+                                        // taken at the first block set
 static uint32_t s_block_tick;
 static uint32_t s_block_gen;            // one count for every block: a block taken anew
                                         // sets its fields past any generation a part kept
 
 // The block `id` names; with `make`, one taken for it (the free one, else
-// the one set longest ago) where none holds it.
+// the one set longest ago) where none holds it. NULL where the blocks'
+// memory could not be had.
 static block_t *block_of(moy_ui_span_t id, int make) {
+    if (s_blocks == NULL) {
+        if (!make) {
+            return NULL;
+        }
+        s_blocks = (block_t *)KEPT_ALLOC(MOY_UI_BLOCKS * sizeof(block_t));
+        if (s_blocks == NULL) {
+            return NULL;
+        }
+        memset(s_blocks, 0, MOY_UI_BLOCKS * sizeof(block_t));
+    }
     uint32_t h = hash(id.p, id.n, 0x626c6f63u) | 1u;
     block_t *take = NULL;
     for (int i = 0; i < MOY_UI_BLOCKS; i++) {
@@ -5084,6 +5096,9 @@ int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value) {
         return 0;
     }
     block_t *b = block_of(id, 1);
+    if (b == NULL) {
+        return 1;                       // (nothing kept: every set is a change)
+    }
     if (b->g[field] != 0 && b->v[field] == value) {
         return 0;
     }
