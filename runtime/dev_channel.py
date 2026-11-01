@@ -476,7 +476,7 @@ def heapcaps_line(esp32=None, gc=None):
     `heap_caps_get_minimum_free_size` sums it. `gc` is the MicroPython heap:
     H bytes its areas hold and A areas (`gc.areas()`), read BEFORE the collect
     that makes V, the bytes live -- a split heap keeps an area until a sweep
-    empties it (docs/native_kernel_2026-09.md 1.3), so a collect first would
+    empties it (docs/history/native_kernel_2026-09.md 1.3), so a collect first would
     report what the heap held after it, not what it holds.
 
     A figure this board or host cannot read is `-`, never 0: no `esp32` module

@@ -52,7 +52,7 @@ def board():
 TF_CARD_SRAM = 844
 # And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
 # panic wrapper in IRAM and its statics), which every console image carries
-# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# and native/moy_play/moy_play.h bounds on its own: measured
 # 2026-10-06 on the Waveshare P4; the Guition P4 runs the same code, the internal heap an image that takes
 # the module has against the same tree denying it.
 # Plus the glass's statics (native/moy_glass: its tables' roots and the

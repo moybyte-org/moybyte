@@ -1,5 +1,55 @@
 // moy_kernel: the kernel's entry, its crash intake and its recovery floor, as
-// the binding (modmoy_kernel.c) reaches them. moy_kernel.c has the design.
+// the binding (modmoy_kernel.c) reaches them. moy_kernel.c has the entry's
+// design; this header holds the rules every kernel module keeps. The kernel's
+// decisions (its language, why the apps stay Python) are this directory's
+// README.
+//
+// HANDLES, NOT OBJECTS. Kernel state holds no runtime's object beyond a call.
+// A runtime holds integer handles -- index plus generation, moy_htab.h --
+// validated against a live table on every use, so a handle that outlived its
+// VM fails loudly ("loud beats corrupt"). That is what makes a VM stop safe.
+// (The surface model's graveyard buried per-object generations because a web
+// client's cache aliased a recreated surface; here the table's owner checks
+// every use and there is no remote cache.)
+//
+// KERNEL DATA IS PSRAM. Moving state out of the GC heap into C can be a net
+// internal SRAM loss (.bss, task stacks and small mallocs land internal, and
+// the S3's internal budget is shared with WiFi, BLE and the panel's DMA), so
+// kernel data is allocated with heap_caps(MALLOC_CAP_SPIRAM) unless it is
+// latency-bound, and tests/test_moy_spine_twins.py asserts the placement. The
+// kernel's share is configuration (native/moy_play/moy_play.h, "the shares").
+//
+// STOPPING THE VM. The VM runs the console; the kernel stops it for a run
+// that needs no VM when moy_play.h's verdict says so, and a board without the
+// lever (the P4s) never stops it. EMBED, NOT FORK (owner, 2026-10-05): MicroPython is a service
+// the kernel starts and stops on its own task inside the esp32 port's build
+// (MICROPY_ESP_IDF_ENTRY renames the port's app_main). A fork would rebase a
+// multi-hunk patch over mp_task on every tag bump and inherit a teardown list
+// wrong for a stop with the kernel up; the embed links against the port's
+// functions, so a rename fails the build, and mp_task_calls.txt with
+// tools/mp_task_calls.py fails it when the tag's call list moves (v1.29.0
+// drops machine_timer_deinit_all, so the stop stops timers itself). The ORDER
+// of a stop: the app's close(); the cooperative stops (threads joined,
+// moycore's close() -- which ends a wasm session and frees the Lua state --
+// the flush feeder drained and the fold disarmed, async copies waited:
+// moy_glass_vm_stop); the port's deinit list, with the pin sweep replaced by
+// one that removes only the pins a Python handler holds, so the kernel's GPIO
+// ISRs survive; gc_sweep_all, whose finalisers close files, sockets, I2S and
+// SD and return the glass rows Python held (moy_glass_vm_swept; the theme
+// fonts, moy_text_vm_stop); the native-code arena freed; mp_deinit; the root
+// section ZEROED (a stale root would mark whatever sits at its address in the
+// next first area); the first heap area freed; the console's stdin ring and
+// the interrupt character taken by the kernel, which drains the ring and
+// re-polls the USB FIFO while no VM runs (a host writing through a stop
+// otherwise stalls the console's input for good). The VM's task is NOT
+// deleted: it drives the kernel's frame with no VM until the stop's run ends,
+// then starts the next VM (a RETURN start). What C owns survives: the input
+// task, the BLE central, the ESP-NOW link and its ring, the WiFi station and
+// its lease table, the card's FATFS and the internal flash volume, the driver
+// buffers and native tasks (the audio task silences the cart's sound). A stop
+// is refused while a Python owner holds a WiFi lease or an OTA write runs.
+// An app that is stopped comes back from persisted state: close() is the
+// leaving hook, commit() the forced save, open() re-enters.
 
 #ifndef MOY_KERNEL_H
 #define MOY_KERNEL_H

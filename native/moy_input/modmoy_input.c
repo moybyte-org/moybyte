@@ -1543,7 +1543,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_task_stack_free_obj, input_task_stack_fre
 //
 // loop_bind(pointer, touch=None, ble=None, ball=None, kick_at_tail=False): the
 // objects the loop's input stage reads, held as root pointers for the VM's
-// life (the kernel keeps no VM object: docs/native_kernel_2026-09.md §4.3).
+// life (the kernel keeps no VM object: native/moy_kernel/moy_kernel.h).
 // The stage is one C pass a frame: the input task's kick (at the head, or at
 // the tail where the board's task reads while the frame paces), the BLE
 // keyboard's reports and its mouse, the touch's sample, the merge, the

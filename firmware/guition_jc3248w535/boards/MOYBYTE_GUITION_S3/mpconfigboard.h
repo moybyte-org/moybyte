@@ -137,7 +137,7 @@
 
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run, inside the kernel's 1 MiB
-// PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a
+// PSRAM share (native/moy_play/moy_play.h). One 320x240 layer: a
 // scroll cart's 384,000-byte world is freed at exit and allocated again.
 #define MOY_GLASS_POOL_BYTES                (160 * 1024)
 

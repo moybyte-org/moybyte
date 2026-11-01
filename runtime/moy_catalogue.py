@@ -1,6 +1,6 @@
 """The store's interface: carts by handle.
 
-What the native store exposes (docs/native_kernel_2026-09.md, sprint 1b), call
+What the native store exposes (docs/history/native_kernel_2026-09.md, sprint 1b), call
 for call, written over the Python store: every cart the shelf, the boot and the
 roles reach as a CART goes through here, and a cart is named by a handle from
 the store's index (runtime/moy_index.py) -- never by an object the store keeps.

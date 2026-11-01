@@ -4,7 +4,7 @@ A handle is an int, never 0: the row's slot in the low SLOT_BITS and the
 slot's generation above them. Every call that takes one checks it against the
 table, so a handle whose row was released -- or released and taken again by
 another folder -- raises StaleHandle instead of naming the wrong cart
-(docs/native_kernel_2026-09.md section 4.3: handles, not objects). A row holds
+(native/moy_kernel/moy_kernel.h: handles, not objects). A row holds
 a key -- the catalogue's root id and folder name (runtime/moy_catalogue.py),
 which this table compares as it would any string -- and nothing a runtime
 owns; the generation is what tells two tenants of one slot apart. The calls

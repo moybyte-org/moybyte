@@ -98,6 +98,8 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
   legacy readers. The door a migration would use is `sweep_store`'s
   `prune_retired`, and the bar is its own (generation-gated, one small read
   warm) — the picture pass missed it and cost a Guition a 196-second boot.
+- The kernel is C and our apps stay Python (owner, 2026-10-06 and 2026-09-27):
+  `native/moy_kernel/README.md` holds the kernel's decisions and why.
 - `moybyte_console_plan_2026-07.md` holds the positioning (§2), the canvas
   contract (§4) and safety (§13); the rest of it is historical until the OS
   design doc replaces it. `docs/history/` is history, not direction.

@@ -246,8 +246,19 @@ otadata_size   = "0x2000"
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
-# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
-# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
+# MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
+# to print; the floor is the design.
+# The baked web bundle took this image under its first floor (256 KiB), and
+# the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle
+# off. The floor is 200 KiB since 2026-10-15 (owner): the kernel's networking
+# crossed onto the Zero on 2026-10-08, so the floor guards general growth out
+# of an 8 MB flash whose store pays for every slot byte twice. The slots grew
+# to 3.25 MiB (owner, 2026-10-18), leaving a 1.375 MiB store that, full by
+# blocks with the seed roster, gives up no more slot bytes; when the console's
+# scroll and text work crossed the floor (2026-10-28) the baked bundle was
+# trimmed (its cold C built for size, the VM's loader without comments) and
+# the floor stayed.
 headroom_floor_kib = 200
 
 [serial]

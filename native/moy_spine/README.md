@@ -24,7 +24,7 @@ sanitizers.
 | `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |
 
 Every byte a component holds comes from the `moy_htab_mem_t` it is made with:
-PSRAM under `modmoy_spine.c` on a board (`docs/native_kernel_2026-09.md` §4.6),
+PSRAM under `modmoy_spine.c` on a board (`native/moy_kernel/moy_kernel.h`),
 calloc on the host, a counting allocator under the fuzzer; the placement is
 asserted in the sources. The one thing the binding keeps on the VM's heap is a
 `Table`'s row objects, which the collector must see. An object frees its C

@@ -3,7 +3,7 @@
 //
 //   register(handle_input, handle_pointer, frame, words=None, service=None)
 //                      the console's upcalls, held as ROOT POINTERS (never in
-//                      kernel state: docs/native_kernel_2026-09.md §4.3);
+//                      kernel state: native/moy_kernel/moy_kernel.h);
 //                      refused while no VM runs. `frame(dt)` answers the
 //                      console's frames drawn; `words(line)` the console's
 //                      dev words, truthy when the line asked for the REPL

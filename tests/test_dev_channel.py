@@ -1556,7 +1556,7 @@ def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys
     assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()
 
 
-# -- the HEAPCAPS line (docs/native_kernel_2026-09.md sprint 0) ----------------
+# -- the HEAPCAPS line (docs/history/native_kernel_2026-09.md sprint 0) ----------------
 
 
 class FakeEsp32:

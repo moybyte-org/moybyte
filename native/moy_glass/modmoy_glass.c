@@ -21,7 +21,7 @@
 // A Canvas holds its row: `state` and `pal` are views of the row's draw state
 // and colour table, which the draw gates read in C (native/moy_gfx), and
 // point(buf) is where it draws. Every table byte is PSRAM on a board
-// (docs/native_kernel_2026-09.md §4.6); pixels are DMA-reachable PSRAM.
+// (native/moy_kernel/moy_kernel.h); pixels are DMA-reachable PSRAM.
 
 #include <string.h>
 

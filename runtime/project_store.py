@@ -24,7 +24,7 @@ the achievements tracker `ws.ach`.
 per-tab op-history registry (`history_for`) and the CONFIG tab's undo codec --
 and supplies the hooks a commit drains into its journal line: `config_hist` and
 the `_*_history` lookups. The split is the native kernel's line
-(docs/native_kernel_2026-09.md, sprint 1b): this file crosses with the store,
+(docs/history/native_kernel_2026-09.md, sprint 1b): this file crosses with the store,
 project.py stays with the Editor.
 
 Canonical home is runtime/; every board stages it. Bare-or-package imports:

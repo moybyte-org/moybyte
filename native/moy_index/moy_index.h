@@ -1,8 +1,7 @@
 // The store's index as a C ABI: one row per cart folder, named by a handle.
 //
 // runtime/moy_index.py defines the interface and is the reference; this header
-// is its native form, call for call. Sprint 1a (docs/native_kernel_2026-09.md
-// section 5) implements it in C, moy_index.c here, and everything above it
+// is its native form, call for call. Sprint 1a (native/moy_kernel/README.md) implements it in C, moy_index.c here, and everything above it
 // (modmoy_index.c for MicroPython, the ctypes binding on the host, the fuzz
 // driver) calls only what is declared below.
 //

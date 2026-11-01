@@ -337,8 +337,13 @@ before         = "usb_reset"
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
-# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
-# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
+# MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
+# to print; the floor is the design.
+# The slots grew to 6 MiB (owner, 2026-10-15) when the 2026-10 look's font set
+# took the image near the floor, and to 7 MiB (owner, 2026-10-26) when the
+# look's steps took it back there: the theme fonts stay in the image, and the
+# vfs (the store's fallback without a card) gives the room.
 headroom_floor_kib = 512
 
 [serial]

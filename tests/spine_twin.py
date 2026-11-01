@@ -6,7 +6,7 @@ and hold the two to one log (tests/test_moy_spine.py, the random walk of
 tests/test_moy_spine_twins.py, the spine trace in tests/test_semantic_traces.py).
 
 Six components, each holding numbers and strings only -- no runtime's
-object outlives a call into one (docs/native_kernel_2026-09.md section 4.3):
+object outlives a call into one (native/moy_kernel/moy_kernel.h):
 
   Table        a handle table: rows named by kinded, generation-checked ints
   AppRegistry  the registered system apps: id, title, text mode, min size

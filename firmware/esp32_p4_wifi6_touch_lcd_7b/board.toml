@@ -268,8 +268,13 @@ otadata_size   = "0x2000"
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
-# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
-# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
+# MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
+# to print; the floor is the design.
+# The slots were cut to 6 MiB for the kernel (owner, 2026-10-05; f738797). When
+# the 2026-10 look's font set took the image near the floor they grew to 8 MiB
+# on this board's 32 MB (owner, 2026-10-15): the theme fonts stay in the image,
+# and the store (the card, the internal vfs its fallback) gives the room.
 headroom_floor_kib = 1024
 
 [serial]

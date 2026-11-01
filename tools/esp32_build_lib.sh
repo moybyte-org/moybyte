@@ -607,7 +607,7 @@ moybyte_app_size_guard() {
     echo "!!   floor:    ${floor_bytes} bytes ($(( floor_bytes / 1024 )) KB, [image] headroom_floor_kib in its board.toml)" >&2
     echo "!!   short by: $(( floor_bytes - headroom )) bytes" >&2
     echo "!! Trim the image, or change the floor with its reason" >&2
-    echo "!! (docs/native_kernel_2026-09.md section 6.1). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
+    echo "!! (board.toml's [image] says why). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
     echo "!! builds it anyway, for an experiment." >&2
     if [ "${MOYBYTE_ALLOW_UNDER_FLOOR:-0}" != "1" ]; then
       exit 1

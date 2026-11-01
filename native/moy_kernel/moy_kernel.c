@@ -3,7 +3,7 @@
 //
 // THE ENTRY. micropython.cmake defines MICROPY_ESP_IDF_ENTRY, which renames the
 // port's app_main, so this file's runs instead (the embed decision,
-// docs/native_kernel_2026-09.md §4.4): the port's board startup, the crash
+// native/moy_kernel/moy_kernel.h): the port's board startup, the crash
 // intake, then the VM service task with mp_task's stack, priority and core.
 // app_main returns, so the IDF main task's stack is freed as it always was.
 //
@@ -1044,7 +1044,7 @@ static time_t platform_mbedtls_time(time_t *timer) {
 }
 #endif
 
-// The glass's teardown (native/moy_glass, docs/native_kernel_2026-09.md §4.4's
+// The glass's teardown (native/moy_glass, native/moy_kernel/moy_kernel.h's
 // glass rows): before the sweep, nothing the kernel's present started still
 // reads a buffer the VM is about to free; after it, the lifetimes the VM held
 // are ended. Weak, so an image without the glass links.

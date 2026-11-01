@@ -1,6 +1,6 @@
 """The memory census: who holds a console board's memory, by owner.
 
-docs/native_kernel_2026-09.md's sprint 0 asks who sets the boot heap's peak,
+docs/history/native_kernel_2026-09.md's sprint 0 asks who sets the boot heap's peak,
 who holds what is live after it, and who holds the off-heap PSRAM. This module
 answers on the board, and `tools/mem_census.py` drives it from the host.
 

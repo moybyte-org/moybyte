@@ -7,7 +7,7 @@ images/ are written in. A cart's COVER is not one of them: it is `cover.png`
 sidecar and a preview sidecar both validate against.
 
 The store's half of what was moy_image.py: this file crosses with the store
-(docs/native_kernel_2026-09.md, sprint 1b); `Image` and the wallpaper-preview
+(docs/history/native_kernel_2026-09.md, sprint 1b); `Image` and the wallpaper-preview
 sidecar stay in moy_image.py. MicroPython-safe (json + binascii + deflate).
 """
 

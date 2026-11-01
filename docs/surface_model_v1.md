@@ -556,7 +556,7 @@ deletion phase: Phase B retired with the web annex (§13), Phase C does not run
 - **Phase B — web compositing** and **Phase D — per-surface scroll retention
   on web** retired with the web annex (§13, 2026-08-12).
 - **Phase C — P4 consolidation** was the kernel plan's sprint 7 (the window
-  managers), which does not run (`docs/native_kernel_2026-09.md` §10 question
+  managers), which does not run (`docs/history/native_kernel_2026-09.md` §10 question
   8). The windowed WM's per-buffer state stays Python, and §14's mechanisms are
   the desk's.
 
@@ -1149,7 +1149,7 @@ outside its floor or reached into R outside it.
 
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
-`docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
+`docs/history/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
 `docs/history/kernel_survival_2026-10.md` §3.3 executed it. The model did not change:
 the registry moved into the kernel as a handle table of kind SURF, as inert as
 it had been in Python, and §16 deleted it (2026-10-27). What this amendment

@@ -1,7 +1,7 @@
 # Rust toolchain probe (#224, sprint 1a)
 
 **This directory is a record, kept for a revisit.** The kernel's language is C
-(owner, 2026-10-06): `docs/native_kernel_2026-09.md` §5 is the decision and says
+(owner, 2026-10-06): `native/moy_kernel/README.md` is the decision and says
 when Rust is considered again. The store's index was also written as a Rust twin
 (a `no_std` crate over `moy_index.h`, its build script with the toolchain pins,
 and a link-map guard against Rust's bundled C library objects), and that twin

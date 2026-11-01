@@ -127,6 +127,26 @@ struct moy_input;                               // moy_input.h
 // (an unsigned compiled module may load).
 enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 
+// THE SHARES (2026-10-05; configuration, derived from #224's measurements,
+// where each board's standing against them is kept). On each S3 board, at the
+// Player's fit check, the worst of at least five boots, fresh and after the
+// census's scripted session (tools/mem_census.py):
+//   - a cart has AT LEAST 4 MiB of PSRAM free with a 3 MiB LARGEST BLOCK:
+//     Doom's footprint, plus one area of the Python heap at its boot size, so
+//     one growth of the heap before a cart starts cannot refuse it, rounded up
+//     to whole MiB;
+//   - native code holds AT MOST 1 MiB of PSRAM (panel buffers, flush slots,
+//     audio, driver buffers, the game canvas, the layer pool, the kernel's
+//     tables), which with the cart's floor leaves 3 MiB for the Python heap;
+//     a board's MOY_GLASS_POOL_BYTES is cut from it;
+//   - the kernel costs AT MOST 4 KiB of internal SRAM net against sprint 0's
+//     baseline (free, largest block and low-water, all-internal and
+//     DMA-capable, WiFi and BLE up) while the VM runs, and NOTHING net while it
+//     is stopped (no second task's stack is alive: moy_loop.h).
+// The T-Deck's DMA-capable low-water with both radios up is the tightest
+// internal figure on either board. A board's image headroom floor is
+// `[image] headroom_floor_kib` in its board.toml, with its reasons there.
+//
 // THE STOP VERDICT: whether the launch stops the VM for the run, and when it
 // does not, the first clause that kept it, which the run's `info` names. The
 // policy is `need`: a VM-free run stops the VM only when its fit check fails
