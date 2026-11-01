@@ -583,7 +583,7 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     # HOST_ONLY carries names that are not runtime modules at all
     # (`simulate_desktop` is a tool); only the ones a denylist could stage are
     # the board file's business.
-    runtime_names = {p.stem for p in (ROOT / "runtime").glob("*.py")}
+    runtime_names = {p.stem for p in (ROOT / "runtime").rglob("*.py")}
     for name in sorted(HOST_ONLY[target] & runtime_names):
         assert declared.get(name + ".py") == "host-only", (
             "%s/board.toml does not deny %s.py as host-only -- the policy "

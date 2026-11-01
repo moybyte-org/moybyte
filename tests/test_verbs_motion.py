@@ -292,7 +292,7 @@ def test_the_ease_lives_in_one_place():
     surface keeps its own half-life or ease-out (§2.1's grep guard)."""
     pat = re.compile(r"GLIDE_HALF|_SLIDE_MS|0\.5 \*\* \(|\) \*\* 3\b")
     bad = []
-    for path in sorted((ROOT / "runtime").glob("*.py")):
+    for path in sorted((ROOT / "runtime").rglob("*.py")):
         for n, line in enumerate(path.read_text().splitlines(), 1):
             if pat.search(line):
                 bad.append("%s:%d: %s" % (path.name, n, line.strip()))

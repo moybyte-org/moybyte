@@ -340,13 +340,52 @@ def renames(board_dir):
     return {e["file"]: e["as"] for e in _shared(load(board_dir)).get("rename", [])}
 
 
+# A folder by this name, anywhere under the shared source tree, holds modules
+# no board stages: the host's own (its ctypes bindings, the simulator glue).
+HOST_ONLY_DIR = "host"
+
+
+def shared_sources(src_dir):
+    """{basename: Path} -- every module under the shared source tree
+    (`runtime/`), subfolders included, `__init__.py` aside.
+
+    The tree is ONE flat module namespace kept in folders: a board stages each
+    file flat into `modules/`, and the host's package path spans every folder
+    (runtime/__init__.py), so a basename may exist once. A second is refused
+    here, loudly, rather than staged over the first.
+    """
+    src_dir = Path(src_dir)
+    out = {}
+    for p in sorted(src_dir.rglob("*.py")):
+        rel = p.relative_to(src_dir)
+        if p.name == "__init__.py" or any(
+                part == "__pycache__" or part.startswith(".")
+                for part in rel.parts[:-1]):
+            continue
+        if p.name in out:
+            raise SystemExit("%s holds two modules named %s: %s and %s -- "
+                             "they stage flat, one name each"
+                             % (src_dir, p.name, out[p.name].relative_to(src_dir),
+                                rel))
+        out[p.name] = p
+    return out
+
+
+def host_only(src_dir, path):
+    """True for a module under a `host/` folder of the shared source tree."""
+    return HOST_ONLY_DIR in Path(path).relative_to(src_dir).parts[:-1]
+
+
 def staged_modules(board_dir, root=ROOT):
     """{destination filename: source Path} -- what a FRESH build stages.
 
-    Shared modules come from the denylist over `runtime/*.py` -- or, on a board
+    Shared modules come from the denylist over every module under `runtime/`
+    (`shared_sources`, subfolders included, staged flat) -- or, on a board
     that declares `strategy = "allowlist"`, from its own `[[modules.shared.
-    group]]` list (see `shared_strategy` for when each is right). Device
-    modules always come from the per-group allowlist over `device/`.
+    group]]` list (see `shared_strategy` for when each is right). Either way
+    a module under a `host/` folder never stages. Device modules always come
+    from the per-group allowlist over `device/`. Two sources for one
+    destination name is an error, never a silent overwrite.
     """
     board_dir, root = Path(board_dir), Path(root)
     cfg = load(board_dir)
@@ -355,23 +394,41 @@ def staged_modules(board_dir, root=ROOT):
 
     ren = {e["file"]: e["as"] for e in shared.get("rename", [])}
     src_dir = root / shared.get("source", "runtime")
+    sources = shared_sources(src_dir) if src_dir.is_dir() else {}
+
+    def put(name, src):
+        if name in out:
+            raise SystemExit("%s/board.toml stages two files as %s: %s and %s"
+                             % (board_dir, name, out[name], src))
+        out[name] = src
+
     if shared.get("strategy") == "allowlist":
         for group in shared.get("group", []):
             for name in group["files"]:
-                out[ren.get(name, name)] = src_dir / name
+                src = sources.get(name, src_dir / name)
+                if name in sources and host_only(src_dir, src):
+                    raise SystemExit("%s/board.toml stages %s, which lives in "
+                                     "a host/ folder: host-only, never staged"
+                                     % (board_dir, src.relative_to(root)))
+                put(ren.get(name, name), src)
     else:
         deny = {e["file"] for e in shared.get("deny", [])}
-        for p in sorted(src_dir.glob("*.py")):
-            if p.name in deny or p.name == "__init__.py":
+        for name, p in sorted(sources.items()):
+            if name in deny or host_only(src_dir, p):
                 continue
-            out[ren.get(p.name, p.name)] = p
+            put(ren.get(name, name), p)
 
     device = cfg.get("modules", {}).get("device", {})
     if device:
         dev_dir = root / device["source"]
         for group in device.get("group", []):
             for name in group["files"]:
-                out[name] = dev_dir / name
+                if name in sources:
+                    raise SystemExit(
+                        "%s and %s share the name %s: a board stages both flat"
+                        % (sources[name].relative_to(root),
+                           (dev_dir / name).relative_to(root), name))
+                put(name, dev_dir / name)
     # The store index is native (native/moy_index) unless a build sets
     # MOY_INDEX_IMPL=py (tools/moy_index_spike.py): no Python one is frozen, so
     # `import moy_index` reaches the extensible builtin the module registers.

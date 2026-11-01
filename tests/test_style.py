@@ -338,7 +338,7 @@ def test_the_colors_hatch_is_pinned_site_by_site():
     pixels are frozen off-token, and it has to be written down to be argued
     with."""
     total = 0
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":            # where the parameter is DEFINED
             continue
         frozen = _hatch_sites(path)
@@ -361,7 +361,7 @@ def test_no_surface_names_a_shell_kind():
     public UI verbs, the Config tab's own card drawer last. A surface naming
     a shell kind again draws a row the verbs already draw."""
     named = {}
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":
             continue
         k = _named_kinds(path)
@@ -381,7 +381,7 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
     because it is the toolkit ASKING, not a surface: its own draw functions map
     a caller's `kind=` through `_BUTTON_KIND_KEY`, computed by construction."""
     asked = {}
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))

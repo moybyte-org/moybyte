@@ -65,7 +65,8 @@ keep  = [
 source   = "runtime"
 strategy = "denylist"
 why = """
-Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
+Stage EVERY module under runtime/ (flat; a host/ folder never stages); name the
+ones that must not cross, with the reason.
 
 The whole console stages from stage 0 on this board (the checklist's own
 refinement of the T-Deck's stage-2 argument): images along the bring-up ladder

@@ -10,7 +10,27 @@ There is no host canvas CLASS to export any more: the raster is the boards' own
 (`make_canvas` / `make_system_canvas`).
 """
 
+import os as _os
 import sys as _sys
+
+
+def _folders():
+    """runtime/ is ONE flat module namespace kept in folders. The boards stage
+    every file flat into `modules/` (tools/board_config.py), so `import
+    console` names one module wherever its file sits; here the package path
+    spans every subfolder, so `runtime.console` does too. Basenames are unique
+    across the tree: the stager refuses a duplicate."""
+    here = __path__[0]
+    out = []
+    for base, dirs, _files in _os.walk(here):
+        dirs[:] = sorted(d for d in dirs
+                         if d != "__pycache__" and not d.startswith("."))
+        if base != here:
+            out.append(base)
+    return out
+
+
+__path__.extend(_folders())
 
 
 def _native_spine():

@@ -728,11 +728,12 @@ def test_apps_draw_focus_through_the_marks():
     verb's stop, `ui_draw.focus`, or a part's `focus=`), and `focus_ring` is
     the ring a theme without marks falls back to inside it."""
     hits = []
-    for name in sorted(os.listdir(os.path.join(ROOT, "runtime"))):
-        if name.endswith(".py") and name != "ui_draw.py":
-            with open(os.path.join(ROOT, "runtime", name)) as f:
-                if "focus_ring(" in f.read():
-                    hits.append(name)
+    for base, _dirs, names in os.walk(os.path.join(ROOT, "runtime")):
+        for name in sorted(names):
+            if name.endswith(".py") and name != "ui_draw.py":
+                with open(os.path.join(base, name)) as f:
+                    if "focus_ring(" in f.read():
+                        hits.append(name)
     assert hits == []
 
 

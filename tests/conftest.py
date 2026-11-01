@@ -20,7 +20,7 @@ collection had already cached the pre-fix staged page under the bare
 `web_view_page` name, and runtime/web_view.py's bare-first import picked it up.
 
 The meta-path finder below routes any bare import whose name matches a
-runtime/*.py module to that runtime module object itself. sys.meta_path is
+runtime/ module (any subfolder) to that runtime module object itself. sys.meta_path is
 consulted before sys.path, so the repo source always wins on the host no
 matter what staging dirs a test added or what order files were collected in.
 Authored device-only modules (no runtime/ counterpart) are untouched, and the
@@ -46,8 +46,10 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 _RUNTIME_DIR = os.path.join(_REPO_ROOT, "runtime")
+# Every module under runtime/, subfolders included: the package's __path__
+# spans them, so `runtime.<name>` resolves whichever folder holds the file.
 _SHARED = {
-    f[:-3] for f in os.listdir(_RUNTIME_DIR)
+    f[:-3] for _base, _dirs, _files in os.walk(_RUNTIME_DIR) for f in _files
     if f.endswith(".py") and f != "__init__.py"
 }
 # Shared modules the build stages under a DIFFERENT bare name, and native

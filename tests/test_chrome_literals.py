@@ -45,10 +45,11 @@ PINNED = {
 
 def _counts():
     out = {}
-    for name in sorted(os.listdir(RUNTIME)):
-        if not name.endswith(".py"):
-            continue
-        with open(os.path.join(RUNTIME, name)) as f:
+    paths = {}
+    for base, _dirs, names in os.walk(RUNTIME):
+        paths.update((n, os.path.join(base, n)) for n in names if n.endswith(".py"))
+    for name in sorted(paths):
+        with open(paths[name]) as f:
             lines = [ln for ln in f if not ln.lstrip().startswith("def ")]
         text = "".join(lines)
         n = (len(_LITERAL.findall(text)), len(_BRANCH.findall(text)))

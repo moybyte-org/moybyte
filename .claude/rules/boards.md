@@ -28,8 +28,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   oversized image, or one under its board's headroom floor (`[image]
   headroom_floor_kib` in board.toml), is a build FAILURE on every board.
 - **What crosses into an image is board.toml DATA** (#161), staged by
-  `tools/board_config.py`: a denylist over `runtime/*.py` (each `[[deny]]` names
-  a kind and a `why`), an allowlist over `device/*.py`, and a
+  `tools/board_config.py`: a denylist over every module under `runtime/`
+  (each `[[deny]]` names a kind and a `why`; subfolders stage FLAT, one
+  basename each, and a `host/` folder never stages), an allowlist over
+  `device/*.py`, and a
   `[native.shared]` denylist over `native/` (a P4 board also declares
   `[native.p4]`). A new shared module reaches every board by default; staying
   off one is a written decision. The headless Zero inverts the runtime default

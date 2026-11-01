@@ -101,7 +101,7 @@ def test_the_tokens_stay_a_flat_kernel_attribute_with_one_author(tmp_path):
     assert not isinstance(type(ws).theme_colors if hasattr(type(ws), "theme_colors")
                           else None, property)
     writers = set()
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         for i, line in enumerate(path.read_text(encoding="utf-8").split("\n")):
             if ".theme_colors =" in line or "self.theme_colors=" in line:
                 writers.add(path.name)
@@ -130,7 +130,7 @@ def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
     sheet's identity (docs/theme_and_shell_2026-11.md §5: a freed object's id() is
     reused)."""
     ws = build_ws(tmp_path)
-    for f in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for f in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         src = f.read_text(encoding="utf-8")
         assert "id(ws.theme_colors)" not in src and "id(ws.look." not in src, f.name
     cv = ws.sys_canvas

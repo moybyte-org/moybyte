@@ -75,7 +75,8 @@ keep  = [
 source   = "runtime"
 strategy = "denylist"
 why = """
-Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
+Stage EVERY module under runtime/ (flat; a host/ folder never stages); name the
+ones that must not cross, with the reason.
 
 WHY THE WHOLE CONSOLE STAGES FROM STAGE 2, before anything runs it. This port
 lands in six commits (panel, touch, keyboard, SD, audio, console) so the owner

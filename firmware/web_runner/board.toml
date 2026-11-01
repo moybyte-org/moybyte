@@ -65,7 +65,8 @@ prune = false
 source   = "runtime"
 strategy = "denylist"
 why = """
-Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
+Stage EVERY module under runtime/ (flat; a host/ folder never stages); name the
+ones that must not cross, with the reason.
 The web runner had this policy FIRST (its build.sh glob predates #161) -- what
 moves here is the reasons, and the derivation tests/test_staging_closure.py
 performs over them."""

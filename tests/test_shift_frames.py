@@ -685,7 +685,7 @@ def test_one_ring_body():
     band host's paints there (`ui.held`): launcher_layer keeps no ring."""
     import re
     root = Path(__file__).resolve().parent.parent
-    src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").glob("*.py")}
+    src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").rglob("*.py")}
     assert sum(s.count("class PaintRing") for s in src.values()) == 1
     found = []
     for name, text in sorted(src.items()):

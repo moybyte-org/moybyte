@@ -71,7 +71,8 @@ def test_only_the_station_fallback_constructs_the_ports_wlan():
     import glob
     hits = []
     for path in glob.glob(os.path.join(ROOT, "device", "*.py")) + \
-            glob.glob(os.path.join(ROOT, "runtime", "*.py")):
+            glob.glob(os.path.join(ROOT, "runtime", "**", "*.py"),
+                      recursive=True):
         with open(path) as f:
             for n, line in enumerate(f, 1):
                 if "network.WLAN(" in line and not line.lstrip().startswith("#"):

@@ -141,7 +141,7 @@ def _dev_channel_commands():
                     cmds.add(fields[5].value)
 
     # The words each subsystem registers (runtime/devch_*.py's WORDS).
-    for words in sorted(ROOT.glob("runtime/devch_*.py")):
+    for words in sorted(ROOT.glob("runtime/**/devch_*.py")):
         for node in ast.walk(_tree(words)):
             if (isinstance(node, ast.Assign)
                     and any(getattr(t, "id", "") == "WORDS"
