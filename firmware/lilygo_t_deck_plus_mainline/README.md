@@ -823,45 +823,33 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | **on glass 2026-08-16** — the flush leaves the frame, `PUMP` line present |
 | 8 | **The async layer copy** + the `DRAW2` line | `desktop` | `LAYER_COPY_ASYNC = True` in `modules/moy_runtime.py` ships; `DRAW2` is its meter |
 
-### What stage 7 measured
+### Stage 7 — the flush overlap
 
-Owner's board, 2026-08-16. The overlap landed:
+The overlap landed on the owner's board (2026-08-16): the flush left the frame,
+and on the Bench cart the mainline reached the fork on every phase. What did
+not close is the cart-side `bg=`, and "the render-side gap is the PSRAM clock"
+above is the arithmetic for it. The before-and-after numbers are #66's.
 
-```
-flush=     16.8-20.2ms  ->  2-4ms          (fork: 2.1)
-PUMP       absent       ->  pump=3.25 idle=1.93 gaps=1 feed=15.87 bands=5 fold=0
-```
+The three readings any future flush change is read against:
 
-On the Bench cart the mainline is now at or above the fork on every phase (idle
-55.5 vs 58.8, draw 50.0 vs 52.6, silent 55.5 vs 55.5, sound 52.6 vs 55.5). What
-did not close is the cart-side `bg=`, and "the render-side gap is the PSRAM
-clock" above is the arithmetic for it.
-
-The three lines that made that readable, kept here because they are what any
-future flush change is read against:
-
-* **`raw(... flush=N)`** in `DRAWBRK`/`HITCH` — the whole point. **16.8–20.2 → 2–5 ms**
-  is success. Still ~17 means `flush()` is not taking the async path at all
+* **`raw(... flush=N)`** in `DRAWBRK`/`HITCH`. A flush that still costs the
+  whole 153,600 B transfer means `flush()` is not taking the async path
   (`ASYNC_FLUSH`, or `moy_lcd.kick` missing, or `nfbs == 1`), and the PUMP line
   will be absent to match.
-* **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`** — a line that did not
-  exist before, printed on the 3 s diag tick under PERF DIAG. With the diag on,
-  its mere presence says `comp.bounce_flush` is on, i.e. the split path is
-  running; its absence says it is not, and there is no point reading anything
-  else.
-  Expect `pump≈3–4 ms` (five 30 KB PSRAM→SRAM memcpys), `bands=5`, and `fold=`
-  climbing while a small-canvas cart plays, because the #190 game fold is this
-  board's too (`native/moy_flush/moy_fold`), so a frozen 0 there means something disarms
-  it every frame. **`idle`/`gaps` are the diagnosis if
-  fps disappoints**: `idle≈0 gaps=0` like the fork means the feeders keep up and
-  what remains is real transfer time; `idle=2–6 ms` means bands are being fed
-  late and the lever is the pump period or a third bounce slot (the verdict on
-  the third slot was "closed the gap, bought no fps", and it retired the core-1
-  feeder unbuilt; #66's ledger carries it, so read that before repeating it). A `pump=` near the whole
-  transfer would mean the no-acquire patch is not in the image after all.
-* **fps** — Brick Siege **26–27 → ~45** was the expected shape, and ~40 is what
-  it did; the missing few are the `bg=` fill, priced above. Sky Run 30,
-  Celeste 20–24, Letter Blitz 21–33, Brick Siege Lua 27 all moved with it.
+* **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`**, printed on the 3 s
+  diag tick under PERF DIAG. Its presence says `comp.bounce_flush` is on, i.e.
+  the split path is running; its absence says it is not, and there is no point
+  reading anything else. `pump` is five PSRAM-to-SRAM band copies; `fold=`
+  climbs while a small-canvas cart plays, because the #190 game fold is this
+  board's too (`native/moy_flush/moy_fold`), so a frozen 0 there means
+  something disarms it every frame. **`idle`/`gaps` are the diagnosis if fps
+  disappoints**: `idle≈0 gaps=0` means the feeders keep up and what remains is
+  real transfer time; a large `idle` means bands are fed late, and the lever is
+  the pump period or a third bounce slot (the verdict on the third slot was
+  "closed the gap, bought no fps", and it retired the core-1 feeder unbuilt;
+  #66's ledger carries it, so read that before repeating it). A `pump=` near
+  the whole transfer would mean the no-acquire patch is not in the image.
+* **fps**, against the per-cart ledger in #66.
 
 If the serial dev channel is alive on this board (see the RX section — that is
 its own open question), the cheapest check needs no diag tick and no hitch:
