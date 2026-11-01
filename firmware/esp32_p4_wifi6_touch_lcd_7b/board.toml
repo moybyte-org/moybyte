@@ -209,14 +209,12 @@ it runs imports this file."""
 file = "palette.py"
 kind = "never-on-a-board"
 why  = """
-Builds MOY64's indices 16-63 with CPython's `colorsys` at IMPORT time;
-MicroPython has none. VERIFIED ON THIS BOARD'S GLASS 2026-08-15, on firmware
-built before it was unstaged: `import colorsys`, `import palette` and `import
-canvas` all raise ImportError, and the visible consequence was one level up --
-the Appearance screen's cart-wallpaper panel drew its black fill and nothing
-else, because `wallpaper._ensure_preview()` was returning False every time. A
-module that raises on import is worse than one that is missing: every caller
-here is guarded, so it reads as a feature that quietly does not exist."""
+TRIPWIRE -- this file no longer exists. `runtime/palette.py` built MOY64 with
+CPython's `colorsys` at import time, which MicroPython has none of (on glass
+2026-08-15 `import palette` raised ImportError, and the Appearance screen's
+cart-wallpaper panel drew nothing). Deleted 2026-11-01: libmoy's `moy_data.c`
+is the table, `device_canvas.PAL565`/`MOY64_RGB` its baked twins. Named so
+that its return is a decision."""
 
 [[modules.shared.deny]]
 file = "canvas.py"

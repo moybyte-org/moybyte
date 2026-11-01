@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import blocks       # noqa: E402
 from runtime import moy_carts    # noqa: E402
 from runtime import widgets      # noqa: E402
-from runtime import palette      # noqa: E402
+from runtime import chrome       # noqa: E402
 
 mk = blocks.make_block
 
@@ -48,7 +48,7 @@ class _ActorAPI(dict):
         self.spr_calls = []
         self._btn = {}
         self._sfx = []
-        self["col"] = palette.color
+        self["col"] = chrome.color
         self["btn"] = lambda d=None: self._btn.get(d, False)
         self["btnp"] = lambda d=None: False
         self["rnd"] = lambda n=1.0: 0.0

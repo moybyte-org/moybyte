@@ -7,7 +7,7 @@ used to build that canvas by IMPORTING one -- `runtime.host_canvas`, else
 was a black rectangle on hardware from the day it shipped, and no test noticed
 because every caller of a preview is guarded and a missing preview looks exactly
 like a preview of something dark. The first version of the black-rectangle bug
-was `runtime/palette.py` importing `colorsys`; deleting that raster changed the
+was `palette.py` importing `colorsys`; deleting that raster changed the
 reason and not the outcome, which is the shape of failure these tests are for.
 
 So they assert PIXELS, not booleans (`_ensure_preview()` returning True says

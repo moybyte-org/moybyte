@@ -17,9 +17,11 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
-from palette import MOY64          # noqa: E402
+sys.path.insert(0, ROOT)
+sys.path.insert(1, os.path.join(ROOT, "runtime"))
+from runtime.gfx_binding import moy64  # noqa: E402
 import font as petme               # noqa: E402
+MOY64 = moy64()
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else HERE
 INDEX = []

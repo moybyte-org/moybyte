@@ -60,5 +60,5 @@ def test_moy_is_transparent_where_the_art_says_he_is():
 def test_the_marketing_site_wears_the_same_face():
     """moybyte.com and the console must not have different mascots -- it is the
     same product, and the site already generates its whole palette from
-    runtime/palette.py for exactly this reason."""
+    libmoy's MOY64 (gfx_binding.moy64) for exactly this reason."""
     assert _embedded(SITE) == _embedded(PAGE)

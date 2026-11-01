@@ -83,7 +83,6 @@ def _native_ui():
 
 moy_ui = _native_ui()
 
-from . import palette  # noqa: E402
 from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
 from .input import InputState  # noqa: E402
 from .moy_image import Image  # noqa: E402
@@ -94,5 +93,4 @@ __all__ = [
     "PaintEditor",
     "SpriteSheet",
     "InputState",
-    "palette",
 ]

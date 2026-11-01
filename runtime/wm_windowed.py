@@ -81,7 +81,6 @@ root layer (wallpaper + bar + icon column, the retained-backdrop cache) and
 try:
     from wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from layers import Layer
-    # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
     from widgets import _Blit, _in, _ticks_ms, _ticks_diff, _err_text
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR

@@ -364,7 +364,7 @@ def test_overview_paints_each_cell_its_tiles_dominant_colour(tmp_path):
 
 
 def test_overview_leaves_empty_cells_as_the_map_field(tmp_path):
-    from runtime.palette import NAMES
+    from runtime.chrome import NAMES
     ws, drv = _open_map(tmp_path)
     tm = ws.project.tilemap
     _to_overview(ws)
@@ -385,7 +385,7 @@ def test_overview_paints_the_view_as_blocks_and_field_and_no_lattice(tmp_path):
     # lattice of ANY colour (even one a tile happens to share) shows up as a count
     # that does not match.
     from collections import Counter
-    from runtime.palette import NAMES
+    from runtime.chrome import NAMES
     ws, drv = _open_map(tmp_path)
     _to_overview(ws)
     _paint(ws, drv)

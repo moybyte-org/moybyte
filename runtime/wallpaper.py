@@ -874,7 +874,7 @@ class Wallpaper:
         EVERY TIER -- and until 2026-08-15 that sentence was false on the two
         that matter most, in a way nothing reported. The runner built its
         offscreen surface from `runtime/canvas.py`, the pure-Python indexed
-        raster, whose import reached `runtime/palette.py` -> `colorsys`, which
+        raster, whose import reached `palette` -> `colorsys`, which
         MicroPython does not have. So on a board `_ensure_preview` took its
         `return False` path on every call and this panel drew its black fill and
         nothing else, from the day it shipped; every caller is guarded, so the

@@ -271,18 +271,13 @@ def generate(style, d=DIR):
 
 
 def _luminance():
-    """MOY64's relative luminance (WCAG), x10000, from runtime/palette.py."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """MOY64's relative luminance (WCAG), x10000."""
 
     def lin(v):
         v /= 255.0
         return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
     return [round(10000 * (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)))
-            for r, g, b in mod.MOY64]
+            for r, g, b in _moy64()]
 
 
 def generate_theme(style, t):
@@ -644,12 +639,17 @@ def generate_theme(style, t):
 
 
 def _moy64():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return list(mod.MOY64)
+    """MOY64 as 64 (r, g, b) tuples, read out of libmoy's moy_data.c (the
+    spec's palette.json, embedded): the table the kernel resolves through. Read
+    as source text because this tool writes the tables the runtime package
+    compiles, so it imports nothing of that package."""
+    with open(os.path.join(ROOT, "native", "moy_gfx", "libmoy", "moy_data.c")) as f:
+        src = f.read()
+    body = re.search(r"moy_palette_default\[[^]]*\]\s*=\s*\{([^}]*)\}", src).group(1)
+    v = [int(x) for x in re.findall(r"\d+", body)]
+    if len(v) != 192:
+        raise SystemExit("moy_data.c: moy_palette_default is not 64 colours")
+    return [tuple(v[i:i + 3]) for i in range(0, 192, 3)]
 
 
 # A look leaf's kind, and a look field's type (moy_theme.h).

@@ -137,8 +137,8 @@ def moy_roles(mode, roles=SITE_ROLES):
 
 def palette():
     """Moybyte's own 64 colours, as #rrggbb -- the site's palette IS MOY64."""
-    from runtime.palette import MOY64
-    return ["#%02x%02x%02x" % tuple(c) for c in MOY64]
+    from runtime.gfx_binding import moy64
+    return ["#%02x%02x%02x" % tuple(c) for c in moy64()]
 
 
 # Both tabs name their tier EXPLICITLY. An empty query used to be the handheld

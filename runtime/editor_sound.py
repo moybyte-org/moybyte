@@ -67,7 +67,7 @@ def wave_ink(th, wv):
 
 def wave_rgb(th, wv):
     """A wave's ink as 0xRRGGBB, what `ui.swatches` takes: its MOY64
-    index's colour (`palette.MOY64`, which no board stages)."""
+    index's colour (libmoy's MOY64, `gfx_binding.moy64()` on the host)."""
     t = _WAVE_RGB_DAY if th.get("surface_light", False) else _WAVE_RGB_NIGHT
     return t[wv & 7]
 

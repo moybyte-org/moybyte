@@ -42,7 +42,7 @@ sys.path.insert(0, ROOT)
 from runtime import host_app            # noqa: E402
 from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
-from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
+from runtime import gfx_binding         # noqa: E402  (MOY64 -> the exact GIF palette)
 from runtime import ui_draw as UI       # noqa: E402  (labeled tab-row geometry)
 from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
@@ -477,7 +477,7 @@ def save_gif(frames, path, scale, fps, hold_last=18):
     """
     from PIL import Image
     flat = []
-    for rgb in palette.MOY64:
+    for rgb in gfx_binding.moy64():
         flat.extend(rgb)
     flat.extend([0] * (768 - len(flat)))
     imgs = []

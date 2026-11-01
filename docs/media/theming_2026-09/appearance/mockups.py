@@ -23,9 +23,10 @@ from PIL import Image
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "runtime"))
-from palette import MOY64          # noqa: E402
 import font as petme               # noqa: E402
 from runtime import chrome         # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+MOY64 = moy64()
 
 
 def _icon_art():

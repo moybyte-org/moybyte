@@ -48,8 +48,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from runtime import moyimg  # noqa: E402
-from runtime.palette import MOY64  # noqa: E402  (preview colours only)
+from runtime.gfx_binding import moy64  # noqa: E402  (preview colours only)
 from tools import pngwrite  # noqa: E402
+
+MOY64 = moy64()
 
 W, H = 320, 240
 SEED = 20260729

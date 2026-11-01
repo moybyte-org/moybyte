@@ -32,9 +32,10 @@ import pytest
 from runtime import host_canvas
 from runtime.editors import SpriteSheet, TileMap
 from runtime.moy_image import Image
-from runtime.palette import MOY64
+from runtime.gfx_binding import moy64
 
 host_canvas.install()
+MOY64 = moy64()
 import device_canvas as dc                                       # noqa: E402
 from runtime.host_canvas import HostSystemCanvas                 # noqa: E402
 

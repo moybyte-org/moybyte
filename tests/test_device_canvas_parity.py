@@ -60,13 +60,15 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import font as _host_font  # noqa: E402
 from runtime import gfx_binding  # noqa: E402
 from runtime import host_canvas  # noqa: E402
-from runtime import palette  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 DEV = ROOT / "device"
+
+# libmoy's own table (moy_data.c), the one the kernel resolves through.
+MOY64 = gfx_binding.moy64()
 
 
 def rgb565(rgb):
@@ -480,7 +482,7 @@ def _host_rgb565(cv):
     device_canvas picks the T-Deck's byte-SWAPPED `PAL565_SW` as its wire table
     -- on both sides, which is why they compare equal either way, but comparing
     canonical words is what makes a printed `host=0x…` readable against
-    `palette.MOY64`.
+    `MOY64`.
     """
     cv.flush_batch()
     return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(cv._buf).cast("H")]
@@ -532,13 +534,14 @@ def _assert_same(host, dev, label=""):
 
 
 # --------------------------------------------------------------------------- #
-# Sanity: the device PAL565 table equals rgb565(host MOY64).                  #
+# Sanity: the device's baked tables equal libmoy's MOY64 (moy_data.c).       #
 # --------------------------------------------------------------------------- #
 def test_pal565_matches_host_palette():
     m = _load_device_canvas()
     assert len(m.PAL565) == 64
-    for i, c in enumerate(palette.MOY64):
+    for i, c in enumerate(MOY64):
         assert m.PAL565[i] == rgb565(c), i
+    assert m.MOY64_RGB == bytes(v for c in MOY64 for v in c)
 
 
 # --------------------------------------------------------------------------- #
@@ -1055,7 +1058,7 @@ def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
                     idx = _layer_index(x + cx, y + cy)
                 else:
                     idx = _bg_index(x, y)
-                expect.append(rgb565(palette.MOY64[idx]))
+                expect.append(rgb565(MOY64[idx]))
         for name, make in canvases:
             c = make()
             for y in range(H):
@@ -1117,7 +1120,7 @@ def test_cover_draws_a_rounded_scaled_sub_rect_on_every_lane():
         ((4, 0, 8, 10), 14, 8, 20, 20, 6, False, (16, 10, 12, 30), (3, -1)),
         ((0, 2, 10, 8), 30, 20, 9, 7, 3, False, (0, 0, W, 24), (0, 0)),
     )
-    under = palette.MOY64[3]
+    under = MOY64[3]
     for (sx, sy, cw, ch), x, y, w, h, r, st, clip, cam in cases:
         bx, by = x - cam[0], y - cam[1]
         cx0, cy0, cx1, cy1 = 0, 0, W, H
@@ -1173,7 +1176,7 @@ def test_tint565_dims_a_sub_rect_into_its_own_buffer():
         c.cls(5)
         before = bytes(c._buf)
         src = _words_in(c, words)
-        col = rgb565(palette.MOY64[12])
+        col = rgb565(MOY64[12])
         for alpha in (0, 77, 255):
             dst = bytearray(2 * 5 * 4)
             assert c.tint565(dst, src, sw, 3, 2, 5, 4, 12, alpha) == 20, name
@@ -2297,15 +2300,14 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
 # purpose (palette.py is deny-listed on the boards; chrome.py is what the     #
 # device freezes), so the two copies are pinned to each other here.           #
 # --------------------------------------------------------------------------- #
-def test_chrome_names_match_palette_names():
+def test_chrome_names_are_the_base_sixteen():
     from runtime import chrome
-    assert chrome.NAMES == palette.NAMES
-    assert len(chrome.NAMES) == 16
-    for name, idx in palette.NAMES.items():
-        assert chrome.color(name) == palette.color(name) == idx
+    assert sorted(chrome.NAMES.values()) == list(range(16))
+    for name, idx in chrome.NAMES.items():
+        assert chrome.color(name) == idx
     for idx in range(70):
-        assert chrome.color(idx) == palette.color(idx)
-    assert chrome.color("no-such-colour") == palette.color("no-such-colour") == 7
+        assert chrome.color(idx) == idx & 63
+    assert chrome.color("no-such-colour") == 7
 
 
 def test_scroll_layer_buffer_is_off_gc_heap():
@@ -2356,7 +2358,7 @@ def test_blit565_places_direct_colour_on_every_lane():
         if clip is not None:
             cx0, cy0 = max(0, clip[0]), max(0, clip[1])
             cx1, cy1 = min(W, clip[0] + clip[2]), min(H, clip[1] + clip[3])
-        bg = rgb565(palette.MOY64[3])
+        bg = rgb565(MOY64[3])
         expect = []
         for py in range(H):
             for px in range(W):

@@ -105,8 +105,7 @@ _color = None
 def color(name_or_index):
     """Resolve a color name or MOY64 index -- `chrome.color`, bound LAZILY.
 
-    chrome is the device-safe home of the name map (its twin, palette.color,
-    needs CPython colorsys at import time), but importing chrome pulls the
+    chrome is the home of the name map, but importing chrome pulls the
     code-editor chain in behind it -- and this module is a LEAF the device
     imports at boot. By the time a cart calls col()/background() the console
     has long imported chrome, so the lazy bind costs one getattr ever."""

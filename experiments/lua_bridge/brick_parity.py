@@ -81,7 +81,7 @@ _ROOT = os.path.join(_HERE, "..", "..")
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from runtime import palette                      # noqa: E402
+from runtime import chrome                       # noqa: E402
 from runtime.editors_sheet import TileMap         # noqa: E402
 from parity_wire import lua_run       # noqa: E402
 from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
@@ -238,7 +238,7 @@ class FakeConsole:
             "W": 320, "H": 240,
             "cfg": lambda k, d=None: self.config.get(k, d),
             "rnd": self.lcg.rnd,
-            "col": palette.color,
+            "col": chrome.color,
             "btn": self.btn, "btnp": self.btnp,
             # The #65 roster verb: this is a single-player determinism check, so
             # one player is the right answer -- and the carts read it to decide

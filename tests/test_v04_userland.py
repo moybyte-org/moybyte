@@ -13,7 +13,8 @@ from ws_helpers import shelf, select_on_home, step_card  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import palette  # noqa: E402
+from runtime import chrome  # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
 from runtime.host_canvas import make_canvas as Canvas  # noqa: E402
 from runtime.host_canvas import make_system_canvas as SysCanvas  # noqa: E402
@@ -38,13 +39,13 @@ def _on_the_night_fixture(monkeypatch):
 # -- palette ---------------------------------------------------------------
 
 def test_palette_has_64_valid_colors():
-    assert len(palette.MOY64) == 64
-    for rgb in palette.MOY64:
+    assert len(moy64()) == 64
+    for rgb in moy64():
         assert len(rgb) == 3
         assert all(0 <= ch <= 255 for ch in rgb)
-    assert palette.color("white") == 7
-    assert palette.color(10) == 10
-    assert palette.color(99) == 99 & 63  # indices wrap into 0-63
+    assert chrome.color("white") == 7
+    assert chrome.color(10) == 10
+    assert chrome.color(99) == 99 & 63  # indices wrap into 0-63
 
 
 # -- canvas ----------------------------------------------------------------
@@ -64,7 +65,7 @@ def test_canvas_cls_pix_and_rgb_resolution():
     rgb = cv.to_rgb888()
     assert len(rgb) == 20 * 10 * 3
     off = (5 * 20 + 5) * 3
-    assert tuple(rgb[off:off + 3]) == palette.MOY64[7]
+    assert tuple(rgb[off:off + 3]) == moy64()[7]
 
 
 def test_canvas_rect_is_filled_and_clips_to_bounds():
@@ -1751,8 +1752,8 @@ def test_background_declares_color_and_image_backdrops():
     from runtime import host_app, palette
     cv = Canvas(64, 48)
     api = host_app.make_api(cv, StubInput(), {})
-    red = palette.color("red")
-    white = palette.color("white")
+    red = chrome.color("red")
+    white = chrome.color("white")
     api["background"](red)
     api["_moy_restore_bg"]()
     assert cv.pix(0, 0) == red and cv.pix(63, 47) == red
@@ -1792,8 +1793,8 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     )
     assert ws._start()
     ws.player.tick(1 / 30)
-    red = palette.color("red")
-    white = palette.color("white")
+    red = chrome.color("red")
+    white = chrome.color("white")
     assert ws.canvas.pix(0, 0) == white           # the actor drew over the backdrop
     assert ws.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
     ws.canvas.pix(100, 100, white)                # scribble...

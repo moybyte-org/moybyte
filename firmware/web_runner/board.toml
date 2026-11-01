@@ -12,8 +12,7 @@
 #  What this file does NOT cover: the emscripten usermod staging (moy_gfx /
 #  moy_lua / moy_audio / moycore / moy_png / moy_wasm_web ride micropython.mk
 #  fragments into the wasm port, structurally unlike the boards' USER_C_MODULES
-#  cmake), the generated
-#  `palette.py` literal twin, the runner's own authored modules (web_boot.py /
+#  cmake), the runner's own authored modules (web_boot.py /
 #  web_canvas.py / gpio_link.py / update_link.py / carts_link.py / web_p8.py),
 #  which build.sh copies by name the way a board's tracked modules/ files
 #  simply exist -- and the p8 importer
@@ -179,18 +178,16 @@ Runs the boards' canvas class on CPython over the ctypes compositor. The
 browser runs device_canvas DIRECTLY (staged below) over web_canvas's
 WebCompositor -- no adapter needed where the real class already loads."""
 
-# -- generated instead: the file cannot cross, its CONTENT does ---------------
-
 [[modules.shared.deny]]
 file = "palette.py"
 kind = "never-on-a-board"
 why  = """
-Builds MOY64's indices 16-63 with CPython's `colorsys` at IMPORT time, which
-MicroPython (wasm included) does not have. Unlike the boards -- which read the
-baked device_canvas.PAL565 twin -- this build GENERATES a literal palette.py
-into the stage (build.sh runs the real module under the venv python and dumps
-its tables), because the web's recording-era consumers wanted the index-space
-palette by that name. The generation step stays in build.sh."""
+TRIPWIRE -- this file no longer exists. `runtime/palette.py` built MOY64 with
+CPython's `colorsys` at import time, which MicroPython has none of (on glass
+2026-08-15 `import palette` raised ImportError, and the Appearance screen's
+cart-wallpaper panel drew nothing). Deleted 2026-11-01: libmoy's `moy_data.c`
+is the table, `device_canvas.PAL565`/`MOY64_RGB` its baked twins. Named so
+that its return is a decision."""
 
 # -- staged under another name -----------------------------------------------
 

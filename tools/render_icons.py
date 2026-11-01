@@ -24,7 +24,9 @@ from tools import pngwrite  # noqa: E402
 from runtime import host_app  # noqa: F401,E402
 from runtime import chrome as _chrome  # noqa: E402
 from runtime import console as C  # noqa: E402
-from runtime.palette import _BASE16  # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+
+_BASE16 = moy64()[:16]
 
 DEFAULT_OUT = ("/tmp/claude-1000/-home-nikola-Documents-Work-moybyte/"
                "950f1685-037e-4148-b85c-4b08b06bd9eb/scratchpad/icons_preview.png")

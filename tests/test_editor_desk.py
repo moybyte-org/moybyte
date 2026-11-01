@@ -1265,7 +1265,8 @@ def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
 
 def test_the_waves_swatches_are_their_moy64_inks():
     from runtime import editor_sound as S
-    from runtime.palette import MOY64
+    from runtime.gfx_binding import moy64
+    MOY64 = moy64()
     for light, inks, rgbs in ((True, S.WAVE_INK_DAY, S._WAVE_RGB_DAY),
                               (False, S.WAVE_INK_NIGHT, S._WAVE_RGB_NIGHT)):
         for wv in range(8):

@@ -194,6 +194,18 @@ def available():
     return _lib() is not None
 
 
+def moy64():
+    """MOY64 (SPEC.md 2) as 64 (r, g, b) tuples, read out of the library.
+
+    The table is libmoy's `moy_palette_default` (moy_data.c, embedded from the
+    spec's palette.json), the one the kernel resolves through. The host's
+    tools and tests read the palette here; the device tier carries its baked
+    twins (`device_canvas.PAL565`, `MOY64_RGB`), pinned to this table by
+    tests/test_device_canvas_parity.py."""
+    raw = bytes((ctypes.c_uint8 * 192).in_dll(_lib(), "moy_palette_default"))
+    return [tuple(raw[i:i + 3]) for i in range(0, 192, 3)]
+
+
 def _buf(b):
     """(ctypes array, pixel capacity) sharing `b`'s memory -- no copy.
 

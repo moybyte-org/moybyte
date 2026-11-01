@@ -39,7 +39,8 @@ def mascot_rgba(scale=2):
     0, which is also Moy's outline colour, so the sheet blit boxes him in
     (the same reason console.splash_image builds its own Image)."""
     from runtime import chrome
-    from runtime.palette import MOY64
+    from runtime.gfx_binding import moy64
+    MOY64 = moy64()
 
     art = chrome._ICON_ART["moy"]
     rows = []

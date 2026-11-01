@@ -10,7 +10,7 @@ the old parallel SDK.
 the one `make_api()` in `runtime/cart_api.py`, the same function on every tier
 (`runtime/host_app.py` and `device/device_api.py` re-export it). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
 it through `runtime/host_canvas.py`); the palette in
-`runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
+libmoy's `native/moy_gfx/libmoy/moy_data.c`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
 **moy-spec is the game console spec** (owner, 2026-10-21): Moybyte's app
@@ -1035,7 +1035,7 @@ same here as on any other console that implements the spec.
 
 ## Palette
 
-The **MOY64** palette (`runtime/palette.py`) is 64 colors. Indices **0–15** are the
+The **MOY64** palette (SPEC.md 2, libmoy's `native/moy_gfx/libmoy/moy_data.c`) is 64 colors. Indices **0–15** are the
 PICO-8 base (named, use `col("name")`); **16–63** are a curated desktop gamut (pastels,
 earth tones, vivid accents, neutrals, deep shades) — pass those as integers.
 

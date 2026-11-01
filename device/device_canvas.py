@@ -250,7 +250,7 @@ def _release_bakes(owner, owners=_OWNERS):
         _glass_mod.reclaim(h, _BAKE_MASK)
         _sweep_bakes()
 
-# MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
+# MOY64 palette as RGB565 (libmoy's moy_data.c, the spec's palette.json, baked).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
     0xF809, 0xFD00, 0xFF64, 0x0726, 0x2D7F, 0x83B3, 0xFBB5, 0xFE75,
@@ -304,19 +304,16 @@ except (ImportError, AttributeError):
 # indexes in Python, so it serves both. (The tuple stays for the other PAL565_WIRE uses.)
 _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 
-# MOY64 as RGB888, baked. runtime/palette.py builds this table with CPython's
-# `colorsys` at import time, so it cannot be staged to a board at all (verified
-# on P4 glass: `import palette` raises ImportError). The web head solved the
-# same problem by GENERATING a literal twin at build time; this is that twin,
-# inline, because 192 bytes do not justify a build step.
+# MOY64 as RGB888, baked: libmoy's `moy_palette_default` (moy_data.c), inline,
+# because 192 bytes do not justify a build step.
 #
 # It exists so `canvas.palette` can be READ, which SPEC.md 3.1 needs: a cart
 # ships its own 64-entry table, runtime/player.py saves the current one before
 # applying it and assigns it back on exit. Without a readable default there is
 # nothing to restore TO.
 #
-# tests/test_device_canvas_parity.py pins it equal to runtime.palette.MOY64, so
-# a re-vendor that moves the palette cannot leave this behind.
+# tests/test_device_canvas_parity.py pins it (and PAL565) equal to libmoy's
+# table, so a re-vendor that moves the palette cannot leave this behind.
 MOY64_RGB = bytes.fromhex(
     "0000001d2b537e2553008751ab52365f574fc2c3c7fff1e8ff004dffa300ffec2700e43629adff83769cff77a8ffccaa"
     "e6a1a1e6b9a1e6d2a1aee6a1a1e6d1a1d1e6a1b4e6b7a1e6d8a1e6e6a1cae6a1b1a1e6e68c6b4da88d7966502eccbf9f"

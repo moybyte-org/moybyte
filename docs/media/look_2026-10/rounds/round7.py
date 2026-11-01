@@ -31,8 +31,10 @@ sys.argv = [sys.argv[0], OUT]
 spec = importlib.util.spec_from_file_location("look", BASE)
 M = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(M)
-sys.path.insert(0, os.path.join(REPO, "runtime"))
-from palette import MOY64, NAMES  # noqa: E402
+sys.path.insert(0, REPO)
+from runtime.chrome import NAMES  # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+MOY64 = moy64()
 
 
 def _chrome_tables():

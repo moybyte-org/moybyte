@@ -203,9 +203,12 @@ it runs imports this file."""
 file = "palette.py"
 kind = "never-on-a-board"
 why  = """
-Builds MOY64's indices 16-63 with CPython's `colorsys` at IMPORT time;
-MicroPython has none (verified on P4 glass 2026-08-15). `device_canvas.PAL565`
-is the baked twin every board reads instead."""
+TRIPWIRE -- this file no longer exists. `runtime/palette.py` built MOY64 with
+CPython's `colorsys` at import time, which MicroPython has none of (on glass
+2026-08-15 `import palette` raised ImportError, and the Appearance screen's
+cart-wallpaper panel drew nothing). Deleted 2026-11-01: libmoy's `moy_data.c`
+is the table, `device_canvas.PAL565`/`MOY64_RGB` its baked twins. Named so
+that its return is a decision."""
 
 [[modules.shared.deny]]
 file = "canvas.py"
