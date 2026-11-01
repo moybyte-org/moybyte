@@ -1,5 +1,5 @@
 // moy_files: a compiled cart's written files (moy-spec SPEC.md 16.12), the
-// store half, in C (docs/kernel_cartpath_2026-10.md §1, `cart_files.py`'s
+// store half, in C (docs/history/kernel_cartpath_2026-10.md §1, `cart_files.py`'s
 // row). runtime/cart_files.py is the reference, rule for rule, and
 // tests/test_moy_files.py holds the two together.
 //

@@ -49,7 +49,7 @@ try:
 except ImportError:  # pragma: no cover - host: the ctypes binding
     from runtime import glass_binding as _glass
 
-# THE EDITOR SURFACES ARE IMPORTED AT THEIR FIRST USE (docs/kernel_cartpath_2026-10.md
+# THE EDITOR SURFACES ARE IMPORTED AT THEIR FIRST USE (docs/history/kernel_cartpath_2026-10.md
 # section 5.5): the block, map, scene and music editors' UIs and the sprite/icon
 # PAINT surface (paint_layer.py) and the theme mode's two tabs (theme_editor.py)
 # are modules a start that never opens the Editor does not load.
@@ -521,7 +521,7 @@ def _kernel_tables():
     """(apps, back, returns, leases) as views of the kernel's own tables where
     the console runs on a kernel (a board: `moy_kernel` is in the image), so a
     VM stop leaves its routes and leases for the next VM
-    (docs/kernel_cartpath_2026-10.md section 5.4); None elsewhere, where each
+    (docs/history/kernel_cartpath_2026-10.md section 5.4); None elsewhere, where each
     console owns its own. A return start keeps them as they were; every other
     start puts them back as they are made."""
     try:
@@ -2619,7 +2619,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.open_in_editor(selected)
             return
         # The run's route is HOME (the launcher is its caller): what lets the
-        # kernel stop the VM for it (docs/kernel_cartpath_2026-10.md 5.1).
+        # kernel stop the VM for it (docs/history/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
         try:
             self._open_workspace(selected)
@@ -2895,7 +2895,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         it = items[pick]
         return it.get("title") or it.get("path", "").rsplit("/", 1)[-1] or "cart"
 
-    # -- the resume record (docs/kernel_cartpath_2026-10.md 5.4) --------------
+    # -- the resume record (docs/history/kernel_cartpath_2026-10.md 5.4) --------------
 
     def resume_record(self):
         """The launcher's place as the resume record's text: the selection,

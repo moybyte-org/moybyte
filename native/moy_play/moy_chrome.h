@@ -1,5 +1,5 @@
 // moy_chrome: the chrome drawn over a cart and the shell's bar, one body each
-// (docs/kernel_cartpath_2026-10.md §3.5): the strip (the crash and tool bars,
+// (docs/history/kernel_cartpath_2026-10.md §3.5): the strip (the crash and tool bars,
 // the band and right zone every bar shares), the error
 // and notice panel, the system menu and its ABOUT box, the notice banner and
 // the achievement toast.

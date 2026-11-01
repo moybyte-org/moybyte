@@ -1,5 +1,5 @@
 // moycore_lua: a Lua cart's VM over the console, with no MicroPython in it
-// (docs/kernel_cartpath_2026-10.md §1, the modmoycore.c split).
+// (docs/history/kernel_cartpath_2026-10.md §1, the modmoycore.c split).
 //
 // The cart's lua_State opened over moycore_run.c's console with libmoy's verb
 // table, the p8 machine, the layer glue and the native superset; its chunks

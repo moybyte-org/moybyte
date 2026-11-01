@@ -3,7 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 /* The host's Lua run and the kernel's Player, by ctypes
- * (runtime/lua_binding.py; docs/kernel_cartpath_2026-10.md §1).
+ * (runtime/lua_binding.py; docs/history/kernel_cartpath_2026-10.md §1).
  *
  * CPython gets the program the boards run, not a twin of it: the cart's VM is
  * native/moycore/moycore_lua.c over moycore_run.c's console -- the allocator,

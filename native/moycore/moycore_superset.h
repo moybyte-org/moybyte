@@ -1,5 +1,4 @@
-/* The superset names a Lua run gets from C (docs/kernel_cartpath_2026-10.md
- * §2's table): moybyte's names outside libmoy's verb table whose answer is a
+/* The superset names a Lua run gets from C (native/moy_play/moy_play.h's table): moybyte's names outside libmoy's verb table whose answer is a
  * number or the pointer, so a frame that calls them makes no crossing.
  *
  *   col(name_or_index)  a colour's index: a name from the base sixteen

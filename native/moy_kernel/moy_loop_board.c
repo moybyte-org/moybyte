@@ -346,7 +346,7 @@ static bool w_mem(int argc, char **argv, const char *line) {
 
 // kstop N [stop] (§7.5): the VM service's soft reset N times, the console
 // booting between, a KSTOP line of the heaps before and after each teardown.
-// `stop`: each a real stop and start instead (docs/kernel_cartpath_2026-10.md
+// `stop`: each a real stop and start instead (docs/history/kernel_cartpath_2026-10.md
 // section 5), with a third line while the VM is down. DEV.
 static bool w_kstop(int argc, char **argv, const char *line) {
     (void)line;
@@ -580,7 +580,7 @@ uint32_t moy_loop_board_window_frames(void) {
     return s_window_frames;
 }
 
-// -- the VM stopped (docs/kernel_cartpath_2026-10.md section 5.3) -------------
+// -- the VM stopped (docs/history/kernel_cartpath_2026-10.md section 5.3) -------------
 //
 // The stages the VM service task drives while no VM runs: the kernel's input
 // table, the dev channel over the stdin ring, the tail's services, the

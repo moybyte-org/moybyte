@@ -1,5 +1,5 @@
 """The Player launches a runtime cart's run in the kernel's Player BEFORE the
-runtime loads (docs/kernel_cartpath_2026-10.md §6 step 1): the load and _init
+runtime loads (docs/history/kernel_cartpath_2026-10.md §6 step 1): the load and _init
 are then in the run's books, which the on-glass zero-crossing check reads from
 before the launch. A run whose runtime will not load ends as a crash; one
 whose runtime offers no C frame ends at once and ticks through Python."""

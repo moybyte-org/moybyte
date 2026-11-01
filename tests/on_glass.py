@@ -1548,7 +1548,7 @@ VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
 
 
 def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
-    """The cart path's second checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    """The cart path's second checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a VM-free seed game is the kernel loop's foreground -- its input, ticks,
     chrome and present in C -- so from its launch to its exit the run's own
     books hold NO upcall of any class (CONSOLE, APP, DRIVER, SERVICE,
@@ -1573,7 +1573,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
             {k: st.get(k) for k in ("screen", "cart", "run", "play")})
         # VM-free, and it keeps the VM: under the `need` policy a Lua cart has
         # no footprint whose fit could fail, and a P4 has no stop at all
-        # (docs/kernel_cartpath_2026-10.md section 5).
+        # (docs/history/kernel_cartpath_2026-10.md section 5).
         run = dict(st["run"])
         assert run.pop("fit", None) is None, st["run"]
         assert run == {"runtime": "lua", "vm_free": True, "why": "free",
@@ -1611,7 +1611,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
 def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=0,
                               front=True):
     """A Ctrl-C reaches the VM past a run in the kernel's front
-    (docs/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
+    (docs/history/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
     SERIAL and the console's next upcall raises the interrupt, so the REPL
     comes up as it does with no run in front -- which is what `board.py
     reboot --soft` and every interrupting tool rely on. The soft reset after it
@@ -1661,7 +1661,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
 
 def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
                                       runtime="lua"):
-    """The cart path's first checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    """The cart path's first checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a seed game the kernel's rule runs with no VM reads that verdict from
     `state`, its frames run in the kernel's Player, and they make no APP,
     SERVICE or REFUSED upcall (DRIVER is a harness's, zero on a board) with
@@ -1920,7 +1920,7 @@ def _desk_back(board, timeout=120.0):
 
 def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N stop`: N real stops and starts of the VM with no cart
-    (docs/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
+    (docs/history/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
     lease on the kernel's tables before the stop and reads them back with the
     VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
     then -- the first heap area freed with the VM -- hold flat from the second

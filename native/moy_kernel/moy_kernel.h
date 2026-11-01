@@ -49,7 +49,7 @@ void moy_kernel_kstop(int n);
 // The console proved itself again: true while kstop has a reset left to run.
 bool moy_kernel_kstop_next(void);
 
-// THE VM STOP (docs/kernel_cartpath_2026-10.md section 5). moy_kernel_stop
+// THE VM STOP (docs/history/kernel_cartpath_2026-10.md section 5). moy_kernel_stop
 // makes the next teardown a stop -- MOY_STOP_RUN for the run the Player
 // launched, MOY_STOP_KSTOP for `kstop N stop` -- and ends the loop with
 // MOY_LOOP_STOP at the frame's end. How the running VM started: BOOT (power-on,
@@ -79,7 +79,7 @@ void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
 void moy_kernel_heapwalk(const char *tag);
 void moy_kernel_heapwalk_at_stop(bool on, bool all);
 
-// THE START'S STAMPS (docs/kernel_cartpath_2026-10.md section 5.5): ms after
+// THE START'S STAMPS (docs/history/kernel_cartpath_2026-10.md section 5.5): ms after
 // power-on of each part of a VM's start. EXIT is the last VM's end -- the
 // stopped run's end at a RETURN start, the teardown's first moment at a soft
 // reset, 0 at power-on -- and clears the rest; VM is the next VM's mp_init;

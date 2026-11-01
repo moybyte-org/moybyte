@@ -301,7 +301,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # stays dark until a frame has composed (#45), so the splash is what
     # makes a slow boot legible on the glass and on the wire.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, name)
-    # A RETURN start (docs/kernel_cartpath_2026-10.md 5.4): the VM is back
+    # A RETURN start (docs/history/kernel_cartpath_2026-10.md 5.4): the VM is back
     # after the kernel stopped it for a run. No splash and no OTA verdict; the
     # launcher lands where the resume record left it.
     returning = kernel is not None and getattr(kernel, "start", None) is not None \

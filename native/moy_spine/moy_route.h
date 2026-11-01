@@ -169,7 +169,7 @@ uint32_t moy_leases_mask(const moy_leases_t *l);
 
 // The console's registry, back-stack, return records, leases and settings rows
 // (system.json, moy_settings.h) as kernel
-// singletons (docs/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
+// singletons (docs/history/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
 // the first call that passes one, and never freed, so a VM stop's sweep leaves
 // them and a return start reads them. The VM's objects are views of these
 // (modmoy_spine.c's kernel()). NULL `mem` answers them only once made: NULL

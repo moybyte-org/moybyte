@@ -412,7 +412,7 @@ hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
 the load (`scene_put`), are parsed there into Lua row tables, and
 `draw_scene` draws the live rows, so no scene verb crosses.
 
-What a frame calls is C (docs/kernel_cartpath_2026-10.md §2), so a frame makes
+What a frame calls is C (native/moy_play/moy_play.h), so a frame makes
 no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration
 loops skip by `lua_ext.NATIVE_NAMES`), and `draw_layer`, the prelude's wrapper
 over `__layer_blit`, which copies through the screen canvas's layer restore

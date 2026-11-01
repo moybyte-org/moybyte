@@ -325,7 +325,7 @@ difference between a table that fits and one that does not."""
 [[native.shared.deny]]
 module = "moy_play"
 why = """
-The kernel's Player (docs/kernel_cartpath_2026-10.md). This board runs no
+The kernel's Player (docs/history/kernel_cartpath_2026-10.md). This board runs no
 carts: the browser it serves plays them."""
 
 [[native.shared.deny]]

@@ -1,7 +1,7 @@
 # Every call into Python (mp_call_*, mp_sched_schedule) in the trees the run
 # path lives in: native/moy_kernel, native/moy_play, native/moycore,
 # native/moy_wasm, native/moy_store, native/moy_net, native/moy_input
-# (docs/kernel_cartpath_2026-10.md §4). tests/test_upcall_sites.py holds the
+# (docs/history/kernel_cartpath_2026-10.md §4). tests/test_upcall_sites.py holds the
 # tree to this list: a site added, moved or removed fails it until its row is
 # written here, with the class it is counted under or why it is no crossing of
 # its own.

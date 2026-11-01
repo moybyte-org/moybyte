@@ -215,7 +215,7 @@ except ImportError:                     # host CPython: the host drives its fram
 
 def _verdict(cart):
     """(runtime, vm_free, why) of a run's cart by the kernel's VM-free rule
-    (moy_play.census over its folder, docs/kernel_cartpath_2026-10.md §2): the
+    (moy_play.census over its folder, native/moy_play/moy_play.h): the
     verdict `state` reports for the run in front and the census pins. None for
     a cart with no folder, or an image whose module has no rule."""
     path = cart.get("path") if cart is not None else None
@@ -856,7 +856,7 @@ class Player:
     def release_radio(self):
         """The run's radio leases go: the link's (its radio stopped) and the
         run's own. A run's teardown calls it, and so does a RETURN start
-        (docs/kernel_cartpath_2026-10.md section 5.4), whose run ended in the
+        (docs/history/kernel_cartpath_2026-10.md section 5.4), whose run ended in the
         kernel with no VM to run this teardown: the leases are the kernel's
         table, which the stop keeps."""
         # Nobody to talk to, and power save back on. UNLESS a session is already arranged for the run about to
@@ -1219,7 +1219,7 @@ class Player:
         self._run_handle = 0
         if _rt != "python":
             # The kernel decides the stop from the catalogue entry before
-            # anything of the run is built here (docs/kernel_cartpath_2026-10.md
+            # anything of the run is built here (docs/history/kernel_cartpath_2026-10.md
             # section 5.2): an audio session or a buffer made with the VM up
             # would sit inside the free run the stop is about to widen.
             run = self._launch_play(cart)
@@ -1978,7 +1978,7 @@ class Player:
 
     def _stop_for(self, run, cart):
         """True when the kernel decided at the launch to stop the VM for the
-        run (docs/kernel_cartpath_2026-10.md 5.2, the `need` policy: a VM-free
+        run (docs/history/kernel_cartpath_2026-10.md 5.2, the `need` policy: a VM-free
         cart that does not fit with the VM up): nothing of the cart loads here.
         The shelf's place goes to the resume record, and the loop ends at
         this frame; the kernel loads and runs the cart with no VM and starts
@@ -2052,7 +2052,7 @@ class Player:
         """Hand a VM-free game's frame to the kernel (moy_play_front): from the
         next loop frame its input, ticks, chrome and present are C and the
         loop makes no console upcall until the run ends or needs the console
-        (docs/kernel_cartpath_2026-10.md §4). Where the board's compositor
+        (docs/history/kernel_cartpath_2026-10.md §4). Where the board's compositor
         gives no front (`ws.front_bind`), or this canvas is not the one it
         composes, the console's frame keeps driving the same Player."""
         if self._play is None or self._is_tool or not (self.verdict and self.verdict[1]):

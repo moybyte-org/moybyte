@@ -13,9 +13,9 @@ the rows still open, and the gates that can still kill a claim. Numbers live in
 A Lua cart's whole frame runs inside libmoy: moycore's frame calls `_update`
 and `_draw` back to back with no return to Python, and the kernel's Player
 (`native/moy_play/moy_play.c`) is what calls it. MicroPython is neither the
-engine nor the cart's loop: a VM-free Lua run (`docs/kernel_cartpath_2026-10.md`
-§2) is the kernel loop's foreground on the boards — its input, ticks, chrome
-and present in C, no upcall from launch to exit — and the VM stays up only
+engine nor the cart's loop: a VM-free Lua run (`native/moy_play/moy_play.h`)
+is the kernel loop's foreground on the boards — its input, ticks, chrome and
+present in C, no upcall from launch to exit — and the VM stays up only
 for the shell around it. There is exactly **one** Lua runtime on every tier —
 boards, browser, host — and `import moy_lua` is meant to fail.
 

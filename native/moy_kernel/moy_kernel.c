@@ -17,7 +17,7 @@
 // (input's trackball and touch gate) outlive a soft reset, and each VM start
 // clears the VM objects the kernel's modules cached in root pointers, which
 // the last heap held. After mp_deinit a VM STOP (moy_kernel_vm_down,
-// docs/kernel_cartpath_2026-10.md section 5) frees the first area and runs the
+// docs/history/kernel_cartpath_2026-10.md section 5) frees the first area and runs the
 // kernel's frame on this task with no VM before the next start. The copy's call list is pinned: mp_task_calls.txt is what it was reviewed
 // against, and tools/mp_task_calls.py fails the build when the tag's differs.
 //
@@ -1165,7 +1165,7 @@ static int s_kstop_n;
 static int s_kstop_left;
 static bool s_kstop_stop;           // `kstop N stop`: each cycle a real stop and start
 
-// -- the VM stop (docs/kernel_cartpath_2026-10.md section 5) --------------------
+// -- the VM stop (docs/history/kernel_cartpath_2026-10.md section 5) --------------------
 //
 // A stop is the soft reset's teardown and then more: after mp_deinit the root
 // section is zeroed (no stale root marks the reused first area), the first
@@ -1573,7 +1573,7 @@ static void moy_vm_task(void *pvParameter) {
     // MOY: what the kernel keeps for a run is made before the VM's first area,
     // below every area a VM will hold: a table made at a launch, with the VM's
     // areas in place, would sit inside the free run the VM's stop leaves and
-    // split it (docs/kernel_cartpath_2026-10.md section 5.2).
+    // split it (docs/history/kernel_cartpath_2026-10.md section 5.2).
     moy_kernel_reserve();
 
     // MOY: a missing first area lands on the floor instead of restarting.

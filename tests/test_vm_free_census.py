@@ -2,7 +2,7 @@
 Player's rule in C (native/moy_play/moy_play_rule.c), over the catalogue
 entry the store's C reads, pinned against the real manifests -- every seed
 cart, the compiled carts' manifests, and the manifest the PICO-8 porter
-writes for every import (docs/kernel_cartpath_2026-10.md §2)."""
+writes for every import (native/moy_play/moy_play.h)."""
 
 import json
 import os

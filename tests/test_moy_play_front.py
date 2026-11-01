@@ -1,4 +1,4 @@
-"""A VM-free game is the kernel loop's foreground (docs/kernel_cartpath_2026-10.md
+"""A VM-free game is the kernel loop's foreground (docs/history/kernel_cartpath_2026-10.md
 §4): once the Player hands it over (`moy_play_front`), each loop frame is
 `moy_play_front_frame` -- the run's input, its ticks, the chrome over it and
 the board's present, all C -- and the console's frame does not run until the

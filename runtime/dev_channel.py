@@ -819,7 +819,7 @@ def _remote_state(ws):
         st["crash_err"] = str(exc)
     try:
         # How this VM started and what each part of it took, from the
-        # kernel's stamps (docs/kernel_cartpath_2026-10.md section 5.5).
+        # kernel's stamps (docs/history/kernel_cartpath_2026-10.md section 5.5).
         # None on a tier without them.
         st["start"] = kernel_start()
     except Exception as exc:  # noqa: BLE001
@@ -913,7 +913,7 @@ def _remote_state(ws):
         st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
                        bool(pl.sched.steady)] if pl.tick_ms else None)
         st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
-        # The run's VM-free verdict (docs/kernel_cartpath_2026-10.md §2), the
+        # The run's VM-free verdict (native/moy_play/moy_play.h), the
         # kernel's rule over the cart's catalogue entry: what the census pins
         # and the zero-upcall gate reads beside the frame's upcalls. None with
         # no cart in front, or no rule in the image.
@@ -929,7 +929,7 @@ def _remote_state(ws):
             import moy_play
             info = moy_play.info()
         # The launch's stop verdict and whether the run had the VM down
-        # (docs/kernel_cartpath_2026-10.md section 5), where the Player has
+        # (docs/history/kernel_cartpath_2026-10.md section 5), where the Player has
         # the run.
         if st["run"] is not None and info is not None and len(info) > 12:
             st["run"]["stop"] = info[11]

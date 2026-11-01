@@ -1,4 +1,4 @@
-// moy_img: the moyimg-v1 decoder in C (docs/kernel_cartpath_2026-10.md §1),
+// moy_img: the moyimg-v1 decoder in C (docs/history/kernel_cartpath_2026-10.md §1),
 // the reader a cart's `images/*.moyimg` crosses through when its run has no
 // VM. runtime/moyimg.py's `decode_moyimg` is the reference, rule for rule, and
 // tests/test_moy_img.py holds the two together over every seed image.

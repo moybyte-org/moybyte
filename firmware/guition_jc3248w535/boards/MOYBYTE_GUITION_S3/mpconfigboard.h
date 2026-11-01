@@ -104,7 +104,7 @@
 #define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
 #define MOY_KERNEL_TOUCH_ADDR               (0x3B)
 
-// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM
 // up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
 // the panel's own framebuffer (moy_axs's kernel entry points above), and

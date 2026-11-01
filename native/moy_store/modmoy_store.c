@@ -221,7 +221,7 @@ extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
 extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
                            uint32_t *bsize) __attribute__((weak));
 
-// While no VM runs (its mount table is gone: docs/kernel_cartpath_2026-10.md
+// While no VM runs (its mount table is gone: docs/history/kernel_cartpath_2026-10.md
 // section 5.3) the kernel's own volumes answer: the card's FATFS at /sd, held
 // open across the stop (moy_card.c), and the internal flash's littlefs at /.
 void *moy_store_card_fatfs(void);

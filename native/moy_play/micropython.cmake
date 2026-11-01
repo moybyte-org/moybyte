@@ -1,4 +1,4 @@
-# moy_play: the kernel's Player (docs/kernel_cartpath_2026-10.md §3) -- the
+# moy_play: the kernel's Player (native/moy_play/moy_play.h) -- the
 # tick model (moy_tick.c), the runtime map (moy_rt.c), the VM-free rule
 # (moy_play_rule.c), the Player (moy_play.c) and the module `moy_play`
 # (modmoy_play.c). A console TAKES

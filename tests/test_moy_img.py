@@ -2,7 +2,7 @@
 VM-free run takes a cart's images with, held to runtime/moyimg.py's
 `decode_moyimg` -- every image this repo ships, pictures of every shape and
 window the writers make, and the ways a blob is not a picture
-(docs/kernel_cartpath_2026-10.md §1)."""
+(docs/history/kernel_cartpath_2026-10.md §1)."""
 
 import binascii
 import glob

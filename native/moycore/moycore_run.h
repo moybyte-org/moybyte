@@ -1,5 +1,5 @@
 // moycore_run: the console a cart runs against, with no VM in it
-// (docs/kernel_cartpath_2026-10.md §1, the modmoycore.c split).
+// (docs/history/kernel_cartpath_2026-10.md §1, the modmoycore.c split).
 //
 // libmoy's console over buffers its caller holds -- the canvas, the sheet and
 // the map -- and the host callbacks libmoy's verbs call: input, time and the
@@ -105,7 +105,7 @@ int moycore_run_view(const moycore_run_t *c, int *w, int *h);
 void moycore_run_close(moycore_run_t *c);
 
 // A compiled cart's run opened and closed from C with no VM (modmoycore.c, the
-// boards' binding: docs/kernel_cartpath_2026-10.md section 5.2). Every
+// boards' binding: docs/history/kernel_cartpath_2026-10.md section 5.2). Every
 // pointer is the caller's and outlives the run.
 typedef struct {
     uint16_t *fb;                // the canvas, w x h words

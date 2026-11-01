@@ -173,7 +173,7 @@ def test_a_loop_with_nothing_registered_runs_no_frame(loop):
 
 
 def test_with_no_vm_every_stage_runs_and_each_upcall_is_refused(loop):
-    """A VM stop (docs/kernel_cartpath_2026-10.md section 4): the frame goes
+    """A VM stop (docs/history/kernel_cartpath_2026-10.md section 4): the frame goes
     on with no VM -- the inputs, the dev channel, the tail -- and each of the
     console's three upcalls is refused and counted REFUSED, never made."""
     L.vm(False)

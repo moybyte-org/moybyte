@@ -1,4 +1,4 @@
-// moy_match: two-console play below the VM (docs/kernel_cartpath_2026-10.md
+// moy_match: two-console play below the VM (docs/history/kernel_cartpath_2026-10.md
 // §3.6, docs/netplay_v1.md). The radio link's protocol -- beacons, the peer
 // table, the same-cart handshake (offer, join, start, the host's chase), the
 // match's end -- and the lockstep session it forms: inputs, never state; a

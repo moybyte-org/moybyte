@@ -1,4 +1,4 @@
-/* A Lua cart's placed-actor scenes in C (docs/kernel_cartpath_2026-10.md §2's
+/* A Lua cart's placed-actor scenes in C (native/moy_play/moy_play.h's
  * table: scene, load_scene, actors, touching, move_actor, move_actor_to,
  * remove_actor, draw_scene).
  *

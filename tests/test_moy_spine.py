@@ -306,7 +306,7 @@ def test_leases_are_a_mask_over_a_closed_set_of_tags(sp):
 
 def test_the_kernels_tables_outlive_their_views(sp):
     """kernel(fresh): the console's tables as the kernel's own
-    (docs/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
+    (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
     a view dropping (a VM stop's sweep) does not free. A return start
     (fresh False) reads the route and the lease the stopped VM left; every
     start clears the registry, and any other start puts the rest back."""

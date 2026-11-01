@@ -429,7 +429,7 @@ do
   -- named scene's rows without switching the active one, each scene parsed
   -- once a run and its rows shared (a fresh sequence each call); the world is
   -- copies of the ACTIVE scene's rows, made at its first use. A run holds at
-  -- most 256 live actors (docs/kernel_cartpath_2026-10.md §9 decision 5).
+  -- most 256 live actors (docs/history/kernel_cartpath_2026-10.md §9 decision 5).
   local scene_names, scene_rows, draw_rows = __scene_names, __scene_rows, __draw_scene
   __scene_names, __scene_rows, __draw_scene = nil, nil, nil
   local floor, tremove, type, pairs = math.floor, table.remove, type, pairs

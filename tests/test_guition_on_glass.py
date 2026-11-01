@@ -638,7 +638,7 @@ def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
     on_glass.a_ctrl_c_ends_a_front_run(board, front=False)
 
 
-# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): the kernel stops the
 # VM and starts it again with no cart, the routes and the lease read back and
 # PSRAM flat while it is down; Doom runs with no VM (its fit forced to fail),
 # its end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back over the

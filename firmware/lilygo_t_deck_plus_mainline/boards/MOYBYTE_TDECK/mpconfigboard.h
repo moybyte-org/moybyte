@@ -137,7 +137,7 @@
 #define MOY_KERNEL_BUTTON_GPIO              (0)
 #define MOY_KERNEL_BUTTON_NAME              "the trackball"
 
-// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM
 // up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
 // the panel's own framebuffers (moy_lcd's kernel entry points above), and

@@ -191,7 +191,7 @@ bool moy_loop_vm(void);
 // One frame. With a VM, it runs only while the three console upcalls are
 // registered (STOPPED otherwise). With none, every stage runs and each
 // upcall the frame would make is refused and counted REFUSED: the kernel's
-// run in front is the frame (docs/kernel_cartpath_2026-10.md section 4).
+// run in front is the frame (docs/history/kernel_cartpath_2026-10.md section 4).
 int moy_loop_step(void);
 int moy_loop_run(void);
 

@@ -1617,7 +1617,7 @@ static mp_obj_t input_ball_coast(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_ball_coast_obj, input_ball_coast);
 
-// While the VM is stopped (docs/kernel_cartpath_2026-10.md section 5.3) the
+// While the VM is stopped (docs/history/kernel_cartpath_2026-10.md section 5.3) the
 // loop's objects went with it: the kernel's table alone, its board drivers
 // kicked and its frame begun, which is every source a stopped run reads (the
 // keys and the buttons the board's input task writes into it).

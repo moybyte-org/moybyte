@@ -428,8 +428,7 @@ def test_every_board_decides_the_kernel_entry(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_player_and_the_zero_denies_it(board):
-    """native/moy_play is the kernel's Player (docs/kernel_cartpath_2026-10.md
-    §3): every console takes it; the Zero, which runs no carts, denies it."""
+    """native/moy_play is the kernel's Player (native/moy_play/moy_play.h): every console takes it; the Zero, which runs no carts, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
     assert "moy_play" in takes or "moy_play" in denies, (

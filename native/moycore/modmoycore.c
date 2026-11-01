@@ -2510,7 +2510,7 @@ static mp_obj_t mod_close(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
 
-// A compiled cart's run opened from C, with no VM (docs/kernel_cartpath_2026-10.md
+// A compiled cart's run opened from C, with no VM (docs/history/kernel_cartpath_2026-10.md
 // section 5.2, the load after the stop): run_begin's console over the
 // caller's buffers, then wasm_open's session -- the same two steps the binding
 // takes, every buffer the caller's for the run's life. 0, or non-zero with the

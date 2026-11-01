@@ -1,4 +1,4 @@
-"""The runaway watch (native/moy_play/moy_play.h, docs/kernel_cartpath_2026-10.md
+"""The runaway watch (native/moy_play/moy_play.h, docs/history/kernel_cartpath_2026-10.md
 §8.2): a tick that has not come back after its budget is ended from the
 watcher's thread, and the run reads as raised with the panel's stuck words.
 
