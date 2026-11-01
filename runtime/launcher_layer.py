@@ -2200,11 +2200,12 @@ class Carousel(Launcher):
     def paint_key(self):
         """What the band's pixels depend on besides the offset and the
         statics: the selection, the motion (a card at rest wears its mark),
-        the centre card's title and star (its caption's line is laid out
-        once a card and a play record, `_draw_caption`)."""
+        whether the tabs or the bar hold the focus (the mark goes), the
+        centre card's title and star (its caption's line is laid out once a
+        card and a play record, `_draw_caption`)."""
         it = self.items[self.nearest()] if self.items else None
         f = self.favorite_for
-        return (self._sel, self.moving, it and it.get("title"),
+        return (self._sel, self.moving, self.tab_focus, it and it.get("title"),
                 it is not None and f is not None and bool(f(it)))
 
     def favorite_rect(self, i):
@@ -3179,14 +3180,16 @@ class LauncherHomeLayer:
         Library panel fill/header/footer) is a pure function of: the shared
         base plus the wallpaper, the search field and the keys a modal's hint
         strip names (`modal_keys`). A key change forces full paints until the
-        streak re-arms."""
+        streak re-arms. Where the keys are -- the tab row, the bar, a card --
+        is not in it: the tabs are the bar's, which a band frame draws, the
+        hint strip names the tab row's keys under its own key (`_outside_key`)
+        and the selected card wears the focus as its part's gen."""
         ws = self.ws
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id, modal_keys(ws),
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
-            self.grid.tab, self._tab_focus, self._tab_at, self._button_focus,
-            self._on_bar, self.grid.arrangement,
+            self.grid.tab, self._button_focus, self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
     def _retained_key(self, cv, statics=None):
@@ -3205,7 +3208,8 @@ class LauncherHomeLayer:
         ws = self.ws
         return (self._statics_key(cv) if statics is None else statics, self.grid.sel,
                 self.grid.scroll, ws.covers.gen, self._lhover, self.grid.items,
-                ws.carts.titled, ws.system.gen(), ws.bar_layer.shown_key("home"))
+                ws.carts.titled, ws.system.gen(), ws.bar_layer.shown_key("home"),
+                self._tab_keys, self._tab_at, self._on_bar)
 
     def _try_stamp_retained(self, cv, dt):
         """Present the retained home frame when nothing it depends on changed:
@@ -3437,11 +3441,13 @@ class LauncherHomeLayer:
 
     def _outside_key(self):
         """What the home's parts outside the band show of the selection:
-        the hint strip its verbs and its star (`_hint_groups`), the handheld
+        the hint strip its verbs and its star (`_hint_groups`), or the tab
+        row's keys while the tab row has them (`_draw_hints`), the handheld
         icons' caption band its cart and the day its line counts from."""
         g = self.grid
         it = self.favourable()
-        hint = (self.zone_verbs(), it is not None and self.ws.carts.is_favorite(it))
+        hint = (self.zone_verbs(), it is not None and self.ws.carts.is_favorite(it),
+                bool(self._tab_keys))
         if isinstance(g, IconHome) and g._cells().caption is not None:
             return (hint, (g.sel, g.today()))
         return (hint, None)
