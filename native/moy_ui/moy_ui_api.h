@@ -534,8 +534,11 @@ typedef struct {
     // the frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is
     // kept); kf the floor the kept table drawn last draws this frame, kf_i
     // the next rect moy_ui_api_table_floor answers, kf_held whether every
-    // buffer holds the table as this frame draws it.
-    uint8_t kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np;
+    // buffer holds the table as this frame draws it; kf_copy the floor's
+    // rects the buffer the last frame painted holds as this frame draws
+    // them (a bit each), kf_took those the app copied out of it
+    // (moy_ui_api_table_copy), kf_ci the next one that answers.
+    uint8_t kt_k, kf_n, kf_i, kf_held, tp_keep, tp_np, kf_copy, kf_took, kf_ci;
     int32_t kt_f;
     moy_ui_box_t kf[MOY_UI_KEPT_FLOOR];
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
@@ -840,6 +843,15 @@ int32_t moy_ui_api_table_dist(const moy_ui_ctx_t *c);
 // other frame draws the view whole. A table that keeps nothing answers
 // its view, then 0.
 int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]);
+// Before moy_ui_api_table_floor: the next rect of the floor the buffer the
+// last frame painted holds as this frame draws it -- every part that meets
+// it unchanged since that paint (its cells, gen and marks; nothing drawn
+// over it), that paint the app's alone, its table's key and scroll this
+// frame's -- into out[0..3], 1, for the app to copy out of that buffer
+// (the canvas's copy_last): the floor and the parts then pass it by. 0
+// after the last. `back` gives the rect answered last back to the floor
+// (a canvas that could not copy it), answering 0.
+int32_t moy_ui_api_table_copy(moy_ui_ctx_t *c, int32_t out[4], int back);
 // Whether the buffer this frame paints holds part `id` of the app's page
 // as a frame drew it under `key`: the buffers RETAINED_FRAMES back, the
 // frames between this context's paints, that paint the app's alone and

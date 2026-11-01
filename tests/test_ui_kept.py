@@ -40,9 +40,11 @@ class Rig:
         self.r = array("i", [0] * 4)
 
     def frame(self, rows=_ROWS, cur=0, key=7, offset=0, over=None, whole=False, gen=0,
-              gap=False, named=()):
+              gap=False, named=(), copied=None, back=False):
         """One painted frame: (the floor's rects, its end, the parts
-        answered, what `held` answered for each of `named`)."""
+        answered, what `held` answered for each of `named`). Given a list
+        `copied`, the rects `table_copy` answers go in it first (`back`:
+        each given back, as a canvas that cannot copy does)."""
         self.n += 2 if gap else 1
         ui_draw.paint_frame(self.n, True)
         self.host.whole()
@@ -54,6 +56,11 @@ class Rig:
                                          "offset": offset, "keep": key, "spill": 4,
                                          "gen": gen, "current": False, "mark": False,
                                          "over": over, "whole": whole})
+        if copied is not None:
+            while ui.table_copy(self.r) > 0:
+                copied.append(tuple(self.r))
+                if back:
+                    assert ui.table_copy(self.r, True) == 0
         floor = []
         v = ui.table_floor(self.r)
         while v > 0:
@@ -139,6 +146,64 @@ def test_what_was_drawn_over_the_table_draws_in_the_buffer_that_holds_it(th, buf
         assert rig.frame()[0] == []
     floor, end, _p, _h = rig.frame()           # the buffer the stamp lies in
     assert floor == [stamp] and end == 0
+
+
+def test_a_lagging_buffer_copies_what_the_last_frame_drew_as_this_one(th):
+    """`ui.table_copy`: where the buffer the last frame painted holds a
+    floor rect as this frame draws it, the rect is the app's to copy out of
+    it, and the floor and the parts pass it by: a double buffer's catch-up
+    of a step is a copy."""
+    rig = Rig(th, 2)
+    _settle(rig, 3)
+    row0, row4 = (10, 20, 54, 60), (10 + 200 - 4, 20, 58, 60)
+    got = []
+    floor, end, parts, _h = rig.frame(cur=4, copied=got)
+    assert got == [] and floor == [row0, row4] and end == -1
+    got = []
+    floor, end, parts, _h = rig.frame(cur=4, copied=got)   # the other buffer catches up
+    assert sorted(got) == [row0, row4] and floor == [] and parts == [] and end == 0
+    # a step a frame: the buffer lacks the step before last's row, which
+    # the last frame drew as this one does (copied), and this step's, whose
+    # reach meets the row the last frame marked (drawn)
+    _settle(rig, 3)
+    rig.frame(cur=4)
+    got = []
+    floor, end, parts, _h = rig.frame(cur=5, copied=got)
+    assert got == [row0] and floor == [(10 + 250 - 4, 20, 54, 60)] and parts == [4, 5]
+    # a changed cell's catch-up
+    _settle(rig, 3)
+    rows = [r[:] for r in _ROWS]
+    rows[3] = ["D"]
+    rig.frame(rows=rows)
+    got = []
+    assert rig.frame(rows=rows, copied=got)[0] == [] and got == [(10 + 150 - 4, 20, 58, 60)]
+
+
+def test_table_copy_holds_back_what_it_cannot_vouch_for(th):
+    """Nothing is copied with one buffer, across a stamp drawn over the
+    last paint, a scroll or a whole frame; a rect given back is drawn."""
+    rig = Rig(th, 1)
+    _settle(rig, 2)
+    got = []
+    assert rig.frame(cur=4, copied=got)[0] and got == []
+    rig = Rig(th, 2)
+    _settle(rig, 3)
+    rig.frame(cur=4, over=(12, 30, 8, 13))          # the stamp lies over row 0
+    got = []
+    floor, end, _p, _h = rig.frame(cur=4, copied=got)
+    assert got == [(10 + 200 - 4, 20, 58, 60)] and floor == [(10, 20, 54, 60)]
+    _settle(rig, 3)
+    rig.frame(offset=5)
+    got = []
+    assert rig.frame(offset=5, copied=got, whole=True)[0] == [_VIEW] and got == []
+    got = []
+    assert rig.frame(offset=5, copied=got)[0] == [] and got == []
+    _settle(rig, 3)
+    rig.frame(cur=4)
+    got = []
+    floor, _e, parts, _h = rig.frame(cur=4, copied=got, back=True)
+    assert len(got) == 2 and floor == [(10, 20, 54, 60), (10 + 200 - 4, 20, 58, 60)]
+    assert parts == [0, 1, 3, 4, 5]
 
 
 def test_a_vertical_kept_table(th):

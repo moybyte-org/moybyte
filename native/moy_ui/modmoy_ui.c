@@ -2841,6 +2841,20 @@ static mp_obj_t ui_api_table_floor(mp_obj_t ctx, mp_obj_t r) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_table_floor_obj, ui_api_table_floor);
 
+// api_table_copy(ctx, r, back) -> 1 and the next rect of the floor the
+// last frame's buffer holds into r (four words); 0 after the last, or
+// with `back` (the rect answered last given back to the floor)
+static mp_obj_t ui_api_table_copy(mp_obj_t ctx, mp_obj_t r, mp_obj_t back) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
+    if (b.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    return mp_obj_new_int(moy_ui_api_table_copy(ctx_of(ctx), (int32_t *)b.buf,
+                                                mp_obj_is_true(back)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_copy_obj, ui_api_table_copy);
+
 // api_held(ctx, id, key) -> whether the buffer this frame paints holds part
 // `id` as a frame drew it under `key`
 static mp_obj_t ui_api_held(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
@@ -3929,6 +3943,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_floor), MP_ROM_PTR(&ui_api_table_floor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_copy), MP_ROM_PTR(&ui_api_table_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_held), MP_ROM_PTR(&ui_api_held_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_held_last), MP_ROM_PTR(&ui_api_held_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_held_all), MP_ROM_PTR(&ui_api_held_all_obj) },

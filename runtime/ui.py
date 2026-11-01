@@ -662,6 +662,24 @@ def table_floor(r):
     return v
 
 
+def table_copy(r, back=False):
+    """Before `table_floor`: the next rect of the floor of the table drawn
+    last that the buffer the last frame painted holds as this frame draws
+    it (every part meeting it unchanged since that paint, nothing drawn
+    over it there) written into `r`, 1, for the app to copy out of that
+    buffer (the canvas's `copy_last`); the floor and the parts then pass it
+    by. 0 after the last. `back` gives the rect answered last back to the
+    floor (the canvas could not copy it) and answers 0."""
+    a = _TF
+    v = _C.api_table_copy(_T[0], a, back)
+    if v > 0:
+        r[0] = a[0]
+        r[1] = a[1]
+        r[2] = a[2]
+        r[3] = a[3]
+    return v
+
+
 def held(id, key):
     """Whether the buffer this frame paints holds part `id` of the page as
     a frame drew it under `key` (an int): the buffers the canvas presents

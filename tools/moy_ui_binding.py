@@ -371,6 +371,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_table_dist", [c.c_void_p], c.c_int32),
     ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
     ("moy_ui_api_table_floor", [c.c_void_p, c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_copy", [c.c_void_p, c.c_void_p, c.c_int], c.c_int32),
     ("moy_ui_api_held", [c.c_void_p, _Span, c.c_int32], _I),
     ("moy_ui_api_held_last", [c.c_void_p, _Span, c.c_int32], _I),
     ("moy_ui_api_held_all", [c.c_void_p], _I),
@@ -1457,6 +1458,11 @@ def binding():
         v = (c.c_int32 * 4).from_buffer(r)
         return int(lib.moy_ui_api_table_floor(p, c.addressof(v)))
 
+    def api_table_copy(ctx, r, back):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4).from_buffer(r)
+        return int(lib.moy_ui_api_table_copy(p, c.addressof(v), 1 if back else 0))
+
     def api_held(ctx, id_, key):
         p, _k = _ctx(ctx)
         t, keep = span(id_)
@@ -1714,7 +1720,7 @@ def binding():
               api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics, api_table_part, api_table_dist,
-              api_table_floor, api_held, api_held_last, api_held_all,
+              api_table_floor, api_table_copy, api_held, api_held_last, api_held_all,
               api_slots, api_slot, api_slot_next,
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,

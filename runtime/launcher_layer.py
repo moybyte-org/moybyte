@@ -401,6 +401,7 @@ class Launcher:
         self._krows_of = None
         self._kcols = ()              # ...and their columns, one a card across
         self.floor = []               # the rects the band's frame draws (`band_floor`)
+        self.copied = []              # ...and those it copied out of the last frame's buffer
         self._bo = {"id": "band", "part": [0, 0], "axis": "x", "snap": False, "offset": 0,
                     "spill": 0, "gen": 0, "current": False, "mark": False}
         self._shows = bytearray()     # the cards the engine says show (`Carousel`)
@@ -873,13 +874,26 @@ class Launcher:
             return None
         return held
 
-    def band_floor(self, cv, fill):
+    def band_floor(self, cv, fill, copy=True):
         """The floor of the band's table (`ui.table_floor`): each rect the
         frame draws, kept in `floor`, its ground put back by `fill` where
-        given; then the floor's end."""
+        given; then the floor's end. With `copy`, first the rects the
+        buffer the last frame painted holds as this frame draws them
+        (`ui.table_copy`), copied out of it (`copy_last`) into `copied`:
+        the double buffer's catch-up of a step costs a copy, not its
+        cards."""
         fl = self.floor
         del fl[:]
+        cp = self.copied
+        del cp[:]
         r = _FLOOR
+        cl = getattr(cv, "copy_last", None) if copy else None
+        if cl is not None:
+            while _ui.table_copy(r) > 0:
+                if not cl(r[0], r[1], r[2], r[3]):
+                    _ui.table_copy(r, True)  # (drawn: the floor answers it)
+                    break
+                cp.append((r[0], r[1], r[2], r[3]))
         v = _ui.table_floor(r)
         while v > 0:
             q = (r[0], r[1], r[2], r[3])
@@ -958,7 +972,7 @@ class Launcher:
             cv, c.side, c.r, (c.cols + 2) * c.rows if self.horizontal else (c.rows + 2) * c.cols)
         if beside is not None:
             beside(cv, whole or not held)
-        end = self.band_floor(cv, fill)
+        end = self.band_floor(cv, fill, not note)
         if note:
             del self.floor[:]
         r = _PART
@@ -2289,7 +2303,7 @@ class Carousel(Launcher):
         _ui.table("", _PART_COL, self._band_rows(n), self.nearest(), o)
         if beside is not None:
             beside(cv, whole or not held)
-        end = self.band_floor(cv, None)
+        end = self.band_floor(cv, None, not note)
         if note:
             del self.floor[:]
         shows = self._shows
@@ -2911,6 +2925,9 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
     for r in grid.floor:
         ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
         a += r[2] * r[3]
+    for r in grid.copied:
+        ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        a += r[2] * r[3]
     whole = 2 * a > bw * bh             # (more than a step's cells: a scroll's, a jump's)
     if not moving:
         # (a moving frame notes no cover landing: the next frame scrolls
@@ -3466,19 +3483,30 @@ class LauncherHomeLayer:
         now = self._outside_key()
         if now is None:
             return
-        held = _ui.held("hint", self._hk.of(now[0]))
+        kh = self._hk.of(now[0])
+        held = _ui.held("hint", kh)
+        # where the last frame's buffer holds the frame round the band and
+        # the part as this frame draws them, the part is copied out of it
+        cl = (getattr(cv, "copy_last", None)
+              if draw and not whole and _ui.held_last("band", self._keys[0]) else None)
         if draw and (whole or not held):
             h = g.foot()[5]
             if h[2] > 0 and h[3] > 0:
-                self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
-                self._draw_home_chrome(cv)
+                if not (cl is not None and _ui.held_last("hint", kh)
+                        and cl(h[0], h[1], h[2], h[3])):
+                    self.ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
+                    self._draw_home_chrome(cv)
                 drew.append(h)
         if now[1] is not None:
-            held = _ui.held("caption", self._ck.of(now[1]))
+            kc = self._ck.of(now[1])
+            held = _ui.held("caption", kc)
             if draw and (whole or not held):
                 c = g._cells()
-                g._draw_caption_band(cv, c)
-                drew.append(c.caption)
+                r = c.caption
+                if not (cl is not None and _ui.held_last("caption", kc)
+                        and cl(r[0], r[1], r[2], r[3])):
+                    g._draw_caption_band(cv, c)
+                drew.append(r)
 
     def _name_beside(self, cv, whole):
         """`_beside` naming the parts a whole paint drew."""
