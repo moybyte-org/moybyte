@@ -8,6 +8,7 @@
 
 #include "esp_async_memcpy.h"
 #include "esp_rom_sys.h"
+#include "soc/soc_caps.h"
 #include "esp_timer.h"
 
 #include "moy_flush.h"
@@ -52,6 +53,14 @@ static void moy_fold_snap_wait(void) {
 // Start the DMA, or say why not. False means the caller memcpys instead --
 // and never that anything went wrong the caller must report.
 static bool moy_fold_snap_start(uint8_t *dst, const uint8_t *src, size_t len) {
+    #if !SOC_ASYNC_MEMCPY_SUPPORTED
+    // No DMA engine on this chip (the classic ESP32): every snapshot is the
+    // caller's memcpy, the path a dead engine takes anyway.
+    (void)dst; (void)src; (void)len;
+    (void)moy_fold_snap_done;
+    (void)s_snap;
+    return false;
+    #else
     if (s_snap_dead) {
         return false;
     }
@@ -80,6 +89,7 @@ static bool moy_fold_snap_start(uint8_t *dst, const uint8_t *src, size_t len) {
         return false;                    // a full queue is transient: memcpy this frame
     }
     return true;
+    #endif
 }
 
 // ---------------------------------------------------------------------------

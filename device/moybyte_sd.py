@@ -11,6 +11,14 @@ CS and sdspi's CS are driver-owned and never touched here.
 
 The desktop loop is single-threaded, so `with_sd_live()` runs between frames and
 never overlaps a panel flush.
+
+THE PINS ARE THE PANEL MODULE'S. `moy_lcd` owns the host and exports it with
+the card's CS and the CS to park (`SPI_HOST`, `SD_CS`, `RADIO_CS`, -1 where a
+board has none), each its board's define; the constants below are the T-Deck's
+and answer only where no `moy_lcd` does. The M5Stack Core2 takes this module
+with CS 4 and no radio, and its GPIO9 is a FLASH data line: driving the
+T-Deck's radio CS there corrupts the next flash read and hangs the board in its
+own panic handler (2026-11-01).
 """
 
 SD_MOUNT = "/sd"
@@ -20,7 +28,18 @@ SD_CS = 39
 SD_LIVE_FREQ_KHZ = 20000
 
 
-def mount_sd_live(host=SPI_HOST, cs=SD_CS, freq_khz=SD_LIVE_FREQ_KHZ):
+def _pins():
+    """(host, sd_cs, radio_cs): the panel module's, else this file's."""
+    try:
+        import moy_lcd
+        return (getattr(moy_lcd, "SPI_HOST", SPI_HOST),
+                getattr(moy_lcd, "SD_CS", SD_CS),
+                getattr(moy_lcd, "RADIO_CS", RADIO_CS))
+    except ImportError:
+        return SPI_HOST, SD_CS, RADIO_CS
+
+
+def mount_sd_live(host=None, cs=None, freq_khz=SD_LIVE_FREQ_KHZ):
     """Attach the SD card on the display-shared host via moy_sd and mount the
     store's own volume over it: native/moy_store's card, a FATFS over a C
     block device with the sector cache (moy_card.c), which VfsFat and the
@@ -29,6 +48,10 @@ def mount_sd_live(host=SPI_HOST, cs=SD_CS, freq_khz=SD_LIVE_FREQ_KHZ):
     import moy_sd
     import moy_store
 
+    if host is None or cs is None:
+        p_host, p_cs, _radio = _pins()
+        host = p_host if host is None else host
+        cs = p_cs if cs is None else cs
     sectors = moy_sd.init(host, cs, freq_khz)
     bd = moy_store.card(sectors)
     _mount(bd, SD_MOUNT)
@@ -54,12 +77,14 @@ def with_sd_live(fn):
         # and a running compiled cart's every `read` is a session.
         import os
 
-        try:
-            from machine import Pin
+        radio_cs = _pins()[2]
+        if radio_cs >= 0:
+            try:
+                from machine import Pin
 
-            Pin(RADIO_CS, Pin.OUT, value=1)  # park the unused LoRa radio CS only
-        except Exception:
-            pass
+                Pin(radio_cs, Pin.OUT, value=1)  # park the unused radio CS only
+            except Exception:
+                pass
         try:
             os.mkdir(SD_MOUNT)
         except OSError:

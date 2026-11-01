@@ -24,8 +24,8 @@
 // ROTATION -- the T-Deck panel is portrait-native 240x320 and the console is
 //   landscape 320x240. The fork reached that with LVGL rotation 270 over
 //   _ORIENTATION_TABLE = (0, 160, 192, 96): index 3 = 0x60 = MV|MX, plus the
-//   BGR bit 0x08 -> MADCTL 0x68. Here that is swap_xy(true) + mirror(x=true,
-//   y=false) + rgb_ele_order BGR, which produces the same byte. set_madctl()
+//   BGR bit 0x08 -> MADCTL 0x68, which bring-up writes whole (MOY_LCD_MADCTL,
+//   a board's own byte where its glass differs). set_madctl()
 //   exists so a wrong-way-up panel can be corrected over serial without a
 //   rebuild -- this driver has never been on glass, and that is the one thing a
 //   compile cannot check.
@@ -158,13 +158,18 @@
 #include "moy_vol.h"      // the store's bus gate, which this panel's rule is
 #include "moy_fold.h"     // the GAME FOLD: the latch, the fence, the gather
 
-// ---- board facts (device/tdeck_*.py)
+// ---- board facts: the T-Deck's, each a default a board's mpconfigboard.h
+// replaces (the M5Stack Core2 takes this module with its own). A pin a board
+// does not have is -1 and is never touched. MOY_LCD_POWER() and
+// MOY_LCD_BACKLIGHT(on) name a board's own functions where its panel rail and
+// backlight sit behind a power IC instead of a GPIO.
 #define MOY_LCD_W            320
 #define MOY_LCD_H            240
 #define MOY_LCD_FB_BYTES     (MOY_LCD_W * MOY_LCD_H * 2)
 #define MOY_LCD_ROW_BYTES    (MOY_LCD_W * 2)
 
 #define MOY_LCD_SPI_HOST     SPI2_HOST   // == 1, the host moy_sd attaches to
+#ifndef MOY_LCD_PIN_SCK
 #define MOY_LCD_PIN_SCK      40
 #define MOY_LCD_PIN_MOSI     41
 #define MOY_LCD_PIN_MISO     38
@@ -174,13 +179,31 @@
 #define MOY_LCD_PIN_POWERON  10          // board power rail (peripherals + panel)
 #define MOY_LCD_PIN_SD_CS    39
 #define MOY_LCD_PIN_RADIO_CS 9           // unused LoRa module; park it high
+#endif
+
+// The controller's own init after esp_lcd's SLPOUT/MADCTL/COLMOD: the
+// ST7789's table below (MOY_LCD_INIT_ST7789, the T-Deck's), or none -- an
+// ILI9342C runs on its power-on defaults. MADCTL is the landscape byte the
+// panel boots with (set_madctl corrects it live), INVERT whether it takes
+// INVON.
+#ifndef MOY_LCD_INIT_ST7789
+#define MOY_LCD_INIT_ST7789  (1)
+#endif
+#ifndef MOY_LCD_MADCTL
+#define MOY_LCD_MADCTL       (0x68)
+#endif
+#ifndef MOY_LCD_INVERT
+#define MOY_LCD_INVERT       (1)
+#endif
 
 // 80 MHz is requested, not delivered: none of MOSI/SCK/MISO are the S3's
 // IOMUX-native FSPI pins, so every signal routes through the GPIO matrix, which
 // caps a write-only LCD at ~40 MHz. esp_lcd's divider clamps to what it can do.
 // Kept at the fork's requested value so the two builds are comparable; drop to
 // 62500000 then 40000000 if the panel tears or garbles.
+#ifndef MOY_LCD_PCLK_HZ
 #define MOY_LCD_PCLK_HZ      (80 * 1000 * 1000)
+#endif
 
 // Bands of 32 rows = 20480 B; two slots = 40960 B of internal DMA SRAM.
 //
@@ -331,6 +354,7 @@ typedef struct {
 // the pieces esp_lcd_panel_reset/init already did (SWRESET, SLPOUT, MADCTL,
 // COLMOD) and minus the I80-only RAMCTRL byte-swap branch, which does not apply
 // to an SPI panel.
+#if MOY_LCD_INIT_ST7789
 static const moy_lcd_cmd_t MOY_LCD_INIT[] = {
     { CMD_NORON,    0,  10, {0} },
     { CMD_B6,       2,   0, {0x0A, 0x82} },
@@ -348,8 +372,12 @@ static const moy_lcd_cmd_t MOY_LCD_INIT[] = {
     { CMD_NGC,     14,   0, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31,
                              0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E} },
 };
+#endif
 
 static void moy_lcd_park_pin(int gpio, int level) {
+    if (gpio < 0) {
+        return;
+    }
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << gpio,
         .mode = GPIO_MODE_OUTPUT,
@@ -384,6 +412,13 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     // which is what the fork's tdeck_board.init_board_pins does; what the hard
     // constraints forbid is re-creating a Pin on TFT_CS/SD_CS AFTERWARDS, while
     // a driver owns it.
+    #ifdef MOY_LCD_POWER
+    int perr = MOY_LCD_POWER();
+    if (perr != ESP_OK) {
+        *what = "board power";
+        return perr;
+    }
+    #endif
     moy_lcd_park_pin(MOY_LCD_PIN_POWERON, 1);
     moy_lcd_park_pin(MOY_LCD_PIN_SD_CS, 1);
     moy_lcd_park_pin(MOY_LCD_PIN_RADIO_CS, 1);
@@ -391,7 +426,14 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     // Backlight OFF until the first composed frame has been flushed (#45): the
     // ST7789's power-on GRAM is noise and the user must never see it lit.
     moy_lcd_park_pin(MOY_LCD_PIN_BL, 0);
+    #ifdef MOY_LCD_BACKLIGHT
+    MOY_LCD_BACKLIGHT(0);
+    #endif
+    // GPIO34..39 on the classic ESP32 are input-only with no pulls (the
+    // Core2's MISO is 38): the board says so rather than taking an IDF error.
+    #ifndef MOY_LCD_MISO_NO_PULL
     gpio_set_pull_mode(MOY_LCD_PIN_MISO, GPIO_PULLUP_ONLY);
+    #endif
 
     // Framebuffers in PSRAM, bounce buffers in internal DMA-capable SRAM.
     // Allocated BEFORE the bus so a memory failure leaves nothing half-built.
@@ -468,11 +510,11 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     MOY_LCD_TRY(esp_lcd_panel_init(s_panel), "init");   // SLPOUT + MADCTL + COLMOD
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    // Landscape: MV|MX (+ the BGR bit the panel config already carries) == 0x68.
-    MOY_LCD_TRY(esp_lcd_panel_swap_xy(s_panel, true), "swap_xy");
-    MOY_LCD_TRY(esp_lcd_panel_mirror(s_panel, true, false), "mirror");
-    s_madctl = 0x68;
+    // Landscape: on the T-Deck MV|MX + the BGR bit == 0x68, written whole.
+    s_madctl = MOY_LCD_MADCTL;
+    MOY_LCD_TRY(esp_lcd_panel_io_tx_param(s_io, CMD_MADCTL, &s_madctl, 1), "madctl");
 
+    #if MOY_LCD_INIT_ST7789
     for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_LCD_INIT); i++) {
         const moy_lcd_cmd_t *c = &MOY_LCD_INIT[i];
         MOY_LCD_TRY(esp_lcd_panel_io_tx_param(s_io, c->cmd,
@@ -482,7 +524,9 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
         }
     }
 
-    MOY_LCD_TRY(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
+    #endif
+
+    MOY_LCD_TRY(esp_lcd_panel_invert_color(s_panel, MOY_LCD_INVERT), "invert");   // INVON
     MOY_LCD_TRY(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
     vTaskDelay(pdMS_TO_TICKS(120));
     return ESP_OK;
@@ -519,7 +563,13 @@ int moy_lcd_kpresent(void) {
 // Active HIGH on GPIO42. Plain on/off; the fork drove PWM duty through LVGL's
 // driver, which nothing in the console ever used for dimming.
 void moy_lcd_kbacklight(int on) {
-    gpio_set_level(MOY_LCD_PIN_BL, on ? 1 : 0);
+    #ifdef MOY_LCD_BACKLIGHT
+    MOY_LCD_BACKLIGHT(on);
+    #else
+    if (MOY_LCD_PIN_BL >= 0) {
+        gpio_set_level(MOY_LCD_PIN_BL, on ? 1 : 0);
+    }
+    #endif
 }
 
 // init(nfbs=2, pclk_hz=80000000) -> None
@@ -1172,6 +1222,7 @@ static const mp_rom_map_elem_t moy_lcd_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_BYTE_SWAP),  MP_ROM_TRUE },
     { MP_ROM_QSTR(MP_QSTR_SPI_HOST),   MP_ROM_INT(MOY_LCD_SPI_HOST) },
     { MP_ROM_QSTR(MP_QSTR_SD_CS),      MP_ROM_INT(MOY_LCD_PIN_SD_CS) },
+    { MP_ROM_QSTR(MP_QSTR_RADIO_CS),   MP_ROM_INT(MOY_LCD_PIN_RADIO_CS) },
 };
 static MP_DEFINE_CONST_DICT(moy_lcd_module_globals, moy_lcd_module_globals_table);
 

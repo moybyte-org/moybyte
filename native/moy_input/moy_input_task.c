@@ -9,6 +9,8 @@
 //     _ADDR, _YX, _CLEAR_FIRST, _INT (the GT911's gate, or the GSL's address
 //     strap), _RST, _SWAP, _FLIP_X, _FLIP_Y, _RAW_W, _RAW_H, _RAW_X0, _RAW_Y0,
 //     _EXTRAPOLATE, _HOLD_MS, _FW and _FW_LEN (the GSL3680's firmware)
+//   MOY_INPUT_PAD_M5FACES          an M5Stack Faces Gamepad3 at 0x08 on the
+//     kernel's bus, and _INT its event line (the Core2's G35)
 //   MOY_INPUT_TASK                 the drivers' passes run on a core-0 task of
 //                                  MOY_INPUT_TASK_STACK bytes, one per kick;
 //                                  without it a kick runs the pass inline
@@ -26,7 +28,7 @@
 #include "moy_drivers.h"
 
 #if defined(MOY_INPUT_BOARD) && (defined(MOY_INPUT_KBD_TDECK) || defined(MOY_INPUT_TOUCH_KIND) \
-    || defined(MOY_INPUT_BALL_UP))
+    || defined(MOY_INPUT_BALL_UP) || defined(MOY_INPUT_PAD_M5FACES))
 
 #include <string.h>
 
@@ -123,6 +125,64 @@ static void IRAM_ATTR touch_int_isr(void *arg) {
 #define TOUCH_INT_GATE 1
 #endif
 
+#ifdef MOY_INPUT_PAD_M5FACES
+// The Faces Gamepad3 (an STM32 at 0x08, M5Stack's M5Faces library is the
+// protocol's authority): event-driven -- each change of the eight buttons
+// pulls INT low with one frame ready, register 0x00 is the button byte,
+// ACTIVE-LOW (bit 0..7: up down left right A B select start), and the read
+// consumes the frame. A read with no frame answers 0x00, the stale buffer,
+// which is never a state (all eight held at once reads the same and is
+// dropped). Its source is "pad", made on the first pass.
+#define PAD_ADDR 0x08
+#define PAD_KEY_REG 0x00
+static bool s_pad_up;
+static uint32_t s_pad_src;
+static uint32_t s_pad_mask;
+// The table's bit for each of the pad's: the d-pad, A, B, select, start
+// (MOY_INPUT_NAMES; start is the console's key).
+static const uint8_t PAD_BITS[8] = {2, 3, 0, 1, 4, 5, 13, 14};
+
+static void pad_pass(void) {
+    moy_input_t *t = moy_input_kernel();
+    if (t == NULL) {
+        return;
+    }
+    if (!s_pad_up) {
+        if (moy_input_source(t, "pad", 0, &s_pad_src) != MOY_INPUT_OK) {
+            return;
+        }
+        #ifdef MOY_INPUT_PAD_INT
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << MOY_INPUT_PAD_INT,
+            .mode = GPIO_MODE_INPUT,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io);
+        #endif
+        s_pad_up = true;
+    }
+    #ifdef MOY_INPUT_PAD_INT
+    if (gpio_get_level(MOY_INPUT_PAD_INT) != 0) {
+        return;                     // no frame waiting
+    }
+    #endif
+    uint8_t reg = PAD_KEY_REG, raw;
+    if (bus_write_read(NULL, PAD_ADDR, &reg, 1, &raw, 1) != 0 || raw == 0x00) {
+        return;
+    }
+    uint32_t m = 0;
+    for (int i = 0; i < 8; i++) {
+        if (!(raw & (1u << i))) {
+            m |= 1u << PAD_BITS[i];
+        }
+    }
+    if (m != s_pad_mask) {
+        s_pad_mask = m;
+        moy_input_set_mask(t, s_pad_src, m);
+    }
+}
+#endif
+
 static bool s_isr_service;
 
 static bool isr_service(void) {
@@ -164,6 +224,9 @@ static void one_pass(void) {
     if (s_touch_up) {
         moy_touchdev_pass(&s_touch, &s_bus);
     }
+    #endif
+    #ifdef MOY_INPUT_PAD_M5FACES
+    pad_pass();
     #endif
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The stdin of the ESP32-P4 console whose serial is a UART: a 4 KB ring in
-TCM, and an RX ISR that drains early, survives an overflow and wakes the
+"""The stdin of a console whose serial is a UART: a 4 KB ring in internal
+memory (TCM where the chip has it), and an RX ISR that drains early, survives an overflow and wakes the
 reader.
 
     python3 tools/patch_stdin_ring.py <micropython checkout>
@@ -45,8 +45,11 @@ memory, so the ISR stays IRAM-safe through a flash write.
 Only a board whose serial is a UART takes this. The USB-Serial/JTAG boards'
 ISR takes only what the ring has room for and the USB host waits for the rest,
 so a stall there costs throughput and never a byte, and it already wakes the
-reader. TCM_DRAM_ATTR is the P4's: another chip taking this fails to compile
-rather than placing the ring somewhere unmeasured.
+reader. TCM_DRAM_ATTR is the P4's alone: a chip with no TCM (the M5Stack
+Core2's classic ESP32) takes the ring as DRAM_ATTR, internal .bss. Its linker
+script has no .tcm.data placement, so TCM_DRAM_ATTR there COMPILES and puts the
+ring in read-only flash, where the ISR's first byte is a LoadStoreError
+(measured on the Core2's glass 2026-11-01).
 
 Applied by `moybyte_patch_stdin_ring` in tools/esp32_build_lib.sh, to
 `ports/esp32/mphalport.c` and `ports/esp32/uart.c`. All-or-nothing: every
@@ -70,8 +73,13 @@ HUNKS = [
      "// %s, %d bytes: a UART with no flow control drops what arrives\n"
      "// while a heap collection stalls the reader (tools/patch_stdin_ring.py).\n"
      "#include \"esp_attr.h\"\n"
+     "#include \"soc/soc_caps.h\"\n"
+     "#if SOC_MEM_TCM_SUPPORTED\n"
      "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[%d];\n"
-     % (MARKER, RING_BYTES, RING_BYTES)),
+     "#else\n"
+     "static uint8_t DRAM_ATTR stdin_ringbuf_array[%d];\n"
+     "#endif\n"
+     % (MARKER, RING_BYTES, RING_BYTES, RING_BYTES)),
     ("ports/esp32/uart.c", "RX threshold",
      "#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN - 8)\n",
      "// %s: the ISR takes the FIFO at a quarter full, so a\n"

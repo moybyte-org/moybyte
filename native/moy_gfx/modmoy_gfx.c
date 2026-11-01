@@ -69,7 +69,14 @@
 #if defined(__has_include)
 #if __has_include("esp_async_memcpy.h")
 #include "esp_async_memcpy.h"
+#include "soc/soc_caps.h"
 #define MOY_GFX_HAS_ASYNC_COPY 1
+// The engine itself: a chip with no GDMA or CP-DMA (the classic ESP32, the
+// Core2's) has the header and not the driver, so its restore latches
+// synchronous exactly as the unix port's does.
+#if SOC_ASYNC_MEMCPY_SUPPORTED
+#define MOY_GFX_HAS_ASYNC_ENGINE 1
+#endif
 #endif
 #endif
 
@@ -525,7 +532,7 @@ static mp_obj_t moy_gfx_copy_wait(void) {
 // The GDMA pair above as the restore's engine, and nothing where the image has
 // no GDMA: the restore then latches synchronous at its first kick.
 static bool lr_start(uint16_t *dst, const uint16_t *src, size_t npix) {
-    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    #ifdef MOY_GFX_HAS_ASYNC_ENGINE
     if (moy_gfx_mcp == NULL) {
         async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
         cfg.backlog = 4;

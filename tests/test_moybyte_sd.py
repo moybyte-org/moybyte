@@ -174,7 +174,7 @@ class World:
     leaked one would make the second test in a file silently exercise nothing.
     """
 
-    NAMES = ("machine", "os", "vfs", "moy_sd", "moy_store")
+    NAMES = ("machine", "os", "vfs", "moy_sd", "moy_store", "moy_lcd")
 
     def __init__(self):
         self.log = []
@@ -187,6 +187,14 @@ class World:
         self.vfs()
         self.moy_sd()
         self.moy_store()
+        sys.modules["moy_lcd"] = None     # no panel module: the T-Deck constants
+
+    def moy_lcd(self, **pins):
+        """A panel module exporting a board's host and pins."""
+        m = types.ModuleType("moy_lcd")
+        for k, v in pins.items():
+            setattr(m, k, v)
+        sys.modules["moy_lcd"] = m
 
     def moy_store(self):
         m = types.ModuleType("moy_store")
@@ -251,6 +259,17 @@ def test_the_live_session_parks_the_radio_CS_and_nothing_else(w):
     w.mod.with_sd_live(lambda: None)
     assert w.pins() == [RADIO_CS]
     assert TFT_CS not in w.pins() and SD_CS not in w.pins()
+
+
+def test_the_pins_are_the_panel_modules_when_it_names_them(w):
+    """The M5Stack Core2 takes this module through the T-Deck's moy_lcd with
+    its own defines: the card on CS 4 and no radio. Its GPIO9 is a flash data
+    line, so the T-Deck's radio park there hangs the board -- a board whose
+    moy_lcd says RADIO_CS -1 parks nothing."""
+    w.moy_lcd(SPI_HOST=1, SD_CS=4, RADIO_CS=-1)
+    w.mod.with_sd_live(lambda: None)
+    assert w.pins() == []
+    assert ("moy_sd.init", 1, 4, 20000) in w.log
 
 
 def test_the_live_mount_attaches_and_never_re_initialises_the_bus(w):

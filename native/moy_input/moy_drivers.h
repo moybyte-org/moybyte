@@ -110,6 +110,7 @@ enum {
     MOY_TOUCH_GT911 = 1,        // status 0x814E, point 0x8150, 16-bit registers
     MOY_TOUCH_GSL3680 = 2,      // RAM-loaded; 8 bytes at 0x80, every read current
     MOY_TOUCH_AXS = 3,          // the AXS15231B bridge: a command, 8 bytes back
+    MOY_TOUCH_FT6X36 = 4,       // FocalTech FT6236/FT6336: 5 bytes at 0x02, every read current
 };
 
 enum {

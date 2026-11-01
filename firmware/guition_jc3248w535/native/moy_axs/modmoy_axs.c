@@ -406,6 +406,9 @@ static IRAM_ATTR void moy_axs_post_cb(spi_transaction_t *t) {
 }
 
 static void moy_axs_park_pin(int gpio, int level) {
+    if (gpio < 0) {
+        return;
+    }
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << gpio,
         .mode = GPIO_MODE_OUTPUT,
