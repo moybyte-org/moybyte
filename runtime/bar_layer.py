@@ -951,15 +951,20 @@ class BarLayer:
         packed = self._packed(where)[i]
         bar = (0, 0, packed[1][2], packed[1][3])
         rect = None
+        fs = self.ws.layout.fs
         if part & (1 << 6):
-            rect = self.lent_zone(where, packed)
+            # (the zone's span, the bar's full height: the open tab's mark
+            # lies on the bar's edge past the zone)
+            z = self.lent_zone(where, packed)
+            # (a bar with a title cell and no zone shows the field too: whole)
+            rect = bar if z is None else (z[0] - 2 * fs, 0, z[2] + 4 * fs, bar[3])
         f = key[12]
         pill = self._pill(where, i, f) if f is not None and f[0] == i else None
         for it in (old, f):
             if it is not None and it[0] == i:
                 p = pill if it is f else self._pill(where, i, it)
                 b = p[0]
-                m = 2 * p[2] + 2 * self.ws.layout.fs
+                m = 2 * p[2] + 2 * fs
                 rect = _union(rect, (b[0] - m, b[1] - m, b[2] + 2 * m, b[3] + 2 * m))
         if rect is None:
             return
