@@ -63,6 +63,28 @@ _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom 
 _BAR_STRIP_SLOTS = 2
 
 
+def _meets(a, b):
+    """Whether rects `a` and `b` overlap."""
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
+            and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def _union(a, b):
+    """The least rect holding rects `a` and `b` (`a` None: `b`)."""
+    if a is None:
+        return b
+    x0 = min(a[0], b[0])
+    y0 = min(a[1], b[1])
+    return (x0, y0, max(a[0] + a[2], b[0] + b[2]) - x0, max(a[1] + a[3], b[1] + b[3]) - y0)
+
+
+def _cut(a, b):
+    """Rect `a` inside rect `b` (empty where they do not meet)."""
+    x0 = max(a[0], b[0])
+    y0 = max(a[1], b[1])
+    return (x0, y0, min(a[0] + a[2], b[0] + b[2]) - x0, min(a[1] + a[3], b[1] + b[3]) - y0)
+
+
 def _release_layer(lay):
     """A strip is a root-canvas layer, off the gc heap on a board (nothing
     collects it): an evicted or outgrown strip is given back here, or every
@@ -108,12 +130,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
+    import ui as _ui
     import ui_draw as _ui_draw
     import layout_base as _layout_base
     import iconsets as _iconsets
     from shell_layout import STATUS as _STATUS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
+    from runtime import ui as _ui, ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
     from runtime import iconsets as _iconsets
     from runtime.shell_layout import STATUS as _STATUS
@@ -144,6 +167,7 @@ _KEY_OF = {"clock": (1,), "zone": (2, 5, 6, 8, 9), "title": (6, 8), "wifi": (7,)
 _KEY_N = 13                 # 12: the item keys focus (`focus_item`)
 _KEY_ALL = (1 << _KEY_N) - 1
 _KEY_UNDO = 1 << 9          # drawn only by the Editor's zone ("menu")
+_KEY_PARTS = (1 << 6) | (1 << 12)   # the fields drawn in a part of the bar: the zone, the pill
 
 
 def _battery(cv, x, y, side, u, ink):
@@ -233,7 +257,7 @@ class BarLayer:
         # strip draw and bar tap are no-ops.
         self.held = False
         self._lent_last = [None, None]  # ui_draw.bar_lent's last answer, and _lent's
-        self._k8 = [None, None, None]   # key[8]'s title and lent, and their pair
+        self._k8 = [None, None, None, 0]   # key[8]'s title and lent, their pair, its count
         self._cr_last = None            # content_rect's last (x, y, w, h)
         self._cr_game = [0, 0, None, None]   # ...and a game zone's: w, h, bars, rect
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
@@ -284,7 +308,7 @@ class BarLayer:
         self._need = _KEY_ALL
         # Each `where`'s frame key, filled in place (_fill_key).
         self._keys = {}
-        self._shown_at = {}           # where -> [shown_gen, its fields, as a tuple]
+        self._blk = {}                # where -> its block of fields in the engine, by id
         # The keys on the bar (`focus_enter`): the `where` whose bar holds
         # them, the item index, what the keys came from ("tabs": the home's
         # tab row, "page": the surface under the bar) and the focused item
@@ -666,8 +690,7 @@ class BarLayer:
         key = self._keys.get(where)
         if key is None:
             key = self._keys[where] = [None] * _KEY_N
-        self._fill_key(key, where, cv, self._shown(where))
-        self._note_shown(where, key)
+        self._fill_key(key, where, cv, self._shown(where), self._block(where))
         if hasattr(cv, "_lr"):
             # The canvas is itself a RecordingLayer (a windowed-WM window buffer on
             # the web console): a strip cache NESTED in a recorded layer can't ship
@@ -719,19 +742,26 @@ class BarLayer:
         return self._need if where == "menu" else self._need & ~_KEY_UNDO
 
     def shown_gen(self, where):
-        """An int that moves whenever what `where`'s bars draw does
-        (`_cart_bar_key` narrowed to their fields): the key a part named
-        per buffer folds (`ui.held`) -- the same int, the same fields.
-        Each ask, and the bar's own draw, fills the fields again into the
-        one list the draw keeps; the int moves only where a field did."""
-        return self._shown_now(where)[0]
+        """An int that moves whenever what `where`'s bars draw does: what
+        the fields of its block in the engine show, hashed (`ui.block_key`),
+        the fields filled again on each ask as the bar's own draw fills
+        them (`_fill_key`). The key a part named per buffer folds
+        (`ui.held`), and the key a cache over a whole frame that includes
+        the bar folds: a state left and come back to matches again."""
+        return self._shown_now(where)
 
     def shown_key(self, where):
-        """Those fields as a tuple, a field a skipped bar leaves None: the
-        key a cache over a whole frame that includes the bar folds, which
-        a state left and come back to matches again. Made only when a
-        field moved."""
-        return self._shown_now(where)[2]
+        """`shown_gen`: the one int serves both."""
+        return self._shown_now(where)
+
+    def _block(self, where):
+        """`where`'s block of fields in the engine (`ui.block_set`), by
+        its id: each field set as the bar fills it, so the engine says
+        which moved since a strip was drawn (`ui.block_since`)."""
+        b = self._blk.get(where)
+        if b is None:
+            b = self._blk[where] = "bar." + where
+        return b
 
     def _shown_now(self, where):
         game = self._zone_is_game(where)
@@ -740,24 +770,9 @@ class BarLayer:
         key = self._keys.get(where)
         if key is None:
             key = self._keys[where] = [None] * _KEY_N
-        self._fill_key(key, where, cv, self._shown(where))
-        return self._note_shown(where, key)
-
-    def _note_shown(self, where, key):
-        """`where`'s record [gen, fields, their tuple] as `key` fills it:
-        the generation moved and the tuple made again where a field
-        differs from the last fill's."""
-        s = self._shown_at.get(where)
-        if s is None:
-            s = self._shown_at[where] = [0, [None] * _KEY_N, None]
-        prev = s[1]
-        for i in range(_KEY_N):
-            if prev[i] != key[i]:
-                prev[:] = key
-                s[0] = (s[0] + 1) & 0x3fffffff
-                s[2] = tuple(key)
-                break
-        return s
+        blk = self._block(where)
+        self._fill_key(key, where, cv, self._shown(where), blk)
+        return _ui.block_key(blk)
 
     def _draw_bar(self, cv, slots, rect, key, fields, i):
         """Bar `i`'s strip at `rect` on `cv`, from the slot that holds it for
@@ -784,8 +799,11 @@ class BarLayer:
                 slot[0] = None                     # canvas we are no longer drawing
                 slot[1] = None                     # into, so it is rebuilt below
                 slot[2] = None
+                slot[3] = None
             else:
-                slot = [None, None, None]          # [strip, key, canvas]
+                # [strip, the block's generation it was drawn at, canvas,
+                #  the item the keys were on]
+                slot = [None, None, None, None]
             slots.insert(0, slot)
         else:
             # Move to front. By IDENTITY, not list.remove(), whose == would happily
@@ -806,13 +824,20 @@ class BarLayer:
         # browser anyway), so rebuild whenever either changes.
         canvas_changed = slot[2] is not cv
         size_changed = strip is None or strip.w != bw or strip.h != bh
-        old = slot[1]
-        fresh = size_changed or canvas_changed or old is None
+        fresh = size_changed or canvas_changed or slot[1] is None
+        part = 0
+        blk = self._block(key[0])
         if not fresh:
+            # the fields this bar shows set since the strip was drawn
+            # (`ui.block_since`): those drawn in a part of the bar draw
+            # that part again (`_render_cart_part`); any other, the strip
+            m = 0
             for k in fields:
-                if old[k] != key[k]:
-                    fresh = True
-                    break
+                m |= 1 << k
+            part = _ui.block_since(blk, slot[1]) & m
+            if part & ~_KEY_PARTS:
+                fresh = True
+                part = 0
         if fresh:
             # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
             # bar body draws into in BAR coordinates, so the cached pixels are
@@ -827,9 +852,14 @@ class BarLayer:
                 slot[2] = cv
             self.ws.note_cost("bar.strip.render")
             self._render_cart_bar(strip, key, i)
-            slot[1] = tuple(key)
+        elif part:
+            self.ws.note_cost("bar.strip.part")
+            self._render_cart_part(strip, key, i, part, slot[3])
+        if fresh or part:
+            slot[1] = _ui.block_gen(blk)
+            slot[3] = key[12]
         cv.blit_strip(strip, bx, by)
-        if fresh:
+        if fresh or part:
             self._strip_moved(cv, bx, by, bw, bh)
 
     def _cart_bar_key(self, where):
@@ -846,15 +876,18 @@ class BarLayer:
         re-render beyond the shared dimensions here), and a generation counter the
         explicit invalidators bump (a bar placement, a journal flip)."""
         key = [None] * _KEY_N
-        self._fill_key(key, where, self._bar_canvas(where), _KEY_ALL)
+        self._fill_key(key, where, self._bar_canvas(where), _KEY_ALL, None)
         return tuple(key)
 
-    def _fill_key(self, key, where, cv, need):
+    def _fill_key(self, key, where, cv, need, blk):
         """Write `_cart_bar_key`'s fields into `key` in place: the ones `need`
         names (a bit per field), plus the shared ones every bar folds. The
         frame's draw fills `where`'s one list with only what the bars on show
         draw, so a painted frame allocates no key and reads no state it does
-        not show; a field it skips keeps the value no bar compares."""
+        not show; a field it skips keeps the value no bar compares. Each
+        field then goes to `blk`, `where`'s block in the engine
+        (`ui.block_set`), which knows the fields that moved since a strip
+        drew them; None sets none (a key asked for alone)."""
         ws = self.ws
         key[0] = where
         if need & 2:
@@ -879,6 +912,7 @@ class BarLayer:
                 k8[0] = t
                 k8[1] = lent
                 k8[2] = (t, lent)
+                k8[3] = (k8[3] + 1) & 0x3fffffff   # (the block's field: made again)
             key[8] = k8[2]
         if need & _KEY_UNDO:
             # #111: the local op-history dim state (RAM-only; journal flips
@@ -889,6 +923,11 @@ class BarLayer:
         if need & 2048:
             m = getattr(ws, "sysmenu", None)       # the system button's open plate
             key[11] = m is not None and m.open and m.widget == "menu"
+        if blk is not None:
+            for i in range(_KEY_N):
+                # (the title and what the app lent by the count of times the
+                # tuple was made: only where one of them is another object)
+                _ui.block_set(blk, i, self._k8[3] if i == 8 else key[i])
 
     def _render_cart_bar(self, cv, key, i=0):
         """Bar `i` (`_render_bar`), and the focus mark on the item the keys
@@ -900,6 +939,39 @@ class BarLayer:
         if pill is not None:
             _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
                            after=True, pill=True)
+
+    def _render_cart_part(self, cv, key, i, part, old):
+        """Bar `i`'s strip drawn again where the fields `part` (a bit each,
+        `_KEY_PARTS`) show: its zone (field 6, its owner's generation) and
+        the focus pill's plate and ring where they were (`old`, the item
+        the keys were on at the last draw) and where they are (field 12),
+        the bar's pixels under them put back (`_render_bar` inside the
+        rect alone)."""
+        where = key[0]
+        packed = self._packed(where)[i]
+        bar = (0, 0, packed[1][2], packed[1][3])
+        rect = None
+        if part & (1 << 6):
+            rect = self.lent_zone(where, packed)
+        f = key[12]
+        pill = self._pill(where, i, f) if f is not None and f[0] == i else None
+        for it in (old, f):
+            if it is not None and it[0] == i:
+                p = pill if it is f else self._pill(where, i, it)
+                b = p[0]
+                m = 2 * p[2] + 2 * self.ws.layout.fs
+                rect = _union(rect, (b[0] - m, b[1] - m, b[2] + 2 * m, b[3] + 2 * m))
+        if rect is None:
+            return
+        rect = _cut(rect, bar)
+        if rect[2] <= 0 or rect[3] <= 0:
+            return
+        cv.clip(rect[0], rect[1], rect[2], rect[3])
+        self._render_bar(cv, key, i, pill, rect)
+        if pill is not None:
+            _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
+                           after=True, pill=True)
+        cv.clip()
 
     def _pill(self, where, i, item):
         """(box, radius, unit) of the focus pill on `item` (`focus_items`)
@@ -940,13 +1012,15 @@ class BarLayer:
         x1 = min(x1, bar[2])
         return (x0, y, x1 - x0, h), rad, u
 
-    def _render_bar(self, cv, key, i=0, pill=None):
+    def _render_bar(self, cv, key, i=0, pill=None, only=None):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
         for `key[0]` (`where`), in bar coordinates. The pieces are the kernel's
         strip (native/moy_play/moy_chrome.c: a widget's cell) and the
         toolkit's band, the one body every bar draws with; the lent zone is its
         app's. Factored out of _draw_top_bar_cart so the SAME drawing serves
-        the cache build and the direct path."""
+        the cache build and the direct path. `only`, a rect in the bar,
+        draws the cells and the zone that meet it alone (`_render_cart_part`,
+        the canvas clipped to it)."""
         ws = self.ws
         where = key[0]
         mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
@@ -978,12 +1052,14 @@ class BarLayer:
             self._ink_dx = self._status_dx(cells) if looked and not across else None
             for name, r, text, _slot in cells:
                 if name in _PAINTED and (show_x or name != "close"):
+                    if only is not None and not _meets(r, only):
+                        continue
                     if looked:
                         self._paint_look_cell(cv, where, name, r, text, bar, across)
                     else:
                         self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
         zone = self.lent_zone(where, packed)
-        if zone is None:
+        if zone is None or (only is not None and not _meets(zone, only)):
             return
         back = self.draws_back(where)
         if tool:

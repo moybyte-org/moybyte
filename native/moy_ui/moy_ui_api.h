@@ -919,6 +919,22 @@ int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mi
 // so a round's minting never takes the slot of a part it named; -1 after
 // the last, and the order starts again (as moy_ui_api_slots starts it).
 int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
+
+// -- blocks of fields an app sets through the engine (moy_ui_api_block_*) ------
+// A block is MOY_UI_BLOCK_FIELDS fields the state a part shows lies in (a
+// bar's: its clock text, its zone's generation, the item the keys are on),
+// each set through the engine as it changes, so a change is known as it
+// is made: the block's generation moves with every change,
+// moy_ui_api_block_since answers the fields set to another value after a
+// generation (what a strip drawn at it draws again), and its key is what
+// every field shows, hashed (a key that matches again once every field is
+// back). MOY_UI_BLOCKS blocks, by id; one more takes the one set longest ago.
+#define MOY_UI_BLOCKS 8
+#define MOY_UI_BLOCK_FIELDS 32
+int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value);  // 1 where it changed
+int32_t moy_ui_api_block_gen(moy_ui_span_t id);                  // its generation (0: never set)
+uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen);  // the fields set after `gen`
+int32_t moy_ui_api_block_key(moy_ui_span_t id);                  // what its fields show, hashed (30 bits)
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting

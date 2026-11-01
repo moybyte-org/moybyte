@@ -679,3 +679,47 @@ def test_a_ring_given_up_for_another_context_draws_whole(th):
     floor, _e, parts, _h = rigs[0].frame()
     assert floor == [_VIEW] and parts == [0, 1, 2, 3, 4, 5]
     assert rigs[0].frame()[0] == []
+
+
+def test_a_block_of_fields_knows_the_fields_set_since_a_generation():
+    """`ui.block_set`: a field set to another value moves the block's
+    generation and is among the fields set since any earlier one
+    (`ui.block_since`); set to the value it holds, nothing moves. The
+    key (`ui.block_key`) is what the fields show, so it matches again
+    once every field is back; a block never set has generation 0 and
+    no field since it."""
+    assert ui.block_gen("b.none") == 0
+    assert ui.block_since("b.none", 0) == 0
+    assert ui.block_set("b.one", 0, 7)
+    assert ui.block_set("b.one", 1, "12:00")
+    assert ui.block_set("b.one", 12, (0, (1, 2, 3, 4), "clock"))
+    g = ui.block_gen("b.one")
+    assert g == 3
+    assert not ui.block_set("b.one", 0, 7)
+    assert not ui.block_set("b.one", 1, "12:00")
+    assert ui.block_gen("b.one") == g
+    k = ui.block_key("b.one")
+    assert ui.block_since("b.one", 0) == (1 << 0) | (1 << 1) | (1 << 12)
+    assert ui.block_since("b.one", g) == 0
+    assert ui.block_set("b.one", 1, "12:01")
+    assert ui.block_since("b.one", g) == 1 << 1
+    assert ui.block_key("b.one") != k
+    assert ui.block_set("b.one", 1, "12:00")
+    assert ui.block_key("b.one") == k                   # (every field back)
+    assert ui.block_since("b.one", g) == 1 << 1         # (set twice since)
+    assert ui.block_set("b.one", 2, None) and not ui.block_set("b.one", 2, None)
+    assert not ui.block_set("b.one", 40, 1)             # (no such field)
+    assert ui.block_set("b.two", 0, 7)                  # (another block: its own)
+    assert ui.block_gen("b.two") == 1 and ui.block_gen("b.one") == g + 3
+
+
+def test_one_more_block_than_the_engine_keeps_takes_the_one_set_longest_ago():
+    """Eight blocks; the ninth takes the one set longest ago, which is
+    then as never set."""
+    for i in range(8):
+        assert ui.block_set("b.lru%d" % i, 0, i)
+    for i in range(1, 8):
+        assert not ui.block_set("b.lru%d" % i, 0, i)    # (touched: lru0 is the oldest)
+    assert ui.block_set("b.lru8", 0, 8)
+    assert ui.block_gen("b.lru0") == 0
+    assert ui.block_gen("b.lru1") == 1 and ui.block_gen("b.lru8") == 1

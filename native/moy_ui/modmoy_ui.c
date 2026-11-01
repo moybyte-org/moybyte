@@ -2938,6 +2938,47 @@ static mp_obj_t ui_api_slot_next(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_slot_next_obj, ui_api_slot_next);
 
+// api_block_set(id, field, value) -> whether field `field` of block `id` changed
+static mp_obj_t ui_api_block_set(mp_obj_t id, mp_obj_t field, mp_obj_t value) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_bool(moy_ui_api_block_set(sp, mp_obj_get_int(field),
+                                                (uint32_t)mp_obj_get_int_truncated(value)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_block_set_obj, ui_api_block_set);
+
+// api_block_gen(id) -> the block's generation, 0 never set
+static mp_obj_t ui_api_block_gen(mp_obj_t id) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_int(moy_ui_api_block_gen(sp));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_gen_obj, ui_api_block_gen);
+
+// api_block_since(id, gen) -> the fields set to another value after `gen`, a bit each
+static mp_obj_t ui_api_block_since(mp_obj_t id, mp_obj_t gen) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_int_from_uint(moy_ui_api_block_since(sp, (int32_t)mp_obj_get_int(gen)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_block_since_obj, ui_api_block_since);
+
+// api_block_key(id) -> what the block's fields show, hashed
+static mp_obj_t ui_api_block_key(mp_obj_t id) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    return mp_obj_new_int(moy_ui_api_block_key(sp));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_key_obj, ui_api_block_key);
+
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -3977,6 +4018,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_slots), MP_ROM_PTR(&ui_api_faces_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slot), MP_ROM_PTR(&ui_api_face_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slot_next), MP_ROM_PTR(&ui_api_slot_next_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_block_set), MP_ROM_PTR(&ui_api_block_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_block_gen), MP_ROM_PTR(&ui_api_block_gen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_block_since), MP_ROM_PTR(&ui_api_block_since_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_block_key), MP_ROM_PTR(&ui_api_block_key_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },

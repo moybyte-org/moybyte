@@ -5043,6 +5043,79 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     }
 }
 
+// -- blocks of fields an app sets through the engine (moy_ui_api_block_*) ------
+
+typedef struct {
+    uint32_t id, gen, used;
+    uint32_t v[MOY_UI_BLOCK_FIELDS];    // each field's value...
+    uint32_t g[MOY_UI_BLOCK_FIELDS];    // ...and the generation that set it (0: unset)
+} block_t;
+static block_t s_blocks[MOY_UI_BLOCKS];
+static uint32_t s_block_tick;
+
+// The block `id` names; with `make`, one taken for it (the free one, else
+// the one set longest ago) where none holds it.
+static block_t *block_of(moy_ui_span_t id, int make) {
+    uint32_t h = hash(id.p, id.n, 0x626c6f63u) | 1u;
+    block_t *take = NULL;
+    for (int i = 0; i < MOY_UI_BLOCKS; i++) {
+        block_t *b = &s_blocks[i];
+        if (b->id == h) {
+            b->used = ++s_block_tick;
+            return b;
+        }
+        if (take == NULL || (take->id != 0 && (b->id == 0 || b->used < take->used))) {
+            take = b;
+        }
+    }
+    if (!make) {
+        return NULL;
+    }
+    memset(take, 0, sizeof(*take));
+    take->id = h;
+    take->used = ++s_block_tick;
+    return take;
+}
+
+int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value) {
+    if (field < 0 || field >= MOY_UI_BLOCK_FIELDS) {
+        return 0;
+    }
+    block_t *b = block_of(id, 1);
+    if (b->g[field] != 0 && b->v[field] == value) {
+        return 0;
+    }
+    b->v[field] = value;
+    b->g[field] = ++b->gen;
+    return 1;
+}
+
+int32_t moy_ui_api_block_gen(moy_ui_span_t id) {
+    const block_t *b = block_of(id, 0);
+    return b == NULL ? 0 : (int32_t)b->gen;
+}
+
+uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen) {
+    const block_t *b = block_of(id, 0);
+    uint32_t m = 0;
+    if (b != NULL) {
+        for (int i = 0; i < MOY_UI_BLOCK_FIELDS; i++) {
+            if (b->g[i] > (uint32_t)gen) {
+                m |= 1u << i;
+            }
+        }
+    }
+    return m;
+}
+
+int32_t moy_ui_api_block_key(moy_ui_span_t id) {
+    const block_t *b = block_of(id, 0);
+    if (b == NULL) {
+        return 0;
+    }
+    return (int32_t)(hash((const uint8_t *)b->v, sizeof(b->v), 0x6b657973u) & 0x3fffffffu);
+}
+
 int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
                        int32_t out[2]) {
     out[0] = out[1] = 0;

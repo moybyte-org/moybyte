@@ -506,9 +506,11 @@ def test_zoned_bar_rerenders_on_app_switch(tmp_path):
 
 
 def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
-    """Switching Editor tabs bumps EditorApp.zone_gen, which the cache key folds
-    in -- so a tab switch re-renders the bar exactly once, proving zone_gen (not a
-    per-frame poll) is what invalidates it."""
+    """Switching Editor tabs bumps EditorApp.zone_gen, a field of the bar's
+    block in the engine -- so a tab switch draws the bar's zone again
+    exactly once (`_render_cart_part`: the zone alone, the strip's other
+    cells kept), proving zone_gen (not a per-frame poll) is what
+    invalidates it, and the whole strip is not rendered for it."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -516,16 +518,25 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     ws.open_in_editor()
     drv.frame(1 / 30)
     calls = [0]
-    orig = ws.bar_layer._render_cart_bar
+    whole = [0]
+    orig = ws.bar_layer._render_cart_part
+    orig_whole = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key, i=0):
+    def counting(cv, key, i, part, old):
         calls[0] += 1
-        return orig(cv, key, i)
-    ws.bar_layer._render_cart_bar = counting
+        assert part == 1 << 6                    # (the zone's field alone)
+        return orig(cv, key, i, part, old)
+
+    def counting_whole(cv, key, i=0):
+        whole[0] += 1
+        return orig_whole(cv, key, i)
+    ws.bar_layer._render_cart_part = counting
+    ws.bar_layer._render_cart_bar = counting_whole
     ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
     ws._dirty = True
     drv.frame(1 / 30)
-    assert calls[0] == 1, "switching Editor tabs must re-render the zoned bar once"
+    assert calls[0] == 1, "switching Editor tabs must draw the zoned bar's zone once"
+    assert whole[0] == 0, "...and not the strip whole"
     for _ in range(3):
         ws._dirty = True
         drv.frame(1 / 30)
@@ -535,18 +546,25 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
 def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
     """The home's zone draws its tabs alone: moving the selection along the
     row (a held key's glide) reuses the cached strip, whose pixels are the
-    ones a fresh render paints, and a tab switch renders it once."""
+    ones a fresh render paints, and a tab switch draws its zone once
+    (`_render_cart_part`), the strip never whole."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     calls = [0]
-    orig = ws.bar_layer._render_cart_bar
+    orig = ws.bar_layer._render_cart_part
+    orig_whole = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key, i=0):
+    def counting(cv, key, i, part, old):
         calls[0] += 1
-        return orig(cv, key, i)
-    ws.bar_layer._render_cart_bar = counting
+        return orig(cv, key, i, part, old)
+
+    def counting_whole(cv, key, i=0):
+        calls[0] += 1
+        return orig_whole(cv, key, i)
+    ws.bar_layer._render_cart_part = counting
+    ws.bar_layer._render_cart_bar = counting_whole
     ws.launcher.nav2d(1, 0)
     ws._dirty = True
     for _ in range(60):
@@ -1168,3 +1186,48 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     zone = ws.bar_layer._zone_rect("menu")
     night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
     assert day[0] == night[0] == "Code" and day[1] >= 0 and night[1] >= 0
+
+
+def test_the_keys_stepping_on_the_bar_draw_the_pill_alone(tmp_path):
+    """The item the keys are on (`focus_item`, field 12 of the bar's block)
+    moved: the strip draws the pill's old and new places again
+    (`_render_cart_part`), never the strip whole, so a key step along
+    the bar costs the pill, not every cell."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    _pin_clock(ws, drv)
+    bl = ws.bar_layer
+    items = bl.focus_items("home")
+    assert len(items) >= 2
+    parts = [0]
+    whole = [0]
+    orig = bl._render_cart_part
+    orig_whole = bl._render_cart_bar
+
+    def counting(cv, key, i, part, old):
+        parts[0] += 1
+        assert part == 1 << 12
+        return orig(cv, key, i, part, old)
+
+    def counting_whole(cv, key, i=0):
+        whole[0] += 1
+        return orig_whole(cv, key, i)
+    bl._render_cart_part = counting
+    bl._render_cart_bar = counting_whole
+    bl.focus_where = "home"
+    bl.focus_item = items[0]
+    ws._dirty = True
+    drv.frame(1 / 30)
+    bl.focus_item = items[1]
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert parts[0] == 2 and whole[0] == 0
+    bl.focus_item = None
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert parts[0] == 3 and whole[0] == 0
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert parts[0] == 3 and whole[0] == 0, "nothing moved: the strip is reused"

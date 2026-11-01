@@ -755,6 +755,40 @@ def slot_next():
     return _C.api_slot_next(_T[0])
 
 
+def block_set(block, field, value):
+    """Field `field` (0 .. 31) of block `block` (a str, its id) set to
+    `value` through the engine -- an int as it is, None as a value of its
+    own, anything else by its hash -- so the change is known as it is made:
+    True where the field changed (a block of fields the state a part shows
+    lies in: a bar's)."""
+    if value is None:
+        v = 0x3fffffff
+    elif isinstance(value, int):
+        v = value
+    else:
+        v = hash(value)
+    return _C.api_block_set(block, field, v)
+
+
+def block_gen(block):
+    """Block `block`'s generation: moved by every change, 0 where no field
+    was ever set."""
+    return _C.api_block_gen(block)
+
+
+def block_since(block, gen):
+    """The fields of block `block` set to another value after generation
+    `gen` (`block_gen`), a bit each: what a part drawn at `gen` draws
+    again."""
+    return _C.api_block_since(block, gen)
+
+
+def block_key(block):
+    """What block `block`'s fields show, hashed: a key that matches again
+    once every field is back to a value it had."""
+    return _C.api_block_key(block)
+
+
 def held_last(id, key):
     """Whether the buffer the last frame painted holds part `id` of the
     page as that frame named it under `key` (`held`): the frame before

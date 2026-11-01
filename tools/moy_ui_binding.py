@@ -379,6 +379,10 @@ _DRAW_SIGS = (
     ("moy_ui_api_slots", [c.c_void_p, c.c_int32, c.c_int32], c.c_int32),
     ("moy_ui_api_slot", [c.c_void_p, _Span, c.c_int32, _I], c.c_int32),
     ("moy_ui_api_slot_next", [c.c_void_p], c.c_int32),
+    ("moy_ui_api_block_set", [_Span, c.c_int, c.c_uint32], c.c_int),
+    ("moy_ui_api_block_gen", [_Span], c.c_int32),
+    ("moy_ui_api_block_since", [_Span, c.c_int32], c.c_uint32),
+    ("moy_ui_api_block_key", [_Span], c.c_int32),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -1505,6 +1509,29 @@ def binding():
         p, _k = _ctx(ctx)
         return int(lib.moy_ui_api_slot_next(p))
 
+    def _block(name):
+        t, keep = span(name)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return t, keep
+
+    def api_block_set(name, field, value):
+        t, _keep = _block(name)
+        return bool(lib.moy_ui_api_block_set(t, int(field), int(value) & 0xffffffff))
+
+    def api_block_gen(name):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_gen(t))
+
+    def api_block_since(name, gen):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_since(t, int(gen)))
+
+    def api_block_key(name):
+        t, _keep = _block(name)
+        return int(lib.moy_ui_api_block_key(t))
+
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 8)()
@@ -1729,6 +1756,7 @@ def binding():
               api_table_floor, api_table_copy, api_table_shift, api_held, api_held_last,
               api_held_all,
               api_slots, api_slot, api_slot_next,
+              api_block_set, api_block_gen, api_block_since, api_block_key,
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,
