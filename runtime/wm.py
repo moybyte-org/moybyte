@@ -9,7 +9,7 @@
 docs/history/shell_ux_technical_plan_v1.md).
 
 `FullscreenStackWM` is the ONLY tier-specific layer of the console (spec
-shell_architecture_v1.md Section 3's tier table): on the S3 + the host simulator the
+docs/history/shell_architecture_v1.md Section 3's tier table): on the S3 + the host simulator the
 top of the process back-stack owns the whole 320x240, so this WM's whole job is
 
   * the game<->system COMPOSITE (`composite_game` + `viewport`/`game_xy`, #39): blit

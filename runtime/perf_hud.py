@@ -13,7 +13,7 @@ Two layers, the same split as the console's other sub-UIs:
     read-only consumer of the owning Workstation's timing fields; it draws, it
     never measures.
 
-Dependency profile (the facade lens, shell_architecture_v1.md §2) -- PerfHud is
+Dependency profile (the facade lens, runtime/system_api.py) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
   * shared (non-privileged):   ws.canvas, ws.theme_colors, ws.perf_hud,

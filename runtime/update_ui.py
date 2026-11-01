@@ -20,7 +20,7 @@ The split follows the same discipline as the console's other sub-UIs:
     the drawing. It owns the screen's transient state (_upd_phase / _upd_msg /
     _upd_bin / _online_manifest / _check_armed / _upd_at).
 
-Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through its
+Dependency profile (the facade lens, runtime/system_api.py) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
                              ws._set_text_mode, ws.go_home,
