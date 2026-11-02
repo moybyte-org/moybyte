@@ -4606,7 +4606,8 @@ FRAME_PATH = ("draw_stack", "_still", "_settled", "_calm", "_retained_n",
               "_player_view", "_frame_is_quiet", "_draw_windows",
               "_direct_render", "_shown_ok", "_debt_rows", "refill_step",
               "_content_static", "_draw_app_window", "_draw_player_window",
-              "_player_rows", "_blit_game", "_fps_chip_on")
+              "_player_rows", "_blit_game", "_fps_chip_on", "_shape_sig",
+              "_content_flinging")
 
 
 def test_the_frame_path_is_found_on_the_class_or_its_first_base():

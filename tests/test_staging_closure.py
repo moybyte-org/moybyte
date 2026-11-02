@@ -723,7 +723,7 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
     """
     tdeck = set(board_config.denials(TDECK))
     p4 = set(board_config.denials(P4))
-    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py", "wm_parts.py", "wm_paint.py", "wm_overlays.py",
+    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py", "wm_parts.py", "wm_route.py", "wm_paint.py", "wm_overlays.py",
                          "editor_desk.py"}, (
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (

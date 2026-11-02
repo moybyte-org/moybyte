@@ -496,6 +496,29 @@ class WindowPaint:
             self._bezel_paints += 1
             sc.cls(_VIEWPORT_BEZEL)    # letterbox fill
 
+    # -- what a frame keys its retained pixels on ------------------------------
+
+    def _shape_sig(self):
+        """The frame's window SHAPE: which windows exist, z-order, geometry,
+        minimised state, focus. The ONE signature both retained-pixel voiders
+        key on (window stamps AND the desk-restore streak) -- a change means
+        pixels somewhere stopped being covered by what covered them last frame."""
+        return (tuple(self._order), self._focus,
+                tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
+                      for w in (self._wins[k] for k in self._order)))
+
+    def _content_flinging(self):
+        """True while a window's CONTENT is coasting on a kinetic fling (#113) --
+        the finger is up but the view is still moving, so the desk is as static
+        as it is mid-drag. Without this the release dropped straight back onto
+        the live desk render and the fling frames measured ~180ms against the
+        drag's ~100ms (on glass, 2026-07-26)."""
+        ws = self.ws
+        for grid in (ws.projects_grid, ws.launcher):
+            if grid is not None and getattr(grid, "flinging", False):
+                return True
+        return False
+
     # -- drawing ---------------------------------------------------------------
 
     def _lowest_dirty_window(self, dt):

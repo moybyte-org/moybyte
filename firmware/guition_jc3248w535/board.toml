@@ -169,6 +169,14 @@ buffers, the game's composite, the windows' draw, the shown ring), imported
 only by `wm_windowed.py`."""
 
 [[modules.shared.deny]]
+file = "wm_route.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the windowed WM's `WindowRoute` mixin (the keys to the
+focused window, the pointer's drag, resize, strip buttons and content),
+imported only by `wm_windowed.py`."""
+
+[[modules.shared.deny]]
 file = "editor_desk.py"
 kind = "tier"
 why  = """
