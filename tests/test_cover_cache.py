@@ -320,7 +320,8 @@ def test_a_definitive_miss_bumps_gen_too(tmp_path):
 
 # The home's modules: the layers, the arrangements and the band frame.
 HOME_MODULES = ("launcher_layer.py", "home_band.py", "home_grid.py",
-                "home_carousel.py", "home_icons.py", "home_search.py")
+                "home_carousel.py", "home_icons.py", "home_search.py",
+                "home_details.py")
 
 
 def test_gen_has_no_ws_mirror(tmp_path):
