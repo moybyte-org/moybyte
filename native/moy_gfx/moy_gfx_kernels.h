@@ -396,7 +396,7 @@ void mg_blit_indices_scale(uint16_t *dst, size_t dcap, int dw, int dh,
                            const uint16_t *pal, size_t pcap, const uint8_t *palt,
                            int colorkey, int cx0, int cy0, int cx1, int cy1);
 
-/* ---- one byte a pixel: a drawing's palette indices (runtime/artwork.py) --
+/* ---- one byte a pixel: a drawing's palette indices (runtime/apps/artwork.py) --
  * A bw x bh buffer of `cap` bytes; every op clips to it (a cap short of
  * bw * bh shortens bh). Paint's marks are these calls, and the canvas bakes
  * what they changed (`blit_indices`). */

@@ -2288,7 +2288,7 @@ def roles_trace(ws):
         _n(a.follow("drawings", "pic", "pic2")), _n(a.current()), _n(paint.doc_name()))
     a.follow("drawings", "pic2", "pic")
 
-    # -- the copies of a drawing (runtime/picture_copies.py), over these roles
+    # -- the copies of a drawing (runtime/apps/picture_copies.py), over these roles
     pc = PictureCopies(ctx)
     say("copies", _n(pc.usage("pic")), len(pc.targets()) >= 0,
         _n(w.thumbnail(16, 12) is not None))

@@ -575,7 +575,7 @@ class HomeVerbs:
 
         SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
         2026-07-31). Files/Paint/Calc/Appearance are not really
-        carts: the app is a shell MODULE (runtime/*_app.py, frozen on device),
+        carts: the app is a shell MODULE (runtime/apps/*_app.py, frozen on device),
         and the `.moy` only carries identity, icon art and a few-line fallback
         body for an older shell. Listing them offered a project whose "code" was
         that stub -- editing it changes nothing the kid can see. Hiding them is

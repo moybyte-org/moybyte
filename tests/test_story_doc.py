@@ -1,4 +1,4 @@
-"""A story's document (runtime/story_doc.py): the moystory-2 reader takes its
+"""A story's document (runtime/apps/story_doc.py): the moystory-2 reader takes its
 format and nothing else, and the edits record what they change so undo and
 redo give it back."""
 

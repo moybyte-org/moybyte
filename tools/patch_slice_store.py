@@ -11,7 +11,7 @@ replaces, those two offsets are the same and the second memmove copies the
 tail onto itself. That changes no byte and costs a pass over the tail, which
 is the rest of the buffer: on the Waveshare P4, 100 equal-length 512-byte
 stores into a 153 KB bytearray in PSRAM took 219 ms, about 2.2 ms a store, and
-a 1024x600 drawing's starter garden (runtime/artwork.py, row stores into one
+a 1024x600 drawing's starter garden (runtime/apps/artwork.py, row stores into one
 bytearray) ran past the task watchdog. The patch skips the second memmove when
 `beg + slice_len == end`; every other store moves exactly what it did.
 

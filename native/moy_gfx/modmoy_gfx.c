@@ -1370,7 +1370,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_scale_obj, 20, 2
                                            moy_gfx_blit_indices_scale);
 
 // One byte a pixel: a drawing's palette indices (moy_gfx_kernels.h has the
-// contracts). The marks Paint makes (runtime/artwork.py's PaintDocument).
+// contracts). The marks Paint makes (runtime/apps/artwork.py's PaintDocument).
 static uint8_t *moy_gfx_ibuf(mp_obj_t obj, size_t *cap, mp_uint_t flags) {
     mp_buffer_info_t bi;
     mp_get_buffer_raise(obj, &bi, flags);

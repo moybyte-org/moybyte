@@ -1758,7 +1758,7 @@ class DeviceCanvas:
 
     # -- paths and the outline faces (native/moy_gfx/moy_path.h) -----------
     #
-    # A story's slides (runtime/story_render.py): shapes as filled paths and
+    # A story's slides (runtime/apps/story_render.py): shapes as filled paths and
     # text in the shell's faces at any size, anti-aliased, the same pixels on
     # every tier. Coordinates and sizes are 26.6 (1/64 px); a face is 0 sans,
     # 1 sans bold, 2 mono.

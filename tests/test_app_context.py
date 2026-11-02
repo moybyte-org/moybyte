@@ -973,7 +973,7 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # -- the RATCHET ---------------------------------------------------------------
 
 # Scoped deliberately. The source plan's stop-condition grep was
-# `runtime/*_app.py runtime/artwork.py`, whose glob also catches editor_app.py
+# `runtime/*_app.py runtime/apps/artwork.py`, whose glob also catches editor_app.py
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",

@@ -211,7 +211,7 @@ Content + tooling:
   publishes it through the `moybyte.wallpaper.moy` wallpaper, and can attach it to a game as
   `images/bg.moyimg`). Paint's store actions are its model's (`ArtworkService`) and
   `picture_copies`'; they are not part of the kid cart API.
-  `moybyte.appearance.moy` (title: Appearance) opens the ONE appearance surface (`runtime/appearance_app.py`,
+  `moybyte.appearance.moy` (title: Appearance) opens the ONE appearance surface (`runtime/apps/appearance_app.py`,
   deep-linked from Settings' APPEARANCE row): the Appearance page. Its wallpapers' page
   shows the wallpaper in force on its card through `wallpaper.draw_preview`: a cart's preview is a
   COMPUTED STILL, one render per cart source and size on an offscreen canvas, reduced back to
@@ -227,7 +227,7 @@ Content + tooling:
   envelope, so the card opens in any editor on a PC. It claims the Files
   router's text door with the `editor` marker permission, so a `.md` (or a
   `.json`/`.txt`) opened in Files runs it on that document.
-  `moybyte.storybook.moy` (title: Storybook) opens `runtime/storybook_app.py`, the
+  `moybyte.storybook.moy` (title: Storybook) opens `runtime/apps/storybook_app.py`, the
   slides app: a story is a document of the user files' `stories` kind, not a cart.
   Each seed carries its own `config` defaults and edit schema where applicable.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.

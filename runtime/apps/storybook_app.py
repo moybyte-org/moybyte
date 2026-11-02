@@ -9,8 +9,8 @@
 #   StorybookAppLayer._present  Present: the slide alone, its taps and transitions
 """Storybook -- the kids' slides app (docs/media/look_2026-10/APPS_RESTYLE.md,
 Storybook): a story is slides of words, shapes and pictures, an app's own
-document (runtime/story_doc.py), not a cart. One renderer draws a slide at
-any zoom (runtime/story_render.py).
+document (runtime/apps/story_doc.py), not a cart. One renderer draws a slide at
+any zoom (runtime/apps/story_render.py).
 
   STORIES   a card a story, its first slide: the handheld's at 1/8, two a
             row; the desk's at 1/4, three a row, New story first, Present
@@ -19,7 +19,7 @@ any zoom (runtime/story_render.py).
   A STORY   on the handheld, a slide at 1/4 to look at, left and right step,
             P presents: a handheld shows stories and does not edit them, so
             the edit keys answer "Stories are edited on a desk". On the desk
-            the sorter and the slide editor (runtime/story_edit.py).
+            the sorter and the slide editor (runtime/apps/story_edit.py).
   PRESENT   the slide alone at the largest zoom the glass takes (1:1 on the
             desk's 1024 x 600 glass, 5/16 on the handheld's 320 x 240), its
             objects appearing on taps, Fade and Swipe between slides, its
@@ -348,7 +348,7 @@ class StorybookAppLayer(ListShellApp):
         self.typed = ""               # a dialog's field
         self.glass = False            # presenting: the app holds the whole glass
         self.show = None              # Present's state
-        self.ed = None                # the desk's editor (runtime/story_edit.py)
+        self.ed = None                # the desk's editor (runtime/apps/story_edit.py)
         self._focus = None
         self._focused = None
         self._key = 0

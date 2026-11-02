@@ -85,7 +85,7 @@ the two differed on Storybook, the functional one decided.
 
 ## Paint
 
-`runtime/artwork.py` (`PaintAppLayer`, `ArtworkService`). The sprite tab
+`runtime/apps/artwork.py` (`PaintAppLayer`, `ArtworkService`). The sprite tab
 (`runtime/paint_layer.py`, step 24) and Paint share their vocabulary: the
 tools as toggles, the colour in use two-toned, the ring cursor, the more
 menu.
@@ -158,7 +158,7 @@ row, 14 apart; desk 152×114, five a row.
 
 ## Get Carts
 
-`runtime/getcarts_app.py`: the phases CHECKING, LIST, CART, LICENCE, YOUR
+`runtime/apps/getcarts_app.py`: the phases CHECKING, LIST, CART, LICENCE, YOUR
 COPY, GETTING, READY / NOT INSTALLED, ON THE CONSOLE, and the offline
 ones.
 
@@ -205,7 +205,7 @@ Files' does.
 
 ## Storybook
 
-`runtime/storybook_app.py` today: a shelf of stories, a story's pages, a
+`runtime/apps/storybook_app.py` today: a shelf of stories, a story's pages, a
 page (4 lines of 34 mono characters, BG cycling six colours, MY ART
 attaching the current drawing, TEAR OUT tapped twice), 16 pages, the story
 a cart whose `main.py` the deck compiles to, read-only once its code is

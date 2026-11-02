@@ -835,7 +835,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.clipboard = _moy_app.Clipboard(
             self.app_abi, self.app_abi.grant("editor", ("clipboard",)))
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
-        # Paint's document model (runtime/artwork.py's ArtworkService), which
+        # Paint's document model (runtime/apps/artwork.py's ArtworkService), which
         # Paint builds over its own grant: the backdrop's My Art, the image
         # door and the Paint cart's identity reach it here. None until the
         # apps register, and in a build that carries no Paint.

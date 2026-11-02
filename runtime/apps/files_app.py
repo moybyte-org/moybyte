@@ -221,7 +221,7 @@ class FilesAppLayer(ListShellApp):
     # the text page, a project in the Editor) -- app_api_v1 called that a v1
     # non-goal and it shipped anyway, because it is a real product need. WALL,
     # GAME and USE copy a drawing into the backdrop and into a project
-    # (`carts`, `wallpaper`: runtime/picture_copies.py), and `artwork` follows
+    # (`carts`, `wallpaper`: runtime/apps/picture_copies.py), and `artwork` follows
     # a renamed drawing Paint has open.
     NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork", "carts",
              "wallpaper")

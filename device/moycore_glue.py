@@ -295,7 +295,7 @@ class MoycoreRun:
             if err:
                 raise RuntimeError(err)
             # The namespace's OWN prelude, if it brought one (the text console's
-            # `print`/`input` binding -- runtime/text_console.py's).
+            # `print`/`input` binding -- runtime/apps/text_console.py's).
             # A string, so the registration loop above skipped it.
             extra = ns.get("_moy_prelude")
             if extra:

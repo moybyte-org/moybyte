@@ -9,7 +9,7 @@
 #   Editor._pictures       Add a picture: My Art's drawings, copied into the story
 """Storybook's editor, on the desk boards and in the web build
 (docs/media/look_2026-10/APPS_RESTYLE.md, Storybook: Screens, Desk, Inputs).
-A handheld does not edit a story; runtime/storybook_app.py makes this only
+A handheld does not edit a story; runtime/apps/storybook_app.py makes this only
 where the console is a desk.
 
   SLIDES    the sorter: a card a slide at 1/4, three a row, its number and

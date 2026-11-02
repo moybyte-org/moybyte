@@ -674,16 +674,16 @@ NOT_MOVED = frozenset((
 
 # The shell's apps (§7): their modules and the system carts' code.
 APPS = (
-    "runtime/appearance_app.py", "runtime/artwork.py", "runtime/paint_app.py",
-    "runtime/myart_app.py", "runtime/drawing_pages.py", "runtime/block_editor_ui.py",
-    "runtime/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
+    "runtime/apps/appearance_app.py", "runtime/apps/artwork.py", "runtime/apps/paint_app.py",
+    "runtime/apps/myart_app.py", "runtime/apps/drawing_pages.py", "runtime/block_editor_ui.py",
+    "runtime/apps/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
     "runtime/editor_blocks.py", "runtime/editor_desk.py", "runtime/editor_map.py", "runtime/editor_music.py",
     "runtime/editor_parts.py", "runtime/editor_scene.py", "runtime/editor_settings.py",
     "runtime/editor_sound.py",
-    "runtime/toolkit/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
+    "runtime/toolkit/file_widgets.py", "runtime/apps/files_app.py", "runtime/apps/getcarts_app.py",
     "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/storybook_app.py",
-    "runtime/story_edit.py",
+    "runtime/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/apps/storybook_app.py",
+    "runtime/apps/story_edit.py",
 )
 
 

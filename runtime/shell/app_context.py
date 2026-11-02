@@ -155,7 +155,7 @@ class AppContext:
 
     def copy_gen(self):
         """The wallpaper copy's generation (`wallpaper.save_copy` moves it):
-        what a decode of the copy is keyed on (runtime/artwork.py)."""
+        what a decode of the copy is keyed on (runtime/apps/artwork.py)."""
         return self._app.copy_gen()
 
     def adopt(self, other):

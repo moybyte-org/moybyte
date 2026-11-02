@@ -1,5 +1,5 @@
 """The cart store (#124): `runtime/cart_index.py` (the console's `moy install`)
-and `runtime/getcarts_app.py` (the Get Carts app), on the host.
+and `runtime/apps/getcarts_app.py` (the Get Carts app), on the host.
 
 Five families:
 

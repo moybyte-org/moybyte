@@ -55,7 +55,7 @@ def test_paint_my_art_and_the_wallpaper_are_well_formed_system_carts():
 
 
 def test_the_paint_cart_body_is_only_the_fallback_card():
-    """Paint the APP is `runtime/paint_app.py`; `moybyte.paint.moy/main.py` is the card an
+    """Paint the APP is `runtime/apps/paint_app.py`; `moybyte.paint.moy/main.py` is the card an
     older shell shows instead, and nothing else.
 
     A registered app CLAIMS its cart (`console.open()` routes a claimed cart to
