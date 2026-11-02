@@ -28,6 +28,8 @@
                       bar, its tabs in the bar's zone), its four tabs (Games / Mine / Apps / Make, the lists
                       ws._launcher_items builds) and their input. A tap on the
                       centre card is the active tab's (ws.launch_selected).
+                      Its bases: `HomeSearch` (home_search.py, the search
+                      line).
   * `HomeWindowLayer` -- the "projects" content Layer: the SAME home in a
                       desktop-mode window (docs/theme_and_shell_2026-11.md §8.10, the
                       desk's PROJECTS): the console home's design over
@@ -90,6 +92,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_band import (_wall_ink, _overlaps_any, _ground_of, _dim_of, _cursor_stamp,
                                    _statics_base, _Keyed, _band_key, _band_frame)
 try:
+    from home_search import HomeSearch
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.home_search import HomeSearch
+try:
     from home_icons import IconHome
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_icons import IconHome
@@ -151,7 +157,7 @@ def times_words(n):
     return "Not yet" if not n else ("Once" if n == 1 else "%d times" % n)
 
 
-class LauncherHomeLayer:
+class LauncherHomeLayer(HomeSearch):
     """The "launcher" content Layer (system domain): the home, console mode's root.
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
@@ -1174,15 +1180,6 @@ class LauncherHomeLayer:
         """The hint strip along the home's foot (its tabs are the bar's)."""
         self._draw_hints(cv)
 
-    def _search_label(self, query, typing):
-        """The search box's words: "Search: " and the query (a bar caret
-        follows it while typed, `_draw_search`), or, where the input in use
-        cannot type, that a keyboard is needed (#239 is the on-screen
-        keyboard)."""
-        if typing and not query and not self.ws.can_type():
-            return self.ws.no_keyboard_text
-        return "Search: " + query
-
     def _search_open(self):
         """Whether the home's search is open: a query held or being typed."""
         ws = self.ws
@@ -1202,53 +1199,6 @@ class LauncherHomeLayer:
         lay = self.ws.layout
         h = lay.line_h
         return (rect[0], lay.cy + lay.ch - 4 * lay.fs - h, rect[2], h)
-
-    def _search_close_items(self):
-        """The strip's way out of search: a field's cancel while typing (the
-        T-Deck's Mic, where its K types), else back."""
-        return ("cancel" if getattr(self.ws, "search_typing", False) else "back", "Close")
-
-    def _draw_search(self, cv, th, ink):
-        """The search line (`_search_line`): its words, a bar caret after
-        the query while it is typed, and where a strip shows, the key that
-        closes it. Returns the line's right edge drawn to."""
-        ws = self.ws
-        line = self._search_line()
-        if line is None:
-            return 0
-        fs = ws.layout.fs
-        query = getattr(ws, "search_query", "")
-        typing = getattr(ws, "search_typing", False)
-        x = line[0] + self._hint_pad()
-        y = line[1] + (line[3] - ws.layout.line_h) // 2
-        label = _ui_draw.print_fit(self._search_label(query, typing), line[2] // 2, fs)
-        cv.print(label, x, y, ink, 1)
-        x += _ui_draw.print_width(label, fs)
-        if typing and ws.can_type():
-            # the field's caret: a unit wide, a unit over and under the ink
-            x += fs
-            cv.rect(x, y + fs, fs, ws.layout.line_h - 2 * fs, th["value"])
-            x += fs
-        if line[3] > 0 and line is self.grid.foot()[5]:
-            x += 4 * fs
-            sp = _ui_draw.hints(cv, th, (x, line[1], line[0] + line[2] - x, line[3]),
-                                self._search_close_items(), self.grid.desk())
-            if sp:
-                x = sp[-1][1]
-        return x
-
-    def _search_tap(self, px, py):
-        """A tap on the search line closes search, cleared (under touch its
-        only way out but the system menu's Clear search)."""
-        line = self._search_line()
-        if line is None:
-            return False
-        spans, _rect = self._hint_spans(self.ws.sys_canvas)
-        x1 = next((a for v, a, _b in spans if v == "tabs"), line[0] + line[2])
-        if not _in(px, py, (line[0], line[1], x1 - line[0], line[3])):
-            return False
-        self.ws.close_search(clear=True)
-        return True
 
     def card_verbs(self):
         """The selected card's verbs beyond its tap, the ONE list every
@@ -1636,31 +1586,6 @@ class LauncherHomeLayer:
                              or (v == "window" and v in self._desk_verbs())):
             return False
         self._do_verb(v)
-        return True
-
-    def _handle_search_typing(self, i):
-        """Keyboard while a search query is being TYPED (ws.search_typing, entered
-        via the sysmenu SEARCH item) -- mirrors settings_layer._wifi_input's
-        password-typing branch: typed ASCII bytes edit the query live (plain
-        printable range only -- no `=[]{}<>%` needed, so it works on the T-Deck's
-        keyboard), BACKSPACE deletes, ENTER leaves typing (keeping the filtered
-        results up for d-pad/trackball browsing), ESC leaves AND clears back to
-        the full grid. Grid nav is intentionally NOT handled here (mirrors the
-        wifi panel: while typing, the d-pad doesn't drive anything else)."""
-        ws = self.ws
-        k = ws.input.last_key
-        if i.pressed("b"):                          # a gamepad's B: the strip's Close
-            ws.close_search(clear=True)
-        elif k and k != self._search_kprev:
-            if k in (10, 13):                       # ENTER -> stop typing, keep results
-                ws.close_search(clear=False)
-            elif k == 27:                           # ESC -> cancel back to the full grid
-                ws.close_search(clear=True)
-            elif k == 8:                            # BACKSPACE -> delete
-                ws.set_search_query(ws.search_query[:-1])
-            elif 32 <= k <= 126 and len(ws.search_query) < 24:
-                ws.set_search_query(ws.search_query + chr(k))
-        self._search_kprev = k
         return True
 
     def handle_input(self, i):
