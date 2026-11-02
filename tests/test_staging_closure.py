@@ -695,6 +695,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
                  "moy_carts.py", "moyimg.py",         # #108 files sync
                  "moy_store_base.py", "moy_seed.py",  # ...and the store's own
+                 "moy_docs.py", "moy_pack.py",        # ...its documents and archive
                  "moy_journal.py",                    # the store of record
                  "ticks.py",                          # the transport's clock leaf
                  "moy_webhost.py",

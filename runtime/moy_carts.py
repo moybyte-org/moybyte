@@ -13,10 +13,8 @@
 #   -- block source            load_blocks, save_blocks
 #   -- persistent cart memory  load_pmem, save_pmem
 #   -- shared sprite sheet     load_shared_sheet, save_shared_sheet
-#   -- known WiFi networks     load_wifi, save_wifi, remember_wifi
-#   -- system settings         load_system, save_system
-#   -- achievements            load_achievements, save_achievements
 #   -- cart management         store_full, create, new_from_template, duplicate
+#   -- the modules split off this file  moy_seed; moy_docs (wifi, system, achievements); moy_pack
 # Moybyte SD cartridge store.
 #
 # Cartridges live as .moy folders under /sd/moybyte/carts/<name>.moy/:
@@ -429,43 +427,6 @@ def _read_sibling(root, name):
         return _read(_sibling_path(root, name))
     except OSError:
         return None
-
-
-def _load_store_json(path, pick):
-    """A system JSON store's value, or None when nothing usable is on disk.
-
-    `pick(parsed)` pulls the value out of the parsed document and returns None for
-    "this isn't one", so MISSING, unparseable and wrong-shape all fall through to
-    the `<path>.bak` copy `_write_atomic` leaves behind; a usable backup is
-    republished as `path` (the heal `_read_recover` does for manifests) so the
-    recovery is durable rather than re-run on every read.
-
-    Every sibling store must read through this. `_write_atomic` is crash-safe only
-    BECAUSE of that .bak, so its window leaves the store truncated -- and a loader
-    that reads a truncated store as "nothing saved yet" makes the loss permanent:
-    the next save overwrites the one surviving good copy.
-    """
-    def _pick(text):
-        try:
-            return pick(json.loads(text)) if text is not None else None
-        except (ValueError, TypeError, AttributeError):
-            return None
-
-    try:
-        got = _pick(_read(path))
-    except OSError:
-        got = None
-    if got is not None:
-        return got
-    text = _read_bak(path)
-    got = _pick(text)
-    if got is None:
-        return None
-    try:
-        _write(path, text)            # heal: republish the last known-good copy
-    except Exception:                 # noqa: BLE001 -- still return what we recovered
-        pass
-    return got
 
 
 def _write_sibling(root, name, text):
@@ -1495,200 +1456,6 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
     _write_sibling(root, SHARED_SHEET_NAME, hex_text)
 
 
-# --- known WiFi networks (system credential store, #38) ---------------------
-#
-# The WiFi service persists known networks (ssid + password) to a single system
-# JSON that lives BESIDE the carts dir (a sibling of `root`, like the shared
-# sheet) -- it is system state, not tied to any cart. The injected `wifi` API
-# (permission-gated) drives load/save here; the device autoconnects from this at
-# boot. Written atomically (same crash-safe path as the cart saves) so an
-# interrupted write can never truncate a kid's saved passwords. MicroPython-safe
-# (json + os only).
-
-WIFI_STORE_NAME = "wifi.json"
-
-
-def wifi_store_path(root=CARTS_DIR):
-    """Well-known path of the WiFi credential store."""
-    return _sibling_path(root, WIFI_STORE_NAME)
-
-
-def _wifi_networks(data):
-    """The known-networks list out of a parsed wifi.json, or None when the document
-    isn't one (so _load_store_json falls through to the backup). Entries with no
-    ssid are dropped (see save_wifi)."""
-    nets = data.get("networks") if isinstance(data, dict) else None
-    if not isinstance(nets, list):
-        return None
-    out = []
-    for n in nets:
-        if isinstance(n, dict) and n.get("ssid"):
-            out.append({"ssid": str(n["ssid"]), "password": str(n.get("password", ""))})
-    return out
-
-
-def load_wifi(root=CARTS_DIR):
-    """Read the known-networks list: [{"ssid": str, "password": str}, ...].
-    Returns [] only when nothing usable has ever been saved: a corrupt store must
-    never crash the boot autoconnect, and must not be reported as an empty one
-    either -- see _load_store_json."""
-    return _load_store_json(wifi_store_path(root), _wifi_networks) or []
-
-
-def save_wifi(networks, root=CARTS_DIR):
-    """Persist the known-networks list, atomically. Ensures the parent dir exists.
-    `networks` is a list of {"ssid", "password"} dicts. An entry with a BLANK ssid
-    is dropped: there is no such network, and one would sit at the front of the
-    list that boot autoconnect walks."""
-    ensure_dirs(root)
-    clean = [{"ssid": str(n["ssid"]), "password": str(n.get("password", ""))}
-             for n in networks if n.get("ssid")]
-    _write_atomic(wifi_store_path(root), json.dumps({"networks": clean}))
-
-
-def remember_wifi(ssid, password, root=CARTS_DIR):
-    """Add/replace one network in the store (by ssid) and persist. Returns the
-    updated list -- what is actually STORED, so a caller can trust it. The
-    most-recently-remembered network is moved to the FRONT, so autoconnect prefers
-    the last one the kid joined.
-
-    A blank ssid, and a re-remember of the network already at the front with the
-    same password, both write NOTHING: save_wifi would drop the first anyway, the
-    second is what the panel's known-network reconnect and every boot autoconnect
-    do, and each rewrite is another _write_atomic crash window."""
-    ssid = str(ssid)
-    nets = load_wifi(root)
-    if not ssid:
-        return nets
-    password = str(password or "")
-    if nets and nets[0]["ssid"] == ssid and nets[0]["password"] == password:
-        return nets
-    nets = [n for n in nets if n["ssid"] != ssid]
-    nets.insert(0, {"ssid": ssid, "password": password})
-    save_wifi(nets, root)
-    return nets
-
-
-def forget_wifi(ssid, root=CARTS_DIR):
-    """Drop one network from the store (by ssid) and persist. Returns the updated
-    list (unchanged if the ssid wasn't known). Forgetting a network that isn't
-    there writes NOTHING -- a full atomic rewrite, and its crash window, for a
-    no-op."""
-    ssid = str(ssid)
-    nets = load_wifi(root)
-    kept = [n for n in nets if n["ssid"] != ssid]
-    if len(kept) != len(nets):
-        save_wifi(kept, root)
-    return kept
-
-
-# --- system settings (desktop shell, #28) -----------------------------------
-#
-# A single system-level config (the theme, the font scale, the toggles, later
-# volume/brightness/name) that is NOT tied to any one cart -- today config is per-cart only
-# (cart["cfg"] / save_config). It lives BESIDE the carts dir (a sibling of
-# `root`, like wifi.json and the shared sheet) so it is system state. Written
-# atomically (same crash-safe path as the cart saves) so an interrupted write can
-# never truncate the kid's settings, and written through the same with_sd_live
-# path on device. MicroPython-safe (json + os only).
-
-SYSTEM_STORE_NAME = "system.json"
-
-
-def system_store_path(root=CARTS_DIR):
-    """Well-known path of the system settings store."""
-    return _sibling_path(root, SYSTEM_STORE_NAME)
-
-
-def load_system(root=CARTS_DIR):
-    """Read the system settings dict. Returns {} when nothing usable has ever been
-    saved (a corrupt store must never crash boot); recovers from the .bak like
-    load_wifi, so a half-published file is not read as "no settings"."""
-    return _load_store_json(system_store_path(root),
-                            lambda d: d if isinstance(d, dict) else None) or {}
-
-
-def save_system(settings, root=CARTS_DIR):
-    """Persist the system settings, atomically. Ensures the parent dir exists.
-    `settings` is a dict of plain JSON-able data, or the object's JSON text
-    (what the settings store's rows dump)."""
-    ensure_dirs(root)
-    _write_atomic(system_store_path(root), settings if isinstance(settings, str)
-                  else json.dumps(dict(settings)))
-
-
-# --- achievements (#21) -----------------------------------------------------
-#
-# The badges a kid found (milestones hit naturally, plus the hidden Easter-egg
-# rewards) persist to a single achievements.json that lives BESIDE the carts
-# dir (a sibling of `root`, like system.json/wifi.json/the shared sheet) -- it
-# is system state, not tied to any cart. Stored as
-#   {"v": 2, "found": {id: YYYYMMDD, ...}, "count": {badge: [key, ...]}}
-# -- the day each was found (0 where the console had no clock) and a counter
-# badge's progress (Cart Explorer's carts, Toolbox Master's editors); the
-# catalog of what each id MEANS lives in the shared console (host == device).
-# The reader is strict: any other document, the ids-only one before it
-# included, reads as ABSENT (CLAUDE.md, no store migrations). Written
-# atomically (same crash-safe path as the cart saves) so an interrupted write
-# can never lose a kid's earned badges. MicroPython-safe (json + os only).
-
-ACHIEVEMENTS_STORE_NAME = "achievements.json"
-ACHIEVEMENTS_FORMAT = 2
-
-
-def achievements_store_path(root=CARTS_DIR):
-    """Well-known path of the achievements store."""
-    return _sibling_path(root, ACHIEVEMENTS_STORE_NAME)
-
-
-def achievements_doc(data):
-    """achievements.json's document out of its parsed JSON, `{"found": {id:
-    day}, "count": {badge: [key, ...]}}`, or None when it is not one of
-    this format (so _load_store_json falls through to the backup)."""
-    if not isinstance(data, dict) or data.get("v") != ACHIEVEMENTS_FORMAT:
-        return None
-    found, count = data.get("found"), data.get("count", {})
-    if not isinstance(found, dict) or not isinstance(count, dict):
-        return None
-    out = {}
-    for k, v in found.items():
-        if not isinstance(k, str) or type(v) is not int or v < 0:
-            return None
-        out[k] = v
-    keys = {}
-    for k, v in count.items():
-        if not isinstance(k, str) or not isinstance(v, list):
-            return None
-        got = []
-        for i in v:
-            if not isinstance(i, str):
-                return None
-            if i not in got:
-                got.append(i)
-        keys[k] = got
-    return {"found": out, "count": keys}
-
-
-def achievements_text(doc):
-    """achievements.json's text for `doc` (an `Achievements.doc()`)."""
-    return json.dumps({"v": ACHIEVEMENTS_FORMAT, "found": doc.get("found", {}),
-                       "count": doc.get("count", {})})
-
-
-def load_achievements(root=CARTS_DIR):
-    """The badges' document (`achievements_doc`), or None when nothing of this
-    format has been saved (a corrupt store must never crash boot); recovers
-    from the .bak like load_wifi."""
-    return _load_store_json(achievements_store_path(root), achievements_doc)
-
-
-def save_achievements(doc, root=CARTS_DIR):
-    """Persist the badges' document (`Achievements.doc()`), atomically.
-    Ensures the parent dir exists."""
-    ensure_dirs(root)
-    _write_atomic(achievements_store_path(root), achievements_text(doc))
-
-
 # --- cart management (create / duplicate / delete) --------------------------
 
 # A friendly starter cartridge: an editable colored dot, as a GAME project. The
@@ -1953,237 +1720,29 @@ def delete(cart):
     _rmtree(cart["path"])
 
 
-def save_package(path, files, remove=(), fresh=False):
-    """Publish a theme package's folder (`custom`, docs/history/theming_2026-09.md
-    §9 phase 6 step 5): each of `files` (name -> bytes) written whole, each
-    of `remove` deleted. `fresh` empties the folder first, so a package
-    replaced by another keeps nothing of the one before."""
-    if fresh:
-        _rmtree(path)
-    _mkdir(path)
-    for name in files:
-        _write_bytes(path + "/" + name, files[name])
-    for name in remove:
-        _remove(path + "/" + name)
-
-
-def rename_package(path, dest, files, replace=False):
-    """A theme package's folder `path` moved to `dest` by one rename (NAME…,
-    docs/history/theming_2026-09.md §9 phase 6 step 8), then each of `files` written
-    whole into it. A folder at `dest` is replaced only with `replace`
-    (`adopt`'s aside-and-remove), else OSError(EEXIST)."""
-    if _exists(dest):
-        if not replace:
-            raise OSError(17, "exists")
-        adopt(path, dest)
-    else:
-        os.rename(path, dest)
-    for name in files:
-        _write_bytes(dest + "/" + name, files[name])
-
-
-# --- a cart as it travels (#127, #122): the archive and adopt ---------------
-#
-# A `.moy` archive is the browser's codec (firmware/web_runner/moy_store.mjs's
-# zipStore/unzip): STORED entries under `<folder>/`, a fixed 1980-01-01 date,
-# files in name order at most six folders deep, nothing the wire skips (the
-# journal too, unless `history`). The native store writes and reads it
-# wherever it is linked (native/moy_store/moy_pack.c); these are the twins.
-
-_PACK_DEPTH = 6
-_SKIP_DIRS = ("thumbs", "__pycache__", "journal")
-_SKIP_FILES = ("journal.jsonl",)
-
-
-def pack_skip(name, history=False):
-    """`moy_sync._skip`'s rule (journal/ and journal.jsonl let through with
-    `history`): what never crosses the wire or goes into an archive."""
-    if _store is not None:
-        return _store.skip(name, history)
-    if name in ("thumbs", "__pycache__") or (not history and (
-            name in _SKIP_DIRS or name in _SKIP_FILES)):
-        return True
-    return name.endswith(".bak") or name.endswith(".tmp")
-
-
-def pack(path, dest, history=False, folder=None):
-    """The cart folder at `path` written to `dest` as a `.moy` archive whose
-    entries sit under `folder` (the cart's own folder name). Returns the
-    number of files."""
-    if folder is None:
-        folder = path.rstrip("/").rsplit("/", 1)[-1]
-    if _store is not None:
-        return _store.pack(path, folder, dest, history)
-    import struct
-    import binascii
-    out = []
-    cen = []
-    at = [0]
-
-    def emit(b):
-        out.append(b)
-        at[0] += len(b)
-
-    def walk(p, rel, depth):
-        if depth > _PACK_DEPTH:
-            return
-        names = _listing(p)
-        for n in sorted(names or ()):
-            if pack_skip(n, history):
-                continue
-            if names[n]:
-                walk(p + "/" + n, rel + "/" + n, depth + 1)
-                continue
-            try:
-                data = _read_bytes(p + "/" + n, 1 << 30)
-            except OSError:
-                continue
-            name = (rel + "/" + n).encode("utf-8")
-            crc = binascii.crc32(data) & 0xFFFFFFFF
-            cen.append((name, crc, len(data), at[0]))
-            emit(struct.pack("<IHHHHHIIIHH", 0x04034B50, 20, 0, 0, 0, 0x21, crc,
-                             len(data), len(data), len(name), 0) + name + data)
-
-    walk(path, folder, 0)
-    start = at[0]
-    for name, crc, size, off in cen:
-        emit(struct.pack("<IHHHHHHIIIHHHHHII", 0x02014B50, 20, 20, 0, 0, 0, 0x21,
-                         crc, size, size, len(name), 0, 0, 0, 0, 0, off) + name)
-    emit(struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, len(cen), len(cen),
-                     at[0] - start, start, 0))
-    _write_bytes(dest, b"".join(out))
-    return len(cen)
-
-
-def unpack(archive, dest):
-    """The `.moy` archive at `archive` unpacked into the folder `dest`, the one
-    top folder its entries sit under stripped and any path that climbs or
-    names what the wire skips refused: (files, top folder or "")."""
-    if _store is not None:
-        return _store.unpack(archive, dest)
-    import io
-    try:
-        import zipfile          # CPython; a board reads through the native store
-    except ImportError:  # pragma: no cover
-        zipfile = None
-    if zipfile is None:  # pragma: no cover
-        raise OSError(19, "no archive reader")
-    with open(archive, "rb") as f:
-        z = zipfile.ZipFile(io.BytesIO(f.read()))
-    names = [i for i in z.infolist() if not i.filename.endswith("/")]
-    tops = set(i.filename.split("/", 1)[0] if "/" in i.filename else None
-               for i in names)
-    top = tops.pop() if len(tops) == 1 and None not in tops else ""
-    _mkdir(dest)
-    n = 0
-    for i in names:
-        rel = i.filename[len(top) + 1:] if top else i.filename
-        segs = rel.replace("\\", "/").split("/")
-        if (not rel or rel[0] in "/\\"
-                or any(s in ("", ".", "..") or pack_skip(s) for s in segs)):
-            continue
-        for k in range(1, len(segs)):
-            _mkdir(dest + "/" + "/".join(segs[:k]))
-        try:
-            data = z.read(i)
-        except Exception:  # noqa: BLE001 -- a damaged entry is left out
-            continue
-        with open(dest + "/" + rel, "wb") as f:
-            f.write(data)
-        n += 1
-    return n, top
-
-
-def adopt(stage, target):
-    """The staged cart folder `stage` moved to `target` by one rename; a cart
-    already there goes aside to `<stage>.old` first and is removed after
-    (cart_index.recover puts it back if the power goes between)."""
-    if _store is not None:
-        return _store.adopt(stage, target)
-    aside = stage + ".old"
-    if _exists(target):
-        if _exists(aside):
-            _rmtree(aside)
-        os.rename(target, aside)
-        os.rename(stage, target)
-        _rmtree(aside)
-    else:
-        os.rename(stage, target)
-
-
-def import_archive(archive, root=CARTS_DIR, stage=None):
-    """A `.moy` archive unpacked into a staging folder and adopted onto the
-    shelf under the browser's naming rule (moy_store.mjs's cartBase and
-    uniqueCartDir): the new cart's path, or None when it held no files."""
-    if stage is None:
-        stage = _sibling_path(root, "install") + "/import"
-    _mkdir(_sibling_path(root, "install"))
-    _rmtree(stage)
-    n, top = unpack(archive, stage)
-    if not n:
-        _rmtree(stage)
-        return None
-    base = top or archive.rsplit("/", 1)[-1]
-    for ext in (".zip", ".moy"):
-        if base.lower().endswith(ext):
-            base = base[:-len(ext)]
-    out = ""
-    for c in base:
-        ok = ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c in "_-"
-        out += c if ok else ("" if out.endswith("_") else "_")
-    base = out.strip("_") or "cart"
-    theme = _theme_of(stage, base)
-    if theme is not None:
-        base = theme[0]
-    target = cart_path(root, base + CART_EXT)
-    i = 2
-    while _exists(target):
-        stem = base
-        if theme is not None:
-            stem = base[:THEME_NAME_MAX - len(str(i)) - 1]
-        target = cart_path(root, stem + "_" + str(i) + CART_EXT)
-        i += 1
-    if theme is not None:
-        name = target.rsplit("/", 1)[-1][:-len(CART_EXT)]
-        if name != theme[0] or theme[2]:
-            d = json.loads(theme[3])
-            d["name"] = name
-            _write(stage + "/" + theme[1], json.dumps(d))
-    adopt(stage, target)
-    return target
-
-
-def _theme_of(folder, stem):
-    """A theme package's (name, file, renamed, text) in unpacked `folder`,
-    or None for a cart: the browser's `themeOf` (moy_store.mjs). A theme
-    lands under its theme.json's `name`, else its folder's `stem` in the
-    grammar (`renamed`), since the loader takes it only from `<name>.moy`."""
-    try:
-        man = json.loads(_read(folder + "/manifest.json"))
-        if man["moybyte"]["type"] != "theme":
-            return None
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    main = man.get("main")
-    file = main if type(main) is str and main else "theme.json"
-    try:
-        text = _read(folder + "/" + file)
-        name = json.loads(text).get("name")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if theme_name_ok(name):
-        return (name, file, False, text)
-    alt = ""
-    for c in stem.lower():
-        alt += c if ("a" <= c <= "z" or "0" <= c <= "9" or c in "_-") else "_"
-    alt = alt.lstrip("_-")[:24]
-    return (alt if theme_name_ok(alt) else "theme", file, True, text)
-
-
 # --- the modules split off this file, re-exported under their old names -------
 #
 # Nothing in the core above reads any of these; every caller reaches them as
 # `moy_carts.X`, so the umbrella is the import site and the leaves stay leaves.
+try:
+    from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
+                          _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
+                          SYSTEM_STORE_NAME, system_store_path, load_system, save_system,
+                          ACHIEVEMENTS_STORE_NAME, ACHIEVEMENTS_FORMAT,
+                          achievements_store_path, achievements_doc, achievements_text,
+                          load_achievements, save_achievements)
+    from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
+                          import_archive)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
+                                  _wifi_networks, load_wifi, save_wifi, remember_wifi,
+                                  forget_wifi, SYSTEM_STORE_NAME, system_store_path,
+                                  load_system, save_system, ACHIEVEMENTS_STORE_NAME,
+                                  ACHIEVEMENTS_FORMAT, achievements_store_path,
+                                  achievements_doc, achievements_text, load_achievements,
+                                  save_achievements)
+    from runtime.moy_pack import (save_package, rename_package, pack_skip, pack, unpack,
+                                  adopt, import_archive)
 try:
     from moy_seed import (
         seed_builtins,
