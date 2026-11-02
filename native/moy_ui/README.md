@@ -65,7 +65,10 @@ On the host the C is compiled once, into the host's one library
 draw into, the Lua run and the compiled-cart run, as on an image: the theme,
 depth, fonts and cart-text boundary the shell sets are the ones a Lua or
 compiled page's `ui` reads (`tests/test_host_one_library.py`).
-`runtime/host/moy_ui_binding.py` is the module over ctypes.
+`runtime/host/moy_ui_binding.py` is the module over ctypes; its draw verbs,
+its interaction and its public UI API are set on it by
+`moy_ui_draw_binding.py`, `moy_ui_scroll_binding.py` and
+`moy_ui_api_binding.py` beside it.
 A console takes the module in its `board.toml`; the Zero, which runs no apps,
 denies it.
 
