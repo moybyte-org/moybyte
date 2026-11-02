@@ -125,7 +125,7 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 ## The serial dev channel
 
-One vocabulary, every board (`runtime/dev_channel.py`; the T-Deck's README
+One vocabulary, every board (`runtime/boot/dev_channel.py`; the T-Deck's README
 carries the RX story and the `recv` cart push, which are this board's too --
 same S3 USB-Serial/JTAG, same ISR, same **16384** `[serial] window`). What is
 board-specific here is where a pushed cart lands: `python tools/push_cart.py

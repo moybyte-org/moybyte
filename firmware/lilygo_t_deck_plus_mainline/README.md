@@ -291,7 +291,7 @@ from the REPL stops it.
 #### `MODE = "desktop"` (stage 6) — the console
 
 The real thing: `moy_runtime.run_desktop()` over the shared boot spine
-(`runtime/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
+(`runtime/boot/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
 carts through `moycore`, OTA, and the browser console baked into the image.
 
 Boot is the same sequence every console board runs, because it is the same
@@ -320,7 +320,7 @@ and its Quit to leave a game, the ≡ menu and Settings work, the Editor's seven
 ## The serial dev channel
 
 The console answers line commands on its USB serial through the one
-`runtime/dev_channel.py` every board constructs; `tests/test_tdeck_on_glass.py`
+`runtime/boot/dev_channel.py` every board constructs; `tests/test_tdeck_on_glass.py`
 and `tools/board.py` drive it. TX always streamed. RX takes three changes that
 are only sufficient TOGETHER (#201, 2026-08-16), each measured as a failure on
 its own:

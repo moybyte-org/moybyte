@@ -1,4 +1,4 @@
-"""The dev channel's audio words (see runtime/devch_input.py for the shape of
+"""The dev channel's audio words (see runtime/boot/devch_input.py for the shape of
 a word): `vol N`, the console's level, stored in its settings row and applied
 to the kernel's; `hush`, every session silent from the next block."""
 

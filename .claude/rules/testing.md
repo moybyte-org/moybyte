@@ -112,7 +112,7 @@ paths:
     pin `ws.exit()`, because a run started from a desk window does not
     pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
     window-buffer half only where windows exist.
-  - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
+  - **The dev channel is ONE class** (`runtime/boot/dev_channel.py`) with one
     vocabulary, and `DevChannel.run` is the list of record: every word the
     boards answer to is a branch in it, from `state`/`tap`/`swipe` through the
     measurement switches (`diag`, `verbs`, `luaprof`, `perfcnt`, `luagc`,

@@ -293,7 +293,7 @@ PY_FED_MOVED = {
                                    '"still on %s"', '"CART"', "RESTART MOYBYTE",
                                    "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
                                    '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"SLEEP"'],
-    "runtime/device_boot.py": ["IT CRASHED LAST TIME"],
+    "runtime/boot/device_boot.py": ["IT CRASHED LAST TIME"],
     "runtime/shell/cart_manager.py": ["the store is full"],
 }
 

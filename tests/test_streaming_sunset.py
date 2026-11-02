@@ -172,7 +172,7 @@ def test_lua_glue_has_no_tee_sniff():
 
 def test_boards_no_longer_freeze_the_recording_stack():
     # Pin the STAGED SET, not prose and not shell syntax. Since #161 Phase 3 the
-    # boards stage every runtime/*.py minus their board.toml denylist, so the
+    # boards stage every runtime/ module minus their board.toml denylist, so the
     # question this test always meant -- "is the recorder frozen onto a board?"
     # -- is answered by asking what a fresh build stages.
     #

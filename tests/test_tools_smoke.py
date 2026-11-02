@@ -3,7 +3,7 @@
 WHY THIS EXISTS. Most of these tools are reachable only from prose -- the
 board READMEs, `.claude/rules/`, an issue comment. Nothing imports them and no
 suite runs them, so a rename in `tools/p4_autotest.py`'s driver, or a command
-dropped from `runtime/dev_channel.py`'s table, breaks them silently and the
+dropped from `runtime/boot/dev_channel.py`'s table, breaks them silently and the
 report arrives from a human already sitting at a board with a cable in hand.
 
 Two nets, and both are DERIVED FROM SOURCE rather than listed here, the way
@@ -141,7 +141,7 @@ def _dev_channel_commands():
                 if fields[5].value:
                     cmds.add(fields[5].value)
 
-    # The words each subsystem registers (runtime/devch_*.py's WORDS).
+    # The words each subsystem registers (runtime/boot/devch_*.py's WORDS).
     for words in sorted(ROOT.glob("runtime/**/devch_*.py")):
         for node in ast.walk(_tree(words)):
             if (isinstance(node, ast.Assign)
@@ -320,6 +320,6 @@ def test_serial_verbs_are_words_the_dev_channel_knows(tool):
     unknown = {verb: line for verb, line in _verbs_sent(tool).items()
                if verb not in DEV_COMMANDS}
     assert not unknown, (
-        "%s sends %s, which runtime/dev_channel.py does not dispatch"
+        "%s sends %s, which runtime/boot/dev_channel.py does not dispatch"
         % (tool.name, ", ".join("%r (line %d)" % (v, n)
                                 for v, n in sorted(unknown.items()))))

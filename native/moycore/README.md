@@ -241,7 +241,7 @@ These three open it. `profile(1)` replaces every C-function global with a
 closure that times the original; `verb_stats()` returns `(hz, frames, ((name,
 calls, self, inclusive), ...))` and `verb_reset()` zeroes it. The serial face is
 `verbs on|off|reset` and a bare `verbs`, which prints one `VERBS` line of
-**per-frame** calls and milliseconds (`runtime/dev_channel.verbs_line`).
+**per-frame** calls and milliseconds (`runtime/boot/dev_channel.verbs_line`).
 
 Four things about it are load-bearing:
 
@@ -292,7 +292,7 @@ GENERATED, so a fix there lands on every ported cart at once.
 `lua_stats(top)` returns `(hz, frames, interval, totals, rows, srcs)` and
 `lua_reset()` zeroes it. The serial face is `luaprof on|off|reset [interval]`
 and a bare `luaprof`, which prints one `LUAPROF` line
-(`runtime/dev_channel.luaprof_line`).
+(`runtime/boot/dev_channel.luaprof_line`).
 
 Five things about it are load-bearing:
 

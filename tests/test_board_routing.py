@@ -32,8 +32,9 @@ _REPO = Path(__file__).resolve().parent.parent
 
 def _staged():
     """The shared modules a FRESH T-Deck build freezes, by destination name --
-    `build.sh` stages every `runtime/*.py` except the files `board.toml`
-    denies, so the question is asked of the staged set."""
+    `build.sh` stages every module under `runtime/` (flat, `host/` aside)
+    except the files `board.toml` denies, so the question is asked of the
+    staged set."""
     from tools.board_config import staged_modules
     return staged_modules(_REPO / ROOT, _REPO)
 
@@ -902,7 +903,7 @@ def test_one_lua_runtime_wired():
     assert "py/" not in vm, "the VM half includes nothing of MicroPython"
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
-    # The BOARDS reach it through the shared boot spine -- runtime/device_boot.py
+    # The BOARDS reach it through the shared boot spine -- runtime/boot/device_boot.py
     # holds ONE probe where there used to be two hand-kept copies -- so the
     # import lives there. Each board still has to CALL it, and the second loop
     # is what pins that: a spine nobody invokes is a feature that quietly does

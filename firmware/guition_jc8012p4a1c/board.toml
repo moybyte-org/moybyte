@@ -341,7 +341,7 @@ Each file named below is board-AGNOSTIC by construction, with its
 board-specific imports guarded and its hardware inputs passed as constructor
 arguments.
 
-The boot spine is `runtime/device_boot.py` and reaches this board through the
+The boot spine is `runtime/boot/device_boot.py` and reaches this board through the
 SHARED denylist above; the frame loop is the kernel's (`moy_kernel`).
 The line that decides is whether a module can import with no board present:
 both take every hardware object as an argument, so they load on CPython and

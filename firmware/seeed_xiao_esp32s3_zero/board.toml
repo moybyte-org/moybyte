@@ -78,7 +78,7 @@ unless somebody writes down why not, which is #161's whole thesis and the
 reason the other three boards deny by exception.
 
 This board is not a console. It has no glass, runs no carts and constructs no
-Workstation; the default answer for a new `runtime/*.py` here is NO, and a
+Workstation; the default answer for a new `runtime/` module here is NO, and a
 denylist would express that as forty denials that all say "there is no
 console", plus a silent bug every time a new shared module appears and nobody
 adds the forty-first. The allowlist below is short and each group says what

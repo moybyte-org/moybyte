@@ -1,6 +1,6 @@
 """`tools/board.py` with no board attached.
 
-The console on the far side is `runtime/dev_channel.py`'s real `DevChannel`
+The console on the far side is `runtime/boot/dev_channel.py`'s real `DevChannel`
 over a fake workstation, behind a fake serial port whose clock advances as the
 driver reads it -- so the verbs, the replies and the `py` evaluation are the
 channel's own, and a ten-second measurement takes no time. What this cannot

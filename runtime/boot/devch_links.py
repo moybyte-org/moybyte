@@ -1,6 +1,6 @@
 """The dev channel's link words: `link`, `web`, `recv` and the tier-1
 sideload lines `moy?`, `moy-put`, `moy-del`, `moy-rescan` and `moy-run` (see
-runtime/devch_input.py for the shape of a word). `recv` and `moy-put` leave
+runtime/boot/devch_input.py for the shape of a word). `recv` and `moy-put` leave
 the line discipline, so the byte readers they hand the stream to stay the
 channel's (DevChannel._recv, DevChannel._moy_put).
 """

@@ -1,7 +1,7 @@
 """The boot's cart step: read the store's catalogue, seed it against that, fall
 back to the built-in carts -- `DeviceBoot`'s store half, one body for every board.
 
-`BootCarts` is a mixin `DeviceBoot` (runtime/device_boot.py) takes: it speaks
+`BootCarts` is a mixin `DeviceBoot` (runtime/boot/device_boot.py) takes: it speaks
 through the boot's own screen (`say`, `note`), so the serial lines and the
 splash's progress bar are the ones every board already prints. The store
 arrives as an argument -- `moy_catalogue`, the store's interface -- so nothing

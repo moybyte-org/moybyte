@@ -57,7 +57,7 @@ def _load_moy_runtime():
     global _DEVICE_API
     saved = {}
     # moy_runtime does `from console import ...`; the device freezes
-    # build-staged copies of runtime/*.py as top-level modules. Register those
+    # build-staged copies of the runtime/ modules as top-level modules. Register those
     # same canonical files so the device module loads under CPython (the editor
     # UIs [block_editor_ui #29 Part 2 / map_editor_ui #32 / music_editor_ui #50
     # / perf_hud #43/#44] + audio first -- console imports all of them).

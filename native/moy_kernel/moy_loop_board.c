@@ -276,7 +276,7 @@ static uint32_t b_services(void) {
 // -- the board's words (docs/history/kernel_survival_2026-10.md §7.3) -----
 //
 // The words that read or act on kernel state, answered in C before any
-// console word. The host and the browser keep runtime/dev_channel.py's
+// console word. The host and the browser keep runtime/boot/dev_channel.py's
 // copies, which say `-` for what a host cannot read.
 
 void moy_aud_hush(void) __attribute__((weak));

@@ -6,7 +6,7 @@ import `esp32`/`machine`, so every existing net over them is a string match on
 source. That is why `_pace_debt` could ship into one board's loop and not the
 other's for four days with nothing to say so.
 
-`runtime/device_boot.py` deliberately imports no board module -- every hardware
+`runtime/boot/device_boot.py` deliberately imports no board module -- every hardware
 object arrives as an argument -- which means the shared half of both boards'
 boot is ORDINARY PYTHON and can simply be run. So this file runs it: the splash
 lines, the seed-progress cadence, the cart fallback, the OTA verdict and
@@ -661,7 +661,7 @@ def test_the_spine_imports_no_board_module():
     """What lets this file live in `runtime/` and be tested at all.
 
     Every hardware object arrives as an argument. If a board import creeps in,
-    `runtime/device_boot.py` stops importing on the host (killing every
+    `runtime/boot/device_boot.py` stops importing on the host (killing every
     assertion above) and starts being un-stageable to the wasm head, whose
     `DENY` glob does not exclude it.
     """

@@ -100,7 +100,7 @@ class DeviceBoot(BootCarts):
     compositor. `label` is the serial prefix ("Moybyte" / "Moybyte P4") and
     `set_backlight` the board's panel-light function -- the two things that
     differ between the boards in every line this class prints. The cart step
-    (`load_carts`, `seed_progress`) is `BootCarts`, runtime/boot_carts.py.
+    (`load_carts`, `seed_progress`) is `BootCarts`, runtime/boot/boot_carts.py.
     """
 
     def __init__(self, canvas, comp, set_backlight=None, label="Moybyte"):

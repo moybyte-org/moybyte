@@ -398,7 +398,7 @@ def test_the_encoder_runs_under_micropython_and_agrees_with_cpython(tmp_path):
                 "http://192.168.100.101/?pin=4821",
                 "http://moybyte-zero.local/?pin=4821", "x" * 78]
     # Staged FLAT, as `moy_qr`, because that is how a board carries it: the
-    # build copies runtime/*.py into modules/ and freezes them as top-level
+    # build copies every runtime/ module into modules/ and freezes them as top-level
     # names. Importing it through a `runtime` package here would test a shape
     # no board has.
     stage = tmp_path / "stage"

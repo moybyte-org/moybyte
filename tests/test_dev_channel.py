@@ -1,4 +1,4 @@
-"""The unified serial dev channel (runtime/dev_channel.py).
+"""The unified serial dev channel (runtime/boot/dev_channel.py).
 
 Until 2026-08-17 the channel existed three times: this module (extracted for
 the fork, which was then deleted -- zero importers), a verbatim copy inside the

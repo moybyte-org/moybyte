@@ -1,5 +1,5 @@
 """The dev channel's input words: `tap`, `swipe` and `drag`
-(runtime/dev_channel.py holds the console's words; this file says what these
+(runtime/boot/dev_channel.py holds the console's words; this file says what these
 do).
 
 Each word is `word(chan, ws, parts, line)` in WORDS, the table DevChannel

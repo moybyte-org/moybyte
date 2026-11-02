@@ -380,7 +380,7 @@ board-specific imports guarded and its hardware inputs passed as constructor
 arguments.
 
 PHASE 4/5 UPDATE (2026-08-15): the boot spine and frame pump did NOT move here
--- it is `runtime/device_boot.py` (the frame loop is the kernel's) and reaches this
+-- it is `runtime/boot/device_boot.py` (the frame loop is the kernel's) and reaches this
 board through the SHARED denylist above, which is why nothing was added to this
 section for them. The line that decides is whether a module can import with no
 board present: both take every hardware object as an argument, so they load on

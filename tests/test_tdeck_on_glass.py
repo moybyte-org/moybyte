@@ -5,7 +5,7 @@ Gated: they run only when MOYBYTE_TDECK_PORT is set (e.g.
 tests/test_tdeck_on_glass.py -v`), so the normal host suite never needs
 hardware. The suite that #201 said was "worth more than the ~0.5MB of flash
 the LVGL removal frees" -- the T-Deck's RX works on the mainline port, the
-dev channel is the shared `runtime/dev_channel.py`, and this is the P4
+dev channel is the shared `runtime/boot/dev_channel.py`, and this is the P4
 suite's pattern pointed at the second board.
 
 DELIBERATELY NO RESET, unlike the P4 suite -- and that is now READ, not

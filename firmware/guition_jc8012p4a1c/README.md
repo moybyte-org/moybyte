@@ -218,7 +218,7 @@ import moy_runtime; moy_runtime.run_ppa_smoke()        # PPA vs CPU composite A/
 
 Ctrl-C in the desktop drops to the REPL (the USB-Serial/JTAG stays alive under
 the loop, like the S3 boards); the dev channel is the shared one
-(`state`/`tap`/`swipe`/`run`/`py`/`bl`/`power`… — `runtime/dev_channel.py`)
+(`state`/`tap`/`swipe`/`run`/`py`/`bl`/`power`… — `runtime/boot/dev_channel.py`)
 plus the P4 extras `bt`/`union`/`cache`.
 
 ## What's here

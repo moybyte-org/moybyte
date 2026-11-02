@@ -1,7 +1,7 @@
 """`tools/push_cart.py` -- the upload protocol, and the facts it must read.
 
 Never imported by anything (#208), and the protocol it drives is the dev
-channel's RAW receive (`recv`, `runtime/dev_channel.py`'s `_recv`): the host
+channel's RAW receive (`recv`, `runtime/boot/dev_channel.py`'s `_recv`): the host
 writes one window of 8-bit payload, waits for the board's ack, and renames the
 `.new` only once the board's read-back sha256 agrees. **There is no base64
 chunk push** -- one transport, so an image that predates `recv` is refused by

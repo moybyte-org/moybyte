@@ -1,7 +1,7 @@
 """Moybyte T-Deck device backend -- the shared console on the S3.
 
 The `run_desktop` that had the least to invent: the shared boot spine
-(`device/desktop_spine.py` over `runtime/device_boot.py`) owns the splash,
+(`device/desktop_spine.py` over `runtime/boot/device_boot.py`) owns the splash,
 the cart seed/scan, the Lua probe, the service wiring and the OTA verdict,
 the kernel owns the frame (native/moy_kernel/moy_loop.c), and the shared
 `console.Workstation` owns every pixel. What is
