@@ -1,4 +1,4 @@
-"""The frozen QR encoder (runtime/moy_qr.py, #197).
+"""The frozen QR encoder (runtime/system/moy_qr.py, #197).
 
 A QR code fails SILENTLY: a matrix with a wrong generator polynomial, a
 transposed format word or a mask the format bits do not describe still looks

@@ -14,7 +14,7 @@
 //   services) -> pace -> account (PERF, the stage meters' window) -> the
 //   watchdog feed -> the pacing sleep.
 //
-// Draws over the console (the perf HUD, runtime/perf_hud.py) land inside the
+// Draws over the console (the perf HUD, runtime/system/perf_hud.py) land inside the
 // frame upcall, through the system canvas, before its end_frame: the P4's
 // last-write rule (#58).
 //

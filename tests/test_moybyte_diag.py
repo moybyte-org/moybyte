@@ -96,7 +96,7 @@ def test_ring_persists_without_echoing(diag, capsys):
     under the same name, and stamped it with this ring's `Moybyte <uptime> `
     prefix -- which is exactly what made `tools/p4_perf.py` (filtering on
     `startswith("PERF ")`) silently discard every T-Deck sample it ever saw.
-    The shared formatter (runtime/perf_line.py) writes the line now and the
+    The shared formatter (runtime/system/perf_line.py) writes the line now and the
     board PRINTS it; this only persists it, because that board's serial RX was
     dead for months and the ring is what survives a hang.
 

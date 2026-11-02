@@ -303,7 +303,7 @@ Record and gates: #206, #207, #208.
   console pushing its half with `ws.perf_push` when a sample is due, and once
   when a kernel run takes the frame, whose PERF names the cart and leaves the
   console's meters `-`) and
-  `runtime/perf_line.py` holds the field table and the parser; it is written
+  `runtime/system/perf_line.py` holds the field table and the parser; it is written
   only under PERF DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
   `/`, because both readers split on whitespace and an inner `=` reads as a field.

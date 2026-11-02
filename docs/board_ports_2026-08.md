@@ -253,7 +253,7 @@ each of these by copying, and a fourth would pay again):
   board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
   by a zero.
 - **The PERF line** is the kernel's (`native/moy_kernel/moy_perf.c` writes
-  it from the loop's account stage; `runtime/perf_line.py` is its field table
+  it from the loop's account stage; `runtime/system/perf_line.py` is its field table
   and parser). A board emits the SAME field set as every other
   board and prints `-` for what it cannot measure. Do not add a board-shaped
   variant: three of them existed under one name, and the odd one out was

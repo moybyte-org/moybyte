@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The licences the console carries (docs/history/look_2026-10.md step 32, Licences):
-`runtime/licences.py`, built from the texts THIRD_PARTY.md names.
+`runtime/system/licences.py`, built from the texts THIRD_PARTY.md names.
 
 Each licence BODY is stored once, raw-deflated, a paragraph a line: the
 MIT text, Apache-2.0, the LLVM exception, the SIL Open Font Licence, the
@@ -11,7 +11,7 @@ and the boards (`[board] ota` ids) whose image holds it, None for every
 board. The sources are the tracked files below; a body two sources share
 (the fonts' OFL, the MIT text) is checked equal, not assumed.
 
-  build    write runtime/licences.py
+  build    write runtime/system/licences.py
   check    rebuild in memory and compare (tests/test_licences.py)
   report   the bytes the bodies and the notices take, raw and deflated
 

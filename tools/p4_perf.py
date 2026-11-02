@@ -17,7 +17,7 @@ board's own [serial] usb id unless --port says otherwise.
 It also could not READ two of the three: the T-Deck's samples went through the
 diag ring, whose `Moybyte <uptime> ` stamp defeated the `startswith("PERF ")`
 filter here, and the Guition printed a different field set from the P4's. There
-is ONE format now (runtime/perf_line.py), written by one body on every board,
+is ONE format now (runtime/system/perf_line.py), written by one body on every board,
 and this parses it with the module that writes it.
 
 This runs each cart, waits for the numbers to settle, and reports the median
@@ -199,7 +199,7 @@ def _from_perf(board, running, title, secs):
 
 def _median(values):
     """The median of the numeric values, or None: a phase a board did not
-    measure prints `-` (runtime/perf_line.py), and `-` is not a zero."""
+    measure prints `-` (runtime/system/perf_line.py), and `-` is not a zero."""
     nums = [v for v in values if isinstance(v, (int, float))]
     return statistics.median(nums) if nums else None
 

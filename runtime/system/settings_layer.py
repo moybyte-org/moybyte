@@ -18,10 +18,10 @@ channel and the update flows) and About (the version and its channel, the
 board, storage, battery, Achievements and Licences). Brightness and Name
 store a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
 toggle's warning, the last crash record, Achievements
-(runtime/achievements_ui.py) and Licences (runtime/about_ui.py) are pages of
+(runtime/system/achievements_ui.py) and Licences (runtime/system/about_ui.py) are pages of
 their own in place of the rows, Settings' way back closing them; the Wi-Fi
 panel is also what the bar's wifi popover holds (`wifi_page`,
-runtime/popover.py).
+runtime/system/popover.py).
 
 Boundary: SettingsLayer owns NO config. Every value it steps or shows is
 CART/SYSTEM state on Workstation -- ws.system (the system.json rows),

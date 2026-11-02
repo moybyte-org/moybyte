@@ -9,7 +9,7 @@ version, the board) that the system menu's About card
 
 * Licences is a page of Settings (its About group's last row): Moybyte's
   licence in a line, then `ui.group`s of `ui.link` rows -- Moybyte's parts,
-  and what it is made with (`runtime/licences.py`, generated from the texts
+  and what it is made with (`runtime/system/licences.py`, generated from the texts
   THIRD_PARTY.md names, the parts this board's image holds). A row opens its
   licence's text, paragraphs kept, as a page under it that the arrows
   scroll; on the desk the list stands at the left and the focused part's

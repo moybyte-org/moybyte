@@ -276,7 +276,7 @@ proves it with one cart source opened twice, one manifest line apart.
 Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
 author carts can escalate itself), `install` (the same, with somebody else's
 cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all: the update
-screen (`runtime/update_ui.py`) is kernel chrome, like the About card the
+screen (`runtime/system/update_ui.py`) is kernel chrome, like the About card the
 system menu draws, not an app, and keeps the console. The
 policy is C's (native/moy_app: the permission table, the files kinds, the
 two-kinds refusal and the key a grant is made under, the cart's `id`), and its

@@ -16,7 +16,7 @@ nothing else:
     is `http://<ip>/?pin=NNNN` -- an IP and a pairing pin, ~30 characters a
     kid would otherwise read off a 320x240 panel and type into a phone.
     Scanned, it is one gesture and no transcription errors. The encoder is
-    `runtime/moy_qr.py`.
+    `runtime/system/moy_qr.py`.
   * "Open in a browser", the address in the code face and the pin large,
     always shown: the look's 12 px type fits them beside the code, where the
     8 px print face did not, so the address is no longer a tap away.

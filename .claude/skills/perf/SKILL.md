@@ -60,7 +60,7 @@ the best remaining lever is a few hundred µs a frame.
 
 | question | meter |
 |---|---|
-| fps and the frame split | `PERF` (`runtime/perf_line.py`, every board, ~2 s, under PERF DIAG) |
+| fps and the frame split | `PERF` (`runtime/system/perf_line.py`, every board, ~2 s, under PERF DIAG) |
 | the collector's stops | `PERF`'s `gc=n/us/max`: collections this sample, their pause and the longest, in µs (`gc.pauses()`, `tools/patch_gc_meters.py`; `-` where a build lacks it) |
 | what each heap holds | `heapcaps`: PSRAM, internal and internal-DMA total/free/largest/low-water, and the gc heap's held/live/areas (`heapcaps_line` in `runtime/dev_channel.py`) |
 | WHO holds it | `tools/mem_census.py BOARD fresh\|after\|offheap\|cut\|...`: the boot trace (which step grew each gc area, and for what request), the `moy_alloc` registry by owner, each area's occupancy, live bytes by boot step (`arm live`), a compiled cart's PSRAM at the Player's fit check (`device/mem_census.py`'s header) |

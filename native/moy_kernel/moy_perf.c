@@ -11,7 +11,7 @@ typedef struct {
     const char *unit;           // after the number: busy's "ms"
 } field_t;
 
-// runtime/perf_line.py's FIELDS, in its order: the parser's half of the
+// runtime/system/perf_line.py's FIELDS, in its order: the parser's half of the
 // contract reads exactly these names and units. Numbers are written here, not
 // by printf, so no board's libc picks the rounding: half away from zero.
 static const field_t FIELDS[MOY_PF_FIELDS] = {

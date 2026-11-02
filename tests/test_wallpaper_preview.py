@@ -105,7 +105,7 @@ def test_no_factory_degrades_to_the_black_fill(tmp_path):
 
 def test_the_import_ladder_is_gone(tmp_path):
     """A tripwire, because the ladder is exactly the kind of thing that grows a
-    rung back. `runtime/wallpaper.py` must name no per-tier canvas module: the
+    rung back. `runtime/system/wallpaper.py` must name no per-tier canvas module: the
     surface comes from `ws.make_game_canvas`, which every head injects.
 
     Parsed, not grepped: the prose in that file has to be free to DISCUSS the

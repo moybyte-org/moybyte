@@ -1168,7 +1168,7 @@ def test_the_link_wait_is_shared_and_not_recopied_per_board():
 
 # ---------------------------------------------------------------------------
 # WASM MODE (#197): the pairing pin, the parked connection screen, and
-# PLAY ON DEVICE. A SWITCH and not a session -- see runtime/web_console_ui.py.
+# PLAY ON DEVICE. A SWITCH and not a session -- see runtime/system/web_console_ui.py.
 # ---------------------------------------------------------------------------
 
 

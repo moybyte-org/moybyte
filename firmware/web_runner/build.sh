@@ -476,7 +476,7 @@ else
   # The VM's loader ships without comments too: the port appends its api.js,
   # objpyproxy.js and proxy_js.js to emcc's glue as they are in the tree,
   # licence headers and prose included (MicroPython's licence is the console's
-  # About screen's, runtime/licences.py). The same re-print, unindented like
+  # About screen's, runtime/system/licences.py). The same re-print, unindented like
   # the glue it follows; nothing is compressed or renamed.
   "${JS_NODE}" "${TERSER}" "${PORT_DIR}/build-moybyte/micropython.mjs" --module \
     --format comments=false -o "${DIST_DIR}/micropython.mjs"

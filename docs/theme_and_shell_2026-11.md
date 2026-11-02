@@ -459,7 +459,7 @@ existing theme keeps its pixels. The surface painter's five (2026-10-12):
 | `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
 
 The last two are what were once `light_chrome()` branches
-(`runtime/web_console_ui.py`, `runtime/shell/bar_layer.py`). A seed sets them
+(`runtime/system/web_console_ui.py`, `runtime/shell/bar_layer.py`). A seed sets them
 itself where its look needs them. An `_ink` for a fill role that lacks one
 comes when a surface first paints text on it.
 
@@ -1754,7 +1754,7 @@ both modes (docs/history/look_2026-10.md step 33: the calendar's, power's and
 Wi-Fi's cards over the console-mode home too, the hint strip of a handheld
 home saying their keys). No component is docked in a bar (L13). No
 component is a registered app or a desk icon. The components are
-`runtime/popover.py`'s, each on the public UI API's verbs in the system's
+`runtime/system/popover.py`'s, each on the public UI API's verbs in the system's
 flat card: the wifi panel is Settings' Wi-Fi page
 (`SettingsLayer.wifi_page`, its popover form the joined network and the
 networks as a menu) over the component's own UI context, the power rows are

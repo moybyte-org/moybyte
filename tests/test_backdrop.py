@@ -1,7 +1,7 @@
 """A theme's backdrop (docs/history/look_2026-10.md step 7, docs/media/look_2026-10/GAPS.md
 gap 9): `backdrop.home` and `backdrop.desk`, read by the loader
 (native/moy_ui/moy_theme.c, moy_theme_backdrop) and rasterised by
-native/moy_gfx/moy_backdrop.c into the one wallpaper bake (runtime/wallpaper.py).
+native/moy_gfx/moy_backdrop.c into the one wallpaper bake (runtime/system/wallpaper.py).
 
 * Every shape kind and paint mode against the mockups' own renderer
   (docs/media/look_2026-10/mockups.py `backdrop`) at 320x240, 1024x600 and

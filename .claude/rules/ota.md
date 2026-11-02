@@ -3,7 +3,7 @@ paths:
   - "device/moy_ota.py"
   - "device/moy_ota_health.py"
   - "native/moy_net/moy_ota.*"
-  - "runtime/update_ui.py"
+  - "runtime/system/update_ui.py"
   - "tools/ota_*.py"
   - "tools/release.py"
   - "tools/publish_firmware_release.py"

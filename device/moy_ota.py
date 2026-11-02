@@ -10,7 +10,7 @@ section 6.3): the streaming HTTP(S) client with redirects, the manifest's
 signature under the keys below, the stream into the inactive app slot or the
 companion C6, and the image checked whole before anything can boot it. What
 stays here is what a screen drives: `OtaUpdater` keeps the surface
-`runtime/update_ui.py`, the webhost's `/update` and the Zero's `ZeroUpdate`
+`runtime/system/update_ui.py`, the webhost's `/update` and the Zero's `ZeroUpdate`
 pump a step per frame, the boot verdict and the confirm (`moy_ota_health`),
 the card's `ota.json` override and the pending marker -- the store's, read
 under the board's store gate (`with_sd`).

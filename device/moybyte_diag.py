@@ -415,7 +415,7 @@ def ring(tag, msg):
     `log` does both, which is right for a line this module composes. It is
     wrong for one composed elsewhere and already printed by its own emitter --
     the PERF sample since #206 item 2, which every board now prints in one
-    shared format (runtime/perf_line.py) and which this board additionally
+    shared format (runtime/system/perf_line.py) and which this board additionally
     persists, because its serial RX was dead for months and the SD log is why
     anything was known about it. Routing that through `log` would put the same
     sample on the wire twice.

@@ -1017,7 +1017,7 @@ def update_enable(status_json):
     capability that is not there, rather than a row that fails when tapped.
 
     What this buys is the whole point of doing it here instead of in the page:
-    `runtime/update_ui.py` is 659 lines that are ALREADY frozen into this
+    `runtime/system/update_ui.py` is 659 lines that are ALREADY frozen into this
     bundle, and were dead only because nothing was injected. The console gets
     the same update screen every board shows, reached from the same Settings
     row, with the same two-act confirm -- rather than a second update UI drawn

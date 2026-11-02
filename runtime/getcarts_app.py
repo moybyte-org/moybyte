@@ -67,7 +67,7 @@ browses, never into a cart (Play lets go first), never past `close()`.
 
 Work that may wait (dialling the network, fetching an index) runs one frame
 after its screen is shown, so CHECKING is on the glass before the wait starts
--- the update screen's arm (runtime/update_ui.py). Every fetch is a
+-- the update screen's arm (runtime/system/update_ui.py). Every fetch is a
 `cart_index` job stepped once a frame, which on a board or the host finishes
 in that step and in the browser gives the frame back until its bytes come.
 """

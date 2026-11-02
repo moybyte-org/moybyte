@@ -841,7 +841,7 @@ LIFECYCLE = {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
         ("ble_keyboard", "start"): Lazy(
-            "runtime/settings_layer.py", "open_bluetooth",
+            "runtime/system/settings_layer.py", "open_bluetooth",
             "auto_start=False on purpose -- scanning is what makes BLE "
             "expensive and this board's keyboard already works, so the radio "
             "comes up when a kid opens the picker. The touch-only boards start "

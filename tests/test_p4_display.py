@@ -1678,7 +1678,7 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
 
 # -- one field set, two compositors --------------------------------------------
 #
-# `runtime/perf_line.py` labels the ppa= slots ONCE for every board and
+# `runtime/system/perf_line.py` labels the ppa= slots ONCE for every board and
 # `tools/p4_perf.py` parses every board with one table, so the two compositors
 # must answer the same question in each slot. The
 # rotated one used to answer with its rotate meters -- rect frames under

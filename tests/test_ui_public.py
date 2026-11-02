@@ -682,7 +682,7 @@ APPS = (
     "runtime/editor_sound.py",
     "runtime/toolkit/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
     "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py", "runtime/settings_layer.py", "runtime/storybook_app.py",
+    "runtime/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/storybook_app.py",
     "runtime/story_edit.py",
 )
 
