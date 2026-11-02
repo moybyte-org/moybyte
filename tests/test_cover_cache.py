@@ -318,12 +318,17 @@ def test_a_definitive_miss_bumps_gen_too(tmp_path):
     assert ws.covers.gen > before
 
 
+# The home's modules: the layers, the arrangements and the band frame.
+HOME_MODULES = ("launcher_layer.py", "home_band.py")
+
+
 def test_gen_has_no_ws_mirror(tmp_path):
     """One author per derived value (architecture doc 9). The consumers read
     `ws.covers.gen`; a mirror on the console would be a second one."""
     ws = build_ws(tmp_path)
     assert not hasattr(ws, "_cover_gen")
-    launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
+    launcher = "".join((ROOT / "runtime" / n).read_text(encoding="utf-8")
+                       for n in HOME_MODULES)
     windowed = "".join(p.read_text(encoding="utf-8")
                        for p in sorted((ROOT / "runtime").glob("wm_*.py")))
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed

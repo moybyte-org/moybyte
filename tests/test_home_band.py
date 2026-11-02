@@ -1,4 +1,4 @@
-"""The home's band frames (`launcher_layer._band_frame`): a drag, a fling,
+"""The home's band frames (`home_band._band_frame`): a drag, a fling,
 a key, repeat or trackball step, a settle draw the band alone, its
 arrangement's table of parts (`Launcher.band_pass`, `Carousel.band_pass`)
 over the backdrop put back under it -- the plain ground (`bg`), a baked
