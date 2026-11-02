@@ -1101,3 +1101,29 @@ def test_the_artwork_service_keeps_no_copy_of_the_open_drawing(tmp_path):
                            or any(isinstance(x, (bytes, bytearray)) and len(x) >= doc.W * doc.H
                                   for x in (v if isinstance(v, tuple) else ())))]
     assert big == []
+
+
+def test_a_drawing_opens_straight_into_the_documents_pixels(tmp_path, monkeypatch):
+    """Paint reads the open drawing row by row into the document's own
+    pixels, the document kept where its size is the drawing's: the same
+    indices the whole-blob decoder gives, and no copy of the drawing on the
+    gc heap on the way in (a desk's is 600 KB)."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    doc = app.doc                        # a handheld's 320 x 240: a desk's reads the same
+    for i in range(0, len(doc.pix), 5):
+        doc.pix[i] = (i // 5 + i // doc.W) & 63
+    painted = bytes(doc.pix)
+    app._mark_changed()
+    assert app._save() is True
+    blob, err = ws.artwork._files.load("drawings", ws.artwork.doc_name())
+    assert err is None and ws.artwork._files.decode_image(blob)[2] == painted
+
+    def no_whole_decode(_blob):
+        raise AssertionError("decoded whole")
+    monkeypatch.setattr(app._art._files, "decode_image", no_whole_decode)
+    app.open()
+    assert app.doc is doc                # the same size: the same pixels, read into
+    assert bytes(doc.pix) == painted
+    assert ws.artwork.editable()

@@ -204,7 +204,8 @@ class PaintDocument:
         if data[0] != self.W or data[1] != self.H:
             self.release()
             self.__init__(data[0], data[1])
-        self.pix[:] = data[2]
+        if data[2] is not self.pix:       # else read straight in (ArtworkService.load)
+            self.pix[:] = data[2]
         self.history = []
         self.future = []
         self.invalidate()
@@ -866,8 +867,12 @@ class ArtworkService:
         self._set_doc_name(name, self.DRAWINGS)
         return (size[0], size[1], blob)
 
-    def load(self):
+    def load(self, into=None):
         """Return ``(w, h, index_bytes)`` for the open picture, or ``None``.
+        `into(w, h)`, where given, answers the buffer a gallery drawing is
+        read straight into, row by row (`read_cover` at its own size), and
+        the third item is that buffer: a desk drawing never stands whole on
+        the gc heap on its way to the document.
         Resolves the doc pointer (running the one-shot #108 migration first):
         no pointer -> the newest drawing; an empty kind -> fresh canvas; a
         pointer at a since-deleted file -> a fresh canvas under that name.
@@ -900,6 +905,17 @@ class ArtworkService:
                 got = (COVER_SIDE, COVER_SIDE,
                        bytes((PaintDocument.PAPER,)) * (COVER_SIDE * COVER_SIDE))
             return got
+        size = picture_size(blob) if into is not None else None
+        if size is not None and size[0] <= self.MAX_W and size[1] <= self.MAX_H:
+            pix = into(size[0], size[1])
+            try:
+                if read_cover(blob, pix, size[0], size[1]) == size:
+                    return (size[0], size[1], pix)
+            except MemoryError:
+                raise
+            except Exception:  # noqa: BLE001 -- the decoder below says what it is
+                pass
+            _gfx.ifill(pix, size[0], size[1], 0, 0, size[0], size[1], PaintDocument.PAPER)
         got = files.decode_image(blob)
         if got is None:
             if blob:

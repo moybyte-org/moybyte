@@ -341,6 +341,14 @@ class PaintAppLayer(PaintDraw):
         if old is not None and old is not d:
             old.release()             # its bakes went back first (_return_bakes)
 
+    def _pixels_for(self, w, h):
+        """The document's own pixels at w x h, minted at that size where it
+        is another: what the open drawing is read straight into."""
+        d = self._doc
+        if d is None or d.W != w or d.H != h:
+            self.doc = d = PaintDocument(w, h)
+        return d.pix
+
     def _board_size(self):
         """The drawings this board makes: a desk board's, else a handheld's."""
         return (DESK_W, DESK_H) if metric_class() == DESK else (GAME_W, GAME_H)
@@ -382,7 +390,7 @@ class PaintAppLayer(PaintDraw):
             self._damage.all()
             return
         peek = None
-        loaded = art.load()
+        loaded = art.load(self._pixels_for)
         self._first_save = False
         if self.doc.load(loaded):
             if not art.editable():
