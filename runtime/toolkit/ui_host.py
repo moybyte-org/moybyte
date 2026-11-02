@@ -597,7 +597,9 @@ class Hold:
         self.key = key
 
     def drop(self):
-        """The modal closed: the page is no longer held, nor kept."""
+        """The modal closed: the page is no longer held, nor kept, and the
+        next modal asks for room again (`held_layer`)."""
+        _NO_ROOM[0] = None
         self.key = None
         self.snapped = False
         self._at.clear()
@@ -896,6 +898,13 @@ def _whole_retained(cv):
 # dialog's first frame on the T-Deck: the pause card mints both on an idle
 # frame); the fit check's release frees them.
 
+# The canvas size a hold layer last found no room at: not asked for again
+# until a modal closes or a hold layer is given back, because each ask the
+# glass cannot serve collects the whole heap first, and `Hold.layer` asks on
+# every still frame of a modal.
+_NO_ROOM = [None]
+
+
 def held_layer(ws, cv, i=0):
     """Console `ws`'s hold layer `i` -- 0 the page held washed, 2 the frame
     kept as it was (`Hold.snap`) -- of canvas `cv`'s size: minted where
@@ -908,11 +917,14 @@ def held_layer(ws, cv, i=0):
         return lay
     if lay is not None and i and held[3] is not None and held[3].snapped:
         return None
+    if _NO_ROOM[0] == (cv.w, cv.h):
+        return None
     _release(lay)
     held[i] = held[i + 1] = None
     try:
         lay = held[i] = cv.new_layer(cv.w, cv.h)
     except Exception:  # noqa: BLE001
+        _NO_ROOM[0] = (cv.w, cv.h)
         return None
     return lay
 
@@ -926,6 +938,7 @@ def release_held(ws):
         if held[i] is not None and not (i and held[3] is not None and held[3].snapped):
             _release(held[i])
             held[i] = held[i + 1] = None
+            _NO_ROOM[0] = None
             return True
     return False
 
