@@ -1,10 +1,10 @@
 # Map (grep -n a name to jump there):
-#   SLOT_* / CAT_* / SHAPE_*  a slot's type, a block's category and its shape
-#   CATALOG                the block vocabulary: id -> category, shape, label, slots, emit
+#   -- Slot types           a slot's type; the categories and shapes follow
+#   -- THE VOCABULARY CATALOG  CATALOG: id -> category, shape, label, slots, emit
 #   categories             the insert menu's category ids
 #   block_def              the catalog entry for a block type id
 #   slot_options           a dropdown slot's options
-#   proc_name / call_args  a custom block's name, params and a call's args (#48)
+#   proc_name              a custom block's name (#48); proc_params, call_args beside it
 #   block_slots            a block's slots, a custom block's from the live program
 #   block_label            a block's label template
 """The block vocabulary of the #29 block programs and the queries over it: the
