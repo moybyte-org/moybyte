@@ -3545,7 +3545,7 @@ def _selection_pairs(ws, img):
              contrast(best, border), FLOOR, "")]
 
 
-# A list's fade (native/moy_ui/moy_ui_api.c's FADE_H): the last this many
+# A list's fade (native/moy_ui/moy_ui_api_int.h's FADE_H): the last this many
 # rows at the font scale of a body cut to its room; a table's is one row.
 FADE_H = 10
 # A fade band shows rows when this share of the pixels of its half at the

@@ -107,7 +107,7 @@ TF_CARD_SRAM = 844
 # 2026-10-26; the scratch and the band themselves are PSRAM.
 KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270
 # And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
-# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
+# moy_ui_api_text.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
 # face's line cursor and the pointers to the block the views share, which
 # is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
 TEXT_SRAM = 44

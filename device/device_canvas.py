@@ -556,7 +556,7 @@ class DeviceCanvas:
     # row's raster each row it copies costs, so a frame whose move leaves
     # less than that much of R undrawn draws whole instead, and a text view
     # moving inside a still page draws its rows instead (`host_pays`,
-    # `view_pays` in native/moy_ui/moy_ui_api.c). None where nobody measured
+    # `view_pays` in native/moy_ui/moy_ui_api_host.c). None where nobody measured
     # it: it shifts. LAYER_SHIFT_COST: the same for this board's layers,
     # whose shift is an in-place copy (`new_layer`).
     SHIFT_COST = None

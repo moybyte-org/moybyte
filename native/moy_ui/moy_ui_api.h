@@ -86,7 +86,7 @@ typedef struct {
     int32_t began1;
     int16_t dy, mv_dy;
 } moy_ui_host_t;
-// One paint of a context (its kept ring, moy_ui_api.c's): the painted frame (-1:
+// One paint of a context (its kept ring, moy_ui_api_kept.c's): the painted frame (-1:
 // none), whether it is the app's alone (`kept`: no key of its table was
 // negative), and its kept table (has_tbl), as moy_ui_api_table recorded it:
 // its id, key, columns' geometry, view, scroll, row height and count,
@@ -106,7 +106,7 @@ typedef struct {
 // the parts it named this round (wn) and the table's rows it runs over
 // (r0 .. r1 showed, of rows, np parts each);
 // each slot's part key and last use (0: empty). The engine's one record,
-// taken at the first moy_ui_api_slots (moy_ui_api.c's kept memory).
+// taken at the first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
@@ -233,7 +233,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);
 typedef struct {
     uint32_t id;
     moy_ui_box_t b;                 // on screen, as drawn
-    uint16_t flags;                 // STOP_* (moy_ui_api.c)
+    uint16_t flags;                 // STOP_* (moy_ui_api_int.h)
     uint8_t page;                   // the index of its page's stop, or 0xff
     uint8_t part;                   // a part: a held press with no page to drag stays its
     // A list's or a table's rows on its page (STOP_ROWS): the focused row
@@ -538,7 +538,7 @@ typedef struct {
     // What the paints this context began left in the buffers a canvas
     // presents in turn -- its kept table and the parts `held` named
     // (moy_ui_api_held) -- lies in a ring the engine keeps for it outside
-    // the context from its first kept table or `held` on (moy_ui_api.c's
+    // the context from its first kept table or `held` on (moy_ui_api_kept.c's
     // kept memory), so a context that keeps nothing carries none. kt_f is
     // the frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is
     // kept); kf the floor the kept table drawn last draws this frame, kf_i

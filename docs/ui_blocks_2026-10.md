@@ -81,7 +81,7 @@ and are the model for anything new:
 
 - `ui.list` and `ui.table` are one stop each (`STOP_ROWS`,
   `native/moy_ui/moy_ui_api.h`). Focus moves by row index, reveal is built
-  in, and the engine plans their rows by pitch (`table_floor`, `rows_note`
+  in, and the engine plans their rows by pitch (`mua_table_floor`, `mua_rows_note`
   in `moy_ui_api.c`). A table of parts (§4.1) is the list of rich rows.
 - `ui.grid` lays cards in columns. A card scrolled out of view answers a
   zero size, and the app skips drawing it.

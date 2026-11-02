@@ -89,7 +89,7 @@ INVALID = "INVALID"    # the badge a mode's gate raises (#154's SYNTAX twin)
 _BURST_BREAK = ".,!?;:"   # a typing burst closes here (#111 phase 3)
 
 # The view's packed options' words the handle writes each frame
-# (`ui.text_options`), and the text's inset from its left (moy_ui_api.c's
+# (`ui.text_options`), and the text's inset from its left (moy_ui_api_int.h's
 # TEXT_PAD) at the scale.
 _TXO_CARET, _TXO_SEL, _TXO_LEFT, _TXO_GEN = _ui.TXO_CARET, _ui.TXO_SEL, _ui.TXO_LEFT, _ui.TXO_GEN
 _TXO_FONT, _TXO_PAPER, _TXO_TOP = _ui.TXO_FONT, _ui.TXO_PAPER, _ui.TXO_TOP

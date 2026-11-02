@@ -1066,7 +1066,7 @@ the 2D-DMA (`moy_ppa.shift_in`), on the Guition, whose rotate holds that
 engine, on the CPU). A frame whose move leaves too
 little of R undrawn to pay for the copy draws whole, and a text view moving
 inside a still R whose copy costs more than its rows draws its rows instead
-(`host_pays`, `view_pays` in `native/moy_ui/moy_ui_api.c`); a rows frame
+(`host_pays`, `view_pays` in `native/moy_ui/moy_ui_api_host.c`); a rows frame
 moves nothing and pays. None, unmeasured, shifts.
 
 **One voucher per region.** Who says frame n-1 painted R whole: under the

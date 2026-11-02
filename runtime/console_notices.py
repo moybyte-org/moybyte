@@ -783,7 +783,7 @@ class DeleteConfirm:
             ws.request_frame()
 
 
-# A popover's fade, rows at the scale (native/moy_ui/moy_ui_api.c's FADE_H).
+# A popover's fade, rows at the scale (native/moy_ui/moy_ui_api_int.h's FADE_H).
 _FADE_H = 10
 
 
