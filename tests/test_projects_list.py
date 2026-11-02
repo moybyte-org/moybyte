@@ -268,7 +268,7 @@ def _desk(tmp_path):
 
 
 def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
-    from runtime.launcher_layer import Carousel
+    from runtime.home_carousel import Carousel
     ws, drv = _desk(tmp_path)
     assert isinstance(ws.launcher, Carousel)          # the fullscreen home's own
     ws.wm._backdrop_layer._open_icon("projects")      # the desk's icon

@@ -10,6 +10,7 @@ import pytest
 
 import test_shell_goldens as g
 from runtime import launcher_layer
+from runtime import home_carousel
 from runtime import home_grid
 
 DESK = "p4_1024x600_cs2_fs1_windowed"
@@ -69,7 +70,7 @@ def test_the_window_draws_the_console_homes_design(tmp_path):
     pane beside it with the tab's buttons, the shelf under them."""
     ws = _ws(tmp_path)
     win, grid = _projects(ws)
-    assert isinstance(grid, launcher_layer.Carousel) and grid is not ws.launcher
+    assert isinstance(grid, home_carousel.Carousel) and grid is not ws.launcher
     assert grid.tab == "make"
     ws.wm._install(win.ctx)
     try:
@@ -111,7 +112,7 @@ def test_the_window_lays_out_in_its_content_rect_at_any_size(tmp_path, size):
 
 def _geom(cw, ch):
     lay = types.SimpleNamespace(fs=1, cx=0, cy=0, cw=cw, ch=ch)
-    c = launcher_layer.Carousel([])
+    c = home_carousel.Carousel([])
     return c._geom_desk(lay, 4)
 
 
