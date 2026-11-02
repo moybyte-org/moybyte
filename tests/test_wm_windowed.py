@@ -4601,7 +4601,11 @@ FRAME_PATH = ("draw_stack", "_still", "_settled", "_calm", "_retained_n",
               "debt_owed", "_pop_rides", "_scrim_up", "_scrim_rides", "_pop_n",
               "_pause_rides", "_wash_rides", "_game_held", "_pop_live",
               "_ensure_stack", "_overlay_sig", "overlay_stack",
-              "visible_stack_rev", "top_kind", "top_is", "top_is_player")
+              "visible_stack_rev", "top_kind", "top_is", "top_is_player",
+              "viewport", "present_frame", "composite_game", "_view_src",
+              "_player_view", "_frame_is_quiet", "_draw_windows",
+              "_direct_render", "_shown_ok", "_debt_rows", "refill_step",
+              "_content_static")
 
 
 def test_the_frame_path_is_found_on_the_class_or_its_first_base():

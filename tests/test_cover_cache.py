@@ -324,7 +324,8 @@ def test_gen_has_no_ws_mirror(tmp_path):
     ws = build_ws(tmp_path)
     assert not hasattr(ws, "_cover_gen")
     launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
-    windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
+    windowed = "".join(p.read_text(encoding="utf-8")
+                       for p in sorted((ROOT / "runtime").glob("wm_*.py")))
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
     # Four reads: the band's key (`_band_key`), the check that a cover
     # landed while the band drew (`_band_landed`), the retained frame's key

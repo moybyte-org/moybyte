@@ -191,6 +191,14 @@ See `wm_desk.py` above: the windowed WM's `WindowOverlays` mixin (the popover,
 pause and wash overlays), imported only by `wm_windowed.py`."""
 
 [[modules.shared.deny]]
+file = "wm_paint.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the windowed WM's `WindowPaint` mixin (the window
+buffers, the game's composite, the windows' draw, the shown ring), imported
+only by `wm_windowed.py`."""
+
+[[modules.shared.deny]]
 file = "editor_desk.py"
 kind = "tier"
 why  = """

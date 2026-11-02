@@ -79,7 +79,8 @@ def _title_sep():
 
 
 class WindowChrome:
-    """The window chrome + taskbar chips of `WindowedWM` (its first base)."""
+    """The window chrome + taskbar chips of `WindowedWM` (its second base,
+    after `WindowPaint`)."""
 
     def _win_grip(self, win, focused):
         """The resize grip: three diagonal steps in the bottom-right corner.

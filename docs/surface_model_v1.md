@@ -142,7 +142,7 @@ are always `!=`, never `>`.
 **The #44 gate has three legs**, and the model absorbs all three —
 `_needs_redraw` is `_dirty OR _animating(dt) OR ptr_state != _last_ptr`
 (`console.py`) plus the kernel-frame epoch (§15) and the WM's owed-repaint
-legs, and the windowed content-freeze (`_content_static`, `wm_windowed.py`)
+legs, and the windowed content-freeze (`_content_static`, `wm_paint.py`)
 re-derives the three conditions per window. A model
 that absorbed only the `_dirty` leg would freeze live wallpapers, the music
 playhead, OTA progress, and every paint stroke — the review's top finding.
@@ -652,7 +652,7 @@ primitives) stays there and is not carried forward; §8 keeps the verdicts.
 
 ### 14.1 The shipped first slice: the focused-window content freeze
 
-`wm_windowed._content_static` is §4's skip-draw generalization as built: on a
+`wm_paint.WindowPaint._content_static` is §4's skip-draw generalization as built: on a
 PAINTED frame that provably did not change the focused window's content, the
 content draw is skipped and the retained `win.buf` stamp presents it instead.
 "Provably" is five checkable facts, all of them required.
@@ -1163,7 +1163,7 @@ generation counters stands. L6's arithmetic holds on the S3 because the
 `_dirty` writes are untouched and the frame gate reads the epoch once per
 painted frame.
 
-`runtime/console.py`'s frame gate and `wm_windowed`'s content freeze (§14.1)
+`runtime/console.py`'s frame gate and the windowed WM's content freeze (§14.1)
 are Python, as the window managers are (sprint 7 does not run,
 `docs/history/kernel_toolkit_2026-10.md`).
 

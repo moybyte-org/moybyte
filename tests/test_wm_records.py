@@ -613,7 +613,7 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
     s = p.win("settings")
     sx, sy, sw, sh = s.content_rect()
     assert sx + sw <= w._root_canvas.w and sy + sh <= w._root_canvas.h
-    from runtime.wm_windowed import _overlap
+    from runtime.wm_parts import _overlap
     assert _overlap((s.x, s.y, s.w, s.h), (c.x, c.y, c.w, c.h))
     _, _, _, ch = s.content_rect()
     p.drag("settings", -ch // 2, steps=3)
