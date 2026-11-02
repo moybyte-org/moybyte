@@ -160,12 +160,12 @@ now.
 ## What an app draws with
 
 An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
-2026-10-15): `runtime/ui.py`'s verbs (the list is that doc's §1) and its
+2026-10-15): `runtime/toolkit/ui.py`'s verbs (the list is that doc's §1) and its
 rect algebra (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
 `panel`, `toolbar`, `dialog`, `text_field`), the marks
-(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
+(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/toolkit/ui_draw.py`, the chrome's; the shipped apps not yet
 moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
 An app on the verbs sets `UI = True` and draws them into the frame its
 host side, `ctx.ui` (`ui_host.AppHost`), begins: its handlers hand it the
@@ -286,7 +286,7 @@ one or the other, so ADDING a role forces the decision. A user app's grant is
 its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
 Five globals every `type: "app"` cart gets with no permission, because they are
-how an app draws rather than what it may reach: **`ui`** (`runtime/ui.py`, the
+how an app draws rather than what it may reach: **`ui`** (`runtime/toolkit/ui.py`, the
 public UI API's verbs, the calls a Lua cart and a compiled app make;
 `ui_draw`, the engine layer under them, rides beside it while a system cart
 still draws with it), **`screen()`** (the canvas -- `ui_draw`'s `cv`),

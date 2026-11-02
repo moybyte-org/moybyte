@@ -107,7 +107,7 @@ def test_nothing_else_declares_the_baseline_constants():
     for rel, src in _shared_sources():
         assert not _DECL.search(src), (
             "%s re-declares the 320x240 baseline; import BASE_W/BASE_H from "
-            "runtime/layout_base.py instead" % rel)
+            "runtime/toolkit/layout_base.py instead" % rel)
 
 
 def test_no_module_reads_a_layout_base():

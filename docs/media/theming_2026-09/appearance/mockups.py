@@ -3,7 +3,7 @@
 usage: .venv/bin/python docs/media/theming_2026-09/appearance/mockups.py [OUTDIR]
 
 MOY64 colours only, Tiny5 (`native/moy_ui/themes/tiny5.fnt`) for the UI,
-petme128 (`runtime/font.py`) for mono, the real 16x16 system icons
+petme128 (`runtime/toolkit/font.py`) for mono, the real 16x16 system icons
 (`runtime/chrome.py`'s `_ICON_ART`) and the D1 parts. The seeds' rows come
 from the host's own resolver (`chrome.theme_colors`, `chrome.theme_content`),
 so the worktree's venv runs it. Two sizes: 320x240 (the T-Deck, console mode:

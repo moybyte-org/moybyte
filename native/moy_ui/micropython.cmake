@@ -1,5 +1,5 @@
 # moy_ui: the widget toolkit's bodies in C, with style and strings as data
-# (README.md), and the module `moy_ui` runtime/ui.py's face calls. A console
+# (README.md), and the module `moy_ui` runtime/toolkit/ui.py's face calls. A console
 # TAKES it in board.toml; the Zero, which runs no apps, denies it.
 # THIS FILE AND micropython.mk ARE TWINS.
 

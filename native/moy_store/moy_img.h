@@ -78,7 +78,7 @@ int moy_img_stream_head(void *st, moy_img_read_t rd, void *ctx, uint32_t *w, uin
 
 // The rest of the picture, COVER-sampled into `dst` (dw*dh indices): the
 // source cropped about its centre to dst's aspect and sampled nearest, the
-// formula runtime/file_widgets.py's `cover_indices` is. `row` holds w bytes.
+// formula runtime/toolkit/file_widgets.py's `cover_indices` is. `row` holds w bytes.
 // MOY_IMG_OK, MOY_IMG_NOT (dst then holds part of a picture) or MOY_IMG_READ.
 int moy_img_stream_cover(void *st, uint8_t *row, uint8_t *dst, uint32_t dw, uint32_t dh);
 

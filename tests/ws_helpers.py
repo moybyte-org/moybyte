@@ -22,7 +22,7 @@ FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
 
 
 def fresh_icon_caches(monkeypatch):
-    """runtime/iconsets.py's module caches, empty for this test alone: what a
+    """runtime/toolkit/iconsets.py's module caches, empty for this test alone: what a
     test loads under an image it substitutes (no icon sets, another board's
     `fonts_data`) leaves with the substitution instead of answering the next
     test in the process -- a pixel set cached as absent drew the bar's Moy

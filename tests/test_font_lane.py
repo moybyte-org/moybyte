@@ -3,7 +3,7 @@ theme font is a row behind moy_text's font argument, petme128 is row 0, and a
 font file is untrusted data a kid may trade.
 
 * Petme128 through the row draws what the cell rasterizer drew: a reference
-  raster of runtime/font.py's glyphs at every scale, clipped and camera-shifted.
+  raster of runtime/toolkit/font.py's glyphs at every scale, clipped and camera-shifted.
 * A second row draws: the sample font (tests/fixtures/fonts/sample6x9.fnt, a
   proportional 6x9 cut of petme128 with two-byte columns) matches a reference
   raster of its own file, and fits, aligns and measures by its advances.

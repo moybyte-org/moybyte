@@ -1,5 +1,5 @@
 """The oracle for native/moy_ui (docs/history/kernel_toolkit_2026-10.md §7): the
-toolkit's Python bodies as they were before the crossing -- runtime/ui.py's
+toolkit's Python bodies as they were before the crossing -- runtime/toolkit/ui.py's
 style resolution, widgets, ScrollRegion and DragTap -- kept here as
 tests/spine_twin.py keeps the spine's. The fuzz in
 tests/test_ui_twin.py draws every case through this and through the shipped

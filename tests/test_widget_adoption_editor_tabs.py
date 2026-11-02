@@ -1,4 +1,4 @@
-"""The Editor tabs draw their widgets through `runtime/ui.py` (Phase 3d).
+"""The Editor tabs draw their widgets through `runtime/toolkit/ui.py` (Phase 3d).
 
 `docs/history/ui_refactor_2026-08.md` Section 3, Phase 3b/3c/3d: the hand-rolled row /
 cell / button draws are transcribed onto the toolkit kinds, and the ratchet is

@@ -1082,7 +1082,7 @@ def test_an_icon_no_set_or_glyph_names_draws_nothing():
 
 def test_the_icon_slots_are_the_sets():
     """The C names the icon set's slots in tools/make_icons.py's order: the
-    table in native/moy_ui/moy_ui.c is runtime/iconsets.py's SLOTS."""
+    table in native/moy_ui/moy_ui.c is runtime/toolkit/iconsets.py's SLOTS."""
     from runtime import iconsets
     src = open(os.path.join(ROOT, "native", "moy_ui", "moy_ui.c")).read()
     body = src[src.index("s_icon_slots[] = {"):]

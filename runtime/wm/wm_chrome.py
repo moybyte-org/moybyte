@@ -60,7 +60,7 @@ _PLAY = "Play"
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
                 "update": "get", "desktop": "run"}
-# ...and the slot of an icon set (runtime/iconsets.py) each draws.
+# ...and the slot of an icon set (runtime/toolkit/iconsets.py) each draws.
 _ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
                "update": "getcarts", "desktop": "run"}
 # `win.header`'s `fill` (style.json's theme.look enum: plain, fill, bar, grad),

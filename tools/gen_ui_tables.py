@@ -301,7 +301,7 @@ def generate_theme(style, t):
     # of `preset_fonts` (Appearance's Font presets) and, as in a published
     # package, its licence's full text X.txt beside X.fnt, from themes/, in
     # name order. A face of the font set (fonts/, which each board image
-    # carries per tier: runtime/fontset.py) is not embedded a second time.
+    # carries per tier: runtime/toolkit/fontset.py) is not embedded a second time.
     font_set = os.path.join(t.dir, "fonts")
     font_files = sorted({f for _n, src in seeds
                          for f in json.loads(src).get("fonts", {}).values()}
@@ -663,7 +663,7 @@ SLOT_BITS = 30
 
 def _icon_slots():
     """The icon slots, in order: the pixel set's slots.txt (moy_ui.c's table
-    and runtime/iconsets.py's SLOTS are held to it)."""
+    and runtime/toolkit/iconsets.py's SLOTS are held to it)."""
     with open(os.path.join(ROOT, "native", "moy_ui", "icons", "pixel", "slots.txt")) as f:
         return [ln.split()[-1] for ln in f if ln.strip() and not ln.startswith("#")]
 

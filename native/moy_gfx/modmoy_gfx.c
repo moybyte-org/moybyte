@@ -1446,13 +1446,13 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_iflood_obj, 10, 10, moy_gfx_i
 //      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62), in
 // the print font (moy_text.h) when the shell has named one, else as follows: the
 // text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
-// glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
+// glyph, column-major, LSB = top row -- exactly runtime/toolkit/font.py's _FONT, the SAME
 // bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
 // becomes a `scale` x `scale` block of the pre-resolved RGB565 `color`; camera
 // offset and the screen-space clip rect [cx0,cy0)..[cx1,cy1) are honoured per
 // pixel like the other vector ops (framebuf.text could do neither). Glyph advance
 // is 8*scale. The string is walked as BYTES (like framebuf.text); an out-of-range
-// byte renders the font's first glyph (space), matching runtime/font.py glyph().
+// byte renders the font's first glyph (space), matching runtime/toolkit/font.py glyph().
 static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     size_t dcap;

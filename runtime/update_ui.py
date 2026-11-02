@@ -472,7 +472,7 @@ class UpdateUI:
 
     def _draw_update(self, dt):
         """The firmware-update screen: confirm / progress / done / error, a
-        page of the public UI API's rows (runtime/ui.py) filling the content
+        page of the public UI API's rows (runtime/toolkit/ui.py) filling the content
         rect: what the phase says, a download's or a flash's progress as a
         `ui.progress` row, and its keys as hints. Its keys and taps are
         `_update_input` / `_update_pointer`'s, so the page takes no input."""

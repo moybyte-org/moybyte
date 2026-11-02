@@ -22,7 +22,7 @@ device_canvas is deliberate: device_canvas must not learn that hosts exist.
 `__init__`, so a canvas cannot be built without it -- even though every hot path
 goes to moy_gfx. It is the no-kernel fallback for text and lines. The shim
 implements only what device_canvas actually calls (fill, fill_rect, pixel, text,
-line), and its `text` uses runtime/font.py, which is the SAME petme128 the device
+line), and its `text` uses runtime/toolkit/font.py, which is the SAME petme128 the device
 draws: framebuf's built-in font is petme128 too, which is why device_canvas can
 call its text a "same glyphs" fallback.
 """
@@ -120,7 +120,7 @@ def install():
     from . import glass_binding
     sys.modules.setdefault("moy_glass", glass_binding)
     sys.modules.setdefault("framebuf", _FramebufModule)
-    # `moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
+    # `moy_font` is what build.sh stages runtime/toolkit/font.py AS, and device_canvas
     # gates its native text op on being able to import it. That file is a
     # gitignored build artefact, so on a clean checkout the host silently fell
     # back to the Python rasterizer -- which is 15x slower (113us/call vs 7.6us)

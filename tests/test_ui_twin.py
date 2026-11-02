@@ -1,7 +1,7 @@
 """The toolkit against its oracle (docs/history/kernel_toolkit_2026-10.md §7, §10).
 
 `tests/ui_twin.py` is the toolkit's Python as it was before the crossing. Two
-nets hold the shipped toolkit (`runtime/ui.py` and what it calls) to it:
+nets hold the shipped toolkit (`runtime/toolkit/ui.py` and what it calls) to it:
 
 * **The fuzz.** Every widget the theme's look does not draw, over random cases -- boxes smaller than
   their label, negative and float coordinates, ASCII and UTF-8 labels, font
@@ -31,7 +31,7 @@ from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 
 # The toolkit the twin was: the engine layer, with the rect algebra that is
-# runtime/ui.py's beside it.
+# runtime/toolkit/ui.py's beside it.
 TOOLKIT = types.SimpleNamespace(**dict(vars(ui_draw), **{
     n: getattr(ui, n) for n in ("inset", "cut_top", "cut_bottom", "cut_left", "cut_right",
                                 "hsplit", "vsplit", "rect_in")}))

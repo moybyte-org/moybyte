@@ -12,12 +12,12 @@
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
-#   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
+#   ui_frame                          a host begins an app's frame of runtime/toolkit/ui.py's verbs
 #   text_words                        a text view's syntax words (C); text_tones, its code tones
 #   -- the halves re-exported         ui_scroll's ScrollRegion, ui_host's AppHost and Hold, ui_cover's covers
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
-`runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
+`runtime/toolkit/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
 app and cart draws with; this module is what lies under them and what the
 chrome keeps (§7 there): the rect-taking widgets -- buttons, rows, cells, tab
 rows, status rows, panels -- the marks (`focus`, `current`), the theme's shape, depth and
@@ -25,7 +25,7 @@ fonts, and `ui_frame`, which a host calls to begin an app's frame of verbs.
 The one scroll model is `ui_scroll`'s, an app's host side `ui_host`'s and a
 coverless cart's cover `ui_cover`'s; this module re-exports their names.
 The shell's apps not yet moved onto the verbs draw here too, and
-tests/test_ui_public.py pins which. The rect algebra is `runtime/ui.py`'s.
+tests/test_ui_public.py pins which. The rect algebra is `runtime/toolkit/ui.py`'s.
 Design rules (deliberate, argued in the redesign thread):
 
   * IMMEDIATE MODE, and the bodies are C: each widget is one call into
@@ -35,7 +35,7 @@ Design rules (deliberate, argued in the redesign thread):
     allocation beyond small tuples. tests/ui_twin.py keeps the Python bodies
     as the oracle.
   * Widgets take RECTS; the per-surface Layout classes keep owning reflow,
-    with `runtime/ui.py`'s rect algebra.
+    with `runtime/toolkit/ui.py`'s rect algebra.
   * Colors come from the semantic theme tokens (chrome.theme_colors -- surface/ink/
     focus/value/danger/...), so restyling an app means routing it
     through this module, not hunting literals. A button names its KIND
@@ -1635,7 +1635,7 @@ def mark_reach(size="part"):
 
 # -- the public UI API's host side (docs/ui_api_2026-10.md) ----------------------
 #
-# runtime/ui.py's verbs draw into UI_TARGET: the running app's context (its
+# runtime/toolkit/ui.py's verbs draw into UI_TARGET: the running app's context (its
 # focus, the stops its last frame drew, each id's kept state: bytes it keeps
 # between frames), the canvas and the look. A host begins each frame of an
 # app's verbs with ui_frame, before the app's update, so `ui.keys_taken()`

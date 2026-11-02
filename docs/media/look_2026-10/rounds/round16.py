@@ -60,7 +60,7 @@ R13.NEW_ICONS.update({
 
 
 # ==========================================================================
-# the catalogue: runtime/widgets.py's ACHIEVEMENTS, each with how it is
+# the catalogue: runtime/toolkit/widgets.py's ACHIEVEMENTS, each with how it is
 # found, in one voice (what to do)
 # ==========================================================================
 ACH = (("first_open", "First Steps", "app", False, "Open a cart"),

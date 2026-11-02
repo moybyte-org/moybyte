@@ -148,7 +148,7 @@ _TAB_CHIPS = (
     ("music", "Music", "music"),
 )
 
-# The slot of a theme's icon set (runtime/iconsets.py) a ladder icon draws
+# The slot of a theme's icon set (runtime/toolkit/iconsets.py) a ladder icon draws
 # where it differs from the IconSheet's kind: the sliders for Config (the gear
 # is Settings', owner 2026-10-19) and the face for Sprites.
 _SET_KIND = {"edit": "sliders", "paint": "sprite", "run": "play"}

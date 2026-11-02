@@ -229,7 +229,7 @@ def test_one_rasterizer_entry_and_no_second_wrap():
     body = chrome_c[chrome_c.index("static void panel_lines("):]
     body = body[:body.index("\n}\n")]
     assert "moy_text_wrap" in body and "memcpy" not in body
-    ui_src = open(os.path.join(ROOT, "runtime/ui_draw.py")).read()
+    ui_src = open(os.path.join(ROOT, "runtime/toolkit/ui_draw.py")).read()
     body = ui_src[ui_src.index("def wrap_words("):]
     body = body[:body.index("\ndef ")]
     assert "_C.wrap(" in body and "split(" not in body

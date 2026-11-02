@@ -464,7 +464,7 @@ def test_a_stock_layer_still_shares_the_module_table():
 
 
 def test_the_game_tier_clips_its_text():
-    """`moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
+    """`moy_font` is what build.sh stages runtime/toolkit/font.py AS, and device_canvas
     gates its native text op on importing it -- so on a clean checkout (that
     file is a gitignored build artefact) the host fell back to framebuf.text,
     which has NO clip rect and was measured drawing 252 pixels past an edge.

@@ -2,9 +2,9 @@
 
 There are two copies of the petme128 font in this tree, and both are live:
 
-  * `runtime/font.py`'s `_FONT` -- what the shell and a PYTHON cart draw with.
+  * `runtime/toolkit/font.py`'s `_FONT` -- what the shell and a PYTHON cart draw with.
     `moy_gfx`'s `text`/`make_draw_ctx` take it as a blob argument from Python
-    ("exactly runtime/font.py's _FONT, the SAME", modmoy_gfx.c), so every tier
+    ("exactly runtime/toolkit/font.py's _FONT, the SAME", modmoy_gfx.c), so every tier
     that draws through moy_gfx is reading this one.
   * libmoy's `moy_font_data[96 * 8]` (`moy_data.c`, vendored from moy-spec,
     hashed there as SPEC.md 6's `font.bin`) -- what `moy_print` reads, which
@@ -28,7 +28,7 @@ Re-vendoring libmoy is what would move its copy (`make vendor-libmoy` --
 `tests/test_libmoy_vendor.py` guards the copy against UPSTREAM, this guards it
 against font.py). If this test goes red, do not "fix" it by editing the
 vendored file: work out which table upstream intends, and if it is libmoy's,
-bring `runtime/font.py` to it.
+bring `runtime/toolkit/font.py` to it.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def test_the_host_and_libmoy_glyph_tables_are_identical():
     lib = _libmoy_font()
 
     assert len(host) == GLYPHS * COLS, (
-        "runtime/font.py's _FONT is %d bytes, not the %d SPEC.md 6 fixes -- if the "
+        "runtime/toolkit/font.py's _FONT is %d bytes, not the %d SPEC.md 6 fixes -- if the "
         "host font grew glyphs, libmoy's table has to grow them too or lua carts "
         "lose them." % (len(host), GLYPHS * COLS)
     )
@@ -114,7 +114,7 @@ def test_the_host_font_starts_at_space():
     from runtime import font
 
     assert getattr(font, "FIRST", FIRST) == FIRST, (
-        "runtime/font.py's FIRST moved off %d. libmoy's table is indexed from "
+        "runtime/toolkit/font.py's FIRST moved off %d. libmoy's table is indexed from "
         "space with no such constant to follow, so moving one shifts lua text by "
         "the difference and nothing else notices." % FIRST
     )

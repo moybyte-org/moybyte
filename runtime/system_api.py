@@ -111,7 +111,7 @@ lost feature rather than a granted capability.)
 These five are published to every `type: "app"` cart with no permission,
 because they are not capabilities -- they are how an app draws.
 
-  * `ui` is `runtime/ui.py`, the public UI API (docs/ui_api_2026-10.md): its
+  * `ui` is `runtime/toolkit/ui.py`, the public UI API (docs/ui_api_2026-10.md): its
     verbs and rect algebra, the calls a Lua cart and a compiled app make. The
     Player begins each frame of them (`Player._ui_begin`). It imports
     nothing from the shell.

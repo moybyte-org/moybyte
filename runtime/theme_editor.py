@@ -23,7 +23,7 @@ the current line, long lines fading at the edge. Its saves are the look's
 the next frame), never a project's: a theme package is flat data with no
 `journal/`, so undo lives in the session and a save keeps no history.
 
-**Sprites** is its icons as 16 x 16 tiles, one a slot (runtime/iconsets.py's
+**Sprites** is its icons as 16 x 16 tiles, one a slot (runtime/toolkit/iconsets.py's
 SLOTS), the open slot at its zoom with the tools and the palette. A slot of
 the theme's smooth set is its mask, drawn at the zoom in solid ink on a plain
 ground; painting it replaces the slot with a pixel tile in the package's

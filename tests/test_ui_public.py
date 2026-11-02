@@ -9,7 +9,7 @@ the engine's focus and navigation, and the shell-strict ratchet.
     order, spatial moves, activation by key and by tap, `keys_taken`, state
     kept by id and dropped with it, `nav` and `mark` off, a settled frame;
   * the shell is strict (§7): the shell's app modules and the system carts
-    reach the engine layer (`runtime/ui_draw.py`) only where pinned below,
+    reach the engine layer (`runtime/toolkit/ui_draw.py`) only where pinned below,
     and pass no override key but `id`, `current`, `disabled`, `steps` and `hint`.
 """
 
@@ -680,7 +680,7 @@ APPS = (
     "runtime/editor_blocks.py", "runtime/editor_desk.py", "runtime/editor_map.py", "runtime/editor_music.py",
     "runtime/editor_parts.py", "runtime/editor_scene.py", "runtime/editor_settings.py",
     "runtime/editor_sound.py",
-    "runtime/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
+    "runtime/toolkit/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
     "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
     "runtime/scene_editor_ui.py", "runtime/settings_layer.py", "runtime/storybook_app.py",
     "runtime/story_edit.py",

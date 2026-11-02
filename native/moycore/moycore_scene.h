@@ -3,7 +3,7 @@
  * remove_actor, draw_scene).
  *
  * The cart's .moyscene texts are the run's, handed over before the load
- * (moycore_scenes_put, in the order runtime/widgets.py's Scenes keeps, the
+ * (moycore_scenes_put, in the order runtime/toolkit/widgets.py's Scenes keeps, the
  * first the default active scene), so the Editor's unsaved placement reaches
  * the run as it reaches a Python cart. Three natives, which the handles
  * prelude (runtime/lua_ext.py's PRELUDE_HANDLES) captures and clears:

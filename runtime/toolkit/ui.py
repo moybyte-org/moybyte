@@ -43,7 +43,7 @@ algebra is pure tuple math, every rect `(x, y, w, h)`; `text_size` and
 `has_symbols` measure what an app prints into a part, and `face` names the
 theme's face it prints in. What lies under the
 verbs -- the rect-taking widgets, the marks, `ScrollRegion` -- is
-`runtime/ui_draw.py`, the chrome's.
+`runtime/toolkit/ui_draw.py`, the chrome's.
 """
 
 import moy_ui as _C

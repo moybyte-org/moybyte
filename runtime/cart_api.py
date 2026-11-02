@@ -23,7 +23,7 @@ each resolved here on its merits:
     through to the layer's namespace; the host passed neither.
     Both now do both.
   * time() reached the tick helpers through three different lanes; it rides
-    `runtime/ticks.py` now, like everything else.
+    `runtime/toolkit/ticks.py` now, like everything else.
 
 `host_api` and `device_api` still exist -- as the HOMES of what genuinely
 differs per side (host: FakeWifi/ConsoleDriver; device: nothing but

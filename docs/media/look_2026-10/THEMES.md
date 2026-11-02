@@ -177,7 +177,7 @@ pixel look through the same fields on the same two screens.
 
 **Bench (in the style of Amiga Workbench 3.x)**
 
-- **Font:** petme128 (MIT; `runtime/font.py`), the engine's own 8×8 print
+- **Font:** petme128 (MIT; `runtime/toolkit/font.py`), the engine's own 8×8 print
   font. It is fixed-width, like Topaz, and is already in every image. The
   result is drawn at 3×.
 - **Look:**

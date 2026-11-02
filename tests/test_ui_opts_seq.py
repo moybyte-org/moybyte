@@ -1,5 +1,5 @@
 """What a verb hands the board's module as it is -- its options as the list
-or tuple they are (native/moy_ui/modmoy_ui.c's `opts_of`, runtime/ui.py's
+or tuple they are (native/moy_ui/modmoy_ui.c's `opts_of`, runtime/toolkit/ui.py's
 `_opts`), a label's text options in its override dict (`label_text`) --
 draws what the face's own encoding draws, answers what it answers, and,
 where the options fit the module's buffer, builds nothing: under the boards'

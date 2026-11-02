@@ -24,7 +24,7 @@
 //
 // THE FONT is a handle-shaped uint32: a row behind every call's font argument.
 // Row 0 is petme128, libmoy's compiled-in copy, byte-identical to
-// runtime/font.py's (SPEC.md §6 requires it, and the spec's text scenes hold
+// runtime/toolkit/font.py's (SPEC.md §6 requires it, and the spec's text scenes hold
 // it). A theme font is another row: moy_font_load checks a font file
 // (docs/theme_and_shell_2026-11.md §3.7 has the format) and copies it into a buffer
 // the row owns, and its id names the slot and the slot's generation, so an id

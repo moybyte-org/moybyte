@@ -157,7 +157,7 @@ _FONT_BYTES = 65536     # moy_text.h's MOY_FONT_BYTES: the largest font file
 
 def font_file(name):
     """A font file the image carries, by name, as bytes, or None: a seed
-    package's (ui.font_file), else a face of the font set (runtime/fontset.py);
+    package's (ui.font_file), else a face of the font set (runtime/toolkit/fontset.py);
     X.txt beside a font X.fnt is its licence."""
     data = _ui_draw.font_file(name)
     return data if data is not None else _fontset.file(name)

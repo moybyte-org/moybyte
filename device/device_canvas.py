@@ -40,7 +40,7 @@ from device_util import _ticks_us, _ticks_diff
 
 
 # petme128 glyph blob for the native moy_gfx.text kernel (#62) -- staged from
-# runtime/font.py as moy_font by build.sh, so device text rasterizes from the SAME
+# runtime/toolkit/font.py as moy_font by build.sh, so device text rasterizes from the SAME
 # bytes the host Canvas.print does (pixel parity). Absent (old build) -> print()
 # stays on framebuf.text (same glyphs, no clip rect).
 try:
@@ -2273,7 +2273,7 @@ class DeviceCanvas:
         # Native text (#62) in the print font (moy_text.h), petme128 unless the
         # shell names one: the whole string in ONE moy_gfx.text call,
         # camera + clip + pal honoured in C -- and pixel parity with the host at
-        # last (same glyph bytes, staged from runtime/font.py). The per-call
+        # last (same glyph bytes, staged from runtime/toolkit/font.py). The per-call
         # `scale` arg is IGNORED (system-UI scaling is the #39 font_scale path,
         # not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.

@@ -288,7 +288,7 @@ def _app_ui_host_words(tmp_path):
     """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
     run), as canonical RGB565 words: the font and icon sets are the same, the
     browser's handheld faces and masks being the ones the host's handheld
-    class loads (runtime/fontset.py)."""
+    class loads (runtime/toolkit/fontset.py)."""
     from runtime import host_app, wasm_host
     from tools import wasm_cart
     from ws_helpers import make_drv, open_cart, quiesce

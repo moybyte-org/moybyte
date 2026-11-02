@@ -736,7 +736,7 @@ shadow's reach).
   §3.5's footprint.
 - **Icons:** a theme may ship its own icon tiles (`icons`, the pixel icon
   set's shape: eight 16-pixel tiles a row, one a slot of
-  `runtime/iconsets.py`'s `SLOTS`, colours, not roles, its clear pixel 16),
+  `runtime/toolkit/iconsets.py`'s `SLOTS`, colours, not roles, its clear pixel 16),
   and its look's `icons.pixel_slots` names the slots drawn from them over
   its icon set (`Appearance.pixel_draw`). The Editor's theme mode paints
   them: a smooth slot painted becomes a tile and is named there. The icons
@@ -898,7 +898,7 @@ builds least:
   Hyperlegible Next; JetBrains Mono), each `FAMILY-SIZE-WEIGHT-BPP.fnt` with
   its family's licence `FAMILY.txt`, and `set.json` names the faces each tier
   takes. A board image freezes its tier's (`fonts_data`, chosen by
-  board.toml's `tier`); `runtime/fontset.py` reads them, and
+  board.toml's `tier`); `runtime/toolkit/fontset.py` reads them, and
   `appearance.font_file` answers a face, and `X.txt` beside it, after the
   seeds' files. `THIRD_PARTY.md` §3.1b carries the notices.
 
@@ -920,7 +920,7 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
   - **Every seed names the font set's JetBrains Mono for `mono`** (the
     Code tab, `docs/history/look_2026-10.md` step 23), and its look's family for
     the rest; a role neither covers draws petme128. A face of the font set
-    (`runtime/fontset.py`) is the image's, not embedded in the tables.
+    (`runtime/toolkit/fontset.py`) is the image's, not embedded in the tables.
   - **A look's `fam` names the type**: a family of the font set whose
     faces, sized per metric class (`fontset.ROLES`) at the weights its
     `w_med`, `w_semi` and `w_bold` move the type scale's steps to, win over
@@ -1620,7 +1620,7 @@ handed to the app (a new surface mechanism, which `docs/surface_model_v1.md`
 §8 closes).
 
 **Where the value comes from** (2026-10-13 and 2026-10-14). One leaf places the bars and derives what they leave:
-`runtime/layout_base.py`'s `place_bars`, `bar_rects_of` and `content_of(w, h,
+`runtime/toolkit/layout_base.py`'s `place_bars`, `bar_rects_of` and `content_of(w, h,
 rows)` (each bar `size * rows // 18` thick, `rows` the 18-row bar at the
 surface's scale), imported by the bars, every layout and the app heads alike;
 a window's layouts take its band instead (`in_window`: the default bar at the
@@ -1849,7 +1849,7 @@ nothing is off-screen by construction; and the content rectangle keeps **at
 least 75% of each axis of the glass**, or the layout is replaced by the tier
 default and noted. The tier default is the default seed's layout resolved
 the same way, and where even that does not resolve on a glass, today's one
-top bar (`runtime/shell_layout.py`'s `FALLBACK`). The composer never raises;
+top bar (`runtime/toolkit/shell_layout.py`'s `FALLBACK`). The composer never raises;
 both halves are fuzzed (`tests/test_shell_layout.py`) and the boards' module
 answers the host's corpus (`tests/test_theme_loader.py`).
 
@@ -1868,7 +1868,7 @@ layer (`docs/shell_ux_v1.md` §3), so **the WM class carries** `LAYOUT_CATALOGUE
 which modes a board has. Settings shows a row for what the WM lists and none
 for what it does not (absence, never a disabled row). Beside it,
 `LAYOUT_EDGES` names the edges a bar may take on this tier (all four on both
-WMs), and the composer is `runtime/shell_layout.py`'s `resolve`.
+WMs), and the composer is `runtime/toolkit/shell_layout.py`'s `resolve`.
 
 | board | glass, input | modes (default first) | WM | widgets placeable |
 |---|---|---|---|---|
@@ -2191,7 +2191,7 @@ size (a row, a card, a line) from the target if a glide is live, else from
 the offset -- a step moves exactly one step, never more, and n steps in one
 frame move the target n steps at once (the view is never more than one
 glide behind its target). `glide_to(p)` aims at a content position (a focus
-reveal, `docs/history/scroll_and_text_2026-10.md` §7). `ScrollRegion` (`runtime/ui_draw.py`) stays the Python face
+reveal, `docs/history/scroll_and_text_2026-10.md` §7). `ScrollRegion` (`runtime/toolkit/ui_draw.py`) stays the Python face
 over the same buffer, with `step`, `glide_to` and `gliding`; a grep guard
 holds that no `_GLIDE_HALF_MS` or ease arithmetic exists outside
 `moy_ui_interact.c`.

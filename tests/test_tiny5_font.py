@@ -92,7 +92,7 @@ def test_every_seed_font_ships_its_licence_in_the_image():
     for name in seeds:
         with open(os.path.join(THEMES, name)) as f:
             fonts |= set(json.load(f).get("fonts", {}).values())
-    # a face of the font set is the image's (runtime/fontset.py), not the tables'
+    # a face of the font set is the image's (runtime/toolkit/fontset.py), not the tables'
     fonts = {f for f in fonts if os.path.isfile(os.path.join(THEMES, f))}
     assert fonts
     for fnt in fonts:

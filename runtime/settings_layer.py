@@ -7,7 +7,7 @@
 #   SettingsLayer.draw               the Settings app
 """The Settings app (#28/#39/#53): the console's AGGREGATOR, a page of rows
 in captioned groups (docs/history/look_2026-10.md step 19) drawn with the public UI
-API's verbs (`runtime/ui.py`, docs/ui_api_2026-10.md) and nothing else: the
+API's verbs (`runtime/toolkit/ui.py`, docs/ui_api_2026-10.md) and nothing else: the
 engine owns focus, navigation, activation and the page's scroll; this layer
 owns what each row shows and does.
 

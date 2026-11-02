@@ -3,7 +3,7 @@ tests/test_moy_app.py holds native/moy_app's bindings to (the ctypes one on
 CPython, the native module on the desktop MicroPython).
 
 This is what `runtime/app_context.py`'s `Damage`, `Surface`, `Theme` and
-`Prefs`, `runtime/widgets.py`'s `Clipboard`, the ArtworkService's open picture
+`Prefs`, `runtime/toolkit/widgets.py`'s `Clipboard`, the ArtworkService's open picture
 and `runtime/system_api.py`'s grant policy did before sprint 5 steps 4 to 6
 moved them to C, reshaped only where the design moved the line
 (native/moy_app/README.md): a grant table keyed by the app's id,

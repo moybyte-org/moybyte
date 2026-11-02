@@ -259,7 +259,7 @@ class Face(_FaceBase):
 
 
 class Petme(_FaceBase):
-    """petme128, the engine's own 8x8 print font (runtime/font.py, MIT), at a
+    """petme128, the engine's own 8x8 print font (runtime/toolkit/font.py, MIT), at a
     whole-number scale: an MFNT v1 face, 1 bpp, fixed 8 px advance."""
     SUBST = {"×": "x", "÷": "/", "−": "-", "…": "~", "·": "-", "‹": "<", "›": ">"}
 

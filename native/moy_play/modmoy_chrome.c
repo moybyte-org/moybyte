@@ -1,7 +1,7 @@
 // moy_play's chrome functions (moy_chrome.h) as a VM sees them; runtime/
 // moy_play.py has the same names on CPython. Each piece answers its display
 // list: [(op, c, scale, x, y, w, h, text)], which the shell replays through
-// its canvas (runtime/ui.py's replay).
+// its canvas (runtime/toolkit/ui.py's replay).
 //
 //   chrome_inks(inks, bar_light)
 //   chrome_panel(cw, ch, notice, title, text)

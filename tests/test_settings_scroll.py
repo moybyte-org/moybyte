@@ -1,5 +1,5 @@
 """Settings' rows page scrolls (docs/history/look_2026-10.md step 19): the public
-UI API's page (runtime/ui.py) keeps the focused row in view as the keys move
+UI API's page (runtime/toolkit/ui.py) keeps the focused row in view as the keys move
 it, a finger drag scrolls it and is no tap, and a clean tap activates the row
 under it. The rows are the session's (`_settings_rows`, memoized on the
 capabilities), the page its groups of them.

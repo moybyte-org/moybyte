@@ -1106,7 +1106,7 @@ class Player(PlayerDiag):
         return wifi, net, gpio, console
 
     def _ui_begin(self, ws, render=True):
-        """Begin a Python app's frame of `ui` verbs (runtime/ui.py) over the
+        """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
         input its btn() and touch() read, in the run snapshot's shape, before
         its update, so `ui.keys_taken()` answers there.
 

@@ -248,11 +248,11 @@ int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h,
 // The live theme's icon set for the parts the C draws (docs/history/look_2026-10.md
 // step 16): its mask files at 16 and 24 px (0 where it has none, the whole
 // set off when both are) and the glyph codes of close, maximize and
-// minimize, by MOY_UI_FB_*. runtime/iconsets.py installs it at a look change.
+// minimize, by MOY_UI_FB_*. runtime/toolkit/iconsets.py installs it at a look change.
 void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
 // Moy's tile (slot 0, MOY_UI_ICON_MOY), which is pixel art in every theme: 16x16
 // palette indices, `clear` the one that draws nothing; NULL takes it away.
-// runtime/iconsets.py installs the pixel set's with the set. moy_ui_moy answers
+// runtime/toolkit/iconsets.py installs the pixel set's with the set. moy_ui_moy answers
 // it (NULL: none) and its clear index.
 #define MOY_UI_ICON_MOY 0
 void moy_ui_moy_use(const uint8_t px[256], int clear);

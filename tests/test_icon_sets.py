@@ -1,4 +1,4 @@
-"""The icon sets (docs/history/look_2026-10.md step 16, runtime/iconsets.py): the
+"""The icon sets (docs/history/look_2026-10.md step 16, runtime/toolkit/iconsets.py): the
 masks every smooth set fills from its sources, the pixel set and its swap,
 Moy's outline, the slots past 0x7f, and the bar, the tabs and a depth
 frame's title buttons drawing the theme's set. The Editor's theme mode,

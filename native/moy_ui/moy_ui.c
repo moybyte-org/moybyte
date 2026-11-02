@@ -647,7 +647,7 @@ void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
     memcpy(s_icon_code, codes, sizeof(s_icon_code));
 }
 
-// Moy, slot 0: pixel art in every theme, not a mask (runtime/iconsets.py).
+// Moy, slot 0: pixel art in every theme, not a mask (runtime/toolkit/iconsets.py).
 static uint8_t s_moy[256];
 static int16_t s_moy_clear = -1;        // -1: no tile installed
 
@@ -665,7 +665,7 @@ const uint8_t *moy_ui_moy(int *clear) {
     return s_moy_clear < 0 ? NULL : s_moy;
 }
 
-// The slots, tools/make_icons.py's order (runtime/iconsets.py SLOTS;
+// The slots, tools/make_icons.py's order (runtime/toolkit/iconsets.py SLOTS;
 // tests/test_ui_parts.py holds the two equal).
 static const char *const s_icon_slots[] = {
     "moy", "home", "wifi", "wifi_off", "battery", "search", "play", "projects",

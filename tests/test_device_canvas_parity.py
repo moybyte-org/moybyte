@@ -46,7 +46,7 @@ auto-cache and its opaque lane, the pal-tint bake cache, the layer pool, the
 spr_gate and lua-spr protocols, `pix()` as a read. Those have no other home.
 
 `DeviceCanvas` runs under CPython here by injecting `_FakeGfx` and `_FB` into
-`sys.modules`, plus `moy_font` (what build.sh stages runtime/font.py AS, so the
+`sys.modules`, plus `moy_font` (what build.sh stages runtime/toolkit/font.py AS, so the
 native-text path activates).
 """
 
@@ -451,7 +451,7 @@ def _load_device_canvas():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
-    # runtime/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
+    # runtime/toolkit/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
     # it under that name so the native-text path activates here too.
     sys.modules["moy_font"] = _host_font
     # DeviceCanvas + PAL565 + Image + _USE_GFX now live in device_canvas.py

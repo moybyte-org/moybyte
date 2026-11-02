@@ -1,4 +1,4 @@
-"""runtime/ui.py Phase 3a: the six-state interaction model and the two new
+"""runtime/toolkit/ui.py Phase 3a: the six-state interaction model and the two new
 widget kinds (`row`, `cell`): the state model resolves right -- the full
 precedence lattice, not a sample of it -- and the rows and cells paint their
 state's tokens.

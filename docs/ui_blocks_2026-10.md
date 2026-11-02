@@ -107,7 +107,7 @@ the Notes split needs.
 **G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
 `floor*`) are not in any public face. They reach the shell through
 `modmoy_ui.c`'s private table. But the Code tab drives them with a path
-of its own (#243 lists it). `AppHost.begin` (`runtime/ui_draw.py`, over
+of its own (#243 lists it). `AppHost.begin` (`runtime/toolkit/ui_draw.py`, over
 `moy_ui_api_host_begin`) is the one path that stays. The others go as
 their surfaces move. The Launcher's bands have none: their pass opens
 through `AppHost.begin` and draws whole. The desk's panes have none: a
@@ -150,7 +150,7 @@ They carry options (`grid`'s `cols`, `group`'s `card`, `card`'s badge,
 
 ## 4. The blocks
 
-Every block enters all three faces (`runtime/ui.py`,
+Every block enters all three faces (`runtime/toolkit/ui.py`,
 `native/moycore/moycore_ui.h`, `native/moy_ui/moy_ui_wasm.h` with
 `native/moy_app/roles.json`'s `ui` rows, Moybyte's vendor extension). Every
 block is held by `tests/test_ui_public.py`'s three-faces fixture and by an

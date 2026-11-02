@@ -169,7 +169,7 @@ int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
     return m;
 }
 
-// -- an app's host (runtime/ui_draw.py's AppHost) ------------------------------------
+// -- an app's host (runtime/toolkit/ui_draw.py's AppHost) ------------------------------------
 
 static int host_slot(const moy_ui_host_t *h, int back) {
     int i = h->ri - back;

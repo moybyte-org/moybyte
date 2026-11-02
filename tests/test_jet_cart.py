@@ -339,7 +339,7 @@ def test_the_hud_is_the_frames_and_what_the_verbs_would_draw(tmp_path, jet):
 
 
 def test_the_hud_font_is_the_consoles():
-    """src/hud_font.h is runtime/font.py's bytes, glyph for glyph."""
+    """src/hud_font.h is runtime/toolkit/font.py's bytes, glyph for glyph."""
     import re
     from runtime import font
     path = os.path.join(ROOT, "ports", "jet", "teapot.moy", "src", "hud_font.h")

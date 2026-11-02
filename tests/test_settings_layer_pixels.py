@@ -12,7 +12,7 @@ the whole firmware-update screen **not at all** -- its own docstring names the
 update screen as out of scope.
 
 Those surfaces are precisely where Phase 3b transcribed hand-rolled row/dialog
-drawing onto `runtime/ui.py`'s kinds, so without this file the transcription had
+drawing onto `runtime/toolkit/ui.py`'s kinds, so without this file the transcription had
 no oracle at all on four of the five modules it touched. This is the same
 mechanism as the shell goldens -- a hash of bytes COMMITTED to the repo, not a
 live-vs-live A/B -- applied one level down: each sub-surface is drawn straight

@@ -62,7 +62,7 @@ enum {
     MOY_UI_IN_LEN
 };
 
-// An app's host (runtime/ui_draw.py's AppHost, moy_ui_api_host_begin): what
+// An app's host (runtime/toolkit/ui_draw.py's AppHost, moy_ui_api_host_begin): what
 // the frames it painted left of its page in the buffers a canvas presents
 // in turn, a slot a paint (the ring, newest at ri, rn held): the frame, its
 // key (what the pixels are a function of besides the page: the look's
@@ -1198,7 +1198,7 @@ void moy_ui_api_lag_note(const moy_ui_ctx_t *c, int32_t *hist, int slots, int ba
 // most, merged as lag_note merges), their count (0, none), else -1.
 int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
                    int32_t *out, int cap);
-// An app host's frame begins (runtime/ui_draw.py's AppHost.begin): the
+// An app host's frame begins (runtime/toolkit/ui_draw.py's AppHost.begin): the
 // frame begun last is noted as its pass left it, the frame begins as
 // moy_ui_api_begin's, and the shift frame it may be is planned against the
 // host's ring -- the canvas's part of it (moving pixels, the fence) is left
