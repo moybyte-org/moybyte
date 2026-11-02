@@ -35,7 +35,7 @@ press **A** (or tap it twice) to open the insert menu:
 
 `Pick a kind` (a category) -> `Pick a block` (a block in that category).
 
-The categories, in `CATEGORY_ORDER` (`runtime/blocks.py`), are: **When...**,
+The categories, in `CATEGORY_ORDER` (`runtime/editors/blocks.py`), are: **When...**,
 **Control**, **Sprite**, **Looks**, **Draw**, **Buttons**, **Variables**,
 **Lists**, **Math**, **Sound**, **My Blocks**.
 

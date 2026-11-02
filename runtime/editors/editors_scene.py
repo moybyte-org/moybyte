@@ -3,7 +3,7 @@ row table, the scene analogue of MapEditor. MapEditor places tile ids onto map
 CELLS; this places tagged ACTORS at world-space pixel positions. Pure logic:
 the shell (scene_editor_ui.py) maps taps on the world view / tile palette to
 these calls and renders the result; undo/redo rides the shared #111
-op-history core (runtime/op_history.py).
+op-history core (runtime/editors/op_history.py).
 
 The rows are plain dicts in the .moyscene shape ({tag, tile, x, y, flip,
 flags}) so serialize() round-trips the exact on-disk format; list order IS the

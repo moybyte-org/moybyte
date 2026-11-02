@@ -7,7 +7,7 @@
 #   MusicEditor._snapshot         what one undo step records
 """MusicEditor (#50/#92) -- the tracker-style step editor over a cart's
 AudioBank; undo/redo rides the
-shared #111 op-history core (runtime/op_history.py)."""
+shared #111 op-history core (runtime/editors/op_history.py)."""
 
 try:
     from op_history import History, OpCodec, OpHistoryMixin

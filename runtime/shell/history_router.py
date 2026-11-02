@@ -162,7 +162,7 @@ class HistoryRouter:
     # -- which History is in front of the kid --------------------------------
 
     def _theme(self):
-        """The theme open in the Editor's theme mode (runtime/theme_editor.py),
+        """The theme open in the Editor's theme mode (runtime/editors/theme_editor.py),
         or None: its tabs keep their own undo, and no journal."""
         app = getattr(self.ws, "editor_app", None)
         return getattr(app, "theme", None) if app is not None else None

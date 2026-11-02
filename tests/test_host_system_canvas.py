@@ -137,7 +137,7 @@ def _sprite_map():
 
 
 def _sheet_and_map():
-    # 16 x 32 tiles = the 128 x 256 sheet SPEC.md 3.2 fixes (runtime/project.py
+    # 16 x 32 tiles = the 128 x 256 sheet SPEC.md 3.2 fixes (runtime/editors/project.py
     # builds exactly this). A differently-shaped sheet is REFUSED by libmoy's
     # map kernel and draws nothing at all -- silently, on every tier.
     sheet = SpriteSheet(16, 32)

@@ -1,4 +1,4 @@
-"""The Code tab's colour runs as runtime/code_layer.py found them in Python
+"""The Code tab's colour runs as runtime/editors/code_layer.py found them in Python
 before they crossed into C (native/moy_ui/moy_ui_text.c): the oracle the
 C's runs are held to (tests/test_text_view.py), as tests/ui_twin.py is the
 toolkit's."""

@@ -20,7 +20,7 @@ and the desk's (tools/make_font.py's `module`).
 * A THEME'S OWN TILES: the package's `icons` sheet, in the pixel set's
   shape, and the slots its look's `icons.pixel_slots` names draw from it in
   place of the set's (Appearance.pixel_draw), in every theme. The Editor's
-  theme mode paints them (runtime/theme_editor.py).
+  theme mode paints them (runtime/editors/theme_editor.py).
 * Both: Moy is the pixel set's, in every theme; redo is undo's mirror
   (built so: make_icons mirrors the masks, the pixel set's art mirrors
   undo).

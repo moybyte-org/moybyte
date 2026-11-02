@@ -1171,7 +1171,7 @@ CAT = {  # the insert menu's categories (block_editor_ui._CAT_LABEL) and their c
     "actors": ("Sprite", "#4c8df6"), "looks": ("Looks", "#a070ff"), "operators": ("Math", "#00c26b"),
     "sound": ("Sound", "#d65cc6"), "myblocks": ("My Blocks", "#ff4d6d"),
 }
-# The labels and categories of the blocks Coin Quest uses (runtime/blocks.py's
+# The labels and categories of the blocks Coin Quest uses (runtime/editors/blocks.py's
 # CATALOG), copied so the renderer imports no runtime.
 BLOCK_LABELS = {
     "on_start": ("when program starts", "events"), "on_update": ("every frame (update)", "events"),

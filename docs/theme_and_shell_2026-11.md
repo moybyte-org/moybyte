@@ -444,7 +444,7 @@ a light surface), and the Scratch category colours in both. The six
 `code_*` roles are theme roles held to a floor of their own, 4.5:1 on the
 code surface (`surface`; style.json's `theme.code`, §6); every seed sets its
 own (`docs/history/look_2026-10.md` steps 23 and 26).
-`runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
+`runtime/editors/code_layer.py` and `runtime/editors/block_editor_ui.py` read them through
 the look (`runtime/shell/appearance.py`'s `content_colors`).
 
 **Additive roles come with the code that draws them**, under §2's rule, each
@@ -2462,7 +2462,7 @@ app's own surface (Paint, a project's Editor) -- popped by
 `Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file. Every file draws as its
-monospace source in `ui.text_view` (`runtime/editor_handle.py`): Markdown wraps
+monospace source in `ui.text_view` (`runtime/editors/editor_handle.py`): Markdown wraps
 and is coloured as syntax (285b5d1e), its checkboxes and `[[note]]` links still
 answering a tap; code (the per-runtime highlighter and parse gate), JSON (pretty-printed at indent 2 on
 open, saved as shown; soft save refuses an invalid document; a hard exit writes

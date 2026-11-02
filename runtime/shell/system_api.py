@@ -65,7 +65,7 @@ role is granted by, the files kinds, the manifest refusal
 handle: it opens `(kind, name)` through the same role `files.*` narrows, and
 the cart can never NAME a kind -- it gets the one it was granted, or the one
 the console was already asked to open (the Files router's door). The engine
-behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
+behind it stays in the shell; `runtime/editors/editor_handle.py` is the whole of it.
 
 Every `type: "app"` cart also gets `ui`, `theme()`, `screen()`,
 `content_rect()` and `bar_h()` -- see UNGATED below. Everything else a

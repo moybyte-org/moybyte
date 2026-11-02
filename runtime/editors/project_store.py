@@ -20,7 +20,7 @@ store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.audio`,
 the save-failure UI field `ws.cart_error` and
 the achievements tracker `ws.ach`.
 
-`Project` (runtime/project.py) is this class plus the Editor's half -- the
+`Project` (runtime/editors/project.py) is this class plus the Editor's half -- the
 per-tab op-history registry (`history_for`) and the CONFIG tab's undo codec --
 and supplies the hooks a commit drains into its journal line: `config_hist` and
 the `_*_history` lookups. The split is the native kernel's line

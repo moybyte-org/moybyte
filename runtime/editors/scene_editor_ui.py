@@ -7,10 +7,10 @@
 WYSIWYG view of the WORLD -- the tilemap as the backdrop, the fixed 320x240
 game viewport as a frame, every placed actor as its sprite -- and the
 gestures over it. On the handheld the Scene tab is the page
-`runtime/editor_scene.py` draws round the view (the stamps, the picked
+`runtime/editors/editor_scene.py` draws round the view (the stamps, the picked
 actor's props, the tools); in a desk Editor's Scene pane the view fills the
 pane, the stamps are the Stamps pane's, the props the Actor pane's and the
-tools the pane header's (`runtime/editor_desk.py`).
+tools the pane header's (`runtime/editors/editor_desk.py`).
 
 The map editor's gesture grammar, over objects:
 

@@ -39,7 +39,7 @@ opens the menu on its Home row, which leaves saving as Done does, and the
 tabs are a touch's. A keyboard steps the slot with Q and W (E on
 the T-Deck, where W moves), moves the cursor with the arrows and paints
 where it stands with Enter; Ctrl+Tab changes tab, Esc is Done. The desk shows
-both tabs as panes side by side (runtime/editor_desk.py's `theme`
+both tabs as panes side by side (runtime/editors/editor_desk.py's `theme`
 workspace), the tab following the focused one (F6).
 """
 

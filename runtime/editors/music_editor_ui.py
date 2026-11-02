@@ -5,9 +5,9 @@
 cart's AudioBank -- SFX view (note/wave/vol steps) and SONG view (a phrase of
 SFX-id slots) -- its keys, and the live preview (played on the same audio
 session the running cart uses). On the handheld the Music tab is the page
-`runtime/editor_music.py` draws; a desk Editor's Sound pane is
-`runtime/editor_sound.py` over the same core, and its Sounds and Song panes
-`runtime/editor_parts.py`'s.
+`runtime/editors/editor_music.py` draws; a desk Editor's Sound pane is
+`runtime/editors/editor_sound.py` over the same core, and its Sounds and Song panes
+`runtime/editors/editor_parts.py`'s.
 
 One instance lives on Workstation (`ws.music_ui`), with a back-reference to
 it for the cart's audio session and `save_sounds`. Workstation.go_home() does

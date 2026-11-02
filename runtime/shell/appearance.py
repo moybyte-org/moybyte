@@ -21,7 +21,7 @@ happened to share a Settings screen. And `custom`, the theme a change makes
 the Appearance rows, applied once a frame (`tick`) and written once the
 changes settle or at an exit (`commit`), through Paint's mechanism (#108).
 And Edit theme… (`edit_file`, step 6 and docs/history/look_2026-10.md step 33):
-custom opened in the Editor's theme mode (runtime/theme_editor.py), whose
+custom opened in the Editor's theme mode (runtime/editors/theme_editor.py), whose
 saves of its theme.json and its pixel tiles come through the look's writes,
 the loader installing them at the next frame. And NAME… (`name_custom`,
 step 8): custom renamed to a name of the kid's, a package of its own in the
@@ -805,7 +805,7 @@ class Appearance:
         return None
 
     def note_font(self):
-        """The font a note's text view draws in (runtime/editor_handle.py,
+        """The font a note's text view draws in (runtime/editors/editor_handle.py,
         `ui.text_view`'s `font`): on the desk the live `mono` face's family
         at 15 pixels, where the image carries it (tools/make_font.py's
         NOTE); 0, the `mono` role's own, on the handheld, for petme128 and

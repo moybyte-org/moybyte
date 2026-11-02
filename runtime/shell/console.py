@@ -1264,7 +1264,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.cards_layer = CardsLayer(self, NAMES, _err_text)
         # The PAINT editor surface (#4/#30) over the cart sheet ("paint"). It reads
         # ws.paint / ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme mode's
-        # tabs ("theme_config", "theme_sprites") are runtime/theme_editor.py's.
+        # tabs ("theme_config", "theme_sprites") are runtime/editors/theme_editor.py's.
         self._paint_layer = None      # built at its first use
         self._editor_desk = None      # the desk Editor, at its first use on a desk
         self._theme_config_layer = None
@@ -1347,7 +1347,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def editor_layer(self):
         """The Editor's content layer: the desk Editor's workspaces where they
-        show (runtime/editor_desk.py), else the open tab's surface."""
+        show (runtime/editors/editor_desk.py), else the open tab's surface."""
         desk = self.editor_desk
         if desk is not None and desk.active():
             return desk

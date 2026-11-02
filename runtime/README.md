@@ -220,7 +220,7 @@ Content + tooling:
   prebaked assets), so the page closes the redraw gate like any static UI.
   `system_carts/moybyte.notes.moy` (title: Notes) is the console's ONE text app and it
   is a CART on the public UI API (`ui`): a vault table plus one note drawn through the
-  editor handle (`runtime/editor_handle.py`), holding no text of its own; a built-in,
+  editor handle (`runtime/editors/editor_handle.py`), holding no text of its own; a built-in,
   it draws in the look (`system_api.draws_in_look`), and on a desk its window is its
   surface (`Workstation.app_window_canvas`). Each note is a named
   `files/docs/<name>.md` user file (#108) — plain Markdown, UTF-8, LF, no

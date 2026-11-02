@@ -49,7 +49,7 @@ RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
 # registry instead; the player shows the live cart title).
 _TITLES = {"menu": "Editor", "projects": "Projects",
            "settings": "Settings", "update": "Update"}
-# The Editor's title in its theme mode (runtime/theme_editor.py).
+# The Editor's title in its theme mode (runtime/editors/theme_editor.py).
 THEME_TITLE = "Theme"
 # The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
 # separator and the cart; the separator is a hyphen in a face without the dot

@@ -118,9 +118,9 @@ point-towards, graphic effects, and trig operators**.
 - **On-stage monitors** — no variable/list watchers drawn on the game screen.
 
 ## Where the code lives
-- Vocabulary + compiler: `runtime/blocks.py` (catalog, helpers, `compile_blocks`).
+- Vocabulary + compiler: `runtime/editors/blocks.py` (catalog, helpers, `compile_blocks`).
 - Runtime actor verbs + `draw_scene` (looks/rotation): `runtime/cart_api.py`,
   the one cart namespace on every tier; the actor world is `runtime/toolkit/widgets.py` (`SceneWorld`).
-- Editor surfaces: `runtime/block_editor_ui.py` (+ `editors_block.py`) and
-  `runtime/scene_editor_ui.py`, side by side in a desk's Code workspace of a
-  blocks cart (`runtime/editor_desk.py`).
+- Editor surfaces: `runtime/editors/block_editor_ui.py` (+ `editors_block.py`) and
+  `runtime/editors/scene_editor_ui.py`, side by side in a desk's Code workspace of a
+  blocks cart (`runtime/editors/editor_desk.py`).

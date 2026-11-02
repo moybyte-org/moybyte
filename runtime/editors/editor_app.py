@@ -130,7 +130,7 @@ _PLAY_SLOT = 170                # the desk Editor's Play slot, Play or Restart a
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
 # sentinels (UNDO/REDO) and PLAY (None) are actions; the theme mode's two tabs
-# commit through their ThemeDoc (runtime/theme_editor.py), so they are not
+# commit through their ThemeDoc (runtime/editors/theme_editor.py), so they are not
 # tabs here either.
 COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
                     if isinstance(t, str) and not t.startswith("\x00"))
@@ -168,12 +168,12 @@ _TAB_LAYOUT_UI = {
     "theme_config": "theme_config_layer",
     "theme_sprites": "theme_sprites_layer",
 }
-# The theme mode's tabs (runtime/theme_editor.py's TAB_CONFIG, TAB_SPRITES).
+# The theme mode's tabs (runtime/editors/theme_editor.py's TAB_CONFIG, TAB_SPRITES).
 THEME_TABS = ("theme_config", "theme_sprites")
 
 
 def _te():
-    """runtime/theme_editor.py, imported at the theme mode's first use."""
+    """runtime/editors/theme_editor.py, imported at the theme mode's first use."""
     try:
         import theme_editor
     except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -229,7 +229,7 @@ class EditorApp:
         # the next Play a fresh start (`start_owed`, its tabs).
         self.restart_owed = False
         self.start_owed = ()
-        # The theme mode (runtime/theme_editor.py): the theme package open in
+        # The theme mode (runtime/editors/theme_editor.py): the theme package open in
         # place of a cart (a ThemeDoc, else None), where Done returns to, and
         # the tab the Editor held before it.
         self.theme = None
@@ -333,7 +333,7 @@ class EditorApp:
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")
 
-    # -- the theme mode (runtime/theme_editor.py) ----------------------------------
+    # -- the theme mode (runtime/editors/theme_editor.py) ----------------------------------
 
     def open_theme(self, doc, back):
         """Open the Editor on a theme package (`doc`, a ThemeDoc) in place of
@@ -463,7 +463,7 @@ class EditorApp:
 
     def focus_tab(self, view):
         """The desk Editor moved the keys to the pane showing tab `view`
-        (runtime/editor_desk.py): the Editor's tab is it, built, with the
+        (runtime/editors/editor_desk.py): the Editor's tab is it, built, with the
         keyboard's text mode -- and nothing is committed: moving focus
         between panes is no boundary (EDITOR_LAYOUT.md's frame)."""
         ws = self.ws

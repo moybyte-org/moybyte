@@ -663,26 +663,26 @@ def test_a_hover_owes_a_frame_only_over_a_stop():
 # steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a);
 # the editors and Paint's layer stay on it.
 NOT_MOVED = frozenset((
-    "runtime/block_editor_ui.py",
-    "runtime/code_layer.py",
-    "runtime/editor_app.py",
-    "runtime/map_editor_ui.py",
-    "runtime/music_editor_ui.py",
-    "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py",
+    "runtime/editors/block_editor_ui.py",
+    "runtime/editors/code_layer.py",
+    "runtime/editors/editor_app.py",
+    "runtime/editors/map_editor_ui.py",
+    "runtime/editors/music_editor_ui.py",
+    "runtime/editors/paint_layer.py",
+    "runtime/editors/scene_editor_ui.py",
 ))
 
 # The shell's apps (§7): their modules and the system carts' code.
 APPS = (
     "runtime/apps/appearance_app.py", "runtime/apps/artwork.py", "runtime/apps/paint_app.py",
-    "runtime/apps/myart_app.py", "runtime/apps/drawing_pages.py", "runtime/block_editor_ui.py",
-    "runtime/apps/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
-    "runtime/editor_blocks.py", "runtime/editor_desk.py", "runtime/editor_map.py", "runtime/editor_music.py",
-    "runtime/editor_parts.py", "runtime/editor_scene.py", "runtime/editor_settings.py",
-    "runtime/editor_sound.py",
+    "runtime/apps/myart_app.py", "runtime/apps/drawing_pages.py", "runtime/editors/block_editor_ui.py",
+    "runtime/apps/calc_app.py", "runtime/editors/code_layer.py", "runtime/editors/editor_app.py",
+    "runtime/editors/editor_blocks.py", "runtime/editors/editor_desk.py", "runtime/editors/editor_map.py", "runtime/editors/editor_music.py",
+    "runtime/editors/editor_parts.py", "runtime/editors/editor_scene.py", "runtime/editors/editor_settings.py",
+    "runtime/editors/editor_sound.py",
     "runtime/toolkit/file_widgets.py", "runtime/apps/files_app.py", "runtime/apps/getcarts_app.py",
-    "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/apps/storybook_app.py",
+    "runtime/editors/map_editor_ui.py", "runtime/editors/music_editor_ui.py", "runtime/editors/paint_layer.py",
+    "runtime/editors/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/apps/storybook_app.py",
     "runtime/apps/story_edit.py",
 )
 

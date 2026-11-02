@@ -97,7 +97,7 @@ THEMES = {
                   "desktop": {"keypad": 26, "op": 28, "result": 50, "tape": 17, "wtitle": 17}}),
 }
 MONO = ("jbmono", 11, 400, 2)     # the Code tab: a 7 px cell, on every tier
-# A note's faces beside it (runtime/editor_handle.py): on the desk the 15 px
+# A note's faces beside it (runtime/editors/editor_handle.py): on the desk the 15 px
 # regular its text view draws in (Appearance.note_font), and the bolds.
 NOTE = {"handheld": (("jbmono", 11, 700, 2),),
         "desktop": (("jbmono", 11, 700, 2), ("jbmono", 15, 400, 4), ("jbmono", 15, 700, 4))}

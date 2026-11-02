@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _handle(ws, name, mode=None):
-    """The shell's text page as a CART reaches it (`runtime/editor_handle.py`)
+    """The shell's text page as a CART reaches it (`runtime/editors/editor_handle.py`)
     -- the table's second consumer since the notebook app was deleted."""
     ctx = ws.app_context("probe", ("files", "clipboard"))
     return ws.player._open_cart_editor(ctx.files, "docs", name, mode,

@@ -55,7 +55,7 @@ CONTENTS = {
     "stamps": ("Stamps", "stamp", None, FLOOR),
     "palette": ("Block palette", "blocks", None, FLOOR),
     "made": ("Code", "lock", None, FLOOR),
-    # the Editor's theme mode (runtime/theme_editor.py): its two tabs
+    # the Editor's theme mode (runtime/editors/theme_editor.py): its two tabs
     "theme_config": ("Config", "sliders", "theme_config", FLOOR),
     "theme_sprites": ("Sprites", "sprite", "theme_sprites", (420, 330 + HEADER)),
 }

@@ -50,7 +50,7 @@ made false, in place. The rest is `.claude/rules/docs.md`.
 Moybyte is an operating system for ESP32 boards: a console whose software is
 cartridges, running as firmware on the boards below, in a host simulator and in
 a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
-2026-07-31; the block compiler is `runtime/blocks.py`; do not reintroduce it).
+2026-07-31; the block compiler is `runtime/editors/blocks.py`; do not reintroduce it).
 
 - `runtime/` — the host reference of the console (launcher → Player → tabbed
   Editor), staged into every board image. `runtime/README.md` is the file map.

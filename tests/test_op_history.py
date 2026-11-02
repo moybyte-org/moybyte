@@ -1,4 +1,4 @@
-"""The #111 universal op-history CORE: runtime/op_history.py (the in-RAM
+"""The #111 universal op-history CORE: runtime/editors/op_history.py (the in-RAM
 undo/redo primitive shared by every editor + Desk Lab app) and the journal
 persistence adapter's additive `ops` field. Same shared modules the device
 freezes -- MicroPython-safe (plain classes, json-able ops)."""

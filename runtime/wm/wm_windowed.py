@@ -1307,7 +1307,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def dock(self, kind, rect):
         """Stand window `kind` in `rect` (glass coordinates) with no frame and
         no strip, above the window it docks in: the desk Editor's Run slot
-        and Game tab hold the playtest so (runtime/editor_desk.py). `rect`
+        and Game tab hold the playtest so (runtime/editors/editor_desk.py). `rect`
         None gives the window back its place; False hides it, its run held,
         as a minimise does. Whether there is such a window: a game moved
         out to a window of its own (`play_in_window`) never docks."""

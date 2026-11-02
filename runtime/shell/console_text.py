@@ -192,7 +192,7 @@ class TextVerbs:
 
     @property
     def _editing_icons(self):
-        """Whether the Editor holds a theme (its theme mode, runtime/theme_editor.py):
+        """Whether the Editor holds a theme (its theme mode, runtime/editors/theme_editor.py):
         the windowed WM's name for it, whose window X commits it through
         `look.save_icons`."""
         app = getattr(self, "editor_app", None)

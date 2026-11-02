@@ -253,7 +253,7 @@ class BarLayer:
         self.ws = ws
         self._NAMES = names
         # True while a desk Editor pane draws an Editor tab
-        # (runtime/editor_desk.py): the pane takes no bar, and the tab's own
+        # (runtime/editors/editor_desk.py): the pane takes no bar, and the tab's own
         # strip draw and bar tap are no-ops.
         self.held = False
         self._lent_last = [None, None]  # ui_draw.bar_lent's last answer, and _lent's

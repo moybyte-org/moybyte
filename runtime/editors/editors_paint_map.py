@@ -13,7 +13,7 @@
 """PaintEditor (#4) + MapEditor (#32) -- pixel-paint state over a sheet tile
 and tile-placement state over a TileMap.
 
-Undo/redo runs on the shared #111 op-history core (runtime/op_history.py): each
+Undo/redo runs on the shared #111 op-history core (runtime/editors/op_history.py): each
 editor keeps ONE `History` per open sheet/map over a small OpCodec, replacing the
 per-editor UndoStack rings. The codecs record JSON-able ops (flat ints + hex
 blobs -- MicroPython-safe, frozen on device) that INVERT in place carrying their

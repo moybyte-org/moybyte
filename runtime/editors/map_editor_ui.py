@@ -5,10 +5,10 @@
 """The map (tilemap) editor's UI layer (issue #32): a panned, zoomed view of
 the map where each cell shows the placed sprite tile, and the tap-to-paint /
 drag-to-pan gestures over it (#37). On the handheld the Map tab is the page
-`runtime/editor_map.py` draws round the view (its brushes, tools and foot);
+`runtime/editors/editor_map.py` draws round the view (its brushes, tools and foot);
 in a desk Editor's Map pane the view fills the pane above a status line, the
 brush is the Sheet pane's and the tools the pane header's
-(`runtime/editor_desk.py`).
+(`runtime/editors/editor_desk.py`).
 
 One instance lives on Workstation (`ws.map_ui`), with a back-reference to it
 for the cart's shared resources (the sheet and the tilemap, which a run

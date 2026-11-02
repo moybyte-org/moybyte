@@ -227,7 +227,7 @@ def in_window(on, foot=0):
 
 def in_pane(on):
     """While an Editor tab's layout builds for a pane of the desk Editor
-    (`runtime/editor_desk.py`), the surface is the pane and takes no bar."""
+    (`runtime/editors/editor_desk.py`), the surface is the pane and takes no bar."""
     global _pane
     _pane = bool(on)
 

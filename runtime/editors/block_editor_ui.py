@@ -8,12 +8,12 @@
 cart's block program, its insert menu, and the number/name/text prompts.
 
 Two layers, the same split as the console's other sub-editors:
-  * BlockEditor (runtime/editors_block.py) -- the pure tree-edit core: flattens the
+  * BlockEditor (runtime/editors/editors_block.py) -- the pure tree-edit core: flattens the
     program into cursor-addressable rows, inserts/deletes/moves blocks, sets
     slot values. No canvas, no input.
   * BlockEditorUI (here) -- the UI: the outline's taps, drags and keys, the
     menus' and the prompts' state, save and graduation. The page on the
-    verbs, `runtime/editor_blocks.py`, draws the outline and the menus, on
+    verbs, `runtime/editors/editor_blocks.py`, draws the outline and the menus, on
     the handheld and in a desk Editor's Blocks pane alike; the prompts are
     drawn here over it.
 
@@ -407,7 +407,7 @@ class BlockEditorUI:
     # + the `+` insert points between them); A inserts (at an insert point) or steps
     # through / edits the selected block's slots. No dragging -- the decided
     # device-friendly interaction. The vocabulary/compiler is Part 1's blocks module;
-    # the BlockEditor core (runtime/editors_block.py) owns the tree edits, this owns the UI.
+    # the BlockEditor core (runtime/editors/editors_block.py) owns the tree edits, this owns the UI.
 
     def _blk_move_cursor(self, d):
         be = self.blocks_ed

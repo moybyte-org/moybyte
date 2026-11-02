@@ -10,7 +10,7 @@ is NOT a copy -- the editors and a re-run share the same live sheet and bank
 flags a run reads are its own copies, taken at its start (`play_world`,
 EDITOR_LAYOUT.md E-02): the map and the scenes again at Play, the flags'
 edits at every frame (`flag_edits`). Its data, builders and commit_*
-verbs are `ProjectStore` (runtime/project_store.py), the store's half, which
+verbs are `ProjectStore` (runtime/editors/project_store.py), the store's half, which
 crosses with the store (docs/history/native_kernel_2026-09.md, sprint 1b). What this
 file adds is the Editor's half: the per-tab op-history registry (`history_for`,
 `_HISTORY_TABS`), the CONFIG tab's undo codec (`_ConfigOps`) and its History --

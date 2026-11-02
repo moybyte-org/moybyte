@@ -12,7 +12,7 @@ implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
 `shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`, and
 `shell_architecture_v1.md`, superseded; `runtime/shell/system_api.py` is the authority
 on the cart API's trust level). The shipped module
-map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
+map (`runtime/editors/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
 `Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
 guarantee is meaningless without one.
@@ -293,7 +293,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   step/slot reorder, and undo/redo. They are tabs of the one Editor rather than
   global console modes. (In the codebase these are the extracted layer modules —
   `code_layer` / `paint_layer` / `map_editor_ui` / `scene_editor_ui` /
-  `music_editor_ui` — owned as tabs by `runtime/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
+  `music_editor_ui` — owned as tabs by `runtime/editors/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
   draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
@@ -313,7 +313,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 - **On a desk** the Editor shows several of these at once, as five
   workspaces (Settings, Code, Art, World, Sound) whose dividers move, one
   pane at a time where the glass holds none of them
-  (`runtime/editor_desk.py`, `docs/history/look_2026-10.md` step 30).
+  (`runtime/editors/editor_desk.py`, `docs/history/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
@@ -369,7 +369,7 @@ the ladder, so the two views must coexist — and coexisting honestly means admi
 when they can't:
 
 - **Blocks are the beginner's source of truth and GENERATE the code.** (The compiler
-  exists: `runtime/blocks.py` does blocks → Python.) Edit blocks, flip to the
+  exists: `runtime/editors/blocks.py` does blocks → Python.) Edit blocks, flip to the
   Code tab, and see what your program *is* — that flip is the single most valuable
   teaching gesture in the console.
 - **Blocks → code is always smooth.** Regenerate any time; the code view is never
@@ -575,11 +575,11 @@ its per-surface `make_system_api` track remains open) and `shell_architecture_v1
 this doc, `docs/theme_and_shell_2026-11.md` is the contract for the theme
 format, the bars and modes, the home, scrolling and the text files.
 
-Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
-`runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`,
-`runtime/cards_layer.py`, `runtime/block_editor_ui.py`) ARE the Editor's tabs, owned
-by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
-`runtime/project.py` is the project workspace + commit verbs (§7, §11);
+Concretely, as shipped: the extracted layer modules (`runtime/editors/code_layer.py`,
+`runtime/editors/paint_layer.py`, `runtime/editors/map_editor_ui.py`, `runtime/editors/music_editor_ui.py`,
+`runtime/editors/cards_layer.py`, `runtime/editors/block_editor_ui.py`) ARE the Editor's tabs, owned
+by `runtime/editors/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
+`runtime/editors/project.py` is the project workspace + commit verbs (§7, §11);
 `runtime/wm/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
 bar. `Workstation` (`runtime/shell/console.py`) is the kernel — see `runtime/README.md` for the

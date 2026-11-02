@@ -86,7 +86,7 @@ the two differed on Storybook, the functional one decided.
 ## Paint
 
 `runtime/apps/artwork.py` (`PaintAppLayer`, `ArtworkService`). The sprite tab
-(`runtime/paint_layer.py`, step 24) and Paint share their vocabulary: the
+(`runtime/editors/paint_layer.py`, step 24) and Paint share their vocabulary: the
 tools as toggles, the colour in use two-toned, the ring cursor, the more
 menu.
 
@@ -181,7 +181,7 @@ ones.
 
 ## Notes
 
-`system_carts/moybyte.notes.moy` (a cart; `runtime/editor_handle.py` draws
+`system_carts/moybyte.notes.moy` (a cart; `runtime/editors/editor_handle.py` draws
 the note). On the verbs it leaves `ui_draw`, the exception step 11a pinned.
 
 | today | becomes |

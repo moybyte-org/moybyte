@@ -4,7 +4,7 @@ ladder every prompt on the console types through.
 
 This module also carried the pre-#111 history pair -- `UndoStack` and
 `UndoRedoMixin` -- until 2026-08-18: every editor core had moved onto the
-op-history `History` (and its `OpHistoryMixin` facade, runtime/op_history.py),
+op-history `History` (and its `OpHistoryMixin` facade, runtime/editors/op_history.py),
 leaving the pair with no importer but its own unit tests. Git history has it.
 Dependency-free (freezes cleanly on CPython + MicroPython)."""
 

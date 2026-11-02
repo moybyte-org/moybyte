@@ -7,7 +7,7 @@ board freezes them as and then execs the board's `moy_runtime.py`, so
 here with stub canvases: the spr() dispatch (sheet tile / Image / span /
 flip), map/mget/mset over an injected TileMap, and the tile cache a sprite
 edit must bust. The editor-core tests beside them exercise the canonical
-`runtime/editors_*.py` cores the same way.
+`runtime/editors/editors_*.py` cores the same way.
 """
 
 import importlib.util

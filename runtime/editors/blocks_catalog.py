@@ -12,7 +12,7 @@ slot types, categories and shapes, `CATALOG` (every block type's category,
 shape, label, slots and how it becomes code) and the custom blocks' labels and
 slots derived from the live program.
 
-The compiler (runtime/blocks.py) reads this table and re-exports every
+The compiler (runtime/editors/blocks.py) reads this table and re-exports every
 public name, so `blocks.CATALOG` and the rest name these. A leaf with no
 imports; MicroPython-safe like the compiler (no f-strings, plain dicts).
 """

@@ -1,7 +1,7 @@
 """Tests for the structured-outline block editor UI (issue #29, Part 2).
 
 Two layers:
-  * BlockEditor core (runtime/editors_block.py) -- pure tree edits + cursor, tested
+  * BlockEditor core (runtime/editors/editors_block.py) -- pure tree edits + cursor, tested
     directly against the Part-1 blocks model/compiler.
   * The console UI -- driven through the real shared host Workstation (the same
     code the device runs) via ConsoleDriver (mouse == touch, arrows == trackball),

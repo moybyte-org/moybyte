@@ -11,7 +11,7 @@
 #   EditorDesk.handle_pointer  the row, the dividers, a pane's header and its content
 """The Editor on the desk (docs/media/look_2026-10/EDITOR_LAYOUT.md, concept
 B, and MAXIMISE_VARIANTS.md's Resize): several of its parts at once, as five
-workspaces whose dividers move (`runtime/editor_panes.py` holds the
+workspaces whose dividers move (`runtime/editors/editor_panes.py` holds the
 geometry). The app's row is the band the bar lends the Editor
 (`EditorApp.draw_zone`): the workspaces, undo, redo and the Play slot.
 
