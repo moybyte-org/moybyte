@@ -319,6 +319,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # quiet frames put it back over the game instead of painting it.
         self._pop_face = None
         self._pop_face_ok = False
+        # The idle frame's scrim snapshot found no room (`prealloc`): it is
+        # not asked for again until the WM gives a layer back.
+        self._prealloc_refused = False
         # Retained desktop-backdrop cache (#58 drag perf): during a DRAG/RESIZE the
         # wallpaper + OS bar are invariant, so the first such frame captures
         # their composite and every later one blits it (see _BackdropLayer). Its

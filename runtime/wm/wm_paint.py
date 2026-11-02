@@ -61,11 +61,11 @@ class WindowPaint:
     # the gc heap and a collect cost 430ms. `release` is probed, so a
     # recording tier's layer (no release) and the host's are unaffected.
 
-    @staticmethod
-    def _release_layer(lay):
+    def _release_layer(self, lay):
         rel = getattr(lay, "release", None)
         if rel is not None:
             rel()
+            self._prealloc_refused = False    # room again, maybe (`prealloc`)
 
     def _drop_win(self, win):
         buf = win.buf

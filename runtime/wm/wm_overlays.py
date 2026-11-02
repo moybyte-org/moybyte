@@ -9,6 +9,7 @@
 #   WindowOverlays._pause_paint        the riding pause menu's scrim and card
 #   WindowOverlays._scrim_game         wash the game's fresh frame under the scrim
 #   WindowOverlays.prealloc            the riding scrim's snapshot, minted when idle
+#   WindowOverlays._ride_refused       a snapshot the glass has no room for: nothing rides
 """The windowed WM's OVERLAYS on a retained desk (docs/theme_and_shell_2026-11.md
 §8.6): the popover (the system menu and a card's menu) painted in its rect
 alone, the pause menu riding over a paused playtest's window, the system
@@ -83,6 +84,10 @@ class WindowOverlays:
                 self._pop_reset()
                 j = 0
             s = slots[j]
+            if not self._room(s, rect):
+                self.ws._dirty = True     # no room for its snapshot: repaint whole
+                self._pop_reset()
+                return
             s[1] = rect
             s[3] = False
             cur = self._pop_cur = j
@@ -175,23 +180,23 @@ class WindowOverlays:
         is up, its snapshot put back once it is down. False when the change
         cannot ride and the frame repaints whole: the scrim came back while
         a buffer is still owed the last one's restore, or it goes with no
-        snapshot to put back, or another modal's scrim stays."""
+        snapshot to put back, or another modal's scrim stays. A scrim whose
+        snapshot the glass has no room for comes up whole, as one that came
+        up while the frame repainted does, and stays so."""
         w = self._pop_wash
         up = self._wash_rides()
         if up and not w[4] and self._scrim_was:
             up = False                    # the scrim came up whole: it stays so
+        rect = self._wash_bbox() if up and not w[4] else None
+        if rect is not None and not self._room(w, rect):
+            up = False
         if up == w[4]:
             return True
         self._wash_seq += 1
         ride = True
         if up:
             ride = w[1] is None
-            rects = self._wash_rects()
-            x0 = min(r[0] for r in rects)
-            y0 = min(r[1] for r in rects)
-            x1 = max(r[0] + r[2] for r in rects)
-            y1 = max(r[1] + r[3] for r in rects)
-            w[1] = (x0, y0, x1 - x0, y1 - y0)
+            w[1] = rect
             w[3] = False
             sp = self._pause_span
             sp[0] = sp[1] = sp[2] = sp[3] = 0
@@ -202,6 +207,25 @@ class WindowOverlays:
         w[4] = up
         w[2] = n if ride else 0
         return ride
+
+    def _wash_bbox(self):
+        """The rect the riding scrim's snapshot takes: its rects' bounds."""
+        rects = self._wash_rects()
+        x0 = min(r[0] for r in rects)
+        y0 = min(r[1] for r in rects)
+        x1 = max(r[0] + r[2] for r in rects)
+        y1 = max(r[1] + r[3] for r in rects)
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    def _room(self, s, rect):
+        """Slot `s`'s snapshot layer minted at `rect`'s size before a ride
+        counts on it: False where the glass has no room, and the change
+        repaints whole instead. Asked once a change, never a frame."""
+        try:
+            self._grown(s, 0, rect[2], rect[3])
+        except MemoryError:
+            return False
+        return True
 
     def popover_takes_keys(self):
         """The open popover owns the keyboard and paints its own change, so
@@ -318,21 +342,41 @@ class WindowOverlays:
 
     def _snap(self, s):
         """Snapshot the pixels under slot `s`'s rect from the root canvas
-        (a popover's, or the riding scrim's)."""
+        (a popover's, or the riding scrim's), in the layer `_room` minted
+        when its ride began. False where a rect that grew since finds no
+        room: nothing rides, and the frame after repaints whole
+        (`_ride_refused`)."""
         x, y, w, h = s[1]
-        self._grown(s, 0, w, h).blit_strip(self._root_canvas, -x, -y)
+        try:
+            lay = self._grown(s, 0, w, h)
+        except MemoryError:
+            self._ride_refused()
+            return False
+        lay.blit_strip(self._root_canvas, -x, -y)
         s[3] = True
+        return True
+
+    def _ride_refused(self):
+        """A snapshot found no room: every overlay's ride is dropped and the
+        next frame repaints whole, as a WM with no retained root paints
+        them. An overlay's next change asks again: a failed ask costs that
+        change, never every frame after it."""
+        self._pop_reset()
+        self.ws._dirty = True
+        self.ws._frame_requested = True   # asked from within a draw (request_frame)
 
     def _pop_capture(self, s):
         """Snapshot slot `s` (`_snap`), and note whether it lies over the
-        playtest's window."""
-        self._snap(s)
+        playtest's window. False where it found no room."""
+        if not self._snap(s):
+            return False
         # Whether the playtest's window repaints under it, read once here:
         # nothing moves a window while a popover is open (a tap outside
         # closes it), and a play frame allocates nothing.
         win = self._wins.get("desktop")
         self._pop_over_game = (win is not None and not win.minimized
                                and _overlap(s[1], self._win_extent(win)))
+        return True
 
     def _pop_paint(self, ride):
         """Paint the open popover: snapshot what it covers first (always on
@@ -352,7 +396,9 @@ class WindowOverlays:
             # Taken at its rect as it is now: a card that grew (the networks
             # a scan found) repainted the frame whole at its new size.
             s[1] = self.ws.menu_ui.panel_rect()
-            self._pop_capture(s)
+            if not self._pop_capture(s):
+                self.ws.menu_ui._draw_sysmenu()
+                return
         r = s[1]
         if (ride and not fresh and self._pop_over_game and self._pop_face_ok
                 and "desktop" in self._wins):
@@ -450,7 +496,8 @@ class WindowOverlays:
             self._draw_player_window(game, False, self._focus == "desktop", 0,
                                      full=False, defer=False)
         if not w[3]:
-            self._snap(w)
+            if not self._snap(w):
+                return
             self._wash_focus()
         win = self._wash_win[0]
         if win is not None:
@@ -532,7 +579,8 @@ class WindowOverlays:
             if r is not None:
                 _grow(self._pause_span, r[0], r[1], r[0] + r[2], r[1] + r[3])
             return
-        self._snap(w)
+        if not self._snap(w):
+            return
         w[2] = 0
         self._pause_owed = 0
 
@@ -546,7 +594,12 @@ class WindowOverlays:
             ww[0] = None                  # it shows under the menu as it is
             return
         buf = win.buf
-        self._grown(ww, 1, buf.w, buf.h).blit_strip(buf, 0, 0)
+        try:
+            lay = self._grown(ww, 1, buf.w, buf.h)
+        except MemoryError:
+            ww[0] = None                  # no room: it shows as it is
+            return
+        lay.blit_strip(buf, 0, 0)
         ww[0] = win
         ww[2] = win._buf_stale
         ww[3][:] = win._lag
@@ -579,10 +632,13 @@ class WindowOverlays:
         """The riding scrim's snapshot layer at the layout's content rect,
         minted on an idle frame (the device new_layer pre-collects), so a
         menu's first open over the desk copies into it instead. Its size
-        allocates nothing once minted; release_cache gives it back."""
-        if not self._pop_rides() or self._pop_live():
+        allocates nothing once minted; release_cache gives it back. No
+        room is asked about once: a refused mint waits for the WM to give a
+        layer back (`_release_layer`), because each ask that the glass
+        cannot serve collects the whole heap first."""
+        if self._prealloc_refused or not self._pop_rides() or self._pop_live():
             return
         try:
             self._grown(self._pop_wash, 0, self.ws.layout.cw, self.ws.layout.ch)
         except Exception:  # noqa: BLE001 -- no room: the open mints it, or repaints
-            pass
+            self._prealloc_refused = True

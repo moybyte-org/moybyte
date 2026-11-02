@@ -4622,3 +4622,74 @@ def test_the_frame_path_is_found_on_the_class_or_its_first_base():
     far = [n for n in FRAME_PATH
            if n not in vars(WindowedWM) and n not in vars(first)]
     assert not far, "the frame reads these past the first base: %s" % far
+
+
+def _no_room_over(ws, least):
+    """The root canvas's glass with no room for a layer of `least` bytes or
+    more, as a long session's PSRAM leaves a Guition P4: such a mint raises
+    MemoryError. Returns the list each refused ask is noted in."""
+    asks = []
+    real = ws.sys_canvas.new_layer
+
+    def new_layer(w, h, *a, **k):
+        if w * h * 2 >= least:
+            asks.append((w, h))
+            raise MemoryError("memory allocation failed")
+        return real(w, h, *a, **k)
+    ws.sys_canvas.new_layer = new_layer
+    return asks
+
+
+def test_a_snapshot_with_no_room_repaints_whole_instead_of_failing_every_frame(tmp_path):
+    """The pause menu's scrim rides on a snapshot of the glass under it. With
+    no room for that snapshot the menu paints as a WM with no retained root
+    paints it -- whole frames, the bytes of a WM whose scrims never ride --
+    and the refusal costs the change that asked, never every frame after it: a mint the glass cannot
+    serve collects the heap first, and asking on every frame wedged the
+    Guition P4 at one frame a second."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+    asks = _no_room_over(ws, ws.sys_canvas.w * ws.sys_canvas.h)
+    _no_room_over(ref, ref.sys_canvas.w * ref.sys_canvas.h)
+    steps = (lambda w: w.pause.show(),
+             lambda w: _pause_key(w, "down"),
+             lambda w: setattr(w, "_dirty", True),
+             lambda w: _pause_key(w, "up"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 8)
+        rring.settle(rdrv, 8)
+        assert set(stacks) <= {"full"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.bufs):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+        if i == 0:
+            first = len(asks)
+    # the scrim's snapshot, the idle mint and the card's held frame, each
+    # asked once when the menu came up; its later changes ask nothing
+    assert len(asks) == first <= 3, asks
+    ws.pause.close()
+    ref.pause.close()
+    ring.settle(drv, 6)
+    rring.settle(rdrv, 6)
+    for a, b in zip(ring.bufs, rring.bufs):
+        assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
+
+
+def test_an_idle_snapshot_mint_with_no_room_is_asked_once(tmp_path):
+    """The system menu's scrim snapshot is minted on idle frames. Refused, it
+    is not asked for again until the WM gives a layer back."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    wm = ws.wm
+    wm._release_layer(wm._pop_wash[0])
+    wm._pop_wash[0] = None
+    asks = _no_room_over(ws, ws.layout.cw * ws.layout.ch * 2)
+    for _ in range(12):
+        drv.frame(1 / 30)
+    assert len(asks) == 1, asks
+    ws.close_app(ws._apps_by_id["calc"]) if hasattr(ws, "close_app") else \
+        wm.close_window_kind("calc")
+    for _ in range(12):
+        _quiesce(ws)
+        drv.frame(1 / 30)
+    assert len(asks) == 2, asks
