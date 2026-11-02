@@ -81,7 +81,8 @@ void moycore_lua_unstuck(void);
 // One frame of the open run, whichever its runtime: the draw state reset,
 // time()'s base stamped, then the Lua frame above or a compiled cart's two
 // hooks on its engine's thread. 0, or -1 with the cart's error in `err`.
-// Defined by the binding (modmoycore.c), where a compiled cart's session is.
+// Defined by the binding (modmoycore.c; a compiled cart's session is
+// moycore_wasm.c's).
 int moycore_frame(float dt, int draw, char *err, size_t n);
 
 // The open run's frame is past the runaway watch's budget: from the

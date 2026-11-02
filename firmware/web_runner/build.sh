@@ -180,8 +180,8 @@ PYEOF
   # would have been two different engines implementing the same spec.
   #
   # It ships its own micropython.mk (Makefile fragment) and needs no wasm
-  # variant of it: the fragment compiles only modmoycore.c + libmoy's Lua
-  # binding, and reaches its two SIBLINGS by relative path for the rest -- the
+  # variant of it: the fragment compiles only the binding (modmoycore.c and the
+  # files beside it) + libmoy's Lua binding, and reaches its two SIBLINGS by relative path for the rest -- the
   # raster from moy_gfx's vendored libmoy, the VM from moy_lua's vendored Lua
   # 5.4. Both are staged directly above, so the sibling layout the boards get
   # from ext_mod/ holds here too. The board allocator it prefers is

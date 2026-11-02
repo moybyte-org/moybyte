@@ -182,7 +182,7 @@ def test_the_board_decides_the_switch_where_it_decides_the_signature():
     assert body.count("unsigned_ok") == 2, "the switch is read once, for a missing trailer"
     assert "a[ARG_allow_unsigned].u_bool" in src
     assert "verify_module(s->file, s->file_len, allow_unsigned != 0" in src
-    core = (ROOT / "native" / "moycore" / "modmoycore.c").read_text()
+    core = (ROOT / "native" / "moycore" / "moycore_wasm.c").read_text()
     assert "moy_wasm_session_open(path, sha, memory, allow_unsigned," in core
     assert "n_args > 7 && mp_obj_is_true(a[7])" in core
     glue = (ROOT / "device" / "moycore_glue.py").read_text()

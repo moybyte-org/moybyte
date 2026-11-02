@@ -29,7 +29,7 @@ and `list` never touch the store after that.
 
 THE TIERS: a run's requests are native/moy_store/moy_files.c's on every
 tier -- the boards' and the browser's moycore on the MicroPython task
-(native/moycore/modmoycore.c, through moy_wasm_on_vm), the host's run by
+(native/moycore/moycore_wasm.c, through moy_wasm_on_vm), the host's run by
 ctypes (runtime/host/moyhost_wasm.c). This module is the reference
 tests/test_moy_files.py holds that C to, rule for rule, and the store's half:
 `remove` and `cart_id`, which Get Carts' REMOVE calls. `gate(fn)` runs fn

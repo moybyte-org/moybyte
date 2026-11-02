@@ -11,7 +11,9 @@ half: what a *moybyte* console is made of. The console itself -- the pieces
 below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
 and the cart's Lua VM -- its allocator and pool, open, load, frame and close
 -- is `moycore_lua.c`; neither includes anything of MicroPython.
-`modmoycore.c` binds them to buffers Python owns, and the host's two ctypes
+`modmoycore.c` binds them to buffers Python owns (its profilers, hardware
+performance counters and compiled cart are `moycore_prof.c`, `moycore_pmu.c`
+and `moycore_wasm.c` beside it, sharing `modmoycore_int.h`), and the host's two ctypes
 shims (`runtime/host/moyhost_lua.c`, `runtime/host/moyhost_wasm.c`) run the console's
 file. On a VM tier a run's frame is the kernel's Player's
 (`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and

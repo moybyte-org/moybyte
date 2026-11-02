@@ -195,7 +195,7 @@ void hw_interp_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
  * library as on a board's image: its rows for module "moybyte.app" (the
  * toolkit's among them, native/moy_ui's), the run's grant and the load's
  * grant check, registered with WAMR once, beside the "moy" table, as
- * modmoycore.c registers them. */
+ * moycore_wasm.c registers them. */
 const NativeSymbol *moy_app_wasm_natives(uint32_t *count);
 uint32_t moy_app_wasm_grant(void);
 int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen);
