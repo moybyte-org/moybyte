@@ -4593,3 +4593,25 @@ def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
     assert not win.full() and win.own
     assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]
     assert ws.wm._focus == "desktop" and "projects" in ws.wm._wins
+
+
+# The names the windowed tier's frame reads every frame -- the router's draw
+# list, the quiet frame's predicates and the base's verbs the console asks.
+FRAME_PATH = ("draw_stack", "_still", "_settled", "_calm", "_retained_n",
+              "debt_owed", "_pop_rides", "_scrim_up", "_scrim_rides", "_pop_n",
+              "_pause_rides", "_wash_rides", "_game_held", "_pop_live",
+              "_ensure_stack", "_overlay_sig", "overlay_stack",
+              "visible_stack_rev", "top_kind", "top_is", "top_is_player")
+
+
+def test_the_frame_path_is_found_on_the_class_or_its_first_base():
+    """On MicroPython a method the class lacks is looked up through its
+    bases in order, a dict miss per base. WindowedWM's mixins stand before
+    its base, so the names the frame reads every frame live on the class
+    or its first base, and the base's are bound on the class."""
+    import runtime  # noqa: F401 -- the package path first
+    from runtime.wm_windowed import WindowedWM
+    first = WindowedWM.__bases__[0]
+    far = [n for n in FRAME_PATH
+           if n not in vars(WindowedWM) and n not in vars(first)]
+    assert not far, "the frame reads these past the first base: %s" % far

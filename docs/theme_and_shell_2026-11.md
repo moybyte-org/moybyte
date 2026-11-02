@@ -1681,7 +1681,8 @@ Enter activates — exactly the `sysmenu` layer's rules. That layer is the
 one popover layer, with the system menu as its first content; the system
 menu is a popup in console mode too, as on the T-Deck.
 
-**A popover rides the quiet stack** (`runtime/wm_windowed.py`).
+**A popover rides the quiet stack** (`runtime/wm_overlays.py`, the draw
+stack in `runtime/wm_windowed.py`).
 A change that stays inside the panel -- it opened, a row moved, it closed --
 does not mark the frame dirty: the WM owes the popover's rect to each of the
 root's real buffers (`RETAINED_FRAMES`; one on a persistent root, so the
