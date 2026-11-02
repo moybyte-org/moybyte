@@ -3,6 +3,7 @@ lacks. CPython has them, so every host test passes and the first call on a
 board or in the browser is an AttributeError: Files' `kind.capitalize()`
 crashed the browser console on open (2026-10-18)."""
 
+import glob
 import os
 import re
 
@@ -16,13 +17,13 @@ CALL = re.compile(r"\.(%s)\(" % "|".join(MISSING))
 def test_shipped_code_calls_no_str_method_micropython_lacks():
     hits = []
     for top in ("runtime", "device"):
-        for name in sorted(os.listdir(os.path.join(ROOT, top))):
-            if not name.endswith(".py"):
-                continue
-            path = os.path.join(ROOT, top, name)
+        for path in sorted(glob.glob(os.path.join(ROOT, top, "**", "*.py"),
+                                     recursive=True)):
+            if "%shost%s" % (os.sep, os.sep) in path:
+                continue                  # the host's own: never shipped
             with open(path, encoding="utf-8") as f:
                 for n, line in enumerate(f, 1):
                     code = line.split("#", 1)[0]
                     if CALL.search(code):
-                        hits.append("%s/%s:%d: %s" % (top, name, n, line.strip()))
+                        hits.append("%s:%d: %s" % (os.path.relpath(path, ROOT), n, line.strip()))
     assert not hits, "\n".join(hits)

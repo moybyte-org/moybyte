@@ -34,9 +34,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-RUNTIME = ROOT / "runtime"
 
 from ws_helpers import build_ws as _ws, use_theme
+from tools.board_config import runtime_file
 
 from runtime import app_context as _ac
 from runtime import chrome as _chrome
@@ -60,7 +60,7 @@ APP_TARGETS = _app_targets()
 
 
 def _class_node(mod_name, cls_name):
-    tree = ast.parse((RUNTIME / (mod_name + ".py")).read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_file(mod_name + ".py").read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == cls_name:
             return node
@@ -75,7 +75,7 @@ _MODEL_MODULES = ("artwork", "picture_copies")
 
 def _model_node(name):
     for mod in _MODEL_MODULES:
-        tree = ast.parse((RUNTIME / (mod + ".py")).read_text(encoding="utf-8"))
+        tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))
         for node in tree.body:
             if isinstance(node, ast.ClassDef) and node.name == name:
                 return node
@@ -189,7 +189,7 @@ def test_no_role_uses_a_property_forward():
     Checked twice over -- the SOURCE (every decorator on every method, so a
     `@property` cannot arrive under an alias or inside a class the loop below
     never reaches) and the built classes' own descriptors."""
-    tree = ast.parse((RUNTIME / "app_context.py").read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_file("app_context.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -995,7 +995,7 @@ def test_no_migrated_module_reaches_the_workstation(mod):
     one that matters, because `getattr(self.ws, "clipboard", None)` is invisible
     to a `ws.` grep -- which is how the source plan concluded the clipboard had
     zero consumers while five shipped."""
-    src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
+    src = runtime_file(mod + ".py").read_text(encoding="utf-8")
     for line_no, line in enumerate(src.splitlines(), 1):
         assert "self.ws" not in line, "%s:%d still holds a ws reference" % (mod, line_no)
         code = line.split("#", 1)[0]
@@ -1009,7 +1009,7 @@ def test_kernel_chrome_is_not_an_app():
     is held to the ratchet above."""
     assert not set(KERNEL_CHROME) & set(MIGRATED)
     for mod in KERNEL_CHROME:
-        assert (RUNTIME / (mod + ".py")).is_file(), mod
+        assert runtime_file(mod + ".py").is_file(), mod
     for role in ("update", "firmware", "updater", "reboot"):
         assert role not in _ac.ROLES, role
 
@@ -1022,5 +1022,5 @@ def test_no_role_hands_out_the_console():
     assert "shell" not in _ac.ROLES
     for mod, cls in APP_TARGETS:
         assert "shell" not in _declared(mod, cls), cls
-        src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
+        src = runtime_file(mod + ".py").read_text(encoding="utf-8")
         assert "ctx.shell" not in src, mod

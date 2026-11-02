@@ -48,6 +48,7 @@ import pytest
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
 from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
+from tools.board_config import runtime_file
 
 # The sub-surfaces are rendered on every config that renders the whole
 # surface list; a `plan` config holds a few named surfaces alone, and a
@@ -441,7 +442,7 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
         r"cv\.rect\([^\n]*\bth\[[\"'](?:hilite|selection)[\"']\][^\n]*\)\s*\n"
         r"\s*(?:fg\s*=[^\n]*\n\s*)?cv\.print\(")
     for name in group:
-        src = (ROOT / "runtime" / name).read_text(encoding="utf-8")
+        src = runtime_file(name).read_text(encoding="utf-8")
         assert not pat.search(src), (
             "runtime/%s still hand-rolls a selection row (a `hilite` rect "
             "followed by a print). Use ui.row." % name)

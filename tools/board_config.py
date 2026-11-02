@@ -371,6 +371,25 @@ def shared_sources(src_dir):
     return out
 
 
+def runtime_file(name, root=ROOT):
+    """The Path of runtime module `name` (`"console.py"`), whichever folder of
+    runtime/ holds it: the tree is one flat namespace, so a tool or a test
+    names a module by its basename and never by its folder."""
+    sources = shared_sources(Path(root) / "runtime")
+    if name not in sources:
+        raise FileNotFoundError("runtime/ holds no module named %s" % name)
+    return sources[name]
+
+
+def runtime_dirs(root=ROOT):
+    """Every folder of runtime/ that holds modules a board stages, `host/`
+    aside: what a CPython process puts on `sys.path` to import them bare, the
+    way a board's flat `modules/` lets it."""
+    src = Path(root) / "runtime"
+    return sorted({str(p.parent) for p in shared_sources(src).values()
+                   if not host_only(src, p)})
+
+
 def host_only(src_dir, path):
     """True for a module under a `host/` folder of the shared source tree."""
     return HOST_ONLY_DIR in Path(path).relative_to(src_dir).parts[:-1]

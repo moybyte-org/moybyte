@@ -11,6 +11,7 @@ real pointer/input dispatch the device loop uses.
 from pathlib import Path
 import pytest
 from ws_helpers import boot_on_fixture
+from tools.board_config import runtime_file
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -971,7 +972,7 @@ def test_the_line_walker_is_integer_only():
     """Host CPython and frozen MicroPython must produce byte-identical pixels, so
     the walker may not divide or touch a float."""
     import ast
-    src = (ROOT / "runtime" / "editors_paint_map.py").read_text(encoding="utf-8")
+    src = runtime_file("editors_paint_map.py").read_text(encoding="utf-8")
     fn = next(n for n in ast.walk(ast.parse(src))
               if isinstance(n, ast.FunctionDef) and n.name == "_pe_line")
     for node in ast.walk(fn):

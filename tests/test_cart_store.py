@@ -1664,7 +1664,7 @@ print("refused", job.error == ci.MISMATCH, "bad.moy" in os.listdir(root))
 
 @pytest.mark.parametrize("archive", ["ram", "store"])
 def test_the_installer_runs_under_micropython(tmp_path, archive):
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(why="the deflate half of cart_index only exists there")
     repo = Repo("https://mp.example/carts")
     wad = os.urandom(90000)
@@ -1685,7 +1685,7 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     root = _store(tmp_path)
     script = tmp_path / "run.py"
     script.write_text(_MP_SCRIPT % {
-        "runtime": str(ROOT / "runtime"), "map": str(tmp_path / "map.json"),
+        "runtime": runtime_tree(), "map": str(tmp_path / "map.json"),
         "index": url_map[repo.url("index.json")], "index_url": repo.url("index.json"),
         "root": root, "archive": archive})
     out = subprocess.run([exe, "-X", "heapsize=4M", str(script)], capture_output=True,

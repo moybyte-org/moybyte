@@ -30,7 +30,11 @@ ctypes bindings to the native kernels (`*_binding.py`, `moy_input`,
 host's one library and its compile body (`host_native`, `native_build`), the
 compiled-cart runner (`wasm_host`), the boards' canvas on CPython
 (`host_canvas`) and the simulator glue (`host_app`). The rows below name a
-file by its basename.
+file by its basename, and so does code that reads one: a test or a tool takes
+its path from `board_config.runtime_file(name)`, a CPython process importing
+the staged modules bare puts `board_config.runtime_dirs()` on its path, and a
+MicroPython driver puts `tests/unix_mp.py`'s `runtime_tree()`, runtime/ staged
+flat as a board stages it, on its own.
 
 | file | role |
 |---|---|

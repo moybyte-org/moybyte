@@ -1264,7 +1264,7 @@ def qr(cv, x, y, side):
     zone whatever the theme (a scanner needs dark on light)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "moy_qr", os.path.join(R7.REPO, "runtime", "moy_qr.py"))
+        "moy_qr", os.path.join(R7.REPO, "runtime/moy_qr.py"))
     moy_qr = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(moy_qr)
     m = moy_qr.encode(URL)

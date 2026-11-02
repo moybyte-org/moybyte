@@ -64,6 +64,7 @@ from runtime.editors_sheet import SpriteSheet, TileMap  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from tools.board_config import runtime_file
 
 DEV = ROOT / "device"
 
@@ -446,7 +447,7 @@ def _load_device_canvas():
     # Inject the fake framebuf, then load moy_runtime's DeviceCanvas under CPython.
     sys.modules["framebuf"] = _FakeFramebuf()
     for name in ("editors_sheet", "audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod

@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 from unix_mp import require_unix_mp                            # noqa: E402
 
 from runtime import moy_qr                                     # noqa: E402
+from tools.board_config import runtime_file
 
 
 # What a board's connection screen encodes since the 2026-08-29 move to port 80
@@ -402,7 +403,7 @@ def test_the_encoder_runs_under_micropython_and_agrees_with_cpython(tmp_path):
     # no board has.
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(ROOT / "runtime" / "moy_qr.py", stage / "moy_qr.py")
+    shutil.copy(runtime_file("moy_qr.py"), stage / "moy_qr.py")
     src = (_MP_DRIVER
            .replace("@STAGE@", repr(str(stage)))
            .replace("@PAYLOADS@", repr(payloads)))

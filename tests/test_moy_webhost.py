@@ -31,6 +31,7 @@ sys.path.insert(0, str(MODULES))
 
 import moy_webhost as wh                                       # noqa: E402
 from runtime import net_binding as nb                           # noqa: E402
+from tools.board_config import runtime_file
 
 
 @pytest.fixture(autouse=True)
@@ -1788,7 +1789,7 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
 def test_the_dev_channel_run_uses_the_same_lookup():
     """ONE author for the cart lookup: a name that works over serial works from
     the page, and neither can grow its own idea of what a cart is called."""
-    src = (ROOT / "runtime" / "dev_channel.py").read_text()
+    src = runtime_file("dev_channel.py").read_text()
     assert "ws.launch_named(" in src
     assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
 

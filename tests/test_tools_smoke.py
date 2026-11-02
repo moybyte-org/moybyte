@@ -38,6 +38,7 @@ TOOLS = ROOT / "tools"
 sys.path.insert(0, str(TOOLS))
 
 import p4_autotest                                              # noqa: E402
+from tools.board_config import runtime_file
 
 # A tool answering its usage has nothing to compute. Generous enough not to
 # flake on a loaded CI box, short enough to catch a tool that went to hardware:
@@ -107,7 +108,7 @@ def _dev_channel_commands():
     Guition S3's `bt`).
     """
     run = None
-    for node in ast.walk(_tree(ROOT / "runtime" / "dev_channel.py")):
+    for node in ast.walk(_tree(runtime_file("dev_channel.py"))):
         if isinstance(node, ast.ClassDef) and node.name == "DevChannel":
             for fn in node.body:
                 if isinstance(fn, ast.FunctionDef) and fn.name == "run":
@@ -129,7 +130,7 @@ def _dev_channel_commands():
                             if isinstance(e, ast.Constant))
 
     # A settings toggle's own serial word is the 6th field of its entry.
-    for node in ast.walk(_tree(ROOT / "runtime" / "settings_layer.py")):
+    for node in ast.walk(_tree(runtime_file("settings_layer.py"))):
         if not (isinstance(node, ast.Assign)
                 and any(getattr(t, "id", "") == "SETTINGS_TOGGLES"
                         for t in node.targets)):

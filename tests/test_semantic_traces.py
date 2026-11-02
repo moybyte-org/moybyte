@@ -109,7 +109,8 @@ from pathlib import Path
 
 import pytest
 
-from unix_mp import find_unix_mp, require_unix_mp
+from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -578,10 +579,10 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     stage.mkdir()
     # moy_font is what build.sh stages from runtime/font.py -- the gate ctx
     # (and with it every direct lane) needs it at device_canvas import time.
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     # lua_ext is the object-verb glue (prelude + int-handle registry) both Lua
     # runtimes import; build.sh stages it from runtime/ the same way.
-    shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
+    shutil.copy(runtime_file("lua_ext.py"), stage / "lua_ext.py")
     # input.py so the scripted feed can BE the console's InputState rather than
     # a second implementation of held/pressed/button_masks -- and it is the
     # BOARDS' one, because this harness models a device build: the native
@@ -593,13 +594,13 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # Same reasoning as the input class above: device_canvas takes Image from
     # moy_image now (ONE definition, shared with the host canvas), and the real
     # build stages it -- with its moy_fs leaf -- out of runtime/ into modules/.
-    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
-    shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
+    shutil.copy(runtime_file("moy_image.py"), stage / "moy_image.py")
+    shutil.copy(runtime_file("moy_fs.py"), stage / "moy_fs.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),
                          ("@DEVICE@", str(ROOT / "device")),
-                         ("@RUNTIME@", str(ROOT / "runtime")),
+                         ("@RUNTIME@", runtime_tree()),
                          ("@DT@", DT), ("@FRAMES@", FRAMES),
                          ("@HELD@", HELD),
                          ("@PY_CART@", PY_CART), ("@LUA_CART@", LUA_CART)):
@@ -897,7 +898,7 @@ def _store_trace(exe, tmp_path, tag, prelude=None):
     root.mkdir()
     script = tmp_path / ("store_%s.py" % tag)
     script.write_text((TWIN_SPINE if prelude is None else prelude) + STORE_DRIVER.replace(
-        "@RUNTIME@", repr(str(ROOT / "runtime"))).replace("@ROOT@", repr(str(root))))
+        "@RUNTIME@", repr(runtime_tree())).replace("@ROOT@", repr(str(root))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -1188,7 +1189,7 @@ keys ['app_guard', 'wallpaper_guard'] ['open', 'proven', 'strikes']
 def _spine_trace(exe, tmp_path, tag, prelude=None):
     script = tmp_path / ("spine_%s.py" % tag)
     script.write_text((TWIN_SPINE if prelude is None else prelude) + SPINE_DRIVER.replace(
-        "@RUNTIME@", repr(str(ROOT / "runtime"))))
+        "@RUNTIME@", repr(runtime_tree())))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -2004,10 +2005,10 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     stage.mkdir(parents=True)
     store.mkdir()
     # What a build stages under frozen names that the glass's canvas imports.
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     for f in ("moy_image.py", "moy_fs.py"):
-        shutil.copy(ROOT / "runtime" / f, stage / f)
-    for token, value in (("@RUNTIME@", ROOT / "runtime"), ("@DEVICE@", ROOT / "device"),
+        shutil.copy(runtime_file(f), stage / f)
+    for token, value in (("@RUNTIME@", runtime_tree()), ("@DEVICE@", ROOT / "device"),
                          ("@STAGE@", stage), ("@ROOT@", store), ("@REPO@", ROOT)):
         driver = driver.replace(token, repr(str(value)))
     script = work / "driver.py"

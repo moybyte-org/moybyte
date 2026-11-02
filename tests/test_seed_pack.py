@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(ROOT, "runtime"))
 import gen_device_carts as gen              # noqa: E402
 import moy_carts                            # noqa: E402
 import moy_seed                             # noqa: E402
+from tools.board_config import runtime_file
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 ZERO = os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero")
@@ -450,7 +451,7 @@ def _stage_for_micropython(tmp_path):
     for name in ("moy_carts.py", "moy_store_base.py", "moy_seed.py",
                  "moy_docs.py", "moy_pack.py", "moyimg.py", "moy_fs.py", "moy_journal.py", "ticks.py",
                  "cart_listing.py"):
-        with open(os.path.join(ROOT, "runtime", name), encoding="utf-8") as f:
+        with open(str(runtime_file(name)), encoding="utf-8") as f:
             body = f.read()
         with open(os.path.join(str(tmp_path), name), "w", encoding="utf-8") as f:
             f.write(body)

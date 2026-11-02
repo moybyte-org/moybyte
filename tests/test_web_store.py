@@ -16,6 +16,8 @@ import subprocess
 
 import pytest
 
+from tools.board_config import runtime_file
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.abspath(os.path.join(_HERE, os.pardir))
 _RUNNER = os.path.join(_ROOT, "firmware", "web_runner")
@@ -210,7 +212,7 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
     # The relaxation is site-AND-that-root-of-record; the DEFAULT is the wire's
     # own predicate (None), so a mode that fails to arrive never starts shipping
     # journals at a board.
-    sync = _read("runtime", "moy_sync.py")
+    sync = runtime_file("moy_sync.py").read_text(encoding="utf-8")
     skip = sync[sync.index("def watch_skip("):sync.index("def watch_skip(") + 400]
     assert "skip_keep_journal" in skip and "site_keep_journal" in skip, skip
     assert "else None" in skip, skip

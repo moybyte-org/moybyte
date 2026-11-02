@@ -29,6 +29,7 @@ import pytest  # noqa: E402
 
 from runtime import chrome, iconsets  # noqa: E402
 from runtime import ui_draw as _ui  # noqa: E402
+from tools.board_config import runtime_file
 
 ICONS = ROOT / "native" / "moy_ui" / "icons"
 
@@ -478,7 +479,7 @@ def test_the_boards_module_draws_the_slots_past_0x7f(tmp_path):
     import shutil
     import subprocess
     import zlib
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(
         "moy_ui", "moy_gfx", "moy_glass",
         why="Without it the boards' icon_mask, the one every board imports, "
@@ -487,13 +488,13 @@ def test_the_boards_module_draws_the_slots_past_0x7f(tmp_path):
     from runtime.host_canvas import make_system_canvas
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
-    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
+    shutil.copy(runtime_file("moy_image.py"), stage / "moy_image.py")
     files = [str(ICONS / n) for n in MASKS]
     codes = [iconsets.FIRST + iconsets.SLOT[n] for n in PAST]
     script = tmp_path / "icons.py"
     script.write_text(_MP_ICONS.replace("@DEVICE@", repr(str(ROOT / "device")))
-                      .replace("@RUNTIME@", repr(str(ROOT / "runtime")))
+                      .replace("@RUNTIME@", repr(runtime_tree()))
                       .replace("@STAGE@", repr(str(stage)))
                       + ICON_CASES
                       + "icon_cases(make, lambda rc, c, b: print(rc, c, binascii.crc32(b)), "

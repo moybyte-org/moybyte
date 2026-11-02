@@ -17,6 +17,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 from ws_helpers import build_ws as _ws
 import pytest
 from ws_helpers import boot_on_fixture, use_theme
+from tools.board_config import runtime_file
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -463,7 +464,7 @@ def test_the_pre_2026_07_bottom_dock_is_gone(tmp_path):
                  "status_gh"):
         assert not hasattr(lay, name), name
     # ...and the module's own text no longer routes a reader to it.
-    src = (ROOT / "runtime" / "settings_layer.py").read_text()
+    src = runtime_file("settings_layer.py").read_text()
     assert "_draw_dock" not in src and "_activate_dock" not in src
 
 

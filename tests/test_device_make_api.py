@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from ws_helpers import StubInput
+from tools.board_config import runtime_file
 
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
@@ -64,7 +65,7 @@ def _load_moy_runtime():
                  "music_editor_ui",
                  "perf_hud", "update_ui", "achievements_ui",
                  "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
-        spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         _swap_in(saved, name, mod)
         spec.loader.exec_module(mod)

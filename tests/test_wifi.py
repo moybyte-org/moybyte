@@ -26,6 +26,7 @@ class _Stub:
 
 
 from ws_helpers import StubInput, open_cart as _open_cart
+from tools.board_config import runtime_file
 
 
 # -- the base key-set is identical; `wifi` is the only conditional name --------
@@ -50,7 +51,7 @@ def test_host_and_device_make_api_keysets_match_except_wifi(monkeypatch):
 
     # Load the device moy_runtime under CPython (mirrors the spike test loader).
     for name in ("audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod

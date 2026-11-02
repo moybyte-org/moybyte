@@ -33,11 +33,12 @@ from pathlib import Path
 
 from runtime.settings_layer import SETTINGS_TOGGLES
 from ws_helpers import build_ws
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
-CONSOLE = ROOT / "runtime" / "console.py"
-SETTINGS = ROOT / "runtime" / "settings_layer.py"
-DEV = ROOT / "runtime" / "dev_channel.py"
+CONSOLE = runtime_file("console.py")
+SETTINGS = runtime_file("settings_layer.py")
+DEV = runtime_file("dev_channel.py")
 
 KEYS = [t[0] for t in SETTINGS_TOGGLES]
 SETTERS = [t[3] for t in SETTINGS_TOGGLES]
@@ -84,7 +85,7 @@ def _workstation_ast():
     assert set(modules) == bases, "a Workstation base is not imported by name"
     body = list(ws.body)
     for name in sorted(bases):
-        body.extend(_class(ROOT / "runtime" / (modules[name] + ".py"), name)[0].body)
+        body.extend(_class(runtime_file(modules[name] + ".py"), name)[0].body)
     return ast.ClassDef(name="Workstation", bases=[], keywords=[], body=body,
                         decorator_list=[])
 
@@ -391,12 +392,12 @@ def test_the_hot_readers_still_read_the_flat_attribute():
     registry or the system dict."""
     console_src = CONSOLE.read_text(encoding="utf-8")
     assert 'ws.show_fps and self.stack.top() == "desktop"' in (
-        ROOT / "runtime" / "wm.py").read_text(encoding="utf-8")
+        runtime_file("wm.py")).read_text(encoding="utf-8")
     assert 'self.ws.show_fps and self.stack.top() == "desktop"' in (
-        ROOT / "runtime" / "wm_paint.py").read_text(encoding="utf-8")
+        runtime_file("wm_paint.py")).read_text(encoding="utf-8")
     for src in (console_src,
-                (ROOT / "runtime" / "wm.py").read_text(encoding="utf-8"),
-                (ROOT / "runtime" / "wm_paint.py").read_text("utf-8")):
+                runtime_file("wm.py").read_text(encoding="utf-8"),
+                runtime_file("wm_paint.py").read_text("utf-8")):
         for key in KEYS:
             assert 'system["%s"]' % key not in src, key
 

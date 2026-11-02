@@ -115,8 +115,8 @@ def test_the_import_ladder_is_gone(tmp_path):
     import ast
     import pathlib
 
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "runtime" / "wallpaper.py").read_text(encoding="utf-8")
+    from tools.board_config import runtime_file
+    src = runtime_file("wallpaper.py").read_text(encoding="utf-8")
     named = set()
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Import):

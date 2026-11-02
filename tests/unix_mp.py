@@ -36,6 +36,7 @@ can share the lookup instead of keeping a sixth copy of the path.
 
 import os
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 
@@ -66,6 +67,31 @@ CANDIDATES = (CANONICAL,)
 BOARD_MODEL = CANONICAL.parent.parent / "build-moybyte-board" / "micropython"
 
 _PROBED = {}
+
+_RUNTIME_TREE = []
+
+
+def runtime_tree():
+    """runtime/ as a board stages it: one flat directory holding every module
+    a board would freeze (a link per file, `host/` left out), made once per
+    process. A MicroPython driver puts it on `sys.path` and imports shared
+    modules bare, wherever in runtime/'s folders each file sits."""
+    if _RUNTIME_TREE:
+        return _RUNTIME_TREE[0]
+    import atexit
+    import shutil
+    import tempfile
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools import board_config
+    src = ROOT / "runtime"
+    out = tempfile.mkdtemp(prefix="moy_runtime_")
+    atexit.register(shutil.rmtree, out, True)
+    for name, path in board_config.shared_sources(src).items():
+        if not board_config.host_only(src, path):
+            os.symlink(path, os.path.join(out, name))
+    _RUNTIME_TREE.append(out)
+    return out
 
 
 def build_flags():

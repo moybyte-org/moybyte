@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 from tests import unix_mp  # noqa: F401  (the helpers' home; imported for its path)
-from tests.unix_mp import require_unix_mp
+from tests.unix_mp import require_unix_mp, runtime_tree
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -98,7 +98,7 @@ print("DRIVER_DONE")
 
 def _run(exe, tmp_path, tag, prelude=""):
     script = tmp_path / ("ledger_%s.py" % tag)
-    script.write_text(prelude + DRIVER.replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+    script.write_text(prelude + DRIVER.replace("@RUNTIME@", repr(runtime_tree())))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=300)
     assert out.returncode == 0, out.stderr or out.stdout
     lines = out.stdout.strip().splitlines()

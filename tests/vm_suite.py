@@ -9,6 +9,7 @@ and tests/test_moy_spine_twins.py share it.
 
 import os
 import subprocess
+from tools.board_config import runtime_file
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -103,11 +104,11 @@ def run(exe, tmp_path, module, test_file, native, arg, skip=(), extra=()):
     (d / "runtime" / "__init__.py").write_text("")
     (d / "runtime" / (module + ".py")).write_text("from %s import *\n" % module)
     for name in extra:
-        with open(os.path.join(ROOT, "runtime", name + ".py")) as f:
+        with open(str(runtime_file(name + ".py"))) as f:
             (d / (name + ".py")).write_text(f.read())
         (d / "runtime" / (name + ".py")).write_text("from %s import *\n" % name)
     if not native:
-        with open(TWINS.get(module) or os.path.join(ROOT, "runtime", module + ".py")) as f:
+        with open(TWINS.get(module) or str(runtime_file(module + ".py"))) as f:
             (d / (module + ".py")).write_text(f.read())
     script = d / "run.py"
     script.write_text(VM_RUNNER.replace("@DIR@", repr(str(d)))

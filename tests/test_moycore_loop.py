@@ -38,7 +38,7 @@ pointing at a cause.
 import os
 import subprocess
 
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -598,7 +598,7 @@ def _run():
             "C -- the claim every later stage rests on -- nor the three "
             "regressions moycore shipped with.")
     from runtime.moyimg import encode_moyimg
-    src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime")).replace(
+    src = DRIVER.replace("@RUNTIME@", runtime_tree()).replace(
         "@BG@", repr(encode_moyimg(2, 2, bytes((8, 8, 8, 8)))))
     p = subprocess.run([exe, "-c", src], capture_output=True, text=True,
                        timeout=180)

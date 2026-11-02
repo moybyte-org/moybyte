@@ -32,7 +32,8 @@ from runtime.host_canvas import make_system_canvas
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from on_glass import GLYPH_CASES  # noqa: E402
 from test_font_lane import FONTS, _Font2, _read, _Target, _v2_files  # noqa: E402
-from unix_mp import require_unix_mp  # noqa: E402
+from unix_mp import require_unix_mp, runtime_tree  # noqa: E402
+from tools.board_config import runtime_file
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 W, H = 160, 40
@@ -362,13 +363,13 @@ def test_the_boards_module_draws_the_hosts_bytes(tmp_path):
     import shutil
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(os.path.join(ROOT, "runtime", "font.py"), stage / "moy_font.py")
-    shutil.copy(os.path.join(ROOT, "runtime", "moy_image.py"), stage / "moy_image.py")
+    shutil.copy(str(runtime_file("font.py")), stage / "moy_font.py")
+    shutil.copy(str(runtime_file("moy_image.py")), stage / "moy_image.py")
     fonts = _v2_files()
     cases = GLYPH_CASES.replace("@SEED@", "11").replace("@N@", "60")
     script = tmp_path / "driver.py"
     script.write_text(_MP_DRIVER.replace("@DEVICE@", repr(os.path.join(ROOT, "device")))
-                      .replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+                      .replace("@RUNTIME@", repr(runtime_tree()))
                       .replace("@STAGE@", repr(str(stage))).replace("@FONTS@", repr(fonts))
                       + cases + _MP_TAIL)
     out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=300)

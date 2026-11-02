@@ -87,7 +87,7 @@ from pathlib import Path
 import pytest
 
 from tools.wasm_module import format_version
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
@@ -1531,7 +1531,7 @@ print("RESULT", idle, typed, gc.mem_alloc() - m0)
 def _mp_result(tmp_path, driver, why):
     exe = require_unix_mp(board_model=True, why=why)
     script = tmp_path / "driver.py"
-    script.write_text(driver.replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+    script.write_text(driver.replace("@RUNTIME@", repr(runtime_tree())))
     out = subprocess.run([exe, "-X", "heapsize=16M", str(script)],
                          capture_output=True, text=True, timeout=60)
     line = [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT ")]

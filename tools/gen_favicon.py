@@ -24,9 +24,11 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
 
 from tools import pngwrite  # noqa: E402
+from tools.board_config import runtime_dirs  # noqa: E402
+
+sys.path[1:1] = runtime_dirs()
 
 PAGE = os.path.join(ROOT, "firmware", "web_runner", "page_core.html")
 MARK_A = '<link rel=icon href="'

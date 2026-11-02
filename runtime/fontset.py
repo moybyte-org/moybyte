@@ -63,9 +63,14 @@ def _host_dir():
         _DIR = ""
         try:
             import os.path as _p
-            d = _p.join(_p.dirname(_p.dirname(_p.abspath(__file__))), "native", "moy_ui", "fonts")
-            if _p.isdir(d):
-                _DIR = d
+            # The checkout's fonts, from whichever folder of runtime/ holds
+            # this file: the nearest parent with native/moy_ui/fonts.
+            d = _p.dirname(_p.abspath(__file__))
+            while d and d != _p.dirname(d):
+                d = _p.dirname(d)
+                if _p.isdir(_p.join(d, "native", "moy_ui", "fonts")):
+                    _DIR = _p.join(d, "native", "moy_ui", "fonts")
+                    break
         except (ImportError, NameError, AttributeError):
             pass
     return _DIR

@@ -37,6 +37,7 @@ import unix_mp
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import moyimg  # noqa: E402
+from tools.board_config import runtime_file
 
 BOARDS = (
     "lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK",
@@ -284,7 +285,7 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
             "every other check uses for both halves.")
     for name in ("moyimg.py",):
         (tmp_path / name).write_text(
-            (ROOT / "runtime" / name).read_text(encoding="utf-8"),
+            runtime_file(name).read_text(encoding="utf-8"),
             encoding="utf-8")
     art = bytes(((i * 37) & 63) for i in range(320 * 240))
     (tmp_path / "host.moyimg").write_text(moyimg.encode_moyimg(320, 240, art))

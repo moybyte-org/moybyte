@@ -25,7 +25,7 @@ import pytest
 
 from runtime import moy_fs
 from tools import moy_index_spike as spike
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -255,7 +255,7 @@ except OSError as e:
 
 
 def _vm_session(cmd, d):
-    script = (VM_SESSION.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+    script = (VM_SESSION.replace("@RUNTIME@", repr(runtime_tree()))
               .replace("@DIR@", repr(str(d))))
     os.makedirs(str(d))
     out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,

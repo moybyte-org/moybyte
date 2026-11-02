@@ -439,7 +439,8 @@ def moy_mark(pal, scale=3):
     Read out of the source text rather than imported: chrome.py pulls in the whole
     surface stack, and this script must stay importable with nothing installed."""
     import re, struct, zlib
-    src = open(os.path.join(ROOT, "runtime", "chrome.py"), encoding="utf-8").read()
+    path, = glob.glob(os.path.join(ROOT, "runtime", "**", "chrome.py"), recursive=True)
+    src = open(path, encoding="utf-8").read()
     m = re.search(r'"moy":\s*\((.*?)\)\s*,', src, re.S)
     if not m:
         return ""

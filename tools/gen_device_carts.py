@@ -478,9 +478,8 @@ def _default_system_carts():
 
 
 def _default_app_decls():
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "runtime", "app_decls.py")
+    from tools.board_config import runtime_file
+    return str(runtime_file("app_decls.py"))
 
 
 def main(argv):

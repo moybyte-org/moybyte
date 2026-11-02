@@ -31,9 +31,10 @@ import re
 from pathlib import Path
 
 from ws_helpers import build_desktop_ws, build_ws
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
-CONSOLE = ROOT / "runtime" / "console.py"
+CONSOLE = runtime_file("console.py")
 
 # The collaborator attributes on Workstation -- all six of the architecture
 # doc's clusters, complete as of landing E.
@@ -171,7 +172,7 @@ def _workstation_classes():
     assert set(found) == bases, "a Workstation base is not imported by name"
     out = [ws]
     for name in sorted(bases):
-        path = ROOT / "runtime" / (found[name] + ".py")
+        path = runtime_file(found[name] + ".py")
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.ClassDef) and node.name == name:
                 out.append(node)

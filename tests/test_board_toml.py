@@ -472,7 +472,7 @@ def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
     (the twin is the suites' oracle, tests/spine_twin.py)."""
     assert "MOY_SPINE_IMPL" not in board_config.impls(BOARDS[board])
     assert "moy_spine.py" not in board_config.staged_modules(BOARDS[board], root=ROOT)
-    assert not (ROOT / "runtime" / "moy_spine.py").exists()
+    assert "moy_spine.py" not in board_config.shared_sources(ROOT / "runtime")
 
 
 def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):

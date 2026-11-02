@@ -232,8 +232,9 @@ def _windowed_install_sites():
     """
     import ast
     import warnings
-    shared = {p.name for base in ("runtime", "device")
-              for p in (ROOT / base).glob("*.py")}
+    from tools.board_config import shared_sources
+    shared = set(shared_sources(ROOT / "runtime")) | {
+        p.name for p in (ROOT / "device").glob("*.py")}
     found = {}
     # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
     # escapes in vendored/staged sources); this walk is a search, not a lint.

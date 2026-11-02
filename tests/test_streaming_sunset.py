@@ -30,8 +30,11 @@ flash write.
 
 import os
 from pathlib import Path
+from tools.board_config import runtime_file, shared_sources
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Every module under runtime/, whichever folder holds it.
+RUNTIME_MODULES = shared_sources(os.path.join(ROOT, "runtime"))
 TDECK = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline")
 
 
@@ -43,18 +46,15 @@ def _read(*rel):
 def test_the_recording_stack_is_gone_with_its_modules():
     """Stage 4: the wasm head re-rasters, so the last consumer of the recorder
     died and both modules went with it."""
-    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view.py"))
-    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view_page.py"))
+    assert "web_view.py" not in RUNTIME_MODULES
+    assert "web_view_page.py" not in RUNTIME_MODULES
     assert not os.path.exists(os.path.join(ROOT, "tests", "webharness.py"))
     # The classes must not reappear anywhere in the shared console either.
     names = ("class TeeCanvas", "class CommandCanvas", "class DrawRecorder",
              "class RecordingLayer", "class ServedState", "class SurfaceDelta",
              "class WsClientState")
-    rt = os.path.join(ROOT, "runtime")
-    for fn in sorted(os.listdir(rt)):
-        if not fn.endswith(".py"):
-            continue
-        src = _read("runtime", fn)
+    for fn, path in sorted(RUNTIME_MODULES.items()):
+        src = path.read_text(encoding="utf-8")
         for n in names:
             assert n not in src, "%s reappeared in runtime/%s" % (n, fn)
 
@@ -62,7 +62,7 @@ def test_the_recording_stack_is_gone_with_its_modules():
 def test_the_input_decode_survives_on_its_own():
     """The one piece of the old web_view that is NOT raster: browser events ->
     console input, which the 3.4 sync RPC speaks too."""
-    src = _read("runtime", "web_input.py")
+    src = runtime_file("web_input.py").read_text(encoding="utf-8")
     assert "def apply_events" in src
     assert "def apply_ws_text" in src
     assert "def effective_input_kinds" in src
@@ -120,7 +120,7 @@ def test_the_transport_is_the_kernels_and_the_python_one_is_gone():
 def test_the_websocket_half_is_gone_with_its_framing_leaf():
     """The 2026-09 deletion (see this module's docstring): the RPC it was kept
     for speaks plain HTTP, so nothing in the tree ever opened it."""
-    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view_ws.py"))
+    assert "web_view_ws.py" not in RUNTIME_MODULES
     src = _read("device", "moy_webhost.py")
     for dead in ("class _WSConn", "def _upgrade_ws", "import web_view_ws",
                  "WS_OP_TEXT =", "WS_IDLE_MS ="):
@@ -151,10 +151,10 @@ def test_console_has_no_web_hook_surface():
     key and the exact "WEB VIEW" label -- rather than banning the substring
     "web", which would forbid the successor along with the thing being buried.
     """
-    console = _read("runtime", "console.py")
+    console = runtime_file("console.py").read_text(encoding="utf-8")
     assert "web_hook" not in console
     assert "_toggle_web_view" not in console
-    settings = _read("runtime", "settings_layer.py")
+    settings = runtime_file("settings_layer.py").read_text(encoding="utf-8")
     assert '"web"' not in settings
     assert "WEB VIEW" not in settings
 

@@ -20,6 +20,7 @@ from pathlib import Path
 from board_source import runtime_text
 
 from tools import board_config
+from tools.board_config import runtime_file
 
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
@@ -155,7 +156,7 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     """The per-frame CALL that derives the keyboard mode from the cart's
     textmode request lives in Player.tick; the mode flip itself is executed in
     tests/test_cart_textmode.py and tests/test_tdeck_input.py."""
-    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    player = runtime_file("player.py").read_text(encoding="utf-8")
     assert "ws._sync_cart_text_mode()" in player
 
 
@@ -532,7 +533,7 @@ def test_the_pre_kernel_guards_are_one_body():
                "mg_blit_map", "mg_blit_quads"):
         assert usermod.count(fn + "(") >= 1, "modmoy_gfx.c does not call " + fn
         assert '("%s",' % fn in binding, "gfx_binding does not call " + fn
-    assert not (Path("runtime") / "moyhost_gfx.c").exists(), \
+    assert not list(Path("runtime").rglob("moyhost_gfx.c")), \
         "a host shim is back: its verbs belong in moy_gfx_kernels.c"
 
 
@@ -613,7 +614,7 @@ def test_player_isolation_no_forbidden_names():
     needs goes through thin ws helpers). A stray reach-through would compile
     and pass every behavior test yet quietly re-couple the run loop to the
     shell, so this source grep is the guard."""
-    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    player = runtime_file("player.py").read_text(encoding="utf-8")
     for forbidden in ("menu_view", "launcher", "bar_layer", "carts_store"):
         assert forbidden not in player, (
             "player.py names '%s' -- the Player must not reach the store/bar/home grid/"
@@ -906,7 +907,7 @@ def test_one_lua_runtime_wired():
     # import lives there. Each board still has to CALL it, and the second loop
     # is what pins that: a spine nobody invokes is a feature that quietly does
     # not exist, exactly like the web console on the T-Deck.
-    for src_path in ((_REPO / "runtime" / "device_boot.py"),
+    for src_path in (runtime_file("device_boot.py"),
                      (Path("firmware/web_runner") / "web_boot.py")):
         src = src_path.read_text(encoding="utf-8")
         assert "from moycore_glue import make_runtimes" in src, src_path

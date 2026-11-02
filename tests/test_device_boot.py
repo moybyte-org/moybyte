@@ -32,6 +32,7 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
 from runtime import boot_carts, device_boot  # noqa: E402
+from tools.board_config import runtime_file
 
 
 # -- fakes --------------------------------------------------------------------
@@ -677,7 +678,7 @@ def test_the_spine_imports_no_board_module():
                "crash_guard", "moy_kernel", "ui_draw"}
     seen = set()
     for name in ("device_boot.py", "boot_carts.py"):
-        src = (ROOT / "runtime" / name).read_text(encoding="utf-8")
+        src = runtime_file(name).read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(src)):
             if isinstance(node, ast.Import):
                 seen |= {a.name.split(".")[0] for a in node.names}

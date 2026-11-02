@@ -681,11 +681,10 @@ def test_no_verbs_app_marks_its_page_after_the_pass():
     pass drew before it owes the next frame through the app's host
     (`AppHost.again`); a mark of the page from its draw is a ratchet."""
     import ast
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent / "runtime"
+    from tools.board_config import runtime_file
     bad = []
     for mod in VERBS_APPS:
-        tree = ast.parse((root / (mod + ".py")).read_text())
+        tree = ast.parse(runtime_file(mod + ".py").read_text())
         for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
             for fn in cls.body:
                 if not (isinstance(fn, ast.FunctionDef) and fn.name == "draw"):

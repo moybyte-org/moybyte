@@ -24,7 +24,10 @@ import sys
 import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "runtime", "licences.py")
+sys.path.insert(0, ROOT)
+from tools.board_config import runtime_file  # noqa: E402
+
+OUT = str(runtime_file("licences.py"))
 
 LEAD = "Free to use and change; each release becomes MIT after two years."
 CC0_URL = "https://creativecommons.org/publicdomain/zero/1.0/"

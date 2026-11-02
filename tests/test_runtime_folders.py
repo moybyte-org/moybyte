@@ -10,6 +10,7 @@ would race for one name.
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -131,3 +132,43 @@ def test_no_board_stages_a_module_from_runtime_host():
         assert not host & set(board_config.denials(toml.parent)), (
             "%s/board.toml denies a module runtime/host/ already keeps off "
             "every board" % toml.parent.name)
+
+
+def test_a_module_is_found_by_its_name_in_whichever_folder_holds_it(tmp_path):
+    _tree(tmp_path, ["top.py", "shell/deep/leaf.py", "host/host_probe.py"])
+    assert board_config.runtime_file("leaf.py", root=tmp_path) == (
+        tmp_path / "runtime" / "shell" / "deep" / "leaf.py")
+    with pytest.raises(FileNotFoundError, match="gone.py"):
+        board_config.runtime_file("gone.py", root=tmp_path)
+    # A process importing the staged modules bare gets every folder but host/.
+    assert board_config.runtime_dirs(root=tmp_path) == sorted(
+        str(tmp_path / "runtime" / d) for d in ("", "shell/deep"))
+
+
+def test_a_vm_driver_sees_runtime_as_a_board_stages_it():
+    import unix_mp
+    tree = Path(unix_mp.runtime_tree())
+    sources = board_config.shared_sources(ROOT / "runtime")
+    want = {n for n, p in sources.items()
+            if not board_config.host_only(ROOT / "runtime", p)}
+    assert {p.name for p in tree.iterdir()} == want
+    assert all(p.resolve() == sources[p.name].resolve() for p in tree.iterdir())
+
+
+# A test or a tool that joins runtime/ with a module's name breaks the day the
+# module moves folder: it names the module and lets the lookup find the file.
+_JOIN = re.compile(r'(ROOT|REPO|_REPO|_ROOT|RUNTIME)\)? */ *"runtime" */ *[("a-z]'
+                   r'|os\.path\.join\([A-Z_]+, *"runtime", *[("a-z]')
+
+
+def test_no_test_or_tool_joins_runtime_with_a_module_name():
+    hits = []
+    for top in ("tests", "tools", "site"):
+        for p in sorted((ROOT / top).rglob("*.py")):
+            if p.name == "test_runtime_folders.py":
+                continue
+            for n, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
+                if (_JOIN.search(line) and '"host"' not in line
+                        and '"**"' not in line):
+                    hits.append("%s:%d: %s" % (p.relative_to(ROOT), n, line.strip()))
+    assert not hits, "\n".join(hits)

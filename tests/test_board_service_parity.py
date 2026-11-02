@@ -70,6 +70,7 @@ from pathlib import Path
 import pytest
 
 from board_source import wiring_chain
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -435,7 +436,7 @@ def _wire_param_map():
     A service the Workstation takes through its setter (`ws.set_pointer(p)`)
     lands on `ws.pointer` the same way.
     """
-    fn = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
+    fn = _func(runtime_file("console.py"), "wire_workstation_core")
     params = {a.arg for a in fn.args.args}
     out = {}
     for n in ast.walk(fn):
@@ -614,7 +615,7 @@ def _wire_supplied(fn, param_map, dead=frozenset()):
     """{attr: lineno} for services this link hands to wire_workstation_core.
     SUPPLIED IS NOT INJECTED: only a value `_real` counts."""
     fname = "wire_workstation_core"
-    order = _params(_func(ROOT / "runtime" / "console.py", fname))
+    order = _params(_func(runtime_file("console.py"), fname))
     out = {}
     for n in ast.walk(fn):
         if not isinstance(n, ast.Call) or _called(n) != fname:
@@ -1016,7 +1017,7 @@ def _chain_maps(links):
     inv = {}
     for attr, param in _wire_param_map().items():
         inv.setdefault(param, attr)
-    wire = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
+    wire = _func(runtime_file("console.py"), "wire_workstation_core")
     maps = [None] * len(links)
     seeds = [None] * len(links)
     for i in range(len(links) - 1, -1, -1):

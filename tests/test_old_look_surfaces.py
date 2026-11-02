@@ -292,11 +292,10 @@ def test_the_dialog_caps_say_real_tdeck_keys():
     """Every hint the step's surfaces draw on the T-Deck names a key it has:
     its actions (`cancel` is Mic where letters type, `back` K), never Tab,
     Esc or Ctrl (ACT_KEYS in native/moy_ui/moy_ui_parts.c)."""
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent / "runtime"
+    from tools.board_config import runtime_file
     for name in ("cards_layer.py", "block_editor_ui.py", "popover.py", "text_console.py",
                  "web_console_ui.py", "code_layer.py", "console_notices.py"):
-        src = (root / name).read_text()
+        src = runtime_file(name).read_text()
         for word in ('"Tab"', '"Esc"', '"Ctrl', '"Mic"', '"K"'):
             assert word not in src, "%s spells %s: name the action" % (name, word)
 

@@ -14,7 +14,8 @@ import subprocess
 import pytest
 
 from runtime import glass_binding as g
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
+from tools.board_config import runtime_file
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GLASS = os.path.join(ROOT, "native", "moy_glass")
@@ -196,10 +197,10 @@ def _run_mp(exe, tmp_path, src):
     """Run `src` (a _MP_HEAD script) under the desktop MicroPython; its result."""
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(os.path.join(ROOT, "runtime", "font.py"), stage / "moy_font.py")
-    shutil.copy(os.path.join(ROOT, "runtime", "moy_image.py"), stage / "moy_image.py")
+    shutil.copy(str(runtime_file("font.py")), stage / "moy_font.py")
+    shutil.copy(str(runtime_file("moy_image.py")), stage / "moy_image.py")
     src = (src.replace("@DEVICE@", repr(os.path.join(ROOT, "device")))
-           .replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+           .replace("@RUNTIME@", repr(runtime_tree()))
            .replace("@STAGE@", repr(str(stage))))
     script = tmp_path / "glass.py"
     script.write_text(src)

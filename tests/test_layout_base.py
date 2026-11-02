@@ -21,6 +21,8 @@ import re
 
 import pytest
 
+from tools.board_config import runtime_file
+
 from runtime import layout_base
 from runtime.block_editor_ui import BlockLayout
 from runtime.cards_layer import CardsLayout
@@ -31,7 +33,7 @@ from runtime.paint_layer import PaintLayout
 from runtime.scene_editor_ui import SceneLayout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE_REL = os.path.join("runtime", "layout_base.py")
+BASE_REL = os.path.relpath(runtime_file("layout_base.py"), ROOT)
 
 # (class, takes a `bounds` argument that extends the predicate)
 LAYOUTS = [
@@ -89,11 +91,12 @@ def _shared_sources():
     """Every authored shared/device module -- not the gitignored staged copies
     under firmware/*/modules/, which are rebuilt from these."""
     for tier in ("runtime", "device"):
-        d = os.path.join(ROOT, tier)
-        for name in sorted(os.listdir(d)):
-            rel = os.path.join(tier, name)
-            if name.endswith(".py") and rel != BASE_REL:
-                yield rel, _read(rel)
+        for base, dirs, files in os.walk(os.path.join(ROOT, tier)):
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for name in sorted(files):
+                rel = os.path.relpath(os.path.join(base, name), ROOT)
+                if name.endswith(".py") and rel != BASE_REL:
+                    yield rel, _read(rel)
 
 
 _DECL = re.compile(r"^_?BASE_[WH]\s*=\s*\d+", re.M)

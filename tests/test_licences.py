@@ -90,13 +90,13 @@ def test_every_body_inflates_on_micropython(tmp_path):
     """The boards and the browser inflate through `deflate.DeflateIO`, whose
     raw window defaults to 256 bytes: a body deflated with a wider one must
     name it, or a far back-reference is EINVAL there and never on CPython."""
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(why="Without it no body is inflated the way a board does.")
     script = tmp_path / "inflate.py"
     script.write_text(
         "import sys\nsys.path.insert(0, %r)\nimport licences as L\n"
         "for k in sorted(L._BODIES):\n"
-        "    print(k, len(L._inflate(L._BODIES[k])))\n" % str(ROOT / "runtime"))
+        "    print(k, len(L._inflate(L._BODIES[k])))\n" % runtime_tree())
     run = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr[-2000:] or run.stdout[-2000:]
     import zlib

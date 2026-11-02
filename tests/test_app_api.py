@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 from ws_helpers import build_ws as _build_ws, select_on_home, use_theme
+from tools.board_config import runtime_file
 
 
 def _ws(tmp_path, **kw):
@@ -556,5 +557,5 @@ def test_no_app_module_carries_the_bar_ritual():
     app module may reach the bar surface at all."""
     for name in ("calc_app", "artwork", "appearance_app", "files_app",
                  "storybook_app"):
-        src = (ROOT / "runtime" / (name + ".py")).read_text(encoding="utf-8")
+        src = runtime_file(name + ".py").read_text(encoding="utf-8")
         assert "bar_layer" not in src, name + " still reaches ws.bar_layer"

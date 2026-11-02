@@ -22,16 +22,16 @@ from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
-import font as petme               # noqa: E402
+from runtime import font as petme  # noqa: E402
 from runtime import chrome         # noqa: E402
 from runtime.gfx_binding import moy64  # noqa: E402
+from tools.board_config import runtime_file  # noqa: E402
 MOY64 = moy64()
 
 
 def _icon_art():
     import ast
-    tree = ast.parse(open(os.path.join(ROOT, "runtime", "chrome.py")).read())
+    tree = ast.parse(open(str(runtime_file("chrome.py"))).read())
     for node in tree.body:
         if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "_ICON_ART":
             return ast.literal_eval(node.value)

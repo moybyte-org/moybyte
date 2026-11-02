@@ -5,6 +5,7 @@ the Editor's Code tab and the shell's text page."""
 from pathlib import Path
 
 from runtime import host_app, moy_carts, text_modes
+from tools.board_config import runtime_file
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,7 +34,7 @@ def test_every_extension_lands_on_its_mode():
 def test_markdown_is_the_stores_doc_extension_and_not_a_spelled_string():
     """The table asks moy_carts, so a kind that changes extension keeps its
     mode. Nothing in text_modes.py spells the document extension."""
-    src = (ROOT / "runtime" / "text_modes.py").read_text(encoding="utf-8")
+    src = runtime_file("text_modes.py").read_text(encoding="utf-8")
     assert '".md"' not in src and "'.md'" not in src
     assert text_modes.BY_EXT[moy_carts.DOC_EXT] == text_modes.MD
     assert text_modes.mode_for_kind("docs", "note") == text_modes.MD

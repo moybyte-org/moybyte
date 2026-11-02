@@ -40,6 +40,7 @@ from pathlib import Path
 import pytest
 
 from test_moy_flush_c import SCENARIOS, require_harness
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 DEVICE = ROOT / "device"
@@ -163,7 +164,7 @@ def test_frame_walk_disarms_above_the_game():
     root above it -- including the deferred-transition loading toast. Without
     this the overlay lands on a root the flush is about to ignore, i.e. it is
     invisible."""
-    src = (ROOT / "runtime" / "console.py").read_text(encoding="utf-8")
+    src = runtime_file("console.py").read_text(encoding="utf-8")
     walk = src[src.index("_fold_live = False"):]
     assert walk.index("self._composite_game()") \
         < walk.index("self._disarm_fn()") \

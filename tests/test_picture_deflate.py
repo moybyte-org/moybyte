@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from unix_mp import require_unix_mp  # noqa: E402
+from unix_mp import require_unix_mp, runtime_tree  # noqa: E402
 
 W, H = 512, 300
 
@@ -99,7 +99,7 @@ def test_the_boards_python_codecs_reach_the_c_compressor(tmp_path):
         "assert moyimg.decode_moyimg(moyimg.encode_moyimg(%d, %d, page))[2] == page\n"
         "png = cover_png.encode_indexed(bytes(range(64)) * 256, bytes(range(192)))\n"
         "sys.stdout.buffer.write(png)\n"
-        % (str(ROOT / "runtime"), W * H, W, H))
+        % (runtime_tree(), W * H, W, H))
     proc = subprocess.run([exe, str(script)], capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode()[-2000:]
     png = proc.stdout
