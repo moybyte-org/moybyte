@@ -115,7 +115,7 @@ class MyArtAppLayer:
     id = "myart"
     domain = "system"
     TITLE = "My Art"
-    # The shell roles this app uses (runtime/app_context.py): the drawings
+    # The shell roles this app uses (runtime/shell/app_context.py): the drawings
     # (`files`), Paint's door (`nav`), the wallpaper and a project's copy
     # (runtime/picture_copies.py: `wallpaper`, `carts`), and `artwork`, which
     # follows a drawing Paint has open when it is renamed.

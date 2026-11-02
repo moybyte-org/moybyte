@@ -223,7 +223,7 @@ nor those docs will warn you about:
   screenshot verb on the sync RPC was its recorded successor and was DROPPED
   (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
   2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
-  used it. What survives of the old view is `runtime/web_input.py` (browser
+  used it. What survives of the old view is `runtime/shell/web_input.py` (browser
   events → InputState/Pointer, which the sync RPC speaks). The recording-tier
   surface machinery in `wm_windowed` and the kernel's surface table were
   deleted on 2026-10-27 (`docs/surface_model_v1.md` §16).

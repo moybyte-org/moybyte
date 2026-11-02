@@ -13,7 +13,7 @@ The plan's lane ledger pins each deletion with a grep-test so a revert or
 cargo-cult reintroduction fails loudly instead of resurrecting a seam the
 architecture buried. What SURVIVES by decision: an HTTP transport (since 2026-10
 the kernel's, native/moy_net, with device/moy_webserver.py deleted), and
-runtime/web_input.py -- the browser event decode, which is transport-shaped
+runtime/shell/web_input.py -- the browser event decode, which is transport-shaped
 rather than raster-shaped.
 
 THE WEBSOCKET HALF WENT IN 2026-09, and it is pinned here as an absence for the

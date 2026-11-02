@@ -11,7 +11,7 @@ character with icons only. These tests assert:
     headless, and the other seed carts still render their (text) cards.
 
 Kept in its own file (per the issue) so it never collides with the existing
-suites. Runs the same code path the device freezes (runtime/console.py).
+suites. Runs the same code path the device freezes (runtime/shell/console.py).
 """
 
 from pathlib import Path

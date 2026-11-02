@@ -216,7 +216,7 @@ class FilesAppLayer(ListShellApp):
     APP_TITLE = "Files"
     APP_PERM = "files"
     APP_FOLDER = "moybyte.files.moy"
-    # The shell roles this app uses (runtime/app_context.py). `nav` carries the
+    # The shell roles this app uses (runtime/shell/app_context.py). `nav` carries the
     # app-to-app jumps the router takes (a drawing opens in Paint, a note on
     # the text page, a project in the Editor) -- app_api_v1 called that a v1
     # non-goal and it shipped anyway, because it is a real product need. WALL,

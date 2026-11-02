@@ -11,7 +11,7 @@
 #   -- the popover             Popup
 #   Popup                      the one popover: rows or a component
 """Self-contained console support widgets, extracted from Workstation
-(runtime/console.py) -- the cohesive, boundaried little classes with their own state
+(runtime/shell/console.py) -- the cohesive, boundaried little classes with their own state
 that don't belong to any one surface Layer or the router:
 
   * `_Blit`        -- the minimal blittable the cursor sprite + the #39 game->system
@@ -83,7 +83,7 @@ def arm_prompt(ws):
     takes the byte held as it opened as typing nothing (its host's key)."""
     ws._set_text_mode(True)
     # EVERYBODY let go: the shared object's meaning (every source), not a
-    # driver's per-source "I hold nothing" (runtime/input.py).
+    # driver's per-source "I hold nothing" (runtime/shell/input.py).
     ws.input.release_all()
     clear = getattr(ws.input, "clear_edges", None)
     if clear is not None:

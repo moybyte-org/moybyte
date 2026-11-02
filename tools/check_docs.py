@@ -164,6 +164,9 @@ NOT_OURS = (
     # upstream and re-vendored, never edited here.
     "runtime/audio_binding.py", "runtime/moyhost_wasm.c", "runtime/moycore.py",
     "runtime/wasm_host.py", "runtime/wasm_binding.py",
+    # Shared modules' paths before runtime/ grouped them into folders
+    # (2026-11-02), as the same vendored copies name them.
+    "runtime/console_notices.py",
 )
 
 

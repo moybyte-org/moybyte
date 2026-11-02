@@ -289,12 +289,12 @@ def test_the_py_sites_only_come_down():
 # notices the runtime raises. A literal back in its file is a string the
 # language pack cannot reach.
 PY_FED_MOVED = {
-    "runtime/console_notices.py": ["MOYBYTE UPDATED", "Moybyte updated", "UPDATE UNDONE", '"now %s"',
+    "runtime/shell/console_notices.py": ["MOYBYTE UPDATED", "Moybyte updated", "UPDATE UNDONE", '"now %s"',
                                    '"still on %s"', '"CART"', "RESTART MOYBYTE",
                                    "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
                                    '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"SLEEP"'],
     "runtime/device_boot.py": ["IT CRASHED LAST TIME"],
-    "runtime/cart_manager.py": ["the store is full"],
+    "runtime/shell/cart_manager.py": ["the store is full"],
 }
 
 

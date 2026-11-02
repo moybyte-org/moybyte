@@ -8,7 +8,7 @@ with the public UI API's verbs (docs/ui_api_2026-10.md) and nothing under them.
   * one content-Layer class here (id/domain/draw/handle_input/handle_pointer +
     the app protocol: is_app / open / relayout), declaring the shell roles it
     uses in NEEDS and reaching the shell ONLY through the AppContext it is
-    constructed with (runtime/app_context.py), `UI = True` giving it the host
+    constructed with (runtime/shell/app_context.py), `UI = True` giving it the host
     side of its verbs as `ctx.ui`;
   * geometry from the rect algebra over the content rect `ui.page` answers,
     the keys as `ui.button`s of their kinds placed with `ui.at`, and the tape
@@ -128,7 +128,7 @@ class CalcAppLayer:
     id = "calc"
     domain = "system"
     TITLE = "Calc"
-    # The shell roles this app uses (runtime/app_context.py). The context
+    # The shell roles this app uses (runtime/shell/app_context.py). The context
     # carries these and nothing else, so an undeclared reach-in is an
     # AttributeError here rather than a coupling nobody sees.
     NEEDS = ("surface", "theme", "damage")

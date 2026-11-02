@@ -3,7 +3,7 @@ paths:
   - "runtime/**/*canvas*.py"
   - "runtime/toolkit/ui.py"
   - "runtime/toolkit/ui_draw.py"
-  - "runtime/chrome.py"
+  - "runtime/shell/chrome.py"
   - "runtime/**/*_layer.py"
   - "runtime/**/*_ui.py"
   - "runtime/wm/**"
@@ -121,12 +121,12 @@ left:
   moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
   coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
-  an `"app"` block in the identity cart's manifest, and `runtime/app_decls.py`, its
+  an `"app"` block in the identity cart's manifest, and `runtime/shell/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on
   device only. Ratchet: `tests/test_app_registry.py`.
 - **The bar contract is a HOST guarantee**, scoped to `"tool"` — there are SEVEN
   strip kinds and collapsing them breaks the others.
-- **Apps declare what they need** (`runtime/app_context.py`, a pure leaf) and there
+- **Apps declare what they need** (`runtime/shell/app_context.py`, a pure leaf) and there
   is **zero `ws.` in the app tier**. `ctx.files` and `ctx.carts` are split
   deliberately: carts authors executable content, so granting it to a cart is
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
@@ -141,7 +141,7 @@ left:
   changes beyond colours is its theme's shape (surfaces, frame, metrics, text
   effects), installed with the theme, and `tests/test_style.py` holds the style
   tables and the `colors=` hatch.
-- **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
+- **A user can add an app.** `runtime/shell/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST (`native/moy_app/roles.json` is the table); never
   grantable: `artwork`, `carts`, `damage`, `install`, `notify`, `surface`,
   `wallpaper`. `clipboard` comes with the clipboard permission, and `ui` goes to

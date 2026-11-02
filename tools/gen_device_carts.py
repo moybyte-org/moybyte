@@ -39,7 +39,7 @@ block, and host_app.py's alias table. Four of the five failed SILENTLY and on
 device only: forget `CART_ORDER` and the identity cart never seeds, so `is_app`
 never claims it, so the app is simply unreachable on hardware while working
 perfectly on the host. They are all
-derived from the declarations now (`runtime/app_decls.py` is this file's
+derived from the declarations now (`runtime/shell/app_decls.py` is this file's
 generated output for the frozen tiers, which have no `system_carts/`).
 
 Pure stdlib so it runs under any Python the build has.
@@ -77,7 +77,7 @@ mp_obj_str_t`), which is the property that actually mattered.
   pack_cart(cart) -> bytes         one cart's JSON, raw-deflated
   build_packed(dir) -> [(title, version, blob)]   the packed roster
   render_packed_module(packed) -> str   a freezable PACKED carts_data.py
-  render_app_decls(decls) -> str   a freezable runtime/app_decls.py source
+  render_app_decls(decls) -> str   a freezable runtime/shell/app_decls.py source
   as_module(dir) -> ModuleType     an in-memory carts_data (for host tests)
   main(argv)                       CLI: write the module (or stdout)
 """
@@ -444,7 +444,7 @@ APP_DECLS_HEADER = (
 
 
 def render_app_decls(decls):
-    """A freezable `runtime/app_decls.py`: a header + `APPS = <repr>`. One dict
+    """A freezable `runtime/shell/app_decls.py`: a header + `APPS = <repr>`. One dict
     per app, in registration order -- plain literals MicroPython parses."""
     body = ["APPS = ["]
     for d in decls:
@@ -489,7 +489,7 @@ def main(argv):
       gen_device_carts.py --packed OUT [SRC] [--skip F,F]
                                                  the same, PACKED (the Zero),
                                                  less the named cart folders
-      gen_device_carts.py --app-decls [OUT]      regenerate runtime/app_decls.py
+      gen_device_carts.py --app-decls [OUT]      regenerate runtime/shell/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
                                                  (the web runner's bundle list)

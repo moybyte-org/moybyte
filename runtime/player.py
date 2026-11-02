@@ -400,7 +400,7 @@ class Player(PlayerDiag):
 
     def _end_grant(self):
         """The run is over: its grant ends, and so does any store session it
-        left open (a session holds no gate; runtime/shell_servers.py)."""
+        left open (a session holds no gate; runtime/shell/shell_servers.py)."""
         ctx, self._app_ctx = self._app_ctx, None
         if ctx is not None:
             self._wasm_bind(None)
@@ -1000,7 +1000,7 @@ class Player(PlayerDiag):
             # CRASH ISOLATION FIRST, before a single line of the cart's code has
             # been compiled, let alone run: the mark has to survive a death the
             # interpreter never observes (a hang, an OOM, a native fault). See
-            # runtime/crash_guard.py. A cart that has used up its strikes is
+            # runtime/shell/crash_guard.py. A cart that has used up its strikes is
             # refused into the ORDINARY error panel, whose top bar carries
             # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
             # are the same screen.
@@ -1320,7 +1320,7 @@ class Player(PlayerDiag):
         # `needs` tuple differs (a manifest here, a class constant there). The
         # ungated riders (`ui`, `theme()`, `screen()`, `content_rect()`,
         # `bar_h()`) are how an app draws, not what it may reach -- see
-        # runtime/system_api.py.
+        # runtime/shell/system_api.py.
         # A SCRIPT is handed the same filter by the same call: its permissions
         # come from the manifest `run_script` synthesized, so the refusing is
         # the machinery that already refuses, and `carts` is not grantable to

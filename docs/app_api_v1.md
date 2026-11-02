@@ -80,7 +80,7 @@ came to 41 distinct names and ~371 uses, 13 of the names private. Nothing could
 say what an app was permitted to do, which is the question user apps have to
 answer.
 
-An app now takes an **`AppContext`** (`runtime/app_context.py`) carrying only the
+An app now takes an **`AppContext`** (`runtime/shell/app_context.py`) carrying only the
 roles it declared:
 
 | role | what it is | verbs |
@@ -103,7 +103,7 @@ Read that module for the signatures. The verbs column is the role table's
 Every context holds a **grant**, a row of native/moy_app's grant table keyed by
 the app's id, and every role is native/moy_app's role object over it: a C row
 reads the kernel's state, and a shell row checks the grant and calls the server
-the console registers for the role (`runtime/shell_servers.py`) with the grant
+the console registers for the role (`runtime/shell/shell_servers.py`) with the grant
 first (the table's `server` column says which). The rows with a `wasm` type
 are what a compiled app imports ("A compiled user app" below).
 Four things about the roles are load-bearing:
@@ -186,7 +186,7 @@ bar.
 
 This used to be a paragraph here telling you to write both halves yourself, in
 the right order, and an app that forgot either became **unexitable** — silently,
-on device only. Seven apps carried the same two lines. `runtime/console.py`'s
+on device only. Seven apps carried the same two lines. `runtime/shell/console.py`'s
 `_app_bar_route` owns them now, pinned behaviourally by
 `tests/test_app_api.py` (a stub app that draws no strip and routes no bar tap
 must still show the strip and still exit on its back, and so must all seven
@@ -255,7 +255,7 @@ capabilities in its own `manifest.json` and gets them as cart globals.
                 "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
 The mechanism is `make_system_api(ctx_factory, cart, canvas, ...)`
-(`runtime/system_api.py` -- READ IT, it is the authority and carries the policy
+(`runtime/shell/system_api.py` -- READ IT, it is the authority and carries the policy
 argument for each entry). It is a FILTER over the `AppContext` above and not a
 second interface: it maps each declared permission to a role, calls the same
 `ws.app_context` factory a shipped app goes through, and returns the globals
@@ -380,7 +380,7 @@ an `app` block, a regenerated `app_decls.py` and a firmware build.
 The Player turns a cart exception into the stop card (its See why opens the
 code on the line; docs/history/look_2026-10.md step 33). What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
-itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
+itself, the next boot runs it again. `runtime/shell/crash_guard.py` marks the app id in
 `system.json` BEFORE the cart's code is compiled and clears it after three
 painted frames (a compiled app whose frames the kernel's Player drew clears it
 at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
@@ -390,7 +390,7 @@ cart stays on Make, because editing it is how it gets fixed.
 The Player arms it for `type: "app"` carts only. Two small settings writes per
 open is not free, and a game that always crashes shows the panel and is not a
 brick. The wallpaper, which runs itself at every boot, has its own ledger; how
-it boots without those writes is in `runtime/crash_guard.py`.
+it boots without those writes is in `runtime/shell/crash_guard.py`.
 
 ## Non-goals (v1)
 

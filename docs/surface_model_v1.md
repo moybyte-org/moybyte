@@ -484,7 +484,7 @@ folded into is gone (§16).
 
 | mechanism | where it stands |
 |---|---|
-| #44 `ws._dirty` frame gate (three legs: dirty / `_animating` / pointer) | §3's three producer classes: the `_dirty` writes are the Class A epoch signal; the predicate is Python (`runtime/console.py`), with the kernel epoch as one more leg (§15) |
+| #44 `ws._dirty` frame gate (three legs: dirty / `_animating` / pointer) | §3's three producer classes: the `_dirty` writes are the Class A epoch signal; the predicate is Python (`runtime/shell/console.py`), with the kernel epoch as one more leg (§15) |
 | the bar strip cache keyed on canvas identity (ui_damage §2.1's flagship bug) | the identity key behind the silent rebuild is gone; `tests/test_top_bar.py` pins the strip's rebuild budget |
 | `_content_static` by-name freeze + its exclusion lists | the windowed WM's own, under §14.1's focused-window content freeze |
 | streak/sig family (`_win_sig`/`_stamp_streak`, `_chrome_sig/_streak`, `_chip_sig/_streak`, `_desk_sig/_streak`, `_bezel_key/_paints`) | the windowed WM's per-buffer state, beside §14.3's shown ring |
@@ -1163,7 +1163,7 @@ generation counters stands. L6's arithmetic holds on the S3 because the
 `_dirty` writes are untouched and the frame gate reads the epoch once per
 painted frame.
 
-`runtime/console.py`'s frame gate and the windowed WM's content freeze (§14.1)
+`runtime/shell/console.py`'s frame gate and the windowed WM's content freeze (§14.1)
 are Python, as the window managers are (sprint 7 does not run,
 `docs/history/kernel_toolkit_2026-10.md`).
 

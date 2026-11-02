@@ -1,5 +1,5 @@
 """The console's Layer protocol + the self-contained surface adapters, extracted
-from Workstation (runtime/console.py) -- docs/history/shell_layers_refactor_v1.md.
+from Workstation (runtime/shell/console.py) -- docs/history/shell_layers_refactor_v1.md.
 
 `Workstation` is the compositor/router over a z-ordered stack of Layers; this
 module holds the shell-side building blocks that are NOT the router itself:

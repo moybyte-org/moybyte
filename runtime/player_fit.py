@@ -147,7 +147,7 @@ _OUT_OF_MEMORY = "out of memory"
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
 # slower, and INTERP_NOTICE is the short system NOTICE that says so
-# (`ws.notice`, runtime/console_notices.py's `_draw_notice` -- the same body
+# (`ws.notice`, runtime/shell/console_notices.py's `_draw_notice` -- the same body
 # "MOYBYTE UPDATED" uses, never `_draw_toast`'s achievement banner, and it
 # expires on its own rather than needing a dismissal). A module whose
 # SIGNATURE is present and does not verify keeps the ordinary error panel --

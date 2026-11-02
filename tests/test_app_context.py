@@ -119,7 +119,7 @@ def _declared(mod_name, cls_name):
 @pytest.mark.parametrize("mod,cls", APP_TARGETS)
 def test_every_app_declares_its_needs(mod, cls):
     needs = _declared(mod, cls)
-    assert needs, cls + " declares no NEEDS -- see runtime/app_context.py"
+    assert needs, cls + " declares no NEEDS -- see runtime/shell/app_context.py"
     assert len(set(needs)) == len(needs), cls + " repeats a NEED"
     for name in needs:
         assert name in _ac.ROLES, cls + " declares unknown role " + name

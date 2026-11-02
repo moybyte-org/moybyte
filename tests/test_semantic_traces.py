@@ -81,7 +81,7 @@ native index (sprint 1a's twin, native/moy_index) on both object models.
 
 EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
 trace, the SPINE's (its Python oracle tests/spine_twin.py, and the strike ledger in
-runtime/crash_guard.py). One session of handle tables (a foreign, released,
+runtime/shell/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
 the return routes, the WiFi leases, the settings rows (the setter that
 persists, the dirty store and its retried write, the read decoded afresh) and
@@ -423,7 +423,7 @@ class ScriptInput(InputState):
 
     AND IT SUBCLASSES THE BOARDS' CLASS, not the host's (2026-08-14). There are
     two InputState classes; this harness models a DEVICE build, and it was
-    staging runtime/input.py -- so for input it compared the host against
+    staging runtime/shell/input.py -- so for input it compared the host against
     itself. That is the hole the rotated d-pad went through: the boards' BUTTONS
     is a different tuple in a different ORDER, moycore packs the mask from it,
     and every Lua cart on both boards read its d-pad a quarter turn off while

@@ -3,7 +3,7 @@
 #   LauncherHomeLayer.draw      the home frame
 #   LauncherHomeLayer.zone_gen  the int the bar's strip key reads (the zone is HomeZone's)
 #   HomeWindowLayer             the home in a desktop-mode window (PROJECTS)
-"""The home (#28), extracted from Workstation (runtime/console.py) as a Layer
+"""The home (#28), extracted from Workstation (runtime/shell/console.py) as a Layer
 -- docs/history/shell_layers_refactor_v1.md (Move 1b).
 
   * `Launcher`     -- (home_grid.py) the selection model (items/sel/scroll/nav)

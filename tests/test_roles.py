@@ -153,7 +153,7 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
 
 def test_the_shell_rows_are_the_servers_methods():
     """Each shell row is a method of the server the console registers for its
-    role (runtime/shell_servers.py), taking the grant first; a server method
+    role (runtime/shell/shell_servers.py), taking the grant first; a server method
     that is no row is a verb no app can reach."""
     import inspect
     from runtime import shell_servers as ss

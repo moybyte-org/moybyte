@@ -7,7 +7,7 @@
 // A PIECE IS A DISPLAY LIST. Each builder lays its piece out as a short list
 // of the canvas verbs it is made of -- rect, rectb, print, a 12x12 glyph, a
 // bar icon -- in palette indices, so the one body is drawn two ways: replayed
-// through a VM's canvas (runtime/chrome.py's `replay`; the canvas keeps its
+// through a VM's canvas (runtime/shell/chrome.py's `replay`; the canvas keeps its
 // damage, its sprite-batch order and a web view's recording), or rasterised
 // here into an RGB565 buffer by the same kernels the canvas verbs end in
 // (moy_gfx_kernels.h; text by the one text path, moy_text.h; a glyph by
@@ -141,7 +141,7 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
 // -- the kernel's state --------------------------------------------------------
 
 // The banners a run the kernel drives shows over its frames, the shell's
-// copies (runtime/console_notices.py): the system notice (`ok`, else a
+// copies (runtime/shell/console_notices.py): the system notice (`ok`, else a
 // warning) until `until_ms`, and the unlock banner -- `head` over the badge's
 // `name` on its `icon`'s tile, a secret's (`secret`) with confetti -- armed
 // for MOY_CHROME_TOAST_MS (widgets.TOAST_MS) up to `until_ms`.

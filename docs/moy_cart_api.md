@@ -10,7 +10,7 @@ the old parallel SDK.
 the one `make_api()` in `runtime/cart_api.py`, the same function on every tier
 (`runtime/host/host_app.py` and `device/device_api.py` re-export it). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
 it through `runtime/host/host_canvas.py`); the palette in
-libmoy's `native/moy_gfx/libmoy/moy_data.c`; buttons in `runtime/input.py`. A cart runs **identically** on the
+libmoy's `native/moy_gfx/libmoy/moy_data.c`; buttons in `runtime/shell/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
 **moy-spec is the game console spec** (owner, 2026-10-21): Moybyte's app

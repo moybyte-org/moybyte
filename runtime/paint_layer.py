@@ -4,7 +4,7 @@
 #   PaintLayout        responsive paint-editor geometry
 #   PaintLayer         the paint editor content layer: draw, strokes, keys
 """The sprite PAINT editor (#4/#30), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
+(runtime/shell/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
 It edits the cart's SpriteSheet (ws.project.sheet) through `ws.paint` (a PaintEditor).
 SAVE is GONE (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the

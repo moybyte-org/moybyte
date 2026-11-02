@@ -1,4 +1,4 @@
-"""Host glue that runs the SHARED console (runtime/console.py -- the exact same UI
+"""Host glue that runs the SHARED console (runtime/shell/console.py -- the exact same UI
 the T-Deck runs) on the PC: a 320x240 host Canvas, the petme128 font, the
 moy_carts .moy store, a host make_api, and a mouse/keyboard driver.
 

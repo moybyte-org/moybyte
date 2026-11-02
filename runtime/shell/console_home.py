@@ -580,7 +580,7 @@ class HomeVerbs:
         body for an older shell. Listing them offered a project whose "code" was
         that stub -- editing it changes nothing the kid can see. Hiding them is
         a placeholder for the real fix: #181, "privileged system carts"
-        (runtime/system_api.py), where each app becomes a genuine cart running
+        (runtime/shell/system_api.py), where each app becomes a genuine cart running
         under make_system_api and this filter comes back out.
 
         Deliberately narrow: only carts an app CLAIMS as its identity are hidden

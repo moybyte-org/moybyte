@@ -9,7 +9,7 @@
 #   BarLayer.handle_bar_tap   the bars' tap slice, shared by every surface
 """The shell's bars (#46; docs/theme_and_shell_2026-11.md §8.2, §8.5): every bar the
 theme's layout resolves to, on any edge, each a cached strip of widget cells
-(`shell_layout.pack`), extracted from Workstation (runtime/console.py) as its
+(`shell_layout.pack`), extracted from Workstation (runtime/shell/console.py) as its
 own surface -- docs/history/shell_layers_refactor_v1.md.
 
 This module is the SINGLE SOURCE of the bar geometry constants (`_STATUS_H`,

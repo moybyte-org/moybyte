@@ -12,7 +12,7 @@ roles, so touching an undeclared one is an `AttributeError` on the spot rather
 than a coupling nobody notices. `tests/test_app_context.py` pins both
 directions -- every role an app's source names must be declared, and every role
 it declares must be named (an over-declaration is a permission nobody needs).
-`make_system_api(ctx, cart)` (runtime/system_api.py) is the same filter keyed
+`make_system_api(ctx, cart)` (runtime/shell/system_api.py) is the same filter keyed
 on a cart's manifest permissions rather than on a class constant.
 
 ## The roles
@@ -47,7 +47,7 @@ is native/moy_app's over that grant, one method per row of
 `native/moy_app/roles.json`: a C row reads the kernel's state (the damage
 flags, the grant's surface row, the live token table, the settings rows, Paint's
 open picture, the clipboard's 4 KiB of text); a shell row calls the server the
-console registers for its role (runtime/shell_servers.py) with the grant first.
+console registers for its role (runtime/shell/shell_servers.py) with the grant first.
 A shipped app's grant is idempotent by its id, so a start re-registering the
 app finds the row it had; a user app's (`run=True`) is its run's, ended when
 the run ends (`AppContext.end`).
@@ -74,7 +74,7 @@ attribute.
 success, the `NO_STORE` singleton when there is no writable store, else the
 failure's text -- the difference between CAN'T SAVE HERE and CAN'T SAVE <why>.
 Each storage verb is one store op; `begin`/`end` bracket a session, which holds
-nothing a frame waits on (runtime/shell_servers.py).
+nothing a frame waits on (runtime/shell/shell_servers.py).
 """
 
 

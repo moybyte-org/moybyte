@@ -91,7 +91,7 @@ TILE_FLAGS = 512
 
 # A cart's COVER (SPEC.md 3.6, visual identity v1 Section 11.4): `cover.png` in
 # the folder's root, beside the manifest -- a 128x128 PNG the shelf draws
-# (runtime/cover_cache.py) and Paint edits, read through runtime/cover_png.py.
+# (runtime/shell/cover_cache.py) and Paint edits, read through runtime/cover_png.py.
 # A file outside the profile is no cover, and the card draws the cart's icon or
 # type glyph instead. tools/gen_covers.py writes the seed games' covers. The one
 # binary file in a cart that is not a compiled module, and the one the store,

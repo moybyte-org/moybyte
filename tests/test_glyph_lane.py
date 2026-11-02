@@ -381,7 +381,7 @@ def test_the_boards_module_draws_the_hosts_bytes(tmp_path):
     exec(cases, g)
     # The host's font slots are the process's, and the workstations earlier
     # tests built keep their faces loaded: free them the way the shell does
-    # when a load finds the slots full (runtime/appearance.py), so the
+    # when a load finds the slots full (runtime/shell/appearance.py), so the
     # cases' faces load in any test order.
     from runtime import appearance
     moy_ui.font_reset()

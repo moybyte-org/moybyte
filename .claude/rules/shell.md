@@ -18,13 +18,13 @@ freezes the identical code. The shipped **2026-07 shell** (spec
 playing — joined by one primitive, `run(cart)` plays until exit and returns control
 to whoever called it.
 
-- `runtime/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
+- `runtime/shell/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
   refactor to a compositor — the Layer-stack frame loop, the shared draw
   toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
   (`carts_store`/`wifi`/`updater`); the rest of the class is its `console_*`
   mixins (`runtime/README.md` lists them): the key and pointer routers are
   `console_input.py`'s, and the spawn/exit verbs, app registration and
-  the WiFi lease `runtime/console_spine.py`'s, over the spine's components
+  the WiFi lease `runtime/shell/console_spine.py`'s, over the spine's components
   in `native/moy_spine` (ids and kinds, never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
@@ -143,7 +143,7 @@ to whoever called it.
   - **Wallpaper previews keep a sidecar; covers DO NOT** (#155) — and the
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
     to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
-    of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
+    of file and a native decode, so `runtime/shell/cover_cache.py` keeps the FILE and
     ONE decoded 128x128 base in RAM (and its 64x64 half) and draws it scaled --
     the shelf at a whole-number scale, the carousel's cards at any ratio through
     `blit565_resize`, one call a card -- with no per-size variants

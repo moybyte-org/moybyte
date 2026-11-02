@@ -1210,7 +1210,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- CrashGuard: the strike ledger over the settings rows ----------------------------
 
-// runtime/crash_guard.py's CrashGuard, call for call: the slot's text is read
+// runtime/shell/crash_guard.py's CrashGuard, call for call: the slot's text is read
 // with moy_settings_get and written with the same persisting write Settings.set
 // makes. The OPEN id is mirrored through the hook set_mirror() was given (the
 // kernel's moy_crash.arm), called as hook(role, id or None).

@@ -146,7 +146,7 @@ def _workstation():
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "Workstation":
             return node
-    raise AssertionError("Workstation is not a class in runtime/console.py")
+    raise AssertionError("Workstation is not a class in runtime/shell/console.py")
 
 
 def _mixin_modules(tree, bases):

@@ -4,7 +4,7 @@
     python tools/gen_favicon.py            # print the data: URI
     python tools/gen_favicon.py --write    # patch it into page_core.html
 
-Moy is 16x16 nibble art in `runtime/chrome.py` (`_ICON_ART["moy"]`), resolved
+Moy is 16x16 nibble art in `runtime/shell/chrome.py` (`_ICON_ART["moy"]`), resolved
 through the MOY64 palette -- the same source the boot splash and the launcher
 header draw from. Generating the favicon from it rather than checking in a
 hand-drawn PNG means the browser tab and the console cannot disagree about what

@@ -300,7 +300,7 @@ class SettingsLayer:
     ws config/system state and dispatches every mutation to ws setters.
 
     The bar's lent zone is the back chevron and the title where the bar
-    places no X (runtime/bar_layer.py draws it from `back_title`): a tap on
+    places no X (runtime/shell/bar_layer.py draws it from `back_title`): a tap on
     the chevron is `back`, as Esc and B are, one on the title knocks on the
     secret door (#21)."""
 
@@ -987,7 +987,7 @@ class SettingsLayer:
 
     def draw_zone(self, cv, rect):
         """Where the bar places an X the zone stays empty; else the bar draws
-        `back_title` there itself (runtime/bar_layer.py)."""
+        `back_title` there itself (runtime/shell/bar_layer.py)."""
 
     def zone_tap(self, px, py, rect=None):
         """The zone past the chevron (the bar takes the chevron's tap,

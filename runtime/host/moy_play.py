@@ -949,7 +949,7 @@ class Match:
 # -- the chrome (native/moy_play/moy_chrome.h) -----------------------------------
 #
 # Each piece is a list of (op, c, scale, x, y, w, h, text) the shell replays
-# through its canvas (runtime/chrome.py's `replay`); the kernel rasterises the
+# through its canvas (runtime/shell/chrome.py's `replay`); the kernel rasterises the
 # same list for a frame it draws with no VM.
 
 CH_RECT, CH_RECTB, CH_TEXT, CH_GLYPH, CH_ICON = 1, 2, 3, 4, 5

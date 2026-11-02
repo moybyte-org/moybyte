@@ -2300,7 +2300,7 @@ class DeviceCanvas:
         its size. Opaque, or at scale 1 with its words equal to `key` left
         out (a story's picture with a clear background); camera and clip
         honoured; pal() does not apply, because direct colour has no index to
-        remap. A cart's cover is drawn this way (runtime/cover_cache.py)."""
+        remap. A cart's cover is drawn this way (runtime/shell/cover_cache.py)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2487,7 +2487,7 @@ class DeviceCanvas:
         """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
         a row into `dst` (w words a row), colour `c` over every pixel at
         `alpha` (0..255), in this canvas's byte order: a dimmed cover, made
-        once and kept by its owner (runtime/cover_cache.py). Draws nothing.
+        once and kept by its owner (runtime/shell/cover_cache.py). Draws nothing.
         The pixels written, 0 where either buffer is short."""
         return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
                               self._col(c), int(alpha))

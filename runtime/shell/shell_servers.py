@@ -114,7 +114,7 @@ class ThemeServer:
 class _Store:
     """The readiness pair, the session and the `(value, err)` wrappers the
     storage servers share: ONE store op per verb inside the one try/except, so
-    nothing here raises. The shell's `StoreHandle` (runtime/system_store.py)
+    nothing here raises. The shell's `StoreHandle` (runtime/shell/system_store.py)
     is the guard, read per call."""
 
     def __init__(self, ws):
@@ -325,7 +325,7 @@ class NavServer:
         """`cart`'s cover decoded at its half (64x64), what a list row draws
         scaled to its picture (Files' projects): None for a cart with no
         cover, False while its decode is in flight (the shell's cover cache,
-        runtime/cover_cache.py, lands it over frames: ask again)."""
+        runtime/shell/cover_cache.py, lands it over frames: ask again)."""
         covers = getattr(self.__ws, "covers", None)
         if covers is None:
             return None

@@ -1,10 +1,10 @@
 """The on-screen perf HUD's *rendering* layer (#43/#44), extracted from
-Workstation (runtime/console.py).
+Workstation (runtime/shell/console.py).
 
 Two layers, the same split as the console's other sub-UIs:
   * The perf *query* API -- perf_sample / perf_breakdown / perf_breakdown_raw /
     perf_backdrop / perf_pointer / perf_batch -- is the PerfMeters mixin's
-    (runtime/console_perf.py). Those are the device backend's measurement
+    (runtime/shell/console_perf.py). Those are the device backend's measurement
     contract (device_diag calls `ws.perf_sample()` / `ws.perf_breakdown()`
     every few seconds for its PERF/DRAWBRK diag lines). They read the
     frame-timing fields the frame loop writes.
@@ -13,7 +13,7 @@ Two layers, the same split as the console's other sub-UIs:
     read-only consumer of the owning Workstation's timing fields; it draws, it
     never measures.
 
-Dependency profile (the facade lens, runtime/system_api.py) -- PerfHud is
+Dependency profile (the facade lens, runtime/shell/system_api.py) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
   * shared (non-privileged):   ws.canvas, ws.theme_colors, ws.perf_hud,

@@ -103,7 +103,7 @@ end
 """
 
 # A capability a script's manifest does not name has no name in its namespace
-# (runtime/system_api.py). That is a NameError inside the cart, which is the
+# (runtime/shell/system_api.py). That is a NameError inside the cart, which is the
 # right mechanism and the wrong words for a kid, so these names get a sentence
 # instead when one escapes into the console.
 GATED = {

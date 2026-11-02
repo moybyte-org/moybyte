@@ -8,7 +8,7 @@
 #   the rename entry cap      -- RENAME_MAX.
 #
 # The host class binds `self._store` to its storage role (see
-# runtime/app_context.py) and draws its own views.
+# runtime/shell/app_context.py) and draws its own views.
 #
 # MicroPython-safe; staged to both boards like every runtime/ module.
 

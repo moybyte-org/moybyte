@@ -77,7 +77,7 @@ class StoreHandle:
     Four bodies re-derived it before this landing (`_persist_system`, the
     wallpaper's, `_save_achievements`, `rescan_carts`) -- which is why
     this is a standalone object and not private to `SystemStore`: CartManager
-    and the storage roles' servers (runtime/shell_servers.py) take one too.
+    and the storage roles' servers (runtime/shell/shell_servers.py) take one too.
 
     Plain methods, no properties: a property forward measured +5.1us against a
     plain hop's +0.5us on this codebase, and `writable()` sits in front of every

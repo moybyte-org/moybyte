@@ -1,4 +1,4 @@
-"""The idle ladder's console half (runtime/idle_ladder.py): the Settings rows
+"""The idle ladder's console half (runtime/shell/idle_ladder.py): the Settings rows
 over the kernel's ladder, and the saver its SAVER rung shows. The ladder's
 own decisions are tests/test_moy_loop.py's."""
 

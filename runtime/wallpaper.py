@@ -7,7 +7,7 @@
 #   Wallpaper._glass_paint    a per-glass wallpaper's frame: QUIET in, SUBJECT out
 #   Wallpaper.draw_preview    the Appearance monitor's screen
 """The desktop wallpaper backdrop (#28), extracted from Workstation
-(runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
+(runtime/shell/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
 Wallpaper isn't a screen like the surface Layers -- it's the SHARED backdrop the
 launcher home AND the Settings screen both draw behind their chrome (the Picotron
@@ -43,7 +43,7 @@ The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
 code runs and heals once the backdrop has painted, so a wallpaper that hangs or
 faults the board at every boot strikes out and the desk boots on the fill. A
 proven wallpaper (its source already healed on this firmware) arms for free --
-runtime/crash_guard.py, "What it costs".
+runtime/shell/crash_guard.py, "What it costs".
 """
 import sys
 try:

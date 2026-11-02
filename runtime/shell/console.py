@@ -305,7 +305,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The narrowed shell interface a SYSTEM APP is handed (ui_refactor_2026-08
 # Phase 6). An app no longer holds `ws`; it holds an AppContext carrying only
-# the roles its NEEDS tuple declares -- see runtime/app_context.py.
+# the roles its NEEDS tuple declares -- see runtime/shell/app_context.py.
 try:
     from app_context import AppContext
     import shell_servers as _shell_servers
@@ -316,7 +316,7 @@ import moy_app as _moy_app
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
 # ui_refactor_2026-08 Phase 8): three failed runs and an app cart, or the
-# wallpaper, stops being run -- see runtime/crash_guard.py for why an
+# wallpaper, stops being run -- see runtime/shell/crash_guard.py for why an
 # in-process except cannot do this job.
 try:
     from crash_guard import CrashGuard, WALLPAPER_KEY
@@ -822,7 +822,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._damage_take = self.app_abi.damage_take
         self._files_end_all = self.app_abi.files_end_all
         self._damage_drop = self.app_abi.damage_drop
-        # The servers of the roles' shell rows (runtime/shell_servers.py), and
+        # The servers of the roles' shell rows (runtime/shell/shell_servers.py), and
         # the live token table the look writes at every switch. The surface
         # rows' pointer is bound by `set_pointer`; until then they answer none.
         _shell_servers.serve_all(self)
@@ -1110,7 +1110,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.ball_stepped = 0         # every step a roll delivered (the bench's count)
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
         # stay the same object across a load. One ledger per role -- see
-        # runtime/crash_guard.py, "Two roles, two ledgers".
+        # runtime/shell/crash_guard.py, "Two roles, two ledgers".
         self.app_guard = CrashGuard(self.system)
         self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
@@ -2482,7 +2482,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None):
         """Build the narrowed shell interface for one system app
-        (docs/app_api_v1.md, runtime/app_context.py).
+        (docs/app_api_v1.md, runtime/shell/app_context.py).
 
         `needs` is the app class's own `NEEDS` tuple, and `AppContext` attaches
         ONLY those roles -- so an app reaching for something it did not declare

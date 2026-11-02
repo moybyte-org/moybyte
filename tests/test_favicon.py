@@ -1,6 +1,6 @@
 """The browser tab shows Moy, and it is the SAME Moy the console draws.
 
-The favicon is generated from `runtime/chrome._ICON_ART["moy"]` -- the art the
+The favicon is generated from `runtime/shell/chrome._ICON_ART["moy"]` -- the art the
 boot splash and the launcher header already use -- and embedded in the page as a
 data: URI. That is the point: a hand-drawn PNG checked in beside it would be a
 second copy of the mascot, free to drift the moment anyone touches the art, and

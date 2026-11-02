@@ -86,7 +86,7 @@ def test_the_kernel_keeps_no_look_state(tmp_path):
                  "wallpaper_id", "icon_sheet"):
         assert not hasattr(ws, name), name
         assert hasattr(ws.look, name), name
-    src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
+    src = ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8")
     for gone in ("self.theme_name", "self.theme_variant",
                  "self.wallpaper_id", "self.icon_sheet"):
         assert gone not in src, gone
@@ -1127,7 +1127,7 @@ def test_the_look_is_built_before_anything_reads_it(tmp_path):
     """3c's wiring-order trap. `Appearance` is constructed in `_init_canvases`,
     because the two lines under it -- the system canvas's font scale and the
     responsive `Layout` -- already ask it for one."""
-    src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
+    src = ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8")
     built = src.index("self.look = Appearance(")
     for reader in ("self._sys_canvas.set_font_scale(self.look.font_scale)",
                    "self.look.effective_font_scale()"):

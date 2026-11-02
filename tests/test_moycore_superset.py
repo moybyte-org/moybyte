@@ -4,7 +4,7 @@ col and mouse are moybyte's, outside libmoy's verb table, and a Lua run used to
 reach them through a trampoline into the cart's Python namespace: a crossing
 on every frame that asked for a colour by name. They are C now, on the boards
 and the host alike, and these pin the C to the Python bodies they replaced
-(runtime/chrome.py's color, cart_api's mouse) value for value.
+(runtime/shell/chrome.py's color, cart_api's mouse) value for value.
 """
 
 import pytest

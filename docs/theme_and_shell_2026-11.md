@@ -445,7 +445,7 @@ a light surface), and the Scratch category colours in both. The six
 code surface (`surface`; style.json's `theme.code`, §6); every seed sets its
 own (`docs/history/look_2026-10.md` steps 23 and 26).
 `runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
-the look (`runtime/appearance.py`'s `content_colors`).
+the look (`runtime/shell/appearance.py`'s `content_colors`).
 
 **Additive roles come with the code that draws them**, under §2's rule, each
 joining the token row (and native/moy_app's vocabulary, which
@@ -459,7 +459,7 @@ existing theme keeps its pixels. The surface painter's five (2026-10-12):
 | `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
 
 The last two are what were once `light_chrome()` branches
-(`runtime/web_console_ui.py`, `runtime/bar_layer.py`). A seed sets them
+(`runtime/web_console_ui.py`, `runtime/shell/bar_layer.py`). A seed sets them
 itself where its look needs them. An `_ink` for a fill role that lacks one
 comes when a surface first paints text on it.
 
@@ -467,8 +467,8 @@ comes when a surface first paints text on it.
 (`moy`, the default, `blocks` and `contrast`), `native/moy_ui/themes/*.json`
 in format 2, each with its modes' tables, embedded in every image by
 `tools/gen_ui_tables.py`; `native/moy_ui/moy_theme.c` loads them and
-`runtime/chrome.py`'s `theme_colors(name, variant)` is its Python face.
-`runtime/appearance.py`'s `set_theme` installs a set and writes it into
+`runtime/shell/chrome.py`'s `theme_colors(name, variant)` is its Python face.
+`runtime/shell/appearance.py`'s `set_theme` installs a set and writes it into
 native/moy_app's live token table. The persisted settings are `theme` and
 `theme_variant` in `system.json`; the wallpaper is the theme's (D6) and has
 no row. There is no reader for old settings beyond that: under the no-migrations rule a stored name that no
@@ -1553,7 +1553,7 @@ declined for the reason §3.2 gives — pixel positions
 split a catalogue by screen size, and scripts are code in a theme. GNOME's
 date menu is the popover of §8.6, from memory. Win95's bottom taskbar and the
 macOS menu bar are examples 2 and 3, from memory; today's right zone already
-follows the macOS model (`runtime/chrome.py`'s comment). Steam's Big Picture
+follows the macOS model (`runtime/shell/chrome.py`'s comment). Steam's Big Picture
 is §8.1's switch, from memory.
 
 ### 8.4 Worked examples, as data
@@ -1637,7 +1637,7 @@ the same two writers (`console._surface_write`, `_LayoutCtx.install`) with
 RUNNING app's screen; the C answers `bar_h` as its `cy`. `roles.json` carries
 `surface.content_rect` (`server: c`, `grant: never`, `wasm: null`, as `bar_h`
 is) and the role table's drift tests (`tests/test_roles.py`) move with it.
-`runtime/system_api.py` publishes `content_rect()` ungated beside `bar_h()` —
+`runtime/shell/system_api.py` publishes `content_rect()` ungated beside `bar_h()` —
 an app-API global, not a cart verb (the verb table and moy-spec are
 untouched) — and a Lua app gets its four values as four results, the host's
 binding fanning a tuple of ints out as moycore does. The shipped apps place by
@@ -1915,7 +1915,7 @@ the theme, not in it. A layout the user edits is the theme's own: it is
 edited through Appearance's Edit theme…, the Editor's theme mode
 (`docs/history/look_2026-10.md` step 33).
 
-**Precedence, in one function.** `Appearance.layout()` (`runtime/appearance.py`,
+**Precedence, in one function.** `Appearance.layout()` (`runtime/shell/appearance.py`,
 `ws.look`) resolves the picked package's `bars` if the row is set and
 resolves, else the active theme's, else the default; then §8.8's per-element
 rule and §8.7's rule for the current mode. It runs at boot's `load_system`
@@ -2121,7 +2121,7 @@ round them (design review R5-10, F6-04).
 
 **Caches, and what each folds.** A layout change, and a mode switch, is a
 Class A dirty plus a relayout — the path `set_font_scale` takes today
-(`runtime/appearance.py`: relayout the eight layout heads, every registered
+(`runtime/shell/appearance.py`: relayout the eight layout heads, every registered
 app, the WM's re-anchor hook) — with the mode switch relayouting bars and the
 root context only. Nothing here invents an invalidation mechanism.
 
@@ -2155,7 +2155,7 @@ gated as single-frame maxima. Idle
 stays zero under every layout and in both modes: `tools/p4_bench.py`'s
 `desk idle`, `library idle`, `settings idle` and `app idle` capture no frame,
 and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
-(the clock's) (`runtime/console_perf.py`). The carousel's motion cost is
+(the clock's) (`runtime/shell/console_perf.py`). The carousel's motion cost is
 §8.10's and goes to #66; parked windows' memory and the off-heap census are #58's.
 
 ## 9. Scrolling: one scroll model

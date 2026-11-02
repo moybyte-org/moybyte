@@ -4,7 +4,7 @@
 #   draw_symbol_keys                  the symbol palette renderer
 #   -- code-editor syntax highlighting  the token colours
 #   CodeLayer                         the code editor content layer: draw, keys, pointer
-"""The Python code editor (#24/#39), extracted from Workstation (runtime/console.py)
+"""The Python code editor (#24/#39), extracted from Workstation (runtime/shell/console.py)
 as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2 (the last surface).
 
 The full-screen code view: the responsive text area (drawn on the SYSTEM canvas at the

@@ -294,7 +294,7 @@ def _system_canvas_class():
     It is defined inside a function, not at module scope, because subclassing
     `DeviceCanvas` means IMPORTING it, and that import only works after
     `install()` -- which registers `moy_gfx` and `framebuf` in `sys.modules` for
-    the rest of the process. `runtime/console.py` and `runtime/player.py` both
+    the rest of the process. `runtime/shell/console.py` and `runtime/player.py` both
     decide behaviour on a bare `import moy_gfx`, so merely importing a canvas
     module must not flip those probes behind their back. Callers reach the class
     by name (module `__getattr__`) or through `make_system_canvas`; either way

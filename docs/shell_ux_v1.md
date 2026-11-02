@@ -10,7 +10,7 @@ exit via the new `quit()` cart verb). It remains the "what the user experiences"
 "how" docs beneath it are
 implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
 `shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`, and
-`shell_architecture_v1.md`, superseded; `runtime/system_api.py` is the authority
+`shell_architecture_v1.md`, superseded; `runtime/shell/system_api.py` is the authority
 on the cart API's trust level). The shipped module
 map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
 `Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
@@ -571,7 +571,7 @@ that shipped the 2026-07 shell), `shell_layers_refactor_v1.md` (the Layer decomp
 that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
 its per-surface `make_system_api` track remains open) and `shell_architecture_v1.md`
 (privileged system carts and the layered compositor; superseded, and
-`runtime/system_api.py` is the authority on the cart API's trust level). Beside
+`runtime/shell/system_api.py` is the authority on the cart API's trust level). Beside
 this doc, `docs/theme_and_shell_2026-11.md` is the contract for the theme
 format, the bars and modes, the home, scrolling and the text files.
 
@@ -582,7 +582,7 @@ by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
 `runtime/project.py` is the project workspace + commit verbs (§7, §11);
 `runtime/wm/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
-bar. `Workstation` (`runtime/console.py`) is the kernel — see `runtime/README.md` for the
+bar. `Workstation` (`runtime/shell/console.py`) is the kernel — see `runtime/README.md` for the
 module map.
 
 **Issue map:**

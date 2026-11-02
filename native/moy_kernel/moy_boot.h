@@ -3,7 +3,7 @@
 // panel up, draws the boot logo into framebuffer 0 and lights the glass; the
 // console's themed boot screen follows once Python is up.
 //
-// The logo is runtime/console.py's draw_splash with no track and no status,
+// The logo is runtime/shell/console.py's draw_splash with no track and no status,
 // to the pixel, because both are moy_scr's splash (native/moy_gfx/moy_scr.h):
 // Moy at min(w, h) / 56 times (at least 3) over the `moybyte` wordmark in the
 // bold outline face, on the stored theme's ground -- the palette the console

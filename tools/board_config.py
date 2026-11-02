@@ -43,7 +43,7 @@ Usage from a build script:
 Usage from a test:
 
     from tools.board_config import staged_modules
-    staged_modules(TDECK)      # {"console.py": Path(".../runtime/console.py")}
+    staged_modules(TDECK)      # {"console.py": Path(".../runtime/shell/console.py")}
 """
 
 import os

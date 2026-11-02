@@ -1000,7 +1000,7 @@ class DragTap:
             return None
         return press
 
-# --- the glyph raster as it was in runtime/chrome.py ---------------------------
+# --- the glyph raster as it was in runtime/shell/chrome.py ---------------------------
 # The oracle for native/moy_ui's glyph raster (tests/test_chrome_glyphs.py):
 # the 12x12 bitmaps and the run-coalescing walk, drawn as rect spans.
 

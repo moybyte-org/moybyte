@@ -123,7 +123,7 @@
 // Steps a trackball roll delivers above MOY_INPUT_BALL_COAST_RATE a second
 // become a coast instead: MOY_INPUT_BALL_COAST thousandths of a step a ms per
 // surplus step, delivered on as steps that decay as a fling does
-// (runtime/console.py Workstation._ball_steps); 0 is no momentum.
+// (runtime/shell/console.py Workstation._ball_steps); 0 is no momentum.
 #ifndef MOY_INPUT_BALL_COAST
 #define MOY_INPUT_BALL_COAST 0
 #endif

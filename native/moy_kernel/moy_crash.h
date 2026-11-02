@@ -23,7 +23,7 @@
 // `crash`, Settings' diagnostics row shows it, and the recovery screen
 // (moy_recovery.h) shows it when the console cannot come up.
 //
-// THE STRIKE LEDGER is CrashGuard: runtime/crash_guard.py the reference,
+// THE STRIKE LEDGER is CrashGuard: runtime/shell/crash_guard.py the reference,
 // native/moy_spine/moy_ledger.c under moy_spine.CrashGuard on the native
 // spine's consoles, over the settings rows (tests/test_ledger_twin.py holds the
 // two to the same answers and bytes). Its armed id is mirrored here per role
@@ -67,7 +67,7 @@ enum {
 };
 
 // What a record's id names: the strike ledger's two roles
-// (runtime/crash_guard.py's KEY, WALLPAPER_KEY), and a game the kernel's
+// (runtime/shell/crash_guard.py's KEY, WALLPAPER_KEY), and a game the kernel's
 // Player armed at its launch (native/moy_play/moy_play.h). A game
 // is named and earns no strikes: no ledger counts it.
 enum { MOY_ROLE_NONE = 0, MOY_ROLE_APP, MOY_ROLE_WALLPAPER, MOY_ROLE_GAME };

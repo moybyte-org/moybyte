@@ -435,7 +435,7 @@ TARGETS = [
 
 def moy_mark(pal, scale=3):
     """The Moy mascot as a PNG data URI, rendered from the system's OWN icon art
-    (runtime/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
+    (runtime/shell/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
     Read out of the source text rather than imported: chrome.py pulls in the whole
     surface stack, and this script must stay importable with nothing installed."""
     import re, struct, zlib

@@ -1,5 +1,5 @@
 """The strike ledger's C twin (native/moy_spine/moy_ledger.c) against the
-Python one (runtime/crash_guard.py), on the same session.
+Python one (runtime/shell/crash_guard.py), on the same session.
 
 One seeded driver runs under CPython, where `CrashGuard` is the Python class,
 and under the desktop MicroPython with the native spine, where `crash_guard`

@@ -228,7 +228,7 @@ class PaintAppLayer(PaintDraw):
     id = "artwork"
     domain = "system"
     TITLE = "Paint"
-    # The shell roles this app uses (runtime/app_context.py): its document
+    # The shell roles this app uses (runtime/shell/app_context.py): its document
     # model's (`ArtworkService`, built here), its copies' and My Art's door.
     NEEDS = ("surface", "theme", "damage", "files", "carts", "wallpaper",
              "prefs", "notify", "nav")

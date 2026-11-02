@@ -2,7 +2,7 @@
  * number or the pointer, so a frame that calls them makes no crossing.
  *
  *   col(name_or_index)  a colour's index: a name from the base sixteen
- *                       (runtime/chrome.py's NAMES; an unknown name is 7), or
+ *                       (runtime/shell/chrome.py's NAMES; an unknown name is 7), or
  *                       a number truncated and masked to 0..63
  *   mouse()             x, y, left, middle, right, scroll_x, scroll_y: the
  *                       pointer in the cart's coordinates from the run's

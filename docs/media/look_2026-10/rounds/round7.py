@@ -6,7 +6,7 @@ adds:
 - icon sets: the smooth set as SVG sources (icons/<set>/*.svg here),
   rasterised on the host per size to 2/4 bpp alpha masks and tinted by theme
   roles at draw time; the pixel set as the existing 16x16 IconSheet art
-  (runtime/chrome.py), palette-coloured;
+  (runtime/shell/chrome.py), palette-coloured;
 - the code editor and the sprite editor, with the editor's tab row.
 
 A layer of the target, not an entry point: `../draw.py` draws every
@@ -38,11 +38,11 @@ MOY64 = moy64()
 
 
 def _chrome_tables():
-    """runtime/chrome.py's icon slot map and 16x16 art, read without
+    """runtime/shell/chrome.py's icon slot map and 16x16 art, read without
     importing the toolkit (which needs the native moy_ui)."""
     import ast
     out = {}
-    for n in ast.parse(open(os.path.join(REPO, "runtime/chrome.py")).read()).body:
+    for n in ast.parse(open(os.path.join(REPO, "runtime/shell/chrome.py")).read()).body:
         if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("_ICON", "_ICON_ART"):
             out[n.targets[0].id] = ast.literal_eval(n.value)
     return out["_ICON"], out["_ICON_ART"]

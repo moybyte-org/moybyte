@@ -1129,7 +1129,7 @@ def test_an_input_without_button_masks_falls_back_and_agrees_bit_for_bit(w):
 
 
 def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
-    """`runtime/input.py` and the boards' table differ in BUTTONS length; the
+    """`runtime/shell/input.py` and the boards' table differ in BUTTONS length; the
     snapshot must not."""
     from runtime.input import InputState as HostInput
     from runtime.moy_input import InputTable as BoardInput

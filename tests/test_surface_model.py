@@ -49,7 +49,7 @@ def test_wm_never_signals_the_table():
 
 
 def test_the_console_reads_only_the_kernel_epoch():
-    src = _read("runtime/console.py")
+    src = _read("runtime/shell/console.py")
     assert src.count("_glass.kernel_epoch()") == 2
     assert src.count("_glass.") == 2
 

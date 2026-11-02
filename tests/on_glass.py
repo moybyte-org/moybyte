@@ -3452,7 +3452,7 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
     interpreter tier: `ws.player._lua.interp` is true and the short system
-    notice (`runtime/console_notices.py`'s `_draw_notice`, the "MOYBYTE
+    notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
     (native/moy_wasm/README.md, "A cart survives its firmware",
