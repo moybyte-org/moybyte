@@ -878,7 +878,7 @@ class ScrollRegion:
         return self._fling or self._glide is not None
 
     # The glide and the slide: the home carousel's motion as
-    # runtime/launcher_layer.py's Carousel.anim_frame computed it before it
+    # runtime/home/launcher_layer.py's Carousel.anim_frame computed it before it
     # moved into native/moy_ui's scroll state (docs/theme_and_shell_2026-11.md
     # §9.1), over a dt in ms rather than the carousel's seconds.
     def glide_to(self, p, slide=False):
