@@ -336,7 +336,10 @@ class PaintAppLayer(PaintDraw):
 
     @doc.setter
     def doc(self, d):
+        old = self._doc
         self._doc = d
+        if old is not None and old is not d:
+            old.release()             # its bakes went back first (_return_bakes)
 
     def _board_size(self):
         """The drawings this board makes: a desk board's, else a handheld's."""

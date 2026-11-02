@@ -75,6 +75,11 @@ try:
 except ImportError:  # pragma: no cover - a board without the layer
     _uf = None
 
+try:
+    import moybuf as _moybuf
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moybuf as _moybuf
+
 # A cart's cover is this square, always (SPEC.md 3.6).
 COVER_SIDE = 128
 # The drawings a board makes (owner, 2026-10-21): a desk board's, and a
@@ -155,7 +160,12 @@ class PaintDocument:
     them (`_touch`), so an undo step holds the parts a stroke reached, never
     the whole drawing -- on a 1024 x 600 desk drawing a whole copy is 600 KB a
     step. `dirty` is the rect the marks changed since the canvas last mended
-    its bake (`take_dirty`)."""
+    its bake (`take_dirty`).
+
+    Its pixels are off the gc heap (`moybuf`, #186): a desk drawing is 600 KB
+    every collect would scan, in one run the heap must find whole. The
+    document is their one owner, and `release` gives them back when its app
+    replaces it."""
 
     PAPER = 7
     # The off-heap loan key for this document's bake (#186). The app id, so a
@@ -171,7 +181,7 @@ class PaintDocument:
     def __init__(self, width=GAME_W, height=GAME_H, seed=False):
         self.W = int(width)
         self.H = int(height)
-        self.pix = bytearray(self.W * self.H)
+        self.pix = _moybuf.alloc(self.W * self.H)
         _gfx.ifill(self.pix, self.W, self.H, 0, 0, self.W, self.H, self.PAPER)
         self.image = Bitmap(self.W, self.H, self.pix, self.OWNER)
         self.tiles_x = (self.W + self.TILE - 1) // self.TILE
@@ -192,12 +202,22 @@ class PaintDocument:
         if data is None or data[0] < 1 or data[1] < 1:
             return False
         if data[0] != self.W or data[1] != self.H:
+            self.release()
             self.__init__(data[0], data[1])
         self.pix[:] = data[2]
         self.history = []
         self.future = []
         self.invalidate()
         return True
+
+    def release(self):
+        """Give the pixels back: the document is replaced and its bakes went
+        back first. Idempotent; the image goes with them."""
+        pix = self.pix
+        self.pix = None
+        self.image = None
+        if pix is not None:
+            _moybuf.free(pix)
 
     def invalidate(self):
         """Every pixel changed: the whole bake goes."""
@@ -721,7 +741,6 @@ class ArtworkService:
         self._notify = ctx.notify
         self.copies = PictureCopies(ctx)
         self.last_error = ""
-        self._cached = None            # the OPEN doc's decoded (w, h, bytes)
         self._thumb_bitmap = None
         self._thumb_key = None
         # The copy's generation (the wallpaper role's save_copy bumps it, from
@@ -821,7 +840,6 @@ class ArtworkService:
                 (self.doc_kind(), self.doc_name()):
             self.on_leave()
         self._set_doc_name(name, kind)
-        self._cached = None
         self._read_only = False
         self._why = ""
 
@@ -877,24 +895,23 @@ class ArtworkService:
         if name is not None:
             self._set_doc_name(name, kind)
         if self._cover_doc():
-            self._cached = files.decode_cover(blob)
-            if self._cached is None:
-                self._cached = (COVER_SIDE, COVER_SIDE,
-                                bytes((PaintDocument.PAPER,))
-                                * (COVER_SIDE * COVER_SIDE))
-            return self._cached
-        self._cached = files.decode_image(blob)
-        if self._cached is None:
+            got = files.decode_cover(blob)
+            if got is None:
+                got = (COVER_SIDE, COVER_SIDE,
+                       bytes((PaintDocument.PAPER,)) * (COVER_SIDE * COVER_SIDE))
+            return got
+        got = files.decode_image(blob)
+        if got is None:
             if blob:
                 self._read_only = True
                 self._why = "Can't read this picture"
-        elif self._cached[0] > self.MAX_W or self._cached[1] > self.MAX_H:
+        elif got[0] > self.MAX_W or got[1] > self.MAX_H:
             # Bigger than Paint's largest document. It still OPENS -- refusing a
             # picture outright is what "no editor for this" was, and a kid with a
             # picture they cannot look at learns nothing.
             self._read_only = True
             self._why = "Too big to edit"
-        return self._cached
+        return got
 
     def save(self, indices, width=320, height=240):
         """Persist Paint's canvas to its named drawing file (auto-naming a
@@ -931,7 +948,6 @@ class ArtworkService:
             self.last_error = str(err)
             return False
         self._set_doc_name(got, kind)
-        self._cached = (w, h, bytes(indices))
         self.last_error = ""
         self._notify.achieve("paint_save")
         return True
@@ -952,7 +968,6 @@ class ArtworkService:
         self._set_doc_name(name, self.DRAWINGS)
         self._read_only = False
         self._why = ""
-        self._cached = None
         return name
 
     # -- the wallpaper copy (#108 copy-on-set) --------------------------------

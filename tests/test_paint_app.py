@@ -1041,3 +1041,63 @@ def test_paints_frame_path_is_found_on_the_class_or_its_first_base():
                  "_show", "_view_page", "_game_page", "_story_page", "_draw_toast",
                  "_desk_row", "_desk_panel", "_desk_foot", "_lend"):
         assert name in vars(cls) or name in vars(paint_draw.PaintDraw), name
+
+
+class _PixLedger:
+    """moybuf over a ledger: what is lent, and what came back."""
+
+    def __init__(self):
+        self.live = {}
+        self.freed = 0
+
+    def alloc(self, n):
+        b = memoryview(bytearray(n))
+        self.live[id(b)] = b
+        return b
+
+    def free(self, b):
+        assert isinstance(b, memoryview) and self.live.pop(id(b), None) is not None, \
+            "freed twice, or never lent"
+        self.freed += 1
+
+
+def test_a_drawings_pixels_are_off_the_heap_and_go_back_when_it_is_replaced(
+        tmp_path, monkeypatch):
+    """A desk drawing is 600 KB: on the gc heap every collect scans it and
+    it wants one run of the heap whole, which a long session's heap stops
+    having. Its pixels are moybuf's, the document their one owner, and a
+    replaced document gives them back."""
+    from runtime import artwork
+    ledger = _PixLedger()
+    monkeypatch.setattr(artwork, "_moybuf", ledger)
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    old = app.doc
+    assert isinstance(old.pix, memoryview) and id(old.pix) in ledger.live
+    app._fresh_doc(old.W, old.H)
+    assert ledger.freed == 1 and old.pix is None
+    assert id(app.doc.pix) in ledger.live and len(ledger.live) == 1
+    app._fresh_doc(320, 240)
+    app.doc.load((64, 48, bytes(64 * 48)))     # another size re-mints the pixels
+    assert ledger.freed == 3 and len(ledger.live) == 1
+    assert len(app.doc.pix) == 64 * 48
+
+
+def test_the_artwork_service_keeps_no_copy_of_the_open_drawing(tmp_path):
+    """Load hands the decoded drawing over and save writes the document's own
+    pixels: the service holds neither, so the drawing stands in memory once."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    doc = app.doc
+    doc.pix[0] = 3
+    app._mark_changed()
+    assert app._save() is True
+    app.open()
+    big = [k for k, v in vars(ws.artwork).items()
+           if isinstance(v, (bytes, bytearray, memoryview, tuple))
+           and len(v) and (len(v) >= doc.W * doc.H
+                           or any(isinstance(x, (bytes, bytearray)) and len(x) >= doc.W * doc.H
+                                  for x in (v if isinstance(v, tuple) else ())))]
+    assert big == []
