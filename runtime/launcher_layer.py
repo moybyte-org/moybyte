@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   LauncherHomeLayer           the home: wallpaper, the cells, the bar's tabs, the hints
 #   LauncherHomeLayer.draw      the home frame
-#   LauncherHomeLayer.zone_tap  the tabs in the bar's zone
+#   LauncherHomeLayer.zone_gen  the int the bar's strip key reads (the zone is HomeZone's)
 #   HomeWindowLayer             the home in a desktop-mode window (PROJECTS)
 """The home (#28), extracted from Workstation (runtime/console.py) as a Layer
 -- docs/history/shell_layers_refactor_v1.md (Move 1b).

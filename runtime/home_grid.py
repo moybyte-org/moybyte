@@ -10,7 +10,7 @@
 #   Launcher.pointer_frame      one pointer sample over the cells
 #   Launcher.cover_specs        every cover the next full draw needs
 #   Launcher.band_pass          the band as a table of parts, on its own app host
-#   HOME_TABS                   the home's tabs and their words
+#   tab_count_title             the bar's title on the home: the tab's count
 #   day_words                   a date as the home says it
 #   desk_button_layout          the desk pane's rows of verb buttons
 """The home's GRID arrangement and the cards every arrangement draws.
