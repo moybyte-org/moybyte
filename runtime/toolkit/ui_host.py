@@ -201,7 +201,7 @@ class AppHost:
 
     def split_frame(self, gen, known, top, lag, out):
         """Whether the frame about to begin draws the pane the keys reach
-        alone (`moy_ui_api_split_frame`, docs/ui_blocks_2026-10.md §4.2):
+        alone (`moy_ui_api_split_frame`, docs/ui_api_2026-10.md §5a):
         SPLIT_ALONE with that pane's rect below `top` (the header the
         context's own pass draws) in `out`, an array('i') of four;
         SPLIT_LAGS with it where the target lags (`lag`, x0, y0, x1, y1)
@@ -519,7 +519,7 @@ class Hold:
     a frame the dialog drew over the hold alone on the glass, `note`), or
     where the frame is a window's whose target holds it as the last frame
     left it (`window_frame` 2 and up: the desk Editor's split frame of the
-    dialog's pane, docs/ui_blocks_2026-10.md §4.2), and only on a frame
+    dialog's pane, docs/ui_api_2026-10.md §5a), and only on a frame
     whose dialog gave the gen it gave the last."""
 
     def __init__(self):

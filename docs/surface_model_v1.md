@@ -952,7 +952,7 @@ Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),
 and a frame whose buffer holds the desk as its last draw left it, with no
 input the desk took itself (a press, a chord) and no look, size, layout or
 bar key moved, is the prompt pane's split frame
-(`docs/ui_blocks_2026-10.md` §4.2) and draws the prompt's rows alone; the
+(`docs/ui_api_2026-10.md` §5a) and draws the prompt's rows alone; the
 stamp copies them, and the full-screen row over the band stays as the
 buffer holds it (`WindowedWM._row_over`).
 

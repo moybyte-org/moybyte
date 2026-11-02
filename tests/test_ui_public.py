@@ -917,7 +917,7 @@ def test_a_press_focuses_its_pane_and_a_split_without_focus_answers_none():
 
 
 def test_a_split_frame_is_the_focused_panes_where_nothing_else_moved():
-    """The engine's split frame (docs/ui_blocks_2026-10.md §4.2): the pane a
+    """The engine's split frame (docs/ui_api_2026-10.md §5a): the pane a
     split's focus names, drawn alone where the gen the host gives is the
     last frame's, the WM knows this frame's target holds the page as the
     last frame left it (whatever it knew of the last frame's) and the

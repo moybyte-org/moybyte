@@ -18,7 +18,7 @@ The look itself — the marks, the type scale, each seed's fields — is
 `docs/media/look_2026-10/`: `DESIGN.md` is the look, `THEMES.md` the theme
 model and each theme's fields, `GAPS.md` what the engine lacked, and
 `EDITOR_LAYOUT.md` the Editor's rules. The public UI verbs are
-`docs/ui_api_2026-10.md` and `docs/ui_blocks_2026-10.md`; the app contract
+`docs/ui_api_2026-10.md`; the app contract
 is `docs/app_api_v1.md`; the shell's process model is `docs/shell_ux_v1.md`;
 the dirty protocol every cache here obeys is `docs/surface_model_v1.md` §3,
 and its §14.6-§14.7 state the copy and shift frames §9 relies on. Numbers
@@ -2300,7 +2300,7 @@ default.
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
 The Blocks outline and Music's steps are tables of parts
-(`docs/ui_blocks_2026-10.md` §4.1): the engine's region, drag, fling and
+(`docs/ui_api_2026-10.md` §2, A table of parts): the engine's region, drag, fling and
 reveal, their rows carried in C, and the page holding each table the
 region R its frames move the table inside. Config's cards are a verbs
 page (`editor_settings.SettingsPage`) whose gen makes a key step the

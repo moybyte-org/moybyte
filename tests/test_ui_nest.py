@@ -1,5 +1,5 @@
 """A nest opened past the engine's depth is an error in every face
-(docs/ui_blocks_2026-10.md §4.0): inside two open scroll regions
+(docs/ui_api_2026-10.md §1): inside two open scroll regions
 (moy_ui_api.h's MOY_UI_API_NEST), `ui.scroll`, `ui.text_view`, `ui.dialog`
 and `ui.popover` raise in Python and Lua, and their wasm imports answer
 -MOY_UI_DEEP, a value none of the four answers otherwise. The fixtures,

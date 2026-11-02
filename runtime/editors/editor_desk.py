@@ -755,8 +755,8 @@ class EditorDesk(Layer):
 
     def _split_frame(self, dt, got, own):
         """The frame as the split frame of the pane the keys reach, where
-        the engine plans one (`AppHost.split_frame`, docs/ui_blocks_2026-10.md
-        §4.2): that pane drawn alone -- its prompt's rows (`got`), or its
+        the engine plans one (`AppHost.split_frame`, docs/ui_api_2026-10.md
+        §5a): that pane drawn alone -- its prompt's rows (`got`), or its
         body (`own`; the Sound pane its card, header and body) -- and what
         it changed said (`changed`). True where it drew. The desk gives the
         engine what it draws outside the pane as a gen, and None where that

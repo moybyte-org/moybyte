@@ -1012,7 +1012,7 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // 0 otherwise (the part activated by a key, the pointer off it, no part
 // this frame).
 int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
-// ui.split(id, dir, sizes, o) (docs/ui_blocks_2026-10.md §4.2): ui.at's
+// ui.split(id, dir, sizes, o) (docs/ui_api_2026-10.md §5a): ui.at's
 // rect (else the page's, from its row cursor down) cut into `n` panes along
 // one axis, `gap` pixels apart -- left to right, or with MOY_UI_SPLIT_Y top
 // to bottom -- pane i sizes[i] long, the last taking what is left. Writes
@@ -1052,7 +1052,7 @@ int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // Whether (x, y) lies on a divider the last pass's splits drew, where a
 // press would hold it.
 int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
-// The split frame (docs/ui_blocks_2026-10.md §4.2), asked before the frame
+// The split frame (docs/ui_api_2026-10.md §5a), asked before the frame
 // begins: whether it draws the pane the keys reach alone. That pane is the
 // one a split of the last pass named with its focus (opt's CUR), of the
 // panes its splits cut (a pane a later split cut again is none). It is the
