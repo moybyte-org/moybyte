@@ -1,12 +1,12 @@
 ---
 paths:
-  - "runtime/*canvas*.py"
+  - "runtime/**/*canvas*.py"
   - "runtime/ui.py"
   - "runtime/ui_draw.py"
   - "runtime/chrome.py"
-  - "runtime/*_layer.py"
-  - "runtime/*_ui.py"
-  - "runtime/wm*.py"
+  - "runtime/**/*_layer.py"
+  - "runtime/**/*_ui.py"
+  - "runtime/wm/**"
   - "device/device_canvas.py"
   - "native/moy_gfx/**"
   - "docs/surface_model_v1.md"

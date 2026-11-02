@@ -42,7 +42,7 @@ def _read(rel):
 
 
 def test_wm_never_signals_the_table():
-    src = _read("runtime/wm.py")
+    src = _read("runtime/wm/wm.py")
     assert "moy_glass" not in src and "glass_binding" not in src, (
         "the fullscreen WM signals nothing: the frame gate reads the "
         "kernel's epoch (spec L6/§15)")

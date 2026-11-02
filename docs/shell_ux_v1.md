@@ -123,7 +123,7 @@ sibling app stealing milliseconds. "One fullscreen app + a back-stack" is not a
 compromise UI; it is the mechanism by which games hit their #66 numbers.
 
 *(Status 2026-07-08: the windowed tier is IMPLEMENTED host-side —
-`runtime/wm_windowed.py`, also served over the web transport — with two
+`runtime/wm/wm_windowed.py`, also served over the web transport — with two
 owner-directed refinements to this section's sketch: INPUT FOCUS is decoupled
 from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
@@ -580,7 +580,7 @@ Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
 `runtime/cards_layer.py`, `runtime/block_editor_ui.py`) ARE the Editor's tabs, owned
 by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
 `runtime/project.py` is the project workspace + commit verbs (§7, §11);
-`runtime/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
+`runtime/wm/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
 bar. `Workstation` (`runtime/console.py`) is the kernel — see `runtime/README.md` for the
 module map.

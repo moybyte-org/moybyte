@@ -376,7 +376,7 @@ int moy_ui_depth_title_ink(int active);
 int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
 // What a window leaves to the layer under it: its shadow at `mode`'s size and
 // its outline's partly covered pixels, blended over what that layer just
-// painted (runtime/wm_desk.py draws it, clipped to what it repainted).
+// painted (runtime/wm/wm_desk.py draws it, clipped to what it repainted).
 int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode);
 // The same, onto the pixels window `o` (title strip `oth`, focused `oactive`)
 // paints opaque -- its frame and content, never its outline's fringe or the

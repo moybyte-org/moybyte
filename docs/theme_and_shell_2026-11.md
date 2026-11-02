@@ -650,7 +650,7 @@ chooses. SerenityOS and xfwm4 work this way (§11). On the fullscreen tiers the
 "window" is the app's full-screen strip, so the same style draws that strip.
 
 **As built** (`native/moy_ui/moy_ui_draw.c`'s `moy_ui_frame`, reached through
-`ui.frame` from `runtime/wm_chrome.py`; 2026-10-12). `classic`
+`ui.frame` from `runtime/wm/wm_chrome.py`; 2026-10-12). `classic`
 is D1's: a one-pixel ring and the strip's bottom line in
 `shade_dark`, the hard black shadow, the app's identity stripe at the strip's
 left with the title beside it, and a square close (its glyph boxed in the
@@ -1428,7 +1428,7 @@ the gesture (`docs/surface_model_v1.md` §14.1) and relays out once on
 release.
 
 **Boards with one mode, and the hardware reason.** The T-Deck's one canvas IS
-the 320×240 game raster (`runtime/wm.py`), so there is no system canvas to
+the 320×240 game raster (`runtime/wm/wm.py`), so there is no system canvas to
 put a window on. The Guition S3 has a 480×320 system canvas, but at #203's
 tap floor its chrome scale is 2: a window's title strip alone is 36 of 320
 rows and a 16-logical icon 32 px, so a window smaller than the glass holds
@@ -1681,8 +1681,8 @@ Enter activates — exactly the `sysmenu` layer's rules. That layer is the
 one popover layer, with the system menu as its first content; the system
 menu is a popup in console mode too, as on the T-Deck.
 
-**A popover rides the quiet stack** (`runtime/wm_overlays.py`, the draw
-stack in `runtime/wm_windowed.py`).
+**A popover rides the quiet stack** (`runtime/wm/wm_overlays.py`, the draw
+stack in `runtime/wm/wm_windowed.py`).
 A change that stays inside the panel -- it opened, a row moved, it closed --
 does not mark the frame dirty: the WM owes the popover's rect to each of the
 root's real buffers (`RETAINED_FRAMES`; one on a persistent root, so the

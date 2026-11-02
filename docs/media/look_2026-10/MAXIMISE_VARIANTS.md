@@ -184,7 +184,7 @@ frame, Moy Day:
   (`-resize-art-800x480`, the divider dragged left and stopped there, the
   canvas 8 × 8 at 25).
 - **A restored window** resizes by the grip dev already has: the
-  bottom-right corner (`runtime/wm_chrome.py`'s `_grip_rect` and
+  bottom-right corner (`runtime/wm/wm_chrome.py`'s `_grip_rect` and
   `_grip_hit_rect`), drawn 12 px, hit 24 px plus a 4 px overhang at font
   scale 1, applied on release under a rubber-band outline or live
   (`_live_resize_ok`). The Editor's window stops shrinking at its

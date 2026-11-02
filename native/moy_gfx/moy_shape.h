@@ -26,7 +26,7 @@
  * what is under them. The two together are the whole shape. A window's frame is the
  * inner, drawn over pixels it paints itself, so it repeats to the same
  * pixels; its fringe belongs to whatever repaints the pixels under it (the
- * desk, runtime/wm_desk.py, or a window behind, runtime/wm_chrome.py), so a
+ * desk, runtime/wm/wm_desk.py, or a window behind, runtime/wm/wm_chrome.py), so a
  * fringe never blends twice.
  *
  * PAINTS (GAPS 7). A fill is a paint: up to MOY_SHAPE_STOPS stops (t in

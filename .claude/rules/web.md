@@ -2,7 +2,7 @@
 paths:
   - "firmware/web_runner/**"
   - "runtime/moy_sync.py"
-  - "runtime/web_*.py"
+  - "runtime/**/web_*.py"
   - "device/moy_web*.py"
   - "tools/*web*.py"
 ---
