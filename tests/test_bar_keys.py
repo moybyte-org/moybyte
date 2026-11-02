@@ -232,14 +232,14 @@ def test_the_bar_key_carries_the_focus():
 
 
 def test_the_homes_strip_names_the_bars_keys_while_on_it(tmp_path):
-    from runtime import launcher_layer
+    from runtime import home_hints
     ws, drv = _home(tmp_path)
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
     _press(drv, "up")
     _press(drv, "left")
-    assert launcher_layer.modal_keys(ws) == ui_draw.BAR_KEYS
+    assert home_hints.modal_keys(ws) == ui_draw.BAR_KEYS
     _press(drv, "down")
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
 
 
 def test_a_pages_strip_names_the_bars_keys_while_on_it(tmp_path, monkeypatch):
@@ -286,7 +286,7 @@ def test_the_keys_come_off_the_bar_when_its_surface_goes(tmp_path):
 
 
 def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
-    from runtime import launcher_layer
+    from runtime import home_hints
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
@@ -294,7 +294,7 @@ def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
     _walk_to(ws, drv, "battery")
     _press(drv, "a")
     assert ws.sysmenu.open and not ui_draw.on_bar()
-    assert launcher_layer.modal_keys(ws) != ui_draw.BAR_KEYS
+    assert home_hints.modal_keys(ws) != ui_draw.BAR_KEYS
     _press(drv, "b")
     assert not ws.sysmenu.open and ui_draw.on_bar()
 

@@ -8,8 +8,9 @@
 its hero -- the title, the facts line (`_facts`: kind, plays, the last day),
 the description and the rows of verb buttons (docs/theme_and_shell_2026-11.md
 §8.10) -- with the buttons' layout and their tap, and the card's verbs a
-card's menu lists (`card_verbs`). A mixin over `LauncherHomeLayer`: the
-details are drawn on the desk home's painted frames, never on a band frame.
+card's menu lists (`card_verbs`). A mixin over `LauncherHomeLayer`, after
+`HomeHints` among its bases: the details are drawn on the desk home's
+painted frames, never on a band frame.
 It owns no state of its own: the button focus it draws is the layer's.
 """
 

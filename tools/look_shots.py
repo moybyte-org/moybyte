@@ -3435,19 +3435,19 @@ def _strongest(img, r):
 
 def _menu_keys_words(ws, layer, ox=0, oy=0):
     """The glass rect of the words a home's hint strip names the open
-    modal's first key with (`launcher_layer.modal_keys`: "Close" after its
+    modal's first key with (`home_hints.modal_keys`: "Close" after its
     keycap under a menu, "Choose" under the delete confirm), `layer` the
     home's layer,
     its strip offset by (ox, oy); None where it draws none. The words, not
     the strip's strongest colour: a keycap's glyph can stand far stronger
     than the words beside it, so a scrim over the words would pass on the
     glyph (design review R5-03)."""
-    from runtime import launcher_layer, ui_draw
+    from runtime import home_hints, ui_draw
     foot = layer.grid.foot()
     if foot is None or not foot[5][3]:
         return None
     rect = foot[5]
-    keys = launcher_layer.modal_keys(ws)
+    keys = home_hints.modal_keys(ws)
     if keys is None:
         return None
     spans = ui_draw.hints(ws.sys_canvas, ws.theme_colors, layer._hint_inner(rect), keys,
@@ -3495,7 +3495,7 @@ def _menu_pairs(ws, img):
 
 def _strip_pairs(ws, img):
     """The hint strip that names an open modal's keys (the system menu's,
-    the delete confirm's, `launcher_layer.modal_keys`): over the home its
+    the delete confirm's, `home_hints.modal_keys`): over the home its
     ink on its ground at 4.5:1 (R4-05), and its words on the desk's
     PROJECTS window's strip unwashed (R5-03, F6-02)."""
     out = []

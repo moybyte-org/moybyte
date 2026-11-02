@@ -11,6 +11,7 @@ stays on it.
 import pytest
 
 from runtime import host_app, launcher_layer, ui_draw
+from runtime import home_hints
 from runtime import home_grid
 from test_v04_userland import select_first_game
 
@@ -171,7 +172,7 @@ def test_the_rows_strip_names_its_keys(tmp_path):
         drv.frame(1 / 30)
     finally:
         ui_draw.hints = real
-    assert launcher_layer._TAB_ROW_KEYS in seen
+    assert home_hints._TAB_ROW_KEYS in seen
 
 
 def _stepped(ws):
@@ -217,7 +218,7 @@ def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):
     assert ws.bar_layer.focus is not None
     ws.input_used("touch")
     assert ws.bar_layer.focus is None and not ws.launcher_layer._tab_focus
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
 
 
 def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path):

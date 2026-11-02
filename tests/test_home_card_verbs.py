@@ -13,6 +13,7 @@ import pytest
 
 import test_shell_goldens as g
 from runtime import launcher_layer, moy_input, ui_draw
+from runtime import home_hints
 from runtime import home_grid
 from ws_helpers import make_drv
 
@@ -120,7 +121,7 @@ def _reached(ws, drv, kind, monkeypatch):
     if tap:
         got.add(tap)                          # a tap, A or enter
     ui_draw.input_kind(kind)
-    if kind in launcher_layer._LETTER_INPUTS:
+    if kind in home_hints._LETTER_INPUTS:
         done = []
         monkeypatch.setattr(home, "_do_verb", lambda v: done.append(v))
         monkeypatch.setattr(home, "toggle_favourite", lambda: done.append("favourite") or True)
@@ -274,7 +275,7 @@ def test_y_is_copy_and_nothing_else(tmp_path):
     assert "Y" not in items[::2]
     home.handle_input(_Pad("y"))
     assert not ws.carts.is_favorite(it)
-    assert launcher_layer._VERB_KEY["y"] == "copy"
+    assert home_hints._VERB_KEY["y"] == "copy"
     caps = {}
     for v, (k, _w) in home_grid._VERB_HINT.items():
         if k in ("confirm", "X"):
