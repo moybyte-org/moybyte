@@ -461,6 +461,13 @@ boot trace and the import timer. The spine imports it, so every board that
 takes the spine takes it."""
 
 [[modules.device.group]]
+files = ["battery.py"]
+why = """
+The battery's gauge (#130): the cell on GPIO4 behind the board's 100k/100k
+divider, read through the ADC into the console's `battery_level`. This board
+is the one with a gauge; the others read none and answer None."""
+
+[[modules.device.group]]
 files = ["device_util.py", "device_canvas.py"]
 why = """
 STAGE 2 (touch). The drawing backend: `DeviceCanvas` (the RGB565 raster every

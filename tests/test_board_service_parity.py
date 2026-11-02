@@ -127,6 +127,8 @@ SERVICES = {
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
     "reboot_hook": "the sysmenu Reboot row's real reset",
+    "battery": "the battery's gauge (#130) behind the bar's battery widget, "
+               "its popover and About",
     "net": "the #65 multiplayer transport behind net.* in a cart",
     "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
     "link": "the #7 ESP-NOW radio: discovery, pairing and the two-console lockstep link",
@@ -168,6 +170,7 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": INJECTED,
         "net": INJECTED,
         "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
                 "keyboard, trackball, radio -- and a cart here runs on the board\n"
@@ -209,6 +212,8 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
+                   "system battery (the README's power notes)",
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
                 "the C6, and a cart runs locally. Nothing to expose.",
@@ -248,6 +253,7 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "the board's README names no cell and no gauge pin",
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
                 "the C6, and a cart runs locally. Nothing to expose.",
@@ -286,6 +292,9 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
+                   "ESPHome example nobody has checked against a fitted cell; "
+                   "it is wired once one confirms the ratio",
         "net": INJECTED,
         "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
                 "panel and touch.",
@@ -329,6 +338,7 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
@@ -383,6 +393,7 @@ WIRING = {
         "cart_keep": INJECTED,
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
+        "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",

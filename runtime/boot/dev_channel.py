@@ -1307,8 +1307,8 @@ class DevChannel:
         """One SERIAL line per diag tick, and it is the channel's self-diagnosis:
         `rx` climbing while `lines` stays 0 means something is injecting bytes
         into stdin that are not commands -- UART0's ISR shares this ring buffer,
-        so a floating U0RXD (GPIO44, on the expansion header) reads exactly like
-        this. That is a fact, printed, instead of a hang to be puzzled over."""
+        so what arrives on U0RXD (a floating pin, or on the T-Deck the GPS
+        module's TX) reads exactly like this. That is a fact, printed, instead of a hang to be puzzled over."""
         st = _loop.devch_stats() if _loop is not None else (0, 0, 0, False)
         _diag_log("SERIAL", "rx=%d lines=%d dropped=%d raw=%d"
                   % (st[0], st[1], st[2], self.raw), diag)

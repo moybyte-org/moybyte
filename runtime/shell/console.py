@@ -655,6 +655,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # The board's inputs as the hints know them (`use_inputs`): None until a
     # board declares them, and then the source names' kinds.
     input_kinds = None
+    # The battery's gauge (device/battery.py): None until a board that reads
+    # one sets it.
+    battery = None
     _news = None
     _cart_keys = False              # what the input table was told last
     _menu_over = False              # a menu holds the keys over the surface (`_menu_keys`)
@@ -2042,8 +2045,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def battery_level(self):
         """The battery's charge in percent, or None where the board reads none
-        (every board today: the glyph is the widget's whole value)."""
-        return None
+        (no `battery` gauge: the glyph is the widget's whole value)."""
+        return None if self.battery is None else self.battery.level()
 
     # -- firmware update screen (#53) -----------------------------------------
     #

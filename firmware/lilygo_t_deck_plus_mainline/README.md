@@ -317,6 +317,31 @@ and its Quit to leave a game, the ≡ menu and Settings work, the Editor's seven
 
 ---
 
+## The light, the battery and the GPS
+
+The pins are the vendor's (`examples/UnitTest/utilities.h` in
+Xinyuan-LilyGO/T-Deck); the protocols are its examples'.
+
+- **The backlight (GPIO42) is a pulse-stepped LED driver, not a PWM input**
+  (`UnitTest.ino`'s `setBrightness`): held low over 2.5 ms it is off, raised
+  from off it comes up at the top of 16 steps, and each short low pulse steps
+  it down one, wrapping from the bottom to the top. `moy_lcd_kbacklight` takes
+  the kernel's level (0 off, 255 full) to the nearest step at or above it, and
+  `moy_lcd.backlight()` answers the step it holds. Settings' Brightness is the
+  idle ladder's top (`IdleLadder.brightness`), and the ladder's dim rung is a
+  real dim here.
+- **The battery is read on GPIO4** (`BOARD_BAT_ADC`), the cell behind a
+  100k/100k divider, through `device/battery.py` into the console's
+  `battery_level`. There is no charge-status line, so on USB the level reads
+  the charger's voltage, not the cell's resting one.
+- **The GPS is on UART0**: `BOARD_GPS_TX_PIN` 43 (U0TXD, to the module's RX) and
+  `BOARD_GPS_RX_PIN` 44 (U0RXD, from the module's TX). These are the Grove
+  connector's pins, which the T-Deck Plus gives to its GPS, so its Grove port
+  is not free. The vendor's `GPSShield.ino` opens it at 9600 baud 8N1 for an
+  L76K and at 38400 for a u-blox M10Q, the two modules the board has shipped
+  with. Nothing in the console drives it yet; the module talks into U0RXD
+  whenever the board's power rail (GPIO10) is up.
+
 ## The serial dev channel
 
 The console answers line commands on its USB serial through the one
@@ -332,7 +357,8 @@ its own:
 2. USB-Serial/JTAG as the **PRIMARY** ESP-IDF console. A SECONDARY console is
    output-only by design.
 3. `MICROPY_HW_ENABLE_UART_REPL (0)` — UART0 shared the ring buffer, and its
-   floating pin is where every `SERIAL rx=1` stray byte came from.
+   RX pin is the GPS module's TX line (below), so what arrives there reads as
+   typed input: UART0 was where every `SERIAL rx=1` stray byte came from.
 
 (2) alone HANGS the board: with USBDEV still on, `mp_hal_stdout_tx_strn` falls
 through to IDF's blocking primary console. It needs (1)'s non-blocking
@@ -341,9 +367,9 @@ then latches `terminal_connected = false`.
 
 `nm` is what settled it. The image recorded as having dead RX linked
 `tud_cdc_rx_cb` but neither `tusb_init` nor `usb_serial_jtag_isr_handler`, and
-bound stdin to `uart_stdout_init` on U0RXD — a header pin with nothing attached
-— so bytes written to the enumerated interface were accepted by the host stack
-and dropped. Both explanations recorded before that were wrong: "the USB-CDC
+bound stdin to `uart_stdout_init` on U0RXD — the GPS module's TX line (above),
+not a host's — so bytes written to the enumerated interface were accepted by the
+host stack and dropped. Both explanations recorded before that were wrong: "the USB-CDC
 stack has no at-arrival interrupt-char scan" (`tud_cdc_rx_cb` is linked and
 scans) and micropython#18581's "CDC only initialises at the REPL" (true of CDC,
 not the reason). The lvgl_micropython fork could not be fixed this way: its

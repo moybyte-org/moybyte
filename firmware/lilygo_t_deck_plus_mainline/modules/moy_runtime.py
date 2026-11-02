@@ -65,8 +65,8 @@ LAYER_COPY_ASYNC = True
 # kilobytes arrive without a single complete command. Its module docstring
 # carries the reader's design; what is THIS board's alone is mechanism 2 of the
 # original stall: `MICROPY_HW_ENABLE_UART_REPL` would put UART0's ISR on the
-# same stdin ring buffer, so noise on the floating U0RXD (GPIO44, exposed on
-# the expansion header) reads exactly like typed input. The board header keeps
+# same stdin ring buffer, so what arrives on U0RXD (GPIO44, the GPS module's
+# TX -- the README's GPS) reads exactly like typed input. The board header keeps
 # UART_REPL off (#201); if `SERIAL rx=` ever climbs on an idle board, that is
 # the mechanism to suspect. (The full history of why RX was thought impossible
 # here -- and why the fork's never worked -- is in this board's README and
@@ -280,6 +280,9 @@ def run_desktop(fps_cap=60):
                       fps_cap=fps_cap)
     ws = d.ws
     serial = d.serial
+    # The battery's gauge: GPIO4 behind the board's 100k/100k divider.
+    from battery import Battery
+    ws.battery = Battery(4, 2)
 
     # The offline diag ring's per-frame Python: this board's own, run inside
     # the frame upcall (never an upcall of its own). HITCH and LOOP are the

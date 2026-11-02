@@ -22,8 +22,8 @@
 //
 // The result is a board with NO stdin at all: measured 2026-08-16, the image
 // carried tud_cdc_rx_cb but no tusb_init and no usb_serial_jtag_isr_handler,
-// stdin came from uart_stdout_init on U0RXD -- a header pin with nothing
-// attached -- and a host write() to the enumerated 303a:1001 interface was
+// stdin came from uart_stdout_init on U0RXD -- the GPS module's TX line
+// (GPIO44, the README's GPS) -- and a host write() to the enumerated 303a:1001 interface was
 // accepted and then went nowhere (SERIAL rx= never moved off a single stray
 // byte). Output worked the whole time, because ESP-IDF's SECONDARY console is
 // output-only.
@@ -38,11 +38,11 @@
 // failure mode of picking wrong is silent in one direction only.
 #define MICROPY_HW_ENABLE_USBDEV            (0)
 
-// UART REPL OFF. It shares stdin_ringbuf with the USB path, and U0RXD is an
-// exposed header pin with nothing attached -- which is where the single stray
-// byte behind every `SERIAL rx=1` came from. Leaving it on makes a received
-// byte's ORIGIN ambiguous exactly while the USB path is being debugged. Turn it
-// back on to drive the board over the header pins.
+// UART REPL OFF. It shares stdin_ringbuf with the USB path, and U0RXD (GPIO44)
+// is the GPS module's TX (the README's GPS; the Grove connector's pin, which
+// the T-Deck Plus gives to the GPS), and UART0 is where the single stray byte
+// behind every `SERIAL rx=1` came from. On, whatever the GPS sends reads as
+// typed input: UART0 is the GPS's, not a REPL's.
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
