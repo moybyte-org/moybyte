@@ -113,7 +113,7 @@ their surfaces move. The Launcher's bands have none: their pass opens
 through `AppHost.begin` and draws whole. The desk's panes have none: a
 frame of one pane alone, or of its dialog's rows, is the engine's split
 frame (§4.2). Paint's pickers have none either: the page under them is a
-modal's page (`ui_draw.Hold`), and their cells are read from a part
+modal's page (`ui_host.Hold`), and their cells are read from a part
 (§4.4).
 
 **G5. Budgets.**

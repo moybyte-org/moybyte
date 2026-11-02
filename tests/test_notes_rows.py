@@ -21,7 +21,7 @@ from array import array
 
 import pytest
 
-from runtime import host_app, moy_carts, ui_draw
+from runtime import host_app, moy_carts, ui_draw, ui_host
 from ws_helpers import no_unlock_banner, quiesce, select_on_home
 
 _DT = 1 / 30
@@ -410,8 +410,8 @@ def _moves(p):
         r = run(*a, **k)
         if h.shifting and h._dy:
             hp = h._hp
-            n = hp[ui_draw._HP_N]
-            k = ui_draw._HP_MOVES + 5 * (n - 1)
+            n = hp[ui_host._HP_N]
+            k = ui_host._HP_MOVES + 5 * (n - 1)
             got.append(tuple(hp[k:k + 5]))
         return r
     h.run = kept

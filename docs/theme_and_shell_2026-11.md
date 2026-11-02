@@ -1397,7 +1397,7 @@ resize takes. There is no allocation-retry hook. The home's `_lib_cache`
 lives across switches (the home is console mode's root and hot on return)
 and is released by the same fit-check path after the stamps, and after it
 the layers a modal keeps what lies under it in, kept across modals: a
-dialog's held page and the frame under the pause card (`ui_draw.Hold`). The Waveshare
+dialog's held page and the frame under the pause card (`ui_host.Hold`). The Waveshare
 P4's off-heap census is `tools/mem_census.py p4 offheap`, its numbers in #58.
 
 **No boot setting** (owner, 2026-10-13: not for now). A P4 boots to the
@@ -2103,7 +2103,7 @@ count. An empty Mine or Make shows one "+ New" card.
 cover: the theme's `surface` in a cover's corners with the icon set's plus in
 `ink_accent` (`home_grid.draw_new_art`, `iconsets.plus`), the same at
 rest and selected. A colour block with a glyph is what a coverless cart's
-generated cover is (`ui_draw.initial_cover`), so New stays off that
+generated cover is (`ui_cover.initial_cover`), so New stays off that
 vocabulary; a theme that casts no shadow frames the page in its `border`,
 the page inside the frame keeping a cover's corners and the frame running
 round them (design review R5-10, F6-04).

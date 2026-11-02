@@ -1,7 +1,7 @@
 """A coverless cart's generated cover (design review D-13, owner 2026-10-19):
 its title's initial on a colour block that stays the cart's."""
 
-from runtime import ui_draw
+from runtime import ui_cover, ui_draw
 from runtime.host_canvas import make_system_canvas
 
 
@@ -10,7 +10,7 @@ def test_a_titles_block_is_the_same_every_time_and_titles_spread():
     blocks = {ui_draw.initial_block(t) for t in (
         "Coin Quest", "Pin Light", "Calc", "Files", "Paint", "Notes", "Storybook", "Bench")}
     assert len(blocks) >= 4, "eight titles share too few blocks"
-    for block, ink in ui_draw.INITIAL_BLOCKS:
+    for block, ink in ui_cover.INITIAL_BLOCKS:
         assert 0 <= block < 64 and 0 <= ink < 64 and block != ink   # MOY64 indices
 
 

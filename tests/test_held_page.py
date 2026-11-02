@@ -1,4 +1,4 @@
-"""The page held under a dialog (`ui_draw.Hold`, docs/surface_model_v1.md
+"""The page held under a dialog (`ui_host.Hold`, docs/surface_model_v1.md
 §14.5): while the Editor's Cart info dialog or a Blocks entry prompt is up,
 or the pause or stop card stands over a run, a frame puts the page under it
 back washed instead of drawing the page and its wash.
@@ -15,7 +15,7 @@ buffer (`Hold.last`) where it may."""
 
 import pytest
 
-from runtime import block_editor_ui, host_app, ui, ui_draw
+from runtime import block_editor_ui, host_app, ui, ui_draw, ui_host
 from ws_helpers import no_unlock_banner, open_cart, quiesce
 
 # A game whose frames are a function of its frame count alone.
@@ -57,7 +57,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     the gate lets through, as on a board). `puts` counts the frames that
     put the held page back, the first frames that took the page from the
     last frame (`Hold.last`), and the dialogs' rows frames, which left
-    the page as it was (`ui_draw.Hold`)."""
+    the page as it was (`ui_host.Hold`)."""
     puts = [0, 0, 0]
     real = ui_draw.Hold.put
     real_last = ui_draw.Hold.last
@@ -80,8 +80,8 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     if ref:
         # the dialog washes the page itself, as one with no held page did,
         # and draws whole on every frame
-        monkeypatch.setattr(ui_draw, "wash_page", lambda *a: (0, 0, 0, 0))
-        monkeypatch.setattr(ui_draw, "NO_WASH", None)
+        monkeypatch.setattr(ui_host, "wash_page", lambda *a: (0, 0, 0, 0))
+        monkeypatch.setattr(ui_host, "NO_WASH", None)
         real_dialog = ui.dialog
 
         def dialog(title=None, buttons=(), kind="primary", o=None):

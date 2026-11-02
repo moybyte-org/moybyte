@@ -890,9 +890,9 @@ change while it stays up; a frame that types into it or moves its focus
 paid the page and its wash anyway, and on the T-Deck the two were most of
 the frame. #66 has the numbers.
 
-**A modal keeps the page under it washed** (`ui_draw.Hold`, one per modal):
+**A modal keeps the page under it washed** (`ui_host.Hold`, one per modal):
 the first frame draws the page and washes it (`Hold.wash` over
-`ui_draw.wash_page`, the toolkit's own rule: the surface less the page's
+`ui_host.wash_page`, the toolkit's own rule: the surface less the page's
 hint band at its foot), the wash storing each pixel to the held layer as
 it lands (`moy_shape_shadow_io`) and the rest of the page's rect copied
 there after it; each frame after puts the copy back and draws the dialog
@@ -917,7 +917,7 @@ dialog and Blocks' entry prompts hold their page (`Hold.under`); the pause
 and stop cards hold the run's frame washed beside the frame the same hold
 keeps as the game left it for the resumed game (`Hold.snap`), in a second
 shared layer kept across cards and freed by the fit check the same way
-(`ui_draw.held_layer`); where the game's frame is the system canvas (the
+(`ui_host.held_layer`); where the game's frame is the system canvas (the
 handheld) an idle frame mints both, so no card's first frame does.
 
 **A dialog's first frame takes the page from the last frame where it can**
@@ -1073,7 +1073,7 @@ moves nothing and pays. None, unmeasured, shifts.
 windowed WM the shown ring (`_shown`) for a window's content, never the
 content (`WindowedWM._vouches`, handed to the page's host for the draw:
 `ui_draw.window_frame`); on the full-screen tier the content's own `PaintRing`
-(`ui_draw.PaintRing`, the slots `ScrollRegion`'s #113 ring also keeps),
+(`ui_scroll.PaintRing`, the slots `ScrollRegion`'s #113 ring also keeps),
 because the stack draws everything around R every frame. The WM says which
 (`CONTENT_RING`), and the console tells each painted frame whether the
 content is alone on the glass (`ui_draw.paint_frame`: no overlay, splash,

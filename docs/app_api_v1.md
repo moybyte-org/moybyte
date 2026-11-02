@@ -168,7 +168,7 @@ app make. The engine under them -- the rect-taking widgets (`button`,
 (`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
 moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
 An app on the verbs sets `UI = True` and draws them into the frame its
-host side, `ctx.ui` (`ui_draw.AppHost`), begins: its handlers hand it the
+host side, `ctx.ui` (`ui_host.AppHost`), begins: its handlers hand it the
 input (`keys`, `point`, each answering whether a frame is owed) and its draw
 begins the frame (`begin`); Calc is the example.
 Theme tokens are `ctx.theme.colors()` and `ctx.theme.light()`; layout stays
