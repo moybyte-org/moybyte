@@ -2960,7 +2960,7 @@ def initial_block(title):
 # The generated cover is a picture of a cover's side (SPEC.md 3.6's 128),
 # drawn into any card as a cover is (`cv.cover`): its letter's pixels are
 # INITIAL_UNIT of that side each -- a sixteenth, so the letter is whole
-# pixels at every clean card side (`launcher_layer._clean_side`) and no
+# pixels at every clean card side (`home_grid._clean_side`) and no
 # taller than half the block.
 INITIAL_SIDE = 128
 INITIAL_UNIT = 8

@@ -1228,7 +1228,7 @@ def _kb_pixels(gfx, cases):
 
 KERNEL_BENCH = """
 import gc, time, moy_gfx
-import launcher_layer as _ll
+import home_grid as _ll
 _T, _D = time.ticks_us, time.ticks_diff
 
 def _kb_med(f, n=15):
