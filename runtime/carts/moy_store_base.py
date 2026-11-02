@@ -77,7 +77,7 @@ def _canvas_str(value):
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
 # header {format,w,h,data} over deflated indices, one byte per pixel -- ONE format,
-# whoever wrote it (runtime/moyimg.py holds the codec and the argument).
+# whoever wrote it (runtime/carts/moyimg.py holds the codec and the argument).
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 
@@ -91,7 +91,7 @@ TILE_FLAGS = 512
 
 # A cart's COVER (SPEC.md 3.6, visual identity v1 Section 11.4): `cover.png` in
 # the folder's root, beside the manifest -- a 128x128 PNG the shelf draws
-# (runtime/shell/cover_cache.py) and Paint edits, read through runtime/cover_png.py.
+# (runtime/shell/cover_cache.py) and Paint edits, read through runtime/carts/cover_png.py.
 # A file outside the profile is no cover, and the card draws the cart's icon or
 # type glyph instead. tools/gen_covers.py writes the seed games' covers. The one
 # binary file in a cart that is not a compiled module, and the one the store,
@@ -100,7 +100,7 @@ COVER_FILE = "cover.png"
 COVER_MAX_BYTES = 65536               # cover_png.MAX_BYTES (pinned equal)
 
 # A cart's regenerable preview cache: `thumbs/`, the wallpaper-preview
-# sidecars runtime/moy_image.py writes. Never copied with a cart, never synced.
+# sidecars runtime/carts/moy_image.py writes. Never copied with a cart, never synced.
 THUMBS_DIR = "thumbs"
 
 # Placed-actor scenes (#85) live in a per-cart scenes/ subfolder, one .moyscene

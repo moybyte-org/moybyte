@@ -1,6 +1,6 @@
 """Cross-cart sprite reuse (#18): the SpriteSheet.copy_tile import primitive and
 the shared sprite sheet stored alongside the carts dir. These exercise the same
-shared `runtime/editors/editors_sheet.py` + `runtime/moy_carts.py` the device freezes.
+shared `runtime/editors/editors_sheet.py` + `runtime/carts/moy_carts.py` the device freezes.
 
 The sprite tab in the 2026-10 look (docs/history/look_2026-10.md step 24) is held at
 the foot: a clear pixel on the grey checker, the ring cursor the arrows move

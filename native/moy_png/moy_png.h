@@ -6,7 +6,7 @@
 // chunks skipped; chunk CRCs not checked. A file outside the profile, or one
 // whose data does not decode, is not a cover -- the caller draws as if there
 // were none. moy-spec's moycore/cover.py `read` is the reference this mirrors
-// rule for rule, and runtime/cover_png.py is the console's Python twin of it;
+// rule for rule, and runtime/carts/cover_png.py is the console's Python twin of it;
 // tests/test_cover_png.py holds the three together.
 //
 // PURE C, no MicroPython: modmoy_png.c is the binding the boards and the

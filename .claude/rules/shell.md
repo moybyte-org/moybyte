@@ -123,11 +123,11 @@ to whoever called it.
   icon tiles: the shell's baked bar icons and a theme's own pixel tiles;
   `editors_sheet`), `PaintEditor` (`editors_paint_map`). Each is frozen under
   its own name.
-- **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo
+- **`runtime/carts/moy_carts.py` is the `.moy` store** (and the per-project undo
   journal; the #108 user-files layer beside it is native/moy_store's
   `moy_ufiles`, which `moy_carts` names reach and the files role's C rows
   serve). The file lists its verbs; the decisions behind it:
-  - **A CART is reached by handle, through `runtime/moy_catalogue.py`** -- the
+  - **A CART is reached by handle, through `runtime/carts/moy_catalogue.py`** -- the
     shelf's scan, a whole-cart load, create, duplicate and delete -- and every
     cart dict it returns carries its index handle as `"h"`. A path names a FILE
     (the save_* verbs, the journal, the sync wire). Calling moy_carts' own

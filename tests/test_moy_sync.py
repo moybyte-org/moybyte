@@ -1,4 +1,4 @@
-"""The 3.4 sync push's two halves in isolation (runtime/moy_sync.py).
+"""The 3.4 sync push's two halves in isolation (runtime/carts/moy_sync.py).
 
 The convergence harness (test_sync_convergence.py) proves two whole stores
 agree; this file proves the PIECES are trustworthy on their own -- above all

@@ -1,5 +1,5 @@
 """The store's crash-safe write in C (native/moy_store, docs/history/kernel_store_2026-10.md
-section 5), held to runtime/moy_fs.py, which CPython keeps as its twin.
+section 5), held to runtime/carts/moy_fs.py, which CPython keeps as its twin.
 
   * the power-cut matrix: every scripted write sequence on oofatfs over a RAM
     card and littlefs2 over a RAM flash, cut at every block write, reads back
@@ -101,7 +101,7 @@ def _lib():
 
 
 class _CStore:
-    """runtime/moy_fs.py's calls over the C store, as the twin answers them."""
+    """runtime/carts/moy_fs.py's calls over the C store, as the twin answers them."""
 
     def __init__(self, lib):
         self.lib = lib

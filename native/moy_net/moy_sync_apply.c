@@ -55,7 +55,7 @@ static int is_shelf(const char *name) {
     return 0;
 }
 
-// runtime/moy_sync.py's is_binary: a cart's cover by name, a theme package's
+// runtime/carts/moy_sync.py's is_binary: a cart's cover by name, a theme package's
 // fonts and sheets by suffix.
 static int is_binary(const char *name) {
     static const char *const suffixes[] = {".fnt", ".moygfx"};

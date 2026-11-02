@@ -3,7 +3,7 @@
 #   Component          one native component: its dir, hook and host sources
 #   impl_of            the hook's value, checked
 #   build_env          the hook's environment for one build
-#   binding            runtime/moy_index.py's interface over a twin, by ctypes
+#   binding            runtime/carts/moy_index.py's interface over a twin, by ctypes
 #   host_bindings      the suite's native BINDINGS
 #   fuzz_binary        fuzz_index under ASan+UBSan: libFuzzer's or the seeded one
 #   unix_micropython   the desktop MicroPython with a twin in both binaries
@@ -46,10 +46,10 @@ browser console built as the default (`py`) and each board's image as the twin.
 THE HOOK. MOY_INDEX_IMPL picks the store index a build compiles in:
 
     c     the default: native/moy_index/moy_index.c under modmoy_index.c, and
-          runtime/moy_index.py left out of the frozen set, so the extensible
+          runtime/carts/moy_index.py left out of the frozen set, so the extensible
           builtin answers `import moy_index` on every image that takes the
           module (the boards, the browser)
-    py    runtime/moy_index.py, frozen; no native index at all
+    py    runtime/carts/moy_index.py, frozen; no native index at all
 
 native/moy_index/micropython.cmake (the boards) and micropython.mk (the
 desktop MicroPython, the browser) read it, tools/board_config.py drops the
@@ -60,7 +60,7 @@ The spine has no hook: native/moy_spine (modmoy_spine.c over moy_route.c,
 moy_settings.c and moy_ledger.c, and moy_htab.c, the handle table both
 components take their slots from) is in every image, the desktop MicroPython
 and the CPython host (over ctypes), and its Python twin is the suites' oracle,
-tests/spine_twin.py. runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
+tests/spine_twin.py. runtime/carts/moy_index.py stays the host's: CPython's simulator, tools and tests
 import it, and it is the reference every binding is pinned against.
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
@@ -262,7 +262,7 @@ _SIGS = (
 
 
 def binding(impl="c", sanitize=False):
-    """An Index class with runtime/moy_index.py's interface over the C twin's
+    """An Index class with runtime/carts/moy_index.py's interface over the C twin's
     host library, or None where there is no C compiler."""
     path = host_library(impl, sanitize)
     if path is None:

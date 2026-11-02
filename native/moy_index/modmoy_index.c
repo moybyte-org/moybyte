@@ -1,5 +1,5 @@
 // moy_index's MicroPython binding: the native index (moy_index.h) as the
-// module runtime/moy_index.py is, name for name -- Index, StaleHandle,
+// module runtime/carts/moy_index.py is, name for name -- Index, StaleHandle,
 // SLOT_BITS, SLOTS, GEN_MAX, ROOTS -- and mem(), the bytes the index holds now
 // and at its high water, which the census reads. Every image builds it unless
 // its MOY_INDEX_IMPL is `py` (tools/moy_index_spike.py).

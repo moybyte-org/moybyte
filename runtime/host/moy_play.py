@@ -25,7 +25,7 @@ so this is what it finds.
   Files(cart)      a cart's written files by the C store
                    (native/moy_store/moy_files.c), with files_key,
                    files_path_of, files_folder and files_live: the parity
-                   suite's view of it beside runtime/cart_files.py. Host only.
+                   suite's view of it beside runtime/carts/cart_files.py. Host only.
   front_ops(buf, w, h), front_frame, front_end, state_json
                    the kernel loop's half of a run in front (a board's loop
                    calls the C), over a buffer standing in for a compositor.
@@ -306,7 +306,7 @@ def files_folder(cart_path):
 
 class Files:
     """A cart's written files by the C store (moy_files.h), the shape of
-    runtime/cart_files.py's CartFiles: where, read, write, erase, name, and
+    runtime/carts/cart_files.py's CartFiles: where, read, write, erase, name, and
     `shipped`, a read of the cart's own folder. Host only."""
 
     def __init__(self, cart_path):

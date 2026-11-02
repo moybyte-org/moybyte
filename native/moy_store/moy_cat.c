@@ -1,4 +1,4 @@
-// The catalogue (moy_cat.h has the contract; runtime/moy_carts.py's `_load`
+// The catalogue (moy_cat.h has the contract; runtime/carts/moy_carts.py's `_load`
 // and `_each` are the reference every branch below follows).
 
 #include <stdio.h>
@@ -283,7 +283,7 @@ static char *str_of(arena_t *a, moy_cat_json_t f, size_t *n) {
     return d;
 }
 
-// SPEC.md 3.7's genres, closed: runtime/cart_listing.py's GENRES.
+// SPEC.md 3.7's genres, closed: runtime/carts/cart_listing.py's GENRES.
 static const char *const genres[] = {
     "action", "adventure", "arcade", "music", "platformer", "puzzle",
     "racing", "rpg", "shooter", "sports", "strategy", "toy",

@@ -1,5 +1,5 @@
 """A compiled cart's written files in C (native/moy_store/moy_files.c) held to
-runtime/cart_files.py, the reference, rule for rule: the key a path is kept
+runtime/carts/cart_files.py, the reference, rule for rule: the key a path is kept
 under and back, where a cart's files live, the whole-or-nothing write, the
 recovery of what a power loss left, erase, and the listing a cart walks.
 

@@ -3225,7 +3225,7 @@ def wasm_files_turn(board):
 
 def wasm_written_files_outlive_the_session(board, board_dir):
     """A compiled cart's written files on the board's store, through moycore
-    and runtime/cart_files.py under the store's gate: the first run writes
+    and runtime/carts/cart_files.py under the store's gate: the first run writes
     (over a shipped default, "Case" beside "case" -- which the T-Deck's FAT
     card must keep apart), the second run, a new session, finds every file
     and erases them. The reboot between the two is the on-glass pass's

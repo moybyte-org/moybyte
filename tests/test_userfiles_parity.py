@@ -157,7 +157,7 @@ def test_the_palette_is_the_canvas_palette():
 
 def test_the_sync_reads_the_layers_kinds():
     """The sync names the files root and its kinds from the on-card layout
-    (runtime/moy_store_base.py), which the Zero carries without the layer:
+    (runtime/carts/moy_store_base.py), which the Zero carries without the layer:
     they are the layer's own."""
     import moy_ufiles_binding
     from runtime import moy_store_base

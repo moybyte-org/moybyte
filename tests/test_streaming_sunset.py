@@ -19,7 +19,7 @@ rather than raster-shaped.
 THE WEBSOCKET HALF WENT IN 2026-09, and it is pinned here as an absence for the
 same reason everything else on this page is. It survived the sunset itself on
 one claim -- "the 3.4 sync RPC rides both" -- and the RPC then shipped as plain
-HTTP (`moy_webhost.handle_http`, `runtime/moy_sync`). So the RFC 6455 upgrade,
+HTTP (`moy_webhost.handle_http`, `runtime/carts/moy_sync`). So the RFC 6455 upgrade,
 the framing leaf `runtime/web_view_ws.py`, the persistent `_WSConn` and the
 `on_text`/`send_text` seams were ~350 lines frozen into five board images with
 no caller of any kind, and `.claude/rules/web.md` had already recorded the

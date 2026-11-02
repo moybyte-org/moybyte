@@ -1,7 +1,7 @@
 """What a list says about a cart (moy-spec SPEC.md 3.7): `description`, `genre`
 and `tags`, read as every host reads them.
 
-  * `runtime/cart_listing.py`, `moy_carts.load` (the manifest on disk) and
+  * `runtime/carts/cart_listing.py`, `moy_carts.load` (the manifest on disk) and
     `cart_index.parse_index` (an index entry) each reach moy-spec's verdict on
     every case of `conformance/listing.json` (`tests/listing_vectors/`), the
     degrade-to-absent rules included: none of the three fields ever refuses a

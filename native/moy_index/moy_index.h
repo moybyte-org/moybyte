@@ -1,6 +1,6 @@
 // The store's index as a C ABI: one row per cart folder, named by a handle.
 //
-// runtime/moy_index.py defines the interface and is the reference; this header
+// runtime/carts/moy_index.py defines the interface and is the reference; this header
 // is its native form, call for call. Sprint 1a (native/moy_kernel/README.md) implements it in C, moy_index.c here, and everything above it
 // (modmoy_index.c for MicroPython, the ctypes binding on the host, the fuzz
 // driver) calls only what is declared below.
@@ -16,7 +16,7 @@
 // changes the table. The store's keys are a root's id, one byte, then the cart's
 // folder name, never a path; the table compares them as it would any path, and
 // only the root table below reads that first byte. Only the store composes a
-// cart's path from root and folder (runtime/moy_store_base.py's cart_path,
+// cart's path from root and folder (runtime/carts/moy_store_base.py's cart_path,
 // cart_folder and store_path; tests/test_store_paths.py fails any other module
 // that does), a catalogue of a root reconciles that root's rows alone, and a
 // caller that starts from a path (the sync wire, Files) has it split against

@@ -3,7 +3,7 @@
 What the native store exposes (docs/history/native_kernel_2026-09.md, sprint 1b), call
 for call, written over the Python store: every cart the shelf, the boot and the
 roles reach as a CART goes through here, and a cart is named by a handle from
-the store's index (runtime/moy_index.py) -- never by an object the store keeps.
+the store's index (runtime/carts/moy_index.py) -- never by an object the store keeps.
 A cart dict this module returns is the caller's, built for the call; it carries
 its handle as "h" beside its "path".
 
@@ -46,7 +46,7 @@ thing the store holds across them, so its rows are what take handles.
                                    #162; `ns` is the Settings author)
   delete(h)                        remove the cart's folder; h goes stale
 
-The cart's undo journal (runtime/moy_journal.py), by handle:
+The cart's undo journal (runtime/carts/moy_journal.py), by handle:
 
   journal_append(h, file, data, grad=None, ops=None) -> seq | None
   journal_undo(h, files=None) / journal_redo(h, files=None) -> file | None

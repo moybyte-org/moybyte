@@ -12,7 +12,7 @@ SPEC.md §3.6 is the cover profile, and these are the files a reader must
 accept or ignore: `expected.json` gives each file's verdict, and for a cover
 the sha256 of its 128 × 128 pixels as R, G, B bytes, row-major.
 `tests/test_cover_png.py` hands every file to both of this repository's
-readers — the native `moy_png` (`native/moy_png/`) and `runtime/cover_png.py`'s
+readers — the native `moy_png` (`native/moy_png/`) and `runtime/carts/cover_png.py`'s
 `Reference` — on every `make test`.
 
 ## Re-vendoring

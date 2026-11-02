@@ -722,7 +722,7 @@ static void binary_value(out_t *o, const char *path, const char *rel,
     body(o, "\"}", 2);
 }
 
-// runtime/moy_sync.py's is_binary: a cart's cover by name, a theme package's
+// runtime/carts/moy_sync.py's is_binary: a cart's cover by name, a theme package's
 // fonts and sheets by suffix.
 static int is_binary(const char *name) {
     static const char *const suffixes[] = {".fnt", ".moygfx"};
@@ -894,7 +894,7 @@ static void asset(out_t *o, const char *name, const char *ctype) {
 }
 
 // THE SYSTEM ROOT IS THE VM'S. Which of a browser's Settings a board takes,
-// and what changing one sets off, are the console's own (runtime/moy_sync.py,
+// and what changing one sets off, are the console's own (runtime/carts/moy_sync.py,
 // merge_system), so a pinned system batch is parked for the VM -- the one that
 // serves its pull, /console.json -- and refused where no VM answers it.
 static const char SYSTEM_PULL[] = "/console.json";

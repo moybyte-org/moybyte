@@ -7,7 +7,7 @@
 // (moybyte.com, an export, file://) keeps the carts HERE, and this module is
 // where they live.
 //
-// The engine is the same one either way: runtime/moy_sync's StoreWatcher
+// The engine is the same one either way: runtime/carts/moy_sync's StoreWatcher
 // already sweeps the wasm VFS ~1/s and hands out commit-shaped op batches, so
 // mode 1 is not a second persistence design -- it is a second DELIVERY TARGET
 // for the batch the sweep already built. Writes, deletes and cart-deletes all
@@ -35,7 +35,7 @@
 // node can drive it directly (worker_persist_test.mjs) against a fake OPFS.
 
 // What never crosses THE WIRE or goes into a zip -- the JS mirror of
-// runtime/moy_sync's `_skip`, which is the ONE predicate for what stays home.
+// runtime/carts/moy_sync's `_skip`, which is the ONE predicate for what stays home.
 // journal/ is the durable undo history, thumbs/ a regenerable cache, .bak/.tmp
 // moy_fs's crash-safety artifacts.
 const SKIP_DIRS = ["thumbs", "__pycache__", "journal"];
@@ -59,7 +59,7 @@ function skipIn(name, dirs, files) {
 export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
 
 // The binary files that cross -- a cart's cover (SPEC.md 3.6) by name, a theme
-// package's fonts and sheets by suffix -- the JS mirror of runtime/moy_sync's
+// package's fonts and sheets by suffix -- the JS mirror of runtime/carts/moy_sync's
 // BINARY_FILES and BINARY_SUFFIXES. They travel as base64: `b` where text
 // rides as `t` in a batch op, `{b: ...}` as a value in a served bundle, and as
 // BYTES once they are in the VFS or this store.
@@ -101,7 +101,7 @@ export function skipLocal(name) {
     return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
 }
 
-// The SYNC ROOT REGISTRY -- the JS MIRROR of runtime/moy_sync.SYNC_ROOTS, so the
+// The SYNC ROOT REGISTRY -- the JS MIRROR of runtime/carts/moy_sync.SYNC_ROOTS, so the
 // worker and this store iterate roots instead of naming carts/files. A static
 // host has no server to ask for this, so it is a constant, pinned against the
 // Python registry by tests/test_web_store.py (a drift there fails the build).
@@ -268,7 +268,7 @@ const dec = new TextDecoder();
 const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 // The record of what Get Carts installed, and the folder an install is built
-// in, as siblings of the carts store -- runtime/cart_index.py's RECORD_NAME
+// in, as siblings of the carts store -- runtime/carts/cart_index.py's RECORD_NAME
 // and STAGE_DIR, the same layout as beside a board's carts folder. Pinned
 // against the Python by tests/test_web_store.py.
 export const RECORD_NAME = "installed.json";
@@ -502,7 +502,7 @@ export async function isEmpty(store) {
 // the kid's work -- but a console that ships a system cart the store has never
 // had (a new app like Get Carts, a new seed game) must still reach a browser
 // that has kept its shelf since an older visit, the way a board seeds a
-// built-in it does not have (runtime/moy_seed.py). A cart the store has is
+// built-in it does not have (runtime/carts/moy_seed.py). A cart the store has is
 // never touched.
 export function missingSystemCarts(local, bundle) {
     const have = new Set(Object.keys(local).map((k) => k.split("/")[0]));
@@ -715,7 +715,7 @@ async function settleFiles(dir) {
 
 // ---------------------------------------------------------------------------
 // A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
-// carts: written/<cart>/<key>, runtime/cart_files.py's layout, so the VFS the
+// carts: written/<cart>/<key>, runtime/carts/cart_files.py's layout, so the VFS the
 // console reads and this store of record hold the same names. The console
 // writes the VFS and queues the file here (carts_link's WebCartKeep), and a
 // write lands with `commitFile`'s crash-safety, so readWritten finds the old

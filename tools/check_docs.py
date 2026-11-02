@@ -166,7 +166,8 @@ NOT_OURS = (
     "runtime/wasm_host.py", "runtime/wasm_binding.py",
     # Shared modules' paths before runtime/ grouped them into folders
     # (2026-11-02), as the same vendored copies name them.
-    "runtime/console_notices.py",
+    "runtime/console_notices.py", "runtime/cart_index.py", "runtime/cart_files.py",
+    "runtime/moy_sync.py",
 )
 
 

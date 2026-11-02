@@ -125,7 +125,7 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
 // carts); v2 names a root whose wire is 2, "files" or "system". A system
-// batch (the console's own documents, runtime/moy_sync.py's SYSTEM_ROOT) is
+// batch (the console's own documents, runtime/carts/moy_sync.py's SYSTEM_ROOT) is
 // never applied here: the webhost parks it for the VM, whose Settings decide
 // which of its keys a browser may change (moy_sync.merge_system), and
 // moy_sync_apply refuses every op of one.

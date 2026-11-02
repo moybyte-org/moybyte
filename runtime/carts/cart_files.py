@@ -8,7 +8,7 @@ kept, a write that is whole or not at all, and the listing.
 WHERE: beside the carts store, `written/<cart>/` -- <cart> the cart folder's
 name less ".moy" (`cart_id`) -- so an install, an update or a push replaces
 the cart's folder and never touches them, and Get Carts' REMOVE takes them
-with the cart (`remove`, from runtime/cart_index.py's).
+with the cart (`remove`, from runtime/carts/cart_index.py's).
 
 ONE FLAT FOLDER PER CART: a path is one file named by its key (`key`), the
 rule moy-spec's libmoy/port/moy_files.c keeps for the desktop player: a-z,

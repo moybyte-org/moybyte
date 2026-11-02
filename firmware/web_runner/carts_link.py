@@ -9,7 +9,7 @@ SHAPE: gpio_link's and update_link's. A capability reaches this VM by
 QUEUEING on the Python side while the worker does the I/O and hands the answer
 back between frames, through one poll (`poll_json`, the worker's carts pump)
 and one way back (`event_json`). The difference is that nothing here blocks a
-frame waiting for an answer: runtime/cart_index.py's jobs give the frame back
+frame waiting for an answer: runtime/carts/cart_index.py's jobs give the frame back
 while an answer is on its way (its docstring's non-blocking transport), which
 is what a VM with no ASYNCIFY needs -- the worker cannot deliver a byte while
 Python is running.
@@ -117,7 +117,7 @@ class CartsLink:
 
 class _Answer:
     """One response, read from the spool the worker fills: the transport
-    answer runtime/cart_index.py reads, non-blocking."""
+    answer runtime/carts/cart_index.py reads, non-blocking."""
 
     def __init__(self, link, rid):
         self.link = link
@@ -269,7 +269,7 @@ class WebCartKeep:
     # The console writes the VFS (moycore's C, whose log the pump drains); the
     # worker makes each file durable in OPFS (moy_store's commitWritten) in the
     # order they were written, and drops one, or with `key` None every file a
-    # removed cart wrote (runtime/cart_index.py's remove).
+    # removed cart wrote (runtime/carts/cart_index.py's remove).
 
     def erased(self, cart, key):
         self.link.queue({"op": "wdel", "cart": cart, "key": key})

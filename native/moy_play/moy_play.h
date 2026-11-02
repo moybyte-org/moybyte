@@ -6,7 +6,7 @@
 // imports too:
 //   1. the runtime is "lua" or "wasm" and this image has its row (moy_rt_get);
 //   2. the type is "game" (a manifest that names none is a game when it is a
-//      spec cart, an app otherwise: runtime/moy_carts.py's rule), or "app"
+//      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
 //      with the runtime "wasm" where the image carries native/moy_app;
 //   3. every permission is in the native set: graphics, input, audio,
 //      multiplayer -- or, for a compiled app, a role's permission, which

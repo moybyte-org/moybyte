@@ -22,7 +22,7 @@
  *     is in this same library (runtime/host/host_native.py), as on a board;
  *   - a paint image decodes through moy_img.c where the build has the
  *     desktop MicroPython's inflater (MOYHOST_IMG_C), else through the Python
- *     codec (runtime/moyimg.py, the reference moy_img.c is pinned to), handed
+ *     codec (runtime/carts/moyimg.py, the reference moy_img.c is pinned to), handed
  *     over as hl_img_decoder;
  *   - register()'s verbs call back into Python through one dispatch, and each
  *     call is counted APP, as modmoycore.c's trampoline counts it.

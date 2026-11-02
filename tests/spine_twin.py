@@ -18,7 +18,7 @@ object outlives a call into one (native/moy_kernel/moy_kernel.h):
 
 A handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, always
 below 2**30 (a small int on every VM), its generation in the same bits as
-runtime/moy_index.py's, so the index is this table with the kind field folded
+runtime/carts/moy_index.py's, so the index is this table with the kind field folded
 into a 12-bit slot. A handle presented to a table that did not make it, or
 after its row was released, raises StaleHandle (a ValueError); a handle that is
 not an int raises TypeError.

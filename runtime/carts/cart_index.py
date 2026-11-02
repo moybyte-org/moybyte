@@ -49,7 +49,7 @@ What it does differently, because a console is not a PC:
     installed (a module for this console's format, say), replaces the folder
     through the same staging, carrying the kid's saves and an edited config;
     the files a compiled cart wrote live beside the store
-    (runtime/cart_files.py), so an update never touches them, and REMOVE
+    (runtime/carts/cart_files.py), so an update never touches them, and REMOVE
     takes them with the cart.
   * it installs only what a sandbox runs or the loader validates (RUNTIMES):
     a compiled cart, whose native module a board loads only by its
@@ -661,7 +661,7 @@ def recover(root):
 def remove(root, folder, keep=None):
     """Take `folder` off the shelf: one rename out of the carts folder (so a
     crash mid-delete never leaves half a cart listed), then the delete, then
-    the record, then the files the cart wrote (runtime/cart_files.py), which
+    the record, then the files the cart wrote (runtime/carts/cart_files.py), which
     live beside the store and go with it. Call inside one store session.
 
     With a keeper the record without the cart goes to the store of record

@@ -197,7 +197,7 @@ PYEOF
 
   # moy_index usermod: the store's native index. Its fragment compiles it unless
   # MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header), and board_config's
-  # stage below then leaves runtime/moy_index.py out.
+  # stage below then leaves runtime/carts/moy_index.py out.
   cp -r "${REPO_ROOT}/native/moy_index" \
         "${USERMODS_DIR}/moy_index"
 

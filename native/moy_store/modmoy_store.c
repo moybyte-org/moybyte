@@ -1,5 +1,5 @@
 // moy_store's MicroPython binding: the store's crash-safe write and file verbs
-// (moy_fs.h) as the module runtime/moy_fs.py delegates to wherever it imports
+// (moy_fs.h) as the module runtime/carts/moy_fs.py delegates to wherever it imports
 // -- every board, the browser and the desktop MicroPython. Names follow
 // moy_fs.py's: publish is its _write_atomic, read_recover its _read_recover,
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,

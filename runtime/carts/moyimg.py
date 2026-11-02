@@ -3,7 +3,7 @@ stamp the store's sidecars are keyed on.
 
 encode/decode_moyimg is ONE format, the one every user picture and a cart's
 images/ are written in. A cart's COVER is not one of them: it is `cover.png`
-(runtime/cover_png.py, SPEC.md 3.6). `text_sig` is the cheap stamp a history
+(runtime/carts/cover_png.py, SPEC.md 3.6). `text_sig` is the cheap stamp a history
 sidecar and a preview sidecar both validate against.
 
 The store's half of what was moy_image.py: this file crosses with the store

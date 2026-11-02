@@ -434,7 +434,7 @@ class WallpaperServer(_Store):
 class InstallServer:
     """Carts from outside (#124): the network a store fetches with, the radio
     lease it fetches under, the store it installs into and the engine's
-    sizing. `runtime/cart_index.py` does the installing; Get Carts drives it.
+    sizing. `runtime/carts/cart_index.py` does the installing; Get Carts drives it.
     Its verbs raise: the installer turns every failure into a screen of its
     own. Never a cart's (no permission maps to it)."""
 

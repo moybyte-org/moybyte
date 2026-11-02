@@ -2,7 +2,7 @@
 paths:
   - "system_carts/**"
   - "runtime/cart_api.py"
-  - "runtime/moy_carts.py"
+  - "runtime/carts/moy_carts.py"
   - "runtime/lua_ext.py"
   - "runtime/player.py"
   - "native/moycore/**"

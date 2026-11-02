@@ -48,7 +48,7 @@ none of them is ever a reason to refuse it: `description` (plain text, at most
 most eight short lowercase words; `pico8` is reserved for a converted cart, which
 is how the importer records a conversion). The home's metadata line says the
 genre, the desk's details pane the description, and Get Carts both for an index
-entry that has them; `runtime/cart_listing.py` is the one reader.
+entry that has them; `runtime/carts/cart_listing.py` is the one reader.
 
 ```python
 # a tiny cart: move a ball with the D-pad

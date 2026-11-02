@@ -1,6 +1,6 @@
 # moy_index: the store's index, native (moy_index.h). Every image that takes
 # the module builds it; MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header)
-# builds nothing here and freezes runtime/moy_index.py instead. THIS FILE AND
+# builds nothing here and freezes runtime/carts/moy_index.py instead. THIS FILE AND
 # micropython.mk ARE TWINS.
 
 set(MOY_INDEX_IMPL "$ENV{MOY_INDEX_IMPL}")

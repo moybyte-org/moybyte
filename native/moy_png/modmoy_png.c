@@ -1,5 +1,5 @@
 // moy_png's MicroPython binding: the cover reader (moy_png.h) for the boards
-// and the browser console. runtime/cover_png.py is the one caller, and the
+// and the browser console. runtime/carts/cover_png.py is the one caller, and the
 // Python twin the host runs instead.
 //
 //   begin(work, data, div, fmt[, pal]) -> True (decode it) / False (not a cover)

@@ -1,4 +1,4 @@
-// The seed (moy_seed.h has the contract; runtime/moy_seed.py's seed_builtins
+// The seed (moy_seed.h has the contract; runtime/carts/moy_seed.py's seed_builtins
 // is the reference every branch below follows).
 
 #include <stdio.h>

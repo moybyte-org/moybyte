@@ -1,7 +1,7 @@
 """The cart store (#124) in the shape the browser gives it, on the host.
 
 A page's network is NON-BLOCKING: its bytes arrive between frames, while no
-Python runs, so `runtime/cart_index.py` must give the frame back instead of
+Python runs, so `runtime/carts/cart_index.py` must give the frame back instead of
 waiting, and read only what the transport vouches for. The page can read only
 what CORS lets it, so it reads a release asset's mirror beside the index and
 asks the player for an external file whose hosts it cannot read. Its store of

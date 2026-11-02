@@ -248,7 +248,7 @@ UNIX_MP_NATIVE := native
 # host's Python reader and to moy-spec's vectors. moy_index is the store's
 # native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
 # has the hook): it registers extensible, so a run with runtime/ on its path
-# still imports runtime/moy_index.py, and tests/test_moy_index_twins.py and the
+# still imports runtime/carts/moy_index.py, and tests/test_moy_index_twins.py and the
 # store trace reach the native one with the path emptied. moy_spine is the
 # kernel's spine, native as on every image (its Python oracle is
 # tests/spine_twin.py); it holds the handle table moy_index shares, so the two

@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-COMPOSER = "runtime/moy_store_base.py"
+COMPOSER = "runtime/carts/moy_store_base.py"
 
 # The names a store root goes by in the console's code.
 ROOT_NAMES = {"root", "carts_root", "carts_dir", "CARTS_DIR"}

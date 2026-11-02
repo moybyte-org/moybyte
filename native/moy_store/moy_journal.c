@@ -1,4 +1,4 @@
-// The journal (moy_journal.h has the contract; runtime/moy_journal.py is the
+// The journal (moy_journal.h has the contract; runtime/carts/moy_journal.py is the
 // reference every branch below follows).
 
 #include <stdio.h>

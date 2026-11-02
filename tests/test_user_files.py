@@ -1,6 +1,6 @@
 """The #108 user-files layer: files/<kind>/ beside the carts dir -- the kind
 registry, list/load/save/rename/duplicate verbs, the restorable trash, and the
-one-shot artwork.moyimg move. Same shared runtime/moy_carts.py the device
+one-shot artwork.moyimg move. Same shared runtime/carts/moy_carts.py the device
 freezes."""
 
 import json

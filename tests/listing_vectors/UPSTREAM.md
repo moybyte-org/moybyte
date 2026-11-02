@@ -9,7 +9,7 @@
 
 SPEC.md §3.7 says how a host reads a manifest's `description`, `genre` and
 `tags`; each case gives a manifest and what a reader must reach (`null` is
-absent). `tests/test_cart_listing.py` hands every case to `runtime/cart_listing.py`,
+absent). `tests/test_cart_listing.py` hands every case to `runtime/carts/cart_listing.py`,
 to `moy_carts.load` (the manifest on disk) and to `cart_index.parse_index` (an
 index entry) on every `make test`.
 

@@ -204,7 +204,7 @@ class _HostResponse:
 
 class HostCartNet:
     """The network Get Carts fetches through on the host (#124):
-    `runtime/cart_index.py`'s transport over urllib, which follows redirects
+    `runtime/carts/cart_index.py`'s transport over urllib, which follows redirects
     and checks certificates.
     The board's twin is device/wire_links.CartNet; both answer `online()` and
     `open(url)` -> status / length / readinto / close. The PC is already on a

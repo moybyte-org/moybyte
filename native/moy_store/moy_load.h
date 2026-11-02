@@ -1,7 +1,7 @@
 // Loading a cart (docs/history/kernel_store_2026-10.md section 7): its entry and
 // every payload's bytes, read from inside its folder into one PSRAM arena.
 //
-// runtime/moy_carts.py's `_load(path, whole=True)` is the reference: the
+// runtime/carts/moy_carts.py's `_load(path, whole=True)` is the reference: the
 // main script through moy_fs's recovering reader, the other scripts in the
 // manifest's `sources` order (a compiled cart's `src/` texts instead), the
 // config (the manifest's under config.json's), the tile flags, the sheet,

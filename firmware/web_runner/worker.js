@@ -496,10 +496,10 @@ function mkdirs(p) {
 // directly; everything else iterates store.ROOTS.
 const CARTS_ROOT = store.rootById("carts").vfs;
 // Get Carts' record, beside the carts folder as on every console
-// (runtime/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
+// (runtime/carts/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
 const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
 // The files compiled carts wrote (moy-spec SPEC.md 16.12), beside the carts
-// folder too (runtime/cart_files.py), and their store of record in OPFS:
+// folder too (runtime/carts/cart_files.py), and their store of record in OPFS:
 // site mode only, where a page keeps its own carts.
 const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
 let writtenStore = null;

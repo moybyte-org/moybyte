@@ -176,7 +176,7 @@ def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
 def test_a_theme_packages_font_crosses_both_ways_as_its_bytes(tmp_path):
     """The kernel's two copies of the wire's binary rule (moy_webhost.c's
     pull, moy_sync_apply.c's apply) take a theme package's fonts and sheets
-    by suffix, as runtime/moy_sync's BINARY_SUFFIXES does."""
+    by suffix, as runtime/carts/moy_sync's BINARY_SUFFIXES does."""
     import base64
     import shutil
     fixture = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"

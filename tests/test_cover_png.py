@@ -1,5 +1,5 @@
 """The cover reader (SPEC.md 3.6): the native `moy_png` the boards and the
-browser run, `runtime/cover_png.py`'s `Reference` the host runs, and moy-spec's
+browser run, `runtime/carts/cover_png.py`'s `Reference` the host runs, and moy-spec's
 vectors (tests/cover_vectors/, vendored -- its UPSTREAM.md says from where).
 
 Three things are held together here, and each pair once had a way to drift:

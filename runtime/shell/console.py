@@ -897,7 +897,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
-        # The network Get Carts fetches carts through (#124, runtime/cart_index.py):
+        # The network Get Carts fetches carts through (#124, runtime/carts/cart_index.py):
         # `online()` and `open(url)`, injected by a board (device/wire_links.CartNet),
         # by the live simulator (host_app.HostCartNet) and by a browser page
         # that keeps its own carts (firmware/web_runner/carts_link.py). None

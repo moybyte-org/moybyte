@@ -61,7 +61,7 @@ layer's camera, clip and pal, the camera read-back, and the sspr/tline/map/spr
 
 EXTENDED 2026-10-05 (#224, before the store crosses in sprint 1b): a second
 trace, the STORE's. The native store will expose carts by handle
-(runtime/moy_catalogue.py over runtime/moy_index.py), and this replays one
+(runtime/carts/moy_catalogue.py over runtime/carts/moy_index.py), and this replays one
 scripted session of that interface -- create, catalogue, a rescan, entry and
 load, path and handle, new, duplicate, delete and every call on the deleted
 handle, a freed slot taken again under its next generation, a folder removed
@@ -96,7 +96,7 @@ CrashGuard.
 EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
 crosses): five more, one per twin -- input (runtime/host/moy_input.py), the glass
 (native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
-(runtime/frame_loop.py), the links (native/moy_net, runtime/moy_sync.py
+(runtime/frame_loop.py), the links (native/moy_net, runtime/carts/moy_sync.py
 and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
 Each is pinned on every VM and over the native spine; the section above the
 drivers says what each logs.
@@ -870,7 +870,7 @@ ints True True
 
 # Run ahead of STORE_DRIVER, it puts the NATIVE index under every import of
 # moy_index: the extensible builtin, reached with the path emptied and then
-# registered so runtime/moy_index.py never loads (modmoy_index.c's header).
+# registered so runtime/carts/moy_index.py never loads (modmoy_index.c's header).
 NATIVE_INDEX = r'''import sys
 _path = sys.path[:]
 sys.path[:] = []

@@ -485,7 +485,7 @@ def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
 def test_a_build_exports_a_boards_twin_and_the_environment_wins(tmp_path):
     """The lib exports the board's [native.impl] hooks before anything reads
     them, and a build that sets a hook itself keeps its own: a board naming
-    the index's Python twin freezes runtime/moy_index.py, and the
+    the index's Python twin freezes runtime/carts/moy_index.py, and the
     environment's `c` takes it out again."""
     bd = tmp_path / "board"
     bd.mkdir()

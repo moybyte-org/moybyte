@@ -76,7 +76,7 @@ class _Response:
 
 
 class CartNet:
-    """`ws.cart_net` on a board: Get Carts' transport (runtime/cart_index.py),
+    """`ws.cart_net` on a board: Get Carts' transport (runtime/carts/cart_index.py),
     the shape the host's urllib one has (runtime/host/host_app.py).
 
         online()   dial the saved network if the link is down and WAIT for it

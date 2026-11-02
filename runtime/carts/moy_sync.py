@@ -963,7 +963,7 @@ class StoreWatcher:
     def adopt(self, unit):
         """Take the cart folder `unit` AS IS, with nothing pending for it: its
         files reached the store of record by another road (an install the
-        browser's keeper committed whole, runtime/cart_index.py), so shipping
+        browser's keeper committed whole, runtime/carts/cart_index.py), so shipping
         them again would only rewrite what is there -- and the files the wire
         cannot carry would be missing from it."""
         prefix = unit + "/"

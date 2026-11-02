@@ -1,7 +1,7 @@
 """The picture compressor (native/moy_store/moy_ufiles.c, `moy_uf_deflate`).
 
 Every picture and cover a board writes goes through it, and a board's Python
-codecs (runtime/moyimg.py) reach it as `moy_ufiles.deflate`. Its work is
+codecs (runtime/carts/moyimg.py) reach it as `moy_ufiles.deflate`. Its work is
 bounded per byte: a matcher that walks its whole window at every position
 spends that window on every byte of a flat page, and on a P4 a blank 512x300
 drawing held the VM past the task watchdog.
@@ -86,7 +86,7 @@ def test_a_blank_page_is_one_run_of_long_matches(uf):
 
 def test_the_boards_python_codecs_reach_the_c_compressor(tmp_path):
     exe = require_unix_mp("moy_ufiles", board_model=True,
-                          why="runtime/moyimg.py's compressor on a board.")
+                          why="runtime/carts/moyimg.py's compressor on a board.")
     script = tmp_path / "deflate_route.py"
     script.write_text(
         "import sys\n"

@@ -606,7 +606,7 @@ def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypa
 
 def test_the_sync_walk_leaves_the_module_home(tmp_path):
     """The sync RPC declines binary files, so a compiled cart's module never
-    crosses (runtime/moy_sync.py says so): its manifest and text do."""
+    crosses (runtime/carts/moy_sync.py says so): its manifest and text do."""
     from runtime import moy_sync
     root = _store(tmp_path, _hello)
     path = os.path.join(root, "hello.moy")

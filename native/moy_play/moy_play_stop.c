@@ -525,7 +525,7 @@ static void cfg_load(const char *path) {
     moy_buf_free(&b);
 }
 
-// pmem.json: a list of 256 signed 32-bit ints (runtime/moy_carts.py's
+// pmem.json: a list of 256 signed 32-bit ints (runtime/carts/moy_carts.py's
 // load_pmem); missing or unreadable is all zero.
 static void pmem_load(const char *path) {
     char p[224];

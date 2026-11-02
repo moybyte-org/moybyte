@@ -3,7 +3,7 @@
 # instead of re-rendering the cart) and the picture's bake (the desk's picture
 # resampled to the screen, read instead of decoding it) -- regenerable, plain
 # writes, readers validate magic + size + stamp. The moyimg codec is
-# runtime/moyimg.py.
+# runtime/carts/moyimg.py.
 #
 # MicroPython-safe (_mkdir from the moy_fs leaf).
 

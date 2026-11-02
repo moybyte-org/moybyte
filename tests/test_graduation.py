@@ -5,7 +5,7 @@ This module has three layers, matching the three implementation commits:
 
   1. the NORMALIZATION primitives in runtime/editors/blocks.py (the fuzzy heart -- what
      counts as a cosmetic vs a diverging edit),
-  2. the STORE layer in runtime/moy_carts.py (the stored `graduated` manifest
+  2. the STORE layer in runtime/carts/moy_carts.py (the stored `graduated` manifest
      fact + the journal `grad` rider that un-graduates on undo),
   3. the console WIRING (a code commit graduates a block cart; the blocks tab goes
      read-only + celebrates; an undo past the graduating commit restores both the

@@ -1,4 +1,4 @@
-// The store's crash-safe write (moy_fs.h has the contract; runtime/moy_fs.py's
+// The store's crash-safe write (moy_fs.h has the contract; runtime/carts/moy_fs.py's
 // header has the story every branch below follows).
 
 #include <stdio.h>

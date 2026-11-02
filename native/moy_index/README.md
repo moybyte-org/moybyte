@@ -1,11 +1,11 @@
 # moy_index — the store's index, native
 
-The handle table `runtime/moy_index.py` defines, as a C ABI (`moy_index.h`) and
+The handle table `runtime/carts/moy_index.py` defines, as a C ABI (`moy_index.h`) and
 its C twin (`moy_index.c`): sprint 1a's component, and since sprint 1b's slice 1
 (`native/moy_index/moy_index.h`; `docs/history/kernel_store_2026-10.md` §10) the index every image runs -- the
 boards and the browser freeze no `moy_index.py`. Its rows and its root table
 (`moy_index_root`: up to eight store roots, a key being the root's id byte and
-the cart's folder) are PSRAM on a board. `runtime/moy_index.py` stays the host's:
+the cart's folder) are PSRAM on a board. `runtime/carts/moy_index.py` stays the host's:
 CPython's simulator, tools and tests import it, and it is the reference every
 binding is pinned against. `MOY_INDEX_IMPL=py` builds an image with the Python
 index instead; `tools/moy_index_spike.py`'s header is the authority on that hook

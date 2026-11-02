@@ -10,7 +10,7 @@
 #   CoverCache.prefetch_tick   warm one cart's cover file
 """The shelf's COVER + ICON pipeline (#209 landing C) -- `Workstation.covers`.
 
-A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/cover_png.py
+A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/carts/cover_png.py
 -- the native `moy_png` on a board and in the browser, its Python twin on the
 host. What is cached is ONE decoded picture per cover, the BASE: its 128 x 128
 pixels as RGB565 in the system canvas's byte order, which the picker's shelf

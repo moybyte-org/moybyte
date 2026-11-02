@@ -3,7 +3,7 @@ browser, against a board twin (serve.py --carts).
 
 The page seeds its console from the board's GET /console.json and sends its
 changes back as system batches; the twin merges them through the same bodies a
-board's VM runs (runtime/moy_sync.py's SystemReceiver). So a theme named
+board's VM runs (runtime/carts/moy_sync.py's SystemReceiver). So a theme named
 through Appearance and a badge earned by opening a cart land in the twin's
 system.json and achievements.json beside its carts, and the next page load --
 a fresh profile, since board mode keeps nothing in the browser -- comes back
