@@ -282,7 +282,6 @@ def capture(cfg, carts_dir):
 
     # The Achievements page (locked AND found cards) with a badge opened,
     # the unlock banner (a secret's, its confetti out whole) and the notice.
-    from runtime import achievements_ui
     ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
     ws.open_settings()
     sl.open_page("achievements")
@@ -297,7 +296,7 @@ def capture(cfg, carts_dir):
     ws.go_home()
     ws.ach.award("konami")
     ws._toast_at -= 10000
-    out["banner"] = _shot(ws, lambda: achievements_ui.unlock_banner(ws))
+    out["banner"] = _shot(ws, lambda: ws._draw_toast())
     ws._notice = ("Moybyte updated", "Now 0.8", "ok")
     out["notice"] = _shot(ws, lambda: ws._draw_notice())
     ws._notice = None

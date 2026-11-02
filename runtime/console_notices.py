@@ -9,7 +9,7 @@
 """What the console SAYS on its own: the achievements wiring (the tracker,
 the unlock banner's deadline + beep), the timed system notice and the
 firmware-update verdict that rides it, and the two banners, both
-native/moy_ui's `moy_ui_unlock` (the unlock's from achievements_ui). A mixin
+native/moy_ui's `moy_ui_unlock`. A mixin
 of `Workstation`; the deadlines it arms are the flat kernel fields
 `_animating` and both WMs read.
 """
@@ -200,8 +200,27 @@ class Notices:
                         title, sub or "", "check" if kind == "ok" else "warn", 0, desk)
 
     def _draw_toast(self):
-        """The unlock banner over whatever screen is up (achievements_ui)."""
-        _ach_ui.unlock_banner(self)
+        """The unlock banner over whatever is up (`ach.toast`), at the top
+        centre of the glass: under the bar where there is one, at the glass's
+        top over a fullscreen game. A secret's bursts confetti from its
+        edges (achievements_ui names the heads and the burst)."""
+        t = self.ach.toast
+        if t is None:
+            return
+        cv = self.sys_canvas
+        lay = self.layout
+        desk = _desk_class()
+        wm = self.wm
+        game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
+                and not self._running_cart_shows_bar())
+        top = (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
+        burst = 0
+        if t[3]:
+            el = _ticks_diff(_ticks_ms(), self._toast_at)
+            burst = 255 if el >= _ach_ui.BURST_MS else max(1, el * 255 // _ach_ui.BURST_MS)
+        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top,
+                        _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE,
+                        t[1], t[2], burst, desk)
 
 
 class PauseMenu:

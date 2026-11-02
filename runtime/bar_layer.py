@@ -32,7 +32,7 @@ toolkit ws._glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). 
 `NAMES` (palette) is injected at construction -- the same circular-import dodge the
 other extracted UIs use, since console.py builds the one BarLayer instance a
 Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
-`_ticks_diff` are duplicated here (time-only, like achievements_ui.py) for the clock.
+`_ticks_diff` are duplicated here (time-only) for the clock.
 """
 import time
 

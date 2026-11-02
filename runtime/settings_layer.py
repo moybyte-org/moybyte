@@ -393,7 +393,8 @@ class SettingsLayer:
         self._ach_n = -1              # the badges the Achievements row last said
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
         self._ach_words = ""
-        self.achievements = AchievementsPage(ws)
+        self.achievements = AchievementsPage(
+            ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws)
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode

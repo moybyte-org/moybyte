@@ -2255,8 +2255,12 @@ def roles_trace(ws):
     ws.go_home()
 
     # -- notify
-    ctx.notify.achieve("open", "trace")
-    say("notify")
+    nt = ctx.notify
+    nt.achieve("open", "trace")
+    c0 = nt.count()
+    say("notify", nt.award("konami"), nt.award("konami"), nt.count() - c0,
+        nt.has("konami"), nt.found_on("konami") == nt.today(),
+        nt.progress("play_five") is not None, nt.found_on("decorator"))
 
     # -- wallpaper
     w = ctx.wallpaper
@@ -2491,7 +2495,7 @@ text_mode True False
 cover None
 cover_gen True
 play desktop
-notify
+notify True False 1 True True True None
 wallpaper None 'moybyte.wall_z'
 wallpaper carts True None True
 selected None custom

@@ -355,6 +355,37 @@ class NotifyServer:
         if ach is not None:
             ach.note(kind, key)
 
+    def award(self, g, ach_id):
+        """Award badge `ach_id` (a hidden one's find): True when it is new."""
+        ach = getattr(self.__ws, "ach", None)
+        return False if ach is None else bool(ach.award(ach_id))
+
+    def count(self, g):
+        """How many badges are found."""
+        ach = getattr(self.__ws, "ach", None)
+        return 0 if ach is None else ach.count()
+
+    def has(self, g, ach_id):
+        """Whether badge `ach_id` is found."""
+        ach = getattr(self.__ws, "ach", None)
+        return ach is not None and ach.has(ach_id)
+
+    def found_on(self, g, ach_id):
+        """The day (YYYYMMDD) badge `ach_id` was found, 0 for a day nobody
+        knows, None while it is not found."""
+        ach = getattr(self.__ws, "ach", None)
+        return None if ach is None else ach.found_on(ach_id)
+
+    def progress(self, g, ach_id):
+        """(done, goal) of a counted badge, None for one that is not."""
+        ach = getattr(self.__ws, "ach", None)
+        return None if ach is None else ach.progress(ach_id)
+
+    def today(self, g):
+        """Today as the badges record it (YYYYMMDD off the bar's clock), 0
+        without a clock."""
+        return self.__ws._today_ymd()
+
 
 # -- the desktop backdrop ----------------------------------------------------------
 

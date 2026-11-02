@@ -750,6 +750,25 @@ def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
 
 # -- ctx.nav -------------------------------------------------------------------
 
+def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
+    """The badge rows answer the console's tracker as it is NOW: a store load
+    replaces `ws.ach`, and a role that had captured the old one would count
+    badges nobody can see."""
+    ws = _ws(tmp_path)
+    notify = ws.app_context("probe_badges", ("notify",)).notify
+    assert notify.count() == ws.ach.count()
+    assert notify.award("konami") is True
+    assert notify.award("konami") is False             # a repeat is no find
+    assert notify.has("konami") and notify.count() == ws.ach.count()
+    assert notify.found_on("konami") == ws.ach.found_on("konami")
+    assert notify.found_on("decorator") is None
+    assert notify.progress("play_five") == ws.ach.progress("play_five")
+    assert notify.today() == ws._today_ymd()
+    ws.load_achievements()
+    assert notify.count() == ws.ach.count()
+    assert notify.has("konami") == ws.ach.has("konami")
+
+
 def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
     """`open_app` resolves by REGISTERED id so an app never holds a reference
     to another app's class. That branch is also what `system_api` publishes to
@@ -959,7 +978,7 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
             "artwork", "picture_copies", "app_shell", "getcarts_app",
-            "file_widgets", "web_console_ui")
+            "file_widgets", "web_console_ui", "achievements_ui")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)

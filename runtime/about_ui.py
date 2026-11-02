@@ -301,7 +301,8 @@ class LicencesPage:
         if e is not self._foot_of:
             self._foot_of = e
             self._foot_status = "%s · %s" % (e[0], e[1])
-        _ach.desk_foot(self.ws, rect, self._foot_status, _HINT_DESK)
+        _ach.desk_foot(self.ws.sys_canvas, self.ws.theme_colors, rect,
+                       self._foot_status, _HINT_DESK)
 
 
 class AboutCard:

@@ -1186,7 +1186,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (_konami_pos/_clock_taps/_secret_taps), reset on screen changes
         # (go_home/settings/desktop tap) so a stray sequence never carries
         # between contexts.
-        self.ach_ui = AchievementsUI(self)
+        self.ach_ui = AchievementsUI(self.app_context("eggs", AchievementsUI.NEEDS))
         # A transient SYSTEM banner (#53): something the machine did on its own and
         # the kid should hear about without going looking. Distinct from the
         # achievement toast, which celebrates something the KID did. First user is
