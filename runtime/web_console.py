@@ -59,7 +59,8 @@ class WebConsole:
         # re-parks while it is set, so a cart launched from the browser comes
         # back HERE rather than dropping a kid onto a shelf the browser is
         # concurrently rewriting.
-        self.ui = WebConsoleUI(ws, names)
+        self.ui = WebConsoleUI(ws.app_context("webconsole", WebConsoleUI.NEEDS),
+                               self, names)
         self._parked = False
 
     @property

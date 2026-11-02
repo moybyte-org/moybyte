@@ -25,11 +25,12 @@ nothing else:
     trap: back (K on the T-Deck, Esc on a keyboard) turns it off, and a
     touch or pointer glass adds Turn off as a button.
 
-Dependency profile is UpdateUI's (the other parked fullscreen surface, and the
-model this follows): everything reaches the console through `self.ws`, and
-NAMES is injected at construction rather than imported back from console.py --
-`WebConsole` (web_console.py) builds the one instance a Workstation holds, as
-`ws.web.ui`. The rect hit-test is `ui.rect_in`, imported directly.
+The screen reaches the shell through its AppContext (`NEEDS`: the surface it
+draws on, the live tokens, the damage flags) and through the `WebConsole`
+that owns it (web_console.py builds the one instance, as its `ui`, and hands
+itself in): the url and the stop. Its layer (`layers._WebConsoleLayer`) hands
+it the content rect and draws the bar's status strip over it. NAMES is
+injected at construction rather than imported back from console.py.
 """
 
 try:
@@ -60,9 +61,15 @@ _KEYS = ("back", "Turn off")
 
 class WebConsoleUI:
 
-    def __init__(self, ws, names):
-        self.ws = ws
+    NEEDS = ("surface", "theme", "damage")
+
+    def __init__(self, ctx, web, names):
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._web = web
         self._NAMES = names
+        self._fs = 1                  # the font scale the last draw laid out at
         # The encoded matrix, cached by the url it encodes. Re-encoding costs
         # a Reed-Solomon pass per frame otherwise, and this screen repaints on
         # every theme change.
@@ -80,16 +87,17 @@ class WebConsoleUI:
                 or getattr(i, "last_key", 0) == 27:
             # HOME turns the mode off rather than trying to leave it. Leaving is
             # what the mode forbids -- every other exit path re-parks here (see
-            # Workstation.go_home) -- so a HOME that did nothing would read as a
-            # frozen console.
-            self.ws.web.stop()
+            # the Workstation's go_home) -- so a HOME that did nothing would
+            # read as a frozen console.
+            self._web.stop()
         elif self.host.keys(i):
-            self.ws._dirty = True
+            self._damage.all()
         return True
 
     def handle_pointer(self, px, py, click):
-        if self.host.point(px, py, click, getattr(self.ws.pointer, "down", False)):
-            self.ws._dirty = True
+        p = self._surf.pointer()
+        if self.host.point(px, py, click, p is not None and p.down):
+            self._damage.all()
         return True
 
     # -- draw ----------------------------------------------------------------
@@ -109,20 +117,19 @@ class WebConsoleUI:
             self._qr_for = url
         return self._qr
 
-    def draw(self, dt):
-        """The page under the bar: the code at the left, what to do at its
-        right -- "Open in a browser", how, the address in the code face, the
-        pin large -- and Turn off where a finger or a pointer is."""
-        ws = self.ws
-        cv = ws.sys_canvas
-        lay = ws.layout
-        fs = lay.fs
+    def draw(self, rect):
+        """The page over `rect`, the content under the bar: the code at the
+        left, what to do at its right -- "Open in a browser", how, the
+        address in the code face, the pin large -- and Turn off where a
+        finger or a pointer is."""
+        cv = self._surf.canvas()
+        fs = self._fs = self._surf.font_scale()
         desk = _lb.metric_class() == _lb.DESK
-        cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
-        self.host.begin(cv, ws.theme_colors, (cx, cy, cw, ch), desk)
+        cx, cy, cw, ch = rect
+        self.host.begin(cv, self._theme.colors(), rect, desk)
         _ui.page("")
         _ui.hints(_KEYS)
-        url = ws.web.url()
+        url = self._web.url()
         host, pin = _split(url)
         pad = (24 if desk else 14) * fs
         foot = (_ui_draw.metrics("value_row")[17 if desk else 16] * fs
@@ -146,15 +153,15 @@ class WebConsoleUI:
         if _ui.input_kind() == "touch" or desk:
             _ui.at(x, y + 8 * fs, min(w, 120 * fs), 28 * fs)
             if _ui.button("Turn off", "danger"):
-                ws.web.stop()
-        ws.bar_layer._draw_status_strip("webconsole")
+                self._web.stop()
         if self.host.owed or self.host.tap == 2:
-            ws.request_frame()               # a tap's release, next frame
+            self._damage.again()             # a tap's release, next frame
 
     def _line(self, text, o, x, y, w, role, lines=1):
         """`text` stacked at (x, y) `w` wide in `role`'s face, `lines` lines
         at most: the y under it."""
-        h = _ui_draw.font(role)[2] * self.ws.layout.fs * lines + 4 * self.ws.layout.fs
+        fs = self._fs
+        h = _ui_draw.font(role)[2] * fs * lines + 4 * fs
         _ui.at(x, y, w, h)
         _ui.label(text, o)
         return y + h

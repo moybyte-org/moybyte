@@ -182,7 +182,10 @@ class _WebConsoleLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        self.ws.web.ui.draw(dt)
+        ws = self.ws
+        lay = ws.layout
+        ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch))
+        ws.bar_layer._draw_status_strip("webconsole")
 
     def handle_input(self, i):
         return self.ws.web.ui.handle_input(i)

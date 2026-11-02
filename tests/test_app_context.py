@@ -959,7 +959,7 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
             "artwork", "picture_copies", "app_shell", "getcarts_app",
-            "file_widgets")
+            "file_widgets", "web_console_ui")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
