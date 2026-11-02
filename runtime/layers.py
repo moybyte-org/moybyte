@@ -484,7 +484,7 @@ class _SysMenuLayer(Layer):
 
 
 class _AboutLayer(Layer):
-    """About's card (about_ui.AboutCard) over the washed content: its rows
+    """About's card (console_notices.AboutCard) over the washed content: its rows
     take the keys and taps; Esc, B or a tap outside closes it. Modal --
     always consumes + clears the game pointer's tap."""
 

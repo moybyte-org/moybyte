@@ -6,12 +6,15 @@
 #   SystemMenuUI.card_rows      the home's selected card as a menu group
 #   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
 #   SystemMenuUI._draw_look     the rows as the look's popover card
+#   AboutCard                   the system menu's About: Moy, the version, the board, two rows
 """What the console SAYS on its own: the achievements wiring (the tracker,
 the unlock banner's deadline + beep), the timed system notice and the
 firmware-update verdict that rides it, and the two banners, both
 native/moy_ui's `moy_ui_unlock`. A mixin
 of `Workstation`; the deadlines it arms are the flat kernel fields
-`_animating` and both WMs read.
+`_animating` and both WMs read. Beside it, the cards the console puts up
+over what is running: the pause and stop cards (`PauseMenu`), the delete
+confirm, the system menu (`SystemMenuUI`) and its About card (`AboutCard`).
 """
 
 try:
@@ -814,7 +817,7 @@ class SystemMenuUI:
         self._host = None           # the look's card: its verbs' context
         self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
         self._card_proj = False     # a card's menu hangs from PROJECTS' hero
-        self.about = _about_ui.AboutCard(ws)
+        self.about = AboutCard(ws)
         # The handheld home under the card, washed (`put_home`), and the
         # frame that put it back
         self._held = _ui_draw.Hold()
@@ -937,7 +940,7 @@ class SystemMenuUI:
         self.ws.confirm.ask(None, self.ws.go_home)
 
     def _menu_about(self):
-        # About's card over the washed content (about_ui.AboutCard).
+        # About's card over the washed content (AboutCard).
         self.ws._dirty = True
         self.about.open()
         self.ws._about = True
@@ -1317,5 +1320,127 @@ class SystemMenuUI:
         return -1 if _in_box(px, py, host.box("System")) else None
 
     def _draw_about(self):
-        """About: the look's card over the washed content (about_ui.AboutCard)."""
+        """About: the look's card over the washed content (AboutCard)."""
         self.about.draw()
+
+
+class AboutCard:
+    """The system menu's About: a card over the washed content, hung under
+    the bar -- Moy, the wordmark, the version and the board, then Updates
+    (the updater's state; no row where there is no updater) and Licences. A
+    touch board's card has a close in its corner; Esc, B or a tap outside
+    closes it. Its words are about_ui's."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.host = _ui_draw.AppHost()
+        self._words = None            # (version, board, updates) for this open
+        self._fresh = True
+
+    def open(self):
+        self.host.reset()
+        ws = self.ws
+        u = ws.updater
+        v = _about_ui.version_words(u, ws._ota_channel() if u is not None else None)
+        b = _about_ui.board_of()
+        try:
+            from settings_layer import BOARDS
+        except ImportError:
+            from runtime.settings_layer import BOARDS
+        upd = None
+        if u is not None:
+            ready = getattr(ws.update_ui, "offered", None)
+            upd = ("%s is ready" % ready) if ready else "Up to date"
+        self._words = ("Version " + v if v else None,
+                       _about_ui.board_words(BOARDS.get(b, b)) if b else None, upd)
+
+    def rect(self):
+        """The card's (x, y, w) on the system canvas."""
+        ws = self.ws
+        lay = ws.layout
+        desk = _desk_class()
+        fs = lay.fs
+        w = 420 if desk else (300 if lay.cw >= 440 * fs else 248) * fs
+        top = lay.cy + (52 if desk else (16 if lay.cw >= 440 * fs else 8) * fs)
+        return (lay.cx + (lay.cw - w) // 2, top, w)
+
+    def draw(self):
+        ws = self.ws
+        cv = ws.sys_canvas
+        lay = ws.layout
+        desk = _desk_class()
+        fs = 2 if desk else lay.fs
+        if self._words is None:
+            self.open()
+        ver, board, upd = self._words
+        x, top, w = self.rect()
+        settled = self.host.begin(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        _ui.at(x, top - 4 * (1 if desk else lay.fs), w, 0)
+        shown = _ui.popover("About", w)
+        n = 32 * fs
+        head = n + (52 if desk else 30) + (44 if desk else 30) * (1 if desk else lay.fs)
+        r = _ui.part("About head", 0, head, {"disabled": True, "fill": "surface"})
+        if r[2]:
+            cx = r[0] + r[2] // 2
+            ws.draw_icon("moy", (cx - n // 2, r[1], n, n), ws.theme_colors["value"], cv)
+            y = r[1] + n + (14 if desk else 8 * lay.fs)
+            lh = (26 if desk else 17 * lay.fs)
+            _ui.at(r[0], y, r[2], lh + 6)
+            _ui.label("moybyte", _WORDMARK)
+            y += lh + 6
+            for line in (ver, board):
+                if line:
+                    _ui.at(r[0], y, r[2], 20 if desk else 15 * lay.fs)
+                    _ui.label(line, _CENTRE_DIM)
+                    y += 22 if desk else 15 * lay.fs
+        _ui.rule()
+        if upd is not None and _ui.link("Updates", upd):
+            self.close()
+            ws.open_settings()
+            ws.settings_layer.show_row("ota_channel")
+        if _ui.link("Licences"):
+            self.close()
+            ws.open_settings()
+            ws.settings_layer.open_page("licences")
+        if desk:
+            _ui.hints(_HINT_ABOUT)
+        _ui.popover()
+        strip = self._strip()
+        if strip is not None:
+            # the home's hint strip, which the wash leaves clear, says the card's keys
+            cv.rect(strip[0], strip[1], strip[2], strip[3], ws.theme_colors["panel"])
+            _ui.at(strip[0], strip[1], strip[2], strip[3])
+            _ui.hints(_HINT_ABOUT)
+        if _ui.input_kind() == "touch":
+            c = self.host.box("About")
+            if c is not None:
+                _ui.at(c[0] + c[2] - 34 * lay.fs, c[1] + 6 * lay.fs, 28 * lay.fs, 28 * lay.fs)
+                if _ui.tool("close", "Close"):
+                    self.close()
+        if not shown:
+            self.close()
+        if not settled:
+            ws.request_frame()
+
+    def _strip(self):
+        """The home's hint strip under the card, (x, y, w, h), or None (an
+        arrangement with no foot strip)."""
+        ws = self.ws
+        if ws.screen != "launcher" or _desk_class():
+            return None
+        foot = getattr(ws.launcher_layer.grid, "foot", None)
+        foot = foot() if foot is not None else None
+        if foot is None or foot[5][3] <= 0:
+            return None
+        return foot[5]
+
+    def close(self):
+        ws = self.ws
+        ws._about = False
+        self._words = None
+        ws._dirty = True
+
+
+_WORDMARK = {"face": "title", "align": "center"}
+_HINT_ABOUT = ("confirm", "Open", "back", "Close")
+_CENTRE_DIM = {"tone": "dim", "align": "center"}

@@ -395,7 +395,7 @@ class SettingsLayer:
         self._ach_words = ""
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
-        self.licences = LicencesPage(ws)
+        self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
@@ -1257,7 +1257,7 @@ class SettingsLayer:
         ws = self.ws
         out = []
         u = ws.updater
-        v = version_words(ws)
+        v = version_words(u, ws._ota_channel() if u is not None else None)
         if v:
             out.append(("Version", v))
         board = board_name()

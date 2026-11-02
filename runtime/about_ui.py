@@ -2,9 +2,10 @@
 #   version_words       the firmware's version and channel, as About says them
 #   wrap_lines          paragraphs broken into lines a width wide, in the ui face
 #   LicencesPage        Settings' Licences: the parts and their licences, a licence's text
-#   AboutCard           the system menu's About: Moy, the version, the board, two rows
-"""About on the console (docs/history/look_2026-10.md step 32): the system menu's
-About card and Settings' Licences page, on the public UI API's verbs.
+"""About on the console (docs/history/look_2026-10.md step 32): Settings'
+Licences page on the public UI API's verbs, and the words About says (the
+version, the board) that the system menu's About card
+(`console_notices.AboutCard`) and Settings' About rows share.
 
 * Licences is a page of Settings (its About group's last row): Moybyte's
   licence in a line, then `ui.group`s of `ui.link` rows -- Moybyte's parts,
@@ -13,10 +14,8 @@ About card and Settings' Licences page, on the public UI API's verbs.
   licence's text, paragraphs kept, as a page under it that the arrows
   scroll; on the desk the list stands at the left and the focused part's
   text at the right, which PgUp and PgDn scroll.
-* About is a card over the washed content, hung under the bar: Moy, the
-  wordmark, the version and the board, then Updates (the updater's state;
-  no row where there is no updater) and Licences. A touch board's card has
-  a close in its corner; Esc, B or a tap outside closes it.
+
+The page reaches the shell through its AppContext (`LicencesPage.NEEDS`).
 """
 
 try:
@@ -53,17 +52,16 @@ def _desk():
     return _lb.metric_class() == _lb.DESK
 
 
-def version_words(ws):
-    """The firmware's version and channel as About says them ("0.8 ·
-    Stable"), None where the console has no updater (the host)."""
-    u = ws.updater
-    if u is None:
+def version_words(updater, channel):
+    """The firmware's version and its update `channel` as About says them
+    ("0.8 · Stable"), None where the console has no `updater` (the host)."""
+    if updater is None:
         return None
     try:
-        v = str(u.version_label())
+        v = str(updater.version_label())
     except Exception:  # noqa: BLE001
         return None
-    ch = _CHANNELS.get(ws._ota_channel())
+    ch = _CHANNELS.get(channel)
     return v + " · " + ch if ch else v
 
 
@@ -119,8 +117,12 @@ class LicencesPage:
     """Settings' Licences page (`SettingsLayer` draws it on its sub page's
     host): the parts and their licences, and a part's licence text."""
 
-    def __init__(self, ws):
-        self.ws = ws
+    NEEDS = ("surface", "theme", "damage")
+
+    def __init__(self, ctx):
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
         self.entry = None             # the part whose text is open (the handheld's page)
         self._groups = None           # (caption, (entry, ...)) this image holds
         self._ids = {}                # a row's id -> its entry
@@ -153,7 +155,7 @@ class LicencesPage:
         self._focus = self.entry[0]
         self.entry = None
         self._top = 0
-        self.ws._dirty = True
+        self._damage.all()
         return True
 
     def keys(self, i):
@@ -178,7 +180,7 @@ class LicencesPage:
         top = max(0, min(self._top + step, len(self._lines) - self._rows))
         if top != self._top:
             self._top = top
-            self.ws._dirty = True
+            self._damage.all()
         return True
 
     def _parts(self):
@@ -197,7 +199,7 @@ class LicencesPage:
     def _text(self, entry, w):
         """`entry`'s lines `w` wide, broken again when the entry, the width
         or the look moves."""
-        gen = self.ws.look.look_gen
+        gen = self._theme.gen()
         if entry is not self._shown or w != self._lw or gen != self._gen:
             self._shown, self._lw, self._gen = entry, w, gen
             self._lines = tuple(wrap_lines(_lic.text(entry), w))
@@ -236,14 +238,14 @@ class LicencesPage:
         if got is not None:
             self.entry = got
             self._top = 0
-            self.ws._dirty = True
+            self._damage.all()
 
     def _lines_at(self, x, y, w, h, lh):
         """The text's lines from `_top` placed in the rect, `lh` apart (half
         that between paragraphs), the last that shows faded where the text
         runs on."""
         lines = self._lines
-        pad = 4 * (1 if _desk() else self.ws.layout.fs)   # a placed label's own inset
+        pad = 4 * (1 if _desk() else self._surf.font_scale())   # a placed label's own inset
         self._rows = max(1, h // lh)
         k, at, foot = self._top, y, y + h
         while k < len(lines) and at + lh <= foot + lh // 2:
@@ -256,13 +258,13 @@ class LicencesPage:
             k += 1
         if k < len(lines):
             fh = lh + lh // 2
-            _ui_draw.fade(self.ws.sys_canvas, (x - pad, foot - fh, w + 2 * pad, fh),
-                          self.ws.theme_colors["panel"])
+            _ui_draw.fade(self._surf.canvas(), (x - pad, foot - fh, w + 2 * pad, fh),
+                          self._theme.colors()["panel"])
 
     def _draw_text(self):
         x, y, w, h = _ui.page("")
         _ui.hints(_HINT_TEXT)
-        fs = self.ws.layout.fs
+        fs = self._surf.font_scale()
         if _ui.hints_width(_HINT_TEXT) > 0:
             h -= 22 * fs                  # the hint band at the foot
         e = self.entry
@@ -289,8 +291,9 @@ class LicencesPage:
         if e is None:
             e = self._shown or self._parts()[0][1][0]
         px = x + lw + 36
-        cv_th = self.ws.theme_colors
-        self.ws.sys_canvas.rect(px - 12, y, 1, h, cv_th["border"])
+        cv = self._surf.canvas()
+        th = self._theme.colors()
+        cv.rect(px - 12, y, 1, h, th["border"])
         tw = x + w - px - 28
         _ui.at(px + 8, y + 16, tw, 28)
         _ui.label(e[0], _NAME)
@@ -301,123 +304,4 @@ class LicencesPage:
         if e is not self._foot_of:
             self._foot_of = e
             self._foot_status = "%s · %s" % (e[0], e[1])
-        _ach.desk_foot(self.ws.sys_canvas, self.ws.theme_colors, rect,
-                       self._foot_status, _HINT_DESK)
-
-
-class AboutCard:
-    """The system menu's About: a card over the washed content, hung under
-    the bar. `draw` answers False the frame it is dismissed."""
-
-    def __init__(self, ws):
-        self.ws = ws
-        self.host = _ui_draw.AppHost()
-        self._words = None            # (version, board, updates) for this open
-        self._fresh = True
-
-    def open(self):
-        self.host.reset()
-        ws = self.ws
-        v = version_words(ws)
-        b = board_of()
-        try:
-            from settings_layer import BOARDS
-        except ImportError:
-            from runtime.settings_layer import BOARDS
-        upd = None
-        if ws.updater is not None:
-            ready = getattr(ws.update_ui, "offered", None)
-            upd = ("%s is ready" % ready) if ready else "Up to date"
-        self._words = ("Version " + v if v else None,
-                       board_words(BOARDS.get(b, b)) if b else None, upd)
-
-    def rect(self):
-        """The card's (x, y, w) on the system canvas."""
-        ws = self.ws
-        lay = ws.layout
-        desk = _desk()
-        fs = lay.fs
-        w = 420 if desk else (300 if lay.cw >= 440 * fs else 248) * fs
-        top = lay.cy + (52 if desk else (16 if lay.cw >= 440 * fs else 8) * fs)
-        return (lay.cx + (lay.cw - w) // 2, top, w)
-
-    def draw(self):
-        ws = self.ws
-        cv = ws.sys_canvas
-        lay = ws.layout
-        desk = _desk()
-        fs = 2 if desk else lay.fs
-        if self._words is None:
-            self.open()
-        ver, board, upd = self._words
-        x, top, w = self.rect()
-        settled = self.host.begin(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
-        _ui.at(x, top - 4 * (1 if desk else lay.fs), w, 0)
-        shown = _ui.popover("About", w)
-        n = 32 * fs
-        head = n + (52 if desk else 30) + (44 if desk else 30) * (1 if desk else lay.fs)
-        r = _ui.part("About head", 0, head, {"disabled": True, "fill": "surface"})
-        if r[2]:
-            cx = r[0] + r[2] // 2
-            ws.draw_icon("moy", (cx - n // 2, r[1], n, n), ws.theme_colors["value"], cv)
-            y = r[1] + n + (14 if desk else 8 * lay.fs)
-            lh = (26 if desk else 17 * lay.fs)
-            _ui.at(r[0], y, r[2], lh + 6)
-            _ui.label("moybyte", _WORDMARK)
-            y += lh + 6
-            for line in (ver, board):
-                if line:
-                    _ui.at(r[0], y, r[2], 20 if desk else 15 * lay.fs)
-                    _ui.label(line, _CENTRE_DIM)
-                    y += 22 if desk else 15 * lay.fs
-        _ui.rule()
-        if upd is not None and _ui.link("Updates", upd):
-            self.close()
-            ws.open_settings()
-            ws.settings_layer.show_row("ota_channel")
-        if _ui.link("Licences"):
-            self.close()
-            ws.open_settings()
-            ws.settings_layer.open_page("licences")
-        if desk:
-            _ui.hints(_HINT_ABOUT)
-        _ui.popover()
-        strip = self._strip()
-        if strip is not None:
-            # the home's hint strip, which the wash leaves clear, says the card's keys
-            cv.rect(strip[0], strip[1], strip[2], strip[3], ws.theme_colors["panel"])
-            _ui.at(strip[0], strip[1], strip[2], strip[3])
-            _ui.hints(_HINT_ABOUT)
-        if _ui.input_kind() == "touch":
-            c = self.host.box("About")
-            if c is not None:
-                _ui.at(c[0] + c[2] - 34 * lay.fs, c[1] + 6 * lay.fs, 28 * lay.fs, 28 * lay.fs)
-                if _ui.tool("close", "Close"):
-                    self.close()
-        if not shown:
-            self.close()
-        if not settled:
-            ws.request_frame()
-
-    def _strip(self):
-        """The home's hint strip under the card, (x, y, w, h), or None (an
-        arrangement with no foot strip)."""
-        ws = self.ws
-        if ws.screen != "launcher" or _desk():
-            return None
-        foot = getattr(ws.launcher_layer.grid, "foot", None)
-        foot = foot() if foot is not None else None
-        if foot is None or foot[5][3] <= 0:
-            return None
-        return foot[5]
-
-    def close(self):
-        ws = self.ws
-        ws._about = False
-        self._words = None
-        ws._dirty = True
-
-
-_WORDMARK = {"face": "title", "align": "center"}
-_HINT_ABOUT = ("confirm", "Open", "back", "Close")
-_CENTRE_DIM = {"tone": "dim", "align": "center"}
+        _ach.desk_foot(cv, th, rect, self._foot_status, _HINT_DESK)
