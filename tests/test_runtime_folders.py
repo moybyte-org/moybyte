@@ -172,3 +172,22 @@ def test_no_test_or_tool_joins_runtime_with_a_module_name():
                         and '"**"' not in line):
                     hits.append("%s:%d: %s" % (p.relative_to(ROOT), n, line.strip()))
     assert not hits, "\n".join(hits)
+
+
+def test_the_readme_maps_every_folder_and_files_each_row_under_its_own():
+    text = (ROOT / "runtime" / "README.md").read_text(encoding="utf-8")
+    folders = {p.name for p in (ROOT / "runtime").iterdir()
+               if p.is_dir() and p.name != "__pycache__"}
+    mapped = set(re.findall(r"^\| `([a-z]+)/` \|", text, re.M))
+    assert mapped == folders
+    section, wrong = None, []
+    for line in text.split("\n"):
+        m = re.match(r"### `([a-z]+)/`", line)
+        if m or line.startswith("### "):
+            section = m.group(1) if m else None
+            continue
+        row = re.match(r"\| `([a-z_0-9]+)\.(py|c)`", line)
+        if section and row and not (ROOT / "runtime" / section
+                                    / ("%s.%s" % row.groups())).exists():
+            wrong.append("%s under %s/" % (row.group(1), section))
+    assert not wrong, wrong
