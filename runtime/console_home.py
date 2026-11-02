@@ -19,7 +19,7 @@ console.py.
 """
 
 try:
-    from launcher_layer import IconHome
+    from home_icons import IconHome
     from home_carousel import Carousel
     from home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
                            HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
@@ -27,7 +27,7 @@ try:
     from cart_manager import today_ymd as _today_ymd
     from chrome import NAMES
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.launcher_layer import IconHome
+    from runtime.home_icons import IconHome
     from runtime.home_carousel import Carousel
     from runtime.home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
                                    HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)

@@ -62,7 +62,7 @@ def _full_frame(ws, drv):
 
 def test_a_layouts_home_picks_the_arrangement(tmp_path):
     import moy_ui
-    from runtime.launcher_layer import IconHome
+    from runtime.home_icons import IconHome
     from runtime.home_carousel import Carousel
     from runtime.home_grid import Launcher
 
