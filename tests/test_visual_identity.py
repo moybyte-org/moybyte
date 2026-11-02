@@ -364,7 +364,7 @@ def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
     overflows the slot by at most 10% each way. The Guition P4's 258x245 card
     takes 2x (11 px over); the Waveshare's 206x173 stays at 1x (2x would be
     48% over)."""
-    from runtime.launcher_layer import _cover_scale
+    from runtime.home_grid import _cover_scale
     assert _cover_scale(128, 258, 245) == 2
     assert _cover_scale(128, 206, 173) == 1
     assert _cover_scale(128, 256, 256) == 2

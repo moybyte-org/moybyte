@@ -429,7 +429,8 @@ def test_tap_another_card_brings_it_to_the_centre(tmp_path):
 
 def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     from runtime import host_app
-    from runtime.launcher_layer import Carousel, Launcher
+    from runtime.launcher_layer import Carousel
+    from runtime.home_grid import Launcher
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
@@ -473,7 +474,8 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
     import json
 
     import moy_ui
-    from runtime.launcher_layer import Carousel, Launcher
+    from runtime.launcher_layer import Carousel
+    from runtime.home_grid import Launcher
 
     ws = _ws_with_carts(tmp_path, 4)
     rc, _n = moy_ui.theme_install(json.dumps({"format": 2, "name": "hg", "layout": {

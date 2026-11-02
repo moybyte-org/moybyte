@@ -30,7 +30,7 @@ PINNED = {
     "cards_layer.py": (6, 0),
     "code_layer.py": (0, 0),
     "console.py": (0, 0),
-    "launcher_layer.py": (1, 0),
+    "home_grid.py": (1, 0),
     "map_editor_ui.py": (7, 0),
     "paint_layer.py": (1, 0),
     "perf_hud.py": (0, 0),

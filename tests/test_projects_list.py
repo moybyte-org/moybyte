@@ -47,7 +47,7 @@ class _Keys:
 # -- the Make tab's list -----------------------------------------------------
 
 def test_make_lists_the_new_card_then_every_editable_cart(tmp_path):
-    from runtime.launcher_layer import NEW_TILE_TYPE
+    from runtime.home_grid import NEW_TILE_TYPE
     ws = _ws(tmp_path)
     ws.set_home_tab("make")
     items = ws.launcher.items
@@ -115,7 +115,7 @@ def test_a_tap_on_the_make_tab_edits(tmp_path):
 
 
 def test_new_card_creates_a_game_and_opens_the_editor(tmp_path):
-    from runtime.launcher_layer import NEW_TILE_TYPE
+    from runtime.home_grid import NEW_TILE_TYPE
     ws = _ws(tmp_path)
     drv = _drv(ws)
     n0 = len(ws.carts.all)

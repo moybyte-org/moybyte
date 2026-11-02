@@ -61,7 +61,7 @@ class FullscreenStackWM:
     # motion and at rest; HOME_SCALE lowered is the order's "reduced scale"),
     # "rest" (every card at 1.0 while the row moves, the centre scaled once
     # settled), "one" (one card size). Every board runs "full" at 2: the
-    # handheld's 2x hero (launcher_layer.HOME_SCALE_HH). The desk's shelf
+    # handheld's 2x hero (home_grid.HOME_SCALE_HH). The desk's shelf
     # cards keep one size, so the verdict moves only the handheld's.
     HOME_MOTION = "full"
     HOME_SCALE = 2.0

@@ -11,6 +11,7 @@ stays on it.
 import pytest
 
 from runtime import host_app, launcher_layer, ui_draw
+from runtime import home_grid
 from test_v04_userland import select_first_game
 
 
@@ -82,7 +83,7 @@ def test_the_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
     bx = bl.bar_rects("home")[0][0]
     items = {it[2]: bx + it[1][0] for it in bl.focus_items("home")}
     on_screen = sorted([(items[n], n) for n in items]
-                       + [(x, t) for x, (t, _l) in zip(xs, launcher_layer.HOME_TABS)])
+                       + [(x, t) for x, (t, _l) in zip(xs, home_grid.HOME_TABS)])
     assert [n for _x, n in on_screen] == _ROW
     _press(drv, "up")
     for _ in range(2):

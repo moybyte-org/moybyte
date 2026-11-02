@@ -7,6 +7,7 @@ import pytest
 import test_shell_goldens as g
 from runtime import ui_draw
 from runtime import launcher_layer
+from runtime import home_grid
 
 THEMES = [("moy", "dark"), ("moy", "light"), ("blocks", "light"), ("blocks", "dark"),
           ("contrast", "dark"), ("contrast", "light")]
@@ -263,7 +264,7 @@ def test_the_star_badges_rim_is_the_dim_ink():
     the chip (R2-23)."""
     th = {"surface": 3, "border": 3, "ink_dim": 9}
     cv = _Rec()
-    launcher_layer._draw_star_badge(cv, {"white": 7, "light_grey": 6, "yellow": 10,
+    home_grid._draw_star_badge(cv, {"white": 7, "light_grey": 6, "yellow": 10,
                                          "orange": 9}, th, (0, 0, 15, 15), False)
     assert cv.rings == [9], "the chip's rim must hold on a cover as dark as the chip"
 
@@ -358,12 +359,12 @@ def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mod
         ws.launcher.sel = 1             # the + tile on the shelf beside it
     _frame(ws, 2)
     drawn = []
-    real = launcher_layer.draw_new_art
+    real = home_grid.draw_new_art
 
     def spy(cv, th, rect, r, *a, **kw):
         drawn.append((rect, r))
         return real(cv, th, rect, r, *a, **kw)
-    monkeypatch.setattr(launcher_layer, "draw_new_art", spy)
+    monkeypatch.setattr(home_grid, "draw_new_art", spy)
     _frame(ws, 1)
     assert drawn, "the Make tab draws its + New tile"
     (x, y, w, h), r = drawn[-1]
@@ -388,7 +389,7 @@ def test_the_star_stands_clear_of_its_chip():
     """The favourite star is about 10 pixels in a 16-pixel chip, its box
     centred, so the chip's rim stands clear of every point (R4-30)."""
     for side in (15, 17, 25):
-        edge, inner = launcher_layer._star_runs(side)
+        edge, inner = home_grid._star_runs(side)
         xs = [dx for dx, _dy, _w in edge + inner] + [dx + w - 1 for dx, _dy, w in edge + inner]
         ys = [dy for _dx, dy, _w in edge + inner]
         assert min(xs) >= 3 and max(xs) <= side - 4, (side, min(xs), max(xs))
@@ -471,7 +472,7 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
             assert under >= 20, "the shelf runs into the strip"
         finally:
             ws.wm._install(ws.wm._root_ctx)
-    assert gaps[0] == gaps[1] == launcher_layer.SHELF_GAP, gaps
+    assert gaps[0] == gaps[1] == home_grid.SHELF_GAP, gaps
 
 
 def test_wrapped_desk_buttons_take_one_width_and_keep_the_danger_apart():
@@ -480,15 +481,15 @@ def test_wrapped_desk_buttons_take_one_width_and_keep_the_danger_apart():
     above, the row form of its gap beside the others (design review F6-03);
     on one row each keeps its own width."""
     verbs = ("change", "copy", "delete")
-    one = launcher_layer.desk_button_layout(verbs, 1000, 1, 1)
+    one = home_grid.desk_button_layout(verbs, 1000, 1, 1)
     assert [b[2] for b in one] == [0, 0, 0] and len({b[3] for b in one}) > 1
     assert all(b[5] == 0 for b in one)
-    stack = launcher_layer.desk_button_layout(verbs, 220, 1, 1)
+    stack = home_grid.desk_button_layout(verbs, 220, 1, 1)
     assert [b[2] for b in stack] == [0, 1, 2]
     assert len({b[3] for b in stack}) == 1, "one width a stack"
-    assert [b[5] for b in stack] == [0, 0, launcher_layer.DESK_ROW_GAP]
-    assert launcher_layer.desk_button_span(220, 1, 1, 42) == \
-        2 * (42 + launcher_layer.DESK_ROW_GAP) + launcher_layer.DESK_ROW_GAP
+    assert [b[5] for b in stack] == [0, 0, home_grid.DESK_ROW_GAP]
+    assert home_grid.desk_button_span(220, 1, 1, 42) == \
+        2 * (42 + home_grid.DESK_ROW_GAP) + home_grid.DESK_ROW_GAP
 
 
 def test_the_desk_title_cuts_with_an_ellipsis(tmp_path):

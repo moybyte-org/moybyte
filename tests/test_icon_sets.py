@@ -309,7 +309,7 @@ def test_a_sets_line_weight_is_read_off_its_own_mask(name):
 def test_the_new_card_is_a_blank_page_with_the_sets_plus(tmp_path, theme, mode):
     """The "+ New" card draws the theme's surface and the plus in its accent
     ink, no IconSheet sprite: its centre is the ink, its corner-in the page."""
-    from runtime.launcher_layer import draw_new_art
+    from runtime.home_grid import draw_new_art
     ws = _ws(tmp_path)
     ws.look.set_theme(theme, persist=False, variant=mode)
     th = ws.theme_colors

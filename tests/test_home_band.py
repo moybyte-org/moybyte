@@ -15,6 +15,7 @@ picture, to the second's bytes."""
 import pytest
 
 from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui, ui_draw
+from runtime import home_grid
 from ws_helpers import cover_bytes, no_unlock_banner, quiesce
 
 
@@ -64,7 +65,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
         monkeypatch.setattr(L, "_try_band_frame", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
-        monkeypatch.setattr(launcher_layer.Launcher, "_faces_for", lambda self, *a: None)
+        monkeypatch.setattr(home_grid.Launcher, "_faces_for", lambda self, *a: None)
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts, **_TIERS[tier])
     for i in range(n):
@@ -416,7 +417,7 @@ def test_a_paint_draws_no_face(tmp_path, monkeypatch, arrangement):
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
                               False, n=120)
     g = ws.launcher
-    L = launcher_layer.Launcher
+    L = home_grid.Launcher
     painting = [0]
     drawn = [0, 0]
     real_pass, real_face = L.band_pass, L._draw_face
@@ -451,7 +452,7 @@ def test_a_cover_landing_keeps_the_frames_damage(tmp_path, monkeypatch, arrangem
     the band whole under a key the other's paint is not under."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
                               False)
-    L = launcher_layer.Launcher
+    L = home_grid.Launcher
     real = L.repaint_band
     land = [False]
 
