@@ -1040,7 +1040,7 @@ def test_a_cart_that_fails_to_load_closes_the_vm_and_names_the_error(w):
 
 
 def test_the_cart_chunk_is_named_for_the_crash_to_code_panel(w):
-    """`player._lua_cart_line` parses `cart:12:` out of a runtime error to put
+    """`player_fit._lua_cart_line` parses `cart:12:` out of a runtime error to put
     the caret on the failing line (#24); "@" is Lua's own source-name sigil."""
     w.run()
     load = [c for c in w.core.calls if c[0] == "load"][0]

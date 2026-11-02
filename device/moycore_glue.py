@@ -308,7 +308,7 @@ class MoycoreRun:
             raise
         # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
         # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
-        # -- what player._lua_cart_line parses for the crash-to-code panel
+        # -- what player_fit._lua_cart_line parses for the crash-to-code panel
         # (#24) -- and load() is where the verb profiler arms, ahead of the
         # first chunk rather than after a shim that already captured its verbs.
         err = _moycore.load(cart_chunks(ns, src))

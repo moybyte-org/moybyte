@@ -197,7 +197,7 @@ def test_lua_load_error_drops_on_the_line(tmp_path):
 
 def test_lua_cart_line_parser_shapes():
     # The text parser both backends' error texts route through (no binding needed).
-    from runtime.player import _lua_cart_line
+    from runtime.player_fit import _lua_cart_line
     assert _lua_cart_line("cart:12: attempt to add a nil value") == 12
     assert _lua_cart_line("LuaError: cart:3: boom") == 3
     assert _lua_cart_line('[string "cart"]:7: unexpected symbol') == 7

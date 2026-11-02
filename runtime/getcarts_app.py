@@ -93,13 +93,13 @@ try:
     import cart_listing as _cl
     from moy_fs import _exists, _read
     from ticks import _ticks_ms, _ticks_diff
-    from player import fit_notice as _fit_notice
+    from player_fit import fit_notice as _fit_notice
 except ImportError:  # pragma: no cover - direct host import
     from runtime import cart_index as _ci
     from runtime import cart_listing as _cl
     from runtime.moy_fs import _exists, _read
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.player import fit_notice as _fit_notice
+    from runtime.player_fit import fit_notice as _fit_notice
 
 
 # An index fetched this session is reused for this long before the app checks

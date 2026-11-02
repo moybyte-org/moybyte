@@ -43,7 +43,7 @@ nothing, so it costs a frozen module and no runtime dependency.
 # The Player puts the scripts either side of main on the namespace as
 # `_moy_pre` / `_moy_post`, each a list of (filename, text); `src` is main's
 # and travels on its own because the Editor edits it and the crash panel maps
-# its lines. Hence main's chunk name stays "@cart" -- player._lua_cart_line
+# its lines. Hence main's chunk name stays "@cart" -- player_fit._lua_cart_line
 # parses exactly that to mark the bad line (#24) -- while the others are named
 # after their file, so a fault in a generated shim reads `p8.lua:412:` and
 # never lands on the kid's line.

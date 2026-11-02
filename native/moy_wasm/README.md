@@ -277,7 +277,7 @@ through `footprint()` above -- and compares it with `mem()`'s PSRAM free total
 and largest block. A cart that does not fit opens the fit NOTICE: the Player's
 panel under the title "Too big for this console." naming the cart, what it
 needs and what the board has free, with the same way out as every panel and
-no EDIT (`runtime/player.py`'s `fit_notice`). The footprint is the file's
+no EDIT (`runtime/player_fit.py`'s `fit_notice`). The footprint is the file's
 block (which the linear memory takes back), the pool, the module's own size
 for the text and data the loader maps, and the run stack; it over-counts the
 text by the module's relocations and symbols, so a cart it passes has the
@@ -301,7 +301,7 @@ refuses a cart too big: `moycore_glue.WasmRuntime.missing` reads the module's
 imports from its head (`wasm_head`) and holds them to `moycore.wasm_table()`,
 the table the engine registers, and a name it lacks opens the NOTICE under
 "Needs a newer console." naming the cart and every import missing
-(`runtime/player.py`'s `newer_notice`). The comparison is
+(`runtime/player_fit.py`'s `newer_notice`). The comparison is
 `moycore_glue.missing_imports`, the one every tier's runtime uses: the host
 twin holds the module to the same table compiled into its binding. A cart is
 never linked short of an import and left to trap when it first calls it;
