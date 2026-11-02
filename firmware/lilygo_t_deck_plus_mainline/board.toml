@@ -177,6 +177,13 @@ See `wm_desk.py` above: the other half of the windowed WM, imported only by
 `wm_windowed.py`."""
 
 [[modules.shared.deny]]
+file = "wm_parts.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the windowed WM's window record, layout context and
+draw-stack layers, imported only by `wm_windowed.py` and its mixins."""
+
+[[modules.shared.deny]]
 file = "editor_desk.py"
 kind = "tier"
 why  = """
