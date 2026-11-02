@@ -196,7 +196,7 @@ door — no setting, no mode:
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
   grid and the icons fling identically; a scroll, fling or step frame is the
-  band's alone (`launcher_layer._band_frame`): the backdrop goes back under
+  band's alone (`home_band._band_frame`): the backdrop goes back under
   the band and the band draws as the engine's table of parts
   (`Launcher.band_pass`), with the hint strip where a step moved focus.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity

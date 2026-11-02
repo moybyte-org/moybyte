@@ -1197,7 +1197,7 @@ since the face's preview ring holds four looks and would thrash.
   every write of the live row moves — an icon sheet's adoption publishes too.
   Every cache whose pixels read the look folds `look_gen` into its key and
   replaces its entry when it moves:
-  - the home statics and retained stamp (`launcher_layer._statics_base`);
+  - the home statics and retained stamp (`home_band._statics_base`);
   - the bar strips (`bar_layer._cart_bar_key`);
   - `wm_chrome`'s frozen chrome, the focused window's content freeze
     (`_content_static`) and every window buffer behind it (each `_Win`
@@ -2101,7 +2101,7 @@ count. An empty Mine or Make shows one "+ New" card.
 
 **The "+ New" card** (design review 2026-10-19) is a blank page, never a
 cover: the theme's `surface` in a cover's corners with the icon set's plus in
-`ink_accent` (`launcher_layer.draw_new_art`, `iconsets.plus`), the same at
+`ink_accent` (`home_grid.draw_new_art`, `iconsets.plus`), the same at
 rest and selected. A colour block with a glyph is what a coverless cart's
 generated cover is (`ui_draw.initial_cover`), so New stays off that
 vocabulary; a theme that casts no shadow frames the page in its `border`,
