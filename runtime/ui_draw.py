@@ -1370,7 +1370,7 @@ def frame_icon(rect, title_h, btns=0):
 # rounded outline's fringe blend over whatever lies under it: the desk layer
 # casts them over what it repainted (`frame_under`, runtime/wm_desk.py), and
 # a window that repaints takes the casts of the windows above it over what
-# it painted (`frame_under_onto`, runtime/wm_windowed.py), so a blend never
+# it painted (`frame_under_onto`, runtime/wm_chrome.py), so a blend never
 # lands twice on the same pixel.
 
 UNDER_FULL, UNDER_SMALL, UNDER_NONE = 0, 1, 2

@@ -393,10 +393,10 @@ def test_the_hot_readers_still_read_the_flat_attribute():
     assert 'ws.show_fps and self.stack.top() == "desktop"' in (
         ROOT / "runtime" / "wm.py").read_text(encoding="utf-8")
     assert 'self.ws.show_fps and self.stack.top() == "desktop"' in (
-        ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
+        ROOT / "runtime" / "wm_paint.py").read_text(encoding="utf-8")
     for src in (console_src,
                 (ROOT / "runtime" / "wm.py").read_text(encoding="utf-8"),
-                (ROOT / "runtime" / "wm_windowed.py").read_text("utf-8")):
+                (ROOT / "runtime" / "wm_paint.py").read_text("utf-8")):
         for key in KEYS:
             assert 'system["%s"]' % key not in src, key
 

@@ -660,7 +660,7 @@ class FullscreenStackWM:
             return
         vp = self.viewport()
         ox, oy, scale = vp
-        # Native composite probe (the wm_windowed._blit_game convention): a
+        # Native composite probe (the wm_paint._blit_game convention): a
         # system canvas with a blit_game verb scales + letterboxes in C -- the
         # T-Deck path for a cart-declared small canvas (SPEC.md 1/3.1), where
         # the boot DeviceCanvas was promoted to system canvas and neither side

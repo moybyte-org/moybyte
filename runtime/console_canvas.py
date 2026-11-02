@@ -71,7 +71,7 @@ class CanvasBinding:
         cannot move. Released by `release_run_canvas`, on every exit path.
 
         In the windowed DESK world the system canvas is never bound: a cart
-        lives in a WINDOW, and `wm_windowed._draw_player_window` blits
+        lives in a WINDOW, and `wm_paint`'s `_draw_player_window` blits
         `ws.canvas` into it, so with the system canvas bound the window blits
         the screen into a rectangle OF that screen (measured).
         There the app takes a window surface of its own instead

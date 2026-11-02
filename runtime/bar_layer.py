@@ -780,7 +780,7 @@ class BarLayer:
         bx, by, bw, bh = rect
         # One slot PER CANVAS, most-recently-used first. The windowed WM draws the
         # same `where` into DIFFERENT canvases from frame to frame -- straight into
-        # the root canvas through a viewport on a quiet frame (wm_windowed
+        # the root canvas through a viewport on a quiet frame (wm_paint
         # _direct_render), into the window's own buffer otherwise -- so a slot that
         # remembers only one canvas reads every switch as a canvas swap and rebuilds.
         # That cost 72ms of an 86ms Settings frame on P4 glass, twice per gesture

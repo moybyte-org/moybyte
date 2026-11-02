@@ -2834,7 +2834,7 @@ class SystemCanvas(DeviceCanvas):
         self._gate_state[_ST_N_TEXT] += 1
         # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
         # two diverge the moment a viewport is set (#155) -- which is exactly
-        # what wm_windowed._direct_render does to paint a window's content in
+        # what wm_paint._direct_render does to paint a window's content in
         # place. Passing the logical size as the stride makes every glyph row
         # step by the window width instead of the buffer's, so scaled text
         # walks diagonally out of its rect.
