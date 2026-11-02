@@ -816,9 +816,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     over the one `bufs` frames before it. `chosen`: the tool was chosen before
     the page was painted, so the press is the stroke's first change; `start`
     is where in the view the pointer's stroke begins."""
-    from runtime import paint_app
+    from runtime import paint_draw
     if not stroke_frames:
-        monkeypatch.setattr(paint_app, "_loop", None)
+        monkeypatch.setattr(paint_draw, "_loop", None)
     if desk:
         ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                         font_scale=2, windowed=True, panel_diagonal_in=7.0)
@@ -986,7 +986,7 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     asks for one more or leaves every buffer of the canvas holding the page,
     RETAINED_FRAMES paints of it in a row; an idle board has then painted it
     by the next press, which is a stroke frame from its first."""
-    from runtime import paint_app
+    from runtime import paint_app, paint_draw
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
@@ -1004,7 +1004,7 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     def counted(cv, th):
         got = stroke(cv, th)
         if not got:
-            whole.append(paint_app._loop.drawn())
+            whole.append(paint_draw._loop.drawn())
         return got
     app._stroke_frame = counted
     draw = app.draw
@@ -1026,3 +1026,18 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     for _ in range(6):
         drv.frame(1 / 30)
     assert whole and len(whole) <= bufs + 1, whole
+
+
+def test_paints_frame_path_is_found_on_the_class_or_its_first_base():
+    """On MicroPython a method the class lacks is looked up through its bases
+    in order, a dict miss per base. Paint's draw entry and the WM's shown
+    protocol are on the class; the draw half they reach every frame is its
+    first base (paint_draw.PaintDraw), and nothing it calls lies further."""
+    from runtime import paint_app, paint_draw
+    cls = paint_app.PaintAppLayer
+    assert cls.__bases__[0] is paint_draw.PaintDraw
+    assert not [n for n in ("draw", "retained", "changed") if n not in vars(cls)]
+    for name in ("_canvas", "_stroke_frame", "_view", "_drawing", "_tools", "_rail",
+                 "_show", "_view_page", "_game_page", "_story_page", "_draw_toast",
+                 "_desk_row", "_desk_panel", "_desk_foot", "_lend"):
+        assert name in vars(cls) or name in vars(paint_draw.PaintDraw), name
