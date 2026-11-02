@@ -167,7 +167,7 @@ nor those docs will warn you about:
   - **The shelves are the serving host's**: an `indexes.json` beside the page
     replaces the defaults, read once at boot.
   - **A page keeps no compiled module**, so a release asset is read by RANGE
-    (`ranges` on the page's transport, `cart_index._Ranged`): the zip's
+    (`ranges` on the page's transport, `cart_unpack._Ranged`): the zip's
     directory, then the runs of members it keeps -- a cart's modules are most
     of its asset and never cross. Any first range not answered 206 (a host that
     ignores ranges, a refused preflight) reads the asset whole.
