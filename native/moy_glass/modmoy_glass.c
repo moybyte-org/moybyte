@@ -589,12 +589,12 @@ static MP_DEFINE_CONST_FUN_OBJ_0(glass_block_view_obj, glass_block_view);
 
 // -- the panel's backlight -------------------------------------------------------
 //
-// backlight(on): the panel entry sprint 2 gave the recovery floor
-// (MOY_KERNEL_PANEL), on every console.
+// backlight(x=True): the panel entry the recovery floor lights with
+// (MOY_KERNEL_PANEL), on every console -- True, False or a level (moy_light.h).
 
 #ifdef MOY_KERNEL_PANEL
 static mp_obj_t glass_backlight(size_t n_args, const mp_obj_t *a) {
-    MOY_KERNEL_PANEL(backlight)(n_args < 1 || mp_obj_is_true(a[0]));
+    MOY_KERNEL_PANEL(backlight)(n_args < 1 ? MOY_LIGHT_FULL : moy_light_arg(a[0]));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_backlight_obj, 0, 1, glass_backlight);
@@ -835,13 +835,18 @@ void moy_glass_loop_idle(void) {
     #endif
 }
 
-// The light on or off; a level between is the dim rung's, which a binary
-// light shows as on. Answers false: no compositor here dims.
+// The light at `level` (moy_light.h). A console's panel entry takes the level
+// and answers true; the desktop build's compositors take on or off, so a level
+// between shows as on and it answers false.
 bool moy_glass_loop_light(int level) {
     mp_obj_t c = loop_comp();
     if (c == MP_OBJ_NULL) {
         return false;
     }
+    #ifdef MOY_KERNEL_PANEL
+    MOY_KERNEL_PANEL(backlight)(level);
+    return true;
+    #else
     bool on = level > 0;
     #ifdef MOY_GLASS_BANDED_TYPE
     if (LOOP_BANDED(c)) {
@@ -851,6 +856,7 @@ bool moy_glass_loop_light(int level) {
     #endif
     mp_call_function_1(mp_load_attr(c, MP_QSTR_set_backlight), mp_obj_new_bool(on));
     return false;
+    #endif
 }
 
 // The DSI compositors' overlap counters (moy_present.h's order); false on a

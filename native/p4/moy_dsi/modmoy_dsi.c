@@ -21,6 +21,7 @@
 #include "esp_cache.h"
 #include "esp_attr.h"
 #include "driver/gpio.h"
+#include "moy_light_ledc.h"
 
 // ---------------------------------------------------------------------------
 // The panel: everything a board's glass decides, and nothing else. A board
@@ -204,21 +205,15 @@ int moy_dsi_kpresent(void) {
 }
 
 // The backlight is the BOARD's (MOY_DSI_BL_GPIO and its polarity, beside the
-// panel define in mpconfigboard.cmake).
-void moy_dsi_kbacklight(int on) {
-    static bool configured;
-    int level = (on != 0) != (MOY_DSI_BL_ACTIVE_LOW != 0);
-    if (!configured) {
-        gpio_config_t cfg = {
-            .pin_bit_mask = 1ULL << MOY_DSI_BL_GPIO,
-            .mode = GPIO_MODE_OUTPUT,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_set_level(MOY_DSI_BL_GPIO, level);
-        gpio_config(&cfg);
-        configured = true;
-    }
-    gpio_set_level(MOY_DSI_BL_GPIO, level);
+// panel define in mpconfigboard.cmake), an LEDC PWM channel at the kernel's
+// level (moy_light.h: 0 off, 255 full).
+void moy_dsi_kbacklight(int level) {
+    moy_light_ledc_set(MOY_DSI_BL_GPIO, MOY_DSI_BL_ACTIVE_LOW != 0, level);
+}
+
+// The light's hardware setting now: the channel's duty (moy_light_ledc_duty).
+int moy_dsi_klight(void) {
+    return moy_light_ledc_duty();
 }
 
 static mp_obj_t moy_dsi_init(void) {
@@ -328,12 +323,16 @@ static mp_obj_t moy_dsi_set_pattern(mp_obj_t pat_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_set_pattern_obj, moy_dsi_set_pattern);
 
-// backlight(on): this board's backlight, through the kernel's body.
-static mp_obj_t moy_dsi_backlight(mp_obj_t on_in) {
-    moy_dsi_kbacklight(mp_obj_is_true(on_in));
+// backlight(x): this board's light, through the kernel's body -- True, False
+// or a level (moy_light.h). backlight() -> moy_dsi_klight().
+static mp_obj_t moy_dsi_backlight(size_t n_args, const mp_obj_t *a) {
+    if (n_args == 0) {
+        return MP_OBJ_NEW_SMALL_INT(moy_dsi_klight());
+    }
+    moy_dsi_kbacklight(moy_light_arg(a[0]));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_backlight_obj, moy_dsi_backlight);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_dsi_backlight_obj, 0, 1, moy_dsi_backlight);
 
 static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_dsi) },

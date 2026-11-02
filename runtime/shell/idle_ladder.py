@@ -11,7 +11,9 @@ console can do:
   IdleLadder  the rows' values -- seconds of no input, OFF a value -- stepped
               from Settings, persisted in the system store and handed to the
               kernel (`moy_loop.idle`). A rung the board's light cannot show
-              (DIM on a binary backlight) has no row.
+              (DIM on a binary backlight) has no row. Settings' Brightness
+              is the light the ladder's full rung means (`moy_loop.light_top`),
+              applied at boot and on a change.
   Saver       what the screen shows on the SAVER rung: a cover cycle where
               the console is fullscreen (the S3s), the desk's wallpaper cart
               where there is a desk (the P4s). Never over a running cart:
@@ -67,6 +69,17 @@ class IdleLadder:
             except (TypeError, ValueError):
                 pass
             loop.idle(rung, secs)
+        self.brightness()
+
+    def brightness(self, level=None):
+        """Settings' Brightness `level` (the stored one when None) on the
+        panel, an even step of its light a level, the highest full and the
+        lowest still lit: the kernel's light top now, or None where the
+        board's light cannot dim."""
+        v, lo, hi = self.ws.settings_layer.level("brightness")
+        if level is not None:
+            v = max(lo, min(hi, int(level)))
+        return self.loop.light_top(255 * (v - lo + 1) // (hi - lo + 1))
 
     def rows(self):
         """The Settings rows this board's light can show."""

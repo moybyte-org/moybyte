@@ -281,6 +281,25 @@ def test_the_light_follows_the_rungs():
     L.unregister()
 
 
+def test_the_light_top_scales_every_rung_and_a_lit_panel_takes_it_at_once():
+    ladder(dim=1, blank=3)
+    assert L.light_top() == 255
+    assert L.light_top(128) == 128
+    assert L.trace_log().split() == ["light=128"]         # lit: the full rung, now
+    lights = [tok for _t, _s, log in walk(1000, 5000) for tok in log.split()
+              if tok.startswith("light=")]
+    assert lights == ["light=24", "light=0"]               # the dim rung, scaled
+    assert L.light_top(1) == 1 and L.light_top(999) == 255
+    L.unregister()
+
+
+def test_a_light_that_cannot_dim_has_no_top():
+    ladder(can_dim=False)
+    assert L.light_top() is None and L.light_top(128) is None
+    assert "light=" not in L.trace_log()
+    L.unregister()
+
+
 def test_the_touch_that_wakes_a_saver_or_a_dark_panel_is_swallowed():
     for rung in ("saver", "blank"):
         ladder(**{rung: 1})

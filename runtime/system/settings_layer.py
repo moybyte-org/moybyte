@@ -15,8 +15,9 @@ The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
 Appearance, Text size, Layout, Volume, Brightness and Name), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
 channel and the update flows) and About (the version and its channel, the
-board, storage, battery, Achievements and Licences). Brightness and Name
-store a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
+board, storage, battery, Achievements and Licences). Brightness is the
+panel light's (the idle ladder's top, `IdleLadder.brightness`); Name stores
+a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
 toggle's warning, the last crash record, Achievements
 (runtime/system/achievements_ui.py) and Licences (runtime/system/about_ui.py) are pages of
 their own in place of the rows, Settings' way back closing them; the Wi-Fi
@@ -254,7 +255,7 @@ _HINT_TOGGLE = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", 
 # The level rows, by system.json key: (lowest, highest, the value with none
 # stored). Volume is the console's level (`audio_session.console_volume`,
 # the one the boot applies and the dev channel's `vol` sets); Brightness is
-# stored and applied by nothing yet.
+# the panel light's, which the idle ladder applies at boot and on a change.
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 7, 4)}
 _STEPPED = {"steps": True}    # a level row's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
@@ -322,8 +323,8 @@ class SettingsLayer:
         # ONE appearance surface); this row deep-links to it.
         ("appearance", "APPEARANCE", "action"),
         ("font_scale", "FONT SIZE", "font"),
-        # VOLUME applies the console's level; BRIGHTNESS and NAME are
-        # stored in system.json and applied by nothing yet.
+        # VOLUME applies the console's level, BRIGHTNESS the panel light's
+        # top; NAME is stored in system.json and applied by nothing yet.
         ("volume", "VOLUME", "level"),
         ("brightness", "BRIGHTNESS", "level"),
         ("name", "NAME", "name"),
@@ -1241,12 +1242,17 @@ class SettingsLayer:
 
     def set_level(self, key, v):
         """Store a level row's value, held in its range; VOLUME also sets the
-        console's level, which every audio session mixes at."""
+        console's level, which every audio session mixes at, and BRIGHTNESS
+        the panel's light where the board's dims (the idle ladder's)."""
         lo, hi, _dflt = LEVELS[key]
         v = max(lo, min(hi, int(v)))
         self.ws.system.set(key, v)
         if key == "volume":
             console_volume(v)
+        elif key == "brightness":
+            lad = getattr(self.ws, "idle_ladder", None)
+            if lad is not None:
+                lad.brightness(v)
 
     # -- About ----------------------------------------------------------------------
 

@@ -287,6 +287,9 @@ each of these by copying, and a fourth would pay again):
   binary; owner call at bring-up. **ANSWERED 2026-08-18: binary.** Every caller
   in the console — the boot light-up fence, `IdleBlank`, the dev channel's
   `bl` — asks for on/off, so the duty stays unbuilt until something wants it.
+  **Built 2026-11-02** with the OS plan's first step (the cheap fixes):
+  Settings' Brightness and the idle ladder's dim rung want it, and every
+  console board's light takes the kernel's level (`moy_light_ledc.h`).
 
 ## Declined (recorded so it is not re-litigated)
 

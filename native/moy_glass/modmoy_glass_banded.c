@@ -39,7 +39,7 @@ static int banded_ship(void *ctx, int n) {
 
 void glass_banded_light(mp_obj_t panel, bool on) {
     (void)panel;
-    MOY_KERNEL_PANEL(backlight)(on);
+    MOY_KERNEL_PANEL(backlight)(on ? MOY_LIGHT_FULL : 0);
 }
 #else
 // The desktop MicroPython: the panel module is whatever was passed in (a

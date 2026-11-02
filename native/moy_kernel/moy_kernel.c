@@ -167,7 +167,7 @@ void moy_loop_board_down(void);
 int MOY_KERNEL_PANEL(init)(void);
 uint16_t *MOY_KERNEL_PANEL(fb)(void);
 int MOY_KERNEL_PANEL(present)(void);
-void MOY_KERNEL_PANEL(backlight)(int on);
+void MOY_KERNEL_PANEL(backlight)(int level);   // moy_light.h: 0 off, 255 full
 #if !MOY_KERNEL_SCR
 #error "a board with a panel draws its screens through moy_gfx's moy_scr.h"
 #endif
@@ -897,7 +897,7 @@ static void moy_kernel_recovery(int why) {
         k_printf("KERNEL recovery panel err=0x%x\r\n", e);
     }
     k_draw(&k);
-    MOY_KERNEL_PANEL(backlight)(1);
+    MOY_KERNEL_PANEL(backlight)(255);
     #endif
     k_report(&k);
 
@@ -1147,7 +1147,7 @@ static void moy_kernel_first_light(void) {
         k_printf("KERNEL first light: present err=0x%x\r\n", e);
         return;
     }
-    MOY_KERNEL_PANEL(backlight)(1);
+    MOY_KERNEL_PANEL(backlight)(255);
     s_lit = true;
     s_lit_ms = (uint32_t)(esp_timer_get_time() / 1000);
     k_printf("KERNEL first light at %u ms\r\n", (unsigned)s_lit_ms);

@@ -86,6 +86,7 @@ _SIGS = (
     ("moy_loop_pump", [ctypes.POINTER(_Pump)], None),
     ("moy_loop_pace", [_U32], _U32),
     ("moy_loop_set_lit", [_B], None),
+    ("moy_loop_light_top", [_I], _I),
     ("moy_loop_arm_health", [_B], None),
     ("moy_loop_frames", [], _U32),
     ("moy_loop_drawn", [], _U32),
@@ -421,6 +422,11 @@ def idle_state():
 
 def idle_can_dim():
     return bool(_lib().moy_loop_idle().contents.can_dim)
+
+
+def light_top(top=0):
+    v = _lib().moy_loop_light_top(int(top))
+    return None if v < 0 else v
 
 
 def power(on):

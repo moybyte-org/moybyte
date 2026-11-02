@@ -17,6 +17,8 @@
 #include "py/runtime.h"
 #include "py/mphal.h"
 
+#include "moy_light.h"
+
 #if __has_include("esp_heap_caps.h")
 #define MOY_GLASS_BOARD 1
 #include "esp_heap_caps.h"
@@ -38,9 +40,9 @@
 #endif
 
 // The panel's backlight, the entry its module gives the recovery floor
-// (MOY_KERNEL_PANEL), on every console.
+// (MOY_KERNEL_PANEL), on every console: a level, moy_light.h's.
 #ifdef MOY_KERNEL_PANEL
-extern void MOY_KERNEL_PANEL(backlight)(int on);
+extern void MOY_KERNEL_PANEL(backlight)(int level);
 #endif
 
 // A Buf: its row, and the view it hands out (modmoy_glass.c's -- Buf).

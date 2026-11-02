@@ -179,8 +179,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `moy_glass.DsiCompositor` over `moy_dsi` and `moy_ppa`
     (`native/moy_glass/moy_present.h`: the triple-buffer rotation, the
     deferred present and its fences), held dark until the first composed
-    frame; the backlight (GPIO32 active-low, the `MOY_DSI_BL_*` defines) is
-    `moy_glass.backlight`, the panel entry the recovery floor lights it with.
+    frame; the backlight (GPIO32 active-low, the `MOY_DSI_BL_*` defines, an
+    LEDC PWM channel at the kernel's level: `native/moy_glass/moy_light_ledc.h`)
+    is `moy_glass.backlight`, the panel entry the recovery floor lights it with.
   - the GT911 is the kernel's driver (`native/moy_input`, I2C0 SDA7/SCL8 @
     0x5D on the kernel's bus, native 1024×600 coords), named in
     `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`, both flips for the 180° panel

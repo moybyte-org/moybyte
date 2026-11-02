@@ -262,6 +262,11 @@ void moy_loop_set_services(uint32_t bits);
 uint32_t moy_loop_services(void);
 // The panel was lit before the loop (the boot splash did it).
 void moy_loop_set_lit(bool lit);
+// The light the idle ladder's full rung means (Settings' Brightness), 1..255:
+// every level the loop gives the backlight is scaled to it, and a lit panel
+// takes a new one at once. `top` <= 0 only reads it. -1 where the board's
+// light cannot dim (no backlight stage, or the ladder's `can_dim` false).
+int moy_loop_light_top(int top);
 // The console's half of the PERF line, which it fills when a sample is due
 // (moy_loop_perf_due: PERF DIAG is on and this frame closes the period).
 moy_perf_values_t *moy_loop_perf_console(void);

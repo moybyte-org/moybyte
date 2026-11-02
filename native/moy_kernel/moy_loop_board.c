@@ -462,7 +462,7 @@ void moy_loop_board_vm_start(void) {
     moy_devch_words(BOARD_WORDS, (int)(sizeof(BOARD_WORDS) / sizeof(BOARD_WORDS[0])));
     #endif
     moy_idle_t *d = moy_loop_idle();
-    d->can_dim = false;
+    d->can_dim = s_ops.backlight != NULL;
     moy_loop_set_vm(true);
 }
 

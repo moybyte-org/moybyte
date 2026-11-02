@@ -172,9 +172,9 @@ as a Home Assistant panel.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
   the one fact the two boards' display modules differ on), the
   `MOY_DSI_BL_*` defines in `mpconfigboard.cmake` that `moy_dsi.backlight`
-  and the kernel's recovery floor drive. The vendor BSP
-  drives it as an LEDC PWM channel, so a duty is one line away the day
-  something wants dimming; today every caller asks for on/off.
+  and the kernel's recovery floor drive. It is an LEDC PWM channel at the
+  kernel's level, as the vendor BSP drives it (`native/moy_glass/moy_light_ledc.h`):
+  Settings' Brightness and the idle ladder's dim rung.
 - **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, no CH343): the
   S3 boards' rules apply, not the Waveshare's — open with DTR/RTS ASSERTED,
   never pulse a reset under an open handle (`attach_only` in `board.toml`),
@@ -329,4 +329,4 @@ for the C6/audio pins, which agree with the BSP.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
 5. BLE keyboard (unverified: nothing paired), audio by ear (no speaker on
-   our unit), backlight PWM (`moy_dsi`'s backlight entry, when wanted).
+   our unit), backlight PWM dimming on glass.
