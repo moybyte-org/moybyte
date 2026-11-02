@@ -151,8 +151,11 @@ def test_a_vm_driver_sees_runtime_as_a_board_stages_it():
     sources = board_config.shared_sources(ROOT / "runtime")
     want = {n for n, p in sources.items()
             if not board_config.host_only(ROOT / "runtime", p)}
-    assert {p.name for p in tree.iterdir()} == want
-    assert all(p.resolve() == sources[p.name].resolve() for p in tree.iterdir())
+    # Only the module links: an interpreter that imported from the tree may
+    # have left its own __pycache__ beside them.
+    mods = [p for p in tree.iterdir() if p.suffix == ".py"]
+    assert {p.name for p in mods} == want
+    assert all(p.resolve() == sources[p.name].resolve() for p in mods)
 
 
 # A test or a tool that joins runtime/ with a module's name breaks the day the
