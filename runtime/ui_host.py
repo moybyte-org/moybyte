@@ -6,7 +6,7 @@
 #   text_at                           the (line, column) under a point of a text view (`ui.text_view`)
 #   text_aim                          a text view's move, aimed before its frame begins
 #   text_cover                        a text view's rows another pass drew over
-#   held_layer / release_held         a console's two hold layers
+#   held_layer                        a console's hold layer, minted; release_held frees one
 """The host side of the public UI API's verbs: `AppHost`, which gathers one
 app's input from the app protocol's handlers and begins its frame
 (moy_ui_api_host_begin), and `Hold`, the page under a modal held while the

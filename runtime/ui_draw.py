@@ -13,10 +13,8 @@
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
-#   text_words / text_tones           a text view's syntax words and code tones (C)
-#   (re-exported)                     ui_scroll: drag_steps, PaintRing, ScrollRegion, DragTap;
-#                                     ui_host: AppHost, Hold, wash_page, text_at/aim/reveal/cover;
-#                                     ui_cover: initial_block, initial_cover, initial_parts
+#   text_words                        a text view's syntax words (C); text_tones, its code tones
+#   -- the halves re-exported         ui_scroll's ScrollRegion, ui_host's AppHost and Hold, ui_cover's covers
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
@@ -2055,6 +2053,7 @@ def fill_uncovered(cv, inner, outer, col):
     _C.fill_uncovered(cv, inner, outer, col)
 
 
+# -- the halves re-exported ----------------------------------------------------
 # The scrolling, the coverless cart's cover and an app's host live in modules
 # of their own; their names are this module's too. Imported here, at the foot,
 # because ui_scroll and ui_host take their share of this module's state from it.

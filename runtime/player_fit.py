@@ -5,7 +5,7 @@
 #   _compiled             a compiled ("runtime": "wasm") cart
 #   newer_notice          the notice for a cart built for a newer console
 #   fit_notice            the notice for a cart too big to load
-#   _cart_fit / _fits     what a cart's load needs against what the console has
+#   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
 #   _lua_cart_where       which of a Lua cart's scripts raised, and its line
 """What the Player decides about a cart before and after it runs, as

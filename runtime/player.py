@@ -1,7 +1,6 @@
 # Map (grep -n a name to jump there):
 #   Player                runs one cart: start, tick every frame, always exit
-#   (player_fit)          the fit and newer notices, _Refused, the crash-line mapping
-#   (player_diag)         PlayerDiag, Player's first base: the run's diag lines
+#   -- What the Player decides about a cart  player_fit; its diagnostics, player_diag
 #   Player.start          start or re-run a cart under make_api
 #   Player.frame_plan     what this loop frame is for the cart
 #   Player.tick           one frame of the running cart
