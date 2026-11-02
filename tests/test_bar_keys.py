@@ -427,3 +427,32 @@ def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
         assert ring != plain, (name, "the ring draws on the bar")
         _press(drv, "up")
         _press(drv, "left")
+
+
+def test_a_bandless_bar_keeps_its_status_while_the_keys_walk(tmp_path):
+    """Blocks draws the home's bar with no band, on the home's backdrop: a
+    redraw of the zone alone puts the backdrop back inside its rect, never
+    over the status beside it."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.look.set_theme("blocks", persist=False)
+    drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    bl = ws.bar_layer
+    bar, (x, y, w, h) = bl.cell("home", "battery")
+    x += bar[1][0]
+    y += bar[1][1]
+    stride = ws.sys_canvas.w * 2
+
+    def cell():
+        buf = bytes(ws.sys_canvas._buf)
+        return b"".join(buf[stride * (y + r) + 2 * x:stride * (y + r) + 2 * (x + w)]
+                        for r in range(h))
+    shown = cell()
+    _press(drv, "up")
+    assert ws.launcher_layer._tab_focus
+    assert cell() == shown, "the tab row's focus leaves the battery drawn"
+    _press(drv, "left")
+    assert bl.focus is not None
+    assert cell() == shown, "the bar's focus leaves the battery drawn"

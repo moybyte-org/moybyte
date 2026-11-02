@@ -598,7 +598,11 @@ class Wallpaper:
             src._buf = img._rgb_i
             src.w = img.w
             src.h = img.h
-        cv.blit_strip_rect(src, x, y, 0, 0, cv.w, cv.h)
+        # (blit_strip_rect takes its rect, not the canvas's clip: inside it)
+        ox = cv._ox
+        oy = cv._oy
+        cv.blit_strip_rect(src, x, y, cv._clip_x0 - ox, cv._clip_y0 - oy,
+                           cv._clip_x1 - cv._clip_x0, cv._clip_y1 - cv._clip_y0)
         return True
 
     def bars(self):
