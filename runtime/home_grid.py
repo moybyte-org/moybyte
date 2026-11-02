@@ -1438,27 +1438,6 @@ class Launcher:
         return (kind, src, "Played " + words)
 
 
-def _cut(rects, h):
-    """`rects` less rect `h`: each one that meets it in up to four parts."""
-    hx0, hy0, hx1, hy1 = h[0], h[1], h[0] + h[2], h[1] + h[3]
-    out = []
-    for r in rects:
-        x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
-        if hx0 >= x1 or hx1 <= x0 or hy0 >= y1 or hy1 <= y0:
-            out.append(r)
-            continue
-        if hy0 > y0:
-            out.append((x0, y0, r[2], hy0 - y0))
-        if hy1 < y1:
-            out.append((x0, hy1, r[2], y1 - hy1))
-        m0, m1 = max(y0, hy0), min(y1, hy1)
-        if hx0 > x0:
-            out.append((x0, m0, hx0 - x0, m1 - m0))
-        if hx1 < x1:
-            out.append((hx1, m0, x1 - hx1, m1 - m0))
-    return out
-
-
 def _cover_div_for(side):
     """The cover decode a card `side` across draws: the whole cover where it
     takes 128 or more, else its half (a handheld shelf card's 1x, an icon's
@@ -1471,7 +1450,6 @@ def _cover_div_for(side):
 HOME_TABS = (("games", "Games"), ("mine", "Mine"), ("apps", "Apps"),
              ("make", "Make"))
 _TAB_NAME = dict(HOME_TABS)
-_TAB_ICON = {"games": "run", "mine": "moy", "apps": "gear", "make": "edit"}
 _TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
              "apps": ("APP", "APPS"), "make": ("PROJECT", "PROJECTS")}
 # The handheld hero's scale the home is laid out for: a board's verdict
