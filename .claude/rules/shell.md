@@ -19,10 +19,12 @@ playing — joined by one primitive, `run(cart)` plays until exit and returns co
 to whoever called it.
 
 - `runtime/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
-  refactor to a compositor/router — the Layer-stack frame/input/pointer loop, the
-  shared draw toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
-  (`carts_store`/`wifi`/`updater`); the spawn/exit verbs, app registration and
-  the WiFi lease are `runtime/console_spine.py`'s, over the spine's components
+  refactor to a compositor — the Layer-stack frame loop, the shared draw
+  toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
+  (`carts_store`/`wifi`/`updater`); the rest of the class is its `console_*`
+  mixins (`runtime/README.md` lists them): the key and pointer routers are
+  `console_input.py`'s, and the spawn/exit verbs, app registration and
+  the WiFi lease `runtime/console_spine.py`'s, over the spine's components
   in `native/moy_spine` (ids and kinds, never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)

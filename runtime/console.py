@@ -467,7 +467,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The Workstation's mixins -- what a kernel does not need to be in the same
 # file with: the input routers, pointer and trackball (console_input), the
 # home's verbs and cards (console_home), typing, text mode and the Editor's
-# tab landings (console_text), the
+# tab landings (console_text), a run's own canvas bound and released
+# (console_canvas), the
 # perf meters + query API (console_perf), the Settings toggles + OTA channel
 # (console_settings), the Editor's save/PLAY verbs (console_saves), the
 # notices, toast and achievements wiring (console_notices) and the run/exit
@@ -480,6 +481,7 @@ try:
     from console_input import InputVerbs
     from console_home import HomeVerbs
     from console_text import TextVerbs
+    from console_canvas import CanvasBinding
     from console_perf import PerfMeters, _ema
     from console_settings import SettingsToggles
     from console_saves import SaveVerbs
@@ -490,6 +492,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_input import InputVerbs
     from runtime.console_home import HomeVerbs
     from runtime.console_text import TextVerbs
+    from runtime.console_canvas import CanvasBinding
     from runtime.console_perf import PerfMeters, _ema
     from runtime.console_settings import SettingsToggles
     from runtime.console_saves import SaveVerbs
@@ -640,7 +643,7 @@ def draw_splash(cv, frac=None, status=None, pal=None):
 
 
 class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
-                  SpineVerbs, HomeVerbs, TextVerbs):
+                  SpineVerbs, HomeVerbs, TextVerbs, CanvasBinding):
     # The editor surfaces, built at their first use (_LAZY_MODULES above).
     block_ui = _first_use("block_ui", _build_block_ui)
     map_ui = _first_use("map_ui", _build_map_ui)
@@ -2964,138 +2967,16 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             cf.settle()
 
     # -- per-run cart canvas (SPEC.md 1/3.1) ---------------------------------
-
-    def bind_run_canvas(self, w, h):
-        """Bind a per-run GAME canvas for a cart whose manifest declares a
-        smaller raster: the cart draws (and W/H report) the declared size, and
-        the WM's viewport()/composite scale it up exactly like a cart-declared
-        view -- on a shared-canvas tier (the T-Deck, where the boot canvas IS
-        the glass) the boot canvas is promoted to SYSTEM canvas for the run, so
-        `sc is gc` stops short-circuiting and the composite runs. Returns True
-        when bound (or already native-size); False when this backend has no
-        factory -- the caller refuses the cart cleanly (SPEC.md 3.1), never
-        runs it at dimensions it did not ask for."""
-        stock = self.canvas
-        if w == stock.w and h == stock.h:
-            return True                 # declared == native raster: nothing to bind
-        mk = self.make_game_canvas
-        if mk is None:
-            return False
-        # The run's own: its pixels are on loan to the run ("cart"), so the
-        # run's end returns them with its layers, after moycore has let go.
-        try:
-            small = mk(w, h, "cart")
-        except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
-            print("Moybyte run canvas failed:", _err_text(exc))
-            small = None
-        if small is None:
-            return False
-        self._run_canvas = small
-        self._run_canvas_stock = stock
-        self._run_canvas_shared = self._sys_canvas is None
-        if self._run_canvas_shared:
-            self._sys_canvas = stock    # promote: the boot canvas is the glass
-            self._surface_write()
-        self.canvas = small
-        return True
-
-    def bind_app_canvas(self):
-        """Bind the SYSTEM canvas as a RESPONSIVE app cart's draw surface (#181).
-
-        The sibling of `bind_run_canvas`, and its opposite direction: that one
-        gives a cart a SMALLER raster than the glass, this one gives an app cart
-        the whole responsive system surface so `_layout(w, h, fs)` means
-        something. Because `ws.canvas` then IS `ws.sys_canvas`, every downstream
-        consumer degrades for free -- `composite_game` short-circuits on the
-        identity check it has always had, `viewport()` reads (0, 0, 1) and
-        `game_xy` becomes the identity, so the pointer arrives in the same
-        coordinates the app drew in.
-
-        Returns False on a SHARED-canvas tier (the T-Deck, where the boot canvas
-        IS the glass and the two are already one object): there is nothing to
-        bind and nothing to change, which is exactly why the handheld's pixels
-        cannot move. Released by `release_run_canvas`, on every exit path.
-
-        In the windowed DESK world the system canvas is never bound: a cart
-        lives in a WINDOW, and `wm_windowed._draw_player_window` blits
-        `ws.canvas` into it, so with the system canvas bound the window blits
-        the screen into a rectangle OF that screen (measured).
-        There the app takes a window surface of its own instead
-        (`_bind_window_canvas`). In console mode (`windowed_chrome` False) it
-        gets the whole system surface."""
-        sc = self._sys_canvas
-        if self.windowed_chrome:
-            return self._bind_window_canvas()
-        if sc is None or sc is self.canvas or self._run_canvas is not None:
-            # ...or a cart-declared small canvas already holds the slot: a
-            # manifest asking for 128x128 AND a _layout is contradictory, and
-            # the declared size is the one with a SPEC contract behind it.
-            return False
-        self._run_canvas = sc
-        self._run_canvas_stock = self.canvas
-        self._run_canvas_shared = False
-        self.canvas = sc
-        self.app_full_canvas = True
-        self._surface_write()             # the strip is the responsive one now
-        return True
-
-    def _bind_window_canvas(self):
-        """A responsive app cart's surface on the desk: a canvas of the
-        desk's work area (`WindowedWM.app_surface`) on loan to the run, of
-        which its window shows the content rect (`app_window_size`). True
-        when bound; False where the tier has no factory or the WM no desk."""
-        mk = self.make_game_canvas
-        size = getattr(self.wm, "app_surface", None)
-        if mk is None or size is None or self._run_canvas is not None:
-            return False
-        w, h = size()
-        try:
-            cv = mk(w, h, "cart")
-        except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
-            print("Moybyte window canvas failed:", _err_text(exc))
-            cv = None
-        if cv is None:
-            return False
-        self._run_canvas = cv
-        self._run_canvas_stock = self.canvas
-        self._run_canvas_shared = False
-        self.canvas = cv
-        self.app_full_canvas = True
-        self.app_window_canvas = True
-        self._surface_write()
-        return True
+    #
+    # Binding and releasing the run's canvas are console_canvas's; the window
+    # size stays here, read on every frame of a window-bound app cart.
 
     def app_window_size(self):
         """(w, h) of a window-bound app cart's content: its window's content
         rect, which its canvas holds from the top left."""
         return self.wm.app_window_content()
 
-    def release_run_canvas(self):
-        """Undo bind_run_canvas / bind_app_canvas at run death
-        (Player.release_world) -- the cart_quit pattern, idempotent.
-        Identity-guarded so a backend that swapped ws.canvas mid-run (the
-        web-view Tee) is never clobbered."""
-        self.app_full_canvas = False
-        self.app_window_canvas = False
-        stock = self._run_canvas_stock
-        if stock is None:
-            self._surface_write()
-            return
-        if self.canvas is self._run_canvas:
-            self.canvas = stock
-        if self._run_canvas_shared and self._sys_canvas is stock:
-            self._sys_canvas = None     # back to the shared-canvas degradation
-        self._run_canvas = self._run_canvas_stock = None
-        self._run_canvas_shared = False
-        self._surface_write()
-
     # -- redraw-on-change (#44 step 1) ---------------------------------------
-
-    def release_held(self):
-        """Free one of the layers a modal holds what is under it in -- a
-        page held washed, the frame under the pause card (`ui_draw.Hold`) --
-        the fit check's last releases: True when there was one."""
-        return _ui_draw.release_held(self)
 
     def request_frame(self):
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).

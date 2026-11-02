@@ -1443,7 +1443,7 @@ class EditorApp:
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
         SAVE was a tap dispatching here; now every exit path calls this directly:
         PLAY (leave), a workspace swap (console.py's _open_workspace, reached from
-        another project's CHANGE) and going home (console.py's go_home), a
+        another project's CHANGE) and going home (console_home's go_home), a
         window/context-X close (wm_windowed.py's close_window_kind), the OTA reboot
         (update_ui) and the idle debounce (history_router). A TAB SWITCH owes its
         commit instead -- see commit_later -- and this pays that debt first, so a
