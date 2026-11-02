@@ -98,7 +98,7 @@ try:
 except ImportError:  # pragma: no cover
     json = None
 
-# The cart API's names, once (see runtime/cart_verbs.py) -- _RESERVED_NAMES
+# The cart API's names, once (see runtime/run/cart_verbs.py) -- _RESERVED_NAMES
 # below is derived from them.
 try:
     from cart_verbs import CART_VERBS as _CART_VERBS
@@ -904,7 +904,7 @@ _KEYWORDS = {
 # and break the cart. The editor gates proc names through this too, so a BlockError
 # here only ever fires on a hand-corrupted blocks.json.
 _RESERVED_NAMES = set(_CART_VERBS) | {
-    # (The cart API verbs are DERIVED, from runtime/cart_verbs.CART_VERBS --
+    # (The cart API verbs are DERIVED, from runtime/run/cart_verbs.CART_VERBS --
     # they used to be retyped here under a comment reading "keep in sync if
     # that grows", and by 2026-08-15 the copy was missing sspr/tline/tri/trib/
     # view/players/net/on_net. That is not cosmetic: a proc compiles to

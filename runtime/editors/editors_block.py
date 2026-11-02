@@ -849,7 +849,7 @@ class BlockEditor(OpHistoryMixin):
 
 # -- music / sound editor (#50) ----------------------------------------------
 
-# Editable bounds for an SFX step, mirrored from runtime/audio.py so this core
+# Editable bounds for an SFX step, mirrored from runtime/run/audio.py so this core
 # stays dependency-free (the docstring contract): a step is [pitch, wave, vol].
 # pitch is a semitone index 0..95 (C0..B7) or -1 for a rest; wave is 0..3
 # (square/triangle/saw/noise); vol is 0..7. The console renders pitch as a note

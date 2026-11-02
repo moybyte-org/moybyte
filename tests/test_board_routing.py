@@ -48,7 +48,7 @@ def _device_backend_src():
     return "\n".join((
         runtime_text(ROOT / "modules" / "moy_runtime.py"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
-        Path("runtime/cart_api.py").read_text(encoding="utf-8"),
+        Path("runtime/run/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
     ) + _kernel_frame())
 
@@ -564,7 +564,7 @@ def test_paint_image_assets_wired_device_and_carts():
     envelope themselves while the store read Paint's second codec, which is how
     a picture came back blank on whichever tier held the other half. The codec
     is executed in tests/test_moyimg.py."""
-    cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
+    cart_api_src = Path("runtime/run/cart_api.py").read_text(encoding="utf-8")
     assert "return moyimg.decode_moyimg(text)" in cart_api_src
     assert "deflate" not in cart_api_src and "zlib" not in cart_api_src
 

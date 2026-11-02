@@ -4,7 +4,7 @@
 #   make_api  the cart's global namespace: every verb a cart calls
 """THE cart-API namespace builder (make_api) -- one body for every tier.
 
-Until 2026-08-17 this function existed twice: `runtime/host_api.py` (host sim +
+Until 2026-08-17 this function existed twice: `runtime/run/host_api.py` (host sim +
 the web runner) and `device/device_api.py` (both boards), ~80% line-identical
 and drifting exactly as twins do. The measured deltas when they were merged,
 each resolved here on its merits:
@@ -204,7 +204,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def cfg(key, default=None):
         return config.get(key, default)
 
-    # Audio (#16): bound to the run's audio session (runtime/audio_session.py);
+    # Audio (#16): bound to the run's audio session (runtime/run/audio_session.py);
     # no-op if absent (a wallpaper), so a cart's sfx()/beep()/music() never
     # crash when no session is wired.
     def _sfx(n, chan=None):

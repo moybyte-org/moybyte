@@ -3436,7 +3436,7 @@ def a_stuck_run_is_ended(board, runtime):
 
 
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
-# The sub-line by cause (runtime/player.py's INTERP_NOTICE_SUB, duplicated
+# The sub-line by cause (runtime/run/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than
 # importing the runtime): "missing" covers no module for this console at
 # all, one built for another chip, and one left over from an older format --

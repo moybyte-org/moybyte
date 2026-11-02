@@ -37,7 +37,7 @@ NOT reachable from a host, and named rather than faked into looking covered:
   observable here and is what these tests assert.
 
 Mutation-checked per #208: 69 perturbations of the glue and 13 of the shared
-`runtime/lua_ext.py` beside it (whose handle registry these tests are the only
+`runtime/run/lua_ext.py` beside it (whose handle registry these tests are the only
 host execution of), 82 red, no survivors.
 """
 

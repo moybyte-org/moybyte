@@ -1,5 +1,5 @@
 """Headless tests for the audio core (#16): the shared sound data model
-(runtime/audio.py), what a bank renders through the kernel's audio
+(runtime/run/audio.py), what a bank renders through the kernel's audio
 (native/moy_audio, the same C the boards compile, over ctypes; driven here by
 tests/audio_synth.py), the cart API's audio verbs, the .moy sounds.json store
 (moy_carts), and a cart making sound on the shared console (host == device).

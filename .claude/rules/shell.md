@@ -178,7 +178,7 @@ to whoever called it.
     proposing to bring any of it back: it was kept as a fallback long after it
     should have been, and while it was there it silently ran every layer cart.
   - **What moycore registers on top of libmoy is a DENY list, not an allow list**
-    (`runtime/lua_ext.py`, ONE definition every runtime imports). An allow list
+    (`runtime/run/lua_ext.py`, ONE definition every runtime imports). An allow list
     silently drops any moybyte verb nobody remembered to add — and it did.
     Object-valued verbs (`make_layer`/`draw_layer`/`image`, and the #85/#109
     placement family since #214) can never be registry entries: a trampoline

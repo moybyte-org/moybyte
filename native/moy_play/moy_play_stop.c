@@ -433,7 +433,7 @@ static int sha_of(const char *p) {
     return e;
 }
 
-// config.json as cfg() reads it (runtime/lua_ext.py's cfg_blob): sorted by
+// config.json as cfg() reads it (runtime/run/lua_ext.py's cfg_blob): sorted by
 // key, a string without its quotes, a boolean as 1/0, an int as Python's %d,
 // another number as %.7g; anything else is no value.
 typedef struct {

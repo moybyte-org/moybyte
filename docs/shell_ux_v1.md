@@ -578,7 +578,7 @@ format, the bars and modes, the home, scrolling and the text files.
 Concretely, as shipped: the extracted layer modules (`runtime/editors/code_layer.py`,
 `runtime/editors/paint_layer.py`, `runtime/editors/map_editor_ui.py`, `runtime/editors/music_editor_ui.py`,
 `runtime/editors/cards_layer.py`, `runtime/editors/block_editor_ui.py`) ARE the Editor's tabs, owned
-by `runtime/editors/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
+by `runtime/editors/editor_app.py` (§6); `runtime/run/player.py` is the Player (§2);
 `runtime/editors/project.py` is the project workspace + commit verbs (§7, §11);
 `runtime/wm/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS

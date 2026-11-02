@@ -1,10 +1,10 @@
 ---
 paths:
   - "system_carts/**"
-  - "runtime/cart_api.py"
+  - "runtime/run/cart_api.py"
   - "runtime/carts/moy_carts.py"
-  - "runtime/lua_ext.py"
-  - "runtime/player.py"
+  - "runtime/run/lua_ext.py"
+  - "runtime/run/player.py"
   - "native/moycore/**"
   - "native/moy_audio/**"
   - "docs/moy_cart_api.md"
@@ -65,7 +65,7 @@ at the first focus. Every tier reaches it as the module `moy_audio`: the
 usermod on the boards, the browser and the desktop MicroPython, and on the
 host `runtime/host/audio_binding.py`, which compiles it with the DOUBLE-WIDENED
 libmoy (the parity harness's own recipe) into a hash-cached `.so` under
-`.build/host_audio/`. `runtime/audio_session.py` is the Python face
+`.build/host_audio/`. `runtime/run/audio_session.py` is the Python face
 (`AudioSession`, the per-frame `PcmPump` of the host and the browser). **No
 compiler / no native module means SILENCE, not a fallback synth** (owner call,
 KISS): a session then holds no handle and its verbs do nothing.

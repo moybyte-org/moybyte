@@ -181,7 +181,7 @@ def run_live(driver, dt, scale):
     # code and the modifiers held with it (ConsoleDriver.key_down), which
     # presses what it presses beside typing it -- arrows + Z/X, PICO-8's and
     # every emulator's (owner call 2026-08-14), the letters only while a cart
-    # owns the keys (runtime/host_api.py's DESK_KEYS and CART_KEYS). The
+    # owns the keys (runtime/run/host_api.py's DESK_KEYS and CART_KEYS). The
     # modifiers go as a level too, so Super acts on its release (the tap).
     from runtime import moy_input as mi
     mod_keys = {}

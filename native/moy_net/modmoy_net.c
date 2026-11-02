@@ -251,7 +251,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(mod_wifi_remember_obj, mod_wifi_remember);
 #include "moy_link.h"
 
 // moy_net.Link: the radio link's face for a VM, the subset of the port's
-// espnow.ESPNow that runtime/players.py's link brings up (the protocol over
+// espnow.ESPNow that runtime/run/players.py's link brings up (the protocol over
 // it is native/moy_play/moy_match.c's). The radio and its ring are the kernel's
 // (moy_link.c); this object holds only what irecv hands back, reused.
 typedef struct {

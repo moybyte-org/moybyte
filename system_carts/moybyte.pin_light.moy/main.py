@@ -3,7 +3,7 @@
 # This cart is not "for the Zero". It is for ANY console that has pins, and it
 # asks that question the only honest way: whether the verb has a name. The
 # console injects pin_write/pin_read only when the thing serving this page
-# answered the GPIO probe (runtime/cart_api.py), exactly like wifi and net --
+# answered the GPIO probe (runtime/run/cart_api.py), exactly like wifi and net --
 # a verb that cannot work must not exist, because a pin_write that quietly does
 # nothing is the worst answer a kid can get: the cart looks right and the light
 # never moves.

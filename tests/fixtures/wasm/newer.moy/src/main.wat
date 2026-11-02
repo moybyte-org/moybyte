@@ -5,7 +5,7 @@
 ;;
 ;; This file is the cart's SOURCE; main.wasm is built from it with
 ;; tools/wasm_cart.py and never committed. Every console refuses it before it
-;; loads, with the notice naming `later` (runtime/player.py's NEWER_TITLE),
+;; loads, with the notice naming `later` (runtime/run/player.py's NEWER_TITLE),
 ;; never with a load error or a trap when the cart calls it. A console that
 ;; ever did run it would show a plain frame and never reach the call.
 (module

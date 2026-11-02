@@ -143,6 +143,6 @@ tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; 
 | `carts.md` | `system_carts/**`, cart API, Lua tier, audio | | `release` | branches, OTA channels, `make release` |
 | `web.md` | `firmware/web_runner/**`, sync RPC, webhost | | | |
 | `ota.md` | `device/moy_ota.py`, release and signing tools | | | |
-| `netplay.md` | `native/moy_play/moy_match*`, `runtime/players.py` | | | |
+| `netplay.md` | `native/moy_play/moy_match*`, `runtime/run/players.py` | | | |
 | `testing.md` | `tests/**` | | | |
 | `docs.md` | any `.md` | | | |

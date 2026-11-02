@@ -3,7 +3,7 @@ docs/theme_and_shell_2026-11.md §10).
 
 `open_editor` returns an OBJECT, and no binding here marshals one -- so without
 the handle glue a Lua cart's `ed:draw(...)` would die on "index a nil value",
-exactly as `make_layer` did before `runtime/lua_ext.py` existed and as the whole
+exactly as `make_layer` did before `runtime/run/lua_ext.py` existed and as the whole
 placement family did before #214. It rides the same route: an int handle on the
 Python side, a wrapper table in the prelude, and only numbers and strings
 across the boundary.

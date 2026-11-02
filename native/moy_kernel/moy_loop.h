@@ -42,7 +42,7 @@
 // write from the loop needs no deferral. In the browser and on the host each
 // frame is one moy_loop_step of the DRIVER tier (moy_loop.drive: no stages but
 // the clock, the three console upcalls, an upcall's exception handed back to
-// the harness), under runtime/host_api.py's ConsoleDriver.frame.
+// the harness), under runtime/run/host_api.py's ConsoleDriver.frame.
 //
 // THE PUMP is FramePump in C: the clamped dt, the cadence debt, the
 // sleep-overshoot slack against the 10 ms FreeRTOS tick, and the published

@@ -119,7 +119,7 @@ point-towards, graphic effects, and trig operators**.
 
 ## Where the code lives
 - Vocabulary + compiler: `runtime/editors/blocks.py` (catalog, helpers, `compile_blocks`).
-- Runtime actor verbs + `draw_scene` (looks/rotation): `runtime/cart_api.py`,
+- Runtime actor verbs + `draw_scene` (looks/rotation): `runtime/run/cart_api.py`,
   the one cart namespace on every tier; the actor world is `runtime/toolkit/widgets.py` (`SceneWorld`).
 - Editor surfaces: `runtime/editors/block_editor_ui.py` (+ `editors_block.py`) and
   `runtime/editors/scene_editor_ui.py`, side by side in a desk's Code workspace of a

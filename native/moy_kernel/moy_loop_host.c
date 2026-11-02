@@ -211,7 +211,7 @@ void moy_loop_host_note(const char *token) {
 
 // ---- the driver tier ------------------------------------------------------------
 //
-// The host's and the browser's frame: their harness (runtime/host_api.py's
+// The host's and the browser's frame: their harness (runtime/run/host_api.py's
 // ConsoleDriver, under host_app and the browser's worker) feeds the input and
 // owns the clock, and each of its frames is one moy_loop_step over stages that
 // are all absent but the clock -- the order, the three console upcalls, the

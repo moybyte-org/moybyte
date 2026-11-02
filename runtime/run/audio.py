@@ -13,7 +13,7 @@ It holds the sound DATA MODEL -- the kid-authored, JSON-serializable cart audio:
        AudioBank = {sfx:[SFX], music:[track]}  (the whole cart bank -> sounds.json)
 
 The PLAYING is the kernel's: native/moy_audio (sessions, the mix, the speaker)
-over vendored libmoy, reached through runtime/audio_session.py on every tier.
+over vendored libmoy, reached through runtime/run/audio_session.py on every tier.
 
 THERE IS NO PYTHON SYNTH (#97, moycore stage 0). The host binds the vendored
 C itself (runtime/host/audio_binding.py, compiled DOUBLE-WIDENED, the parity

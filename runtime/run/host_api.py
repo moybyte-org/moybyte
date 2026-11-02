@@ -1,7 +1,7 @@
 """The HOST side of the cart-API backend: the driver + fake services, plus the
 re-export of THE make_api.
 
-make_api itself moved to `runtime/cart_api.py` on 2026-08-17 -- it existed here
+make_api itself moved to `runtime/run/cart_api.py` on 2026-08-17 -- it existed here
 and in device/device_api.py as ~80% line-identical twins, and the twin killed
 that day had already drifted (the device's layer verbs lost `tline`, the host's
 multi-tile spr had lost the #63 cache). What REMAINS here is what is genuinely

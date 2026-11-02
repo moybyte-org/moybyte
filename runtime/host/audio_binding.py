@@ -2,7 +2,7 @@
 `moy_audio` as the boards and the browser import it, name for name, over the
 same C built for the host.
 
-`install()` puts it where `import moy_audio` finds it; `runtime/audio_session.py`
+`install()` puts it where `import moy_audio` finds it; `runtime/run/audio_session.py`
 does that on first use. The library is the session table and the mix
 (`moy_aud.c`), the output stub that has no speaker (`moy_aud_out.c`), the handle
 table (`moy_htab.c`) and the vendored synth (`libmoy/moy_audio.c`), cached under

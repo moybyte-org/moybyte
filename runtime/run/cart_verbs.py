@@ -1,6 +1,6 @@
 """The cart API's NAMES -- one list, for everything that is not make_api.
 
-`make_api` builds the cart's global namespace, twice: `runtime/host_api.py` for
+`make_api` builds the cart's global namespace, twice: `runtime/run/host_api.py` for
 the host and the wasm head, `device_api.py` for both boards. Those two are a
 deliberate pair (one contract, two backends) and a test asserts their key sets
 match exactly.
@@ -25,7 +25,7 @@ builds on BOTH backends. That is the part that makes it a single source rather
 than a fifth copy: nothing here is authoritative on its own, the test is.
 
 Imports nothing, so it costs a frozen module and no runtime dependency (the
-same shape as runtime/lua_ext.py, and it is staged to the boards by the same
+same shape as runtime/run/lua_ext.py, and it is staged to the boards by the same
 shared denylist).
 
 This is the CART's vocabulary, not the console's -- the capability-gated names

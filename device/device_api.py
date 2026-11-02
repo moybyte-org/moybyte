@@ -1,10 +1,10 @@
 """The device HOME of the cart namespace -- a re-export since 2026-08-17.
 
-make_api lived here as the ~80%-line-identical twin of runtime/host_api.py's,
+make_api lived here as the ~80%-line-identical twin of runtime/run/host_api.py's,
 extracted from moy_runtime so both boards could stage one copy (#58) -- and the
 two copies drifted anyway (this one's `_Layer` had lost `tline`; the host's
 multi-tile spr had lost the #63 span cache). THE body is
-`runtime/cart_api.py` now, one function object for every tier; the merge notes
+`runtime/run/cart_api.py` now, one function object for every tier; the merge notes
 live in its docstring, and tests/test_cart_api_unified.py pins the identity.
 
 This module stays because it is the name both boards' moy_runtime imports

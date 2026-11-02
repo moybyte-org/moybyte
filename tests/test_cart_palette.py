@@ -1,6 +1,6 @@
 """A cart's own palette (SPEC.md 3.1), on the raster every tier draws with.
 
-This was host-only and nobody knew. `runtime/player.py` assigns
+This was host-only and nobody knew. `runtime/run/player.py` assigns
 `ws.canvas.palette = table` when a cart ships one and restores it on exit, and
 player.py is STAGED TO BOTH BOARDS -- but `DeviceCanvas` had no `palette` at
 all, so on device the assignment set an attribute nothing read.

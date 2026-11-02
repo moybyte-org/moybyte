@@ -97,7 +97,7 @@ EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
 crosses): five more, one per twin -- input (runtime/host/moy_input.py), the glass
 (native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
 (runtime/frame_loop.py), the links (native/moy_net, runtime/carts/moy_sync.py
-and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
+and device/moy_ota_health.py) and audio sessions (runtime/run/audio_session.py).
 Each is pinned on every VM and over the native spine; the section above the
 drivers says what each logs.
 """

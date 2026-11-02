@@ -652,7 +652,7 @@ published format, protocol or behaviour; none contains third-party code.
   [zepto8](https://github.com/samhocevar/zepto8)'s observable behaviour (the
   wiki's rule is wrong); no zepto8 or picotool code was used. Both projects are
   permissively licensed in any case (zepto8 WTFPL, picotool MIT).
-- **PICO-8 audio parity** (`runtime/audio.py`) — waveform numbering and the
+- **PICO-8 audio parity** (`runtime/run/audio.py`) — waveform numbering and the
   per-note effect column follow PICO-8's numbering so imported carts sound
   right. The synthesis is Moybyte's own.
 - **PNG decoding** (`tools/p8_import.py`) and **PNG encoding**

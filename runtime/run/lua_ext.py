@@ -374,7 +374,7 @@ do
   __layer_new, __layer_spr_img, __layer_canvas = nil, nil, nil
   __layer_verb, __layer_blit, __image_handle = nil, nil, nil
   local setmt, type = setmetatable, type
-  -- The methods every layer shares (LAYER_VERBS in runtime/lua_ext.py): the
+  -- The methods every layer shares (LAYER_VERBS in runtime/run/lua_ext.py): the
   -- screen's own verbs, run against the layer's canvas `__c`. Each one sets
   -- `__e`, which tells draw_layer the pixels moved since it last looked.
   local Layer = {}

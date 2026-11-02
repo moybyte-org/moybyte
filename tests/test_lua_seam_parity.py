@@ -3,7 +3,7 @@
 The device glue (`device/moycore_glue.py`) and the host runtime
 (`runtime/lua_host.py`) do the same three things around every Lua tick: fill the
 snapshot slots libmoy reads, apply the cart's `view()`, and drain the audio
-queue onto the run's session. Until the seam moved into `runtime/lua_ext.py`
+queue onto the run's session. Until the seam moved into `runtime/run/lua_ext.py`
 they were two copies, identical down to `None if b < 0 else b`, `b / 1000.0` and
 the guard comments -- differing only in where the ABI numbers came from
 (`moycore` the C module on a board, `runtime.lua_binding` on the host).

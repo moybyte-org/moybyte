@@ -20,9 +20,9 @@ tape, `advance()` — and the link's protocol, in C (#224, sprint 4): the kernel
 one instance owns the radio's receive ring for the whole console (ESP-NOW has
 one firmware-wide receive slot, held by `native/moy_net/moy_link.c`), dispatches
 by frame type and is polled from the loop's tail with no crossing into Python.
-`runtime/players.py` is the console's view of it: the radio's bring-up, the
+`runtime/run/players.py` is the console's view of it: the radio's bring-up, the
 session's player slots, the cart it asks the console to open.
-`runtime/player.py` adopts a session, feeds it and lets go; a Lua run's
+`runtime/run/player.py` adopts a session, feeds it and lets go; a Lua run's
 lockstep frame is the kernel Player's (`moy_play_lockstep`).
 
 ## 2. Lockstep: what crosses the air, and when a console may simulate

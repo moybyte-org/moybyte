@@ -85,7 +85,7 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime.editors_code import TextMouse
     from runtime.ticks import _ticks_ms
 
-# The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
+# The cart API's names, once (see runtime/run/cart_verbs.py) -- the syntax
 # highlighter's builtin class is derived from them below.
 try:
     from cart_verbs import CART_VERBS as _CART_VERBS
@@ -241,7 +241,7 @@ _HL_LUA_KEYWORDS = (
 )
 # Cart-API verbs + the common builtins a kid actually types.
 #
-# The verb half is DERIVED (runtime/cart_verbs.CART_VERBS, pinned against
+# The verb half is DERIVED (runtime/run/cart_verbs.CART_VERBS, pinned against
 # make_api's real namespace by a test) rather than retyped. It used to be a
 # hand-kept copy under a comment reading "keep roughly in sync with make_api";
 # it had drifted to 37 names against make_api's 62, and still highlighted

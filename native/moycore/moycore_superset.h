@@ -11,7 +11,7 @@
  * Included by modmoycore.c (the boards and the browser) and by
  * runtime/host/moyhost_lua.c (the host), and opened beside moycore_layers_open, so
  * the two Lua hosts answer these names with one body. The registration loops
- * skip them (runtime/lua_ext.py's NATIVE_NAMES): a trampoline registered over
+ * skip them (runtime/run/lua_ext.py's NATIVE_NAMES): a trampoline registered over
  * them would shadow the C.
  */
 #ifndef MOYCORE_SUPERSET_H

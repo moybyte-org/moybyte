@@ -259,7 +259,7 @@ class ProjectStore:
         cart's sound bank (sounds.json), closing the run before it. A cart with
         no bank gets the friendly default so beep() and the Music editor still
         work. On a console without `moy_audio` the session holds no handle and
-        its verbs do nothing (runtime/audio_session.py)."""
+        its verbs do nothing (runtime/run/audio_session.py)."""
         ws = self.ws
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()

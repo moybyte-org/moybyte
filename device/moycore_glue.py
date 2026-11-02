@@ -306,7 +306,7 @@ class MoycoreRun:
             _moycore.close()
             layer_restore_end(canvas, self)
             raise
-        # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
+        # The cart's scripts in one call (SPEC.md 4, runtime/run/lua_ext.py): main
         # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
         # -- what player_fit._lua_cart_line parses for the crash-to-code panel
         # (#24) -- and load() is where the verb profiler arms, ahead of the
@@ -600,7 +600,7 @@ _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature"
 
 # The one non-tamper refusal that names a SIGNED-vs-not cause rather than a
 # stale/foreign module: `self.interp_cause` reads this to pick the notice's
-# sub-line ("isn't signed" against "needs an update", runtime/player.py).
+# sub-line ("isn't signed" against "needs an update", runtime/run/player.py).
 _AOT_UNSIGNED = "refused: unsigned module"
 
 # A load that stops on a helper the module calls and this firmware's runtime

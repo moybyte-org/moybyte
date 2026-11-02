@@ -6,7 +6,7 @@
  *
  * A moybyte layer is the CONSOLE's object -- device_canvas's off-heap RGB565
  * buffer, lent to the run, composited by draw_layer's blit_window -- and the
- * prelude in runtime/lua_ext.py is what a Lua cart holds. Drawing into it is
+ * prelude in runtime/run/lua_ext.py is what a Lua cart holds. Drawing into it is
  * libmoy's: a layer method points con->canvas at a moy_canvas over the
  * layer's buffer for the length of one call and runs the screen's own verb,
  * the trick libmoy's binding plays for its own layers (moy_lua.c's

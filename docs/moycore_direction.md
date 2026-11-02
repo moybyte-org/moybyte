@@ -115,7 +115,7 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   a paint image are the run's own C (#224, `bc88eb2`), so a layer cart makes
   no crossing; the host keeps the console's layer object behind a trampoline.
 - **Registration is a DENY list, not an allow list** — what is stable and
-  enumerable is what libmoy OWNS. One definition, `runtime/lua_ext.py`, imported
+  enumerable is what libmoy OWNS. One definition, `runtime/run/lua_ext.py`, imported
   by every runtime including the host's; an allow list silently drops any verb
   nobody remembered to add, and did.
 - **The spec-surface core grows UPSTREAM.** Raster, audio, VM and loop are

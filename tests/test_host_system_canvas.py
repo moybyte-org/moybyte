@@ -221,7 +221,7 @@ def test_the_readout_is_not_a_bit_expansion():
 
 
 def test_a_cart_palette_reaches_the_readout():
-    """SPEC.md 3.1: a cart ships its own 64-entry table and runtime/player.py
+    """SPEC.md 3.1: a cart ships its own 64-entry table and runtime/run/player.py
     assigns it to the canvas. The readout has to resolve through THAT table --
     reading through the module's stock LUT would show the kid MOY64 while the
     glass shows their own colours."""

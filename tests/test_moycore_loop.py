@@ -246,7 +246,7 @@ moycore.close()
 
 # OBJECT-valued verbs ride the shared prelude over the run's own C: a layer's
 # pixels and a paint image are moycore_lua.c's, with no call into Python. This
-# is the real runtime/lua_ext.py, imported and executed.
+# is the real runtime/run/lua_ext.py, imported and executed.
 from lua_ext import PRELUDE_HANDLES, install_handles
 
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)

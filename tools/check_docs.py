@@ -167,7 +167,8 @@ NOT_OURS = (
     # Shared modules' paths before runtime/ grouped them into folders
     # (2026-11-02), as the same vendored copies name them.
     "runtime/console_notices.py", "runtime/cart_index.py", "runtime/cart_files.py",
-    "runtime/moy_sync.py",
+    "runtime/moy_sync.py", "runtime/audio.py", "runtime/player_fit.py",
+    "runtime/player.py",
 )
 
 

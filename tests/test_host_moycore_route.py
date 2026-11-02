@@ -3,7 +3,7 @@
 `build_workstation` runs Lua carts through `runtime/lua_binding` -- libmoy's
 binding over the same vendored 5.4 the boards build, LUA_32BITS and all --
 and there is no second runtime for carts that use moybyte's superset: those
-verbs ride the shared handle glue (runtime/lua_ext.py).
+verbs ride the shared handle glue (runtime/run/lua_ext.py).
 
 The route used to have a source gate, and that gate's first version was a
 silent no-op: a substring scan for the superset names disqualified EVERY cart

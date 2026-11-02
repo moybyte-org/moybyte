@@ -6,7 +6,7 @@
  * (moycore_scenes_put, in the order runtime/toolkit/widgets.py's Scenes keeps, the
  * first the default active scene), so the Editor's unsaved placement reaches
  * the run as it reaches a Python cart. Three natives, which the handles
- * prelude (runtime/lua_ext.py's PRELUDE_HANDLES) captures and clears:
+ * prelude (runtime/run/lua_ext.py's PRELUDE_HANDLES) captures and clears:
  *
  *   __scene_names()     the scene names in order
  *   __scene_rows(name)  a scene's rows as fresh tables {tag, tile, x, y,

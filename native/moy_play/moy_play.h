@@ -19,7 +19,7 @@
 // every role permission runtime/shell/system_api.py grants. The census pins the
 // verdict against every seed cart's and PICO-8 import's real manifest.
 //
-// THE LUA SUPERSET, name by name (runtime/cart_verbs.py's names outside
+// THE LUA SUPERSET, name by name (runtime/run/cart_verbs.py's names outside
 // libmoy's table):
 //   make_layer, draw_layer       native: libmoy's verbs over the Display seam
 //                                (moycore_run.c); a layer is a BUF row the run owns

@@ -7,7 +7,7 @@ console API — it supersedes the legacy `.moyproj` SDK API in
 the old parallel SDK.
 
 **Source of truth (keep this doc in sync with them):** the API namespace is built by
-the one `make_api()` in `runtime/cart_api.py`, the same function on every tier
+the one `make_api()` in `runtime/run/cart_api.py`, the same function on every tier
 (`runtime/host/host_app.py` and `device/device_api.py` re-export it). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
 it through `runtime/host/host_canvas.py`); the palette in
 libmoy's `native/moy_gfx/libmoy/moy_data.c`; buttons in `runtime/shell/input.py`. A cart runs **identically** on the
@@ -989,7 +989,7 @@ Since #170 the model is PICO-8-parity:
   changing pattern lengths survive the import.
 - An SFX may carry a `name`, a string of at most 24 characters (SPEC.md 8.1).
   It labels the sound for a person and never changes how it plays. The bank
-  (`runtime/audio.py`) keeps it through a load and a save, so the Music tab
+  (`runtime/run/audio.py`) keeps it through a load and a save, so the Music tab
   writes back the name it read, though it has no field to edit one yet.
 
 - A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still

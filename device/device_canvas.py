@@ -308,7 +308,7 @@ _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 # because 192 bytes do not justify a build step.
 #
 # It exists so `canvas.palette` can be READ, which SPEC.md 3.1 needs: a cart
-# ships its own 64-entry table, runtime/player.py saves the current one before
+# ships its own 64-entry table, runtime/run/player.py saves the current one before
 # applying it and assigns it back on exit. Without a readable default there is
 # nothing to restore TO.
 #
@@ -525,7 +525,7 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 
 
 # _decode_moyimg lived here until 2026-08-17; THE copy is
-# runtime/cart_api.py (one body for every tier -- see its docstring). Its
+# runtime/run/cart_api.py (one body for every tier -- see its docstring). Its
 # removal briefly took the neighbouring constant below with it, which broke
 # make_spr_gate -- and therefore EVERY cart start -- while both on-glass
 # suites stayed green, because neither ran a cart. The host pyflakes net
@@ -706,7 +706,7 @@ class DeviceCanvas:
         # normal case allocates nothing and costs one attribute load.
         #
         # It is per-instance because SPEC.md 3.1 lets a cart ship its own 64-entry
-        # RGB table, and runtime/player.py duly assigns `ws.canvas.palette = table`
+        # RGB table, and runtime/run/player.py duly assigns `ws.canvas.palette = table`
         # on start and restores it on exit -- except player.py is STAGED TO BOTH
         # BOARDS and DeviceCanvas had no `palette` at all, so on device that
         # assignment set an attribute nobody read. Verified on P4 glass
@@ -1165,7 +1165,7 @@ class DeviceCanvas:
     def palette(self):
         """The 64-entry RGB table this canvas resolves colour through.
 
-        SPEC.md 3.1 lets a cart ship its own; runtime/player.py reads this to
+        SPEC.md 3.1 lets a cart ship its own; runtime/run/player.py reads this to
         save the current one before applying the cart's, and assigns it back on
         exit. Built lazily from MOY64_RGB so the stock case costs nothing.
         """
@@ -2984,5 +2984,5 @@ for _k in (DeviceCanvas, SystemCanvas, _LayerComp):
 del _k
 
 # class _Layer lived here until 2026-08-17 (end of file); THE copy is
-# runtime/cart_api.py -- whose verb list is the superset this one had
+# runtime/run/cart_api.py -- whose verb list is the superset this one had
 # drifted from (it was missing tline).

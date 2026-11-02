@@ -1,7 +1,7 @@
 ---
 paths:
   - "native/moy_play/moy_match*"
-  - "runtime/players.py"
+  - "runtime/run/players.py"
   - "native/moy_c6/**"
   - "docs/netplay_v1.md"
 ---
@@ -24,7 +24,7 @@ belongs here is only what a coder must not undo:
   instance owns the radio's receive ring (`native/moy_net/moy_link.c` holds
   ESP-NOW's single recv slot), polled from the loop's tail with no crossing;
   anything else that ever wants the radio goes through it rather than opening
-  its own. `runtime/players.py` is the console's view: the radio's bring-up,
+  its own. `runtime/run/players.py` is the console's view: the radio's bring-up,
   the session's player slots, a Python cart's random stream, the actions the
   link leaves (the button order arrives from `cart_api`, its one author).
 - **The payload is INPUTS, never state**, and that is a measurement rather than a
