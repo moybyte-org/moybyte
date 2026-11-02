@@ -499,7 +499,7 @@ def _dsi_lib():
 
 
 def _copy_rect(ppa, dst, src, W, H, x, y, w, h):
-    """modmoy_glass.c's glass_copy: the rect, clipped to W x H, of `src`
+    """modmoy_glass_dsi.c's glass_copy: the rect, clipped to W x H, of `src`
     into `dst` -- whole rows through ppa.copy where it takes them, else a
     row copy."""
     if x < 0:

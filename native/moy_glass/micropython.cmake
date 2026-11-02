@@ -10,7 +10,10 @@ target_sources(usermod_moy_glass INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_present_banded.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_present_dsi.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_present_rot.c
-    ${CMAKE_CURRENT_LIST_DIR}/modmoy_glass.c)
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_glass.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_glass_banded.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_glass_dsi.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_glass_rot.c)
 
 target_include_directories(usermod_moy_glass INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
