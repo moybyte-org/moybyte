@@ -18,8 +18,9 @@ two sectors' worth is free the call goes to IDF as before. A buffer the host
 can DMA from already goes to IDF whole, so that path is untouched.
 
 No console's card is `machine.SDCard`: every one is the store's card volume
-over native/moy_sd, which does the same in its own module. The Guition S3
-still takes this. Applied by `moybyte_patch_sdcard_runs` in
+over native/moy_sd, which moves the caller's buffer in multi-block runs with
+no internal DMA memory per call (`moy_sd_card_io`). The Guition S3 still
+takes this. Applied by `moybyte_patch_sdcard_runs` in
 tools/esp32_build_lib.sh, to `ports/esp32/machine_sdcard.c`. All-or-nothing:
 every hunk must match exactly once or nothing is written and the exit is
 non-zero, naming the hunk. A tree already carrying the marker is left as it is.

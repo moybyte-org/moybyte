@@ -1435,6 +1435,72 @@ def cart_store_follows_the_card(board):
     assert board.pyval("len(ws.carts.all)") > 0, "the store shows no carts"
 
 
+_SD_SQUEEZE = r"""
+def _sd_squeeze():
+    import esp32, moy_alloc, moy_sd, os
+    caps = 0x808          # MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
+    def largest():
+        return max(r[2] for r in esp32.idf_heap_info(caps))
+    path = '/sd/moybyte/.sd_squeeze'
+    data = bytes(range(256)) * 12
+    ref = bytearray(16 * 512)
+    buf = bytearray(16 * 512)
+    moy_sd.read(64, ref, 16)
+    held = []
+    out = {'read': None, 'write': None}
+    try:
+        for _ in range(64):
+            big = largest()
+            if big < 512:
+                break
+            try:
+                held.append(moy_alloc.alloc(max(big - 128, 64), caps))
+            except MemoryError:
+                break
+        out['left'] = largest()
+        try:
+            moy_sd.read(64, buf, 16)
+            out['read'] = 'same' if buf == ref else 'differs'
+        except OSError as e:
+            out['read'] = str(e)
+        try:
+            with open(path, 'wb') as f:
+                f.write(data)
+            out['write'] = 'ok'
+        except OSError as e:
+            out['write'] = str(e)
+    finally:
+        for v in held:
+            moy_alloc.free(v)
+    try:
+        with open(path, 'rb') as f:
+            out['back'] = f.read() == data
+        os.remove(path)
+    except OSError as e:
+        out['back'] = str(e)
+    return out
+ws._g['_sd_squeeze'] = _sd_squeeze
+"""
+
+
+def sd_card_io_takes_no_internal_dma(board):
+    """An SPI card's transfers take no internal DMA memory: with every block of
+    it taken (the largest left under one sector), a 16-sector multi-block read
+    returns the card's bytes and a store file is written and reads back. With
+    WiFi and BLE up an S3 has a few KB of internal DMA memory left, and a
+    per-call buffer taken there failed a cart's module read with EIO under a
+    radio's burst. The squeeze is moy_alloc's, freed before this returns."""
+    if not board.pyval("__import__('moy_sd').sector_count()", strict=True):
+        pytest.skip("no card in the slot")
+    board.pyexec(_SD_SQUEEZE, strict=True)
+    got = board.pyval("(getattr(ws, '_with_sd', None) or (lambda fn: fn()))"
+                      "(ws._g['_sd_squeeze'])", timeout=30, strict=True)
+    assert got["left"] < 512, ("the squeeze left a sector's worth: no power", got)
+    assert got["read"] == "same", got
+    assert got["write"] == "ok" and got["back"] is True, got
+    return got
+
+
 def web_console_is_baked_into_the_image(board):
     """The wasm console this board hands a browser lives in its OWN image, and
     reads back correctly from flash -- the one part no host test can reach,
