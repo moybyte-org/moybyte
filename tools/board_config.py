@@ -276,15 +276,16 @@ def load(board_dir):
 def headroom_floor(board_dir):
     """`(ota id, floor in bytes)`: the OTA-slot headroom the board's app image
     must keep, `[image] headroom_floor_kib`. The build's size guard fails
-    under it; a board with an OTA id and no floor is an error, not a pass."""
+    under it; a board with an OTA id and no floor is an error, not a pass.
+    A declared 0 is a written decision to keep only the slot-fit guard."""
     cfg = load(board_dir)
     ota = cfg.get("board", {}).get("ota")
     kib = cfg.get("image", {}).get("headroom_floor_kib")
     if not ota:
         raise ValueError("%s/board.toml: [board] has no ota id" % board_dir)
-    if not isinstance(kib, int) or isinstance(kib, bool) or kib <= 0:
+    if not isinstance(kib, int) or isinstance(kib, bool) or kib < 0:
         raise ValueError("%s/board.toml: [image] headroom_floor_kib must be a "
-                         "positive integer, got %r" % (board_dir, kib))
+                         "non-negative integer, got %r" % (board_dir, kib))
     return ota, kib * 1024
 
 

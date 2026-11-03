@@ -261,8 +261,11 @@ otadata_size   = "0x2000"
 # blocks with the seed roster, gives up no more slot bytes; when the console's
 # scroll and text work crossed the floor (2026-10-28) the baked bundle was
 # trimmed (its cold C built for size, the VM's loader without comments) and
-# the floor stayed.
-headroom_floor_kib = 200
+# the floor stayed. The floor is DROPPED since 2026-11-03 (owner): the OS
+# work's shell code (#246) took the image under it step after step, and the
+# Zero's way out is a card-backed Zero or one without OTA, not a trim per
+# step. Only the slot-fit guard (#168) holds this image now.
+headroom_floor_kib = 0
 
 [serial]
 # USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board

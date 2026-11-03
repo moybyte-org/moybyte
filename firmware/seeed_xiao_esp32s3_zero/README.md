@@ -117,9 +117,9 @@ them back on the next visit — but anything that existed *only* here is.
   ENOSPC and a kid's cart had no room), so this board's build leaves the two
   speed-test carts out of its roster (`--skip` in `build.sh`; owner,
   2026-10-23). The boot line says `the store is FULL` when a seed fails that
-  way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run beside the board's
-  floor (`[image] headroom_floor_kib` in `board.toml`) and fails under it or on
-  an overflow (#168).
+  way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
+  `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is

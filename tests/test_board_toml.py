@@ -366,8 +366,8 @@ def test_every_board_with_an_ota_slot_carries_its_headroom_floor():
         if not board_config.load(toml.parent).get("board", {}).get("ota"):
             continue
         ota, floor = board_config.headroom_floor(toml.parent)
-        assert floor >= 64 * 1024, "%s: a floor of %d bytes guards nothing" % (
-            ota, floor)
+        assert floor == 0 or floor >= 64 * 1024, (
+            "%s: a floor of %d bytes guards nothing" % (ota, floor))
         found[ota] = floor
     assert set(found) >= {"tdeck", "p4", "guition_s3", "guition_p4",
                           "xiao_zero"}, sorted(found)
@@ -381,8 +381,17 @@ def test_a_board_without_a_floor_is_refused(tmp_path):
     (tmp_path / "board.toml").write_text(
         '[board]\nota = "x"\n[image]\nheadroom_floor_kib = "512"\n',
         encoding="utf-8")
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="non-negative integer"):
         board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = -1\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative integer"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 0\n',
+        encoding="utf-8")
+    assert board_config.headroom_floor(tmp_path) == ("x", 0)
     (tmp_path / "board.toml").write_text(
         '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 512\n',
         encoding="utf-8")
