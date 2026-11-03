@@ -1189,6 +1189,49 @@ def the_log_word_reads_the_ring(board):
     assert got and " notice shell/1 on-glass probe" in got[-1], board.lines[n0:]
 
 
+def the_event_rings_keep_their_records(board):
+    """The input table's event rings (native/moy_input/moy_event.h) in the
+    real C on glass: the touch source's ring is POLL and in PSRAM (no internal
+    cost), a reader that keeps up with a writer passing the ring's depth many
+    times over loses nothing, a burst past the depth drops the oldest and the
+    reader reads the gap as one LOST record, and reading allocates nothing.
+    The records are posted on the `local` source, whose latch they leave
+    alone."""
+    board.pyexec("import array, gc, moy_input as I\n"
+                 "t = ws.input\n"
+                 "s = t.source('local')\n"
+                 "dbase = s.ring()[2]\n"
+                 "ws._er = t.reader(1 << I.EV_EDGE)\n"
+                 "ws._eb = array.array('i', [0] * (I.EV_FIELDS * 64))\n"
+                 "kept = 0\n"
+                 "for f in range(40):\n"
+                 "    for i in range(24):\n"
+                 "        s.post(I.EV_EDGE, i, 0, f)\n"
+                 "    kept += t.events(ws._eb, ws._er)\n"
+                 "d0 = s.ring()[2] - dbase\n"
+                 "for i in range(100):\n"
+                 "    s.post(I.EV_EDGE, i, 0, 1)\n"
+                 "n = t.events(ws._eb, ws._er)\n"
+                 "first = (ws._eb[I.EV_KIND], ws._eb[I.EV_B], ws._eb[I.EV_FIELDS + I.EV_A])\n"
+                 "gc.collect()\n"
+                 "m0 = gc.mem_alloc()\n"
+                 "for i in range(100):\n"
+                 "    t.events(ws._eb, ws._er)\n"
+                 "m1 = gc.mem_alloc()\n"
+                 "t.reader_free(ws._er)\n"
+                 "ws._eq = (kept, d0, n, first, m1 - m0, s.ring()[2] - dbase - d0, s.ring(), "
+                 "t.source('touch').ring()[3:5])",
+                 strict=True)
+    kept, d0, n, first, alloc, drops, ring, touch = board.pyval("ws._eq", strict=True)
+    depth, _count, _drops, prov, internal, _src = ring
+    assert kept == 40 * 24 and d0 == 0, (kept, d0)
+    assert n == depth + 1 and first == (16, 100 - depth, 100 - depth), (n, first, depth)
+    assert drops == 100 - depth, (drops, ring)
+    assert (prov, internal) == (2, False), ring
+    assert touch == (2, False), touch
+    assert alloc == 0, alloc
+
+
 def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a

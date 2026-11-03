@@ -436,6 +436,10 @@ def test_the_log_word_reads_the_ring(board):
     on_glass.the_log_word_reads_the_ring(board)
 
 
+def test_the_event_rings_keep_their_records(board):
+    on_glass.the_event_rings_keep_their_records(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
