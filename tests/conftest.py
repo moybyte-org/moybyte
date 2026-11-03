@@ -37,6 +37,9 @@ import sys
 import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The machine's timing log (tools/timings.py) records real runs only: a test
+# that runs a timed tool writes nowhere unless it names its own log.
+os.environ["MOYBYTE_TIMINGS"] = os.devnull
 # ONE repo-root sys.path insert for the whole suite (2026-08-18). 83 test
 # files each carried the same four-line header for this; pytest imports
 # conftest before collecting any of them, so this is the only copy now. Test

@@ -89,10 +89,11 @@ tools/board.py pass --all --shot      # ...and a screenshot of each at the end
 ```
 
 It is one job, however many boards: run it in the background and take its
-one notice; the table is its last lines. One row a board: the commit its image
-was built from (`+`: tracked changes on top), the headroom the build printed,
-passed/skipped/failed and the failing tests by name; every step's log is a
-file under the directory it prints. A
+one notice; the table and the pass's wall time are its last lines. One row a
+board: the commit its image was built from (`+`: tracked changes on top), the
+headroom the build printed, passed/skipped/failed, the time each step took
+(`wait` is for the P4s' one-at-a-time build slot) and the failing tests by
+name; every step's log is a file under the directory it prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
 check). Run it
@@ -101,6 +102,18 @@ refused without `--main`, because its `dist/` is what every other session
 flashes. It skips a board whose port is held, naming the holder, never touches
 the Zero, and leaves each board at its launcher, the T-Deck at volume 0. The
 `board-pass` agent (`.claude/agents/board-pass.md`) runs it and reports the table.
+
+**Where the time goes.** A pass, every board's `build.sh` and
+`tools/preflight.sh` print their steps' times as they end and append them to
+one log every checkout and worktree shares, `~/.cache/moybyte/timings.csv`
+(one line a lane: date, checkout, rev, tool, lane, seconds, status, and for a
+build the machine-wide ccache hits and misses over it). A build's lanes are its
+phases: toolchain, patches, stage-native, web-blob, stage, mpy-cross, then
+configure, compile, link and image (one `port` phase when its output is a
+terminal) and collect. `tools/timings.py` prints the recent runs and each
+lane's median of its last ten passing runs, flagging a last run 1.25× over it;
+`--tool pass`, `--lane tdeck` narrow it. The numbers stay in the log: an
+optimisation's before and after go in its issue.
 
 ## Flash, reboot, wait
 

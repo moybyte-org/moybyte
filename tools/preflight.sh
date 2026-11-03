@@ -77,18 +77,51 @@ trap 'rm -rf "${TOUR_DIR}"' EXIT
 
 fails=0
 failed=()
+# Each step's wall time, printed as it ends, tabled at the end and appended to
+# the machine's shared timing log (tools/timings.py).
+now_ms() { local t="${EPOCHREALTIME//[.,]/}"; echo $(( t / 1000 )); }
+dur() {                         # dur MS -> 3.2s / 14m32s
+  local ms="$1"
+  if [ "${ms}" -lt 60000 ]; then
+    printf '%d.%ds' $(( ms / 1000 )) $(( ms % 1000 / 100 ))
+  else
+    printf '%dm%02ds' $(( ms / 60000 )) $(( ms % 60000 / 1000 ))
+  fi
+}
+T0="$(now_ms)"
+lanes=()
+lane_ms=()
 step() {                        # step "name" cmd...
   local name="$1"; shift
+  local t ms
   printf '== %s\n' "${name}"
+  t="$(now_ms)"
   if "$@" > /tmp/preflight.$$ 2>&1; then
-    printf '   ok\n'
+    ms=$(( $(now_ms) - t ))
+    printf '   ok  %s\n' "$(dur "${ms}")"
   else
-    printf '   FAIL\n'
+    ms=$(( $(now_ms) - t ))
+    printf '   FAIL  %s\n' "$(dur "${ms}")"
     sed 's/^/   | /' /tmp/preflight.$$ | tail -25
     fails=$((fails + 1))
     failed+=("${name}")
   fi
   rm -f /tmp/preflight.$$
+  lanes+=("${name}")
+  lane_ms+=("${ms}")
+}
+lane_times() {                # lane_times STATUS: the table, then the shared log
+  local total i args=()
+  total=$(( $(now_ms) - T0 ))
+  printf '\n'
+  for i in "${!lanes[@]}"; do
+    printf '  %9s  %s\n' "$(dur "${lane_ms[$i]}")" "${lanes[$i]}"
+    args+=("preflight/${lanes[$i]}=$(( lane_ms[i] / 1000 )).$(( lane_ms[i] % 1000 / 100 ))")
+  done
+  printf '  %9s  total\n' "$(dur "${total}")"
+  "${PY}" tools/timings.py add --tool preflight --status "$1" \
+    "preflight=$(( total / 1000 )).$(( total % 1000 / 100 ))" "${args[@]}" || true
+  TOTAL_DUR="$(dur "${total}")"
 }
 
 PYTEST=(env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
@@ -144,7 +177,7 @@ firmware_touched() {
 }
 
 say_failed() {
-  printf '\npreflight: %d step(s) failed -- CI would too:\n' "${fails}"
+  printf '\npreflight: %d step(s) failed in %s -- CI would too:\n' "${fails}" "${TOTAL_DUR}"
   printf '   %s\n' "${failed[@]}"
 }
 
@@ -161,10 +194,12 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && [ "${FIRMWARE}" = "0" ] && docs_
   step "tests that name a changed document" \
     "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
   if [ "${fails}" -ne 0 ]; then
+    lane_times fail
     say_failed
     exit 1
   fi
-  printf '\npreflight: green (docs lane). A push should be too.\n'
+  lane_times ok
+  printf '\npreflight: green in %s (docs lane). A push should be too.\n' "${TOTAL_DUR}"
   exit 0
 fi
 
@@ -217,10 +252,12 @@ if [ "${FIRMWARE}" = "1" ]; then
 fi
 
 if [ "${fails}" -ne 0 ]; then
+  lane_times fail
   say_failed
   exit 1
 fi
-printf '\npreflight: green. A push should be too.\n'
+lane_times ok
+printf '\npreflight: green in %s. A push should be too.\n' "${TOTAL_DUR}"
 printf 'ON-GLASS IS NOT IN HERE: the board suites need a board CONNECTED to\n'
 printf 'this machine, which CI has none of. Whoever is at this checkout --\n'
 printf 'person or agent -- runs them when one is plugged in, no permission\n'
