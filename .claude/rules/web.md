@@ -37,8 +37,10 @@ nor those docs will warn you about:
   -Oz over the rest is smaller still and could not be shown free of frame
   cost (2026-10-28). The C no browser reaches is not built at all, and its
   names are ABSENT from the modules, never stubs: `moy_glass`'s compositors
-  and `front` (`MOY_GLASS_PRESENT=0`) and `moy_net`'s webhost, web console,
-  DNS, GPIO route, updater and HTTP client (`MOY_NET_SERVE=0`), both set in
+  and `front` (`MOY_GLASS_PRESENT=0`), `moy_net`'s webhost, web console,
+  DNS, GPIO route, updater and HTTP client (`MOY_NET_SERVE=0`) and
+  `moy_input`'s keyboard, touch, trackball and BLE drivers
+  (`MOY_INPUT_DRIVERS=0`; its event rings stay), all set in
   `variant/mpconfigvariant.mk`; Python probes for them (`getattr`).
 - **The browser draws what its boards draw: each arrangement on its board's
   metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the

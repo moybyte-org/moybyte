@@ -880,6 +880,7 @@ def test_every_authored_web_module_reaches_the_bundle():
 WEB_ABSENT_FLAGS = {
     "moy_glass": ("MOY_GLASS_PRESENT", ROOT / "native" / "moy_glass" / "modmoy_glass.c"),
     "moy_net": ("MOY_NET_SERVE", ROOT / "native" / "moy_net" / "modmoy_net.c"),
+    "moy_input": ("MOY_INPUT_DRIVERS", ROOT / "native" / "moy_input" / "modmoy_input.c"),
 }
 
 
@@ -901,9 +902,9 @@ def _gated_table_names(src, flag):
 
 
 def test_the_web_build_reaches_no_board_only_name_unprobed():
-    """The browser's build leaves `moy_glass`'s compositors and `moy_net`'s
-    serving half out, and their names are ABSENT from its modules, never
-    stubs. A web module that names one outright (`moy_net.web_start`, `from
+    """The browser's build leaves `moy_glass`'s compositors, `moy_net`'s
+    serving half and `moy_input`'s drivers out, and their names are ABSENT
+    from its modules, never stubs; `moy_input`'s event rings stay. A web module that names one outright (`moy_net.web_start`, `from
     moy_net import ota_verify`) raises where every board passes; it asks with
     getattr/hasattr instead, which this does not see as a use."""
     mk = (WEB / "variant" / "mpconfigvariant.mk").read_text(encoding="utf-8")
@@ -916,6 +917,10 @@ def test_the_web_build_reaches_no_board_only_name_unprobed():
     assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
     assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
     assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}
+    assert {"keyboard", "touch", "trackball", "ble"} <= absent["moy_input"]
+    assert not absent["moy_input"] & {
+        "InputTable", "HostInputTable", "InputSource", "Pointer", "pointer_state",
+        "ball_coast", "kick", "reader", "events", "pending", "post", "hid_usage"}
 
     bad = []
     for name, path in sorted(frozen_set("web").items()):

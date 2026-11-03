@@ -29,6 +29,16 @@
 #include "moy_hid.h"
 #include "moy_input.h"
 
+// The board's drivers: keyboard(), touch(), trackball() and ble(), and the
+// frame's stage over them. A build that has none -- the browser's, whose input
+// is the page's events posted into sources -- sets MOY_INPUT_DRIVERS=0 and
+// builds none of their C (micropython.mk): the four names are absent, so
+// `hasattr(moy_input, "ble")` is the probe. kick() and task_stack_free() stay,
+// answered by moy_input_task.c's driverless half.
+#ifndef MOY_INPUT_DRIVERS
+#define MOY_INPUT_DRIVERS 1
+#endif
+
 static const qstr NAME_Q[MOY_INPUT_BUTTONS] = {
     MP_QSTR_left, MP_QSTR_right, MP_QSTR_up, MP_QSTR_down, MP_QSTR_a, MP_QSTR_b,
     MP_QSTR_run, MP_QSTR_home, MP_QSTR_x, MP_QSTR_y, MP_QSTR_stop, MP_QSTR_save,
@@ -1075,6 +1085,8 @@ static MP_DEFINE_CONST_FUN_OBJ_2(input_pointer_state_obj, input_pointer_state);
 // kick(): one pass of the board's drivers (on the input task where the board
 //   has one); the frame's input stage calls it once.
 
+#if MOY_INPUT_DRIVERS
+
 static mp_obj_t stat_first_big(const moy_touchdev_t *d) {
     if (!d->fb_set) {
         return mp_const_none;
@@ -1632,12 +1644,16 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_ble_obj, input_ble);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_ble_obj);
 
+#endif // MOY_INPUT_DRIVERS
+
 // The VM service's soft reset re-initialises the heap but not the root
 // pointers registered beside it: the wrappers above belonged to the last VM's
 // heap, and the next VM builds its own.
 void moy_input_vm_fresh(void) {
     MP_STATE_VM(moy_input_kernel_obj) = MP_OBJ_NULL;
+    #if MOY_INPUT_DRIVERS
     MP_STATE_VM(moy_input_ble_obj) = MP_OBJ_NULL;
+    #endif
     for (int i = 0; i < 4; i++) {
         MP_STATE_VM(moy_input_loop_objs)[i] = MP_OBJ_NULL;
     }
@@ -1695,9 +1711,13 @@ static mp_obj_t input_loop_bind(size_t n_args, const mp_obj_t *pos, mp_map_t *kw
     }
     mp_obj_t *o = MP_STATE_VM(moy_input_loop_objs);
     o[LOOP_PTR] = a[ARG_pointer].u_obj;
+    #if MOY_INPUT_DRIVERS
     o[LOOP_TOUCH] = mp_obj_is_type(a[ARG_touch].u_obj, &input_touch_type) ? a[ARG_touch].u_obj : MP_OBJ_NULL;
     o[LOOP_BLE] = mp_obj_is_type(a[ARG_ble].u_obj, &input_ble_type) ? a[ARG_ble].u_obj : MP_OBJ_NULL;
     o[LOOP_BALL] = mp_obj_is_type(a[ARG_ball].u_obj, &input_ball_type) ? a[ARG_ball].u_obj : MP_OBJ_NULL;
+    #else
+    o[LOOP_TOUCH] = o[LOOP_BLE] = o[LOOP_BALL] = MP_OBJ_NULL;
+    #endif
     s_kick_tail = a[ARG_kick_at_tail].u_bool;
     s_nav[0] = s_nav[1] = 0;
     s_nav_click = false;
@@ -1769,6 +1789,7 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
     if (!s_kick_tail) {
         moy_input_board_kick();
     }
+    #if MOY_INPUT_DRIVERS
     if (o[LOOP_BLE] != MP_OBJ_NULL) {
         input_ble_obj_t *b = MP_OBJ_TO_PTR(o[LOOP_BLE]);
         moy_hid_frame(b->h);
@@ -1792,8 +1813,10 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
         moy_touchdev_poll(tc->d, now, &pt);
         moy_input_point(t, tc->src, pt.x, pt.y, pt.down, pt.edge, tc->d->held.fresh);
     }
+    #endif
     moy_input_begin_frame(t, now);
     bool ball_click = false;
+    #if MOY_INPUT_DRIVERS
     if (o[LOOP_BALL] != MP_OBJ_NULL) {
         input_ball_obj_t *bo = MP_OBJ_TO_PTR(o[LOOP_BALL]);
         uint32_t c[4];
@@ -1807,6 +1830,7 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
         s_nav[0] += (int32_t)c[3] - (int32_t)c[2];      // right - left
         s_nav[1] += (int32_t)c[1] - (int32_t)c[0];      // down - up
     }
+    #endif
     int f = moy_input_ptr_apply(t, p, now);
     uint32_t h, pr;
     moy_input_masks(t, MOY_INPUT_UNION, &h, &pr);
@@ -1889,11 +1913,13 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Pointer), MP_ROM_PTR(&input_pointer_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&input_kernel_obj) },
     { MP_ROM_QSTR(MP_QSTR_pointer_state), MP_ROM_PTR(&input_pointer_state_obj) },
+    #if MOY_INPUT_DRIVERS
     { MP_ROM_QSTR(MP_QSTR_keyboard), MP_ROM_PTR(&input_keyboard_obj) },
     { MP_ROM_QSTR(MP_QSTR_touch), MP_ROM_PTR(&input_touch_obj) },
     { MP_ROM_QSTR(MP_QSTR_trackball), MP_ROM_PTR(&input_trackball_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kick), MP_ROM_PTR(&input_kick_obj) },
     { MP_ROM_QSTR(MP_QSTR_ble), MP_ROM_PTR(&input_ble_obj) },
+    #endif
+    { MP_ROM_QSTR(MP_QSTR_kick), MP_ROM_PTR(&input_kick_obj) },
     { MP_ROM_QSTR(MP_QSTR_task_stack_free), MP_ROM_PTR(&input_task_stack_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&input_loop_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },

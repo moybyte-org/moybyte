@@ -26,6 +26,9 @@ $(BUILD)/py/scope.o $(BUILD)/py/persistentcode.o $(BUILD)/py/builtinimport.o: CF
 # micropython.mk): the browser presents through its worker's own framebuffer,
 # so it builds none of moy_glass's compositors, and its wire is the page's
 # fetch, so moy_net is the sync codec and apply alone -- no webhost, web
-# console, DNS, GPIO route, updater or HTTP client.
+# console, DNS, GPIO route, updater or HTTP client; its input is the page's
+# events posted into sources, so moy_input has no keyboard, touch, trackball
+# or BLE driver.
 MOY_GLASS_PRESENT = 0
 MOY_NET_SERVE = 0
+MOY_INPUT_DRIVERS = 0
