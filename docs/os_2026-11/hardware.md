@@ -137,8 +137,9 @@ order of preference:
    GC frame). Each ring counts its drops. Carts get `ticks_us()` (wrapping,
    allocation-free) and `events(into)` filling a caller's buffer, since a
    Python frame allocates nothing (`tests/test_frame_alloc.py`); `btn` and
-   `key` stay, derived from the same rings; a reader has its own cursor and
-   sees only the sources focus routes to it.
+   `key` stay, read from the latches the same driver call writes beside its
+   record; a reader has its own cursor per source and a kind mask, and a
+   source mask lets focus route sources to it (P1.7).
 2. **Hardware engines keep time.** Steppers and servos ride RMT and MCPWM; a
    fixed-rate sample rides ADC DMA; MIDI and serial ride a UART's FIFO;
    LoRaWAN's receive windows are timed by the OS-side MAC in C. User code
@@ -194,7 +195,10 @@ BLE keyboard map straight through and the T-Deck's matrix and the browser
 translate to it; a **keyboard layout is data** (a file under `system/`
 mapping usage and modifiers to a codepoint) that turns KEY into TEXT.
 
-One ring per source; per-reader cursors; `events()` reports the drop count.
+One ring per source; per-reader cursors. A full ring overwrites its oldest
+record; a reader that missed records reads one LOST record (`b` = how many)
+where the gap was, and the source counts only the drops a reader missed.
+A KEY's `b` is the console key event; TEXT is its own record.
 
 ## 3. The media service
 

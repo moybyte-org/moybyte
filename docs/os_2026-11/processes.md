@@ -88,8 +88,9 @@ as today; a minimised app keeps a reduced-rate `update` (above). **A background 
 tick.** It declares its wake sources and sleeps between them: timers
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`) and events
 (`moybyte.on(source, fn)`: a UART, a socket readable, a pin edge, a LoRa
-packet), each fed from the C rings of `hardware.md` §2, so nothing is lost
-and a record keeps its real timestamp. An idle process costs nothing, the
+packet). Events are read from the C rings of `hardware.md` §2, so nothing is
+lost and a record keeps its real timestamp; timers are deadlines on
+`ticks_ms` in the wake registry (`runtime/system/moybyte.py`). An idle process costs nothing, the
 idle ladder can still dim and sleep (§5), and it is one model for Python,
 Lua, wasm's `moy_timer` and ELF. A timer means "no earlier than"; jitter of up
 to a frame is normal, and precise timing belongs to C, the wasm lanes and the
