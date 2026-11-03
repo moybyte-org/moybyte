@@ -8,6 +8,8 @@
 //   InputSource                   table.source(name, player=0): one producer
 //   Pointer(w, h, idle_ms=...)    a screen-space cursor
 //   pointer_state(inp, out)       the pointer a cart sees: [x, y, P_*, 0]
+//   table.reader(kinds)/events(into, r)/pending(r)   the event rings' readers;
+//                                 source.set_events/post/ring a source's ring
 //
 // A table carries a dict for the attributes the shell hangs on its input
 // (game_pointer, netplay_live, players, ...). Nothing a frame calls allocates:
@@ -20,9 +22,11 @@
 #include "py/objlist.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
+#include "py/smallint.h"
 
 #include "moy_ble.h"
 #include "moy_drivers.h"
+#include "moy_hid.h"
 #include "moy_input.h"
 
 static const qstr NAME_Q[MOY_INPUT_BUTTONS] = {
@@ -449,6 +453,76 @@ static MP_DEFINE_CONST_FUN_OBJ_3(table_set_button_obj, table_set_button);
 static mp_obj_t table_apply_pointer(mp_obj_t self_in, mp_obj_t ptr);
 static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
 
+// -- the event rings: readers (moy_input.h) -------------------------------------------
+
+// A record's fields in a caller's buffer of 32-bit ints, EV_FIELDS a record.
+enum { EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B, EV_FIELDS };
+
+// time.ticks_us's mask, at most the boards' 2^30 so a stamp is a small int.
+static inline uint32_t ev_ticks_mask(void) {
+    mp_uint_t p = MICROPY_PY_TIME_TICKS_PERIOD;
+    return p == 0 || p > (1u << 30) ? (1u << 30) - 1u : (uint32_t)(p - 1u);
+}
+
+// reader(kinds=EV_ALL) -> a reader's number
+static mp_obj_t table_reader(size_t n_args, const mp_obj_t *args) {
+    int r;
+    uint32_t kinds = n_args > 1 ? (uint32_t)mp_obj_get_int(args[1]) : MOY_EV_ALL;
+    check(moy_input_reader(table_of(args[0])->t, kinds, &r));
+    return MP_OBJ_NEW_SMALL_INT(r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_reader_obj, 1, 2, table_reader);
+
+static mp_obj_t table_reader_free(mp_obj_t self_in, mp_obj_t r) {
+    check(moy_input_reader_free(table_of(self_in)->t, mp_obj_get_int(r)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_reader_free_obj, table_reader_free);
+
+// events(into, r) -> n: reader r's records into `into` (an array('i'), EV_FIELDS
+// ints a record, as many as fit), each stamp on time.ticks_us's clock.
+// Allocates nothing.
+static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
+    input_table_obj_t *s = table_of(self_in);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(into, &bi, MP_BUFFER_WRITE);
+    if (bi.typecode != 'i' && bi.typecode != 'I') {
+        mp_raise_TypeError(MP_ERROR_TEXT("events: an array('i')"));
+    }
+    int r = mp_obj_get_int(r_in);
+    size_t cap = bi.len / (sizeof(int32_t) * EV_FIELDS);
+    int32_t *w = bi.buf;
+    uint32_t clock = moy_input_now_us();
+    uint32_t ticks = (uint32_t)mp_hal_ticks_us();
+    moy_event_t chunk[8];
+    size_t k = 0;
+    while (k < cap) {
+        size_t want = cap - k < 8 ? cap - k : 8;
+        size_t got = moy_input_events(s->t, r, chunk, want);
+        for (size_t i = 0; i < got; i++, k++) {
+            const moy_event_t *e = &chunk[i];
+            int32_t *f = &w[k * EV_FIELDS];
+            f[EV_T] = (int32_t)((ticks - (clock - e->t_us)) & ev_ticks_mask());
+            f[EV_SRC] = e->src;
+            f[EV_KIND] = e->kind;
+            f[EV_PROV] = e->prov;
+            f[EV_A] = e->a;
+            f[EV_ID] = e->id;
+            f[EV_B] = (int32_t)e->b;
+        }
+        if (got < want) {
+            break;
+        }
+    }
+    return MP_OBJ_NEW_SMALL_INT(k);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(table_events_obj, table_events);
+
+static mp_obj_t table_pending(mp_obj_t self_in, mp_obj_t r) {
+    return MP_OBJ_NEW_SMALL_INT(moy_input_pending(table_of(self_in)->t, mp_obj_get_int(r)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_pending_obj, table_pending);
+
 #define TABLE_LOCALS(buttons) \
     { MP_ROM_QSTR(MP_QSTR_BUTTONS), MP_ROM_PTR(buttons) }, \
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&table_del_obj) }, \
@@ -478,7 +552,11 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
     { MP_ROM_QSTR(MP_QSTR_news), MP_ROM_PTR(&table_news_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_apply_pointer), MP_ROM_PTR(&table_apply_pointer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_set_button), MP_ROM_PTR(&table_set_button_obj) }, \
-    { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&table_set_button_obj) }
+    { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&table_set_button_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_reader), MP_ROM_PTR(&table_reader_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_reader_free), MP_ROM_PTR(&table_reader_free_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_events), MP_ROM_PTR(&table_events_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&table_pending_obj) }
 
 static const mp_rom_map_elem_t table_locals_table[] = { TABLE_LOCALS(&names_obj) };
 static MP_DEFINE_CONST_DICT(table_locals, table_locals_table);
@@ -671,7 +749,46 @@ static mp_obj_t source_held_names(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(source_held_names_obj, source_held_names);
 
+// set_events(prov, depth): the source's ring made again (moy_input_source_events).
+static mp_obj_t source_set_events(mp_obj_t self_in, mp_obj_t prov, mp_obj_t depth) {
+    input_source_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    check(moy_input_source_events(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h,
+                                  (uint8_t)mp_obj_get_int(prov), (uint32_t)mp_obj_get_int(depth)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(source_set_events_obj, source_set_events);
+
+// post(kind, a=0, id=0, b=0): a record of the producer's own.
+static mp_obj_t source_post(size_t n_args, const mp_obj_t *args) {
+    input_source_obj_t *o = MP_OBJ_TO_PTR(args[0]);
+    mp_int_t v[4] = {0, 0, 0, 0};
+    for (size_t i = 1; i < n_args; i++) {
+        v[i - 1] = mp_obj_get_int_truncated(args[i]);
+    }
+    check(moy_input_post(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h, (uint8_t)v[0],
+                         (uint16_t)v[1], (uint16_t)v[2], (uint32_t)v[3]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(source_post_obj, 2, 5, source_post);
+
+// ring() -> (depth, count, drops, prov, internal, src): the source's ring.
+static mp_obj_t source_ring(mp_obj_t self_in) {
+    input_source_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    moy_input_ring_info_t g;
+    check(moy_input_ring_info(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h, &g));
+    mp_obj_t items[6] = {
+        mp_obj_new_int_from_uint(g.depth), mp_obj_new_int_from_uint(g.count),
+        mp_obj_new_int_from_uint(g.drops), MP_OBJ_NEW_SMALL_INT(g.prov),
+        mp_obj_new_bool(g.internal), MP_OBJ_NEW_SMALL_INT(g.src),
+    };
+    return mp_obj_new_tuple(6, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(source_ring_obj, source_ring);
+
 static const mp_rom_map_elem_t source_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_set_events), MP_ROM_PTR(&source_set_events_obj) },
+    { MP_ROM_QSTR(MP_QSTR_post), MP_ROM_PTR(&source_post_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ring), MP_ROM_PTR(&source_ring_obj) },
     { MP_ROM_QSTR(MP_QSTR_release_all), MP_ROM_PTR(&source_release_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_button), MP_ROM_PTR(&source_set_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&source_set_button_obj) },
@@ -1750,6 +1867,18 @@ static mp_obj_t input_event(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(input_event_obj, 1, 2, input_event);
 
+// pin_clock(us): the records' clock held at `us` (0: the real one), for tests.
+static mp_obj_t input_pin_clock(mp_obj_t us) {
+    moy_input_pin_clock((uint32_t)mp_obj_get_int_truncated(us));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(input_pin_clock_obj, input_pin_clock);
+
+static mp_obj_t input_hid_usage(mp_obj_t ev) {
+    return MP_OBJ_NEW_SMALL_INT(moy_hid_usage(mp_obj_get_int(ev)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(input_hid_usage_obj, input_hid_usage);
+
 static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_input) },
     { MP_ROM_QSTR(MP_QSTR_NAMES), MP_ROM_PTR(&names_obj) },
@@ -1795,6 +1924,34 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
     { MP_ROM_QSTR(MP_QSTR_KEY_PGUP), MP_ROM_INT(MOY_INPUT_KEY_PGUP) },
     { MP_ROM_QSTR(MP_QSTR_KEY_PGDN), MP_ROM_INT(MOY_INPUT_KEY_PGDN) },
+    { MP_ROM_QSTR(MP_QSTR_pin_clock), MP_ROM_PTR(&input_pin_clock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hid_usage), MP_ROM_PTR(&input_hid_usage_obj) },
+    { MP_ROM_QSTR(MP_QSTR_EV_VERSION), MP_ROM_INT(MOY_EVENT_VERSION) },
+    { MP_ROM_QSTR(MP_QSTR_EV_FIELDS), MP_ROM_INT(EV_FIELDS) },
+    { MP_ROM_QSTR(MP_QSTR_EV_T), MP_ROM_INT(EV_T) },
+    { MP_ROM_QSTR(MP_QSTR_EV_SRC), MP_ROM_INT(EV_SRC) },
+    { MP_ROM_QSTR(MP_QSTR_EV_KIND), MP_ROM_INT(EV_KIND) },
+    { MP_ROM_QSTR(MP_QSTR_EV_PROV), MP_ROM_INT(EV_PROV) },
+    { MP_ROM_QSTR(MP_QSTR_EV_A), MP_ROM_INT(EV_A) },
+    { MP_ROM_QSTR(MP_QSTR_EV_ID), MP_ROM_INT(EV_ID) },
+    { MP_ROM_QSTR(MP_QSTR_EV_B), MP_ROM_INT(EV_B) },
+    { MP_ROM_QSTR(MP_QSTR_EV_KEY_DOWN), MP_ROM_INT(MOY_EV_KEY_DOWN) },
+    { MP_ROM_QSTR(MP_QSTR_EV_KEY_UP), MP_ROM_INT(MOY_EV_KEY_UP) },
+    { MP_ROM_QSTR(MP_QSTR_EV_TEXT), MP_ROM_INT(MOY_EV_TEXT) },
+    { MP_ROM_QSTR(MP_QSTR_EV_BTN), MP_ROM_INT(MOY_EV_BTN) },
+    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_DOWN), MP_ROM_INT(MOY_EV_TOUCH_DOWN) },
+    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_MOVE), MP_ROM_INT(MOY_EV_TOUCH_MOVE) },
+    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_UP), MP_ROM_INT(MOY_EV_TOUCH_UP) },
+    { MP_ROM_QSTR(MP_QSTR_EV_EDGE), MP_ROM_INT(MOY_EV_EDGE) },
+    { MP_ROM_QSTR(MP_QSTR_EV_LOST), MP_ROM_INT(MOY_EV_LOST) },
+    { MP_ROM_QSTR(MP_QSTR_EV_KEYS), MP_ROM_INT(MOY_EV_KEYS) },
+    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH), MP_ROM_INT(MOY_EV_TOUCH) },
+    { MP_ROM_QSTR(MP_QSTR_EV_PAD), MP_ROM_INT(MOY_EV_PAD) },
+    { MP_ROM_QSTR(MP_QSTR_EV_ALL), MP_ROM_INT(MOY_EV_ALL) },
+    { MP_ROM_QSTR(MP_QSTR_PROV_ISR), MP_ROM_INT(MOY_EV_ISR) },
+    { MP_ROM_QSTR(MP_QSTR_PROV_FIFO), MP_ROM_INT(MOY_EV_FIFO) },
+    { MP_ROM_QSTR(MP_QSTR_PROV_POLL), MP_ROM_INT(MOY_EV_POLL) },
+    { MP_ROM_QSTR(MP_QSTR_EV_DEPTH), MP_ROM_INT(MOY_EV_DEPTH) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

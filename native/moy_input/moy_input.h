@@ -84,6 +84,21 @@
 // While every source sits on one slot, that slot's view is the union and
 // every other slot's is empty.
 //
+// THE EVENTS (moy_event.h; docs/os_2026-11/hardware.md section 2). Every
+// source has a ring of event records beside its latch, written by the same
+// call under the same lock: a held bit that changes is a BTN record, a key
+// level that changes a KEY_UP for the old and a KEY_DOWN (and TEXT, when it
+// types) for the new, a one-shot key all three at once, a pointer sample that
+// goes down, moves or lifts a TOUCH record. A write that changes nothing
+// writes no record, so a poller re-asserting its level each frame costs none.
+// The merge reads the latches; a reader reads the records. A ring is made with
+// the source, MOY_EV_DEPTH deep and stamped POLL; moy_input_source_events
+// names its provenance and depth (an ISR's ring is internal RAM, any other the
+// table's). A full ring drops its oldest record, counted against the source
+// (moy_input_ring_info) when a reader of its kind had not read it, and against
+// that reader, which reads a LOST record where the gap was. A reader is a
+// cursor per source and a kind mask; it starts at the records written after it.
+//
 // A handle is the spine's: gen << 12 | MOY_KIND_SRC << 8 | slot, generation 1
 // (a source is never released). Slot 0 is the table's own source, "local".
 
@@ -93,6 +108,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "moy_event.h"
 
 // ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
 // board is recognised by the header it has.
@@ -246,6 +263,34 @@ int32_t moy_input_source_typing(const moy_input_t *t, uint32_t h);
 // This source's pointer sample, which stands until it writes another.
 int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
                     bool fresh);
+
+// -- the event rings --
+// The source's ring made again with `prov` (MOY_EV_ISR, _FIFO, _POLL) and
+// `depth` records (a power of two, at most MOY_EV_DEPTH_MAX), empty; a
+// producer names them before it first writes.
+int moy_input_source_events(moy_input_t *t, uint32_t h, uint8_t prov, uint32_t depth);
+// A record a producer writes itself (a kind no latch has), stamped now.
+int moy_input_post(moy_input_t *t, uint32_t h, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
+typedef struct {
+    uint32_t depth, head, count, drops;
+    uint8_t prov;
+    bool internal;
+    uint16_t src;                   // the records' `src`
+} moy_input_ring_info_t;
+int moy_input_ring_info(const moy_input_t *t, uint32_t h, moy_input_ring_info_t *out);
+// A reader of `kinds` (MOY_EV_BIT of each; MOY_EV_ALL) into *r; MOY_INPUT_FULL
+// when MOY_EV_READERS are taken.
+int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);
+int moy_input_reader_free(moy_input_t *t, int r);
+// Up to `n` of the reader's records, oldest first across its sources, its
+// cursors past them; a LOST record stands where a gap was. Allocates nothing.
+size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n);
+// How many records (a gap counting one) the reader has waiting.
+size_t moy_input_pending(moy_input_t *t, int r);
+// The records' clock: microseconds, wrapping at 2^32 (a test pins it; 0: the
+// real one).
+uint32_t moy_input_now_us(void);
+void moy_input_pin_clock(uint32_t us);
 
 // -- the frame --
 // The latches merged, the edges and the repeats computed; `now` is the

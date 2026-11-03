@@ -1,18 +1,25 @@
 // moy_input: the merged input table. moy_input.h has the contract.
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
+#endif
+
 #include "moy_input.h"
 
 #include <string.h>
 
+#include "moy_hid.h"
 #include "moy_htab.h"
 
 #ifdef MOY_INPUT_BOARD
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #define LOCK(t) portENTER_CRITICAL_SAFE(&(t)->front->mux)
 #define UNLOCK(t) portEXIT_CRITICAL_SAFE(&(t)->front->mux)
 #else
 #include <stdlib.h>
+#include <time.h>
 #define LOCK(t) ((void)0)
 #define UNLOCK(t) ((void)0)
 #endif
@@ -42,6 +49,18 @@ typedef struct {
 } moy_input_latch_t;
 
 enum { P_SET = 1, P_DOWN = 2, P_EDGE = 4, P_FRESH = 8 };
+
+// A source's event ring (moy_event.h): `n` records, the newest at seq
+// head - 1, each at seq & mask.
+typedef struct {
+    uint32_t head;                  // the seq the next record takes
+    uint32_t mask;                  // depth - 1
+    uint32_t n;                     // records held, at most the depth
+    uint32_t drops;                 // records overwritten before a reader read them
+    uint8_t prov;
+    bool internal;                  // internal RAM: an ISR writes it
+    moy_event_t rec[];
+} moy_input_ring_t;
 
 typedef struct {
 #ifdef MOY_INPUT_BOARD
@@ -85,6 +104,12 @@ struct moy_input {
     uint32_t krep_due[MOY_INPUT_SOURCES];
     int32_t krep_ev;                        // this frame's repeated key, and its count
     uint8_t krep;
+    // the event rings and their readers, written under the lock
+    moy_input_ring_t *ring[MOY_INPUT_SOURCES];
+    uint8_t ev_used;                        // a bit a reader
+    uint32_t ev_kinds[MOY_EV_READERS];
+    uint32_t ev_cur[MOY_EV_READERS][MOY_INPUT_SOURCES];    // the seq each reads next
+    uint32_t ev_lost[MOY_EV_READERS][MOY_INPUT_SOURCES];   // its records dropped unread
 };
 
 #define HANDLE(slot) ((1u << MOY_HTAB_GEN_SHIFT) | ((uint32_t)MOY_KIND_SRC << MOY_HTAB_KIND_SHIFT) | (slot))
@@ -125,6 +150,21 @@ static void *front_alloc(void) {
 static void front_free(void *p) {
     heap_caps_free(p);
 }
+// A ring an ISR writes is internal, as the latches are; any other is the
+// table's (PSRAM).
+static void *ring_alloc(size_t n, bool internal) {
+    return internal ? heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : tab_alloc(n);
+}
+static void ring_free(void *p, bool internal) {
+    if (internal) {
+        heap_caps_free(p);
+    } else {
+        tab_free(p);
+    }
+}
+static uint64_t clock_us(void) {
+    return (uint64_t)esp_timer_get_time();
+}
 #else
 static void *tab_alloc(size_t n) {
     return calloc(1, n);
@@ -138,7 +178,103 @@ static void *front_alloc(void) {
 static void front_free(void *p) {
     free(p);
 }
+static void *ring_alloc(size_t n, bool internal) {
+    (void)internal;
+    return calloc(1, n);
+}
+static void ring_free(void *p, bool internal) {
+    (void)internal;
+    free(p);
+}
+static uint64_t clock_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+}
 #endif
+
+static uint32_t s_pinned_us;
+
+uint32_t moy_input_now_us(void) {
+    return s_pinned_us ? s_pinned_us : (uint32_t)clock_us();
+}
+
+void moy_input_pin_clock(uint32_t us) {
+    s_pinned_us = us;
+}
+
+static uint32_t depth_of(uint32_t depth) {
+    uint32_t d = 1;
+    while (d < depth && d < MOY_EV_DEPTH_MAX) {
+        d <<= 1;
+    }
+    return d;
+}
+
+static moy_input_ring_t *ring_new(uint8_t prov, uint32_t depth) {
+    depth = depth_of(depth);
+    bool internal = prov == MOY_EV_ISR;
+    moy_input_ring_t *g = ring_alloc(sizeof(*g) + depth * sizeof(moy_event_t), internal);
+    if (g != NULL) {
+        g->mask = depth - 1u;
+        g->prov = prov;
+        g->internal = internal;
+    }
+    return g;
+}
+
+#define SRC16(s) ((uint16_t)((1u << 8) | (s)))
+
+// One record into source s's ring, under the lock. A full ring drops its
+// oldest record; the drop is counted against the source and against each
+// reader of that kind that had not read it.
+static void put_locked(moy_input_t *t, int s, uint8_t kind, uint16_t a, uint16_t id, uint32_t b) {
+    moy_input_ring_t *g = t->ring[s];
+    if (g == NULL) {
+        return;
+    }
+    if (g->n > g->mask) {
+        uint32_t old = g->head - g->n;
+        uint32_t bit = MOY_EV_BIT(g->rec[old & g->mask].kind);
+        bool dropped = false;
+        for (uint8_t r = 0; r < MOY_EV_READERS; r++) {
+            if ((t->ev_used & (1u << r)) && (t->ev_kinds[r] & bit)
+                && (int32_t)(t->ev_cur[r][s] - old) <= 0) {
+                t->ev_lost[r][s]++;
+                dropped = true;
+            }
+        }
+        g->drops += dropped;
+    } else {
+        g->n++;
+    }
+    moy_event_t *e = &g->rec[g->head & g->mask];
+    e->t_us = moy_input_now_us();
+    e->src = SRC16(s);
+    e->kind = kind;
+    e->prov = g->prov;
+    e->a = a;
+    e->id = id;
+    e->b = b;
+    g->head++;
+}
+
+static void put_buttons_locked(moy_input_t *t, int s, uint32_t was, uint32_t now) {
+    for (uint32_t d = was ^ now, i = 0; d >> i; i++) {
+        if (d & (1u << i)) {
+            put_locked(t, s, MOY_EV_BTN, (uint16_t)i, 0, (now >> i) & 1u);
+        }
+    }
+}
+
+// A key record; `usage` is moy_hid_usage(ev), found before the lock is taken.
+static void put_key_locked(moy_input_t *t, int s, uint8_t kind, int32_t ev, uint16_t usage) {
+    put_locked(t, s, kind, usage, 0, (uint32_t)ev);
+    int32_t c = kind == MOY_EV_KEY_DOWN ? moy_input_typed(ev) : 0;
+    if (c) {
+        put_locked(t, s, MOY_EV_TEXT, 0, 0, (uint32_t)c);
+    }
+}
 
 static void rescan(moy_input_t *t) {
     t->multi = false;
@@ -188,6 +324,11 @@ void moy_input_free(moy_input_t *t) {
     if (t == NULL || t == moy_input_kernel()) {
         return;
     }
+    for (uint8_t i = 0; i < t->nsrc; i++) {
+        if (t->ring[i] != NULL) {
+            ring_free(t->ring[i], t->ring[i]->internal);
+        }
+    }
     front_free(t->front);
     tab_free(t);
 }
@@ -229,6 +370,7 @@ int moy_input_source(moy_input_t *t, const char *name, uint8_t player, uint32_t 
     uint8_t i = t->nsrc;
     memcpy(t->name[i], name, n + 1);
     t->player[i] = player;
+    t->ring[i] = ring_new(MOY_EV_POLL, MOY_EV_DEPTH);
     t->nsrc = i + 1;
     rescan(t);
     *h = HANDLE(i);
@@ -282,11 +424,13 @@ int moy_input_set_held(moy_input_t *t, uint32_t h, uint8_t button, bool held) {
     }
     moy_input_latch_t *l = &t->front->src[s];
     LOCK(t);
+    uint32_t was = l->held;
     if (held) {
         l->held |= 1u << button;
     } else {
         l->held &= ~(1u << button);
     }
+    put_buttons_locked(t, s, was, l->held);
     UNLOCK(t);
     return MOY_INPUT_OK;
 }
@@ -300,6 +444,7 @@ int moy_input_set_mask(moy_input_t *t, uint32_t h, uint32_t held) {
         return MOY_INPUT_BAD;
     }
     LOCK(t);
+    put_buttons_locked(t, s, t->front->src[s].held, held);
     t->front->src[s].held = held;
     UNLOCK(t);
     return MOY_INPUT_OK;
@@ -343,9 +488,23 @@ int moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key) {
     if (s < 0) {
         return MOY_INPUT_STALE;
     }
+    // a source's key is its one producer's, so the level read here is the
+    // one the lock finds
+    int32_t was = t->front->src[s].key;
+    uint16_t u_was = was && was != key ? moy_hid_usage(was) : 0;
+    uint16_t u_key = key && key != was ? moy_hid_usage(key) : 0;
     LOCK(t);
     t->front->src[s].queued = 0;
     t->front->src[s].qn = 0;
+    int32_t old = t->front->src[s].key;
+    if (key != old) {
+        if (old) {
+            put_key_locked(t, s, MOY_EV_KEY_UP, old, old == was ? u_was : moy_hid_usage(old));
+        }
+        if (key) {
+            put_key_locked(t, s, MOY_EV_KEY_DOWN, key, key != was ? u_key : moy_hid_usage(key));
+        }
+    }
     key_locked(t, s, key);
     UNLOCK(t);
     return MOY_INPUT_OK;
@@ -361,7 +520,10 @@ int moy_input_key(moy_input_t *t, uint32_t h, int32_t key) {
     }
     moy_input_latch_t *l = &t->front->src[s];
     int r = MOY_INPUT_OK;
+    uint16_t usage = moy_hid_usage(key);
     LOCK(t);
+    put_key_locked(t, s, MOY_EV_KEY_DOWN, key, usage);
+    put_key_locked(t, s, MOY_EV_KEY_UP, key, usage);
     l->queued = 1;
     if (l->qn < MOY_INPUT_KEYQ) {
         l->q[l->qn++] = key;
@@ -460,8 +622,21 @@ int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down,
     }
     moy_input_latch_t *l = &t->front->src[s];
     LOCK(t);
-    l->px = (int16_t)(x < INT16_MIN ? INT16_MIN : (x > INT16_MAX ? INT16_MAX : x));
-    l->py = (int16_t)(y < INT16_MIN ? INT16_MIN : (y > INT16_MAX ? INT16_MAX : y));
+    bool was = (l->pflags & P_DOWN) != 0;
+    int16_t cx = sat16(x), cy = sat16(y);
+    uint32_t at = (uint32_t)(uint16_t)cx << 16 | (uint16_t)cy;
+    if (down && (!was || edge)) {
+        if (was) {
+            put_locked(t, s, MOY_EV_TOUCH_UP, 0, 0, (uint32_t)(uint16_t)l->px << 16 | (uint16_t)l->py);
+        }
+        put_locked(t, s, MOY_EV_TOUCH_DOWN, 0, 0, at);
+    } else if (down && (cx != l->px || cy != l->py)) {
+        put_locked(t, s, MOY_EV_TOUCH_MOVE, 0, 0, at);
+    } else if (!down && was) {
+        put_locked(t, s, MOY_EV_TOUCH_UP, 0, 0, at);
+    }
+    l->px = cx;
+    l->py = cy;
     l->pflags = (uint8_t)(P_SET | (down ? P_DOWN : 0) | (edge ? P_EDGE : 0) | (fresh ? P_FRESH : 0)
                           | (l->pflags & P_EDGE));
     l->pseq = ++t->front->pseq;
@@ -480,6 +655,192 @@ static int32_t dequeue_locked(moy_input_latch_t *l) {
     memmove(&l->q[0], &l->q[1], (size_t)(l->qn - 1) * sizeof(l->q[0]));
     l->qn--;
     l->qlast = k;
+    return k;
+}
+
+// -- the event rings ----------------------------------------------------------------
+
+int moy_input_source_events(moy_input_t *t, uint32_t h, uint8_t prov, uint32_t depth) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    if (prov > MOY_EV_POLL || depth == 0) {
+        return MOY_INPUT_BAD;
+    }
+    moy_input_ring_t *g = t->ring[s];
+    if (g != NULL && g->prov == prov && g->mask + 1u == depth_of(depth)) {
+        return MOY_INPUT_OK;
+    }
+    moy_input_ring_t *n = ring_new(prov, depth);
+    if (n == NULL) {
+        return MOY_INPUT_NOMEM;
+    }
+    LOCK(t);
+    t->ring[s] = n;
+    for (uint8_t r = 0; r < MOY_EV_READERS; r++) {
+        t->ev_cur[r][s] = 0;
+        t->ev_lost[r][s] = 0;
+    }
+    UNLOCK(t);
+    if (g != NULL) {
+        ring_free(g, g->internal);
+    }
+    return MOY_INPUT_OK;
+}
+
+int moy_input_post(moy_input_t *t, uint32_t h, uint8_t kind, uint16_t a, uint16_t id, uint32_t b) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    if (kind == MOY_EV_NONE || kind >= MOY_EV_LOST) {
+        return MOY_INPUT_BAD;
+    }
+    LOCK(t);
+    put_locked(t, s, kind, a, id, b);
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
+int moy_input_ring_info(const moy_input_t *t, uint32_t h, moy_input_ring_info_t *out) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    const moy_input_ring_t *g = t->ring[s];
+    if (g == NULL) {
+        return MOY_INPUT_NOMEM;
+    }
+    out->depth = g->mask + 1u;
+    out->head = g->head;
+    out->count = g->n;
+    out->drops = g->drops;
+    out->prov = g->prov;
+    out->internal = g->internal;
+    out->src = SRC16(s);
+    return MOY_INPUT_OK;
+}
+
+int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r) {
+    int got = MOY_INPUT_FULL;
+    LOCK(t);
+    for (uint8_t i = 0; i < MOY_EV_READERS; i++) {
+        if (!(t->ev_used & (1u << i))) {
+            t->ev_used |= (uint8_t)(1u << i);
+            t->ev_kinds[i] = kinds & MOY_EV_ALL;
+            for (uint8_t s = 0; s < MOY_INPUT_SOURCES; s++) {
+                t->ev_cur[i][s] = t->ring[s] ? t->ring[s]->head : 0;
+                t->ev_lost[i][s] = 0;
+            }
+            *r = i;
+            got = MOY_INPUT_OK;
+            break;
+        }
+    }
+    UNLOCK(t);
+    return got;
+}
+
+static bool reader_ok(const moy_input_t *t, int r) {
+    return r >= 0 && r < (int)MOY_EV_READERS && (t->ev_used & (1u << r));
+}
+
+int moy_input_reader_free(moy_input_t *t, int r) {
+    if (!reader_ok(t, r)) {
+        return MOY_INPUT_STALE;
+    }
+    LOCK(t);
+    t->ev_used &= (uint8_t)~(1u << r);
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
+// A reader's cursor on source s moved up to the oldest record the ring holds.
+static uint32_t *cursor_locked(moy_input_t *t, int r, uint8_t s) {
+    const moy_input_ring_t *g = t->ring[s];
+    uint32_t *c = &t->ev_cur[r][s];
+    if ((int32_t)(*c - (g->head - g->n)) < 0) {
+        *c = g->head - g->n;
+    }
+    return c;
+}
+
+size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n) {
+    if (!reader_ok(t, r)) {
+        return 0;
+    }
+    size_t k = 0;
+    LOCK(t);
+    uint32_t kinds = t->ev_kinds[r];
+    while (k < n) {
+        // the oldest record any source holds for this reader, its gap first
+        int best = -1;
+        uint32_t best_t = 0;
+        for (uint8_t s = 0; s < t->nsrc; s++) {
+            const moy_input_ring_t *g = t->ring[s];
+            if (g == NULL) {
+                continue;
+            }
+            uint32_t c = *cursor_locked(t, r, s);
+            if (c == g->head) {
+                continue;
+            }
+            uint32_t ts = g->rec[c & g->mask].t_us;
+            if (best < 0 || (int32_t)(ts - best_t) < 0) {
+                best = s;
+                best_t = ts;
+            }
+        }
+        if (best < 0) {
+            break;
+        }
+        moy_input_ring_t *g = t->ring[best];
+        if (t->ev_lost[r][best]) {
+            moy_event_t *e = &out[k++];
+            e->t_us = best_t;
+            e->src = SRC16(best);
+            e->kind = MOY_EV_LOST;
+            e->prov = g->prov;
+            e->a = 0;
+            e->id = 0;
+            e->b = t->ev_lost[r][best];
+            t->ev_lost[r][best] = 0;
+            continue;
+        }
+        const moy_event_t *e = &g->rec[t->ev_cur[r][best]++ & g->mask];
+        if (kinds & MOY_EV_BIT(e->kind)) {
+            out[k++] = *e;
+        }
+    }
+    UNLOCK(t);
+    return k;
+}
+
+size_t moy_input_pending(moy_input_t *t, int r) {
+    if (!reader_ok(t, r)) {
+        return 0;
+    }
+    size_t k = 0;
+    LOCK(t);
+    uint32_t kinds = t->ev_kinds[r];
+    for (uint8_t s = 0; s < t->nsrc; s++) {
+        const moy_input_ring_t *g = t->ring[s];
+        if (g == NULL) {
+            continue;
+        }
+        uint32_t *c = cursor_locked(t, r, s);
+        k += t->ev_lost[r][s] != 0;
+        // a record this reader would skip is skipped now, so it never reads
+        // as unread when the ring wraps
+        while (*c != g->head && !(kinds & MOY_EV_BIT(g->rec[*c & g->mask].kind))) {
+            (*c)++;
+        }
+        for (uint32_t i = *c; i != g->head; i++) {
+            k += (kinds & MOY_EV_BIT(g->rec[i & g->mask].kind)) != 0;
+        }
+    }
+    UNLOCK(t);
     return k;
 }
 
@@ -684,6 +1045,7 @@ int moy_input_news(moy_input_t *t, uint32_t *h) {
 void moy_input_release_all(moy_input_t *t) {
     LOCK(t);
     for (uint8_t i = 0; i < t->nsrc; i++) {
+        put_buttons_locked(t, i, t->front->src[i].held, 0);
         t->front->src[i].held = 0;
         t->front->src[i].mods = 0;
         t->front->src[i].pbuttons = 0;

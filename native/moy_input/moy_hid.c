@@ -170,6 +170,38 @@ int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
     return moy_input_typed(moy_hid_event(usage, mods, caps));
 }
 
+uint16_t moy_hid_usage(int32_t ev) {
+    int32_t c = MOY_INPUT_CODE(ev);
+    uint8_t mods = MOY_INPUT_MODS(ev);
+    uint8_t u = 0;
+    switch (c) {
+        case MOY_INPUT_KEY_RIGHT: u = 0x4F; break;
+        case MOY_INPUT_KEY_LEFT: u = 0x50; break;
+        case MOY_INPUT_KEY_DOWN: u = 0x51; break;
+        case MOY_INPUT_KEY_UP: u = 0x52; break;
+        case '\n': u = 0x28; break;
+        default: break;
+    }
+    if (u == 0 && c >= 0x01 && c <= 0x1A && c != 0x08 && c != '\t' && c != '\r') {
+        u = (uint8_t)(0x04 + c - 0x01);         // a Ctrl chord typed as its control byte
+        mods |= MOY_INPUT_MOD_CTRL;
+    }
+    // Else the usage moy_hid_event types `c` from, plain before shifted;
+    // 0x32 is the non-US key, whose '#' and '~' a US keyboard types elsewhere.
+    for (uint8_t v = 0x04; u == 0 && v <= 0x4E; v++) {
+        if (v == 0x32) {
+            continue;
+        }
+        if (MOY_INPUT_CODE(moy_hid_event(v, 0, false)) == c) {
+            u = v;
+        } else if (MOY_INPUT_CODE(moy_hid_event(v, 0x02, false)) == c) {
+            u = v;
+            mods |= MOY_INPUT_MOD_SHIFT;
+        }
+    }
+    return u ? (uint16_t)(u | (uint16_t)mods << 8) : (uint16_t)((uint16_t)mods << 8);
+}
+
 enum {
     B_LEFT = 1u << 0, B_RIGHT = 1u << 1, B_UP = 1u << 2, B_DOWN = 1u << 3,
     B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_STOP = 1u << 10,

@@ -13,6 +13,9 @@
 #   HidMachine                   the BLE keyboard central's machine over a fake stack
 #   event                        a key event: its code and modifiers
 #   typed                        the byte a key event types
+#   InputTable.reader            the event rings' readers (moy_event.h): events, pending
+#   pin_clock                    the records' clock, held for a test
+#   hid_usage                    a key event as its HID usage and modifiers
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/history/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
@@ -43,11 +46,11 @@ import os
 
 try:                                    # the host's runtime package
     from . import host_native, native_build
-    from .ticks import _ticks_ms
+    from .ticks import _ticks_ms, _ticks_us
 except ImportError:                     # loaded flat, runtime/ on sys.path
     import host_native
     import native_build
-    from ticks import _ticks_ms
+    from ticks import _ticks_ms, _ticks_us
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -64,6 +67,7 @@ SOURCES = 8
 PLAYERS = 8
 UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
+_TICKS_US_MASK = (1 << 30) - 1  # and its ticks_us period: an event's stamp
 OK, STALE, FULL, NOMEM, BAD = range(5)
 
 CURSOR_IDLE_MS = 2000   # hide the trackball cursor after this long with no movement
@@ -80,6 +84,21 @@ KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
 KEY_PGUP, KEY_PGDN = 0x114, 0x115
 # The pointer's buttons, a bit each.
 PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
+
+# The event records (native/moy_input/moy_event.h): a record's fields in an
+# events() buffer, its kinds, the kind masks a reader takes, its provenance.
+EV_VERSION = 1
+EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = range(7)
+EV_FIELDS = 7
+(EV_KEY_DOWN, EV_KEY_UP, EV_TEXT, EV_BTN, EV_TOUCH_DOWN, EV_TOUCH_MOVE, EV_TOUCH_UP,
+ EV_EDGE) = range(1, 9)
+EV_LOST = 16
+EV_KEYS = (1 << EV_KEY_DOWN) | (1 << EV_KEY_UP) | (1 << EV_TEXT)
+EV_TOUCH = (1 << EV_TOUCH_DOWN) | (1 << EV_TOUCH_MOVE) | (1 << EV_TOUCH_UP)
+EV_PAD = 1 << EV_BTN
+EV_ALL = (1 << 17) - 2
+PROV_ISR, PROV_FIFO, PROV_POLL = 0, 1, 2
+EV_DEPTH = 32
 
 P_NONE = 0
 P_LIVE = 1                     # there is a pointer at all
@@ -187,11 +206,35 @@ _SIGS = (
     ("moy_input_ptr_apply", [_P, _P, _U32], _I),
 )
 
+
+class _Event(ctypes.Structure):
+    _fields_ = [("t_us", _U32), ("src", ctypes.c_uint16), ("kind", _U8), ("prov", _U8),
+                ("a", ctypes.c_uint16), ("id", ctypes.c_uint16), ("b", _U32)]
+
+
+class _Ring(ctypes.Structure):
+    _fields_ = [("depth", _U32), ("head", _U32), ("count", _U32), ("drops", _U32),
+                ("prov", _U8), ("internal", _B), ("src", ctypes.c_uint16)]
+
+
+_EV_SIGS = (
+    ("moy_input_source_events", [_P, _U32, _U8, _U32], _I),
+    ("moy_input_post", [_P, _U32, _U8, ctypes.c_uint16, ctypes.c_uint16, _U32], _I),
+    ("moy_input_ring_info", [_P, _U32, ctypes.POINTER(_Ring)], _I),
+    ("moy_input_reader", [_P, _U32, ctypes.POINTER(_I)], _I),
+    ("moy_input_reader_free", [_P, _I], _I),
+    ("moy_input_events", [_P, _I, ctypes.POINTER(_Event), ctypes.c_size_t], ctypes.c_size_t),
+    ("moy_input_pending", [_P, _I], ctypes.c_size_t),
+    ("moy_input_now_us", [], _U32),
+    ("moy_input_pin_clock", [_U32], None),
+    ("moy_hid_usage", [_I32], ctypes.c_uint16),
+)
+
 _LIB = [None]
 
 
 # This module's share of the host's one library (runtime/host/host_native.py).
-PART = native_build.Part("input", ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
+PART = native_build.Part("input", ("moy_input.h", "moy_event.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
                                    "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
                                    "moy_hid.c"), (_INPUT, _SPINE), shim=_SHIM)
 
@@ -206,7 +249,7 @@ def _lib():
         if path is None:
             raise ImportError("moy_input: no C compiler for the host build")
         d = ctypes.CDLL(path)
-        for name, args, res in _SIGS + _DRV_SIGS:
+        for name, args, res in _SIGS + _DRV_SIGS + _EV_SIGS:
             fn = getattr(d, name)
             fn.argtypes = args
             fn.restype = res
@@ -319,6 +362,22 @@ class InputSource:
     def key(self, value):
         """A one-shot key: delivered as this source's key for exactly one frame."""
         _check(_lib().moy_input_key(self.state._t, self.h, value), "key")
+
+    def set_events(self, prov, depth):
+        """This source's event ring made again, empty: `prov` (PROV_*) and
+        `depth` records."""
+        _check(_lib().moy_input_source_events(self.state._t, self.h, prov, depth), "events")
+
+    def post(self, kind, a=0, id=0, b=0):
+        """A record of the producer's own, stamped now."""
+        _check(_lib().moy_input_post(self.state._t, self.h, kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF), "post")
+
+    def ring(self):
+        """(depth, count, drops, prov, internal, src): this source's ring."""
+        g = _Ring()
+        _check(_lib().moy_input_ring_info(self.state._t, self.h, ctypes.byref(g)), "ring")
+        return (g.depth, g.count, g.drops, g.prov, g.internal, g.src)
 
 
 class InputTable:
@@ -599,6 +658,43 @@ class InputTable:
         """Do the sources sit on more than one player slot?"""
         return _lib().moy_input_multi(self._t)
 
+    # -- the event rings -----------------------------------------------------
+    def reader(self, kinds=EV_ALL):
+        """A reader of `kinds` (a mask of 1 << kind): its number."""
+        r = _I()
+        _check(_lib().moy_input_reader(self._t, kinds, ctypes.byref(r)), "reader")
+        return r.value
+
+    def reader_free(self, r):
+        _check(_lib().moy_input_reader_free(self._t, r), "reader")
+
+    def events(self, into, r):
+        """Reader `r`'s records into `into` (an array('i'), EV_FIELDS ints a
+        record, as many as fit), each stamp on the microsecond clock wrapping
+        at 2^30, time.ticks_us's on a board; answers how many."""
+        cap = len(into) // EV_FIELDS
+        if cap == 0:
+            return 0
+        buf = (_Event * cap)()
+        clock = _lib().moy_input_now_us()
+        ticks = _ticks_us()
+        n = _lib().moy_input_events(self._t, r, buf, cap)
+        for i in range(n):
+            e = buf[i]
+            k = i * EV_FIELDS
+            into[k + EV_T] = (ticks - ((clock - e.t_us) & 0xFFFFFFFF)) & _TICKS_US_MASK
+            into[k + EV_SRC] = e.src
+            into[k + EV_KIND] = e.kind
+            into[k + EV_PROV] = e.prov
+            into[k + EV_A] = e.a
+            into[k + EV_ID] = e.id
+            into[k + EV_B] = e.b - (1 << 32) if e.b & 0x80000000 else e.b
+        return n
+
+    def pending(self, r):
+        """How many records reader `r` has waiting (a gap counting one)."""
+        return _lib().moy_input_pending(self._t, r)
+
     def player_count(self):
         return len(self.source_players())
 
@@ -645,6 +741,17 @@ def pointer_state(inp, out):
 # kernel (native/moy_input/moy_input_task.c); the host has none, so each is
 # None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
 # is the drivers' table, the one a board's console reads.
+
+def pin_clock(us):
+    """The records' clock held at `us` microseconds (0: the real one)."""
+    _lib().moy_input_pin_clock(us & 0xFFFFFFFF)
+
+
+def hid_usage(ev):
+    """The HID usage a key event's key is (low byte) and its modifiers (high
+    byte): a KEY record's `a`."""
+    return _lib().moy_hid_usage(ev)
+
 
 def event(code, mods=0):
     """The key event of `code` typed with `mods` held."""

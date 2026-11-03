@@ -164,6 +164,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.web_console import WebConsole
 
+# The OS's own names for a Python app (moybyte.py): its events read the rings
+# of the input this Workstation is built over.
+try:
+    import moybyte as _moybyte
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moybyte as _moybyte
+
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
 try:
@@ -803,6 +810,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """Injected-service attach points + the shell processes (Project/Player/
         EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
+        if input is not None:
+            _moybyte.bind(input)
         # The (store, root, can_manage, with_sd) guard 4-tuple as ONE object
         # (#209 landing B, system_store.py). FIRST, because everything that
         # touches storage takes it: both store-owning collaborators below AND

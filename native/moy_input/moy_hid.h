@@ -188,6 +188,11 @@ bool moy_hid_decode(const uint8_t *r, size_t n, uint8_t *mods, uint8_t keys[6], 
 // 0 for a usage that is no key; moy_hid_keycode is the byte that event types.
 int32_t moy_hid_event(uint8_t usage, uint8_t mods, bool caps);
 int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps);
+// A key event (moy_input.h) -> the HID usage that types it on a US layout in
+// the low byte and the modifiers in the high byte (moy_event.h's KEY field):
+// moy_hid_event's inverse, the Shift a character needs added. A key no usage
+// types answers usage 0 with its modifiers.
+uint16_t moy_hid_usage(int32_t ev);
 // The buttons a typed byte presses: Enter and Esc on every surface, the
 // letters and Space only while a game owns the keys (`cart`).
 uint32_t moy_hid_buttons_for_key(int32_t key, bool cart);

@@ -70,6 +70,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import os_log as _os_log
 try:
+    import moybyte as _moybyte
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moybyte as _moybyte
+try:
     from moy_play import Tick as TickScheduler     # the kernel's tick model
     import moy_play as _moy_play
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -593,6 +597,7 @@ class Player(PlayerDiag):
         self._paused_at = 0
         self._audio_held = 0
         _os_log.end(self.pid)
+        _moybyte.end(self.pid)
         self.pid = None
         # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
         # (ws.project still points at this run's Project here -- both exit call
@@ -914,6 +919,7 @@ class Player(PlayerDiag):
         pid named by the cart's id, current until the run's world is
         released; a re-run without a release ends the last one first."""
         _os_log.end(self.pid, "restart")
+        _moybyte.end(self.pid)
         c = cart or {}
         self.pid = _os_log.begin(c.get("id") or c.get("title") or "cart")
         self.crash_seq = 0

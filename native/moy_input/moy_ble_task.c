@@ -424,6 +424,8 @@ moy_hid_t *moy_ble_hid(void) {
         if (t == NULL || moy_input_source(t, "ble", 0, &h) != MOY_INPUT_OK) {
             return NULL;
         }
+        // a report is stamped as the host task takes it off the controller's queue
+        moy_input_source_events(t, h, MOY_EV_FIFO, MOY_EV_DEPTH);
         moy_hid_init(s_h, &s_ops, t, h);
         load(s_h);
         s_inited = true;
