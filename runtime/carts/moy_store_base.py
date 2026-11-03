@@ -219,7 +219,7 @@ USER_NS_KEY = "author"
 # (`"moybyte": {"type": "app", ...}`), never loose at the top level. A field
 # of these at the top level reads as absent: the readers are strict.
 VENDOR_KEY = "moybyte"
-VENDOR_FIELDS = ("type", "system", "order", "permissions",
+VENDOR_FIELDS = ("type", "system", "order", "permissions", "required",
                  "config", "edit", "targets", "age_mode", "app", "assets",
                  "graduated", "glass", "pictures", "animates")
 

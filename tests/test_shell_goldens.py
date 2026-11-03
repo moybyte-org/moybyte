@@ -713,6 +713,8 @@ def _surface_plan(ws, cfg):
     plan.append(("settings_licences", licences))
     plan.append(("settings_licence", licence))
     plan.append(("settings_log", syslog))
+    plan.append(("settings_permissions",
+                 lambda: ws.settings_layer.open_page("permissions")))
     plan.append(("about", about))
     plan.append(("unlock_banner", unlock))
     cart = _cart_by_title(ws, _EDITOR_CART)
@@ -738,6 +740,8 @@ def _surface_plan(ws, cfg):
             enter = _after_appearance(ws, enter)
             pages = False
         plan.append(("app_" + app, enter))
+        if app == "getcarts":
+            plan.append(("app_getcarts_consent", _get_carts_consent(ws)))
         if app == "appearance" and cfg.get("appearance"):
             plan.append(("app_appearance_walls", _walls_page(ws)))
             plan.append(("app_appearance_name",
@@ -993,6 +997,20 @@ def _open_get_carts(ws):
     return enter
 
 
+def _get_carts_consent(ws):
+    """The install prompt over Get Carts' shelf's first cart, its lines the
+    permission table's for a cart that asks for the network, its own
+    settings and nearby consoles."""
+    def enter():
+        from runtime import app_perms
+        app = ws._apps_by_id["getcarts"]
+        app.cur = app.rows[0]
+        app.question = app_perms.prompt(
+            {"runtime": "lua", "permissions": ["graphics", "network", "prefs", "multiplayer"]})
+        app._go("consent")
+    return enter
+
+
 def surface_names(config_name):
     """The surfaces a config covers -- the key set its goldens must carry."""
     cfg = CONFIGS[config_name]
@@ -1013,10 +1031,12 @@ def surface_names(config_name):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
     names += ["launcher", "settings"]
     names += ["settings_achievements", "settings_licences", "settings_licence",
-              "settings_log", "about", "unlock_banner"]
+              "settings_log", "settings_permissions", "about", "unlock_banner"]
     names += ["editor_" + t for t in TABS]
     for a in APPS:
         names.append("app_" + a)
+        if a == "getcarts":
+            names.append("app_getcarts_consent")
         if a == "appearance" and cfg.get("appearance"):
             names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]

@@ -278,7 +278,7 @@ _DOC_GRANT = "moybyte.document"
 
 
 def make_system_api(ctx_factory, cart, canvas=None,
-                    editor=None, request=None, keep=None):
+                    editor=None, request=None, keep=None, perms=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -298,9 +298,11 @@ def make_system_api(ctx_factory, cart, canvas=None,
     shell, not a role. Without them `open_editor` simply has no name.
 
     The context is a RUN grant (native/moy_app), keyed by the cart's id and
-    made from its permissions by the C policy (`moy_app.policy`); `keep` is
-    handed the context so the run can end its grant when it ends."""
-    perms = cart.get("permissions") if cart else None
+    made from its permissions by the C policy (`moy_app.policy`): `perms`,
+    the run's granted ones (`app_perms.check`), else the manifest's; `keep`
+    is handed the context so the run can end its grant when it ends."""
+    if perms is None:
+        perms = cart.get("permissions") if cart else None
     roles, kind = _moy_app.policy(perms)
     # `theme` and `surface` are always held: `theme()`, `content_rect()` and
     # `bar_h()` are ungated reads of their rows. Requesting one twice is

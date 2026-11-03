@@ -42,6 +42,14 @@ The screens, in the order a kid meets them:
   LICENCE    a file the cart needs that is not in its release (Doom's WAD)
              shows its licence before it is fetched. No has the focus; I
              agree is the only way on.
+  INSTALL?   the install prompt (runtime/shell/app_perms.py), once every
+             file is checked and before anything moves onto the shelf: a
+             dialog over the download naming what the cart can reach, No
+             first. Install puts it on the shelf with every permission it
+             lists and records that consent; No (B, Esc) removes the build,
+             and the shelf is as it was. A cart that asks for nothing a game
+             does not, or an update that adds nothing, is not asked about.
+             One that requires what this console lacks is not installed.
   YOUR COPY  a console that can be handed a file (the browser) first asks
              whether it can read that file from anywhere the index names --
              its mirror beside the index, then its archive's hosts; where it
@@ -87,6 +95,11 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.app_shell import ListShellApp
     from runtime.layout_base import (bar_rows, content_of, metric_class, window_foot,
                                      DESK)
+
+try:
+    import app_perms as _perms
+except ImportError:  # pragma: no cover - direct host import
+    from runtime import app_perms as _perms
 
 try:
     import cart_index as _ci
@@ -140,7 +153,7 @@ ARCHIVE_RAM_SHARE = 4
 # The phases whose work runs a slice per frame from draw().
 BUSY = ("checking", "licence_fetch", "probing", "picked", "connecting", "getting")
 # The phases past the list that are pages of their own (`has_page`).
-_PAGES = ("licence", "pick", "cart", "done", "failed")
+_PAGES = ("licence", "pick", "cart", "done", "failed", "consent")
 # The pages that say why there is no shelf, and Try again.
 _AWAY = ("nonet", "nowifi", "unreached", "nomemory")
 
@@ -360,6 +373,8 @@ class GetCartsAppLayer(ListShellApp):
         self._lic_text = ""
         self.accepted = []
         self.asking = False           # Remove's dialog is up
+        self.question = None          # the install prompt's lines, while it is up
+        self._consented = None        # (app id, permissions) the install records
         self.why = ""                 # the NOT INSTALLED page's reason
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
@@ -987,17 +1002,44 @@ class GetCartsAppLayer(ListShellApp):
         self.job = _ci.Install(row["cart"], row["plan"], self._inst.net(),
                                self._inst.root(), self._inst.op, self.accepted,
                                archive=keep, supplied=self.supplied,
-                               keep=self._inst.keep())
+                               keep=self._inst.keep(), ask=self._ask)
         self._go("getting")
         self.armed = True
+
+    def _ask(self, stage):
+        """The install check and prompt for the checked build at `stage`
+        (`cart_index.Install`'s `ask`): the prompt's lines, or None to go
+        on. A permission the cart requires that this console lacks refuses
+        the install."""
+        folder = self.cur["cart"]["folder"]
+        try:
+            man = json.loads(_read(stage + "/manifest.json"))
+        except (OSError, ValueError):
+            man = {}
+        cart = _perms.manifest_cart(man if isinstance(man, dict) else {}, folder)
+        consent = self._inst.consent()
+        _g, _a, refusal = consent.check(cart, install=True)
+        if refusal is not None:
+            raise _ci.InstallError("Not for this console: " + refusal,
+                                   "%s: %s" % (folder, refusal))
+        aid = _perms.app_id(cart)
+        self._consented = (aid, list(cart["permissions"]))
+        return _perms.prompt(cart, consent.get(aid))
 
     def _pump_get(self):
         job = self.job
         if job.step():
+            if job.asking is not None and self.question is None:
+                self.question = job.asking
+                self._release()           # nothing left to fetch
+                self._go("consent")
             return
         self._release()
         self._unpick()
         if job.path:
+            if self._consented is not None:
+                self._inst.consent().record(*self._consented)
+                self._consented = None
             self._inst.rescan()
             self._build_rows()
             self._go("done")
@@ -1048,11 +1090,29 @@ class GetCartsAppLayer(ListShellApp):
         self._say("Using " + self.cur["cart"]["name"])
         self._damage.all()
 
+    def _answer(self, install):
+        """The install prompt answered: Install puts the build on the shelf,
+        No removes it."""
+        self.question = None
+        job = self.job
+        if install:
+            job.agree()
+            self._go("getting")
+            self.armed = True
+            return
+        self._consented = None
+        job.cancel()
+        self._unpick()
+        self._say("Not installed. Nothing changed.")
+        self._go("cart")
+        self._focus_go()
+
     def _remove(self):
         """The cart off the shelf, its saves and the files it wrote with it:
-        what Remove's dialog said."""
+        what Remove's dialog said; and the consent it was installed with."""
         self.asking = False
         row = self.cur
+        had = self._inst.find(row["cart"]["folder"])
         root = self._inst.root()
         keep = self._inst.keep()
         try:
@@ -1062,6 +1122,8 @@ class GetCartsAppLayer(ListShellApp):
             self._say("Can't remove it", "warn")
             self._damage.all()
             return
+        if had is not None:
+            self._inst.consent().forget(_perms.app_id(had))
         self._inst.rescan()
         self._build_rows()
         self.cur = None
@@ -1083,7 +1145,7 @@ class GetCartsAppLayer(ListShellApp):
     def _in_pane(self):
         """Whether the desk shows this phase in the pane beside the shelf."""
         ph = self.phase
-        return ph in ("list", "cart", "done", "getting") or (
+        return ph in ("list", "cart", "done", "getting", "consent") or (
             ph in BUSY and self.cur is not None and ph != "checking")
 
     def back(self):
@@ -1097,6 +1159,8 @@ class GetCartsAppLayer(ListShellApp):
         if self.asking:
             self.asking = False
             self._focus = vid("REMOVE")
+        elif ph == "consent":
+            self._answer(False)
         elif ph == "licence":
             self._press("NO")
         elif ph in BUSY or ph == "pick":
@@ -1252,7 +1316,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._pane(cv)
         elif ph in ("cart", "done"):
             self._cart_page(cv)
-        elif ph == "getting":
+        elif ph in ("getting", "consent"):
             self._getting(cv)
         elif ph == "licence":
             self._licence(cv, th)
@@ -1263,6 +1327,7 @@ class GetCartsAppLayer(ListShellApp):
         else:
             self._empty()
         self._dialog()
+        self._prompt()
         if self.toast is not None:
             self._toast()
         f = ui.focus()
@@ -1730,6 +1795,8 @@ class GetCartsAppLayer(ListShellApp):
         """(title, line, done, total) of the work in hand."""
         name = self.cur["cart"]["name"] if self.cur is not None else ""
         job = self.job
+        if self.phase == "consent":
+            return ("Getting " + name, "", 1, 1)  # every byte in and checked
         if self.phase == "getting" and job is not None:
             if job.keeping:
                 return ("Getting " + name, "Putting it on the shelf…", job.total, job.total)
@@ -1969,6 +2036,25 @@ class GetCartsAppLayer(ListShellApp):
             self.asking = False
             self._focus = vid("REMOVE")
             self._damage.all()
+
+    def _prompt(self):
+        """The install prompt: what the cart can reach, a line a permission
+        (app_perms.prompt), in a dialog whose first stop is No."""
+        lines = self.question
+        if self.phase != "consent" or lines is None or self.cur is None:
+            return
+        pick = ui.dialog("Install %s?" % self.cur["cart"]["name"], ("No", "Install"),
+                         "primary")
+        if any(ln != _perms.TRUSTED for ln in lines):
+            ui.label("It can:", {"tone": "dim"})
+        for ln in lines:
+            ui.label(ln, {"wrap": True, "lines": 2, "tone": "danger"}
+                     if ln == _perms.TRUSTED else {"wrap": True, "lines": 2})
+        ui.dialog()
+        if pick == 1:
+            self._answer(True)
+        elif pick == 0:
+            self._answer(False)
 
     def _toast(self):
         lay = self.layout

@@ -185,6 +185,18 @@ def test_the_grant_column_is_the_permission_map():
             r["role"], r["verb"], r["grant"], want)
 
 
+def test_the_grant_column_is_the_permission_tables():
+    """A role a manifest permission grants is the permission table's
+    `role:<role>` row (runtime/shell/app_perms.py): the install prompt names
+    exactly the grants the policy can make."""
+    by_role = {}
+    for r in json.loads(TABLE.read_text())["permissions"]:
+        if r["grants"].startswith("role:"):
+            by_role[r["grants"][5:]] = r["perm"]
+    for r in _rows():
+        assert r["grant"] == by_role.get(r["role"], "never"), (r["role"], r["verb"])
+
+
 def _doc_table():
     text = (ROOT / "docs" / "app_api_v1.md").read_text()
     out = {}

@@ -15,12 +15,13 @@ The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
 Appearance, Text size, Layout, Volume, Brightness and Name), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
 channel and the update flows) and About (the version and its channel, the
-board, storage, battery, Achievements, Licences and the System log). Brightness is the
+board, storage, battery, App permissions, Achievements, Licences and the System log). Brightness is the
 panel light's (the idle ladder's top, `IdleLadder.brightness`); Name stores
 a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
-toggle's warning, the last crash record, Achievements
-(runtime/system/achievements_ui.py), Licences (runtime/system/about_ui.py) and the
-System log (runtime/system/log_ui.py, `open_log`) are pages of
+toggle's warning, the last crash record, App permissions
+(runtime/system/perms_ui.py), Achievements (runtime/system/achievements_ui.py),
+Licences (runtime/system/about_ui.py) and the System log
+(runtime/system/log_ui.py, `open_log`) are pages of
 their own in place of the rows, Settings' way back closing them; the Wi-Fi
 panel is also what the bar's wifi popover holds (`wifi_page`,
 runtime/system/popover.py).
@@ -55,11 +56,13 @@ try:
     from achievements_ui import AchievementsPage
     from about_ui import LicencesPage, version_words, board_words
     from log_ui import LogPage
+    from perms_ui import PermsPage
     from widgets import ACHIEVEMENTS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements_ui import AchievementsPage
     from runtime.about_ui import LicencesPage, version_words, board_words
     from runtime.log_ui import LogPage
+    from runtime.perms_ui import PermsPage
     from runtime.widgets import ACHIEVEMENTS
 try:
     from editors_base import TextEntry
@@ -233,8 +236,10 @@ _STABLE_BETA = ("Stable", "Beta")
 # the name a reader knows it by.
 BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guition 3.5″",
           "guition_p4": "Guition P4 10″", "xiao_zero": "XIAO ESP32-S3"}
-_PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log"}
-_PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "System log"}
+_PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
+                "permissions": "App permissions"}
+_PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
+              "permissions": "App permissions"}
 
 # The groups, in page order: (caption, row keys). A row of kind `idle` is
 # Power's.
@@ -402,6 +407,7 @@ class SettingsLayer:
             ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
         self.syslog = LogPage()
+        self.permits = PermsPage(ws.app_context("permissions", PermsPage.NEEDS))
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
@@ -447,6 +453,8 @@ class SettingsLayer:
             self.achievements.open()
         elif page == "log":
             self.syslog.open(pid)
+        elif page == "permissions":
+            self.permits.open()
         else:
             self.licences.open()
         self._name_bar(self.page_title() or "Settings")
@@ -1571,6 +1579,9 @@ class SettingsLayer:
         lvl = self._lvl
         if lvl is not None:
             _ui.info("Battery", "%d%%" % lvl)
+        self._kinds["App permissions"] = "link"
+        if _ui.link("App permissions"):
+            self.open_page("permissions")
         self._kinds["Achievements"] = "link"
         if _ui.link("Achievements", self._ach_words):
             ws.ach_ui._secret_taps = 0
@@ -1643,7 +1654,7 @@ class SettingsLayer:
             if not self.licences.back():
                 self.close_page()
             self._name_bar(self.page_title() or "Settings")
-        elif view == "log":
+        elif view in ("log", "permissions"):
             self.close_page()
         elif view == "wifi":
             if self.wifi_pick is not None:
@@ -1743,6 +1754,8 @@ class SettingsLayer:
                 self._name_bar(self.page_title() or "Settings")
             elif view == "log":
                 self.syslog.draw(self._content())
+            elif view == "permissions":
+                self.permits.draw(self._content())
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()

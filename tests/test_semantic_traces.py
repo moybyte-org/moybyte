@@ -843,7 +843,7 @@ seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'pictures', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
+loaded ['author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'pictures', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
 publish True
 recover True True
 journal 1 None False False
@@ -2312,6 +2312,7 @@ def roles_trace(ws):
     say("lease", i.hold() in (True, False), i.release())
     say("op", i.op(lambda: 7))
     say("wifi page", i.wifi_open(), i.wifi(), i.wifi_open())
+    say("consent", i.consent() is ws.consent)
     ws.settings_layer.back()                # the panel goes back to where it was
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
@@ -2515,6 +2516,7 @@ install True True False None True True True
 lease True None
 op 7
 wifi page False None True
+consent True
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2

@@ -1015,6 +1015,13 @@ class Install:
     player gave instead of its archive. On any failure the staging folder goes
     and the shelf is exactly as it was; `cancel()` does the same on purpose.
 
+    With an `ask`, `ask(stage)` is called once every file is checked and
+    before anything moves into place, inside a store session: None goes on,
+    anything else is the install prompt's question (runtime/shell/
+    app_perms.py), held in `asking` until `agree()` goes on or `cancel()`
+    removes the build; an InstallError it raises refuses the install. A
+    denied install leaves the shelf exactly as it was.
+
     With a `keep` (the module docstring's keeper) the checked build goes to the
     store of record before it moves into place, and moves only once that store
     has it: `keeping` is True meanwhile, and there is no cancelling -- every
@@ -1022,8 +1029,10 @@ class Install:
     comes, whether or not anybody is still stepping it."""
 
     def __init__(self, cart, p, net, root, session, accepted=(), chunk=None,
-                 step_ms=None, archive="ram", supplied=None, keep=None):
+                 step_ms=None, archive="ram", supplied=None, keep=None, ask=None):
         self.cart = cart
+        self.ask = ask
+        self.asking = None
         self.plan = p
         self.net = net
         self.root = root
@@ -1093,7 +1102,7 @@ class Install:
         still on their way."""
         if self.finished:
             return False
-        if self.keeping:
+        if self.keeping or self.asking is not None:
             return True
         budget = self.step_ms if budget_ms is None else budget_ms
         t = _ticks_ms()
@@ -1103,6 +1112,11 @@ class Install:
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
+                        ask, self.ask = self.ask, None
+                        if ask is not None:
+                            self.asking = self.in_store(lambda: ask(self.stage))
+                            if self.asking is not None:
+                                return True
                         self._commit()
                         return not self.finished
                     if self._reader is None and not self._open_step():
@@ -1137,6 +1151,11 @@ class Install:
                        "%s: %s" % (self.folder, exc))
         else:
             self._fail(STOPPED, "%s: %r" % (self.folder, exc))
+
+    def agree(self):
+        """The install prompt accepted: the build moves into place on the
+        next step."""
+        self.asking = None
 
     def cancel(self):
         """Stop, keeping nothing. False once the keeper has the build: past

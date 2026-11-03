@@ -735,6 +735,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
     }
     put(d, MP_QSTR_edit, json_or(e->edit, mp_obj_new_list(0, NULL)));
     put(d, MP_QSTR_permissions, json_or(e->permissions, mp_obj_new_list(0, NULL)));
+    put(d, MP_QSTR_required, json_or(e->required, mp_obj_new_list(0, NULL)));
     if (e->input_n == MOY_CAT_NO_INPUT) {
         put(d, MP_QSTR_input, mp_const_none);
     } else {

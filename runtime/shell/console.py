@@ -327,8 +327,10 @@ import moy_app as _moy_app
 # in-process except cannot do this job.
 try:
     from crash_guard import CrashGuard, WALLPAPER_KEY
+    import app_perms as _app_perms
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
+    from runtime import app_perms as _app_perms
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the system font scale, the theme's wallpaper, `custom`
@@ -1124,6 +1126,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # stay the same object across a load. One ledger per role -- see
         # runtime/shell/crash_guard.py, "Two roles, two ledgers".
         self.app_guard = CrashGuard(self.system)
+        self.consent = _app_perms.Consent(self.system,
+                                          lambda: _app_perms.services(self))
         self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
@@ -1494,9 +1498,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """True iff the open cart's manifest permissions include `name` (#38).
         moy_carts.load() carries the manifest "permissions" list onto the cart;
         an embedded/legacy cart with none simply never matches, so it gets no
-        gated APIs."""
+        gated APIs. One the run holds absent (runtime/shell/app_perms.py) is
+        not held."""
         perms = self.cart.get("permissions") if self.cart else None
-        return bool(perms) and name in perms
+        return bool(perms) and name in perms and name not in self.player.absent
 
     def cart_editor_focus(self, handle):
         """A cart's editor handle takes (`handle`) or releases (None) the

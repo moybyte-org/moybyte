@@ -510,6 +510,11 @@ class InstallServer:
             return True
         return bool(ws.wm.top_is("settings") and ws.settings_layer.wifi_view)
 
+    def consent(self, g):
+        """The console's consent records (`app_perms.Consent`): what the
+        install prompt asked and the user allowed, per app id."""
+        return self.__ws.consent
+
     def free(self, g):
         """`(free bytes, block size)` of the store the carts live on, or None:
         the keeper's answer where there is one."""

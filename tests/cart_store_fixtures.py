@@ -78,13 +78,14 @@ class Repo:
     def add(self, cid, version=1, runtime="wasm", name=None, spdx="MIT",
             modules=(("esp32s3", 2), ("esp32p4", 2)), extra=None, external=None,
             config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main", cover=None,
-            release=None, mirror=False, files=None):
+            release=None, mirror=False, files=None, moybyte=None):
         """`release` puts the release asset on another host (a GitHub release
         download's base URL) instead of under `base`; `mirror` serves a copy
         under `base` too and names it in the index, the way moy-spec's
         `moy index --mirror releases` does. Each of `external` is (path, data,
         archive member), or with a fourth item True a file the repository
-        also serves bare at files/<id>/<path>, named as its mirror."""
+        also serves bare at files/<id>/<path>, named as its mirror. `moybyte`
+        is the manifest's Moybyte object (its permissions, say)."""
         folder = cid + ".moy"
         name = name or cid.replace("_", " ").title()
         if files is not None:
@@ -92,9 +93,11 @@ class Repo:
             files = dict(files)
             modules = ()
         else:
-            files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
-                                                  "runtime": runtime, "main": "main.wasm",
-                                                  "memory": 4}).encode(),
+            man = {"format": "moy-1", "title": name, "runtime": runtime,
+                   "main": "main.wasm", "memory": 4}
+            if moybyte is not None:
+                man["moybyte"] = moybyte
+            files = {"manifest.json": json.dumps(man).encode(),
                      "config.json": config,
                      "main.wasm": main + str(version).encode(),
                      "LICENSES.txt": b"MIT License\n\nfor " + cid.encode()}

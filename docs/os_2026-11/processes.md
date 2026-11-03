@@ -116,16 +116,16 @@ OS reads:
   **several entry points** sharing one grant and one prefs namespace
   (`"entries": {"app": "...", "service": "..."}`): the LoRa node and
   its radio app are one cart;
-- **permissions**: names from the one table (below): a role (`files:documents`,
+- **permissions**: names from the one table (below): a role (`files:docs`,
   `prefs`, `appearance`, `launch`, `clipboard`), the ungated floor
-  (`graphics`, `input`), a device API (`mic`, `battery`, `brightness`,
+  (`graphics`, `input`, `audio`), a device API (`mic`, `battery`, `brightness`,
   `alarms` (`between_apps.md` §3), `gps`, `lora`, `ble`, `usb:hid`, `midi`,
   `camera`, `http`, `network`, `multiplayer`, `media`, `media:url`,
   `notifications` §7), `autostart` (§5), a lease (`lease:<resource>` naming a
   row of the board's resource table, `hardware.md` §1), or `native`. A
-  permission may be marked
-  `required`: revoked, it makes the launch refused with a message naming
-  it, where any other revoked permission is absent (`None`);
+  permission the manifest also lists in `"moybyte": {"required": [...]}`
+  is required: absent, it makes the launch refused with a message naming
+  it, where any other absent permission reads `None`;
 - **background**: a service's one-line reason the OS shows ("LoRa node"),
   and `"lanes"` naming the timed lanes a wasm or ELF process exports
   (`hardware.md` §2).
@@ -144,31 +144,52 @@ no boundary (§3). For **ELF** permissions
 are informational (`tiers.md` §1). Where the manifest does not bind, the
 **install prompt** does the telling (the overview's §1).
 
-A permission naming a class or resource the board lacks is refused **at
-install**, naming the board, and **re-checked at launch** (a card moves
-between boards; an update may drop a class). **Install is all or nothing
-(owner, 2026-11-03)**: accepting the prompt installs the app with every
-permission it lists, denying installs nothing. Any single permission can be
-revoked later in Settings, and from the next launch the app sees it absent
-(`None`), or is refused with a message if it marked the permission
-`required`. An update that adds a permission prompts again, all or nothing.
+A permission is **absent** for a run when Settings turned it off, when an
+update added it and nobody consented, when the console lacks the service it
+needs, or when the cart's tier may not hold it. Turned off or unconsented,
+its names read `None`; a permission naming what this console has not (`pins`
+on a board without them) installs and leaves no name, as the board has no
+verb, and only a `required` one is refused, **at install** naming the board
+and **again at launch** (a card moves between boards; an update may drop a
+class). **Install is all or
+nothing (owner, 2026-11-03)**: accepting the prompt installs the app with
+every permission it lists, denying installs nothing. Any single permission
+can be turned off later in Settings (About → App permissions,
+`runtime/system/perms_ui.py`), and from the next launch the app sees it
+absent, or is refused with a message if it requires it. An update that adds
+a permission prompts again, all or nothing; one that adds none, and a cart
+that asks for nothing a game does not, install unasked.
 
-**The permission table (sketch).** One JSON source in `native/moy_app/`, each
-row: the name, what it grants, the tiers that may hold it, what its line of
-the install prompt says (its own name, or `"full"`: "full access to the
-console", the overview's §4), the board class it needs, whether it is
-**enforced** on that tier or informational (above).
+**Consent is recorded with the grant's key**: the console's `system.json`
+holds one record per app id (`moy_app.id_for`, what the grant, the prefs
+namespace and the crash strikes are keyed by), the permissions consented
+at install and the ones turned off since (`runtime/shell/app_perms.py`,
+`Consent`). A cart with no record (written in the Editor, a seed, a cart
+copied onto the card by hand) never prompts and runs on its manifest, less
+what Settings turned off. Get Carts asks once every file of the download is
+checked and before anything moves onto the shelf, since a carts index
+carries no manifest (`cart_index.Install`'s `ask`); a denied install
+removes the build, and Remove forgets the record.
 
-```json
-{"perm": "graphics",   "grants": "floor",      "tiers": ["python","lua","wasm","elf"]},
-{"perm": "files:documents", "grants": "role:files", "tiers": ["python","lua","wasm","elf"]},
-{"perm": "autostart",  "grants": "boot",       "tiers": ["python","lua","wasm","elf"]},
-{"perm": "mic",        "grants": "api:mic",    "tiers": ["python","lua","wasm","elf"], "needs": "class:mic"},
-{"perm": "pins",       "grants": "lease:gpio:digital", "tiers": ["python","lua","wasm","elf"]},
-{"perm": "lease:uart", "grants": "lease:uart", "tiers": ["python","wasm","elf"], "prompt": "full"},
-{"perm": "notifications", "grants": "api:notify", "tiers": ["python","lua","wasm","elf"]},
-{"perm": "native",     "grants": "elf",        "tiers": ["elf"], "prompt": "full", "enforced": false}
-```
+**The permission table.** One JSON source, `native/moy_app/roles.json`'s
+`"permissions"` beside the role rows, restated as `app_perms.TABLE` (held
+equal to it, and its `role:` rows to the C policy's allowlist, by
+`tests/test_app_perms.py`), which the prompt, the install check, the launch
+check and Settings all read. Each row: the name (`files` also matches
+`files:<kind>`), what it grants (`floor`, `role:<role>`, `api:<service>`,
+`boot`, or `marker`: a shipped app's claim on its cart, granting nothing),
+the tiers that may hold it, its line of the install prompt (None for the
+floor and the markers: nothing to consent to and nothing to turn off), the
+console service it needs (`wifi`, `net`, `gpio`), and the names a Python
+cart's namespace holds while it is granted, each `None` while it is turned
+off.
+The rows Python holds in phase 1 are the floor, the roles, `network`,
+`multiplayer`, `pins`, `console`, `notifications`, `autostart` and the
+markers; a Python app's prompt also says it is a trusted app. The later
+phases' rows (`mic` and the other device APIs, the leases, `native`) arrive
+with their APIs, and with them a prompt line of `"full"` ("full access to
+the console", the overview's §4) and whether the row is enforced on its
+tier or informational (above).
 
 ## 3. Python: one VM, stepped cooperatively
 

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import app_context as _ac        # noqa: E402
 from runtime import bar_layer as _bar         # noqa: E402
-from runtime import crash_guard, moy_carts, system_api  # noqa: E402
+from runtime import app_perms, crash_guard, moy_carts, system_api  # noqa: E402
 import moy_app                                 # noqa: E402
 from runtime.crash_guard import CrashGuard    # noqa: E402
 from runtime.moy_spine import Settings        # noqa: E402
@@ -107,6 +107,10 @@ def test_every_role_is_either_grantable_or_named_ungrantable():
     somebody maps a permission onto it without noticing there was a policy.
     The policy is C's (native/moy_app): its permission table is an allowlist."""
     grantable = {role for _perm, role in moy_app.perms()}
+    # ...and the permission table's role rows are that allowlist
+    # (runtime/shell/app_perms.py, the table the install prompt reads)
+    assert grantable == {r[app_perms.GRANTS][5:] for r in app_perms.TABLE
+                         if r[app_perms.GRANTS].startswith("role:")}
     never = set(NEVER_GRANTED)
     assert grantable | never == set(_ac.ROLES), (
         "roles classified by neither moy_app.perms() nor NEVER_GRANTED: %s"

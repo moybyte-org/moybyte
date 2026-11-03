@@ -665,7 +665,7 @@ _SERVED = {
     "notify": "achieve award count has found_on progress today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
-                "writable op rescan free find net keep wifi wifi_open"),
+                "writable op rescan free find net keep wifi wifi_open consent"),
 }
 
 

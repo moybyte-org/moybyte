@@ -181,6 +181,10 @@ except ImportError:                     # host: the runtime package
     from runtime.system_api import draws_in_look, make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
 try:
+    import app_perms as _perms
+except ImportError:                     # host: the runtime package
+    from runtime import app_perms as _perms
+try:
     from audio_session import native as _audio_native
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio_session import native as _audio_native
@@ -283,6 +287,10 @@ class Player(PlayerDiag):
                                       # window resize / font-scale change re-runs it and a
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
+        # The run's permissions (runtime/shell/app_perms.py): the manifest's
+        # granted ones and its absent ones.
+        self.granted = ()
+        self.absent = ()
         self._look = False            # a built-in app: its code draws in the look, outside
                                       # the app-cart boundary (system_api.draws_in_look)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
@@ -445,7 +453,7 @@ class Player(PlayerDiag):
                 or APP_EXT not in (cart.get("extensions") or ())):
             bind(0, ())
             return
-        bind(ctx.grant, _moy_app.policy(cart.get("permissions"))[0])
+        bind(ctx.grant, _moy_app.policy(self.granted)[0])
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
@@ -950,6 +958,8 @@ class Player(PlayerDiag):
         self._app_layout = None
         self._app_wh = None
         self._app_id = None
+        self.granted = ()
+        self.absent = ()
         self._look = False
         self._ui = None
         self._uh = None
@@ -999,6 +1009,15 @@ class Player(PlayerDiag):
                    if e not in SUPPORTED_EXTENSIONS]
         if missing:
             return "needs extension: " + ", ".join(missing)
+        # The launch check (runtime/shell/app_perms.py): what Settings turned
+        # off, what the console lacks, a permission an update added unasked
+        # are absent; a `required` one absent refuses the run by name.
+        if cart:
+            granted, absent, refusal = ws.consent.check(cart)
+            if refusal is not None:
+                return refusal
+            self.granted = tuple(granted)
+            self.absent = tuple(absent)
         # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
         # field -- an out-of-set size was carried raw by the loader and is
         # refused here BY NAME, like an unknown runtime; an in-set size binds a
@@ -1360,7 +1379,7 @@ class Player(PlayerDiag):
             ns.update(make_system_api(ws.app_context, cart, ws.canvas,
                                       editor=self._open_cart_editor,
                                       request=ws.take_text_request(),
-                                      keep=self._keep_grant))
+                                      keep=self._keep_grant, perms=self.granted))
             if "ui" in ns:
                 self._uh = _ui_draw.AppHost()
                 self._ui = [self._uh.ctx, _array("i", [0] * _UI_IN_LEN), ws.canvas]
@@ -1387,6 +1406,12 @@ class Player(PlayerDiag):
                         ns["background"] = self._cart_bg
         if console is not None:
             ns.update(console.api())
+        # A permission the manifest lists that Settings turned off reads None
+        # in a Python cart, never NameError (app_perms.absent_names).
+        if self.absent and cart.get("runtime", "python") == "python":
+            rec = ws.consent.get(_perms.app_id(cart))
+            for name in _perms.absent_names(self.absent, rec):
+                ns[name] = None
         # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
         # cart's generated half -- data tables + the compat shim -- lives in
         # p8.lua and runs ahead of main.lua, so main.lua is the cart's own code
@@ -1584,7 +1609,7 @@ class Player(PlayerDiag):
                 or APP_EXT not in (cart.get("extensions") or ())
                 or not ws.is_user_app(cart)):
             return
-        roles, kind = _moy_app.policy(cart.get("permissions"))
+        roles, kind = _moy_app.policy(self.granted)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True)

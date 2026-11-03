@@ -657,8 +657,9 @@ def _update(dt):
     net.send((me.x, me.y))          # tell the friend where I am
 ```
 
-Both `net` and `on_net` are **only present** when the manifest grants
-`"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`).
+Both `net` and `on_net` are **only present** when the manifest asks for
+`"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`) —
+and are `None` while it is turned off in Settings.
 
 > **Keeping two consoles in step:** if both sides run the same game logic, seed your
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
@@ -764,6 +765,22 @@ and never crashes, so there is no `try` to write.
 
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
+
+What you asked for can still be **turned off**: whoever owns the console can
+switch any permission off in Settings (About → App permissions). Then the
+name is there and is `None`, so `if prefs is None:` is how an app copes (a
+console without Wi-Fi or pins gives `network` or `pins` no names at all, as
+above). A permission your app cannot work without goes in `required` too,
+and then the console refuses to start the app, or one without what it needs
+to install it, and says which one is missing:
+
+```json
+"moybyte": {"type": "app", "permissions": ["graphics", "input", "prefs"], "required": ["prefs"]}
+```
+
+A cart installed from Get Carts is shown with what it asks for first, and is
+put on the shelf only if the player says Install; a cart you write yourself
+in the Editor is never asked about.
 
 An app is drawn on change (the frame loop, above), so an idle one costs the
 console nothing. An app that moves on its own — a clock, a meter, an
@@ -1028,8 +1045,8 @@ same here as on any other console that implements the spec.
 | `rnd(n=1.0)` | random float in `[0, n)` |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
-| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
+| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
+| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
 
 ---
 

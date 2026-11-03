@@ -791,6 +791,9 @@ def _load(path, whole, folder=None):
             # normal kid cart has just ["graphics","input"] (or none) and stays
             # network-less -- the sandbox is preserved.
             "permissions": ven.get("permissions", []),
+            # The permissions the cart cannot run without (runtime/shell/
+            # app_perms.py): one of them absent refuses its launch by name.
+            "required": ven.get("required", []),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).
