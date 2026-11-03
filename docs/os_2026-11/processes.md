@@ -235,7 +235,7 @@ socket.socket(...)                     lwIP's, under "network"
 requests.get(url)                      micropython-lib over socket; non-blocking use rides asyncio
 asyncio.sleep(s) / sleep_ms(ms) / StreamReader over a UART or a socket
 machine.UART / I2C / SPI / Pin / PWM / ADC   handed back by a lease (hardware.md §1), invalid after the sweep
-print(...) / input()                   the process's stdio; print also reaches the log (§9)
+print(...) / input()                   a script's stdio; its print also reaches the log (§9); a cart's print draws
 logging.getLogger(name).info(...)      micropython-lib logging, routed to the OS log (§9)
 moybyte.every(ms, fn) / after(ms, fn) / on(source, fn) / at(t, fn)   wake sources (§1); at needs "alarms"
 moybyte.notify(summary, body, icon=None, actions=(), urgency=1, replaces_id=0) -> id   §7
@@ -359,23 +359,25 @@ testable with no LoRa.
 
 ## 9. The system log and crash reports
 
-Today's diagnostics are the kernel's crash record
-(`native/moy_kernel/moy_crash.h`), the strike ledger
-(`native/moy_spine/moy_ledger.h`), the Player's panel
-(`runtime/run/player.py`), `print` to serial and the HITCH and LOOP lines
-(`native/moy_kernel/moy_loop.h`). None of it is addressed to an app's author.
-
-**The design: one OS log**, a ring in PSRAM (`native/moy_kernel/moy_log.h`)
-of records `(t_us, severity, process id, text)`, the **syslog severities**
-(`emerg` … `debug`, RFC 5424; owner, 2026-11-03), a crash written at
-`crit`. Writers: the kernel's diag lines; a process's `print` and its log
-calls (micropython-lib `logging` for Python, `moybyte.log` for Lua and
-wasm), routed to the ring under its process id (and still mirrored to
-serial); the crash intake, with the
-record's text; the Player's panel text and a Python app's **traceback**,
-under the app's process id. Readers: the terminal's `log` command (as
-`dmesg`/`logcat`; `log -f`, `log <process>`), and before the terminal
-exists a dev-channel word `log` and a desk viewer. **A crash shows itself
+**One OS log** (P1.3): a ring in PSRAM (`native/moy_kernel/moy_log.h`, its
+size the board define `MOY_LOG_BYTES`) of records `(t_us, seq, process id,
+severity, text)`, the **syslog severities** (`emerg` … `debug`, RFC 5424;
+owner, 2026-11-03). A write takes a lock and allocates nothing; a full ring
+drops its oldest records, and a reader that falls behind restarts at the
+oldest. Process ids: 0 the kernel, 1 the shell, one per run until the
+process table (P1.6) takes over spawn and `current`. Writers: the kernel's
+HITCH (warning), LOOP and PERF (debug) lines and the crash intake (crit);
+the shell's diag lines; each run's start, exit and crash (a Python
+traceback, or the Lua and wasm panel text, at crit); a console script's
+`print` (still mirrored to serial); `logging` (`moy_logging`, installed as
+`logging` on a VM that has none; on the host a cart's `import logging` is
+CPython's own and misses the ring); `moybyte.log` for Lua and wasm arrives
+in phase 5. A **cart's** `print` is the draw verb, never routed. A run the
+VM stops for writes its exit record once the kernel's run end has the
+process table. Readers: the kernel word `log [level] [+seq] [name]`, which
+answers with no VM running; Settings → About → System log
+(`runtime/system/log_ui.py`, `open log` on the dev channel); and the
+terminal's `log` (phase 3). **A crash shows itself
 to its author**: the task manager's row offers "this app crashed: details"
 (the traceback from the ring), and a background app's crash posts a
 notification (§7) that opens it. Developers need this from day one, so
