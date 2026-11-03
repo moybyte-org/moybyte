@@ -233,7 +233,11 @@ UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 # ubuntu-26.04 runner installs from Ubuntu's amd64v3 variant, whose gcc
 # defaults to -march=x86-64-v3, and tests/test_audio_parity.py diverged there.
 # Pinned, the result no longer depends on the compiler's default target.
-UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off
+# MICROPY_ENABLE_VM_ABORT is the boards' too (each console's mpconfigboard.h):
+# the scheduler's callback guard, native/moy_kernel/modmoy_guard.c. It changes
+# the VM's state struct, so a build tree whose objects were compiled with
+# other flags is rebuilt whole (the `moy_cflags` stamp below).
+UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off -DMICROPY_ENABLE_VM_ABORT=1
 UNIX_MP_R32_CFLAGS := $(UNIX_MP_CFLAGS) \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
@@ -293,6 +297,9 @@ unix-micropython:
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
 	@for b in build-moybyte build-moybyte-board; do \
+	  c=$(UNIX_MP_SRC)/ports/unix/$$b/moy_cflags; \
+	  if [ -d "$$(dirname $$c)" ] && [ "$$(cat $$c 2>/dev/null)" != "$(UNIX_MP_CFLAGS)" ]; then \
+	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b; fi; \
 	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
 	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
 	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
@@ -306,6 +313,7 @@ unix-micropython:
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
+	@echo "$(UNIX_MP_CFLAGS)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_cflags
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
@@ -315,6 +323,7 @@ unix-micropython:
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
 	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
+	  echo "$(UNIX_MP_CFLAGS)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_cflags && \
 	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \

@@ -2,7 +2,9 @@
 # (moy_kernel.c), its first light (moy_boot.c), the board's I2C bus (moy_bus.c), and the frame: the loop,
 # the idle ladder, PERF and the dev channel (moy_loop.c, moy_idle.c,
 # moy_perf.c, moy_devch.c, the module `moy_loop`), and the OS log (moy_log.c,
-# the module `moy_log`). A board TAKES it in
+# the module `moy_log`), and the scheduler's callback guard (modmoy_guard.c,
+# the module `moy_guard`, built where the board's mpconfigboard.h turns on
+# MICROPY_ENABLE_VM_ABORT). A board TAKES it in
 # board.toml ([[native.shared.take]]), and taking it is what makes the kernel
 # own app_main.
 #
@@ -27,6 +29,7 @@ target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_log.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_log.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_loop.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_guard.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_loop_board.c
 )
 

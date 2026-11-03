@@ -135,3 +135,7 @@
 // released layer buffers it keeps for the next run. A window's buffer is
 // never pooled (the desk re-mints at every size); a cart's worlds are.
 #define MOY_GLASS_POOL_BYTES                (2 * 1024 * 1024)
+
+// The VM abort: the scheduler stops a background Python callback that never
+// returns while the shell goes on (native/moy_kernel/modmoy_guard.c).
+#define MICROPY_ENABLE_VM_ABORT             (1)
