@@ -32,6 +32,7 @@ import contextlib
 import hashlib
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -2580,6 +2581,46 @@ def _internal_heap(board):
 
 def _ble(board):
     return "(getattr(ws, 'ble_keyboard', None) or ws.keyboard)"
+
+
+def _ble_up_and_working(board, ble, timeout=15.0):
+    """The host synced (`available`) and the machine left `off` without an
+    error: scanning, idle, a pad connected, or switched off in Settings."""
+    end = time.time() + timeout
+    while True:
+        up = board.pyval("%s.available" % ble, strict=True)
+        status = board.pyval("%s.settings_status()" % ble, strict=True)
+        if up and status[1] not in ("off", "error") and status[4] is None:
+            return status
+        assert time.time() < end, "BLE did not come up: %r" % (status,)
+        board.drain(0.5)
+
+
+def ble_stops_and_starts_again(board, cycles=3, dwell=3.0):
+    """The BLE host stops and starts again `cycles` times, working after each
+    start and still answering after each stop. A start after a stop once
+    re-made NimBLE's event pool under events that still held blocks of it, and
+    the controller's next HCI event panicked the board (task btController,
+    LoadProhibited at 0) within seconds. `stop()` answers whether it took a
+    running host down. The board leaves with BLE as it found it."""
+    ble = _ble(board)
+    was_up = board.pyval("bool(%s.available)" % ble, strict=True)
+    try:
+        if was_up:
+            assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is True
+        assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is False
+        for i in range(cycles):
+            assert board.pyval("%s.start()" % ble, timeout=30, strict=True) is True, i
+            _ble_up_and_working(board, ble)
+            board.drain(dwell)
+            assert board.pyval("%s.available" % ble, strict=True) is True, i
+            assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is True, i
+            assert board.pyval("%s.settings_status()[1]" % ble, strict=True) == "off", i
+    finally:
+        if was_up:
+            board.pyval("%s.start()" % ble, timeout=30)
+    if was_up:
+        _ble_up_and_working(board, ble)
 
 
 def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):

@@ -24,9 +24,11 @@ enum {
 // task's lock: a status, never a decision.
 moy_hid_t *moy_ble_hid(void);
 // Bring the NimBLE host up (the controller first, on a hosted board). The
-// console starts it once and never stops it; stop is the on-glass suites'.
+// console starts it once and never stops it (Settings' switch is a verb that
+// keeps the host up); stop is the on-glass suites', and answers whether it
+// took a running host down.
 bool moy_ble_start(void);
-void moy_ble_stop(void);
+bool moy_ble_stop(void);
 bool moy_ble_up(void);
 // Queue a verb for the host task.
 bool moy_ble_verb(uint8_t verb, const moy_hid_addr_t *addr);

@@ -559,6 +559,10 @@ def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
     on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
 
 
+def test_bluetooth_stops_and_starts_again(board):
+    on_glass.ble_stops_and_starts_again(board)
+
+
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)

@@ -1284,10 +1284,8 @@ static mp_obj_t ble_start(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ble_start_obj, ble_start);
 
 static mp_obj_t ble_stop(mp_obj_t self_in) {
-    bool was = moy_ble_up();
-    moy_ble_stop();
     (void)self_in;
-    return mp_obj_new_bool(was);
+    return mp_obj_new_bool(moy_ble_stop());
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ble_stop_obj, ble_stop);
 

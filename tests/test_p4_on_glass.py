@@ -848,6 +848,10 @@ def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
     on_glass.a_ctrl_c_ends_a_front_run(board, clear=3)
 
 
+def test_bluetooth_stops_and_starts_again(board):
+    on_glass.ble_stops_and_starts_again(board)
+
+
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)
