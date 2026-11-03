@@ -179,14 +179,24 @@ instance and no state swap, and "embed, not fork"
 instance per process is #246's comment of 2026-11-03. What this costs,
 written down: **no memory isolation**; the apps' live
 objects lengthen the shell's GC; a stop relies on the shell dropping every
-reference; a runaway callback freezes the shell until the abort. Python
-stays trusted under per-app consent (the overview's §1).
+reference; a runaway callback holds the shell until the abort lands,
+which can be one GC pause after its budget, and a callback blocked inside
+C with no pending check (a socket read without a timeout, a lock wait) is
+never aborted. Python stays trusted under per-app consent (the overview's
+§1).
 
 **The scheduler**: a background
 Python app's callbacks (§1) run in the loop's slack after present, each
 under a **per-callback slice** the shell measures, overruns going warning
 → strike → suspend; a callback that never returns gets a timer-driven
-`mp_sched_vm_abort` while the shell survives, which P1.1 proves. On a
+`mp_sched_vm_abort` while the shell survives (P1.1 proved it on the
+T-Deck and a P4, 2026-11-03, #246). The mechanism is a guard around each
+callback: its own abort point, a one-shot timer that requests the abort,
+the outer point, the gc lock and the scheduler restored after; it runs on
+the main thread only, and every console board builds with
+`MICROPY_ENABLE_VM_ABORT`. An abort skips `finally` and `__exit__`, so a
+lock the callback took stays held; an aborted callback is a strike, and
+the ladder's slice is sized to land after a GC pause. On a
 board with the VM stop, Python background apps **pause** while the VM is
 stopped and resume with it (§5; the mini-VM spike, P3.8, may keep
 them running). The hardening rung is the overview's §4.
@@ -203,11 +213,13 @@ only for what is genuinely ours (below, and `hardware.md` §4).
 threads share the one VM and its GIL, so one runs Python at a time and
 every GC stops them all: a thread's timing depends on the rest of Python,
 and a stall can last as long as a collection (#246 holds the pause
-figures). A thread counts toward its app's process in the task manager,
-and closing the app ends it, as the VM stop already joins threads
-(`native/moy_kernel/moy_kernel.h`). MicroPython cannot kill a thread, so
-one that ignores the stop holds the close until the VM-abort path takes
-it (whether it reaches one is P1.1's question). For audio, a thread or the loop renders ahead into the ring at a
+figures). The shell creates an app's threads through a registering entry,
+so each counts toward its app's process in the task manager, and closing
+the app ends them with a **per-thread kill**: an exception the thread
+cannot catch, delivered at its next pending check. The VM abort never
+reaches a thread that is not the main one (P1.1), and upstream MicroPython
+has no thread kill; a thread blocked inside C ends only at the VM stop,
+which deletes the VM's threads. For audio, a thread or the loop renders ahead into the ring at a
 depth greater than a GC pause (`hardware.md` §2).
 
 **Verbs (sketch).** The standard names, Python's (each tier has the same by
