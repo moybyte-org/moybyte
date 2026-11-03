@@ -682,6 +682,20 @@ def _surface_plan(ws, cfg):
         page.entry = page._ids["MicroPython"]
         page._focus = "MicroPython"
 
+    def syslog():
+        # The ring as a board's first minute leaves it, on a pinned clock:
+        # the shell, a game's start, its log calls and its crash.
+        import moy_log
+        moy_log.init(16384)
+        pids = {"kernel": moy_log.KERNEL, "shell": moy_log.SHELL}
+        for t, level, who, text in GOLDEN_LOG:
+            if who not in pids:
+                pids[who] = moy_log.spawn(who)
+            moy_log.pin_clock(t)
+            moy_log.write(level, pids[who], text)
+        moy_log.pin_clock(0)
+        ws.settings_layer.open_page("log")
+
     def about():
         home()
         ws._golden_about = True
@@ -698,6 +712,7 @@ def _surface_plan(ws, cfg):
     plan.append(("settings_achievements", achievements))
     plan.append(("settings_licences", licences))
     plan.append(("settings_licence", licence))
+    plan.append(("settings_log", syslog))
     plan.append(("about", about))
     plan.append(("unlock_banner", unlock))
     cart = _cart_by_title(ws, _EDITOR_CART)
@@ -825,6 +840,21 @@ def _after_appearance(ws, enter):
 _PAUSE_CART, _PAUSE_FRAMES = "Star Catcher", 30
 MENU_SURFACES = ("sysmenu", "pause", "pause_options")
 # The badges the About surfaces show found, with the targets' two days.
+# The System log page's ring: (t_us, level, process, text), levels syslog's.
+GOLDEN_LOG = (
+    (412000, 2, "kernel", "crash kind=abort task=mp_task app=- pc=4037a1c2 reset=panic what=heap"),
+    (1830500, 6, "shell", "STAGE desktop int_free=61k big=31k int_tot=180k ps_free=5120k"),
+    (2264100, 6, "shell", "wifi autoconnected: home"),
+    (9001250, 6, "moybyte.brick_siege", "start moybyte.brick_siege"),
+    (9420000, 7, "moybyte.brick_siege", "score: level 1 bricks=48"),
+    (12880400, 4, "kernel", "HITCH ms=96 inputs=0.4 present=12.1 frame=81.3"),
+    (15102900, 3, "moybyte.brick_siege", "score: lives ran out"),
+    (15103300, 2, "moybyte.brick_siege",
+     "Traceback (most recent call last):\n  File \"<cart>\", line 88, in _update\n"
+     "TypeError: unsupported types for +: 'int', 'NoneType'"),
+    (15103900, 5, "shell", "the run stopped: Brick Siege"),
+)
+
 GOLDEN_BADGES = (("first_open", 20261001), ("first_run", 20261001), ("first_paint", 20261001),
                  ("first_map", 20261012), ("first_code", 20261001), ("play_five", 20261009),
                  ("toolbox", 20261001), ("konami", 20261001), ("clock_tinker", 20261001))
@@ -982,8 +1012,8 @@ def surface_names(config_name):
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
     names += ["launcher", "settings"]
-    names += ["settings_achievements", "settings_licences", "settings_licence", "about",
-              "unlock_banner"]
+    names += ["settings_achievements", "settings_licences", "settings_licence",
+              "settings_log", "about", "unlock_banner"]
     names += ["editor_" + t for t in TABS]
     for a in APPS:
         names.append("app_" + a)

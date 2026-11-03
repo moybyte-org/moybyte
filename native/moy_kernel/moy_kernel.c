@@ -109,6 +109,7 @@
 #include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_kernel.h"
+#include "moy_log.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
 #include "moy_str.h"
@@ -351,6 +352,10 @@ static void moy_kernel_print_rec(const char *tag, const moy_crash_rec_t *r) {
            (unsigned)r->bt[0], (unsigned)r->bt[1], moy_kernel_reset_name(r->reset),
            (unsigned)r->boot, (unsigned)r->uptime_ms, r->what);
     fflush(stdout);
+    moy_log_say(MOY_LOG_CRIT, MOY_LOG_KERNEL, "%s kind=%s task=%s %s=%s pc=%08x reset=%s what=%s",
+                tag, moy_crash_kind_name(r->kind), r->task, moy_crash_role_name(r->role),
+                r->id[0] ? r->id : "-", (unsigned)r->pc, moy_kernel_reset_name(r->reset),
+                r->what);
 }
 
 static void moy_kernel_intake(void) {
@@ -1749,6 +1754,10 @@ void app_main(void) {
     // Hook for a board to run code at start up.
     // This defaults to initialising NVS and detecting the flash size.
     MICROPY_BOARD_STARTUP();
+
+    // MOY: the OS log's ring, before the intake writes the crash into it and
+    // before the VM's first heap area (moy_log.h).
+    moy_log_reserve();
 
     // MOY: the crash intake, before anything can overwrite the evidence.
     moy_kernel_intake();

@@ -15,11 +15,12 @@ The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
 Appearance, Text size, Layout, Volume, Brightness and Name), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
 channel and the update flows) and About (the version and its channel, the
-board, storage, battery, Achievements and Licences). Brightness is the
+board, storage, battery, Achievements, Licences and the System log). Brightness is the
 panel light's (the idle ladder's top, `IdleLadder.brightness`); Name stores
 a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
 toggle's warning, the last crash record, Achievements
-(runtime/system/achievements_ui.py) and Licences (runtime/system/about_ui.py) are pages of
+(runtime/system/achievements_ui.py), Licences (runtime/system/about_ui.py) and the
+System log (runtime/system/log_ui.py, `open_log`) are pages of
 their own in place of the rows, Settings' way back closing them; the Wi-Fi
 panel is also what the bar's wifi popover holds (`wifi_page`,
 runtime/system/popover.py).
@@ -53,10 +54,12 @@ except ImportError:  # pragma: no cover - host fallback
 try:
     from achievements_ui import AchievementsPage
     from about_ui import LicencesPage, version_words, board_words
+    from log_ui import LogPage
     from widgets import ACHIEVEMENTS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements_ui import AchievementsPage
     from runtime.about_ui import LicencesPage, version_words, board_words
+    from runtime.log_ui import LogPage
     from runtime.widgets import ACHIEVEMENTS
 try:
     from editors_base import TextEntry
@@ -230,7 +233,8 @@ _STABLE_BETA = ("Stable", "Beta")
 # the name a reader knows it by.
 BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guition 3.5″",
           "guition_p4": "Guition P4 10″", "xiao_zero": "XIAO ESP32-S3"}
-_PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences"}
+_PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log"}
+_PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "System log"}
 
 # The groups, in page order: (caption, row keys). A row of kind `idle` is
 # Power's.
@@ -390,13 +394,14 @@ class SettingsLayer:
         self.crash_view = False
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
-        self.page = None              # "achievements", "licences" or None
+        self.page = None              # "achievements", "licences", "log" or None
         self._ach_n = -1              # the badges the Achievements row last said
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
         self._ach_words = ""
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
+        self.syslog = LogPage()
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
@@ -430,15 +435,18 @@ class SettingsLayer:
         self._typing = False
         self._about = self._read_about()
 
-    # -- About's pages: Achievements, Licences ------------------------------------
+    # -- About's pages: Achievements, Licences, the System log --------------------
 
-    def open_page(self, page):
-        """Open About's `page` ("achievements", "licences") over the rows,
-        Settings' way back closing it."""
+    def open_page(self, page, pid=None):
+        """Open About's `page` ("achievements", "licences", "log") over the
+        rows, Settings' way back closing it; the log on one process where
+        `pid` names it."""
         self.commit_name()
         self.page = page
         if page == "achievements":
             self.achievements.open()
+        elif page == "log":
+            self.syslog.open(pid)
         else:
             self.licences.open()
         self._name_bar(self.page_title() or "Settings")
@@ -448,7 +456,7 @@ class SettingsLayer:
         was = self.page
         self.page = None
         self._name_bar("Settings")
-        self._want = "Achievements" if was == "achievements" else "Licences"
+        self._want = _PAGE_ROWS.get(was, "Licences")
         self.ws._dirty = True
 
     def _name_bar(self, title):
@@ -463,7 +471,14 @@ class SettingsLayer:
         licence's name over its text, else the page's."""
         if self.page == "licences":
             return self.licences.title()
+        if self.page == "log":
+            return self.syslog.title()
         return _PAGE_TITLES.get(self.page)
+
+    def log_moved(self):
+        """The System log page is up and a record came since it drew: the
+        console's animation gate draws it again."""
+        return self.page == "log" and self._page_of() == "log" and self.syslog.moved()
 
     # -- the cursor, as a row index ---------------------------------------------
 
@@ -1563,6 +1578,9 @@ class SettingsLayer:
         self._kinds["Licences"] = "link"
         if _ui.link("Licences"):
             self.open_page("licences")
+        self._kinds["System log"] = "link"
+        if _ui.link("System log"):
+            self.open_page("log")
         _ui.group()
 
     # -- the frame --------------------------------------------------------------------
@@ -1625,6 +1643,8 @@ class SettingsLayer:
             if not self.licences.back():
                 self.close_page()
             self._name_bar(self.page_title() or "Settings")
+        elif view == "log":
+            self.close_page()
         elif view == "wifi":
             if self.wifi_pick is not None:
                 self._wifi_cancel()
@@ -1687,6 +1707,8 @@ class SettingsLayer:
         if want is not None:
             host.focus(want)          # before the frame: its keys act on it
             self._want = None
+        if view == "log":
+            self.syslog.aim(host)
         host.begin(ws.sys_canvas, ws.theme_colors, self._content(),
                    _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
         was = ws._dirty
@@ -1719,6 +1741,8 @@ class SettingsLayer:
             elif view == "licences":
                 self.licences.draw(self._content())
                 self._name_bar(self.page_title() or "Settings")
+            elif view == "log":
+                self.syslog.draw(self._content())
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()

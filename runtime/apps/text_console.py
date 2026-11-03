@@ -64,6 +64,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import KeyEdge
 
 try:
+    import os_log as _os_log
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import os_log as _os_log
+
+try:
     from code_layer import symbols_for, draw_symbol_keys
     import ui as _ui
     import ui_draw as _ui_draw
@@ -311,20 +316,25 @@ class TextConsole:
     def api(self):
         """The names a cart with the `console` permission gets. `print` SHADOWS
         the draw verb of the same name: a script's screen is this, not a
-        raster, and both tiers say so with the same word."""
+        raster, and both tiers say so with the same word. What a script
+        prints is also its process's record in the OS log, and on serial."""
         def _print(*args, **kw):
             sep = kw.get("sep", " ")
             end = kw.get("end", "\n")
-            self.write(sep.join(str(a) for a in args) + end)
+            self._say(sep.join(str(a) for a in args) + end)
 
         def _input(prompt=""):
             return self.ask(prompt)
 
         return {"print": _print, "input": _input,
                 # Lua: registered under reserved names, bound by the prelude.
-                "__moy_say": lambda s="": self.write(str(s) + "\n"),
+                "__moy_say": lambda s="": self._say(str(s) + "\n"),
                 "__moy_ask": lambda prompt="": self.ask(prompt or ""),
                 "_moy_prelude": LUA_PRELUDE}
+
+    def _say(self, text):
+        self.write(text)
+        _os_log.printed(text)
 
     def driver(self, update):
         """Wrap the script's `_update` as the shell-owned tick.
@@ -377,6 +387,8 @@ class TextConsole:
         """A script's failure, in the console. `exc` may be an exception or the
         text the Player already turned one into."""
         text = exc if isinstance(exc, str) else _err_text(exc)
+        if not isinstance(exc, str):
+            _os_log.crashed(None, exc, text)
         name = _missing_name(text)
         self.write("\n" + text + "\n")
         if name in GATED:

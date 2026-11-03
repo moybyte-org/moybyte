@@ -28,7 +28,7 @@ COUNTS what it swallowed (`rx=` on the SERIAL line), so "something is
 injecting into stdin" is a number rather than a mystery hang.
 
 THE READER IS THE KERNEL'S (native/moy_kernel/moy_devch.c): it takes the
-bytes, runs the kernel's own words (`power`, `bl`, `quit`) and hands every
+bytes, runs the kernel's own words (`power`, `bl`, `log`, `quit`) and hands every
 other line to `run` here through the loop's word upcall. The gestures `tap`,
 `swipe` and `drag` play from C too; the words below find what they aim at.
 
@@ -1007,7 +1007,13 @@ class DevChannel:
       tap <x> <y>     a synthetic tap at canvas coords
       tap <name>      tap a named bar button (any ws.layout.<name>_btn rect)
       run [name]      select the first cart whose title matches, and run it
-      open <what>     settings|projects|appearance|wifi -- deterministic app open
+      open <what>     settings|projects|appearance|wifi|log -- deterministic app
+                      open (`log`: Settings' System log page)
+      log [level] [+seq] [name]   the OS log (native/moy_kernel/moy_log.h): a
+                      `LOG` line a line of each record at that level or more
+                      severe, from record seq on, of the processes whose name
+                      holds `name`, then `LOG end` -- a kernel word, answered
+                      with no VM running too
       swipe x0 y0 x1 y1 [frames]   a touch gesture through the real pointer
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
@@ -1985,6 +1991,10 @@ class DevChannel:
             if what == "appearance" and getattr(ws, "appearance_app", None) is not None:
                 ok = ws.open_app(ws.appearance_app)
                 print("REMOTE open appearance -> %s" % ok)
+                return
+            if what == "log" and hasattr(ws, "open_log"):
+                ws.open_log()
+                print("REMOTE open log")
                 return
             if what == "wifi" and hasattr(ws, "open_settings"):
                 ws.open_settings()

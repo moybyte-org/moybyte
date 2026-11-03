@@ -7,6 +7,7 @@
 
 #include "moy_devch.h"
 #include "moy_loop.h"
+#include "moy_log.h"
 #include "moy_perf.h"
 
 // The stage budgets in per-mille of the pacing slot; -1 is no deadline (the
@@ -549,6 +550,8 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 // PERF period by stage. Both cover the stages inside the frame's work (inputs to
 // tail); the pacing sleep is LOOP's `sleep`, and `other` is the work no stage
 // holds. A stage with no op on this tier was never metered and prints `-`.
+// Both go to the OS log under the kernel (moy_log.h): HITCH at warning, LOOP
+// and the PERF line at debug.
 
 static size_t put_ms(char *out, size_t cap, const char *name, bool have, uint32_t us) {
     if (!have) {
@@ -585,6 +588,7 @@ static void diag_frame(uint32_t elapsed, uint32_t sleep) {
     }
     h->pending |= DIAG_HITCH;
     moy_loop_say("%s", h->hitch);
+    moy_log_write(MOY_LOG_WARNING, MOY_LOG_KERNEL, h->hitch, strlen(h->hitch));
 }
 
 static void diag_window(bool emit) {
@@ -609,6 +613,7 @@ static void diag_window(bool emit) {
         }
         h->pending |= DIAG_LOOP;
         moy_loop_say("%s", h->loop);
+        moy_log_write(MOY_LOG_DEBUG, MOY_LOG_KERNEL, h->loop, strlen(h->loop));
     }
     memset(w, 0, sizeof(*w));
 }
@@ -664,6 +669,7 @@ static void account(uint32_t elapsed) {
         } else {
             moy_loop_say("%s", L.heavy->line);
         }
+        moy_log_write(MOY_LOG_DEBUG, MOY_LOG_KERNEL, L.heavy->line, strlen(L.heavy->line));
         diag_window(true);
     } else {
         moy_perf_skip(p, L.drawn);

@@ -66,6 +66,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
 try:
+    import os_log as _os_log
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import os_log as _os_log
+try:
     from moy_play import Tick as TickScheduler     # the kernel's tick model
     import moy_play as _moy_play
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -240,6 +244,8 @@ class Player(PlayerDiag):
         self._update = None
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
+        self.pid = None               # this run's process in the OS log (os_log.begin)
+        self.crash_seq = 0            # ...and its crash's record there, 0: none
         self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
         self._notice_title = None  # ...and the title it is drawn under (None: the fit's)
@@ -586,6 +592,8 @@ class Player(PlayerDiag):
         self._front = False
         self._paused_at = 0
         self._audio_held = 0
+        _os_log.end(self.pid)
+        self.pid = None
         # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
         # (ws.project still points at this run's Project here -- both exit call
         # sites run release_world ahead of replacing/slimming it).
@@ -741,6 +749,7 @@ class Player(PlayerDiag):
         _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         h0 = _hs()
         cart = self._begin_run(ws, project, t0)
+        self._log_begin(cart)
         self.verdict = _verdict(cart)
         err = self._gate_spec(ws, cart)
         if err is not None:
@@ -868,6 +877,7 @@ class Player(PlayerDiag):
             # exception whose __str__ itself raises would otherwise escape here and
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
+            self._crashed(exc, self.cart_error)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
             self.crash_file = None      # the python tier runs main and nothing else
             h1 = _hs()
@@ -899,9 +909,24 @@ class Player(PlayerDiag):
         return True
 
 
+    def _log_begin(self, cart):
+        """This run is a process of the OS log (runtime/system/os_log.py): a
+        pid named by the cart's id, current until the run's world is
+        released; a re-run without a release ends the last one first."""
+        _os_log.end(self.pid, "restart")
+        c = cart or {}
+        self.pid = _os_log.begin(c.get("id") or c.get("title") or "cart")
+        self.crash_seq = 0
+
+    def _crashed(self, exc, text):
+        """The crash intake: the run's failure into the OS log at crit, the
+        Python traceback where there is one, else the panel's words."""
+        self.crash_seq = _os_log.crashed(self.pid, exc, text)
+
     def _refuse(self, msg):
         """Refuse a run before any of the cart's code has run: the ordinary
         error panel, with no line to mark."""
+        _os_log.failed(self.pid, msg)
         self.cart_error = msg
         self.crash_line = None
         self.crash_file = None
@@ -1887,6 +1912,10 @@ class Player(PlayerDiag):
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
+            if self.notice:
+                _os_log.failed(self.pid, self.cart_error)
+            else:
+                self._crashed(None, self.cart_error)
             self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
             print("Moybyte cart %s:" % ("notice" if self.notice else "error"),
                   self.cart_error)
@@ -2154,6 +2183,7 @@ class Player(PlayerDiag):
             self.cart_error = _err_text(exc)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
             self.crash_file = None
+        self._crashed(exc if self._lua is None else None, self.cart_error)
         self._update = None
         self._draw = None
         self._disarm_pacing()  # the crash panel is a console screen

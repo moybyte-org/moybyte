@@ -365,7 +365,7 @@ Today's diagnostics are the kernel's crash record
 (`runtime/run/player.py`), `print` to serial and the HITCH and LOOP lines
 (`native/moy_kernel/moy_loop.h`). None of it is addressed to an app's author.
 
-**The design: one OS log**, a ring in PSRAM (`+native/moy_kernel/moy_log.h`)
+**The design: one OS log**, a ring in PSRAM (`native/moy_kernel/moy_log.h`)
 of records `(t_us, severity, process id, text)`, the **syslog severities**
 (`emerg` … `debug`, RFC 5424; owner, 2026-11-03), a crash written at
 `crit`. Writers: the kernel's diag lines; a process's `print` and its log

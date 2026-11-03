@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_devch.h"
+#include "moy_log.h"
 #include "moy_loop.h"
 
 enum { G_NONE, G_TAP, G_SWIPE, G_DRAG };
@@ -318,7 +319,31 @@ static bool w_bl(int argc, char **argv, const char *line) {
     return true;
 }
 
+// `log [LEVEL] [+SEQ] [NAME]`: the OS log (moy_log.h), every record at
+// LEVEL or more severe (debug: all), from record SEQ on, of the processes
+// whose name holds NAME; one `LOG` line a line, then `LOG end`. The kernel's,
+// so it answers with no VM running.
+static bool w_log(int argc, char **argv, const char *line) {
+    (void)line;
+    int level = MOY_LOG_DEBUG;
+    uint32_t since = 0;
+    const char *name = NULL;
+    for (int i = 1; i < argc; i++) {
+        int lv = moy_log_level_of(argv[i], strlen(argv[i]));
+        if (lv >= 0) {
+            level = lv;
+        } else if (argv[i][0] == '+') {
+            since = (uint32_t)strtoul(argv[i] + 1, NULL, 10);
+        } else {
+            name = argv[i];
+        }
+    }
+    moy_log_dump(since, level, name, moy_loop_say_line);
+    return true;
+}
+
 static const moy_devch_word_t KERNEL_WORDS[] = {
+    {"log", w_log},
     {"power", w_power},
     {"bl", w_bl},
     {"state", w_state},

@@ -296,6 +296,10 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_log_word_reads_the_ring(board):
+    on_glass.the_log_word_reads_the_ring(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 

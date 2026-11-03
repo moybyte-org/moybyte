@@ -103,6 +103,19 @@ def _native_ui():
 
 moy_ui = _native_ui()
 
+
+def _native_log():
+    """The OS log (native/moy_kernel/moy_log.h) over the host's one library,
+    registered as `moy_log` like the boards' module (runtime/host/moy_log.py)."""
+    if "moy_log" in _sys.modules:
+        return _sys.modules["moy_log"]
+    from . import moy_log as mod
+    _sys.modules["moy_log"] = mod
+    return mod
+
+
+moy_log = _native_log()
+
 from .editors_code import CodeEditor  # noqa: E402
 from .editors_paint_map import PaintEditor  # noqa: E402
 from .editors_sheet import SpriteSheet  # noqa: E402

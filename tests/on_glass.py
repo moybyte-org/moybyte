@@ -1175,6 +1175,20 @@ def py_probe_reaches_the_console(board):
     assert line == "PY True", line
 
 
+def the_log_word_reads_the_ring(board):
+    """The OS log (native/moy_kernel/moy_log.h) over the dev channel: a record
+    the console writes is a `LOG` line of the kernel's `log` word, under the
+    shell at its level, and the word ends with `LOG end`."""
+    line = board.cmd('py __import__("moy_log").write(5, 1, "on-glass probe")',
+                     wait_for="PY ")
+    assert line is not None and line.startswith("PY "), line
+    n0 = len(board.lines)
+    end = board.cmd("log notice shell", wait_for="LOG end")
+    assert end is not None and end.startswith("LOG end n="), end
+    got = [l for l in board.lines[n0:] if l.startswith("LOG ") and "on-glass probe" in l]
+    assert got and " notice shell/1 on-glass probe" in got[-1], board.lines[n0:]
+
+
 def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a

@@ -1794,6 +1794,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
 
+    def open_log(self, pid=None):
+        """Settings' System log page (runtime/system/log_ui.py), on one
+        process's records where `pid` names it: what a crash's "details"
+        open."""
+        self.open_settings()
+        self.settings_layer.open_page("log", pid)
+
     def _exit_settings(self):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
         # open (a running game, the Make window) stays. Desktop mode only:
@@ -3053,6 +3060,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # asynchronously. A static wallpaper would otherwise close the redraw
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
+            return True
+        # The System log page follows the ring: a new record draws it again.
+        if kind == "settings" and self.settings_layer.log_moved():
             return True
         # A verbs page the last painted frame drew coasts on a fling or eases
         # on a glide (`api_moving`): its next frame is due with nothing dirty.

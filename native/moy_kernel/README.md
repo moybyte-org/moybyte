@@ -5,7 +5,8 @@ board's entry and the VM service (`moy_kernel.c`), the frame loop
 (`moy_loop.h`), the crash record and the boot decision (`moy_crash.h`), the
 recovery floor and first light (`moy_recovery.h`, `moy_boot.h`), the idle
 ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
-(`moy_devch.h`) and the kernel's I2C bus (`moy_bus.h`). Each header states how
+(`moy_devch.h`), the OS log (`moy_log.h`, the ring every writer shares and
+the dev channel's `log` word reads) and the kernel's I2C bus (`moy_bus.h`). Each header states how
 its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 (handles, PSRAM, stopping the VM), and `native/moy_play/moy_play.h` the
 memory shares. The design record is `docs/history/native_kernel_2026-09.md`
