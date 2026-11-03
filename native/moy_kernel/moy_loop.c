@@ -297,6 +297,15 @@ uint32_t moy_loop_pace(uint32_t elapsed) {
     return 0;
 }
 
+uint32_t moy_loop_slack_us(void) {
+    if (L.tick_ms) {
+        return 0;
+    }
+    uint32_t used = now_ms() - L.last + L.debt;
+    uint32_t fms = slot_ms();
+    return used < fms ? (fms - used) * 1000u : 0u;
+}
+
 void moy_loop_pump(moy_loop_pump_t *out) {
     out->frame_ms = L.frame_ms;
     out->slot = L.slot;

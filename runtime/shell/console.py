@@ -171,6 +171,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moybyte as _moybyte
 
+# The cooperative scheduler (scheduler.py): the services this console starts
+# at its first drawn frame.
+try:
+    import scheduler as _scheduler
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import scheduler as _scheduler
+
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
 try:
@@ -1259,6 +1266,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._dirty_in = True         # a change reported before this input (handle_input)
         self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
+        self._services_due = True     # the services start at the first drawn frame
         self._press_taken = False     # ...unless a popover's change took it (popover_touch)
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
@@ -3163,6 +3171,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # system-domain now and always fully covered the backdrop anyway, so the tabs
     # just reset the game canvas's draw state and paint their own opaque body.)
 
+    def boot_services(self):
+        """The services that start with the console: every service cart
+        holding `autostart`, and those a VM stop paused (scheduler.boot)."""
+        try:
+            _scheduler.boot(self)
+        except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
+            print("Moybyte services: %s" % (exc,))
+
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
         # EMA tail) run ONLY under perf_capture -- the measurement-session mode,
@@ -3173,6 +3189,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # row's count; `carts.begin`, the handle's) ends here, at the next
         # frame: it holds no gate, so this is bookkeeping, never a flush held
         # off (native/moy_app/README.md).
+        if self._services_due and self._frames_drawn:
+            self._services_due = False
+            self.boot_services()
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:

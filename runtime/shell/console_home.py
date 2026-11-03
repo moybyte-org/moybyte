@@ -26,6 +26,7 @@ try:
     from project import Project
     from cart_manager import today_ymd as _today_ymd
     from chrome import NAMES
+    import scheduler as _scheduler
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_icons import IconHome
     from runtime.home_carousel import Carousel
@@ -34,6 +35,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.project import Project
     from runtime.cart_manager import today_ymd as _today_ymd
     from runtime.chrome import NAMES
+    from runtime import scheduler as _scheduler
 
 # The home's arrangements by the layout's `home` value
 # (docs/theme_and_shell_2026-11.md §8.10); an unknown one is the carousel.
@@ -124,12 +126,15 @@ class HomeVerbs:
     def resume_record(self):
         """The launcher's place as the resume record's text: the selection,
         the shelf's scroll, the search and the selected cart's folder (the
-        selection is found by it again, in case the shelf moved)."""
+        selection is found by it again, in case the shelf moved), and the
+        paths of the services running, which the console after the stop
+        starts again (scheduler.pause)."""
         import json
         lw = self.launcher
         sel = lw.selected() or {}
         return json.dumps({"tab": lw.tab, "sel": int(lw.sel),
-                           "search": self.search_query, "path": sel.get("path")})
+                           "search": self.search_query, "path": sel.get("path"),
+                           "svc": _scheduler.SCHED.running_paths()})
 
     def resume_launcher(self, text):
         """Land the launcher where the resume record left it. A record that
@@ -153,6 +158,9 @@ class HomeVerbs:
                         break
             self.launcher.sel = max(0, min(sel, len(items) - 1))
             self._dirty = True
+            svc = rec.get("svc")
+            if isinstance(svc, list):
+                _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
 
@@ -387,7 +395,7 @@ class HomeVerbs:
             return out
         out = []
         for c in carts:
-            if c.get("type") in ("wallpaper", "theme") or self.is_system_app(c):
+            if c.get("type") in ("wallpaper", "theme", "service") or self.is_system_app(c):
                 continue
             if tab == "mine":
                 if own(c):

@@ -422,6 +422,13 @@ static mp_obj_t loop_pace(mp_obj_t elapsed) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(loop_pace_obj, loop_pace);
 
+// slack() -> the microseconds this frame could still give away before the
+// pace's sleep (moy_loop_slack_us): a small int, allocation-free.
+static mp_obj_t loop_slack(void) {
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)moy_loop_slack_us());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(loop_slack_obj, loop_slack);
+
 static mp_obj_t loop_lit(mp_obj_t on) {
     moy_loop_set_lit(mp_obj_is_true(on));
     return mp_const_none;
@@ -756,6 +763,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_drawn), MP_ROM_PTR(&loop_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_last), MP_ROM_PTR(&loop_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_at), MP_ROM_PTR(&loop_frame_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_slack), MP_ROM_PTR(&loop_slack_obj) },
     { MP_ROM_QSTR(MP_QSTR_idle), MP_ROM_PTR(&loop_idle_obj) },
     { MP_ROM_QSTR(MP_QSTR_power), MP_ROM_PTR(&loop_power_obj) },
     { MP_ROM_QSTR(MP_QSTR_idle_state), MP_ROM_PTR(&loop_idle_state_obj) },

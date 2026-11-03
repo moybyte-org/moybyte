@@ -161,13 +161,15 @@ typedef struct {
 
 // The services a frame's tail calls up into while they are live: the
 // webhost's Python routes while it serves or says goodbye, the OTA confirm's
-// marker once. One upcall a frame carries every bit; none while no bit is
+// marker once, the background scheduler while any wake is registered
+// (runtime/system/scheduler.py). One upcall a frame carries every bit; none while no bit is
 // set. (The radio link's drain is C, moy_match: no bit.)
 enum {
     MOY_SVC_WEB = 1u << 0,
     MOY_SVC_UPDATE = 1u << 2,
     MOY_SVC_HEALTHY = 1u << 3,
     MOY_SVC_DIAG = 1u << 4,
+    MOY_SVC_SCHED = 1u << 5,
 };
 
 // The binding's upcall dispatcher: run upcall `which` (MOY_UP_*), with `arg`
@@ -304,5 +306,10 @@ typedef struct {
 void moy_loop_pump(moy_loop_pump_t *out);
 // The pump's pacing arithmetic on an injected elapsed: how long to sleep.
 uint32_t moy_loop_pace(uint32_t elapsed);
+// The frame's slack so far: the microseconds the pace would still sleep if
+// the frame ended now (its slot less the time since its top and the debt),
+// 0 while the Player paces a game (that frame does not sleep). What the
+// background scheduler may spend at the tail (runtime/system/scheduler.py).
+uint32_t moy_loop_slack_us(void);
 
 #endif // MOY_LOOP_H

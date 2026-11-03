@@ -207,21 +207,31 @@ C with no pending check (a socket read without a timeout, a lock wait) is
 never aborted. Python stays trusted under per-app consent (the overview's
 §1).
 
-**The scheduler**: a background
-Python app's callbacks (§1) run in the loop's slack after present, each
-under a **per-callback slice** the shell measures, overruns going warning
-→ strike → suspend; a callback that never returns gets a timer-driven
-`mp_sched_vm_abort` while the shell survives (P1.1 proved it on the
-T-Deck and a P4, 2026-11-03, #246). The mechanism is a guard around each
-callback: its own abort point, a one-shot timer that requests the abort,
-the outer point, the gc lock and the scheduler restored after; it runs on
-the main thread only, and every console board builds with
-`MICROPY_ENABLE_VM_ABORT`. An abort skips `finally` and `__exit__`, so a
-lock the callback took stays held; an aborted callback is a strike, and
-the ladder's slice is sized to land after a GC pause. On a
-board with the VM stop, Python background apps **pause** while the VM is
-stopped and resume with it (§5; the mini-VM spike, P3.8, may keep
-them running). The hardening rung is the overview's §4.
+**The scheduler** (`runtime/system/scheduler.py`, whose header is the
+authority): every process's wake callbacks (§1) run once a frame after
+the console's frame, in the kernel loop's tail (the service upcall, its
+bit set while any wake is registered) on a board and after the frame on the
+host and in the browser, within the frame's slack and the guaranteed slice
+(§4). Each runs as its process (the OS log's current pid) under a
+**per-callback slice**: a callback over `MOY_BG_CALLBACK_US` (20 ms,
+measured less the collections inside it) is an overrun, and overruns go
+warning → strike → suspend (the first a warning, every later one a strike,
+`MOY_BG_STRIKES`, 3, suspend the process, whose wakes then stay unserved
+until it is resumed); the shell is never struck. A callback that never
+returns gets a timer-driven `mp_sched_vm_abort` while the shell survives
+(P1.1 proved it on the T-Deck and a P4, 2026-11-03, #246): the guard
+(`native/moy_kernel/modmoy_guard.c`, `moy_guard.call`) is its own abort
+point and a one-shot timer of `MOY_BG_ABORT_US` (300 ms, past the longest
+collection #246 measured) that requests the abort, and it puts back the
+outer point, the globals, the gc lock depth and the scheduler's lock. The
+abort is armed on the main thread only; every console board's
+`mpconfigboard.h` and both unix builds turn on `MICROPY_ENABLE_VM_ABORT`,
+while the browser's VM has none and the Zero runs no scheduler. An abort
+skips `finally` and `__exit__`, so a lock the callback took stays held; an
+aborted callback is a strike. A callback's exception is a crash (§10). On
+a board with the VM stop, Python services are stopped before the stop and
+started again after it (§5; the mini-VM spike, P3.8, may keep them
+running). The hardening rung is the overview's §4.
 
 **`asyncio`** is one event loop the shell owns on this scheduler: a
 task's step is a callback under the same slice, `await asyncio.sleep(s)`
@@ -268,10 +278,15 @@ moybyte.log(severity, text)            the OS log, for Lua and wasm (§9)
 
 A foreground game running unpaced (`"fps": "free"`, `docs/moy_cart_api.md`)
 leaves no slack after present, so background callbacks would starve. The
-scheduler gives background work a **small guaranteed slice** every frame, or
-every N frames, taken before the next frame starts: configuration, sketched
-as `MOY_BG_SLICE_US` and `MOY_BG_SLICE_EVERY` in the shell's loop. A paced
-game pays nothing extra, since the slice comes out of its idle; an unpaced
+scheduler's budget each frame is the frame's slack (`moy_loop.slack()`, what
+the pace would still sleep; none while the Player paces a game) and at least
+a **guaranteed slice**, `MOY_BG_SLICE_US` (1000 µs) every
+`MOY_BG_SLICE_EVERY` (1) frames: configuration in
+`runtime/system/scheduler.py`. A callback is never split, so the first one
+due runs whatever the budget, and what the budget left runs first on the
+next frame. The slice is a ceiling, not a spend: with no wake due it costs
+the registry's scan, and with none registered nothing at all. A paced
+game's loop has time between its ticks, which the slice takes; an unpaced
 game's lost time shows in the task manager as the slice's cost (§6).
 
 ## 5. Service lifecycle
@@ -279,9 +294,14 @@ game's lost time shows in the task manager as the slice's cost (§6).
 A service sleeps on its declared wake sources (§1), and the idle ladder
 (`native/moy_kernel/moy_idle.h`) treats a running service as activity for
 those sources only. Across a VM stop (the S3s) an OS service (and, on a
-board that runs them, a Lua, wasm or ELF service) keeps running; a Python
-background app pauses with the VM and resumes with it, its timers and events
-delivered then with their real timestamps (owner, 2026-11-03). The mini-VM
+board that runs them, a Lua, wasm or ELF service) keeps running. A Python
+service cannot be held through it, since the stop ends the VM's heap: the
+Player TERMs every running service just before the stop (its `moy_stop`
+persists what it needs), the resume record names them, and the console that
+starts after the stop starts them again (`moy_start`), so its timers start
+afresh and the records its sources took during the stop are not delivered
+(the owner's 2026-11-03 answer asked for them with their real timestamps,
+which a restart cannot give; #246 holds the question). The mini-VM
 spike (P3.8) tries more on the S3s: when a big cart stops the VM, a
 **small MicroPython VM** (a few hundred KB of heap) starts in its place, one
 VM at a time and in sequence through the stop/start machinery
@@ -297,14 +317,19 @@ first, and what it persists there is its contract.
 
 **Services are managed like an init system (owner, 2026-11-03).** The
 process table holds, per service, its **autostart** state (a permission,
-`autostart`, owner 2026-11-03: an app holding it starts at boot by default,
-and the user can turn that off in Settings), its **restart
+`autostart`, owner 2026-11-03: a service cart holding it starts at the
+console's first drawn frame, and the user can turn that off in Settings), its **restart
 policy** (`never`, `on-crash`, `always`, with a back-off and the strike
-ledger's cap; P3.6) and its log lines under its process id (§9). `service
+ledger's cap; P3.6) and its log lines under its process id (§9): start,
+stop, kill, exit with its code, and each rung. `service
 start/stop/status/restart` and the task manager are the two faces of one
 implementation. The `moy_stop` hook is the TERM; a service still running after
-`MOY_SERVICE_STOP_MS` (configuration) gets the KILL: its task deleted, its
-OWNER swept, the ledger told.
+`MOY_SERVICE_STOP_MS` (configuration, 2000) gets the KILL: its task deleted, its
+OWNER swept, the ledger told. A Python service's row is the scheduler's
+(`runtime/system/scheduler.py`): its `moy_stop` runs under a guard of
+`MOY_SERVICE_STOP_MS`, and the KILL is that guard's abort with its wakes and
+readers ended (exit 137); a start that runs past the same limit is killed
+too, and a service with no wakes left has exited (0).
 
 ## 6. The task manager and admission
 

@@ -26,8 +26,10 @@ collections free what the other thread holds: a segfault or a lost attribute
 mid-boot, with the driver reporting nothing. `tests/unix_mp.py` refuses a
 board-model binary that is not under a GIL.
 
-WHAT IT PINS. The frames allocate nothing -- with nothing held, and with a
-button held down -- over windows long enough to take in two PERF periods and a
+WHAT IT PINS. The frames allocate nothing -- with nothing held, with a
+button held down, and with a background service due every frame (the
+kernel's service upcall, runtime/system/scheduler.py's tick and the wake) --
+over windows long enough to take in two PERF periods and a
 T-Deck diag tick (net of a thread's straddling block, see SLACK). The console boots in kid mode (PERF DIAG off,
 the default), where nothing periodic is formatted, printed or ringed (owner
 call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
@@ -394,6 +396,7 @@ def measure(loop):
     _frames(loop, 100, True)             # the press edge itself may allocate
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
+    background(loop, info)
     notes(loop, info)
     code(loop, info)
     apps(loop, info)
@@ -403,6 +406,32 @@ def measure(loop):
     panes(loop, info)
     row_of_parts(loop, info)
     print("RESULT " + json.dumps(info))
+
+
+BG = """
+import moybyte
+n = [0]
+def tick():
+    n[0] += 1
+moybyte.every(1, tick)
+"""
+
+
+def background(loop, info):
+    """The play frame again with a background service due every frame: the
+    kernel's service upcall, the scheduler's tick, the guard and the wake."""
+    import scheduler
+    pid = scheduler.SCHED.start({"id": "t.bg", "title": "bg", "src": BG,
+                                 "permissions": []})
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    info["bg"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    p = scheduler.SCHED.procs[pid]
+    info["bg_ran"] = p.ns["n"][0] if p.ns else -1
+    scheduler.SCHED.stop(pid)
 
 
 def _typing(loop, ms, least=0):
@@ -1264,6 +1293,12 @@ def test_a_play_frame_allocates_nothing(result):
 def test_a_play_frame_with_a_button_held_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["held"], "'up' held", text)
+
+
+def test_a_play_frame_with_a_background_service_allocates_nothing(result):
+    info, text = result
+    assert info["bg_ran"] > len(info["bg"]) // 2, text[-3000:]
+    _assert_quiet(info["bg"], "a background service", text)
 
 
 def test_notes_is_the_run_being_measured(result):

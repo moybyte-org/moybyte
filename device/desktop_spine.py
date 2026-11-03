@@ -57,6 +57,8 @@ from device_canvas import DeviceCanvas, _LayerComp, _owner_h
 import moy_input
 import wire_input
 import wire_links
+import moybyte
+import scheduler
 from mem_census import mark as _census
 
 
@@ -147,6 +149,7 @@ class Desktop:
             # counter against (the kernel's loop keeps it now).
             serial.env["pump"] = _FrameClock(moy_loop)
         service = make_service(ws, moy_loop)
+        _want_sched(moy_loop)
         moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
         moy_loop.fps(self.fps_cap)
         moy_loop.lit(boot.lit)
@@ -202,10 +205,27 @@ class _FrameClock:
         return self._loop.drawn()
 
 
+def _want_sched(loop):
+    """The scheduler's bit set whenever a wake is made, and now if one is."""
+    services = loop.services
+
+    def added():
+        services(services() | SVC_SCHED)
+    moybyte.WAKES.added = added
+    if moybyte.WAKES.list:
+        added()
+
+
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, and the OTA confirm's pending marker, once. Answers the bits it still wants."""
+    says goodbye, the OTA confirm's pending marker, once, and the background
+    scheduler while any wake is registered, with the frame's slack. Answers
+    the bits it still wants."""
+    slack = loop.slack
+    wakes = moybyte.WAKES
+    tick = scheduler.SCHED.tick
+
     def service(bits):
         keep = 0
         if bits & SVC_WEB:
@@ -222,11 +242,15 @@ def make_service(ws, loop):
                     upd.confirmed_by_kernel()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
+        if bits & SVC_SCHED:
+            tick(slack())
+            if wakes.list:
+                keep |= SVC_SCHED
         return keep
     return service
 
 
-SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
+SVC_WEB, SVC_UPDATE, SVC_HEALTHY, SVC_SCHED = 1, 4, 8, 32
 
 
 def bt_command(keyboard, comp=None):

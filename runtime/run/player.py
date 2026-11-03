@@ -71,8 +71,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import os_log as _os_log
 try:
     import moybyte as _moybyte
+    import scheduler as _scheduler
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moybyte as _moybyte
+    from runtime import scheduler as _scheduler
 try:
     from moy_play import Tick as TickScheduler     # the kernel's tick model
     import moy_play as _moy_play
@@ -1589,6 +1591,9 @@ class Player(PlayerDiag):
                 resume(rec())
             except Exception as exc:  # noqa: BLE001 -- a lost place is not a lost run
                 print("PLAY resume:", exc)
+        # The VM's heap goes with the stop: every Python service TERMed now,
+        # started again by the console after it (the resume record's `svc`).
+        _scheduler.SCHED.pause()
         self._stop_grant(cart)
         print("PLAY stop: %s runs with the VM down" % (cart.get("title") or "cart"))
         self._stopping = True

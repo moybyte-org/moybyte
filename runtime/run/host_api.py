@@ -28,6 +28,10 @@ try:                                    # a VM: the native module
     import moy_input as _mi
 except ImportError:
     from runtime import moy_input as _mi
+try:                                    # staged/frozen flat namespace (web runner)
+    from scheduler import SCHED as _sched
+except ImportError:                     # host: the runtime package
+    from runtime.scheduler import SCHED as _sched
 
 # A desk keyboard's keys on a host (the simulator's and the browser page's),
 # in one place: the button each presses beside what it types. The arrows and
@@ -506,6 +510,9 @@ class ConsoleDriver:
         ws = self.ws
         _loop.drive(ws.handle_input, ws.handle_pointer,
                     lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
+        # The background scheduler after the frame, as a board's tail runs it:
+        # this harness does not sleep, so its budget is the guaranteed slice.
+        _sched.tick(0)
         for name in self._pending:
             if name not in self._held_ext:     # never release an explicit hold()
                 self.input.set_held(name, False)

@@ -1232,6 +1232,50 @@ def the_event_rings_keep_their_records(board):
     assert alloc == 0, alloc
 
 
+def the_scheduler_stops_a_runaway_service(board):
+    """The cooperative scheduler (runtime/system/scheduler.py) over the real
+    guard (native/moy_kernel/modmoy_guard.c) on glass: a service whose
+    callback never returns is aborted by the guard's timer each time it runs,
+    each abort a strike, and the third suspends it while the desk keeps
+    drawing; its stop that never returns is killed. The limits are shortened
+    for the test and put back."""
+    import time
+    board.pyexec("import scheduler as S, moy_guard\n"
+                 "ws._sq = (S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS)\n"
+                 "S.MOY_BG_ABORT_US = 50000\n"
+                 "S.MOY_SERVICE_STOP_MS = 100\n"
+                 "SRC = 'import moybyte\\n"
+                 "def spin():\\n    while True:\\n        pass\\n"
+                 "def moy_start():\\n    moybyte.every(200, spin)\\n"
+                 "def moy_stop():\\n    spin()\\n'\n"
+                 "ws._sa = moy_guard.stats()[1]\n"
+                 "ws._sp = S.SCHED.start({'id': 't.runaway', 'title': 'runaway', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "ws._sf = ws._frames_drawn",
+                 strict=True)
+    try:
+        time.sleep(2.5)
+        board.pyexec("import scheduler as S, moy_guard\n"
+                     "p = S.SCHED.procs[ws._sp]\n"
+                     "ws._sq2 = (p.strikes, p.state, moy_guard.can_abort())\n"
+                     "S.SCHED.stop(ws._sp)\n"
+                     "ws._sq2 = ws._sq2 + (moy_guard.stats()[1] - ws._sa, p.code, "
+                     "S.SCHED.wakes.count(ws._sp))",
+                     strict=True)
+        strikes, state, can, aborts, code, left = board.pyval("ws._sq2", strict=True)
+        assert can is True
+        assert (strikes, state) == (3, "suspended"), (strikes, state, aborts)
+        assert aborts == 4, aborts             # three in its wakes, one in its stop
+        assert (code, left) == (137, 0), (code, left)
+        line = board.cmd("state", wait_for="STATE ")
+        assert line is not None, "the desk did not answer after the aborts"
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS = ws._sq\n"
+                     "S.SCHED.reset()",
+                     strict=True)
+
+
 def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a

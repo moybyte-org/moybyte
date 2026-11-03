@@ -23,10 +23,11 @@ is C's (hardware.md section 2).
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
 it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
 preallocated list) and runs each with `call(wid)`, which points events() at the
-wake's reader for the call; `end(pid)` drops a process's wakes and readers.
-Each wake belongs to the process that made it (the OS log's `current`, the
-pid a process table takes over). This module registers and queues; running a
-callback under a slice is the scheduler's.
+wake's reader for the call; `count(pid)` answers how many wakes a process
+holds; `end(pid)` drops a process's wakes and readers and tells `ended`, the
+scheduler's hook. Each wake belongs to the process that made it (the OS log's
+`current`). This module registers and queues; running a callback under a
+slice is the scheduler's (runtime/system/scheduler.py).
 
 The rings are the input table the shell binds (`bind`, the Workstation's
 input), so a host and a board read the same records.
@@ -80,6 +81,9 @@ class Wakes:
         self.readers = {}           # pid -> its events() reader
         self.cur = [-1]             # the reader events() reads; -1: the current process's
         self.next_id = 1
+        self.ended = None           # fn(pid) told when a process's wakes end
+        self.added = None           # fn() told when a wake is made (a board's
+                                    # loop then makes the scheduler's upcall)
 
     def bind(self, table):
         """The input table whose rings the readers read. A new table starts
@@ -98,6 +102,8 @@ class Wakes:
         w = [wid, _pid(), how, ms, at, fn, reader]
         self.list.append(w)
         self.by_id[wid] = w
+        if self.added is not None:
+            self.added()
         return wid
 
     def on(self, source, fn):
@@ -134,6 +140,16 @@ class Wakes:
         r = self.readers.pop(pid, None)
         if r is not None and self.table is not None:
             self.table.reader_free(r)
+        if self.ended is not None:
+            self.ended(pid)
+
+    def count(self, pid):
+        """How many wakes process `pid` holds. Allocates nothing."""
+        n = 0
+        for w in self.list:
+            if w[_OWNER] == pid:
+                n += 1
+        return n
 
     def due(self, now, out):
         """The wakes due at `now` (ticks_ms) into `out`, a list of at least
