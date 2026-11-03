@@ -3,7 +3,8 @@
 **Project:** Moybyte — a kid-safe creative computer where everything is an editable cartridge
 **Written:** 2026-07-01
 **Supersedes:** `docs/history/moybyte_Console_Plan_v0_4.md` (2026-06-21)
-**Status:** Consolidation + course-correction. The June plan was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
+**Superseded by:** `docs/os_2026-11.md` (2026-11-02), which carries this plan's §2, §4 and §13 and holds the direction; the rest of this document is historical.
+**Status when written:** Consolidation + course-correction. The June plan was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
 
 > **Plans are dated, not numbered.** A `0.x` on a design document reads like a
 > release and is not one: the only version a user ever sees is the firmware's

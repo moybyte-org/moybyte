@@ -3,7 +3,7 @@
 **Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance
 and Storybook grew organically ("a cartridge identity backed by a
 responsive system process") into one public seam, aligned with
-`docs/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
+`docs/history/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
 (`runtime/apps/calc_app.py` + `system_carts/moybyte.calc.moy`) is the reference app — small
 enough to read in one sitting, built ONLY on the seams below.
 

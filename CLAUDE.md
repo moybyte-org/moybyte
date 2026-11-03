@@ -100,9 +100,13 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
   warm) — the picture pass missed it and cost a Guition a 196-second boot.
 - The kernel is C and our apps stay Python (owner, 2026-10-06 and 2026-09-27):
   `native/moy_kernel/README.md` holds the kernel's decisions and why.
-- `moybyte_console_plan_2026-07.md` holds the positioning (§2), the canvas
-  contract (§4) and safety (§13); the rest of it is historical until the OS
-  design doc replaces it. `docs/history/` is history, not direction.
+- `docs/os_2026-11.md` is the OS design (owner, 2026-11-01, tracker #246):
+  the overview every agent reads (the principles, the trust ladder, the
+  per-board table, the owner's answers and the six phases of work), with one
+  area doc per phase group in `docs/os_2026-11/` (its §8 maps them). It carries
+  what stands of `moybyte_console_plan_2026-07.md` (positioning, the canvas
+  contract, safety); the rest of that plan is historical. `docs/history/` is
+  history, not direction.
 
 ## Working here
 
