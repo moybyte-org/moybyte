@@ -1048,6 +1048,39 @@ same here as on any other console that implements the spec.
 | `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
 | `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
 
+### Notifications (a Moybyte-side verb)
+
+`moybyte.notify` is Moybyte's own, not moy-spec's: a Python cart reaches it
+with `import moybyte`, and Lua and compiled carts get it later. It asks
+for the `"notifications"` permission in the manifest
+(`"moybyte": {"permissions": ["notifications"]}`); without it the call
+answers `None` and nothing shows.
+
+```python
+import moybyte
+
+nid = moybyte.notify("Ana: are you coming?", "We start at eight.", "heart",
+                     ("default", "Open", "reply", "Reply"), 1)
+
+def moy_action(nid, key):       # the player opened it: "default", or "reply"
+    ...
+```
+
+| argument | is |
+|---|---|
+| `summary` | one line, up to 47 characters |
+| `body` | more text, up to 200 characters, shown in the task manager's list |
+| `icon` | a name from the console's icon set (`"heart"`, `"star"`, `"warn"`...), `"bubble"` if `None` |
+| `actions` | key, label, key, label...; `"default"` is what opening the notification itself means |
+| `urgency` | 0 the list only, 1 a banner for 5 s, 2 a banner for 10 s |
+| `replaces_id` | an id this cart got back before: that notification is updated in place |
+
+The console draws the banner over whatever is on screen, the game in front
+included, which never sees it. Opening it (a tap on the banner, or the task
+manager's Notifications tab, which holding the console's key opens) brings
+your cart to the front and calls your `moy_action(id, key)`; ignoring it
+leaves it in that list. `docs/os_2026-11/processes.md` §7 has the rules.
+
 ---
 
 ## Palette

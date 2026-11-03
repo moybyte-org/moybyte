@@ -2389,11 +2389,12 @@ class Player(PlayerDiag):
                 ws.perf_hud = not ws.perf_hud
         return True
 
-    def window_event(self, name):
-        """Tell a Python cart its window was minimised or restored: its
-        `_minimise()` or `_restore()`, where it defines one
-        (docs/os_2026-11/processes.md §1). What it raises is its crash, as
-        a frame's is. False when the run crashed there."""
+    def window_event(self, name, *args):
+        """Tell a Python cart its window was minimised or restored, or that
+        a notification it posted was acted on: its `_minimise()`,
+        `_restore()` or `moy_action(id, key)`, where it defines one
+        (docs/os_2026-11/processes.md §1 and §7). What it raises is its
+        crash, as a frame's is. False when the run crashed there."""
         ns = self.ns
         fn = ns.get(name) if ns and self.cart_error is None else None
         if fn is None:
@@ -2402,7 +2403,7 @@ class Player(PlayerDiag):
         _was = _cart_text(not self._look)
         t0 = _ticks_us()
         try:
-            fn()
+            fn(*args)
         except Exception as exc:  # noqa: BLE001 -- the cart's, as a frame's is
             _cart_text(_was)
             self._capture_frame_error(ws, exc)

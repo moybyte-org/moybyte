@@ -1840,7 +1840,7 @@ static mp_obj_t ui_unlock(size_t n_args, const mp_obj_t *a) {
                         num(a[8]), num(a[9]), &b));
     mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
                      MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
-    return mp_obj_new_tuple(4, t);
+    return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_unlock_obj, 10, 10, ui_unlock);
 

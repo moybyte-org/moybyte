@@ -37,10 +37,12 @@ try:
     from widgets import _Blit, _ticks_ms, _ticks_diff
     from moy_spine import BackStack, STAYED
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from notifications import NOTES as _NOTES
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
     from runtime.moy_spine import BackStack, STAYED
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from runtime.notifications import NOTES as _NOTES
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -363,6 +365,8 @@ class FullscreenStackWM:
             sig |= 128
         if ws.notice_active():
             sig |= 256
+        if _NOTES.banner is not None and _NOTES.up(now) is not None:
+            sig |= 2048
         return sig
 
     def _ensure_stack(self):
@@ -387,7 +391,7 @@ class FullscreenStackWM:
         self._rebuild(self.ws._content_layer(), sig)
 
     def _overlay_layers(self, sig):
-        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..1024,
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..2048,
         cursor appended last so it sits above everything). One copy: a new
         overlay layer (like #53's notice banner) registers here ONCE and
         reaches the windowed WM's stack too -- the two _rebuild bodies used to
@@ -407,6 +411,8 @@ class FullscreenStackWM:
             overlays.append(ws._confirm_layer)
         if sig & 256:
             overlays.append(ws._notice_layer)
+        if sig & 2048:
+            overlays.append(ws._note_layer)
         overlays.append(ws._cursor_layer)
         return overlays
 

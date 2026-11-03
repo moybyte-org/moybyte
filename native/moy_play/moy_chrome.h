@@ -24,9 +24,9 @@
 // to indices by the shell and handed over (moy_chrome_set_inks) whenever it
 // draws, so the kernel's own frames use the theme the shell last drew with.
 //
-// THE KERNEL'S STATE: the notice banner and the toast with their deadlines
-// (one each; a second replaces the first), which the kernel's run reads to
-// draw over its frame.
+// THE KERNEL'S STATE: the notice banner, the toast and the notification
+// banner with their deadlines (one each; a second replaces the first), which
+// the kernel's run reads to draw over its frame.
 
 #ifndef MOY_CHROME_H
 #define MOY_CHROME_H
@@ -150,10 +150,15 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
 void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t until_ms);
 void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, bool secret,
                           uint32_t until_ms);
+// The notification banner (runtime/system/notifications.py): `head` (the
+// posting app) over `name` (its summary) on `icon`'s tile until `until_ms`;
+// an `until_ms` of 0 takes it down.
+void moy_chrome_note(const char *head, const char *name, const char *icon, uint32_t until_ms);
 // What is up at `now`, drawn over the run's RGB565 canvas `px` (`w` x `h`,
 // its palette `pal`) at the top centre in the kernel's look
 // (MOY_UI_LOOK_KERNEL: the theme chrome_inks last handed over), by
-// moy_ui_unlock: the notice, then the unlock banner. False: nothing was.
+// moy_ui_unlock: the notice, the unlock banner, then the notification
+// banner. False: nothing was.
 bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now);
 
 #endif // MOY_CHROME_H

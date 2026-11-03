@@ -217,6 +217,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
+    from notifications import NOTES as _NOTES
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.notifications import NOTES as _NOTES
+try:
     from procs import Procs
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.procs import Procs
@@ -1226,6 +1230,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # is no screen it could otherwise report to.
         self._notice = None            # (title, sub, kind) while up
         self._notice_until = 0
+        # An app's notifications (runtime/system/notifications.py): the
+        # banner over whatever is up, and what acting on one does.
+        self._init_notes()
         # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is
@@ -1365,6 +1372,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._perf_layer = _PerfLayer(self)
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
+        self._note_layer = L("note", "system", draw=lambda dt: self._draw_note(),
+                             ptr=self._note_pointer)
         self._sysmenu_layer = _SysMenuLayer(self)
         self._pause_layer = _PauseLayer(self)
         self._confirm_layer = _ConfirmLayer(self)
@@ -1840,7 +1849,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def open_tasks(self):
         """The task manager (runtime/system/tasks_ui.py): from the system
         menu and a held console key. On a handheld it goes on top, holding
-        a front game while it shows; on the desk it is a window."""
+        a front game while it shows; on the desk it is a window. Opened while
+        a notification's banner is up, it takes the banner down and opens on
+        the Notifications tab with that one current."""
         self.close_popover()
         if self.pause.open:
             self.pause.close()
@@ -1848,10 +1859,18 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.confirm.cancel()
         self._dirty = True
         layer = self.tasks_layer
+        note = _NOTES.up()
+        if note is not None:
+            _NOTES.dismiss()
         if self.wm.top_is("tasks"):
+            if note is not None:
+                layer.open(note)
             return
-        if not self.wm.bring_forward("tasks"):
-            layer.open()
+        if self.wm.bring_forward("tasks"):
+            if note is not None:
+                layer.open(note)
+        else:
+            layer.open(note)
             pl = self.player
             layer.held = False
             if self.procs.handheld():
@@ -3229,7 +3248,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return True
         if self.notice_active():
             return True
-        return False
+        return _NOTES.banner is not None and _NOTES.up(now) is not None
 
     def _needs_redraw(self, dt):
         """Decide whether frame() must repaint+flush this frame. True when something
@@ -3357,7 +3376,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             now = _ticks_ms()
             cv.covered = bool((self._toast_until and _ticks_diff(self._toast_until, now) > 0
                                and self.ach.toast is not None)
-                              or (self._notice is not None and self.notice_active(now)))
+                              or (self._notice is not None and self.notice_active(now))
+                              or (_NOTES.banner is not None and _NOTES.up(now) is not None))
         # Input focus moved (a window clicked, a screen left): Settings stores
         # a Name still being typed and hands back the keyboard's text mode.
         h = self.wm.input_holder()

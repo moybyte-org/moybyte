@@ -11,8 +11,9 @@
 //   chrome_strip_band(cw, bar_h,
 //   light), chrome_strip_cell(kind, rect, cs, dy, s|None, across)
 //   chrome_notice(title, sub, ok, until_ms),
-//   chrome_toast_arm(head, name, icon, secret, until_ms): the banners a run the
-//   kernel drives shows over its frames
+//   chrome_toast_arm(head, name, icon, secret, until_ms),
+//   chrome_note(head, name, icon, until_ms): the banners a run the kernel
+//   drives shows over its frames
 
 #include <string.h>
 
@@ -150,3 +151,11 @@ static mp_obj_t ch_toast_arm(size_t n, const mp_obj_t *a) {
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_toast_arm_obj, 5, 5, ch_toast_arm);
+
+static mp_obj_t ch_note(size_t n, const mp_obj_t *a) {
+    (void)n;
+    moy_chrome_note(s_of(a[0]), s_of(a[1]), s_of(a[2]),
+                    (uint32_t)mp_obj_get_int_truncated(a[3]));
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_note_obj, 4, 4, ch_note);

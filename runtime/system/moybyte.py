@@ -14,6 +14,10 @@ one, `time.ticks_us()`.
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   cancel(wid)        a wake undone
+  notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
+                     post a notification (processes.md section 7) under the
+                     `notifications` permission: its id, or None where the
+                     process does not hold it (runtime/system/notifications.py)
 
 on/every/after answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
@@ -244,3 +248,11 @@ def cancel(wid):
 
 def end(pid):
     WAKES.end(pid)
+
+
+def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
+    try:
+        from notifications import NOTES
+    except ImportError:  # host: the runtime package
+        from runtime.notifications import NOTES
+    return NOTES.post(_pid(), summary, body, icon, actions, urgency, replaces_id)

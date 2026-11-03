@@ -977,6 +977,7 @@ _CSIGS = (
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _CS, _B, _U32], None),
+    ("moy_chrome_note", [_CS, _CS, _CS, _U32], None),
     ("moy_chrome_overlay_draw", [_CP, _CI, _CI, _CP, _U32], _B),
     ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
     ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
@@ -1075,6 +1076,10 @@ def chrome_notice(title, sub, ok, until_ms):
 def chrome_toast_arm(head, name, icon, secret, until_ms):
     _clib().moy_chrome_toast_arm(_b(head), _b(name), _b(icon), bool(secret),
                                  int(until_ms) & 0xFFFFFFFF)
+
+
+def chrome_note(head, name, icon, until_ms):
+    _clib().moy_chrome_note(_b(head), _b(name), _b(icon), int(until_ms) & 0xFFFFFFFF)
 
 
 def chrome_overlay_draw(buf, w, h, pal, now_ms):

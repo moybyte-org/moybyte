@@ -960,7 +960,8 @@ def _procs_plan(ws):
     return [("desk_two_games", two), ("desk_close_refusal", refusal)]
 
 
-TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service")
+TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service",
+                  "note_banner", "tasks_notes")
 
 
 def _tasks_plan(ws, cfg):
@@ -1024,8 +1025,44 @@ def _tasks_plan(ws, cfg):
         ws.tasks_layer.cur = 2
         ws.tasks_layer.host.reset()
 
+    def banner():
+        # A service's notification over the game in front, its banner held
+        # up through the render (a deadline far off the test's clock).
+        from runtime import notifications as N
+        from runtime import moybyte
+        import moy_log
+        ws.close_tasks()
+        # The game in front draws every frame and moves nothing: the banner
+        # over it is over a frame drawn anew, as a playing game's is.
+        ws.player._paused_at = 0
+        ws.player._update = lambda *a: None
+        N.NOTES.reset()
+        pid = S.SCHED.start({"id": "moybyte.mesh", "title": "Mesh",
+                             "permissions": ["notifications"],
+                             "src": "import moybyte\nmoybyte.every(60000, lambda: None)\n"})
+        was = moy_log.current()
+        moy_log.current(pid)
+        try:
+            moybyte.notify("Weather", "Rain from 4 pm", "warn", (), N.LOW)
+            moybyte.notify("Ana: are you coming?", "We start at eight, by the lake.",
+                           "heart", ("default", "Open", "reply", "Reply"))
+        finally:
+            moy_log.current(was)
+        N.NOTES.until = N.NOTES.banner.at + 3600 * 1000
+        if windowed:
+            ws.wm.bring_forward("desktop")
+
+    def notes():
+        # The console's key held over it: the task manager on its
+        # Notifications tab, the banner's notification current.
+        ws.open_tasks()
+        if windowed:
+            ws.wm._sync_windows()
+            ws.wm._move_window(ws.wm._wins["tasks"], 420, 120)
+
     return [("tasks_empty", empty), ("tasks_two_games", two),
-            ("tasks_crashed_service", crashed)]
+            ("tasks_crashed_service", crashed), ("note_banner", banner),
+            ("tasks_notes", notes)]
 
 
 def _popover_plan(ws):
@@ -1198,6 +1235,8 @@ def capture(config_name, carts_dir):
     finally:
         from runtime import scheduler
         scheduler.SCHED.reset()        # a service a plan started is process-wide too
+        from runtime import notifications
+        notifications.NOTES.reset()    # ...and so is what it posted
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
     return out

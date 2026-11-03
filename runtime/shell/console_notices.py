@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   Notices                     the achievements wiring, the notice banner, the unlock banner
+#   Notices._draw_note          the notification banner (notifications.py) and its input
 #   PauseMenu                   the card over a held game: Resume, Options, Quit
 #   DeleteConfirm               "Delete <title>?" before any cart is deleted
 #   SystemMenuUI                the system menu's rows and their actions
@@ -9,8 +10,9 @@
 #   AboutCard                   the system menu's About: Moy, the version, the board, two rows
 """What the console SAYS on its own: the achievements wiring (the tracker,
 the unlock banner's deadline + beep), the timed system notice and the
-firmware-update verdict that rides it, and the two banners, both
-native/moy_ui's `moy_ui_unlock`. A mixin
+firmware-update verdict that rides it, the banners -- the notice, the unlock
+and an app's notification (runtime/system/notifications.py), each
+native/moy_ui's `moy_ui_unlock` -- and the notification's input. A mixin
 of `Workstation`; the deadlines it arms are the flat kernel fields
 `_animating` and both WMs read. Beside it, the cards the console puts up
 over what is running: the pause and stop cards (`PauseMenu`), the delete
@@ -45,6 +47,10 @@ try:
     from moy_store_base import builtin_name as _builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name as _builtin_name
+try:
+    from notifications import NOTES as _NOTES
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.notifications import NOTES as _NOTES
 try:
     import achievements_ui as _ach_ui
     import about_ui as _about_ui
@@ -226,6 +232,115 @@ class Notices:
         _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top,
                         _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE,
                         t[1], t[2], burst, desk)
+
+    # -- notifications (docs/os_2026-11/processes.md §7) ----------------------
+
+    def _init_notes(self):
+        """The notification service's hooks are this console's: who a pid
+        is, the banner's kernel copy, and acting on one."""
+        _NOTES.who = self._note_who
+        _NOTES.shown = self._note_shown
+        _NOTES.acted = self._note_acted
+        self._note_rect = None          # the banner's card where it last drew
+        self._note_y0 = None            # where a press on it went down
+
+    def _note_who(self, pid):
+        return self.procs.who(pid)
+
+    def _note_shown(self, n, until):
+        """The banner went up (`n`) or down: the kernel's copy, which a run
+        it drives draws over its frames, follows."""
+        self._dirty = True
+        if n is None:
+            self._note_rect = None
+            _ch._moy_play().chrome_note("", "", "", 0)
+        else:
+            _ch._moy_play().chrome_note(n.app, n.summary, n.icon, until or 1)
+
+    def _note_acted(self, n, key):
+        """Notification `n` was opened by `key`: its process comes to the
+        front -- a run the front's, as the task manager's Switch to brings
+        it (the game in front then throttled on the desk, minimised on a
+        handheld), a cart no longer running opened again -- and its
+        `moy_action(id, key)` runs; a service, which has no window, gets
+        the call alone."""
+        self._dirty = True
+        procs = self.procs
+        pl = self.player
+        if pl is not None and n.pid is not None and pl.pid == n.pid:
+            if not procs.handheld():
+                self.wm.bring_forward("desktop")
+            elif self.wm.top_is("tasks"):
+                self.close_tasks()
+            pl.window_event("moy_action", n.id, key)
+            return
+        for p in procs.list:
+            if p.player.pid == n.pid:
+                self.tasks_switch(p.key)
+                if self.player.pid == n.pid:
+                    self.player.window_event("moy_action", n.id, key)
+                return
+        try:
+            import scheduler as _sched
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import scheduler as _sched
+        if _sched.SCHED.hook(n.pid, "moy_action", n.id, key):
+            return
+        c = n.cart
+        if c and c.get("path") and c.get("type") != "service":
+            if self.wm.top_is("tasks") and procs.handheld():
+                self.close_tasks()
+            self.open(c)
+
+    def _note_top(self):
+        """The banner's top: under the bar where there is one, at the
+        glass's top over a fullscreen game (the unlock banner's)."""
+        lay = self.layout
+        desk = _desk_class()
+        wm = self.wm
+        game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
+                and not self._running_cart_shows_bar())
+        return (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
+
+    def _draw_note(self):
+        """The notification banner over whatever is up: the posting app's
+        title over the summary, on its icon's tile, at the top centre."""
+        n = _NOTES.up()
+        if n is None:
+            return
+        cv = self.sys_canvas
+        self._note_rect = _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, self._note_top(),
+                                          n.app, n.summary, n.icon, 0, _desk_class())
+
+    def _note_pointer(self, px, py, click):
+        """A tap on the banner opens its notification; a press on it dragged
+        up dismisses it, the app in front playing on. While a press on it is
+        held, the pointer is the banner's."""
+        n = _NOTES.up()
+        y0 = self._note_y0
+        if n is None:
+            self._note_y0 = None
+            return False
+        down = bool(getattr(self.pointer, "down", False))
+        if y0 is None:
+            r = self._note_rect
+            if r is None or not (down or click) or not _in_box(px, py, r):
+                return False
+            if click and not down:
+                _NOTES.act(n.id)
+                return True
+            self._note_y0 = py
+            return True
+        if down and not click:
+            return True
+        self._note_y0 = None
+        if y0 - py >= 8 * self.layout.fs:
+            _NOTES.dismiss()
+        else:
+            r = self._note_rect
+            if r is not None and _in_box(px, py, r):
+                _NOTES.act(n.id)
+        return True
 
 
 class PauseMenu:

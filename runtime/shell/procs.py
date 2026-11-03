@@ -97,6 +97,7 @@ METER_MS = 2000                 # the PROCS line's period under PERF DIAG
 RUNNING, THROTTLED, MINIMISED = "running", "throttled", "minimised"
 PAUSED, CRASHED = "paused", "crashed"
 SVC = "svc:"                    # a service row's key prefix
+NOTIFY = "notifications"        # the permission a post needs
 
 # The Workstation's fields a world holds, and its InputState's.
 _WS = ("player", "project", "audio", "canvas", "cart_frame", "_run_canvas",
@@ -186,6 +187,10 @@ def _unhold(pl):
 def _sample(pl, el):
     pl.cpu = (pl.us_upd + pl.us_draw) // el
     pl.us_upd = pl.us_draw = 0
+
+
+def _poster(cart, granted):
+    return (str((cart or {}).get("title") or "App"), cart, NOTIFY in (granted or ()))
 
 
 class Proc:
@@ -846,6 +851,28 @@ class Procs:
             out.append((SVC + str(sp.pid), str(name), "service", st, sp.cpu,
                         sp.mem, sp.pid))
         return out
+
+    # -- notifications -------------------------------------------------------
+
+    def who(self, pid):
+        """Process `pid` as a notification names it (notifications.py's
+        `who`): (title, cart, may_post), may_post whether its run or its
+        service was granted `notifications`; the shell always may."""
+        if pid == _sched.SHELL:
+            return ("Moybyte", None, True)
+        ws = self.ws
+        pl = ws.player
+        if pl is not None and pl.pid == pid:
+            return _poster(ws.cart, pl.granted)
+        for p in self.list:
+            pl = p.world.player
+            if pl.pid == pid:
+                return _poster(p.world.project.cart if p.world.project else None,
+                               pl.granted)
+        sp = _sched.SCHED.procs.get(pid)
+        if sp is not None and sp.kind == _sched.SERVICE and sp.state != _sched.EXITED:
+            return _poster(sp.cart, sp.granted)
+        return (None, None, False)
 
     def stop_service(self, pid):
         """The task manager's Stop: the service's TERM, then KILL (§5)."""

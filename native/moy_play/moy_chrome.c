@@ -371,6 +371,9 @@ static struct {
     bool secret;
     uint32_t toast_at, toast_until;
     bool toast_up;
+    char note_head[48], note_name[48], note_icon[16];
+    uint32_t note_until;
+    bool note_up;
 } K;
 
 void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t until_ms) {
@@ -392,6 +395,14 @@ void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, 
     K.toast_up = true;
 }
 
+void moy_chrome_note(const char *head, const char *name, const char *icon, uint32_t until_ms) {
+    snprintf(K.note_head, sizeof(K.note_head), "%s", head ? head : "");
+    snprintf(K.note_name, sizeof(K.note_name), "%s", name ? name : "");
+    snprintf(K.note_icon, sizeof(K.note_icon), "%s", icon ? icon : "");
+    K.note_until = until_ms;
+    K.note_up = until_ms != 0;
+}
+
 static moy_ui_span_t span(const char *s) {
     return (moy_ui_span_t){(const uint8_t *)s, (uint16_t)strlen(s)};
 }
@@ -403,7 +414,10 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
     if (K.toast_up && (int32_t)(K.toast_until - now) <= 0) {
         K.toast_up = false;
     }
-    if (!K.up && !K.toast_up) {
+    if (K.note_up && (int32_t)(K.note_until - now) <= 0) {
+        K.note_up = false;
+    }
+    if (!K.up && !K.toast_up && !K.note_up) {
         return false;
     }
     // the run's canvas lent as a row of the shell's look: its palette below,
@@ -439,6 +453,12 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
         moy_ui_unlock(&s, w / 2, 6, span(K.head), span(K.name),
                       moy_ui_icon_slot((const uint8_t *)K.icon, n),
                       moy_ui_icon_glyph((const uint8_t *)K.icon, n), burst, 1, 0, NULL);
+    }
+    if (K.note_up) {
+        size_t n = strlen(K.note_icon);
+        moy_ui_unlock(&s, w / 2, 6, span(K.note_head), span(K.note_name),
+                      moy_ui_icon_slot((const uint8_t *)K.note_icon, n),
+                      moy_ui_icon_glyph((const uint8_t *)K.note_icon, n), 0, 1, 0, NULL);
     }
     moy_ui_cart_text(was);
     return true;

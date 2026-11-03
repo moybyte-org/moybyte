@@ -94,6 +94,7 @@ try:
     from wm_route import WindowRoute
     from moy_spine import EDITOR
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from notifications import NOTES as _NOTES
     import layout_base as _layout_base
     import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -110,6 +111,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm_route import WindowRoute
     from runtime.moy_spine import EDITOR
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from runtime.notifications import NOTES as _NOTES
     from runtime import layout_base as _layout_base
     from runtime import ui_draw as _ui_draw
 
@@ -1676,13 +1678,15 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def desk_moves(self, dt):
         """Whether the desk's own pixels change this frame with nothing
-        marking them: a live wallpaper, the boot logo, the unlock banner or a
-        notice over it. A running game, a music preview or any other
+        marking them: a live wallpaper, the boot logo, the unlock banner, a
+        notice or a notification over it. A running game, a music preview or any other
         content animates inside its window, over the desk's cache."""
         ws = self.ws
         if ws._splash_until is not None or ws.wallpaper.is_animating(dt):
             return True
         if ws._toast_until and _ticks_diff(ws._toast_until, _ticks_ms()) > 0:
+            return True
+        if _NOTES.banner is not None and _NOTES.up() is not None:
             return True
         return ws.notice_active()
 

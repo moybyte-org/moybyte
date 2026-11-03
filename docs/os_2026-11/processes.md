@@ -215,7 +215,8 @@ cart's namespace holds while it is granted, each `None` while it is turned
 off.
 The rows Python holds in phase 1 are the floor, the roles, `network`,
 `multiplayer`, `pins`, `console`, `notifications`, `autostart` and the
-markers; a Python app's prompt also says it is a trusted app. The later
+markers (`notifications` with no names: its verb lives on the shared
+`moybyte` module and checks the poster's grant, §7); a Python app's prompt also says it is a trusted app. The later
 phases' rows (`mic` and the other device APIs, the leases, `native`) arrive
 with their APIs, and with them a prompt line of `"full"` ("full access to
 the console", the overview's §4) and whether the row is enforced on its
@@ -446,6 +447,47 @@ process's API (§8), so the two never collide.
 
 The motivating case: a background mesh app wakes on `moybyte.on("lora", fn)`
 while a game plays, and posts.
+
+As built (`runtime/system/notifications.py`, the service `NOTES`), phase 1
+serves Python processes; Lua and wasm get the verb with their process tables
+(phase 5). `moybyte.notify` answers the notification's id, or None where the
+process does not hold the permission: `moybyte` is one module every process
+shares, so the permission's row names no Python names (§2) and the grant is
+read at the post, from the one its run or its service was bound with
+(`Procs.who`); the shell itself always may post. `summary` is one line (47
+characters, the kernel copy's), `body` up to 200, `icon` a name of the
+console's icon set ("bubble" where it names none), `actions` the freedesktop
+flat list (key, label, ...; `"default"` the action the notification itself
+stands for), `urgency` 0 to 2, and `replaces_id` one of the same process's
+notifications, updated in place under its id.
+
+- **The banner** is the unlock banner's card (`moy_ui_unlock`): the posting
+  app's title over the summary, on the icon's tile, at the top centre, under
+  the bar where there is one and at the glass's top over a fullscreen game.
+  It stays up `BANNER_MS` (5 s) at urgency 1 and `CRITICAL_MS` (10 s) at 2,
+  so no banner stays over a game on its own; urgency 0 goes to the list
+  without one, and a new banner replaces the one up. The shell draws it as a
+  system layer on every tier, and arms the kernel's copy (`moy_chrome_note`,
+  a slot beside the notice and the toast) for a run the kernel drives, so a
+  banner over a compiled cart costs its frame no Python and no allocation
+  (`tests/test_frame_alloc.py`).
+- **Acting** is a tap or a click on the banner, or Open (and each action the
+  app named) on the task manager's Notifications tab. The posting process's
+  run comes to the front as the task manager's Switch to brings it, a cart no
+  longer running opens again, and the process's `moy_action(id, key)` hook
+  runs (a run's through `Player.window_event`, a service's through
+  `Scheduler.hook`, under the guard and the rungs). A service has no window,
+  so acting on its notification calls the hook alone until §2's `entries`
+  give a service cart an app.
+- **Dismissing** is the banner's deadline passing, a press on it dragged up,
+  or opening the task manager; the game in front plays on, and the
+  notification stays in the list until opened or cleared.
+- **The list** is the task manager's second tab, Notifications: the
+  notifications nobody opened, newest first (16 at most), the app and the
+  summary a row, the current one's body under the table, and Open, its named
+  actions and Clear. Holding the console's key while a banner is up opens the
+  task manager there with that notification current, so the keys and the pad
+  reach it as a finger reaches the banner.
 
 ## 8. Achievements, the first background process
 

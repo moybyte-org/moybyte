@@ -137,6 +137,7 @@ class Proc:
         self.cart = cart
         self.state = BACKGROUND if kind == SERVICE else RUNNING
         self.ns = None
+        self.granted = ()       # the permissions its start was granted (a service's)
         self.overruns = 0
         self.strikes = 0
         self.code = None
@@ -352,6 +353,7 @@ class Scheduler:
         granted, absent, refusal = app_perms.check(cart, rec, have)
         pid = _L.spawn(name) if _L is not None else self._next_pid()
         p = self.procs[pid] = Proc(pid, SERVICE, name, cart)
+        p.granted = tuple(granted)
         if refusal is not None:
             _log(ERR, pid, refusal)
             p.state, p.code = EXITED, EXIT_CRASHED
@@ -383,6 +385,21 @@ class Scheduler:
             self._exit(p, EXIT_OK)
             return None
         return pid
+
+    def hook(self, pid, name, *args):
+        """Run live service `pid`'s hook `name(*args)` (`moy_action`, a
+        notification acted on) as a callback: under the guard and the rungs.
+        False where the service is gone or defines no such hook."""
+        p = self.procs.get(pid)
+        if p is None or p.kind != SERVICE or p.state == EXITED or p.ns is None:
+            return False
+        fn = p.ns.get(name)
+        if fn is None:
+            return False
+        self._guarded(pid, lambda: fn(*args))
+        if p.state != EXITED and not self.wakes.count(pid):
+            self._exit(p, EXIT_OK)
+        return True
 
     def _next_pid(self):
         n = 2

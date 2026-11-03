@@ -12,6 +12,14 @@ Close (a run, a stopped service's row), Stop (a service), Details (a
 crashed or suspended row: its log, `Workstation.open_log`), and on a
 handheld Home.
 
+Its second tab, Notifications, is the list of what apps posted and nobody
+opened yet (runtime/system/notifications.py), newest first, each row the
+app and its summary, the current one's body under the table. Its verbs:
+Open (the notification's process comes to the front and is told,
+`Notifications.act`), each action the app named, and Clear. The console's
+key held while a banner is up opens the task manager on this tab with that
+notification current, and takes the banner down.
+
 Reached from the system menu and by holding the console's key
 (`Workstation.open_tasks`); a kernel kind ("tasks"), a window on the desk
 and the surface on top on a handheld, where it holds the front game while
@@ -29,8 +37,10 @@ except ImportError:  # pragma: no cover - host fallback
 
 try:
     from layers import Layer
+    from notifications import NOTES
 except ImportError:  # pragma: no cover - host fallback
     from runtime.layers import Layer
+    from runtime.notifications import NOTES
 
 TITLE = "Tasks"
 COLUMNS = ("Name", "State", "CPU", "Mem")
@@ -38,7 +48,14 @@ STATES = {"running": "Running", "throttled": "Behind", "minimised": "Minimised",
           "paused": "Paused", "background": "Service", "suspended": "Suspended",
           "stopping": "Stopping", "crashed": "Crashed"}
 SWITCH, CLOSE, STOP, DETAILS, HOME = "Switch to", "Close", "Stop", "Details", "Home"
+OPEN, CLEAR = "Open", "Clear"
+RUNNING, NOTES_TAB = 0, 1
+TABS = ("Running", "Notifications")
+NOTE_COLUMNS = ("From", "Notification")
+NOTE_LABELS = 2                 # the actions a row offers by name, at most
 _HINTS = ["confirm", SWITCH, "back", "Back"]
+_ROWS = {"id": "rows"}          # the tables' id: the focus a page opens on
+_NOTE_ROWS = {"id": "notes"}
 
 
 def cpu_text(pm):
@@ -55,6 +72,15 @@ def mem_text(n):
     if n >= 1 << 20:
         return "~%d.%dM" % (n >> 20, ((n & 0xFFFFF) * 10) >> 20)
     return "~%dK" % ((n + 1023) >> 10)
+
+
+def note_verbs(n):
+    """The verbs notification `n` offers: Open, its named actions, Clear."""
+    out = [OPEN]
+    for a in n.labels()[:NOTE_LABELS]:
+        out.append(a[1])
+    out.append(CLEAR)
+    return out
 
 
 def verbs(row):
@@ -95,12 +121,26 @@ class TasksLayer(Layer):
         self._gen = -1               # the running set's gen the rows were read at
         self._rect = (0, 0, 0, 0)
         self.held = False            # it paused the front game when it opened
+        self.tab = RUNNING
+        self._focus = False
+        self.note_cur = 0
+        self.notes = []              # the list's notifications as the rows show them
+        self.note_cells = []
+        self._note_gen = -1
 
     # -- the rows -----------------------------------------------------------
 
     def moved(self):
-        """The rows changed since they were drawn: a sample, a state, a run."""
-        return self.ws.procs.gen != self._gen
+        """The rows changed since they were drawn: a sample, a state, a run,
+        a notification."""
+        return self.ws.procs.gen != self._gen or NOTES.gen != self._note_gen
+
+    def _read_notes(self):
+        self._note_gen = NOTES.gen
+        self.notes = list(NOTES.list)
+        self.note_cells = [(n.app, n.summary) for n in self.notes]
+        if self.note_cur >= len(self.notes):
+            self.note_cur = len(self.notes) - 1 if self.notes else 0
 
     def _read(self):
         procs = self.ws.procs
@@ -116,10 +156,21 @@ class TasksLayer(Layer):
 
     # -- the app protocol ----------------------------------------------------
 
-    def open(self):
+    def open(self, note=None):
+        """Open on the running set, or on the Notifications tab with
+        notification `note` current."""
         self.host.reset()
         self.cur = 0
         self._gen = -1
+        self._note_gen = -1
+        self.tab = RUNNING
+        self.note_cur = 0
+        if note is not None:
+            self.tab = NOTES_TAB
+            self._read_notes()
+            if note in self.notes:
+                self.note_cur = self.notes.index(note)
+        self._focus = True           # the first frame puts the focus on the list
 
     def back(self):
         self.ws.close_tasks()
@@ -188,15 +239,22 @@ class TasksLayer(Layer):
 
     def _page(self):
         ws = self.ws
-        if self.moved():
+        if ws.procs.gen != self._gen:
             self._read()
+        if NOTES.gen != self._note_gen:
+            self._read_notes()
         desk = _lb.metric_class() == _lb.DESK
         hand = ws.procs.handheld()
         rect = self._content()
         self.host.begin(ws.sys_canvas, ws.theme_colors, rect, desk, ws.windowed_chrome)
         page = _ui.page("")
-        row = self.rows[self.cur] if self.rows else None
-        acts = verbs(row) if row is not None else []
+        notes = self.tab == NOTES_TAB
+        if notes:
+            n = self.notes[self.note_cur] if self.notes else None
+            acts = note_verbs(n) if n is not None else []
+        else:
+            row = self.rows[self.cur] if self.rows else None
+            acts = verbs(row) if row is not None else []
         if hand:
             acts = acts + [HOME]
         hints = _HINTS
@@ -207,9 +265,20 @@ class TasksLayer(Layer):
             _ui.hints(hints)
         bh = _ui_draw.metrics("value_row")[17 if desk else 16] * ws.layout.fs
         pad = 8 if desk else 0
+        band, page = _ui.cut_top(page, bh + 2 * pad)
+        if pad:
+            band = _ui.inset(band, 2 * pad, pad)
+        _ui.at(*band)
+        tab = _ui.tabs("Tasks", TABS, self.tab)
+        if tab != self.tab:
+            self.tab = tab
+            ws.request_frame()          # the page follows the tab
         foot, body = _ui.cut_bottom(page, bh + 2 * pad)
         if pad:
             foot = _ui.inset(foot, 2 * pad, pad)
+        if notes:
+            self._notes_page(body, foot, acts)
+            return
         if row is None:
             _ui.at(*body)
             _ui.empty("layout", "Nothing running", ("Games and apps you open show here.",))
@@ -217,7 +286,10 @@ class TasksLayer(Layer):
                 self._buttons(foot, acts, None)
             return
         _ui.at(*body)
-        cur, opened = _ui.table("", COLUMNS, self.cells, self.cur)
+        cur, opened = _ui.table("", COLUMNS, self.cells, self.cur, _ROWS)
+        if self._focus:
+            self._focus = False
+            _ui.focus("rows")
         if 0 <= cur < len(self.rows) and cur != self.cur:
             self.cur = cur
             ws.request_frame()          # the verbs follow the current row
@@ -225,6 +297,34 @@ class TasksLayer(Layer):
             self._do(acts[0], row)
             return
         self._buttons(foot, acts, row)
+
+    def _notes_page(self, body, foot, acts):
+        ws = self.ws
+        n = self.notes[self.note_cur] if self.notes else None
+        if n is None:
+            _ui.at(*body)
+            _ui.empty("bubble", "No notifications", ("What apps post shows here.",))
+            if acts:
+                self._buttons(foot, acts, None)
+            return
+        if n.body:
+            lh = _ui.text_size("Ag")[1] + 4 * ws.layout.fs
+            line, body = _ui.cut_bottom(body, lh)
+            _ui.at(*_ui.inset(line, 4 * ws.layout.fs, 0))
+            _ui.label(n.body)
+        _ui.at(*body)
+        cur, opened = _ui.table("", NOTE_COLUMNS, self.note_cells, self.note_cur,
+                                 _NOTE_ROWS)
+        if self._focus:
+            self._focus = False
+            _ui.focus("notes")
+        if 0 <= cur < len(self.notes) and cur != self.note_cur:
+            self.note_cur = cur
+            ws.request_frame()
+        if opened and acts:
+            self._do(acts[0], n)
+            return
+        self._buttons(foot, acts, n)
 
     def _buttons(self, rect, acts, row):
         n = len(acts)
@@ -242,6 +342,9 @@ class TasksLayer(Layer):
         if verb == HOME:
             ws.close_tasks(home=True)
             return
+        if self.tab == NOTES_TAB:
+            self._do_note(verb, row)
+            return
         key, _name, kind, _state, _cpu, _mem, pid = row
         procs = ws.procs
         if verb == DETAILS:
@@ -256,3 +359,15 @@ class TasksLayer(Layer):
             else:
                 ws.tasks_close(key)
         self._gen = -1
+
+    def _do_note(self, verb, n):
+        self._note_gen = -1
+        if verb == CLEAR:
+            NOTES.clear(n.id)
+        elif verb == OPEN:
+            NOTES.act(n.id)
+        else:
+            for a in n.labels():
+                if a[1] == verb:
+                    NOTES.act(n.id, a[0])
+                    break

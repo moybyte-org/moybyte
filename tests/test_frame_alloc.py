@@ -27,8 +27,9 @@ mid-boot, with the driver reporting nothing. `tests/unix_mp.py` refuses a
 board-model binary that is not under a GIL.
 
 WHAT IT PINS. The frames allocate nothing -- with nothing held, with a
-button held down, and with a background service due every frame (the
-kernel's service upcall, runtime/system/scheduler.py's tick and the wake) --
+button held down, with a background service due every frame (the
+kernel's service upcall, runtime/system/scheduler.py's tick and the wake),
+and with a notification's banner over the game (runtime/system/notifications.py) --
 over windows long enough to take in two PERF periods and a
 T-Deck diag tick (net of a thread's straddling block, see SLACK). The console boots in kid mode (PERF DIAG off,
 the default), where nothing periodic is formatted, printed or ringed (owner
@@ -397,6 +398,7 @@ def measure(loop):
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     background(loop, info)
+    banner(loop, info)
     notes(loop, info)
     code(loop, info)
     apps(loop, info)
@@ -432,6 +434,36 @@ def background(loop, info):
     p = scheduler.SCHED.procs[pid]
     info["bg_ran"] = p.ns["n"][0] if p.ns else -1
     scheduler.SCHED.stop(pid)
+
+
+POSTER = """
+import moybyte
+def post():
+    moybyte.notify("Ana: are you coming?", "by the lake", "heart", (), 2)
+moybyte.after(0, post)
+moybyte.every(60000, lambda: None)
+"""
+
+
+def banner(loop, info):
+    """The play frame again under a notification's banner: a service posts
+    (outside the window), and the frames measured are the game's with the
+    banner over them."""
+    import scheduler
+    import notifications
+    pid = scheduler.SCHED.start({"id": "t.mesh", "title": "Mesh", "src": POSTER,
+                                 "permissions": ["notifications"]})
+    for _ in range(30):
+        loop.step()
+    info["banner_posted"] = notifications.NOTES.up() is not None
+    gc.collect()
+    gc.disable()
+    info["banner"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    info["banner_up"] = notifications.NOTES.up() is not None
+    info["banner_top"] = loop.ws.wm.top_kind()
+    scheduler.SCHED.stop(pid)
+    notifications.NOTES.reset()
 
 
 def _typing(loop, ms, least=0):
@@ -1299,6 +1331,13 @@ def test_a_play_frame_with_a_background_service_allocates_nothing(result):
     info, text = result
     assert info["bg_ran"] > len(info["bg"]) // 2, text[-3000:]
     _assert_quiet(info["bg"], "a background service", text)
+
+
+def test_a_play_frame_under_a_notification_banner_allocates_nothing(result):
+    info, text = result
+    assert info["banner_posted"] and info["banner_up"], text[-3000:]
+    assert info["banner_top"] == "desktop", text[-3000:]
+    _assert_quiet(info["banner"], "a notification's banner", text)
 
 
 def test_notes_is_the_run_being_measured(result):
