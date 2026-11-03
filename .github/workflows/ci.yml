@@ -38,7 +38,7 @@ jobs:
     env:
       # Nothing in the suite needs a real display: pygame is imported lazily
       # everywhere (moybyte_sim/pygame_backend.PygameBackend.__init__,
-      # runtime/host_app.py's PygameAudio) and every call site falls back to
+      # runtime/host/host_app.py's PygameAudio) and every call site falls back to
       # headless/silent if init fails. `make setup` DOES install pygame now
       # (the sim extra, so a fresh clone can run the simulator), so pin the
       # dummy SDL drivers: a headless runner should never hang waiting on a

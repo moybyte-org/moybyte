@@ -3,7 +3,7 @@
 #   Component          one native component: its dir, hook and host sources
 #   impl_of            the hook's value, checked
 #   build_env          the hook's environment for one build
-#   binding            runtime/moy_index.py's interface over a twin, by ctypes
+#   binding            runtime/carts/moy_index.py's interface over a twin, by ctypes
 #   host_bindings      the suite's native BINDINGS
 #   fuzz_binary        fuzz_index under ASan+UBSan: libFuzzer's or the seeded one
 #   unix_micropython   the desktop MicroPython with a twin in both binaries
@@ -19,8 +19,8 @@
 #   cmd_ci_time        what the twin's tests cost a CI run
 """Sprint 1a's harness: the store's index built as the C twin for every target,
 and the numbers the kernel's language was decided on (#224; the decision is
-docs/native_kernel_2026-09.md section 5, C). Sprint 2 generalised it to a second
-component, the kernel's spine (native/moy_spine, docs/kernel_spine_2026-10.md):
+native/moy_kernel/README.md, C). Sprint 2 generalised it to a second
+component, the kernel's spine (native/moy_spine, docs/history/kernel_spine_2026-10.md):
 `--component spine` runs `host` and `sanitize` for it, with its own host
 library, fuzz driver and tests; `sizes`, `bench` and `ci-time` stay the
 index's, because the spine has no Python twin an image could take instead.
@@ -46,10 +46,10 @@ browser console built as the default (`py`) and each board's image as the twin.
 THE HOOK. MOY_INDEX_IMPL picks the store index a build compiles in:
 
     c     the default: native/moy_index/moy_index.c under modmoy_index.c, and
-          runtime/moy_index.py left out of the frozen set, so the extensible
+          runtime/carts/moy_index.py left out of the frozen set, so the extensible
           builtin answers `import moy_index` on every image that takes the
           module (the boards, the browser)
-    py    runtime/moy_index.py, frozen; no native index at all
+    py    runtime/carts/moy_index.py, frozen; no native index at all
 
 native/moy_index/micropython.cmake (the boards) and micropython.mk (the
 desktop MicroPython, the browser) read it, tools/board_config.py drops the
@@ -60,7 +60,7 @@ The spine has no hook: native/moy_spine (modmoy_spine.c over moy_route.c,
 moy_settings.c and moy_ledger.c, and moy_htab.c, the handle table both
 components take their slots from) is in every image, the desktop MicroPython
 and the CPython host (over ctypes), and its Python twin is the suites' oracle,
-tests/spine_twin.py. runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
+tests/spine_twin.py. runtime/carts/moy_index.py stays the host's: CPython's simulator, tools and tests
 import it, and it is the reference every binding is pinned against.
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
@@ -155,7 +155,7 @@ INDEX = Component(
 # The spine's part carries native/moy_app too: the app ABI's state reads the
 # spine's tables and settings rows. The user-files layer its files rows reach
 # is native/moy_store's, which the console hands moy_app by its verb table
-# (tools/moy_ufiles_binding.py) and the host's one library compiles as its own
+# (runtime/host/moy_ufiles_binding.py) and the host's one library compiles as its own
 # part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
@@ -218,7 +218,7 @@ def build_env(impl, bench=False, comp=INDEX):
 
 def host_library(impl="c", sanitize=False, comp=INDEX):
     """The host shared library for the C twin: the host's one library
-    (runtime/host_native.py), which carries every component; a sanitizer
+    (runtime/host/host_native.py), which carries every component; a sanitizer
     build is the component's alone, cached under .build/host_<component>.
     None where there is no C compiler."""
     from runtime import host_native, native_build
@@ -262,7 +262,7 @@ _SIGS = (
 
 
 def binding(impl="c", sanitize=False):
-    """An Index class with runtime/moy_index.py's interface over the C twin's
+    """An Index class with runtime/carts/moy_index.py's interface over the C twin's
     host library, or None where there is no C compiler."""
     path = host_library(impl, sanitize)
     if path is None:

@@ -1,12 +1,12 @@
-// moy_play: the kernel's Player (docs/kernel_cartpath_2026-10.md §3). What a
-// cart's run is, decided and driven below the VM.
+// moy_play: the kernel's Player (#224 sprint 4). What a cart's run is, decided
+// and driven below the VM.
 //
-// THE VM-FREE RULE (§2), one function the census and the Player both call,
+// THE VM-FREE RULE, one function the census and the Player both call,
 // decided from the catalogue entry, and for a compiled app from its module's
 // imports too:
 //   1. the runtime is "lua" or "wasm" and this image has its row (moy_rt_get);
 //   2. the type is "game" (a manifest that names none is a game when it is a
-//      spec cart, an app otherwise: runtime/moy_carts.py's rule), or "app"
+//      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
 //      with the runtime "wasm" where the image carries native/moy_app;
 //   3. every permission is in the native set: graphics, input, audio,
 //      multiplayer -- or, for a compiled app, a role's permission, which
@@ -14,9 +14,38 @@
 //      C-served (moy_play_vm_free_at). A permission the kernel does not know
 //      keeps the VM.
 // A cart that fails it runs with the VM up, and `why` names the first clause
-// it failed.
+// it failed. Everything outside the native set keeps the VM, by name:
+// `network`, `console`, `pins`, `files` and every `files:<kind>`, `prefs`, and
+// every role permission runtime/shell/system_api.py grants. The census pins the
+// verdict against every seed cart's and PICO-8 import's real manifest.
 //
-// THE CRASH RECORD (docs/kernel_cartpath_2026-10.md §8.3). `launch` arms the
+// THE LUA SUPERSET, name by name (runtime/run/cart_verbs.py's names outside
+// libmoy's table):
+//   make_layer, draw_layer       native: libmoy's verbs over the Display seam
+//                                (moycore_run.c); a layer is a BUF row the run owns
+//   image, Image                 native: an IMAGE row over the cart's image,
+//                                decoded by the C port of moyimg
+//   scene, load_scene, actors, touching, move_actor, move_actor_to,
+//   remove_actor, draw_scene     native: the scene texts parsed in C, the live
+//                                world the prelude's Lua tables, at most 256
+//                                actors (a kinded table's cap, 2026-10-08)
+//   mouse, col, W, H             native: the pointer snapshot; globals set at open
+//   net, on_net                  native: moy_match.c's queue, behind multiplayer
+//   wifi, pin_write, pin_read    keep the VM: behind network and pins
+//   open_editor, the app roles,
+//   the console verbs            keep the VM: granted only to app, tool and
+//                                script carts (rule 2)
+//   trace                        absent with no VM: the host harness's
+// A cart that keeps the VM runs under the same Player with its non-native
+// names as trampolines, counted APP upcalls; the names a cart sees are the
+// same either way. A Lua cart with no VM runs on the VM service task over
+// moy_load's arena and moycore's pool. A wasm cart with no VM runs on its
+// session thread; its file requests are C over the kernel's volume
+// (native/moy_store/moy_files.h), run on the VM service task through
+// moy_wasm_on_vm inside the bus gate. A Python cart always keeps the VM: its
+// runtime row turns open, tick and draw into APP upcalls.
+//
+// THE CRASH RECORD. `launch` arms the
 // record's GAME role with a game's id (its folder's stem) before the runtime
 // opens, and `end` clears it: a fault or a hang inside a run names its cart,
 // and a game earns no strikes (no ledger counts the role). The board's kernel
@@ -98,10 +127,33 @@ struct moy_input;                               // moy_input.h
 // (an unsigned compiled module may load).
 enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 
-// THE STOP VERDICT (docs/kernel_cartpath_2026-10.md section 5.1): whether the
-// launch stops the VM for the run, and when it does not, the first clause
-// that kept it. The policy is `need`: a VM-free run stops the VM only when
-// its fit check fails with the VM up.
+// THE SHARES (2026-10-05; configuration, derived from #224's measurements,
+// where each board's standing against them is kept). On each S3 board, at the
+// Player's fit check, the worst of at least five boots, fresh and after the
+// census's scripted session (tools/mem_census.py):
+//   - a cart has AT LEAST 4 MiB of PSRAM free with a 3 MiB LARGEST BLOCK:
+//     Doom's footprint, plus one area of the Python heap at its boot size, so
+//     one growth of the heap before a cart starts cannot refuse it, rounded up
+//     to whole MiB;
+//   - native code holds AT MOST 1 MiB of PSRAM (panel buffers, flush slots,
+//     audio, driver buffers, the game canvas, the layer pool, the kernel's
+//     tables), which with the cart's floor leaves 3 MiB for the Python heap;
+//     a board's MOY_GLASS_POOL_BYTES is cut from it;
+//   - the kernel costs AT MOST 4 KiB of internal SRAM net against sprint 0's
+//     baseline (free, largest block and low-water, all-internal and
+//     DMA-capable, WiFi and BLE up) while the VM runs, and NOTHING net while it
+//     is stopped (no second task's stack is alive: moy_loop.h).
+// The T-Deck's DMA-capable low-water with both radios up is the tightest
+// internal figure on either board. A board's image headroom floor is
+// `[image] headroom_floor_kib` in its board.toml, with its reasons there.
+//
+// THE STOP VERDICT: whether the launch stops the VM for the run, and when it
+// does not, the first clause that kept it, which the run's `info` names. The
+// policy is `need`: a VM-free run stops the VM only when its fit check fails
+// with the VM up. Only a launcher launch may stop it (KEEP_PLACE): a return
+// start rebuilds the launcher alone, and no other surface comes back after a
+// stop (owner, 2026-10-10; native/moy_app/README.md). A Python owner's WiFi
+// lease refuses a stop; the kernel's own holders (the link, the run) do not.
 enum {
     MOY_PLAY_STOPS = 0,         // the VM stops; the load follows the stop
     MOY_PLAY_KEEP_RULE = 1,     // the cart fails the VM-free rule
@@ -200,7 +252,7 @@ uint32_t moy_play_current(void);       // the live run, or 0
 #define MOY_PLAY_NO_STACK 0xFFFFFFFFu
 uint32_t moy_play_stack_free(void);
 uint32_t moy_play_last(void);          // the last run launched, live or ended
-// THE RUNAWAY WATCH (docs/kernel_cartpath_2026-10.md §8.2, #212's rider).
+// THE RUNAWAY WATCH (docs/history/kernel_cartpath_2026-10.md §8.2, #212's rider).
 // Each tick runs under a budget: MOY_PLAY_STUCK_SLOTS of the run's pacing
 // slot (30 Hz unpaced), within [MOY_PLAY_STUCK_MIN_MS, MOY_PLAY_STUCK_MAX_MS],
 // which is under every board's task-watchdog timeout. A watcher on another
@@ -237,7 +289,7 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks);
 // The seed a matched run's console starts from (its _init draws from it):
 // true while the kernel's link has a live session.
 bool moy_play_lock_seed(uint32_t *seed);
-// THE KERNEL RUN AS THE LOOP'S FOREGROUND (docs/kernel_cartpath_2026-10.md
+// THE KERNEL RUN AS THE LOOP'S FOREGROUND (docs/history/kernel_cartpath_2026-10.md
 // §4). While a run is in front the loop's frame stage calls
 // moy_play_front_frame and makes no console upcall: the run's input (the
 // pointer), its ticks (the tick model's plan, or

@@ -28,7 +28,7 @@ one existed but was never in the path anything runs.
 ## What checks what
 
 - `tests/test_spec_conformance.py` (here) — replays `traces/` through the host's
-  canvas (`runtime/host_canvas.py` → `device_canvas.DeviceCanvas` over the
+  canvas (`runtime/host/host_canvas.py` → `device_canvas.DeviceCanvas` over the
   compiled `moy_gfx`/libmoy kernel) and hashes the framebuffer against
   `hashes.json`, on every `make test`, with no spec checkout.
 - `tests/test_gfx_binding.py` — that host kernel against the REAL native module

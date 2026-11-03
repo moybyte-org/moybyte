@@ -1,6 +1,6 @@
 """The #108 user-files layer: files/<kind>/ beside the carts dir -- the kind
 registry, list/load/save/rename/duplicate verbs, the restorable trash, and the
-one-shot artwork.moyimg move. Same shared runtime/moy_carts.py the device
+one-shot artwork.moyimg move. Same shared runtime/carts/moy_carts.py the device
 freezes."""
 
 import json
@@ -456,7 +456,7 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# the VAULT holds more than notes (docs/text_editing_2026-09.md)
+# the VAULT holds more than notes (docs/theme_and_shell_2026-11.md §10)
 # ---------------------------------------------------------------------------
 
 def test_the_vault_lists_every_file_it_holds_under_its_whole_name(tmp_path):

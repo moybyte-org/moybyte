@@ -1,7 +1,7 @@
 """The picture compressor (native/moy_store/moy_ufiles.c, `moy_uf_deflate`).
 
 Every picture and cover a board writes goes through it, and a board's Python
-codecs (runtime/moyimg.py) reach it as `moy_ufiles.deflate`. Its work is
+codecs (runtime/carts/moyimg.py) reach it as `moy_ufiles.deflate`. Its work is
 bounded per byte: a matcher that walks its whole window at every position
 spends that window on every byte of a flat page, and on a P4 a blank 512x300
 drawing held the VM past the task watchdog.
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from unix_mp import require_unix_mp  # noqa: E402
+from unix_mp import require_unix_mp, runtime_tree  # noqa: E402
 
 W, H = 512, 300
 
@@ -86,7 +86,7 @@ def test_a_blank_page_is_one_run_of_long_matches(uf):
 
 def test_the_boards_python_codecs_reach_the_c_compressor(tmp_path):
     exe = require_unix_mp("moy_ufiles", board_model=True,
-                          why="runtime/moyimg.py's compressor on a board.")
+                          why="runtime/carts/moyimg.py's compressor on a board.")
     script = tmp_path / "deflate_route.py"
     script.write_text(
         "import sys\n"
@@ -99,7 +99,7 @@ def test_the_boards_python_codecs_reach_the_c_compressor(tmp_path):
         "assert moyimg.decode_moyimg(moyimg.encode_moyimg(%d, %d, page))[2] == page\n"
         "png = cover_png.encode_indexed(bytes(range(64)) * 256, bytes(range(192)))\n"
         "sys.stdout.buffer.write(png)\n"
-        % (str(ROOT / "runtime"), W * H, W, H))
+        % (runtime_tree(), W * H, W, H))
     proc = subprocess.run([exe, str(script)], capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode()[-2000:]
     png = proc.stdout

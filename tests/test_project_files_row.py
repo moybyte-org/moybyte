@@ -1,5 +1,5 @@
 """The Config tab's Files -- a project's own files, as files (step 5 of
-docs/text_editing_2026-09.md).
+docs/theme_and_shell_2026-11.md §10).
 
 The rule the whole step exists to keep: **the loader stays in the loop.** A
 project file is never reached straight from a listing, because JSON mode is

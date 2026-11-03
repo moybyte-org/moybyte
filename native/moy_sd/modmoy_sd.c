@@ -34,6 +34,7 @@
 #include "driver/sdspi_host.h"
 #include "driver/spi_master.h"
 #include "sdmmc_cmd.h"
+#include "esp_private/sdmmc_common.h"
 #include "soc/soc_caps.h"
 #if SOC_SDMMC_HOST_SUPPORTED
 #include "driver/sdmmc_host.h"
@@ -44,9 +45,10 @@
 #endif
 
 #define MOY_SD_SECTOR 512
-// Sectors per multi-block transfer: a 16 KB bounce, taken per call and halved
-// until internal DMA memory can give it. The card holds no bounce between
-// calls.
+// Sectors per multi-block command, so a transfer holds a shared SPI bus for
+// at most this many sectors at a time; on SDMMC also a 16 KB bounce in PSRAM,
+// taken per call and halved until PSRAM can give it. The card holds no bounce
+// between calls.
 #define MOY_SD_RUN 32
 
 #if MOY_SD_HAVE_IDF
@@ -54,8 +56,8 @@ static sdmmc_card_t *s_card = NULL;
 static sdspi_dev_handle_t s_dev = -1;
 static bool s_host_inited = false;
 static int s_mmc_slot = -1;
-// Where a transfer's bounce comes from: internal DMA memory, unless the host
-// can reach PSRAM (the P4's SDMMC), when it is PSRAM on cache-line bounds.
+// Where an SDMMC transfer's bounce comes from: PSRAM on cache-line bounds when
+// the host reaches PSRAM (the P4's), else internal DMA memory.
 static uint32_t s_bounce_caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
 
 static void moy_sd_release(void) {
@@ -244,13 +246,22 @@ static void moy_sd_require(void) {
 }
 
 // `count` sectors from or to `buf`, which may live anywhere (a PSRAM
-// bytearray, unaligned), through a bounce the host's DMA reaches: internal
-// DMA memory on SPI, aligned PSRAM on the P4's SDMMC. A run of sectors is one
-// multi-block command: on a write the card's busy time is paid once per run
-// instead of once per sector, and that wait is most of what a single-block
-// write costs. The run's bounce is taken for this call and given back; when
-// its memory cannot give it the run halves, down to one sector, and
-// with not even that the call fails with ESP_ERR_NO_MEM.
+// bytearray, unaligned), as multi-block commands of up to MOY_SD_RUN sectors:
+// on a write the card's busy time is paid once per command instead of once
+// per sector, and that wait is most of what a single-block write costs.
+//
+// On SPI the transfer allocates nothing. sdspi moves every block through its
+// own DMA buffer (516 bytes, taken at the card's first data command, at mount)
+// and copies to or from `buf` with the CPU, so `buf` goes to the card as it
+// is, through sdmmc_{read,write}_sectors_dma: the public sdmmc_read_sectors
+// would refuse a PSRAM `buf` and take a DMA block per call for it. Internal
+// DMA memory is what WiFi and BLE run short of together: a buffer taken there
+// per call is a store read that fails with EIO under a radio's burst.
+//
+// On SDMMC a run goes through a bounce the host's DMA reaches (aligned PSRAM
+// on the P4), taken for this call and given back; when its memory cannot give
+// it the run halves, down to one sector, and with not even that the call fails
+// with ESP_ERR_NO_MEM.
 // The card's sectors moved, raising nothing: ESP_OK or the driver's error.
 // What native/moy_store's card volume reads and writes through.
 int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
@@ -259,6 +270,17 @@ int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
     }
     if (count == 0) {
         return ESP_OK;
+    }
+    if (s_dev >= 0) {
+        esp_err_t err = ESP_OK;
+        for (uint32_t i = 0; i < count && err == ESP_OK; i += MOY_SD_RUN) {
+            uint32_t n = count - i < MOY_SD_RUN ? count - i : MOY_SD_RUN;
+            uint8_t *at = buf + (size_t)i * MOY_SD_SECTOR;
+            size_t len = (size_t)n * MOY_SD_SECTOR;
+            err = write ? sdmmc_write_sectors_dma(s_card, at, start + i, n, len)
+                        : sdmmc_read_sectors_dma(s_card, at, start + i, n, len);
+        }
+        return err;
     }
     uint32_t run = count < MOY_SD_RUN ? count : MOY_SD_RUN;
     uint8_t *bounce = NULL;
@@ -290,9 +312,14 @@ int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write) {
     return err;
 }
 
+// A failed transfer raises and keeps the card: tearing the device down is a
+// failed bring-up's, never an op's.
 static void moy_sd_xfer(uint32_t start, uint8_t *buf, uint32_t count, bool write) {
     esp_err_t err = moy_sd_card_io(start, buf, count, write);
-    moy_sd_check(err, write ? "write" : "read");
+    if (err != ESP_OK) {
+        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("moy_sd %s failed: %d"),
+                          write ? "write" : "read", (int)err);
+    }
 }
 
 #endif

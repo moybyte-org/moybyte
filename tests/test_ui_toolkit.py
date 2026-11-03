@@ -1,4 +1,4 @@
-"""runtime/ui.py -- the shared immediate-mode widget toolkit (visual identity
+"""runtime/toolkit/ui.py -- the shared immediate-mode widget toolkit (visual identity
 v1 Phase 3): rect algebra, themed widgets, and the one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
 path is the one every tier shares.
 

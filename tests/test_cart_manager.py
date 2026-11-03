@@ -54,7 +54,7 @@ def test_the_kernel_keeps_no_roster_state(tmp_path):
     ws = build_ws(tmp_path)
     assert not hasattr(ws, "_all_carts")
     assert ws.carts.all
-    assert "_all_carts" not in ROOT.joinpath("runtime/console.py").read_text(
+    assert "_all_carts" not in ROOT.joinpath("runtime/shell/console.py").read_text(
         encoding="utf-8")
 
 
@@ -507,7 +507,7 @@ def test_a_launcher_run_records_the_cart_as_recent(tmp_path):
 # -- the frame loop -----------------------------------------------------------
 
 def _workstation_method(name):
-    tree = ast.parse(ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8"))
+    tree = ast.parse(ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8"))
     cls = next(n for n in tree.body
                if isinstance(n, ast.ClassDef) and n.name == "Workstation")
     return next(f for f in cls.body
@@ -579,7 +579,7 @@ def test_rescan_loads_no_cart_whole_and_the_open_path_rehydrates_it(tmp_path):
     assert cart["src"].startswith("def _draw") and cart["lazy"] is False
 
 
-# -- the play records (docs/look_2026-10.md step 18) ---------------------------
+# -- the play records (docs/history/look_2026-10.md step 18) ---------------------------
 
 def _real(ws, n=1):
     return [c for c in ws.carts.all if c.get("path")][:n]

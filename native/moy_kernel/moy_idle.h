@@ -1,4 +1,4 @@
-// moy_idle: the idle ladder (docs/kernel_survival_2026-10.md §7.2, §13 answers
+// moy_idle: the idle ladder (docs/history/kernel_survival_2026-10.md §7.2, §13 answers
 // 1 and 7). A pure state machine over the caller's clock: the loop ticks it
 // after EVERY input source and the dev channel have been read, and it answers
 // what the backlight should be, whether this frame's click is swallowed, and

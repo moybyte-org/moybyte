@@ -1,4 +1,4 @@
-"""Native 1x on the big boards, and the 2x option (docs/look_2026-10.md step 9).
+"""Native 1x on the big boards, and the 2x option (docs/history/look_2026-10.md step 9).
 
 A board whose declared glass is a desk's lays its chrome out on the desk's
 metric class (`layout_base.CLASSES`): a 40-row bar, list rows 28, Places 34,

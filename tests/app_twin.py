@@ -2,11 +2,11 @@
 tests/test_moy_app.py holds native/moy_app's bindings to (the ctypes one on
 CPython, the native module on the desktop MicroPython).
 
-This is what `runtime/app_context.py`'s `Damage`, `Surface`, `Theme` and
-`Prefs`, `runtime/widgets.py`'s `Clipboard`, the ArtworkService's open picture
-and `runtime/system_api.py`'s grant policy did before sprint 5 steps 4 to 6
+This is what `runtime/shell/app_context.py`'s `Damage`, `Surface`, `Theme` and
+`Prefs`, `runtime/toolkit/widgets.py`'s `Clipboard`, the ArtworkService's open picture
+and `runtime/shell/system_api.py`'s grant policy did before sprint 5 steps 4 to 6
 moved them to C, reshaped only where the design moved the line
-(docs/kernel_appabi_2026-10.md section 2): a grant table keyed by the app's id,
+(native/moy_app/README.md): a grant table keyed by the app's id,
 the role mask checked on every call, the damage flags the frame gate takes, each
 grant's surface row and the pointer it is offset from, the live token table
 under its generation, Paint's open picture in its settings rows, a clipboard of
@@ -662,7 +662,7 @@ _SERVED = {
               "hydrate images save_image encode_image"),
     "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
             "play run_script text_mode"),
-    "notify": "achieve",
+    "notify": "achieve award count has found_on progress today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
                 "writable op rescan free find net keep wifi wifi_open"),

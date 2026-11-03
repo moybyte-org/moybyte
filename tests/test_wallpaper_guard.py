@@ -2,7 +2,7 @@
 
 A wallpaper cart runs itself at every boot, so one that hangs or faults the
 board is a boot loop unless a mark written BEFORE its code runs outlives the
-death. `runtime/crash_guard.py` holds the design; these pin the backdrop's
+death. `runtime/shell/crash_guard.py` holds the design; these pin the backdrop's
 adoption of it: the strike-out after three boots (a wallpaper that raises, and
 one that takes the board down before it paints), survival across fresh
 workstations over one store, the fill and the notice a struck-out wallpaper
@@ -70,7 +70,7 @@ def _carts(tmp_path):
 def _wallpaper(tmp_path, slug, src, title=None):
     """A wallpaper cart in the store, chosen as the backdrop the next boot
     restores: what a kid's earlier Appearance pick left, `custom` naming it
-    (docs/theming_2026-09.md D6)."""
+    (docs/theme_and_shell_2026-11.md D6)."""
     carts = _carts(tmp_path)
     d = Path(carts) / (slug + ".moy")
     d.mkdir(parents=True, exist_ok=True)

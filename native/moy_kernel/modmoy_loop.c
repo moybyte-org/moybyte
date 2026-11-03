@@ -1,9 +1,9 @@
 // moy_loop's MicroPython binding: the kernel's frame as the module `moy_loop`,
-// the same names runtime/moy_loop.py gives CPython.
+// the same names runtime/host/moy_loop.py gives CPython.
 //
 //   register(handle_input, handle_pointer, frame, words=None, service=None)
 //                      the console's upcalls, held as ROOT POINTERS (never in
-//                      kernel state: docs/native_kernel_2026-09.md §4.3);
+//                      kernel state: native/moy_kernel/moy_kernel.h);
 //                      refused while no VM runs. `frame(dt)` answers the
 //                      console's frames drawn; `words(line)` the console's
 //                      dev words, truthy when the line asked for the REPL
@@ -428,6 +428,14 @@ static mp_obj_t loop_lit(mp_obj_t on) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(loop_lit_obj, loop_lit);
 
+// light_top() -> the light the ladder's full rung means, 1..255, or None where
+// the board's light cannot dim; light_top(n) sets it (moy_loop_light_top).
+static mp_obj_t loop_light_top(size_t n_args, const mp_obj_t *a) {
+    int v = moy_loop_light_top(n_args > 0 ? mp_obj_get_int(a[0]) : 0);
+    return v < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(loop_light_top_obj, 0, 1, loop_light_top);
+
 static mp_obj_t loop_health(mp_obj_t on) {
     moy_loop_arm_health(mp_obj_is_true(on));
     return mp_const_none;
@@ -742,6 +750,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pump), MP_ROM_PTR(&loop_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_pace), MP_ROM_PTR(&loop_pace_obj) },
     { MP_ROM_QSTR(MP_QSTR_lit), MP_ROM_PTR(&loop_lit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_light_top), MP_ROM_PTR(&loop_light_top_obj) },
     { MP_ROM_QSTR(MP_QSTR_health), MP_ROM_PTR(&loop_health_obj) },
     { MP_ROM_QSTR(MP_QSTR_frames), MP_ROM_PTR(&loop_frames_obj) },
     { MP_ROM_QSTR(MP_QSTR_drawn), MP_ROM_PTR(&loop_drawn_obj) },

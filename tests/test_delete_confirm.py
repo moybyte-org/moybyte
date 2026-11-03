@@ -283,6 +283,7 @@ def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
     verbs (design review F6-02), as it names Close under the system menu;
     it names the home's verbs again once the dialog is answered."""
     from runtime import launcher_layer
+    from runtime import home_hints
     ws = build_ws(tmp_path)
     drv = _drv(ws)
     ui_draw.input_kind(kind)
@@ -307,7 +308,7 @@ def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
     monkeypatch.setattr(launcher_layer._ui_draw, "hints", spy)
     assert ws.confirm.ask(ws.launcher.selected())
     c = _asked(ws, drv)
-    assert drawn == [launcher_layer._CONFIRM_KEYS] * len(drawn) and drawn, drawn
+    assert drawn == [home_hints._CONFIRM_KEYS] * len(drawn) and drawn, drawn
     assert strip() != home
     c.cancel()
     _frames(drv)

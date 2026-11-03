@@ -1,4 +1,4 @@
-// A cart as it travels (docs/kernel_store_2026-10.md section 8; #127, #122):
+// A cart as it travels (docs/history/kernel_store_2026-10.md section 8; #127, #122):
 // the `.moy` archive and adopt, which moves a staged cart into its place on
 // the shelf. The wire's skip rule it packs by is moy_fs.h's.
 //
@@ -8,7 +8,7 @@
 // order, at most six folders deep. A reader takes stored and deflated entries
 // (the image's uzlib), sizes from the central directory, strips the one top
 // folder every entry sits under, and refuses a path that climbs, is absolute,
-// or names what the wire skips. runtime/moy_carts.py's pack/unpack/adopt are
+// or names what the wire skips. runtime/carts/moy_carts.py's pack/unpack/adopt are
 // the twins; tests/test_store_native.py pins the archive against the
 // browser's zipStore and unzip both ways.
 

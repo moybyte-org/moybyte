@@ -1,4 +1,4 @@
-// The app ABI's wasm import adapter (docs/kernel_appabi_2026-10.md section
+// The app ABI's wasm import adapter (docs/history/kernel_appabi_2026-10.md section
 // 4): the role rows a compiled app imports, from module "moybyte.app" (the
 // vendor extension its manifest declares, moy-spec SPEC.md 16.2), one native
 // per row of roles.json with a wasm type, named "<role>_<verb>" at that type.

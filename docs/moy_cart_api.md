@@ -7,11 +7,10 @@ console API — it supersedes the legacy `.moyproj` SDK API in
 the old parallel SDK.
 
 **Source of truth (keep this doc in sync with them):** the API namespace is built by
-`make_api()` in `runtime/host_app.py` (host reference) and the identical
-`make_api()` in `firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py`
-(device). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
-it through `runtime/host_canvas.py`); the palette in
-`runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
+the one `make_api()` in `runtime/run/cart_api.py`, the same function on every tier
+(`runtime/host/host_app.py` and `device/device_api.py` re-export it). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
+it through `runtime/host/host_canvas.py`); the palette in
+libmoy's `native/moy_gfx/libmoy/moy_data.c`; buttons in `runtime/shell/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
 **moy-spec is the game console spec** (owner, 2026-10-21): Moybyte's app
@@ -49,7 +48,7 @@ none of them is ever a reason to refuse it: `description` (plain text, at most
 most eight short lowercase words; `pico8` is reserved for a converted cart, which
 is how the importer records a conversion). The home's metadata line says the
 genre, the desk's details pane the description, and Get Carts both for an index
-entry that has them; `runtime/cart_listing.py` is the one reader.
+entry that has them; `runtime/carts/cart_listing.py` is the one reader.
 
 ```python
 # a tiny cart: move a ball with the D-pad
@@ -127,10 +126,7 @@ logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
 The few Lua-specific notes:
 
 - `touch()` returns **multiple values**, not a tuple:
-  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer). Lua carts
-  had **no** pointer at all until 2026-09-12: the snapshot slot libmoy reads was
-  never written on either Lua tier, so `touch()` answered nil everywhere while
-  the Python twin of the same cart had one.
+  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer).
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
   `lay:map(...)`, `lay:rect(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
@@ -993,7 +989,7 @@ Since #170 the model is PICO-8-parity:
   changing pattern lengths survive the import.
 - An SFX may carry a `name`, a string of at most 24 characters (SPEC.md 8.1).
   It labels the sound for a person and never changes how it plays. The bank
-  (`runtime/audio.py`) keeps it through a load and a save, so the Music tab
+  (`runtime/run/audio.py`) keeps it through a load and a save, so the Music tab
   writes back the name it read, though it has no field to edit one yet.
 
 - A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still
@@ -1039,7 +1035,7 @@ same here as on any other console that implements the spec.
 
 ## Palette
 
-The **MOY64** palette (`runtime/palette.py`) is 64 colors. Indices **0–15** are the
+The **MOY64** palette (SPEC.md 2, libmoy's `native/moy_gfx/libmoy/moy_data.c`) is 64 colors. Indices **0–15** are the
 PICO-8 base (named, use `col("name")`); **16–63** are a curated desktop gamut (pastels,
 earth tones, vivid accents, neutrals, deep shades) — pass those as integers.
 

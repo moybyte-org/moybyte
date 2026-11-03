@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import gen_device_carts as _gdc  # noqa: E402
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,10 +49,10 @@ TITLE_TO_FOLDER = _gdc.title_to_folder(str(SYSTEM_CARTS))
 
 def _load_moy_runtime():
     # Mirror tests/test_device_make_api.py::_load_moy_runtime: the device does
-    # `from editors import ...` / `from audio import ...` / `from console import ...`,
-    # frozen from runtime/ (editors + audio first -- console imports both).
-    for name in ("editors", "audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
+    # `from audio import ...` / `from console import ...`, frozen from runtime/
+    # (audio first -- console imports it).
+    for name in ("audio", "console"):
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod

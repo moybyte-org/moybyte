@@ -1,4 +1,4 @@
-"""A theme's sprites (docs/theming_2026-09.md §4.6, §9 phase 6 step 9).
+"""A theme's sprites (docs/history/theming_2026-09.md §4.6, §9 phase 6 step 9).
 
 * The sheet: the cart sheet's hex format read strictly as a ROLE sheet, each
   nibble a slot of style.json's `theme.sprite_slots`; the caps and the

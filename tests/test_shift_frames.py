@@ -1,4 +1,4 @@
-"""Shift frames in the verbs engine (docs/scroll_and_text_2026-10.md §3.3,
+"""Shift frames in the verbs engine (docs/history/scroll_and_text_2026-10.md §3.3,
 §13): a frame whose change is one page's scroll plus rows the engine knows
 of moves the last frame's pixels of that page (a canvas's `shift_last`) and
 draws only its floor -- the band the move exposed, the rows whose marks
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from runtime import ui, ui_draw
+from runtime import ui, ui_draw, ui_host
 from runtime.host_canvas import make_system_canvas
 from ws_helpers import build_ws
 
@@ -685,7 +685,7 @@ def test_one_ring_body():
     band host's paints there (`ui.held`): launcher_layer keeps no ring."""
     import re
     root = Path(__file__).resolve().parent.parent
-    src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").glob("*.py")}
+    src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").rglob("*.py")}
     assert sum(s.count("class PaintRing") for s in src.values()) == 1
     found = []
     for name, text in sorted(src.items()):
@@ -831,7 +831,8 @@ def test_the_hosts_words_are_the_engines():
                   ("_HB_MOVING", "MOY_UI_HB_MOVING"), ("_HB_EDGE", "MOY_UI_HB_EDGE"), ("_HB_DUP", "MOY_UI_HB_DUP"),
                   ("_HB_SHIFT", "MOY_UI_HB_SHIFT"), ("_HB_HELD", "MOY_UI_HB_HELD"),
                   ("_HB_FENCE", "MOY_UI_HB_FENCE")):
-        assert getattr(ui_draw, py) == vals[c], (py, c, vals.get(c))
+        mod = ui_host if py.startswith(("_HP_", "_HH_", "_HB_")) else ui_draw
+        assert getattr(mod, py) == vals[c], (py, c, vals.get(c))
     assert len(ui_draw._PF) == vals["MOY_UI_PF_LEN"]
 
 

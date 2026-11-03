@@ -1,0 +1,486 @@
+"""The shelf's ROSTER (#209 landing C) -- `Workstation.carts`.
+
+The scanned cart list and everything that changes it: the store-writing verbs
+(new / duplicate / delete), the re-scan the browser sync fires, the #66 live-set
+diet (slim / rehydrate / re-slim) and the #105 favorites + recents. One object
+owns the list, so "what carts exist" has one author and one place a second cart
+SOURCE registers (docs/history/console_architecture_2026-08.md Section 5: #123/#124/#125
+gallery browse/install/publish).
+
+## `all` is a plain attribute with no `ws` mirror
+
+A re-scan builds a NEW list (`apply` rebinds it), so there is no alias trick to
+be had -- `ws.system`'s in-place `adopt()` works because that store is
+never rebound, and this list is rebound on every create, duplicate, delete,
+re-seed and browser sync. So the consumers read `ws.carts.all` and they all
+migrated in the landing that moved it: the desk icon column and its statics key
+(`wm_windowed`), the dev channel's `state` snapshot, the sysmenu's delete
+detection, `app_context`'s `Carts.all()` role, the cover prefetch and icon
+prune, `tools/make_site_gifs.py`, `tools/p4_conformance.py`'s serial surgery and
+the web runner's boot + re-scan.
+
+## What stays on the kernel, and why
+
+`_launcher_items` / `_launcher_view_items` / `_make_items`
+are GRID PRESENTATION, not roster: each is keyed on kernel state this object has
+no business knowing -- `can_manage`, `wm.has_desk`, the registered-app list, the
+search query, the pinned pseudo tiles. They read `carts.all` like every other
+consumer, and keeping them out means a future cart SOURCE plugs into the roster
+without also having to know what a shelf card looks like. `_fat_cart` stays
+kernel too: it is the OPEN WORKSPACE's cart, written by `_open_workspace`, not a
+property of the roster.
+
+## Reading the store through `ws`, per call
+
+Same `StoreHandle` `SystemStore` takes, and for the same reason: `carts_store`,
+`carts_root`, `can_manage` and `_with_sd` are all `None`-or-wrong at
+construction time and are injected (or swapped, on the boards) afterwards. The
+handle reads them through `ws` at the moment of use, so there is no wiring-order
+trap to get right.
+
+## Carts by handle
+
+The roster reaches the store's carts through `moy_catalogue`, the interface the
+native store exposes: every entry the scan returns carries its index handle as
+"h", and opening (`rehydrate`/`reload`), `dup` and `delete` name a cart by it.
+A cart deleted behind the shelf's back is a stale handle the next time it is
+named, which the verbs below already read as "nothing to load".
+"""
+
+# The shelf holds each cart as the store's catalogue entry (`moy_catalogue`):
+# none of the cart's PAYLOADS -- its scripts and assets, kept resident they are
+# ~300-500KB of permanently-live strings the GC MARK phase pays for on every
+# collect (#66 live-set diet). Opening a cart rehydrates them from the store,
+# and switching carts re-slims the previous one. "icon_rows" is what the scan
+# read for the cart's icon, dropped once slim() has baked it.
+try:
+    import moy_catalogue
+    from moy_carts import PAYLOADS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moy_catalogue
+    from runtime.moy_carts import PAYLOADS
+try:
+    import ui_draw as _ui_draw
+except ImportError:  # pragma: no cover - host package lane
+    from runtime import ui_draw as _ui_draw
+_SLIM_DROPS = PAYLOADS + ("icon_rows",)
+
+
+class CartManager:
+    """The scanned cart list, its store-writing verbs and the #105 favorites.
+
+    Plain methods, no properties (a property forward measured +5.1us against a
+    plain hop's +0.5us on this codebase), and the one member the grids call per
+    card -- `is_favorite` -- is handed to the launcher as a BOUND METHOD rather
+    than reached through the console."""
+
+    # -- favorites + recents (#105) -------------------------------------------
+    #
+    # Both ride the SAME system.json persistence Settings already uses for
+    # theme/font/OTA channel (ws.system.set, which persists) -- no new
+    # store surface. `favorites` is a plain path list (order = the order a kid
+    # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
+    # capped most-recently-run path list, newest first. Cart identity is the
+    # store PATH (stable across a rename/rescan, unlike an in-memory dict).
+    # `plays` (docs/history/look_2026-10.md step 18) maps a path to [count, day]: how
+    # many times it was run and the day of the last run as YYYYMMDD, 0 where
+    # the board had no wall clock. A value of any other shape reads as absent.
+
+    _MRU_CAP = 8          # how many recents system.json remembers
+    _PLAYS_CAP = 64       # how many carts' play records it keeps
+
+    def __init__(self, ws, handle, carts=None):
+        self.ws = ws
+        self.store = handle
+        # The scanned cart list is the single source both grids derive from:
+        # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and
+        # the Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every
+        # editable cart. Kept whole here so wallpaper discovery + the wifi-tool
+        # lookup read the FULL list rather than either display grid (the
+        # Make/New pseudo tiles never leak out).
+        self.all = list(carts) if carts else []
+        # Moves with every `apply`: what a reader of the roster keys on.
+        self.gen = 0
+        # Moves with every title a cart's dict takes in place (the Editor's
+        # rename, `ProjectStore.commit_manifest`): what a reader of the titles
+        # keys on beside the list it holds.
+        self.titled = 0
+        # The favorites as `is_favorite` last decoded them, with the row's text
+        # it decoded them from and the rows' generation it read that text at
+        # (`gen`): a card asks per paint, a read of the row is per change of
+        # the rows and a decode per change of the row.
+        self._fav_text = None
+        self._fav_gen = -1
+        self._fav_paths = ()
+        # The play records as `plays` last decoded them, the same way.
+        self._plays_text = None
+        self._plays_gen = -1
+        self._plays = {}
+
+    # -- the roster ----------------------------------------------------------
+
+    def apply(self, items):
+        """Adopt a fresh scan as the live roster and re-sync BOTH display grids,
+        re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
+
+        The ONE body every roster change runs -- create, duplicate, delete, the
+        browser sync's re-scan, and `app_context`'s `Carts.apply`."""
+        if items:
+            self.all = list(items)
+            self.gen += 1
+            ws = self.ws
+            # Cover bitmaps, parsed sources, the cover-less set AND the icon
+            # cache: a re-scan may carry new or changed art and may take a cart
+            # away entirely. BEFORE slim(), and that order is load-bearing:
+            # slim() bakes each cart's icon and then DELETES the rows it baked
+            # from, so it is the last moment the art exists in RAM -- clearing
+            # after it would leave a slimmed cart with no icon and nothing to
+            # rebuild one from, and clearing nothing (what this did before #209
+            # landing C) let slim()'s bake hit the STALE entry and make it
+            # permanent.
+            ws.covers.invalidate_all()
+            self.slim()                    # #66: bake the new entries' icons, mark them lazy
+            ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
+            if ws.projects_grid is not None:
+                ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
+            look = getattr(ws, "look", None)
+            if look is not None:
+                look.store_moved()      # the theme packages are carts too
+
+    def rescan(self):
+        """Re-read the store and rebuild both shelves -- the sync push's board
+        half (moy_webhost wires it as `on_sync`), fired when a browser batch
+        changed what the launcher shows: a manifest, a cover sheet, a cart
+        created or deleted. `apply` does the whole refresh (re-slim, cover
+        caches dropped, generation bumped), the same body every create/dup/
+        delete already runs. Safe between frames: the webhost polls at the frame
+        tail, after present."""
+        if not self.store.ready():
+            return
+        ws = self.ws
+        # The catalogue on every scan here: the payloads come back at open, and
+        # reading them mid-session is the allocation a fragmented heap refuses
+        # (see moy_carts.entry).
+        try:
+            self.apply(self.store.call(
+                lambda: moy_catalogue.catalogue(ws.carts_root)))
+        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
+            print("Moybyte rescan failed:", exc)
+        ws._dirty = True
+
+    def adopt(self, path):
+        """Read cart folder `path` (new, or written again whole) into the
+        roster: one entry read, not a scan (`custom`'s first write,
+        `Appearance.commit`)."""
+        if not self.store.ready():
+            return
+        try:
+            e = self.store.call(
+                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
+        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
+            print("Moybyte adopt failed:", exc)
+            return
+        if e:
+            self.apply([c for c in self.all if c.get("path") != path] + [e])
+
+    def moved(self, old, path):
+        """Cart folder `old` renamed to `path` (NAME…, `Appearance.name_custom`):
+        the entry at `old` and any at `path` give way to `path` read again."""
+        if not self.store.ready():
+            return
+        try:
+            e = self.store.call(
+                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
+        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
+            print("Moybyte adopt failed:", exc)
+            e = None
+        keep = [c for c in self.all if c.get("path") not in (old, path)]
+        self.apply(keep + [e] if e else keep)
+
+    # -- the #66 live-set diet -----------------------------------------------
+
+    def slim(self):
+        """The #66 live-set diet, run once the backend wires the cart store:
+        every SD-backed cart on the shelf becomes a catalogue entry marked
+        `lazy`. Its grid icon is baked into the icon cache first -- from the
+        `icon_rows` a catalogue scan read, or from the sprite sheet of a cart
+        that arrived whole -- and then its PAYLOADS and the rows go. Keeping
+        them resident would cost ~300-500KB of live heap, most of a GC
+        collect's mark cost (~0.2ms/KB on device). Embedded carts (no path /
+        no store) stay fat -- they cannot be reloaded."""
+        ws = self.ws
+        if ws.carts_store is None:
+            return
+        for cart in self.all:
+            if not cart.get("path") or cart.get("lazy"):
+                continue
+            try:
+                ws.covers.sheet_icon(cart)   # bake the grid icon while the art is here
+            except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
+                pass
+            for k in _SLIM_DROPS:
+                if k in cart:
+                    del cart[k]
+            cart["lazy"] = True
+        try:
+            import gc
+            gc.collect()                       # reclaim the dropped payloads NOW
+        except Exception:  # noqa: BLE001
+            pass
+
+    def rehydrate(self, cart):
+        """Load a slimmed cart's full payloads back from the store IN PLACE (the
+        launcher/picker hold the same dict, so every reference fattens at once).
+        No-op for fat/embedded carts; a failed load leaves the cart slim, which
+        `_open_workspace` reads as NOT OPENABLE and refuses on the spot."""
+        ws = self.ws
+        if not cart.get("lazy") or ws.carts_store is None or not cart.get("path"):
+            return cart
+        try:
+            full = self.store.call(lambda: moy_catalogue.load(cart["h"]))
+        except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
+            full = None
+        if full:
+            cart.update(full)
+            cart["lazy"] = False
+        return cart
+
+    def reload(self, cart):
+        """Re-read ONE cart from the store in place, fat or not -- what puts the
+        loader back in the loop after something edited a project's own files
+        (`Workstation._return_to_project`, step 5 of
+        docs/theme_and_shell_2026-11.md §10). `rehydrate` cannot serve: it is a no-op on
+        the fat cart the Editor is holding, which is exactly the case here.
+
+        `broken` is popped first because it is the one key `load()` omits when
+        it has nothing to say, so a repaired manifest must not leave the old
+        note behind. A failed read keeps the cart as it stands."""
+        ws = self.ws
+        if cart is None or not cart.get("path") or ws.carts_store is None:
+            return cart
+        try:
+            full = self.store.call(lambda: moy_catalogue.load(cart["h"]))
+        except Exception:  # noqa: BLE001 -- SD hiccup: keep what we have
+            full = None
+        if full:
+            cart.pop("broken", None)
+            cart.update(full)
+            cart["lazy"] = False
+        return cart
+
+    def reslim(self, cart):
+        # Re-slim a previously-opened cart when the workspace moves on (keeps at
+        # most ~one fat cart live). Only SD-backed carts that slim() managed.
+        if cart is None or not cart.get("path") or cart.get("lazy") is not False:
+            return
+        for k in PAYLOADS:
+            if k in cart:
+                del cart[k]
+        cart["lazy"] = True
+
+    # -- cart management (SD) ------------------------------------------------
+    #
+    # Each action mounts the SD card, mutates, and re-scans within a single
+    # storage session, then the card is unmounted before the next flush.
+
+    def new(self):
+        """Create a fresh GAME cart from the store's NEW_TEMPLATE, adopt the new
+        roster and return the created cart -- None on a read-only store (a device
+        without SD writes) or a failed write, so the caller can stay put rather
+        than crash.
+
+        ONE body, where there were two: `new_cart` and the first half of
+        `new_cart_and_edit` were the same six lines written twice, differing only
+        in which element of the (create, scan) tuple they kept. `new_cart` had no
+        callers left anywhere in the tree."""
+        if not self.store.writable():
+            return None
+        ws = self.ws
+        try:
+            new, items = self.store.call(lambda: (
+                moy_catalogue.new(ws.carts_root, ns=self._ns()),
+                moy_catalogue.catalogue(ws.carts_root)))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte new cart failed:", exc)
+            self._say_if_full(exc, "CAN'T MAKE")
+            return None
+        self.apply(items)
+        return new
+
+    def dup(self, sel):
+        """COPY on the home's Make tab: duplicate the cart `sel` as the kid's own."""
+        ws = self.ws
+        if sel is not None and not sel.get("path"):
+            sel = None                     # the "+ New" card is not a cart
+        if not self.store.writable() or sel is None:
+            return
+        try:
+            self.apply(self.store.call(lambda: (
+                moy_catalogue.duplicate(sel["h"], ws.carts_root, ns=self._ns()),
+                moy_catalogue.catalogue(ws.carts_root))[1]))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte duplicate failed:", exc)
+            self._say_if_full(exc, "CAN'T COPY")
+
+    def _ns(self):
+        """The author a made cart's id takes (#162): the Settings field, else
+        the store's default until profiles exist."""
+        ns = self.ws.system.get(moy_catalogue.USER_NS_KEY)
+        return ns if isinstance(ns, str) and ns else moy_catalogue.USER_NS
+
+    def _say_if_full(self, exc, refusal):
+        """A store that ran out of room says so on screen, in the system
+        notice banner -- the voice's refusal idiom over its reason
+        (docs/os_voice_v1.md): the store removed what it had written, so all
+        that is left to do is tell the kid why nothing appeared."""
+        full = getattr(self.ws.carts_store, "store_full", None)
+        if full is not None and full(exc):
+            self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
+
+    def delete(self, cart=None):
+        """Delete `cart` (a home's Delete), else the OPEN cart (the system
+        menu's "Delete cart"), for good: the folder goes, and no Trash holds
+        a cart. Every route asks first (`console_notices.DeleteConfirm`) and
+        calls this on its Delete. Keeps at least one real cart on the
+        device."""
+        ws = self.ws
+        target = cart if cart is not None else ws.cart
+        if target is not None and not target.get("path"):
+            target = None
+        if not self.store.writable() or target is None or len(self.all) <= 1:
+            return
+        try:
+            self.apply(self.store.call(lambda: (
+                moy_catalogue.delete(target["h"]),
+                moy_catalogue.catalogue(ws.carts_root))[1]))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte delete failed:", exc)
+
+    # -- favorites + recents (#105) ------------------------------------------
+
+    def is_own(self, cart):
+        """Whether `cart` is the kid's own -- made here, or taken to make their
+        own (a copy): its id's author is the one the store gives a made cart
+        (`_ns`, #162). The home's Mine tab, never its Games."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        folder = path.rsplit("/", 1)[-1]
+        return folder.startswith(self._ns() + ".")
+
+    def is_favorite(self, cart):
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        rows = self.ws.system
+        g = rows.gen()
+        if g != self._fav_gen:
+            self._fav_gen = g
+            text = rows.text("favorites")
+            if text != self._fav_text:
+                self._fav_text = text
+                self._fav_paths = tuple(rows.get("favorites", ()))
+        return path in self._fav_paths
+
+    def toggle_favorite(self, cart):
+        """Star/unstar `cart` (the launcher card's corner badge tap) and persist.
+        A no-op for a pseudo tile (no path)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return
+        ws = self.ws
+        favs = list(ws.system.get("favorites", []))
+        if path in favs:
+            favs.remove(path)
+        else:
+            favs.append(path)
+        ws.system.set("favorites", favs)
+        ws._dirty = True
+
+    def note_recent(self, cart):
+        """Record `cart` as most-recently-run: move its path to the front of
+        system.json's `desk_mru` list (issue #105's naming), capped at
+        _MRU_CAP. Called from every launcher-driven run/open (open/open_app) --
+        a pseudo tile (no path) is never recorded."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return
+        ws = self.ws
+        mru = [p for p in ws.system.get("desk_mru", []) if p != path]
+        mru.insert(0, path)
+        ws.system.set("desk_mru", mru[:self._MRU_CAP])
+        self._note_play(path)
+
+    def _plays_rows(self):
+        """{path: (count, day)} of the well-formed play records."""
+        rows = self.ws.system
+        g = rows.gen()
+        if g == self._plays_gen:
+            return self._plays
+        self._plays_gen = g
+        text = rows.text("plays")
+        if text != self._plays_text:
+            self._plays_text = text
+            got = rows.get("plays", None)
+            out = {}
+            if isinstance(got, dict):
+                for path, rec in got.items():
+                    rec = _play_rec(rec)
+                    if rec is not None:
+                        out[path] = rec
+            self._plays = out
+        return self._plays
+
+    def plays(self, cart):
+        """(times run, day of the last run as YYYYMMDD or 0) for `cart`, or
+        None where it has no record (never run, or a record that does not
+        read)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return None
+        return self._plays_rows().get(path)
+
+    def _note_play(self, path):
+        """Count a run of `path` and stamp today on it (the bar's wall clock;
+        a board without one keeps the day it had). Past _PLAYS_CAP records
+        the one run longest ago goes."""
+        recs = self._plays_rows()
+        old = recs.get(path)
+        day = today_ymd(self.ws)
+        if not day and old is not None:
+            day = old[1]
+        out = {p: [r[0], r[1]] for p, r in recs.items() if p != path}
+        while len(out) >= self._PLAYS_CAP:
+            drop = min(out, key=lambda p: out[p][1])
+            del out[drop]
+        out[path] = [(old[0] if old is not None else 0) + 1, day]
+        self.ws.system.set("plays", out)
+
+    def recent(self):
+        """The desk_mru path list resolved back to live cart dicts (newest first),
+        silently dropping any path that no longer scans (deleted/renamed since).
+        Read-only convenience for a future recents surface; #105 only settled the
+        system.json key, not where it renders."""
+        by_path = {c.get("path"): c for c in self.all if c.get("path")}
+        out = []
+        for path in self.ws.system.get("desk_mru", []):
+            c = by_path.get(path)
+            if c is not None:
+                out.append(c)
+        return out
+
+
+def _play_rec(rec):
+    """A `plays` value as (count, day), or None for any other shape."""
+    if (isinstance(rec, list) and len(rec) == 2
+            and type(rec[0]) is int and type(rec[1]) is int
+            and rec[0] > 0 and 0 <= rec[1] <= 99991231):
+        return (rec[0], rec[1])
+    return None
+
+
+def today_ymd(ws):
+    """Today as YYYYMMDD from the bar's wall clock, 0 without one (a board
+    that never set its clock reads a year before 2020)."""
+    y, m, d = ws.bar_layer._today()
+    return y * 10000 + m * 100 + d if y >= 2020 else 0

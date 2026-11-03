@@ -1,4 +1,4 @@
-"""The Editor tabs draw their widgets through `runtime/ui.py` (Phase 3d).
+"""The Editor tabs draw their widgets through `runtime/toolkit/ui.py` (Phase 3d).
 
 `docs/history/ui_refactor_2026-08.md` Section 3, Phase 3b/3c/3d: the hand-rolled row /
 cell / button draws are transcribed onto the toolkit kinds, and the ratchet is
@@ -20,6 +20,7 @@ import pytest
 
 from ws_helpers import build_ws, open_cart, quiesce
 from ws_helpers import boot_on_fixture
+from tools.board_config import runtime_file
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -83,7 +84,7 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
     module draws no filled+bordered button of its own."""
     from runtime.code_layer import CodeLayer
     assert not hasattr(CodeLayer, "_panel_btn")
-    src = (ROOT / "runtime" / "code_layer.py").read_text(encoding="utf-8")
+    src = runtime_file("code_layer.py").read_text(encoding="utf-8")
     assert "def _panel_btn" not in src          # (the name survives in prose)
     assert "self._panel_btn(" not in src
     # The give-away pair of a hand-rolled button: a field fill immediately
@@ -125,7 +126,7 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
 
 
 def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
-    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/look_2026-10.md
+    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/history/look_2026-10.md
     step 33): a row per entry, the picked one focused, and no toolkit row."""
     from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
@@ -152,7 +153,7 @@ def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
 
 
 def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
-    """See why's popover (docs/look_2026-10.md step 33): `ui.popover`, hung
+    """See why's popover (docs/history/look_2026-10.md step 33): `ui.popover`, hung
     under the stopped line, never the old dialog shell."""
     from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))

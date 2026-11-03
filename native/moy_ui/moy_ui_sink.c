@@ -1,7 +1,7 @@
 // The ROW sink (moy_ui.h): a canvas row of the glass, by its CANVAS handle.
 // Its own file because it is the one call that reaches the glass's handle
 // table; a library that draws only through the RUN sink (the host's compiled
-// run, runtime/lua_binding.py) leaves it out.
+// run, runtime/host/lua_binding.py) leaves it out.
 
 #include "moy_ui.h"
 #include "moy_canvas.h"

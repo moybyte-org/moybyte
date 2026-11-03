@@ -1,4 +1,4 @@
-"""The handheld app bar's way back (docs/look_2026-10.md step 27a).
+"""The handheld app bar's way back (docs/history/look_2026-10.md step 27a).
 
 Back goes one level; a window's X closes it. On a console bar the way back
 is the back chevron at the head of the zone, after the Moy button, wherever

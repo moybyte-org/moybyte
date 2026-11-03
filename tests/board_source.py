@@ -30,7 +30,7 @@ _SPINES = {
     "from desktop_spine import": (ROOT / "device" / "desktop_spine.py",
                                   "build_desktop"),
     # A board's own input module, and the spine's providers (each subsystem's
-    # construction, docs/kernel_survival_2026-10.md section 2 item 1): the
+    # construction, docs/history/kernel_survival_2026-10.md section 2 item 1): the
     # function named is the one that attaches to the Workstation, or builds.
     "from tdeck_input import": (ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
                                 / "modules" / "tdeck_input.py", "build"),

@@ -62,7 +62,7 @@ enum {
     MOY_UI_IN_LEN
 };
 
-// An app's host (runtime/ui_draw.py's AppHost, moy_ui_api_host_begin): what
+// An app's host (runtime/toolkit/ui_draw.py's AppHost, moy_ui_api_host_begin): what
 // the frames it painted left of its page in the buffers a canvas presents
 // in turn, a slot a paint (the ring, newest at ri, rn held): the frame, its
 // key (what the pixels are a function of besides the page: the look's
@@ -86,7 +86,7 @@ typedef struct {
     int32_t began1;
     int16_t dy, mv_dy;
 } moy_ui_host_t;
-// One paint of a context (its kept ring, moy_ui_api.c's): the painted frame (-1:
+// One paint of a context (its kept ring, moy_ui_api_kept.c's): the painted frame (-1:
 // none), whether it is the app's alone (`kept`: no key of its table was
 // negative), and its kept table (has_tbl), as moy_ui_api_table recorded it:
 // its id, key, columns' geometry, view, scroll, row height and count,
@@ -106,7 +106,7 @@ typedef struct {
 // the parts it named this round (wn) and the table's rows it runs over
 // (r0 .. r1 showed, of rows, np parts each);
 // each slot's part key and last use (0: empty). The engine's one record,
-// taken at the first moy_ui_api_slots (moy_ui_api.c's kept memory).
+// taken at the first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
@@ -152,7 +152,7 @@ enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_
 // popover washing what it covers, a dialog over a page washed already where
 // clear; bit 1: lead, a table whose first row is a verb; bit 2: gen, a word
 // follows: the stop's content generation, §3.3 of
-// docs/scroll_and_text_2026-10.md; bit 3: wash not given, bit 0 then
+// docs/theme_and_shell_2026-11.md; bit 3: wash not given, bit 0 then
 // ignored). A wasm app hands it over as a pointer and its length.
 enum {
     MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
@@ -233,7 +233,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);
 typedef struct {
     uint32_t id;
     moy_ui_box_t b;                 // on screen, as drawn
-    uint16_t flags;                 // STOP_* (moy_ui_api.c)
+    uint16_t flags;                 // STOP_* (moy_ui_api_int.h)
     uint8_t page;                   // the index of its page's stop, or 0xff
     uint8_t part;                   // a part: a held press with no page to drag stays its
     // A list's or a table's rows on its page (STOP_ROWS): the focused row
@@ -474,7 +474,7 @@ typedef struct {
     // the one tool lent as words, not an icon (Paint's zoom chip), and its place
     char bar_chip[MOY_UI_API_CHIP];
     int8_t bar_chip_at;
-    // A shift frame (docs/scroll_and_text_2026-10.md §3.3): the region R that
+    // A shift frame (docs/history/scroll_and_text_2026-10.md §3.3): the region R that
     // moved (its keep's id and its box as the last frame drew it), the move
     // (dy, the shift_last a host makes: -1 x what the scroll moved), the plan
     // (MOY_UI_SHIFT_*) and whether R draws a fade at its head; then the
@@ -538,7 +538,7 @@ typedef struct {
     // What the paints this context began left in the buffers a canvas
     // presents in turn -- its kept table and the parts `held` named
     // (moy_ui_api_held) -- lies in a ring the engine keeps for it outside
-    // the context from its first kept table or `held` on (moy_ui_api.c's
+    // the context from its first kept table or `held` on (moy_ui_api_kept.c's
     // kept memory), so a context that keeps nothing carries none. kt_f is
     // the frame begun, kt_k the buffers (RETAINED_FRAMES, 0: nothing is
     // kept); kf the floor the kept table drawn last draws this frame, kf_i
@@ -612,7 +612,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // view before its frame begins (moy_ui_api_text_aim) lands it there instead,
 // as that frame's shift. A frame draws only the rows that changed and
 // moves the rest, as a scroll region's floor (§3.3 of
-// docs/scroll_and_text_2026-10.md). out: the first line shown and the rows
+// docs/theme_and_shell_2026-11.md). out: the first line shown and the rows
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
 // the end are cut.
 //
@@ -1012,7 +1012,7 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // 0 otherwise (the part activated by a key, the pointer off it, no part
 // this frame).
 int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
-// ui.split(id, dir, sizes, o) (docs/ui_blocks_2026-10.md §4.2): ui.at's
+// ui.split(id, dir, sizes, o) (docs/ui_api_2026-10.md §5a): ui.at's
 // rect (else the page's, from its row cursor down) cut into `n` panes along
 // one axis, `gap` pixels apart -- left to right, or with MOY_UI_SPLIT_Y top
 // to bottom -- pane i sizes[i] long, the last taking what is left. Writes
@@ -1052,7 +1052,7 @@ int moy_ui_api_split(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // Whether (x, y) lies on a divider the last pass's splits drew, where a
 // press would hold it.
 int moy_ui_api_split_at(const moy_ui_ctx_t *c, int x, int y);
-// The split frame (docs/ui_blocks_2026-10.md §4.2), asked before the frame
+// The split frame (docs/ui_api_2026-10.md §5a), asked before the frame
 // begins: whether it draws the pane the keys reach alone. That pane is the
 // one a split of the last pass named with its focus (opt's CUR), of the
 // panes its splits cut (a pane a later split cut again is none). It is the
@@ -1114,7 +1114,7 @@ int moy_ui_api_lost(moy_ui_ctx_t *c);
 // where ui.end drew a tooltip.
 int moy_ui_api_pop_box(const moy_ui_ctx_t *c, int32_t out[4]);
 
-// -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
+// -- shift frames (docs/history/scroll_and_text_2026-10.md §3.3) ---------------------------
 //
 // A frame whose change is one region R's scroll plus rows the engine knows
 // of draws R's rows only where they changed: its host moves the pixels the
@@ -1186,7 +1186,7 @@ int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
 // (what it draws outside R draws as it did; a dialog's rows frame's: the
 // surface). 1, or 0 where the pass drew whole.
 int moy_ui_api_change_box(const moy_ui_ctx_t *c, int32_t out[8]);
-// A host's lag history (docs/scroll_and_text_2026-10.md §3.4): `slots`
+// A host's lag history (docs/history/scroll_and_text_2026-10.md §3.4): `slots`
 // slots of 2 + 2 * `bands` words, a frame's in slot f % slots -- the frame,
 // its kind (0 whole, 1 rows, 2 shift) and its floor's rows as `bands` pairs
 // y0, y1 in order (an empty pair, 0 0, unused; past `bands`, the nearest
@@ -1198,7 +1198,7 @@ void moy_ui_api_lag_note(const moy_ui_ctx_t *c, int32_t *hist, int slots, int ba
 // most, merged as lag_note merges), their count (0, none), else -1.
 int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
                    int32_t *out, int cap);
-// An app host's frame begins (runtime/ui_draw.py's AppHost.begin): the
+// An app host's frame begins (runtime/toolkit/ui_draw.py's AppHost.begin): the
 // frame begun last is noted as its pass left it, the frame begins as
 // moy_ui_api_begin's, and the shift frame it may be is planned against the
 // host's ring -- the canvas's part of it (moving pixels, the fence) is left

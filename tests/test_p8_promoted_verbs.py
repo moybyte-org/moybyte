@@ -13,7 +13,7 @@ So this pins the SEAM, in both directions:
 
   * the vendored importer emits the binding, for each promoted verb;
   * the vendored C answers when a cart takes it, through the same host binding
-    (`runtime/lua_binding.py`) that compiles libmoy's real sources.
+    (`runtime/host/lua_binding.py`) that compiles libmoy's real sources.
 
 The arity case is spelled out because it is the bug split shipped with
 upstream: a C verb that reads its second argument after pushing anything sees

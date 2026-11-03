@@ -1,7 +1,7 @@
 """The SHARED update screen, driven over a wire (#41/#53, 2026-08-29).
 
 The browser console is the same console every board runs, so the update SCREEN
-in it is `runtime/update_ui.py` -- the one that ships on glass, frozen into the
+in it is `runtime/system/update_ui.py` -- the one that ships on glass, frozen into the
 wasm bundle and dead only while `ws.updater` is None.
 `firmware/web_runner/update_link.py` fills that seam from a board's pin-gated
 /update, which makes Settings -> UPDATE ONLINE in a browser the screen a kid

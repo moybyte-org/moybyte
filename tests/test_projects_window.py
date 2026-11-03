@@ -10,6 +10,8 @@ import pytest
 
 import test_shell_goldens as g
 from runtime import launcher_layer
+from runtime import home_carousel
+from runtime import home_grid
 
 DESK = "p4_1024x600_cs2_fs1_windowed"
 
@@ -68,7 +70,7 @@ def test_the_window_draws_the_console_homes_design(tmp_path):
     pane beside it with the tab's buttons, the shelf under them."""
     ws = _ws(tmp_path)
     win, grid = _projects(ws)
-    assert isinstance(grid, launcher_layer.Carousel) and grid is not ws.launcher
+    assert isinstance(grid, home_carousel.Carousel) and grid is not ws.launcher
     assert grid.tab == "make"
     ws.wm._install(win.ctx)
     try:
@@ -110,7 +112,7 @@ def test_the_window_lays_out_in_its_content_rect_at_any_size(tmp_path, size):
 
 def _geom(cw, ch):
     lay = types.SimpleNamespace(fs=1, cx=0, cy=0, cw=cw, ch=ch)
-    c = launcher_layer.Carousel([])
+    c = home_carousel.Carousel([])
     return c._geom_desk(lay, 4)
 
 
@@ -119,7 +121,7 @@ def test_a_narrow_tall_window_stands_the_hero_over_its_details():
     stacked: the hero over the pane, the pane the width, the shelf under."""
     g9 = _geom(360, 1000)[9]
     (hx, hy, hero, _h), dx, dw, shelf_y, pad, _m, dy, _rows, _brows = g9
-    assert hero >= launcher_layer._COVER_SIDE // 2
+    assert hero >= home_grid._COVER_SIDE // 2
     assert dx == hx and dy >= hy + hero and dw == 360 - 2 * pad
     assert shelf_y >= dy + g9[5][5]
 
@@ -208,7 +210,7 @@ def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
         _items, verbs = home._hint_groups()
         assert verbs[:2] == ["new", "change"], "the strip keeps N New on Make"
         grid.sel = next(i for i, it in enumerate(grid.items)
-                        if it.get("type") == launcher_layer.NEW_TILE_TYPE)
+                        if it.get("type") == home_grid.NEW_TILE_TYPE)
         _frame(ws)
         assert [(v, k) for v, _r, k in home._desk_buttons()] == [("new", "primary")]
     finally:

@@ -5,7 +5,7 @@
  * experiments/lua_bridge/host_parity.py for the Lua VM). The DEVICE and the web
  * runner compile libmoy itself, so they are conformant by construction; the host
  * sim cannot link C without putting a compiler in `make setup`, so
- * runtime/audio.py stays a Python twin of the same file. This program is what
+ * runtime/run/audio.py stays a Python twin of the same file. This program is what
  * keeps that twin honest: it renders a scenario through the real library, and
  * audio_parity.py renders the same scenario through the Python engine and
  * compares them.

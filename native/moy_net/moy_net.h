@@ -1,7 +1,7 @@
-// moy_net: the links (docs/kernel_survival_2026-10.md section 6).
+// moy_net: the links (docs/history/kernel_survival_2026-10.md section 6).
 //
 // One body for every tier: the boards, the browser, the unix port and
-// CPython (by ctypes, runtime/net_binding.py). The wire's pure half -- the
+// CPython (by ctypes, runtime/host/net_binding.py). The wire's pure half -- the
 // HTTP request parser and response head (moy_http.c), the sync batch's
 // envelope and root rule (moy_sync.c), the WiFi credential rules -- touches
 // no socket, radio or file, and fuzz_net.c runs it under the sanitizers; it
@@ -125,7 +125,7 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
 // carts); v2 names a root whose wire is 2, "files" or "system". A system
-// batch (the console's own documents, runtime/moy_sync.py's SYSTEM_ROOT) is
+// batch (the console's own documents, runtime/carts/moy_sync.py's SYSTEM_ROOT) is
 // never applied here: the webhost parks it for the VM, whose Settings decide
 // which of its keys a browser may change (moy_sync.merge_system), and
 // moy_sync_apply refuses every op of one.

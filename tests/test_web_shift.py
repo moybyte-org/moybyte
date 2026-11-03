@@ -1,4 +1,4 @@
-"""shift_last in the browser's VM (docs/scroll_and_text_2026-10.md §3.2).
+"""shift_last in the browser's VM (docs/theme_and_shell_2026-11.md §9.6).
 
 `shift_test.mjs` boots the frozen console from dist/ under node and shifts
 rects of the canvas the page draws on, in place, against the per-pixel

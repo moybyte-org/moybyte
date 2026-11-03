@@ -1,4 +1,4 @@
-"""The theme's depth in the shell (docs/look_2026-10.md step 6): installed
+"""The theme's depth in the shell (docs/history/look_2026-10.md step 6): installed
 with the theme and its mode, the WM's rounded windows with their foot, the
 shadows and outline fringes the desk draws under the windows over pixels it
 has just painted (so a drag, a release and a re-render agree to the byte), a

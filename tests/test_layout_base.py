@@ -5,7 +5,7 @@ Eight classes -- `chrome.Layout`, `chrome.CodeLayout` and the six editor
 layouts (cards/paint/map/music/scene/block) -- subclass it. Each lays out
 every canvas, the T-Deck's 320x240 included, through the same formulas: the
 frozen 320x240 branch they once kept (`_base`) retired with theming phase 3
-step 4 (docs/theming_2026-09.md §9), and this file holds that retirement:
+step 4 (docs/history/theming_2026-09.md §9), and this file holds that retirement:
 
   * no layout carries a `_base` attribute, and no module reads one;
   * no other shared module re-declares the 320x240 default size.
@@ -21,6 +21,8 @@ import re
 
 import pytest
 
+from tools.board_config import runtime_file
+
 from runtime import layout_base
 from runtime.block_editor_ui import BlockLayout
 from runtime.cards_layer import CardsLayout
@@ -31,7 +33,7 @@ from runtime.paint_layer import PaintLayout
 from runtime.scene_editor_ui import SceneLayout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE_REL = os.path.join("runtime", "layout_base.py")
+BASE_REL = os.path.relpath(runtime_file("layout_base.py"), ROOT)
 
 # (class, takes a `bounds` argument that extends the predicate)
 LAYOUTS = [
@@ -89,11 +91,12 @@ def _shared_sources():
     """Every authored shared/device module -- not the gitignored staged copies
     under firmware/*/modules/, which are rebuilt from these."""
     for tier in ("runtime", "device"):
-        d = os.path.join(ROOT, tier)
-        for name in sorted(os.listdir(d)):
-            rel = os.path.join(tier, name)
-            if name.endswith(".py") and rel != BASE_REL:
-                yield rel, _read(rel)
+        for base, dirs, files in os.walk(os.path.join(ROOT, tier)):
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for name in sorted(files):
+                rel = os.path.relpath(os.path.join(base, name), ROOT)
+                if name.endswith(".py") and rel != BASE_REL:
+                    yield rel, _read(rel)
 
 
 _DECL = re.compile(r"^_?BASE_[WH]\s*=\s*\d+", re.M)
@@ -104,7 +107,7 @@ def test_nothing_else_declares_the_baseline_constants():
     for rel, src in _shared_sources():
         assert not _DECL.search(src), (
             "%s re-declares the 320x240 baseline; import BASE_W/BASE_H from "
-            "runtime/layout_base.py instead" % rel)
+            "runtime/toolkit/layout_base.py instead" % rel)
 
 
 def test_no_module_reads_a_layout_base():

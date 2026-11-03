@@ -22,7 +22,7 @@ its `worst` is lower -- `sum` is the honest latency number.
 Each scenario resets the board so it cannot inherit another's warm caches, then
 runs its `pre` verbs, arms the recorder, and runs the `click` verb.
 
-The Editor rows drive the desk Editor (`runtime/editor_desk.py`): a project
+The Editor rows drive the desk Editor (`runtime/editors/editor_desk.py`): a project
 opens in its window through `ws.open_in_editor`, and `ws.editor_app.set_tab`
 is what a tap on the app's row or a pane's tab does -- it shows the workspace
 holding that tab (`ws_*`) or, inside the one on show, focuses its pane

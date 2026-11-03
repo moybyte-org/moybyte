@@ -1,5 +1,5 @@
-"""The oracle for native/moy_ui (docs/kernel_toolkit_2026-10.md §7): the
-toolkit's Python bodies as they were before the crossing -- runtime/ui.py's
+"""The oracle for native/moy_ui (docs/history/kernel_toolkit_2026-10.md §7): the
+toolkit's Python bodies as they were before the crossing -- runtime/toolkit/ui.py's
 style resolution, widgets, ScrollRegion and DragTap -- kept here as
 tests/spine_twin.py keeps the spine's. The fuzz in
 tests/test_ui_twin.py draws every case through this and through the shipped
@@ -25,7 +25,7 @@ def _fs(cv):
 def is_light(th):
     return bool(th.get('surface_light', False))
 
-# Edited with the text path (sprint 6 step 3, docs/kernel_toolkit_2026-10.md
+# Edited with the text path (sprint 6 step 3, docs/history/kernel_toolkit_2026-10.md
 # §4): text is measured in UTF-8 BYTES, whitespace is str.split()'s ASCII set,
 # and a truncation backs up to the last whole codepoint, ending its line. For
 # ASCII this is the old body exactly.
@@ -216,7 +216,7 @@ def _primary_states():
 # states whose (field, ink) misses the contrast floor take these forms.
 FLOORS = {'button_tonal': ((('surface', _WHITE), ('ink', _BLACK)),), 'button_danger': ((('danger', 8), _WHITE), (('danger', 8), _BLACK))}
 DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_primary': _primary_states(), 'button_tonal': _button_states(('surface', _WHITE), _VALUE), 'button_danger': _button_states(('surface', _WHITE), ('danger', 8)), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
-# Edited with theming phase 4 step 2 (docs/theming_2026-09.md §4.3): the
+# Edited with theming phase 4 step 2 (docs/theme_and_shell_2026-11.md §3.3): the
 # mini_btn and chip quirks' rulings, re-ruled; the pixels they describe are
 # the same.
 NON_DATA_QUIRKS = (('game_btn', 'at font scale 1 the label prints with the legacy scale-2 argument but centres with height 8 -- an off-by-one-scale mismatch the shipped pixels bake in. It is a BRANCH on fs, not a number.'), ('text_field', 'fixed 1x metrics: both block prompts draw on the game canvas, so the pads, the caret box and the 8px caret advance never scale. The numbers are data (TF_*), the absence of `* fs` is the quirk.'), ('mini_btn', "unscaled label pads (2, 2), re-ruled 2026-10-13 (theming phase 4, step 2) to stay: the label is placed from its rect's corner, not centred, so no line metric enters it, and a pad is a pixel inset as the chip's are. Data (MB_*), unscaled by branch."), ('chip', "unscaled label clip/min pads (4, 2, 1), re-ruled 2026-10-13 (theming phase 4, step 2) to stay: they inset the label's box, which is the ui font's (its drawn width, its line advance at the scale), in pixels, as a theme's radius is. Data (CHIP_*), unscaled."))
@@ -878,9 +878,9 @@ class ScrollRegion:
         return self._fling or self._glide is not None
 
     # The glide and the slide: the home carousel's motion as
-    # runtime/launcher_layer.py's Carousel.anim_frame computed it before it
-    # moved into native/moy_ui's scroll state (docs/scroll_and_text_2026-10.md
-    # §2.1), over a dt in ms rather than the carousel's seconds.
+    # runtime/home/launcher_layer.py's Carousel.anim_frame computed it before it
+    # moved into native/moy_ui's scroll state (docs/theme_and_shell_2026-11.md
+    # §9.1), over a dt in ms rather than the carousel's seconds.
     def glide_to(self, p, slide=False):
         p = max(0, min(int(p), self._max_offset()))
         self._fling = False
@@ -1000,7 +1000,7 @@ class DragTap:
             return None
         return press
 
-# --- the glyph raster as it was in runtime/chrome.py ---------------------------
+# --- the glyph raster as it was in runtime/shell/chrome.py ---------------------------
 # The oracle for native/moy_ui's glyph raster (tests/test_chrome_glyphs.py):
 # the 12x12 bitmaps and the run-coalescing walk, drawn as rect spans.
 

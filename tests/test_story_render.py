@@ -1,4 +1,4 @@
-"""The one slide renderer (runtime/story_render.py): a slide at any zoom, its
+"""The one slide renderer (runtime/apps/story_render.py): a slide at any zoom, its
 words in the shell's outline faces, its shapes filled, its pictures read a
 row at a time at the size they draw.
 

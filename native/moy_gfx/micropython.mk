@@ -14,8 +14,8 @@
 # vendored copies). Listing the vendored sources here as well would define every
 # symbol twice.
 #
-# moy_gfx_kernels.c is the COMPOSITOR -- the loops this module and
-# runtime/moyhost_gfx.c both run, extracted so there is one copy. It carries its
+# moy_gfx_kernels.c is the COMPOSITOR and the libmoy bridge -- what this
+# module and the host's runtime/host/gfx_binding.py both run, one copy. It carries its
 # own -O3 pragma for the same reason libmoy_kernels.c does. moy_text.c is the
 # one UI text path (its header), over that compositor's rasterizer.
 # moy_backdrop.c rasterises a theme's backdrop (its header); moy_shape.c the

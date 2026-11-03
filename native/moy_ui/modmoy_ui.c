@@ -1,4 +1,4 @@
-// The module `moy_ui` (moy_ui.h): what runtime/ui.py's face calls. Names in,
+// The module `moy_ui` (moy_ui.h): what runtime/toolkit/ui.py's face calls. Names in,
 // ids out once; after that the face passes ints, and caches what it gets
 // back, so a widget draw reaches here only on a cache miss.
 
@@ -419,7 +419,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 // theme_look's (dark, light) and backdrops theme_backdrop's ((dark home, dark
 // desk), (light home, light desk)), modes theme_modes'. On a refusal every
 // field after notes is None.
-// -- the look and RGB (docs/look_2026-10.md step 5) ---------------------------
+// -- the look and RGB (docs/history/look_2026-10.md step 5) ---------------------------
 
 static mp_obj_t ints(const int32_t *v, int n) {
     mp_obj_t t = mp_obj_new_tuple(n, NULL);
@@ -1905,7 +1905,7 @@ static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 5, 5, ui_frame_band);
 
-// -- depth (moy_ui.h, docs/look_2026-10.md step 6) -------------------------------
+// -- depth (moy_ui.h, docs/history/look_2026-10.md step 6) -------------------------------
 
 static mp_obj_t depth_tuple(void) {
     const moy_ui_depth_t *d = moy_ui_depth();
@@ -2254,7 +2254,7 @@ static mp_obj_t ui_dragtap(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_dragtap_obj, 13, 13, ui_dragtap);
 
-// -- the public UI API (moy_ui_api.h; runtime/ui.py is its Python face) ---------------
+// -- the public UI API (moy_ui_api.h; runtime/toolkit/ui.py is its Python face) ---------------
 //
 // Each verb takes the app's context (a bytearray of api_size() bytes), the
 // canvas and look it draws in, its arguments, and `o`: the override block
@@ -2363,7 +2363,7 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
     }
 }
 
-// The override table (§3) straight from the app's dict, as runtime/ui.py's
+// The override table (§3) straight from the app's dict, as runtime/toolkit/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t vals[OV_COUNT];
@@ -2492,7 +2492,7 @@ static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
 // A verb's options as the engine reads them, NUL-separated: bytes as they
 // are, or a list or tuple of the items, each as str() makes it, joined into
 // `buf` (OPTS_BUF bytes, the caller's) or, where they run longer, into the
-// heap. runtime/ui.py's `_opts` hands a sequence straight over where the
+// heap. runtime/toolkit/ui.py's `_opts` hands a sequence straight over where the
 // module takes one (`opts_seq`), so a verb given its options builds nothing.
 #define OPTS_BUF 512
 static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
@@ -2589,7 +2589,7 @@ static int word_of(mp_obj_t v, const char *const *w, int n) {
     return -1;
 }
 
-// A label's text options from its override dict, read as runtime/ui.py's
+// A label's text options from its override dict, read as runtime/toolkit/ui.py's
 // `label` reads them where the module takes no dict: any of `wrap` (with
 // `lines`), `align`, `inset`, `tone` and `face` present sets the next label's
 // text.

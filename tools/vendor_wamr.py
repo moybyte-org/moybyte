@@ -6,8 +6,8 @@
     python3 tools/vendor_wamr.py --check              # what would change
 
 The runtime the boards compile is moybyte-org/wasm-micro-runtime, branch
-moybyte-2.4.5 (docs/wasm_tier_plan_2026-09.md: "WAMR is carried as a fork,
-pinned by hash"). This copies the subset the engine needs -- the AOT loader
+moybyte-2.4.5 (native/moy_wasm/README.md: "WAMR is a fork pinned by
+hash"). This copies the subset the engine needs -- the AOT loader
 and runtime, the interpreter tier (both of WAMR's interpreters and the plain
 .wasm loader, landed 2026-09-30), the common layer, the esp-idf platform, the
 allocator and the utilities -- and none of the compiler, WASI, the builtin
@@ -90,7 +90,7 @@ FILES = [
     # headers only, no sources
     "core/iwasm/compilation/aot.h",
     "core/iwasm/compilation/aot_stack_frame.h",
-    # the interpreter tier (docs/wasm_tier_plan_2026-09.md, "A cart survives
+    # the interpreter tier (native/moy_wasm/README.md, "A cart survives
     # its firmware", 2026-09-30): the loader for plain .wasm bytecode and both
     # of WAMR's interpreters, so a board picks classic or fast by #158's
     # measurement the same way it already picks its reloc arch -- one file

@@ -84,6 +84,7 @@ static struct {
     bool slept;
     // the frame
     bool lit, capture, health_armed, measuring;
+    int light_top;              // the full rung's light, 1..255 (Brightness)
     uint32_t frames, drawn, started_at;
     uint32_t front_drawn;           // frames a kernel run in front drew
     uint32_t services, once;
@@ -95,7 +96,7 @@ static struct {
     uint32_t up_frame[MOY_UPC_CLASSES], up_last[MOY_UPC_CLASSES], up_total[MOY_UPC_CLASSES];
     moy_idle_t idle;
     heavy_t *heavy;
-} L = {.vm = true, .frame_ms = 16, .slot = 16};
+} L = {.vm = true, .frame_ms = 16, .slot = 16, .light_top = MOY_IDLE_LIGHT_FULL};
 
 // -- the tier's helpers ---------------------------------------------------------
 
@@ -323,6 +324,7 @@ void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap) {
     L.health_armed = false;
     L.capture = false;
     L.lit = false;
+    L.light_top = MOY_IDLE_LIGHT_FULL;
     L.tick_ms = 0;
     L.services = 0;
     L.once = 0;
@@ -428,6 +430,30 @@ void moy_loop_set_lit(bool lit) {
     L.lit = lit;
 }
 
+// The ladder's level as the panel takes it: scaled to the top, and never
+// below the lowest lit level while it asks for any light.
+static int light_at(int level) {
+    if (level <= 0) {
+        return 0;
+    }
+    int v = level * L.light_top / MOY_IDLE_LIGHT_FULL;
+    return v > 0 ? v : 1;
+}
+
+int moy_loop_light_top(int top) {
+    const moy_loop_ops_t *ops = L.ops;
+    if (ops == NULL || ops->backlight == NULL || !L.idle.can_dim) {
+        return -1;
+    }
+    if (top > 0) {
+        L.light_top = top > MOY_IDLE_LIGHT_FULL ? MOY_IDLE_LIGHT_FULL : top;
+        if (L.lit && L.idle.state < MOY_IDLE_BLANK) {
+            ops->backlight(light_at(moy_idle_light(&L.idle)));
+        }
+    }
+    return L.light_top;
+}
+
 moy_idle_t *moy_loop_idle(void) {
     return &L.idle;
 }
@@ -516,7 +542,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     return L.role(grant, row, arg, n, ans, cap);
 }
 
-// -- HITCH and LOOP (docs/kernel_survival_2026-10.md §7.3) ----------------------------
+// -- HITCH and LOOP (docs/history/kernel_survival_2026-10.md §7.3) --------
 //
 // Under PERF DIAG, from the stage meters: HITCH names every stage of one frame
 // whose work (`ms`) ran past MOY_LOOP_HITCH_MS, LOOP the average frame of the
@@ -688,7 +714,7 @@ int moy_loop_step(void) {
     moy_idle_out_t io;
     moy_idle_tick(&L.idle, now, active || ran, &io);
     if (io.light >= 0 && ops->backlight != NULL && L.lit) {
-        ops->backlight(io.light);
+        ops->backlight(light_at(io.light));
     }
     if (io.repaint && ops->repaint != NULL) {
         ops->repaint();
@@ -747,7 +773,7 @@ int moy_loop_step(void) {
             ops->fence();
         }
         if (ops->backlight != NULL) {
-            ops->backlight(moy_idle_light(&L.idle));
+            ops->backlight(light_at(moy_idle_light(&L.idle)));
         }
         L.lit = true;
     }

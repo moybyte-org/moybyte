@@ -21,7 +21,7 @@ INDEX = M.INDEX
 PAL = R7.PAL
 PAL.append((0, 0, 0))  # index 16: Moy's black outline (written as 0 in the .moygfx)
 
-# ---- 1. the canonical Moy: the website's 16x16 (docs/visual_identity_v1.md 6.5)
+# ---- 1. the canonical Moy: the website's 16x16 (docs/history/visual_identity_v1.md 6.5)
 SITE_MOY = (
     "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
     ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",

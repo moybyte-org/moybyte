@@ -1,9 +1,9 @@
-"""The font lane (docs/theming_2026-09.md §4.7, native/moy_gfx/moy_text.h): a
+"""The font lane (docs/theme_and_shell_2026-11.md §3.7, native/moy_gfx/moy_text.h): a
 theme font is a row behind moy_text's font argument, petme128 is row 0, and a
 font file is untrusted data a kid may trade.
 
 * Petme128 through the row draws what the cell rasterizer drew: a reference
-  raster of runtime/font.py's glyphs at every scale, clipped and camera-shifted.
+  raster of runtime/toolkit/font.py's glyphs at every scale, clipped and camera-shifted.
 * A second row draws: the sample font (tests/fixtures/fonts/sample6x9.fnt, a
   proportional 6x9 cut of petme128 with two-byte columns) matches a reference
   raster of its own file, and fits, aligns and measures by its advances.
@@ -310,13 +310,13 @@ def _theme(name, **keys):
 
 
 # The default's fonts (Moy's): its Code tab's JetBrains Mono alone, the
-# rest its look's family (docs/look_2026-10.md step 27).
+# rest its look's family (docs/history/look_2026-10.md step 27).
 DEFAULT_FONTS = (("mono", "jbmono-11-400-2.fnt"),)
 
 
 def test_every_seed_names_jetbrains_mono_alone():
     """Every seed names the font set's JetBrains Mono for `mono` (the Code
-    tab, docs/look_2026-10.md steps 23, 26b and 26c), a face of the font set
+    tab, docs/history/look_2026-10.md steps 23, 26b and 26c), a face of the font set
     and not embedded in the tables, and no other file: its look's family
     gives the other roles their faces."""
     for name in moy_ui.themes():

@@ -1,5 +1,5 @@
 // moy_index's MicroPython binding: the native index (moy_index.h) as the
-// module runtime/moy_index.py is, name for name -- Index, StaleHandle,
+// module runtime/carts/moy_index.py is, name for name -- Index, StaleHandle,
 // SLOT_BITS, SLOTS, GEN_MAX, ROOTS -- and mem(), the bytes the index holds now
 // and at its high water, which the census reads. Every image builds it unless
 // its MOY_INDEX_IMPL is `py` (tools/moy_index_spike.py).
@@ -10,7 +10,7 @@
 // emptied (tests/test_moy_index_twins.py).
 //
 // A path is a str; a handle is an int, and one outside 1 .. 2**30 - 1 names
-// no row. The table's memory is PSRAM on a board (docs/kernel_store_2026-10.md
+// no row. The table's memory is PSRAM on a board (docs/history/kernel_store_2026-10.md
 // section 9), malloc elsewhere, and none of it is the gc heap's: an Index frees
 // its table in __del__.
 

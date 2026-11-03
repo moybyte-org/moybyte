@@ -18,8 +18,8 @@ the boards (or `--all`) and any flags (`-k EXPR`, `--skip-build`, `--no-flash`,
    cd <worktree> && .venv/bin/python tools/board.py pass <boards> <flags>
    ```
 
-   It is one job for all the boards: one notice, the table as its last
-   lines. It builds each image, flashes it, waits for the boot, runs the
+   It is one job for all the boards: one notice, the table and the wall
+   time as its last lines. It builds each image, flashes it, waits for the boot, runs the
    suite and leaves each board at its launcher (the T-Deck at volume 0). It refuses the
    main checkout; report that refusal as it is, never add `--main`.
 3. For each failing test, read its traceback from the suite log the pass

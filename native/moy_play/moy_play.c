@@ -208,7 +208,7 @@ static void arm(const char *id) {
 
 // The audio sessions, where the image takes moy_audio (the Guition S3, with no
 // speaker, does not): a run there is silent, its queue dropped. The host's
-// build (runtime/moycore.py) has them, its sources side by side.
+// build (runtime/host/moycore.py) has them, its sources side by side.
 #if defined(MOY_PLAY_HOST)
 #include "moy_aud.h"
 #define MOY_PLAY_AUDIO 1

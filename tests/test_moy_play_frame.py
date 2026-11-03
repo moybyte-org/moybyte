@@ -1,5 +1,5 @@
 """The kernel's Player drives a Lua cart's frame (native/moy_play/moy_play.c,
-docs/kernel_cartpath_2026-10.md §3.2), on the desktop MicroPython.
+native/moy_play/moy_play.h), on the desktop MicroPython.
 
 The run is launched from its cart folder's catalogue entry, bound to an input
 table, an audio session and a Tick, and every frame is one call: the press

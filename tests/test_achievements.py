@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
-# host_app registers the bare `audio`/`editors` module aliases that console.py
+# host_app registers the bare `audio`/`editors_*` module aliases that console.py
 # imports (its frozen device names), so import it BEFORE console.
 from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402
@@ -338,21 +338,21 @@ def test_a_settled_achievements_page_paints_nothing(tmp_path):
 def test_the_unlock_banner_over_a_game_sits_at_the_glass_top(tmp_path):
     """Over a fullscreen game, which has no bar, the banner's card stands at
     the glass's top centre; over the home, under the bar."""
-    from runtime import achievements_ui, ui_draw
+    from runtime import ui_draw
     ws = _ws(tmp_path)
     got = []
     real = ui_draw.unlock
     ui_draw.unlock = lambda cv, th, cx, y, *a, **k: got.append((cx, y)) or real(cv, th, cx, y, *a, **k)
     try:
         ws.ach.award("decorator")
-        achievements_ui.unlock_banner(ws)
+        ws._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, ws.layout.cy + 6)
         ws.launcher.sel = [it.get("title") for it in ws.launcher.items].index("Star Catcher")
         ws.open()
         for _ in range(3):
             ws.frame(1 / 30)
         assert not ws._running_cart_shows_bar() and ws.wm.top_is_player()
-        achievements_ui.unlock_banner(ws)
+        ws._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, 6)
     finally:
         ui_draw.unlock = real

@@ -6,7 +6,7 @@
 #   _recolour         the accent-and-tint derivation's tables (accents, tints, classes)
 #   generate_strings  the string table (strings/en.json)
 #   outputs           every generated file and its text (the drift test reads it)
-"""Write the toolkit's tables from their data (docs/kernel_toolkit_2026-10.md
+"""Write the toolkit's tables from their data (docs/history/kernel_toolkit_2026-10.md
 §2.1): native/moy_ui's `style.json` in, its `moy_ui_tables.h` and
 `moy_ui_tables.c` out, the seed theme packages (`themes/*.json`) embedded in
 them; native/moy_spine's `strings/en.json` in, its
@@ -271,18 +271,13 @@ def generate(style, d=DIR):
 
 
 def _luminance():
-    """MOY64's relative luminance (WCAG), x10000, from runtime/palette.py."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """MOY64's relative luminance (WCAG), x10000."""
 
     def lin(v):
         v /= 255.0
         return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
     return [round(10000 * (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)))
-            for r, g, b in mod.MOY64]
+            for r, g, b in _moy64()]
 
 
 def generate_theme(style, t):
@@ -306,7 +301,7 @@ def generate_theme(style, t):
     # of `preset_fonts` (Appearance's Font presets) and, as in a published
     # package, its licence's full text X.txt beside X.fnt, from themes/, in
     # name order. A face of the font set (fonts/, which each board image
-    # carries per tier: runtime/fontset.py) is not embedded a second time.
+    # carries per tier: runtime/toolkit/fontset.py) is not embedded a second time.
     font_set = os.path.join(t.dir, "fonts")
     font_files = sorted({f for _n, src in seeds
                          for f in json.loads(src).get("fonts", {}).values()}
@@ -415,7 +410,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_CODE_CONTRAST %d" % th["code"]["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
-         "// The sheets a package may name (docs/theming_2026-09.md \u00a74.6), the",
+         "// The sheets a package may name (docs/theme_and_shell_2026-11.md \u00a73.6), the",
          "// cart sheet's hex format: a line a row of up to MOY_THEME_SHEET_W nibbles,",
          "// at most each sheet's rows. The role sheet's cells, in pixels, reach",
          "// MOY_THEME_SPRITE_ROWS rows: what the loader keeps.",
@@ -455,7 +450,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_FRAMES %d" % len(th["frames"]),
          "#define MOY_THEME_ALIGNS %d" % len(th["title_aligns"]),
          "#define MOY_THEME_FRAME_BUTTONS %s" % _c_str(th["frame_buttons"]),
-         "// A layout (docs/shell_layout_2026-10.md \u00a75): its bars' edges, their",
+         "// A layout (docs/theme_and_shell_2026-11.md \u00a78.3): its bars' edges, their",
          "// slots and the widget catalogue; the caps and the size clamp.",
          "#define MOY_THEME_BARS %d  // one per edge" % len(lay["edges"]),
          "#define MOY_THEME_SLOTS %d" % len(lay["slots"]),
@@ -644,12 +639,17 @@ def generate_theme(style, t):
 
 
 def _moy64():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return list(mod.MOY64)
+    """MOY64 as 64 (r, g, b) tuples, read out of libmoy's moy_data.c (the
+    spec's palette.json, embedded): the table the kernel resolves through. Read
+    as source text because this tool writes the tables the runtime package
+    compiles, so it imports nothing of that package."""
+    with open(os.path.join(ROOT, "native", "moy_gfx", "libmoy", "moy_data.c")) as f:
+        src = f.read()
+    body = re.search(r"moy_palette_default\[[^]]*\]\s*=\s*\{([^}]*)\}", src).group(1)
+    v = [int(x) for x in re.findall(r"\d+", body)]
+    if len(v) != 192:
+        raise SystemExit("moy_data.c: moy_palette_default is not 64 colours")
+    return [tuple(v[i:i + 3]) for i in range(0, 192, 3)]
 
 
 # A look leaf's kind, and a look field's type (moy_theme.h).
@@ -663,7 +663,7 @@ SLOT_BITS = 30
 
 def _icon_slots():
     """The icon slots, in order: the pixel set's slots.txt (moy_ui.c's table
-    and runtime/iconsets.py's SLOTS are held to it)."""
+    and runtime/toolkit/iconsets.py's SLOTS are held to it)."""
     with open(os.path.join(ROOT, "native", "moy_ui", "icons", "pixel", "slots.txt")) as f:
         return [ln.split()[-1] for ln in f if ln.strip() and not ln.startswith("#")]
 
@@ -768,7 +768,7 @@ def _sublist(seq, part):
 
 
 def _look(th, roles):
-    """The look model's tables (docs/look_2026-10.md step 5, THEMES.md's
+    """The look model's tables (docs/history/look_2026-10.md step 5, THEMES.md's
     theme model): every field, its leaves, their kinds, ranges and
     defaults, the enum names and the object groups."""
     lk = th["look"]
@@ -810,7 +810,7 @@ def _look(th, roles):
     def term(v):
         return "INT32_MIN" if v is None else "%d" % v
 
-    h = ["// The look (docs/look_2026-10.md step 5): the theme model's fields, each",
+    h = ["// The look (docs/history/look_2026-10.md step 5): the theme model's fields, each",
          "// one or more leaves; a leaf's kind, its range (an enum's first name and",
          "// count), its default (MOY_THEME_NONE: silent, the renderer derives it).",
          "#define MOY_THEME_LEAVES %d" % len(leaves),
@@ -867,7 +867,7 @@ def _look(th, roles):
          "extern const moy_theme_field_t moy_theme_btn_fields[%d];" % len(btn),
          "#define MOY_THEME_BTN_FIELDS %d" % len(btn),
          "extern const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES];",
-         "// RGB colours (docs/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
+         "// RGB colours (docs/history/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
          "// WCAG luminance (x10000, as moy_theme_lum) of an RGB565 channel.",
          "extern const uint32_t moy_theme_moy64[64];",
          "extern const uint16_t moy_theme_lin5[32], moy_theme_lin6[64];"]
@@ -923,9 +923,9 @@ def _look(th, roles):
 
 
 def _recolour(th, roles, flags):
-    """The accent-and-tint derivation's tables (docs/theming_2026-09.md
-    §4.10, moy_theme_derive): the accents, the presets (an accent in a dark
-    and a light value, docs/look_2026-10.md step 27), the tints' ramps and
+    """The accent-and-tint derivation's tables (docs/theme_and_shell_2026-11.md
+    §3.10, moy_theme_derive): the accents, the presets (an accent in a dark
+    and a light value, docs/history/look_2026-10.md step 27), the tints' ramps and
     the role classes its steps rewrite."""
     lum = _luminance()
     rc = th["recolour"]
@@ -967,7 +967,7 @@ def _recolour(th, roles, flags):
     dims = [(role(r), role(f), [role(b) for b in bgs]) for r, f, bgs in rc["dim_ink"]]
     if any(not 1 <= len(b) <= 3 for _r, _f, b in dims):
         raise SystemExit("theme.recolour.dim_ink: one to three backgrounds each")
-    h = ["// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the",
+    h = ["// Accent and tint (docs/theme_and_shell_2026-11.md §3.10, moy_theme_derive): the",
          "// accents [A, deep], the presets [dark, light] (an accent index past",
          "// MOY_THEME_ACCENTS names one), the tints' ramps ([0] the length, then",
          "// dark to light), and the role classes, each 0xff past its end.",

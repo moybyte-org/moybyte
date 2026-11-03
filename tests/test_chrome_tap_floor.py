@@ -260,7 +260,7 @@ def test_the_menu_rows_follow_the_chrome_scale_and_its_labels_do_not(tmp_path):
 
 
 def test_a_tap_box_centres_its_content_and_is_the_identity_at_cs_eq_fs():
-    """`Layout.tap_box` is `row_band` for a BUTTON (owner report on Guition
+    """`Layout.tap_box` centres a BUTTON's content (owner report on Guition
     glass, 2026-09-06: "the achievements and x icons are tiny and in the top
     left corner, but their buttons are big"). It has to be the exact identity
     wherever the button did not grow, or every non-declaring tier moves."""

@@ -40,7 +40,7 @@ from device_util import _ticks_us, _ticks_diff
 
 
 # petme128 glyph blob for the native moy_gfx.text kernel (#62) -- staged from
-# runtime/font.py as moy_font by build.sh, so device text rasterizes from the SAME
+# runtime/toolkit/font.py as moy_font by build.sh, so device text rasterizes from the SAME
 # bytes the host Canvas.print does (pixel parity). Absent (old build) -> print()
 # stays on framebuf.text (same glyphs, no clip rect).
 try:
@@ -250,7 +250,7 @@ def _release_bakes(owner, owners=_OWNERS):
         _glass_mod.reclaim(h, _BAKE_MASK)
         _sweep_bakes()
 
-# MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
+# MOY64 palette as RGB565 (libmoy's moy_data.c, the spec's palette.json, baked).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
     0xF809, 0xFD00, 0xFF64, 0x0726, 0x2D7F, 0x83B3, 0xFBB5, 0xFE75,
@@ -304,19 +304,16 @@ except (ImportError, AttributeError):
 # indexes in Python, so it serves both. (The tuple stays for the other PAL565_WIRE uses.)
 _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 
-# MOY64 as RGB888, baked. runtime/palette.py builds this table with CPython's
-# `colorsys` at import time, so it cannot be staged to a board at all (verified
-# on P4 glass: `import palette` raises ImportError). The web head solved the
-# same problem by GENERATING a literal twin at build time; this is that twin,
-# inline, because 192 bytes do not justify a build step.
+# MOY64 as RGB888, baked: libmoy's `moy_palette_default` (moy_data.c), inline,
+# because 192 bytes do not justify a build step.
 #
 # It exists so `canvas.palette` can be READ, which SPEC.md 3.1 needs: a cart
-# ships its own 64-entry table, runtime/player.py saves the current one before
+# ships its own 64-entry table, runtime/run/player.py saves the current one before
 # applying it and assigns it back on exit. Without a readable default there is
 # nothing to restore TO.
 #
-# tests/test_device_canvas_parity.py pins it equal to runtime.palette.MOY64, so
-# a re-vendor that moves the palette cannot leave this behind.
+# tests/test_device_canvas_parity.py pins it (and PAL565) equal to libmoy's
+# table, so a re-vendor that moves the palette cannot leave this behind.
 MOY64_RGB = bytes.fromhex(
     "0000001d2b537e2553008751ab52365f574fc2c3c7fff1e8ff004dffa300ffec2700e43629adff83769cff77a8ffccaa"
     "e6a1a1e6b9a1e6d2a1aee6a1a1e6d1a1d1e6a1b4e6b7a1e6d8a1e6e6a1cae6a1b1a1e6e68c6b4da88d7966502eccbf9f"
@@ -470,12 +467,12 @@ def _room(obj):
 
 _PAL_IDENTITY = bytes(range(64))
 
-# THE SHELL'S BLOCK (docs/look_2026-10.md step 5): the live theme's RGB
+# THE SHELL'S BLOCK (docs/history/look_2026-10.md step 5): the live theme's RGB
 # colours, colour indices 64..127, in this build's wire order. A canvas row's
 # table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
 # (this class writes them), 64..127 this block (native/moy_glass writes it into
 # every row; pal() never remaps it). `_CMASK[0]` is what a colour index is
-# masked with: 127, or 63 while a cart's code runs (`set_cart`), so a cart's
+# masked with: 127, or 63 while a cart's code runs (`ui_draw.cart_text`), so a cart's
 # colour stays its index modulo 64.
 _BLOCK = _glass_mod.block_view()
 _CMASK = _glass_mod.cmask()
@@ -490,10 +487,6 @@ def set_block(words):
         wire[i] = w if PAL565_WIRE is PAL565 else (((w & 0xFF) << 8) | (w >> 8))
     _glass_mod.block(wire)
 
-
-def set_cart(on):
-    """The cart boundary: while on, a colour index is masked to 0..63."""
-    _glass_mod.cart(on)
 _PALT_OPAQUE = bytes(64)
 
 
@@ -532,7 +525,7 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 
 
 # _decode_moyimg lived here until 2026-08-17; THE copy is
-# runtime/cart_api.py (one body for every tier -- see its docstring). Its
+# runtime/run/cart_api.py (one body for every tier -- see its docstring). Its
 # removal briefly took the neighbouring constant below with it, which broke
 # make_spr_gate -- and therefore EVERY cart start -- while both on-glass
 # suites stayed green, because neither ran a cart. The host pyflakes net
@@ -563,7 +556,7 @@ class DeviceCanvas:
     # row's raster each row it copies costs, so a frame whose move leaves
     # less than that much of R undrawn draws whole instead, and a text view
     # moving inside a still page draws its rows instead (`host_pays`,
-    # `view_pays` in native/moy_ui/moy_ui_api.c). None where nobody measured
+    # `view_pays` in native/moy_ui/moy_ui_api_host.c). None where nobody measured
     # it: it shifts. LAYER_SHIFT_COST: the same for this board's layers,
     # whose shift is an in-place copy (`new_layer`).
     SHIFT_COST = None
@@ -713,7 +706,7 @@ class DeviceCanvas:
         # normal case allocates nothing and costs one attribute load.
         #
         # It is per-instance because SPEC.md 3.1 lets a cart ship its own 64-entry
-        # RGB table, and runtime/player.py duly assigns `ws.canvas.palette = table`
+        # RGB table, and runtime/run/player.py duly assigns `ws.canvas.palette = table`
         # on start and restores it on exit -- except player.py is STAGED TO BOTH
         # BOARDS and DeviceCanvas had no `palette` at all, so on device that
         # assignment set an attribute nobody read. Verified on P4 glass
@@ -970,7 +963,7 @@ class DeviceCanvas:
         # remap, one slice-copy per real reset) instead of the 64-iteration
         # rebuild _sync_gate_pal does: the celeste shim calls pal() reset every
         # frame and pal-sandwiches around tinted draws, and the rebuild was ~80%
-        # of a 5us pal() body (unix-MP attribution, experiments/state_verb_cost;
+        # of a 5us pal() body (unix-MP attribution, #192 and a791c33;
         # the trampoline crossing itself measured 0.07us -- the cost was always
         # this body). Invariant: _gate_pal mirrors _pal_map after every mutation;
         # tests/test_gate_pal_sync.py pins it against the full rebuild.
@@ -1172,7 +1165,7 @@ class DeviceCanvas:
     def palette(self):
         """The 64-entry RGB table this canvas resolves colour through.
 
-        SPEC.md 3.1 lets a cart ship its own; runtime/player.py reads this to
+        SPEC.md 3.1 lets a cart ship its own; runtime/run/player.py reads this to
         save the current one before applying the cart's, and assigns it back on
         exit. Built lazily from MOY64_RGB so the stock case costs nothing.
         """
@@ -1765,7 +1758,7 @@ class DeviceCanvas:
 
     # -- paths and the outline faces (native/moy_gfx/moy_path.h) -----------
     #
-    # A story's slides (runtime/story_render.py): shapes as filled paths and
+    # A story's slides (runtime/apps/story_render.py): shapes as filled paths and
     # text in the shell's faces at any size, anti-aliased, the same pixels on
     # every tier. Coordinates and sizes are 26.6 (1/64 px); a face is 0 sans,
     # 1 sans bold, 2 mono.
@@ -2280,7 +2273,7 @@ class DeviceCanvas:
         # Native text (#62) in the print font (moy_text.h), petme128 unless the
         # shell names one: the whole string in ONE moy_gfx.text call,
         # camera + clip + pal honoured in C -- and pixel parity with the host at
-        # last (same glyph bytes, staged from runtime/font.py). The per-call
+        # last (same glyph bytes, staged from runtime/toolkit/font.py). The per-call
         # `scale` arg is IGNORED (system-UI scaling is the #39 font_scale path,
         # not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
@@ -2307,7 +2300,7 @@ class DeviceCanvas:
         its size. Opaque, or at scale 1 with its words equal to `key` left
         out (a story's picture with a clear background); camera and clip
         honoured; pal() does not apply, because direct colour has no index to
-        remap. A cart's cover is drawn this way (runtime/cover_cache.py)."""
+        remap. A cart's cover is drawn this way (runtime/shell/cover_cache.py)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2407,7 +2400,7 @@ class DeviceCanvas:
         """Place a w x h picture of RGB565 words (this canvas's byte order,
         as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any
         ratio, opaque, camera and clip honoured. One kernel call: the home's
-        cards at their scale (docs/shell_layout_2026-10.md §12)."""
+        cards at their scale (docs/theme_and_shell_2026-11.md §8.10)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2494,7 +2487,7 @@ class DeviceCanvas:
         """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
         a row into `dst` (w words a row), colour `c` over every pixel at
         `alpha` (0..255), in this canvas's byte order: a dimmed cover, made
-        once and kept by its owner (runtime/cover_cache.py). Draws nothing.
+        once and kept by its owner (runtime/shell/cover_cache.py). Draws nothing.
         The pixels written, 0 where either buffer is short."""
         return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
                               self._col(c), int(alpha))
@@ -2724,7 +2717,7 @@ class DeviceCanvas:
         (`_IN_PLACE`) where it takes the move, the CPU's otherwise. A queued copy is
         fenced by shift_fence(), and by anything that reads or presents this
         buffer; until then the caller writes no row the shift writes
-        (docs/scroll_and_text_2026-10.md §3.2)."""
+        (docs/theme_and_shell_2026-11.md §9.6)."""
         self.flush_batch()
         cs = self._comp_shift
         if cs is not None:
@@ -2774,7 +2767,7 @@ class SystemCanvas(DeviceCanvas):
     print through them), and the wallpaper's cover-crop composite.
 
     ONE body for the three tiers that subclass it. HostSystemCanvas
-    (runtime/host_canvas.py), WebSystemCanvas (firmware/web_runner) and
+    (runtime/host/host_canvas.py), WebSystemCanvas (firmware/web_runner) and
     P4SystemCanvas (the P4's moy_runtime) each carried a hand-copy of these
     methods, and two of the copies drifted on their own: the P4's print passed
     the window's logical size as the kernel stride (scaled text walked
@@ -2841,7 +2834,7 @@ class SystemCanvas(DeviceCanvas):
         self._gate_state[_ST_N_TEXT] += 1
         # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
         # two diverge the moment a viewport is set (#155) -- which is exactly
-        # what wm_windowed._direct_render does to paint a window's content in
+        # what wm_paint._direct_render does to paint a window's content in
         # place. Passing the logical size as the stride makes every glyph row
         # step by the window width instead of the buffer's, so scaled text
         # walks diagonally out of its rect.
@@ -2991,5 +2984,5 @@ for _k in (DeviceCanvas, SystemCanvas, _LayerComp):
 del _k
 
 # class _Layer lived here until 2026-08-17 (end of file); THE copy is
-# runtime/cart_api.py -- whose verb list is the superset this one had
+# runtime/run/cart_api.py -- whose verb list is the superset this one had
 # drifted from (it was missing tline).

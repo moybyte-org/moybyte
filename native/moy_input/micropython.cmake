@@ -1,5 +1,5 @@
 # moy_input: the merged input table, its sources and the pointer, and the
-# drivers that write them (docs/kernel_survival_2026-10.md section 4). Its
+# drivers that write them (docs/history/kernel_survival_2026-10.md section 4). Its
 # handle constants are native/moy_spine's moy_htab.h; its board half drives the
 # kernel's I2C bus (native/moy_kernel/moy_bus.h).
 # THIS FILE AND micropython.mk ARE TWINS.

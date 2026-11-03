@@ -1,7 +1,7 @@
 """The cart store (#124) in the shape the browser gives it, on the host.
 
 A page's network is NON-BLOCKING: its bytes arrive between frames, while no
-Python runs, so `runtime/cart_index.py` must give the frame back instead of
+Python runs, so `runtime/carts/cart_index.py` must give the frame back instead of
 waiting, and read only what the transport vouches for. The page can read only
 what CORS lets it, so it reads a release asset's mirror beside the index and
 asks the player for an external file whose hosts it cannot read. Its store of
@@ -1145,7 +1145,7 @@ def test_the_browser_path_runs_under_micropython(tmp_path):
     """The page runs this Python in the wasm MicroPython: the non-blocking
     install, the mirror, a supplied file and the keeper, through the real
     carts_link over spool files, under the desktop MicroPython."""
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(why="the browser runs cart_index and carts_link on MicroPython")
     repo = Repo(BASE)
     wad = os.urandom(70000)
@@ -1168,7 +1168,7 @@ def test_the_browser_path_runs_under_micropython(tmp_path):
     root = _store(tmp_path)
     script = tmp_path / "run.py"
     script.write_text(_MP_SCRIPT % {
-        "runtime": str(ROOT / "runtime"), "web": str(ROOT / "firmware" / "web_runner"),
+        "runtime": runtime_tree(), "web": str(ROOT / "firmware" / "web_runner"),
         "spool": str(tmp_path / "spool"), "map": str(tmp_path / "map.json"),
         "index": url_map[repo.url("index.json")], "index_url": repo.url("index.json"),
         "root": root, "picked": str(tmp_path / "picked")})

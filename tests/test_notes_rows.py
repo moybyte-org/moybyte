@@ -1,4 +1,4 @@
-"""Notes' frames on its text view (docs/scroll_and_text_2026-10.md §5): a
+"""Notes' frames on its text view (docs/history/scroll_and_text_2026-10.md §5): a
 key typed into a note, a caret step, a selection grown and the frames a
 change owes after it draw the rows of the note that changed, never the view
 whole.
@@ -21,7 +21,7 @@ from array import array
 
 import pytest
 
-from runtime import host_app, moy_carts, ui_draw
+from runtime import host_app, moy_carts, ui_draw, ui_host
 from ws_helpers import no_unlock_banner, quiesce, select_on_home
 
 _DT = 1 / 30
@@ -410,8 +410,8 @@ def _moves(p):
         r = run(*a, **k)
         if h.shifting and h._dy:
             hp = h._hp
-            n = hp[ui_draw._HP_N]
-            k = ui_draw._HP_MOVES + 5 * (n - 1)
+            n = hp[ui_host._HP_N]
+            k = ui_host._HP_MOVES + 5 * (n - 1)
             got.append(tuple(hp[k:k + 5]))
         return r
     h.run = kept

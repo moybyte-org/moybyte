@@ -42,14 +42,14 @@ def _read(rel):
 
 
 def test_wm_never_signals_the_table():
-    src = _read("runtime/wm.py")
+    src = _read("runtime/wm/wm.py")
     assert "moy_glass" not in src and "glass_binding" not in src, (
         "the fullscreen WM signals nothing: the frame gate reads the "
         "kernel's epoch (spec L6/§15)")
 
 
 def test_the_console_reads_only_the_kernel_epoch():
-    src = _read("runtime/console.py")
+    src = _read("runtime/shell/console.py")
     assert src.count("_glass.kernel_epoch()") == 2
     assert src.count("_glass.") == 2
 

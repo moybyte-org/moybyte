@@ -6,7 +6,7 @@ adds:
 - icon sets: the smooth set as SVG sources (icons/<set>/*.svg here),
   rasterised on the host per size to 2/4 bpp alpha masks and tinted by theme
   roles at draw time; the pixel set as the existing 16x16 IconSheet art
-  (runtime/chrome.py), palette-coloured;
+  (runtime/shell/chrome.py), palette-coloured;
 - the code editor and the sprite editor, with the editor's tab row.
 
 A layer of the target, not an entry point: `../draw.py` draws every
@@ -31,16 +31,18 @@ sys.argv = [sys.argv[0], OUT]
 spec = importlib.util.spec_from_file_location("look", BASE)
 M = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(M)
-sys.path.insert(0, os.path.join(REPO, "runtime"))
-from palette import MOY64, NAMES  # noqa: E402
+sys.path.insert(0, REPO)
+from runtime.chrome import NAMES  # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+MOY64 = moy64()
 
 
 def _chrome_tables():
-    """runtime/chrome.py's icon slot map and 16x16 art, read without
+    """runtime/shell/chrome.py's icon slot map and 16x16 art, read without
     importing the toolkit (which needs the native moy_ui)."""
     import ast
     out = {}
-    for n in ast.parse(open(os.path.join(REPO, "runtime/chrome.py")).read()).body:
+    for n in ast.parse(open(os.path.join(REPO, "runtime/shell/chrome.py")).read()).body:
         if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in ("_ICON", "_ICON_ART"):
             out[n.targets[0].id] = ast.literal_eval(n.value)
     return out["_ICON"], out["_ICON_ART"]
@@ -381,7 +383,7 @@ def icon_flash():
 
 
 # ==========================================================================
-# the Studio (docs/studio_2026-09.md's layout, drawn in this look)
+# the Studio (docs/history/studio_2026-09.md's layout, drawn in this look)
 # ==========================================================================
 SYN = {
     "moy-light": dict(bg="#ffffff", line="#f1effc", gutter="#6b7085", text="#15161d", com="#5f6478",

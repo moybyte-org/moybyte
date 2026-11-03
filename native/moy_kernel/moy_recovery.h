@@ -1,5 +1,22 @@
-// moy_recovery: the kernel's own screens (docs/kernel_spine_2026-10.md §7,
-// docs/look_2026-10.md step 33, GAPS 55).
+// moy_recovery: the kernel's own screens (docs/history/look_2026-10.md step 33,
+// GAPS 55).
+//
+// THE FLOOR comes up when the VM fails to start (its first heap area is not
+// there, or the console's boot ends before boot_ok) or the boot-loop guard
+// trips (moy_crash.h), and only on a boot no VM ran in (moy_kernel.c). It
+// offers Try again (RETRY: the VM as usual), Safe start (SAFE: system.json
+// neither read nor written, the defaults, a fill for the wallpaper) and
+// Developer console (REPL: main.py skipped); the serial words and the `sel=`
+// names stay RETRY, SAFE and REPL whatever the rows say. The minimum on every
+// console is the panel brought up, presented and lit from C, one font, and
+// serial: while the VM is down the kernel drains the console's RX ring, reads
+// `retry`, `safe` and `repl`, answers `state` with "screen": "recovery", and
+// prints `KERNEL recovery reason=<r> sel=<choice> crc=<framebuffer crc32>`
+// with the lines it drew every five seconds, which is how the gate drives a
+// board with no input on the floor. A one-button board moves the highlight on
+// a press and picks on a one-second hold; a board with no input on the floor
+// (the Guition P4, whose touch needs a firmware upload) picks SAFE, never
+// RETRY, after 30 s.
 //
 // What the kernel draws when the console cannot come up -- the recovery
 // floor -- and while no VM runs and the web console serves: in the 2026-10

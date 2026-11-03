@@ -3,7 +3,7 @@
 Every tier compiles libmoy (native/moy_audio/libmoy/) now: the boards and the
 web runner natively, and -- since moycore stage 0 deleted the hand-maintained
 Python twin -- the host sim too, through the ctypes .so that
-runtime/audio_binding.py builds from the DOUBLE-WIDENED vendored source and
+runtime/host/audio_binding.py builds from the DOUBLE-WIDENED vendored source and
 the kernel's sessions (native/moy_audio/moy_aud.c). This harness renders the
 same scenario through a session of that binding and through an independently-driven reference binary
 (libmoy_render.c) and compares; what it can catch is no longer synth drift --

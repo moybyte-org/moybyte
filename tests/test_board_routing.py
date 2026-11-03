@@ -20,6 +20,7 @@ from pathlib import Path
 from board_source import runtime_text
 
 from tools import board_config
+from tools.board_config import runtime_file
 
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
@@ -31,8 +32,9 @@ _REPO = Path(__file__).resolve().parent.parent
 
 def _staged():
     """The shared modules a FRESH T-Deck build freezes, by destination name --
-    `build.sh` stages every `runtime/*.py` except the files `board.toml`
-    denies, so the question is asked of the staged set."""
+    `build.sh` stages every module under `runtime/` (flat, `host/` aside)
+    except the files `board.toml` denies, so the question is asked of the
+    staged set."""
     from tools.board_config import staged_modules
     return staged_modules(_REPO / ROOT, _REPO)
 
@@ -47,7 +49,7 @@ def _device_backend_src():
     return "\n".join((
         runtime_text(ROOT / "modules" / "moy_runtime.py"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
-        Path("runtime/cart_api.py").read_text(encoding="utf-8"),
+        Path("runtime/run/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
     ) + _kernel_frame())
 
@@ -155,7 +157,7 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     """The per-frame CALL that derives the keyboard mode from the cart's
     textmode request lives in Player.tick; the mode flip itself is executed in
     tests/test_cart_textmode.py and tests/test_tdeck_input.py."""
-    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    player = runtime_file("player.py").read_text(encoding="utf-8")
     assert "ws._sync_cart_text_mode()" in player
 
 
@@ -506,25 +508,34 @@ def test_the_pre_kernel_guards_are_one_body():
     board never did, so a zero-height canvas drew nothing here and fourteen
     pixels on glass, and no test could see it. The clamping branches are exactly
     the ones the conformance goldens never reach, so the only defence is that
-    there is nothing to diverge -- mg_solid_prologue / mg_map_ok / mg_is_moy_sheet
-    in moy_gfx_kernels.h, called by both."""
+    there is nothing to diverge: the libmoy bridge verbs are bodies in
+    moy_gfx_kernels.c (mg_line ... mg_blit_quads), the usermod's wrappers only
+    marshal into them, and the host's ctypes binding calls the same functions
+    with no shim of its own."""
     header = (NATIVE / "moy_gfx" / "moy_gfx_kernels.h").read_text(encoding="utf-8")
     for fn in ("mg_solid_prologue", "mg_map_ok"):
         assert "static inline int %s(" % fn in header
-    surfaces = {
-        "modmoy_gfx.c": (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8"),
-        "moyhost_gfx.c": (Path("runtime") / "moyhost_gfx.c").read_text(encoding="utf-8"),
-    }
-    for name, src in surfaces.items():
-        # tri/circ/circb/line, both sides.
-        assert src.count("mg_solid_prologue(") == 4, (
-            "%s: the solid-verb prologue is written out again" % name)
-        # tline/blit_map on both sides (the device adds DrawCtx.set_map_src).
-        assert src.count("mg_map_ok(") >= 2, (
-            "%s: the map-cells guard is written out again" % name)
+    kernels = (NATIVE / "moy_gfx" / "moy_gfx_kernels.c").read_text(encoding="utf-8")
+    usermod = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    binding = (Path("runtime") / "host" / "gfx_binding.py").read_text(encoding="utf-8")
+    # tri/circ/circb/line, once.
+    assert kernels.count("mg_solid_prologue(") == 4
+    assert "mg_solid_prologue(" not in usermod, \
+        "modmoy_gfx.c: a solid verb's body is written out again"
+    # tline/blit_map (the usermod's one is DrawCtx.set_map_src's registration).
+    assert kernels.count("mg_map_ok(") == 2
+    assert usermod.count("mg_map_ok(") <= 1, \
+        "modmoy_gfx.c: the map-cells guard is written out again"
+    for src in (kernels, usermod):
         assert "MOY_MAP_MAX" not in src, (
-            "%s: the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
-            "before mw * mh can overflow" % name)
+            "the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
+            "before mw * mh can overflow")
+    for fn in ("mg_line", "mg_circ", "mg_circb", "mg_tri", "mg_sspr", "mg_tline",
+               "mg_blit_map", "mg_blit_quads"):
+        assert usermod.count(fn + "(") >= 1, "modmoy_gfx.c does not call " + fn
+        assert '("%s",' % fn in binding, "gfx_binding does not call " + fn
+    assert not list(Path("runtime").rglob("moyhost_gfx.c")), \
+        "a host shim is back: its verbs belong in moy_gfx_kernels.c"
 
 
 def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
@@ -543,7 +554,7 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
                 Path("firmware/guition_jc8012p4a1c/modules/moy_runtime.py"),
                 Path("device/p4_canvas.py"),
                 Path("firmware/web_runner/web_canvas.py"),
-                Path("runtime/host_canvas.py")):
+                Path("runtime/host/host_canvas.py")):
         assert "def new_layer(" not in mod.read_text(encoding="utf-8"), \
             mod.name + ": grew a new_layer copy back; use the _make_layer hook"
 
@@ -554,19 +565,19 @@ def test_paint_image_assets_wired_device_and_carts():
     envelope themselves while the store read Paint's second codec, which is how
     a picture came back blank on whichever tier held the other half. The codec
     is executed in tests/test_moyimg.py."""
-    cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
+    cart_api_src = Path("runtime/run/cart_api.py").read_text(encoding="utf-8")
     assert "return moyimg.decode_moyimg(text)" in cart_api_src
     assert "deflate" not in cart_api_src and "zlib" not in cart_api_src
 
 
 def test_editor_cores_are_shared_single_source():
-    """One canonical file (runtime/editors.py); neither backend redefines the
+    """One canonical source (runtime/editors/editors_*.py); neither backend redefines the
     shared cores."""
     runtime = _device_backend_src()
-    # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds
+    # The HOST canvas is the boards' own class now (runtime/host/host_canvas.py builds
     # `device_canvas.DeviceCanvas` on CPython), so "the host does not redefine the
     # cores" is checked where a redefinition could still be written.
-    host_canvas = Path("runtime/host_canvas.py").read_text(encoding="utf-8")
+    host_canvas = Path("runtime/host/host_canvas.py").read_text(encoding="utf-8")
     for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
         assert cls not in host_canvas, "host canvas redefines " + cls
@@ -604,7 +615,7 @@ def test_player_isolation_no_forbidden_names():
     needs goes through thin ws helpers). A stray reach-through would compile
     and pass every behavior test yet quietly re-couple the run loop to the
     shell, so this source grep is the guard."""
-    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    player = runtime_file("player.py").read_text(encoding="utf-8")
     for forbidden in ("menu_view", "launcher", "bar_layer", "carts_store"):
         assert forbidden not in player, (
             "player.py names '%s' -- the Player must not reach the store/bar/home grid/"
@@ -892,12 +903,12 @@ def test_one_lua_runtime_wired():
     assert "py/" not in vm, "the VM half includes nothing of MicroPython"
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
-    # The BOARDS reach it through the shared boot spine -- runtime/device_boot.py
+    # The BOARDS reach it through the shared boot spine -- runtime/boot/device_boot.py
     # holds ONE probe where there used to be two hand-kept copies -- so the
     # import lives there. Each board still has to CALL it, and the second loop
     # is what pins that: a spine nobody invokes is a feature that quietly does
     # not exist, exactly like the web console on the T-Deck.
-    for src_path in ((_REPO / "runtime" / "device_boot.py"),
+    for src_path in (runtime_file("device_boot.py"),
                      (Path("firmware/web_runner") / "web_boot.py")):
         src = src_path.read_text(encoding="utf-8")
         assert "from moycore_glue import make_runtimes" in src, src_path

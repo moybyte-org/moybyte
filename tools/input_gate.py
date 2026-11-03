@@ -30,7 +30,7 @@ image against dev on fresh boots, on every board named at once.
 
 A surface holds when every row of it holds its p90 on every board, against a
 dev image benched on fresh boots: the perf pass's measure
-(`docs/ui_blocks_2026-10.md`, "Move first, then one perf pass"). A row is
+(`docs/history/ui_blocks_2026-10.md`, "Move first, then one perf pass"). A row is
 one surface under one input; its number is the row's `gate` p90 (input_bench's
 presented interval over the live, coast and glide frames), and a side's number
 is the MEDIAN over its runs. The line is dev's number plus `--tol` (0: the

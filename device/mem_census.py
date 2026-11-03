@@ -1,6 +1,6 @@
 """The memory census: who holds a console board's memory, by owner.
 
-docs/native_kernel_2026-09.md's sprint 0 asks who sets the boot heap's peak,
+docs/history/native_kernel_2026-09.md's sprint 0 asks who sets the boot heap's peak,
 who holds what is live after it, and who holds the off-heap PSRAM. This module
 answers on the board, and `tools/mem_census.py` drives it from the host.
 
@@ -194,7 +194,7 @@ def growths():
 
 
 def store():
-    """The store's resident native memory (docs/kernel_store_2026-10.md
+    """The store's resident native memory (docs/history/kernel_store_2026-10.md
     section 9): the index's rows, and the bytes it holds now and at its high
     water; None where the index is the Python one."""
     mi = sys.modules.get("moy_index")

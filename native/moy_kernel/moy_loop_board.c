@@ -1,5 +1,5 @@
 // moy_loop_board: the loop's stages on a VM -- the ops table a console
-// board's VM service hands moy_loop.c (docs/kernel_survival_2026-10.md §7.1),
+// board's VM service hands moy_loop.c (native/moy_kernel/moy_loop.h),
 // and the same stages on the desktop MicroPython, which drives a staged
 // console's frames through them (tests/test_frame_alloc.py). What only a
 // board has -- the stdin ring, the OTA slot, the watchdog, PSRAM, the
@@ -273,10 +273,10 @@ static uint32_t b_services(void) {
 }
 
 #if MOY_LOOP_ESP
-// -- the board's words (docs/kernel_survival_2026-10.md §7.3) ---------------------
+// -- the board's words (docs/history/kernel_survival_2026-10.md §7.3) -----
 //
 // The words that read or act on kernel state, answered in C before any
-// console word. The host and the browser keep runtime/dev_channel.py's
+// console word. The host and the browser keep runtime/boot/dev_channel.py's
 // copies, which say `-` for what a host cannot read.
 
 void moy_aud_hush(void) __attribute__((weak));
@@ -346,7 +346,7 @@ static bool w_mem(int argc, char **argv, const char *line) {
 
 // kstop N [stop] (§7.5): the VM service's soft reset N times, the console
 // booting between, a KSTOP line of the heaps before and after each teardown.
-// `stop`: each a real stop and start instead (docs/kernel_cartpath_2026-10.md
+// `stop`: each a real stop and start instead (docs/history/kernel_cartpath_2026-10.md
 // section 5), with a third line while the VM is down. DEV.
 static bool w_kstop(int argc, char **argv, const char *line) {
     (void)line;
@@ -462,7 +462,7 @@ void moy_loop_board_vm_start(void) {
     moy_devch_words(BOARD_WORDS, (int)(sizeof(BOARD_WORDS) / sizeof(BOARD_WORDS[0])));
     #endif
     moy_idle_t *d = moy_loop_idle();
-    d->can_dim = false;
+    d->can_dim = s_ops.backlight != NULL;
     moy_loop_set_vm(true);
 }
 
@@ -516,7 +516,7 @@ int moy_loop_board_run(void) {
 }
 
 #if MOY_LOOP_ESP
-// THE LOOP TASK (docs/kernel_survival_2026-10.md §7.1): while no VM runs --
+// THE LOOP TASK (native/moy_kernel/moy_loop.h): while no VM runs --
 // the soft reset's window today, sprint 4's stops tomorrow -- a small kernel
 // task drives the kernel's own frame, pinned to the VM's core at the VM's
 // priority. It is created when the window opens (after the teardown has
@@ -580,7 +580,7 @@ uint32_t moy_loop_board_window_frames(void) {
     return s_window_frames;
 }
 
-// -- the VM stopped (docs/kernel_cartpath_2026-10.md section 5.3) -------------
+// -- the VM stopped (docs/history/kernel_cartpath_2026-10.md section 5.3) -------------
 //
 // The stages the VM service task drives while no VM runs: the kernel's input
 // table, the dev channel over the stdin ring, the tail's services, the

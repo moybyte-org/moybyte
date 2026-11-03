@@ -25,7 +25,7 @@ The two-domain seam (#39) as it runs on both P4 boards:
     (native text kernel's scale arg), font-scale-carrying layers (window
     buffers, the bar cache), and the two native composite hooks the shared
     presentation code probes for -- blit_game (the windowed WM's game->window
-    viewport, wm_windowed._blit_game) and blit_cover (the wallpaper's
+    viewport, wm_paint._blit_game) and blit_cover (the wallpaper's
     cover-crop desktop backdrop, wallpaper._backdrop_blit) -- each ONE
     moy_gfx.blit565_scale call over the game canvas's RGB565 buffer, or the
     PPA's DMA where it wins (upscale composites only; the README of either
@@ -297,7 +297,7 @@ class P4SystemCanvas(SystemCanvas):
         return self._blit_game_full(gc, ox, oy, scale, defer)
 
     def _blit_game_full(self, gc, ox, oy, scale, defer=False):
-        """wm_windowed._blit_game's device path (#58/#73): integer-scale the
+        """wm_paint._blit_game's device path (#58/#73): integer-scale the
         320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
         ~2.6x faster than the CPU blit -- measured) when available, else the
         moy_gfx CPU kernel. NOTE the two do NOT write the same bytes: the PPA
@@ -599,7 +599,7 @@ class P4SystemCanvas(SystemCanvas):
     # read) -- exactly blit_game above / blit_cover below.
 
     def blit_strip_async(self, layer, x, y):
-        """The #58 drag stamp-defer hook (probed by wm_windowed._draw_app_window):
+        """The #58 drag stamp-defer hook (probed by wm_paint._draw_app_window):
         kick `layer`'s 1:1 stamp at (x, y) on the PPA NON-BLOCKING and defer the
         scan-out switch (the same composite-pending/present_pending machinery as
         the quiet-game-frame composite). A 1:1 PPA copy is a wall-time WASH vs
@@ -665,7 +665,7 @@ def run_ppa_smoke(comp, set_backlight, scale=2, iters=60, game_w=320, game_h=240
     moy_gfx.blit565_scale (CPU) and moy_ppa.blit_scale (PPA DMA) -- showing each
     result so correctness (colors/scale/position) is eyeballable over serial +
     glass, and printing per-blit timings + the speedup. The composite is the
-    exact op wm_windowed._blit_game runs every game frame, so the speedup here is
+    exact op wm_paint._blit_game runs every game frame, so the speedup here is
     the headline lever for both game play and window drags.
 
     moy_dsi.init() is idempotent, so a fresh compositor reuses the live panel

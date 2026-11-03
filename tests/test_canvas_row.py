@@ -1,4 +1,4 @@
-"""A host canvas's CANVAS row is the canvas's (docs/kernel_toolkit_2026-10.md
+"""A host canvas's CANVAS row is the canvas's (docs/history/kernel_toolkit_2026-10.md
 §3.1): its draw state, its colour table and its op counters are kept in step
 on every canvas, gated or not, so a native/moy_ui primitive drawing through
 the row draws with the clip, camera and palette the canvas has.

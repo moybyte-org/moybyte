@@ -1,8 +1,8 @@
 ---
 paths:
   - "firmware/web_runner/**"
-  - "runtime/moy_sync.py"
-  - "runtime/web_*.py"
+  - "runtime/carts/moy_sync.py"
+  - "runtime/**/web_*.py"
   - "device/moy_web*.py"
   - "tools/*web*.py"
 ---
@@ -167,7 +167,7 @@ nor those docs will warn you about:
   - **The shelves are the serving host's**: an `indexes.json` beside the page
     replaces the defaults, read once at boot.
   - **A page keeps no compiled module**, so a release asset is read by RANGE
-    (`ranges` on the page's transport, `cart_index._Ranged`): the zip's
+    (`ranges` on the page's transport, `cart_unpack._Ranged`): the zip's
     directory, then the runs of members it keeps -- a cart's modules are most
     of its asset and never cross. Any first range not answered 206 (a host that
     ignores ranges, a refused preflight) reads the asset whole.
@@ -223,7 +223,7 @@ nor those docs will warn you about:
   screenshot verb on the sync RPC was its recorded successor and was DROPPED
   (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
   2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
-  used it. What survives of the old view is `runtime/web_input.py` (browser
+  used it. What survives of the old view is `runtime/shell/web_input.py` (browser
   events → InputState/Pointer, which the sync RPC speaks). The recording-tier
   surface machinery in `wm_windowed` and the kernel's surface table were
   deleted on 2026-10-27 (`docs/surface_model_v1.md` §16).
@@ -279,8 +279,7 @@ nor those docs will warn you about:
   entirely** (`createImageBitmap` + `getImageData`, then read the low bits in JS)
   and that is exactly what was DECLINED: it would be a second reader of one
   format, the same shape as the hand-copied converter, and it does not generalise
-  to a board. Measured on a real MicroPython: 40ms to read a `.p8.png`, 13ms to
-  write a small cart, ~360ms for Celeste. Rules the tests pin: the **zoom hint is
+  to a board. Rules the tests pin: the **zoom hint is
   unconditional** here (`p8_writer.P8_CROP`, canvas `128x128`) because on the web
   that footgun would fire on every import; the PNG validation is **explicit**
   because the frozen build is opt=3, which strips the converter's own asserts;
@@ -297,9 +296,9 @@ nor those docs will warn you about:
   because unlike `os.path.basename` a regex engine and a str method **cannot be
   injected from out here**. `tests/test_p8_micropython.py` is the lane that found
   them and `tests/test_p8_import_vendor.py` scans a re-vendored file for the six
-  statically. **Memory is the other tier fact**: a real BBS cart needs ~8MB of
-  MicroPython heap to import (the fixture fits in 2MB); the browser gives the VM
-  16MB, so that is headroom here and the bar a device leg has to clear.
+  statically. **Memory is the other tier fact**: a real BBS cart needs several
+  times the fixture's MicroPython heap to import; the browser gives the VM 16MB,
+  and that import is the bar a device leg has to clear.
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.

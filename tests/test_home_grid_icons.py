@@ -1,4 +1,4 @@
-"""The home's grid and icons arrangements (docs/look_2026-10.md step 33),
+"""The home's grid and icons arrangements (docs/history/look_2026-10.md step 33),
 the layout's `home: grid` and `home: icons`.
 
 The grid is a shelf of cards -- the cover at a clean scale, its title under
@@ -13,6 +13,7 @@ import json
 import pytest
 
 from runtime import host_app, launcher_layer, ui_draw
+from runtime import home_grid
 from runtime.cover_cache import BASE, HALF
 from ws_helpers import build_ws_with_shelf
 
@@ -61,7 +62,9 @@ def _full_frame(ws, drv):
 
 def test_a_layouts_home_picks_the_arrangement(tmp_path):
     import moy_ui
-    from runtime.launcher_layer import Carousel, IconHome, Launcher
+    from runtime.home_icons import IconHome
+    from runtime.home_carousel import Carousel
+    from runtime.home_grid import Launcher
 
     ws = build_ws_with_shelf(tmp_path, 4)
     for home, cls in (("icons", IconHome), ("grid", Launcher)):
@@ -297,4 +300,4 @@ def test_a_tap_on_a_card_runs_it(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    assert ws.screen != "launcher" and launcher_layer.PSEUDO_TILE_TYPES
+    assert ws.screen != "launcher" and home_grid.PSEUDO_TILE_TYPES

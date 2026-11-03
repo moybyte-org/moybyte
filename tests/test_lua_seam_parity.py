@@ -3,7 +3,7 @@
 The device glue (`device/moycore_glue.py`) and the host runtime
 (`runtime/lua_host.py`) do the same three things around every Lua tick: fill the
 snapshot slots libmoy reads, apply the cart's `view()`, and drain the audio
-queue onto the run's session. Until the seam moved into `runtime/lua_ext.py`
+queue onto the run's session. Until the seam moved into `runtime/run/lua_ext.py`
 they were two copies, identical down to `None if b < 0 else b`, `b / 1000.0` and
 the guard comments -- differing only in where the ABI numbers came from
 (`moycore` the C module on a board, `runtime.lua_binding` on the host).
@@ -134,7 +134,7 @@ def test_the_two_glues_hold_no_private_copy_of_the_seam():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    for rel in ("device/moycore_glue.py", "runtime/wasm_host.py"):
+    for rel in ("device/moycore_glue.py", "runtime/host/wasm_host.py"):
         src = (root / rel).read_text(encoding="utf-8")
         for name in ("drain_audio", "snap_shared", "sync_view"):
             assert name in src, "%s stopped using the shared %s" % (rel, name)

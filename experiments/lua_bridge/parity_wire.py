@@ -221,7 +221,7 @@ def same(a, b, tol, stats=None):
 
 def lua_run(ws, ns, src):
     """The cart's Lua run as a board makes it: device/moycore_glue.py's
-    MoycoreRun over the host's moycore (runtime/moycore.py), the C a board
+    MoycoreRun over the host's moycore (runtime/host/moycore.py), the C a board
     runs."""
     import os
     import sys

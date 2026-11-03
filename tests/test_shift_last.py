@@ -1,5 +1,5 @@
 """`shift_last` and `copy_last_into`, EXECUTED on every canvas
-(docs/scroll_and_text_2026-10.md §3.2, §11, §13).
+(docs/history/scroll_and_text_2026-10.md §3.2, §11, §13).
 
 `shift_last(x, y, w, h, dx, dy)` moves the rect of the buffer the last
 presented frame drew into by (dx, dy) inside the rect, into the buffer this
@@ -16,7 +16,7 @@ too, everything else (the exposed band included) what the destination held:
   and the viewport (buffer coordinates, never the camera's);
 - the P4s' compositors with the 2D-DMA emulated two ways -- the copy landing
   at its submit, and only at the fence -- plus a transport without the engine
-  and one that refuses the block: the host binding (`runtime/glass_binding.py`)
+  and one that refuses the block: the host binding (`runtime/host/glass_binding.py`)
   and the boards' C binding (`native/moy_glass/modmoy_glass.c`, compiled into
   the desktop MicroPython) run the SAME scenario script, the S3s' banded
   compositor in the C binding beside them;

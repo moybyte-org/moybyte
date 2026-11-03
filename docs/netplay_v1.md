@@ -20,9 +20,9 @@ tape, `advance()` — and the link's protocol, in C (#224, sprint 4): the kernel
 one instance owns the radio's receive ring for the whole console (ESP-NOW has
 one firmware-wide receive slot, held by `native/moy_net/moy_link.c`), dispatches
 by frame type and is polled from the loop's tail with no crossing into Python.
-`runtime/players.py` is the console's view of it: the radio's bring-up, the
+`runtime/run/players.py` is the console's view of it: the radio's bring-up, the
 session's player slots, the cart it asks the console to open.
-`runtime/player.py` adopts a session, feeds it and lets go; a Lua run's
+`runtime/run/player.py` adopts a session, feeds it and lets go; a Lua run's
 lockstep frame is the kernel Player's (`moy_play_lockstep`).
 
 ## 2. Lockstep: what crosses the air, and when a console may simulate
@@ -149,9 +149,12 @@ seconds. The P4 took `moybyte_patch_repr_c` and the probe re-read **1106 of 1106
 bit-identical**. Every board that can hold a link runs REPR_C; one that cannot
 take it cannot join a match.
 
-**Board scope is all three consoles**; the browser has no radio and is out. The
-S3 pair talks to its own silicon. The P4 has none of its own and reaches the C6
-over ESP-Hosted 2.12.12's custom RPC through `native/moy_c6` — seventeen
+**Board scope is three consoles**: the T-Deck, the Guition S3 and the
+Waveshare P4. The browser has no radio and is out, and the Guition P4's C6 runs
+Guition's factory slave with no ESP-NOW shim, so its link comes up inactive (its
+README). The S3 pair talks to its own silicon. The Waveshare P4 has none of its
+own and reaches the C6 over ESP-Hosted 2.12.12's custom RPC through
+`native/p4/moy_c6` — seventeen
 `esp_now_*` wrappers plus the rate lever, under the same link protocol the S3s
 run — against a shimmed C6 slave the console
 flashes itself over SDIO. One rule is load-bearing there: `WLAN.active(True)`

@@ -1,9 +1,9 @@
 // moy_input: the merged input table every surface reads, its sources and the
-// pointer (docs/kernel_survival_2026-10.md section 4.1).
+// pointer (docs/history/kernel_survival_2026-10.md section 4.1).
 //
 // One table body for every tier: the boards' kernel table (moy_input_kernel),
 // the tables the MicroPython binding (modmoy_input.c) and the host's ctypes
-// binding (runtime/moy_input.py) make, and the fuzzer's.
+// binding (runtime/host/moy_input.py) make, and the fuzzer's.
 //
 // THE BUTTONS are libmoy's moy_button order, then `home` and the console's own
 // six: bit i of every mask is MOY_INPUT_NAMES[i]. A table holds the first
@@ -123,7 +123,7 @@
 // Steps a trackball roll delivers above MOY_INPUT_BALL_COAST_RATE a second
 // become a coast instead: MOY_INPUT_BALL_COAST thousandths of a step a ms per
 // surplus step, delivered on as steps that decay as a fling does
-// (runtime/console.py Workstation._ball_steps); 0 is no momentum.
+// (runtime/shell/console.py Workstation._ball_steps); 0 is no momentum.
 #ifndef MOY_INPUT_BALL_COAST
 #define MOY_INPUT_BALL_COAST 0
 #endif

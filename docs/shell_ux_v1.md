@@ -9,9 +9,10 @@ affordance left to keep), and §9 (tools/apps run with a minimal bar; text-mode 
 exit via the new `quit()` cart verb). It remains the "what the user experiences"; the
 "how" docs beneath it are
 implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
-`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
-`docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
-map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
+`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`, and
+`shell_architecture_v1.md`, superseded; `runtime/shell/system_api.py` is the authority
+on the cart API's trust level). The shipped module
+map (`runtime/editors/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
 `Workstation` kernel) lives in `runtime/README.md` and `.claude/rules/shell.md`. This doc deliberately does NOT contain
 module design, migration phases, or code; mechanisms are named only where the UX
 guarantee is meaningless without one.
@@ -35,21 +36,24 @@ manager.
 
 ---
 
-## 1. One console, three presentations
+## 1. One console, several presentations
 
-Three tiers run the **same functionality**:
+Each board.toml names its tier (`[board] tier`), and the tier decides the
+presentation; CLAUDE.md lists the boards:
 
-| Tier | Screen | Presentation |
+| Tier | Boards | Presentation |
 |---|---|---|
-| LilyGO T-Deck (ESP32-S3) | 320×240 handheld | one app fullscreen at a time |
-| WebView (#22/#41) | whatever the browser gives | whichever model fits the viewport |
-| ONE (ESP32-P4, #58) | 1024×600 desktop-ish | windows, several apps at once |
+| handheld | `tdeck`, `guition_s3` | one app fullscreen at a time |
+| desktop | `p4`, `guition_p4` | windows, several apps at once |
+| browser | `firmware/web_runner/` | the handheld's or the desk's arrangement, whichever fits the viewport |
+| headless | `xiao_zero` | no screen (#41) |
 
-The ONLY difference between tiers is UI presentation — screen size and window model.
-No tier has a feature the others lack; no tier has its own shell logic. This is the
-existing host == device discipline plus the #39 responsive-layout discipline, extended
-one level up: not just "the same pixels reflow," but "the same *apps* present
-differently." A kid who learns the console on the T-Deck already knows the P4.
+No tier has its own shell logic. This is the existing host == device discipline
+plus the #39 responsive-layout discipline, extended one level up: not just "the
+same pixels reflow," but "the same *apps* present differently." A kid who learns
+the console on the T-Deck already knows the P4. Tiers may differ in features
+where the hardware does (owner, 2026-11-01): capture is the P4's, through its
+H.264 encoder (#126).
 
 ---
 
@@ -80,7 +84,7 @@ never special-cases "was I launched from the editor?", the Editor never special-
 slideshow, the web view) costs nothing.
 
 *(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**, a row of
-the stop card since docs/look_2026-10.md step 33. A cart that fails to start
+the stop card since docs/history/look_2026-10.md step 33. A cart that fails to start
 or raises mid-frame stops under the stop card, whose See why exits into the
 Editor's Code tab with the caret on the crashing line, the inline marker set,
 and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
@@ -119,29 +123,28 @@ sibling app stealing milliseconds. "One fullscreen app + a back-stack" is not a
 compromise UI; it is the mechanism by which games hit their #66 numbers.
 
 *(Status 2026-07-08: the windowed tier is IMPLEMENTED host-side —
-`runtime/wm_windowed.py`, also served over the web transport — with two
+`runtime/wm/wm_windowed.py`, also served over the web transport — with two
 owner-directed refinements to this section's sketch: INPUT FOCUS is decoupled
 from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
 and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another, but for the Editor's own playtest, which ends
-with it: the 2026-10-31 paragraph below). One cart still runs at a time (#73's multi-cart
-boundary). The P4 device port of this tier rides #58.)*
+with it: the 2026-10-31 paragraph below). The P4 device port of this tier rides #58.)*
 
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
-`docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
+`docs/theme_and_shell_2026-11.md` §8.1: the windowed tier BOOTS onto the
 **desktop** — wallpaper + a static icon column (PLAY, PROJECTS — the home in
 a window, on Make — then every app on the home's Apps tab, Notes and any
 installed app cart among them) + the one OS bar with taskbar chips — desktop mode's floor:
 everything opened there is a window, and the desk bar draws no X (nothing is
 beneath it). The **PLAY icon** enters console mode: the desk's windows wait
 parked, off the back-stack, and the fullscreen **home** shows — the same
-home every board has (`docs/shell_layout_2026-10.md` §12: its Games / Mine /
+home every board has (`docs/theme_and_shell_2026-11.md` §8.10: its Games / Mine /
 Apps / Make tabs, the Games tab holding no app): a tap runs a game
 FULLSCREEN exactly like the small tiers (the pause menu's Quit exits back to the
-home), and a tap on the Make tab and a card's CHANGE open the Editor
-fullscreen, as there. The home's X — B from a keyboard — is the way back to
-the desk, its windows where they were. The Player tier only ever gets the
+home), and the Editor, from Make or CHANGE, is a desk window
+(`docs/theme_and_shell_2026-11.md` L18). The bar's back — B or Esc from a
+keyboard — is the way back to the desk, its windows where they were. The Player tier only ever gets the
 home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
@@ -159,7 +162,7 @@ memory remain open on #178.)*
 Picture: no window buttons during play, and the pause menu's **Play in a
 window** (§9a) is the one way into a window. **Closing the Editor closes its
 playtest**; a game the kid moved out with Play in a window is its own window
-and stays open. `docs/shell_layout_2026-10.md` §3, "Games on the desk",
+and stays open. `docs/theme_and_shell_2026-11.md` §8.1, "Games on the desk",
 holds the rule.)*
 
 ---
@@ -179,21 +182,21 @@ door — no setting, no mode:
   cart opens the app). Every cart type, no per-device default, no type
   dispatch. The fourth tab, **Make**, is the one list of projects (owner,
   2026-10-14) and a tap there EDITS (owner, 2026-10-13) — the one tab whose
-  tap makes rather than plays (`docs/shell_layout_2026-10.md` §12).
-- **The home is a carousel** (2026-10, `docs/shell_layout_2026-10.md` §12):
+  tap makes rather than plays (`docs/theme_and_shell_2026-11.md` §8.10).
+- **The home is a carousel** (2026-10, `docs/theme_and_shell_2026-11.md` §8.10):
   one row of cover cards slides sideways under the tab row, the centre card
   larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
   `ui.DragTap` machine the Settings rows ride too), so a scroll can never
   launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
   included. A layout may pick another arrangement (`home`): the **grid**, a
   shelf of cards in the rows the glass holds that scrolls LEFT-RIGHT, or the
-  **icons**, tiles that scroll down (`docs/look_2026-10.md` step 33).
+  **icons**, tiles that scroll down (`docs/history/look_2026-10.md` step 33).
 - **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
   grid and the icons fling identically; a scroll, fling or step frame is the
-  band's alone (`launcher_layer._band_frame`): the backdrop goes back under
+  band's alone (`home_band._band_frame`): the backdrop goes back under
   the band and the band draws as the engine's table of parts
   (`Launcher.band_pass`), with the hint strip where a step moved focus.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
@@ -229,9 +232,9 @@ every screen a kid starts on.
 ## 5. The zoned top bar — the macOS menu-bar model
 
 The default layout is a single OS-owned 18px top bar with two zones; a theme's
-layout places the same widgets in bars on any edge (`docs/shell_layout_2026-10.md`
-§4). This is the #46 bar, re-framed: it stopped being a hardcoded strip of mode
-buttons and became an OS shell with an app-populated region.
+layout places the same widgets in bars on any edge (`docs/theme_and_shell_2026-11.md`
+§8.2). It is the #46 bar as an OS shell with an app-populated region, not a
+hardcoded strip of mode buttons.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
   Editor loads its tab ladder + PLAY here (§6, no SAVE -- #111); the home puts
@@ -240,8 +243,7 @@ buttons and became an OS shell with an app-populated region.
   the OS owns the zone's existence and bounds.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
   opening its component (the WIFI panel, the calendar, the power rows) as a popover
-  in desktop mode and fullscreen in console mode (`docs/shell_layout_2026-10.md`
-  §8). Apps cannot draw here; the right zone is how the OS stays present
+  hung from it, in both modes (`docs/theme_and_shell_2026-11.md` §8.6). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
   320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
@@ -279,7 +281,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   tool row (#90/#91/#92): the sprite painter has PICO-8's row (pen, fill, shape,
   select, stamp) with stroke-level undo/redo, and its operations
   (copy/flip/rotate/shift/mirror/clear, on the selection or the whole sprite)
-  under a more menu and PICO-8's keys (`docs/look_2026-10.md` step 24); the map editor has
+  under a more menu and PICO-8's keys (`docs/history/look_2026-10.md` step 24); the map editor has
   per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
   whose last rung is an OVERVIEW -- each cell a solid block of its tile's dominant
   colour, because no tile can be drawn below 8px, at 4-7px per cell: the whole map
@@ -291,7 +293,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   step/slot reorder, and undo/redo. They are tabs of the one Editor rather than
   global console modes. (In the codebase these are the extracted layer modules —
   `code_layer` / `paint_layer` / `map_editor_ui` / `scene_editor_ui` /
-  `music_editor_ui` — owned as tabs by `runtime/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
+  `music_editor_ui` — owned as tabs by `runtime/editors/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
   draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
@@ -311,7 +313,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 - **On a desk** the Editor shows several of these at once, as five
   workspaces (Settings, Code, Art, World, Sound) whose dividers move, one
   pane at a time where the glass holds none of them
-  (`runtime/editor_desk.py`, `docs/look_2026-10.md` step 30).
+  (`runtime/editors/editor_desk.py`, `docs/history/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
@@ -367,7 +369,7 @@ the ladder, so the two views must coexist — and coexisting honestly means admi
 when they can't:
 
 - **Blocks are the beginner's source of truth and GENERATE the code.** (The compiler
-  exists: `runtime/blocks.py` does blocks → Python.) Edit blocks, flip to the
+  exists: `runtime/editors/blocks.py` does blocks → Python.) Edit blocks, flip to the
   Code tab, and see what your program *is* — that flip is the single most valuable
   teaching gesture in the console.
 - **Blocks → code is always smooth.** Regenerate any time; the code view is never
@@ -396,9 +398,9 @@ bar (one screen stack, no windows) the way back is the **back chevron** at
 the head of the bar's zone, after the Moy button: the bar draws it wherever
 there is somewhere to go back to and its layout places no `close` widget
 (`BarLayer.draws_back`; the shipped themes place none, a theme without a
-look keeps the X, `docs/shell_layout_2026-10.md` §9). The chevron, Esc and B
+look keeps the X, `docs/theme_and_shell_2026-11.md` §8.7). The chevron, Esc and B
 do the same thing, and on an app's first page they leave it
-(`Workstation.app_back`; docs/look_2026-10.md step 27a). On the desk the X
+(`Workstation.app_back`; docs/history/look_2026-10.md step 27a). On the desk the X
 lives only in a window's title strip and closes the window.
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
@@ -428,7 +430,7 @@ launcher or Editor.
 
 Every device has one key the console keeps for itself, in every input mode, and no
 cart ever reads it. It is the `start` button (`Workstation.system_key`,
-`docs/look_2026-10.md` step 25a), and each input spells it once:
+`docs/history/look_2026-10.md` step 25a), and each input spells it once:
 
 | input | the console key |
 |---|---|
@@ -477,30 +479,13 @@ is a taskbar app, so it exits via the bar's back, so its password field's BACKSP
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
 
-*(Status 2026-07-08: implemented — Settings carries a WIFI row + panel
-(scan/pick/password/connect/forget over the injected wifi service), and because
-Settings is an app, wifi setup works while a game keeps running. The panel is
-the one wifi implementation: the bar's wifi widget opens it as a popover in
-desktop mode and as the Settings page opened at it in console mode
-(`docs/shell_layout_2026-10.md` §8; the wifi tool cart was deleted for it on
-2026-10-14). Settings also
-gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
-the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
-surface / ink / focus / play / author / danger etc., resolved for every theme
-with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
-the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
-grape identity, green PLAY / orange authoring / yellow focus. The default is
-Moy's Day, the 2026-10 look, since `docs/look_2026-10.md` step 27 (2026-10-18),
-which deleted `night` and `machine` with the other old seeds. 2026-07-23: every theme family ships a **dark AND a
-light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
-`theme_variant`), and the tokens now reach the whole system: the OS bar,
-Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
-the windowed-WM strips/chips, and the editor tabs on every tier, the 320×240
-one included (its frozen dark literals retired with theming's phase 2b,
-2026-10-11). Bar icons derive plate-free
-light-mode sprites at draw time (`Workstation._bar_image`), so wifi/battery
-read on a light band. See docs/visual_identity_v1.md §4.3 for the role
-contract.)*
+Settings carries the WIFI row and panel (scan/pick/password/connect/forget over
+the injected wifi service), and because Settings is an app, wifi setup works
+while a game keeps running. The panel is the one wifi implementation: the bar's
+wifi widget opens it as a popover in both modes, and an app that asks for the
+Wi-Fi page gets Settings' page in console mode (`docs/theme_and_shell_2026-11.md`
+§8.6). The look — themes, their Day and Night modes, the semantic colour roles —
+is `docs/theme_and_shell_2026-11.md` §2-§6's.
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
@@ -584,18 +569,20 @@ clean its boundaries are.
 archived under `docs/history/` — `shell_ux_technical_plan_v1.md` (the staged migration
 that shipped the 2026-07 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
 that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
-its per-surface `make_system_api` track remains open) — plus
-`docs/shell_architecture_v1.md` (privileged system carts §2 + the layered compositor
-§3), which stays current.
+its per-surface `make_system_api` track remains open) and `shell_architecture_v1.md`
+(privileged system carts and the layered compositor; superseded, and
+`runtime/shell/system_api.py` is the authority on the cart API's trust level). Beside
+this doc, `docs/theme_and_shell_2026-11.md` is the contract for the theme
+format, the bars and modes, the home, scrolling and the text files.
 
-Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
-`runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`,
-`runtime/cards_layer.py`, `runtime/block_editor_ui.py`) ARE the Editor's tabs, owned
-by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
-`runtime/project.py` is the project workspace + commit verbs (§7, §11);
-`runtime/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
+Concretely, as shipped: the extracted layer modules (`runtime/editors/code_layer.py`,
+`runtime/editors/paint_layer.py`, `runtime/editors/map_editor_ui.py`, `runtime/editors/music_editor_ui.py`,
+`runtime/editors/cards_layer.py`, `runtime/editors/block_editor_ui.py`) ARE the Editor's tabs, owned
+by `runtime/editors/editor_app.py` (§6); `runtime/run/player.py` is the Player (§2);
+`runtime/editors/project.py` is the project workspace + commit verbs (§7, §11);
+`runtime/wm/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
 launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
-bar. `Workstation` (`runtime/console.py`) is the kernel — see `runtime/README.md` for the
+bar. `Workstation` (`runtime/shell/console.py`) is the kernel — see `runtime/README.md` for the
 module map.
 
 **Issue map:**

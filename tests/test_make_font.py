@@ -1,4 +1,4 @@
-"""The font converter, tools/make_font.py (docs/look_2026-10.md step 3):
+"""The font converter, tools/make_font.py (docs/history/look_2026-10.md step 3):
 TrueType at a fixed size into a font file, version 2.
 
 * The checked-in fixture (tests/fixtures/fonts/inter_subset.ttf, a subset of
@@ -84,7 +84,7 @@ def test_the_set_is_every_themes_roles_and_the_mono():
 
 
 def test_every_family_a_seed_names_carries_its_type_roles():
-    """A seed's look `fam` (docs/look_2026-10.md step 26a) draws each role of
+    """A seed's look `fam` (docs/history/look_2026-10.md step 26a) draws each role of
     `fontset.ROLES`, at the weight steps the look moves (`w_med`, `w_semi`,
     `w_bold`; step 26b) and the sizes it sets a role on a class
     (`sizes.hh`, `sizes.dk`; step 26c), in a face its class's tier carries,

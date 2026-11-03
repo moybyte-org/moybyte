@@ -138,10 +138,9 @@
 //   its chunk loop is preempted). If the glass ever disagrees, ASYNC_FLUSH in
 //   guition_panel.py serializes the flush in one reflash.
 //
-// BACKLIGHT -- GPIO1, active high, plain on/off here (#45: parked LOW at init
-//   so power-on GRAM noise is never lit). The board's backlight is PWM-capable
-//   (ESPHome drives it ledc @5kHz); a duty argument is an owner call for
-//   later, and it would land here.
+// BACKLIGHT -- GPIO1, active high, parked LOW at init (#45: power-on GRAM
+//   noise is never lit), then an LEDC PWM channel (moy_light_ledc.h) at the
+//   kernel's level.
 
 #include <string.h>
 
@@ -159,6 +158,7 @@
 // yield needs, and the state this file's verbs report on.
 #include "moy_flush.h"
 #include "moy_fold.h"     // the GAME FOLD: the latch, the fence, both gathers
+#include "moy_light_ledc.h"
 
 // ---- board facts (Guition JC3248W535; pins from the owner's working ESPHome
 // definition -- treat as verified)
@@ -684,9 +684,14 @@ int moy_axs_kpresent(void) {
     return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
 }
 
-// GPIO1, active high, binary (see BACKLIGHT above).
-void moy_axs_kbacklight(int on) {
-    gpio_set_level(MOY_AXS_PIN_BL, on ? 1 : 0);
+// The light at `level` (moy_light.h: 0 off, 255 full; see BACKLIGHT above).
+void moy_axs_kbacklight(int level) {
+    moy_light_ledc_set(MOY_AXS_PIN_BL, false, level);
+}
+
+// The light's hardware setting now: the channel's duty (moy_light_ledc_duty).
+int moy_axs_klight(void) {
+    return moy_light_ledc_duty();
 }
 
 // init(nfbs=2, pclk_hz=40000000) -> None
@@ -1035,12 +1040,16 @@ static mp_obj_t moy_axs_show(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_show_obj, 0, 1, moy_axs_show);
 
-// backlight(on) -- GPIO1, active high, binary (see BACKLIGHT above).
-static mp_obj_t moy_axs_backlight(mp_obj_t on_in) {
-    moy_axs_kbacklight(mp_obj_is_true(on_in));
+// backlight(x) -- the kernel's body (moy_axs_kbacklight): True, False or a
+// level (moy_light.h). backlight() -> moy_axs_klight().
+static mp_obj_t moy_axs_backlight(size_t n_args, const mp_obj_t *a) {
+    if (n_args == 0) {
+        return MP_OBJ_NEW_SMALL_INT(moy_axs_klight());
+    }
+    moy_axs_kbacklight(moy_light_arg(a[0]));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_backlight_obj, moy_axs_backlight);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_backlight_obj, 0, 1, moy_axs_backlight);
 
 // set_madctl(v) -- the bring-up escape hatch. NOTE the AXS15231B is not
 // expected to honor MV (ESPHome models it as unable to swap axes); this exists

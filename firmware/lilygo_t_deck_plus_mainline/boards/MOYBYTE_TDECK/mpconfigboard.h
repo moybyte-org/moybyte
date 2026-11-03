@@ -22,8 +22,8 @@
 //
 // The result is a board with NO stdin at all: measured 2026-08-16, the image
 // carried tud_cdc_rx_cb but no tusb_init and no usb_serial_jtag_isr_handler,
-// stdin came from uart_stdout_init on U0RXD -- a header pin with nothing
-// attached -- and a host write() to the enumerated 303a:1001 interface was
+// stdin came from uart_stdout_init on U0RXD -- the GPS module's TX line
+// (GPIO44, the README's GPS) -- and a host write() to the enumerated 303a:1001 interface was
 // accepted and then went nowhere (SERIAL rx= never moved off a single stray
 // byte). Output worked the whole time, because ESP-IDF's SECONDARY console is
 // output-only.
@@ -38,11 +38,11 @@
 // failure mode of picking wrong is silent in one direction only.
 #define MICROPY_HW_ENABLE_USBDEV            (0)
 
-// UART REPL OFF. It shares stdin_ringbuf with the USB path, and U0RXD is an
-// exposed header pin with nothing attached -- which is where the single stray
-// byte behind every `SERIAL rx=1` came from. Leaving it on makes a received
-// byte's ORIGIN ambiguous exactly while the USB path is being debugged. Turn it
-// back on to drive the board over the header pins.
+// UART REPL OFF. It shares stdin_ringbuf with the USB path, and U0RXD (GPIO44)
+// is the GPS module's TX (the README's GPS; the Grove connector's pin, which
+// the T-Deck Plus gives to the GPS), and UART0 is where the single stray byte
+// behind every `SERIAL rx=1` came from. On, whatever the GPS sends reads as
+// typed input: UART0 is the GPS's, not a REPL's.
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
@@ -83,7 +83,7 @@
 #define MOYBYTE_GC_SPLIT_RESERVE            (3072 * 1024)
 
 // Paint SAVES pictures, and since 2026-09-07 a `.moyimg` is a deflate stream --
-// ONE format, the compressed one (runtime/moy_image.py). The esp32 port sits at
+// ONE format, the compressed one (runtime/carts/moy_image.py). The esp32 port sits at
 // MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES, which builds `deflate` READ-ONLY:
 // upstream gates the compressor at FULL_FEATURES, so without this line a board
 // can open every picture on the card and cannot write one.
@@ -137,7 +137,7 @@
 #define MOY_KERNEL_BUTTON_GPIO              (0)
 #define MOY_KERNEL_BUTTON_NAME              "the trackball"
 
-// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM
 // up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
 // the panel's own framebuffers (moy_lcd's kernel entry points above), and
@@ -190,7 +190,7 @@
 
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run, inside the kernel's 1 MiB
-// PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a
+// PSRAM share (native/moy_play/moy_play.h). One 320x240 layer: a
 // scroll cart's 384,000-byte world is freed at exit and allocated again.
 #define MOY_GLASS_POOL_BYTES                (160 * 1024)
 

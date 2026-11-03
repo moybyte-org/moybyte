@@ -150,6 +150,7 @@
 #include "esp_lcd_panel_vendor.h"   // pulls in esp_lcd_panel_st7789.h
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 
 // The SHARED banded-flush engine (native/moy_flush, staged per board.toml).
 // It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
@@ -157,6 +158,7 @@
 #include "moy_flush.h"
 #include "moy_vol.h"      // the store's bus gate, which this panel's rule is
 #include "moy_fold.h"     // the GAME FOLD: the latch, the fence, the gather
+#include "moy_light.h"
 
 // ---- board facts (device/tdeck_*.py)
 #define MOY_LCD_W            320
@@ -174,6 +176,11 @@
 #define MOY_LCD_PIN_POWERON  10          // board power rail (peripherals + panel)
 #define MOY_LCD_PIN_SD_CS    39
 #define MOY_LCD_PIN_RADIO_CS 9           // unused LoRa module; park it high
+
+// The light's driver state (moy_lcd_kbacklight).
+static int s_bl_step;               // 0 off, 1..16
+static int64_t s_bl_off_us;         // when the pin last went low for off
+static portMUX_TYPE s_bl_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // 80 MHz is requested, not delivered: none of MOSI/SCK/MISO are the S3's
 // IOMUX-native FSPI pins, so every signal routes through the GPIO matrix, which
@@ -391,6 +398,8 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     // Backlight OFF until the first composed frame has been flushed (#45): the
     // ST7789's power-on GRAM is noise and the user must never see it lit.
     moy_lcd_park_pin(MOY_LCD_PIN_BL, 0);
+    s_bl_step = 0;
+    s_bl_off_us = esp_timer_get_time();
     gpio_set_pull_mode(MOY_LCD_PIN_MISO, GPIO_PULLUP_ONLY);
 
     // Framebuffers in PSRAM, bounce buffers in internal DMA-capable SRAM.
@@ -516,10 +525,54 @@ int moy_lcd_kpresent(void) {
     return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
 }
 
-// Active HIGH on GPIO42. Plain on/off; the fork drove PWM duty through LVGL's
-// driver, which nothing in the console ever used for dimming.
-void moy_lcd_kbacklight(int on) {
-    gpio_set_level(MOY_LCD_PIN_BL, on ? 1 : 0);
+// The light on GPIO42 is a pulse-stepped LED driver, not a PWM input (the
+// vendor's UnitTest.ino setBrightness): held low over 2.5 ms it is off; raised
+// from off it comes up at the top of its 16 steps; each low pulse while on
+// steps it down one, wrapping from the bottom to the top. A level (moy_light.h)
+// is held as the nearest step at or above it, so any level above off lights.
+#define MOY_LCD_BL_STEPS 16
+#define MOY_LCD_BL_OFF_US 3000      // low this long and the driver is off
+#define MOY_LCD_BL_ON_US 30         // raised from off, settled at the top step
+
+void moy_lcd_kbacklight(int level) {
+    int want = level <= 0 ? 0
+             : (level * MOY_LCD_BL_STEPS + MOY_LIGHT_FULL - 1) / MOY_LIGHT_FULL;
+    if (want > MOY_LCD_BL_STEPS) {
+        want = MOY_LCD_BL_STEPS;
+    }
+    if (want == s_bl_step) {
+        return;
+    }
+    if (want == 0) {
+        gpio_set_level(MOY_LCD_PIN_BL, 0);
+        s_bl_off_us = esp_timer_get_time();
+        s_bl_step = 0;
+        return;
+    }
+    if (s_bl_step == 0) {
+        int64_t low = esp_timer_get_time() - s_bl_off_us;
+        if (low < MOY_LCD_BL_OFF_US) {
+            esp_rom_delay_us((uint32_t)(MOY_LCD_BL_OFF_US - low));
+        }
+        gpio_set_level(MOY_LCD_PIN_BL, 1);
+        esp_rom_delay_us(MOY_LCD_BL_ON_US);
+        s_bl_step = MOY_LCD_BL_STEPS;
+    }
+    int pulses = (MOY_LCD_BL_STEPS + s_bl_step - want) % MOY_LCD_BL_STEPS;
+    portENTER_CRITICAL(&s_bl_mux);
+    for (int i = 0; i < pulses; i++) {
+        gpio_set_level(MOY_LCD_PIN_BL, 0);
+        esp_rom_delay_us(1);
+        gpio_set_level(MOY_LCD_PIN_BL, 1);
+        esp_rom_delay_us(1);
+    }
+    portEXIT_CRITICAL(&s_bl_mux);
+    s_bl_step = want;
+}
+
+// The light's hardware setting now: the driver's step, 0 off .. 16.
+int moy_lcd_klight(void) {
+    return s_bl_step;
 }
 
 // init(nfbs=2, pclk_hz=80000000) -> None
@@ -1035,12 +1088,16 @@ static mp_obj_t moy_lcd_fold_test(mp_obj_t back_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_fold_test_obj, moy_lcd_fold_test);
 
-// backlight(on) -- the kernel's body (moy_lcd_kbacklight).
-static mp_obj_t moy_lcd_backlight(mp_obj_t on_in) {
-    moy_lcd_kbacklight(mp_obj_is_true(on_in));
+// backlight(x) -- the kernel's body (moy_lcd_kbacklight): True, False or a
+// level (moy_light.h). backlight() -> moy_lcd_klight().
+static mp_obj_t moy_lcd_backlight(size_t n_args, const mp_obj_t *a) {
+    if (n_args == 0) {
+        return MP_OBJ_NEW_SMALL_INT(moy_lcd_klight());
+    }
+    moy_lcd_kbacklight(moy_light_arg(a[0]));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_backlight_obj, moy_lcd_backlight);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_backlight_obj, 0, 1, moy_lcd_backlight);
 
 // set_madctl(v) -- write MADCTL (0x36) directly. The bring-up escape hatch: if
 // the first frame is upside down or mirrored, try 0x28 / 0xA8 / 0xE8 / 0x68 over

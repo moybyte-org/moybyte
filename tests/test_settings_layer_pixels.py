@@ -12,7 +12,7 @@ the whole firmware-update screen **not at all** -- its own docstring names the
 update screen as out of scope.
 
 Those surfaces are precisely where Phase 3b transcribed hand-rolled row/dialog
-drawing onto `runtime/ui.py`'s kinds, so without this file the transcription had
+drawing onto `runtime/toolkit/ui.py`'s kinds, so without this file the transcription had
 no oracle at all on four of the five modules it touched. This is the same
 mechanism as the shell goldens -- a hash of bytes COMMITTED to the repo, not a
 live-vs-live A/B -- applied one level down: each sub-surface is drawn straight
@@ -25,7 +25,7 @@ matters most here is the same one that file discovered: at 320x240 / font
 scale 1 the shell takes frozen branches, so a widget change is only visible on
 the other rows.
 
-Settings is a page of the public UI API's verbs (docs/look_2026-10.md step
+Settings is a page of the public UI API's verbs (docs/history/look_2026-10.md step
 19), so its shots are the PAGE (`SettingsLayer._draw_page`, the bar left out)
 with focus on each row in turn -- the page scrolled to it -- and each panel's
 page; the full screen with its bar is `test_shell_goldens.py`'s `settings`
@@ -48,6 +48,7 @@ import pytest
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
 from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
+from tools.board_config import runtime_file
 
 # The sub-surfaces are rendered on every config that renders the whole
 # surface list; a `plan` config holds a few named surfaces alone, and a
@@ -282,7 +283,6 @@ def capture(cfg, carts_dir):
 
     # The Achievements page (locked AND found cards) with a badge opened,
     # the unlock banner (a secret's, its confetti out whole) and the notice.
-    from runtime import achievements_ui
     ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
     ws.open_settings()
     sl.open_page("achievements")
@@ -297,7 +297,7 @@ def capture(cfg, carts_dir):
     ws.go_home()
     ws.ach.award("konami")
     ws._toast_at -= 10000
-    out["banner"] = _shot(ws, lambda: achievements_ui.unlock_banner(ws))
+    out["banner"] = _shot(ws, lambda: ws._draw_toast())
     ws._notice = ("Moybyte updated", "Now 0.8", "ok")
     out["notice"] = _shot(ws, lambda: ws._draw_notice())
     ws._notice = None
@@ -442,7 +442,7 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
         r"cv\.rect\([^\n]*\bth\[[\"'](?:hilite|selection)[\"']\][^\n]*\)\s*\n"
         r"\s*(?:fg\s*=[^\n]*\n\s*)?cv\.print\(")
     for name in group:
-        src = (ROOT / "runtime" / name).read_text(encoding="utf-8")
+        src = runtime_file(name).read_text(encoding="utf-8")
         assert not pat.search(src), (
             "runtime/%s still hand-rolls a selection row (a `hilite` rect "
             "followed by a print). Use ui.row." % name)

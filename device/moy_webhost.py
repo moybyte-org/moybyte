@@ -45,7 +45,7 @@ two places is a rule nobody holds), /run off its body like /sync.
 
 FIRMWARE UPDATES ARE TWO BACKENDS behind one route. A board WITH GLASS
 (`ConsoleUpdate`) hands the glass back: the request turns the web console off
-and opens the update screen (runtime/update_ui.py), whose confirms are taps on
+and opens the update screen (runtime/system/update_ui.py), whose confirms are taps on
 the board -- nothing installs unattended. A HEADLESS board
 (`zero_host.ZeroUpdate`) drives the install from its own poll. `screen` in the
 status document says which, so the page knows whether it is about to stop
@@ -166,7 +166,7 @@ def update_status(ota, state, screen, error=None, offer=None, progress=None,
 class ConsoleUpdate:
     """The /update backend on a board WITH GLASS: a HAND-OFF, not a driver.
 
-    This board already owns the update flow -- `runtime/update_ui.py` advances
+    This board already owns the update flow -- `runtime/system/update_ui.py` advances
     the flash one chunk per painted frame of its screen and takes two confirms
     on the glass. A browser-driven install would be a second driver running
     while the update screen is not up, which on the T-Deck puts SD reads at

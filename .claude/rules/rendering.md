@@ -1,12 +1,12 @@
 ---
 paths:
-  - "runtime/*canvas*.py"
-  - "runtime/ui.py"
-  - "runtime/ui_draw.py"
-  - "runtime/chrome.py"
-  - "runtime/*_layer.py"
-  - "runtime/*_ui.py"
-  - "runtime/wm*.py"
+  - "runtime/**/*canvas*.py"
+  - "runtime/toolkit/ui.py"
+  - "runtime/toolkit/ui_draw.py"
+  - "runtime/shell/chrome.py"
+  - "runtime/**/*_layer.py"
+  - "runtime/**/*_ui.py"
+  - "runtime/wm/**"
   - "device/device_canvas.py"
   - "native/moy_gfx/**"
   - "docs/surface_model_v1.md"
@@ -16,7 +16,7 @@ paths:
 
 ### The indexed-canvas portability contract (why the canvas is "indexed")
 
-The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every board and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
+The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every board and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
 
 **The native rect/rectb gates fill SOLID.** Every canvas with a native `moy_gfx` (the boards, the wasm head) swaps them in over the Python verbs, and the host's ctypes kernel has none, so a host test cannot see a draw state the gates do not know. The fill pattern is one: the row's `ST_FILLP` flag (the draw-state array's last entry, `device_canvas._ST_FILLP`, in step with `moy_canvas.h` and `modmoy_gfx.c`) makes the gates decline while one is set, and `tests/test_web_fillp.py` draws a patterned rect and rectb in the wasm VM. `ST_DMA_MIN` is the other decline: on a canvas with a DMA fill (the P4s' `ppa_fill`) a rect of that many pixels or more goes back to `rect` → `_fill`, which hands it to the engine (`tests/test_dma_fill.py`). State a gate reads is a new `ST_*` entry, never a Python-only attribute.
 
@@ -51,7 +51,7 @@ and removed a ~100ms first-use bake nobody had attributed. What `moy_gfx` still
 owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`, `blit565_resize`,
 the layer restore (`layer_*`), `scroll_rect` and `shift_rect` (a canvas's `shift_last`), `copy_block` (its `copy_last_into`), `blit_window`, `blit_indices`, `blit_indices_scale`, `fill_spans`,
 `draw_ctx`, and the one-byte-a-pixel marks Paint's drawings take (`ifill`/`iline`/`icopy`/`iflood`,
-called from `runtime/artwork.py`) — which the spec's raster has no counterpart for.
+called from `runtime/apps/artwork.py`) — which the spec's raster has no counterpart for.
 **`native/moy_gfx/libmoy/UPSTREAM.md` is the authority on which verbs cross and
 why** (it carries the before/after table, the dates, and the warning about which
 of the bench's verbs are too cheap to quote); fixes belong upstream (`moy_circ`
@@ -66,7 +66,7 @@ so the capture helper installs once and the desk stays where it is).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
 `tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded
-verb traces through the host's canvas (`runtime/host_canvas.py` → `DeviceCanvas`) and hashes each frame against the
+verb traces through the host's canvas (`runtime/host/host_canvas.py` → `DeviceCanvas`) and hashes each frame against the
 golden — every scene in the suite, the 3D verbs included, in ~0.1s, on every
 `make test`. It exists because the suite previously only checked this repo from
 *outside* it (moy-spec's `conformance/parity.py --ref`, and `tools/p4_conformance.py`
@@ -116,34 +116,36 @@ left:
 
 - **Every golden row draws through the toolkit, the T-Deck's 320×240 included.**
   The frozen 320×240 branches (`_base`) retired with theming phase 3 step 4
-  (`docs/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
+  (`docs/history/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
   from the formulas every tier runs, so a widget or a layout formula change
   moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
   coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
-  an `"app"` block in the identity cart's manifest, and `runtime/app_decls.py`, its
+  an `"app"` block in the identity cart's manifest, and `runtime/shell/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on
   device only. Ratchet: `tests/test_app_registry.py`.
 - **The bar contract is a HOST guarantee**, scoped to `"tool"` — there are SEVEN
   strip kinds and collapsing them breaks the others.
-- **Apps declare what they need** (`runtime/app_context.py`, a pure leaf) and there
+- **Apps declare what they need** (`runtime/shell/app_context.py`, a pure leaf) and there
   is **zero `ws.` in the app tier**. `ctx.files` and `ctx.carts` are split
   deliberately: carts authors executable content, so granting it to a cart is
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
   +5.1µs) — live state reads through a method. `prefs_ns` exists because
   `paint_doc` is the real key in kids' `system.json` since #108.
 - **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
-  C, with `runtime/ui_draw.py` its face (sprint 6, `docs/kernel_toolkit_2026-10.md`);
-  `runtime/ui.py` is the public UI API over it (`docs/ui_api_2026-10.md`), and
+  C, with `runtime/toolkit/ui_draw.py` its face (sprint 6, `docs/history/kernel_toolkit_2026-10.md`);
+  `runtime/toolkit/ui.py` is the public UI API over it (`docs/ui_api_2026-10.md`), and
   an app on the verbs passes no colour (`tests/test_ui_public.py`).
   A data edit is the JSON plus `tools/gen_ui_tables.py`'s committed output
   (`tests/test_ui_tables.py` fails a stale one). There is no skin: what a look
   changes beyond colours is its theme's shape (surfaces, frame, metrics, text
   effects), installed with the theme, and `tests/test_style.py` holds the style
   tables and the `colors=` hatch.
-- **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
-  roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
-  `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
+- **A user can add an app.** `runtime/shell/system_api.py` maps manifest permissions to
+  roles as an ALLOWLIST (`native/moy_app/roles.json` is the table); never
+  grantable: `artwork`, `carts`, `damage`, `install`, `notify`, `surface`,
+  `wallpaper`. `clipboard` comes with the clipboard permission, and `ui` goes to
+  every app. **An ungranted verb is ABSENT, not
   stubbed** (`system_carts/moybyte.notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives

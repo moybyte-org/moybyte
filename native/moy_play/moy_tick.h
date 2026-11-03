@@ -1,4 +1,4 @@
-// The tick model (#217; docs/kernel_cartpath_2026-10.md §3.4): ONE scheduler
+// The tick model (#217): ONE scheduler
 // for a cart's logic and its draw.
 //
 // Logic runs at the cart's declared rate -- 30, or 60 by manifest -- and is

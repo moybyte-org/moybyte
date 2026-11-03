@@ -17,7 +17,8 @@ own board-dir README and in the sections below.
 
 | board | class | why |
 |---|---|---|
-| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | **PORTED 2026-09-06** (`firmware/guition_jc8012p4a1c/`, its README is the authority; on-glass suite `tests/test_guition_p4_on_glass.py`). The entry below was written before the port and its architectural call held: the glass IS portrait-native (JD9365 + GSL3680, as predicted), the P4's DSI scans continuously, and the console first ran PORTRAIT at 800×1280; the owner then chose LANDSCAPE the same morning, and the bill this row priced was paid as designed: `device/dsi_panel.RotatedCompositor` paints a persistent landscape buffer and the PPA rotates it onto the glass — the whole frame per chrome paint, one rect per quiet game frame, with per-buffer stale-rect bookkeeping (the README carries the measured costs). What the port CHANGED in the tree is the point: the P4-silicon modules became the shared `native/p4/` tier (a second `[native.<name>]` source in board.toml), the DSI compositor and the PPA system canvas moved to `device/`, and the board authors no C. Two risks named below resolved at bring-up: the C6 IS ESP-Hosted over SDIO on the Waveshare's exact pins (BLE scanning on the first boot, WiFi see the README), and the schematic exists (Guition's demo zip, `5-Schematic/`). Original entry: the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. |
+| **M5Stack CoreS3** | handheld tier, 320×240 | the 320×240 player-tier candidate (#213). The M5Stack Core2 port (#222) was shelved on 2026-11-01 as too slow; its branch `core2` is parked as the base for the CoreS3 port. |
+| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | **PORTED 2026-09-06** (`firmware/guition_jc8012p4a1c/`, its README is the authority; on-glass suite `tests/test_guition_p4_on_glass.py`). The entry below was written before the port and its architectural call held: the glass IS portrait-native (JD9365 + GSL3680, as predicted), the P4's DSI scans continuously, and the console first ran PORTRAIT at 800×1280; the owner then chose LANDSCAPE the same morning, and the bill this row priced was paid as designed: the kernel's C `moy_glass.RotatedCompositor` paints a persistent landscape buffer and the PPA rotates it onto the glass — the whole frame per chrome paint, one rect per quiet game frame, with per-buffer stale-rect bookkeeping (the README carries the measured costs). What the port CHANGED in the tree is the point: the P4-silicon modules became the shared `native/p4/` tier (a second `[native.<name>]` source in board.toml), the DSI compositors went to the kernel (`native/moy_glass/`) and the PPA system canvas to `device/p4_canvas.py`, and the board authors no C. Two risks named below resolved at bring-up: the C6 IS ESP-Hosted over SDIO on the Waveshare's exact pins (BLE scanning on the first boot, WiFi see the README), and the schematic exists (Guition's demo zip, `5-Schematic/`). Original entry: the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. |
 
 ## What a port costs today (re-stated 2026-08-29)
 
@@ -28,7 +29,7 @@ own board-dir README and in the sections below.
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
 | input drivers | one copy each | `native/moy_input` (the touch controllers, the T-Deck keyboard and trackball, selected by a board's `MOY_INPUT_*` defines), `native/moy_flush`, `native/moy_glass`'s banded compositor |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is the kernel's (`native/moy_kernel/moy_loop.c`, #224), and every console board hands its console to it |
+| **`modules/moy_runtime.py`** | **board hardware + hooks: its panel, its input and the compositor it constructs** | the invariant order is the kernel's (`native/moy_kernel/moy_loop.c`, #224), and every console board hands its console to it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | main.py returns; the kernel runs the loop |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |
@@ -141,9 +142,8 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     the Guition's game window -- and the fold and SD-guard verbs are the panel
     module's, which the compositor forwards only where the module has them: a
     board without the lever carries no such attribute at all, which is how a
-    board says it lacks one. Measured on glass when the fold went shared:
-    T-Deck 58.1 → 58.7 fps, Guition 44.7 → 44.8 (Brick Siege medians of three
-    6.6 s samples, fresh boot), `idle=0 gaps=0` on both, suites 9/9 and 10/10.
+    board says it lacks one. The fold went shared with no frame-rate cost on
+    either board (#66 holds the measurement).
 
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
@@ -247,12 +247,13 @@ follows the CI matrix row.
 **TAKE THESE, DO NOT COPY THEM** (2026-08-28, #206 — the third port paid for
 each of these by copying, and a fourth would pay again):
 
-- **The panel compositor** is `device/banded_panel.BandedCompositor`; a board
-  subclasses it and adds only its own native module and levers. A lever the
+- **The panel compositor** is the kernel's C `moy_glass.BandedCompositor`
+  (`native/moy_glass/`); a board constructs it over its own native panel module
+  and passes its levers. A lever the
   board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
   by a zero.
 - **The PERF line** is the kernel's (`native/moy_kernel/moy_perf.c` writes
-  it from the loop's account stage; `runtime/perf_line.py` is its field table
+  it from the loop's account stage; `runtime/system/perf_line.py` is its field table
   and parser). A board emits the SAME field set as every other
   board and prints `-` for what it cannot measure. Do not add a board-shaped
   variant: three of them existed under one name, and the odd one out was
@@ -286,6 +287,9 @@ each of these by copying, and a fourth would pay again):
   binary; owner call at bring-up. **ANSWERED 2026-08-18: binary.** Every caller
   in the console — the boot light-up fence, `IdleBlank`, the dev channel's
   `bl` — asks for on/off, so the duty stays unbuilt until something wants it.
+  **Built 2026-11-02** with the OS plan's first step (the cheap fixes):
+  Settings' Brightness and the idle ladder's dim rung want it, and every
+  console board's light takes the kernel's level (`moy_light_ledc.h`).
 
 ## Declined (recorded so it is not re-litigated)
 

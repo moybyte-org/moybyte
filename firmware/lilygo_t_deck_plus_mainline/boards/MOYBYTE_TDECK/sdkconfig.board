@@ -311,7 +311,7 @@ CONFIG_PM_ENABLE=
 # automatic bad-PSRAM detector at boot.
 CONFIG_SPIRAM_MEMTEST=
 
-# The task watchdog (#160, docs/kernel_spine_2026-10.md section 6). The stock
+# The task watchdog (#160, native/moy_kernel/moy_kernel.c's header). The stock
 # build leaves it on, watching no idle task and only logging a timeout; the
 # kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
 # once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
@@ -328,6 +328,6 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 # download (the kernel's updater and Get Carts, native/moy_net/moy_ota.c) took
 # about 22 KB of it at its peak on the Guition S3. External puts all of
 # mbedtls's state in PSRAM; what stays internal is the hardware AES/SHA's DMA
-# bounce, a record at a time. docs/kernel_survival_2026-10.md section 8; the
+# bounce, a record at a time. docs/history/kernel_survival_2026-10.md section 8; the
 # figures are #224's.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

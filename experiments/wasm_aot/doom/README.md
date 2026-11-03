@@ -93,7 +93,7 @@ zone the load holds the linear memory's block, the runtime pool and the text
 at once. Both S3 boards fit it with the VM up on a fresh boot and after the
 census's session (#224 holds the figures), and run it from the launcher; a
 launch whose fit check fails with the VM up stops the VM for it and runs it
-with none (`docs/kernel_cartpath_2026-10.md` section 5), which is the S3s'
+with none (`docs/history/kernel_cartpath_2026-10.md` section 5), which is the S3s'
 answer where a larger reserve (`MOYBYTE_GC_SPLIT_RESERVE`) or text in flash
 was once the only one. The Waveshare P4 and both S3s run the cart from the
 launcher, and their suites hold the frames to the host's (the P4's also the

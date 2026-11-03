@@ -41,7 +41,7 @@ import pytest
 
 from runtime import moy_carts, moy_catalogue
 from test_catalogue import _store
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = Path(__file__).resolve().parent.parent
 SECTORS = 32768                         # a 16 MB card
@@ -204,7 +204,7 @@ def _session(tmp_path, exe, fs, skip_drop=False):
     script = stage / "driver.py"
     script.write_text(
         DRIVER.replace("@STAGE@", repr(str(stage)))
-        .replace("@RUNTIME@", repr(str(ROOT / "runtime")))
+        .replace("@RUNTIME@", repr(runtime_tree()))
         .replace("@DEVICE@", repr(str(ROOT / "device")))
         .replace("@SECTORS@", str(SECTORS))
         .replace("@FS@", repr(fs))

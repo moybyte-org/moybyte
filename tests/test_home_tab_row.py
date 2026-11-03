@@ -1,5 +1,5 @@
-"""The home's tab row (owner calls 2026-10-27, docs/shell_layout_2026-10.md
-§8): where the bar holds the tabs, the tabs and the bar's items are one row
+"""The home's tab row (owner calls 2026-10-27, docs/theme_and_shell_2026-11.md
+§8.6): where the bar holds the tabs, the tabs and the bar's items are one row
 in screen order -- left and right walk all of them and stop at its ends, up
 stays, down goes to the cards. The walk moves a focus; confirm opens the tab
 the focus is on and takes the keys to its cards; a tap opens a tab at once.
@@ -11,6 +11,8 @@ stays on it.
 import pytest
 
 from runtime import host_app, launcher_layer, ui_draw
+from runtime import home_hints
+from runtime import home_grid
 from test_v04_userland import select_first_game
 
 
@@ -82,7 +84,7 @@ def test_the_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
     bx = bl.bar_rects("home")[0][0]
     items = {it[2]: bx + it[1][0] for it in bl.focus_items("home")}
     on_screen = sorted([(items[n], n) for n in items]
-                       + [(x, t) for x, (t, _l) in zip(xs, launcher_layer.HOME_TABS)])
+                       + [(x, t) for x, (t, _l) in zip(xs, home_grid.HOME_TABS)])
     assert [n for _x, n in on_screen] == _ROW
     _press(drv, "up")
     for _ in range(2):
@@ -170,7 +172,7 @@ def test_the_rows_strip_names_its_keys(tmp_path):
         drv.frame(1 / 30)
     finally:
         ui_draw.hints = real
-    assert launcher_layer._TAB_ROW_KEYS in seen
+    assert home_hints._TAB_ROW_KEYS in seen
 
 
 def _stepped(ws):
@@ -216,7 +218,7 @@ def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):
     assert ws.bar_layer.focus is not None
     ws.input_used("touch")
     assert ws.bar_layer.focus is None and not ws.launcher_layer._tab_focus
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
 
 
 def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Tiny5, the default theme's UI font, as a font file (docs/theming_2026-09.md
-§4.7 has the format).
+"""Tiny5, the default theme's UI font, as a font file (docs/theme_and_shell_2026-11.md
+§3.7 has the format).
 
 Two steps, so the font in the tree rebuilds from the tree alone:
 

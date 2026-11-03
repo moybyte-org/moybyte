@@ -1,5 +1,5 @@
 // moy_devch: the serial dev channel's reader, the kernel's words and the
-// scripted gestures (docs/kernel_survival_2026-10.md §7.3).
+// scripted gestures (docs/history/kernel_survival_2026-10.md §7.3).
 //
 // THE READER takes the bytes the loop's getc op hands it, at most a budget a
 // frame, and never blocks: a byte read is a byte consumed, so line noise costs

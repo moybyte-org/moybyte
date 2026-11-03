@@ -1,7 +1,7 @@
 """A table that keeps its parts across frames (`o.keep`, `ui.table_floor`)
 and the parts a page names per buffer (`ui.held`): docs/ui_api_2026-10.md
 §2, A table of parts. The engine keeps a record of each paint a context
-begins (moy_ui_api.c's kept ring), and a frame draws only what the buffer it
+begins (moy_ui_api_kept.c's kept ring), and a frame draws only what the buffer it
 paints lacks of the table: the parts whose cells, gen or marks changed since
 that buffer's paint and what was drawn over that paint, or the view whole
 where the buffer is unknown, the scroll moved or the key changed."""
@@ -660,8 +660,8 @@ def test_the_lua_face_keeps_faces(tmp_path):
 
 def test_a_context_carries_no_kept_ring(th):
     """The kept ring and the faces' record lie outside the context, in one
-    block the engine takes when a context first keeps (moy_ui_api.c's kept
-    memory): a context that never keeps -- most of an S3's eighteen --
+    block the engine takes when a context first keeps (moy_ui_api_kept.c's
+    kept memory): a context that never keeps -- most of an S3's eighteen --
     carries neither (they came to about 2.3 KB each)."""
     assert ui._C.api_size() < 6 * 1024
 

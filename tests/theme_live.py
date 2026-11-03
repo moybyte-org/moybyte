@@ -1,4 +1,4 @@
-"""A theme's tokens as the shell draws them (docs/look_2026-10.md step 5):
+"""A theme's tokens as the shell draws them (docs/history/look_2026-10.md step 5):
 `chrome.live_colors`, each RGB role in its block slot, with the block put
 where the canvases and the readability check read it, as the look does."""
 

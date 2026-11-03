@@ -1,12 +1,12 @@
-/* A Lua cart's placed-actor scenes in C (docs/kernel_cartpath_2026-10.md §2's
+/* A Lua cart's placed-actor scenes in C (native/moy_play/moy_play.h's
  * table: scene, load_scene, actors, touching, move_actor, move_actor_to,
  * remove_actor, draw_scene).
  *
  * The cart's .moyscene texts are the run's, handed over before the load
- * (moycore_scenes_put, in the order runtime/widgets.py's Scenes keeps, the
+ * (moycore_scenes_put, in the order runtime/toolkit/widgets.py's Scenes keeps, the
  * first the default active scene), so the Editor's unsaved placement reaches
  * the run as it reaches a Python cart. Three natives, which the handles
- * prelude (runtime/lua_ext.py's PRELUDE_HANDLES) captures and clears:
+ * prelude (runtime/run/lua_ext.py's PRELUDE_HANDLES) captures and clears:
  *
  *   __scene_names()     the scene names in order
  *   __scene_rows(name)  a scene's rows as fresh tables {tag, tile, x, y,
@@ -20,7 +20,7 @@
  * frame that moves, removes or draws actors makes no crossing.
  *
  * Included by moycore_lua.c (the boards and the browser) and by
- * runtime/moyhost_lua.c (the host); each owns one moycore_scenes_t and its
+ * runtime/host/moyhost_lua.c (the host); each owns one moycore_scenes_t and its
  * allocator.
  */
 #ifndef MOYCORE_SCENE_H

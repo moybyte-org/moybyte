@@ -19,7 +19,7 @@
 // -- the words a syntax colours ----------------------------------------------------
 //
 // One table for every caller: the keywords of each language and the builtins
-// they share (runtime/code_layer.py installs them once, the cart API's verbs
+// they share (runtime/editors/code_layer.py installs them once, the cart API's verbs
 // among them). A word installed again takes its new tone, as a dict's key
 // assigned again does.
 
@@ -207,7 +207,7 @@ static int word_tone(const uint8_t *p, size_t n, int lua) {
 
 typedef void (*run_fn)(void *ctx, int tone, uint32_t a, uint32_t b, int col);
 
-// What a byte starts (runtime/code_layer.py's _HL_CLASS): 1 a name, 2 a
+// What a byte starts (runtime/editors/code_layer.py's _HL_CLASS): 1 a name, 2 a
 // digit, 3 a quote, 4 `#`, 5 `-`, 0 anything else.
 static int cls(uint8_t c) {
     if (c == 95 || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) {

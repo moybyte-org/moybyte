@@ -3,7 +3,7 @@
 WHY THIS EXISTS. Most of these tools are reachable only from prose -- the
 board READMEs, `.claude/rules/`, an issue comment. Nothing imports them and no
 suite runs them, so a rename in `tools/p4_autotest.py`'s driver, or a command
-dropped from `runtime/dev_channel.py`'s table, breaks them silently and the
+dropped from `runtime/boot/dev_channel.py`'s table, breaks them silently and the
 report arrives from a human already sitting at a board with a cable in hand.
 
 Two nets, and both are DERIVED FROM SOURCE rather than listed here, the way
@@ -38,6 +38,7 @@ TOOLS = ROOT / "tools"
 sys.path.insert(0, str(TOOLS))
 
 import p4_autotest                                              # noqa: E402
+from tools.board_config import runtime_file
 
 # A tool answering its usage has nothing to compute. Generous enough not to
 # flake on a loaded CI box, short enough to catch a tool that went to hardware:
@@ -107,7 +108,7 @@ def _dev_channel_commands():
     Guition S3's `bt`).
     """
     run = None
-    for node in ast.walk(_tree(ROOT / "runtime" / "dev_channel.py")):
+    for node in ast.walk(_tree(runtime_file("dev_channel.py"))):
         if isinstance(node, ast.ClassDef) and node.name == "DevChannel":
             for fn in node.body:
                 if isinstance(fn, ast.FunctionDef) and fn.name == "run":
@@ -129,7 +130,7 @@ def _dev_channel_commands():
                             if isinstance(e, ast.Constant))
 
     # A settings toggle's own serial word is the 6th field of its entry.
-    for node in ast.walk(_tree(ROOT / "runtime" / "settings_layer.py")):
+    for node in ast.walk(_tree(runtime_file("settings_layer.py"))):
         if not (isinstance(node, ast.Assign)
                 and any(getattr(t, "id", "") == "SETTINGS_TOGGLES"
                         for t in node.targets)):
@@ -140,8 +141,8 @@ def _dev_channel_commands():
                 if fields[5].value:
                     cmds.add(fields[5].value)
 
-    # The words each subsystem registers (runtime/devch_*.py's WORDS).
-    for words in sorted(ROOT.glob("runtime/devch_*.py")):
+    # The words each subsystem registers (runtime/boot/devch_*.py's WORDS).
+    for words in sorted(ROOT.glob("runtime/**/devch_*.py")):
         for node in ast.walk(_tree(words)):
             if (isinstance(node, ast.Assign)
                     and any(getattr(t, "id", "") == "WORDS"
@@ -319,6 +320,6 @@ def test_serial_verbs_are_words_the_dev_channel_knows(tool):
     unknown = {verb: line for verb, line in _verbs_sent(tool).items()
                if verb not in DEV_COMMANDS}
     assert not unknown, (
-        "%s sends %s, which runtime/dev_channel.py does not dispatch"
+        "%s sends %s, which runtime/boot/dev_channel.py does not dispatch"
         % (tool.name, ", ".join("%r (line %d)" % (v, n)
                                 for v, n in sorted(unknown.items()))))

@@ -1,4 +1,4 @@
-"""The compiled-cart Player path on the host (docs/wasm_tier_plan_2026-09.md,
+"""The compiled-cart Player path on the host (docs/history/wasm_tier_plan_2026-09.md,
 phase 3): a `"runtime": "wasm"` cart through `ws.runtimes`, on the boards' own
 import table (libmoy's moy_wasm.c) over WAMR built for Linux at the boards' pin.
 
@@ -606,7 +606,7 @@ def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypa
 
 def test_the_sync_walk_leaves_the_module_home(tmp_path):
     """The sync RPC declines binary files, so a compiled cart's module never
-    crosses (runtime/moy_sync.py says so): its manifest and text do."""
+    crosses (runtime/carts/moy_sync.py says so): its manifest and text do."""
     from runtime import moy_sync
     root = _store(tmp_path, _hello)
     path = os.path.join(root, "hello.moy")
@@ -616,7 +616,7 @@ def test_the_sync_walk_leaves_the_module_home(tmp_path):
 
 # -- a cart this console cannot fit ---------------------------------------------
 #
-# docs/wasm_tier_plan_2026-09.md: a cart above the floor is allowed, and a
+# native/moy_wasm/README.md: a cart above the floor is allowed, and a
 # console that cannot fit it refuses at launch with a plain notice -- never an
 # error panel, never a crash. The host refuses by its configured limit
 # (wasm_host.MEMORY_LIMIT) with the boards' own footprint arithmetic.
@@ -675,7 +675,7 @@ def test_the_engine_and_the_host_twin_share_one_statement_of_the_rule():
     engine = open(os.path.join(native, "moy_wasm", "modmoy_wasm.c"),
                   encoding="utf-8").read()
     assert "moy_wasm_file_block(" in engine and "hold / 32" not in engine
-    host = open(os.path.join(ROOT, "runtime", "moyhost_wasm.c"),
+    host = open(os.path.join(ROOT, "runtime", "host", "moyhost_wasm.c"),
                 encoding="utf-8").read()
     assert '#include "moy_wasm_footprint.h"' in host
 
@@ -805,7 +805,7 @@ def _parked_desk(tmp_path):
 def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
     """A compiled cart that does not fit gets back the parked window stamps,
     oldest first and one at a time, and stops releasing once it fits
-    (docs/shell_layout_2026-10.md §3); the released window re-renders once
+    (docs/theme_and_shell_2026-11.md §8.1); the released window re-renders once
     when the desk comes back."""
     _binding_or_skip()
     ws, wins = _parked_desk(tmp_path)

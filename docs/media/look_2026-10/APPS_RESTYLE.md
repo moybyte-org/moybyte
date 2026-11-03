@@ -26,7 +26,7 @@ the two differed on Storybook, the functional one decided.
   can use it as its wallpaper or put it in a story, not draw on it.
 - **Wallpapers.** A wallpaper cart may carry one image per screen size,
   so a desk and a handheld each show a picture made for it
-  (`docs/theming_2026-09.md`'s Wallpapers).
+  (`docs/theme_and_shell_2026-11.md`'s Wallpapers).
 - **Moybyte fields, not moy-spec.** moy-spec is the game console spec: an
   app feature such as the story document or a wallpaper's sizes is
   Moybyte's, in Moybyte-side fields (`docs/moy_cart_api.md`).
@@ -37,7 +37,7 @@ the two differed on Storybook, the functional one decided.
 
 - **A page, the app bar, a way back.** `ui.page(title)` under the handheld
   bar (Moy, ‹, the title, then status); ‹, B and Esc step back one page
-  (`docs/look_2026-10.md` step 27a). Paint, Notes and Storybook lend the
+  (`docs/history/look_2026-10.md` step 27a). Paint, Notes and Storybook lend the
   bar their undo, redo, zoom and Present after the title, as the editors
   do (**GAPS 37**); on the desk those live in the window's tool row. The
   bar's status is true: with no link, Wi-Fi shows `wifi_off`.
@@ -85,8 +85,8 @@ the two differed on Storybook, the functional one decided.
 
 ## Paint
 
-`runtime/artwork.py` (`PaintAppLayer`, `ArtworkService`). The sprite tab
-(`runtime/paint_layer.py`, step 24) and Paint share their vocabulary: the
+`runtime/apps/artwork.py` (`PaintAppLayer`, `ArtworkService`). The sprite tab
+(`runtime/editors/paint_layer.py`, step 24) and Paint share their vocabulary: the
 tools as toggles, the colour in use two-toned, the ring cursor, the more
 menu.
 
@@ -158,7 +158,7 @@ row, 14 apart; desk 152×114, five a row.
 
 ## Get Carts
 
-`runtime/getcarts_app.py`: the phases CHECKING, LIST, CART, LICENCE, YOUR
+`runtime/apps/getcarts_app.py`: the phases CHECKING, LIST, CART, LICENCE, YOUR
 COPY, GETTING, READY / NOT INSTALLED, ON THE CONSOLE, and the offline
 ones.
 
@@ -181,7 +181,7 @@ ones.
 
 ## Notes
 
-`system_carts/moybyte.notes.moy` (a cart; `runtime/editor_handle.py` draws
+`system_carts/moybyte.notes.moy` (a cart; `runtime/editors/editor_handle.py` draws
 the note). On the verbs it leaves `ui_draw`, the exception step 11a pinned.
 
 | today | becomes |
@@ -205,7 +205,7 @@ Files' does.
 
 ## Storybook
 
-`runtime/storybook_app.py` today: a shelf of stories, a story's pages, a
+`runtime/apps/storybook_app.py` today: a shelf of stories, a story's pages, a
 page (4 lines of 34 mono characters, BG cycling six colours, MY ART
 attaching the current drawing, TEAR OUT tapped twice), 16 pages, the story
 a cart whose `main.py` the deck compiles to, read-only once its code is

@@ -73,7 +73,7 @@ class Desktop:
         the glass over its compositor), and the three console upcalls, the
         console's dev words and the services' Python half are registered as
         root pointers. The VM service runs the loop once main.py returns, as
-        this task's outermost frame (docs/kernel_survival_2026-10.md 7.1).
+        this task's outermost frame (docs/history/kernel_survival_2026-10.md 7.1).
 
         What each upcall carries beyond the console's own entry is the Python
         half of a stage the kernel cannot do for a VM object: the canvases
@@ -301,7 +301,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # stays dark until a frame has composed (#45), so the splash is what
     # makes a slow boot legible on the glass and on the wire.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, name)
-    # A RETURN start (docs/kernel_cartpath_2026-10.md 5.4): the VM is back
+    # A RETURN start (docs/history/kernel_cartpath_2026-10.md 5.4): the VM is back
     # after the kernel stopped it for a run. No splash and no OTA verdict; the
     # launcher lands where the resume record left it.
     returning = kernel is not None and getattr(kernel, "start", None) is not None \

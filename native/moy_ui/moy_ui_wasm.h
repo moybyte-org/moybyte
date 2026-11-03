@@ -34,8 +34,8 @@
 
 #define MOY_UI_WASM_ROWS 43
 
-// The run's draw target, from the module that drives the run (modmoycore.c on
-// an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
+// The run's draw target, from the module that drives the run (moycore_wasm.c on
+// an image, runtime/host/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
 // while no compiled run is open.
 void *moycore_ui_target(void);
 

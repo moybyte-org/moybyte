@@ -11,6 +11,7 @@ real pointer/input dispatch the device loop uses.
 from pathlib import Path
 import pytest
 from ws_helpers import boot_on_fixture
+from tools.board_config import runtime_file
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -25,7 +26,8 @@ def _pe(cols=16, rows=16):
     # spec=False: a PaintEditor scratch sheet, not a cart sheet. The editor is
     # tile-count agnostic and nothing here draws through libmoy, so a half-height
     # sheet keeps these fixtures small -- see editors_sheet's SPEC.md 3.2 note.
-    from runtime.editors import PaintEditor, SpriteSheet
+    from runtime.editors_paint_map import PaintEditor
+    from runtime.editors_sheet import SpriteSheet
     return PaintEditor(SpriteSheet(cols=cols, rows=rows, spec=False))
 
 
@@ -970,7 +972,7 @@ def test_the_line_walker_is_integer_only():
     """Host CPython and frozen MicroPython must produce byte-identical pixels, so
     the walker may not divide or touch a float."""
     import ast
-    src = (ROOT / "runtime" / "editors_paint_map.py").read_text(encoding="utf-8")
+    src = runtime_file("editors_paint_map.py").read_text(encoding="utf-8")
     fn = next(n for n in ast.walk(ast.parse(src))
               if isinstance(n, ast.FunctionDef) and n.name == "_pe_line")
     for node in ast.walk(fn):

@@ -1,8 +1,7 @@
 // The store's index as a C ABI: one row per cart folder, named by a handle.
 //
-// runtime/moy_index.py defines the interface and is the reference; this header
-// is its native form, call for call. Sprint 1a (docs/native_kernel_2026-09.md
-// section 5) implements it in C, moy_index.c here, and everything above it
+// runtime/carts/moy_index.py defines the interface and is the reference; this header
+// is its native form, call for call. Sprint 1a (native/moy_kernel/README.md) implements it in C, moy_index.c here, and everything above it
 // (modmoy_index.c for MicroPython, the ctypes binding on the host, the fuzz
 // driver) calls only what is declared below.
 //
@@ -15,8 +14,13 @@
 // A path is `len` bytes, compared bytewise (the bindings pass a str's UTF-8).
 // The pointer moy_index_path hands back stays valid until the next call that
 // changes the table. The store's keys are a root's id, one byte, then the cart's
-// folder name (docs/kernel_store_2026-10.md section 4); the table compares them
-// as it would any path, and only the root table below reads that first byte.
+// folder name, never a path; the table compares them as it would any path, and
+// only the root table below reads that first byte. Only the store composes a
+// cart's path from root and folder (runtime/carts/moy_store_base.py's cart_path,
+// cart_folder and store_path; tests/test_store_paths.py fails any other module
+// that does), a catalogue of a root reconciles that root's rows alone, and a
+// caller that starts from a path (the sync wire, Files) has it split against
+// the roots.
 //
 // The root table holds MOY_INDEX_ROOTS store roots, a root's id its slot plus
 // one. moy_index_root takes a root the first time it is named: the lowest free
@@ -24,8 +28,10 @@
 // whose key starts with that id -- are released first.
 //
 // Every byte an implementation holds comes from moy_index_host_alloc and goes
-// back through moy_index_host_free, which the HOST defines: the gc heap under
-// MicroPython (modmoy_index.c), malloc on the host (moy_index_host.c), a
+// back through moy_index_host_free, which the HOST defines: PSRAM under
+// MicroPython on a board (modmoy_index.c), so the rows outlive a VM stop and a
+// handle the kernel holds stays valid across one; malloc on the host
+// (moy_index_host.c), a
 // failure-injecting counter under the fuzzer (fuzz_index.c). An implementation
 // allocates nothing else and keeps no global state.
 

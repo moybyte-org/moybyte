@@ -11,8 +11,10 @@ half: what a *moybyte* console is made of. The console itself -- the pieces
 below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
 and the cart's Lua VM -- its allocator and pool, open, load, frame and close
 -- is `moycore_lua.c`; neither includes anything of MicroPython.
-`modmoycore.c` binds them to buffers Python owns, and the host's two ctypes
-shims (`runtime/moyhost_lua.c`, `runtime/moyhost_wasm.c`) run the console's
+`modmoycore.c` binds them to buffers Python owns (its profilers, hardware
+performance counters and compiled cart are `moycore_prof.c`, `moycore_pmu.c`
+and `moycore_wasm.c` beside it, sharing `modmoycore_int.h`), and the host's two ctypes
+shims (`runtime/host/moyhost_lua.c`, `runtime/host/moyhost_wasm.c`) run the console's
 file. On a VM tier a run's frame is the kernel's Player's
 (`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
 plays the queue.
@@ -28,7 +30,7 @@ plays the queue.
 
 ## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)
 
-A `"runtime": "wasm"` cart (docs/wasm_tier_plan_2026-09.md) runs on the SAME
+A `"runtime": "wasm"` cart (native/moy_wasm/README.md) runs on the SAME
 console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 `pmem_image`, `retarget`, `close` -- with libmoy's wasm import table
 (`libmoy/moy_wasm.c`, vendored) in place of a Lua state. `run_begin`'s last
@@ -123,7 +125,7 @@ session callbacks, and nothing else does. `moycore.WASM` is 1 in both and 0 on
 the unix build, where `libmoy/moy_wasm.c` is an empty translation unit. The
 MicroPython surface is unconditional, because qstr scanning does not see those
 defines. `device/moycore_glue.py`'s `WasmRun` is the glue on every tier but the
-host, whose twin is `runtime/moyhost_wasm.c`.
+host, whose twin is `runtime/host/moyhost_wasm.c`.
 
 ## What it does NOT compile
 
@@ -239,7 +241,7 @@ These three open it. `profile(1)` replaces every C-function global with a
 closure that times the original; `verb_stats()` returns `(hz, frames, ((name,
 calls, self, inclusive), ...))` and `verb_reset()` zeroes it. The serial face is
 `verbs on|off|reset` and a bare `verbs`, which prints one `VERBS` line of
-**per-frame** calls and milliseconds (`runtime/dev_channel.verbs_line`).
+**per-frame** calls and milliseconds (`runtime/boot/dev_channel.verbs_line`).
 
 Four things about it are load-bearing:
 
@@ -290,7 +292,7 @@ GENERATED, so a fix there lands on every ported cart at once.
 `lua_stats(top)` returns `(hz, frames, interval, totals, rows, srcs)` and
 `lua_reset()` zeroes it. The serial face is `luaprof on|off|reset [interval]`
 and a bare `luaprof`, which prints one `LUAPROF` line
-(`runtime/dev_channel.luaprof_line`).
+(`runtime/boot/dev_channel.luaprof_line`).
 
 Five things about it are load-bearing:
 
@@ -407,12 +409,12 @@ transfer.
 `make_layer`/`image` and scenes are moybyte's, not the spec's. On the boards
 and in the browser a layer's pixels and a paint image are the run's own C
 (`moycore_lua.c`); the host still makes them through registered trampolines
-and the int-handle prelude in `runtime/lua_ext.py`. Scenes are C on both Lua
+and the int-handle prelude in `runtime/run/lua_ext.py`. Scenes are C on both Lua
 hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
 the load (`scene_put`), are parsed there into Lua row tables, and
 `draw_scene` draws the live rows, so no scene verb crosses.
 
-What a frame calls is C (docs/kernel_cartpath_2026-10.md §2), so a frame makes
+What a frame calls is C (native/moy_play/moy_play.h), so a frame makes
 no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration
 loops skip by `lua_ext.NATIVE_NAMES`), and `draw_layer`, the prelude's wrapper
 over `__layer_blit`, which copies through the screen canvas's layer restore
@@ -424,7 +426,7 @@ again rather than a copy of it (#225): `moycore_layers.h` gives the prelude
 `__layer_canvas`, a `moy_canvas` over the layer's buffer (which `layer_bind`
 hands over from the `__layer_new` trampoline), and `__layer_verb`, which wraps
 a screen verb into a layer method that points `con->canvas` at that canvas for
-one protected call. The host's Lua shim (`runtime/moyhost_lua.c`) includes the
+one protected call. The host's Lua shim (`runtime/host/moyhost_lua.c`) includes the
 same header, so both Lua hosts draw into a layer through one body.
 
 ## Testing

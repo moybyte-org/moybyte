@@ -1,5 +1,5 @@
 """Input's provider: the console's input sources and its pointer, constructed
-in one place for every console board (docs/kernel_survival_2026-10.md section
+in one place for every console board (docs/history/kernel_survival_2026-10.md section
 2 item 1).
 
 `build_desktop` (device/desktop_spine.py) calls `wire_pointer` behind the

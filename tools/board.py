@@ -845,11 +845,15 @@ def cmd_flash(name, dirs, a):
     port = stable(a.port or resolve(name, dirs)[0])
     if not a.force:
         refuse_if_held(port)
+    t0 = time.monotonic()
     if subprocess.call([sys.executable, os.path.join(HERE, "board_flash.py"),
                         "flash", d, "--port", port], cwd=ROOT) != 0:
         raise BoardError("the flash of %s failed" % name)
+    # `tools/board.py pass` reads these two lines for its flash and boot columns.
+    print("board flash: written in %.1fs" % (time.monotonic() - t0), flush=True)
     if not is_console(d):
         return 0
+    t0 = time.monotonic()
     try:
         wait_for_desk(name, dirs, port, a.timeout / 2, reset=True)
     except BoardError:
@@ -858,6 +862,7 @@ def cmd_flash(name, dirs, a):
         print("no desk yet -- one reset through esptool, then waiting again")
         esptool_reset(name, dirs, port)
         wait_for_desk(name, dirs, port, a.timeout / 2, reset=True)
+    print("board flash: desk in %.1fs" % (time.monotonic() - t0), flush=True)
     return 0
 
 

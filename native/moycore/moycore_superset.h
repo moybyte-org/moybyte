@@ -1,18 +1,17 @@
-/* The superset names a Lua run gets from C (docs/kernel_cartpath_2026-10.md
- * §2's table): moybyte's names outside libmoy's verb table whose answer is a
+/* The superset names a Lua run gets from C (native/moy_play/moy_play.h's table): moybyte's names outside libmoy's verb table whose answer is a
  * number or the pointer, so a frame that calls them makes no crossing.
  *
  *   col(name_or_index)  a colour's index: a name from the base sixteen
- *                       (runtime/palette.py's NAMES; an unknown name is 7), or
+ *                       (runtime/shell/chrome.py's NAMES; an unknown name is 7), or
  *                       a number truncated and masked to 0..63
  *   mouse()             x, y, left, middle, right, scroll_x, scroll_y: the
  *                       pointer in the cart's coordinates from the run's
  *                       snapshot, `left` the press edge (cart_api.mouse)
  *
  * Included by modmoycore.c (the boards and the browser) and by
- * runtime/moyhost_lua.c (the host), and opened beside moycore_layers_open, so
+ * runtime/host/moyhost_lua.c (the host), and opened beside moycore_layers_open, so
  * the two Lua hosts answer these names with one body. The registration loops
- * skip them (runtime/lua_ext.py's NATIVE_NAMES): a trampoline registered over
+ * skip them (runtime/run/lua_ext.py's NATIVE_NAMES): a trampoline registered over
  * them would shadow the C.
  */
 #ifndef MOYCORE_SUPERSET_H

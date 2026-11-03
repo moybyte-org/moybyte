@@ -31,6 +31,7 @@ sys.path.insert(0, str(MODULES))
 
 import moy_webhost as wh                                       # noqa: E402
 from runtime import net_binding as nb                           # noqa: E402
+from tools.board_config import runtime_file
 
 
 @pytest.fixture(autouse=True)
@@ -175,7 +176,7 @@ def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
 def test_a_theme_packages_font_crosses_both_ways_as_its_bytes(tmp_path):
     """The kernel's two copies of the wire's binary rule (moy_webhost.c's
     pull, moy_sync_apply.c's apply) take a theme package's fonts and sheets
-    by suffix, as runtime/moy_sync's BINARY_SUFFIXES does."""
+    by suffix, as runtime/carts/moy_sync's BINARY_SUFFIXES does."""
     import base64
     import shutil
     fixture = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
@@ -1167,7 +1168,7 @@ def test_the_link_wait_is_shared_and_not_recopied_per_board():
 
 # ---------------------------------------------------------------------------
 # WASM MODE (#197): the pairing pin, the parked connection screen, and
-# PLAY ON DEVICE. A SWITCH and not a session -- see runtime/web_console_ui.py.
+# PLAY ON DEVICE. A SWITCH and not a session -- see runtime/system/web_console_ui.py.
 # ---------------------------------------------------------------------------
 
 
@@ -1519,7 +1520,7 @@ def _turn_off_by_its_button(ws):
 
 def test_the_page_always_shows_the_address_and_the_pin(tmp_path, monkeypatch):
     """The look's type fits the address and the pin beside the code, so the
-    page shows them always (docs/look_2026-10.md step 33), the pin large."""
+    page shows them always (docs/history/look_2026-10.md step 33), the pin large."""
     from runtime import ui
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
@@ -1788,7 +1789,7 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
 def test_the_dev_channel_run_uses_the_same_lookup():
     """ONE author for the cart lookup: a name that works over serial works from
     the page, and neither can grow its own idea of what a cart is called."""
-    src = (ROOT / "runtime" / "dev_channel.py").read_text()
+    src = runtime_file("dev_channel.py").read_text()
     assert "ws.launch_named(" in src
     assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
 

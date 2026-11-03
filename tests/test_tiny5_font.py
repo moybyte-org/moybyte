@@ -1,4 +1,4 @@
-"""Tiny5, the default theme's UI font (docs/theming_2026-09.md §4.7; theming
+"""Tiny5, the default theme's UI font (docs/theme_and_shell_2026-11.md §3.7; theming
 phase 4 step 3).
 
 * The committed font is what tools/make_tiny5_font.py builds from its
@@ -73,7 +73,7 @@ def test_the_font_covers_ascii_on_one_byte_columns():
 
 
 def test_the_tables_embed_the_file_as_a_font_preset():
-    """No seed names Tiny5 since docs/look_2026-10.md step 27 (every seed
+    """No seed names Tiny5 since docs/history/look_2026-10.md step 27 (every seed
     draws its look's family); the tables carry it for Appearance's Font
     preset (style.json's `preset_fonts`) and a package that names it."""
     assert ui_draw.font_file("tiny5.fnt") == _fnt()
@@ -92,7 +92,7 @@ def test_every_seed_font_ships_its_licence_in_the_image():
     for name in seeds:
         with open(os.path.join(THEMES, name)) as f:
             fonts |= set(json.load(f).get("fonts", {}).values())
-    # a face of the font set is the image's (runtime/fontset.py), not the tables'
+    # a face of the font set is the image's (runtime/toolkit/fontset.py), not the tables'
     fonts = {f for f in fonts if os.path.isfile(os.path.join(THEMES, f))}
     assert fonts
     for fnt in fonts:
@@ -151,7 +151,7 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path):
     for _ in range(3):
         for name in appearance.THEME_NAMES:
             ws.look.set_theme(name, persist=False)
-            # moy's Code tab adds JetBrains Mono (docs/look_2026-10.md step 23)
+            # moy's Code tab adds JetBrains Mono (docs/history/look_2026-10.md step 23)
             # and its Night, this workstation's mode, Inter's four faces and
             # Calc's three in place of Tiny5 (steps 26a and 22); blocks and
             # contrast the same with Atkinson's (26b, 26c)

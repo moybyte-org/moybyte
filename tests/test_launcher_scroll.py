@@ -1,4 +1,4 @@
-"""Tests for the home's carousel (docs/shell_layout_2026-10.md §12): one row of
+"""Tests for the home's carousel (docs/theme_and_shell_2026-11.md §8.10): one row of
 square cards that slides sideways under the tab row, the card at the centre
 larger, on EVERY tier (the 320x240 baseline included). With more carts than fit
 the band, touch drag / a fling / keyboard nav must reveal the last cart, the
@@ -429,7 +429,8 @@ def test_tap_another_card_brings_it_to_the_centre(tmp_path):
 
 def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     from runtime import host_app
-    from runtime.launcher_layer import Carousel, Launcher
+    from runtime.home_carousel import Carousel
+    from runtime.home_grid import Launcher
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
@@ -473,7 +474,8 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
     import json
 
     import moy_ui
-    from runtime.launcher_layer import Carousel, Launcher
+    from runtime.home_carousel import Carousel
+    from runtime.home_grid import Launcher
 
     ws = _ws_with_carts(tmp_path, 4)
     rc, _n = moy_ui.theme_install(json.dumps({"format": 2, "name": "hg", "layout": {
@@ -506,12 +508,12 @@ def test_cursor_delta_is_faster_and_accelerates():
     assert C._cursor_delta(8) >= 320 // 3
 
 
-# -- the handheld home (docs/look_2026-10.md step 17) ---------------------------
+# -- the handheld home (docs/history/look_2026-10.md step 17) ---------------------------
 
 def test_the_handheld_hero_keeps_its_gap_to_the_neighbours(tmp_path):
     """A hero twice its neighbours, every gap the same, the card half the
     cover's side; the title and the hint strip under the band."""
-    from runtime import launcher_layer as ll
+    from runtime import home_grid as ll
 
     ws = _ws_with_carts(tmp_path, 10)
     lz = ws.launcher
@@ -690,7 +692,7 @@ def test_a_card_shows_its_whole_cover_at_a_clean_scale(tmp_path, monkeypatch):
     """Every home card draws the WHOLE 128x128 cover (owner call 2026-10-17),
     and a card side is only ever a whole multiple of the cover's or its half,
     quarter or eighth -- never a ratio like 1.5x."""
-    from runtime import launcher_layer as ll
+    from runtime import home_grid as ll
 
     assert [ll._clean_side(n) for n in (400, 320, 256, 200, 128, 112, 64, 50, 20)] \
         == [384, 256, 256, 128, 128, 64, 64, 32, 16]
@@ -717,7 +719,7 @@ def test_a_card_shows_its_whole_cover_at_a_clean_scale(tmp_path, monkeypatch):
     assert [d[4] for d in drawn] == [128, 64]
 
 
-# -- the desk home (docs/look_2026-10.md step 18) ---------------------------------
+# -- the desk home (docs/history/look_2026-10.md step 18) ---------------------------------
 
 def _desk_home(tmp_path):
     from runtime import host_app
@@ -737,7 +739,7 @@ def test_the_desk_home_lays_out_the_hero_its_details_and_the_shelf(tmp_path):
     pane beside it, the shelf under them at half its scale with the
     selected card two in, bleeding off the right edge, the hint strip
     along the foot."""
-    from runtime import launcher_layer as ll
+    from runtime import home_grid as ll
 
     ws, drv = _desk_home(tmp_path)
     lz = ws.launcher

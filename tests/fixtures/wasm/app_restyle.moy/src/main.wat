@@ -1,4 +1,4 @@
-;; App Restyle Wasm: the public UI API's restyle verbs (docs/look_2026-10.md
+;; App Restyle Wasm: the public UI API's restyle verbs (docs/history/look_2026-10.md
 ;; step 31) as a compiled app, through the `ui` rows it imports from module
 ;; "moybyte.app": a verb, three tools (one current, one disabled), a rule and
 ;; the bar's title and tools.

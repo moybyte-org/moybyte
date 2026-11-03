@@ -78,7 +78,7 @@ unless somebody writes down why not, which is #161's whole thesis and the
 reason the other three boards deny by exception.
 
 This board is not a console. It has no glass, runs no carts and constructs no
-Workstation; the default answer for a new `runtime/*.py` here is NO, and a
+Workstation; the default answer for a new `runtime/` module here is NO, and a
 denylist would express that as forty denials that all say "there is no
 console", plus a silent bug every time a new shared module appears and nobody
 adds the forty-first. The allowlist below is short and each group says what
@@ -100,7 +100,8 @@ parser and response writer under them are the native `moy_net`. This is the boar
 -- `moy_webhost` is a transport in front of these two files."""
 
 [[modules.shared.group]]
-files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moyimg.py", "cart_listing.py"]
+files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moy_docs.py", "moy_pack.py",
+         "moyimg.py", "cart_listing.py"]
 why = """
 THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), and this pair is what
 that call bought. `moy_sync.file_kinds()` asks the store module for the
@@ -117,9 +118,11 @@ with, one cart at a time behind a decoder, so this board gained a first-boot
 store without gaining a second copy of the seed rules.
 
 `moy_carts` is an umbrella over modules of its own -- `moy_store_base`
-(the on-card layout), `moy_seed` (the seeders) and the leaf `cart_listing`
-(how a manifest's description, genre and tags read, SPEC.md 3.7) -- imported
-and re-exported, so the umbrella cannot load without them. The user-files layer behind its
+(the on-card layout), `moy_seed` (the seeders), `moy_docs` (the WiFi, system
+and achievements documents beside the carts), `moy_pack` (the `.moy` archive
+and adopt) and the leaf `cart_listing` (how a manifest's description, genre
+and tags read, SPEC.md 3.7) -- imported and re-exported, so the umbrella
+cannot load without them. The user-files layer behind its
 other names (list, save, the trash, the sidecars) is native/moy_store's, built
 with `moy_app`, which this board denies: it syncs `files/<kind>/` by path and
 runs no app that edits one."""
@@ -246,8 +249,19 @@ otadata_size   = "0x2000"
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
-# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
-# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
+# MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
+# to print; the floor is the design.
+# The baked web bundle took this image under its first floor (256 KiB), and
+# the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle
+# off. The floor is 200 KiB since 2026-10-15 (owner): the kernel's networking
+# crossed onto the Zero on 2026-10-08, so the floor guards general growth out
+# of an 8 MB flash whose store pays for every slot byte twice. The slots grew
+# to 3.25 MiB (owner, 2026-10-18), leaving a 1.375 MiB store that, full by
+# blocks with the seed roster, gives up no more slot bytes; when the console's
+# scroll and text work crossed the floor (2026-10-28) the baked bundle was
+# trimmed (its cold C built for size, the VM's loader without comments) and
+# the floor stayed.
 headroom_floor_kib = 200
 
 [serial]
@@ -325,13 +339,13 @@ difference between a table that fits and one that does not."""
 [[native.shared.deny]]
 module = "moy_play"
 why = """
-The kernel's Player (docs/kernel_cartpath_2026-10.md). This board runs no
+The kernel's Player (docs/history/kernel_cartpath_2026-10.md). This board runs no
 carts: the browser it serves plays them."""
 
 [[native.shared.deny]]
 module = "moy_app"
 why = """
-The app ABI's kernel half (docs/kernel_appabi_2026-10.md) and the user-files
+The app ABI's kernel half (docs/history/kernel_appabi_2026-10.md) and the user-files
 layer it builds (native/moy_store/moy_ufiles.h, the module `moy_ufiles`). This
 board runs no apps: the browser it serves runs them, and its sync moves the
 files by path."""
@@ -339,7 +353,7 @@ files by path."""
 [[native.shared.deny]]
 module = "moy_ui"
 why = """
-The widget toolkit (docs/kernel_toolkit_2026-10.md). This board runs no apps:
+The widget toolkit (docs/history/kernel_toolkit_2026-10.md). This board runs no apps:
 the browser it serves draws them."""
 
 [[native.shared.deny]]
@@ -422,8 +436,7 @@ runtime would be flash spent in both OTA slots for code nothing calls."""
 [[native.shared.take]]
 module = "moy_kernel"
 why = """
-The kernel's entry, crash record and recovery floor (docs/kernel_spine_2026-10.md
-§6-§8): the kernel is the entry on every target (docs/kernel_survival_2026-10.md
+The kernel's entry, crash record and recovery floor (native/moy_kernel/moy_kernel.c's header): the kernel is the entry on every target (docs/history/kernel_survival_2026-10.md
 section 6.5). This board has no panel, so its floor is serial only -- `retry`,
 `safe`, `repl`, `state` -- and with nobody at the serial it takes SAFE after
 MOY_KERNEL_IDLE_SAFE_MS (mpconfigboard.h). main.py proves the boot as soon as the
@@ -432,20 +445,20 @@ VM reaches it, so a Ctrl-C at any point lands at the REPL, as before."""
 [[native.shared.deny]]
 module = "moy_glass"
 why = """
-The glass's canvas rows, buffer table and present (docs/kernel_survival_2026-10.md
+The glass's canvas rows, buffer table and present (docs/history/kernel_survival_2026-10.md
 section 3): this board has no panel to present to."""
 
 [[native.shared.deny]]
 module = "moy_input"
 why = """
-The merged input table and its drivers (docs/kernel_survival_2026-10.md section
+The merged input table and its drivers (docs/history/kernel_survival_2026-10.md section
 4): this board has no keyboard, touch or pointer of its own; the input a paired
 browser takes is the browser's."""
 
 [[native.shared.take]]
 module = "moy_net"
 why = """
-The links (docs/kernel_survival_2026-10.md section 6): the webhost and the sync
+The links (docs/history/kernel_survival_2026-10.md section 6): the webhost and the sync
 RPC this board serves are what the module is for. It is the batch codec and
 the HTTP parser and response writer the webserver, the sync stack and the GPIO
 routes import; its JSON scanner is moy_store's, which this board takes."""

@@ -1,13 +1,13 @@
 // moy_hid: the BLE HID keyboard central's protocol -- scan, connect, pair,
 // discover the HID service, subscribe to its keyboard input reports, decode
 // them into the kernel table's "ble" source -- as a state machine over events,
-// with no radio in it (docs/kernel_survival_2026-10.md section 4.2).
+// with no radio in it (docs/history/kernel_survival_2026-10.md section 4.2).
 //
 // moy_ble_task.c drives it from NimBLE's host task: every GAP and GATT event
 // arrives as a moy_hid_on_* call, every request it makes goes out through
 // moy_hid_ops_t, and a verb from the frame is posted to that task, so the
 // machine runs on one task and needs no lock but the report latch's. The host
-// drives the same machine over a fake stack (runtime/moy_input.py, the tests).
+// drives the same machine over a fake stack (runtime/host/moy_input.py, the tests).
 //
 // THE PROFILE (HOGP). A Boot Keyboard Input characteristic is preferred: the
 // host writes Protocol Mode = 0 and consumes only the fixed eight-byte boot

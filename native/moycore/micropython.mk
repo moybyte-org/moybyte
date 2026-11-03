@@ -2,7 +2,7 @@
 # boards use the cmake twin beside it, and the two must stay in step.
 #
 # This module compiles exactly TWO things: its own MicroPython binding
-# (modmoycore.c) and libmoy's Lua binding (libmoy/moy_lua.c, vendored). It
+# (modmoycore.c and the files beside it) and libmoy's Lua binding (libmoy/moy_lua.c, vendored). It
 # deliberately compiles neither the raster nor a Lua VM, because the binary
 # already has one of each:
 #
@@ -22,6 +22,9 @@
 MOYCORE_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD += $(MOYCORE_MOD_DIR)/modmoycore.c
+SRC_USERMOD += $(MOYCORE_MOD_DIR)/moycore_prof.c
+SRC_USERMOD += $(MOYCORE_MOD_DIR)/moycore_pmu.c
+SRC_USERMOD += $(MOYCORE_MOD_DIR)/moycore_wasm.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/moycore_run.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/moycore_lua.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy_binding.c

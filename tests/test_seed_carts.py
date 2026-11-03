@@ -266,7 +266,7 @@ PRIMITIVE_CARTS = ("moybyte.tap_only_red",)
 
 
 def test_converted_carts_have_nonempty_sprite_sheets():
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
     for folder, tiles in CONVERTED_SHEETS.items():
         f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"
@@ -360,7 +360,7 @@ WALLPAPER_SHEETS = {
 
 
 def test_wallpaper_carts_have_nonempty_sprite_sheets():
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
     for folder, tiles in WALLPAPER_SHEETS.items():
         f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"

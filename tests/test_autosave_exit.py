@@ -61,7 +61,7 @@ def test_paint_edit_survives_immediate_context_x_close(tmp_path):
     """Same contract for the sprite editor: paint a pixel, context-X immediately,
     reopen -- the pixel survived with no explicit save call."""
     from runtime import moy_carts
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     ws = _ws(tmp_path)
     while not ws.launcher.items[ws.launcher.sel].get("path"):
         ws.launcher.sel += 1
@@ -280,7 +280,7 @@ def test_a_hard_exit_pays_a_commit_the_switch_still_owes(tmp_path):
     ws.editor_app.set_tab("code")      # owes a sprite commit, no frame runs
     ws.exit()                          # context-X -> go_home
     assert ws.screen == "launcher"
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet.from_hex(moy_carts.load(path)["sprites"])
     assert sheet.tget(0, 0, 0) == 7, \
         "going home must pay a commit the tab switch still owed"
@@ -302,7 +302,7 @@ def test_a_workspace_swap_pays_the_outgoing_project_s_debt(tmp_path):
     ws.editor_app.set_tab("code")      # owes a sprite commit
     ws._open_workspace(second)         # PROJECTS -> a different project
     assert ws.editor_app._pending == [], ws.editor_app._pending
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet.from_hex(moy_carts.load(first["path"])["sprites"])
     assert sheet.tget(0, 0, 0) == 7, \
         "the swap must pay the outgoing project's owed commit"

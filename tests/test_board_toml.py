@@ -352,7 +352,7 @@ def test_every_native_take_names_a_module_and_says_why(board):
 
 
 # The WebAssembly tier ships on every console board or on none
-# (docs/wasm_tier_plan_2026-09.md), so its engine is the one shared module
+# (native/moy_wasm/README.md), so its engine is the one shared module
 # whose default "yes" is not enough: every board file decides it in writing.
 CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
 
@@ -415,8 +415,8 @@ def test_every_board_decides_the_wasm_engine(board):
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_board_decides_the_kernel_entry(board):
     """Taking native/moy_kernel hands app_main to the kernel
-    (docs/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
-    with a serial-only floor (docs/kernel_survival_2026-10.md section 6.5)."""
+    (docs/history/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
+    with a serial-only floor (docs/history/kernel_survival_2026-10.md section 6.5)."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
     assert "moy_kernel" in takes or "moy_kernel" in denies, (
@@ -428,8 +428,7 @@ def test_every_board_decides_the_kernel_entry(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_player_and_the_zero_denies_it(board):
-    """native/moy_play is the kernel's Player (docs/kernel_cartpath_2026-10.md
-    §3): every console takes it; the Zero, which runs no carts, denies it."""
+    """native/moy_play is the kernel's Player (native/moy_play/moy_play.h): every console takes it; the Zero, which runs no carts, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
     assert "moy_play" in takes or "moy_play" in denies, (
@@ -442,7 +441,7 @@ def test_every_console_takes_the_player_and_the_zero_denies_it(board):
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
     """native/moy_app is the app ABI's kernel half
-    (docs/kernel_appabi_2026-10.md): every console takes it; the Zero, which
+    (docs/history/kernel_appabi_2026-10.md): every console takes it; the Zero, which
     runs no apps, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
@@ -455,7 +454,7 @@ def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_console_takes_the_toolkit_and_the_zero_denies_it(board):
-    """native/moy_ui is the widget toolkit (docs/kernel_toolkit_2026-10.md):
+    """native/moy_ui is the widget toolkit (docs/history/kernel_toolkit_2026-10.md):
     every console takes it; the Zero, which runs no apps, denies it."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
@@ -468,12 +467,12 @@ def test_every_console_takes_the_toolkit_and_the_zero_denies_it(board):
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
-    """The spine is native on every image (docs/kernel_spine_2026-10.md): no
+    """The spine is native on every image (docs/history/kernel_spine_2026-10.md): no
     board declares a twin hook for it, and no image freezes a Python spine
     (the twin is the suites' oracle, tests/spine_twin.py)."""
     assert "MOY_SPINE_IMPL" not in board_config.impls(BOARDS[board])
     assert "moy_spine.py" not in board_config.staged_modules(BOARDS[board], root=ROOT)
-    assert not (ROOT / "runtime" / "moy_spine.py").exists()
+    assert "moy_spine.py" not in board_config.shared_sources(ROOT / "runtime")
 
 
 def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
@@ -486,7 +485,7 @@ def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
 def test_a_build_exports_a_boards_twin_and_the_environment_wins(tmp_path):
     """The lib exports the board's [native.impl] hooks before anything reads
     them, and a build that sets a hook itself keeps its own: a board naming
-    the index's Python twin freezes runtime/moy_index.py, and the
+    the index's Python twin freezes runtime/carts/moy_index.py, and the
     environment's `c` takes it out again."""
     bd = tmp_path / "board"
     bd.mkdir()
@@ -996,7 +995,7 @@ def test_every_console_board_imports_its_frozen_modules_first():
         assert fake_sys.path == [".frozen", "", "/lib"], (d.name, fake_sys.path)
 
 
-# Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2 item 6):
+# Sprint 3's kernel modules (docs/history/kernel_survival_2026-10.md section 2 item 6):
 # every board decides each in writing, and every console takes all three.
 @pytest.mark.parametrize("board", sorted(BOARDS))
 @pytest.mark.parametrize("module", ("moy_glass", "moy_input", "moy_net"))

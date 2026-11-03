@@ -12,9 +12,9 @@ for the rules.
 | touch an ESP32-P4 board | that board's README, then `native/p4/` | the panel is a board DEFINE (`MOY_DSI_PANEL_*`); compositors `native/moy_glass/moy_present_*.c`, PPA canvas `device/p4_canvas.py`, P4 tier `device/p4_desktop.py` over `device/desktop_spine.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once"; `tests/moy_flush_harness/` compiles it with no board |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
-| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too. A surface scrolls and draws text through the public verbs (`ui.scroll`, `ui.text_view`) and gets its fast frames from the engine: a surface with its own scroll state or frame path is the duplication the owner chose to fold back (2026-10-29, after v0.15.1), never a pattern to copy |
+| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md`, `docs/theme_and_shell_2026-11.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too. A surface scrolls and draws text through the public verbs (`ui.scroll`, `ui.text_view`) and gets its fast frames from the engine: a surface with its own scroll state or frame path is the duplication the owner chose to fold back (2026-10-29, after v0.15.1), never a pattern to copy |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in moy-spec | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
-| touch a compiled (wasm) cart or the tier | `docs/wasm_tier_plan_2026-09.md`, then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
+| touch a compiled (wasm) cart or the tier | `native/moy_wasm/README.md` (its "Decisions the tier rests on"), then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
 | touch `native/moy_wasm/` | its README | VENDORED from our WAMR fork (`make vendor-wamr`, pin in `native/moy_wasm/wamr_pin.h`): fix the fork and re-vendor, never edit the copy; a board TAKES or denies it in board.toml |
 | change the PICO-8 importer or its Lua shim | `PICO8.md` and `p8_lua_port.py` in moy-spec | `tools/p8_lua_port.py` is VENDORED (`make vendor-p8-import`); the net is `make -C libmoy p8-carts`; a board-only failure is usually frame cadence (`run_cart --dt`) |
 | touch audio | `native/moy_audio/libmoy/UPSTREAM.md` | VENDORED — fix it in moy-spec and re-vendor |
@@ -41,7 +41,7 @@ made false, in place. The rest is `.claude/rules/docs.md`.
 | per-cart fps, frame budgets, the lever ledger | **#66** |
 | the P4 port, its transitions and image cost | **#58** |
 | cross-board strategy, A/B benches, ranked levers | `docs/perf_native_gap_v1.md` (**#77**) |
-| the Guition ports · Lua/moycore tier · crisp composite | **#202** · **#67** · **#204** |
+| the Lua/moycore tier | **#67** |
 | the compiled tier | **#158** |
 | a board's image headroom | the build prints it; nothing else is current |
 
@@ -50,7 +50,7 @@ made false, in place. The rest is `.claude/rules/docs.md`.
 Moybyte is an operating system for ESP32 boards: a console whose software is
 cartridges, running as firmware on the boards below, in a host simulator and in
 a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
-2026-07-31; the block compiler is `runtime/blocks.py`; do not reintroduce it).
+2026-07-31; the block compiler is `runtime/editors/blocks.py`; do not reintroduce it).
 
 - `runtime/` — the host reference of the console (launcher → Player → tabbed
   Editor), staged into every board image. `runtime/README.md` is the file map.
@@ -98,8 +98,15 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
   legacy readers. The door a migration would use is `sweep_store`'s
   `prune_retired`, and the bar is its own (generation-gated, one small read
   warm) — the picture pass missed it and cost a Guition a 196-second boot.
-- `moybyte_console_plan_2026-07.md` is the current design doc; `docs/history/`
-  is history, not direction.
+- The kernel is C and our apps stay Python (owner, 2026-10-06 and 2026-09-27):
+  `native/moy_kernel/README.md` holds the kernel's decisions and why.
+- `docs/os_2026-11.md` is the OS design (owner, 2026-11-01, tracker #246):
+  the overview every agent reads (the principles, the trust ladder, the
+  per-board table, the owner's answers and the six phases of work), with one
+  area doc per phase group in `docs/os_2026-11/` (its §8 maps them). It carries
+  what stands of `moybyte_console_plan_2026-07.md` (positioning, the canvas
+  contract, safety); the rest of that plan is historical. `docs/history/` is
+  history, not direction.
 
 ## Working here
 
@@ -140,6 +147,6 @@ tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; 
 | `carts.md` | `system_carts/**`, cart API, Lua tier, audio | | `release` | branches, OTA channels, `make release` |
 | `web.md` | `firmware/web_runner/**`, sync RPC, webhost | | | |
 | `ota.md` | `device/moy_ota.py`, release and signing tools | | | |
-| `netplay.md` | `native/moy_play/moy_match*`, `runtime/players.py` | | | |
+| `netplay.md` | `native/moy_play/moy_match*`, `runtime/run/players.py` | | | |
 | `testing.md` | `tests/**` | | | |
 | `docs.md` | any `.md` | | | |

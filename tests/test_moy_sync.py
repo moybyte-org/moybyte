@@ -1,4 +1,4 @@
-"""The 3.4 sync push's two halves in isolation (runtime/moy_sync.py).
+"""The 3.4 sync push's two halves in isolation (runtime/carts/moy_sync.py).
 
 The convergence harness (test_sync_convergence.py) proves two whole stores
 agree; this file proves the PIECES are trustworthy on their own -- above all
@@ -998,7 +998,7 @@ _THEME = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
 
 
 def test_a_theme_packages_fonts_and_sheets_cross_as_their_bytes(tmp_path):
-    """A theme package crosses as a cart does (docs/theming_2026-09.md §9
+    """A theme package crosses as a cart does (docs/history/theming_2026-09.md §9
     phase 6 step 2): its theme.json and manifest as text, a font and a sheet
     as bytes (BINARY_SUFFIXES, the rule's four copies), byte-equal."""
     import shutil
@@ -1038,7 +1038,7 @@ def test_a_big_cover_crosses_in_parts_each_its_own_base64(tmp_path):
 
 
 def test_only_the_cover_crosses_as_bytes(tmp_path):
-    """A compiled module stays home (docs/wasm_tier_plan_2026-09.md), and a
+    """A compiled module stays home (native/moy_wasm/README.md), and a
     receiver refuses bytes under any other name."""
     root = _store(tmp_path)
     (root / "hop.moy" / "main.wasm").write_bytes(b"\0asm\1\0\0\0\xff")

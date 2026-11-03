@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The `mp_task` call-list guard (docs/kernel_spine_2026-10.md §8).
+"""The `mp_task` call-list guard (docs/history/kernel_spine_2026-10.md §8).
 
     python3 tools/mp_task_calls.py check  <micropython checkout> <record>
     python3 tools/mp_task_calls.py record <micropython checkout> <record>

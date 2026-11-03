@@ -1,4 +1,4 @@
-// moy_ledger: the strike ledger's slot (runtime/crash_guard.py), in C, over the
+// moy_ledger: the strike ledger's slot (runtime/shell/crash_guard.py), in C, over the
 // settings rows' JSON text. A slot is the object
 //
 //     {"strikes": {id: n, ...}, "open": id | null, "proven": {id: proof, ...}}

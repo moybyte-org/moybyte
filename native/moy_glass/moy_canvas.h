@@ -1,4 +1,4 @@
-// The glass's canvases (docs/kernel_survival_2026-10.md §3.1).
+// The glass's canvases (#224 sprint 3; their buffers are moy_buf.h's).
 //
 // A canvas is a row of kind CANVAS: where it draws (the pixels, their capacity,
 // the BUF row they are when they are one), its size and stride, its owner, the
@@ -6,7 +6,7 @@
 // counters, in the order device/device_canvas.py's _ST_* names them -- and the
 // 128-entry RGB565 table colour indices resolve through: entries 0..63 are
 // MOY64 through the canvas's palette and pal(), written by the canvas class;
-// 64..127 are the live theme's block (docs/look_2026-10.md step 5), written
+// 64..127 are the live theme's block (docs/history/look_2026-10.md step 5), written
 // here for every row at once and never remapped. A colour index is masked
 // with moy_canvas_cmask, 127 for the shell and 63 while a cart's code runs
 // (moy_ui_cart_text), so a cart's colour stays its index modulo 64.

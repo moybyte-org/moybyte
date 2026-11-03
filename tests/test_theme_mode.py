@@ -1,5 +1,5 @@
-"""The Editor's theme mode (docs/look_2026-10.md step 33, GAPS 56;
-runtime/theme_editor.py).
+"""The Editor's theme mode (docs/history/look_2026-10.md step 33, GAPS 56;
+runtime/editors/theme_editor.py).
 
 * The door: Appearance's last row, Edit theme…, makes `custom` from a seed
   and opens it in the Editor on Config; Done (the bar's ‹, Esc, B) comes back.

@@ -6,7 +6,7 @@ The injection is permission-gated: a cart whose manifest grants "network" gets a
 `wifi` name in its namespace; a normal cart does NOT (sandbox preserved). These
 tests pin that gate, the FakeWifi behavior, persistence + reload, and who holds
 the radio. Setting a network up is Settings' WIFI panel, the one wifi
-implementation (docs/shell_layout_2026-10.md §8).
+implementation (docs/theme_and_shell_2026-11.md §8.6).
 """
 
 import sys
@@ -26,6 +26,7 @@ class _Stub:
 
 
 from ws_helpers import StubInput, open_cart as _open_cart
+from tools.board_config import runtime_file
 
 
 # -- the base key-set is identical; `wifi` is the only conditional name --------
@@ -49,8 +50,8 @@ def test_host_and_device_make_api_keysets_match_except_wifi(monkeypatch):
     from runtime import host_app
 
     # Load the device moy_runtime under CPython (mirrors the spike test loader).
-    for name in ("editors", "audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
+    for name in ("audio", "console"):
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod

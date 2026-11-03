@@ -15,7 +15,7 @@ sprint 2's harness (tools/moy_index_spike.py --component spine) CI runs.
     sets (an empty key, a lone surrogate in a key, 31 nested containers);
   * the API-sequence fuzz (native/moy_spine/fuzz_spine.c) under AddressSanitizer
     and UndefinedBehaviorSanitizer: #224's containment;
-  * the placement rule of docs/native_kernel_2026-09.md section 4.6, asserted
+  * the placement rule of native/moy_kernel/moy_kernel.h, asserted
     in the sources: kernel data is PSRAM.
 
 The spine trace over the native module is tests/test_semantic_traces.py's.
@@ -31,7 +31,8 @@ import pytest
 
 import vm_suite
 import spine_twin as moy_spine    # the oracle (tests/spine_twin.py)
-from tools import moy_index_spike, moy_spine_binding
+from tools import moy_index_spike
+from runtime import moy_spine_binding
 from unix_mp import find_unix_mp, require_unix_mp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -550,7 +551,7 @@ ALLOC_CALLS = re.compile(r"\b(malloc|calloc|realloc|free|heap_caps_\w+|m_malloc"
 
 
 def test_kernel_data_is_allocated_from_psram():
-    """docs/native_kernel_2026-09.md section 4.6: kernel data is
+    """native/moy_kernel/moy_kernel.h: kernel data is
     heap_caps(MALLOC_CAP_SPIRAM) unless it is latency-bound. The components
     allocate only through the table's allocator; the binding's allocator asks
     for PSRAM first and falls to the default heap only on a board with none;

@@ -3,7 +3,8 @@
 **Project:** Moybyte — a kid-safe creative computer where everything is an editable cartridge
 **Written:** 2026-07-01
 **Supersedes:** `docs/history/moybyte_Console_Plan_v0_4.md` (2026-06-21)
-**Status:** Consolidation + course-correction. The June plan was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
+**Superseded by:** `docs/os_2026-11.md` (2026-11-02), which carries this plan's §2, §4 and §13 and holds the direction; the rest of this document is historical.
+**Status when written:** Consolidation + course-correction. The June plan was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
 
 > **Plans are dated, not numbered.** A `0.x` on a design document reads like a
 > release and is not one: the only version a user ever sees is the firmware's
@@ -63,7 +64,7 @@ Picotron and TIC-80 remain the north-star references for *grammar* (everything-i
 
 v0.4 described *one* device. v0.5's central architectural claim is:
 
-> **One console, N backends. A tier is a backend port, not a fork.** The shared `console` / `editors` / `moy_carts` modules, the cart format, and the **320×240 indexed MOY64 canvas contract** are identical across every tier. Only the display / input / storage / transport backend differs. **The cart contract is the portability guarantee — the technical promise everything else rests on.**
+> **One console, N backends. A tier is a backend port, not a fork.** The shared `console` / `editors_*` / `moy_carts` modules, the cart format, and the **320×240 indexed MOY64 canvas contract** are identical across every tier. Only the display / input / storage / transport backend differs. **The cart contract is the portability guarantee — the technical promise everything else rests on.**
 
 ---
 
@@ -200,7 +201,7 @@ MicroPython runtime  (device backend: DeviceCanvas + make_api + TrackBall/Touch/
    ↓
 Shared console  (host == device, staged into firmware at build)
    - console.py     Launcher + Pointer + Workstation + top bar + mode switching
-   - editors.py     CodeEditor / SpriteSheet / PaintEditor / IconSheet
+   - editors_*.py   CodeEditor / SpriteSheet / PaintEditor / IconSheet
    - moy_carts.py   the .moy store (scan/load/save/create/dup/del/seed)
    ↓
 Cartridge userland  (.moy: games, wallpapers, widgets, tools, lessons)
@@ -270,7 +271,7 @@ Progressive authoring, all editing the *same* cart:
 - **Icons → blocks → Python.** #29 shipped the block-language overhaul + a working single-object tap game.
 - **Blocks depth (#48)** is the path to real games in blocks, in leverage order: **lists** (the biggest gap — no collections ⇒ no multiple enemies/bullets/inventories), **custom blocks** (define/call with params), **control** (`repeat until`, `wait until`, `break`; fix frame-yielding `forever`), **operators** (`mod`, `round`, `abs`, `min/max`, comparisons).
 - **Blockly-in-browser (#22)** is the richer web-based block editor path.
-- The block compiler lives in `runtime/blocks.py`; the old `.moyproj` SDK around it was deleted 2026-07-31 (git history has it).
+- The block compiler lives in `runtime/editors/blocks.py`; the old `.moyproj` SDK around it was deleted 2026-07-31 (git history has it).
 
 ### 6.3 Quests & pedagogy (#20, see §7).
 
@@ -327,7 +328,7 @@ The teachable moment is always: **the computer is made of editable things, and *
 
 - **Code editor (#3):** full-screen; caret nav, vertical+horizontal scroll, drag-to-scroll, tap-to-place, RUN/SAVE/CLOSE, and an on-screen symbol palette for `= ( ) [ ] { } < > %` (the T-Deck keyboard lacks `=`).
 - **Sprite / paint editor (#4):** `sprites.moygfx` storage (PICO-8 `__gfx__`-style indexed).
-- **IconSheet (#46):** 16×16 themeable system-bar icons; a theme's own are painted in the Editor's theme mode (`docs/look_2026-10.md` step 33). The low-risk first slice of §5.5.
+- **IconSheet (#46):** 16×16 themeable system-bar icons; a theme's own are painted in the Editor's theme mode (`docs/history/look_2026-10.md` step 33). The low-risk first slice of §5.5.
 
 ### 8.2 Editors in progress / planned
 
@@ -344,7 +345,7 @@ One 18px bar: icon-only mode switchers (home/edit/paint/map/blocks) on the left,
 
 The web view (#22/#41) is not just for play. Because keyboard-less tiers (Zero, and a D-pad Player) can't comfortably author on-device, **authoring for those tiers happens through the web view**, where the phone/PC supplies a real keyboard and a big screen.
 
-> **DECIDED direction — remote the *same* editor, don't fork it.** The browser is a thin terminal: the device runs the real `editors.py`, streams it over the #22 draw-command protocol, and the browser sends keystrokes back. **One editor codebase** — preserving host==device. (The rejected alternative — a separate JS editor in the browser — means maintaining two editors and syncing their features + file formats forever.)
+> **DECIDED direction — remote the *same* editor, don't fork it.** The browser is a thin terminal: the device runs the real editor cores (`editors_*.py`), streams it over the #22 draw-command protocol, and the browser sends keystrokes back. **One editor codebase** — preserving host==device. (The rejected alternative — a separate JS editor in the browser — means maintaining two editors and syncing their features + file formats forever.)
 >
 > The one detail to nail under this: what resolution the editor renders at when remoted to a phone viewport vs. running native on the One's panel.
 
@@ -468,13 +469,13 @@ Offline by default; local sharing first; no accounts for local use; no child rea
 ```text
 low  (default): graphics, input, sound, local_storage
 high (parent-gated): radio_send, radio_receive, local_web_server, wifi_internet,
-                     ai_helper, sensor_read, actuator_write, raw_files, advanced_system
+                     sensor_read, actuator_write, raw_files, advanced_system
 ```
 Wallpapers/widgets cannot silently use the network. Received carts are quarantined until accepted. Parent can restore defaults / system carts.
 
-### 13.3 AI helper (#8, OPEN, parent-gated)
+### 13.3 AI helper (#8, closed 2026-11-01)
 
-AI understands *cartridges and customization*, not only game code. Allowed: explain this error · suggest one small change · make this wallpaper more fun · turn this pet into a game idea · summarize my project for a parent. **Not** allowed by default: open-ended child chat · AI companion behavior · raw internet · unrestricted image gen · unapproved sharing. Architecture: device → parent-approved gateway → LLM → **schema-checked** structured response → device. AI returns structured assets/hints, never freeform control of the system.
+Not part of the OS (owner, 2026-11-01): an AI helper is bad for learning to program.
 
 ---
 
@@ -520,7 +521,6 @@ M7  Voxel bake-to-sprite in the sprite pipeline                               (#
 5. **Rich web-view 3D scope (EXPLORATION, §10.3)** — if/when, and only in the fenced "device-as-server" form.
 6. **Lua second cart type timing (#11)** — gated on a real `.tic`/Lua source-compat goal.
 7. **Lego/modules scope (#9)** and **BLE input (#26)** — the Hardware Lab surface.
-8. **AI helper (#8)** — gateway and provider.
 
 ---
 

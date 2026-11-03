@@ -1,6 +1,6 @@
 """The host's SYSTEM canvas, on the boards' raster (#161).
 
-`runtime/host_canvas.py` runs `DeviceCanvas` on CPython; `HostSystemCanvas` is
+`runtime/host/host_canvas.py` runs `DeviceCanvas` on CPython; `HostSystemCanvas` is
 the rest of what the shared console asks a system SURFACE for:
 
   * font_scale text and font-scale-carrying layers (#39/#73),
@@ -30,11 +30,12 @@ under test proves nothing about the class under test.
 import pytest
 
 from runtime import host_canvas
-from runtime.editors import SpriteSheet, TileMap
+from runtime.editors_sheet import SpriteSheet, TileMap
 from runtime.moy_image import Image
-from runtime.palette import MOY64
+from runtime.gfx_binding import moy64
 
 host_canvas.install()
+MOY64 = moy64()
 import device_canvas as dc                                       # noqa: E402
 from runtime.host_canvas import HostSystemCanvas                 # noqa: E402
 
@@ -136,7 +137,7 @@ def _sprite_map():
 
 
 def _sheet_and_map():
-    # 16 x 32 tiles = the 128 x 256 sheet SPEC.md 3.2 fixes (runtime/project.py
+    # 16 x 32 tiles = the 128 x 256 sheet SPEC.md 3.2 fixes (runtime/editors/project.py
     # builds exactly this). A differently-shaped sheet is REFUSED by libmoy's
     # map kernel and draws nothing at all -- silently, on every tier.
     sheet = SpriteSheet(16, 32)
@@ -220,7 +221,7 @@ def test_the_readout_is_not_a_bit_expansion():
 
 
 def test_a_cart_palette_reaches_the_readout():
-    """SPEC.md 3.1: a cart ships its own 64-entry table and runtime/player.py
+    """SPEC.md 3.1: a cart ships its own 64-entry table and runtime/run/player.py
     assigns it to the canvas. The readout has to resolve through THAT table --
     reading through the module's stock LUT would show the kid MOY64 while the
     glass shows their own colours."""
@@ -463,7 +464,7 @@ def test_a_stock_layer_still_shares_the_module_table():
 
 
 def test_the_game_tier_clips_its_text():
-    """`moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
+    """`moy_font` is what build.sh stages runtime/toolkit/font.py AS, and device_canvas
     gates its native text op on importing it -- so on a clean checkout (that
     file is a gitignored build artefact) the host fell back to framebuf.text,
     which has NO clip rect and was measured drawing 252 pixels past an edge.

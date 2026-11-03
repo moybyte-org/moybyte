@@ -222,7 +222,7 @@ def test_only_blocks_py_knows_the_container_keys():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent / "runtime"
     hits = []
-    for path in sorted(root.glob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         src = path.read_text(encoding="utf-8")
         if 'get("c", [])' in src and 'get("p", {})' in src:
             hits.append(path.name)

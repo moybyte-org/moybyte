@@ -13,8 +13,9 @@ from ws_helpers import shelf, select_on_home, step_card  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import palette  # noqa: E402
-from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime import chrome  # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+from runtime.editors_sheet import SpriteSheet, TileMap  # noqa: E402
 from runtime.host_canvas import make_canvas as Canvas  # noqa: E402
 from runtime.host_canvas import make_system_canvas as SysCanvas  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
@@ -38,13 +39,13 @@ def _on_the_night_fixture(monkeypatch):
 # -- palette ---------------------------------------------------------------
 
 def test_palette_has_64_valid_colors():
-    assert len(palette.MOY64) == 64
-    for rgb in palette.MOY64:
+    assert len(moy64()) == 64
+    for rgb in moy64():
         assert len(rgb) == 3
         assert all(0 <= ch <= 255 for ch in rgb)
-    assert palette.color("white") == 7
-    assert palette.color(10) == 10
-    assert palette.color(99) == 99 & 63  # indices wrap into 0-63
+    assert chrome.color("white") == 7
+    assert chrome.color(10) == 10
+    assert chrome.color(99) == 99 & 63  # indices wrap into 0-63
 
 
 # -- canvas ----------------------------------------------------------------
@@ -64,7 +65,7 @@ def test_canvas_cls_pix_and_rgb_resolution():
     rgb = cv.to_rgb888()
     assert len(rgb) == 20 * 10 * 3
     off = (5 * 20 + 5) * 3
-    assert tuple(rgb[off:off + 3]) == palette.MOY64[7]
+    assert tuple(rgb[off:off + 3]) == moy64()[7]
 
 
 def test_canvas_rect_is_filled_and_clips_to_bounds():
@@ -1012,7 +1013,7 @@ def test_key_keyp_plumbed_through_console_driver(tmp_path):
 # -- map (tilemap) editor (#32) --------------------------------------------
 
 def test_map_editor_place_erase_select_pick_pan():
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(20, 15)
     sheet = SpriteSheet()
     me = MapEditor(tm, sheet)
@@ -1041,7 +1042,7 @@ def test_map_editor_size_brush_stamps_and_erases_blocks():
     # n / n+1 / n+cols / n+cols+1, the same contiguous layout spr(w=2, h=2) and
     # tile_span_image read -- and erase clears the whole block. Size 1 stays the
     # old single-cell behavior; cycle_size wraps 1 -> 2 -> 3 -> 1.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(20, 15)
     sheet = SpriteSheet()                    # 16 cols -> the row stride is 16
     me = MapEditor(tm, sheet)
@@ -1077,7 +1078,7 @@ def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
     # simply dropped, and a brush near the sheet's right/bottom edge must never
     # wrap ids into the next tile row -- the span clamps exactly like
     # tile_span_image, so the stamp still matches what spr() would draw.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     # spec=False: a 16-ROW sheet, deliberately. The clamp is pure geometry
     # ((sheet.h - oy) // TILE), but the bottom-row half is only reachable through
     # place() on a short sheet -- on the real 16x32 sheet the last row starts at
@@ -1114,7 +1115,7 @@ def test_map_size_stamp_renders_identical_to_spr_multitile():
     # #57 acceptance: the stamped block renders byte-identical to the code-drawn
     # spr(n, x, y, w=2, h=2) -- map() over the stamped cells vs one spr() of the
     # same tile span at the same pixel origin.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     sheet = SpriteSheet(16, 32)              # the spec sheet -- map() gates on it
     for t, c in ((7, 1), (8, 2), (7 + 16, 3), (8 + 16, 4)):
         for py in range(8):
@@ -1143,7 +1144,7 @@ def test_map_editor_undo_redo_across_gestures():
     # #91: each COMPLETED gesture (bracketed by begin_edit/end_edit) is ONE undo
     # step recording only the changed cells; undo/redo walk the stack, redo is
     # dropped by a fresh edit, and the depth is bounded.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(8, 8)
     me = MapEditor(tm, SpriteSheet())
     me.n = 3
@@ -1180,7 +1181,7 @@ def test_map_editor_undo_redo_across_gestures():
 def test_map_editor_undo_depth_is_bounded():
     # #91: the undo stack never grows past UNDO_MAX (device RAM); the oldest step
     # is dropped so recent edits stay undoable.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(64, 4)
     me = MapEditor(tm, SpriteSheet())
     me.n = 1
@@ -1192,7 +1193,7 @@ def test_map_editor_undo_depth_is_bounded():
 def test_map_editor_rect_fill_bounds_and_erase():
     # #91: fill_rect fills the inclusive rectangle with the brush, normalizes the
     # corners (any drag direction), clamps to the map, and honors the eraser.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(10, 8)
     me = MapEditor(tm, SpriteSheet())
     me.n = 4
@@ -1221,7 +1222,7 @@ def test_map_editor_rect_fill_bounds_and_erase():
 def test_map_editor_flood_fill_same_tile_noop_and_full_map():
     # #91: flood fills the contiguous same-tile region iteratively; a same-tile
     # fill is a no-op, and a blank map floods entirely.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(6, 5)
     me = MapEditor(tm, SpriteSheet())
 
@@ -1254,7 +1255,7 @@ def test_map_editor_big_batch_compacts_to_bounded_snapshot():
     # (idx, prev, new) tuple per cell (~hundreds of KB on MicroPython). end_edit
     # compacts such a batch to a ("snap", w, h, before, after) whole-map snapshot
     # -- 2 bytes/cell, bounded -- and undo/redo replay it exactly like a delta.
-    from runtime.editors import MapEditor
+    from runtime.editors_paint_map import MapEditor
     tm = TileMap(96, 96)
     me = MapEditor(tm, SpriteSheet())
     tm.mset(10, 10, 7)                       # pre-existing content to restore
@@ -1748,11 +1749,11 @@ def test_background_declares_color_and_image_backdrops():
     # #63 fast-by-default: background(x) declares the backdrop ONCE; the api's
     # _moy_restore_bg hook repaints it (a color cls, or a baked full-screen layer)
     # so a naive cart never writes a per-frame cls/backdrop blit.
-    from runtime import host_app, palette
+    from runtime import host_app
     cv = Canvas(64, 48)
     api = host_app.make_api(cv, StubInput(), {})
-    red = palette.color("red")
-    white = palette.color("white")
+    red = chrome.color("red")
+    white = chrome.color("white")
     api["background"](red)
     api["_moy_restore_bg"]()
     assert cv.pix(0, 0) == red and cv.pix(63, 47) == red
@@ -1777,7 +1778,7 @@ def test_background_declares_color_and_image_backdrops():
 def test_player_restores_declared_background_each_frame(tmp_path):
     # The Player calls the restore hook BEFORE the cart's frame, so a cart with
     # background() and NO cls still gets a clean backdrop every frame.
-    from runtime import host_app, palette
+    from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     # A GAME: it owns all 320x240, so pixel (0, 0) is the cart's. An app runs with
     # the bar over that row. Which cart sorts first is alphabetical, so say "game".
@@ -1792,8 +1793,8 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     )
     assert ws._start()
     ws.player.tick(1 / 30)
-    red = palette.color("red")
-    white = palette.color("white")
+    red = chrome.color("red")
+    white = chrome.color("white")
     assert ws.canvas.pix(0, 0) == white           # the actor drew over the backdrop
     assert ws.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
     ws.canvas.pix(100, 100, white)                # scribble...

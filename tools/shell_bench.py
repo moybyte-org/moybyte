@@ -58,7 +58,8 @@ Each step's output and log land in DIR under the board's name. WiFi stays
 as the board has it; `BOARD_shell.json`'s first row records it.
 
 `--report` renders DIR's files for the board as markdown tables; with
-`--against` each row sits beside the same row of the earlier run, with the
+`--against` each row sits beside the same row of the earlier run (a name a
+run repeats, by its occurrence: the second beside the second), with the
 median's change and a flag where it grew by more than 10% and 2 ms, crossed a
 60 Hz frame, an idle row started painting or the loop rate fell by more than
 10%. Numbers live in issues (#66, #58, #202); this tool makes them.
@@ -892,20 +893,34 @@ def _mem_txt(ra, rb):
     return "; ".join(bits)
 
 
+def _keyed(rows):
+    """Each row with its key, (name, how many rows of that name came before
+    it): a name a run repeats ("editor workspace: settings") pairs with the
+    earlier run's row of the same occurrence."""
+    count = {}
+    out = []
+    for r in rows:
+        n = r.get("name", "")
+        i = count.get(n, 0)
+        count[n] = i + 1
+        out.append(((n, i), r))
+    return out
+
+
 def report(d, board, against=None):
-    after = load_run(d, board)
-    before = {r["name"]: r for r in load_run(against, board)} if against else {}
+    after = _keyed(load_run(d, board))
+    before = dict(_keyed(load_run(against, board))) if against else {}
     seen = set()
     out = ["| scenario | frames | median ms | Δ median | p90 ms | max ms | "
            "top layers (median ms) | PERF diag | flag |",
            "|---|---|---|---|---|---|---|---|---|"]
     mems = []
-    for r in after:
-        n = r.get("name", "")
+    for k, r in after:
+        n = k[0]
         if n == "meta" or "ok" in r:
             continue
-        a = before.get(n)
-        seen.add(n)
+        a = before.get(k)
+        seen.add(k)
         if n.startswith("memory: "):
             mems.append("- %s: %s" % (n[8:], _mem_txt(a, r)))
             continue
@@ -937,8 +952,8 @@ def report(d, board, against=None):
                 (" " + note) if note else ""),
             _perf_txt(pa, r.get("perf")),
             flags(n, sa, sb, pa, r.get("perf")) if a is not None else ""))
-    gone = [n for n in before if n not in seen and n != "meta"
-            and "ok" not in before[n]]
+    gone = [k[0] for k in before if k not in seen and k[0] != "meta"
+            and "ok" not in before[k]]
     text = "\n".join(out)
     if gone:
         text += "\n\nIn the earlier run only: " + "; ".join(gone)

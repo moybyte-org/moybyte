@@ -120,6 +120,10 @@ class FakeSteps:
             f.write("$ %s\n" % " ".join(cmd))
         if cmd[:2] == ["bash", board_pass.WEB_BUILD]:
             return self.web_rc
+        if cmd[1:2] == [board_pass.BOARD_PY] and cmd[3] == "flash":
+            with open(log, "a") as f:
+                f.write("board flash: written in 0.0s\n")
+            return 0
         if cmd[0] == "bash":
             name, chip = self.chip_of(cmd[1])
             with self.lock:
@@ -156,6 +160,7 @@ def bench(tmp_path, monkeypatch):
     """Every board on a fake port nobody holds, an image in dist, the build
     lock in tmp."""
     monkeypatch.setenv("MOYBYTE_LOCK_DIR", str(tmp_path / "locks"))
+    monkeypatch.setenv("MOYBYTE_TIMINGS", str(tmp_path / "timings.csv"))
     image = tmp_path / "image.bin"
     image.write_bytes(b"\0")
     monkeypatch.setattr(board_pass, "image_path", lambda d: str(image))
@@ -272,9 +277,41 @@ def test_the_table_has_one_row_a_board_with_the_failures_by_name(bench, capsys):
                                      "skipped", "failed"]
     rows = {ln.split()[0]: ln.split() for ln in out[head + 1:head + 3]}
     assert rows["tdeck"][1:6] == ["c2d35a0c", "1102", "KB", "3", "1"]
-    assert rows["p4"][5:8] == ["1", "1", "test_wasm_runs"]
+    assert rows["p4"][5:7] == ["1", "1"] and rows["p4"][-1] == "test_wasm_runs"
     assert any(ln.startswith("p4: ") and ln.endswith("p4.suite.log")
                for ln in out)
+
+
+def test_the_table_says_where_each_boards_time_went_and_the_log_keeps_it(
+        bench, capsys):
+    steps = FakeSteps(fail={"p4": ["test_wasm_runs"]})
+    run_pass(bench, steps, "tdeck", "p4")
+    out = capsys.readouterr().out.splitlines()
+    head = next(ln for ln in out if ln.startswith("board  ")).split()
+    assert head[6:12] == ["wait", "build", "flash", "boot", "suite", "total"]
+    rows = {ln.split()[0]: ln.split() for ln in out
+            if ln.split()[:1] in (["tdeck"], ["p4"])}
+    assert rows["tdeck"][8:13] != ["-"] * 5      # build..total all timed
+    assert out[-1].startswith("board pass: wall ")
+    assert "browser console build" in out[-1]
+    import timings
+    got = {(r["tool"], r["lane"], r["status"])
+           for r in timings.read(str(bench / "timings.csv"))}
+    assert {("pass", "pass", "fail"), ("pass", "pass/web", "fail"),
+            ("pass", "tdeck", "ok"), ("pass", "tdeck/build", "ok"),
+            ("pass", "tdeck/flash", "ok"), ("pass", "tdeck/boot", "ok"),
+            ("pass", "tdeck/suite", "ok"), ("pass", "p4", "fail"),
+            ("pass", "p4/wait", "fail")} <= got
+
+
+def test_the_flash_column_is_the_write_and_the_boot_column_the_rest(tmp_path):
+    log = tmp_path / "flash.log"
+    log.write_text("old run\nboard flash: written in 9.0s\n")
+    start = log.stat().st_size
+    with open(log, "a") as f:
+        f.write("esptool...\nboard flash: written in 21.5s\ndesk\n")
+    assert board_pass.flash_split(str(log), start, 60.0) == (21.5, 38.5)
+    assert board_pass.flash_split(str(log), log.stat().st_size, 5.0) == (5.0, None)
 
 
 def test_a_failed_build_stops_its_board_and_names_its_log(bench, capsys):

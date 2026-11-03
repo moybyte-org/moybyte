@@ -2,7 +2,7 @@
 block indent/outdent, and the line-number gutter.
 
 Two layers, mirroring the existing split:
-  * CodeEditor core (runtime.editors) -- pure buffer logic, unit-tested directly.
+  * CodeEditor core (runtime.editors_code) -- pure buffer logic, unit-tested directly.
   * CodeLayer surface (runtime.code_layer) -- the touch affordances (tool palette,
     SELECT mode drag, find bar, gutter), driven through the SAME shared console the
     device runs (host_app + ConsoleDriver / Workstation), so they assert host==device.
@@ -804,7 +804,7 @@ def test_the_swallowed_key_still_types_when_it_is_pressed_again(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The 2026-10 look (docs/look_2026-10.md step 23): the current line and the fade
+# The 2026-10 look (docs/history/look_2026-10.md step 23): the current line and the fade
 # ---------------------------------------------------------------------------
 
 def _w(cv, x, y):

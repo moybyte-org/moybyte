@@ -1,6 +1,6 @@
-"""The cart API is ONE function (runtime/cart_api.py, 2026-08-17).
+"""The cart API is ONE function (runtime/run/cart_api.py, 2026-08-17).
 
-make_api existed twice for a year -- runtime/host_api.py and
+make_api existed twice for a year -- runtime/run/host_api.py and
 device/device_api.py, ~80% line-identical -- and the copies drifted in both
 directions (the device's _Layer lost `tline`; the host's multi-tile spr lost
 the #63 span cache). These tests pin the unification the strongest way

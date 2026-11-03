@@ -1,7 +1,7 @@
 """The browser's half of "update the board that served this page" (#41/#53).
 
 The console this page runs IS the console every board runs, so the update
-SCREEN is already here -- `runtime/update_ui.py` is frozen into this bundle and
+SCREEN is already here -- `runtime/system/update_ui.py` is frozen into this bundle and
 was dead code only because `ws.updater` was None. This module is what makes it
 live: a backend behind the SAME injected seam a board fills with
 `moy_ota.OtaUpdater`, so Settings -> UPDATE ONLINE in a browser is the screen a

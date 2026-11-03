@@ -13,9 +13,9 @@ the rows still open, and the gates that can still kill a claim. Numbers live in
 A Lua cart's whole frame runs inside libmoy: moycore's frame calls `_update`
 and `_draw` back to back with no return to Python, and the kernel's Player
 (`native/moy_play/moy_play.c`) is what calls it. MicroPython is neither the
-engine nor the cart's loop: a VM-free Lua run (`docs/kernel_cartpath_2026-10.md`
-§2) is the kernel loop's foreground on the boards — its input, ticks, chrome
-and present in C, no upcall from launch to exit — and the VM stays up only
+engine nor the cart's loop: a VM-free Lua run (`native/moy_play/moy_play.h`)
+is the kernel loop's foreground on the boards — its input, ticks, chrome and
+present in C, no upcall from launch to exit — and the VM stays up only
 for the shell around it. There is exactly **one** Lua runtime on every tier —
 boards, browser, host — and `import moy_lua` is meant to fail.
 
@@ -27,8 +27,8 @@ second Lua runtime deleted, −1,907 lines (2026-08-13) · both boards flashed a
 measured on glass (2026-08-13; the S3 is where it paid, celeste p50 30 → 43) ·
 `spr_batch`/`rect_batch`/`spans` deleted from the cart API (2026-08-14) · lupa
 deleted (2026-08-14) · the host raster binds libmoy — runtime/canvas.py deleted,
-`runtime/host_canvas.py` over `runtime/gfx_binding.py` (2026-08-15) · the §3.4
-sync RPC ships as `runtime/moy_sync.py` (2026-08-25).
+`runtime/host/host_canvas.py` over `runtime/host/gfx_binding.py` (2026-08-15) · the §3.4
+sync RPC ships as `runtime/carts/moy_sync.py` (2026-08-25).
 
 ## 2. The trace-vocabulary contract — the one rule that gates the next crossing
 
@@ -115,7 +115,7 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   a paint image are the run's own C (#224, `bc88eb2`), so a layer cart makes
   no crossing; the host keeps the console's layer object behind a trampoline.
 - **Registration is a DENY list, not an allow list** — what is stable and
-  enumerable is what libmoy OWNS. One definition, `runtime/lua_ext.py`, imported
+  enumerable is what libmoy OWNS. One definition, `runtime/run/lua_ext.py`, imported
   by every runtime including the host's; an allow list silently drops any verb
   nobody remembered to add, and did.
 - **The spec-surface core grows UPSTREAM.** Raster, audio, VM and loop are

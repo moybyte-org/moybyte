@@ -12,12 +12,17 @@ it, wait for the fresh boot, run its on-glass suite, print one table.
 
 It is ONE job however many boards it covers: start it in the background and
 take its one completion notice. It prints a line naming the log directory,
-then nothing until the table, which is always its last lines.
+then nothing until the table and its wall time, which are always its last
+lines.
 
 One row a board: the commit its image was built from (`+` when the tree had
 tracked changes on top), the OTA-slot headroom the build printed, the suite's
-passed/skipped/failed counts and the failing tests by name. Every step's full
-output goes to a log file under one directory, whose path is printed.
+passed/skipped/failed counts, where its time went (the wait for the P4
+build slot, build, flash, boot to the desk, suite, the board's total) and the
+failing tests by name. Under the table, the pass's wall time; every time is
+also appended to the machine's timing log (tools/timings.py, tool `pass`).
+Every step's full output goes to a log file under one directory, whose path
+is printed.
 
 A PASS THAT BUILDS builds the browser console first
 (`firmware/web_runner/build.sh`, once), because every image bakes this tree's
@@ -61,6 +66,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import board                                                       # noqa: E402
+import timings                                                     # noqa: E402
 
 BOARD_PY = os.path.join(HERE, "board.py")
 # Every image bakes the browser console from this tree's bundle, so a pass
@@ -77,6 +83,7 @@ LOST_RACE = "index.lock':\n  File exists"
 LOST_RACE_RE = re.compile(r"index\.lock':\s+File exists")
 RETRIES = 2
 RETRY_PAUSE_S = (5.0, 20.0)
+FLASH_RE = re.compile(r"board flash: written in ([\d.]+)s")
 HEADROOM_RE = re.compile(r"App image: \d+ bytes of a \d+-byte \S+ slot -- "
                          r"(-?\d+) bytes headroom")
 GATE_RE = re.compile(r"""on_glass\.gate\(\s*["'](MOYBYTE_\w+_PORT)["']""")
@@ -85,6 +92,10 @@ DIR_RE = re.compile(r"""ROOT\s*/\s*["']firmware["']\s*/\s*["'](\w+)["']""")
 
 class PassError(RuntimeError):
     """A pass that cannot start, in words a person can act on."""
+
+
+# A row's time columns, in the order a board takes them.
+STEPS = ("wait", "build", "flash", "boot", "suite", "total")
 
 
 class Row:
@@ -98,6 +109,8 @@ class Row:
         self.failing = []
         self.note = ""
         self.logs = []
+        # Seconds per step, None for a step the board did not take.
+        self.times = dict.fromkeys(STEPS)
 
     @property
     def ok(self):
@@ -106,9 +119,12 @@ class Row:
     def cells(self):
         def n(v):
             return "-" if v is None else str(v)
+        def t(v):
+            return "-" if v is None else timings.dur(v)
         why = self.note or ", ".join(self.failing)
-        return [self.name, self.image, self.headroom, n(self.passed),
-                n(self.skipped), n(self.failed), why]
+        return ([self.name, self.image, self.headroom, n(self.passed),
+                 n(self.skipped), n(self.failed)]
+                + [t(self.times[k]) for k in STEPS] + [why])
 
 
 # -- what a pass covers --------------------------------------------------------
@@ -274,16 +290,30 @@ def junit_counts(path):
 def run_board(name, a, ctx):
     """One board, start to finish. Never raises: a stopped step is the row's
     note, with the log that says why."""
-    try:
-        return _run_board(name, a, ctx)
-    except Exception as exc:  # noqa: BLE001 -- one board's crash is its row
-        row = Row(name)
-        row.note = "pass error: %s" % (str(exc).splitlines() or [repr(exc)])[0]
-        return row
-
-
-def _run_board(name, a, ctx):
+    t0 = time.monotonic()
     row = Row(name)
+    try:
+        _run_board(row, a, ctx)
+    except Exception as exc:  # noqa: BLE001 -- one board's crash is its row
+        row.note = "pass error: %s" % (str(exc).splitlines() or [repr(exc)])[0]
+    row.times["total"] = time.monotonic() - t0
+    return row
+
+
+def flash_split(log, start, secs):
+    """(flash, boot) of a `board.py flash` that took `secs`, from the line it
+    prints when the image is written; (secs, None) without one."""
+    with open(log, errors="replace") as f:
+        f.seek(start)
+        m = FLASH_RE.search(f.read())
+    if not m:
+        return secs, None
+    wrote = min(float(m.group(1)), secs)
+    return wrote, secs - wrote
+
+
+def _run_board(row, a, ctx):
+    name = row.name
     d, port, run = ctx["dirs"][name], ctx["ports"][name], ctx["run"]
     logs = ctx["logdir"]
 
@@ -303,8 +333,12 @@ def _run_board(name, a, ctx):
 
     if not a.no_flash and not a.skip_build:
         path = log("build")
+        t = time.monotonic()
         with build_slot(board.board_file(d).get("board", {}).get("chip")):
+            row.times["wait"] = time.monotonic() - t
+            t = time.monotonic()
             rc = build(run, d, path)
+            row.times["build"] = time.monotonic() - t
         row.headroom = headroom_of(path)
         if rc != 0:
             return stop("build failed", path)
@@ -318,9 +352,15 @@ def _run_board(name, a, ctx):
         row.image = image_stamp(d)
         if board.holders(port):
             return stop("port held", path)
-        if run(verb("flash"), path) != 0:
+        start = os.path.getsize(path) if os.path.exists(path) else 0
+        t = time.monotonic()
+        rc = run(verb("flash"), path)
+        row.times["flash"], row.times["boot"] = flash_split(
+            path, start, time.monotonic() - t)
+        if rc != 0:
             return stop("flash failed", path)
     path = log("suite")
+    t = time.monotonic()
     if board.holders(port):
         return stop("port held", path)
     run(verb("desk"), path)
@@ -336,6 +376,7 @@ def _run_board(name, a, ctx):
     if os.path.exists(xml):
         os.remove(xml)
     run(cmd, path, env=env)
+    row.times["suite"] = time.monotonic() - t
     got = junit_counts(xml)
     if got is None:
         stop("suite did not run", path)
@@ -353,8 +394,8 @@ def _run_board(name, a, ctx):
 # -- the table ----------------------------------------------------------------
 
 
-HEAD = ["board", "image", "headroom", "passed", "skipped", "failed",
-        "failing / stopped at"]
+HEAD = (["board", "image", "headroom", "passed", "skipped", "failed"]
+        + list(STEPS) + ["failing / stopped at"])
 
 
 def table(rows):
@@ -420,7 +461,23 @@ def resolve_ports(names, dirs):
     return ports, stopped
 
 
+def record(rows, wall, web, ok):
+    """The pass's times into the machine's timing log. Never fails a pass."""
+    try:
+        whole = [("pass", wall)] + ([("pass/web", web)] if web is not None
+                                    else [])
+        timings.record("pass", whole, "ok" if ok else "fail")
+        for r in rows:
+            lanes = [(r.name, r.times["total"])] if r.times["total"] else []
+            lanes += [("%s/%s" % (r.name, k), r.times[k])
+                      for k in STEPS[:-1] if r.times[k] is not None]
+            timings.record("pass", lanes, "ok" if r.ok else "fail")
+    except OSError as exc:
+        print("board pass: times not recorded (%s)" % exc)
+
+
 def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
+    t0 = time.monotonic()
     a = parser().parse_args(argv)
     dirs = board.boards() if dirs is None else dirs
     if main_checkout is None:
@@ -441,9 +498,13 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
            "suites": suites(ROOT, dirs)}
     todo = [n for n in names if n in ports]
     rows = {r.name: r for r in stopped}
+    web = None
     if todo and not (a.skip_build or a.no_flash):
         web_log = os.path.join(logdir, "web.build.log")
-        if run(["bash", WEB_BUILD], web_log) != 0:
+        t = time.monotonic()
+        rc = run(["bash", WEB_BUILD], web_log)
+        web = time.monotonic() - t
+        if rc != 0:
             for n in todo:
                 rows[n] = Row(n)
                 rows[n].note = "web build failed (web.build.log)"
@@ -454,11 +515,17 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
             for row in pool.map(lambda n: run_board(n, a, ctx), todo):
                 rows[row.name] = row
     ordered = [rows[n] for n in names]
+    ok = all(r.ok for r in ordered)
+    wall = time.monotonic() - t0
+    record(ordered, wall, web, ok)
     print(table(ordered))
     for r in ordered:
         if (r.note or r.failed) and r.logs:
             print("%s: %s" % (r.name, r.logs[-1]))
-    return 0 if all(r.ok for r in ordered) else 1
+    print("board pass: wall %s%s" % (
+        timings.dur(wall),
+        "" if web is None else ", browser console build %s" % timings.dur(web)))
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

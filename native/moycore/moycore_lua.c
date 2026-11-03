@@ -822,10 +822,10 @@ static void put_err(char *err, size_t n, const char *msg)
 }
 
 
-// -- the cart's layers, paint images and scenes, in C (docs/kernel_cartpath_2026-10.md §2) --
+// -- the cart's layers, paint images and scenes, in C (native/moy_play/moy_play.h) --
 //
 // __layer_new, __layer_spr_img and __image_handle, which the handles prelude
-// (runtime/lua_ext.py's PRELUDE_HANDLES) captures, and the scene natives
+// (runtime/run/lua_ext.py's PRELUDE_HANDLES) captures, and the scene natives
 // (moycore_scene.h): a layer's pixels and a paint image's indices are the
 // run's, so none of them crosses into Python.
 //

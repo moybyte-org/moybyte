@@ -1,5 +1,5 @@
 // The module `moy_play`: the kernel's Player as a VM sees it
-// (docs/kernel_cartpath_2026-10.md §3). runtime/moy_play.py is the same
+// (native/moy_play/moy_play.h). runtime/host/moy_play.py is the same
 // module on CPython, by ctypes, name for name:
 //
 //   Tick()            the tick model (moy_tick.h), one per run:
@@ -17,7 +17,7 @@
 //                     (MOY_WASM).
 //
 // The Player (moy_play.h), the VM's alone -- on CPython the host's runs are
-// runtime/lua_host.py's and runtime/wasm_host.py's:
+// runtime/lua_host.py's and runtime/host/wasm_host.py's:
 //
 //   launch(path, paced[, flags]) -> run   the cart's verdict and its runtime's
 //                                row; flags HOME, UNSIGNED feed the stop verdict
@@ -49,7 +49,7 @@
 #include "moy_input.h"
 
 #if MICROPY_KBD_EXCEPTION
-// A Ctrl-C the serial ISR scheduled for the VM (docs/kernel_cartpath_2026-10.md
+// A Ctrl-C the serial ISR scheduled for the VM (docs/history/kernel_cartpath_2026-10.md
 // §9 decision 4): the run in front ends with why SERIAL, and the console's
 // next upcall raises the interrupt as it does with no run in front.
 bool moy_play_interrupt_pending(void) {

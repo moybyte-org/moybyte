@@ -5,7 +5,7 @@ the inline-error behavior is driven through the shared console exactly like
 test_safe_edit drives it (host_app + a hand-authored cart).
 """
 
-from runtime import host_app  # noqa: F401  -- registers the `editors` alias console.py needs
+from runtime import host_app  # noqa: F401  -- registers the `editors_*` aliases console.py needs
 from runtime.code_layer import _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN
 from text_twin import _highlight    # the C's oracle (tests/test_text_view.py)
 from ws_helpers import build_ws_with_cart
@@ -226,7 +226,7 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
 
 
 def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
-    """Code syntax colours are theme roles (docs/look_2026-10.md, the
+    """Code syntax colours are theme roles (docs/history/look_2026-10.md, the
     decisions): Moy's Day draws the targets' set, each placed in the live
     block the canvas draws through."""
     from runtime import chrome

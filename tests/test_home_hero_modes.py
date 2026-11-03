@@ -1,5 +1,5 @@
 """The handheld home shows a theme's hero at one side in every mode
-(docs/look_2026-10.md step 17): a mode whose faces are taller (Moy Day's
+(docs/history/look_2026-10.md step 17): a mode whose faces are taller (Moy Day's
 against Night's) takes the room from the gaps around the caption, never a
 clean step off the card (`CarouselLauncher._geom_hh`)."""
 

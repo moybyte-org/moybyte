@@ -42,9 +42,9 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from runtime import cover_png, host_app, host_canvas, palette  # noqa: E402
+from runtime import cover_png, gfx_binding, host_app, host_canvas  # noqa: E402
 
-MOY64_RGB = bytes(c for rgb in palette.MOY64 for c in rgb)
+MOY64_RGB = bytes(c for rgb in gfx_binding.moy64() for c in rgb)
 
 FRAMES = 80           # ~2.5s of play: the scene develops, nobody has died yet
 SEED = 1
@@ -279,7 +279,7 @@ def capture(slug):
             return None
         cv = ws.canvas                   # the cart's GAME canvas
         # indices_of is the exact reduction of the RGB565 canvas back to MOY64
-        # indices -- see runtime/host_canvas.py.
+        # indices -- see runtime/host/host_canvas.py.
         return cv.w, cv.h, host_canvas.indices_of(cv), crop
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

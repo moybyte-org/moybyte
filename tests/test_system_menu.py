@@ -549,7 +549,7 @@ import test_shell_goldens as _g  # noqa: E402
 
 _THEME_MODES = [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
                 ("contrast", "light"), ("contrast", "dark")]
-_FADE_H = 10            # the engine's fade, rows at the scale (moy_ui_api.c)
+_FADE_H = 10            # the engine's fade, rows at the scale (moy_ui_api_int.h)
 
 
 class _Ladder:

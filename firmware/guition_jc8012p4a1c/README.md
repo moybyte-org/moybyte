@@ -19,6 +19,12 @@ function. This directory owns what this glass decides: the panel define, the
 backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 `docs/board_ports_2026-08.md` carries the checklist this port walked.
 
+**Support level: beta, permanently (owner, 2026-11-01).** The glass scans
+portrait and the console runs landscape, so every frame pays a rotation, and
+everything runs a little slower here than on the Waveshare P4. That makes it
+a poor general console, but a good board for a single fullscreen app, such
+as a Home Assistant panel.
+
 ## What this glass decided (read before touching the board)
 
 - **The console runs LANDSCAPE, 1280×800, on glass that scans PORTRAIT** (owner
@@ -166,9 +172,9 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
   the one fact the two boards' display modules differ on), the
   `MOY_DSI_BL_*` defines in `mpconfigboard.cmake` that `moy_dsi.backlight`
-  and the kernel's recovery floor drive. The vendor BSP
-  drives it as an LEDC PWM channel, so a duty is one line away the day
-  something wants dimming; today every caller asks for on/off.
+  and the kernel's recovery floor drive. It is an LEDC PWM channel at the
+  kernel's level, as the vendor BSP drives it (`native/moy_glass/moy_light_ledc.h`):
+  Settings' Brightness and the idle ladder's dim rung.
 - **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, no CH343): the
   S3 boards' rules apply, not the Waveshare's — open with DTR/RTS ASSERTED,
   never pulse a reset under an open handle (`attach_only` in `board.toml`),
@@ -212,7 +218,7 @@ import moy_runtime; moy_runtime.run_ppa_smoke()        # PPA vs CPU composite A/
 
 Ctrl-C in the desktop drops to the REPL (the USB-Serial/JTAG stays alive under
 the loop, like the S3 boards); the dev channel is the shared one
-(`state`/`tap`/`swipe`/`run`/`py`/`bl`/`power`… — `runtime/dev_channel.py`)
+(`state`/`tap`/`swipe`/`run`/`py`/`bl`/`power`… — `runtime/boot/dev_channel.py`)
 plus the P4 extras `bt`/`union`/`cache`.
 
 ## What's here
@@ -245,7 +251,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | Backlight | **GPIO23, active-high** (LEDC-capable) |
 | Touch | GSL3680 @ **0x40** on I2C0 **SDA=7 / SCL=8** (400kHz), **RST=22, INT=21** (INT held low through reset selects the address) |
 | C6 (WiFi/BLE) | ESP-Hosted SDIO: CLK18 CMD19 D0–D3 = 14–17, reset **GPIO54** — the Waveshare's wiring pin for pin |
-| Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Unwired, like the Waveshare's (#82) |
+| Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Wired, with the Waveshare's driver (#82): the codec answers and the stream runs with 0 underruns, but our unit has no speaker fitted, so nobody has heard it |
 | TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
 | Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`) |
@@ -316,11 +322,11 @@ for the C6/audio pins, which agree with the BSP.
 1. ~~Touch calibration~~ — done on glass, 2026-09-06 (above).
 2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
 3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): the radio link
-   (`runtime/players.py`'s `EspNowLink`) fails into an inactive link by design. The Waveshare's `c6_slave/` image is
+   (`runtime/run/players.py`'s `EspNowLink`) fails into an inactive link by design. The Waveshare's `c6_slave/` image is
    the same chip and the same SDIO; flashing it here is Phase D of
    `docs/history/espnow_p4_2026-08.md` on this board, and the publisher does
    not stage a `c6` block in this board's manifest yet.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
-5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
-   Waveshare), backlight PWM (`moy_dsi`'s backlight entry, when wanted).
+5. BLE keyboard (unverified: nothing paired), audio by ear (no speaker on
+   our unit), backlight PWM dimming on glass.

@@ -32,6 +32,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
@@ -475,13 +476,41 @@ bool moy_ble_start(void) {
     return true;
 }
 
-void moy_ble_stop(void) {
+// The host stops on its own task: nimble_port_stop() returns once that task
+// has left nimble_port_run(). A host whose start event has not run yet answers
+// BLE_HS_EALREADY and one already stopping BLE_HS_EBUSY; both settle within a
+// few of the host task's turns.
+static bool host_stop(void) {
+    for (int tries = 0; tries < 100; tries++) {
+        if (nimble_port_stop() == 0) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    return false;
+}
+
+bool moy_ble_stop(void) {
     if (!s_up) {
-        return;
+        return false;
     }
     s_up = false;
     ble_npl_callout_stop(&s_tick);
-    nimble_port_stop();
+    if (!host_stop()) {
+        s_up = true;
+        ble_npl_callout_reset(&s_tick, ble_npl_time_ms_to_ticks32(500));
+        return false;
+    }
+    // Our events and the tick go back to NimBLE's pools while they exist.
+    // An event keeps its pool block across nimble_port_deinit(), and the next
+    // start's ble_npl_event_init() REUSES a block it still points into without
+    // taking it off the re-made free list: the block is then on the list and
+    // in use at once, the event's memset cuts the list, and the next
+    // os_memblock_get() -- an HCI event on the controller's task -- loads
+    // through NULL.
+    ble_npl_callout_deinit(&s_tick);
+    ble_npl_event_deinit(&s_verb_ev);
+    ble_npl_event_deinit(&s_scan_done_ev);
     nimble_port_deinit();
     #if defined(MOY_INPUT_BLE_HOSTED)
     esp_hosted_bt_controller_disable();
@@ -489,6 +518,7 @@ void moy_ble_stop(void) {
     #endif
     s_synced = false;
     moy_hid_stopped(s_h);
+    return true;
 }
 
 bool moy_ble_up(void) {
@@ -537,7 +567,8 @@ bool moy_ble_start(void) {
     return false;
 }
 
-void moy_ble_stop(void) {
+bool moy_ble_stop(void) {
+    return false;
 }
 
 bool moy_ble_up(void) {

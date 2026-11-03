@@ -3,8 +3,8 @@
 **Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance
 and Storybook grew organically ("a cartridge identity backed by a
 responsive system process") into one public seam, aligned with
-`docs/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
-(`runtime/calc_app.py` + `system_carts/moybyte.calc.moy`) is the reference app — small
+`docs/history/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
+(`runtime/apps/calc_app.py` + `system_carts/moybyte.calc.moy`) is the reference app — small
 enough to read in one sitting, built ONLY on the seams below.
 
 ## The model
@@ -80,20 +80,20 @@ came to 41 distinct names and ~371 uses, 13 of the names private. Nothing could
 say what an app was permitted to do, which is the question user apps have to
 answer.
 
-An app now takes an **`AppContext`** (`runtime/app_context.py`) carrying only the
+An app now takes an **`AppContext`** (`runtime/shell/app_context.py`) carrying only the
 roles it declared:
 
 | role | what it is | verbs |
 |---|---|---|
 | `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
 | `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
-| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
+| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
 | `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made with a files kind (a user app's) reaches that kind alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
 | `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
-| `ctx.notify` | achievement events | `achieve()` |
-| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theming_2026-09.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
+| `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
+| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
 | `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()` |
@@ -103,7 +103,7 @@ Read that module for the signatures. The verbs column is the role table's
 Every context holds a **grant**, a row of native/moy_app's grant table keyed by
 the app's id, and every role is native/moy_app's role object over it: a C row
 reads the kernel's state, and a shell row checks the grant and calls the server
-the console registers for the role (`runtime/shell_servers.py`) with the grant
+the console registers for the role (`runtime/shell/shell_servers.py`) with the grant
 first (the table's `server` column says which). The rows with a `wasm` type
 are what a compiled app imports ("A compiled user app" below).
 Four things about the roles are load-bearing:
@@ -160,18 +160,15 @@ now.
 ## What an app draws with
 
 An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
-2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
-`slider`, `list`, `group`, `info`, `link`, `cycle`, `seg`, `swatches`,
-`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `popover`, `menu`, `tabs`,
-`grid`, `card`, `part`, `part_at`, `split`, `focus`, `keys_taken`, `at`) and its rect algebra
-(`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
+2026-10-15): `runtime/toolkit/ui.py`'s verbs (the list is that doc's §1) and its
+rect algebra (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
 `panel`, `toolbar`, `dialog`, `text_field`), the marks
-(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
+(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/toolkit/ui_draw.py`, the chrome's; the shipped apps not yet
 moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
 An app on the verbs sets `UI = True` and draws them into the frame its
-host side, `ctx.ui` (`ui_draw.AppHost`), begins: its handlers hand it the
+host side, `ctx.ui` (`ui_host.AppHost`), begins: its handlers hand it the
 input (`keys`, `point`, each answering whether a frame is owed) and its draw
 begins the frame (`begin`); Calc is the example.
 Theme tokens are `ctx.theme.colors()` and `ctx.theme.light()`; layout stays
@@ -189,7 +186,7 @@ bar.
 
 This used to be a paragraph here telling you to write both halves yourself, in
 the right order, and an app that forgot either became **unexitable** — silently,
-on device only. Seven apps carried the same two lines. `runtime/console.py`'s
+on device only. Seven apps carried the same two lines. `runtime/shell/console.py`'s
 `_app_bar_route` owns them now, pinned behaviourally by
 `tests/test_app_api.py` (a stub app that draws no strip and routes no bar tap
 must still show the strip and still exit on its back, and so must all seven
@@ -198,7 +195,7 @@ shipped apps, through the same assertion).
 Two things follow for an app author:
 
 - **Lay out in the content rect.** The bar may sit on any edge the console's
-  layout puts it (docs/shell_layout_2026-10.md §7); the host paints over its
+  layout puts it (docs/theme_and_shell_2026-11.md §8.5); the host paints over its
   band and swallows taps inside it, so `handle_pointer` never sees one. Your
   layout's `cx, cy, cw, ch` is the rest of your surface — the whole of it in a
   window, where the WM's title strip is outside your buffer.
@@ -258,7 +255,7 @@ capabilities in its own `manifest.json` and gets them as cart globals.
                 "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
 The mechanism is `make_system_api(ctx_factory, cart, canvas, ...)`
-(`runtime/system_api.py` -- READ IT, it is the authority and carries the policy
+(`runtime/shell/system_api.py` -- READ IT, it is the authority and carries the policy
 argument for each entry). It is a FILTER over the `AppContext` above and not a
 second interface: it maps each declared permission to a role, calls the same
 `ws.app_context` factory a shipped app goes through, and returns the globals
@@ -278,7 +275,9 @@ proves it with one cart source opened twice, one manifest line apart.
 
 Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
 author carts can escalate itself), `install` (the same, with somebody else's
-cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all. The
+cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all: the update
+screen (`runtime/system/update_ui.py`) is kernel chrome, like the About card the
+system menu draws, not an app, and keeps the console. The
 policy is C's (native/moy_app: the permission table, the files kinds, the
 two-kinds refusal and the key a grant is made under, the cart's `id`), and its
 permission table is an ALLOWLIST, so a role nobody mapped is ungrantable by
@@ -287,7 +286,7 @@ one or the other, so ADDING a role forces the decision. A user app's grant is
 its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
 Five globals every `type: "app"` cart gets with no permission, because they are
-how an app draws rather than what it may reach: **`ui`** (`runtime/ui.py`, the
+how an app draws rather than what it may reach: **`ui`** (`runtime/toolkit/ui.py`, the
 public UI API's verbs, the calls a Lua cart and a compiled app make;
 `ui_draw`, the engine layer under them, rides beside it while a system cart
 still draws with it), **`screen()`** (the canvas -- `ui_draw`'s `cv`),
@@ -379,9 +378,9 @@ an `app` block, a regenerated `app_decls.py` and a firmware build.
 ### Crash isolation: three strikes (#160)
 
 The Player turns a cart exception into the stop card (its See why opens the
-code on the line; docs/look_2026-10.md step 33). What it cannot catch is a cart that does not
+code on the line; docs/history/look_2026-10.md step 33). What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
-itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
+itself, the next boot runs it again. `runtime/shell/crash_guard.py` marks the app id in
 `system.json` BEFORE the cart's code is compiled and clears it after three
 painted frames (a compiled app whose frames the kernel's Player drew clears it
 at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
@@ -391,14 +390,14 @@ cart stays on Make, because editing it is how it gets fixed.
 The Player arms it for `type: "app"` carts only. Two small settings writes per
 open is not free, and a game that always crashes shows the panel and is not a
 brick. The wallpaper, which runs itself at every boot, has its own ledger; how
-it boots without those writes is in `runtime/crash_guard.py`.
+it boots without those writes is in `runtime/shell/crash_guard.py`.
 
 ## Non-goals (v1)
 
-- Kid-installed NATIVE apps -- a `runtime/` module in an image the kid did not
-  build. `register_app` is a shell seam and stays one. What #181 asked for is
-  covered by the USER APPS section above: the cart IS the app.
 - Multiple instances of one app.
+
+Native apps are the direction (owner, 2026-11-01): C apps as ELF modules
+loaded on demand (#227).
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
 anyway: `files_app` reached straight into the notebook app's layer across five
@@ -408,7 +407,7 @@ resolution is by REGISTERED ID, so no app holds a reference to another app's
 class and a build without the target degrades to a status line. IPC beyond
 "open that, pointed here" is still out.
 
-The Files ROUTER (docs/text_editing_2026-09.md) is the seam's second customer,
+The Files ROUTER (docs/theme_and_shell_2026-11.md §10.2) is the seam's second customer,
 and it added verbs that are all "open that, pointed here":
 `nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
 the project Editor, `nav.open_text(name, kind, mode)` opens a document on

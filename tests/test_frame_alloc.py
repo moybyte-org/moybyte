@@ -52,7 +52,7 @@ console publishes while it is down, and the state the frame keeps to compare
 the next with. So a drag frame is held to one answer a card it drew and four
 more; the bar's clock turning its minute is an event of its own, one frame.
 
-Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
+Then Settings' Achievements page (docs/history/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
 Then the home, idle: the launcher's input and frame path with nothing pressed
@@ -87,7 +87,7 @@ from pathlib import Path
 import pytest
 
 from tools.wasm_module import format_version
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
@@ -725,7 +725,7 @@ def apps(loop, info):
 
 
 def editor(loop, info):
-    """The Editor's table of parts (docs/ui_blocks_2026-10.md section 4.1):
+    """The Editor's table of parts (docs/ui_api_2026-10.md section 2):
     the Blocks outline grown to 40 rows, its cursor walked a row a frame
     (the move handed in between frames, as a key's edit is) and its rows
     swiped and coasting: what each frame and the page's draw allocate."""
@@ -794,7 +794,7 @@ def editor(loop, info):
 
 
 def panes(loop, info):
-    """ui.split's moving frames (docs/ui_blocks_2026-10.md section 4.2): on
+    """ui.split's moving frames (docs/ui_api_2026-10.md section 5a): on
     an app host of its own, a divider pressed, dragged 40 px and let go, then
     a tap on a part in the second pane (ui.part_at): what the split
     allocates each frame, and what part_at does."""
@@ -843,8 +843,8 @@ def panes(loop, info):
 
 
 def row_of_parts(loop, info):
-    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
-    section 4.1): on an app host of its own, a drag across it, its fling
+    """A table of parts side by side under snap (docs/ui_api_2026-10.md
+    section 2): on an app host of its own, a drag across it, its fling
     and its glide to a part's centre, each part drawn at its distance
     (ui.table_dist): what the table, its parts and their distances
     allocate each frame."""
@@ -1439,7 +1439,7 @@ SETTINGS_FRAME = 1024
 @pytest.mark.parametrize("app", ("getcarts", "myart"))
 def test_an_app_drag_is_shift_frames(result, app):
     """The drag frames of an app whose shelf carries its gens shift
-    (docs/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
+    (docs/history/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
     slots and the floor's rects are kept, so the budget the test below holds
     every drawn frame to holds the shift frames."""
     info, text = result
@@ -1531,7 +1531,7 @@ print("RESULT", idle, typed, gc.mem_alloc() - m0)
 def _mp_result(tmp_path, driver, why):
     exe = require_unix_mp(board_model=True, why=why)
     script = tmp_path / "driver.py"
-    script.write_text(driver.replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+    script.write_text(driver.replace("@RUNTIME@", repr(runtime_tree())))
     out = subprocess.run([exe, "-X", "heapsize=16M", str(script)],
                          capture_output=True, text=True, timeout=60)
     line = [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT ")]
@@ -1573,8 +1573,8 @@ def test_the_blocks_outlines_moving_frames_allocate_nothing(result):
 
 
 def test_a_row_of_parts_allocates_nothing(result):
-    """A table of parts side by side under snap (docs/ui_blocks_2026-10.md
-    section 4.1): no frame of a drag across it, its fling and its glide to a
+    """A table of parts side by side under snap (docs/ui_api_2026-10.md
+    section 2): no frame of a drag across it, its fling and its glide to a
     part's centre allocates, its parts and their distances included, past
     the first, which makes its rows' cells once, but the answer of a frame
     whose current row moved."""
@@ -1586,7 +1586,7 @@ def test_a_row_of_parts_allocates_nothing(result):
 
 
 def test_a_splits_divider_drag_allocates_nothing(result):
-    """ui.split (docs/ui_blocks_2026-10.md section 4.2): no frame of a
+    """ui.split (docs/ui_api_2026-10.md section 5a): no frame of a
     divider's press, drag and let-go allocates, the drag lands in `sizes`,
     and ui.part_at answers a tap on a part in a pane, allocating its
     answer alone on the frame it answers."""

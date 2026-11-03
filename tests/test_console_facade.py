@@ -31,9 +31,10 @@ import re
 from pathlib import Path
 
 from ws_helpers import build_desktop_ws, build_ws
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
-CONSOLE = ROOT / "runtime" / "console.py"
+CONSOLE = runtime_file("console.py")
 
 # The collaborator attributes on Workstation -- all six of the architecture
 # doc's clusters, complete as of landing E.
@@ -48,7 +49,6 @@ FORWARDS = {
         "web_console_url": "url",            # dev_channel's `web`
         "park_web_console": "park",          # layers.py's contract comment
         "stop_web_console": "stop",          # the Guition on-glass suite (serial)
-        "unpark_web_console": "unpark",      # tests
         "webhost_serving": "serving",        # settings_layer, tools/push_cart_wifi
         "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
         "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi
@@ -146,7 +146,7 @@ def _workstation():
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "Workstation":
             return node
-    raise AssertionError("Workstation is not a class in runtime/console.py")
+    raise AssertionError("Workstation is not a class in runtime/shell/console.py")
 
 
 def _mixin_modules(tree, bases):
@@ -172,7 +172,7 @@ def _workstation_classes():
     assert set(found) == bases, "a Workstation base is not imported by name"
     out = [ws]
     for name in sorted(bases):
-        path = ROOT / "runtime" / (found[name] + ".py")
+        path = runtime_file(found[name] + ".py")
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.ClassDef) and node.name == name:
                 out.append(node)
@@ -190,11 +190,30 @@ def _methods():
                 yield fn
 
 
+# The mixins Workstation lists as bases, by module. A new one is a deliberate
+# edit here: the ratchets below walk exactly these, so a base that was not
+# imported by name -- or a carve that forgot this table -- fails here first.
+MIXINS = {
+    "InputVerbs": "console_input",
+    "HomeVerbs": "console_home",
+    "TextVerbs": "console_text",
+    "CanvasBinding": "console_canvas",
+    "PerfMeters": "console_perf",
+    "SettingsToggles": "console_settings",
+    "SaveVerbs": "console_saves",
+    "Notices": "console_notices",
+    "SpineVerbs": "console_spine",
+}
+
+
 def test_the_ratchet_sees_every_mixin():
-    """The walk covers the four mixins console.py names as bases; a fifth
-    that was not imported by name would be silently skipped."""
+    """The walk covers exactly the mixins console.py names as bases, each
+    from the module MIXINS pins."""
+    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
+    bases = {b.id for b in _workstation().bases if isinstance(b, ast.Name)}
+    assert _mixin_modules(tree, bases) == MIXINS
     names = [c.name for c in _workstation_classes()]
-    assert names[0] == "Workstation" and len(names) >= 5, names
+    assert names == ["Workstation"] + sorted(MIXINS), names
 
 
 def _statements(fn):

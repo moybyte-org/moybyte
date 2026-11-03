@@ -1,6 +1,6 @@
-// moy_img: the moyimg-v1 decoder in C (docs/kernel_cartpath_2026-10.md §1),
+// moy_img: the moyimg-v1 decoder in C (docs/history/kernel_cartpath_2026-10.md §1),
 // the reader a cart's `images/*.moyimg` crosses through when its run has no
-// VM. runtime/moyimg.py's `decode_moyimg` is the reference, rule for rule, and
+// VM. runtime/carts/moyimg.py's `decode_moyimg` is the reference, rule for rule, and
 // tests/test_moy_img.py holds the two together over every seed image.
 //
 // A `.moyimg` is a JSON object {format, w, h, data}: `w` and `h` as Python's
@@ -60,7 +60,7 @@ int moy_img_decode(const char *text, size_t n, uint8_t *pix, size_t cap,
 //   the stream  a ZLIB stream of exactly w*h indices, its checksum good; what
 //               follows its end inside the base64 is not read as pixels.
 //
-// runtime/moyimg.py's `cover_stream` is the reference, rule for rule.
+// runtime/carts/moyimg.py's `cover_stream` is the reference, rule for rule.
 
 #define MOY_IMG_HEAD 256u
 
@@ -78,7 +78,7 @@ int moy_img_stream_head(void *st, moy_img_read_t rd, void *ctx, uint32_t *w, uin
 
 // The rest of the picture, COVER-sampled into `dst` (dw*dh indices): the
 // source cropped about its centre to dst's aspect and sampled nearest, the
-// formula runtime/file_widgets.py's `cover_indices` is. `row` holds w bytes.
+// formula runtime/toolkit/file_widgets.py's `cover_indices` is. `row` holds w bytes.
 // MOY_IMG_OK, MOY_IMG_NOT (dst then holds part of a picture) or MOY_IMG_READ.
 int moy_img_stream_cover(void *st, uint8_t *row, uint8_t *dst, uint32_t dw, uint32_t dh);
 

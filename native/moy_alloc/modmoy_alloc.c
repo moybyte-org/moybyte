@@ -6,7 +6,7 @@
 // buffer and a layer are (device/dsi_panel.py, device/device_canvas.py).
 //
 // alloc/free (#186) is the registry-backed pair beside it, for payloads that
-// must not be walked by every gc mark phase; runtime/moybuf.py is the Python
+// must not be walked by every gc mark phase; runtime/toolkit/moybuf.py is the Python
 // discipline over it. See the moy_buf block below for what the registry buys.
 
 #include "py/obj.h"
@@ -72,7 +72,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_alloc_malloc_dma_obj, 1, 2, moy_a
 // makes free() refuse any pointer this module did not hand out -- a wrong
 // free raises ValueError instead of corrupting the heap -- and a freed view
 // is neutered (len 0, items NULL) so a stale read raises instead of reading
-// freed memory. Python-side discipline lives in runtime/moybuf.py.
+// freed memory. Python-side discipline lives in runtime/toolkit/moybuf.py.
 
 #if MOY_HAVE_HEAP_CAPS
 typedef struct _moy_buf_node_t {

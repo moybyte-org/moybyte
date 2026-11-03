@@ -1,4 +1,4 @@
-"""The browser console draws in the theme's fonts (docs/look_2026-10.md, the
+"""The browser console draws in the theme's fonts (docs/history/look_2026-10.md, the
 phase gate: "the browser console the Zero serves draws in RGB with the theme's
 fonts").
 

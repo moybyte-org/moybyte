@@ -1,5 +1,5 @@
 """Settings' Wi-Fi password prompt is the engine's field in a dialog over the
-network list (runtime/settings_layer.py `_wifi_prompt`): focus opens on the
+network list (runtime/system/settings_layer.py `_wifi_prompt`): focus opens on the
 field, which every typed key reaches; Enter in it or Connect connects with
 what was typed, Esc or Cancel goes back to the list. It draws as every
 field does -- an outline that clears its ground 3:1 and a bar caret --

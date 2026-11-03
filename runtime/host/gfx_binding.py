@@ -1,0 +1,885 @@
+# Map (grep -n a name to jump there):
+#   build          the host library: moy_gfx's kernels and libmoy
+#   _buf           a buffer's ctypes view and its capacity, shared, never copied
+#   fill           the compositor's verbs, in the native module's argument order
+#   rrect          the 2026-10 look's shapes: corners, rings, paints, shadows
+#   path_fill      filled paths and the outline faces (moy_path.c)
+#   text           petme128 and the theme fonts through moy_text
+#   sspr           the libmoy bridge verbs (sprites, maps, lines)
+"""moy_gfx's compositor surface, on CPython, over its own kernels.
+
+`device_canvas.py` is the raster on the boards and in the browser, and it
+reaches its kernel through a lazy `import moy_gfx`. This module is that kernel
+for the host, so the same canvas class can run here -- which is what lets the
+two canvas implementations become one instead of being kept in agreement by
+hand.
+
+Function names, argument order and return values match the native module
+EXACTLY, because the whole point is that `device_canvas.py` does not know which
+one it got. `tests/test_gfx_binding.py` pins that two ways: it reads the verb
+names `device_canvas.py` actually reaches for out of its source and asserts each
+one exists here (so a verb the canvas calls and this surface lacks fails on the
+day it is added, not at a call site months later), and it drives its op script
+through both this binding and the REAL native module, comparing byte for byte.
+
+NO HOST SHIM. Every symbol called here is the usermod's own C: `mg_*` is
+`native/moy_gfx/moy_gfx_kernels.c` (the compositor, the libmoy bridge verbs
+and the layer restore), compiled here beside libmoy and into the MicroPython
+usermod, whose wrappers only marshal arguments into the same functions. A new
+verb's body belongs in the kernels file, where it gets an `mg_` name and both
+tiers get it at once. The layer restore's engine, which on a board is GDMA, is
+here one of the two the kernels define for every tier: mg_copy_none (the
+synchronous path a board takes when its driver declines) or mg_copy_now.
+
+BUFFERS. The native module takes MicroPython buffer objects and derives their
+capacity through `moy_gfx_buf_w`; ctypes hands over a bare pointer, so capacity
+travels as an explicit argument and the C keeps every bound it had. Buffers are
+borrowed, never copied -- `from_buffer` shares the bytearray's memory, so a blit
+writes into the caller's framebuffer exactly as the native module does. The
+ctypes array is held in a local across each call because letting it fall out of
+scope would release the buffer export mid-flight.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+
+from . import host_native, native_build
+
+# The native module's own directory, searched alongside the vendored libmoy one:
+# the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
+# usermod that also compiles it.
+_MOY_GFX = os.path.dirname(native_build.LIBMOY)
+
+# The sources compiled. The vendored libmoy ones are there because
+# blit_batch, blit_map and the shape verbs are not pure compositing, they draw
+# SPRITES, and sprites are libmoy's. The moy_gfx ones come out of the native
+# module's directory: the SAME FILES the boards build, which is the whole
+# point. read_sources() searches both directories
+# and refuses a name that appears in each, so this cannot silently pick up a
+# stale copy.
+_LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
+           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+           "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c",
+           "moy_path.h", "moy_path.c", "moy_path_faces.h", "moy_scr.h", "moy_scr.c")
+
+# ...and where to find them. One tuple rather than a literal at the call site,
+# because a caller that reconstructs the build (tests/test_native_build_no_
+# compiler.py does) must search the same directories or it fails on a source it
+# cannot find and reports it as a toolchain problem.
+_SRC_DIRS = (native_build.LIBMOY, _MOY_GFX)
+
+# This module's share of the host's one library (runtime/host/host_native.py),
+# whose flags make a libmoy pixel the boards' RGB565.
+PART = native_build.Part("gfx", _LIBMOY, _SRC_DIRS)
+
+_LIB = [None]
+
+_I = ctypes.c_int
+_Z = ctypes.c_size_t
+_P = ctypes.c_void_p
+
+_SIGS = (
+    # The shared compositor (native/moy_gfx/moy_gfx_kernels.c) -- the same
+    # symbols the usermod's MicroPython wrappers call, reached here with no
+    # forwarder in between.
+    ("mg_fill", [_P, _Z, _I, _I], None),
+    ("mg_fill_rect", [_P, _Z, _I, _I, _I, _I, _I, _I], None),
+    ("mg_backdrop", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, ctypes.c_uint16, _I,
+                     _I, _I, _I, _I], _I),
+    ("mg_fill_spans", [_P, _Z, _I, _P, _I, _I, _I, _I, _P,
+                       _I, _I, _I, _I, _I, _I], None),
+    ("mg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_shift_rect", [_P, _P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_shift_clip", [_I, _I, _I, _I, _I, _I, _I, _I, _P], _I),
+    ("mg_copy_block", [_P, _Z, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_block_clip", [_I, _I, _I, _I, _P], _I),
+    ("mg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
+                    _I, _I, _I, _I], None),
+    ("mg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit565_resize", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
+                           _I, _I, _I, _I], None),
+    ("mg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("mg_blit_indices_scale", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
+                               _I, _I, _I, _P, _Z, _P, _I, _I, _I, _I, _I], None),
+    ("mg_ifill", [_P, _Z, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
+    ("mg_iline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
+    ("mg_icopy", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_iflood", [_P, _Z, _I, _I, _I, _I, ctypes.c_uint8, _P, _Z, _I, _I, _P, _I,
+                   ctypes.POINTER(ctypes.c_int)], _I),
+    ("mg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _I, _I, _I, _I, _I,
+                 _I, _I, _I, _I], None),
+    ("mg_shape", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                  _I, _I, _I, _I, _I, _I], None),
+    # The 2026-10 look's shapes (native/moy_gfx/moy_shape.c), flat as the
+    # usermod's wrappers call them.
+    ("mg_rrect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, ctypes.c_int32,
+                  _P, _I, _I, _I, _I, _I, _I, _P], _I),
+    ("mg_shadow", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, _I, _I,
+                   _P, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_cover", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I,
+                  _I, _I, _I, _I, _I, _I], _I),
+    ("mg_face", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z, _I, _I, _I,
+                 ctypes.c_int32, _P, _I, _I, _I, ctypes.c_int32, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I, _I, _I, _I], _I),
+    ("moy_shape_stats", [_P], None),
+    ("moy_shape_reset", [_I], None),
+    ("moy_shape_wire_swapped", [_I], None),
+    ("moy_shape_shadow_io", [_P, _P], None),
+    ("moy_shape_coverage", [_I, _I, _I], _I),
+    # Paths and the outline faces (native/moy_gfx/moy_path.c).
+    ("mg_path_fill", [_P, _Z, _I, _P, _I, _P, _I, _I, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_path_text", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_path_width", [_I, _I, _P, _Z], _I),
+    ("moy_path_metrics", [_I, _P], _I),
+    ("moy_path_wire_swapped", [_I], None),
+    # The boot splash (native/moy_gfx/moy_scr.c).
+    ("moy_splash_buf", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _I, _P, _Z], _I),
+    # The layer restore (moy_gfx_kernels.h's mg_lr_*), its engine one of the
+    # two every tier has (mg_copy_none / mg_copy_now), passed by address.
+    ("mg_lr_size", [], _Z),
+    ("mg_lr_init", [_P, ctypes.c_bool], None),
+    ("mg_lr_kick", [_P, _P, _P, _Z], ctypes.c_bool),
+    ("mg_lr_drain", [_P, _P], None),
+    ("mg_lr_forget", [_P, _P], None),
+    ("mg_lr_blit", [_P, _P, _P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, ctypes.c_bool],
+     None),
+    ("mg_lr_meter", [_P, _P, ctypes.c_bool], None),
+    # The libmoy bridge (moy_gfx_kernels.c): the verbs that draw shapes,
+    # sprites and maps, the same functions the usermod's wrappers call.
+    # device_canvas calls circ/circb/line DIRECTLY (guarded only on the kernel
+    # existing), and reaches tri/sspr/tline through getattr with a Python
+    # fallback. Implemented alike, because "optional" there means "the board
+    # would be slower", not "the host may diverge".
+    ("mg_blit_quads", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
+                       _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
+                     _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
+    ("mg_line", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_circ", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_circb", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I],
+     None),
+    ("mg_sspr", [_P, _Z, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                 _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
+    ("mg_tline", [_P, _Z, _I, _P, _Z, _I, _I, _P, _Z, _I, _I,
+                  _I, _I, _I, _I, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32,
+                  ctypes.c_int32, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
+)
+
+
+def build(verbose=False):
+    return host_native.build(verbose)
+
+
+def _lib():
+    if _LIB[0] is None:
+        try:
+            path = build()
+        except Exception:   # noqa: BLE001 -- a broken build is not a crash here
+            path = None
+        if path is None:
+            _LIB[0] = False
+        else:
+            d = native_build.load_cdll(path, _SIGS)
+            if d.mg_lr_size() > LR_SIZE:
+                raise RuntimeError("gfx_binding: LR_SIZE is short of mg_lrestore_t")
+            _LIB[0] = d
+    return _LIB[0] or None
+
+
+def available():
+    return _lib() is not None
+
+
+def moy64():
+    """MOY64 (SPEC.md 2) as 64 (r, g, b) tuples, read out of the library.
+
+    The table is libmoy's `moy_palette_default` (moy_data.c, embedded from the
+    spec's palette.json), the one the kernel resolves through. The host's
+    tools and tests read the palette here; the device tier carries its baked
+    twins (`device_canvas.PAL565`, `MOY64_RGB`), pinned to this table by
+    tests/test_device_canvas_parity.py."""
+    raw = bytes((ctypes.c_uint8 * 192).in_dll(_lib(), "moy_palette_default"))
+    return [tuple(raw[i:i + 3]) for i in range(0, 192, 3)]
+
+
+def _buf(b):
+    """(ctypes array, pixel capacity) sharing `b`'s memory -- no copy.
+
+    Returned as a pair so the caller can keep the array alive for the duration
+    of the call: a bytearray's buffer export is released when this object is
+    collected, and a pointer taken from a released export is a use-after-free
+    waiting for a garbage collection to land in the wrong place.
+    """
+    arr = (ctypes.c_char * len(b)).from_buffer(b)
+    return arr, len(b) // 2
+
+
+def _rbuf(b):
+    """Read-only variant: bytes and read-only memoryviews refuse from_buffer."""
+    try:
+        return _buf(b)
+    except TypeError:
+        arr = (ctypes.c_char * len(b)).from_buffer_copy(b)
+        return arr, len(b) // 2
+
+
+# -- the surface device_canvas calls -----------------------------------------
+
+
+def fill(buf, npix, color):
+    arr, cap = _buf(buf)
+    _lib().mg_fill(ctypes.cast(arr, _P), cap, int(npix), int(color) & 0xFFFF)
+
+
+def fill_rect(buf, stride, x, y, w, h, color):
+    arr, cap = _buf(buf)
+    _lib().mg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
+                        int(w), int(h), int(color) & 0xFFFF)
+
+
+def backdrop(buf, stride, ox, oy, w, h, rec, bg, swap, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(buf)
+    rec = bytes(rec)
+    return _lib().mg_backdrop(ctypes.cast(arr, _P), cap, int(stride), int(ox), int(oy),
+                              int(w), int(h), rec, len(rec), int(bg) & 0xFFFF,
+                              1 if swap else 0, int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y,
+               cx0, cy0, cx1, cy1):
+    arr_d, cap = _buf(dst)
+    raw = memoryview(arr).cast("B")
+    quads, _ = _rbuf(raw)
+    nmax = len(raw) // 10
+    n = int(n)
+    if n < 0 or n > nmax:
+        n = nmax
+    pal_a = None
+    if pal is not None:
+        pal_a, _ = _rbuf(memoryview(pal).cast("B"))
+    _lib().mg_fill_spans(ctypes.cast(arr_d, _P), cap, int(dw), ctypes.cast(quads, _P),
+                         n, int(ox), int(oy), int(col),
+                         None if pal_a is None else ctypes.cast(pal_a, _P),
+                         int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1),
+                         int(cy1))
+
+
+def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,
+          cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=0, cy1=0):
+    # SPEC.md 6's nine shape verbs, dispatched on `kind` -- see mg_shape's note
+    # in moy_gfx_kernels.h. `dh` is accepted and ignored, like the usermod's
+    # wrapper: the kernel derives the height from the buffer's capacity.
+    arr, cap = _buf(buf)
+    _lib().mg_shape(ctypes.cast(arr, _P), cap, int(dw), int(kind),
+                    int(a0), int(a1), int(a2), int(a3), int(a4), int(a5),
+                    int(color) & 0xFFFF, int(pat) & 0xFFFF, int(hole),
+                    int(cam_x), int(cam_y),
+                    int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+class _Paint(ctypes.Structure):
+    _fields_ = [("n", ctypes.c_uint8), ("mode", ctypes.c_uint8), ("steps", ctypes.c_uint8),
+                ("pad", ctypes.c_uint8), ("t", ctypes.c_int16 * 6), ("c", ctypes.c_uint16 * 6),
+                ("y0", ctypes.c_int), ("h", ctypes.c_int)]
+
+
+class _Hole(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_int) for n in ("x", "y", "w", "h", "r")]
+
+
+def _paint(fill):
+    """moy_shape_paint_t from what modmoy_gfx.c's rrect takes: None, a wire
+    colour, or (mode, steps, y0, h, t0, c0, t1, c1, ...)."""
+    if fill is None:
+        return None
+    p = _Paint()
+    if isinstance(fill, int):
+        p.n = 1
+        p.c[0] = fill & 0xFFFF
+        return p
+    if len(fill) < 6:
+        return None
+    p.mode, p.steps, p.y0, p.h = (int(v) for v in fill[:4])
+    k = min((len(fill) - 4) // 2, 6)
+    for i in range(k):
+        p.t[i] = int(fill[4 + 2 * i])
+        p.c[i] = int(fill[5 + 2 * i]) & 0xFFFF
+    p.n = k
+    return p
+
+
+def rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0, cx1, cy1,
+          hole=None):
+    arr, cap = _buf(dst)
+    p = _paint(fill)
+    hp = None if hole is None else _Hole(*(int(v) for v in hole))
+    return _lib().mg_rrect(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                           int(h), int(r), int(opts), int(hi), int(lo),
+                           None if p is None else ctypes.cast(ctypes.pointer(p), _P),
+                           int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1),
+                           None if hp is None else ctypes.cast(ctypes.pointer(hp), _P))
+
+
+def shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
+           cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    hp = None if hole is None else _Hole(*(int(v) for v in hole))
+    return _lib().mg_shadow(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                            int(h), int(r), int(blur), int(dx), int(dy), int(col),
+                            int(alpha), int(bool(stepped)),
+                            None if hp is None else ctypes.cast(ctypes.pointer(hp), _P),
+                            int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+_IO_KEEP = [None, None]
+
+
+def shadow_io(src, also):
+    """The next shadows blend over `src`'s pixels and store to `also` as
+    well (moy_shape_shadow_io); None, None: in place again. The arrays
+    are kept until then."""
+    a = None if src is None else _rbuf(src)[0]
+    b = None if also is None else _buf(also)[0]
+    _IO_KEEP[0], _IO_KEEP[1] = a, b
+    _lib().moy_shape_shadow_io(None if a is None else ctypes.cast(a, _P),
+                               None if b is None else ctypes.cast(b, _P))
+
+
+def cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped,
+          cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    return _lib().mg_cover(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                           int(h), ctypes.cast(sarr, _P), scap, int(sw), int(sx), int(sy),
+                           int(cw), int(ch), int(r), int(bool(stepped)), int(cam_x),
+                           int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def face(dst, dw, x, y, w, h, face_, fw, fy0, src, sw, cw, ch, fill, quads, r, stepped,
+         ring, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    farr, fcap = _rbuf(face_)
+    sarr, scap = (None, 0) if src is None else _rbuf(src)
+    qarr = None if quads is None else (ctypes.c_int16 * len(quads))(*quads)
+    return _lib().mg_face(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w), int(h),
+                          ctypes.cast(farr, _P), fcap, int(fw), int(fy0),
+                          None if sarr is None else ctypes.cast(sarr, _P), scap, int(sw),
+                          int(cw), int(ch), int(fill),
+                          None if qarr is None else ctypes.cast(qarr, _P),
+                          0 if quads is None else len(quads) // 5, int(r),
+                          int(bool(stepped)), int(ring), int(cam_x), int(cam_y), int(cx0),
+                          int(cy0), int(cx1), int(cy1))
+
+
+def tint(dst, src, sw, sx, sy, w, h, col, alpha, dw=0, dx=0, dy=0):
+    arr, cap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    return _lib().mg_tint(ctypes.cast(arr, _P), cap, ctypes.cast(sarr, _P), scap, int(sw),
+                          int(sx), int(sy), int(w), int(h), int(col) & 0xFFFF, int(alpha),
+                          int(dw), int(dx), int(dy))
+
+
+def shape_stats():
+    out = (ctypes.c_uint32 * 5)()
+    _lib().moy_shape_stats(ctypes.cast(out, _P))
+    return tuple(out)
+
+
+def shape_reset(caches):
+    _lib().moy_shape_reset(int(bool(caches)))
+
+
+def shape_order(swapped):
+    _lib().moy_shape_wire_swapped(int(bool(swapped)))
+    _lib().moy_path_wire_swapped(int(bool(swapped)))
+
+
+def _ints(a):
+    """(ctypes int32 array, count) over an array('i') of int32s, no copy."""
+    arr = (ctypes.c_int32 * len(a)).from_buffer(a)
+    return arr, len(a)
+
+
+def _bytes(s):
+    if isinstance(s, str):
+        s = s.encode()
+    return ctypes.create_string_buffer(bytes(s), len(s)), len(s)
+
+
+def path_fill(dst, dw, pts, ends, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    pa, pn = _ints(pts)
+    ea, en = _ints(ends)
+    return _lib().mg_path_fill(ctypes.cast(arr, _P), cap, int(dw), ctypes.cast(pa, _P),
+                               pn // 2, ctypes.cast(ea, _P), en, int(col), int(cam_x),
+                               int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def path_text(dst, dw, face, size, x, y, s, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    sb, sn = _bytes(s)
+    return _lib().mg_path_text(ctypes.cast(arr, _P), cap, int(dw), int(face), int(size),
+                               int(x), int(y), ctypes.cast(sb, _P), sn, int(col), int(cam_x),
+                               int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def splash(dst, stride, x0, y0, w, h, swap, pal, permille, status):
+    arr, cap = _buf(dst)
+    pb, pn = _bytes(pal)
+    if pn != 12:
+        raise ValueError("splash palette")
+    sb, sn = _bytes(status)
+    return _lib().moy_splash_buf(ctypes.cast(arr, _P), cap, int(stride), int(x0), int(y0),
+                                 int(w), int(h), int(bool(swap)), ctypes.cast(pb, _P),
+                                 int(permille), ctypes.cast(sb, _P), sn)
+
+
+def path_width(face, size, s):
+    sb, sn = _bytes(s)
+    return _lib().moy_path_width(int(face), int(size), ctypes.cast(sb, _P), sn)
+
+
+def path_metrics(face):
+    out = (ctypes.c_int * 3)()
+    _lib().moy_path_metrics(int(face), ctypes.cast(out, _P))
+    return tuple(out)
+
+
+def shape_coverage(r, i, j):
+    return _lib().moy_shape_coverage(int(r), int(i), int(j))
+
+
+def scroll_rect(buf, stride, rx, ry, rw, rh, dx, dy):
+    arr, cap = _buf(buf)
+    _lib().mg_scroll_rect(ctypes.cast(arr, _P), cap, int(stride), int(rx),
+                          int(ry), int(rw), int(rh), int(dx), int(dy))
+
+
+def shift_rect(dst, src, stride, rx, ry, rw, rh, dx, dy):
+    darr, dcap = _buf(dst)
+    if src is dst:
+        _lib().mg_shift_rect(ctypes.cast(darr, _P), ctypes.cast(darr, _P), dcap, int(stride),
+                             int(rx), int(ry), int(rw), int(rh), int(dx), int(dy))
+        return
+    sarr, scap = _rbuf(src)
+    _lib().mg_shift_rect(ctypes.cast(darr, _P), ctypes.cast(sarr, _P), min(dcap, scap),
+                         int(stride), int(rx), int(ry), int(rw), int(rh), int(dx), int(dy))
+
+
+def shift_clip(stride, rows, rx, ry, rw, rh, dx, dy):
+    """mg_shift_clip: (x, y, sx, sy, w, h) of the block a shift moves, or None."""
+    b = (ctypes.c_int * 6)()
+    if not _lib().mg_shift_clip(int(stride), int(rows), int(rx), int(ry), int(rw),
+                                int(rh), int(dx), int(dy), b):
+        return None
+    return tuple(b)
+
+
+def copy_block(dst, dstride, src, sstride, dx, dy, sx, sy, w, h):
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_copy_block(ctypes.cast(darr, _P), dcap, int(dstride), ctypes.cast(sarr, _P),
+                         scap, int(sstride), int(dx), int(dy), int(sx), int(sy), int(w),
+                         int(h))
+
+
+def block_clip(dw, dh, sw, sh, dx, dy, sx, sy, w, h):
+    """mg_block_clip: (dx, dy, sx, sy, w, h) inside both pictures, or None."""
+    b = (ctypes.c_int * 6)(int(dx), int(dy), int(sx), int(sy), int(w), int(h))
+    if not _lib().mg_block_clip(int(dw), int(dh), int(sw), int(sh), b):
+        return None
+    return tuple(b)
+
+
+def blit565(dst, dw, dh, dx, dy, src, sw, sh, key,
+            cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_blit565(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                      int(dx), int(dy),
+                      ctypes.cast(sarr, _P), scap, int(sw), int(sh), int(key),
+                      int(cx0), int(cy0),
+                      int(dw) if cx1 is None else int(cx1),
+                      int(dh) if cy1 is None else int(cy1))
+
+
+def blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale):
+    """Integer-upscale an RGB565 source into dst at (dx, dy), which may be
+    negative -- the windowed composite primitive (game frame -> its window
+    viewport, wallpaper frame -> the full-desktop cover backdrop).
+
+    Its absence used to be silent and expensive: `HostSystemCanvas.blit_cover`
+    probes for this name and otherwise expands every row in Python."""
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_blit565_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                            int(dx), int(dy),
+                            ctypes.cast(sarr, _P), scap, int(sw), int(sh),
+                            int(scale))
+
+
+def blit565_resize(dst, dw, dh, dx, dy, tw, th, src, sw, sh,
+                   cx0=0, cy0=0, cx1=None, cy1=None):
+    """Scale an RGB565 sw x sh source to a tw x th rect at (dx, dy):
+    nearest-neighbour at any ratio, opaque, clipped (moy_gfx_kernels.h)."""
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_blit565_resize(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                             int(dx), int(dy), int(tw), int(th),
+                             ctypes.cast(sarr, _P), scap, int(sw), int(sh),
+                             int(cx0), int(cy0),
+                             int(dw) if cx1 is None else int(cx1),
+                             int(dh) if cy1 is None else int(cy1))
+
+
+def blit_window(dst, dw, dh, src, src_w, sx, sy):
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_blit_window(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                          ctypes.cast(sarr, _P), scap, int(src_w),
+                          int(sx), int(sy))
+
+
+# The layer restore (moy_gfx_kernels.h's mg_lr_*): the state a canvas keeps,
+# in bytes. Larger than the host's struct, which _lib() checks; the native
+# module's own is the board's size.
+LR_SIZE = 64
+
+
+def _engine():
+    """The address of the host's copy engine (see layer_engine)."""
+    name = "mg_copy_now" if _ENGINE_NOW[0] else "mg_copy_none"
+    return ctypes.addressof(ctypes.c_char.in_dll(_lib(), name))
+
+
+_ENGINE_NOW = [False]
+
+
+def layer_init(state, async_ok):
+    arr, _ = _buf(state)
+    _lib().mg_lr_init(ctypes.cast(arr, _P), bool(async_ok))
+
+
+def layer_kick(state, back):
+    sarr, _ = _buf(state)
+    darr, dcap = _buf(back)
+    return bool(_lib().mg_lr_kick(ctypes.cast(sarr, _P), _engine(),
+                                  ctypes.cast(darr, _P), dcap))
+
+
+def layer_drain(state, forget=False):
+    arr, _ = _buf(state)
+    f = _lib().mg_lr_forget if forget else _lib().mg_lr_drain
+    f(ctypes.cast(arr, _P), _engine())
+
+
+def layer_blit(state, dst, dw, dh, src, src_w, src_h, cam_x, cam_y, edited):
+    sarr, _ = _buf(state)
+    darr, dcap = _buf(dst)
+    rarr, scap = _rbuf(src)
+    _lib().mg_lr_blit(ctypes.cast(sarr, _P), _engine(), ctypes.cast(darr, _P), dcap,
+                      int(dw), int(dh), ctypes.cast(rarr, _P), scap, int(src_w),
+                      int(src_h), int(cam_x), int(cam_y), bool(edited))
+
+
+def layer_engine(now):
+    """The host's copy engine: NONE (False, the default: every copy refused, as
+    on a tier with no DMA) or NOW (True: the copy lands as it starts), which a
+    test drives the predicted path with. Host only."""
+    _ENGINE_NOW[0] = bool(now)
+
+
+def layer_meter(state, zero=False):
+    """(us, trips, async_ok) of a canvas's restore; `zero` zeroes the time."""
+    arr, _ = _buf(state)
+    out = (ctypes.c_uint32 * 3)()
+    _lib().mg_lr_meter(ctypes.cast(arr, _P), out, bool(zero))
+    return out[0], out[1], bool(out[2])
+
+
+def _quads(items):
+    """(int16 quad buffer, count) from either shape device_canvas passes.
+
+    The native verb accepts an array("h") whose slot 0 is the write cursor, OR a
+    list of (tile, x, y[, flip]) tuples. Normalising the list form HERE rather
+    than in C keeps one path in the kernel -- the shape differs, the pixels must
+    not -- and the array form, which is the hot one, passes straight through
+    with no copy at all.
+    """
+    import array
+    if isinstance(items, array.array) and items.typecode == "h":
+        n = items[0]
+        if n < 4:
+            n = 4
+        if n > len(items):
+            n = len(items)
+        return items, (n - 4) // 4, 4
+    flat = array.array("h")
+    for it in items:
+        if len(it) < 3:
+            continue
+        flat.extend((it[0], it[1], it[2], it[3] if len(it) > 3 else 0))
+    return flat, len(flat) // 4, 0
+
+
+def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt,
+               key, scale, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    quads, n, off = _quads(items)
+    qarr, _ = _rbuf(memoryview(quads).cast("B"))
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().mg_blit_quads(
+        ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+        ctypes.c_void_p(ctypes.cast(qarr, _P).value + off * 2), int(n),
+        ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+        ctypes.cast(lutarr, _P),
+        ctypes.cast(ptarr, _P) if ptarr is not None else None,
+        int(key), int(scale), int(cam_x), int(cam_y),
+        int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def line(dst, dw, dh, x0, y0, x1, y1, col, cam_x=0, cam_y=0,
+         cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().mg_line(ctypes.cast(darr, _P), dcap, int(dw),
+                   int(x0), int(y0), int(x1), int(y1), int(col) & 0xFFFF,
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def circ(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
+         cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().mg_circ(ctypes.cast(darr, _P), dcap, int(dw),
+                   int(cx), int(cy), int(r), int(col) & 0xFFFF,
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def circb(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
+          cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().mg_circb(ctypes.cast(darr, _P), dcap, int(dw),
+                    int(cx), int(cy), int(r), int(col) & 0xFFFF,
+                    int(cam_x), int(cam_y), int(cx0), int(cy0),
+                    int(dw) if cx1 is None else int(cx1),
+                    int(dh) if cy1 is None else int(cy1))
+
+
+def tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, col, cam_x=0, cam_y=0,
+        cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().mg_tri(ctypes.cast(darr, _P), dcap, int(dw),
+                  int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
+                  int(col) & 0xFFFF, int(cam_x), int(cam_y),
+                  int(cx0), int(cy0),
+                  int(dw) if cx1 is None else int(cx1),
+                  int(dh) if cy1 is None else int(cy1))
+
+
+def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
+    darr, dcap = _buf(dst)
+    imv = memoryview(idx).cast("B")        # index bytes: 1 per pixel
+    iarr, _ = _rbuf(imv)
+    # `len()` on an array("H") is the ELEMENT count, not bytes -- so deriving
+    # the palette's entry count by halving it produced 32 entries for a 64-entry
+    # table and dropped every index above 31 (the C skips `p >= pcap`). Take the
+    # byte length from the memoryview and halve THAT, which is right for both an
+    # array and a bytes-like.
+    pmv = memoryview(pal).cast("B")
+    parr, _ = _rbuf(pmv)
+    _lib().mg_blit_indices(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                           int(dx), int(dy),
+                           ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
+                           ctypes.cast(parr, _P), len(pmv) // 2)
+
+
+def blit_indices_scale(dst, dw, dh, idx, iw, ih, sx, sy, sw, sh, dx, dy, scale,
+                       pal, palt, colorkey, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    imv = memoryview(idx).cast("B")
+    iarr, _ = _rbuf(imv)
+    pmv = memoryview(pal).cast("B")
+    parr, _ = _rbuf(pmv)
+    tarr = None
+    if palt is not None and len(memoryview(palt).cast("B")) >= 64:
+        tarr, _ = _rbuf(memoryview(palt).cast("B"))
+    _lib().mg_blit_indices_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                                 ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
+                                 int(sx), int(sy), int(sw), int(sh),
+                                 int(dx), int(dy), int(scale),
+                                 ctypes.cast(parr, _P), len(pmv) // 2,
+                                 ctypes.cast(tarr, _P) if tarr is not None else None,
+                                 int(colorkey), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+# One byte a pixel (moy_gfx_kernels.h): a drawing's palette indices.
+
+def _bbuf(b):
+    """(ctypes array, byte length) over a writable buffer, no copy."""
+    return (ctypes.c_char * len(b)).from_buffer(b), len(b)
+
+
+def ifill(buf, bw, bh, x, y, w, h, v):
+    arr, cap = _bbuf(buf)
+    _lib().mg_ifill(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x), int(y),
+                    int(w), int(h), int(v) & 0xFF)
+
+
+def iline(buf, bw, bh, x0, y0, x1, y1, d, round_, v):
+    arr, cap = _bbuf(buf)
+    _lib().mg_iline(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x0), int(y0),
+                    int(x1), int(y1), int(d), 1 if round_ else 0, int(v) & 0xFF)
+
+
+def icopy(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, frm, to):
+    darr, dcap = _bbuf(dst)
+    smv = memoryview(src).cast("B")
+    try:
+        sarr = (ctypes.c_char * len(smv)).from_buffer(smv)
+    except TypeError:
+        sarr = (ctypes.c_char * len(smv)).from_buffer_copy(smv)
+    _lib().mg_icopy(ctypes.cast(darr, _P), dcap, int(dw), int(dh), int(dx), int(dy),
+                    ctypes.cast(sarr, _P), len(smv), int(sw), int(sh), int(sx), int(sy),
+                    int(w), int(h), int(frm), int(to))
+
+
+def iflood(buf, bw, bh, x, y, v, marks, t, tx, stack):
+    arr, cap = _bbuf(buf)
+    marr, mcap = _bbuf(marks)
+    sarr, scap = _bbuf(stack)
+    out = (ctypes.c_int * 4)()
+    n = _lib().mg_iflood(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x), int(y),
+                         int(v) & 0xFF, ctypes.cast(marr, _P), mcap, int(t), int(tx),
+                         ctypes.cast(sarr, _P), scap // 4, out)
+    return (n, out[0], out[1], out[2], out[3])
+
+
+_TEXT = [None]
+
+
+def _text_fn():
+    """mg_text from the toolkit's library (runtime/host/glass_binding.py), which
+    holds the loaded fonts and the print font (moy_text.h); this library's
+    own copy of the text path would see neither. On a board the two modules
+    are one image and share them."""
+    if _TEXT[0] is None:
+        fn = None
+        try:
+            from . import glass_binding
+            fn = glass_binding._lib().mg_text
+        except (ImportError, OSError, AttributeError):
+            fn = None
+        if fn is None:
+            fn = _lib().mg_text
+        else:
+            fn.argtypes = dict((n, a) for n, a, _r in _SIGS)["mg_text"]
+            fn.restype = None
+        _TEXT[0] = fn
+    return _TEXT[0]
+
+
+def text(dst, dw, dh, s, x, y, color, font, first, scale,
+         cam_x, cam_y, cx0, cy0, cx1, cy1):
+    """petme128 in one call, with the camera and the clip rect honoured.
+
+    Sixteen positional arguments and no defaults, because the native op takes
+    exactly sixteen: a default here would let a call that TypeErrors on a board
+    quietly work on the host, which is the divergence this binding exists to
+    remove. `dh` is accepted and unused, like the native's (rows come from the
+    buffer capacity) -- dropping it from the signature would be the tidier order
+    the sspr note warns about.
+
+    A str is UTF-8-encoded, which is the buffer MicroPython would have taken
+    from it anyway; bytes pass straight through, so moy_lua's non-UTF-8 strings
+    draw the same glyphs here as on glass (device_canvas._text_bytes).
+
+    The kernel takes a GLYPH COUNT where this signature takes a blob, so the
+    //8 happens here -- exactly as it happens in the usermod's wrapper. petme128
+    is 8 bytes per glyph, column-major."""
+    darr, dcap = _buf(dst)
+    sarr, _ = _rbuf(s.encode("utf-8") if isinstance(s, str) else s)
+    farr, _ = _rbuf(font)
+    _text_fn()(ctypes.cast(darr, _P), dcap, int(dw),
+                   ctypes.cast(sarr, _P), len(sarr),
+                   int(x), int(y), int(color) & 0xFFFF,
+                   ctypes.cast(farr, _P), len(farr) // 8, int(first), int(scale),
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(cx1), int(cy1))
+
+
+def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy,
+         ddw, ddh, ck, flip, lut, palt,
+         cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=None, cy1=None):
+    # Argument ORDER is the native module's, not a tidier one. It reads oddly --
+    # the sheet before its own source rect, the palette after the flip -- and
+    # the first draft here "improved" it, which the parity test caught as a
+    # TypeError from the device side. The binding's whole job is that
+    # device_canvas cannot tell which module it got.
+    darr, dcap = _buf(dst)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().mg_sspr(ctypes.cast(darr, _P), dcap, int(dw),
+                   ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                   int(sx), int(sy), int(sw), int(sh), int(dx), int(dy),
+                   int(ddw), int(ddh), int(ck), int(flip),
+                   ctypes.cast(lutarr, _P),
+                   ctypes.cast(ptarr, _P) if ptarr is not None else None,
+                   int(cam_x), int(cam_y),
+                   int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
+          x0, y0, x1, y1, u, v, du, dv, ck, lut, palt,
+          cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    carr, _ = _rbuf(cells)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().mg_tline(ctypes.cast(darr, _P), dcap, int(dw),
+                    ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
+                    ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                    int(x0), int(y0), int(x1), int(y1),
+                    int(u), int(v), int(du), int(dv), int(ck),
+                    ctypes.cast(lutarr, _P),
+                    ctypes.cast(ptarr, _P) if ptarr is not None else None,
+                    int(cam_x), int(cam_y), int(cx0), int(cy0),
+                    int(dw) if cx1 is None else int(cx1),
+                    int(dh) if cy1 is None else int(cy1))
+
+
+def blit_map(dst, dw, dh, dsx, dsy, cells, mw, mh, mx, my, rw, rh,
+             sheet, sheetw, sheeth, lut, palt, ck, scale, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    carr, _ = _rbuf(cells)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().mg_blit_map(
+        ctypes.cast(darr, _P), dcap, int(dw), int(dsx), int(dsy),
+        ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
+        int(mx), int(my), int(rw), int(rh),
+        ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+        ctypes.cast(lutarr, _P),
+        ctypes.cast(ptarr, _P) if ptarr is not None else None,
+        int(ck), int(scale), int(cx0), int(cy0), int(cx1), int(cy1))

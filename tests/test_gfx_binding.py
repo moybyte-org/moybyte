@@ -1,6 +1,6 @@
 """The host's RGB565 compositor, and its parity with the one on glass.
 
-`runtime/gfx_binding.py` exists so `device_canvas.py` -- the raster the boards
+`runtime/host/gfx_binding.py` exists so `device_canvas.py` -- the raster the boards
 and the browser run -- can run on the host too, which is what lets the two
 canvas implementations become one. That only holds if the two kernels agree
 BYTE FOR BYTE, so the important test here is not the unit ones: it is
@@ -151,14 +151,14 @@ text(buf, 16, 8, msg, 2, 1, 0x9cd3, font, 65, 3, 0, 0, 1, 1, 15, 7)
 # -- in Python, before the kernel is called. So every golden exercises the
 # happy path: positive origins, rects inside the buffer, sources inside the
 # sheet. The branches below it never touches are precisely the ones
-# runtime/moyhost_gfx.c says exist "to stop a bad call scribbling over the
+# the kernels say exist "to stop a bad call scribbling over the
 # framebuffer": x < 0, x >= stride, y >= max_rows, and the dcap/scap capacity
 # guards that derive a row count from the buffer instead of trusting the one
 # they were handed.
 #
-# They are a parity concern and not merely a safety one. A clamp is arithmetic
-# duplicated in two places -- moyhost_gfx.c and modmoy_gfx.c -- and the two
-# have to agree on WHICH pixel is the last one written. Ops here therefore aim
+# They are a parity concern and not merely a safety one. A clamp is arithmetic,
+# and the host's build and the board's have to agree on WHICH pixel is the last
+# one written. Ops here therefore aim
 # just past every edge rather than far past it: a rect that misses the buffer
 # by a mile agrees trivially, and a rect that ends one pixel over does not.
 #
@@ -333,7 +333,7 @@ text(buf, 16, 8, msg, 0, 7, 0x4324, font, 65, 1, 0, 0, 0, 0, 16, 8)
 # Found 2026-08-15 while extracting the compositor, and the reason the "one
 # semantic difference" claim needed checking rather than believing. These verbs
 # ignore `dh` on the device (`(void)dh`; the row count comes from the buffer
-# capacity) but moyhost_gfx.c used to refuse `dh <= 0` outright -- so `line`
+# capacity) but the host's shim used to refuse `dh <= 0` outright -- so `line`
 # with a zero-height canvas drew NOTHING on the host and fourteen pixels on
 # glass. Nothing could see it: the goldens only ever replay a real canvas, and
 # these ops were the first to hand the kernels a degenerate one. The host was

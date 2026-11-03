@@ -1,12 +1,12 @@
 /* A Lua cart's layers, drawn by libmoy's own verbs (#225).
  *
  * Included by modmoycore.c (the boards and the browser) and by
- * runtime/moyhost_lua.c (the host), so the two Lua hosts draw into a layer
+ * runtime/host/moyhost_lua.c (the host), so the two Lua hosts draw into a layer
  * through one body.
  *
  * A moybyte layer is the CONSOLE's object -- device_canvas's off-heap RGB565
  * buffer, lent to the run, composited by draw_layer's blit_window -- and the
- * prelude in runtime/lua_ext.py is what a Lua cart holds. Drawing into it is
+ * prelude in runtime/run/lua_ext.py is what a Lua cart holds. Drawing into it is
  * libmoy's: a layer method points con->canvas at a moy_canvas over the
  * layer's buffer for the length of one call and runs the screen's own verb,
  * the trick libmoy's binding plays for its own layers (moy_lua.c's

@@ -17,9 +17,9 @@ from ws_helpers import quiesce
 
 
 def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
-    from runtime import paint_app, wm_windowed
+    from runtime import paint_app, paint_draw, wm_windowed
     if ref:
-        monkeypatch.setattr(paint_app, "_loop", None)
+        monkeypatch.setattr(paint_draw, "_loop", None)
         monkeypatch.setattr(paint_app.PaintAppLayer, "HELD", False)
         monkeypatch.setattr(wm_windowed.WindowedWM, "_shown_chain", raising=False, value=
                             lambda self, win, f, c: False)

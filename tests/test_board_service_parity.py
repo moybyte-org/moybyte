@@ -70,6 +70,7 @@ from pathlib import Path
 import pytest
 
 from board_source import wiring_chain
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -84,7 +85,7 @@ TARGETS = {
                 "run_desktop"),
     "guition_p4": ("firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
                    "run_desktop"),
-    "host": ("runtime/host_app.py", "build_workstation"),
+    "host": ("runtime/host/host_app.py", "build_workstation"),
     # The wasm head is the third tier and wires the same console (moycore stage
     # 4), so it belongs in the table: it is the target most likely to be handed
     # a new service last. Only `boot()` is read -- web_boot also carries
@@ -126,6 +127,8 @@ SERVICES = {
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
     "reboot_hook": "the sysmenu Reboot row's real reset",
+    "battery": "the battery's gauge (#130) behind the bar's battery widget, "
+               "its popover and About",
     "net": "the #65 multiplayer transport behind net.* in a cart",
     "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
     "link": "the #7 ESP-NOW radio: discovery, pairing and the two-console lockstep link",
@@ -167,6 +170,7 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": INJECTED,
         "net": INJECTED,
         "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
                 "keyboard, trackball, radio -- and a cart here runs on the board\n"
@@ -208,6 +212,8 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
+                   "system battery (the README's power notes)",
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
                 "the C6, and a cart runs locally. Nothing to expose.",
@@ -247,6 +253,7 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "the board's README names no cell and no gauge pin",
         "net": INJECTED,
         "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
                 "the C6, and a cart runs locally. Nothing to expose.",
@@ -285,6 +292,9 @@ WIRING = {
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
         "reboot_hook": INJECTED,
+        "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
+                   "ESPHome example nobody has checked against a fitted cell; "
+                   "it is wired once one confirms the ratio",
         "net": INJECTED,
         "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
                 "panel and touch.",
@@ -328,6 +338,7 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
@@ -382,6 +393,7 @@ WIRING = {
         "cart_keep": INJECTED,
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
+        "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
@@ -435,7 +447,7 @@ def _wire_param_map():
     A service the Workstation takes through its setter (`ws.set_pointer(p)`)
     lands on `ws.pointer` the same way.
     """
-    fn = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
+    fn = _func(runtime_file("console.py"), "wire_workstation_core")
     params = {a.arg for a in fn.args.args}
     out = {}
     for n in ast.walk(fn):
@@ -614,7 +626,7 @@ def _wire_supplied(fn, param_map, dead=frozenset()):
     """{attr: lineno} for services this link hands to wire_workstation_core.
     SUPPLIED IS NOT INJECTED: only a value `_real` counts."""
     fname = "wire_workstation_core"
-    order = _params(_func(ROOT / "runtime" / "console.py", fname))
+    order = _params(_func(runtime_file("console.py"), fname))
     out = {}
     for n in ast.walk(fn):
         if not isinstance(n, ast.Call) or _called(n) != fname:
@@ -840,7 +852,7 @@ LIFECYCLE = {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
         ("ble_keyboard", "start"): Lazy(
-            "runtime/settings_layer.py", "open_bluetooth",
+            "runtime/system/settings_layer.py", "open_bluetooth",
             "auto_start=False on purpose -- scanning is what makes BLE "
             "expensive and this board's keyboard already works, so the radio "
             "comes up when a kid opens the picker. The touch-only boards start "
@@ -848,28 +860,28 @@ LIFECYCLE = {
             "a cart"),
         ("ble_keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
-        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "start"): Via("runtime/run/player.py", "start"),
         ("link", "poll"): _LINK_POLL,
     },
     "p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
-        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "start"): Via("runtime/run/player.py", "start"),
         ("link", "poll"): _LINK_POLL,
     },
     "guition": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
-        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "start"): Via("runtime/run/player.py", "start"),
         ("link", "poll"): _LINK_POLL,
     },
     "guition_p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
-        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "start"): Via("runtime/run/player.py", "start"),
         ("link", "poll"): _LINK_POLL,
     },
 }
@@ -1016,7 +1028,7 @@ def _chain_maps(links):
     inv = {}
     for attr, param in _wire_param_map().items():
         inv.setdefault(param, attr)
-    wire = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
+    wire = _func(runtime_file("console.py"), "wire_workstation_core")
     maps = [None] * len(links)
     seeds = [None] * len(links)
     for i in range(len(links) - 1, -1, -1):

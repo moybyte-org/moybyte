@@ -1,4 +1,4 @@
-"""A Lua run's pixels are the run's (docs/kernel_cartpath_2026-10.md §3.1),
+"""A Lua run's pixels are the run's (native/moy_play/moy_play.h),
 on the desktop MicroPython: the kernel's Player mints an OWNER row at the
 launch, and a layer's pixels and a decoded paint image are BUF rows on loan
 to it, counted as cart memory, while the image itself is an IMAGE row whose

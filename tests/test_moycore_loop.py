@@ -38,7 +38,7 @@ pointing at a cause.
 import os
 import subprocess
 
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -246,7 +246,7 @@ moycore.close()
 
 # OBJECT-valued verbs ride the shared prelude over the run's own C: a layer's
 # pixels and a paint image are moycore_lua.c's, with no call into Python. This
-# is the real runtime/lua_ext.py, imported and executed.
+# is the real runtime/run/lua_ext.py, imported and executed.
 from lua_ext import PRELUDE_HANDLES, install_handles
 
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
@@ -598,7 +598,7 @@ def _run():
             "C -- the claim every later stage rests on -- nor the three "
             "regressions moycore shipped with.")
     from runtime.moyimg import encode_moyimg
-    src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime")).replace(
+    src = DRIVER.replace("@RUNTIME@", runtime_tree()).replace(
         "@BG@", repr(encode_moyimg(2, 2, bytes((8, 8, 8, 8)))))
     p = subprocess.run([exe, "-c", src], capture_output=True, text=True,
                        timeout=180)

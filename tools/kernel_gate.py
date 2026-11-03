@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The kernel's sprint-2 gate on glass (docs/kernel_spine_2026-10.md §10), on
+"""The kernel's sprint-2 gate on glass (docs/history/kernel_spine_2026-10.md §10), on
 one console board.
 
     tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update]   # default: all five

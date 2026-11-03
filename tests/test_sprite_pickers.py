@@ -1,4 +1,4 @@
-"""The sprite pickers' frames (docs/scroll_and_text_2026-10.md §9): while
+"""The sprite pickers' frames (docs/history/scroll_and_text_2026-10.md §9): while
 the pickers are up the page under them does not change but by the input
 that reaches them, so it is a modal's page, held (`ui_draw.Hold`): on the
 handheld's full screen a frame puts the page back as it was held and draws

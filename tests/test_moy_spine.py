@@ -1,9 +1,9 @@
 """The kernel spine's interface, pinned once for every binding: the C spine
-(native/moy_spine, docs/kernel_spine_2026-10.md) and its Python oracle
+(native/moy_spine, docs/history/kernel_spine_2026-10.md) and its Python oracle
 (tests/spine_twin.py), each test unchanged.
 
 `BINDINGS` names each implementation by its module: the Python oracle, and the
-C spine over the host's C ABI through ctypes (tools/moy_spine_binding.py).
+C spine over the host's C ABI through ctypes (runtime/host/moy_spine_binding.py).
 tests/test_moy_spine_twins.py runs this same file on the boards' VM over the
 native module. The semantic trace in tests/test_semantic_traces.py replays one
 session of this interface on every VM and pins the handle VALUES; this file
@@ -32,7 +32,7 @@ import json
 import pytest
 
 try:
-    from tools import moy_spine_binding
+    from runtime import moy_spine_binding
 except ImportError:         # the VM's run of this file has no tools/
     moy_spine_binding = None
 if moy_spine_binding is None:
@@ -68,7 +68,7 @@ def test_a_handle_is_kind_slot_and_generation(sp):
 
 
 # The kinds of moy_htab.h, one per client table: sprint 3's carve added all
-# but APP (docs/kernel_survival_2026-10.md section 3.1), and its audio pass
+# but APP (native/moy_glass/moy_buf.h), and its audio pass
 # CLIP, the sample voice's clips.
 KINDS = {"GRANT": 12, "APP": 1, "BUF": 2, "CANVAS": 3, "SURF": 4, "OWNER": 5, "SRC": 6,
          "PEER": 7, "AUDIO": 8, "CLIP": 9}
@@ -210,7 +210,7 @@ def test_remove_takes_one_kind_and_never_the_root(sp):
 
 
 def test_restore_puts_parked_kinds_back_above_the_root(sp):
-    """The route's restore op (docs/shell_layout_2026-10.md §3): the stack
+    """The route's restore op (docs/theme_and_shell_2026-11.md §8.1): the stack
     becomes the root and the kinds given, whatever stood above the root
     before, and a refused list changes nothing."""
     st = sp.BackStack()
@@ -306,7 +306,7 @@ def test_leases_are_a_mask_over_a_closed_set_of_tags(sp):
 
 def test_the_kernels_tables_outlive_their_views(sp):
     """kernel(fresh): the console's tables as the kernel's own
-    (docs/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
+    (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
     a view dropping (a VM stop's sweep) does not free. A return start
     (fresh False) reads the route and the lease the stopped VM left; every
     start clears the registry, and any other start puts the rest back."""

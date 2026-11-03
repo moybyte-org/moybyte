@@ -1,8 +1,8 @@
 """Cross-cart sprite reuse (#18): the SpriteSheet.copy_tile import primitive and
 the shared sprite sheet stored alongside the carts dir. These exercise the same
-shared `runtime/editors.py` + `runtime/moy_carts.py` the device freezes.
+shared `runtime/editors/editors_sheet.py` + `runtime/carts/moy_carts.py` the device freezes.
 
-The sprite tab in the 2026-10 look (docs/look_2026-10.md step 24) is held at
+The sprite tab in the 2026-10 look (docs/history/look_2026-10.md step 24) is held at
 the foot: a clear pixel on the grey checker, the ring cursor the arrows move
 and `a` paints at, the current mark on the tool, and the pickers -- the
 sprite and its size in a `ui.popover` -- which a tile picks from and a press
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime.editors import SpriteSheet  # noqa: E402
+from runtime.editors_sheet import SpriteSheet  # noqa: E402
 from runtime import moy_carts  # noqa: E402
 import pytest
 from ws_helpers import boot_on_fixture
@@ -225,7 +225,7 @@ def test_get_reports_when_shared_sheet_is_empty(tmp_path):
     assert ws.sheet is not None
 
 
-# -- the sprite tab in the 2026-10 look (docs/look_2026-10.md step 24) ------------------
+# -- the sprite tab in the 2026-10 look (docs/history/look_2026-10.md step 24) ------------------
 
 
 def _look_tab(tmp_path, theme="moy", variant="light"):

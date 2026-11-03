@@ -131,7 +131,7 @@ def warm_host_library():
     """Compile the host's one native library now, in the test process.
 
     `serve.py --carts` runs the real `moy_webhost`, whose transport loads the
-    library `runtime/host_native.py` compiles (`.build/host/moyhost-<hash>.so`).
+    library `runtime/host/host_native.py` compiles (`.build/host/moyhost-<hash>.so`).
     A cold cache -- a CI checkout, or any source edit -- costs seconds of C
     compiling, and under xdist several servers start together: the first
     compiles while the rest wait on its lock, which is longer than the 5 s a

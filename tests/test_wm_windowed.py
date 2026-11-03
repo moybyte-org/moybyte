@@ -1,4 +1,4 @@
-"""Tests for the Picotron-style windowed WM (runtime/wm_windowed.py, #73 -- the
+"""Tests for the Picotron-style windowed WM (runtime/wm/wm_windowed.py, #73 -- the
 big-screen / P4 "One" presentation of the 2026-07 shell).
 
 Driven through the SAME shared console the device runs (runtime.host_app +
@@ -207,7 +207,7 @@ def test_the_wasm_head_shares_the_same_two_meanings(tmp_path):
 # the next presentation cannot inherit the black desk by saying nothing.
 _CLEARS = True
 WINDOWED_INSTALLERS = {
-    "runtime/host_app.py": _CLEARS,
+    "runtime/host/host_app.py": _CLEARS,
     "firmware/web_runner/web_boot.py": _CLEARS,
     # ONE row for both P4 boards: they take one P4 tier body, which hands the
     # WM to the shared spine; the walk reads the canonical file, never the
@@ -232,8 +232,9 @@ def _windowed_install_sites():
     """
     import ast
     import warnings
-    shared = {p.name for base in ("runtime", "device")
-              for p in (ROOT / base).glob("*.py")}
+    from tools.board_config import shared_sources
+    shared = set(shared_sources(ROOT / "runtime")) | {
+        p.name for p in (ROOT / "device").glob("*.py")}
     found = {}
     # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
     # escapes in vendored/staged sources); this walk is a search, not a lint.
@@ -1455,7 +1456,7 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
 
 def test_bar_wifi_icon_opens_the_wifi_panel_as_a_popover(tmp_path):
     """On the desk the bar's wifi widget opens the Settings WIFI panel as a
-    popover over whatever runs (docs/shell_layout_2026-10.md §8): the game
+    popover over whatever runs (docs/theme_and_shell_2026-11.md §8.6): the game
     keeps its slot, no Settings window opens."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -2517,7 +2518,7 @@ def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):
     assert tuple(got) == TWO_WINDOWS
 
 
-# -- console mode as WM state (docs/shell_layout_2026-10.md §3, step 1) ---------
+# -- console mode as WM state (docs/theme_and_shell_2026-11.md §8.1, step 1) ---------
 #
 # The desk's PLAY enters console mode: the windows park outside the back-stack,
 # the route truncates to its root and the home presents fullscreen; the home's X
@@ -2949,7 +2950,7 @@ def test_home_on_the_fullscreen_tier_is_unchanged(tmp_path):
     assert ws.wm.stack.kinds() == ["launcher"]
 
 
-# -- the popover (docs/shell_layout_2026-10.md §8, step 6) ----------------------
+# -- the popover (docs/theme_and_shell_2026-11.md §8.6, step 6) ----------------------
 #
 # One popover at a time, anchored at the widget's cell, closed by a tap outside,
 # B, ESC or HOME. A change that stays inside it -- open, a row moved, close --
@@ -3421,7 +3422,7 @@ def test_the_fit_check_releases_a_closed_popovers_snapshots(tmp_path):
 
 
 def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
-    """docs/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
+    """docs/history/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
     Star Catcher" (a hyphen where the title face has no dot), and under the
     look's depth a chip names the app alone."""
     ws = _ws(tmp_path)
@@ -3465,7 +3466,7 @@ def test_while_a_playtest_runs_play_reads_stop_and_restart(tmp_path):
     assert "desktop" not in ws.wm._wins and not app.playing()
 
 
-# -- the desk and windows (docs/look_2026-10.md step 25) ----------------------
+# -- the desk and windows (docs/history/look_2026-10.md step 25) ----------------------
 
 def _moy_desk(tmp_path, variant="light"):
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
@@ -3563,7 +3564,7 @@ def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypa
 
 
 def test_blocks_tiles_are_each_apps_colour_and_their_icons_the_tile_ink(tmp_path):
-    """Blocks' `tiles` (docs/look_2026-10.md step 26b) name an app by its
+    """Blocks' `tiles` (docs/history/look_2026-10.md step 26b) name an app by its
     icon slot, Paint's `artwork` by `paint`; each tile is that colour inside
     the ink outline, its icon in `tile_ink`, and an app the map leaves out
     keeps the raised fill."""
@@ -3738,7 +3739,7 @@ def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
     assert inks["Files"] == th["chrome_ink_dim"]
 
 
-# -- the wallpaper's subject (docs/look_2026-10.md step 28) -------------------
+# -- the wallpaper's subject (docs/history/look_2026-10.md step 28) -------------------
 
 def _overlaps(a, b):
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
@@ -3836,7 +3837,7 @@ def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
 
 
 # -- every edge and corner resizes; a full-screen row's drag restores --------
-# (docs/shell_layout_2026-10.md §3, owner 2026-10-23)
+# (docs/theme_and_shell_2026-11.md §8.1, owner 2026-10-23)
 
 from runtime.wm_chrome import RZ_L, RZ_R, RZ_T, RZ_B   # noqa: E402
 
@@ -4593,3 +4594,102 @@ def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
     assert not win.full() and win.own
     assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]
     assert ws.wm._focus == "desktop" and "projects" in ws.wm._wins
+
+
+# The names the windowed tier's frame reads every frame -- the router's draw
+# list, the quiet frame's predicates and the base's verbs the console asks.
+FRAME_PATH = ("draw_stack", "_still", "_settled", "_calm", "_retained_n",
+              "debt_owed", "_pop_rides", "_scrim_up", "_scrim_rides", "_pop_n",
+              "_pause_rides", "_wash_rides", "_game_held", "_pop_live",
+              "_ensure_stack", "_overlay_sig", "overlay_stack",
+              "visible_stack_rev", "top_kind", "top_is", "top_is_player",
+              "viewport", "present_frame", "composite_game", "_view_src",
+              "_player_view", "_frame_is_quiet", "_draw_windows",
+              "_direct_render", "_shown_ok", "_debt_rows", "refill_step",
+              "_content_static", "_draw_app_window", "_draw_player_window",
+              "_player_rows", "_blit_game", "_fps_chip_on", "_shape_sig",
+              "_content_flinging")
+
+
+def test_the_frame_path_is_found_on_the_class_or_its_first_base():
+    """On MicroPython a method the class lacks is looked up through its
+    bases in order, a dict miss per base. WindowedWM's mixins stand before
+    its base, so the names the frame reads every frame live on the class
+    or its first base, and the base's are bound on the class."""
+    import runtime  # noqa: F401 -- the package path first
+    from runtime.wm_windowed import WindowedWM
+    first = WindowedWM.__bases__[0]
+    far = [n for n in FRAME_PATH
+           if n not in vars(WindowedWM) and n not in vars(first)]
+    assert not far, "the frame reads these past the first base: %s" % far
+
+
+def _no_room_over(ws, least):
+    """The root canvas's glass with no room for a layer of `least` bytes or
+    more, as a long session's PSRAM leaves a Guition P4: such a mint raises
+    MemoryError. Returns the list each refused ask is noted in."""
+    asks = []
+    real = ws.sys_canvas.new_layer
+
+    def new_layer(w, h, *a, **k):
+        if w * h * 2 >= least:
+            asks.append((w, h))
+            raise MemoryError("memory allocation failed")
+        return real(w, h, *a, **k)
+    ws.sys_canvas.new_layer = new_layer
+    return asks
+
+
+def test_a_snapshot_with_no_room_repaints_whole_instead_of_failing_every_frame(tmp_path):
+    """The pause menu's scrim rides on a snapshot of the glass under it. With
+    no room for that snapshot the menu paints as a WM with no retained root
+    paints it -- whole frames, the bytes of a WM whose scrims never ride --
+    and the refusal costs the change that asked, never every frame after it: a mint the glass cannot
+    serve collects the heap first, and asking on every frame wedged the
+    Guition P4 at one frame a second."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+    asks = _no_room_over(ws, ws.sys_canvas.w * ws.sys_canvas.h)
+    _no_room_over(ref, ref.sys_canvas.w * ref.sys_canvas.h)
+    steps = (lambda w: w.pause.show(),
+             lambda w: _pause_key(w, "down"),
+             lambda w: setattr(w, "_dirty", True),
+             lambda w: _pause_key(w, "up"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 8)
+        rring.settle(rdrv, 8)
+        assert set(stacks) <= {"full"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.bufs):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+        if i == 0:
+            first = len(asks)
+    # the scrim's snapshot, the idle mint and the card's held frame, each
+    # asked once when the menu came up; its later changes ask nothing
+    assert len(asks) == first <= 3, asks
+    ws.pause.close()
+    ref.pause.close()
+    ring.settle(drv, 6)
+    rring.settle(rdrv, 6)
+    for a, b in zip(ring.bufs, rring.bufs):
+        assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
+
+
+def test_an_idle_snapshot_mint_with_no_room_is_asked_once(tmp_path):
+    """The system menu's scrim snapshot is minted on idle frames. Refused, it
+    is not asked for again until the WM gives a layer back."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    wm = ws.wm
+    wm._release_layer(wm._pop_wash[0])
+    wm._pop_wash[0] = None
+    asks = _no_room_over(ws, ws.layout.cw * ws.layout.ch * 2)
+    for _ in range(12):
+        drv.frame(1 / 30)
+    assert len(asks) == 1, asks
+    ws.close_app(ws._apps_by_id["calc"]) if hasattr(ws, "close_app") else \
+        wm.close_window_kind("calc")
+    for _ in range(12):
+        _quiesce(ws)
+        drv.frame(1 / 30)
+    assert len(asks) == 2, asks

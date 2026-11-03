@@ -1,12 +1,12 @@
 // moy_play_stop: the run the kernel stops the VM for
-// (docs/kernel_cartpath_2026-10.md section 5), on a board that takes the stop.
+// (docs/history/kernel_cartpath_2026-10.md section 5), on a board that takes the stop.
 //
 // THE LEVER is the board's MOY_VM_STOP (its mpconfigboard.h): the S3 boards,
 // whose PSRAM a Doom-sized compiled cart needs whole. A board without it (the
 // P4s) has no verdict here and keeps the VM for every run (KEEP_LEVER).
 //
 // THE VERDICT (moy_play_stop_verdict, at the launch, the VM up): a VM-free
-// game stops the VM only when every clause of section 5.1 lets it -- its
+// game stops the VM only when every clause of moy_play.h's verdict lets it -- its
 // route is HOME, no Python owner holds a WiFi lease (the link and a cart's
 // run are the kernel's own holders), no update is being written, the kernel's
 // present shows its canvas -- and, the policy being `need`, its fit check
@@ -433,7 +433,7 @@ static int sha_of(const char *p) {
     return e;
 }
 
-// config.json as cfg() reads it (runtime/lua_ext.py's cfg_blob): sorted by
+// config.json as cfg() reads it (runtime/run/lua_ext.py's cfg_blob): sorted by
 // key, a string without its quotes, a boolean as 1/0, an int as Python's %d,
 // another number as %.7g; anything else is no value.
 typedef struct {
@@ -525,7 +525,7 @@ static void cfg_load(const char *path) {
     moy_buf_free(&b);
 }
 
-// pmem.json: a list of 256 signed 32-bit ints (runtime/moy_carts.py's
+// pmem.json: a list of 256 signed 32-bit ints (runtime/carts/moy_carts.py's
 // load_pmem); missing or unreadable is all zero.
 static void pmem_load(const char *path) {
     char p[224];

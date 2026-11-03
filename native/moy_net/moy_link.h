@@ -1,4 +1,4 @@
-// The radio link's owner (docs/kernel_survival_2026-10.md section 6.1): the one
+// The radio link's owner (docs/history/kernel_survival_2026-10.md section 6.1): the one
 // ESP-NOW receive callback the firmware has, feeding a receive ring the kernel
 // owns, so a VM stop or a soft reset neither orphans the callback nor frees
 // what it writes into.

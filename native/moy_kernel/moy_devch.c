@@ -482,7 +482,7 @@ bool moy_devch_poll(bool *quit) {
             D.armed = false;
             moy_loop_say("Moybyte serial channel DISARMED: %u bytes arrived and not one "
                          "complete command. Something is injecting into stdin -- most "
-                         "likely UART0 (U0RXD/GPIO44 floats on the expansion header) "
+                         "likely UART0 (U0RXD: a floating pin, or the T-Deck's GPS) "
                          "feeding the same ring buffer. Rebuild with "
                          "MICROPY_HW_ENABLE_UART_REPL (0) to take its ISR off it.",
                          (unsigned)D.rx);

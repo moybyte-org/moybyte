@@ -1,5 +1,5 @@
 ;; App Roles Wasm: a compiled app reaching its roles through imports
-;; (docs/kernel_appabi_2026-10.md section 4). It declares the moybyte.app
+;; (docs/history/kernel_appabi_2026-10.md section 4). It declares the moybyte.app
 ;; extension, whose module its role rows come from (moy-spec SPEC.md 16.2), and
 ;; holds prefs by its permission (the theme's reads are every app's).
 ;;

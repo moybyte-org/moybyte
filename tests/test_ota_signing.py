@@ -8,7 +8,7 @@ into the image the owner flashed over a cable.
 
 The VERIFIER is the security-critical half and it lives in the kernel
 (native/moy_net/moy_ota.c: the canonical text, SHA-256 and an RSA-2048 modexp
-of its own), run here over runtime/net_binding.py. The tests carry their own
+of its own), run here over runtime/host/net_binding.py. The tests carry their own
 2048-bit key and sign with `pow(m, d, n)` rather than reaching for
 `cryptography`, so the whole round trip runs in CI (where only the dev extra is
 installed) and not merely on a release machine.

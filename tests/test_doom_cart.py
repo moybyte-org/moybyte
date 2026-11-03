@@ -4,7 +4,7 @@ Opt-in by construction. experiments/wasm_aot/doom/build_cart.py builds the cart
 on the developer's machine -- doomgeneric is GPL and the shareware WAD's
 licence forbids redistribution, so neither is ever in this repository or in
 CI -- and every test here skips, saying so, until it has. Once built, the cart
-runs on the host twin (runtime/wasm_binding.py: the boards' import table over
+runs on the host twin (runtime/host/wasm_binding.py: the boards' import table over
 WAMR) and these hold what the on-glass suites compare a board against: the
 frame Doom renders at a named gametic does not depend on how often the host
 draws, and every level of the shareware episode loads and plays at the zone

@@ -4,11 +4,11 @@ docs/history/ui_refactor_2026-08.md §3 Phase 5.
 Adding a system app used to cost EIGHT files, five of which held the app's name
 in a hand-maintained list:
 
-  * `runtime/console.py`     -- import ladder + construction + register_app(...)
+  * `runtime/shell/console.py`     -- import ladder + construction + register_app(...)
   * `tools/gen_device_carts.py` -- CART_ORDER, the device launcher order
   * `tests/test_device_seed_parity.py` -- TITLE_TO_FOLDER
   * `firmware/web_runner/build.sh`  -- the browser bundle's roster
-  * (`runtime/host_app.py` -- the bare-name alias, which only Calc ever had)
+  * (`runtime/host/host_app.py` -- the bare-name alias, which only Calc ever had)
 
 FOUR of those five failed SILENTLY, and on device only. Forget CART_ORDER and
 the identity cart never seeds, so `is_app` never claims it, so the app is simply
@@ -50,13 +50,13 @@ def _read(rel):
 # -- the declaration is the source of truth ---------------------------------
 
 def test_app_decls_matches_the_manifests():
-    """`runtime/app_decls.py` is generated. If a manifest's `app` block changes
+    """`runtime/shell/app_decls.py` is generated. If a manifest's `app` block changes
     and nobody regenerates, the frozen tiers ship a stale registry -- so the
     generated text must equal the committed file, byte for byte."""
     fresh = gdc.render_app_decls(gdc.app_decls())
-    on_disk = _read("runtime/app_decls.py")
+    on_disk = _read("runtime/shell/app_decls.py")
     assert fresh == on_disk, (
-        "runtime/app_decls.py is STALE -- regenerate it:\n"
+        "runtime/shell/app_decls.py is STALE -- regenerate it:\n"
         "    python tools/gen_device_carts.py --app-decls")
 
 
@@ -97,9 +97,9 @@ def test_the_shell_registers_exactly_the_declared_apps(tmp_path):
 
 def test_console_has_no_per_app_registration_line():
     """`register_app` may appear exactly twice in the Workstation's spine half
-    (runtime/console_spine.py, where the declaration loop lives): its own
+    (runtime/shell/console_spine.py, where the declaration loop lives): its own
     definition and the ONE call inside that loop."""
-    src = _read("runtime/console_spine.py")
+    src = _read("runtime/shell/console_spine.py")
     tree = ast.parse(src)
     calls = [n for n in ast.walk(tree)
              if isinstance(n, ast.Call)
@@ -118,7 +118,7 @@ def test_no_app_is_constructed_by_name_in_console(app_id):
     """The seven `self.<id>_app = SomeAppLayer(...)` lines are gone. The class
     IMPORTS stay -- console.py's barrel is deliberately frozen, not migrated
     (docs/history/shell_decoupling_2026-08.md row 3) -- but nothing may assign one."""
-    tree = ast.parse(_read("runtime/console.py"))
+    tree = ast.parse(_read("runtime/shell/console.py"))
     attr = app_id + "_app"
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):

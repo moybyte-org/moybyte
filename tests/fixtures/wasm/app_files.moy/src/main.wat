@@ -1,4 +1,4 @@
-;; App Files Wasm: the public UI API's Files verbs (docs/look_2026-10.md step
+;; App Files Wasm: the public UI API's Files verbs (docs/history/look_2026-10.md step
 ;; 21) as a compiled app, through the `ui` rows it imports from module
 ;; "moybyte.app": a list in columns, a scroll region, a field, an icon on a
 ;; button and a dialog. tests/fixtures/ui_parts/files_py.moy and

@@ -37,7 +37,7 @@ NOT reachable from a host, and named rather than faked into looking covered:
   observable here and is what these tests assert.
 
 Mutation-checked per #208: 69 perturbations of the glue and 13 of the shared
-`runtime/lua_ext.py` beside it (whose handle registry these tests are the only
+`runtime/run/lua_ext.py` beside it (whose handle registry these tests are the only
 host execution of), 82 red, no survivors.
 """
 
@@ -167,7 +167,7 @@ class FakeMoycore(types.ModuleType):
         self.pmem_image_fill = None
         self.closes = 0
         self.wasm_open_err = None
-        # A retry (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+        # A retry (native/moy_wasm/README.md, "A cart survives its
         # firmware") calls wasm_open a second time; set this to a list to
         # answer each call in turn instead of the same wasm_open_err always.
         self.wasm_open_errs = None
@@ -1040,7 +1040,7 @@ def test_a_cart_that_fails_to_load_closes_the_vm_and_names_the_error(w):
 
 
 def test_the_cart_chunk_is_named_for_the_crash_to_code_panel(w):
-    """`player._lua_cart_line` parses `cart:12:` out of a runtime error to put
+    """`player_fit._lua_cart_line` parses `cart:12:` out of a runtime error to put
     the caret on the failing line (#24); "@" is Lua's own source-name sigil."""
     w.run()
     load = [c for c in w.core.calls if c[0] == "load"][0]
@@ -1129,7 +1129,7 @@ def test_an_input_without_button_masks_falls_back_and_agrees_bit_for_bit(w):
 
 
 def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
-    """`runtime/input.py` and the boards' table differ in BUTTONS length; the
+    """`runtime/shell/input.py` and the boards' table differ in BUTTONS length; the
     snapshot must not."""
     from runtime.input import InputState as HostInput
     from runtime.moy_input import InputTable as BoardInput
@@ -1889,7 +1889,7 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
     """The engine's refusal for a module with no signature (Unknown sources
     off) is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). The cart plays; run.interp says so, and interp_cause says
     why -- "unsigned", so the Player's notice reads "isn't signed" rather
     than "needs an update"."""
@@ -2160,7 +2160,7 @@ def test_a_declaration_past_any_board_is_asked_about_capped_not_overflowed(tmp_p
 
 def test_no_module_for_this_chip_sizes_against_main_wasm_instead(tmp_path):
     """No module for this chip: the cart plays on the interpreter instead of
-    refusing (docs/wasm_tier_plan_2026-09.md, "A cart survives its
+    refusing (native/moy_wasm/README.md, "A cart survives its
     firmware"), so the fit check sizes against main.wasm itself, through the
     INTERPRETED rule (a real file, a real report, never the AOT one) rather
     than giving up."""

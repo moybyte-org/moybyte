@@ -55,7 +55,7 @@ def test_paint_my_art_and_the_wallpaper_are_well_formed_system_carts():
 
 
 def test_the_paint_cart_body_is_only_the_fallback_card():
-    """Paint the APP is `runtime/paint_app.py`; `moybyte.paint.moy/main.py` is the card an
+    """Paint the APP is `runtime/apps/paint_app.py`; `moybyte.paint.moy/main.py` is the card an
     older shell shows instead, and nothing else.
 
     A registered app CLAIMS its cart (`console.open()` routes a claimed cart to
@@ -156,7 +156,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     ws.look.tick(0.0)                          # the change shows at the next frame
     assert ws.look.wallpaper_id == "moybyte.wallpaper" == ws.look.PICTURE
     ws.look.commit()
-    # The picture is the theme's: copied into `custom` (docs/theming_2026-09.md D6).
+    # The picture is the theme's: copied into `custom` (docs/theme_and_shell_2026-11.md D6).
     assert moy_carts.load_system(carts)["theme"] == "custom"
     pic = Path(carts) / "custom.moy" / "desk.moyimg"
     assert pic.read_bytes() == moy_carts.load_artwork(carts).encode()
@@ -816,9 +816,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     over the one `bufs` frames before it. `chosen`: the tool was chosen before
     the page was painted, so the press is the stroke's first change; `start`
     is where in the view the pointer's stroke begins."""
-    from runtime import paint_app
+    from runtime import paint_draw
     if not stroke_frames:
-        monkeypatch.setattr(paint_app, "_loop", None)
+        monkeypatch.setattr(paint_draw, "_loop", None)
     if desk:
         ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                         font_scale=2, windowed=True, panel_diagonal_in=7.0)
@@ -986,7 +986,7 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     asks for one more or leaves every buffer of the canvas holding the page,
     RETAINED_FRAMES paints of it in a row; an idle board has then painted it
     by the next press, which is a stroke frame from its first."""
-    from runtime import paint_app
+    from runtime import paint_app, paint_draw
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
@@ -1004,7 +1004,7 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     def counted(cv, th):
         got = stroke(cv, th)
         if not got:
-            whole.append(paint_app._loop.drawn())
+            whole.append(paint_draw._loop.drawn())
         return got
     app._stroke_frame = counted
     draw = app.draw
@@ -1026,3 +1026,104 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     for _ in range(6):
         drv.frame(1 / 30)
     assert whole and len(whole) <= bufs + 1, whole
+
+
+def test_paints_frame_path_is_found_on_the_class_or_its_first_base():
+    """On MicroPython a method the class lacks is looked up through its bases
+    in order, a dict miss per base. Paint's draw entry and the WM's shown
+    protocol are on the class; the draw half they reach every frame is its
+    first base (paint_draw.PaintDraw), and nothing it calls lies further."""
+    from runtime import paint_app, paint_draw
+    cls = paint_app.PaintAppLayer
+    assert cls.__bases__[0] is paint_draw.PaintDraw
+    assert not [n for n in ("draw", "retained", "changed") if n not in vars(cls)]
+    for name in ("_canvas", "_stroke_frame", "_view", "_drawing", "_tools", "_rail",
+                 "_show", "_view_page", "_game_page", "_story_page", "_draw_toast",
+                 "_desk_row", "_desk_panel", "_desk_foot", "_lend"):
+        assert name in vars(cls) or name in vars(paint_draw.PaintDraw), name
+
+
+class _PixLedger:
+    """moybuf over a ledger: what is lent, and what came back."""
+
+    def __init__(self):
+        self.live = {}
+        self.freed = 0
+
+    def alloc(self, n):
+        b = memoryview(bytearray(n))
+        self.live[id(b)] = b
+        return b
+
+    def free(self, b):
+        assert isinstance(b, memoryview) and self.live.pop(id(b), None) is not None, \
+            "freed twice, or never lent"
+        self.freed += 1
+
+
+def test_a_drawings_pixels_are_off_the_heap_and_go_back_when_it_is_replaced(
+        tmp_path, monkeypatch):
+    """A desk drawing is 600 KB: on the gc heap every collect scans it and
+    it wants one run of the heap whole, which a long session's heap stops
+    having. Its pixels are moybuf's, the document their one owner, and a
+    replaced document gives them back."""
+    from runtime import artwork
+    ledger = _PixLedger()
+    monkeypatch.setattr(artwork, "_moybuf", ledger)
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    old = app.doc
+    assert isinstance(old.pix, memoryview) and id(old.pix) in ledger.live
+    app._fresh_doc(old.W, old.H)
+    assert ledger.freed == 1 and old.pix is None
+    assert id(app.doc.pix) in ledger.live and len(ledger.live) == 1
+    app._fresh_doc(320, 240)
+    app.doc.load((64, 48, bytes(64 * 48)))     # another size re-mints the pixels
+    assert ledger.freed == 3 and len(ledger.live) == 1
+    assert len(app.doc.pix) == 64 * 48
+
+
+def test_the_artwork_service_keeps_no_copy_of_the_open_drawing(tmp_path):
+    """Load hands the decoded drawing over and save writes the document's own
+    pixels: the service holds neither, so the drawing stands in memory once."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    doc = app.doc
+    doc.pix[0] = 3
+    app._mark_changed()
+    assert app._save() is True
+    app.open()
+    big = [k for k, v in vars(ws.artwork).items()
+           if isinstance(v, (bytes, bytearray, memoryview, tuple))
+           and len(v) and (len(v) >= doc.W * doc.H
+                           or any(isinstance(x, (bytes, bytearray)) and len(x) >= doc.W * doc.H
+                                  for x in (v if isinstance(v, tuple) else ())))]
+    assert big == []
+
+
+def test_a_drawing_opens_straight_into_the_documents_pixels(tmp_path, monkeypatch):
+    """Paint reads the open drawing row by row into the document's own
+    pixels, the document kept where its size is the drawing's: the same
+    indices the whole-blob decoder gives, and no copy of the drawing on the
+    gc heap on the way in (a desk's is 600 KB)."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    doc = app.doc                        # a handheld's 320 x 240: a desk's reads the same
+    for i in range(0, len(doc.pix), 5):
+        doc.pix[i] = (i // 5 + i // doc.W) & 63
+    painted = bytes(doc.pix)
+    app._mark_changed()
+    assert app._save() is True
+    blob, err = ws.artwork._files.load("drawings", ws.artwork.doc_name())
+    assert err is None and ws.artwork._files.decode_image(blob)[2] == painted
+
+    def no_whole_decode(_blob):
+        raise AssertionError("decoded whole")
+    monkeypatch.setattr(app._art._files, "decode_image", no_whole_decode)
+    app.open()
+    assert app.doc is doc                # the same size: the same pixels, read into
+    assert bytes(doc.pix) == painted
+    assert ws.artwork.editable()

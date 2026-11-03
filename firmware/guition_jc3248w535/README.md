@@ -17,9 +17,9 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 |---|---|
 | panel | AXS15231B, 320x480 portrait-native, QSPI @ 40MHz: CLK 47, D0 21, D1 48, D2 40, D3 39, CS 45. No reset GPIO. MADCTL MV is DEAD on this glass (tested 0x60 + 0x20 live, both scramble; Arduino_GFX writes the bit, the LVGL-forum reports match ours) -- the console runs LANDSCAPE 480x320 via the rotate in moy_axs's band copy (owner call 2026-08-18). |
 | touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: the kernel's `native/moy_input/moy_touchdev.c`, knobs in `mpconfigboard.h`). |
-| backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
+| backlight | GPIO1, active high, an LEDC PWM channel at the kernel's level (`native/moy_glass/moy_light_ledc.h`): Settings' Brightness and the idle ladder's dim rung. |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
-| flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass: carts +25-29%, pump -23%, SPI starvation -77%; needs the #169 retune patch, applied by build.sh). |
+| flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass with the numbers in #66; needs the #169 retune patch, applied by build.sh). |
 | SD | TF slot VERIFIED on glass (2026-08-20): SPI3, CS 10 / MOSI 11 / SCLK 12 / MISO 13 (f1atb's field guide, confirmed by mount); the panel is QSPI on SPI2, so **nothing shares the card's host**. **A card that mounts IS the cart store**: `moy_runtime.tf_card` opens it (`moy_sd.open` on SPI3, the bus initialised once and never torn down, and the store's card volume over it, `moy_store.card`, with the T-Deck's sector cache) and `device/card_store.py` mounts it once at boot, as on the P4s, whose README carries the rest of that arrangement (the fallback, the verdict in `card_store.STATUS`, the exFAT build flag, what stays internal). The store is `/sd/moybyte/carts` and the documents beside it (`system.json`, `wifi.json` with the WiFi passwords, `shared.moygfx`) are `/sd/moybyte/*`; the card's root, and the `/sd/carts` of builds before 2026-10-05, are not read. FAT12/16/32 and exFAT mount. THE TRAP: SPI slot numbers (`machine.SDCard`'s) map INVERTED to host numbers -- **slot=2 is SPI3 = host 2, slot=3 is SPI2 (the panel's bus)**; `moy_sd.open` takes the HOST, 2. A card that will not mount leaves the bus up for the next try; nothing tears it down. Boot output is DROPPED until a serial host attaches (#201), hence the verdict. A WiFi update streams into the inactive slot and stages nothing, since the internal VFS cannot hold the image. |
 | audio | speaker header exists; amp/pins UNVERIFIED -- stage 5 is open. |
 | USB | the S3's native USB-Serial/JTAG (303a:1001). Console primary per #201, so serial RX works under the desktop. |
@@ -125,7 +125,7 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 ## The serial dev channel
 
-One vocabulary, every board (`runtime/dev_channel.py`; the T-Deck's README
+One vocabulary, every board (`runtime/boot/dev_channel.py`; the T-Deck's README
 carries the RX story and the `recv` cart push, which are this board's too --
 same S3 USB-Serial/JTAG, same ISR, same **16384** `[serial] window`). What is
 board-specific here is where a pushed cart lands: `python tools/push_cart.py
@@ -279,21 +279,19 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     guess that night; `guition_smoke.touch()` with a finger settled them the
     next day, and `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*` carry the winners
     (see above).
-  * stage 6: boots to the desktop (first frame 270ms after a seeded boot;
-    34 carts seeded to `/moy/carts` on the first boot), OTA confirm fired
-    (`marked app valid (slot ota_0)`), and
-    **`tests/test_guition_on_glass.py` passed 10/10** -- state shape, the
+  * stage 6: boots to the desktop with the seed carts on the first boot, OTA
+    confirm fired (`marked app valid (slot ota_0)`), and
+    **`tests/test_guition_on_glass.py` passed** -- state shape, the
     320x480-system/320x240-game viewport seam `(0, 120, 1)`, swipes through
-    the real pointer feed, a Python cart (Star Catcher, ~28fps) and a Lua
-    cart (Sakura Lua via moycore, ~24fps) both run and exit, idle blank +
-    wake, mem. `MODE = "desktop"` is the shipped default.
+    the real pointer feed, a Python cart (Star Catcher) and a Lua cart (Sakura
+    Lua via moycore) both run and exit, idle blank + wake, mem. Per-cart fps
+    is #66's. `MODE = "desktop"` is the shipped default.
   * One anomaly on file: a single
     `frame error: 'NoneType' object isn't iterable` fired once, on the
     first-ever cart exit of the first seeded session, and never reproduced
     (not on later exits, not on a fresh boot); `_frame_error` now prints the
     full traceback so a recurrence names its line.
-  * open stages/decisions: SD (stage 4 -- pins unverified), audio (stage 5 --
-    amp/pins unverified), backlight PWM dimming (owner call), and a
+  * open stages/decisions: audio (stage 5 -- amp/pins unverified), and a
     **touch-only exit gesture for fullscreen games** -- this board has no
     console key of its own, so a running game with no keyboard paired has no
     on-glass exit path (tools/apps keep the bar's back; games hide the bar).

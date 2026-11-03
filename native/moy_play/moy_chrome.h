@@ -1,5 +1,5 @@
 // moy_chrome: the chrome drawn over a cart and the shell's bar, one body each
-// (docs/kernel_cartpath_2026-10.md §3.5): the strip (the crash and tool bars,
+// (docs/history/kernel_cartpath_2026-10.md §3.5): the strip (the crash and tool bars,
 // the band and right zone every bar shares), the error
 // and notice panel, the system menu and its ABOUT box, the notice banner and
 // the achievement toast.
@@ -7,7 +7,7 @@
 // A PIECE IS A DISPLAY LIST. Each builder lays its piece out as a short list
 // of the canvas verbs it is made of -- rect, rectb, print, a 12x12 glyph, a
 // bar icon -- in palette indices, so the one body is drawn two ways: replayed
-// through a VM's canvas (runtime/chrome.py's `replay`; the canvas keeps its
+// through a VM's canvas (runtime/shell/chrome.py's `replay`; the canvas keeps its
 // damage, its sprite-batch order and a web view's recording), or rasterised
 // here into an RGB565 buffer by the same kernels the canvas verbs end in
 // (moy_gfx_kernels.h; text by the one text path, moy_text.h; a glyph by
@@ -121,7 +121,7 @@ const char *moy_chrome_say_text(int say);
 // The band every other bar starts with: `light` is a light band (a window's
 // toolbar under a light theme, or a light theme's bar).
 void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light);
-// One bar widget's cell (docs/shell_layout_2026-10.md §4), at (x, y, w, h)
+// One bar widget's cell (docs/theme_and_shell_2026-11.md §8.2), at (x, y, w, h)
 // of its strip and chrome scale `cs` (0: the canvas's own): `menu`, `close`,
 // `wifi` (`s` its glyph's kind), `battery`, `clock` (`s` "HH:MM"; on a side
 // bar, `across`, two lines in the cell from (x, y)), `title` (`s` cut to the
@@ -141,7 +141,7 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
 // -- the kernel's state --------------------------------------------------------
 
 // The banners a run the kernel drives shows over its frames, the shell's
-// copies (runtime/console_notices.py): the system notice (`ok`, else a
+// copies (runtime/shell/console_notices.py): the system notice (`ok`, else a
 // warning) until `until_ms`, and the unlock banner -- `head` over the badge's
 // `name` on its `icon`'s tile, a secret's (`secret`) with confetti -- armed
 // for MOY_CHROME_TOAST_MS (widgets.TOAST_MS) up to `until_ms`.

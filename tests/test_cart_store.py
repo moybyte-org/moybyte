@@ -1,5 +1,5 @@
-"""The cart store (#124): `runtime/cart_index.py` (the console's `moy install`)
-and `runtime/getcarts_app.py` (the Get Carts app), on the host.
+"""The cart store (#124): `runtime/carts/cart_index.py` (the console's `moy install`)
+and `runtime/apps/getcarts_app.py` (the Get Carts app), on the host.
 
 Five families:
 
@@ -828,7 +828,7 @@ def test_the_host_transport_reports_a_missing_file_and_a_cut_body(tmp_path, serv
 
 def _board_net(wifi=None, dial=None):
     """The board's transport (device/wire_links.CartNet) over the kernel's
-    client, the C run by runtime/net_binding.py."""
+    client, the C run by runtime/host/net_binding.py."""
     from runtime import net_binding
     net_binding.install()
     sys.path.insert(0, str(ROOT / "device"))
@@ -1664,7 +1664,7 @@ print("refused", job.error == ci.MISMATCH, "bad.moy" in os.listdir(root))
 
 @pytest.mark.parametrize("archive", ["ram", "store"])
 def test_the_installer_runs_under_micropython(tmp_path, archive):
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(why="the deflate half of cart_index only exists there")
     repo = Repo("https://mp.example/carts")
     wad = os.urandom(90000)
@@ -1685,7 +1685,7 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     root = _store(tmp_path)
     script = tmp_path / "run.py"
     script.write_text(_MP_SCRIPT % {
-        "runtime": str(ROOT / "runtime"), "map": str(tmp_path / "map.json"),
+        "runtime": runtime_tree(), "map": str(tmp_path / "map.json"),
         "index": url_map[repo.url("index.json")], "index_url": repo.url("index.json"),
         "root": root, "archive": archive})
     out = subprocess.run([exe, "-X", "heapsize=4M", str(script)], capture_output=True,
@@ -1714,7 +1714,7 @@ def _theme_shelf():
 
 
 def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
-    """docs/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
+    """docs/history/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
     removing the active theme falls back to the default seed."""
     import moy_ui
     from runtime import chrome

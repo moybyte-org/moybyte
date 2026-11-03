@@ -1,8 +1,8 @@
 """"No C compiler" has to READ like a missing compiler (#28).
 
 Since runtime/canvas.py was deleted the host has no Python raster to fall back
-on: it draws on device_canvas.DeviceCanvas over runtime/gfx_binding.py, which
-ctypes-loads a library runtime/native_build.py compiles. So "no C compiler = no
+on: it draws on device_canvas.DeviceCanvas over runtime/host/gfx_binding.py, which
+ctypes-loads a library runtime/host/native_build.py compiles. So "no C compiler = no
 host console" stopped being a caveat and became the plain truth -- and what the
 user actually got was
 
@@ -78,7 +78,7 @@ def test_the_warning_goes_to_stderr_not_the_console(capsys):
 def _build_gfx(**kw):
     """Ask for the real host gfx build, whatever the environment allows."""
     from runtime import gfx_binding, host_native
-    return native_build.build_parts("moyhost_gfx", [gfx_binding.PART],
+    return native_build.build_parts("gfx_t", [gfx_binding.PART],
                                     str(ROOT / ".build" / "t"),
                                     cflags=host_native.CFLAGS, **kw)
 

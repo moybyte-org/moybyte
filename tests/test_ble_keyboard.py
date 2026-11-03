@@ -1,7 +1,7 @@
 """The BLE HID keyboard central (native/moy_input/moy_hid.c), EXECUTED: the
 report decode and keymap, the level state with its one-frame make edges, and
 the scan / connect / pair / discover / subscribe machine, over a fake stack
-through the host's binding (runtime/moy_input.py's HidMachine). A board runs
+through the host's binding (runtime/host/moy_input.py's HidMachine). A board runs
 the same machine on NimBLE's host task (moy_ble_task.c); its wiring is pinned
 at the end, and the radio itself on glass."""
 
@@ -184,7 +184,7 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
 
 def test_super_tapped_is_the_start_button_in_every_mode():
     """Either GUI key (Super, the Windows key) tapped is `start`, the
-    console's system key (docs/look_2026-10.md step 25a), on its RELEASE, and
+    console's system key (docs/history/look_2026-10.md step 25a), on its RELEASE, and
     types nothing."""
     table, _stack, m = _machine()
     _ready(m)

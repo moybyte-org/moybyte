@@ -1,5 +1,5 @@
 """What a verb hands the board's module as it is -- its options as the list
-or tuple they are (native/moy_ui/modmoy_ui.c's `opts_of`, runtime/ui.py's
+or tuple they are (native/moy_ui/modmoy_ui.c's `opts_of`, runtime/toolkit/ui.py's
 `_opts`), a label's text options in its override dict (`label_text`) --
 draws what the face's own encoding draws, answers what it answers, and,
 where the options fit the module's buffer, builds nothing: under the boards'
@@ -7,7 +7,7 @@ MicroPython, the real module, each page drawn both ways."""
 
 import subprocess
 
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 from pathlib import Path
 
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DRIVER = r'''
 import sys, gc
-sys.path.insert(0, @ROOT@ + "/runtime")
+sys.path.insert(0, @RUNTIME@)
 sys.path.insert(0, @ROOT@ + "/device")
 import moy_gfx
 from array import array
@@ -137,7 +137,8 @@ print("DONE")
 def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it():
     exe = require_unix_mp("moy_ui", board_model=True,
                           why="the module's options read from a list or tuple")
-    prog = DRIVER.replace("@ROOT@", repr(str(ROOT)))
+    prog = DRIVER.replace("@ROOT@", repr(str(ROOT))).replace(
+        "@RUNTIME@", repr(runtime_tree()))
     out = subprocess.run([exe, "-c", prog], capture_output=True, text=True, timeout=120,
                          cwd=str(ROOT))
     assert out.returncode == 0, out.stderr[-2000:]

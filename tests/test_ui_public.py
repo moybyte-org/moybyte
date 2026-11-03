@@ -9,7 +9,7 @@ the engine's focus and navigation, and the shell-strict ratchet.
     order, spatial moves, activation by key and by tap, `keys_taken`, state
     kept by id and dropped with it, `nav` and `mark` off, a settled frame;
   * the shell is strict (§7): the shell's app modules and the system carts
-    reach the engine layer (`runtime/ui_draw.py`) only where pinned below,
+    reach the engine layer (`runtime/toolkit/ui_draw.py`) only where pinned below,
     and pass no override key but `id`, `current`, `disabled`, `steps` and `hint`.
 """
 
@@ -659,31 +659,31 @@ def test_a_hover_owes_a_frame_only_over_a_stop():
 # -- the shell is strict (§7) ------------------------------------------------------------
 
 # The shell's app modules and system carts not yet moved onto the verbs: each
-# screen step that restyles an app takes it off (docs/look_2026-10.md 19-24;
-# steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a),
-# and step 27 holds the list empty.
+# screen step that restyles an app takes it off (docs/history/look_2026-10.md 19-24;
+# steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a);
+# the editors and Paint's layer stay on it.
 NOT_MOVED = frozenset((
-    "runtime/block_editor_ui.py",
-    "runtime/code_layer.py",
-    "runtime/editor_app.py",
-    "runtime/map_editor_ui.py",
-    "runtime/music_editor_ui.py",
-    "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py",
+    "runtime/editors/block_editor_ui.py",
+    "runtime/editors/code_layer.py",
+    "runtime/editors/editor_app.py",
+    "runtime/editors/map_editor_ui.py",
+    "runtime/editors/music_editor_ui.py",
+    "runtime/editors/paint_layer.py",
+    "runtime/editors/scene_editor_ui.py",
 ))
 
 # The shell's apps (§7): their modules and the system carts' code.
 APPS = (
-    "runtime/appearance_app.py", "runtime/artwork.py", "runtime/paint_app.py",
-    "runtime/myart_app.py", "runtime/drawing_pages.py", "runtime/block_editor_ui.py",
-    "runtime/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
-    "runtime/editor_blocks.py", "runtime/editor_desk.py", "runtime/editor_map.py", "runtime/editor_music.py",
-    "runtime/editor_parts.py", "runtime/editor_scene.py", "runtime/editor_settings.py",
-    "runtime/editor_sound.py",
-    "runtime/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
-    "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
-    "runtime/scene_editor_ui.py", "runtime/settings_layer.py", "runtime/storybook_app.py",
-    "runtime/story_edit.py",
+    "runtime/apps/appearance_app.py", "runtime/apps/artwork.py", "runtime/apps/paint_app.py",
+    "runtime/apps/myart_app.py", "runtime/apps/drawing_pages.py", "runtime/editors/block_editor_ui.py",
+    "runtime/apps/calc_app.py", "runtime/editors/code_layer.py", "runtime/editors/editor_app.py",
+    "runtime/editors/editor_blocks.py", "runtime/editors/editor_desk.py", "runtime/editors/editor_map.py", "runtime/editors/editor_music.py",
+    "runtime/editors/editor_parts.py", "runtime/editors/editor_scene.py", "runtime/editors/editor_settings.py",
+    "runtime/editors/editor_sound.py",
+    "runtime/toolkit/file_widgets.py", "runtime/apps/files_app.py", "runtime/apps/getcarts_app.py",
+    "runtime/editors/map_editor_ui.py", "runtime/editors/music_editor_ui.py", "runtime/editors/paint_layer.py",
+    "runtime/editors/scene_editor_ui.py", "runtime/system/settings_layer.py", "runtime/apps/storybook_app.py",
+    "runtime/apps/story_edit.py",
 )
 
 
@@ -728,11 +728,12 @@ def test_apps_draw_focus_through_the_marks():
     verb's stop, `ui_draw.focus`, or a part's `focus=`), and `focus_ring` is
     the ring a theme without marks falls back to inside it."""
     hits = []
-    for name in sorted(os.listdir(os.path.join(ROOT, "runtime"))):
-        if name.endswith(".py") and name != "ui_draw.py":
-            with open(os.path.join(ROOT, "runtime", name)) as f:
-                if "focus_ring(" in f.read():
-                    hits.append(name)
+    for base, _dirs, names in os.walk(os.path.join(ROOT, "runtime")):
+        for name in sorted(names):
+            if name.endswith(".py") and name != "ui_draw.py":
+                with open(os.path.join(base, name)) as f:
+                    if "focus_ring(" in f.read():
+                        hits.append(name)
     assert hits == []
 
 
@@ -916,7 +917,7 @@ def test_a_press_focuses_its_pane_and_a_split_without_focus_answers_none():
 
 
 def test_a_split_frame_is_the_focused_panes_where_nothing_else_moved():
-    """The engine's split frame (docs/ui_blocks_2026-10.md §4.2): the pane a
+    """The engine's split frame (docs/ui_api_2026-10.md §5a): the pane a
     split's focus names, drawn alone where the gen the host gives is the
     last frame's, the WM knows this frame's target holds the page as the
     last frame left it (whatever it knew of the last frame's) and the

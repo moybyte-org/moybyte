@@ -1,4 +1,4 @@
-// moy_str: the strings C draws, as data (docs/kernel_toolkit_2026-10.md §2.3).
+// moy_str: the strings C draws, as data (native/moy_ui/README.md).
 //
 // THE TABLE is strings/en.json, one entry per dotted id, English complete,
 // generated into moy_str_table.c by tools/gen_ui_tables.py and committed

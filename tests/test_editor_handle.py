@@ -1,5 +1,5 @@
 """The EDITOR HANDLE -- the console's text editor, drawn by a cart (step 3 of
-docs/text_editing_2026-09.md).
+docs/theme_and_shell_2026-11.md §10).
 
 Everything here goes through the REAL console: the handle is built by the real
 factory (`Player._open_cart_editor`) over the real `Files` role and the real

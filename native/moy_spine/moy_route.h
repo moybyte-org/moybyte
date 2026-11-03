@@ -3,7 +3,7 @@
 //
 // runtime/moy_spine.py's AppRegistry, BackStack, Returns and Leases are the
 // interface and the reference; this header is their native form
-// (docs/kernel_spine_2026-10.md section 3). Each holds KINDS, never objects: a
+// (docs/history/kernel_spine_2026-10.md section 3). Each holds KINDS, never objects: a
 // kind is 1 .. MOY_ID_MAX bytes of any value, an app id or a back-stack kind,
 // compared bytewise (the bindings pass a str's UTF-8). The bindings map the
 // codes below to the exceptions the Python twin raises.
@@ -102,7 +102,7 @@ int moy_back_goto(moy_back_t *b, const char *kind, size_t n, int *answer);
 int moy_back_remove(moy_back_t *b, const char *kind, size_t n, int *removed);
 // The stack becomes the root and then `kinds[0 .. n)`, bottom to top -- the
 // restore op that puts parked kinds back without re-opening any
-// (docs/shell_layout_2026-10.md §3). OK; BAD for a kind that is empty, too
+// (docs/theme_and_shell_2026-11.md §8.1). OK; BAD for a kind that is empty, too
 // long, the root or repeated; FULL past MOY_BACK_DEPTH. Nothing changes
 // unless it answers OK.
 int moy_back_restore(moy_back_t *b, const moy_kind_t *kinds, uint32_t n);
@@ -169,7 +169,7 @@ uint32_t moy_leases_mask(const moy_leases_t *l);
 
 // The console's registry, back-stack, return records, leases and settings rows
 // (system.json, moy_settings.h) as kernel
-// singletons (docs/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
+// singletons (docs/history/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
 // the first call that passes one, and never freed, so a VM stop's sweep leaves
 // them and a return start reads them. The VM's objects are views of these
 // (modmoy_spine.c's kernel()). NULL `mem` answers them only once made: NULL

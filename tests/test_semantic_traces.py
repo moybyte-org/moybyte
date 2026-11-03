@@ -61,7 +61,7 @@ layer's camera, clip and pal, the camera read-back, and the sspr/tline/map/spr
 
 EXTENDED 2026-10-05 (#224, before the store crosses in sprint 1b): a second
 trace, the STORE's. The native store will expose carts by handle
-(runtime/moy_catalogue.py over runtime/moy_index.py), and this replays one
+(runtime/carts/moy_catalogue.py over runtime/carts/moy_index.py), and this replays one
 scripted session of that interface -- create, catalogue, a rescan, entry and
 load, path and handle, new, duplicate, delete and every call on the deleted
 handle, a freed slot taken again under its next generation, a folder removed
@@ -81,7 +81,7 @@ native index (sprint 1a's twin, native/moy_index) on both object models.
 
 EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
 trace, the SPINE's (its Python oracle tests/spine_twin.py, and the strike ledger in
-runtime/crash_guard.py). One session of handle tables (a foreign, released,
+runtime/shell/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
 the return routes, the WiFi leases, the settings rows (the setter that
 persists, the dirty store and its retried write, the read decoded afresh) and
@@ -94,10 +94,10 @@ native/moy_spine) on both object models, the ledger half still the Python
 CrashGuard.
 
 EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
-crosses): five more, one per twin -- input (runtime/moy_input.py), the glass
+crosses): five more, one per twin -- input (runtime/host/moy_input.py), the glass
 (native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
-(runtime/frame_loop.py), the links (native/moy_net, runtime/moy_sync.py
-and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
+(runtime/frame_loop.py), the links (native/moy_net, runtime/carts/moy_sync.py
+and device/moy_ota_health.py) and audio sessions (runtime/run/audio_session.py).
 Each is pinned on every VM and over the native spine; the section above the
 drivers says what each logs.
 """
@@ -109,7 +109,8 @@ from pathlib import Path
 
 import pytest
 
-from unix_mp import find_unix_mp, require_unix_mp
+from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -422,7 +423,7 @@ class ScriptInput(InputState):
 
     AND IT SUBCLASSES THE BOARDS' CLASS, not the host's (2026-08-14). There are
     two InputState classes; this harness models a DEVICE build, and it was
-    staging runtime/input.py -- so for input it compared the host against
+    staging runtime/shell/input.py -- so for input it compared the host against
     itself. That is the hole the rotated d-pad went through: the boards' BUTTONS
     is a different tuple in a different ORDER, moycore packs the mask from it,
     and every Lua cart on both boards read its d-pad a quarter turn off while
@@ -576,12 +577,12 @@ def test_semantic_trace_lua_vs_python(tmp_path):
             "before crossing anything further.")
     stage = tmp_path / "stage"
     stage.mkdir()
-    # moy_font is what build.sh stages from runtime/font.py -- the gate ctx
+    # moy_font is what build.sh stages from runtime/toolkit/font.py -- the gate ctx
     # (and with it every direct lane) needs it at device_canvas import time.
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     # lua_ext is the object-verb glue (prelude + int-handle registry) both Lua
     # runtimes import; build.sh stages it from runtime/ the same way.
-    shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
+    shutil.copy(runtime_file("lua_ext.py"), stage / "lua_ext.py")
     # input.py so the scripted feed can BE the console's InputState rather than
     # a second implementation of held/pressed/button_masks -- and it is the
     # BOARDS' one, because this harness models a device build: the native
@@ -593,13 +594,13 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # Same reasoning as the input class above: device_canvas takes Image from
     # moy_image now (ONE definition, shared with the host canvas), and the real
     # build stages it -- with its moy_fs leaf -- out of runtime/ into modules/.
-    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
-    shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
+    shutil.copy(runtime_file("moy_image.py"), stage / "moy_image.py")
+    shutil.copy(runtime_file("moy_fs.py"), stage / "moy_fs.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),
                          ("@DEVICE@", str(ROOT / "device")),
-                         ("@RUNTIME@", str(ROOT / "runtime")),
+                         ("@RUNTIME@", runtime_tree()),
                          ("@DT@", DT), ("@FRAMES@", FRAMES),
                          ("@HELD@", HELD),
                          ("@PY_CART@", PY_CART), ("@LUA_CART@", LUA_CART)):
@@ -869,7 +870,7 @@ ints True True
 
 # Run ahead of STORE_DRIVER, it puts the NATIVE index under every import of
 # moy_index: the extensible builtin, reached with the path emptied and then
-# registered so runtime/moy_index.py never loads (modmoy_index.c's header).
+# registered so runtime/carts/moy_index.py never loads (modmoy_index.c's header).
 NATIVE_INDEX = r'''import sys
 _path = sys.path[:]
 sys.path[:] = []
@@ -897,7 +898,7 @@ def _store_trace(exe, tmp_path, tag, prelude=None):
     root.mkdir()
     script = tmp_path / ("store_%s.py" % tag)
     script.write_text((TWIN_SPINE if prelude is None else prelude) + STORE_DRIVER.replace(
-        "@RUNTIME@", repr(str(ROOT / "runtime"))).replace("@ROOT@", repr(str(root))))
+        "@RUNTIME@", repr(runtime_tree())).replace("@ROOT@", repr(str(root))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -1188,7 +1189,7 @@ keys ['app_guard', 'wallpaper_guard'] ['open', 'proven', 'strikes']
 def _spine_trace(exe, tmp_path, tag, prelude=None):
     script = tmp_path / ("spine_%s.py" % tag)
     script.write_text((TWIN_SPINE if prelude is None else prelude) + SPINE_DRIVER.replace(
-        "@RUNTIME@", repr(str(ROOT / "runtime"))))
+        "@RUNTIME@", repr(runtime_tree())))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -1248,7 +1249,7 @@ def test_spine_trace_holds_over_the_native_spine(tmp_path):
 # -- the survival set's traces (#224, sprint 3) ----------------------------------
 #
 # Sprint 3's carve pins each subsystem's twin before anything crosses
-# (docs/kernel_survival_2026-10.md section 2 item 8): input (a scripted event
+# (docs/history/kernel_survival_2026-10.md section 2 item 8): input (a scripted event
 # stream -> the merged table's masks for players 0 and 1 and the union, and the
 # pointer, per frame), the glass (a draw script -> the frame's hash, the buffer
 # rows by owner and origin, the pool), the loop (twenty frames -> the stage
@@ -2004,14 +2005,19 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     stage.mkdir(parents=True)
     store.mkdir()
     # What a build stages under frozen names that the glass's canvas imports.
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     for f in ("moy_image.py", "moy_fs.py"):
-        shutil.copy(ROOT / "runtime" / f, stage / f)
-    for token, value in (("@RUNTIME@", ROOT / "runtime"), ("@DEVICE@", ROOT / "device"),
+        shutil.copy(runtime_file(f), stage / f)
+    for token, value in (("@RUNTIME@", runtime_tree()), ("@DEVICE@", ROOT / "device"),
                          ("@STAGE@", stage), ("@ROOT@", store), ("@REPO@", ROOT)):
         driver = driver.replace(token, repr(str(value)))
     script = work / "driver.py"
-    script.write_text((TWIN_SPINE if prelude is None else prelude) + driver)
+    head = TWIN_SPINE if prelude is None else prelude
+    if exe == sys.executable:
+        # CPython reaches the kernels through their ctypes faces, which live
+        # in runtime/host/; a VM has them compiled in.
+        head += "import sys\nsys.path.insert(0, %r)\n" % str(ROOT / "runtime" / "host")
+    script.write_text(head + driver)
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
@@ -2028,7 +2034,7 @@ def test_survival_trace_is_the_interface_on_every_vm(name, tmp_path):
     exe = require_unix_mp(
         "moy_gfx",
         why="The survival set's twins on the VM a board runs, before sprint 3 "
-            "crosses them (docs/kernel_survival_2026-10.md section 2 item 8).")
+            "crosses them (docs/history/kernel_survival_2026-10.md section 2 item 8).")
     mp = _survival_trace(name, exe, tmp_path, "micropython")
     assert mp == want, "MicroPython diverges: " + _first_difference(mp, want)
     board = find_unix_mp("moy_gfx", board_model=True)
@@ -2056,7 +2062,7 @@ def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
 # Every row of the app ABI's role table (native/moy_app/roles.json) driven
 # once through a context that holds every role, over a real Workstation and
 # its store, and the effect logged: the net sprint 5's steps swap the roles'
-# servers under. On CPython the Workstation is the host's (runtime/host_app.py);
+# servers under. On CPython the Workstation is the host's (runtime/host/host_app.py);
 # on the boards' object model it is the T-Deck's own desktop, booted by
 # moy_runtime.run_desktop over test_frame_alloc's fakes, seeded from the same
 # system carts. The driver counts every row it calls on the role objects
@@ -2250,8 +2256,12 @@ def roles_trace(ws):
     ws.go_home()
 
     # -- notify
-    ctx.notify.achieve("open", "trace")
-    say("notify")
+    nt = ctx.notify
+    nt.achieve("open", "trace")
+    c0 = nt.count()
+    say("notify", nt.award("konami"), nt.award("konami"), nt.count() - c0,
+        nt.has("konami"), nt.found_on("konami") == nt.today(),
+        nt.progress("play_five") is not None, nt.found_on("decorator"))
 
     # -- wallpaper
     w = ctx.wallpaper
@@ -2278,7 +2288,7 @@ def roles_trace(ws):
         _n(a.follow("drawings", "pic", "pic2")), _n(a.current()), _n(paint.doc_name()))
     a.follow("drawings", "pic2", "pic")
 
-    # -- the copies of a drawing (runtime/picture_copies.py), over these roles
+    # -- the copies of a drawing (runtime/apps/picture_copies.py), over these roles
     pc = PictureCopies(ctx)
     say("copies", _n(pc.usage("pic")), len(pc.targets()) >= 0,
         _n(w.thumbnail(16, 12) is not None))
@@ -2312,7 +2322,7 @@ def roles_trace(ws):
     say("engine", type(i.runtimes()).__name__, i.memory() is None or len(i.memory()) == 2,
         i.fit("wasm", 0, 0, False), len(i.chip()))
 
-    # -- the Appearance page's rows (docs/theming_2026-09.md §9 phase 6 step 7)
+    # -- the Appearance page's rows (docs/history/theming_2026-09.md §9 phase 6 step 7)
     t = ctx.theme
     ch = t.choices()
     say("choices", ch["theme"], ch["variant"], ch["frame"], ch["tint"],
@@ -2486,7 +2496,7 @@ text_mode True False
 cover None
 cover_gen True
 play desktop
-notify
+notify True False 1 True True True None
 wallpaper None 'moybyte.wall_z'
 wallpaper carts True None True
 selected None custom

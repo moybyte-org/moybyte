@@ -38,7 +38,7 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 #                            with "invalid command 'bdist_wheel'".
 # `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
 # needs pygame. Lua needs no extra: the host builds the boards' own vendored
-# Lua 5.4 + libmoy binding on demand (runtime/lua_binding.py -- the lupa extra
+# Lua 5.4 + libmoy binding on demand (runtime/host/lua_binding.py -- the lupa extra
 # was deleted 2026-08-14), so a C compiler is the requirement, same as host audio.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
@@ -49,10 +49,10 @@ setup:
 	$(PYTHON) -m pip install -e '.[dev,sim]'
 # THE HOST NEEDS A C COMPILER. Not for a nicety -- for the console. The host
 # draws on the same libmoy raster both boards run, ctypes-loaded from a .so this
-# builds (runtime/gfx_binding.py); the pure-Python raster that used to stand
+# builds (runtime/host/gfx_binding.py); the pure-Python raster that used to stand
 # behind it was deleted with runtime/canvas.py. So say it HERE, where the person
 # who can act on it is still watching, instead of letting them find out at the
-# first draw via `AttributeError: 'NoneType' object has no attribute 'hg_fill'`.
+# first draw via `AttributeError: 'NoneType' object has no attribute 'mg_fill'`.
 # Non-fatal on purpose: the venv and the deps are installed and useful either
 # way, and firmware work needs the ESP-IDF toolchain rather than this one.
 	@$(PYTHON) -m runtime.native_build || { \
@@ -226,7 +226,7 @@ UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 # What both builds add to the port's flags. -ffp-contract=off compiles every
 # multiply-add UNFUSED, the rounding every other host compile of the same C
 # uses: the audio parity reference and the host binding pass it explicitly,
-# runtime/native_build.py's -std=c99 implies it. The unix port's own
+# runtime/host/native_build.py's -std=c99 implies it. The unix port's own
 # -std=gnu99 implies -ffp-contract=fast, which changes nothing where the
 # compiler's default target has no FMA instruction to fuse into (baseline
 # x86-64) and changes libmoy's samples by one LSB where it has one: the
@@ -248,16 +248,16 @@ UNIX_MP_NATIVE := native
 # host's Python reader and to moy-spec's vectors. moy_index is the store's
 # native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
 # has the hook): it registers extensible, so a run with runtime/ on its path
-# still imports runtime/moy_index.py, and tests/test_moy_index_twins.py and the
+# still imports runtime/carts/moy_index.py, and tests/test_moy_index_twins.py and the
 # store trace reach the native one with the path emptied. moy_spine is the
 # kernel's spine, native as on every image (its Python oracle is
 # tests/spine_twin.py); it holds the handle table moy_index shares, so the two
 # are built together. moy_glass, moy_input
 # and moy_net are sprint 3's kernel modules, listed before they compile anything
-# (docs/kernel_survival_2026-10.md section 2). moy_play is sprint 4's Player
-# (docs/kernel_cartpath_2026-10.md), moy_app sprint 5's app ABI
-# (docs/kernel_appabi_2026-10.md), moy_ui sprint 6's toolkit
-# (docs/kernel_toolkit_2026-10.md).
+# (docs/history/kernel_survival_2026-10.md section 2). moy_play is sprint 4's Player
+# (docs/history/kernel_cartpath_2026-10.md), moy_app sprint 5's app ABI
+# (docs/history/kernel_appabi_2026-10.md), moy_ui sprint 6's toolkit
+# (docs/history/kernel_toolkit_2026-10.md).
 UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
     moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui
 UNIX_MP_INDEX ?= c

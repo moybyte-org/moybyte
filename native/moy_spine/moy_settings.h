@@ -1,7 +1,7 @@
 // The settings store as a C ABI: system.json as rows of JSON text.
 //
 // runtime/moy_spine.py's Settings is the interface and the reference; this is
-// its native form (docs/kernel_spine_2026-10.md section 5). One row per
+// its native form. One row per
 // top-level key, each holding its value's JSON text, kept as it was written and
 // never re-serialised: a value read from the file goes back byte for byte.
 // Keys are held decoded (UTF-8, possibly with NUL), written as JSON strings
@@ -22,6 +22,19 @@
 // its saver, which the binding registers (its save hook, behind a thunk), and
 // moy_settings_flush calls it: a write made through C (native/moy_app's prefs)
 // persists by the same path a write made through the binding does.
+//
+// THE ROWS ARE THE STORE and a write is one verb: no dict beside them, a read
+// decodes a value afresh, and the binding's set encodes, marks dirty and
+// flushes, so a write cannot be left out of the file by a caller that forgot
+// to ask, and a key has one writer (the strike ledger's rows are CrashGuard's,
+// through the same get and set). A saver that answers False (a card pulled)
+// leaves the store dirty and the next write carries the change. On a board
+// the rows are the kernel's (moy_spine.kernel_settings): a VM stop leaves
+// them, and their saver goes with the VM that registered it.
+//
+// THE FORMAT is json.dumps's object, rows in file order, pinned as literal
+// bytes by tests/test_moy_spine.py. It does not migrate: a file the scanner
+// refuses reads as absent ({}), CLAUDE.md's strict readers.
 //
 // Every byte comes from the moy_htab_mem_t the store is made with.
 

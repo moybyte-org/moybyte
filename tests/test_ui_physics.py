@@ -1,5 +1,5 @@
 """The scroll physics in C against the twin, in the boards' float model
-(docs/kernel_toolkit_2026-10.md §3.4).
+(docs/history/kernel_toolkit_2026-10.md §3.4).
 
 A fling decays by FRICTION ** dt in single precision, which is what a board's
 MicroPython computes; CPython computes doubles. So the differential runs on the

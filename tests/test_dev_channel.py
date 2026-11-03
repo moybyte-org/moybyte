@@ -1,4 +1,4 @@
-"""The unified serial dev channel (runtime/dev_channel.py).
+"""The unified serial dev channel (runtime/boot/dev_channel.py).
 
 Until 2026-08-17 the channel existed three times: this module (extracted for
 the fork, which was then deleted -- zero importers), a verbatim copy inside the
@@ -307,7 +307,7 @@ def test_kstale_fails_loudly_when_a_dead_handle_is_served(capsys):
 
 
 class FakeLink:
-    """`ws.link` (runtime/players.py's EspNowLink) narrowed to what `link` drives."""
+    """`ws.link` (runtime/run/players.py's EspNowLink) narrowed to what `link` drives."""
 
     def __init__(self):
         self.active = False
@@ -1556,7 +1556,7 @@ def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys
     assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()
 
 
-# -- the HEAPCAPS line (docs/native_kernel_2026-09.md sprint 0) ----------------
+# -- the HEAPCAPS line (docs/history/native_kernel_2026-09.md sprint 0) ----------------
 
 
 class FakeEsp32:
@@ -1644,7 +1644,7 @@ def test_heapcaps_is_a_dev_channel_word(capsys):
 
 
 def test_each_subsystem_registers_its_words():
-    """The words are registered per subsystem (docs/kernel_survival_2026-10.md
+    """The words are registered per subsystem (docs/history/kernel_survival_2026-10.md
     section 2 item 3), so a pass edits its own table and never the reader's."""
     from runtime import devch_audio, devch_input, devch_links
     assert sorted(devch_input.WORDS) == ["drag", "swipe", "tap"]
@@ -1689,7 +1689,7 @@ def test_kstop_hands_the_kernel_its_count_and_leaves_the_console(monkeypatch,
 
 
 def test_start_parts_split_the_kernels_stamps():
-    """`state`'s `start` (docs/kernel_cartpath_2026-10.md section 5.5): each
+    """`state`'s `start` (docs/history/kernel_cartpath_2026-10.md section 5.5): each
     part is the gap between two of the kernel's stamps, the total from the
     last VM's end; a part with a missing end is None, never 0."""
     from runtime.dev_channel import start_parts

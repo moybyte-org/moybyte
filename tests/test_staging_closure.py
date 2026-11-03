@@ -1,6 +1,6 @@
 """Every module a target freezes must be able to IMPORT on that target.
 
-This is `docs/backend_contract_v1.md` §8's never-built prerequisite, and it
+This is `docs/history/backend_contract_v1.md` §8's never-built prerequisite, and it
 exists because the tree has shipped this bug more than once in the same
 quarter:
 
@@ -16,12 +16,11 @@ quarter:
     (`web_view_ws.py` is deleted outright now -- the RPC it was kept for speaks
     plain HTTP -- so the incident is history and the lesson is not.)
 
-  * `runtime/palette.py` imports CPython's `colorsys` at module scope. The web
-    runner hit this and solved it by GENERATING a literal twin
-    (web_runner/build.sh, "which needs CPython colorsys"). Both boards staged the
-    raw file, so `import palette` -- and therefore `import canvas`, its only
-    device consumer -- could not succeed there. (Neither file reaches a board
-    now, and `runtime/canvas.py` is deleted outright.)
+  * `palette.py` imported CPython's `colorsys` at module scope. The web
+    runner hit this and solved it by GENERATING a literal twin. Both boards
+    staged the raw file, so `import palette` -- and therefore `import canvas`,
+    its only device consumer -- could not succeed there. (Both files are
+    deleted outright now.)
 
 The shape of the defect is always the same: an import that fails on device
 turns into a MISSING FEATURE rather than a crash, because the callers are
@@ -232,11 +231,9 @@ GENERATED = {
     # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.
     "zero": {"carts_data", "_ota_build"},
-    # The web GENERATES its palette (a literal twin of runtime/palette.py, which
-    # needs CPython colorsys) -- which is exactly the fix the boards lack below.
-    # And the font set, the module every console board generates too
+    # The font set, the module every console board generates too
     # (tools/make_font.py module, the board's `font_tier`).
-    "web": {"palette", "fonts_data"},
+    "web": {"fonts_data"},
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
@@ -275,21 +272,13 @@ NEVER_ON_A_BOARD = {
         "renders on the boards' OWN raster now (#31), so a second one in "
         "frozen flash would buy nothing and should not come back."),
     "palette": (
-        "builds indices 16-63 with CPython's `colorsys` at IMPORT time, and "
-        "MicroPython has none. VERIFIED ON P4 GLASS 2026-08-15, on firmware "
-        "built before this file was unstaged: `import colorsys`, `import "
-        "palette` and `import canvas` all raise ImportError('no module named "
-        "colorsys'), and the consequence was visible one level up -- "
-        "wallpaper._ensure_preview() returned False and _static_preview() "
-        "returned None, so the Appearance screen's cart-wallpaper panel drew "
-        "its black fill and nothing else. Staging this means a module that "
-        "raises on import, which reads as a missing FEATURE rather than a "
-        "crash because every caller is guarded -- and that panel is exactly "
-        "how long such a thing survives unreported. (The preview itself is "
-        "FIXED, #31: it renders on device_canvas through the backend's own "
-        "make_game_canvas, needing neither of these two files.) The web head "
-        "needs the same table and GENERATES a literal twin instead; a board "
-        "that ever needs MOY64 should do the same, never stage this file."),
+        "built MOY64 with CPython's `colorsys` at IMPORT time, and MicroPython "
+        "has none: on P4 glass 2026-08-15 `import palette` raised ImportError "
+        "and the Appearance screen's cart-wallpaper panel drew nothing, a "
+        "missing FEATURE rather than a crash because every caller is guarded. "
+        "DELETED 2026-11-01: libmoy's moy_data.c is the table the kernel "
+        "resolves through, device_canvas.PAL565/MOY64_RGB its baked twins and "
+        "gfx_binding.moy64() the host's reading of it. Kept as a tripwire."),
 }
 
 
@@ -594,11 +583,18 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     # HOST_ONLY carries names that are not runtime modules at all
     # (`simulate_desktop` is a tool); only the ones a denylist could stage are
     # the board file's business.
-    runtime_names = {p.stem for p in (ROOT / "runtime").glob("*.py")}
-    for name in sorted(HOST_ONLY[target] & runtime_names):
+    # A module under runtime/host/ is denied by WHERE it lives (no board
+    # stages that folder); one anywhere else needs its own host-only denial,
+    # so moving it out of host/ without one goes red here.
+    src = ROOT / "runtime"
+    sources = board_config.shared_sources(src)
+    for name in sorted(HOST_ONLY[target] & {Path(n).stem for n in sources}):
+        if board_config.host_only(src, sources[name + ".py"]):
+            continue
         assert declared.get(name + ".py") == "host-only", (
-            "%s/board.toml does not deny %s.py as host-only -- the policy "
-            "table in this file says it must never be frozen there" % (target, name))
+            "%s/board.toml does not deny %s.py as host-only, and it does not "
+            "live in runtime/host/ -- the policy table in this file says it "
+            "must never be frozen there" % (target, name))
     for name in sorted(NEVER_ON_A_BOARD):
         assert name + ".py" in declared, (
             "%s/board.toml does not name %s.py at all. NEVER_ON_A_BOARD wants "
@@ -627,7 +623,7 @@ def test_every_board_toml_denial_is_explained_and_classified(target):
                 "%s/board.toml classes %s never-on-a-board but this file's "
                 "table does not carry it" % (target, name))
         if entry["kind"] != "never-on-a-board":
-            assert (ROOT / "runtime" / name).exists(), (
+            assert name in board_config.shared_sources(ROOT / "runtime"), (
                 "%s/board.toml denies %s, which is not a runtime module. Only "
                 "a never-on-a-board TRIPWIRE may name a file that is not there"
                 % (target, name))
@@ -699,6 +695,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
                  "moy_carts.py", "moyimg.py",         # #108 files sync
                  "moy_store_base.py", "moy_seed.py",  # ...and the store's own
+                 "moy_docs.py", "moy_pack.py",        # ...its documents and archive
                  "moy_journal.py",                    # the store of record
                  "ticks.py",                          # the transport's clock leaf
                  "moy_webhost.py",
@@ -708,7 +705,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     # store host and /gpio over its webhost.
     assert "moy_webserver.py" not in staged
     for name in ("console.py", "wm.py", "wm_windowed.py", "device_canvas.py",
-                 "launcher_layer.py", "editors.py",
+                 "launcher_layer.py", "editors_code.py",
                  "cart_api.py", "device_boot.py", "blocks.py"):
         assert name not in staged, (
             "the Zero stages %s -- it has no glass and runs no carts; if that "
@@ -727,7 +724,7 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
     """
     tdeck = set(board_config.denials(TDECK))
     p4 = set(board_config.denials(P4))
-    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py",
+    assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py", "wm_parts.py", "wm_route.py", "wm_paint.py", "wm_overlays.py",
                          "editor_desk.py"}, (
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (

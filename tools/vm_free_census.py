@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Which carts run with no VM: the census (docs/kernel_cartpath_2026-10.md §2).
+"""Which carts run with no VM: the census (native/moy_play/moy_play.h).
 
 Every cart folder named (default: the seed carts, `ports/p8/*.moy` where they
 were generated, and `ports/jet/*.moy` where they were built) through the
@@ -12,7 +12,7 @@ verdicts against the real manifests.
     tools/vm_free_census.py --board BOARD [--secs S]
 
 `--board` holds a console to the same census (the gate's census row and its
-zero-upcall row, docs/kernel_cartpath_2026-10.md section 7): every cart on
+zero-upcall row, docs/history/kernel_cartpath_2026-10.md section 7): every cart on
 its shelf the host census knows is run from the launcher for S seconds and
 ended; the run's verdict in `state` must be the host's, and a VM-free run's
 books from its launch to the exit's request (`state`'s `play` upcalls; the

@@ -385,10 +385,11 @@ def test_the_homes_verb_keys_arrive_in_raw_mode():
     therefore be one the matrix decoder delivers; a key outside RAW_KEYS is a
     hint that does nothing on the one keyboard the strip is drawn for. Search's
     `/` is Sym+G, the chord printed on that key."""
-    from runtime import launcher_layer as ll
+    from runtime import home_grid, home_hints
     mod = _input_module()
-    keys = {ord(ch) for ch in ll._VERB_KEY} | {ord(ll._FAVOURITE_KEY), ord("q"), ord("e")}
-    for cap, _words in ll._VERB_HINT.values():
+    keys = ({ord(ch) for ch in home_hints._VERB_KEY}
+            | {ord(home_hints._FAVOURITE_KEY), ord("q"), ord("e")})
+    for cap, _words in home_grid._VERB_HINT.values():
         if len(cap) == 1:
             keys.add(ord(cap.lower()))
     plain = {code for _i, _b, code in mod.RAW_KEYS}

@@ -1,5 +1,6 @@
-"""The strings C draws are data (docs/kernel_toolkit_2026-10.md §2.3, §10
-"strings are data"): native/moy_spine's table, read through moy_str.
+"""The strings C draws are data (native/moy_ui/README.md;
+docs/history/kernel_toolkit_2026-10.md §10, "strings are data"):
+native/moy_spine's table, read through moy_str.
 
 * A language pack is untrusted: an entry whose conversions differ from
   English's is refused and the id reads English.
@@ -288,12 +289,12 @@ def test_the_py_sites_only_come_down():
 # notices the runtime raises. A literal back in its file is a string the
 # language pack cannot reach.
 PY_FED_MOVED = {
-    "runtime/console_notices.py": ["MOYBYTE UPDATED", "Moybyte updated", "UPDATE UNDONE", '"now %s"',
+    "runtime/shell/console_notices.py": ["MOYBYTE UPDATED", "Moybyte updated", "UPDATE UNDONE", '"now %s"',
                                    '"still on %s"', '"CART"', "RESTART MOYBYTE",
                                    "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
                                    '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"SLEEP"'],
-    "runtime/device_boot.py": ["IT CRASHED LAST TIME"],
-    "runtime/cart_manager.py": ["the store is full"],
+    "runtime/boot/device_boot.py": ["IT CRASHED LAST TIME"],
+    "runtime/shell/cart_manager.py": ["the store is full"],
 }
 
 

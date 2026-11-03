@@ -1,4 +1,4 @@
-"""The idle ladder's console half (runtime/idle_ladder.py): the Settings rows
+"""The idle ladder's console half (runtime/shell/idle_ladder.py): the Settings rows
 over the kernel's ladder, and the saver its SAVER rung shows. The ladder's
 own decisions are tests/test_moy_loop.py's."""
 
@@ -40,6 +40,27 @@ def test_the_store_wins_over_the_boards_default(tmp_path):
     ws.system.set("idle_saver", 120)
     _ladder(ws, blank=300)
     assert L.idle()[2:] == (120, 600)
+
+
+def test_brightness_is_the_lights_top_at_boot_and_on_a_change(tmp_path):
+    ws = build_ws(tmp_path)
+    _ladder(ws, can_dim=True)
+    assert L.light_top() == 159                                # none stored: the default
+    ws.system.set("brightness", 1)
+    _ladder(ws, can_dim=True)
+    assert L.light_top() == 63                                 # the stored level, at boot
+    ws.settings_layer.set_level("brightness", 7)
+    assert L.light_top() == 255 and ws.system.get("brightness") == 7
+    ws.settings_layer.set_level("brightness", -3)
+    assert L.light_top() == 31 and ws.system.get("brightness") == 0   # the lowest still lit
+
+
+def test_a_light_that_cannot_dim_reports_no_brightness(tmp_path):
+    ws = build_ws(tmp_path)
+    lad = _ladder(ws, can_dim=False)
+    assert lad.brightness() is None
+    ws.settings_layer.set_level("brightness", 2)
+    assert ws.system.get("brightness") == 2 and lad.brightness() is None
 
 
 def test_settings_shows_the_rows_only_where_the_kernel_drives_frames(tmp_path):

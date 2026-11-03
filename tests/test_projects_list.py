@@ -1,4 +1,4 @@
-"""One projects list (docs/shell_layout_2026-10.md §12, the owner's rulings of
+"""One projects list (docs/theme_and_shell_2026-11.md §8.10, the owner's rulings of
 2026-10-14): the home's Make tab is the only list of projects. There is no
 project picker on any tier and no PROJECTS button on the Editor's bar; the
 Editor's X backs out one level, to wherever it was opened from. In desktop
@@ -47,7 +47,7 @@ class _Keys:
 # -- the Make tab's list -----------------------------------------------------
 
 def test_make_lists_the_new_card_then_every_editable_cart(tmp_path):
-    from runtime.launcher_layer import NEW_TILE_TYPE
+    from runtime.home_grid import NEW_TILE_TYPE
     ws = _ws(tmp_path)
     ws.set_home_tab("make")
     items = ws.launcher.items
@@ -115,7 +115,7 @@ def test_a_tap_on_the_make_tab_edits(tmp_path):
 
 
 def test_new_card_creates_a_game_and_opens_the_editor(tmp_path):
-    from runtime.launcher_layer import NEW_TILE_TYPE
+    from runtime.home_grid import NEW_TILE_TYPE
     ws = _ws(tmp_path)
     drv = _drv(ws)
     n0 = len(ws.carts.all)
@@ -268,7 +268,7 @@ def _desk(tmp_path):
 
 
 def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
-    from runtime.launcher_layer import Carousel
+    from runtime.home_carousel import Carousel
     ws, drv = _desk(tmp_path)
     assert isinstance(ws.launcher, Carousel)          # the fullscreen home's own
     ws.wm._backdrop_layer._open_icon("projects")      # the desk's icon

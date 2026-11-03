@@ -25,7 +25,7 @@ SCREENS = ((320, 240), (480, 320), (1024, 600), (1280, 800), (37, 91))
 
 
 def _uf():
-    from tools import moy_ufiles_binding
+    from runtime import moy_ufiles_binding
     try:
         moy_ufiles_binding.library()
     except ImportError as exc:
@@ -430,7 +430,7 @@ def test_the_boards_reader_is_the_reference(tmp_path, board_model):
     import hashlib
     import subprocess
 
-    from tests.unix_mp import require_unix_mp
+    from tests.unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp("moy_ufiles", board_model=board_model)
     pix = _art(1024, 600)
     good = _blob(1024, 600, pix)
@@ -442,7 +442,7 @@ def test_the_boards_reader_is_the_reference(tmp_path, board_model):
         p.write_bytes(b)
         for dw, dh in ((320, 240), (480, 320)):
             jobs.append((str(p), dw, dh))
-    script = (MP_DRIVER.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+    script = (MP_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
               .replace("@JOBS@", repr(json.dumps(jobs))))
     run = subprocess.run([exe, "-X", "heapsize=24M", "-c", script], capture_output=True,
                          text=True, timeout=600)

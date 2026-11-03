@@ -1,6 +1,6 @@
 """The host's Lua runs on the boards' PIXEL, not just their VM (#161).
 
-`runtime/lua_binding.py` compiles libmoy for CPython, and it used to compile it
+`runtime/host/lua_binding.py` compiles libmoy for CPython, and it used to compile it
 INDEXED: one byte a pixel, bound straight to the buffer of `runtime/canvas.py`,
 the host's own raster. That file is deleted and the host canvas is the boards'
 `DeviceCanvas`, which is RGB565 -- and `sizeof(moy_pixel)` is not a detail

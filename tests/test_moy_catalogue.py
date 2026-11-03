@@ -1,4 +1,4 @@
-"""The store's cart interface (runtime/moy_catalogue.py): carts by handle.
+"""The store's cart interface (runtime/carts/moy_catalogue.py): carts by handle.
 
 What the native store exposes in sprint 1b, call for call, so these are the
 host half of its parity tests: the boot, the shelf, the roles and the undo
@@ -210,8 +210,8 @@ _CART_BODIES = {"catalogue", "entry", "load", "scan", "create",
                 "journal_undo", "journal_redo", "journal_can_undo",
                 "journal_can_redo", "journal_compact"}
 # The store itself; and moy_seed, which writes the seed roster's folders.
-_STORE = {"runtime/moy_carts.py", "runtime/moy_catalogue.py",
-          "runtime/moy_seed.py"}
+_STORE = {"runtime/carts/moy_carts.py", "runtime/carts/moy_catalogue.py",
+          "runtime/carts/moy_seed.py"}
 
 
 def _production_sources():

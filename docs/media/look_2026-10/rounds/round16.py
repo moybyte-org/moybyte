@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Round 16 of the 2026-10 look, over round 13: Achievements and About
-(`docs/look_2026-10.md` step 32).
+(`docs/history/look_2026-10.md` step 32).
 
 - Achievements is a page of Settings (its About group's Achievements row):
   a progress row, then the found badges and the ones still to find as card
@@ -60,7 +60,7 @@ R13.NEW_ICONS.update({
 
 
 # ==========================================================================
-# the catalogue: runtime/widgets.py's ACHIEVEMENTS, each with how it is
+# the catalogue: runtime/toolkit/widgets.py's ACHIEVEMENTS, each with how it is
 # found, in one voice (what to do)
 # ==========================================================================
 ACH = (("first_open", "First Steps", "app", False, "Open a cart"),

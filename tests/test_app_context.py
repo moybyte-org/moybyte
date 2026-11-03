@@ -34,9 +34,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-RUNTIME = ROOT / "runtime"
 
 from ws_helpers import build_ws as _ws, use_theme
+from tools.board_config import runtime_file
 
 from runtime import app_context as _ac
 from runtime import chrome as _chrome
@@ -60,7 +60,7 @@ APP_TARGETS = _app_targets()
 
 
 def _class_node(mod_name, cls_name):
-    tree = ast.parse((RUNTIME / (mod_name + ".py")).read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_file(mod_name + ".py").read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == cls_name:
             return node
@@ -75,7 +75,7 @@ _MODEL_MODULES = ("artwork", "picture_copies")
 
 def _model_node(name):
     for mod in _MODEL_MODULES:
-        tree = ast.parse((RUNTIME / (mod + ".py")).read_text(encoding="utf-8"))
+        tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))
         for node in tree.body:
             if isinstance(node, ast.ClassDef) and node.name == name:
                 return node
@@ -119,7 +119,7 @@ def _declared(mod_name, cls_name):
 @pytest.mark.parametrize("mod,cls", APP_TARGETS)
 def test_every_app_declares_its_needs(mod, cls):
     needs = _declared(mod, cls)
-    assert needs, cls + " declares no NEEDS -- see runtime/app_context.py"
+    assert needs, cls + " declares no NEEDS -- see runtime/shell/app_context.py"
     assert len(set(needs)) == len(needs), cls + " repeats a NEED"
     for name in needs:
         assert name in _ac.ROLES, cls + " declares unknown role " + name
@@ -189,7 +189,7 @@ def test_no_role_uses_a_property_forward():
     Checked twice over -- the SOURCE (every decorator on every method, so a
     `@property` cannot arrive under an alias or inside a class the loop below
     never reaches) and the built classes' own descriptors."""
-    tree = ast.parse((RUNTIME / "app_context.py").read_text(encoding="utf-8"))
+    tree = ast.parse(runtime_file("app_context.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -593,7 +593,7 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
 
 
 def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
-    """The bus rule (docs/kernel_appabi_2026-10.md section 2.6): on the
+    """The bus rule (native/moy_app/README.md): on the
     T-Deck the card shares the panel's SPI host, and the gate that drains the
     flush is held only around one store op. This is the host's model of it: a
     gate held while `_with_sd` runs a cart-store op (the files rows take the
@@ -706,7 +706,7 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
 # -- ctx.theme -----------------------------------------------------------------
 
 def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
-    """The DARK/LIGHT half of the theme (visual_identity_v1 4.3). Three things
+    """The DARK/LIGHT half of the theme (docs/history/visual_identity_v1.md §4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
     reads -- follows; the app's colour dict is a new one, rebuilt at the
     table's new generation; and the choice reaches system.json or it is gone
@@ -749,6 +749,25 @@ def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
 
 
 # -- ctx.nav -------------------------------------------------------------------
+
+def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
+    """The badge rows answer the console's tracker as it is NOW: a store load
+    replaces `ws.ach`, and a role that had captured the old one would count
+    badges nobody can see."""
+    ws = _ws(tmp_path)
+    notify = ws.app_context("probe_badges", ("notify",)).notify
+    assert notify.count() == ws.ach.count()
+    assert notify.award("konami") is True
+    assert notify.award("konami") is False             # a repeat is no find
+    assert notify.has("konami") and notify.count() == ws.ach.count()
+    assert notify.found_on("konami") == ws.ach.found_on("konami")
+    assert notify.found_on("decorator") is None
+    assert notify.progress("play_five") == ws.ach.progress("play_five")
+    assert notify.today() == ws._today_ymd()
+    ws.load_achievements()
+    assert notify.count() == ws.ach.count()
+    assert notify.has("konami") == ws.ach.has("konami")
+
 
 def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
     """`open_app` resolves by REGISTERED id so an app never holds a reference
@@ -954,12 +973,18 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # -- the RATCHET ---------------------------------------------------------------
 
 # Scoped deliberately. The source plan's stop-condition grep was
-# `runtime/*_app.py runtime/artwork.py`, whose glob also catches editor_app.py
+# `runtime/*_app.py runtime/apps/artwork.py`, whose glob also catches editor_app.py
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
             "artwork", "picture_copies", "app_shell", "getcarts_app",
-            "file_widgets")
+            "file_widgets", "web_console_ui", "achievements_ui", "about_ui")
+
+# Kernel chrome: screens the console draws as itself, never apps, so they keep
+# the console and get no AppContext. The update screen drives the updater, and
+# firmware update is not a role at all (docs/app_api_v1.md); the About card
+# lives in console_notices beside the system menu that owns it.
+KERNEL_CHROME = ("update_ui", "console_notices")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
@@ -970,12 +995,23 @@ def test_no_migrated_module_reaches_the_workstation(mod):
     one that matters, because `getattr(self.ws, "clipboard", None)` is invisible
     to a `ws.` grep -- which is how the source plan concluded the clipboard had
     zero consumers while five shipped."""
-    src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
+    src = runtime_file(mod + ".py").read_text(encoding="utf-8")
     for line_no, line in enumerate(src.splitlines(), 1):
         assert "self.ws" not in line, "%s:%d still holds a ws reference" % (mod, line_no)
         code = line.split("#", 1)[0]
         assert "ws." not in code.replace("news.", "").replace("rows.", ""), \
             "%s:%d still reaches through ws" % (mod, line_no)
+
+
+def test_kernel_chrome_is_not_an_app():
+    """The update screen and the About card are the console's chrome: no role
+    hands out the updater, so neither can move onto an AppContext, and neither
+    is held to the ratchet above."""
+    assert not set(KERNEL_CHROME) & set(MIGRATED)
+    for mod in KERNEL_CHROME:
+        assert runtime_file(mod + ".py").is_file(), mod
+    for role in ("update", "firmware", "updater", "reboot"):
+        assert role not in _ac.ROLES, role
 
 
 def test_no_role_hands_out_the_console():
@@ -986,5 +1022,5 @@ def test_no_role_hands_out_the_console():
     assert "shell" not in _ac.ROLES
     for mod, cls in APP_TARGETS:
         assert "shell" not in _declared(mod, cls), cls
-        src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
+        src = runtime_file(mod + ".py").read_text(encoding="utf-8")
         assert "ctx.shell" not in src, mod

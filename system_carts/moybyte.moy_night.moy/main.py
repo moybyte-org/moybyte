@@ -5,7 +5,7 @@
 # Moy asleep on it. No _update, so the backdrop never forces a repaint (idle
 # stays free). "Make it mine": star count, moon glow colour, whether Moy is home.
 #
-# Per glass (manifest "glass": true, docs/theming_2026-09.md 4.9): W and H are
+# Per glass (manifest "glass": true, docs/theme_and_shell_2026-11.md §3.9): W and H are
 # the glass's, QUIET is the shell's quiet rectangles (its bars, the home's text,
 # the desk's icon column), and SUBJECT is where Moy sleeps, which a new window
 # keeps clear of. Moy sleeps in the bottom-left corner, or the bottom-right

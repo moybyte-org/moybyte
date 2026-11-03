@@ -1,6 +1,6 @@
 """A cart's own palette (SPEC.md 3.1), on the raster every tier draws with.
 
-This was host-only and nobody knew. `runtime/player.py` assigns
+This was host-only and nobody knew. `runtime/run/player.py` assigns
 `ws.canvas.palette = table` when a cart ships one and restores it on exit, and
 player.py is STAGED TO BOTH BOARDS -- but `DeviceCanvas` had no `palette` at
 all, so on device the assignment set an attribute nothing read.
@@ -22,10 +22,12 @@ import struct
 import pytest
 
 from runtime import host_canvas
-from runtime.palette import MOY64
+from runtime.gfx_binding import moy64
 
 host_canvas.install()
 import device_canvas as dc                                      # noqa: E402
+
+MOY64 = moy64()
 
 
 def _canvas(w=8, h=4):
@@ -38,8 +40,8 @@ def _word0(cv):
 
 
 def test_the_baked_rgb_table_is_the_real_MOY64():
-    """MOY64_RGB is a literal twin of runtime/palette.py, which cannot be staged
-    to a board (it builds its ramp with CPython's colorsys). A twin that drifts
+    """MOY64_RGB is a baked twin of libmoy's table (moy_data.c, the spec's
+    palette.json), which a canvas reads back as `palette`. A twin that drifts
     would recolour every cart on device and nothing else would notice."""
     m = dc.MOY64_RGB
     assert len(m) == 64 * 3

@@ -1,5 +1,5 @@
 """The run path's calls into Python, held to native/moy_play/upcall_sites.txt
-(docs/kernel_cartpath_2026-10.md §4), as tests/test_mp_task_calls.py holds
+(docs/history/kernel_cartpath_2026-10.md §4), as tests/test_mp_task_calls.py holds
 the kernel's copy of mp_task to its record: a site added, moved or removed in
 those trees fails here until its row says what it is."""
 

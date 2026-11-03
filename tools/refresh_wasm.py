@@ -6,7 +6,7 @@
     python3 tools/board.py tdeck refresh-wasm
     python3 tools/board.py p4 refresh-wasm
 
-Docs: docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware"
+Docs: native/moy_wasm/README.md, "A cart survives its firmware"
 (2026-09-30, ESP 88). A firmware update that bumps
 native/moy_wasm/moy_wasm_key.h's MOY_WASM_FORMAT_VERSION does not strand a
 cart already on a board -- it plays on the interpreter, with a short notice,

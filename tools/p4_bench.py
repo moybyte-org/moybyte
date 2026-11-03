@@ -30,23 +30,23 @@ Usage:
     python tools/p4_bench.py --board p4 --popovers [--layout ...]
     python tools/p4_bench.py --board tdeck --kernel
 
-`--layout` benches under a theme layout's bars (docs/shell_layout_2026-10.md
-§5): installed as a package beside the seeds and picked, as Settings does,
+`--layout` benches under a theme layout's bars (docs/theme_and_shell_2026-11.md
+§8.3): installed as a package beside the seeds and picked, as Settings does,
 after the board is reset or attached, and unpicked at the end.
 
-`--popovers` benches the bar widgets' popovers alone (docs/shell_layout_2026-10.md
-§8): open, navigate, idle and close, over three desk windows and over a
+`--popovers` benches the bar widgets' popovers alone (docs/theme_and_shell_2026-11.md
+§8.6): open, navigate, idle and close, over three desk windows and over a
 playtest, and a frame on a minute boundary. The open and close are real taps on the widget's cell;
 a key is the popover layer's own handler, with the router's dirty mark where
 the image's WM does not let the popover take keys.
 
-`--home` benches the home (docs/shell_layout_2026-10.md §12, step 7b) on
+`--home` benches the home (docs/theme_and_shell_2026-11.md §8.10, step 7b) on
 any board: idle, a slow drag, a fling and the frames it paints until idle,
 short flicks, the held-key glide (a key press every 120 ms through the home
 layer's own handler), a tab switch where the home has tabs, and idle and a
 drag over a live home wallpaper.
 
-`--edit` benches the in-place theme edit alone (docs/theming_2026-09.md §9,
+`--edit` benches the in-place theme edit alone (docs/history/theming_2026-09.md §9,
 phase 6 step 1; also the default run's, after desk idle): a package over the
 live theme is installed and picked, then re-installed under its own name with
 one role changed on the idle screen -- one repaint, then idle zero. An image
@@ -81,7 +81,7 @@ and no cursor: its drag is the Settings scroll. The live theme is put back.
 `button` painted from a surface (`raised, fill surface, border edge`), the
 same part from the sheet's 9-slice, and a window frame with and without the
 sheet's `window` 9-slice and title buttons -- µs per call, N calls each; then
-the 2026-10 look's shapes under Moy Day (docs/look_2026-10.md step 6): the
+the 2026-10 look's shapes under Moy Day (docs/history/look_2026-10.md step 6): the
 depth's window frame, what it leaves to the desk at each shadow size, a
 card's shadow and the canvas's `rrect` and `shadow` bare.
 
@@ -105,7 +105,7 @@ size and a synthetic focus-band frame into the canvas the home draws into,
 the shelf's drag frame beside them, and the board's pixels for a fixed set of
 calls against the host binding's.
 
-`--backdrop` benches a theme's backdrop (docs/look_2026-10.md step 7, run at
+`--backdrop` benches a theme's backdrop (docs/history/look_2026-10.md step 7, run at
 step 8) on any board: the package `bench-bd` (the `moy` seed with a home
 backdrop of a dither fill, a translucent disc and a wave beside its desk
 discs) is installed and picked. `backdrop raster` is the C raster alone into
@@ -115,7 +115,7 @@ rasters the switch made; then `home idle` and, on a desk, `desk idle` (both
 paint zero), and the home's drag, fling and held-key glide over the backdrop,
 which raster nothing. The live theme is put back and the package dropped.
 
-`--desk-scale` benches a desk at each render scale (docs/look_2026-10.md
+`--desk-scale` benches a desk at each render scale (docs/history/look_2026-10.md
 step 9, run at the phase gate on p4 and guition_p4): at the live theme
 (`render.scale` 1, the desk's native metrics) and under the package
 `bench-x2` (the live theme with `render.scale: 2`, the desk drawn at half
@@ -630,7 +630,7 @@ def _pb(n, sheet):
     "button": {"rest": "raised, fill surface, border edge"}}}).encode(),)
 
 
-# The 2026-10 look's shapes (docs/look_2026-10.md step 6) under Moy Day: a
+# The 2026-10 look's shapes (docs/history/look_2026-10.md step 6) under Moy Day: a
 # window frame drawn by the depth and what it leaves to the desk (its shadow
 # at each size and its fringe), a card's shadow, and the canvas verbs bare.
 SHAPES_BENCH = """
@@ -705,7 +705,7 @@ def _set_moy(b, variant):
 
 
 def bench_shadows(b, out_path):
-    """Step 8's shadow scenarios (docs/look_2026-10.md): on a windowed tier
+    """Step 8's shadow scenarios (docs/history/look_2026-10.md): on a windowed tier
     a window dragged over the desk beside a still one, under the live theme
     and under Moy's Day and Night, with the desk idle after, which paints
     zero; on every tier the home's carousel under the same themes: idle, the
@@ -1019,7 +1019,7 @@ def bench_all(b, out_path):
         b.swipe(bx + bw - 40, cy, bx + 60, cy, frames=30); b.drain(2.0)
         bench.stop("library drag-scroll  [reference]")
 
-    # -- console mode (docs/shell_layout_2026-10.md §3): the switch's spikes,
+    # -- console mode (docs/theme_and_shell_2026-11.md §8.1): the switch's spikes,
     # read as the rows' max (the single-frame maximum) --------------------
     home(b)
     pyexec(b, "ws.open_settings()\n"
@@ -1164,7 +1164,7 @@ def bench_popovers(b, out_path):
 
 
 def bench_repaint(b, surfaces, seconds, out_path):
-    """The widget A/B (docs/kernel_toolkit_2026-10.md §10): each surface open
+    """The widget A/B (docs/history/kernel_toolkit_2026-10.md §10): each surface open
     and repainted EVERY frame for `seconds`, painted-frame ms. Board-neutral,
     so the S3s take it with the P4s."""
     bench = Bench(b)
@@ -1195,7 +1195,7 @@ def bench_repaint(b, surfaces, seconds, out_path):
     return bench
 
 
-# -- --kernel: the home's scaled-blit kernel (docs/shell_layout_2026-10.md
+# -- --kernel: the home's scaled-blit kernel (docs/theme_and_shell_2026-11.md
 # section 12, step 7a) ---------------------------------------------------------
 
 # The scales a card is benched at, relative to the cover's size on today's
@@ -1228,7 +1228,7 @@ def _kb_pixels(gfx, cases):
 
 KERNEL_BENCH = """
 import gc, time, moy_gfx
-import launcher_layer as _ll
+import home_grid as _ll
 _T, _D = time.ticks_us, time.ticks_diff
 
 def _kb_med(f, n=15):
@@ -1288,7 +1288,7 @@ def _kb_run(scales):
         vis = (min(x + t, bx + bw) - max(x, bx)) * (min(y + t, by + bh) - max(y, by))
         cards.append((k, t, vis, us))
     r["cards"] = cards
-    # the moving frame at each centre scale (docs/shell_layout_2026-10.md
+    # the moving frame at each centre scale (docs/theme_and_shell_2026-11.md
     # section 12): the focus band -- the centre +- 1.5 pitches -- cleared, the
     # centre card at k and its two neighbours at 1.0 (the most the three
     # cards cover), each with its title band, the centre's outline and pill;

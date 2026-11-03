@@ -137,8 +137,8 @@ def moy_roles(mode, roles=SITE_ROLES):
 
 def palette():
     """Moybyte's own 64 colours, as #rrggbb -- the site's palette IS MOY64."""
-    from runtime.palette import MOY64
-    return ["#%02x%02x%02x" % tuple(c) for c in MOY64]
+    from runtime.gfx_binding import moy64
+    return ["#%02x%02x%02x" % tuple(c) for c in moy64()]
 
 
 # Both tabs name their tier EXPLICITLY. An empty query used to be the handheld
@@ -435,11 +435,12 @@ TARGETS = [
 
 def moy_mark(pal, scale=3):
     """The Moy mascot as a PNG data URI, rendered from the system's OWN icon art
-    (runtime/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
+    (runtime/shell/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
     Read out of the source text rather than imported: chrome.py pulls in the whole
     surface stack, and this script must stay importable with nothing installed."""
     import re, struct, zlib
-    src = open(os.path.join(ROOT, "runtime", "chrome.py"), encoding="utf-8").read()
+    path, = glob.glob(os.path.join(ROOT, "runtime", "**", "chrome.py"), recursive=True)
+    src = open(path, encoding="utf-8").read()
     m = re.search(r'"moy":\s*\((.*?)\)\s*,', src, re.S)
     if not m:
         return ""

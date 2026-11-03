@@ -10,7 +10,7 @@
 // by importing it with the path emptied (tests/test_moy_spine_twins.py).
 //
 // Every table, record and row the components keep is allocated by spine_alloc:
-// PSRAM on a board (docs/native_kernel_2026-09.md section 4.6: kernel data is
+// PSRAM on a board (native/moy_kernel/moy_kernel.h: kernel data is
 // MALLOC_CAP_SPIRAM unless it is latency-bound), malloc elsewhere. What a
 // component hands Python is a small int, a str or a list of them; a kind is an
 // interned str (a qstr, made once per kind), so top(), has() and index() on the
@@ -1210,7 +1210,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- CrashGuard: the strike ledger over the settings rows ----------------------------
 
-// runtime/crash_guard.py's CrashGuard, call for call: the slot's text is read
+// runtime/shell/crash_guard.py's CrashGuard, call for call: the slot's text is read
 // with moy_settings_get and written with the same persisting write Settings.set
 // makes. The OPEN id is mirrored through the hook set_mirror() was given (the
 // kernel's moy_crash.arm), called as hook(role, id or None).

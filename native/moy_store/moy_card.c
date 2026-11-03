@@ -1,4 +1,4 @@
-// The card volume, owned (docs/kernel_store_2026-10.md section 1, slice 8):
+// The card volume, owned (native/moy_store/moy_vol.h):
 // the store's own FATFS over a native block device with a read cache, which
 // Python mounts at /sd, so VfsFat and the store share one instance and every
 // sector FatFS is handed comes through here.
@@ -123,7 +123,7 @@ void *moy_store_card_fatfs(void) {
 // card(sectors, driver=None) -> the volume, a VfsFat to vfs.mount: the store's
 // FATFS mounted over the card. A second call drops the cache and mounts the
 // same instance again (a card may have changed) -- except at a RETURN start
-// (docs/kernel_cartpath_2026-10.md section 5.4): the volume the kernel held
+// (docs/history/kernel_cartpath_2026-10.md section 5.4): the volume the kernel held
 // open through the VM's stop is handed over as it is, the card untouched,
 // because a failed remount on the Guition S3 stays failed until a reboot.
 static mp_obj_t mod_card(size_t n_args, const mp_obj_t *args) {

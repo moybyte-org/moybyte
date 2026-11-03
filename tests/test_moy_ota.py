@@ -1,6 +1,6 @@
 """The updater on the host: `device/moy_ota.py`'s face over the kernel's
 updater and client (native/moy_net/moy_ota.c), run through
-runtime/net_binding.py against a scripted HTTP server on 127.0.0.1
+runtime/host/net_binding.py against a scripted HTTP server on 127.0.0.1
 (tests/ota_http.py) and the host's slot (moy_net_port.c: memory the tests read
 back, checked at close by its first byte).
 
@@ -12,7 +12,7 @@ WHAT STAYS DEVICE-ONLY: the flash write and its erase, `esp_image_verify`'s
 walk of the segment table, the bootloader and its rollback, TLS (the host's
 connection is plain TCP and refuses https), the C6's slave OTA, and the store
 gate on a board whose card shares the panel's bus. The board suites and the
-on-glass gates of docs/kernel_survival_2026-10.md section 6.9 own those.
+on-glass gates of docs/history/kernel_survival_2026-10.md section 6.9 own those.
 """
 
 import hashlib

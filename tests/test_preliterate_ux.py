@@ -11,16 +11,16 @@ character with icons only. These tests assert:
     headless, and the other seed carts still render their (text) cards.
 
 Kept in its own file (per the issue) so it never collides with the existing
-suites. Runs the same code path the device freezes (runtime/console.py).
+suites. Runs the same code path the device freezes (runtime/shell/console.py).
 """
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import host_app  # noqa: E402  (registers the `editors` alias console needs)
+from runtime import host_app  # noqa: E402  (registers the `editors_*` aliases console needs)
 from runtime import console  # noqa: E402  (import after host_app for the alias)
-from runtime.editors import SpriteSheet  # noqa: E402
+from runtime.editors_sheet import SpriteSheet  # noqa: E402
 from runtime.host_canvas import make_system_canvas as Canvas  # noqa: E402
 from runtime.input import InputState  # noqa: E402
 

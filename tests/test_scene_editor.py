@@ -365,7 +365,7 @@ def test_build_scripts_stage_the_new_modules():
     # staging pins, mirroring the music-editor build asserts).
     #
     # Asked of the STAGED SET rather than of a `cp` line in build.sh: since #161
-    # Phase 3 the boards stage every runtime/*.py minus their board.toml
+    # Phase 3 the boards stage every runtime/ module minus their board.toml
     # denylist, so there is no per-module line to grep for -- and the question
     # was always "is this module frozen onto that board", never "does the shell
     # script contain this string".

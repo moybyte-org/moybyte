@@ -37,7 +37,7 @@ def board():
         b.cmd("diag 0")
 
 
-# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# The engine's idle cost (docs/history/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-25 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
@@ -48,7 +48,7 @@ def board():
 TF_CARD_SRAM = 756
 # And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
 # panic wrapper in IRAM and its statics), which every console image carries
-# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# and native/moy_play/moy_play.h bounds on its own: measured
 # 2026-10-06 on the Waveshare P4; the Guition P4 runs the same code, the internal heap an image that takes
 # the module has against the same tree denying it.
 # Plus the glass's statics (native/moy_glass: its tables' roots and the
@@ -150,7 +150,7 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
     on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) ---------------
 # Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
 # before the radio guards. The floors are this board's median drawn fps
 # measured on 2026-09-25, less a margin; the measurements are the owner's to
@@ -573,7 +573,7 @@ def test_the_cart_store_is_the_card_when_one_mounted(board):
 def test_the_web_console_is_baked_into_this_image(board):
     on_glass.web_console_is_baked_into_the_image(board)
 
-# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.
 
@@ -607,6 +607,10 @@ def test_a_front_run_makes_no_crossing(board, spec, title):
 
 def test_a_ctrl_c_ends_a_front_run_and_reaches_the_repl(board):
     on_glass.a_ctrl_c_ends_a_front_run(board, clear=3, front=False)
+
+
+def test_bluetooth_stops_and_starts_again(board):
+    on_glass.ble_stops_and_starts_again(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.

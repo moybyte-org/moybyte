@@ -49,12 +49,16 @@ paths:
   lands on top of it. Keep the issue number as a reference and drop the
   transition.
 
+- **The newer doc wins (owner, 2026-11-01).** When two docs disagree, the
+  later-dated one is the authority, and the older one is corrected toward it in
+  place (or archived under `docs/history/`), never left to contradict it.
+
 - **Dated, not numbered.** Design docs, plans and shell generations are named by
   the month they describe (`moybyte_console_plan_2026-07.md`, "the 2026-07
   shell"), because a `v0.5` beside a firmware `0.6` reads as an older release.
   The two format generations keep their names: the `.moy` format and the
   indexed-canvas contract (`v04` in `tests/test_v04_userland.py`,
-  `docs/audio_design_v04.md` and code comments).
+  `docs/history/audio_design_v04.md` and code comments).
 
 - **One copy, and a pointer.** When a doc explains what a linked doc already
   explains, the two drift and the reader cannot tell which is current. Prefer a

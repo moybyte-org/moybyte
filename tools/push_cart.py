@@ -68,7 +68,7 @@ FIVE THINGS THIS GETS RIGHT, each of which cost an attempt:
      near the hash that actually stalled it.
 
 ONE TRANSPORT, AND NO FALLBACK: the dev channel's `recv`
-(runtime/dev_channel.py's header and `_recv` are the authority). Carrying the
+(runtime/boot/dev_channel.py's header and `_recv` are the authority). Carrying the
 payload as base64 in `py` lines instead moves about 2KB/s -- fifty to sixty
 seconds per cart over a cable that does hundreds of KB/s -- and keeping it
 alongside `recv` would mean two upload protocols, one of them exercised only by
@@ -395,7 +395,7 @@ def push_file_raw(b, src, dst, link, verbose=False):
     the Waveshare P4's flow-control-free UART safe (its board.toml carries the
     why). A window that comes back short does not end the push: the board
     throws it away, names the boundary its file is still on, and this re-sends
-    from there -- see RECV_RETRIES in runtime/dev_channel.py for why one
+    from there -- see RECV_RETRIES in runtime/boot/dev_channel.py for why one
     dropped byte used to cost a whole cart. Only a board out of retries, or
     one that has gone quiet entirely, raises -- by file name, with the board's
     words.

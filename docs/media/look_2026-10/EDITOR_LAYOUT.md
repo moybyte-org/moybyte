@@ -10,7 +10,7 @@ handheld, the new parts, and the owner's decisions of the same day.
 `rounds/round12.py` draws every picture named here (`draw.py`), with Sky
 Run's code, sheet, map and scene and Coin Quest's blocks; the sound bank
 past Sky Run's two effects is illustrative. It is the target of step 30
-of `docs/look_2026-10.md`; `docs/studio_2026-09.md` is the earlier design
+of `docs/history/look_2026-10.md`; `docs/history/studio_2026-09.md` is the earlier design
 it builds on.
 
 ## The owner's decisions (2026-10-21)
@@ -24,7 +24,7 @@ holds and the picture shows the parts.
 - **E-02, live edits.** A sprite, sound or flag edit reaches a running
   game at once; a map, scene or code edit waits for the next Play, and
   Restart wears a dot while one waits (`moy-*_desktop_editor-b-code`).
-  This revises `docs/studio_2026-09.md` S13, and needs the playtest to
+  This revises `docs/history/studio_2026-09.md` S13, and needs the playtest to
   read the editor's sheet and bank in RAM.
 - **E-03, sound names.** An optional `name` per sound in moy-spec's
   `sounds.json`; without it the list shows numbers and sketches. The
@@ -51,7 +51,7 @@ holds and the picture shows the parts.
   (designer); a 484 px document is about 60 columns, and sprites never
   sit beside the map (game maker). Its context-follows-the-document pane
   lives on as B's Reference. Pictures, as drawn: `moy-light_desktop_editor-a-{code,art,world,sound}.png`.
-- **C, Splits** (any panel in any pane, `docs/studio_2026-09.md`): no
+- **C, Splits** (any panel in any pane, `docs/history/studio_2026-09.md`): no
   visible task switch, and dragging tabs and gutters is pointer work
   (both); a later opt-in layout at most. Pictures, as drawn:
   `moy-light_desktop_editor-c-{code,art,world,sound}.png`.
@@ -144,7 +144,7 @@ always Game (the game at 1× at its top). Pictures: `moy-light_desktop_editor-b-
 | Sound | Sound 442 × 384, the sounds as a menu from its title; the graph at 8 px a semitone (192), 22 px steps, the ops at 36, Oct ‹ 5 › | Game, Song |
 
 Art starts at Sprite 320, its T-Deck minimum, and Map · Game 462
-(`docs/studio_2026-09.md` S5; the pictures draw 306 and 476). A restored
+(`docs/history/studio_2026-09.md` S5; the pictures draw 306 and 476). A restored
 window stops shrinking at its workspace's combined minimum; on glass
 smaller than any workspace's minimum the Editor shows one panel at a
 time, the focused pane over the panes area (2026-10-22, when the desk's

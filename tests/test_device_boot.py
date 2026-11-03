@@ -6,7 +6,7 @@ import `esp32`/`machine`, so every existing net over them is a string match on
 source. That is why `_pace_debt` could ship into one board's loop and not the
 other's for four days with nothing to say so.
 
-`runtime/device_boot.py` deliberately imports no board module -- every hardware
+`runtime/boot/device_boot.py` deliberately imports no board module -- every hardware
 object arrives as an argument -- which means the shared half of both boards'
 boot is ORDINARY PYTHON and can simply be run. So this file runs it: the splash
 lines, the seed-progress cadence, the cart fallback, the OTA verdict and
@@ -32,6 +32,7 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
 from runtime import boot_carts, device_boot  # noqa: E402
+from tools.board_config import runtime_file
 
 
 # -- fakes --------------------------------------------------------------------
@@ -391,7 +392,7 @@ def test_the_seed_progress_bar_is_wired_into_the_store_call(monkeypatch):
 
 
 def test_a_build_without_moycore_says_absent_rather_than_failing(capsys, monkeypatch):
-    # The host has its moycore (runtime/moycore.py); a board built without
+    # The host has its moycore (runtime/host/moycore.py); a board built without
     # the native modules has none, which is this.
     monkeypatch.setitem(sys.modules, "moycore_glue", None)
     boot, _, _ = _boot()
@@ -660,7 +661,7 @@ def test_the_spine_imports_no_board_module():
     """What lets this file live in `runtime/` and be tested at all.
 
     Every hardware object arrives as an argument. If a board import creeps in,
-    `runtime/device_boot.py` stops importing on the host (killing every
+    `runtime/boot/device_boot.py` stops importing on the host (killing every
     assertion above) and starts being un-stageable to the wasm head, whose
     `DENY` glob does not exclude it.
     """
@@ -677,7 +678,7 @@ def test_the_spine_imports_no_board_module():
                "crash_guard", "moy_kernel", "ui_draw"}
     seen = set()
     for name in ("device_boot.py", "boot_carts.py"):
-        src = (ROOT / "runtime" / name).read_text(encoding="utf-8")
+        src = runtime_file(name).read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(src)):
             if isinstance(node, ast.Import):
                 seen |= {a.name.split(".")[0] for a in node.names}

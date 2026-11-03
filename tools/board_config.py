@@ -43,7 +43,7 @@ Usage from a build script:
 Usage from a test:
 
     from tools.board_config import staged_modules
-    staged_modules(TDECK)      # {"console.py": Path(".../runtime/console.py")}
+    staged_modules(TDECK)      # {"console.py": Path(".../runtime/shell/console.py")}
 """
 
 import os
@@ -340,13 +340,71 @@ def renames(board_dir):
     return {e["file"]: e["as"] for e in _shared(load(board_dir)).get("rename", [])}
 
 
+# A folder by this name, anywhere under the shared source tree, holds modules
+# no board stages: the host's own (its ctypes bindings, the simulator glue).
+HOST_ONLY_DIR = "host"
+
+
+def shared_sources(src_dir):
+    """{basename: Path} -- every module under the shared source tree
+    (`runtime/`), subfolders included, `__init__.py` aside.
+
+    The tree is ONE flat module namespace kept in folders: a board stages each
+    file flat into `modules/`, and the host's package path spans every folder
+    (runtime/__init__.py), so a basename may exist once. A second is refused
+    here, loudly, rather than staged over the first.
+    """
+    src_dir = Path(src_dir)
+    out = {}
+    for p in sorted(src_dir.rglob("*.py")):
+        rel = p.relative_to(src_dir)
+        if p.name == "__init__.py" or any(
+                part == "__pycache__" or part.startswith(".")
+                for part in rel.parts[:-1]):
+            continue
+        if p.name in out:
+            raise SystemExit("%s holds two modules named %s: %s and %s -- "
+                             "they stage flat, one name each"
+                             % (src_dir, p.name, out[p.name].relative_to(src_dir),
+                                rel))
+        out[p.name] = p
+    return out
+
+
+def runtime_file(name, root=ROOT):
+    """The Path of runtime module `name` (`"console.py"`), whichever folder of
+    runtime/ holds it: the tree is one flat namespace, so a tool or a test
+    names a module by its basename and never by its folder."""
+    sources = shared_sources(Path(root) / "runtime")
+    if name not in sources:
+        raise FileNotFoundError("runtime/ holds no module named %s" % name)
+    return sources[name]
+
+
+def runtime_dirs(root=ROOT):
+    """Every folder of runtime/ that holds modules a board stages, `host/`
+    aside: what a CPython process puts on `sys.path` to import them bare, the
+    way a board's flat `modules/` lets it."""
+    src = Path(root) / "runtime"
+    return sorted({str(p.parent) for p in shared_sources(src).values()
+                   if not host_only(src, p)})
+
+
+def host_only(src_dir, path):
+    """True for a module under a `host/` folder of the shared source tree."""
+    return HOST_ONLY_DIR in Path(path).relative_to(src_dir).parts[:-1]
+
+
 def staged_modules(board_dir, root=ROOT):
     """{destination filename: source Path} -- what a FRESH build stages.
 
-    Shared modules come from the denylist over `runtime/*.py` -- or, on a board
+    Shared modules come from the denylist over every module under `runtime/`
+    (`shared_sources`, subfolders included, staged flat) -- or, on a board
     that declares `strategy = "allowlist"`, from its own `[[modules.shared.
-    group]]` list (see `shared_strategy` for when each is right). Device
-    modules always come from the per-group allowlist over `device/`.
+    group]]` list (see `shared_strategy` for when each is right). Either way
+    a module under a `host/` folder never stages. Device modules always come
+    from the per-group allowlist over `device/`. Two sources for one
+    destination name is an error, never a silent overwrite.
     """
     board_dir, root = Path(board_dir), Path(root)
     cfg = load(board_dir)
@@ -355,23 +413,41 @@ def staged_modules(board_dir, root=ROOT):
 
     ren = {e["file"]: e["as"] for e in shared.get("rename", [])}
     src_dir = root / shared.get("source", "runtime")
+    sources = shared_sources(src_dir) if src_dir.is_dir() else {}
+
+    def put(name, src):
+        if name in out:
+            raise SystemExit("%s/board.toml stages two files as %s: %s and %s"
+                             % (board_dir, name, out[name], src))
+        out[name] = src
+
     if shared.get("strategy") == "allowlist":
         for group in shared.get("group", []):
             for name in group["files"]:
-                out[ren.get(name, name)] = src_dir / name
+                src = sources.get(name, src_dir / name)
+                if name in sources and host_only(src_dir, src):
+                    raise SystemExit("%s/board.toml stages %s, which lives in "
+                                     "a host/ folder: host-only, never staged"
+                                     % (board_dir, src.relative_to(root)))
+                put(ren.get(name, name), src)
     else:
         deny = {e["file"] for e in shared.get("deny", [])}
-        for p in sorted(src_dir.glob("*.py")):
-            if p.name in deny or p.name == "__init__.py":
+        for name, p in sorted(sources.items()):
+            if name in deny or host_only(src_dir, p):
                 continue
-            out[ren.get(p.name, p.name)] = p
+            put(ren.get(name, name), p)
 
     device = cfg.get("modules", {}).get("device", {})
     if device:
         dev_dir = root / device["source"]
         for group in device.get("group", []):
             for name in group["files"]:
-                out[name] = dev_dir / name
+                if name in sources:
+                    raise SystemExit(
+                        "%s and %s share the name %s: a board stages both flat"
+                        % (sources[name].relative_to(root),
+                           (dev_dir / name).relative_to(root), name))
+                put(name, dev_dir / name)
     # The store index is native (native/moy_index) unless a build sets
     # MOY_INDEX_IMPL=py (tools/moy_index_spike.py): no Python one is frozen, so
     # `import moy_index` reaches the extensible builtin the module registers.
@@ -423,7 +499,7 @@ def native_takes(board_dir):
     The default for a shared module is still "yes", so most modules need no
     entry at all. A take is for the ones where crossing is itself the decision
     -- the WebAssembly engine, whose tier ships on every console board or on
-    none (docs/wasm_tier_plan_2026-09.md) -- so every board file says yes or no
+    none (native/moy_wasm/README.md) -- so every board file says yes or no
     to it with a reason, and tests/test_board_toml.py holds each one to that."""
     out = {}
     for _name, nat in native_sources(board_dir):

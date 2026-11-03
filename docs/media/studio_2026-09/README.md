@@ -1,11 +1,11 @@
 # Studio mockups (2026-09-29)
 
-The pictures behind `docs/studio_2026-09.md`: the middle-ground Studio the
+The pictures behind `docs/history/studio_2026-09.md`: the middle-ground Studio the
 owner settled on, drawn at the Waveshare P4's 1024×600 and the T-Deck's
 320×240, as the record an implementation is checked against.
 
 **Every file is a hand-drawn mockup, not an engine render.** Each was drawn in
-the D1 look (`docs/theming_2026-09.md` §1) with MOY64 colours, the Tiny5 UI
+the D1 look (`docs/theme_and_shell_2026-11.md` §1.1) with MOY64 colours, the Tiny5 UI
 font, and sprites, maps and frames taken from the Sky Run and Coin Quest seed
 carts. The P4 and T-Deck screens are drawn at **2× of device pixels**, so one
 device pixel is a 2×2 block; `panel_minimums.png` is the exception and draws

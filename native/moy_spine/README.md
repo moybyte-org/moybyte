@@ -1,10 +1,11 @@
 # moy_spine — the kernel's spine, native
 
-The data half of the spine `docs/kernel_spine_2026-10.md` designs, in C:
+The data half of the kernel's spine, in C (#224 sprint 2; the design record is
+`docs/history/kernel_spine_2026-10.md`):
 `tests/spine_twin.py` is its Python oracle, call for call, and
 `tests/test_moy_spine.py` pins both. It is built the three ways
 `native/moy_index/` is (see its README), with no hook: every image, the
-desktop MicroPython and the CPython host (`tools/moy_spine_binding.py`, which
+desktop MicroPython and the CPython host (`runtime/host/moy_spine_binding.py`, which
 the `runtime` package registers as `moy_spine`) run it;
 `tools/moy_index_spike.py --component spine` runs its host suite and
 sanitizers.
@@ -15,15 +16,15 @@ sanitizers.
 | `moy_route.h`, `moy_route.c` | the app registry (a kinded `moy_htab`), the back-stack, the return records and `route()`, the WiFi lease mask, and the kernel's own copies of them and of the settings rows (`moy_spine_kernel`) |
 | `moy_settings.h`, `moy_settings.c` | system.json as rows of JSON text, the count of changes since it was last clean, and the saver a flush writes the file through |
 | `moy_json.h`, `moy_json.c` | the kernel's JSON scanner, one body for the settings store and the cart store (manifests, journal lines, the seed roster): spans walked in place, CPython's json.loads as the reference, and json.dumps's text for a span. `native/moy_store`'s fragment compiles it, since every image links the store |
-| `moy_ledger.h`, `moy_ledger.c` | the strike ledger's slot (`runtime/crash_guard.py`) as text in, text out: the edits `CrashGuard` makes, written as `json.dumps` would write them |
+| `moy_ledger.h`, `moy_ledger.c` | the strike ledger's slot (`runtime/shell/crash_guard.py`) as text in, text out: the edits `CrashGuard` makes, written as `json.dumps` would write them |
 | `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a Python module of that name on the path wins (how a suite runs the oracle on a VM). `Settings.set` encodes a value, marks the store dirty and flushes it through the rows' saver, the save hook behind a thunk; `kernel_settings(save, fresh)` is a view of the kernel's rows. It also exports the allocator and a Settings' C rows to `native/moy_app`'s binding |
-| `moy_str.h`, `moy_str.c` | the strings C draws, as data: `moy_str(id)` reads a language pack's entry or English, and a pack entry whose conversions differ from English's is refused (`docs/kernel_toolkit_2026-10.md` §2.3). Here because every image links the spine and the kernel's floor draws these words with no toolkit; a pack's text lives in this file's own allocation (PSRAM on a board) |
+| `moy_str.h`, `moy_str.c` | the strings C draws, as data: `moy_str(id)` reads a language pack's entry or English, and a pack entry whose conversions differ from English's is refused (`native/moy_ui/README.md`). Here because every image links the spine and the kernel's floor draws these words with no toolkit; a pack's text lives in this file's own allocation (PSRAM on a board) |
 | `strings/en.json`, `moy_str_table.h`, `moy_str_table.c` | English for every string C draws, by dotted id; the pair GENERATED from it by `tools/gen_ui_tables.py` and committed (`tests/test_ui_tables.py` fails a stale pair) |
-| `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`tools/moy_spine_binding.py`) |
+| `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`runtime/host/moy_spine_binding.py`) |
 | `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |
 
 Every byte a component holds comes from the `moy_htab_mem_t` it is made with:
-PSRAM under `modmoy_spine.c` on a board (`docs/native_kernel_2026-09.md` §4.6),
+PSRAM under `modmoy_spine.c` on a board (`native/moy_kernel/moy_kernel.h`),
 calloc on the host, a counting allocator under the fuzzer; the placement is
 asserted in the sources. The one thing the binding keeps on the VM's heap is a
 `Table`'s row objects, which the collector must see. An object frees its C

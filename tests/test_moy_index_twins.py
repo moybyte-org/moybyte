@@ -62,7 +62,7 @@ def _outcome(fn, *a):
 def test_a_random_walk_agrees_with_the_python_twin(name):
     """Thousands of calls in a seeded order, with paths that repeat, handles
     live, released and forged, and the table filled to the brim and drained:
-    the native twin answers each exactly as runtime/moy_index.py does."""
+    the native twin answers each exactly as runtime/carts/moy_index.py does."""
     rnd = random.Random(1)
     ref, twin = moy_index.Index(), NATIVE[name]()
     paths = ["/carts/%d.moy" % i for i in range(5000)] + ["", "/é/ü.moy",

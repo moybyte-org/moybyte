@@ -1,7 +1,7 @@
 """Tests for the structured-outline block editor UI (issue #29, Part 2).
 
 Two layers:
-  * BlockEditor core (runtime/editors.py) -- pure tree edits + cursor, tested
+  * BlockEditor core (runtime/editors/editors_block.py) -- pure tree edits + cursor, tested
     directly against the Part-1 blocks model/compiler.
   * The console UI -- driven through the real shared host Workstation (the same
     code the device runs) via ConsoleDriver (mouse == touch, arrows == trackball),
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import blocks  # noqa: E402
 from runtime import moy_carts  # noqa: E402
-from runtime.editors import BlockEditor  # noqa: E402
+from runtime.editors_block import BlockEditor  # noqa: E402
 
 mk = blocks.make_block
 
@@ -1173,7 +1173,7 @@ def test_undo_redo_over_paste():
 
 
 def test_undo_stack_is_bounded():
-    from runtime.editors import _BLK_UNDO_MAX
+    from runtime.editors_block import _BLK_UNDO_MAX
     be = _be()
     be.add_var("x")
     for _ in range(_BLK_UNDO_MAX + 20):

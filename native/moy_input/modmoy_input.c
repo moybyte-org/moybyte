@@ -1,5 +1,5 @@
 // moy_input's MicroPython binding: the input table (moy_input.h) as the module
-// `moy_input`, the same names the host's ctypes binding (runtime/moy_input.py)
+// `moy_input`, the same names the host's ctypes binding (runtime/host/moy_input.py)
 // gives CPython.
 //
 //   NAMES, HOST_NAMES             the buttons, libmoy's order then the console's
@@ -1284,10 +1284,8 @@ static mp_obj_t ble_start(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ble_start_obj, ble_start);
 
 static mp_obj_t ble_stop(mp_obj_t self_in) {
-    bool was = moy_ble_up();
-    moy_ble_stop();
     (void)self_in;
-    return mp_obj_new_bool(was);
+    return mp_obj_new_bool(moy_ble_stop());
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ble_stop_obj, ble_stop);
 
@@ -1543,7 +1541,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_task_stack_free_obj, input_task_stack_fre
 //
 // loop_bind(pointer, touch=None, ble=None, ball=None, kick_at_tail=False): the
 // objects the loop's input stage reads, held as root pointers for the VM's
-// life (the kernel keeps no VM object: docs/native_kernel_2026-09.md §4.3).
+// life (the kernel keeps no VM object: native/moy_kernel/moy_kernel.h).
 // The stage is one C pass a frame: the input task's kick (at the head, or at
 // the tail where the board's task reads while the frame paces), the BLE
 // keyboard's reports and its mouse, the touch's sample, the merge, the
@@ -1617,7 +1615,7 @@ static mp_obj_t input_ball_coast(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_ball_coast_obj, input_ball_coast);
 
-// While the VM is stopped (docs/kernel_cartpath_2026-10.md section 5.3) the
+// While the VM is stopped (docs/history/kernel_cartpath_2026-10.md section 5.3) the
 // loop's objects went with it: the kernel's table alone, its board drivers
 // kicked and its frame begun, which is every source a stopped run reads (the
 // keys and the buttons the board's input task writes into it).

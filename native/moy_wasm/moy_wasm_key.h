@@ -4,7 +4,7 @@
 // The provenance key a module must carry to load on this board.
 //
 // A per-architecture module is native code, so the sandbox is whatever the
-// compiler emitted (docs/wasm_tier_plan_2026-09.md): a board runs a module
+// compiler emitted (native/moy_wasm/README.md): a board runs a module
 // only if it says which wasm it came from, which COMPILED-CODE FORMAT VERSION
 // it was built against, and with which compiler flags. The key is the
 // content of the custom section MOY_WASM_KEY_SECTION, one "name value" field

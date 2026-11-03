@@ -1,7 +1,7 @@
 """The native store's catalogue and JSON scanner (native/moy_store/moy_cat.c,
-native/moy_spine/moy_json.c; docs/kernel_store_2026-10.md sections 6 and 10,
+native/moy_spine/moy_json.c; docs/history/kernel_store_2026-10.md sections 6 and 10,
 slice 3) held to their twins: the desktop MicroPython, whose moy_carts reads
-through the C, against CPython over runtime/moy_carts.py.
+through the C, against CPython over runtime/carts/moy_carts.py.
 
   * the shelf, key for key and icon for icon, over every seed, fixture and
     port cart and the sheet and folder shapes test_catalogue.py builds;
@@ -27,7 +27,7 @@ import sys
 import pytest
 
 from test_catalogue import _store
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -98,7 +98,7 @@ def _run(cmd, ops, tmp):
     opsf = os.path.join(str(tmp), "ops-%d.json" % len(os.listdir(str(tmp))))
     with open(opsf, "w", encoding="utf-8") as f:
         json.dump(ops, f, ensure_ascii=False)     # MicroPython's json pairs no surrogates
-    script = (DRIVER.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+    script = (DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
               .replace("@OPS@", repr(opsf)))
     out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,
                          timeout=600)
@@ -111,7 +111,7 @@ def _vm():
     return require_unix_mp(
         "moy_store",
         why="the catalogue on the VM a board runs, through the native store "
-            "(docs/kernel_store_2026-10.md section 10, slice 3).")
+            "(docs/history/kernel_store_2026-10.md section 10, slice 3).")
 
 
 def _both(ops, tmp):
@@ -489,7 +489,7 @@ def _tree(root):
 
 
 def _seed_step(cmd, tmp, root, step):
-    script = (SEED_DRIVER.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+    script = (SEED_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
               .replace("@DIR@", repr(str(tmp))).replace("@ROOT@", repr(root))
               .replace("@STEP@", repr(step)))
     out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,
@@ -643,7 +643,7 @@ def test_the_native_journal_writes_the_twins_files(tmp_path):
         for name, cmd in (("vm", [exe, "-X", "heapsize=64M"]), ("cp", [sys.executable])):
             d = tmp_path / ("%s%d" % (name, seed))
             d.mkdir()
-            script = (JOURNAL_DRIVER.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+            script = (JOURNAL_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
                       .replace("@DIR@", repr(str(d))).replace("@SEED@", str(seed))
                       .replace("@STEPS@", "160"))
             out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,
@@ -744,7 +744,7 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
     for tag, cmd in (("vm", [exe]), ("cp", [sys.executable])):
         for hist in (False, True):
             t = tag + ("h" if hist else "")
-            script = (PACK_DRIVER.replace("@RUNTIME@", repr(os.path.join(ROOT, "runtime")))
+            script = (PACK_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
                       .replace("@DIR@", repr(str(tmp_path))).replace("@TAG@", t)
                       .replace("@HIST@", repr(hist)))
             out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,

@@ -1,5 +1,5 @@
 """The cover reader (SPEC.md 3.6): the native `moy_png` the boards and the
-browser run, `runtime/cover_png.py`'s `Reference` the host runs, and moy-spec's
+browser run, `runtime/carts/cover_png.py`'s `Reference` the host runs, and moy-spec's
 vectors (tests/cover_vectors/, vendored -- its UPSTREAM.md says from where).
 
 Three things are held together here, and each pair once had a way to drift:
@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from runtime import cover_png
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = Path(__file__).resolve().parent.parent
 VECTORS = ROOT / "tests" / "cover_vectors"
@@ -406,7 +406,7 @@ def test_the_reference_reads_every_cover_on_micropython_too(tmp_path):
     exe = require_unix_mp(why="the reference's other inflater is MicroPython's")
     script = tmp_path / "ref.py"
     script.write_text(_MP_REFERENCE, encoding="utf-8")
-    run = subprocess.run([exe, str(script), str(VECTORS), str(ROOT / "runtime")],
+    run = subprocess.run([exe, str(script), str(VECTORS), runtime_tree()],
                          capture_output=True, text=True, timeout=300)
     assert run.returncode == 0, run.stderr
     got = dict(l.split(" ", 1) for l in run.stdout.split("\n") if l)

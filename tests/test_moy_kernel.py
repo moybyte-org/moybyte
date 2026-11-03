@@ -508,7 +508,7 @@ def _web(lib, board, url, pal=None):
 @pytest.mark.parametrize("board", sorted(CONSOLES))
 def test_the_plain_web_screen_says_where_to_go(lib, board):
     """What the kernel draws while no VM runs and the web console serves
-    (docs/kernel_survival_2026-10.md section 13, answer 8; docs/look_2026-10.md
+    (docs/history/kernel_survival_2026-10.md section 13, answer 8; docs/history/look_2026-10.md
     step 33): the address to open and the pin, the shell's page without its
     QR -- and the address is what the pixels carry. With no address, that the
     console is restarting."""

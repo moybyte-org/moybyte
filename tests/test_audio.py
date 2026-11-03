@@ -1,5 +1,5 @@
 """Headless tests for the audio core (#16): the shared sound data model
-(runtime/audio.py), what a bank renders through the kernel's audio
+(runtime/run/audio.py), what a bank renders through the kernel's audio
 (native/moy_audio, the same C the boards compile, over ctypes; driven here by
 tests/audio_synth.py), the cart API's audio verbs, the .moy sounds.json store
 (moy_carts), and a cart making sound on the shared console (host == device).
@@ -445,7 +445,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path, monkeypatch):
 # -- music / sound editor core (#50) ----------------------------------------
 
 def _music_editor(bank=None):
-    from runtime.editors import MusicEditor
+    from runtime.editors_music import MusicEditor
     b = bank if bank is not None else audio.AudioBank.default()
     return MusicEditor(b, sfx_factory=audio.SFX, track_factory=audio.MusicTrack), b
 
@@ -701,12 +701,12 @@ def test_music_editor_duplicate_track_appends_so_music_ids_stay_stable():
 
 
 def test_music_editor_duplicate_sfx_capped():
-    from runtime import editors
+    from runtime import editors_music
     me, b = _music_editor()
-    while len(b.sfx) < editors._ME_BANK_MAX:
+    while len(b.sfx) < editors_music._ME_BANK_MAX:
         me.duplicate_sfx()
     n = len(b.sfx)
-    assert n == editors._ME_BANK_MAX
+    assert n == editors_music._ME_BANK_MAX
     me.duplicate_sfx()                          # at the cap -> no-op
     assert len(b.sfx) == n
 
@@ -835,18 +835,18 @@ def test_music_editor_redo_after_object_switch_restores_the_edited_object():
 
 
 def test_music_editor_undo_stack_is_bounded():
-    from runtime import editors
+    from runtime import editors_music
     me, b = _music_editor()
     me.add_step()
     me.select_cursor(0)
-    for _ in range(editors._ME_UNDO_MAX + 10):
+    for _ in range(editors_music._ME_UNDO_MAX + 10):
         me.nudge_pitch(1)
-    assert len(me._undo) == editors._ME_UNDO_MAX
+    assert len(me._undo) == editors_music._ME_UNDO_MAX
     steps_taken = 0
     while me.can_undo():
         me.undo()
         steps_taken += 1
-    assert steps_taken == editors._ME_UNDO_MAX
+    assert steps_taken == editors_music._ME_UNDO_MAX
 
 
 def test_music_editor_edits_roundtrip_through_sounds_json(tmp_path):

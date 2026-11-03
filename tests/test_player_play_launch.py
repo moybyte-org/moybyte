@@ -1,5 +1,5 @@
 """The Player launches a runtime cart's run in the kernel's Player BEFORE the
-runtime loads (docs/kernel_cartpath_2026-10.md §6 step 1): the load and _init
+runtime loads (docs/history/kernel_cartpath_2026-10.md §6 step 1): the load and _init
 are then in the run's books, which the on-glass zero-crossing check reads from
 before the launch. A run whose runtime will not load ends as a crash; one
 whose runtime offers no C frame ends at once and ticks through Python."""
@@ -69,3 +69,22 @@ def test_a_runtime_that_will_not_load_ends_its_run_as_a_crash(tmp_path, monkeypa
     assert ws.player.cart_error
     assert log == [("launch", "placement_lua.moy", True), ("load",),
                    ("end", 0x15A, FakePlay.END_CRASH)]
+
+
+# The names a running cart's frame reads every frame: the loop's plan, the
+# ticks it runs, the keys, the lockstep step, the crash capture, the tail and
+# the slow-logic gate under the perf brackets, and the input a cart owns.
+PLAYER_FRAME_PATH = ("frame_plan", "_run_ticks", "tick", "_tick_keys", "_lockstep_step",
+                     "_capture_frame_error", "_tick_tail", "_maybe_diag_slow_logic",
+                     "handle_input", "handle_pointer")
+
+
+def test_the_players_frame_path_is_on_the_class():
+    """On MicroPython a method the class lacks is looked up through its bases
+    in order, a dict miss per base. The Player's diagnostics are its first
+    base (player_diag.PlayerDiag), and a run's frame reads nothing there."""
+    on = vars(player_mod.Player)
+    assert not [n for n in PLAYER_FRAME_PATH if n not in on]
+    diag = player_mod.Player.__bases__[0]
+    assert diag.__name__ == "PlayerDiag"
+    assert not [n for n in PLAYER_FRAME_PATH if n in vars(diag)]

@@ -19,8 +19,8 @@
 # 0x1D000 vs the P4's 0xD000 has already been typed wrong once, by hand).
 #
 # THE SLOT SIZE, and what it is sized against: 3.25 MiB (0x340000) per slot
-# since 2026-10-18 (owner), re-tabled from 3 MiB slots (2026-10-07; option (b)
-# of docs/native_kernel_2026-09.md section 6.1's Zero row) and before that from
+# since 2026-10-18 (owner), re-tabled from 3 MiB slots (2026-10-07; board.toml's
+# [image] says why) and before that from
 # the first table's 2.75 MiB slots and 2.375 MiB vfs.
 #
 #   The image is ~2.91 MB (2,913,328 B at the last measurement), and most of it

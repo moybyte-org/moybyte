@@ -29,6 +29,7 @@ from pathlib import Path
 
 import moy_ota_health  # the health half: its thresholds and marker
 from board_source import runtime_text
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,7 +49,7 @@ def _load_moy_ota():
 
 def _stage():
     """A verified image in the host's slot (native/moy_net/moy_ota.c over
-    runtime/net_binding.py), what a download or a copied image leaves for
+    runtime/host/net_binding.py), what a download or a copied image leaves for
     finish() to activate."""
     from runtime import net_binding as nb
 
@@ -611,7 +612,7 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
            if isinstance(n, ast.FunctionDef)}
     assert "report_update" in fns["build_desktop"]
     assert "confirmed_by_kernel" not in fns["build_desktop"]
-    boot = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    boot = runtime_file("device_boot.py").read_text(encoding="utf-8")
     report = boot[boot.index("def report_update("):boot.index("def boot_ok(")]
     assert "boot_check()" in report and "confirm" not in report.replace(
         "CONFIRM", "").replace("confirm", "", 0).split('"""')[2]

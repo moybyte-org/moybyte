@@ -1,4 +1,4 @@
-"""runtime/ui.py Phase 3a: the six-state interaction model and the two new
+"""runtime/toolkit/ui.py Phase 3a: the six-state interaction model and the two new
 widget kinds (`row`, `cell`): the state model resolves right -- the full
 precedence lattice, not a sample of it -- and the rows and cells paint their
 state's tokens.
@@ -9,7 +9,7 @@ from runtime.chrome import THEME_VARIANTS
 from ws_helpers import fixture_colors
 
 # The palette themes whose states these resolve: the seeds of MOY64 colours
-# docs/look_2026-10.md step 27 deleted, as fixture packages
+# docs/history/look_2026-10.md step 27 deleted, as fixture packages
 # (tests/fixtures/themes/), in their old seed order; `moy`'s, `blocks`' and
 # `contrast`'s RGB roles are tests/test_theme_rgb.py's and its goldens'.
 THEME_NAMES = ("night", "indigo", "berry", "forest", "slate", "machine",
@@ -165,25 +165,30 @@ def test_hover_is_additive_and_disabled_only_dims():
 def test_ui_stays_a_leaf():
     """The cycle ui -> chrome -> settings_layer -> ui must stay impossible.
     Checked on IMPORT STATEMENTS, not on substrings -- the module documents
-    the cycle in prose."""
+    the cycle in prose. ui_draw and its three halves (ui_scroll, ui_host,
+    ui_cover) are one leaf: they import each other and nothing of the shell."""
     import ast
-    tree = ast.parse(open(ui_draw.__file__).read())
+    import os
+    here = os.path.dirname(ui_draw.__file__)
+    halves = ("ui_draw", "ui_scroll", "ui_host", "ui_cover")
     names = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.extend(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            names.append(node.module or "")
+    for mod in halves:
+        tree = ast.parse(open(os.path.join(here, mod + ".py")).read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.extend(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.append(node.module or "")
     assert names, "no imports found -- is the scan still reading ui_draw.py?"
     for name in names:
         leaf = name.split(".")[-1]
         assert leaf not in ("chrome", "console", "settings_layer",
                             "wm_windowed"), name
-    # The imports are the C this module is the face of, the array type its
-    # token rows and hit buffers travel in, and struct to read a scroll
-    # state's velocity.
+    # The imports are the C these modules are the face of, the array type
+    # their token rows and hit buffers travel in, struct to read a scroll
+    # state's velocity, and each other.
     assert set(n.split(".")[-1] for n in names) == {
-        "moy_ui", "array", "struct", "ustruct"}, names
+        "moy_ui", "array", "struct", "ustruct"} | set(halves), names
 
 
 # =============================================================================
@@ -350,7 +355,7 @@ def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
 
 
 def test_the_toggle_is_a_chip_that_reads_switched_on():
-    """A kind added as data (sprint 6, docs/kernel_toolkit_2026-10.md §2.2):
+    """A kind added as data (sprint 6, native/moy_ui/README.md):
     chip's shape and chip's look, except ON, which is the theme's play green
     with light ink."""
     th = fixture_colors("machine")

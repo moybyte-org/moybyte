@@ -1,4 +1,4 @@
-"""The toolkit's style as data, and the outline seed theme.
+"""The toolkit's style as data.
 
 1. **The style IS the shipped pixels.** The widgets hardcode no colour or pad;
    native/moy_ui resolves them from native/moy_ui/style.json, and every kind
@@ -15,9 +15,11 @@
    directions -- and so are the kinds a surface asks the catalog for, so a
    typo'd kind cannot silently fall back to the row palette.
 
-4. **A restyle beyond colours is a theme's shape.** `outline` is a seed theme
-   (docs/theming_2026-09.md §9, phase 3 step 4): its surfaces restyle the
-   shipped widgets on every variant, with no code of its own.
+4. **A restyle beyond colours is a theme's shape** (its surfaces, frame and
+   text effects: docs/theme_and_shell_2026-11.md §3.3-§3.5), never code; the
+   shape is held by tests/test_theme_loader.py. The `outline` seed that showed it
+   here was deleted with the other old seeds (docs/history/look_2026-10.md
+   step 27).
 """
 
 import ast
@@ -244,7 +246,7 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
 # is a red test in three places.
 _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
 # Kinds no surface asks for that stay in the table: the part list theme
-# packages name is frozen (docs/theming_2026-09.md §4.3), so a part outlives
+# packages name is frozen (docs/theme_and_shell_2026-11.md §3.3), so a part outlives
 # its last surface. `row_cta` was the old Storybook's NEW row, `row_list` the
 # power popover's level line (its rows are Settings' sliders since look step 33),
 # `row_menu` the kernel's system menu's rows (the look's card since step 33),
@@ -336,7 +338,7 @@ def test_the_colors_hatch_is_pinned_site_by_site():
     pixels are frozen off-token, and it has to be written down to be argued
     with."""
     total = 0
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":            # where the parameter is DEFINED
             continue
         frozen = _hatch_sites(path)
@@ -359,7 +361,7 @@ def test_no_surface_names_a_shell_kind():
     public UI verbs, the Config tab's own card drawer last. A surface naming
     a shell kind again draws a row the verbs already draw."""
     named = {}
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":
             continue
         k = _named_kinds(path)
@@ -379,7 +381,7 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
     because it is the toolkit ASKING, not a surface: its own draw functions map
     a caller's `kind=` through `_BUTTON_KIND_KEY`, computed by construction."""
     asked = {}
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         if path.name == "ui.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -465,7 +467,3 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
     # without its "what it replaced" row is a colour nobody checked.
     assert {k for k, _s in _PRE_207_TRIPLES} == set(_SHELL_KINDS)
 
-
-# =============================================================================
-# 4. the outline seed: a restyle in the theme's shape
-# =============================================================================

@@ -1,5 +1,5 @@
 """The handheld Editor's Map, Scene, Music and Blocks tabs on the public UI
-API (docs/look_2026-10.md step 30; docs/media/look_2026-10/EDITOR_LAYOUT.md's
+API (docs/history/look_2026-10.md step 30; docs/media/look_2026-10/EDITOR_LAYOUT.md's
 `*-editor` pictures): each tab's pages driven through the host's pointer
 and keys, and a settled tab painting nothing."""
 import os

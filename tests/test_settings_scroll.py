@@ -1,5 +1,5 @@
-"""Settings' rows page scrolls (docs/look_2026-10.md step 19): the public
-UI API's page (runtime/ui.py) keeps the focused row in view as the keys move
+"""Settings' rows page scrolls (docs/history/look_2026-10.md step 19): the public
+UI API's page (runtime/toolkit/ui.py) keeps the focused row in view as the keys move
 it, a finger drag scrolls it and is no tap, and a clean tap activates the row
 under it. The rows are the session's (`_settings_rows`, memoized on the
 capabilities), the page its groups of them.
@@ -242,7 +242,7 @@ def test_a_key_step_paints_once(tmp_path):
     """A down press moves focus and its scroll at the engine's begin, so a
     press that scrolls nothing paints one frame and owes none after it; one
     that scrolls paints the glide's frames and rests when it lands
-    (docs/scroll_and_text_2026-10.md §7)."""
+    (docs/history/scroll_and_text_2026-10.md §7)."""
     import moy_ui
     ws = _ws(tmp_path)
     _force_ota_rows(ws)

@@ -29,7 +29,7 @@ days, while `make test` stayed green because the tests had pinned the wrong
 model too. `tests/test_p8_import_vendor.py` is what makes that impossible now.
 
 Why the assets convert nearly verbatim: the MOY64 palette's first 16 colors *are*
-PICO-8's base 16 byte-for-byte (`runtime/palette.py` `_BASE16`), and
+PICO-8's base 16 byte-for-byte (libmoy's `moy_palette_default`), and
 `sprites.moygfx` is literally PICO-8 `__gfx__` format (a 16x16 grid of 8x8 tiles,
 one hex nibble per pixel). So importing PICO-8 *assets* needs no Lua runtime.
 (Feasibility analysis: issue #13.)

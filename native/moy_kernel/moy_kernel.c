@@ -1,9 +1,9 @@
 // moy_kernel: the kernel's entry, the VM service, the crash intake and the
-// recovery floor (docs/kernel_spine_2026-10.md §6-§8, #224 sprint 2).
+// recovery floor (moy_crash.h, moy_recovery.h; #224 sprint 2).
 //
 // THE ENTRY. micropython.cmake defines MICROPY_ESP_IDF_ENTRY, which renames the
 // port's app_main, so this file's runs instead (the embed decision,
-// docs/native_kernel_2026-09.md §4.4): the port's board startup, the crash
+// native/moy_kernel/moy_kernel.h): the port's board startup, the crash
 // intake, then the VM service task with mp_task's stack, priority and core.
 // app_main returns, so the IDF main task's stack is freed as it always was.
 //
@@ -17,7 +17,7 @@
 // (input's trackball and touch gate) outlive a soft reset, and each VM start
 // clears the VM objects the kernel's modules cached in root pointers, which
 // the last heap held. After mp_deinit a VM STOP (moy_kernel_vm_down,
-// docs/kernel_cartpath_2026-10.md section 5) frees the first area and runs the
+// docs/history/kernel_cartpath_2026-10.md section 5) frees the first area and runs the
 // kernel's frame on this task with no VM before the next start. The copy's call list is pinned: mp_task_calls.txt is what it was reviewed
 // against, and tools/mp_task_calls.py fails the build when the tag's differs.
 //
@@ -167,7 +167,7 @@ void moy_loop_board_down(void);
 int MOY_KERNEL_PANEL(init)(void);
 uint16_t *MOY_KERNEL_PANEL(fb)(void);
 int MOY_KERNEL_PANEL(present)(void);
-void MOY_KERNEL_PANEL(backlight)(int on);
+void MOY_KERNEL_PANEL(backlight)(int level);   // moy_light.h: 0 off, 255 full
 #if !MOY_KERNEL_SCR
 #error "a board with a panel draws its screens through moy_gfx's moy_scr.h"
 #endif
@@ -745,7 +745,7 @@ static void k_state(const k_floor_t *k) {
 }
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
-// The floor's `update` word (docs/kernel_survival_2026-10.md section 6.3): the
+// The floor's `update` word (docs/history/kernel_survival_2026-10.md section 6.3): the
 // kernel's updater with no VM. `update` checks this build's channel for this
 // board and says what it offers; `update install` installs it and restarts
 // into it. A URL after either names another manifest -- typed at the serial,
@@ -897,7 +897,7 @@ static void moy_kernel_recovery(int why) {
         k_printf("KERNEL recovery panel err=0x%x\r\n", e);
     }
     k_draw(&k);
-    MOY_KERNEL_PANEL(backlight)(1);
+    MOY_KERNEL_PANEL(backlight)(255);
     #endif
     k_report(&k);
 
@@ -1044,7 +1044,7 @@ static time_t platform_mbedtls_time(time_t *timer) {
 }
 #endif
 
-// The glass's teardown (native/moy_glass, docs/native_kernel_2026-09.md §4.4's
+// The glass's teardown (native/moy_glass, native/moy_kernel/moy_kernel.h's
 // glass rows): before the sweep, nothing the kernel's present started still
 // reads a buffer the VM is about to free; after it, the lifetimes the VM held
 // are ended. Weak, so an image without the glass links.
@@ -1086,7 +1086,7 @@ __attribute__((weak)) void moy_net_vm_stop(void) {
 }
 
 // The kernel's internal volume, where the image has it (native/moy_store).
-// The kernel's PLAIN web-console screen (docs/kernel_survival_2026-10.md §13
+// The kernel's PLAIN web-console screen (docs/history/kernel_survival_2026-10.md §13
 // answer 8): while no VM runs and the web console serves, the address to open,
 // drawn through the floor's raster into the panel's framebuffer 0. The themed
 // screen is the console's while its VM runs. Answers whether it drew.
@@ -1147,7 +1147,7 @@ static void moy_kernel_first_light(void) {
         k_printf("KERNEL first light: present err=0x%x\r\n", e);
         return;
     }
-    MOY_KERNEL_PANEL(backlight)(1);
+    MOY_KERNEL_PANEL(backlight)(255);
     s_lit = true;
     s_lit_ms = (uint32_t)(esp_timer_get_time() / 1000);
     k_printf("KERNEL first light at %u ms\r\n", (unsigned)s_lit_ms);
@@ -1158,14 +1158,14 @@ extern bool moy_kvol_vm_mount(void) __attribute__((weak));
 // moy_alloc's registry: the buffers the swept VM's views named.
 extern void moy_alloc_vm_swept(void) __attribute__((weak));
 
-// kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
+// kstop N (native/moy_kernel/moy_kernel.h): the VM service's soft reset,
 // N times with the kernel's drivers alive, each one's heaps printed before the
 // teardown and after it. Test-only: the dev channel's word, never a kid's.
 static int s_kstop_n;
 static int s_kstop_left;
 static bool s_kstop_stop;           // `kstop N stop`: each cycle a real stop and start
 
-// -- the VM stop (docs/kernel_cartpath_2026-10.md section 5) --------------------
+// -- the VM stop (docs/history/kernel_cartpath_2026-10.md section 5) --------------------
 //
 // A stop is the soft reset's teardown and then more: after mp_deinit the root
 // section is zeroed (no stale root marks the reused first area), the first
@@ -1573,7 +1573,7 @@ static void moy_vm_task(void *pvParameter) {
     // MOY: what the kernel keeps for a run is made before the VM's first area,
     // below every area a VM will hold: a table made at a launch, with the VM's
     // areas in place, would sit inside the free run the VM's stop leaves and
-    // split it (docs/kernel_cartpath_2026-10.md section 5.2).
+    // split it (docs/history/kernel_cartpath_2026-10.md section 5.2).
     moy_kernel_reserve();
 
     // MOY: a missing first area lands on the floor instead of restarting.

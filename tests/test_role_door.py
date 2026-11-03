@@ -1,4 +1,4 @@
-"""The ROLE door (docs/kernel_appabi_2026-10.md section 2.1): the upcall that
+"""The ROLE door (native/moy_app/README.md): the upcall that
 carries arguments, a compiled app's one way to a role row.
 
 One script drives `moy_app_role` over a grant -- the C rows it runs itself,
@@ -127,7 +127,7 @@ print("DONE")
 
 
 def _host_log():
-    from tools import moy_app_binding, moy_spine_binding
+    from runtime import moy_app_binding, moy_spine_binding
     from runtime import moy_loop
     sp, ap = moy_spine_binding.binding(), moy_app_binding.binding()
     if sp is None or ap is None:

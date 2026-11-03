@@ -2,7 +2,7 @@
 
 `scene`, `load_scene`, `actors`, `touching`, `move_actor`, `move_actor_to`,
 `remove_actor` and `draw_scene` are, for a Lua cart, the handles prelude's Lua
-(runtime/lua_ext.py) over the run's C (native/moycore/moycore_scene.h): the
+(runtime/run/lua_ext.py) over the run's C (native/moycore/moycore_scene.h): the
 scene texts are handed to the run before the load, parsed in C into plain row
 tables, and the live world is those tables, drawn by C. Nothing crosses into
 Python.

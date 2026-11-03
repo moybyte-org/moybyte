@@ -217,7 +217,7 @@ feature, and sign off every commit (`git commit -s`).
 
 The rule that catches people: host and device share one canvas class,
 `device_canvas.DeviceCanvas`, which the host runs through
-`runtime/host_canvas.py`. A drawing change goes there, or carts stop behaving
+`runtime/host/host_canvas.py`. A drawing change goes there, or carts stop behaving
 the same on every target.
 
 ## License

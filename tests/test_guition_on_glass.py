@@ -32,7 +32,7 @@ def board():
         yield b
 
 
-# The engine's idle cost (docs/wasm_tier_plan_2026-09.md, guard 1). FIRST in
+# The engine's idle cost (docs/history/wasm_tier_plan_2026-09.md, guard 1). FIRST in
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-25 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
@@ -43,7 +43,7 @@ def board():
 EXFAT_SRAM = 640
 # And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
 # panic wrapper in IRAM and its statics), which every console image carries
-# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# and native/moy_play/moy_play.h bounds on its own: measured
 # 2026-10-06 on this board, the internal heap an image that takes
 # the module has against the same tree denying it (the worse of two fresh
 # boots: 93067 and 93131 free without it, 92039 with it).
@@ -161,7 +161,7 @@ def test_a_lua_cart_after_a_wasm_run_keeps_its_sram(board, wasm):
     on_glass.wasm_lua_after_wasm_keeps_its_sram(board, wasm)
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) ---------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) ---------------
 # Compiled carts from the launcher, WiFi off -- the state a cart plays in, so
 # before the radio guards. The floors are this board's median drawn fps
 # less a margin -- the hello cart's measured on 2026-09-25, the blit fixture's
@@ -424,6 +424,10 @@ def test_idle_screen_blank_and_wake(board):
     on_glass.idle_timeout_restored(board)
 
 
+def test_an_sd_transfer_takes_no_internal_dma_memory(board):
+    on_glass.sd_card_io_takes_no_internal_dma(board)
+
+
 def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
@@ -601,7 +605,7 @@ def test_perf_line_is_the_one_format(board):
     for name in ("wmr", "wmw", "wms", "ppa", "fence_ms", "gfence_ms"):
         assert got[name] is None, (name, got[name])
 
-# -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
+# -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.
 
@@ -638,7 +642,7 @@ def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
     on_glass.a_ctrl_c_ends_a_front_run(board, front=False)
 
 
-# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): the kernel stops the
 # VM and starts it again with no cart, the routes and the lease read back and
 # PSRAM flat while it is down; Doom runs with no VM (its fit forced to fail),
 # its end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back over the
@@ -657,6 +661,10 @@ def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
 
 def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
     on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
+
+
+def test_bluetooth_stops_and_starts_again(board):
+    on_glass.ble_stops_and_starts_again(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.

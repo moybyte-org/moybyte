@@ -1,5 +1,5 @@
 // moy_play.Match: the kernel's radio link and its lockstep session as a VM
-// sees them (moy_match.h). runtime/moy_play.py's Match is the same class on
+// sees them (moy_match.h). runtime/host/moy_play.py's Match is the same class on
 // CPython, method for method and attribute for attribute; there it takes an
 // io (the host's tests run two consoles in one process), here the instance is
 // the kernel's one over native/moy_net's ring:

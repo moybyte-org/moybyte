@@ -1,6 +1,6 @@
 """The browser tab shows Moy, and it is the SAME Moy the console draws.
 
-The favicon is generated from `runtime/chrome._ICON_ART["moy"]` -- the art the
+The favicon is generated from `runtime/shell/chrome._ICON_ART["moy"]` -- the art the
 boot splash and the launcher header already use -- and embedded in the page as a
 data: URI. That is the point: a hand-drawn PNG checked in beside it would be a
 second copy of the mascot, free to drift the moment anyone touches the art, and
@@ -60,5 +60,5 @@ def test_moy_is_transparent_where_the_art_says_he_is():
 def test_the_marketing_site_wears_the_same_face():
     """moybyte.com and the console must not have different mascots -- it is the
     same product, and the site already generates its whole palette from
-    runtime/palette.py for exactly this reason."""
+    libmoy's MOY64 (gfx_binding.moy64) for exactly this reason."""
     assert _embedded(SITE) == _embedded(PAGE)

@@ -100,8 +100,9 @@ them back on the next visit — but anything that existed *only* here is.
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
   the Guition's 3,668,096 B the day before. The baked browser console grew
-  the image past its first headroom floor, 256 KiB (`docs/native_kernel_2026-09.md`
-  §6.1), so on 2026-10-07 the slots became **3 MiB** (`0x300000`) and the store
+  the image past its first headroom floor, 256 KiB (`[image]` in
+  `board.toml` says why each floor), so on 2026-10-07 the slots became
+  **3 MiB** (`0x300000`) and the store
   the 1.875 MiB `vfs` at `0x620000`, sized for the kernel's native modules to
   cross onto this board. The console kept growing: at 2,913,328 B the image
   had ~226 KB of headroom against the 200 KB floor, so on 2026-10-18 (owner)
@@ -388,7 +389,7 @@ partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
 Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
-(the kernel's /gpio route and portal over `runtime/net_binding.py`)
+(the kernel's /gpio route and portal over `runtime/host/net_binding.py`)
 and `tests/test_zero_update.py` (140-odd cases over the parsing, the refusals,
 the persisted shapes, the captive portal's packets, the browser-side queue, the
 update state machine and one whole first run end to end), plus

@@ -1,5 +1,5 @@
-// moy_loop: the console's frame, the kernel's (docs/kernel_survival_2026-10.md
-// §7.1). One function, every tier: a board's VM service calls moy_loop_run()
+// moy_loop: the console's frame, the kernel's (#224 sprint 3). One function,
+// every tier: a board's VM service calls moy_loop_run()
 // where the port would enter its REPL, the browser's worker and the host call
 // moy_loop_step() once a frame, and Python is what the frame calls UP into.
 //
@@ -14,9 +14,9 @@
 //   services) -> pace -> account (PERF, the stage meters' window) -> the
 //   watchdog feed -> the pacing sleep.
 //
-// The kernel's own draws (the HUD) land inside the frame upcall, through the
-// canvas the console hands them, before its end_frame: the P4's last-write
-// rule (#58).
+// Draws over the console (the perf HUD, runtime/system/perf_hud.py) land inside the
+// frame upcall, through the system canvas, before its end_frame: the P4's
+// last-write rule (#58).
 //
 // WHAT RUNS IT. A tier gives the loop its stages as an ops table (every entry
 // optional: a stage with no op is never metered, so it reads as absent, not
@@ -25,6 +25,28 @@
 // console's boot registered, cleared when the VM goes, and refused while none
 // runs. The loop's state is one static struct, so the task or thread that
 // calls step() may change between any two frames.
+//
+// WHY IT IS SAFE (2026-10-07). A VM cannot tear itself down with its own
+// frames under a loop, so on a board moy_loop_run is the OUTERMOST frame of
+// the VM service task: the console's Python boot registers the upcalls and
+// RETURNS, the service calls moy_loop_run() where mp_task would enter its REPL,
+// and the loop calls Python back on the same task. No Python frame is below
+// the loop, so the teardown list runs with nothing of the loop's on the stack.
+// Across a soft reset's window a small kernel task, moy_loop_task (internal
+// stack, the VM's core), drives the frame, so the glass keeps presenting while
+// the VM restarts. A VM STOP is not that window: the VM service task itself,
+// never deleted, steps the loop with no VM until the stop's run ends, and
+// moy_loop_task is not created. So the loop adds no task while the VM runs,
+// and the kernel holds no more internal SRAM stopped than running; and both
+// tasks that may drive the loop have internal stacks, so an internal-flash
+// write from the loop needs no deferral. In the browser and on the host each
+// frame is one moy_loop_step of the DRIVER tier (moy_loop.drive: no stages but
+// the clock, the three console upcalls, an upcall's exception handed back to
+// the harness), under runtime/run/host_api.py's ConsoleDriver.frame.
+//
+// THE PUMP is FramePump in C: the clamped dt, the cadence debt, the
+// sleep-overshoot slack against the 10 ms FreeRTOS tick, and the published
+// slot the stage budgets are cut from (moy_loop_pump, moy_loop_pace).
 //
 // UPCALLS ARE COUNTED BY CLASS, per frame and in total: CONSOLE is the draw
 // stack's three and the console's dev words; APP an app's hooks; DRIVER a
@@ -153,7 +175,7 @@ enum {
 // a MOY_UP_* failure.
 typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 
-// THE ROLE DOOR (docs/kernel_appabi_2026-10.md section 2.1): the upcall that
+// THE ROLE DOOR (native/moy_app/README.md): the upcall that
 // carries arguments. A compiled app's call of a role row the Python console
 // serves: the calling grant, the row (native/moy_app/roles.json's index), the
 // row's arguments packed in `arg` (n bytes, native/moy_app/moy_app.h's field
@@ -191,7 +213,7 @@ bool moy_loop_vm(void);
 // One frame. With a VM, it runs only while the three console upcalls are
 // registered (STOPPED otherwise). With none, every stage runs and each
 // upcall the frame would make is refused and counted REFUSED: the kernel's
-// run in front is the frame (docs/kernel_cartpath_2026-10.md section 4).
+// run in front is the frame (docs/history/kernel_cartpath_2026-10.md section 4).
 int moy_loop_step(void);
 int moy_loop_run(void);
 
@@ -240,6 +262,11 @@ void moy_loop_set_services(uint32_t bits);
 uint32_t moy_loop_services(void);
 // The panel was lit before the loop (the boot splash did it).
 void moy_loop_set_lit(bool lit);
+// The light the idle ladder's full rung means (Settings' Brightness), 1..255:
+// every level the loop gives the backlight is scaled to it, and a lit panel
+// takes a new one at once. `top` <= 0 only reads it. -1 where the board's
+// light cannot dim (no backlight stage, or the ladder's `can_dim` false).
+int moy_loop_light_top(int top);
 // The console's half of the PERF line, which it fills when a sample is due
 // (moy_loop_perf_due: PERF DIAG is on and this frame closes the period).
 moy_perf_values_t *moy_loop_perf_console(void);

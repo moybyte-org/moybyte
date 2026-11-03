@@ -1,4 +1,4 @@
-;; App Menu Wasm: the public UI API's menu (docs/look_2026-10.md step 25a) as
+;; App Menu Wasm: the public UI API's menu (docs/history/look_2026-10.md step 25a) as
 ;; a compiled app, through the `ui` rows it imports from module "moybyte.app":
 ;; a card centred on the page (a popover with nothing to hang from) holding a
 ;; header row, a menu of four and its hints, then a captioned menu stacked on

@@ -1,4 +1,4 @@
-"""The store's index (runtime/moy_index.py): the interface sprint 1a wrote in
+"""The store's index (runtime/carts/moy_index.py): the interface sprint 1a wrote in
 C beside the Python, pinned once for every binding.
 
 `BINDINGS` names each implementation by a factory for an empty table: the

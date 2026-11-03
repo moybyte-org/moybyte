@@ -1,12 +1,12 @@
 """The kernel's spine in Python: the differential ORACLE for the native module
-`moy_spine` (native/moy_spine), call for call (docs/kernel_spine_2026-10.md).
+`moy_spine` (native/moy_spine), call for call (docs/history/kernel_spine_2026-10.md).
 No image and no host runs it: every tier runs the C spine, the CPython host
-through `tools/moy_spine_binding.py`. The suites run this twin beside the C
+through `runtime/host/moy_spine_binding.py`. The suites run this twin beside the C
 and hold the two to one log (tests/test_moy_spine.py, the random walk of
 tests/test_moy_spine_twins.py, the spine trace in tests/test_semantic_traces.py).
 
 Six components, each holding numbers and strings only -- no runtime's
-object outlives a call into one (docs/native_kernel_2026-09.md section 4.3):
+object outlives a call into one (native/moy_kernel/moy_kernel.h):
 
   Table        a handle table: rows named by kinded, generation-checked ints
   AppRegistry  the registered system apps: id, title, text mode, min size
@@ -18,7 +18,7 @@ object outlives a call into one (docs/native_kernel_2026-09.md section 4.3):
 
 A handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, always
 below 2**30 (a small int on every VM), its generation in the same bits as
-runtime/moy_index.py's, so the index is this table with the kind field folded
+runtime/carts/moy_index.py's, so the index is this table with the kind field folded
 into a 12-bit slot. A handle presented to a table that did not make it, or
 after its row was released, raises StaleHandle (a ValueError); a handle that is
 not an int raises TypeError.
@@ -384,7 +384,7 @@ _KERNEL = []
 
 def kernel(fresh):
     """(apps, back, returns, leases): the console's tables as the kernel's own
-    (docs/kernel_cartpath_2026-10.md section 5.4) -- one set per process, made
+    (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set per process, made
     at the first call and kept, so a VM stop leaves them for the next VM. The
     registry is cleared at every call (the console registers its apps at each
     start); `fresh` also puts the back-stack, the return records and the

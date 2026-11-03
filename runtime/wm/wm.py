@@ -1,0 +1,748 @@
+# Map (grep -n a name to jump there):
+#   FullscreenStackWM                 the fullscreen back-stack window manager (S3, host)
+#   FullscreenStackWM.goto            navigate the stack so a kind is on top
+#   FullscreenStackWM.viewport        the composited game viewport
+#   FullscreenStackWM.game_xy         a system-canvas point -> game coordinates
+#   FullscreenStackWM.present_frame   show a compiled cart's frame
+#   FullscreenStackWM.composite_game  the game canvas into the system canvas
+"""The window manager -- the S3/host fullscreen back-stack WM (Stage 6 of
+docs/history/shell_ux_technical_plan_v1.md).
+
+`FullscreenStackWM` is the ONLY tier-specific layer of the console (spec
+docs/history/shell_architecture_v1.md Section 3's tier table): on the S3 + the host simulator the
+top of the process back-stack owns the whole 320x240, so this WM's whole job is
+
+  * the game<->system COMPOSITE (`composite_game` + `viewport`/`game_xy`, #39): blit
+    the fixed 320x240 GAME canvas into the (possibly larger) SYSTEM canvas as a
+    fixed-aspect, integer-scaled, centered viewport, and map a system-canvas point
+    back into game coords so a running cart / the editors hit-test correctly;
+  * (Stage 6b) the process BACK-STACK (launcher root -> spawned app -> Player/tool),
+    the state of record `Workstation.screen` becomes a read-only projection OF
+    (`top_kind`) -- exactly as `menu_view` projects `EditorApp.tab` since Stage 3;
+  * (Stage 6c) the MEMOIZED visible/draw layer stack -- rebuilt only on a real
+    change (a back-stack push/pop OR an overlay-gate change), so a static top-of-stack
+    allocates NO new per-frame list (retiring the ~9-lists/frame router churn the
+    layers refactor introduced -- the #66 perf-recovery lever this stage owns).
+
+It is a pure host/S3 mechanism -- it holds a `ws` back-reference (the shared canvases
++ layer instances the console owns) and NOTHING device-specific, so the SAME file the
+host imports is frozen onto the device (staged into modules/ by build.sh, same pattern
+as project.py/player.py/editor_app.py). It stays a LEAF: the tiny blittable + tick
+helpers it needs are imported from the widgets leaf (bare name on the device / once
+host_app has aliased it, `runtime.X` for a direct test load), so it never imports back
+into console (no circular import).
+"""
+
+try:
+    from widgets import _Blit, _ticks_ms, _ticks_diff
+    from moy_spine import BackStack, STAYED
+    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
+    from runtime.moy_spine import BackStack, STAYED
+    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
+
+
+_VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
+_VIEWPORT_IDENTITY = (0, 0, 1)   # the degradation viewport: one canvas IS the glass
+
+
+class FullscreenStackWM:
+    """The fullscreen back-stack window manager (S3 + host). Holds a `ws` back-ref to
+    the console it composites for; owns the game<->system viewport composite (#39), the
+    memoized layer stack (Stage 6c), and the navigation verbs over the spine's process
+    back-stack `screen` projects onto (`self.stack`, moy_spine.BackStack). One instance
+    per Workstation, built in `Workstation.__init__`."""
+
+    # The home carousel's motion verdict (docs/theme_and_shell_2026-11.md §8.10),
+    # a per-board constant: a board whose drag frames do not fit its budget
+    # degrades down this order, only as far as its measurement says (#66) --
+    # "full" (the centre card scales with its distance from the centre, in
+    # motion and at rest; HOME_SCALE lowered is the order's "reduced scale"),
+    # "rest" (every card at 1.0 while the row moves, the centre scaled once
+    # settled), "one" (one card size). Every board runs "full" at 2: the
+    # handheld's 2x hero (home_grid.HOME_SCALE_HH). The desk's shelf
+    # cards keep one size, so the verdict moves only the handheld's.
+    HOME_MOTION = "full"
+    HOME_SCALE = 2.0
+    # Registered apps the home's Apps tab and the desk leave out: reached
+    # through Settings instead.
+    HIDDEN_APPS = ("appearance", "myart")
+    # A content's own paint ring vouches for what the buffers hold of it
+    # (docs/history/scroll_and_text_2026-10.md §3.4): the full-screen stack repaints
+    # everything around it, so a frame that moves its pixels shifts out of
+    # the frame before. The windowed WM's shown ring is its windows' voucher.
+    CONTENT_RING = True
+
+    def __init__(self, ws):
+        self.ws = ws
+        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool,
+        # as kinds (the vocabulary the flat `screen` attribute used: "launcher" | "menu" |
+        # "settings" | "update" | "desktop" | an app id); the TOP is what
+        # `Workstation.screen` projects onto (`top_kind`). It is a DATA STRUCTURE the
+        # string-keyed router READS (via ws._content_layer), NOT a second dispatcher --
+        # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
+        # The spine owns it; every navigation goes through `goto` here, so the WM sees
+        # each change it has to rebuild for.
+        kt = getattr(ws, "_kernel_tables", None)
+        self.stack = kt[1] if kt is not None else BackStack()
+        # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
+        # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
+        # switches bump it via EditorApp.tab; overlay-gate changes are caught separately
+        # by the per-call signature -- see _ensure_stack.)
+        self.content_gen = 0
+        # The memoized visible/draw/overlay layer stacks (Stage 6c). Rebuilt ONLY on a
+        # real change -- a back-stack push/pop (content_gen), a menu_view tab switch
+        # (content layer identity), or an overlay-gate/splash flip (the int signature).
+        # On a static top-of-stack every frame's frame()/handle_input()/handle_pointer()
+        # reuses the SAME list objects, so the per-frame router walk allocates NOTHING
+        # (this retires the ~9-lists/frame churn the layers refactor introduced -- #66).
+        self._cache_content = None    # the content Layer the caches were built for
+        self._cache_gen = -1          # content_gen the caches were built at
+        self._cache_sig = -1          # _overlay_sig() the caches were built at
+        self._cache_visible = None    # [content] + overlays (draw/route order, bottom->top)
+        self._cache_visible_rev = None  # visible reversed (top->bottom, input routing)
+        self._cache_draw = None       # [splash-or-content] + overlays (draw order)
+        self._cache_overlay = None    # the transient overlays + cursor
+        # #75: composite_game's per-frame flush_batch probe, cached by canvas identity
+        # (the canvas only changes on a web-view Tee swap, never mid-play).
+        self._fb_for = None
+        self._fb_fn = None
+        self._bg_for = None           # ...and its blit_game probe, the same way
+        self._pf_for = None           # ...and its present_frame probe
+        self._pf_fn = None
+        self._bg_fn = None
+        # The view/viewport GEOMETRY is memoized (#66 lever 1, 2026-09-08). A play
+        # frame asked for it five times -- letterbox, composite, blit source, and
+        # twice for the tap mapping -- and every answer was a fresh tuple. That
+        # is the expensive shape on the S3: a 3-tuple is a two-block allocation,
+        # and MicroPython's allocator only advances its free index on a
+        # single-block hit, so every multi-block request rescans the table from
+        # the live set's front -- measured in situ at 0.3-0.55 ms per tuple
+        # against 10 us for `A + B`. The key is what the answer depends on: the
+        # cart's declared view (by identity -- `view()` writes a new tuple),
+        # both canvases (by identity -- a run binds a small one) and their dims
+        # (a DeviceCanvas can be re-windowed in place), compared field by field
+        # so the check itself allocates nothing.
+        self._vs_key = None
+        self._vs_gc = None
+        self._vs_sc = None
+        self._vs_dims = [0, 0, 0, 0]
+        self._vs_val = None
+        self._vp_view = None
+        self._vp_gc = None
+        self._vp_sc = None
+        self._vp_dims = [0, 0, 0, 0]
+        self._vp_val = None
+
+    # -- the process back-stack (Stage 6b) -----------------------------------
+
+    def top_kind(self):
+        """The kind of the top-of-stack process -- what `Workstation.screen` projects
+        onto (a read-only projection of the back-stack top, exactly as `menu_view`
+        projects `EditorApp.tab`)."""
+        return self.stack.top()
+
+    def top_is(self, kind):
+        """True iff the top-of-stack process is `kind`. The stack query the production
+        readers use in place of `screen == kind` (Stage 6d) -- same answer, phrased as a
+        question to the stack (the source of truth) rather than the projection string."""
+        return self.stack.top() == kind
+
+    def input_holder(self):
+        """The process the keyboard reaches: here the stack top. The windowed
+        WM answers the focused window on its desk (None: the desk itself)."""
+        return self.stack.top()
+
+    def top_is_player(self):
+        """True iff a cart Player is on top (screen "desktop") -- the running-cart test
+        the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
+        return self.stack.top() == "desktop"
+
+    # -- the two modes (docs/theme_and_shell_2026-11.md §8.1) ----------------------
+
+    has_desk = False                   # capability probe: only WindowedWM has a desk
+    mode = "console"                   # this WM has console mode alone
+
+    # What a theme's bars may place here (docs/theme_and_shell_2026-11.md §8.8):
+    # per mode, the widgets this WM has a value for, and the edges a bar may
+    # take. The composer (shell_layout.resolve) drops the rest. `chips` (the
+    # taskbar's window chips) has no value in console mode.
+    LAYOUT_CATALOGUE = {"console": tuple(w for w in _LAYOUT_WIDGETS
+                                         if w != "chips")}
+    LAYOUT_EDGES = ("top", "bottom", "left", "right")
+
+    def popover_changed(self):
+        """The popover opened, moved or closed: here the frame repaints."""
+        self.ws._dirty = True
+
+    def pause_changed(self):
+        """The pause menu opened, moved or closed: here the frame repaints."""
+        self.ws._dirty = True
+
+    def popover_owed(self):
+        """True while the popover still owes a frame; never here."""
+        return False
+
+    def debt_owed(self):
+        """True while a retained buffer still owes the last change and a
+        frame now would pay it; never here."""
+        return False
+
+    def refill_step(self):
+        """A frame with nothing to paint brings a window's buffer up to the
+        glass (the windowed WM); nothing here, no windows."""
+        return False
+
+    def popover_takes_keys(self):
+        """True when the open popover paints its own key presses (the
+        windowed WM in desktop mode); never here."""
+        return False
+
+    def layout_catalogue(self):
+        """The widgets a bar places in the current mode."""
+        return self.LAYOUT_CATALOGUE[self.mode]
+
+    def desk_open(self):
+        """True in DESKTOP mode -- `ws.windowed_chrome` projects this. Always
+        False here: this WM is console mode only."""
+        return False
+
+    def full_key(self):
+        """F11: a desk window full screen (`WindowedWM.full_key`); this WM
+        presents everything full screen already."""
+        return False
+
+    def band_span(self):
+        """Where a full-screen window's band lends its zone; this WM has no
+        windows (`WindowedWM.band_span`)."""
+        return None
+
+    def cursor_shape(self):
+        """The pointer's shape where it is not the arrow; this WM resizes
+        nothing (`WindowedWM.cursor_shape`)."""
+        return None
+
+    def floor(self):
+        """The back-stack depth of this mode's root when nothing is beneath
+        it. The home's X shows when the stack is deeper; here the home is
+        the root and the floor, so it never does."""
+        return 1
+
+    def root_kind(self):
+        """The kind `go_home` lands on: this mode's root."""
+        return "launcher"
+
+    def enter_console(self):
+        """The desk's PLAY. Already in console mode here."""
+
+    def leave_console(self):
+        """The home's X. Nothing is beneath the home here."""
+
+    def is_parked(self, kind):
+        """True when `kind`'s window waits outside the stack for desktop
+        mode; nothing does on this WM."""
+        return False
+
+    def release_cache(self):
+        """The fit check's release (shell_layout §3): free one retained
+        cache a failed fit check can have back -- here the home's retained
+        frame, then the layer a dialog's page is held in. True when
+        something was freed."""
+        return self.ws.launcher_layer.release_retained() or self.ws.release_held()
+
+    def prealloc(self):
+        """An idle frame's mint of what a WM's first modal frame would
+        otherwise mint: nothing on the fullscreen stack."""
+
+    def hand_content_damage(self, cv, x, y, w, h):
+        """The fullscreen content layer painted only (x, y, w, h) of the root
+        this frame (the shelf's drag partial): hand it to a root that presents
+        described frames (`note_damage`, the rotated compositor's). Nothing is
+        handed when anything else drew -- an overlay, the splash, the perf HUD,
+        the visible cursor, an owed LOADING pill -- and the whole frame is
+        presented."""
+        nd = getattr(cv, "note_damage", None)
+        if nd is not None and self.content_alone():
+            nd(x, y, w, h)
+
+    def content_alone(self, besides=0):
+        """Whether the fullscreen content layer is all this frame draws: no
+        overlay, splash, perf HUD, visible cursor or owed LOADING pill over
+        it -- but the overlays of the sig bits `besides`, which the caller
+        accounts for itself."""
+        if self._cache_sig & ~besides:
+            return False
+        ws = self.ws
+        return not (getattr(ws.pointer, "visible", False)
+                    or (ws._deferred and ws._toast_owed()))
+
+    def keys_to_cart(self):
+        """Console hook (#44 redraw gate): this frame's keys are consumed by a
+        healthy RUNNING cart, not by any system surface -- so a key press/hold
+        must NOT mark the shell dirty (the cart's viewport animates on its own
+        and the chrome around it is unchanged by cart-bound keys). On this
+        fullscreen tier a running cart on top owns ALL input; the crash panel
+        (cart_error) hands keys back to the system chrome."""
+        ws = self.ws
+        return (self.stack.top() == "desktop" and ws.cart_error is None
+                and (ws._update is not None or ws._draw is not None))
+
+    def goto(self, kind):
+        """Navigate the back-stack so `kind` is on top -- the mechanism behind the
+        `ws.screen = kind` projection setter (and the explicit push/pop verbs).
+        A `kind` already open BELOW the top is a RETURN (pop back to it, truncating
+        everything above); a new `kind` is a PUSH. This reproduces the old flat-string
+        `screen` transitions exactly at the top (golden-identical) while giving the
+        stack an honest launcher-root -> ... -> top shape."""
+        if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
+            self._on_nav()
+
+    def bring_forward(self, kind):
+        """Show the window process `kind` already has, in front, with no
+        navigation: True when this WM did (a desk's window), False when it
+        has none to show (every fullscreen tier)."""
+        return False
+
+    def activate(self, kind):
+        """Open process `kind` the way a launcher does: its window brought
+        forward where it has one, else `goto`."""
+        if not self.bring_forward(kind):
+            self.goto(kind)
+
+    def _on_nav(self):
+        """A real top-of-stack change happened: bump the content generation so the
+        memoized layer stack (Stage 6c) rebuilds on the next access."""
+        self.content_gen += 1
+
+    def note_content_change(self):
+        """Signal that the ACTIVE content layer changed WITHOUT a stack push/pop -- the
+        one case being a menu_view/tab switch within the Editor (screen stays "menu" but
+        _content_layer resolves to a different tab). EditorApp.tab's setter calls this so
+        the memoized stack rebuilds; folding it here keeps all content-change signals on
+        the WM (the memo's single owner)."""
+        self.content_gen += 1
+
+    # -- the memoized visible/draw/overlay layer stack (Stage 6c) ------------
+    #
+    # The single source of z-order + visibility (mirrors the pre-refactor tail of
+    # frame()). Bottom -> top: the active content layer, the visible transient overlays,
+    # then the always-on cursor. Drawing walks it bottom -> top (with the one game->system
+    # composite at the domain boundary); input routing walks it top -> bottom so the
+    # overlay that owns the event claims it before the content underneath.
+    #
+    # The stack is memoized and rebuilt ONLY on a real change, so a static
+    # top-of-stack allocates zero new lists (built per access, the three walks a
+    # frame cost ~9 fresh lists even during play).
+
+    def _overlay_sig(self):
+        """A cheap, allocation-free signature (int bitmask) of the splash state + which
+        transient overlays are gated ON this frame. Together with the content-layer
+        identity + content_gen it is the memo key: while it is unchanged the cached
+        stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
+        alloc), so computing it every access is free on the hot path."""
+        ws = self.ws
+        sig = 0
+        if ws._splash_until is not None:
+            sig |= 1
+        if ws.show_fps and self.stack.top() == "desktop":
+            sig |= 2
+        # The unlock banner is a flat kernel deadline the unlock pushes at
+        # event time (#209 landing B) -- a plain int read, no call into ach
+        # from the hot path.
+        now = _ticks_ms()
+        if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
+            sig |= 32
+        if ws.sysmenu.open:
+            sig |= 64
+        if ws.pause.open:
+            sig |= 512
+        if ws.confirm.open:
+            sig |= 1024
+        if ws._about:
+            sig |= 128
+        if ws.notice_active():
+            sig |= 256
+        return sig
+
+    def _ensure_stack(self):
+        """Reuse the cached stacks when nothing changed, else rebuild once. The cache is
+        valid iff content_gen is unchanged (no push/pop/tab-switch) and the overlay/
+        splash signature matches. On a static frame both match and this returns without
+        building a single list -- so the stack accessors below hand back the SAME objects
+        every frame (zero allocation).
+
+        #75: content_gen alone stands in for the content-layer identity on the hot path
+        (no per-access ws._content_layer() call). The contract that makes this sound:
+        EVERY writer that can change what _content_layer() resolves to bumps the gen --
+        a back-stack push/pop/return goes through goto() -> _on_nav(), and an Editor tab
+        switch (screen stays "menu", the resolved tab layer changes) goes through
+        EditorApp.tab's setter -> note_content_change(). The memo guardrail test
+        (tests/test_wm_stack_memo.py) pins both invalidation paths."""
+        sig = self._overlay_sig()
+        if (self._cache_visible is not None
+                and self.content_gen == self._cache_gen
+                and sig == self._cache_sig):
+            return
+        self._rebuild(self.ws._content_layer(), sig)
+
+    def _overlay_layers(self, sig):
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..1024,
+        cursor appended last so it sits above everything). One copy: a new
+        overlay layer (like #53's notice banner) registers here ONCE and
+        reaches the windowed WM's stack too -- the two _rebuild bodies used to
+        carry twin ladders that had to be edited in step. Returns a fresh list
+        the caller may extend. The GAME-domain perf HUD (bit 2) is per-tier."""
+        ws = self.ws
+        overlays = []
+        if sig & 32:
+            overlays.append(ws._toast_layer)
+        if sig & 64:
+            overlays.append(ws._sysmenu_layer)
+        if sig & 512:
+            overlays.append(ws._pause_layer)
+        if sig & 128:
+            overlays.append(ws._about_layer)
+        if sig & 1024:
+            overlays.append(ws._confirm_layer)
+        if sig & 256:
+            overlays.append(ws._notice_layer)
+        overlays.append(ws._cursor_layer)
+        return overlays
+
+    def _rebuild(self, content, sig):
+        """Build the overlay list once, then the visible/reversed/draw lists off it, and
+        cache them with the key that produced them. This is the ONLY place the per-change
+        stack lists are allocated -- the Stage-6c guardrail test asserts it is NOT reached
+        on repeat static frames (the memo returns the cached objects instead)."""
+        ws = self.ws
+        overlays = self._overlay_layers(sig)
+        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
+        # running cart, before the composite), so it must precede any system overlay.
+        # (The windowed tier deliberately leaves it out -- see its _rebuild.)
+        if sig & 2:
+            overlays.insert(0, ws._perf_layer)
+        # The boot logo is a draw-time takeover of the content slot (input still routes to
+        # the content underneath -- so _cache_visible keeps `content`, only the draw slot
+        # swaps in the splash).
+        draw_content = ws._splash_layer if (sig & 1) else content
+        self._cache_overlay = overlays
+        self._cache_visible = [content] + overlays
+        self._cache_draw = [draw_content] + overlays
+        rev = list(self._cache_visible)
+        rev.reverse()                              # top -> bottom for input routing
+        self._cache_visible_rev = rev
+        self._cache_content = content
+        self._cache_gen = self.content_gen
+        self._cache_sig = sig
+
+    def overlay_stack(self):
+        """The transient overlays + cursor, in draw order (bottom -> top). Memoized."""
+        self._ensure_stack()
+        return self._cache_overlay
+
+    def visible_stack(self):
+        """The full z-ordered stack, bottom -> top: content, overlays, cursor. Memoized."""
+        self._ensure_stack()
+        return self._cache_visible
+
+    def visible_stack_rev(self):
+        """The visible stack top -> bottom (input routing order) -- cached pre-reversed, so
+        the hot handle_input/handle_pointer path allocates neither a list nor a reversed()
+        iterator."""
+        self._ensure_stack()
+        return self._cache_visible_rev
+
+    def draw_stack(self):
+        """The draw-order stack: same as visible_stack() except the boot logo, when armed,
+        takes the content slot. Memoized."""
+        self._ensure_stack()
+        return self._cache_draw
+
+    # -- two-domain composite + viewport coords (#39) ------------------------
+
+    def viewport(self):
+        """The composited game viewport as (ox, oy, scale) -- the top-left of the
+        320x240 game canvas inside the system canvas, and its integer scale. (0, 0,
+        1) when the two canvases are the same object (degradation)."""
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        if sc is gc:
+            return _VIEWPORT_IDENTITY
+        view = self._view_src_for(gc, sc)
+        d = self._vp_dims
+        if (view is self._vp_view and gc is self._vp_gc and sc is self._vp_sc
+                and d[0] == gc.w and d[1] == gc.h
+                and d[2] == sc.w and d[3] == sc.h):
+            return self._vp_val
+        gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
+        scale = min(sc.w // gw, sc.h // gh)
+        if scale < 1:
+            scale = 1
+        ox = (sc.w - gw * scale) // 2
+        oy = (sc.h - gh * scale) // 2
+        self._vp_view = view
+        self._vp_gc = gc
+        self._vp_sc = sc
+        d[0] = gc.w
+        d[1] = gc.h
+        d[2] = sc.w
+        d[3] = sc.h
+        self._vp_val = (ox, oy, scale)
+        return self._vp_val
+
+    def game_xy(self, px, py):
+        """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
+        coords, so a running cart / the editors (drawn in the 320x240 viewport) hit-
+        test correctly. Identity in the degradation case. A cart-declared VIEW
+        (`view(w, h)`) shifts the mapping by its source origin, so touch coords
+        stay in full game-canvas space -- the cart's own frame of reference."""
+        vp = self.viewport()
+        ox, oy, scale = vp
+        # When the answer is this class's own memo, the view it was validated
+        # against this instant IS _view_src()'s answer. Otherwise -- the
+        # one-canvas identity, or a subclass's viewport (the windowed tier's
+        # is the player window's) -- ask.
+        view = self._vp_view if vp is self._vp_val else self._view_src()
+        if view:
+            sx = view[0]
+            sy = view[1]
+        else:
+            sx = sy = 0
+        return (sx + (px - ox) // scale, sy + (py - oy) // scale)
+
+    def _view_src(self):
+        """The cart view rect the COMPOSITE honors, or None. One source of
+        truth for every viewport/blit/tap-mapping site on both tiers (the
+        windowed player window scales the view exactly like fullscreen).
+
+        Two kinds of view arrive here. A REGION (a 128x128 view of a 320x240
+        canvas: the rest is void) is always honored -- showing the void
+        instead would waste the screen. A TRIM (the p8 importer's 128x120
+        view of a 128x128 canvas: rows the cart can spare) is a hint for the
+        screen that would otherwise sit at 1x, and is honored only there. On
+        a 480x320 screen the full 128x128 already fits at 2x; on the P4 it
+        fits at 4x, where the 5x a trim buys costs a fifth of the frame (the
+        crisp composite scales with output pixels) and eight rows of picture. Three quarters of the canvas is the line.
+
+        Memoized on the declared view's identity + both canvases + their dims
+        (see __init__): the SAME tuple comes back until one of those moves."""
+        ws = self.ws
+        return self._view_src_for(ws.canvas, ws.sys_canvas)
+
+    def _view_src_for(self, gc, sc):
+        """_view_src for canvases the caller already holds (one attribute walk
+        per frame instead of one per asker)."""
+        gv = getattr(self.ws.input, "game_view", None)
+        if not gv:
+            return None                 # no declared view: nothing to crop, ever
+        d = self._vs_dims
+        if (gv is self._vs_key and gc is self._vs_gc and sc is self._vs_sc
+                and d[0] == gc.w and d[1] == gc.h
+                and d[2] == sc.w and d[3] == sc.h):
+            return self._vs_val
+        self._vs_key = gv
+        self._vs_gc = gc
+        self._vs_sc = sc
+        d[0] = gc.w
+        d[1] = gc.h
+        d[2] = sc.w
+        d[3] = sc.h
+        self._vs_val = self._view_src_compute(gc, sc)
+        return self._vs_val
+
+    def _view_src_compute(self, gc, sc):
+        """The rule itself (see _view_src's docstring); runs once per key."""
+        view = getattr(self.ws, "game_view", None)
+        if view is None:
+            return None
+        if sc is gc or not view[2] or not view[3]:
+            return view
+        if view[2] * view[3] * 4 < gc.w * gc.h * 3:
+            return view                              # a region
+        full = min(sc.w // gc.w, sc.h // gc.h)
+        cropped = min(sc.w // view[2], sc.h // view[3])
+        return view if full < 2 and cropped > full else None
+
+    def game_is_fullscreen(self):
+        """True when the game viewport IS the screen -- i.e. composite_game
+        letterboxes it over the whole system canvas. Always so on this WM; the
+        windowed tier overrides (its desk world puts the game in a WINDOW).
+
+        Read by the router when the game canvas is COMMAND-ONLY (#175): there
+        the letterbox + placement must be emitted BEFORE the cart draws, and
+        only the fullscreen presentation wants them."""
+        return True
+
+    def set_play_intent(self, intent):
+        """No-op here (#178): a cart owns the whole screen on this tier, so
+        there is no window whose default size could vary with WHY it started.
+        The windowed WM overrides -- see its _win_size."""
+
+    def letterbox_inplace(self):
+        """Fill the bezel when the system canvas IS the game canvas.
+
+        composite_game owns the bezel on every tier where the two canvases
+        differ -- but it fills it AFTER the cart draws, which it can only get
+        away with because it is copying into a DIFFERENT buffer. When they are
+        the same object (the 320x240 device glass, where the composite is a
+        no-op) nothing ever writes the pixels a cart-declared view leaves
+        uncovered, and a cart is under no obligation to: celeste clears with a
+        clipped `rectfill`, not `cls`. On a ping-pong double-buffered root the
+        two buffers then hold DIFFERENT stale content and the border flashes at
+        the frame rate -- reported on the T-Deck, invisible on the P4 for
+        exactly this reason. So paint it here: before the cart draws, into the
+        buffer it is about to draw into.
+
+        Only the four bands OUTSIDE the view, not a whole-surface cls: this runs
+        on the tier with the least fill rate to spare, and for a 256x240 view
+        that is 15,360 px instead of 76,800. Camera and clip are identity here --
+        the Player resets both after every cart frame."""
+        ws = self.ws
+        sc = ws.sys_canvas
+        gc = ws.canvas
+        if sc is not gc:
+            return                      # the composite will fill it, as it always has
+        view = self._view_src_for(gc, sc)
+        if view is None:
+            return                      # cart owns the whole canvas: nothing outside
+        sx, sy, vw, vh = view
+        if sy > 0:
+            sc.rect(0, 0, sc.w, sy, _VIEWPORT_BEZEL)
+        if sy + vh < sc.h:
+            sc.rect(0, sy + vh, sc.w, sc.h - (sy + vh), _VIEWPORT_BEZEL)
+        if sx > 0:
+            sc.rect(0, sy, sx, vh, _VIEWPORT_BEZEL)
+        if sx + vw < sc.w:
+            sc.rect(sx + vw, sy, sc.w - (sx + vw), vh, _VIEWPORT_BEZEL)
+
+    def present_frame(self, cf, view):
+        """Show a compiled cart's frame from its own memory (`view`, the
+        CartFrame `cf` owes) where composite_game would have read the game
+        canvas: the system canvas snapshots it for its flush, black bezels and
+        integer scale included, and the canvas is never written. True when it
+        took the frame; False leaves the caller to settle it and composite."""
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        if sc is not self._pf_for:
+            self._pf_for = sc
+            self._pf_fn = getattr(sc, "present_frame", None)
+        pf = self._pf_fn
+        if pf is None:
+            return False
+        if sc is gc:
+            return pf(cf, view, gc, 0, 0, 1, None)
+        vp = self.viewport()
+        ox, oy, scale = vp
+        return pf(cf, view, gc, ox, oy, scale,
+                  self._vp_view if vp is self._vp_val else self._view_src())
+
+    def composite_game(self):
+        """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
+        fixed-aspect, integer-scaled, centered viewport, filling the letterbox with
+        a solid bezel color. A no-op when the two canvases are the same object (the
+        degradation case: 320x240 system canvas == game canvas, pixel-identical to
+        today). Index-only (host == device): reads game indices, writes them scaled
+        into the system buffer, so no palette resolve is needed."""
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        # #63: complete any sprites still queued in the game canvas's auto-batch before
+        # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-
+        # suspenders so a missed reset can never drop a cart's last sprite run).
+        # #75: the flush_batch probe is cached by canvas identity -- this runs every
+        # play frame, and the canvas only changes on a web-view Tee swap.
+        if gc is not self._fb_for:
+            self._fb_for = gc
+            self._fb_fn = getattr(gc, "flush_batch", None)
+        if self._fb_fn is not None:
+            self._fb_fn()
+        if sc is gc:
+            return
+        vp = self.viewport()
+        ox, oy, scale = vp
+        # Native composite probe (the wm_paint._blit_game convention): a
+        # system canvas with a blit_game verb scales + letterboxes in C -- the
+        # T-Deck path for a cart-declared small canvas (SPEC.md 1/3.1), where
+        # the boot DeviceCanvas was promoted to system canvas and neither side
+        # has an index `buf` for the Python loops below. The source rect is
+        # the view viewport() validated this instant (see game_xy).
+        if sc is not self._bg_for:
+            self._bg_for = sc
+            self._bg_fn = getattr(sc, "blit_game", None)
+        bg = self._bg_fn
+        if bg is not None:
+            bg(gc, ox, oy, scale,
+               src=self._vp_view if vp is self._vp_val else self._view_src())
+            return
+        sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
+        gbuf = getattr(gc, "buf", None)
+        sbuf = getattr(sc, "buf", None)
+        if gbuf is None or sbuf is None:
+            # A recording system canvas (the web CommandCanvas) has no framebuffer to
+            # copy into -- blit the whole game frame as one scaled sprite so the draw
+            # stream carries the viewport. The game canvas must expose its pixels.
+            self._composite_via_spr(gc, sc, gbuf, ox, oy, scale)
+            return
+        gw = gc.w
+        sw = sc.w
+        sh = sc.h
+        # A cart-declared view (`view(w, h)`) composites only its source rect --
+        # the stride stays the full canvas width, the row slices start at sx.
+        view = getattr(self.ws, "game_view", None)
+        sx, sy, srw, srh = view if view is not None else (0, 0, gw, gc.h)
+        vw = srw * scale
+        # The viewport always fits a system canvas >= the game (the supported case),
+        # so take the fast row-replication path. A degenerate smaller-than-game system
+        # canvas (negative offset / overflow) falls to a clipped per-pixel path that
+        # can never resize the bytearray.
+        fits = ox >= 0 and oy >= 0 and ox + vw <= sw and oy + srh * scale <= sh
+        if fits:
+            for gy in range(srh):
+                grow = (sy + gy) * gw + sx
+                for s in range(scale):
+                    base = (oy + gy * scale + s) * sw + ox
+                    if scale == 1:
+                        sbuf[base:base + srw] = gbuf[grow:grow + srw]
+                    else:
+                        out = base
+                        for gx in range(srw):
+                            sbuf[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
+                            out += scale
+            return
+        for gy in range(srh):                       # clipped fallback (defensive)
+            grow = (sy + gy) * gw + sx
+            for s in range(scale):
+                dy = oy + gy * scale + s
+                if dy < 0 or dy >= sh:
+                    continue
+                dx0 = ox if ox > 0 else 0
+                dx1 = min(sw, ox + vw)
+                if dx1 <= dx0:
+                    continue
+                base = dy * sw
+                for dx in range(dx0, dx1):
+                    sbuf[base + dx] = gbuf[grow + (dx - ox) // scale]
+
+    def _composite_via_spr(self, gc, sc, gbuf, ox, oy, scale):
+        """Composite by blitting the game frame as ONE scaled sprite -- the path for a
+        recording system canvas (the web CommandCanvas) that has no framebuffer to
+        copy into. Records a single command per frame carrying the game pixels;
+        tagged as a paint image so the recorder ships it BASE64 (["img", ..., b64,
+        scale], ~2.4x lighter than a JSON int-list spr -- the webview's heaviest op)."""
+        if gbuf is None:
+            return
+        view = getattr(self.ws, "game_view", None)
+        if view is not None:
+            # A cart-declared view ships only its region (smaller payload, and
+            # the browser scales the VIEW like the framebuffer tiers do).
+            sx, sy, vw, vh = view
+            stride = gc.w
+            rows = bytearray(vw * vh)
+            for gy in range(vh):
+                b = (sy + gy) * stride + sx
+                rows[gy * vw:(gy + 1) * vw] = gbuf[b:b + vw]
+            img = _Blit(vw, vh, bytes(rows), -1)
+        else:
+            img = _Blit(gc.w, gc.h, bytes(gbuf), -1)  # opaque (no transparency)
+        img._paint = True                           # -> the compact b64 wire form
+        sc.spr(img, ox, oy, scale)

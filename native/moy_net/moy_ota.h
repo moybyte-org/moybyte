@@ -1,5 +1,5 @@
 // moy_ota: the updater and the streaming HTTP(S) client under it
-// (docs/kernel_survival_2026-10.md section 6.3).
+// (docs/history/kernel_survival_2026-10.md section 6.3).
 //
 // One body on every tier. The pure half -- a URL, a response head, SHA-256,
 // the manifest's RSA signature, its canonical text and the policy -- reads
@@ -12,7 +12,7 @@
 //
 // Get Carts and the updater fetch through the same client. All of its state
 // and buffers are the kernel's (moy_net_alloc): a VM holds a handle, an index
-// and a generation (docs/native_kernel_2026-09.md section 4.3), and the VM's
+// and a generation (native/moy_kernel/moy_kernel.h), and the VM's
 // stop closes what it left open (moy_net_vm_stop).
 //
 // TLS verifies no certificate. What decides an install is the manifest's

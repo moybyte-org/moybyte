@@ -1,5 +1,5 @@
 // moy_aud: the kernel's audio -- sessions over libmoy's synth, the one mix
-// the speaker plays, and the sample voice (docs/kernel_survival_2026-10.md
+// the speaker plays, and the sample voice (docs/history/kernel_survival_2026-10.md
 // section 5). libmoy/ is the synth and is vendored; this is ours.
 //
 // A SESSION is a row of kind AUDIO in a table of MOY_AUD_SESSIONS, owned by an

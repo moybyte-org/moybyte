@@ -18,6 +18,105 @@
 # report more CPUs than they schedule).
 BUILD_JOBS="${MOYBYTE_BUILD_JOBS:-$(nproc)}"
 
+# Where a board build's time goes. A build.sh that sources this lib is timed
+# from that moment: each `moybyte_phase NAME` ends the phase before it with a
+# `== time:` line, and the build's exit, passing or failing, prints every
+# phase, the total and the compiler cache's hits, and appends them to the
+# machine's shared timing log (tools/timings.py, tool `build`, lane the
+# board's [board] ota id). The port build splits into configure, compile,
+# link and image (elf2image, the merged image, the size checks) from its own
+# output when that output is not a terminal; on a terminal it stays one
+# `port` phase, so ninja keeps its one status line.
+MOYBYTE_T0=""
+MOYBYTE_PHASE=""
+MOYBYTE_PHASE_T=0
+MOYBYTE_PHASES=()
+
+moybyte_dur() {                 # moybyte_dur MS -> 3.2s / 14m32s
+  local ms="$1"
+  if [ "${ms}" -lt 60000 ]; then
+    printf '%d.%ds' $(( ms / 1000 )) $(( ms % 1000 / 100 ))
+  else
+    printf '%dm%02ds' $(( ms / 60000 )) $(( ms % 60000 / 1000 ))
+  fi
+}
+
+moybyte_phase() {               # moybyte_phase NAME [START_US]
+  [ -n "${MOYBYTE_T0}" ] || return 0
+  local now="${2:-${EPOCHREALTIME//[.,]/}}" ms
+  if [ -n "${MOYBYTE_PHASE}" ]; then
+    ms=$(( (now - MOYBYTE_PHASE_T) / 1000 ))
+    MOYBYTE_PHASES+=("${MOYBYTE_PHASE}=${ms}")
+    echo "== time: ${MOYBYTE_PHASE} $(moybyte_dur "${ms}")"
+  fi
+  MOYBYTE_PHASE="$1"
+  MOYBYTE_PHASE_T="${now}"
+}
+
+# "HITS MISSES" from ccache's counters, nothing without ccache.
+moybyte_ccache_counts() {
+  command -v ccache >/dev/null 2>&1 || return 0
+  ccache --print-stats 2>/dev/null | awk '
+    $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { h += $2 }
+    $1 == "cache_miss" { m += $2 }
+    END { if (NR) print h + 0, m + 0 }'
+}
+
+# The port build's stdout, passed through, with the moment each phase starts
+# written to $1 as "NAME START_US" lines (this runs in a pipeline's subshell,
+# so the marks come back through the file). Off a terminal ninja prints a
+# step's line when the step FINISHES, so: configure lasts until the first
+# finished step (a CMake re-run, "[0/1]", prints as it starts and is inside
+# it); the link starts at the last step finished before the app's
+# "Linking CXX executable micropython.elf" line, which is the link's end and
+# the image steps' start.
+moybyte_phase_watch() {
+  local line now last="" compiling="" linked=""
+  : > "$1"
+  while IFS= read -r line || [ -n "${line}" ]; do
+    printf '%s\n' "${line}"
+    [ -z "${linked}" ] || continue
+    now="${EPOCHREALTIME//[.,]/}"
+    case "${line}" in
+      *'Linking CXX executable micropython.elf')
+        [ -z "${last}" ] || echo "link ${last}" >> "$1"
+        echo "image ${now}" >> "$1"
+        linked=1 ;;
+      '['[1-9]*'/'*']'*)
+        if [ -z "${compiling}" ]; then
+          echo "compile ${now}" >> "$1"
+          compiling=1
+        fi
+        last="${now}" ;;
+    esac
+  done
+}
+
+moybyte_build_times() {         # the EXIT trap of a timed build: $1 its status
+  local rc="$1" total p lane cc0 cc1 hits="" misses="" args=() status=ok
+  moybyte_phase end
+  total=$(( (${EPOCHREALTIME//[.,]/} - MOYBYTE_T0) / 1000 ))
+  lane="$(sed -n 's/^ota *= *"\([^"]*\)".*/\1/p' "${MOYBYTE_BUILD_DIR}/board.toml" 2>/dev/null | head -1 || true)"
+  lane="${lane:-$(basename "${MOYBYTE_BUILD_DIR}")}"
+  [ "${rc}" = "0" ] || status=fail
+  echo "== build times (${lane}, ${status}):"
+  for p in "${MOYBYTE_PHASES[@]}"; do
+    printf '   %9s  %s\n' "$(moybyte_dur "${p#*=}")" "${p%%=*}"
+    args+=("${lane}/${p%%=*}=$(( ${p#*=} / 1000 )).$(( ${p#*=} % 1000 / 100 ))")
+  done
+  cc0="${MOYBYTE_CCACHE0}"
+  cc1="$(moybyte_ccache_counts)"
+  if [ -n "${cc0}" ] && [ -n "${cc1}" ]; then
+    hits=$(( ${cc1% *} - ${cc0% *} ))
+    misses=$(( ${cc1#* } - ${cc0#* } ))
+    printf '   ccache: %s hits, %s misses (machine-wide, over this build)\n' "${hits}" "${misses}"
+  fi
+  printf '   %9s  total\n' "$(moybyte_dur "${total}")"
+  "${BUILD_PYTHON:-python3}" "${REPO_ROOT}/tools/timings.py" add --tool build \
+    --status "${status}" ${hits:+--ccache "${hits},${misses}"} \
+    "${lane}=$(( total / 1000 )).$(( total % 1000 / 100 ))" "${args[@]}" || true
+}
+
 # Sets BUILD_PYTHON: the venv python when there is one (same interpreter the
 # tests run), else the system python3. tools/board_config.py is stdlib-only ON
 # PURPOSE (see its docstring): a board must be buildable on nothing but the
@@ -81,6 +180,7 @@ moybyte_setup_idf() {
   fi
   set -u
   moybyte_ccache
+  moybyte_phase patches
 }
 
 # One compiler cache for every checkout of this repository on this machine: the
@@ -388,6 +488,7 @@ moybyte_board_impls() {
 # web bundle only WARNS locally and FAILS under CI/MOYBYTE_REQUIRE_WEB_BUNDLE,
 # because a PUBLISHED image with no console is the whole bug the baking fixes.
 moybyte_stage_native() {
+  moybyte_phase stage-native
   moybyte_board_impls
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
   # WHERE it staged them is the board's to say ([native] dest). Asked rather
@@ -401,8 +502,10 @@ moybyte_stage_native() {
     if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_WEB_BUNDLE:-0}" = "1" ]; then
       args+=(--require)
     fi
+    moybyte_phase web-blob
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" "${args[@]}"
   fi
+  moybyte_phase stage
 }
 
 # The OTA build identity (#53): $1 is the board id inside the signed manifest
@@ -607,7 +710,7 @@ moybyte_app_size_guard() {
     echo "!!   floor:    ${floor_bytes} bytes ($(( floor_bytes / 1024 )) KB, [image] headroom_floor_kib in its board.toml)" >&2
     echo "!!   short by: $(( floor_bytes - headroom )) bytes" >&2
     echo "!! Trim the image, or change the floor with its reason" >&2
-    echo "!! (docs/native_kernel_2026-09.md section 6.1). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
+    echo "!! (board.toml's [image] says why). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
     echo "!! builds it anyway, for an experiment." >&2
     if [ "${MOYBYTE_ALLOW_UNDER_FLOOR:-0}" != "1" ]; then
       exit 1
@@ -686,15 +789,28 @@ moybyte_native_config_guard() {
 
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
+  moybyte_phase mpy-cross
   moybyte_kernel_entry
   make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
   cd "${MPY_DIR}/ports/esp32"
   make submodules BOARD_DIR="${BOARD_DIR}"
   local bout="build-${BOARD}"
   moybyte_native_config_guard "${bout}"
-  make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
-    USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
-    FROZEN_MANIFEST="${MANIFEST}"
+  local port_make=(make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}"
+    USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake"
+    FROZEN_MANIFEST="${MANIFEST}")
+  if [ -n "${MOYBYTE_T0}" ] && [ ! -t 1 ]; then
+    local marks n at
+    marks="$(mktemp)"
+    moybyte_phase configure
+    "${port_make[@]}" | moybyte_phase_watch "${marks}"
+    while read -r n at; do moybyte_phase "${n}" "${at}"; done < "${marks}"
+    rm -f "${marks}"
+  else
+    moybyte_phase port
+    "${port_make[@]}"
+  fi
+  moybyte_phase collect
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
   local floor board_id
@@ -737,3 +853,13 @@ moybyte_patch_esp_hosted_bump() {
     rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
   fi
 }
+
+# A board's build.sh is timed from here (see moybyte_phase above); a script or
+# test that sources this lib for one function is not.
+if [ "$(basename "${BASH_SOURCE[1]:-}")" = "build.sh" ]; then
+  MOYBYTE_T0="${EPOCHREALTIME//[.,]/}"
+  MOYBYTE_BUILD_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)}"
+  MOYBYTE_CCACHE0="$(moybyte_ccache_counts)"
+  moybyte_phase toolchain
+  trap 'moybyte_build_times $?' EXIT
+fi

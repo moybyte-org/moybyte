@@ -12,7 +12,7 @@ MoycoreRun (libmoy's binding over the vendored Lua 5.4 both boards
 compile, LUA_32BITS and all), with the fake API registered the way the
 console's is. The object-valued verbs -- make_layer, image, scene -- reach the
 cart through the SAME int-handle glue and Lua prelude the boards run
-(runtime/lua_ext.py), so this proves that seam as well as the port; touch()
+(runtime/run/lua_ext.py), so this proves that seam as well as the port; touch()
 is libmoy's own, over the run's real input snapshot; spr is shadowed in Lua to
 RECORD, and the record crosses as one string (parity_wire.py).
 

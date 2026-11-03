@@ -4,7 +4,7 @@
     python tools/gen_favicon.py            # print the data: URI
     python tools/gen_favicon.py --write    # patch it into page_core.html
 
-Moy is 16x16 nibble art in `runtime/chrome.py` (`_ICON_ART["moy"]`), resolved
+Moy is 16x16 nibble art in `runtime/shell/chrome.py` (`_ICON_ART["moy"]`), resolved
 through the MOY64 palette -- the same source the boot splash and the launcher
 header draw from. Generating the favicon from it rather than checking in a
 hand-drawn PNG means the browser tab and the console cannot disagree about what
@@ -24,9 +24,11 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
 
 from tools import pngwrite  # noqa: E402
+from tools.board_config import runtime_dirs  # noqa: E402
+
+sys.path[1:1] = runtime_dirs()
 
 PAGE = os.path.join(ROOT, "firmware", "web_runner", "page_core.html")
 MARK_A = '<link rel=icon href="'
@@ -39,7 +41,8 @@ def mascot_rgba(scale=2):
     0, which is also Moy's outline colour, so the sheet blit boxes him in
     (the same reason console.splash_image builds its own Image)."""
     from runtime import chrome
-    from runtime.palette import MOY64
+    from runtime.gfx_binding import moy64
+    MOY64 = moy64()
 
     art = chrome._ICON_ART["moy"]
     rows = []

@@ -1,4 +1,4 @@
-"""A desk Editor pane's own frames (docs/scroll_and_text_2026-10.md §15
+"""A desk Editor pane's own frames (docs/history/scroll_and_text_2026-10.md §15
 P5): while the focused pane shows Blocks, Settings, the Map or the Sound
 pane, a frame whose input reached that pane alone draws the pane alone and
 names it as what it changed, as the Code pane's do.

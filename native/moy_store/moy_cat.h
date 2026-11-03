@@ -1,8 +1,8 @@
-// The catalogue (docs/kernel_store_2026-10.md section 6): the shelf's scan of
+// The catalogue (docs/history/kernel_store_2026-10.md section 6): the shelf's scan of
 // a store root, one cart's entry read again, and the cart verbs that work on a
 // whole folder.
 //
-// runtime/moy_carts.py's `_load(path, whole=False)` and `_each` are the
+// runtime/carts/moy_carts.py's `_load(path, whole=False)` and `_each` are the
 // reference: the scan keeps their access pattern -- one listing of the root,
 // then per `.moy` folder one enter (moy_vol_enter), one listing, and an open
 // of each file the listing shows -- and reads each manifest through moy_fs's
@@ -88,7 +88,7 @@ typedef struct {
     int canvas;                 // 0 None, 1 (w, h) in the set, 2 the raw value
     uint16_t canvas_w, canvas_h;
     moy_cat_json_t canvas_raw;
-    // SPEC.md 3.7, each read as a host reads it (runtime/cart_listing.py) and
+    // SPEC.md 3.7, each read as a host reads it (runtime/carts/cart_listing.py) and
     // absent when it degrades: the description's text (NULL for none), the
     // genre (a MOY_CAT_GENRES name, NULL for none) and the tags that are tags.
     const char *desc;

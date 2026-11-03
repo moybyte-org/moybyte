@@ -1,6 +1,6 @@
 # moy_spine: the kernel's spine, native on every image (moy_htab.h,
 # moy_route.h, moy_settings.h, the string table moy_str.h;
-# docs/kernel_spine_2026-10.md). moy_htab.c is
+# docs/history/kernel_spine_2026-10.md). moy_htab.c is
 # the handle table moy_index shares. THIS FILE AND micropython.mk ARE TWINS.
 
 add_library(usermod_moy_spine INTERFACE)

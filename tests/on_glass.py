@@ -32,6 +32,7 @@ import contextlib
 import hashlib
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -165,7 +166,7 @@ def wifi_is_off_at_rest(board):
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
     """A tap on the bar's wifi widget opens Settings' WIFI panel -- the one
     wifi implementation -- as a popover hung from the widget, in console mode
-    and desktop mode alike (docs/shell_layout_2026-10.md §8, look step 33),
+    and desktop mode alike (docs/theme_and_shell_2026-11.md §8.6, look step 33),
     holding the radio; closing the popover lets the radio go."""
     _home_desk(board)
     cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
@@ -289,7 +290,7 @@ def _home_desk(board):
         board.drain(1.0)
 
 
-# The painter (docs/theming_2026-09.md §4.4): tests/test_ui_painter.py's
+# The painter (docs/theme_and_shell_2026-11.md §3.4): tests/test_ui_painter.py's
 # scenes without text, each (surface, metrics, rect) on a 16x12 canvas
 # cleared to 9, as one installed package's `desk` surface.
 PAINTER_SCENES = (
@@ -371,7 +372,7 @@ def painter_matches_host(board):
                        strict=True) == moy_ui.theme_shape(name)[2]
 
 
-# -- the sprite lane (docs/theming_2026-09.md §4.6) -------------------------------
+# -- the sprite lane (docs/theme_and_shell_2026-11.md §3.6) -------------------------------
 
 SPRITE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "fixtures", "themes", "sprig.moy", "parts.moygfx")
@@ -539,7 +540,7 @@ def picker_kernel_matches_sspr(board):
     """The picker kernel (moy_gfx.blit_indices_scale, this board's C) draws
     sspr's pixels on glass at every scale, state and colorkey of the cases,
     and its frames are the host's: the scaled lane is one body on every tier
-    (docs/scroll_and_text_2026-10.md §13)."""
+    (docs/history/scroll_and_text_2026-10.md §13)."""
     from runtime import host_canvas
     host_canvas.install()
     env = {}
@@ -556,7 +557,7 @@ def picker_kernel_matches_sspr(board):
     assert [crc for _, crc in got] == [crc for _, crc in want]
 
 
-# shift_last and copy_last_into on the live root (docs/scroll_and_text_2026-10.md
+# shift_last and copy_last_into on the live root (docs/history/scroll_and_text_2026-10.md
 # §3.2, §13): a pattern frame presented, then the verb into the next one,
 # held to a reference the snippet builds from row slices. Everything runs
 # inside one `py` exchange, between two of the console's frames; the desk is
@@ -749,7 +750,7 @@ def sheet_corpus(n, seed=11):
     return out
 
 
-# -- the font lane (docs/theming_2026-09.md §4.7) ---------------------------------
+# -- the font lane (docs/theme_and_shell_2026-11.md §3.7) ---------------------------------
 
 FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures", "fonts", "sample6x9.fnt")
@@ -845,7 +846,7 @@ def fonts_match_host(board, n=48):
     assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
 
 
-# -- the glyph lane (docs/look_2026-10.md step 4) ---------------------------------
+# -- the glyph lane (docs/history/look_2026-10.md step 4) ---------------------------------
 
 # A fuzzed run of prints and labels in version 2 fonts, `glyph_cases(make, out,
 # sources)`: `make(w, h, fs)` a system canvas, `out(i, bytes)` each case's
@@ -960,7 +961,7 @@ def _glyph_run():
     assert list(got) == want
 
 
-# -- the theme layout (docs/shell_layout_2026-10.md §5) ---------------------------
+# -- the theme layout (docs/theme_and_shell_2026-11.md §8.3) ---------------------------
 
 def layout_corpus(n, seed=5):
     """Theme packages around `layout`: §5's fuzz cases (a string for bars,
@@ -1055,7 +1056,7 @@ def _custom_digest(src, accents, tints):
 
 
 def theme_custom_matches_host(board):
-    """Every seed x accent (presets too) x tint (docs/theming_2026-09.md §4.10): this
+    """Every seed x accent (presets too) x tint (docs/theme_and_shell_2026-11.md §3.10): this
     board's moy_ui writes `custom`'s theme.json byte for byte as the host's
     does, each seed's answers digested on the board."""
     import binascii
@@ -1104,7 +1105,7 @@ def known_look(board, theme="moy", variant="dark"):
 
 
 def the_theme_font_is_installed(board):
-    """The live theme's faces (docs/theming_2026-09.md §4.7) are what this
+    """The live theme's faces (docs/theme_and_shell_2026-11.md §3.7) are what this
     board's shell draws in: each role holds the face `appearance.role_fonts`
     names on the host for the same theme, variant and metric class, loaded
     once, and the print font is `ui`'s. Read under `known_look`: a saved
@@ -1129,7 +1130,7 @@ def the_theme_font_is_installed(board):
 
 
 def the_font_set_is_the_tiers(board, tier):
-    """The image carries its tier's font set (docs/look_2026-10.md step 3):
+    """The image carries its tier's font set (docs/history/look_2026-10.md step 3):
     the faces set.json names for `tier`, each byte for byte the host's, with
     its family's licence, and each one loads and measures as on the host."""
     import binascii
@@ -1206,8 +1207,7 @@ def a_quiet_console_collects_its_garbage(board):
 
 
 def a_leaked_session_leaves_the_panel_flushing(board):
-    """The bus rule of the app ABI's sessions (docs/kernel_appabi_2026-10.md
-    section 2.6): on the T-Deck the card shares the panel's SPI host, and the
+    """The bus rule of the app ABI's sessions (native/moy_app/README.md): on the T-Deck the card shares the panel's SPI host, and the
     gate that drains the flush is held only around one store op, never by a
     session. A files session begun and never ended, with a store op inside it,
     must leave the panel presenting every repaint, and the next frame ends it."""
@@ -1385,7 +1385,7 @@ def display_underruns_are_zero(board):
 
 def internal_flash_commits_under_a_cart(board, title="Star Catcher", n=10):
     """Ten commits to the kernel's internal volume under a running cart
-    (docs/kernel_survival_2026-10.md section 6.9): a flash write turns the
+    (docs/history/kernel_survival_2026-10.md section 6.9): a flash write turns the
     cache off on both cores, so the panel feeder pauses for it (moy_kvfs.c
     waits the frame in flight out first) -- on a banded panel the feeder's
     timeouts and errors stay where they were; on a DSI panel the scan-out
@@ -1436,6 +1436,72 @@ def cart_store_follows_the_card(board):
     assert board.pyval("len(ws.carts.all)") > 0, "the store shows no carts"
 
 
+_SD_SQUEEZE = r"""
+def _sd_squeeze():
+    import esp32, moy_alloc, moy_sd, os
+    caps = 0x808          # MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
+    def largest():
+        return max(r[2] for r in esp32.idf_heap_info(caps))
+    path = '/sd/moybyte/.sd_squeeze'
+    data = bytes(range(256)) * 12
+    ref = bytearray(16 * 512)
+    buf = bytearray(16 * 512)
+    moy_sd.read(64, ref, 16)
+    held = []
+    out = {'read': None, 'write': None}
+    try:
+        for _ in range(64):
+            big = largest()
+            if big < 512:
+                break
+            try:
+                held.append(moy_alloc.alloc(max(big - 128, 64), caps))
+            except MemoryError:
+                break
+        out['left'] = largest()
+        try:
+            moy_sd.read(64, buf, 16)
+            out['read'] = 'same' if buf == ref else 'differs'
+        except OSError as e:
+            out['read'] = str(e)
+        try:
+            with open(path, 'wb') as f:
+                f.write(data)
+            out['write'] = 'ok'
+        except OSError as e:
+            out['write'] = str(e)
+    finally:
+        for v in held:
+            moy_alloc.free(v)
+    try:
+        with open(path, 'rb') as f:
+            out['back'] = f.read() == data
+        os.remove(path)
+    except OSError as e:
+        out['back'] = str(e)
+    return out
+ws._g['_sd_squeeze'] = _sd_squeeze
+"""
+
+
+def sd_card_io_takes_no_internal_dma(board):
+    """An SPI card's transfers take no internal DMA memory: with every block of
+    it taken (the largest left under one sector), a 16-sector multi-block read
+    returns the card's bytes and a store file is written and reads back. With
+    WiFi and BLE up an S3 has a few KB of internal DMA memory left, and a
+    per-call buffer taken there failed a cart's module read with EIO under a
+    radio's burst. The squeeze is moy_alloc's, freed before this returns."""
+    if not board.pyval("__import__('moy_sd').sector_count()", strict=True):
+        pytest.skip("no card in the slot")
+    board.pyexec(_SD_SQUEEZE, strict=True)
+    got = board.pyval("(getattr(ws, '_with_sd', None) or (lambda fn: fn()))"
+                      "(ws._g['_sd_squeeze'])", timeout=30, strict=True)
+    assert got["left"] < 512, ("the squeeze left a sector's worth: no power", got)
+    assert got["read"] == "same", got
+    assert got["write"] == "ok" and got["back"] is True, got
+    return got
+
+
 def web_console_is_baked_into_the_image(board):
     """The wasm console this board hands a browser lives in its OWN image, and
     reads back correctly from flash -- the one part no host test can reach,
@@ -1482,7 +1548,7 @@ def _clear_to_console(board, clear):
     """`clear` ws.exit()s to shut what the tour left open, then -- on the
     windowed tier, the only one that clears -- the desk's PLAY: a launcher
     run goes fullscreen from console mode's home and exits back to it
-    (docs/shell_layout_2026-10.md §3), whatever windows are left parked."""
+    (docs/theme_and_shell_2026-11.md §8.1), whatever windows are left parked."""
     for _ in range(clear):
         board.cmd("py ws.exit()", wait_for="PY")
         board.drain(0.5)
@@ -1549,7 +1615,7 @@ VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
 
 
 def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
-    """The cart path's second checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    """The cart path's second checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a VM-free seed game is the kernel loop's foreground -- its input, ticks,
     chrome and present in C -- so from its launch to its exit the run's own
     books hold NO upcall of any class (CONSOLE, APP, DRIVER, SERVICE,
@@ -1574,7 +1640,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
             {k: st.get(k) for k in ("screen", "cart", "run", "play")})
         # VM-free, and it keeps the VM: under the `need` policy a Lua cart has
         # no footprint whose fit could fail, and a P4 has no stop at all
-        # (docs/kernel_cartpath_2026-10.md section 5).
+        # (docs/history/kernel_cartpath_2026-10.md section 5).
         run = dict(st["run"])
         assert run.pop("fit", None) is None, st["run"]
         assert run == {"runtime": "lua", "vm_free": True, "why": "free",
@@ -1612,7 +1678,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
 def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=0,
                               front=True):
     """A Ctrl-C reaches the VM past a run in the kernel's front
-    (docs/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
+    (docs/history/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
     SERIAL and the console's next upcall raises the interrupt, so the REPL
     comes up as it does with no run in front -- which is what `board.py
     reboot --soft` and every interrupting tool rely on. The soft reset after it
@@ -1662,7 +1728,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
 
 def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
                                       runtime="lua"):
-    """The cart path's first checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    """The cart path's first checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a seed game the kernel's rule runs with no VM reads that verdict from
     `state`, its frames run in the kernel's Player, and they make no APP,
     SERVICE or REFUSED upcall (DRIVER is a harness's, zero on a board) with
@@ -1871,7 +1937,7 @@ def _kstop_after(line):
 
 def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N`: N soft resets of the VM with the kernel's drivers alive
-    (docs/kernel_survival_2026-10.md section 7.5). With the VM down, PSRAM free
+    (native/moy_kernel/moy_kernel.h). With the VM down, PSRAM free
     and its largest block hold flat across the cycles: whatever a VM left
     behind would compound into a boot that runs out (the Guition S3 stranded
     a cover's bytes and its decode scratch, 46,456 B a cycle, until the
@@ -1921,7 +1987,7 @@ def _desk_back(board, timeout=120.0):
 
 def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N stop`: N real stops and starts of the VM with no cart
-    (docs/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
+    (docs/history/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
     lease on the kernel's tables before the stop and reads them back with the
     VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
     then -- the first heap area freed with the VM -- hold flat from the second
@@ -2028,8 +2094,7 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
 
 
 def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
-    """Only the launcher comes back after a stop (docs/kernel_appabi_2026-10.md
-    section 5): the same cart `vmstop force` stops the VM for from the shelf,
+    """Only the launcher comes back after a stop (native/moy_app/README.md): the same cart `vmstop force` stops the VM for from the shelf,
     started the way Storybook's and Get Carts' PLAY start it (a workspace and
     a run whose caller is a live Python surface), keeps the VM, and the run
     names the reason "place"."""
@@ -2372,7 +2437,7 @@ def _wm_meters_measured(board, win):
     return seen
 
 
-# -- the WebAssembly engine (docs/wasm_tier_plan_2026-09.md, phase 1) --------
+# -- the WebAssembly engine (docs/history/wasm_tier_plan_2026-09.md, phase 1) --------
 #
 # native/moy_wasm on glass: the spike's 6502 core built by tools/wasm_module.py
 # for this board's chip with the pinned compilers, pushed into the board's
@@ -2516,6 +2581,46 @@ def _internal_heap(board):
 
 def _ble(board):
     return "(getattr(ws, 'ble_keyboard', None) or ws.keyboard)"
+
+
+def _ble_up_and_working(board, ble, timeout=15.0):
+    """The host synced (`available`) and the machine left `off` without an
+    error: scanning, idle, a pad connected, or switched off in Settings."""
+    end = time.time() + timeout
+    while True:
+        up = board.pyval("%s.available" % ble, strict=True)
+        status = board.pyval("%s.settings_status()" % ble, strict=True)
+        if up and status[1] not in ("off", "error") and status[4] is None:
+            return status
+        assert time.time() < end, "BLE did not come up: %r" % (status,)
+        board.drain(0.5)
+
+
+def ble_stops_and_starts_again(board, cycles=3, dwell=3.0):
+    """The BLE host stops and starts again `cycles` times, working after each
+    start and still answering after each stop. A start after a stop once
+    re-made NimBLE's event pool under events that still held blocks of it, and
+    the controller's next HCI event panicked the board (task btController,
+    LoadProhibited at 0) within seconds. `stop()` answers whether it took a
+    running host down. The board leaves with BLE as it found it."""
+    ble = _ble(board)
+    was_up = board.pyval("bool(%s.available)" % ble, strict=True)
+    try:
+        if was_up:
+            assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is True
+        assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is False
+        for i in range(cycles):
+            assert board.pyval("%s.start()" % ble, timeout=30, strict=True) is True, i
+            _ble_up_and_working(board, ble)
+            board.drain(dwell)
+            assert board.pyval("%s.available" % ble, strict=True) is True, i
+            assert board.pyval("%s.stop()" % ble, timeout=30, strict=True) is True, i
+            assert board.pyval("%s.settings_status()[1]" % ble, strict=True) == "off", i
+    finally:
+        if was_up:
+            board.pyval("%s.start()" % ble, timeout=30)
+    if was_up:
+        _ble_up_and_working(board, ble)
 
 
 def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
@@ -2781,7 +2886,7 @@ def wasm_low_water_with_radios_up(board, paths):
     return r["sram_before"], r["sram_min"], floor
 
 
-# -- the Player path (docs/wasm_tier_plan_2026-09.md, phase 3) -----------------
+# -- the Player path (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------------
 #
 # A compiled cart run from the launcher: tests/fixtures/wasm/ built for this
 # board's chip by tools/wasm_cart.py (WAT assembled, the module compiled with
@@ -2838,7 +2943,7 @@ APP_UI = ("app_ui", "App UI Wasm")
 
 
 def wasm_app_push(board, board_dir):
-    """The compiled app fixtures (docs/kernel_appabi_2026-10.md section 4),
+    """The compiled app fixtures (docs/history/kernel_appabi_2026-10.md section 4),
     built for this board's chip and pushed as wasm_<name>.moy: App Roles Wasm,
     the same module with no permission (App Short Wasm), and App Shell Wasm,
     which imports a shell-served row, and App UI Wasm, which draws the
@@ -3227,7 +3332,7 @@ def wasm_files_turn(board):
 
 def wasm_written_files_outlive_the_session(board, board_dir):
     """A compiled cart's written files on the board's store, through moycore
-    and runtime/cart_files.py under the store's gate: the first run writes
+    and runtime/carts/cart_files.py under the store's gate: the first run writes
     (over a shipped default, "Case" beside "case" -- which the T-Deck's FAT
     card must keep apart), the second run, a new session, finds every file
     and erases them. The reboot between the two is the on-glass pass's
@@ -3318,7 +3423,7 @@ def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
     return notice
 
 
-# -- a cart too big for the board (docs/wasm_tier_plan_2026-09.md) --------------
+# -- a cart too big for the board (native/moy_wasm/README.md) --------------
 #
 # A compiled cart above what a board can fit is allowed, and the board refuses
 # it at launch with a plain notice -- never an error panel, never a crash. The
@@ -3438,7 +3543,7 @@ def a_stuck_run_is_ended(board, runtime):
 
 
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
-# The sub-line by cause (runtime/player.py's INTERP_NOTICE_SUB, duplicated
+# The sub-line by cause (runtime/run/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than
 # importing the runtime): "missing" covers no module for this console at
 # all, one built for another chip, and one left over from an older format --
@@ -3454,10 +3559,10 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
     interpreter tier: `ws.player._lua.interp` is true and the short system
-    notice (`runtime/console_notices.py`'s `_draw_notice`, the "MOYBYTE
+    notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
-    (docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware",
+    (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). Returns the notice (title, sub)."""
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line

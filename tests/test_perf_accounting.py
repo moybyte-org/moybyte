@@ -29,7 +29,7 @@ def test_the_cart_phase_brackets_use_the_microsecond_clock():
     """player.tick's four brackets (backdrop / _update / _draw / audio) feed
     DRAWBRK directly and `chrome` by subtraction. On ticks_ms each lost up to
     1ms into the residual."""
-    src = _src("runtime/player.py")
+    src = _src("runtime/run/player.py")
     block = src[src.index("_ts = _ticks_us() if _perf else 0"):
                 src.index("self._maybe_diag_slow_logic")]
     assert "_ticks_ms()" not in block, \
@@ -42,7 +42,7 @@ def test_the_cart_phase_brackets_use_the_microsecond_clock():
 def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     """_frame_perf_end's own two spans -- the whole frame and the panel flush --
     are the minuend of every subtraction above them."""
-    src = _src("runtime/console_perf.py")
+    src = _src("runtime/shell/console_perf.py")
     body = src[src.index("def _frame_perf_end"):
                src.index("def perf_sample")]
     assert "_ticks_ms()" not in body, \

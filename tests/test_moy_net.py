@@ -1,5 +1,5 @@
-"""native/moy_net's wire half (docs/kernel_survival_2026-10.md section 6) over
-runtime/net_binding.py: the WiFi credential rules, the HTTP head parser and the
+"""native/moy_net's wire half (docs/history/kernel_survival_2026-10.md section 6) over
+runtime/host/net_binding.py: the WiFi credential rules, the HTTP head parser and the
 sync batch's envelope, and the C under the sanitizers. The radio link's peer
 table is the kernel's (native/moy_play/moy_match.c, tests/test_espnow_link.py).
 (The parser's transport use is pinned by tests/test_moy_webhost.py.)"""

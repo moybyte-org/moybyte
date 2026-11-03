@@ -1,4 +1,4 @@
-;; App Parts Wasm: the public UI API's parts page (docs/look_2026-10.md step
+;; App Parts Wasm: the public UI API's parts page (docs/history/look_2026-10.md step
 ;; 12) as a compiled app, through the `ui` rows it imports from module
 ;; "moybyte.app". tests/fixtures/ui_parts/parts_py.moy and parts_lua.moy draw
 ;; the same page with the same calls, and tests/test_ui_parts.py holds the

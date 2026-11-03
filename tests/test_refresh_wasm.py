@@ -4,7 +4,7 @@ main.wasm at all, so walking their source used to refuse both of them),
 rebuilds a cart's module only when it is actually stale, prefers a KNOWN
 local recipe over anything else, prunes what the board can no longer use,
 and keeps going past one cart it could not refresh
-(docs/wasm_tier_plan_2026-09.md, "A cart survives its firmware")."""
+(native/moy_wasm/README.md, "A cart survives its firmware")."""
 
 import json
 import os

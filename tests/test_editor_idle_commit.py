@@ -61,7 +61,7 @@ def _paint_a_pixel(ws, color=11):
 
 def test_a_paint_edit_commits_on_the_debounce_without_leaving_the_tab(tmp_path):
     from runtime import moy_carts
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     ws = _ws(tmp_path)
     path = _editable(ws)
     _paint_a_pixel(ws)
@@ -123,7 +123,7 @@ def test_the_long_quiet_period_commits_once(tmp_path):
     """Past the drawing window the commit lands, exactly once -- the debounce
     disarms with it, so a static editor screen does not re-write every frame."""
     from runtime import moy_carts
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     ws = _ws(tmp_path)
     path = _editable(ws)
     _paint_a_pixel(ws, color=14)
@@ -389,7 +389,7 @@ def test_the_ota_reboot_commits_an_open_editor_first(tmp_path):
     new image did not, and on the windowed tier an Editor window can be open
     beside the update screen with an edit still inside its debounce window."""
     from runtime import moy_carts
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     ws = _ws(tmp_path)
     path = _editable(ws)
     _paint_a_pixel(ws, color=13)

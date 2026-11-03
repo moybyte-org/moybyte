@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from unix_mp import require_unix_mp
+from unix_mp import require_unix_mp, runtime_tree
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 DEVICE = ROOT / "device"
@@ -217,13 +218,13 @@ def test_the_native_rect_gate_hands_a_big_block_to_the_canvas(tmp_path):
             "block of ST_DMA_MIN pixels or more to the canvas's DMA fill.")
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
-    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
-    shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
+    shutil.copy(runtime_file("moy_image.py"), stage / "moy_image.py")
+    shutil.copy(runtime_file("moy_fs.py"), stage / "moy_fs.py")
     src = (DRIVER
            .replace("@STAGE@", repr(str(stage)))
            .replace("@MODULES@", repr(str(DEVICE)))
-           .replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+           .replace("@RUNTIME@", repr(runtime_tree())))
     script = tmp_path / "driver.py"
     script.write_text(src)
     out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=120)

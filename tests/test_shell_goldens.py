@@ -23,7 +23,7 @@ The matrix, and why it is this one
 ----------------------------------
 Eleven configurations, each ONE axis away from the T-Deck row or from
 the windowed row, so a red golden names the axis by itself. A row that names
-no theme draws the default seed, Moy (docs/look_2026-10.md step 27), in its
+no theme draws the default seed, Moy (docs/history/look_2026-10.md step 27), in its
 variant: Night where it is dark, Day where it is light. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
@@ -67,34 +67,34 @@ keeps the matrix a clean product instead of a pile of special cases.
                            one place light chrome meets the WM's decorations.
                            One axis from the windowed row (variant).
   p4_1024x600_cs2_fs1_contrast_light  the same, under the high-contrast seed
-                           `contrast` (docs/look_2026-10.md step 26c): black
+                           `contrast` (docs/history/look_2026-10.md step 26c): black
                            on white in the light variant, 2 px outlines, a
                            yellow focus outlined in black, Atkinson. One axis
                            (theme) from the as-shipped row in the light
                            variant.
   tdeck_320x240_fs1_moy_day, tdeck_320x240_fs1_moy_night,
   p4_1024x600_cs2_fs1_moy_day, p4_1024x600_cs2_fs1_moy_night
-                           the `moy` seed (docs/look_2026-10.md step 5) in
+                           the `moy` seed (docs/history/look_2026-10.md step 5) in
                            its Day (light) and Night (dark) modes, the
                            T-Deck row and the P4 as shipped: RGB roles in the
                            block at indices 64..127 on every surface. One axis
                            (theme) from each row in its variant.
   tdeck_320x240_fs1_blocks, p4_1024x600_cs2_fs1_blocks
-                           the `blocks` seed (docs/look_2026-10.md step 26b),
+                           the `blocks` seed (docs/history/look_2026-10.md step 26b),
                            one mode (light), the T-Deck row and the P4 as
                            shipped: Atkinson, the sunflower home, the Bauhaus
                            desk and its per-app tiles. One axis (theme) from
                            each row in the light variant.
   tdeck_320x240_fs1_parts_day, tdeck_320x240_fs1_parts_night
                            the public UI API's parts sheet
-                           (docs/look_2026-10.md step 12): a system app
+                           (docs/history/look_2026-10.md step 12): a system app
                            (tests/fixtures/ui_parts/parts_app.py) drawing the
                            Settings and Appearance targets' rows with the
                            verbs, in the `moy` seed's Day and Night, and only
                            those surfaces (a config's `plan`).
   tdeck_320x240_fs1_moy_menus, p4_1024x600_cs2_fs1_moy_menus
                            the system menu and the pause menu
-                           (docs/look_2026-10.md step 25a) in the `moy` seed's
+                           (docs/history/look_2026-10.md step 25a) in the `moy` seed's
                            Day, and only those surfaces (a config's `plan`):
                            the system menu over the home (the T-Deck) or the
                            desk (the P4), and the pause menu and its Options
@@ -105,19 +105,19 @@ keeps the matrix a clean product instead of a pile of special cases.
                            desk glass, on the same desk metrics as the P4.
                            One axis (the glass) from the as-shipped P4 row.
   p4_1024x600_render2_moy_day  the Moy Day row with `render.scale: 2`
-                           (docs/look_2026-10.md step 9): the desk drawn on a
+                           (docs/history/look_2026-10.md step 9): the desk drawn on a
                            512x300 surface at the desk's metrics halved and
                            doubled onto the glass, which is what is hashed.
                            One axis (the render scale) from the Moy Day row.
   p4_1024x600_cs2_fs1_console  the P4 as shipped in CONSOLE mode
-                           (docs/shell_layout_2026-10.md §3): the desk's PLAY,
+                           (docs/theme_and_shell_2026-11.md §8.1): the desk's PLAY,
                            then the T-Deck row's surfaces, every one
                            fullscreen at the P4's size. One axis (the mode)
                            from the as-shipped row.
   p4_1024x600_cs2_fs1_win95bar, p4_1024x600_cs2_fs1_gnomebar,
   p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar
-                           the worked examples of docs/shell_layout_2026-10.md
-                           §6 (2, 3, 4 and 6), each a package whose `layout`
+                           the worked examples of docs/theme_and_shell_2026-11.md
+                           §8.4 (2, 3, 4 and 6), each a package whose `layout`
                            the console picks (`layout_theme`): a bottom
                            taskbar with the chips beside the ≡, a top bar with
                            the clock centred, a top bar over a bottom verb
@@ -134,7 +134,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            Settings at the WIFI panel, Settings at VOLUME.
   tdeck_320x240_fs1_homegrid, p4_1024x600_cs2_fs1_homegrid
                            the home in its GRID arrangement (the layout's
-                           `home`, docs/shell_layout_2026-10.md §12), one
+                           `home`, docs/theme_and_shell_2026-11.md §8.10), one
                            surface a tab -- Games, Mine, Apps, Make -- on the
                            T-Deck and on the as-shipped P4 in console mode.
                            One axis (the arrangement) from those rows.
@@ -144,7 +144,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            arrangement) from the grid's rows.
 
 The last two were added before theming's first phase
-(`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
+(`docs/history/theming_2026-09.md` §9), so the phases that hold the goldens hold
 them on the tier and the variant every restyle reaches.
 
 Determinism
@@ -202,7 +202,7 @@ render `Star Catcher` specifically); and a font/palette change.
 
 Every row draws through the toolkit and the `*Layout` formulas, the T-Deck's
 320x240 included: the frozen 320x240 branches (`_base`) retired with theming
-phase 3 step 4 (docs/theming_2026-09.md §9), so a widget or a layout formula
+phase 3 step 4 (docs/history/theming_2026-09.md §9), so a widget or a layout formula
 change moves the T-Deck rows as it moves the others.
 
 Re-baselining is a DELIBERATE act
@@ -231,7 +231,7 @@ GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
 GOLDEN_FILE = GOLDEN_DIR / "hashes.json"
 # The draw budgets: each settled surface's (fills, texts) through the system
 # canvas's native gates (`gate_counts`), pinned per config beside the hashes
-# (docs/theming_2026-09.md §9, phase 2a). Pixels can hold while the work to
+# (docs/history/theming_2026-09.md §9, phase 2a). Pixels can hold while the work to
 # draw them grows; this is the net for that, re-pinned with the hashes.
 COUNTS_FILE = GOLDEN_DIR / "counts.json"
 
@@ -266,7 +266,7 @@ _EDITOR_CART = "Star Catcher"
 # shelf draws for it, and 34 tiles already exercise every shelf branch there is.
 # Empty today, and deliberately kept: the mechanism is what makes the choice
 # above a decision rather than a shrug. Notes lived here as "the #181 demo
-# cart" until step 3 of docs/text_editing_2026-09.md made it the console's ONE
+# cart" until step 3 of docs/theme_and_shell_2026-11.md §10 made it the console's ONE
 # text app -- a shipped surface with a golden of its own (`app_notes`), which
 # is exactly the case an exclusion must not cover.
 GOLDEN_EXCLUDE = {}
@@ -295,7 +295,7 @@ APP_CARTS = (("notes", "Notes"),)
 UI_PAGE = (str(Path(__file__).resolve().parent / "fixtures" / "ui_page" / "page_py.moy"),
            "UI Page Py")
 
-# The public UI API's parts sheet (docs/look_2026-10.md step 12): a system
+# The public UI API's parts sheet (docs/history/look_2026-10.md step 12): a system
 # app registered for the `parts` configs, its pages their surfaces.
 PARTS_APP = Path(__file__).resolve().parent / "fixtures" / "ui_parts" / "parts_app.py"
 PARTS_PAGES = ("settings", "appearance")
@@ -311,7 +311,7 @@ PARTS_PAGES = ("settings", "appearance")
 GOLDEN_PIN = "4821"
 GOLDEN_URL = "http://192.168.1.151/"
 
-# The TEXT CONSOLE (docs/text_editing_2026-09.md step 6), rendered as a real
+# The TEXT CONSOLE (docs/history/text_editing_2026-09.md step 6), rendered as a real
 # SCRIPT RUN. It is the one running cart in this matrix, and the exception is
 # principled: a script has no `_draw`, so every pixel on it is the SHELL's --
 # the scrollback, the prompt and the symbol palette -- and none of it reads a
@@ -466,7 +466,7 @@ CONFIGS = {
         diagonal_in=7.0, theme="moy", render=2),
 }
 
-# The bar widgets that open a component (docs/shell_layout_2026-10.md §8), in
+# The bar widgets that open a component (docs/theme_and_shell_2026-11.md §8.6), in
 # the order the two `plan` configs render them: a popover each over the desk
 # (`popovers`), and console mode's fullscreen page each (`widget_pages`).
 WIDGETS = ("clock", "wifi", "battery", "menu")
@@ -608,7 +608,7 @@ def _build(cfg, carts_dir):
 
 def pick_layout(ws, cfg):
     """A config's `layout` is a package beside the seeds that the console
-    picks, the way a kid would (docs/shell_layout_2026-10.md §11); it takes
+    picks, the way a kid would (docs/theme_and_shell_2026-11.md §8.9); it takes
     effect at the next theme set."""
     name = _layout_name(cfg)
     if name is None:
@@ -664,7 +664,7 @@ def _surface_plan(ws, cfg):
     plan.append(("launcher", home))
     plan.append(("settings", lambda: ws.open_settings()))
 
-    # About's pages and cards (docs/look_2026-10.md step 32): nine badges
+    # About's pages and cards (docs/history/look_2026-10.md step 32): nine badges
     # found, two on the targets' days, and the system menu's About over the
     # home; then the unlock banner over the home, a secret's with its confetti
     # out whole.
@@ -778,7 +778,7 @@ def _notes_vault(ws, enter):
 
 
 def _walls_page(ws):
-    """The Appearance page's wallpapers (docs/look_2026-10.md step 20): the
+    """The Appearance page's wallpapers (docs/history/look_2026-10.md step 20): the
     tabs over the cards, on the tab of the wallpaper in use."""
     def enter():
         app = ws.appearance_app

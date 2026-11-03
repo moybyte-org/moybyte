@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Round 17 of the 2026-10 look, over round 16: the surfaces still in the
-old look (`docs/look_2026-10.md` step 33).
+old look (`docs/history/look_2026-10.md` step 33).
 
 - The boot splash, and the loading pill an open shows while it loads.
 - The bar widgets' popovers: the calendar, the power rows and the Wi-Fi
@@ -1264,7 +1264,7 @@ def qr(cv, x, y, side):
     zone whatever the theme (a scanner needs dark on light)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "moy_qr", os.path.join(R7.REPO, "runtime", "moy_qr.py"))
+        "moy_qr", os.path.join(R7.REPO, "runtime/system/moy_qr.py"))
     moy_qr = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(moy_qr)
     m = moy_qr.encode(URL)

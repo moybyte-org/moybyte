@@ -7,7 +7,7 @@ used to build that canvas by IMPORTING one -- `runtime.host_canvas`, else
 was a black rectangle on hardware from the day it shipped, and no test noticed
 because every caller of a preview is guarded and a missing preview looks exactly
 like a preview of something dark. The first version of the black-rectangle bug
-was `runtime/palette.py` importing `colorsys`; deleting that raster changed the
+was `palette.py` importing `colorsys`; deleting that raster changed the
 reason and not the outcome, which is the shape of failure these tests are for.
 
 So they assert PIXELS, not booleans (`_ensure_preview()` returning True says
@@ -105,7 +105,7 @@ def test_no_factory_degrades_to_the_black_fill(tmp_path):
 
 def test_the_import_ladder_is_gone(tmp_path):
     """A tripwire, because the ladder is exactly the kind of thing that grows a
-    rung back. `runtime/wallpaper.py` must name no per-tier canvas module: the
+    rung back. `runtime/system/wallpaper.py` must name no per-tier canvas module: the
     surface comes from `ws.make_game_canvas`, which every head injects.
 
     Parsed, not grepped: the prose in that file has to be free to DISCUSS the
@@ -115,8 +115,8 @@ def test_the_import_ladder_is_gone(tmp_path):
     import ast
     import pathlib
 
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "runtime" / "wallpaper.py").read_text(encoding="utf-8")
+    from tools.board_config import runtime_file
+    src = runtime_file("wallpaper.py").read_text(encoding="utf-8")
     named = set()
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Import):
@@ -255,7 +255,7 @@ def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     assert ws.canvas is ws._run_canvas             # ...and the bind survived
 
 
-# -- a wallpaper per glass (docs/look_2026-10.md step 28) ---------------------
+# -- a wallpaper per glass (docs/history/look_2026-10.md step 28) ---------------------
 
 def test_a_per_glass_preview_is_the_glass_frame_and_gives_its_canvas_back(
         tmp_path):

@@ -1,7 +1,9 @@
-// The runtime map (docs/kernel_cartpath_2026-10.md §3.3): which cart runtimes
-// this image runs, by the manifest's "runtime". A runtime the image lacks is
-// an absent row. A row whose ops call into the VM says so (`vm`), and no
-// VM-free run takes it.
+// The runtime map: which cart runtimes this image runs, by the manifest's
+// "runtime". A runtime the image lacks is an absent row and the
+// runtime-missing panel. The Lua and wasm rows are C. The Python row is
+// registered by the MicroPython binding when a VM starts and withdrawn at its
+// stop, its ops counted APP upcalls; a row whose ops call into the VM says so
+// (`vm`), and no VM-free run takes it.
 
 #ifndef MOY_RT_H
 #define MOY_RT_H

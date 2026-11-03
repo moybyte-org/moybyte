@@ -1,4 +1,4 @@
-"""The icon sets (docs/look_2026-10.md step 16, runtime/iconsets.py): the
+"""The icon sets (docs/history/look_2026-10.md step 16, runtime/toolkit/iconsets.py): the
 masks every smooth set fills from its sources, the pixel set and its swap,
 Moy's outline, the slots past 0x7f, and the bar, the tabs and a depth
 frame's title buttons drawing the theme's set. The Editor's theme mode,
@@ -19,7 +19,7 @@ def _ws(tmp_path, **kw):
     return ws
 
 
-# --- the icon sets (docs/look_2026-10.md step 16) ---------------------------------
+# --- the icon sets (docs/history/look_2026-10.md step 16) ---------------------------------
 
 import importlib  # noqa: E402
 import json  # noqa: E402
@@ -29,6 +29,7 @@ import pytest  # noqa: E402
 
 from runtime import chrome, iconsets  # noqa: E402
 from runtime import ui_draw as _ui  # noqa: E402
+from tools.board_config import runtime_file
 
 ICONS = ROOT / "native" / "moy_ui" / "icons"
 
@@ -112,7 +113,7 @@ def test_a_tier_freezes_the_seed_sets_at_its_sizes():
     make_icons = importlib.import_module("tools.make_icons")
     meta = json.loads((ICONS / "set.json").read_text())
     assert meta["tiers"]["handheld"] == ["default-16"]
-    # the desk's tiles draw the 20-pixel size (docs/look_2026-10.md step 25)
+    # the desk's tiles draw the 20-pixel size (docs/history/look_2026-10.md step 25)
     assert meta["tiers"]["desktop"] == ["default-16", "default-20", "default-24"]
     lines = "\n".join(make_icons.module_lines("handheld"))
     assert "'default-16.fnt'" in lines and "'system_icons.moygfx'" in lines
@@ -309,7 +310,7 @@ def test_a_sets_line_weight_is_read_off_its_own_mask(name):
 def test_the_new_card_is_a_blank_page_with_the_sets_plus(tmp_path, theme, mode):
     """The "+ New" card draws the theme's surface and the plus in its accent
     ink, no IconSheet sprite: its centre is the ink, its corner-in the page."""
-    from runtime.launcher_layer import draw_new_art
+    from runtime.home_grid import draw_new_art
     ws = _ws(tmp_path)
     ws.look.set_theme(theme, persist=False, variant=mode)
     th = ws.theme_colors
@@ -478,7 +479,7 @@ def test_the_boards_module_draws_the_slots_past_0x7f(tmp_path):
     import shutil
     import subprocess
     import zlib
-    from unix_mp import require_unix_mp
+    from unix_mp import require_unix_mp, runtime_tree
     exe = require_unix_mp(
         "moy_ui", "moy_gfx", "moy_glass",
         why="Without it the boards' icon_mask, the one every board imports, "
@@ -487,13 +488,13 @@ def test_the_boards_module_draws_the_slots_past_0x7f(tmp_path):
     from runtime.host_canvas import make_system_canvas
     stage = tmp_path / "stage"
     stage.mkdir()
-    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
-    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
+    shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
+    shutil.copy(runtime_file("moy_image.py"), stage / "moy_image.py")
     files = [str(ICONS / n) for n in MASKS]
     codes = [iconsets.FIRST + iconsets.SLOT[n] for n in PAST]
     script = tmp_path / "icons.py"
     script.write_text(_MP_ICONS.replace("@DEVICE@", repr(str(ROOT / "device")))
-                      .replace("@RUNTIME@", repr(str(ROOT / "runtime")))
+                      .replace("@RUNTIME@", repr(runtime_tree()))
                       .replace("@STAGE@", repr(str(stage)))
                       + ICON_CASES
                       + "icon_cases(make, lambda rc, c, b: print(rc, c, binascii.crc32(b)), "

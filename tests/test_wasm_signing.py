@@ -182,7 +182,7 @@ def test_the_board_decides_the_switch_where_it_decides_the_signature():
     assert body.count("unsigned_ok") == 2, "the switch is read once, for a missing trailer"
     assert "a[ARG_allow_unsigned].u_bool" in src
     assert "verify_module(s->file, s->file_len, allow_unsigned != 0" in src
-    core = (ROOT / "native" / "moycore" / "modmoycore.c").read_text()
+    core = (ROOT / "native" / "moycore" / "moycore_wasm.c").read_text()
     assert "moy_wasm_session_open(path, sha, memory, allow_unsigned," in core
     assert "n_args > 7 && mp_obj_is_true(a[7])" in core
     glue = (ROOT / "device" / "moycore_glue.py").read_text()
@@ -192,7 +192,7 @@ def test_the_board_decides_the_switch_where_it_decides_the_signature():
 def test_only_tamper_evidence_stays_a_hard_refusal():
     """device.moycore_glue._AOT_TAMPER_EVIDENCE is the engine's own refusal
     text for a SIGNATURE that does not verify -- the one case a WasmRun does
-    not retry on the interpreter (docs/wasm_tier_plan_2026-09.md, "A cart
+    not retry on the interpreter (native/moy_wasm/README.md, "A cart
     survives its firmware", 2026-09-30). "unsigned module" (no signature at
     all, the Unknown sources case) is deliberately NOT in that tuple: it is
     retried, never a panel."""

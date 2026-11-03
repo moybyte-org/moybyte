@@ -46,7 +46,7 @@ auto-cache and its opaque lane, the pal-tint bake cache, the layer pool, the
 spr_gate and lua-spr protocols, `pix()` as a read. Those have no other home.
 
 `DeviceCanvas` runs under CPython here by injecting `_FakeGfx` and `_FB` into
-`sys.modules`, plus `moy_font` (what build.sh stages runtime/font.py AS, so the
+`sys.modules`, plus `moy_font` (what build.sh stages runtime/toolkit/font.py AS, so the
 native-text path activates).
 """
 
@@ -60,13 +60,16 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import font as _host_font  # noqa: E402
 from runtime import gfx_binding  # noqa: E402
 from runtime import host_canvas  # noqa: E402
-from runtime import palette  # noqa: E402
-from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.editors_sheet import SpriteSheet, TileMap  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+from tools.board_config import runtime_file
 
 DEV = ROOT / "device"
+
+# libmoy's own table (moy_data.c), the one the kernel resolves through.
+MOY64 = gfx_binding.moy64()
 
 
 def rgb565(rgb):
@@ -443,12 +446,12 @@ class _FakeComp:
 def _load_device_canvas():
     # Inject the fake framebuf, then load moy_runtime's DeviceCanvas under CPython.
     sys.modules["framebuf"] = _FakeFramebuf()
-    for name in ("editors", "audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
+    for name in ("editors_sheet", "audio", "console"):
+        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
-    # runtime/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
+    # runtime/toolkit/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
     # it under that name so the native-text path activates here too.
     sys.modules["moy_font"] = _host_font
     # DeviceCanvas + PAL565 + Image + _USE_GFX now live in device_canvas.py
@@ -460,9 +463,9 @@ def _load_device_canvas():
     spec = importlib.util.spec_from_file_location("device_canvas", DEV / "device_canvas.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    # SpriteSheet lives in editors (the shared core); expose it for the parity
+    # SpriteSheet lives in editors_sheet (the shared core); expose it for the parity
     # tests that build sheets against the device canvas.
-    m.SpriteSheet = sys.modules["editors"].SpriteSheet
+    m.SpriteSheet = sys.modules["editors_sheet"].SpriteSheet
     return m
 
 
@@ -480,7 +483,7 @@ def _host_rgb565(cv):
     device_canvas picks the T-Deck's byte-SWAPPED `PAL565_SW` as its wire table
     -- on both sides, which is why they compare equal either way, but comparing
     canonical words is what makes a printed `host=0x…` readable against
-    `palette.MOY64`.
+    `MOY64`.
     """
     cv.flush_batch()
     return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(cv._buf).cast("H")]
@@ -532,13 +535,14 @@ def _assert_same(host, dev, label=""):
 
 
 # --------------------------------------------------------------------------- #
-# Sanity: the device PAL565 table equals rgb565(host MOY64).                  #
+# Sanity: the device's baked tables equal libmoy's MOY64 (moy_data.c).       #
 # --------------------------------------------------------------------------- #
 def test_pal565_matches_host_palette():
     m = _load_device_canvas()
     assert len(m.PAL565) == 64
-    for i, c in enumerate(palette.MOY64):
+    for i, c in enumerate(MOY64):
         assert m.PAL565[i] == rgb565(c), i
+    assert m.MOY64_RGB == bytes(v for c in MOY64 for v in c)
 
 
 # --------------------------------------------------------------------------- #
@@ -771,7 +775,7 @@ def test_text_bytes_parity():
 
 
 def test_text_in_an_anti_aliased_print_font_parity():
-    """A 2 bpp print font blends (the glyph lane, docs/look_2026-10.md step
+    """A 2 bpp print font blends (the glyph lane, docs/history/look_2026-10.md step
     4): both sides draw the same words over a mixed background, camera and
     clip on, and some are no palette colour."""
     import moy_ui
@@ -919,7 +923,7 @@ def _tilemap_scene(c, sheet, tm):
 
 def test_map_camera_clip_matches_host():
     m, host, dev = _both()
-    # Build a sheet + tilemap (both sides share editors.py classes).
+    # Build a sheet + tilemap (both sides share editors_sheet classes).
     # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
     # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
     # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both
@@ -1055,7 +1059,7 @@ def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
                     idx = _layer_index(x + cx, y + cy)
                 else:
                     idx = _bg_index(x, y)
-                expect.append(rgb565(palette.MOY64[idx]))
+                expect.append(rgb565(MOY64[idx]))
         for name, make in canvases:
             c = make()
             for y in range(H):
@@ -1101,7 +1105,7 @@ def _words_in(c, words):
 
 
 def test_cover_draws_a_rounded_scaled_sub_rect_on_every_lane():
-    """`DeviceCanvas.cover` -- a home card (docs/look_2026-10.md step 17): a
+    """`DeviceCanvas.cover` -- a home card (docs/history/look_2026-10.md step 17): a
     sub-rect of a picture scaled to the card as `blit565_resize` samples it,
     the corners anti-aliased over what is under them (moy_shape's coverage,
     the picture at `co` fifteenths) or stepped, camera and clip honoured. The
@@ -1117,7 +1121,7 @@ def test_cover_draws_a_rounded_scaled_sub_rect_on_every_lane():
         ((4, 0, 8, 10), 14, 8, 20, 20, 6, False, (16, 10, 12, 30), (3, -1)),
         ((0, 2, 10, 8), 30, 20, 9, 7, 3, False, (0, 0, W, 24), (0, 0)),
     )
-    under = palette.MOY64[3]
+    under = MOY64[3]
     for (sx, sy, cw, ch), x, y, w, h, r, st, clip, cam in cases:
         bx, by = x - cam[0], y - cam[1]
         cx0, cy0, cx1, cy1 = 0, 0, W, H
@@ -1173,7 +1177,7 @@ def test_tint565_dims_a_sub_rect_into_its_own_buffer():
         c.cls(5)
         before = bytes(c._buf)
         src = _words_in(c, words)
-        col = rgb565(palette.MOY64[12])
+        col = rgb565(MOY64[12])
         for alpha in (0, 77, 255):
             dst = bytearray(2 * 5 * 4)
             assert c.tint565(dst, src, sw, 3, 2, 5, 4, 12, alpha) == 20, name
@@ -2297,15 +2301,14 @@ def test_an_owned_image_is_lent_by_the_register_and_by_nothing_else():
 # purpose (palette.py is deny-listed on the boards; chrome.py is what the     #
 # device freezes), so the two copies are pinned to each other here.           #
 # --------------------------------------------------------------------------- #
-def test_chrome_names_match_palette_names():
+def test_chrome_names_are_the_base_sixteen():
     from runtime import chrome
-    assert chrome.NAMES == palette.NAMES
-    assert len(chrome.NAMES) == 16
-    for name, idx in palette.NAMES.items():
-        assert chrome.color(name) == palette.color(name) == idx
+    assert sorted(chrome.NAMES.values()) == list(range(16))
+    for name, idx in chrome.NAMES.items():
+        assert chrome.color(name) == idx
     for idx in range(70):
-        assert chrome.color(idx) == palette.color(idx)
-    assert chrome.color("no-such-colour") == palette.color("no-such-colour") == 7
+        assert chrome.color(idx) == idx & 63
+    assert chrome.color("no-such-colour") == 7
 
 
 def test_scroll_layer_buffer_is_off_gc_heap():
@@ -2356,7 +2359,7 @@ def test_blit565_places_direct_colour_on_every_lane():
         if clip is not None:
             cx0, cy0 = max(0, clip[0]), max(0, clip[1])
             cx1, cy1 = min(W, clip[0] + clip[2]), min(H, clip[1] + clip[3])
-        bg = rgb565(palette.MOY64[3])
+        bg = rgb565(MOY64[3])
         expect = []
         for py in range(H):
             for px in range(W):

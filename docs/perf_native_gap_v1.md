@@ -269,9 +269,11 @@ The mechanism was checked directly rather than inferred:
 number of distinct names in the hot set, and shows a set that fits the
 reachable slots at ~0.55–0.7 µs a lookup on the S3s (0.34 on the P4) and one
 that overflows them at ~1.2 µs (0.66); at 512 the 160-name set no longer
-overflows. The `experiments/state_verb_cost`
-README had recorded exactly this thrash as an unproven hypothesis a month
-earlier.
+overflows. A unix-MP attribution of `pal()` (2026-08-12, `a791c33`) had
+recorded exactly this thrash as an unproven hypothesis a month earlier: the
+same body cost ~1 µs a call split into two small functions and ~5 µs as one
+large one, whichever piece was removed to make it small, so a unix-MP
+microbench of a LARGE function is not evidence until glass agrees.
 
 ### READ 2026-09-23 — what is left in `mp_map_lookup` is the kid idiom, not a knob
 
@@ -466,13 +468,27 @@ arithmetic, not for the median. Deep recursion is safe either way — it raises
 `RuntimeError: maximum recursion depth exceeded` from `mp_cstack_check()` and
 never crashes, verified on glass at every threshold.
 
+### Shipped — the cores and the P4 critical sections
+
+- **The cores.** The audio feeder is a task pinned to core 1 on every board
+  that takes moy_audio (`native/moy_audio/moy_aud_out.c`), the input task is
+  pinned to core 0 (`native/moy_input/moy_input_task.c`), and the kernel's
+  loop task runs on the core that creates it
+  (`native/moy_kernel/moy_loop_board.c`).
+- **P4 critical sections.** `vPortClearInterruptMaskFromISR` +
+  `vPortExitCriticalMultiCore`, FreeRTOS SMP spinlock pairs the S3 profiles
+  never show, led a Brick Siege profile on both P4s once `gc_alloc` was gone
+  (§6, 2026-09-23). The GIL round-robin divisor was DECLINED (§6, 2026-09-23).
+  The caller, found 2026-10-27 with `moy_prof`'s `ra` slot, was
+  `xTaskGetCurrentTaskHandle` under the VM's `mp_thread_get_state`; the fix is
+  `tools/patch_thread_state_tls.py` on both P4s (§6 above), and the S3 ladders
+  decline the patch in writing. The numbers are #66's.
+
 ### Open — API-preserving (do these first)
 
 | lever | targets | board | payoff | effort/risk |
 |---|---|---|---|---|
-| **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
-| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` were 17–19% of a Brick Siege profile on both P4s once `gc_alloc` was gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. The GIL round-robin divisor measured NULL on every meter (§6, DECLINED 2026-09-23). The caller, found 2026-10-27 with `moy_prof`'s `ra` slot: `xTaskGetCurrentTaskHandle` under the VM's `mp_thread_get_state`, SHIPPED as `tools/patch_thread_state_tls.py` on both P4s (§6 above). The S3 profiles never showed the pairs, and their ladders decline the patch in writing | dispatch | both P4s | #66 | done |
 
 **Render-overlap is CLOSED, not open** (it sat in the table above until
 2026-08-15, which is how a 2026-08-09 perf hunt came to spend its last lead

@@ -1,4 +1,4 @@
-// moy_wasm: the WebAssembly cart tier's ENGINE (docs/wasm_tier_plan_2026-09.md,
+// moy_wasm: the WebAssembly cart tier's ENGINE (docs/history/wasm_tier_plan_2026-09.md,
 // phase 1). The vendored WAMR runtime (wamr/, AOT only) and the thread a
 // module runs on -- nothing else. There are no verbs here: the import table is
 // C in libmoy beside the Lua binding, and moycore hosts it (phases 2 and 3).
@@ -439,7 +439,7 @@ static void release(run_t *r)
 // use and the free PSRAM around it in two pieces. Freed after the load, a
 // block the linear memory's size is where the linear memory goes.
 // The same read with no VM (a run the kernel started after stopping it,
-// docs/kernel_cartpath_2026-10.md section 5.2): the kernel's volume, inside the
+// docs/history/kernel_cartpath_2026-10.md section 5.2): the kernel's volume, inside the
 // board's bus gate. 0, or an errno with nothing held.
 static int read_module_c(const char *path, uint32_t hold, uint8_t **out, uint32_t *out_len)
 {
@@ -860,7 +860,7 @@ int moy_wasm_session_lanes(void)
     // An interpreted session declines lanes the same way a one-core board
     // does (README.md): no sibling instance trick is attempted over the
     // interpreter's module, so a cart's par items run in declaration order
-    // on the calling core instead (docs/wasm_tier_plan_2026-09.md, "A cart
+    // on the calling core instead (native/moy_wasm/README.md, "A cart
     // survives its firmware", 2026-09-30).
     if (g_sess && g_sess->interp) {
         return 0;

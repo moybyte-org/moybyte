@@ -1,5 +1,5 @@
-"""The keys reach the bar (owner call 2026-10-26, docs/shell_layout_2026-10.md
-§8): up past the top of the surface under a bar walks focus onto the bar's
+"""The keys reach the bar (owner call 2026-10-26, docs/theme_and_shell_2026-11.md
+§8.6): up past the top of the surface under a bar walks focus onto the bar's
 items, left and right walk them, confirm opens one as a tap does, down and
 back come off it. On the home the bar's items and its tabs are one row
 (tests/test_home_tab_row.py).
@@ -232,14 +232,14 @@ def test_the_bar_key_carries_the_focus():
 
 
 def test_the_homes_strip_names_the_bars_keys_while_on_it(tmp_path):
-    from runtime import launcher_layer
+    from runtime import home_hints
     ws, drv = _home(tmp_path)
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
     _press(drv, "up")
     _press(drv, "left")
-    assert launcher_layer.modal_keys(ws) == ui_draw.BAR_KEYS
+    assert home_hints.modal_keys(ws) == ui_draw.BAR_KEYS
     _press(drv, "down")
-    assert launcher_layer.modal_keys(ws) is None
+    assert home_hints.modal_keys(ws) is None
 
 
 def test_a_pages_strip_names_the_bars_keys_while_on_it(tmp_path, monkeypatch):
@@ -286,7 +286,7 @@ def test_the_keys_come_off_the_bar_when_its_surface_goes(tmp_path):
 
 
 def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
-    from runtime import launcher_layer
+    from runtime import home_hints
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
@@ -294,7 +294,7 @@ def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
     _walk_to(ws, drv, "battery")
     _press(drv, "a")
     assert ws.sysmenu.open and not ui_draw.on_bar()
-    assert launcher_layer.modal_keys(ws) != ui_draw.BAR_KEYS
+    assert home_hints.modal_keys(ws) != ui_draw.BAR_KEYS
     _press(drv, "b")
     assert not ws.sysmenu.open and ui_draw.on_bar()
 
@@ -427,3 +427,32 @@ def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
         assert ring != plain, (name, "the ring draws on the bar")
         _press(drv, "up")
         _press(drv, "left")
+
+
+def test_a_bandless_bar_keeps_its_status_while_the_keys_walk(tmp_path):
+    """Blocks draws the home's bar with no band, on the home's backdrop: a
+    redraw of the zone alone puts the backdrop back inside its rect, never
+    over the status beside it."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.look.set_theme("blocks", persist=False)
+    drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    bl = ws.bar_layer
+    bar, (x, y, w, h) = bl.cell("home", "battery")
+    x += bar[1][0]
+    y += bar[1][1]
+    stride = ws.sys_canvas.w * 2
+
+    def cell():
+        buf = bytes(ws.sys_canvas._buf)
+        return b"".join(buf[stride * (y + r) + 2 * x:stride * (y + r) + 2 * (x + w)]
+                        for r in range(h))
+    shown = cell()
+    _press(drv, "up")
+    assert ws.launcher_layer._tab_focus
+    assert cell() == shown, "the tab row's focus leaves the battery drawn"
+    _press(drv, "left")
+    assert bl.focus is not None
+    assert cell() == shown, "the bar's focus leaves the battery drawn"

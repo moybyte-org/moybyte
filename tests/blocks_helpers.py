@@ -23,8 +23,8 @@ class _FakeAPI(dict):
         for name in ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
                      "spr", "print", "sfx", "beep", "music"):
             self[name] = self._rec(name)
-        from runtime import palette
-        self["col"] = palette.color        # faithful name/index -> 0-63 resolution
+        from runtime import chrome
+        self["col"] = chrome.color        # faithful name/index -> 0-63 resolution
         self["btn"] = lambda d=None: self._btn.get(d, False)
         self["btnp"] = lambda d=None: self._btnp.get(d, False)
         self["touch"] = lambda: self._touch

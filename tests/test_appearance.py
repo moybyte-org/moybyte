@@ -6,7 +6,7 @@ thorough test of "does the shell still draw the night colorway at 1x". What
 they cannot see is everything below, and it is most of what this object does:
 
   * **a switch moves `look_gen`.** Every cache whose pixels read the look
-    folds that one integer (docs/theming_2026-09.md §6), so a switch that
+    folds that one integer (docs/theme_and_shell_2026-11.md §5), so a switch that
     forgot to publish would leave the launcher painting the old colorway until
     something else happened to dirty it, which no single-frame hash would
     catch. tests/test_theme_look_gen.py walks every cache it reaches.
@@ -86,7 +86,7 @@ def test_the_kernel_keeps_no_look_state(tmp_path):
                  "wallpaper_id", "icon_sheet"):
         assert not hasattr(ws, name), name
         assert hasattr(ws.look, name), name
-    src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
+    src = ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8")
     for gone in ("self.theme_name", "self.theme_variant",
                  "self.wallpaper_id", "self.icon_sheet"):
         assert gone not in src, gone
@@ -101,7 +101,7 @@ def test_the_tokens_stay_a_flat_kernel_attribute_with_one_author(tmp_path):
     assert not isinstance(type(ws).theme_colors if hasattr(type(ws), "theme_colors")
                           else None, property)
     writers = set()
-    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for path in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         for i, line in enumerate(path.read_text(encoding="utf-8").split("\n")):
             if ".theme_colors =" in line or "self.theme_colors=" in line:
                 writers.add(path.name)
@@ -127,10 +127,10 @@ def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
 def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
     """Both home layers' statics keys (one shared base, `_statics_base`) fold
     `look_gen`, and no key in the shell reads a theme dict's or an icon
-    sheet's identity (docs/theming_2026-09.md §6: a freed object's id() is
+    sheet's identity (docs/theme_and_shell_2026-11.md §5: a freed object's id() is
     reused)."""
     ws = build_ws(tmp_path)
-    for f in sorted(ROOT.joinpath("runtime").glob("*.py")):
+    for f in sorted(ROOT.joinpath("runtime").rglob("*.py")):
         src = f.read_text(encoding="utf-8")
         assert "id(ws.theme_colors)" not in src and "id(ws.look." not in src, f.name
     cv = ws.sys_canvas
@@ -249,7 +249,7 @@ def test_the_font_scale_lands_on_the_root_canvas_not_a_window_buffer(tmp_path):
     assert ws.look.effective_font_scale() == 3
 
 
-# -- wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) ---------------
+# -- wallpaper: the theme's (D6, docs/theme_and_shell_2026-11.md §3.9) ---------------
 
 def test_wallpaper_options_are_the_wallpaper_carts(tmp_path):
     ws = build_ws(tmp_path)
@@ -1127,7 +1127,7 @@ def test_the_look_is_built_before_anything_reads_it(tmp_path):
     """3c's wiring-order trap. `Appearance` is constructed in `_init_canvases`,
     because the two lines under it -- the system canvas's font scale and the
     responsive `Layout` -- already ask it for one."""
-    src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
+    src = ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8")
     built = src.index("self.look = Appearance(")
     for reader in ("self._sys_canvas.set_font_scale(self.look.font_scale)",
                    "self.look.effective_font_scale()"):

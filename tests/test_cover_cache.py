@@ -39,6 +39,7 @@ from runtime import cover_cache, cover_png, moy_carts  # noqa: E402
 from ws_helpers import build_ws, cover_bytes  # noqa: E402
 import pytest
 from ws_helpers import boot_on_fixture
+from tools.board_config import runtime_file
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -191,7 +192,7 @@ def test_both_drop_paths_are_the_same_body():
     much they keep and whether the decode scratch goes with it. Pinned as
     "who assigns `self._jobs`", because a second body would have to."""
     import ast
-    src = (ROOT / "runtime" / "cover_cache.py").read_text(encoding="utf-8")
+    src = runtime_file("cover_cache.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     cls = next(n for n in tree.body
                if isinstance(n, ast.ClassDef) and n.name == "CoverCache")
@@ -318,13 +319,21 @@ def test_a_definitive_miss_bumps_gen_too(tmp_path):
     assert ws.covers.gen > before
 
 
+# The home's modules: the layers, the arrangements and the band frame.
+HOME_MODULES = ("launcher_layer.py", "home_band.py", "home_grid.py",
+                "home_carousel.py", "home_icons.py", "home_search.py",
+                "home_details.py", "home_hints.py", "home_zone.py")
+
+
 def test_gen_has_no_ws_mirror(tmp_path):
     """One author per derived value (architecture doc 9). The consumers read
     `ws.covers.gen`; a mirror on the console would be a second one."""
     ws = build_ws(tmp_path)
     assert not hasattr(ws, "_cover_gen")
-    launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
-    windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
+    launcher = "".join(runtime_file(n).read_text(encoding="utf-8")
+                       for n in HOME_MODULES)
+    windowed = "".join(p.read_text(encoding="utf-8")
+                       for p in sorted((ROOT / "runtime").rglob("wm_*.py")))
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
     # Four reads: the band's key (`_band_key`), the check that a cover
     # landed while the band drew (`_band_landed`), the retained frame's key
@@ -409,7 +418,7 @@ def test_the_frame_loop_touches_covers_exactly_twice(tmp_path):
     """The hot rule, pinned in the source: `frame()` binds the collaborator
     once and calls it at its top and its tail. Anything else that grew a
     per-frame reach into covers would show up here."""
-    text = (ROOT / "runtime" / "console.py").read_text(encoding="utf-8")
+    text = runtime_file("console.py").read_text(encoding="utf-8")
     body = text[text.index("\n    def frame(self, dt):"):]
     body = body[:body.index("\n    def arm_splash(")]
     assert body.count("covers = self.covers") == 1
@@ -532,7 +541,7 @@ def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
 
 
 def test_a_tinted_cover_is_made_from_the_base_and_leaves_with_it(tmp_path, monkeypatch):
-    """`tinted` (docs/look_2026-10.md step 15): the whole BASE with a colour
+    """`tinted` (docs/history/look_2026-10.md step 15): the whole BASE with a colour
     over it, made by the canvas's tint and kept in the decodes' LRU -- asked
     twice it is the same picture, and the diet that drops the decodes frees
     it too. Before the BASE lands there is none."""

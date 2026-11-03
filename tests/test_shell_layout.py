@@ -1,4 +1,4 @@
-"""The shell layout's resolver (docs/shell_layout_2026-10.md §9-§11, §13 steps 4
+"""The shell layout's resolver (docs/history/shell_layout_2026-10.md §9-§11, §13 steps 4
 and 5).
 
 The loader's half (caps, clamps, the required set on the data, inheritance)

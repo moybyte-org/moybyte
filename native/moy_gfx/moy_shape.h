@@ -1,4 +1,4 @@
-/* moy_shape: the 2026-10 look's shapes (docs/look_2026-10.md step 6, GAPS
+/* moy_shape: the 2026-10 look's shapes (docs/history/look_2026-10.md step 6, GAPS
  * 5-8): rounded rects with anti-aliased or stepped corners, rings, bevels,
  * paints and shadows, into an RGB565 target (moy_text.h's
  * moy_text_target_t: camera-offset, clipped to its clip and its buffer).
@@ -26,7 +26,7 @@
  * what is under them. The two together are the whole shape. A window's frame is the
  * inner, drawn over pixels it paints itself, so it repeats to the same
  * pixels; its fringe belongs to whatever repaints the pixels under it (the
- * desk, runtime/wm_desk.py, or a window behind, runtime/wm_chrome.py), so a
+ * desk, runtime/wm/wm_desk.py, or a window behind, runtime/wm/wm_chrome.py), so a
  * fringe never blends twice.
  *
  * PAINTS (GAPS 7). A fill is a paint: up to MOY_SHAPE_STOPS stops (t in
@@ -152,7 +152,7 @@ void moy_shape_stats(uint32_t out[MOY_SHAPE_STATS]);
 void moy_shape_reset(int caches);
 
 // The canvas verbs' flat form, over a buffer with the canvas's camera and
-// clip (modmoy_gfx.c and runtime/gfx_binding.py call these, nothing between).
+// clip (modmoy_gfx.c and runtime/host/gfx_binding.py call these, nothing between).
 // opts: the corners (MOY_SHAPE_TL..BL), bit 4 stepped, bits 5-6 the mask,
 // bits 8-15 the ring's width. A NULL fill fills nothing.
 #define MOY_SHAPE_OPT_STEPPED 16
@@ -167,7 +167,7 @@ int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int
               int dx, int dy, int32_t col, int alpha, int stepped, const moy_shape_hole_t *hole,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
-// A home card's cover (docs/look_2026-10.md steps 15 and 17): the sub-rect
+// A home card's cover (docs/history/look_2026-10.md steps 15 and 17): the sub-rect
 // (sx, sy, cw, ch) of an RGB565 picture `sw` words a row, in the wire order,
 // scaled nearest-neighbour to w x h at (x, y) -- target column i samples
 // sx + ((i * fx + fx / 2) >> 16) with fx = (cw << 16) / w, rows alike, as
@@ -178,7 +178,7 @@ int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int
 int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
              const uint16_t *src, size_t scap, int sw, int sx, int sy, int cw, int ch,
              int r, int stepped, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
-// A home card's kept face (docs/scroll_and_text_2026-10.md §9): the w x h
+// A home card's kept face (docs/history/scroll_and_text_2026-10.md §9): the w x h
 // card at (x, y) out of `face`, a picture `fw` words a row holding the same
 // card drawn w x h at its row `fy0`. A pixel the card paints whatever lies
 // under it is copied; one that blends over what is there is drawn as the

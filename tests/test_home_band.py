@@ -1,4 +1,4 @@
-"""The home's band frames (`launcher_layer._band_frame`): a drag, a fling,
+"""The home's band frames (`home_band._band_frame`): a drag, a fling,
 a key, repeat or trackball step, a settle draw the band alone, its
 arrangement's table of parts (`Launcher.band_pass`, `Carousel.band_pass`)
 over the backdrop put back under it -- the plain ground (`bg`), a baked
@@ -15,6 +15,7 @@ picture, to the second's bytes."""
 import pytest
 
 from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui, ui_draw
+from runtime import home_grid
 from ws_helpers import cover_bytes, no_unlock_banner, quiesce
 
 
@@ -64,7 +65,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
         monkeypatch.setattr(L, "_try_band_frame", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
-        monkeypatch.setattr(launcher_layer.Launcher, "_faces_for", lambda self, *a: None)
+        monkeypatch.setattr(home_grid.Launcher, "_faces_for", lambda self, *a: None)
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts, **_TIERS[tier])
     for i in range(n):
@@ -416,7 +417,7 @@ def test_a_paint_draws_no_face(tmp_path, monkeypatch, arrangement):
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
                               False, n=120)
     g = ws.launcher
-    L = launcher_layer.Launcher
+    L = home_grid.Launcher
     painting = [0]
     drawn = [0, 0]
     real_pass, real_face = L.band_pass, L._draw_face
@@ -451,7 +452,7 @@ def test_a_cover_landing_keeps_the_frames_damage(tmp_path, monkeypatch, arrangem
     the band whole under a key the other's paint is not under."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
                               False)
-    L = launcher_layer.Launcher
+    L = home_grid.Launcher
     real = L.repaint_band
     land = [False]
 
@@ -500,3 +501,26 @@ def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
     assert layer._debt_owed is None
     assert ws._frames_drawn == n + 2       # the owed frame, then quiet
     assert ws.launcher.floor == [] and sorted(ws.launcher.copied) == sorted(drew)
+
+
+# The names the home reads on every frame it paints or moves: its draw, the
+# band and still frames and their keys, the hint strip a band frame draws
+# beside the band, and the zone's int the bar's strip cache reads.
+HOME_FRAME_PATH = ("draw", "_try_band_frame", "_try_still_frame", "_statics_key",
+                   "_retained_key", "_note_still", "_outside_key", "_beside",
+                   "_draw_home_chrome", "_draw_hints", "_hint_fit", "_hint_inner",
+                   "_hint_lead", "_hint_pad", "_wall_theme", "_search_line",
+                   "_search_open", "_quiet", "_still_now", "zone_gen", "grid")
+
+
+def test_the_home_frame_path_is_found_on_the_class_or_its_first_base():
+    """On MicroPython a method the class lacks is looked up through its
+    bases in order, a dict miss per base. The home layer's mixins stand in
+    front of nothing but each other, so the names its frames read live on
+    the class or its first base."""
+    for cls in (launcher_layer.LauncherHomeLayer, launcher_layer.HomeWindowLayer):
+        home = launcher_layer.LauncherHomeLayer
+        first = home.__bases__[0]
+        far = [n for n in HOME_FRAME_PATH
+               if n not in vars(cls) and n not in vars(home) and n not in vars(first)]
+        assert not far, "%s reads these past the first base: %s" % (cls.__name__, far)

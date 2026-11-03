@@ -1,6 +1,6 @@
 // The spine's allocator on the host, over calloc, and the few table calls the
 // header only has inline: what the ctypes binding links
-// (tools/moy_spine_binding.py). A ctypes caller passes the address of
+// (runtime/host/moy_spine_binding.py). A ctypes caller passes the address of
 // moy_spine_host_mem to every *_new.
 
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-"""Accent and tint: every colour role derived (docs/theming_2026-09.md §4.10),
+"""Accent and tint: every colour role derived (docs/theme_and_shell_2026-11.md §3.10),
 in C (`moy_theme_derive`, native/moy_ui/moy_theme.c) and written as
 `custom`'s theme.json by `moy_ui.theme_custom`.
 
@@ -47,7 +47,7 @@ PAIRS = len(TH["pairs"])          # the current plate's bit is the one past the 
 OK, BIG, SYNTAX, NEWER, NAME, TAKEN, CHAIN = range(7)
 SEEDS = list(moy_ui.themes())
 ACCENTS = [None] + [a for _n, a, _d in TH["accents"]] + [d for _n, d, _l in TH["presets"]]
-# A preset (docs/look_2026-10.md step 27) is picked by its dark value and is
+# A preset (docs/history/look_2026-10.md step 27) is picked by its dark value and is
 # its mode's value, its own deep.
 PRESETS = {d: (d, li) for _n, d, li in TH["presets"]}
 TINTS = [None] + [n for n, _r in TH["tints"]]
@@ -79,7 +79,7 @@ def _code_reads(a, b):
 
 def _reference(name, variant, accent, tint):
     """The mockups' derivation, its code roles then held to theme.code's
-    floor (docs/look_2026-10.md step 23): the source's where it reaches it,
+    floor (docs/history/look_2026-10.md step 23): the source's where it reaches it,
     else the derive set's for the code surface's side, else black or RGB
     white, the larger ratio."""
     if accent in PRESETS:

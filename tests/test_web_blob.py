@@ -378,16 +378,18 @@ def test_a_bundle_older_than_the_console_says_so(tmp_path):
     d = _dist(tmp_path)
     assets, _ = gwb.collect(str(d))
     root = tmp_path / "root"
-    (root / "runtime").mkdir(parents=True)
     (root / "firmware" / "web_runner").mkdir(parents=True)
-    old = (root / "runtime" / "console.py")
+    old_rel, new_rel = (bc.runtime_file(n).relative_to(ROOT).as_posix()
+                        for n in ("console.py", "wm_windowed.py"))
+    old = root / old_rel
+    old.parent.mkdir(parents=True, exist_ok=True)
     old.write_text("x")
     os.utime(old, (1, 1))
     assert gwb.stale_sources(assets, root=str(root)) == []
-    newer = root / "runtime" / "wm_windowed.py"
+    newer = root / new_rel
+    newer.parent.mkdir(parents=True, exist_ok=True)
     newer.write_text("x")                       # written now: after the bundle
-    assert gwb.stale_sources(assets, root=str(root)) == [
-        "runtime/wm_windowed.py"]
+    assert gwb.stale_sources(assets, root=str(root)) == [new_rel]
 
 
 def test_staleness_is_a_warning_and_never_a_failure(tmp_path, capsys):
@@ -419,7 +421,7 @@ def test_the_watch_list_is_derived_from_the_web_runner_board_file():
     for name in ("web_boot.py", "web_canvas.py"):
         assert "firmware/web_runner/" + name in watched
     # A denied module is not a source of this bundle, and the glob watched it.
-    assert "runtime/host_app.py" not in watched
+    assert "runtime/host/host_app.py" not in watched
 
 
 def test_a_stale_device_canvas_is_reported(tmp_path):

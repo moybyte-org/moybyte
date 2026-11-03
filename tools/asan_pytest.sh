@@ -1,6 +1,6 @@
 #!/bin/bash
 # pytest over the host's one native library built under AddressSanitizer
-# (runtime/host_native.py, MOYHOST_ASAN): a write into a freed or overrun
+# (runtime/host/host_native.py, MOYHOST_ASAN): a write into a freed or overrun
 # glass buffer stops the run at the access, with where the memory was freed,
 # instead of corrupting the heap for a later test to die on.
 #

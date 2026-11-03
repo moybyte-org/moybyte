@@ -19,7 +19,7 @@ paths:
 - **A worker that dies under xdist load is a native heap bug until shown
   otherwise: run it through `tools/asan_pytest.sh <pytest args>`.** It loads the
   host's one library built under AddressSanitizer (`MOYHOST_ASAN`,
-  `runtime/host_native.py`), so a write into a freed or overrun buffer stops at
+  `runtime/host/host_native.py`), so a write into a freed or overrun buffer stops at
   the access with where the memory was freed, serially and every time, instead
   of corrupting the heap for a later test to die on. CI does not run it.
 
@@ -112,7 +112,7 @@ paths:
     pin `ws.exit()`, because a run started from a desk window does not
     pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
     window-buffer half only where windows exist.
-  - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
+  - **The dev channel is ONE class** (`runtime/boot/dev_channel.py`) with one
     vocabulary, and `DevChannel.run` is the list of record: every word the
     boards answer to is a branch in it, from `state`/`tap`/`swipe` through the
     measurement switches (`diag`, `verbs`, `luaprof`, `perfcnt`, `luagc`,

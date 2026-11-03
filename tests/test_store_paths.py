@@ -1,5 +1,4 @@
-"""Only the store composes a cart's path (docs/kernel_store_2026-10.md
-section 4).
+"""Only the store composes a cart's path (native/moy_index/moy_index.h).
 
 A cart's path is its store root and its folder, and `moy_store_base` is the
 one place they are put together: `cart_path(root, folder)`, the folder a name
@@ -28,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-COMPOSER = "runtime/moy_store_base.py"
+COMPOSER = "runtime/carts/moy_store_base.py"
 
 # The names a store root goes by in the console's code.
 ROOT_NAMES = {"root", "carts_root", "carts_dir", "CARTS_DIR"}

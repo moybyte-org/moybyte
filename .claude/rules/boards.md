@@ -28,8 +28,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   oversized image, or one under its board's headroom floor (`[image]
   headroom_floor_kib` in board.toml), is a build FAILURE on every board.
 - **What crosses into an image is board.toml DATA** (#161), staged by
-  `tools/board_config.py`: a denylist over `runtime/*.py` (each `[[deny]]` names
-  a kind and a `why`), an allowlist over `device/*.py`, and a
+  `tools/board_config.py`: a denylist over every module under `runtime/`
+  (each `[[deny]]` names a kind and a `why`; subfolders stage FLAT, one
+  basename each, and a `host/` folder never stages), an allowlist over
+  `device/*.py`, and a
   `[native.shared]` denylist over `native/` (a P4 board also declares
   `[native.p4]`). A new shared module reaches every board by default; staying
   off one is a written decision. The headless Zero inverts the runtime default
@@ -147,7 +149,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 - **On the S3 boards the Python heap and the C side share one 8 MB PSRAM**, and
   the Python heap grows by doubling and gives an area back only when a sweep
   finds it wholly empty, which one surviving object prevents
-  (`docs/native_kernel_2026-09.md` §1.3).
+  (`docs/history/native_kernel_2026-09.md` §1.3).
   `MOYBYTE_GC_SPLIT_RESERVE` (each board's `mpconfigboard.h`, applied by
   `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it; without it one
   fragmented allocation takes every byte and every big cart fails to load until

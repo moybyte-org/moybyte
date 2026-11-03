@@ -222,7 +222,7 @@ def seed_carts(root=CARTS_DIR):
         # `ticks` and not `time.ticks_ms` directly: this module is import-only
         # on the host and the host suites drive this function, where
         # MicroPython's clock does not exist. One shim, the tree's own
-        # (runtime/ticks.py), which this board already freezes for the
+        # (runtime/toolkit/ticks.py), which this board already freezes for the
         # transport's blocking budgets.
         import ticks
 

@@ -87,7 +87,7 @@ start-style button carries Moy and "moy", and the menu bar carries Moy.
   3's text shadow, 12 (the selection fill), 13 (a per-app override), 15
   and 16.
   - The bottom taskbar is the layout's existing `LAYOUT_EDGES`
-    (`docs/shell_layout_2026-10.md` §10), so it needs nothing new.
+    (`docs/theme_and_shell_2026-11.md` §8.8), so it needs nothing new.
 
 **Coast**
 
@@ -177,7 +177,7 @@ pixel look through the same fields on the same two screens.
 
 **Bench (in the style of Amiga Workbench 3.x)**
 
-- **Font:** petme128 (MIT; `runtime/font.py`), the engine's own 8×8 print
+- **Font:** petme128 (MIT; `runtime/toolkit/font.py`), the engine's own 8×8 print
   font. It is fixed-width, like Topaz, and is already in every image. The
   result is drawn at 3×.
 - **Look:**
@@ -243,7 +243,7 @@ is absent. This is the input to the format spec. Colours are `#rrggbb`
 (gap 1). A paint is a colour, a list of colours, or a list of
 `(t, colour)` stops, with `mode` set to `smooth`, `steps:N` or `dither`.
 
-In the package format (`docs/theming_2026-09.md` §3, style.json's
+In the package format (`docs/theme_and_shell_2026-11.md` §2, style.json's
 `theme.look`) a theme carries both modes: its `colors.dark` and
 `colors.light` and its `look`'s shared, `dark` and `light` objects, so
 `mode` names one of a theme's two. The ramp's names map onto the roles:
@@ -277,7 +277,7 @@ In the package format (`docs/theming_2026-09.md` §3, style.json's
 | launcher | `launcher` (`column`/`dock`); `dock.fill`, `dock.alpha`, `dock.frost`, `dock.ring`, `dock.r`; `tiles` (per app), `tile_r`, `tile_fill`, `tile_outline`, `tile_ink`, `tile_grad`; `label.ink`, `label.shadow` | column, `raised` tiles |
 | lists | `sidebar` (paint or `vibrancy`), `places_panel`, `list_bg`, `zebra`, `colhead` | the window body |
 | icons | `icons.kind` (`pixel`/`smooth`), `icons.set`, `icons.swap` (a pixel set's palette swap, index to index) | smooth, the default set |
-| code | the `code_*` roles of `docs/theming_2026-09.md` §4.1 (the mockups' `syn.*`), each 4.5:1 or better on the code surface | derived per mode |
+| code | the `code_*` roles of `docs/theme_and_shell_2026-11.md` §3.1 (the mockups' `syn.*`), each 4.5:1 or better on the code surface | derived per mode |
 | buttons | `buttons[kind]`, `app_buttons[app][kind]`: `fill`, `ink`, `border`, `shape`, `r`, `font`, `bevel` | derived (Button kinds) |
 | display | `lcd`, `lcd_border`, `lcd_bevel`, `lcd_ink`, `lcd_dim` | no box; `value`, `dim` |
 | key hints | `keycap.fill`, `.alpha`, `.border`, `.grad`, `.ink`, `.r`, `.bevel` | a tint of the background |
@@ -285,7 +285,7 @@ In the package format (`docs/theming_2026-09.md` §3, style.json's
 
 **Not theme fields:** `layout.*` here stands in for the WM's default
 placement, which the layout format already owns
-(`docs/shell_layout_2026-10.md`). `tiles` per app is a theme field, but
+(`docs/theme_and_shell_2026-11.md`). `tiles` per app is a theme field, but
 which app gets which glyph is the app's own icon.
 
 ## Real size

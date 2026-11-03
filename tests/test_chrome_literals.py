@@ -1,4 +1,4 @@
-"""The chrome-literal ratchet (docs/theming_2026-09.md §9, phase 2a).
+"""The chrome-literal ratchet (docs/history/theming_2026-09.md §9, phase 2a).
 
 A theme reaches a pixel only through a role. Every `NAMES["..."]` colour
 literal in a `runtime/` module is a pixel no theme reaches, and every
@@ -30,7 +30,7 @@ PINNED = {
     "cards_layer.py": (6, 0),
     "code_layer.py": (0, 0),
     "console.py": (0, 0),
-    "launcher_layer.py": (1, 0),
+    "home_grid.py": (1, 0),
     "map_editor_ui.py": (7, 0),
     "paint_layer.py": (1, 0),
     "perf_hud.py": (0, 0),
@@ -45,10 +45,11 @@ PINNED = {
 
 def _counts():
     out = {}
-    for name in sorted(os.listdir(RUNTIME)):
-        if not name.endswith(".py"):
-            continue
-        with open(os.path.join(RUNTIME, name)) as f:
+    paths = {}
+    for base, _dirs, names in os.walk(RUNTIME):
+        paths.update((n, os.path.join(base, n)) for n in names if n.endswith(".py"))
+    for name in sorted(paths):
+        with open(paths[name]) as f:
             lines = [ln for ln in f if not ln.lstrip().startswith("def ")]
         text = "".join(lines)
         n = (len(_LITERAL.findall(text)), len(_BRANCH.findall(text)))

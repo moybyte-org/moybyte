@@ -19,9 +19,10 @@ from pathlib import Path
 
 from ws_helpers import build_ws, quiesce, select_on_home
 from runtime import history_router
+from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
-CONSOLE = ROOT / "runtime" / "console.py"
+CONSOLE = runtime_file("console.py")
 
 SRC = "def _draw():\n    cls(1)\n"
 
@@ -54,11 +55,24 @@ def _stroke(pe, x, y, color):
 
 
 def _fn(name):
-    """The AST of one `Workstation` method."""
+    """The AST of one `Workstation` method: on the class, or on one of the
+    mixins it lists as bases (each a class in the runtime module of the same
+    name console.py imports it from)."""
     tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
     cls = next(n for n in tree.body
                if isinstance(n, ast.ClassDef) and n.name == "Workstation")
-    return next(n for n in cls.body
+    bases = {b.id for b in cls.bases if isinstance(b, ast.Name)}
+    classes = [cls]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in bases:
+                    bases.discard(alias.name)
+                    path = runtime_file(node.module.split(".")[-1] + ".py")
+                    mod = ast.parse(path.read_text(encoding="utf-8"))
+                    classes += [n for n in mod.body if isinstance(n, ast.ClassDef)
+                                and n.name == alias.name]
+    return next(n for c in classes for n in c.body
                 if isinstance(n, ast.FunctionDef) and n.name == name)
 
 

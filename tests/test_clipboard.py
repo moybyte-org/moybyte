@@ -33,7 +33,7 @@ def test_clipboard_holder_typed_and_versioned():
 
 
 def test_a_put_over_the_buffer_is_refused_and_keeps_the_old_text():
-    """4 KiB of text (configuration, docs/kernel_appabi_2026-10.md 2.4): a
+    """4 KiB of text (configuration, docs/history/kernel_appabi_2026-10.md 2.4): a
     longer put answers False and leaves the buffer and its seq as they were."""
     c = Clipboard()
     c.put_text("kept")

@@ -44,7 +44,7 @@ def _pin_clock(ws, drv):
 # -- IconSheet (16x16 tiles) ------------------------------------------------
 
 def test_icon_sheet_is_16x16():
-    from runtime.editors import IconSheet
+    from runtime.editors_sheet import IconSheet
     s = IconSheet()
     assert s.TILE == 16
     assert (s.cols, s.rows) == (8, 4)           # 32 slots = 128x64 px
@@ -60,7 +60,7 @@ def test_icon_sheet_is_16x16():
 def test_icon_sheet_kgfx_roundtrips_for_16x16():
     """The flat .moygfx hex format serializes/parses a 128x64 (16x16-tile) sheet just
     like an 8x8 SpriteSheet -- one nibble per pixel, h rows of w nibbles."""
-    from runtime.editors import IconSheet
+    from runtime.editors_sheet import IconSheet
     s = IconSheet()
     s.tset(0, 1, 2, 9)                           # paint a pixel in tile 0
     s.tset(31, 15, 15, 11)                       # ... and the last tile's corner
@@ -174,8 +174,8 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
     assert ws.screen == "settings"
 
 
-# NEW/CHANGE/COPY/DEL are the home's Make-tab verbs (docs/shell_layout_2026-10.md
-# §12: Make is the one projects list) -- chips in the lent zone, tapped
+# NEW/CHANGE/COPY/DEL are the home's Make-tab verbs (docs/theme_and_shell_2026-11.md
+# §8.10: Make is the one projects list) -- chips in the lent zone, tapped
 # through the bar.
 
 def _make_chip(ws, verb):
@@ -271,8 +271,8 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
 
 def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
     """The wifi widget's target is the Settings WIFI panel, the one wifi
-    implementation (docs/shell_layout_2026-10.md §8): in console mode too
-    its popover hung from the widget (docs/look_2026-10.md step 33), over
+    implementation (docs/theme_and_shell_2026-11.md §8.6): in console mode too
+    its popover hung from the widget (docs/history/look_2026-10.md step 33), over
     whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
@@ -1125,7 +1125,7 @@ def test_bar_strip_rebuild_budget(tmp_path):
     assert renders <= 2, "strip re-rendered %d times in 24 frames" % renders
 
 
-# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+# -- the 2026-10 look's bar (docs/history/look_2026-10.md step 14) --------------------
 
 def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
     """Under Moy's look the clock's own repaint (`redraw_clock`) lays the
@@ -1152,7 +1152,7 @@ def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
 
 
 def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch):
-    """docs/look_2026-10.md step 23: under a theme's icon set the ladder
+    """docs/history/look_2026-10.md step 23: under a theme's icon set the ladder
     draws the set's gear for Config and face for Sprites, the open tab its
     name in sentence case, and Play bare in `value`."""
     from runtime import host_app

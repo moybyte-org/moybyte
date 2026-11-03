@@ -83,7 +83,7 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
-// chrome's (docs/theming_2026-09.md section 4.1), in role-id order.
+// chrome's (docs/theme_and_shell_2026-11.md §3.1), in role-id order.
 static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
     "panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
     "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim",
@@ -1518,6 +1518,12 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET},
     {"prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR},
     {"notify.achieve", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.award", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.count", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.has", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.found_on", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.progress", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"notify.today", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
     {"wallpaper.current", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.carts", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.id_for", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},

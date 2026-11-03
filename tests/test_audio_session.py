@@ -1,5 +1,5 @@
 """The kernel's audio sessions (native/moy_audio/moy_aud.h;
-docs/kernel_survival_2026-10.md section 5.1) through `moy_audio` as CPython
+docs/history/kernel_survival_2026-10.md section 5.1) through `moy_audio` as CPython
 reaches it: a session per owner, rows of kind AUDIO, the verbs addressed to a
 session, `focus` naming the audible one, the muted one's verbs leaving the mix
 untouched, a bank swap that never holds the lock for a parse, `hush`, and the

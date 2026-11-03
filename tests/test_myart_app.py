@@ -1,4 +1,4 @@
-"""My Art (runtime/myart_app.py): the drawings' page, its cards, its menu
+"""My Art (runtime/apps/myart_app.py): the drawings' page, its cards, its menu
 and its verbs, on the public UI API (docs/media/look_2026-10/APPS_RESTYLE.md,
 My Art)."""
 

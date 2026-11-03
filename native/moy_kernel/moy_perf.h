@@ -1,5 +1,5 @@
 // moy_perf: the PERF line, ONE format and ONE accounting path for every board
-// (#206 item 2; docs/kernel_survival_2026-10.md §7.3). runtime/perf_line.py
+// (#206 item 2). runtime/system/perf_line.py
 // keeps the parser the host tools read; this is the only writer, and
 // tests/test_moy_loop.py holds every line it can print to that parser.
 //

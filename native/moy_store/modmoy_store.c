@@ -1,11 +1,11 @@
 // moy_store's MicroPython binding: the store's crash-safe write and file verbs
-// (moy_fs.h) as the module runtime/moy_fs.py delegates to wherever it imports
+// (moy_fs.h) as the module runtime/carts/moy_fs.py delegates to wherever it imports
 // -- every board, the browser and the desktop MicroPython. Names follow
 // moy_fs.py's: publish is its _write_atomic, read_recover its _read_recover,
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
 //
-// THE BORROW (docs/kernel_store_2026-10.md section 3). moy_vol_at resolves a
+// THE BORROW (native/moy_store/moy_vol.h). moy_vol_at resolves a
 // path through MicroPython's mount table to the VM's own instance: a VfsFat's
 // FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout this file
 // mirrors stops matching), or POSIX under a VfsPosix at "/". A sector read
@@ -221,7 +221,7 @@ extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
 extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
                            uint32_t *bsize) __attribute__((weak));
 
-// While no VM runs (its mount table is gone: docs/kernel_cartpath_2026-10.md
+// While no VM runs (its mount table is gone: docs/history/kernel_cartpath_2026-10.md
 // section 5.3) the kernel's own volumes answer: the card's FATFS at /sd, held
 // open across the stop (moy_card.c), and the internal flash's littlefs at /.
 void *moy_store_card_fatfs(void);

@@ -3,7 +3,7 @@
 A board-served page reads the board's portable Settings and badges through
 GET /console.json and sends its changes back as system batches; the board's C
 parks them for the VM (native/moy_net/moy_webhost.c), which merges them key by
-key (runtime/moy_sync.py's SYSTEM_KEYS, merge_system, SystemReceiver). The
+key (runtime/carts/moy_sync.py's SYSTEM_KEYS, merge_system, SystemReceiver). The
 board is of record, so most of what is pinned here is what a page can NOT do:
 change a key the board keeps for itself, turn on unsigned code, read the pin,
 or take a badge away. The real-browser round trip is

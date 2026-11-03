@@ -1,4 +1,4 @@
-// The app ABI's kernel half (docs/kernel_appabi_2026-10.md): the grants, the
+// The app ABI's kernel half (docs/history/kernel_appabi_2026-10.md): the grants, the
 // grant policy, and the roles served in C. roles.json beside this file is the
 // role table; a C row there is a function here, and tests/test_moy_app.py holds
 // the two equal.
@@ -119,7 +119,7 @@ typedef struct moy_app moy_appabi_t;
 
 // What an app's surface row holds: where it draws, at what size and scales,
 // whether it is a window on the desk, the content rect the host's strip leaves
-// a running app (docs/shell_layout_2026-10.md §7), and its origin on the glass
+// a running app (docs/theme_and_shell_2026-11.md §8.5), and its origin on the glass
 // (what the pointer is offset by).
 typedef struct {
     uint32_t canvas;            // the CANVAS row it draws on (native/moy_glass), or 0
@@ -241,7 +241,7 @@ int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]);
 
 // -- theme ----------------------------------------------------------------------------
 
-// The token vocabulary (docs/theming_2026-09.md section 4.1): role ids 0 ..
+// The token vocabulary (docs/theme_and_shell_2026-11.md §3.1): role ids 0 ..
 // MOY_APP_TOKENS - 1, their names, and which are flags (true/false) rather
 // than MOY64 indices. token_of: the id of a name, or -1.
 const char *moy_app_token_name(int role);
@@ -250,7 +250,7 @@ int moy_app_token_of(const char *name, size_t n);
 
 // The look's writes: the live theme (its name, its variant and every token,
 // MOY_TOKEN_ABSENT for a role it does not set), as the shell draws it (a
-// colour of the theme's block at 64..127, docs/look_2026-10.md step 5) and,
+// colour of the theme's block at 64..127, docs/history/look_2026-10.md step 5) and,
 // in `near` (NULL: the same), each role's nearest MOY64 index, which a RUN
 // grant and a compiled app are answered: a cart's colours are MOY64. It
 // bumps the generation. OK, or BAD for a name over MOY_APP_NAME_MAX bytes.
@@ -434,7 +434,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 158u
+#define MOY_APP_TABLE_N 164u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.
@@ -443,7 +443,7 @@ int moy_app_table_role(uint32_t row);
 int moy_app_table_c_row(uint32_t row);
 const char *moy_app_table_name(uint32_t row);
 
-// A compiled app's way to any row (docs/kernel_appabi_2026-10.md section 2.1):
+// A compiled app's way to any row (native/moy_app/README.md):
 // the grant first, table row `row`, its arguments packed in `arg` (n bytes)
 // and its answer written into `ans` (cap bytes). It answers >= 0, the row's
 // number or the length of the text or blob written, or a MOY_APP_* code

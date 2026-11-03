@@ -1,5 +1,5 @@
 """`look_gen`: one integer every cache whose pixels read the look folds
-(docs/theming_2026-09.md §6, phase 6 step 1).
+(docs/theme_and_shell_2026-11.md §5, phase 6 step 1).
 
 An in-place edit is a re-install under the theme's own name: the name, the
 variant and every dict a cache could hold stay the same, so a cache keyed on

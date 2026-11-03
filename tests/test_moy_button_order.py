@@ -11,7 +11,7 @@ as the order. That reads as obviously-correct single-sourcing, and it is not:
 there are TWO InputState classes, and their BUTTONS differ in order as well as
 in length.
 
-    host   (runtime/input.py)        left right up down a b run home
+    host   (runtime/shell/input.py)        left right up down a b run home
     boards (modules/moybyte/input.py) up down left right a b x y run ...
 
 The host's first seven happen to be libmoy's, so the host stayed right. The
@@ -131,7 +131,7 @@ def test_every_snapshot_filler_sources_the_order_from_lua_ext():
     plumbing, because a future copy would pass those tests on the day it was
     written and diverge later, which is precisely what happened.
     """
-    for rel in ("runtime/wasm_host.py",
+    for rel in ("runtime/host/wasm_host.py",
                 "device/"
                 "moycore_glue.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")

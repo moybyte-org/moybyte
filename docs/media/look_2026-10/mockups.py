@@ -259,15 +259,15 @@ class Face(_FaceBase):
 
 
 class Petme(_FaceBase):
-    """petme128, the engine's own 8x8 print font (runtime/font.py, MIT), at a
+    """petme128, the engine's own 8x8 print font (runtime/toolkit/font.py, MIT), at a
     whole-number scale: an MFNT v1 face, 1 bpp, fixed 8 px advance."""
     SUBST = {"×": "x", "÷": "/", "−": "-", "…": "~", "·": "-", "‹": "<", "›": ">"}
 
     def __new__(cls, scale=1, k=1):
         key = ("petme", scale, k)
         if key not in cls._all:
-            sys.path.insert(0, os.path.join(ROOT, "runtime"))
-            import font as petme
+            sys.path.insert(0, ROOT)
+            from runtime import font as petme
             self = super().__new__(cls)
             self.data, self.first = petme.DATA, petme.FIRST
             self.s, self.k, self.bpp, self.size = scale, k, 1, 8 * scale

@@ -9,6 +9,8 @@ analysis catches exactly this class across a whole file.
 
 from pathlib import Path
 
+from tools.board_config import runtime_file
+
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
 
@@ -24,11 +26,11 @@ def test_no_undefined_names_in_extracted_modules():
 
     targets = sorted((ROOT / "modules").glob("device_*.py"))
     targets.append(ROOT / "modules" / "moy_runtime.py")
-    targets += [Path("runtime") / n for n in (
-        "console.py", "console_perf.py", "console_settings.py", "console_saves.py",
-        "console_notices.py", "wm_desk.py", "wm_chrome.py",
+    targets += [runtime_file(n) for n in (
+        "console.py", "console_input.py", "console_home.py", "console_text.py", "console_canvas.py", "console_perf.py", "console_settings.py", "console_saves.py",
+        "console_notices.py", "wm_desk.py", "wm_chrome.py", "wm_parts.py", "wm_route.py", "wm_paint.py", "wm_overlays.py",
         "project.py", "player.py", "editor_app.py", "wm.py", "perf_hud.py", "update_ui.py",
-        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",
+        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py", "home_band.py", "home_grid.py", "home_carousel.py", "home_icons.py", "home_search.py", "home_details.py", "home_hints.py", "home_zone.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
     bad = []

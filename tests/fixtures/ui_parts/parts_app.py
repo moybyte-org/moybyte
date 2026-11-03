@@ -1,4 +1,4 @@
-"""The public UI API's parts sheet (docs/look_2026-10.md step 12): a system
+"""The public UI API's parts sheet (docs/history/look_2026-10.md step 12): a system
 app drawing the Settings and Appearance targets' rows with the verbs, as the
 shell's apps will. tests/test_shell_goldens.py registers it for its
 `parts` configs, and tools/look_shots.py --parts draws it beside the

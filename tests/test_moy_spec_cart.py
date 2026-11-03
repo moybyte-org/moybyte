@@ -195,7 +195,7 @@ def test_cart_cannot_read_the_hosts_exit_button(tmp_path):
 def test_device_cart_buttons_match_host():
     """host_api and device_api must agree on the cart-visible button set --
     trivially, since 2026-08-17: both re-export the ONE tuple from
-    runtime/cart_api.py (the source-regex this test used to run died with the
+    runtime/run/cart_api.py (the source-regex this test used to run died with the
     device copy). The identity is the strongest agreement there is."""
     from runtime import host_api
     from device import device_api
@@ -268,7 +268,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
     # measuring nothing (a Scenes that silently failed to construct, say).
     assert full_h - base_h, "the capability gates injected no names at all"
 
-    # And the CANONICAL name list is this set. runtime/cart_verbs.CART_VERBS is
+    # And the CANONICAL name list is this set. runtime/run/cart_verbs.CART_VERBS is
     # what the code editor's highlighter and the block compiler's reserved-name
     # gate derive from; both used to retype it by hand and both had drifted.
     # This is the assertion that makes it a single source rather than a fifth

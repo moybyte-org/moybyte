@@ -1,4 +1,4 @@
-"""The page held under a dialog (`ui_draw.Hold`, docs/surface_model_v1.md
+"""The page held under a dialog (`ui_host.Hold`, docs/surface_model_v1.md
 §14.5): while the Editor's Cart info dialog or a Blocks entry prompt is up,
 or the pause or stop card stands over a run, a frame puts the page under it
 back washed instead of drawing the page and its wash.
@@ -15,7 +15,7 @@ buffer (`Hold.last`) where it may."""
 
 import pytest
 
-from runtime import block_editor_ui, host_app, ui, ui_draw
+from runtime import block_editor_ui, host_app, ui, ui_draw, ui_host
 from ws_helpers import no_unlock_banner, open_cart, quiesce
 
 # A game whose frames are a function of its frame count alone.
@@ -57,7 +57,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     the gate lets through, as on a board). `puts` counts the frames that
     put the held page back, the first frames that took the page from the
     last frame (`Hold.last`), and the dialogs' rows frames, which left
-    the page as it was (`ui_draw.Hold`)."""
+    the page as it was (`ui_host.Hold`)."""
     puts = [0, 0, 0]
     real = ui_draw.Hold.put
     real_last = ui_draw.Hold.last
@@ -80,8 +80,8 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     if ref:
         # the dialog washes the page itself, as one with no held page did,
         # and draws whole on every frame
-        monkeypatch.setattr(ui_draw, "wash_page", lambda *a: (0, 0, 0, 0))
-        monkeypatch.setattr(ui_draw, "NO_WASH", None)
+        monkeypatch.setattr(ui_host, "wash_page", lambda *a: (0, 0, 0, 0))
+        monkeypatch.setattr(ui_host, "NO_WASH", None)
         real_dialog = ui.dialog
 
         def dialog(title=None, buttons=(), kind="primary", o=None):
@@ -370,3 +370,45 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
     frame(1)                            # the page drawn, and held again
     frame(2)
     assert ws.held_pages[0] is not None and puts[0] > n
+
+
+def test_a_held_layer_with_no_room_is_asked_once_a_modal(tmp_path, monkeypatch):
+    """A hold layer the glass has no room for: the modal draws as one with no
+    held page does, and the layer is not asked for again until the modal
+    closes -- an ask the glass cannot serve collects the whole heap first,
+    and the idle frames before a card and every still frame of a dialog
+    ask -- after which the next modal asks once more."""
+    ws, frame, shots, puts = _console(tmp_path, monkeypatch, 1, False, False, force=False)
+    cv = ws.sys_canvas
+    asks = []
+    real = cv.new_layer
+
+    def new_layer(w, h, *a, **k):
+        if (w, h) == (cv.w, cv.h):
+            asks.append(1)
+            raise MemoryError("memory allocation failed")
+        return real(w, h, *a, **k)
+    monkeypatch.setattr(cv, "new_layer", new_layer)
+    ws.launcher_layer._lib_unsupported = True     # the home's own mint: not a hold's
+    open_cart(ws, "Stripes")
+    frame(3)
+    ws.pause.show()
+    frame(2)
+    opened = len(asks)
+    assert opened == 1, asks           # the card's first frame
+    frame(4)
+    ws._dirty = True
+    frame(4)
+    for _ in range(10):
+        frame.drv.frame(1 / 30)        # idle frames: the card's mint asks on them
+    assert len(asks) == opened, asks
+    assert ws.held_pages[2] is None and puts[0] == 0
+    ws.pause.close()
+    frame(3)
+    ws.pause.show()                     # the next modal asks once more
+    frame(4)
+    for _ in range(10):
+        frame.drv.frame(1 / 30)
+    assert len(asks) == 2, asks
+    ws.pause.close()
+    frame(2)

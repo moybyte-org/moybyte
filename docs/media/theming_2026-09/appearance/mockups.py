@@ -3,15 +3,15 @@
 usage: .venv/bin/python docs/media/theming_2026-09/appearance/mockups.py [OUTDIR]
 
 MOY64 colours only, Tiny5 (`native/moy_ui/themes/tiny5.fnt`) for the UI,
-petme128 (`runtime/font.py`) for mono, the real 16x16 system icons
-(`runtime/chrome.py`'s `_ICON_ART`) and the D1 parts. The seeds' rows come
+petme128 (`runtime/toolkit/font.py`) for mono, the real 16x16 system icons
+(`runtime/shell/chrome.py`'s `_ICON_ART`) and the D1 parts. The seeds' rows come
 from the host's own resolver (`chrome.theme_colors`, `chrome.theme_content`),
 so the worktree's venv runs it. Two sizes: 320x240 (the T-Deck, console mode:
 the page and its pickers are fullscreen pages) and 1024x600 (the Waveshare P4
 as shipped, chrome 2x, font 1x: Appearance is a window, pickers are
 popovers).
 
-`derive()` below is the colour derivation of `docs/theming_2026-09.md` §4.10
+`derive()` below is the colour derivation of `docs/theme_and_shell_2026-11.md` §3.10
 written out in Python: every derived look in these pictures is computed by
 it, not picked by hand, and it reports the readability pairs it was held to.
 """
@@ -22,15 +22,16 @@ from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
-from palette import MOY64          # noqa: E402
-import font as petme               # noqa: E402
+from runtime import font as petme  # noqa: E402
 from runtime import chrome         # noqa: E402
+from runtime.gfx_binding import moy64  # noqa: E402
+from tools.board_config import runtime_file  # noqa: E402
+MOY64 = moy64()
 
 
 def _icon_art():
     import ast
-    tree = ast.parse(open(os.path.join(ROOT, "runtime", "chrome.py")).read())
+    tree = ast.parse(open(str(runtime_file("chrome.py"))).read())
     for node in tree.body:
         if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "_ICON_ART":
             return ast.literal_eval(node.value)
@@ -42,7 +43,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__fi
 
 
 # ==========================================================================
-# the derivation (docs/theming_2026-09.md §4.10)
+# the derivation (docs/theme_and_shell_2026-11.md §3.10)
 # ==========================================================================
 def _lin(v):
     v /= 255.0
@@ -53,7 +54,7 @@ def _lin(v):
 LUM = [round(10000 * (0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)))
        for r, g, b in MOY64]
 FLOOR = 30          # theme.contrast x 10
-RGB = 0x1000000     # a colour value at or above: RGB | 0xrrggbb (docs/look_2026-10.md step 5)
+RGB = 0x1000000     # a colour value at or above: RGB | 0xrrggbb (docs/history/look_2026-10.md step 5)
 
 
 def _lin_c(v):

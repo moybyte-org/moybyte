@@ -1,8 +1,8 @@
-"""Visual identity v1 "Open Machine" (docs/visual_identity_v1.md) -- Phase 1/2
+"""Visual identity v1 "Open Machine" (docs/history/visual_identity_v1.md) -- Phase 1/2
 vertical slice:
 
   * semantic theme roles (Section 4.3): theme_colors() resolves every role for
-    every theme, and the default is Moy in its Day mode (docs/look_2026-10.md
+    every theme, and the default is Moy in its Day mode (docs/history/look_2026-10.md
     step 27, which deleted `night` and the opt-in `machine`);
   * the Library verbs (Sections 1.2-1.3): the selected card exposes PLAY and
     CHANGE, primary activation still always plays, CHANGE opens the SAME project
@@ -51,7 +51,7 @@ def test_every_theme_resolves_every_semantic_role():
 
 def test_the_default_is_moy_in_its_day_mode(tmp_path):
     """The seed set is Moy, Blocks and Contrast, Moy's Day the default
-    (docs/look_2026-10.md step 27); a deleted seed's name is no theme."""
+    (docs/history/look_2026-10.md step 27); a deleted seed's name is no theme."""
     from runtime.chrome import THEME_NAMES, DEFAULT_THEME, DEFAULT_VARIANT
     assert (DEFAULT_THEME, DEFAULT_VARIANT) == ("moy", "light")
     assert THEME_NAMES == ("moy", "blocks", "contrast")
@@ -202,7 +202,7 @@ def test_studio_play_returns_to_same_tab(tmp_path):
 
 
 def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
-    """docs/shell_layout_2026-10.md §12: no card carries a verb row; the lent bar
+    """docs/theme_and_shell_2026-11.md §8.10: no card carries a verb row; the lent bar
     zone carries the active tab's verbs on the selected card, on every tier."""
     for ws in (_ws(tmp_path / "a"), _ws(tmp_path / "b", sys_size=(1024, 600),
                                          font_scale=2)):
@@ -342,7 +342,7 @@ def test_cover_decodes_are_time_sliced_and_faithful(tmp_path, monkeypatch):
 
 
 def test_a_relayout_keeps_one_base_per_cover(tmp_path):
-    """No per-size variants (docs/theming_2026-09.md, P8): every layout of
+    """No per-size variants (docs/history/theming_2026-09.md, P8): every layout of
     every grid draws the same cached base, so a relayout adds nothing -- but
     the grid's interim HALF, for a card too small for 128."""
     ws = _ws(tmp_path, sys_size=(1024, 600))
@@ -364,7 +364,7 @@ def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
     overflows the slot by at most 10% each way. The Guition P4's 258x245 card
     takes 2x (11 px over); the Waveshare's 206x173 stays at 1x (2x would be
     48% over)."""
-    from runtime.launcher_layer import _cover_scale
+    from runtime.home_grid import _cover_scale
     assert _cover_scale(128, 258, 245) == 2
     assert _cover_scale(128, 206, 173) == 1
     assert _cover_scale(128, 256, 256) == 2

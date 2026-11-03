@@ -1,6 +1,6 @@
 """`blit_indices_scale` against the per-pixel path it replaces, byte for byte.
 
-The verb is the sprite pickers' kernel (docs/scroll_and_text_2026-10.md §9):
+The verb is the sprite pickers' kernel (docs/history/scroll_and_text_2026-10.md §9):
 a source rect of an index sheet at an integer scale, one palette lookup per
 SOURCE pixel. Its contract is sspr's pixels for a destination of
 sw*scale x sh*scale, so every case here draws the same call both ways on the
@@ -16,7 +16,7 @@ import random
 import pytest
 
 from runtime import host_canvas
-from runtime.editors import SpriteSheet
+from runtime.editors_sheet import SpriteSheet
 
 W, H = 160, 120
 
