@@ -96,8 +96,8 @@ moybyte_build_times() {         # the EXIT trap of a timed build: $1 its status
   local rc="$1" total p lane cc0 cc1 hits="" misses="" args=() status=ok
   moybyte_phase end
   total=$(( (${EPOCHREALTIME//[.,]/} - MOYBYTE_T0) / 1000 ))
-  lane="$(sed -n 's/^ota *= *"\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/board.toml" 2>/dev/null | head -1)"
-  lane="${lane:-$(basename "${SCRIPT_DIR}")}"
+  lane="$(sed -n 's/^ota *= *"\([^"]*\)".*/\1/p' "${MOYBYTE_BUILD_DIR}/board.toml" 2>/dev/null | head -1 || true)"
+  lane="${lane:-$(basename "${MOYBYTE_BUILD_DIR}")}"
   [ "${rc}" = "0" ] || status=fail
   echo "== build times (${lane}, ${status}):"
   for p in "${MOYBYTE_PHASES[@]}"; do
@@ -858,6 +858,7 @@ moybyte_patch_esp_hosted_bump() {
 # test that sources this lib for one function is not.
 if [ "$(basename "${BASH_SOURCE[1]:-}")" = "build.sh" ]; then
   MOYBYTE_T0="${EPOCHREALTIME//[.,]/}"
+  MOYBYTE_BUILD_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)}"
   MOYBYTE_CCACHE0="$(moybyte_ccache_counts)"
   moybyte_phase toolchain
   trap 'moybyte_build_times $?' EXIT

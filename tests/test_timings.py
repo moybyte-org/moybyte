@@ -102,6 +102,25 @@ def test_a_board_build_times_its_phases_and_keeps_its_exit_status(tmp_path):
     assert any(r["lane"] == "tdeck" and r["status"] == "fail" for r in rows)
 
 
+def test_a_build_without_script_dir_is_timed_under_its_own_folder(tmp_path):
+    """The C6 slave's build.sh sets no SCRIPT_DIR; under `set -u` the timing
+    names the lane after the build.sh's own folder instead of failing."""
+    d = tmp_path / "c6_slave"
+    d.mkdir()
+    sh = d / "build.sh"
+    sh.write_text(
+        "set -euo pipefail\n"
+        "REPO_ROOT='%s'\n"
+        "source \"$REPO_ROOT/tools/esp32_build_lib.sh\"\n"
+        "moybyte_phase patches\n"
+        "true\n" % ROOT)
+    log = tmp_path / "t.csv"
+    r = subprocess.run(["bash", str(sh)], cwd=tmp_path, capture_output=True,
+                       text=True, env=dict(os.environ, MOYBYTE_TIMINGS=str(log)))
+    assert r.returncode == 0, r.stderr
+    assert "== build times (c6_slave, ok)" in r.stdout
+
+
 def test_a_script_sourcing_the_lib_for_one_function_is_not_timed(tmp_path):
     log = tmp_path / "t.csv"
     out = subprocess.run(
