@@ -64,26 +64,65 @@ def test_a_shown_game_is_throttled_and_presents_its_last_frame(tmp_path):
     assert ws.procs.n == 2
 
 
-def test_a_hidden_game_is_minimised_and_hears_it(tmp_path, monkeypatch):
-    from runtime import procs as procs_mod
+def test_a_hidden_game_is_held_and_hears_it(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     p = ws.procs.list[0]
+    pl = p.player
     heard = []
-    p.player.ns["_minimise"] = lambda: heard.append("min")
-    p.player.ns["_restore"] = lambda: heard.append("res")
+    pl.ns["_minimise"] = lambda: heard.append("min")
+    pl.ns["_restore"] = lambda: heard.append("res")
     ws.wm._minimize(wa, True)
-    now = [500000]
-    monkeypatch.setattr(procs_mod, "_ticks_ms", lambda: now[0])
     ups, draws = p.ups, p.draws
-    for _ in range(20):                       # 1 s at 50 ms a frame
-        now[0] += 50
+    for _ in range(20):
         drv.frame(1 / 20)
     assert p.state == "minimised" and heard == ["min"]
-    assert p.draws == draws
-    assert 9 <= p.ups - ups <= 10
+    assert p.draws == draws and p.ups == ups      # paused: no update, no draw
+    assert pl.paused                            # its clock held
     ws.wm._minimize(wa, False)
     drv.frame(1 / 30)
     assert heard == ["min", "res"] and p.state == "throttled"
+    assert not pl.paused and p.ups > ups
+
+
+def _app_proc(ws, drv, p):
+    """Make Proc `p` an app cart's run: its manifest says `"type": "app"`."""
+    p.world.project.cart = dict(p.world.project.cart, type="app")
+    p.named()
+    assert p.app
+
+
+def test_a_hidden_app_updates_every_frame_and_never_draws(tmp_path):
+    ws, drv, wa, wb = _two(tmp_path)
+    p = ws.procs.list[0]
+    _app_proc(ws, drv, p)
+    ws.wm._minimize(wa, True)
+    drv.frame(1 / 30)
+    ups, draws = p.ups, p.draws
+    for _ in range(20):
+        drv.frame(1 / 30)
+    assert p.state == "minimised" and not p.player.paused
+    assert p.ups - ups == 20 and p.draws == draws
+
+
+def test_the_front_minimised_holds_a_game_and_steps_an_app(tmp_path):
+    ws, drv, wa, wb = _two(tmp_path)
+    pl = ws.player
+    n = [0]
+    pl._update = lambda dt: n.__setitem__(0, n[0] + 1)
+    ws.wm._minimize(wb, True)
+    for _ in range(10):
+        drv.frame(1 / 30)
+    assert ws.procs.front_minimised() and pl.paused and n[0] == 0
+    ws.wm._minimize(wb, False)
+    drv.frame(1 / 30)
+    assert not pl.paused and n[0] >= 1
+    ws.cart["type"] = "app"
+    ws.wm._minimize(wb, True)
+    drv.frame(1 / 30)
+    n[0] = 0
+    for _ in range(10):
+        drv.frame(1 / 30)
+    assert not pl.paused and n[0] == 10
 
 
 def test_focusing_a_background_game_promotes_it(tmp_path):

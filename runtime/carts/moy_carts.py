@@ -1464,26 +1464,10 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
 # A friendly starter cartridge: an editable colored dot, as a GAME project. The
 # home's Make "+ New" card creates one of these and opens it in the Editor
 # (spec shell_ux_v1.md) -- `type=="game"` so a kid's brand-new creation is a real
-# game project with "Make it mine" cards, not a wallpaper. It holds itself
-# while its window is minimised (docs/os_2026-11/processes.md §1): `_update`
-# waits between `_minimise()` and `_restore()`.
+# game project with "Make it mine" cards, not a wallpaper.
 NEW_TEMPLATE = {
     "type": "game",
     "src": (
-        "paused = False\n"
-        "\n"
-        "def _minimise():\n"
-        "    global paused\n"
-        "    paused = True\n"
-        "\n"
-        "def _restore():\n"
-        "    global paused\n"
-        "    paused = False\n"
-        "\n"
-        "def _update(dt):\n"
-        "    if paused:\n"
-        "        return\n"
-        "\n"
         "def _draw():\n"
         "    cls(col(cfg('bg', 'dark_blue')))\n"
         "    circ(W // 2, H // 2, cfg('size', 24), col(cfg('color', 'yellow')))\n"

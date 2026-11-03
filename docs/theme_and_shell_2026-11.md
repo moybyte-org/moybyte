@@ -165,9 +165,9 @@ Nothing is pending the owner.
   (D-03.2); the desk's toolbar is the mockup's padded tabs, undo, redo and
   Play at the right (D-03.3); the playtest opens at 2× over the Editor
   (D-03.4); the symbol keys follow the last input (D-17); Play reads
-  Restart and Stop while a playtest runs (D-23); a minimised game holds
-  itself (D-25, as the owner's 2026-11-03 call keeps its `update` running:
-  the template's `_minimise()`, `docs/os_2026-11/processes.md` §1); and the sprite tab is PICO-8's tool set with a
+  Restart and Stop while a playtest runs (D-23); a minimised game is
+  paused (D-25: the console holds it, no `update` and no `draw`, owner
+  2026-11-03, `docs/os_2026-11/processes.md` §1); and the sprite tab is PICO-8's tool set with a
   more menu, a sprite map and compact parts (D-15, D-11, D-22). Steps 23,
   24 and 25 say how each is built.
 - **Themes and chrome, the owner's calls on design review round 3**

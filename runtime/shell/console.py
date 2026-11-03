@@ -277,9 +277,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # imported back here.
 try:
     from settings_layer import SettingsLayer
+    from tasks_ui import TasksLayer
     from popover import component_for as _component_for
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import SettingsLayer
+    from runtime.tasks_ui import TasksLayer
     from runtime.popover import component_for as _component_for
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
@@ -1304,6 +1306,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # rows and panels; reads ws config/system state + dispatches every
         # mutation to ws setters (it owns NO config).
         self.settings_layer = SettingsLayer(self, _ui_draw.AppHost)
+        # The task manager (runtime/system/tasks_ui.py): the running set and
+        # the services, their CPU and memory, Switch to and Close.
+        self.tasks_layer = TasksLayer(self)
+        self._tasks_return = None     # the kind a handheld's task manager goes back to
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
         # chrome, Storybook's compiling decks, Files' user-files gallery and
@@ -1329,6 +1335,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             "launcher": self.launcher_layer,
             "projects": self.projects_layer,
             "settings": self.settings_layer,
+            "tasks": self.tasks_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
@@ -1829,6 +1836,101 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         open."""
         self.open_settings()
         self.settings_layer.open_page("log", pid)
+
+    def open_tasks(self):
+        """The task manager (runtime/system/tasks_ui.py): from the system
+        menu and a held console key. On a handheld it goes on top, holding
+        a front game while it shows; on the desk it is a window."""
+        self.close_popover()
+        if self.pause.open:
+            self.pause.close()
+        if self.confirm.open:
+            self.confirm.cancel()
+        self._dirty = True
+        layer = self.tasks_layer
+        if self.wm.top_is("tasks"):
+            return
+        if not self.wm.bring_forward("tasks"):
+            layer.open()
+            pl = self.player
+            layer.held = False
+            if self.procs.handheld():
+                self._tasks_return = self.wm.top_kind()
+                if self.wm.top_is_player() and not pl.paused \
+                        and self.cart_error is None:
+                    pl.pause()
+                    layer.held = True
+            self.wm.activate("tasks")
+        self._set_text_mode(False)
+
+    def close_tasks(self, home=False):
+        """The task manager goes: back where it was opened from (a held
+        game resumed), or `home`."""
+        self._dirty = True
+        layer = self.tasks_layer
+        _ck = getattr(self.wm, "close_window_kind", None)
+        if _ck is not None and self.wm.desk_open():
+            _ck("tasks")
+            if home:
+                self.home_key()
+            return
+        back = self._tasks_return
+        self._tasks_return = None
+        if layer.held:
+            layer.held = False
+            if back == "desktop" and not home:
+                self.player.resume()
+        if home or back is None or back == "tasks" or not self.wm.stack.has(back):
+            if self.wm.stack.has("desktop") and self.procs._detachable():
+                self.procs.detach()     # the run that played joins the running set
+            self.go_home()
+            return
+        self.wm.goto(back)
+
+    def tasks_switch(self, key):
+        """The task manager's Switch to: run `key` (a Proc's, or the front
+        run's) shown and given the keys."""
+        procs = self.procs
+        p = procs.by_key.get(key)
+        if procs.handheld():
+            layer = self.tasks_layer
+            if p is None:
+                self.close_tasks()
+                return
+            if layer.held:
+                layer.held = False
+                self.player.resume()
+            self._tasks_return = None
+            procs.switch(p)
+            return
+        if key == "desktop":
+            self.wm.bring_forward("desktop")
+        elif p is not None:
+            self.wm._bring_forward(key)
+        self._dirty = True
+
+    def tasks_close(self, key):
+        """The task manager's Close on run `key`, the task manager staying."""
+        procs = self.procs
+        p = procs.by_key.get(key)
+        if p is not None:
+            procs.close(p)
+            return
+        if key != "desktop":
+            return
+        if procs.handheld():
+            self.tasks_layer.held = False
+            self.player.release_world()
+            self.pause.dismiss()
+            if self.wm.stack.remove("desktop"):
+                self.wm._on_nav()
+            if self._tasks_return == "desktop":
+                self._tasks_return = self.wm.root_kind()
+            procs.gen += 1
+            return
+        _ck = getattr(self.wm, "close_window_kind", None)
+        if _ck is not None:
+            _ck("desktop")
 
     def _exit_settings(self):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
@@ -3097,6 +3199,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return True
         # The System log page follows the ring: a new record draws it again.
         if kind == "settings" and self.settings_layer.log_moved():
+            return True
+        # The task manager's rows moved: a sample, a state, a run.
+        if kind == "tasks" and self.tasks_layer.moved():
             return True
         # A verbs page the last painted frame drew coasts on a fling or eases
         # on a glide (`api_moving`): its next frame is due with nothing dirty.

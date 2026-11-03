@@ -60,11 +60,13 @@ _LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
               "menu.home": "Home",
               "menu.clear_search": "Clear search", "menu.search": "Search",
+              "menu.tasks": "Tasks",
               "menu.settings": "Settings", "menu.about": "About", "menu.sleep": "Sleep",
               "menu.reboot": "Restart Moybyte"}
 _LOOK_ICON = {"menu.delete_cart": "trash", "menu.home": "home",
               "menu.favourite_add": "star", "menu.favourite_remove": "star_on",
               "menu.clear_search": "search", "menu.search": "search",
+              "menu.tasks": "layout",
               "menu.settings": "settings", "menu.about": "doc", "menu.sleep": "sleep",
               "menu.reboot": "power"}
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
@@ -235,7 +237,10 @@ class PauseMenu:
     desk, in both modes, over a game full screen or docked in the Editor's
     Run slot, Play in a window follows Resume (owner, 2026-10-31): the run
     goes on in a desk window of its own (`WindowedWM.play_in_window`); over
-    a game already in a window there is no such row. Options is the card's
+    a game already in a window there is no such row. On a handheld
+    Minimise follows Resume where the run can join the running set
+    (owner, 2026-11-03; `Procs.minimise`): the game is held where it is
+    and the console goes home. Options is the card's
     second page, the console's Volume (Esc goes back). The card is a
     popover of the public UI API's with nothing to hang from, holding a
     `ui.menu`, drawn on the system canvas over the frozen frame; the menu's
@@ -254,6 +259,9 @@ class PauseMenu:
 
     ITEMS = ("Resume", "Restart", "Options", "Quit")
     ICONS = ("play", "rotate", "settings", "close")
+    MINIMISE = "Minimise"
+    HAND_ITEMS = ("Resume", MINIMISE, "Restart", "Options", "Quit")
+    HAND_ICONS = ("play", "minimize", "rotate", "settings", "close")
     WINDOW = "Play in a window"
     DESK_ITEMS = ("Resume", WINDOW, "Restart", "Options", "Quit")
     DESK_ICONS = ("play", "maximize", "rotate", "settings", "close")
@@ -309,6 +317,8 @@ class PauseMenu:
         offers = getattr(ws.wm, "offers_window", None)
         if offers is not None and offers():
             self.rows, self.icons = self.DESK_ITEMS, self.DESK_ICONS
+        elif ws.procs.handheld() and ws.procs._detachable():
+            self.rows, self.icons = self.HAND_ITEMS, self.HAND_ICONS
         else:
             self.rows, self.icons = self.ITEMS, self.ICONS
         self._open()
@@ -412,6 +422,10 @@ class PauseMenu:
         if row == self.WINDOW:
             self.close()
             ws.wm.play_in_window()        # the same run, in a desk window
+        elif row == self.MINIMISE:
+            self._shut()                  # the run stays held: it joins the running set
+            if not ws.procs.minimise():
+                ws.player.resume()
         elif row == "Restart":
             self.close()
             ws._reset_canvas_state()
@@ -897,6 +911,8 @@ class SystemMenuUI:
             sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
                    else "menu.search")
             rows.append(_row("item", sid, self.ws.toggle_search))
+        if not ws.wm.top_is("tasks"):
+            rows.append(_row("item", "menu.tasks", ws.open_tasks))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
         # Sleep where the board's idle ladder can blank its light (absent on

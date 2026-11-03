@@ -440,6 +440,18 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_procs": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="procs"),
+    "tdeck_320x240_fs1_tasks": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="tasks"),
+    "guition_480x320_fs1_tasks": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="tasks"),
+    "p4_1024x600_cs2_fs1_tasks": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="tasks"),
+    "guition_p4_1280x800_tasks": dict(
+        sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=10.1, plan="tasks"),
     "tdeck_320x240_fs1_moy_menus": dict(
         sys_size=None, font_scale=1, windowed=False, variant="light",
         diagonal_in=None, theme="moy", plan="menus"),
@@ -646,6 +658,8 @@ def _surface_plan(ws, cfg):
         return _menus_plan(ws, cfg)
     if cfg.get("plan") == "procs":
         return _procs_plan(ws)
+    if cfg.get("plan") == "tasks":
+        return _tasks_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -946,6 +960,74 @@ def _procs_plan(ws):
     return [("desk_two_games", two), ("desk_close_refusal", refusal)]
 
 
+TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service")
+
+
+def _tasks_plan(ws, cfg):
+    """The task manager (runtime/system/tasks_ui.py): with nothing running;
+    with two games -- on a handheld Star Catcher minimised from its pause
+    card and Brick Siege in front, held under it, on the desk both in
+    windows -- their CPU and memory figures fixed; then a crashed service's
+    row current, its Details and Close."""
+    import random
+    from runtime import scheduler as S
+    windowed = cfg["windowed"]
+    ws.procs.account = lambda now: None        # the figures below stay
+
+    def empty():
+        if windowed:
+            ws.open_desk()
+        ws.open_tasks()
+
+    def two():
+        ws.close_tasks()
+        if windowed:
+            ws.open_desk()
+        for i, title in enumerate(_PROCS_CARTS):
+            random.seed(25 + i)
+            cart = _cart_by_title(ws, title)
+            if windowed:
+                assert ws.procs.launch(cart)
+            ws._open_workspace(cart)
+            ws.run(ws.project, ws.launcher_layer)
+            ws.frame(_DT)
+            if windowed:
+                win = ws.wm._wins["desktop"]
+                if win.saved is not None:
+                    ws.wm._toggle_max(win)
+                ws.wm._resize_window(win, 344, 289)
+                ws.wm._move_window(win, 60 + 120 * i, 60 + 60 * i)
+            for _ in range(_PAUSE_FRAMES):
+                _quiesce(ws)
+                ws.frame(_DT)
+            if not windowed and i == 0:
+                ws.system_key()
+                ws.pause.choose(ws.pause.rows.index(ws.pause.MINIMISE))
+        assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
+        for pl, cpu, mem in ((ws.player, 412, 431 << 10),
+                             (ws.procs.list[0].player, 38, 287 << 10)):
+            pl.cpu, pl.mem = cpu, mem
+        ws.procs.gen += 1
+        ws.open_tasks()
+        if windowed:
+            ws.player._paused_at = 1           # the games held where they are
+            ws.procs.list[0].player._paused_at = 1
+            ws.wm._sync_windows()
+            win = ws.wm._wins["tasks"]
+            ws.wm._move_window(win, 420, 120)
+
+    def crashed():
+        S.SCHED.reset()
+        S.SCHED.start({"id": "moybyte.weather", "title": "Weather", "permissions": [],
+                       "src": "raise ValueError('no network')\n"})
+        ws.procs.gen += 1
+        ws.tasks_layer.cur = 2
+        ws.tasks_layer.host.reset()
+
+    return [("tasks_empty", empty), ("tasks_two_games", two),
+            ("tasks_crashed_service", crashed)]
+
+
 def _popover_plan(ws):
     """The desk with a Calc window, then each widget's popover over it. The
     popover stays open through the render (`_golden_popover`)."""
@@ -1073,6 +1155,8 @@ def surface_names(config_name):
         return list(MENU_SURFACES)
     if cfg.get("plan") == "procs":
         return list(PROCS_SURFACES)
+    if cfg.get("plan") == "tasks":
+        return list(TASKS_SURFACES)
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
@@ -1112,6 +1196,8 @@ def capture(config_name, carts_dir):
                 % (config_name, name, len(bytes(ws.glass_canvas._buf)), expect_bytes))
             out[name] = _render(ws, name, config_name)
     finally:
+        from runtime import scheduler
+        scheduler.SCHED.reset()        # a service a plan started is process-wide too
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
     return out

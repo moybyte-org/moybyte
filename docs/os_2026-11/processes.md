@@ -17,7 +17,7 @@ audio sessions, leases); the row itself, like a grant, outlives a stop.
 
 | kind | canvas | runs when | ends when | exists today as |
 |---|---|---|---|---|
-| **app** (a game, a tool, a system app) | yes | while its window is open: focused, visible-unfocused (throttled) or minimised (`update` at a reduced rate, no `draw`, owner 2026-11-03) | the user closes it, it quits, it crashes | the Player's run, a registered Layer |
+| **app** (a game, a tool, a system app) | yes | while its window is open: focused, visible-unfocused (throttled) or minimised (a game paused, an app's `update` at full rate with no `draw`, owner 2026-11-03) | the user closes it, it quits, it crashes | the Player's run, a registered Layer |
 | **wallpaper** | yes, behind everything | self-started with the desk, never focused | the desk closes or a wallpaper is chosen | the wallpaper cart (its own ledger role, its own audio session) |
 | **command** | no; it writes to its stdout, a VT100 stream the terminal renders (`system.md` §1) | while the terminal runs it; backgrounded with `&` it is a background process whose output goes to the log | it returns an exit code | nothing |
 | **service** | no | from start until stopped, whatever is on screen | the user stops it, it exits, it is killed under memory pressure, it strikes out | nothing user-written |
@@ -59,23 +59,26 @@ window is in one of three states:
   more than 15% over it, moving at most every 500 ms. Between draws its
   window presents its canvas's last frame;
 - **minimised** (owner, 2026-11-03): a window hidden to its chip, under a
-  full-screen window, or parked by console mode. `update` runs every
-  `MIN_UPDATE_MS` (100 ms) with the true `dt`, `draw` never runs, and the
-  cart hears `_minimise()` going in and `_restore()` coming out, functions of
-  its namespace beside `_update` (Python, this phase; `Player.window_event`).
-  The default game template (`moy_carts.NEW_TEMPLATE`) returns from
-  `_update` between the two, so a game written from it is held as the
-  owner's 2026-10-19 call says; an app that wants to keep working (a player,
-  a download) does. A restore gives the run back as it was, with no pause
-  card.
+  full-screen window, or parked by console mode, and every run but the
+  front one on a handheld. A **game** is paused: no `update`, no `draw`, its
+  clock held as the pause menu holds it (`Player.pause`; a Proc's clock
+  alone, its session not being the audible one). An **app** (`"type":
+  "app"`) keeps its `update` every loop frame with the true `dt` and never
+  draws, so a player or a download keeps working. Either hears
+  `_minimise()` going in and `_restore()` coming out, functions of its
+  namespace beside `_update` (Python, this phase; `Player.window_event`).
+  A restore gives the run back as it was, with no pause card.
 
-On a handheld (one app fullscreen, a back-stack) an app not in front is
-minimised, so the playing cart owns every draw there and a minimised app
-costs only its reduced-rate `update`. As built, the running set beyond the
-front run is the desk's: the handheld's WM has no way yet to leave a game
-running behind the home (its pause card's Quit ends the run), so there it
-holds the front run alone; `Procs` and `player_fit.admit` are shared and
-staged to every board, and the S3s' shares are host-tested.
+On a handheld (one app fullscreen, a back-stack) the running set keeps no
+windows, and every run but the front one is minimised, so the playing cart
+owns every draw. The pause card's Minimise (`Procs.minimise`) holds the
+front game in the running set and goes home (a launch while a run plays
+replaces it, as before); launching a running cart again, or the task
+manager's Switch to, brings it back (`Procs.switch`), the run that played
+joining the set. Every world there
+draws on the one glass, so a handheld's worlds share the system canvas
+rather than each making one. Admission is the desk's, over the S3s' 4 MiB
+share.
 
 What this changes in `docs/surface_model_v1.md` §14.1, the focused-window
 content freeze: nothing in the mechanism. The freeze is a *skip-draw* for a
@@ -111,7 +114,7 @@ under which a service persists what a kill would lose (a LoRaWAN frame
 counter). A crash is an exit, recorded in the strike ledger (§10).
 
 **The tick model.** The foreground app keeps frames: `update(dt)`/`draw()`
-as today; a minimised app keeps a reduced-rate `update` (above). **A background process, on every tier, never gets a per-frame
+as today; a minimised app keeps its `update` and a minimised game is paused (above). **A background process, on every tier, never gets a per-frame
 tick.** It declares its wake sources and sleeps between them: timers
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`) and events
 (`moybyte.on(source, fn)`: a UART, a socket readable, a pin edge, a LoRa
@@ -361,13 +364,36 @@ too, and a service with no wakes left has exited (0).
 ## 6. The task manager and admission
 
 **The task manager** is a system app listing every process with its state
-(running, throttled, minimised, paused, background, suspended), its CPU, its memory and a Close
-button. CPU is **exact**: the shell times each app's `update`, `draw` and
-callbacks. Memory is **exact for Lua and wasm**, read from their own heaps,
-and **approximate for Python**, counted as the allocations made during the
-app's own calls and labelled so, because one shared VM cannot attribute
-ownership. Background apps and services are rows too, beside the bar's
-indicator and its stop control (owner, 2026-11-03).
+(running, throttled, minimised, paused, background, suspended, crashed),
+its CPU, its memory and a Close button. CPU is **exact**: the shell times
+each app's `update`, `draw` and callbacks. Memory is **exact for Lua and
+wasm**, read from their own heaps, and **approximate for Python**, counted
+as the allocations made during the app's own calls and labelled so, because
+one shared VM cannot attribute ownership. Background apps and services are
+rows too, beside the bar's indicator and its stop control (owner,
+2026-11-03).
+
+As built (runtime/system/tasks_ui.py, the kernel kind `tasks`), phase 1
+lists Python runs and services; Lua and wasm rows arrive with phase 5. The
+Player times its run's `update`, `draw` and window events in microseconds,
+and the scheduler a process's callbacks (`Proc.cost_us`); every
+`METER_MS` (2 s) `Procs.account` turns each into busy microseconds a second,
+per mille of a core, the row's CPU. A Python run's memory is what its start
+allocated, its body and `_init`: the world it built, its frees not
+subtracted. The VM counts it in `moy_guard.allocated()` (from MicroPython's
+`gc_alloc_amount`, low across a collection, never high) on every console
+board and both unix builds; CPython reads tracemalloc while it traces, and
+otherwise the figure is absent (`-`). A service's is its start's the same
+way. Rows are the front run, the running set oldest first, then the
+services; the current row's verbs sit under the table: Switch to, Close,
+Stop for a service, Details for a crashed or suspended row (its log,
+`Workstation.open_log`), and Home on a handheld. It opens from the system
+menu's Tasks and by holding the console's key (`start`, the T-Deck's Mic)
+for `START_HOLD_MS` (500 ms) on every board: the key acts when it comes
+up, so a tap is the system menu or the pause menu as before (a T-Deck text
+field's Cancel), and a hold never cancels the field. On a handheld it goes
+on top, holding the front game while it shows, and its back returns to it;
+on the desk it is a window.
 
 **Admission.** An app that does not fit THE SHARES (`native/moy_play/moy_play.h`)
 beside what is already running is **refused with a message naming what to

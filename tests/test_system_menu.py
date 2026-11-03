@@ -198,7 +198,7 @@ def test_hamburger_tap_opens_menu_with_the_system_group(tmp_path):
     # a built-in: the console's own, so no Delete and no cart group (a run
     # restarts from the pause menu); off the home, Home leads the System
     # group, and restarting the console is last
-    assert _labels(ws) == ["SYSTEM", "HOME", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+    assert _labels(ws) == ["SYSTEM", "HOME", "TASKS", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
     reboot = ws.sysmenu.items[-1]
     assert reboot[3] == "power" and reboot[4] == "Restart Moybyte"
 
@@ -231,7 +231,7 @@ def test_an_own_cart_offers_delete_last_in_its_group(tmp_path):
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     assert _labels(ws) == ["EXTRA", "DELETE CART",
-                           "SYSTEM", "HOME", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+                           "SYSTEM", "HOME", "TASKS", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
     head = ws.sysmenu.items[0]
     assert head[0] == "header" and head[4] == "Extra"     # the look's caption
 
@@ -253,7 +253,7 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
         {"favourite": "ADD FAVOURITE", "change": "CHANGE", "copy": "DUPLICATE",
          "delete": "DELETE"}[v] for v in ws.launcher_layer.card_verbs()]
         if sel and sel.get("path") else [])
-    assert labels == card + ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+    assert labels == card + ["SYSTEM", "SEARCH", "TASKS", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
 
 
 # -- dismissal ---------------------------------------------------------------

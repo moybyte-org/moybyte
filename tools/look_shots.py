@@ -3214,12 +3214,18 @@ def _code_pairs(ws, img):
     """The Code tab's one inset (design review R3-10): the status line and
     the symbol keys start on the layout's `x0`, a line's number right-aligned
     in the gutter that starts there and its code on the text column after
-    it (D-03.1), a bearing's pixel aside; the worst of them is the measure."""
+    it (D-03.1), a bearing's pixel aside; the worst of them is the measure.
+    What an open system menu's card covers is not sampled."""
     if ws.screen != "menu" or getattr(ws, "menu_view", None) != "code":
         return []
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
     if lay is None:
         return []
+    mu = getattr(ws, "menu_ui", None)
+    card = mu._host.box("System") if mu is not None and ws.sysmenu.open else None
+
+    def shows(x, y, w, h):
+        return card is None or not _meets(card, (x, y, w, h))
     ed = ws.editor
     fs, x0 = lay.fs, lay.x0
     cl = ws.code_layer
@@ -3229,8 +3235,9 @@ def _code_pairs(ws, img):
     edges = []
     for i in range(lay.rows):
         n = ed.top + i
-        if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha():
-            y = oy + lay.y0 + i * lay.lh
+        y = oy + lay.y0 + i * lay.lh
+        if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha() \
+                and shows(ox + lay.cx, y, lay.cw, lay.lh):
             if gc:
                 at = x0 + (gc - 1 - len(str(n + 1))) * lay.cell
                 e = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
@@ -3239,7 +3246,8 @@ def _code_pairs(ws, img):
             edges.append((e, tx0))
             break
     sx, sy, _sw, sh = lay.status_band
-    edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
+    if shows(ox + sx, oy + sy, 200, sh):
+        edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
     if getattr(lay, "sym_h", 0):
         ky = oy + lay.sym_y + lay.sym_h // 2
         edges.append((_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1), x0))

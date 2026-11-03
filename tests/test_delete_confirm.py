@@ -156,7 +156,7 @@ def test_touch_answers_on_the_buttons_and_outside_the_card_cancels(tmp_path):
 def test_the_tdeck_x_asks_enter_keeps_and_mic_cancels(tmp_path):
     """The T-Deck's keyboard in raw mode, the home's: X asks, Enter on the
     default focus is Cancel, and Mic, the console's key, cancels."""
-    from test_system_key import MIC, _tdeck_frame
+    from test_system_key import MIC, _mic, _tdeck_frame
     from test_tdeck_keymap import _chord, _input_module
     mod = _input_module()
     ws = build_ws(tmp_path)
@@ -171,7 +171,7 @@ def test_the_tdeck_x_asks_enter_keeps_and_mic_cancels(tmp_path):
     assert not c.open and _there(ws)
     _tdeck_frame(ws, _chord(mod, ord("x")))
     _asked(ws, drv)
-    _tdeck_frame(ws, MIC)
+    _mic(ws, MIC)
     assert not c.open and not ws.sysmenu.open and _there(ws)
 
 

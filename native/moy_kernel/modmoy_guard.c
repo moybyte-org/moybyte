@@ -17,6 +17,14 @@
 //   can_abort()        whether a call() from here can be aborted
 //   stats()            (calls, aborts, last_land_us, max_land_us): the land is
 //                      the time from the timer's fire to the guard's return
+//   allocated()        the bytes the VM's allocator has handed out, counted
+//                      from its blocks since the last collection
+//                      (MICROPY_GC_ALLOC_THRESHOLD's gc_alloc_amount), wrapping
+//                      at 2**30 so it stays a small int: a difference across a
+//                      call is what the call allocated. A collection between
+//                      two reads loses what was allocated before it (it resets
+//                      the amount), so the count runs low, never high; the
+//                      task manager labels Python's memory approximate
 //   ABORTED            the sentinel call() answers for an aborted callback
 //
 // WHAT AN ABORT SKIPS. Every Python handler between the guard and the point
@@ -191,6 +199,26 @@ static mp_obj_t guard_cost(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(guard_cost_obj, guard_cost);
 
+#if MICROPY_GC_ALLOC_THRESHOLD
+static size_t s_amount_seen;
+static uint32_t s_colls_seen, s_alloc_blocks;
+
+static mp_obj_t guard_allocated(void) {
+    size_t now = MP_STATE_MEM(gc_alloc_amount);
+    uint32_t colls = &moybyte_gc_pause != NULL ? moybyte_gc_pause[0] : 0u;
+    if (colls != s_colls_seen || now < s_amount_seen) {
+        s_alloc_blocks += (uint32_t)now;        // what came since the collection
+    } else {
+        s_alloc_blocks += (uint32_t)(now - s_amount_seen);
+    }
+    s_amount_seen = now;
+    s_colls_seen = colls;
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)((s_alloc_blocks * MICROPY_BYTES_PER_GC_BLOCK)
+                                           & 0x3FFFFFFFu));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(guard_allocated_obj, guard_allocated);
+#endif
+
 static mp_obj_t guard_can_abort(void) {
     return mp_obj_new_bool(mp_thread_is_main_thread());
 }
@@ -212,6 +240,9 @@ static const mp_rom_map_elem_t moy_guard_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_cost), MP_ROM_PTR(&guard_cost_obj) },
     { MP_ROM_QSTR(MP_QSTR_can_abort), MP_ROM_PTR(&guard_can_abort_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&guard_stats_obj) },
+    #if MICROPY_GC_ALLOC_THRESHOLD
+    { MP_ROM_QSTR(MP_QSTR_allocated), MP_ROM_PTR(&guard_allocated_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(moy_guard_globals, moy_guard_globals_table);
 

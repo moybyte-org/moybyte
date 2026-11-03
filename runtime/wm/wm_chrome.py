@@ -48,7 +48,7 @@ RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title).
 _TITLES = {"menu": "Editor", "projects": "Projects",
-           "settings": "Settings", "update": "Update"}
+           "settings": "Settings", "update": "Update", "tasks": "Tasks"}
 # The Editor's title in its theme mode (runtime/editors/theme_editor.py).
 THEME_TITLE = "Theme"
 # The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
@@ -59,10 +59,10 @@ _PLAY = "Play"
 
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
-                "update": "get", "desktop": "run"}
+                "update": "get", "desktop": "run", "tasks": "run"}
 # ...and the slot of an icon set (runtime/toolkit/iconsets.py) each draws.
 _ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
-               "update": "getcarts", "desktop": "run"}
+               "update": "getcarts", "desktop": "run", "tasks": "layout"}
 # `win.header`'s `fill` (style.json's theme.look enum: plain, fill, bar, grad),
 # whose focused header is the `value` colour and its title and icon `value_ink`.
 _HEAD_FILL = 1

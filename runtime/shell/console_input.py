@@ -29,7 +29,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
 
 
+# How long the console's key is held to open the task manager, ms.
+START_HOLD_MS = 500
+
+
 class InputVerbs:
+
+    _start_down = 0               # when the console's key went down; 0: not armed
 
     def handle_input(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
@@ -62,14 +68,30 @@ class InputVerbs:
             i.cart_keys = ck
         self._menu_keys()
         # Super (the `start` button) is the console's from every surface, before
-        # any layer: the system menu, or the pause menu over a fullscreen game.
+        # any layer, and acts when it comes up: a tap is the system menu, or
+        # the pause menu over a fullscreen game (a T-Deck text field's Cancel);
+        # held START_HOLD_MS it opens the task manager, and its release is
+        # spent. Another key going down while it is held spends it too (a
+        # chord), as the host's Super does.
         if i.pressed("start"):
             desk = self._editor_desk
             if desk is not None and i.held("select") and desk.select_start():
                 return                  # the desk Editor's Select+Start: Play
-            if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
-                self.system_key()
+            self._start_down = _ticks_ms() or 1
             return
+        if self._start_down:
+            if i.held("start"):
+                if i.last_key or i.any_pressed():
+                    self._start_down = 0        # a chord: the key does nothing
+                elif _ticks_diff(_ticks_ms(), self._start_down) >= START_HOLD_MS:
+                    self._start_down = 0
+                    self.open_tasks()
+                    return
+            else:
+                self._start_down = 0
+                if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
+                    self.system_key()
+                return
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every

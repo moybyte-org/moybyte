@@ -428,7 +428,8 @@ class ConsoleDriver:
         fullscreen surface (its Esc is the bar's back), or the focused desk
         window shows its back chevron."""
         ws = self.ws
-        return (self.menu_open() or ws.plays_fullscreen() or ws.screen == "settings"
+        return (self.menu_open() or ws.plays_fullscreen()
+                or ws.screen in ("settings", "tasks")
                 or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
                 or (ws.windowed_chrome and ws.wm.focus_has_back()))
 
@@ -453,6 +454,8 @@ class ConsoleDriver:
             ws.system_key()
         elif ws.screen == "settings":
             ws.settings_layer.back()
+        elif ws.screen == "tasks" and not ws.windowed_chrome:
+            ws.tasks_layer.back()
         elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
             ws.app_back()
         elif ws.windowed_chrome and ws.wm.focus_back():

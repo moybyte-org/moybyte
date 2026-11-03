@@ -1,7 +1,7 @@
 {"query": "?dev=1", "boot_ms": 30000, "steps": [
-  {"note": "the desk; Settings from the system menu, then its APPEARANCE row", "wait": 3000},
+  {"note": "the desk; Settings from the system menu (under Home and Tasks), then its APPEARANCE row", "wait": 3000},
   {"click": [16, 14]}, {"wait": 600},
-  {"click": [77, 104]}, {"wait": 1200},
+  {"click": [77, 126]}, {"wait": 1200},
   {"click": [443, 273]}, {"wait": 1500},
   {"note": "ACCENT's second swatch (coral): the look is custom, NAME... appears below the fold; the page scrolls to it and a tap on it opens the field"},
   {"click": [845, 359]}, {"wait": 1200},

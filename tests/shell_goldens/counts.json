@@ -61,6 +61,16 @@
     "unlock_banner": [63, 16],
     "web_console": [165, 8]
   },
+  "guition_480x320_fs1_tasks": {
+    "tasks_crashed_service": [8, 22],
+    "tasks_empty": [7, 7],
+    "tasks_two_games": [8, 18]
+  },
+  "guition_p4_1280x800_tasks": {
+    "tasks_crashed_service": [2, 12],
+    "tasks_empty": [0, 5],
+    "tasks_two_games": [2, 13]
+  },
   "guition_p4_1280x800_windowed": {
     "about": [9, 6],
     "app_appearance": [39, 36],
@@ -308,7 +318,7 @@
   "p4_1024x600_cs2_fs1_moy_menus": {
     "pause": [7, 14],
     "pause_options": [19, 6],
-    "sysmenu": [2, 8]
+    "sysmenu": [2, 10]
   },
   "p4_1024x600_cs2_fs1_moy_night": {
     "about": [9, 6],
@@ -348,12 +358,17 @@
     "desk_window_calc": [0, 5],
     "popover_battery": [35, 31],
     "popover_clock": [29, 64],
-    "popover_menu": [2, 12],
+    "popover_menu": [2, 14],
     "popover_wifi": [26, 36]
   },
   "p4_1024x600_cs2_fs1_procs": {
     "desk_close_refusal": [6, 13],
     "desk_two_games": [2, 9]
+  },
+  "p4_1024x600_cs2_fs1_tasks": {
+    "tasks_crashed_service": [2, 12],
+    "tasks_empty": [0, 5],
+    "tasks_two_games": [2, 13]
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": [9, 6],
@@ -733,7 +748,7 @@
     "web_console": [166, 8]
   },
   "tdeck_320x240_fs1_moy_menus": {
-    "pause": [7, 12],
+    "pause": [7, 14],
     "pause_options": [19, 6],
     "sysmenu": [3, 12]
   },
@@ -775,6 +790,11 @@
   "tdeck_320x240_fs1_parts_night": {
     "parts_appearance": [45, 19],
     "parts_settings": [28, 19]
+  },
+  "tdeck_320x240_fs1_tasks": {
+    "tasks_crashed_service": [8, 22],
+    "tasks_empty": [7, 7],
+    "tasks_two_games": [8, 18]
   },
   "tdeck_320x240_fs1_ui_page": {
     "ui_page": [18, 11]

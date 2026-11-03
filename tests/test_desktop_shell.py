@@ -731,7 +731,7 @@ def test_the_pause_menus_quit_exits_a_game_to_the_caller(tmp_path):
     drv.system_key()
     drv.frame(1 / 30)
     assert ws.pause.open and ws.screen == "desktop"
-    ws.pause.choose(3)                 # Quit
+    ws.pause.choose(ws.pause.rows.index("Quit"))
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -920,7 +920,7 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     drv.frame(1 / 30)
     drv.system_key()                   # the console's key: the pause menu
     drv.frame(1 / 30)
-    ws.pause.choose(3)                 # Quit
+    ws.pause.choose(ws.pause.rows.index("Quit"))
     drv.frame(1 / 30)
     assert ws.screen == "menu"         # exit returned to the EDITOR...
     assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)

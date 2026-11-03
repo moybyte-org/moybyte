@@ -10,7 +10,7 @@ import pytest
 
 from runtime import ui_draw
 from ws_helpers import build_ws, make_drv
-from test_system_key import MIC, _tdeck_frame
+from test_system_key import MIC, _mic
 from test_hint_inputs import _strip
 
 _DT = 1 / 30
@@ -56,7 +56,7 @@ def test_the_tdeck_mic_cancels_the_field_and_puts_its_text_back(tmp_path):
     ws, drv, sl = _name_field(tmp_path)
     _type(drv, "xyz")
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC, text=True)
+    _mic(ws, MIC, text=True)
     assert not ws.sysmenu.open, "inside a field Mic is Cancel, not the console's key"
     drv.frame(_DT)
     drv.frame(_DT)
@@ -75,7 +75,7 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
     monkeypatch.setattr(settings_layer._ui, "hints",
                         lambda items, *a: (drawn.append(tuple(items)), real(items, *a))[1])
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC, text=True)
+    _mic(ws, MIC, text=True)
     ws._dirty = True
     drv.frame(_DT)
     assert drawn[-1] != settings_layer._HINT_TYPE, drawn[-1]
@@ -84,11 +84,11 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
 def test_mic_outside_a_field_is_still_the_console_key(tmp_path):
     ws, drv, sl = _name_field(tmp_path)
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC, text=True)            # cancels: focus leaves the field
+    _mic(ws, MIC, text=True)            # cancels: focus leaves the field
     drv.frame(_DT)
     drv.frame(_DT)
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC)
+    _mic(ws, MIC)
     assert ws.sysmenu.open
 
 
@@ -125,7 +125,7 @@ def test_mic_cancels_the_wifi_password_prompt(tmp_path):
     _type(drv, "abc")
     assert sl.editing_field()
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC, text=True)
+    _mic(ws, MIC, text=True)
     assert sl.wifi_pick is None and not ws.sysmenu.open
 
 
@@ -135,7 +135,7 @@ def test_the_home_search_is_a_field_mic_cancels(tmp_path):
     ws.open_search()
     ws.set_search_query("sta")
     ui_draw.input_kind("tdeck")
-    _tdeck_frame(ws, MIC, text=True)
+    _mic(ws, MIC, text=True)
     assert not ws.search_typing and ws.search_query == "" and not ws.sysmenu.open
 
 

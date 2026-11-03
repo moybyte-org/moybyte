@@ -38,14 +38,18 @@ def _frames(drv, k=2):
 
 
 def _press(ws, name):
-    """One frame of a board's input: `name` pressed, through the console's
-    router, as a BLE keyboard's GUI key or Esc arrives."""
+    """A board's button tapped, through the console's router, as a BLE
+    keyboard's GUI key or Esc arrives: the frame it goes down, and the
+    frame it comes up (the console's key acts on its release)."""
     was = ws.input
     i = InputTable()
     i.source("kbd").set_button(name, True)
     i.begin_frame()
     ws.input = i
     try:
+        ws.handle_input()
+        i.source("kbd").set_button(name, False)
+        i.begin_frame()
         ws.handle_input()
     finally:
         ws.input = was
@@ -140,32 +144,40 @@ def _tdeck_frame(ws, frame, raw=True, text=False):
 MIC = bytes([0x40, 0, 0, 0, 0])             # the matrix with only Mic down
 
 
+def _mic(ws, frame=MIC, raw=True, text=False):
+    """Mic tapped on the T-Deck: its frame down, then the matrix with
+    nothing down (the console's key acts on its release)."""
+    table = _tdeck_frame(ws, frame, raw=raw, text=text)
+    _tdeck_frame(ws, bytes(5), text=text)
+    return table
+
+
 def test_the_tdeck_mic_key_pauses_a_game_and_opens_the_system_menu_elsewhere(tmp_path):
     ws = build_ws(tmp_path)
     _frames(make_drv(ws))
-    table = _tdeck_frame(ws, MIC)
+    table = _mic(ws, MIC)
     assert table.held("start") and ws.sysmenu.open and not ws.pause.open
-    _tdeck_frame(ws, MIC)
+    _mic(ws, MIC)
     assert not ws.sysmenu.open, "Mic again closes it"
     ws, _drv = _game(tmp_path / "g")
-    _tdeck_frame(ws, MIC)
+    _mic(ws, MIC)
     assert ws.pause.open and ws.player.paused and not ws.sysmenu.open
-    _tdeck_frame(ws, MIC)
+    _mic(ws, MIC)
     assert not ws.pause.open and not ws.player.paused
 
 
 def test_the_tdeck_mic_key_works_in_text_mode_and_on_the_ascii_path(tmp_path):
     ws = build_ws(tmp_path)
     _frames(make_drv(ws))
-    _tdeck_frame(ws, MIC, text=True)                  # a text surface, matrix still streaming
+    _mic(ws, MIC, text=True)                  # a text surface, matrix still streaming
     assert ws.sysmenu.open
-    _tdeck_frame(ws, MIC, text=True)
+    _mic(ws, MIC, text=True)
     assert not ws.sysmenu.open
-    _tdeck_frame(ws, [b"\xe0"], raw=False, text=True)   # ASCII mode: Shift+Mic
+    _mic(ws, [b"\xe0"], raw=False, text=True)   # ASCII mode: Shift+Mic
     assert ws.sysmenu.open
     ws.sysmenu.close()
     ws, _drv = _game(tmp_path / "g")
-    _tdeck_frame(ws, [b"\xe0"], raw=False)
+    _mic(ws, [b"\xe0"], raw=False)
     assert ws.pause.open
 
 
@@ -246,8 +258,9 @@ def test_options_is_the_cards_second_page_and_esc_goes_back(tmp_path):
     ws, drv = _game(tmp_path)
     drv.system_key()
     drv.frame(_DT)
-    _key(drv, "down")
-    _key(drv, "down")
+    assert ws.pause.rows == ws.pause.HAND_ITEMS     # a handheld's card: Minimise second
+    for _ in range(3):
+        _key(drv, "down")
     _key(drv, "a")
     assert ws.pause.open and ws.pause.page == 1
     v0 = ws.settings_layer.level("volume")[0]
@@ -263,6 +276,7 @@ def test_restart_runs_the_cart_from_the_top(tmp_path):
     ws, drv = _game(tmp_path)
     _frames(drv, 5)
     drv.system_key()
+    _key(drv, "down")
     _key(drv, "down")
     _key(drv, "a")
     assert not ws.pause.open and not ws.player.paused
@@ -296,7 +310,7 @@ def test_esc_over_an_editor_playtest_pauses_and_quit_returns_to_the_editor(tmp_p
 def test_quit_leaves_for_the_caller(tmp_path):
     ws, drv = _game(tmp_path)
     drv.system_key()
-    for _ in range(3):
+    for _ in range(4):
         _key(drv, "down")
     _key(drv, "a")
     assert not ws.pause.open and ws.screen != "desktop"
@@ -547,10 +561,11 @@ def _choose(ws, row):
 
 def test_the_pause_card_offers_play_in_a_window_on_a_board_with_a_desk(tmp_path):
     """A board with a desk offers Play in a window over a full-screen game in
-    both modes, the desk's and console mode's; a handheld never does."""
+    both modes, the desk's and console mode's; a handheld never does (it
+    offers Minimise)."""
     ws, drv = _game(tmp_path / "handheld")
     drv.system_key()
-    assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS
+    assert ws.pause.open and ws.pause.rows == ws.pause.HAND_ITEMS
     ws, drv = _desk_game(tmp_path / "desk")
     assert ws.wm.mode == "desktop" and ws.plays_fullscreen()
     drv.system_key()

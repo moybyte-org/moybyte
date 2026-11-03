@@ -452,7 +452,16 @@ game full screen, or docked in the Editor's Run slot, has **Play in a window**
 after Resume (owner, 2026-10-31): the run goes on where it stood in a desk
 window of its own (`WindowedWM.play_in_window`; console mode gives the desk
 back first), whose maximise is the way back to full screen. Over a game
-already in a window the menu has no such row, and a handheld never offers it.
+already in a window the menu has no such row, and a handheld never offers it;
+a handheld's menu has **Minimise** there instead (owner, 2026-11-03): the
+game is held where it is in the running set and the console goes home.
+
+The key acts when it comes up. **Held** for half a second (`START_HOLD_MS`) on
+any board it opens the **task manager** instead (owner, 2026-11-03;
+`docs/os_2026-11/processes.md` §6), from every surface, a text field
+included, whose text it leaves as it was; the system menu's Tasks opens it
+too. From it the running games and apps are switched to or closed, and on a
+handheld Home goes home with the game that played kept minimised.
 
 Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
 mode. A **`textmode(True)` game** reaches its pause menu through the console key

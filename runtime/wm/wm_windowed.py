@@ -1716,6 +1716,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True                 # a parked desk's wallpaper is not drawn
         if ws.procs.list:
             return True                 # a running set's game steps every frame
+        if "tasks" in self._wins and ws.tasks_layer.moved():
+            return True                 # the task manager's rows moved
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.player.paused
                 and (ws._update is not None or ws._draw is not None)

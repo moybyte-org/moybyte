@@ -1543,6 +1543,8 @@ def test_select_start_plays_and_restarts_and_start_alone_is_the_console_key(desk
     monkeypatch.setattr(ws, "system_key", lambda: opened.append(1))
     pad["held"], pad["pressed"] = set(), {"start"}
     drv.frame(DT)
+    pad["pressed"] = set()
+    drv.frame(DT)                       # the console's key acts as it comes up
     assert opened == [1]
 
 

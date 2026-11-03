@@ -98,6 +98,28 @@ EXITED = "exited"
 SHELL = 1
 SERVICE, APP = "service", "app"
 
+ALLOC_WRAP = _WRAP              # `allocated()` wraps here: a difference is masked by it
+
+try:
+    import tracemalloc as _tm
+except ImportError:  # a board: the guard counts
+    _tm = None
+_ALLOCATED = getattr(_guard, "allocated", None) if _guard is not None else None
+
+
+def allocated():
+    """The bytes the VM has allocated, a count that wraps at ALLOC_WRAP:
+    a difference across a call is what the call allocated, its frees not
+    subtracted (one shared heap cannot say whose an object is), so a
+    process's memory is approximate. The boards and the unix builds count
+    in the guard (`moy_guard.allocated`); CPython reads tracemalloc's
+    current figure while it traces (the tests), and None otherwise."""
+    if _ALLOCATED is not None:
+        return _ALLOCATED()
+    if _tm is not None and _tm.is_tracing():
+        return _tm.get_traced_memory()[0] & _WRAP
+    return None
+
 _W = _moybyte._OWNER, _moybyte._HOW, _moybyte._AFTER
 _OWNER, _HOW, _AFTER = _W
 
@@ -120,6 +142,9 @@ class Proc:
         self.code = None
         self.calls = 0
         self.cost_us = 0        # its callbacks' cost, summed (wrapping at 2**30)
+        self.mem = None         # what its start allocated (`allocated`), bytes
+        self.cpu = None         # its last sample's busy us a second (Procs.account)
+        self.seen_us = 0        # cost_us at that sample
 
 
 def _log(level, pid, *parts):
@@ -339,10 +364,15 @@ class Scheduler:
         src = cart.get("src") or ""
 
         def body():
-            exec(compile(src, "<%s>" % name, "exec"), ns)
+            code = compile(src, "<%s>" % name, "exec")
+            a0 = allocated()
+            exec(code, ns)
             hook = ns.get("moy_start")
             if hook is not None:
                 hook()
+            a1 = allocated()
+            if a0 is not None and a1 is not None:
+                p.mem = (a1 - a0) & _WRAP
         r = self._guarded(pid, body, None, MOY_SERVICE_STOP_MS * 1000, False)
         if p.state == EXITED:
             return None

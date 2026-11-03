@@ -61,6 +61,16 @@
     "unlock_banner": "ad41af8fdc22fc2be18aaaa520fbd32e338a4d404ec5887fefe82b17ca7ff904",
     "web_console": "9bb06893023b02a6a4fb83668f3a15aaddc2e9294c9f05c7fb8a2f6fededeb09"
   },
+  "guition_480x320_fs1_tasks": {
+    "tasks_crashed_service": "06badb41ae3069911d2ce3b1e8a582d4b2a11ef88b24c788cfa1788724c6215e",
+    "tasks_empty": "7002b01bf35afdd1cc397d1ca880c4044ee882521fb50ea95a3141dd00b69c53",
+    "tasks_two_games": "8ae9eaa479106b0bfa4ae8fc3a59cbff5381cde788f2cfb9df9a40ceb867d9b2"
+  },
+  "guition_p4_1280x800_tasks": {
+    "tasks_crashed_service": "929bc21dc66b7c3c1b8bd1943a31b28c0cfda705a3121d5fca455408d6623e4b",
+    "tasks_empty": "8596e1befa49782a23651f6bee7c4ea826b02767babadff7930872ab32593bd3",
+    "tasks_two_games": "af376424243cdc7e8a2be39fceb7ed72aab3b62ba36f0f0b0011dcf8b2bac5d7"
+  },
   "guition_p4_1280x800_windowed": {
     "about": "0c5b9f3d2cfedf137b3c61fbedde5e9c0cf7a9a51c3c0f7b567fa94e1c96530c",
     "app_appearance": "f358e569d71145460d5cd7cb75d7a00f34a3469da15a1254efeb0d9e3f5635ee",
@@ -308,7 +318,7 @@
   "p4_1024x600_cs2_fs1_moy_menus": {
     "pause": "dbaa27fe90135081b30bb73392bdf5c3fb09ab5fa1483d49ee7f9a1fc69316e7",
     "pause_options": "6e9f260c681815a52cf7ae26178b9266db4da48815ecd1768edc1bd7074fc791",
-    "sysmenu": "818ae4f3306504225b2127a9befda9fb1d370201552e7b338dfe5170eef510b6"
+    "sysmenu": "603e0b9b238edc3e12692365181a8d7769b45e523b30ffadd7cf6b657a6435f0"
   },
   "p4_1024x600_cs2_fs1_moy_night": {
     "about": "ad1f1f94c9cf39f0f31c9d9044aad80a60881fe2446397b94f920e7f81f1985f",
@@ -348,12 +358,17 @@
     "desk_window_calc": "6a90d38e008fae95b4d1f59b384f82831137787d7dcb8b6867d05967892cb46f",
     "popover_battery": "3bc1be16c4e240274c8d2f58fa8fe73ec74bc09e04aa1e33ef043abd221cb124",
     "popover_clock": "098f1d284638f5df7f51909c89e65e374a6a3f00909d88a9f0ea30e022d7dff5",
-    "popover_menu": "fa860b6e45c22fbb1c4994db2a29e5a5905e3fc50cdafaf0b5ceada26ee9205f",
+    "popover_menu": "9a8c7bccfa48d00a8069c1a9839f2517bd68af8ba6fe4bd439f07c344ba3e717",
     "popover_wifi": "376075958a559d984fde4fc9a6d33a9c30444d9183e193c76ccd3738c7960605"
   },
   "p4_1024x600_cs2_fs1_procs": {
     "desk_close_refusal": "71d1ab6657ca6fd5893fd79715d210dd165c2b1b2ecd4f2e741d5a519303a158",
     "desk_two_games": "27fce801e7f89bf513bf4a0861a0f67575f764c63d87f3f2dc2ec5744a9c7815"
+  },
+  "p4_1024x600_cs2_fs1_tasks": {
+    "tasks_crashed_service": "ab08ba7a6bdb0c54d7d4ddb696df659dbce90553b0d36baf3a2d2770827b8942",
+    "tasks_empty": "2ee4c07783c3044367c8bda8479b1a512b8a08fdaa511a8802ed4ad91d753d03",
+    "tasks_two_games": "d966e57ba75bf0e239b653a3ca9468311577f53d9a911255c438fa599e473dfb"
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": "169d97a5f178abc00cd8dd9773f8cf5336d8047476f5e9ef6333327037bcdc90",
@@ -733,9 +748,9 @@
     "web_console": "68aed97069654eaa861418d54e3f026e78414c3d76706a888f76f89f4c8ae3d4"
   },
   "tdeck_320x240_fs1_moy_menus": {
-    "pause": "975e4a7a90a4c9dd8c84ca26525c446c06c0c2329eb567b7885aa7e2da20843e",
+    "pause": "d871c3d7f69bb04c84764ceb734c11326a5800156f2e082c049ec35ac76c0899",
     "pause_options": "20b40fb1f36328d6b5b70264da376d49cad42cda5fc228dd4b0e1b0f04c2fcea",
-    "sysmenu": "896ac5164c1c02ab502c7cb026e8822acb07e47a685eb4ddb0a71d701af6c1f6"
+    "sysmenu": "15f773107cb84430a868e151be0c8a5dfd502c56b09de080d35ffe41bfabfcc5"
   },
   "tdeck_320x240_fs1_moy_night": {
     "about": "3d9c15d69c79dfc1b28587a49edd555822d0a8c4af877691d32380d745893a31",
@@ -776,13 +791,18 @@
     "parts_appearance": "1c362fff7c2442166aaefccfa8cd98ffcc6b037b37536b12f5703355e1466701",
     "parts_settings": "a363b07f8a16eb757ad4e0e584b7b51c6f7c1a85bfc9bcd739e514dbbc988fbd"
   },
+  "tdeck_320x240_fs1_tasks": {
+    "tasks_crashed_service": "e802361d45dbf0f2bd0a1f7f2bab60a731821a46a0b9b43bc64a5d14f6ec74fa",
+    "tasks_empty": "f81d6872aa55764a4e443495110a94655da46a45450a16f7145cd474e02da757",
+    "tasks_two_games": "b40601560f5016277d6218d51f84701e107495d2897c8fa8a915972fa95655e6"
+  },
   "tdeck_320x240_fs1_ui_page": {
     "ui_page": "3f1af4c51d2ccc1e9f4dbdd1c2d77a9154e353f021ab29e8a842782305b3f24f"
   },
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": "71cc6deaac78311eb1433388047b204dddc23ced2fab2faf2d3468db7bcc5847",
     "page_clock": "71cc6deaac78311eb1433388047b204dddc23ced2fab2faf2d3468db7bcc5847",
-    "page_menu": "71f60f424036e5bc6069587e3f2301e882de34bacf52bf41645a7e679e623d55",
+    "page_menu": "1d2e4d36d0d04ed8fe343af26f3229aafa9c537df44fa27618c596883803a37f",
     "page_wifi": "71cc6deaac78311eb1433388047b204dddc23ced2fab2faf2d3468db7bcc5847"
   }
 }

@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   World                    a run's world held aside; _swap exchanges it
+#   _hold                    a minimised game held; _unhold gives it back
+#   Proc                     a running game or app beside the front one
+#   Procs                    the running set (`ws.procs`)
+#   -- the running set       handheld, _front_live, _detachable, running, find
+#   -- launching             launch, refuse, title_of
+#   -- worlds                _fresh, detach, minimise, switch, promote, close
+#   -- the frame             frame, _step, _front_state, _pace
+#   -- the accounting        account, rows, stop_service, forget, _meter
 """The running set: several apps at once (docs/os_2026-11/processes.md §1, §6).
 
 A run's WORLD is what the shell holds of it on the Workstation: its Player,
@@ -29,9 +39,21 @@ The window states (processes.md §1, as built):
               while it does not; between draws its window presents the
               canvas's last frame (`owed`);
   minimised   a window hidden to its chip, covered by a full-screen window
-              or parked by console mode: `update` every MIN_UPDATE_MS with
-              the true dt, no `draw`. Entering it calls the cart's
-              `_minimise()`, leaving it `_restore()` (Player.window_event).
+              or parked by console mode, and every Proc on a handheld: a
+              game is held (no `update`, no `draw`, its clock stopped as the
+              pause menu stops it), an app (`"type": "app"`) keeps its
+              `update` every loop frame and never draws. Entering it calls
+              the cart's `_minimise()`, leaving it `_restore()`
+              (Player.window_event).
+
+A handheld (a WM with no desk) keeps the same set with no windows: the
+pause card's Minimise detaches the front game and goes home (a launch
+replaces a front run that plays, as before), and `switch` brings a Proc to
+the front (the task manager's Switch to, or launching its cart again), the
+run that played joining the set.
+
+`account` samples every run's and every service's CPU each METER_MS, for
+the task manager (runtime/system/tasks_ui.py) and `rows`.
 
 A Proc reads no input: its namespace's input verbs answer nothing while it
 is detached (`MUTED`), and its Player keeps no edges and pulls no mix.
@@ -59,17 +81,22 @@ try:
     import moy_loop as _loop
 except ImportError:  # host: no kernel loop to pace
     _loop = None
+try:
+    import scheduler as _sched
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import scheduler as _sched
 
 RUN = "run:"                    # a Proc window's key prefix
 FRONT = "desktop"               # the front run's window key
 OWNERS = ("cart", "cart2", "cart3", "cart4")    # audio_session.OWNERS' runs
-MIN_UPDATE_MS = 100             # a minimised app's update period
 THROTTLE_MIN = 2                # a throttled game's draw divisor, least...
 THROTTLE_MAX = 4                # ...and most
 PACE_MS = 500                   # how often the divisor moves, at most
 METER_MS = 2000                 # the PROCS line's period under PERF DIAG
 
 RUNNING, THROTTLED, MINIMISED = "running", "throttled", "minimised"
+PAUSED, CRASHED = "paused", "crashed"
+SVC = "svc:"                    # a service row's key prefix
 
 # The Workstation's fields a world holds, and its InputState's.
 _WS = ("player", "project", "audio", "canvas", "cart_frame", "_run_canvas",
@@ -131,6 +158,36 @@ def _swap(ws, w):
         setattr(w, name, a)
 
 
+def _is_app(cart):
+    return (cart or {}).get("type") == "app"
+
+
+def _hold(pl):
+    """A minimised game held: its clock stopped as the pause menu stops it
+    (`Player.pause`), what held it marked so `_unhold` gives back only its
+    own hold. A pause the card made already counts as the hold."""
+    if pl._paused_at:
+        pl._min_held = True
+        return
+    if pl.detached:
+        pl._paused_at = _ticks_ms() or 1    # a Proc's session is not the audible one
+        pl._audio_held = 0
+    else:
+        pl.pause()
+    pl._min_held = True
+
+
+def _unhold(pl):
+    if getattr(pl, "_min_held", False):
+        pl._min_held = False
+        pl.resume()
+
+
+def _sample(pl, el):
+    pl.cpu = (pl.us_upd + pl.us_draw) // el
+    pl.us_upd = pl.us_draw = 0
+
+
 class Proc:
     """A running game beside the front one: its window's key and world."""
 
@@ -140,10 +197,10 @@ class Proc:
         self.state = THROTTLED
         self.skip = 0               # its draw frames since the last it drew
         self.owed = 0               # painted frames its last draw is owed
-        self.last = _ticks_ms()     # its last update (minimised)
         self.draws = self.ups = 0   # since the meter's last sample
         self.fps = self.rate = 0.0  # the meter's last sample: draws, updates /s
         self.name = "Game"          # its cart's title (`named`)
+        self.app = False            # an `"type": "app"` cart: updated while minimised
 
     @property
     def player(self):
@@ -154,6 +211,7 @@ class Proc:
         is held aside, never while installed)."""
         c = self.world.project.cart if self.world.project is not None else None
         self.name = str((c or {}).get("title") or "Game")
+        self.app = _is_app(c)
 
     def title(self):
         return self.name
@@ -173,18 +231,28 @@ class Procs:
         self._ema = 0               # the loop period, smoothed (ms)
         self._paced = 0             # when the divisor last moved
         self._meter_t = 0
+        self._acct_t = 0            # the last accounting sample
+        self.gen = 0                # moves with every sample and every change
         self._front_min = None      # the front Player the last frame minimised
         ws._world_made = None
 
     # -- the running set ----------------------------------------------------
 
+    def handheld(self):
+        """The WM has no desk: the running set keeps no windows."""
+        return not getattr(self.ws.wm, "has_desk", False)
+
     def _front_live(self):
-        """The front run is a live game in a desk window."""
+        """The front run is a live game in a desk window, or on a
+        handheld's back-stack."""
         ws = self.ws
-        wins = getattr(ws.wm, "_wins", None)
         pl = ws.player
-        return (wins is not None and FRONT in wins and pl.cart_error is None
-                and (pl._update is not None or pl._draw is not None))
+        if pl.cart_error is not None or (pl._update is None and pl._draw is None):
+            return False
+        if self.handheld():
+            return ws.wm.stack.has(FRONT)
+        wins = getattr(ws.wm, "_wins", None)
+        return wins is not None and FRONT in wins
 
     def _detachable(self):
         """The front run can join the running set: a Python game in a desk
@@ -192,14 +260,16 @@ class Procs:
         a linked match."""
         ws = self.ws
         wm = ws.wm
-        if getattr(wm, "mode", None) != "desktop" or not self._front_live():
+        hand = self.handheld()
+        if not (hand or getattr(wm, "mode", None) == "desktop") or not self._front_live():
             return False
-        win = wm._wins[FRONT]
         pl = ws.player
-        if win.docked is not None or getattr(win, "own", False) \
-                or getattr(wm, "_play_intent", None) == "dev":
-            return False
-        if pl._is_tool or pl._lua is not None or pl._play is not None \
+        if not hand:
+            win = wm._wins[FRONT]
+            if win.docked is not None or getattr(win, "own", False) \
+                    or getattr(wm, "_play_intent", None) == "dev":
+                return False
+        if (pl._is_tool and not (hand and _is_app(ws.cart))) or pl._script or pl._lua is not None or pl._play is not None \
                 or pl._netplay is not None or ws.cart_frame is not None:
             return False
         ed = getattr(ws, "editor_app", None)
@@ -207,13 +277,16 @@ class Procs:
 
     def running(self):
         """The running set as admission counts it, oldest first:
-        (key, need, python) a run, the front's last."""
+        (key, need, python) a run, the front's last. A handheld's front run
+        is the one a launch replaces, so it does not count there."""
         ws = self.ws
         rts = getattr(ws, "runtimes", None) or {}
         out = []
         for p in self.list:
             c = p.world.project.cart
             out.append((p.key, _fit.app_need(c), True))
+        if self.handheld():
+            return out
         if self._detachable():
             c = ws.cart or {}
             rt = c.get("runtime", "python")
@@ -256,15 +329,20 @@ class Procs:
         running set when one plays), False when it was handled here -- a
         Proc already running it brought to the front, or a refusal."""
         ws = self.ws
-        if getattr(ws.wm, "mode", None) != "desktop":
+        hand = self.handheld()
+        if not hand and getattr(ws.wm, "mode", None) != "desktop":
             return True
         p = self.find(cart)
         if p is not None:
-            self.promote(p)
-            ws.wm._bring_forward(FRONT)
+            if hand:
+                self.switch(p)
+            else:
+                self.promote(p)
+                ws.wm._bring_forward(FRONT)
             return False
         cart = cart or {}
-        if cart.get("type") in BAR_TYPES or cart.get("broken"):
+        if cart.get("broken") or (cart.get("type") in BAR_TYPES
+                                  and not (hand and _is_app(cart))):
             return True
         front = ws.cart
         if front is not None and front.get("path") == cart.get("path"):
@@ -279,7 +357,7 @@ class Procs:
         if close:
             self.refuse(cart, close)
             return False
-        if self._detachable():
+        if not hand and self._detachable():
             self.detach()
         return True
 
@@ -332,6 +410,14 @@ class Procs:
         if mk is None or owner is None:
             return None
         base = ws._run_canvas_stock or ws.canvas
+        if self.handheld():
+            # every world draws on the one glass: only the front draws there
+            w = World()
+            w.player = type(ws.player)(ws, ws.player.NAMES)
+            w.player.owner = owner
+            w.project = type(ws.project)(ws)
+            w.canvas = base
+            return w
         tag = owner + ".world"
         try:
             cv = mk(base.w, base.h, tag)
@@ -421,26 +507,63 @@ class Procs:
         under a Proc's key, and a fresh world is installed for the run
         about to open. False where no world could be made."""
         ws = self.ws
+        hand = self.handheld()
         w = self._fresh()
         if w is None:
             return False
-        rehome = getattr(ws.wallpaper, "rehome", None)
-        if rehome is not None:
-            rehome()
+        if not hand:
+            rehome = getattr(ws.wallpaper, "rehome", None)
+            if rehome is not None:
+                rehome()
         key = RUN + str(self._seq)
         self._seq += 1
+        pl = ws.player
+        minimised = hand or getattr(pl, "_win_state", None) == MINIMISED
+        if hand:
+            pl.window_event("_minimise")
         _swap(ws, w)
         p = Proc(key, w)
         p.named()
-        self._mute(p.player)
+        self._mute(pl)
+        if minimised:
+            p.state = MINIMISED
+            if not p.app:
+                _hold(pl)
+            pl._audio_held = 0          # the front's session is the next run's
         self.list.append(p)
         self.by_key[key] = p
-        ws.wm.rekey(FRONT, key)
-        if ws.wm._focus == key:
-            ws.wm._focus = None         # the run about to open takes it
+        self.gen += 1
+        if not hand:
+            ws.wm.rekey(FRONT, key)
+            if ws.wm._focus == key:
+                ws.wm._focus = None     # the run about to open takes it
         if ws.audio is not None:
             ws.audio.focus()
         return True
+
+    def minimise(self):
+        """A handheld's pause card's Minimise: the front run joins the
+        running set, held where it is, and the console goes home. False
+        where it cannot join (then the card stays)."""
+        ws = self.ws
+        if not self._detachable() or not self.detach():
+            return False
+        ws.go_home()
+        return True
+
+    def switch(self, p):
+        """A handheld brings Proc `p` to the front: a front run that plays
+        joins the running set first, `p`'s world is installed and its run
+        shown, the home its caller."""
+        ws = self.ws
+        if p not in self.list:
+            return
+        if self._front_live():
+            if not self._detachable() or not self.detach():
+                ws._exit_to_caller()    # a run that cannot join ends, as a launch ends it
+        self.promote(p)
+        ws.close_popover()
+        ws.run(ws.project, ws.launcher_layer)
 
     def promote(self, p):
         """Focus reached Proc `p`'s window: its world becomes the front's.
@@ -449,16 +572,21 @@ class Procs:
         ws = self.ws
         wm = ws.wm
         live = FRONT in getattr(wm, "_wins", {})
+        held = p.state == MINIMISED
         _swap(ws, p.world)
-        self._unmute(ws.player)
-        ws.player._win_state = RUNNING
+        pl = ws.player
+        self._unmute(pl)
+        pl._win_state = RUNNING
+        if held:
+            _unhold(pl)
+            pl.window_event("_restore")
+        self.gen += 1
         if live:
             p.named()
             wm.swap_keys(FRONT, p.key)
             self._mute(p.player)
             p.state = THROTTLED
             p.skip = p.owed = 0
-            p.last = _ticks_ms()
         else:
             old = p.world.player
             if old.ns or old._update is not None or old._draw is not None:
@@ -469,7 +597,8 @@ class Procs:
                     self._uninstall(p, was)
             self.list.remove(p)
             del self.by_key[p.key]
-            wm.rekey(p.key, FRONT)
+            if not self.handheld():
+                wm.rekey(p.key, FRONT)
             self._retire(p.world)
         self._pace_front()
         if ws.audio is not None:
@@ -492,9 +621,11 @@ class Procs:
         finally:
             self._uninstall(p, was)
         pl.detached = False
+        pl._min_held = False
         self._retire(p.world)
         self._pace_front()
-        if window:
+        self.gen += 1
+        if window and not self.handheld():
             self.ws.wm._remove_kind(p.key)
         self.ws._dirty = True
 
@@ -518,12 +649,14 @@ class Procs:
     def frame(self, dt):
         """Once a loop frame, before the front's: promote a Proc the focus
         reached, step every Proc by its state and the front by its own when
-        minimised, and move the divisor by the loop's period. Allocates
-        nothing on a frame with no Proc."""
+        minimised, move the divisor by the loop's period and sample the
+        accounting. Allocates nothing on a frame with no Proc."""
         ws = self.ws
         wm = ws.wm
+        now = _ticks_ms()
+        self.account(now)
         if not self.list:
-            self._front_state(wm)
+            self._front_state(wm, dt)
             return
         f = getattr(wm, "_focus", None)
         if f is not None and f in self.by_key:
@@ -532,20 +665,21 @@ class Procs:
         if f is not None and f in self.by_key:
             self.promote(self.by_key[f])
             if not self.list:
-                self._front_state(wm)
+                self._front_state(wm, dt)
                 return
-        now = _ticks_ms()
         self._pace(now)
-        self._front_state(wm)
+        self._front_state(wm, dt)
         horizon = wm._retained_n() if hasattr(wm, "_retained_n") else 1
         i = 0
         while i < len(self.list):
             p = self.list[i]
             i += 1
             shown = wm.game_shown(p.key) if hasattr(wm, "game_shown") else False
+            if not shown and p.state == MINIMISED and not p.app:
+                continue                # a held game: nothing to step
             was = self._install(p)
             try:
-                self._step(p, shown, dt, now, horizon)
+                self._step(p, shown, dt, horizon)
             finally:
                 self._uninstall(p, was)
             pl = p.player
@@ -558,15 +692,21 @@ class Procs:
                 i -= 1
         self._meter(now)
 
-    def _step(self, p, shown, dt, now, horizon):
+    def _step(self, p, shown, dt, horizon):
         pl = self.ws.player
         state = THROTTLED if shown else MINIMISED
         if state != p.state:
             p.state = state
-            pl.window_event("_restore" if shown else "_minimise")
-            if pl.cart_error is not None:
+            self.gen += 1
+            if shown:
+                _unhold(pl)
+                pl.window_event("_restore")
+            else:
+                pl.window_event("_minimise")
+                if not p.app:
+                    _hold(pl)
+            if pl.cart_error is not None or not (shown or p.app):
                 return
-            p.last = now
         if shown:
             draw = pl.frame_plan(dt)
             if draw:
@@ -581,39 +721,38 @@ class Procs:
                 p.draws += 1
                 p.owed = horizon
             return
-        el = _ticks_diff(now, p.last)
-        if el >= MIN_UPDATE_MS:
-            p.last = now
-            pl._n_ticks = 1
-            pl.tick(el / 1000.0, render=False)
-            p.ups += 1
+        pl.frame_plan(dt)               # a minimised app: its update, no draw
+        pl.tick(dt, render=False)
+        p.ups += pl._n_ticks if pl.tick_ms else 1
 
-    def _front_state(self, wm):
-        """The front game's window minimised: its update at the minimised
-        rate (the console's frame does not tick it), and its events."""
+    def _front_state(self, wm, dt):
+        """The front's window minimised (the console's frame does not tick
+        it): a game held, an app's update every frame; and its events."""
         ws = self.ws
         pl = ws.player
         wins = getattr(wm, "_wins", None)
         win = wins.get(FRONT) if wins is not None else None
         hidden = (win is not None and win.minimized and self._front_live())
         if hidden:
+            app = _is_app(ws.cart)
             if self._front_min is not pl:
                 self._front_min = pl
+                self.gen += 1
                 pl._win_state = MINIMISED
-                pl._min_last = _ticks_ms()
                 pl.window_event("_minimise")
+                if not app:
+                    _hold(pl)
                 return
-            now = _ticks_ms()
-            el = _ticks_diff(now, pl._min_last)
-            if el >= MIN_UPDATE_MS:
-                pl._min_last = now
-                pl._n_ticks = 1
-                pl.tick(el / 1000.0, render=False)
+            if app:
+                pl.frame_plan(dt)
+                pl.tick(dt, render=False)
         elif self._front_min is not None:
             was = self._front_min
             self._front_min = None
+            self.gen += 1
             if was is pl and getattr(pl, "_win_state", None) == MINIMISED:
                 pl._win_state = RUNNING
+                _unhold(pl)
                 pl.window_event("_restore")
 
     def front_minimised(self):
@@ -638,6 +777,88 @@ class Procs:
             self.n += 1
         elif self._ema * 100 < budget * 90 and self.n > THROTTLE_MIN:
             self.n -= 1
+
+    # -- the accounting (the task manager's) --------------------------------
+
+    def account(self, now):
+        """Every METER_MS: each run's update, draw and window events, and
+        each process's callbacks (the scheduler's rows), as busy microseconds
+        a second -- per mille of a core -- on `Player.cpu` and the
+        scheduler's `Proc.cpu`. Allocates nothing between samples."""
+        el = _ticks_diff(now, self._acct_t)
+        if el < METER_MS:
+            return
+        self._acct_t = now
+        _sample(self.ws.player, el)
+        for p in self.list:
+            _sample(p.world.player, el)
+        rows = _sched.SCHED.procs
+        if rows:
+            for sp in rows.values():
+                d = (sp.cost_us - sp.seen_us) & _sched.ALLOC_WRAP
+                sp.seen_us = sp.cost_us
+                sp.cpu = d // el
+        self.gen += 1
+
+    def _run_row(self, key, pl, cart, state, out):
+        if pl.cart_error is not None:
+            state = CRASHED
+        cpu = pl.cpu
+        sp = _sched.SCHED.procs.get(pl.pid) if pl.pid is not None else None
+        if sp is not None and sp.cpu is not None:
+            cpu = (cpu or 0) + sp.cpu
+        out.append((key, str((cart or {}).get("title") or "Game"),
+                    "app" if _is_app(cart) else "game", state, cpu, pl.mem, pl.pid))
+
+    def rows(self):
+        """The task manager's rows, front run first, then the running set
+        oldest first, then the services: (key, name, kind, state, cpu, mem,
+        pid), `kind` "game", "app" or "service", `cpu` per mille of a core and
+        `mem` bytes, each None where unmeasured. A Lua or compiled run has no
+        row (phase 5 of docs/os_2026-11.md)."""
+        ws = self.ws
+        out = []
+        pl = ws.player
+        cart = ws.cart
+        if cart is not None and cart.get("runtime", "python") == "python" \
+                and pl._lua is None and pl._play is None and not pl._script \
+                and (pl._update is not None or pl._draw is not None
+                     or pl.cart_error is not None) \
+                and (ws.wm.stack.has(FRONT) or FRONT in getattr(ws.wm, "_wins", {})):
+            if self.front_minimised():
+                state = MINIMISED
+            elif pl.paused or not ws.wm.top_is(FRONT) and self.handheld():
+                state = PAUSED
+            else:
+                state = RUNNING
+            self._run_row(FRONT, pl, cart, state, out)
+        for p in self.list:
+            w = p.world
+            self._run_row(p.key, w.player, w.project.cart if w.project else None,
+                          p.state, out)
+        for sp in _sched.SCHED.services():
+            st = sp.state
+            if st == _sched.EXITED:
+                if not sp.code:
+                    continue
+                st = CRASHED
+            name = (sp.cart or {}).get("title") or sp.name
+            out.append((SVC + str(sp.pid), str(name), "service", st, sp.cpu,
+                        sp.mem, sp.pid))
+        return out
+
+    def stop_service(self, pid):
+        """The task manager's Stop: the service's TERM, then KILL (§5)."""
+        _sched.SCHED.stop(pid)
+        self.gen += 1
+
+    def forget(self, pid):
+        """A crashed service's row goes (its log stays)."""
+        rows = _sched.SCHED.procs
+        sp = rows.get(pid)
+        if sp is not None and sp.state == _sched.EXITED:
+            del rows[pid]
+            self.gen += 1
 
     def _meter(self, now):
         """Each Proc's draws and updates a second, every METER_MS; under

@@ -158,7 +158,7 @@ _PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separ
 _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
-           "webconsole": "Web console"}
+           "webconsole": "Web console", "tasks": "Tasks"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds (field 2:
 # whether focus marks draw, which the lent zone's current tab shows).
 _KEY_ALWAYS = (0, 3, 4, 10, 12)
@@ -382,6 +382,8 @@ class BarLayer:
             return ws.projects_layer
         if where == "settings":
             return ws.settings_layer
+        if where == "tasks":
+            return ws.tasks_layer
         if where == "menu":
             return ws.editor_app
         return None
@@ -1157,6 +1159,8 @@ class BarLayer:
                 ws._exit_to_caller()
         elif where == "settings":
             ws.settings_layer.back()
+        elif where == "tasks":
+            ws.close_tasks()
         else:
             ws.exit()
         ws._dirty = True

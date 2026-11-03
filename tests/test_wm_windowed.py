@@ -922,12 +922,11 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     assert names == ["close", "max", "min"]
 
 
-def test_a_minimised_game_updates_slowly_draws_nothing_and_hears_it(tmp_path, monkeypatch):
+def test_a_minimised_game_is_held_draws_nothing_and_hears_it(tmp_path):
     """Minimising the player window minimises the run
-    (docs/os_2026-11/processes.md §1): no pause, `_minimise()` heard, its
-    update at the minimised rate with the true dt and no draw; the chip
-    restores it, `_restore()` heard, its frames as before."""
-    from runtime import procs as procs_mod
+    (docs/os_2026-11/processes.md §1): a game is held -- no update, no draw,
+    its clock stopped -- and hears `_minimise()`; the chip restores it,
+    `_restore()` heard, its frames as before, with no pause card."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_desk()
@@ -944,21 +943,15 @@ def test_a_minimised_game_updates_slowly_draws_nothing_and_hears_it(tmp_path, mo
     win = ws.wm._wins["desktop"]
     mn = dict(ws.wm._strip_buttons(win))["min"]
     drv.touch(mn[0] + 2, mn[1] + 2)
-    now = [100000]
-    monkeypatch.setattr(procs_mod, "_ticks_ms", lambda: now[0])
-    for _ in range(12):                 # 12 frames, 50 ms apart: 600 ms
-        now[0] += 50
+    for _ in range(12):
         drv.frame(1 / 20)
-    assert win.minimized and not ws.player.paused
+    assert win.minimized and ws.player.paused
     assert heard == ["min"]
-    assert draws[0] == 0
-    assert 5 <= len(ups) <= 6, ups      # one update every MIN_UPDATE_MS
+    assert draws[0] == 0 and ups == []
     ws.wm._minimize(win, False)
-    del ups[:]
     for _ in range(3):
-        now[0] += 33
         drv.frame(1 / 30)
-    assert heard == ["min", "res"] and not ws.pause.open
+    assert heard == ["min", "res"] and not ws.pause.open and not ws.player.paused
     assert draws[0] >= 1 and ups
 
 

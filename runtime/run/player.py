@@ -221,6 +221,12 @@ except ImportError:                     # host CPython: the host drives its fram
     _loop = None
 
 
+try:
+    from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
+except ImportError:                     # host: the runtime package
+    from runtime.scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
+
+
 # Compiled-code cache (#66 exec-arena fix, see Player.start): one entry per
 # cart, keyed by the source's (len, hash) -- so the native emitter runs once
 # per source VERSION, not once per PLAY. Module-level: survives Player runs,
@@ -246,6 +252,16 @@ class Player(PlayerDiag):
 
     _play = None                      # the run's frame in C: _bind_play
     stack_pre = None                  # the task's stack mark before the open: start
+    # The task manager's accounting (runtime/shell/procs.py, `Procs.account`):
+    # the microseconds this run's `_update` and `_draw` took since the last
+    # sample, its window events counted with its updates; `cpu` the last
+    # sample's busy microseconds a second (None before one); `mem` what its
+    # start allocated -- its body and `_init`, the world it built -- in bytes,
+    # None where the VM keeps no allocation count (scheduler.allocated).
+    us_upd = 0
+    us_draw = 0
+    cpu = None
+    mem = None
 
     def __init__(self, ws, NAMES):
         self.ws = ws
@@ -876,6 +892,7 @@ class Player(PlayerDiag):
             t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
             t5 = _ticks_ms()
             _was = _cart_text(not self._look)
+            a0 = _allocated()
             try:
                 exec(code, ns)
                 t_exec = _ticks_diff(_ticks_ms(), t5)
@@ -892,6 +909,9 @@ class Player(PlayerDiag):
                     ns["_init"]()
             finally:
                 _cart_text(_was)
+                a1 = _allocated()
+                self.mem = (a1 - a0) & _ALLOC_WRAP if a0 is not None and a1 is not None \
+                    else None
             t_init = _ticks_diff(_ticks_ms(), t6)
         except Exception as exc:  # noqa: BLE001
             # The device's native run loop starves USB, so a print() never reaches
@@ -961,6 +981,8 @@ class Player(PlayerDiag):
         Returns the cart."""
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_stage_meters()     # #210: this run's misses are its own
+        self.us_upd = self.us_draw = 0
+        self.cpu = self.mem = None
         self._disarm_pacing()          # re-armed below, once the cart is running
         # USER APP per-run state (#181): cleared here rather than at the bind
         # site below, so the early SPEC refusals (extensions / canvas) cannot
@@ -1495,12 +1517,18 @@ class Player(PlayerDiag):
             # exactly ONE cart's current-version blobs at any time -- unlimited
             # edit->PLAY cycles. On builds without the patch the call reports
             # False and behavior is the pre-patch cache-only mitigation.
-            _CODE_CACHE.clear()
-            try:
-                import moy_gfx
-                moy_gfx.native_code_free_all()
-            except Exception:  # noqa: BLE001 -- host / bench builds: no reclaim
-                pass
+            # While the running set holds another world (runtime/shell/procs.py)
+            # its code lives in the arena too, so nothing is reclaimed: the
+            # arena grows until the set is empty again, and an emitter that
+            # runs out falls back to bytecode as above.
+            procs = getattr(self.ws, "procs", None)
+            if procs is None or not procs.list:
+                _CODE_CACHE.clear()
+                try:
+                    import moy_gfx
+                    moy_gfx.native_code_free_all()
+                except Exception:  # noqa: BLE001 -- host / bench builds: no reclaim
+                    pass
             nsrc, ins = _nativize(src)
             ns["micropython"] = _micropython   # the decorator's global, no import line
             try:
@@ -1821,7 +1849,9 @@ class Player(PlayerDiag):
             if upd is not None:
                 t0 = _ticks_us()
                 upd(dt)
-                cost = _ticks_diff(_ticks_us(), t0) / 1000000.0
+                us = _ticks_diff(_ticks_us(), t0)
+                self.us_upd += us
+                cost = us / 1000000.0
                 # THE LOGIC HALF, not the frame. A runtime that runs the whole
                 # cart frame inside update() (moycore: _update and _draw back
                 # to back in C) makes this clock read logic PLUS draw, and the
@@ -2065,13 +2095,14 @@ class Player(PlayerDiag):
                     self._run_ticks(self._n_ticks, self._tick_dt, render)
                 else:
                     self._run_ticks(1, self._loop_dt(dt), render)
-                _tm = _ticks_us() if _perf else 0
+                _tm = _ticks_us()
                 if render and self._draw:
                     self._draw()
                     if self._ui is not None and getattr(self, "_lua", None) is None:
                         self._ui_close()
                 _cart_text(_was)
-                _td = _ticks_us() if _perf else 0
+                _td = _ticks_us()
+                self.us_draw += _ticks_diff(_td, _tm)
                 if ws.audio_out is not None and not self.detached:
                     ws.audio_out.tick(dt)  # pull the mix where no feeder task does (#16)
                 if _perf:
@@ -2369,12 +2400,15 @@ class Player(PlayerDiag):
             return True
         ws = self.ws
         _was = _cart_text(not self._look)
+        t0 = _ticks_us()
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 -- the cart's, as a frame's is
             _cart_text(_was)
             self._capture_frame_error(ws, exc)
             return False
+        finally:
+            self.us_upd += _ticks_diff(_ticks_us(), t0)
         _cart_text(_was)
         return True
 
