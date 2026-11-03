@@ -1507,14 +1507,17 @@ def _sd_squeeze():
     held = []
     out = {'read': None, 'write': None}
     try:
-        for _ in range(64):
+        for _ in range(256):
             big = largest()
             if big < 512:
                 break
             try:
                 held.append(moy_alloc.alloc(max(big - 128, 64), caps))
             except MemoryError:
-                break
+                try:                # a block the request's header overflows
+                    held.append(moy_alloc.alloc(big // 2, caps))
+                except MemoryError:
+                    break
         out['left'] = largest()
         try:
             moy_sd.read(64, buf, 16)
