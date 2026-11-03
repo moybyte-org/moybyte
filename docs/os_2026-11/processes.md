@@ -35,31 +35,58 @@ tell the user the CPU and RAM usage so he can close apps if they get slow").
 Focus and running are separate properties. **Focus** is the window manager's
 (`docs/shell_ux_v1.md` §3): the focused window alone gets input and names
 the audible audio session (`native/moy_audio/moy_aud.h`). **Running** is the
-process table's, and a window is in one of three states:
+running set's (`runtime/shell/procs.py`, built 2026-11-03 for Python games
+on the desk): the FRONT run is the game whose world the Workstation holds,
+in the WM's `desktop` window, and every other running game is a Proc with
+its world held aside -- its Player, Project, audio session, owner tag and
+game canvas -- in a window keyed `run:<n>`. Running one is installing its
+world (an exchange of those fields, done twice to put the front back), so
+the Player and the cart API run whichever world is installed. Focusing a
+Proc's window PROMOTES it: the two worlds trade places and the two windows
+their keys, so the focused game is always the front one and gets the keys,
+the pointer, the audible session and the pause menu. A Proc reads no input
+(its input verbs answer nothing), keeps no edges and pulls no mix. A game
+window is in one of three states:
 
-- **focused**: frames at the cart's rate, as today;
-- **visible, unfocused**: the game keeps running at a lower rate. The rule
-  (sketch): its `update` is stepped every frame with a true `dt`, its `draw`
-  every Nth frame, N from the shell's measured cost of the focused window
-  (2 when the focused frame has slack, rising to the cart's declared floor
-  otherwise), and the task manager calls it *throttled*;
-- **minimised** (owner, 2026-11-03): `update` keeps being stepped at a
-  reduced rate with a true `dt`, `draw` never runs, and the app receives
-  minimise and restore events. The default game template pauses itself on
-  minimise, so a game written from it is held as the owner's 2026-10-19
-  call says; an app that wants to keep working (a player, a download) does.
+- **running**: the front game, frames at the cart's rate as before -- also
+  beside a focused app window, where its canvas has no last frame to show
+  between draws (the desk's live wallpaper painted on it until the first
+  Proc moved the wallpaper onto a canvas of its own, `Wallpaper.rehome`);
+- **throttled**: a Proc whose window shows. Its `update` runs at its own
+  rate with a true `dt` (a paced game's scheduler keeps its tick rate), its
+  `draw` on every Nth of its draw frames: N is 2 while the loop keeps the
+  front's tick period, and rises to `THROTTLE_MAX` (4) while the loop runs
+  more than 15% over it, moving at most every 500 ms. Between draws its
+  window presents its canvas's last frame;
+- **minimised** (owner, 2026-11-03): a window hidden to its chip, under a
+  full-screen window, or parked by console mode. `update` runs every
+  `MIN_UPDATE_MS` (100 ms) with the true `dt`, `draw` never runs, and the
+  cart hears `_minimise()` going in and `_restore()` coming out, functions of
+  its namespace beside `_update` (Python, this phase; `Player.window_event`).
+  The default game template (`moy_carts.NEW_TEMPLATE`) returns from
+  `_update` between the two, so a game written from it is held as the
+  owner's 2026-10-19 call says; an app that wants to keep working (a player,
+  a download) does. A restore gives the run back as it was, with no pause
+  card.
 
 On a handheld (one app fullscreen, a back-stack) an app not in front is
 minimised, so the playing cart owns every draw there and a minimised app
-costs only its reduced-rate `update`.
+costs only its reduced-rate `update`. As built, the running set beyond the
+front run is the desk's: the handheld's WM has no way yet to leave a game
+running behind the home (its pause card's Quit ends the run), so there it
+holds the front run alone; `Procs` and `player_fit.admit` are shared and
+staged to every board, and the S3s' shares are host-tested.
 
 What this changes in `docs/surface_model_v1.md` §14.1, the focused-window
 content freeze: nothing in the mechanism. The freeze is a *skip-draw* for a
-window whose content provably did not change; a throttled game is a Class B
-animating surface on the frames its `draw` runs and a frozen one on the
-frames it does not, so it is marked dirty by the shell on its draw frames
-and presents its retained `win.buf` on the others, through the one
-invalidation path. No second mechanism.
+window whose content provably did not change; a game window has no
+`win.buf`, its content is its canvas composited, as the front's always was.
+A throttled game draws into its own canvas when its `draw` runs, and each
+painted frame that canvas is owed to (one per retained buffer, `Proc.owed`)
+composites it; the quiet frame's partial stack (`_PlayerWindowLayer`)
+carries the running set's windows beside the front's while no window
+overlaps a game's. `tests/test_wm_content_freeze.py` pins the focused
+window's freeze with a throttled game beside it. No second mechanism.
 
 A service runs regardless, has no window, and shows itself through kernel
 chrome and the task manager (§6). Two owner calls stay intact: sound
@@ -344,16 +371,32 @@ indicator and its stop control (owner, 2026-11-03).
 
 **Admission.** An app that does not fit THE SHARES (`native/moy_play/moy_play.h`)
 beside what is already running is **refused with a message naming what to
-close**; nothing degrades silently. On the S3s two big games do not fit, and
-the message says which one to close. The fit check is the Player's today,
-extended to count the running set.
+close**; nothing degrades silently. As built (`player_fit.admit`, asked by
+`Procs.launch` before a game opens on the desk), phase 1 counts one figure
+per board, the PSRAM share the running set's apps hold together
+(`player_fit.APP_SHARE`): 4 MiB on the S3s, the cart floor THE SHARES
+already give (one Doom), and 7 MiB on the P4s, under what a P4 desk keeps
+free beside its Python heap with a game running; a board with no row (the
+host, the browser, the Zero) has no share to count against. An app holds
+its compiled module's load footprint where its runtime reports one, else
+its canvas in RGB565, and a Python world (384 KiB) beside either. So on the
+S3s two big games do not fit, and a big one beside a Python game names the
+Python game. The refusal is the delete confirm's dialog
+(`DeleteConfirm.ask_close`): "Close <name>?", the game that does not fit
+beside it, Cancel and Close, whose Close closes what it names and opens the
+game. P2.1's shares rows replace the one figure. The Player's own fit check
+still runs at the load, as before.
 
 **Sessions.** Lua and wasm run one session at a time today
 (`native/moycore`, `native/moy_wasm`), so several Lua or wasm apps at once
 arrive with the process tables (phase 5); Python, stepped by the shell in
-its one VM, gets several first. Audio has `MOY_AUD_SESSIONS` (4) rows: a
-fifth source is refused with the same message, and the focused app's session
-has priority.
+its one VM, gets several first: admission lets a Lua or compiled game run
+alone and names everything running to close. Each run takes one of four
+owner tags (`cart`, `cart2`..`cart4`) for its layer loans and its audio
+session. Audio has `MOY_AUD_SESSIONS` (4) rows, less the Music editor's while
+it holds one: a fifth source is refused with the same dialog, naming the
+oldest game, and the focused app's session has priority (it is the one
+focused, so the one heard).
 
 ## 7. Notifications
 

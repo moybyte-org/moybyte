@@ -753,6 +753,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 if g not in alive:
                     self._drop_win(self._wins.pop(g))
                     self._text_wish.pop(g, None)
+                    self.ws.procs.dropped(g)    # a running set's game ends with it
             pushed = keys[-1] if keys and keys[-1] not in self._wins else None
             had = set(self._wins)
             for depth, g in enumerate(keys):
@@ -1311,8 +1312,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """Stand window `kind` in `rect` (glass coordinates) with no frame and
         no strip, above the window it docks in: the desk Editor's Run slot
         and Game tab hold the playtest so (runtime/editors/editor_desk.py). `rect`
-        None gives the window back its place; False hides it, its run held,
-        as a minimise does. Whether there is such a window: a game moved
+        None gives the window back its place; False hides it with its run
+        held (`_dock_hide`), the Editor's playtest waiting for its slot. Whether there is such a window: a game moved
         out to a window of its own (`play_in_window`) never docks."""
         win = self._wins.get(kind)
         if win is None or win.own:
@@ -1327,12 +1328,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 self._build_content(win)
                 self.ws._dirty = True
             if rect is False and not win.minimized:
-                self._minimize(win, True)
+                self._dock_hide(win, True)
             elif rect is None and win.minimized:
-                self._minimize(win, False)
+                self._dock_hide(win, False)
             return True
         if win.minimized:
-            self._minimize(win, False)
+            self._dock_hide(win, False)
         rect = tuple(rect)
         host = self._wins.get("menu")
         if host is not None:
@@ -1477,6 +1478,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._text_wish[old] = bool(self.ws.input.text_mode)
         self._focus = key
         self._raise(key)
+        p = self.ws.procs.by_key.get(key)
+        if p is not None:
+            self.ws.procs.promote(p)    # the focused game is the front one
+            key = self._focus
         self._apply_text(key)
 
     def _raise(self, key):
@@ -1500,32 +1505,97 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._move_focus(key)
 
     def _minimize(self, win, on):
-        """Hide `win` to its chip (`on`) or show it again. A running game's
-        window holds its run while hidden, as the pause menu does
-        (`Player.pause`), and a restore lands on the pause menu, which gives
-        the run back on Resume (the owner's D-25, 2026-10-19) -- unless the
-        run was already held (the pause menu open), which stays its
-        holder's. A window-bound app cart's run (Notes) is held the same
-        way and simply goes on when it is shown: an app has no pause menu."""
+        """Hide `win` to its chip (`on`) or show it again. A game's window,
+        or a window-bound app cart's, keeps its run while hidden: the run is
+        minimised -- its update at the minimised rate, no draw -- and hears
+        `_minimise()` and `_restore()` (docs/os_2026-11/processes.md §1,
+        runtime/shell/procs.py), so a game written from the template holds
+        itself."""
         if win.minimized == bool(on):
             return
         win.minimized = bool(on)
-        if win.kind != "desktop":
-            return
-        player = getattr(self.ws, "player", None)
-        if player is None:
-            return
+
+    def _dock_hide(self, win, on):
+        """A docked playtest hidden (`on`) or shown again: minimised, and
+        its run held by the Editor while hidden unless something already
+        holds it (the pause menu), which stays its holder's."""
+        self._minimize(win, on)
+        player = self.ws.player
         if on:
             win.held = not player.paused
             if win.held:
                 player.pause()
-        elif getattr(win, "held", False):
+        elif win.held:
             win.held = False
-            pause = getattr(self.ws, "pause", None)
-            if pause is not None and self._is_game(win):
-                pause.show()
-            else:
-                player.resume()
+            player.resume()
+
+    # -- the running set's windows (runtime/shell/procs.py) --------------------
+
+    def rekey(self, old, new):
+        """Window `old` goes on under key `new`, where it is: its record, its
+        z-slot, its focus, its back-stack slot."""
+        win = self._wins.pop(old)
+        self._wins[new] = win
+        order = self._order
+        if old in order:
+            order[order.index(old)] = new
+        if self._focus == old:
+            self._focus = new
+        if old in self._text_wish:
+            self._text_wish[new] = self._text_wish.pop(old)
+        st = self.stack.kinds()
+        if old in st:
+            st[st.index(old)] = new
+            self.stack.restore(st[1:])      # above the root
+        self._kinds = self._slots()
+        win.proc = self.ws.procs.by_key.get(new)
+        self._win_sig = None
+        self._on_nav()
+
+    def swap_keys(self, a, b):
+        """Windows `a` and `b` trade keys (a promotion: the world each shows
+        moved), each staying where it is."""
+        wa, wb = self._wins[a], self._wins[b]
+        self._wins[a], self._wins[b] = wb, wa
+        order = self._order
+        ia, ib = order.index(a), order.index(b)
+        order[ia], order[ib] = b, a
+        if self._focus == b:
+            self._focus = a
+        elif self._focus == a:
+            self._focus = b
+        procs = self.ws.procs
+        wa.proc = procs.by_key.get(b)
+        wb.proc = procs.by_key.get(a)
+        self._win_sig = None
+        self.ws._dirty = True
+
+    def game_shown(self, key):
+        """A running set's game window shows: on the desk, not hidden to
+        its chip, not under a full-screen window."""
+        win = self._wins.get(key)
+        if win is None or win.minimized or self.mode != "desktop":
+            return False
+        return self._order.index(key) >= self.full_cover()
+
+    def _proc_paint(self, win, key, focused, dt, full=True):
+        """A running set's game window: its world installed, its canvas's
+        last frame composited and its chrome drawn, the cart not run (its
+        frames are `Procs.frame`'s)."""
+        procs = self.ws.procs
+        p = procs.by_key.get(key)
+        if p is None:
+            return
+        if not full and p.owed <= 0:
+            return
+        if p.owed > 0:
+            p.owed -= 1
+        was = procs._install(p)
+        try:
+            self._draw_player_window(win, False, focused, dt, full=full)
+        finally:
+            procs._uninstall(p, was)
+        self._win_touched = True
 
     def goto(self, kind):
         """The back-stack's goto, and on the desk the window it names comes
@@ -1644,6 +1714,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         if self.mode == "desktop" and ws.wallpaper.is_animating(dt):
             return True                 # a parked desk's wallpaper is not drawn
+        if ws.procs.list:
+            return True                 # a running set's game steps every frame
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.player.paused
                 and (ws._update is not None or ws._draw is not None)
@@ -2010,6 +2082,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             self._end_playtest()              # its playtest goes with it
         if kind == "desktop":
             self.close_player()
+        elif kind in ws.procs.by_key:
+            ws.procs.close(ws.procs.by_key[kind])
         else:
             self._remove_kind(kind)
         if kind == "menu" and not ws._editing_icons:

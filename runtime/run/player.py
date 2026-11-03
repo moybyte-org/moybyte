@@ -250,6 +250,14 @@ class Player(PlayerDiag):
     def __init__(self, ws, NAMES):
         self.ws = ws
         self.NAMES = NAMES
+        # The run's owner tag: its layer loans, its run canvas and its audio
+        # session are lent to it (runtime/shell/procs.py hands each world one).
+        self.owner = "cart"
+        # Detached: the run is one of the running set's beside the front
+        # (runtime/shell/procs.py): it reads no input, keeps no edges, pulls
+        # no mix and leaves by `quit_asked` instead of the caller's route.
+        self.detached = False
+        self.quit_asked = False
         self.ns = None
         self._update = None
         self._draw = None
@@ -709,7 +717,7 @@ class Player(PlayerDiag):
                 # TypeError this except swallowed, so the release_world
                 # reclaim was silently dead and only the NEXT start() pooled
                 # (found by the #186 audit).
-                rl("cart")
+                rl(self.owner)
             except Exception:  # noqa: BLE001
                 pass
         if had_world:
@@ -982,7 +990,7 @@ class Player(PlayerDiag):
         # Probe: a canvas with no glass has nothing to return.
         rl = getattr(ws.canvas, "reclaim_layers", None)
         if rl is not None:
-            rl("cart")
+            rl(self.owner)
         self._t_reclaim = _ticks_diff(_ticks_ms(), t0)
         self._sram_run = None          # #211: whatever it reported was the LAST
                                        # run's; a Python cart must not inherit it
@@ -1357,7 +1365,8 @@ class Player(PlayerDiag):
                          project.play_scenes,   # #85: scene()/load_scene(), the run's own
                          net=net,           # #65: capability-gated net.* backend
                          gpio=gpio,         # #9: capability-gated physical pins
-                         flags=project.play_flags)   # SPEC.md 3.5: the run's own flags
+                         flags=project.play_flags,   # SPEC.md 3.5: the run's own flags
+                         owner=self.owner)  # its layer loans end with it
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.
@@ -1749,6 +1758,8 @@ class Player(PlayerDiag):
         tick is dropped, so the shell reads fresh edges and the game does not
         resume on a press made before it was covered."""
         self._keyp_latch = 0
+        if self.detached:
+            return                      # the edges are the front run's
         de = getattr(self.ws.input, "drop_edges", None)
         if de is not None:
             de()
@@ -1991,9 +2002,10 @@ class Player(PlayerDiag):
             return
         if self._paused_at:
             return                     # the pause menu holds it: the frame stays
-        _perf = ws.perf_hud or ws.perf_capture
+        _perf = (ws.perf_hud or ws.perf_capture) and not self.detached
         if self.cart_error is None:
-            self._tick_keys(ws)
+            if not self.detached:
+                self._tick_keys(ws)
             fed = self._focus_editor
             gp = getattr(ws.input, "game_pointer", None) if fed is not None else None
             if gp is not None:
@@ -2060,7 +2072,7 @@ class Player(PlayerDiag):
                         self._ui_close()
                 _cart_text(_was)
                 _td = _ticks_us() if _perf else 0
-                if ws.audio_out is not None:
+                if ws.audio_out is not None and not self.detached:
                     ws.audio_out.tick(dt)  # pull the mix where no feeder task does (#16)
                 if _perf:
                     upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
@@ -2266,7 +2278,13 @@ class Player(PlayerDiag):
         if self.cart_error is None and getattr(ws.input, "cart_quit", False):
             ws.input.cart_quit = False
             ws._reset_canvas_state()
+            if self.detached:
+                self.quit_asked = True      # the running set closes it
+                return
             ws._exit_to_caller()
+            return
+        if self.detached:
+            ws._reset_canvas_state()
             return
         # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
         # have just requested via textmode(), so the NEXT keyboard poll yields the
@@ -2338,6 +2356,26 @@ class Player(PlayerDiag):
                 # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
                 # input -- the touch lands on a small bottom-right corner box.
                 ws.perf_hud = not ws.perf_hud
+        return True
+
+    def window_event(self, name):
+        """Tell a Python cart its window was minimised or restored: its
+        `_minimise()` or `_restore()`, where it defines one
+        (docs/os_2026-11/processes.md §1). What it raises is its crash, as
+        a frame's is. False when the run crashed there."""
+        ns = self.ns
+        fn = ns.get(name) if ns and self.cart_error is None else None
+        if fn is None:
+            return True
+        ws = self.ws
+        _was = _cart_text(not self._look)
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 -- the cart's, as a frame's is
+            _cart_text(_was)
+            self._capture_frame_error(ws, exc)
+            return False
+        _cart_text(_was)
         return True
 
     # -- crash chrome (the Player's own UX) -----------------------------------

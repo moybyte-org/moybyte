@@ -334,8 +334,9 @@ def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
 
 
 def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path):
-    """Minimised, an app cart's run is held as a game's is, and shown again
-    it goes on: the pause menu a game's restore lands on (D-25) is a game's."""
+    """Minimised, an app cart's run is minimised as a game's is -- not
+    held -- and shown again it goes on, with no pause menu
+    (docs/os_2026-11/processes.md §1)."""
     ws = _desk(tmp_path)
     open_cart(ws, "Notes")
     _frames(ws)
@@ -345,7 +346,7 @@ def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path
     _frames(ws)
     wm._minimize(win, True)
     _frames(ws)
-    assert ws.player.paused and win.held
+    assert win.minimized and not ws.player.paused
     wm._minimize(win, False)
     _frames(ws)
     assert not ws.pause.open and not ws.player.paused and win.full()

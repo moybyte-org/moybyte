@@ -277,3 +277,54 @@ def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
     drv._buttons(_mi.PB_PRIMARY, False)
     drv.frame(0.0)
     assert fed[0] > 0 and calls[0] > 0, "a press in the content renders live"
+
+
+def _settings_beside_a_throttled_game(tmp_path):
+    """Two games on the desk -- Star Catcher in the running set, throttled,
+    Brick Siege the front -- and Settings focused over neither, settled.
+    Returns (ws, drv, win, proc)."""
+    from ws_helpers import open_cart
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    drv.frame(0.0)
+    for title in ("Star Catcher", "Brick Siege"):
+        open_cart(ws, title)
+        drv.frame(1 / 30)
+        game = ws.wm._wins["desktop"]
+        if game.saved is not None:
+            ws.wm._toggle_max(game)
+        drv.frame(1 / 30)
+    proc = ws.procs.list[0]
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    ws.wm._move_window(win, 20, win.y)    # clear of both games
+    _quiesce(ws)
+    ws._dirty = True
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws, drv, win, proc
+
+
+def test_a_throttled_game_beside_leaves_the_freeze_as_it_was(tmp_path):
+    """The throttle rule sits beside §14.1's freeze and replaces none of it
+    (docs/os_2026-11/processes.md §1): with a game of the running set
+    throttled on the desk, a cursor-move frame still presents the focused
+    window's retained content, while the throttled game takes its update
+    every frame and its draw every Nth."""
+    ws, drv, win, proc = _settings_beside_a_throttled_game(tmp_path)
+    assert ws.wm._focus == "settings" and proc.state == "throttled"
+    assert win._buf_stale is False
+    calls = _count_draws(ws, "settings")
+    ups, draws = proc.ups, proc.draws
+    for i in range(4):
+        drv.pan(1 if i % 2 == 0 else -1, 0)
+        drv.frame(1 / 30)
+    drv.pan(0, 0)
+    assert calls[0] == 0                       # the focused content froze
+    assert proc.ups - ups == 4                 # the throttled game updated
+    assert proc.draws - draws == 4 // ws.procs.n
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    assert calls[0] == 1                       # a change still renders live

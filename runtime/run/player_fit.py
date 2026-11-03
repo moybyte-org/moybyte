@@ -8,6 +8,9 @@
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
 #   _lua_cart_where       which of a Lua cart's scripts raised, and its line
+#   APP_SHARE             each board's share for the running set of apps
+#   app_need              what one app of the running set holds
+#   admit                 whether a cart fits beside the running set, else what to close
 """What the Player decides about a cart before and after it runs, as
 functions of the cart and its runtime: whether it fits and whether it was
 built for a newer console (the notices it is refused with), whether it is
@@ -306,3 +309,82 @@ def _lua_cart_where(text, cart):
         if pos is not None and (at is None or pos < at):
             at, where = pos, (name, line)
     return where
+
+
+# -- admission over the running set (docs/os_2026-11/processes.md §6) --------
+#
+# The slice of THE SHARES (native/moy_play/moy_play.h) a Python app's
+# admission counts, per board (`moy_ota.BOARD`): the PSRAM the running set's
+# apps hold together. On the S3s it is the cart's floor, the room one Doom
+# takes; on the P4s it is what a desk keeps free beside its Python heap, the
+# panel's buffers and the window stamps with a game running (read with
+# `heapcaps`, #246). A board absent from the table (the host, the browser,
+# the Zero) has no share to count against: None, never 0.
+APP_SHARE = {"tdeck": 4 << 20, "guition_s3": 4 << 20,
+             "p4": 7 << 20, "guition_p4": 7 << 20}
+# A Python run's world on the heap -- its namespace, its objects, the
+# closures of its _update and _draw (Player.release_world's figure).
+PY_WORLD = 384 << 10
+RUN_MAX = 4         # the owner tags a run's loans and audio session take
+
+
+def board_share(board=None):
+    """This board's share for the running set, or None where it has none."""
+    if board is None:
+        try:
+            import moy_ota
+        except ImportError:
+            return None
+        board = getattr(moy_ota, "BOARD", None)
+    return APP_SHARE.get(board)
+
+
+def app_need(cart, make=None):
+    """The bytes an app of the running set holds: a compiled cart's load
+    footprint where its runtime can say, else its canvas (RGB565) and, for
+    every tier, a Python world beside it."""
+    cart = cart or {}
+    need = None
+    if make is not None and cart.get("runtime", "python") == "wasm":
+        fp = getattr(make, "footprint", None)
+        if fp is not None:
+            try:
+                got = fp(cart)
+                need = got[0] if got is not None else None
+            except Exception:  # noqa: BLE001 -- a report is advisory
+                need = None
+    if need is None:
+        cv = cart.get("canvas")
+        w, h = (cv[0], cv[1]) if isinstance(cv, (tuple, list)) and len(cv) == 2 \
+            else (320, 240)
+        need = int(w) * int(h) * 2
+    return need + PY_WORLD
+
+
+def admit(new, running, share, rows):
+    """Whether a run of `new` -- (need, python) -- fits beside `running`,
+    the running set oldest first as (key, need, python): None when it does,
+    else the keys whose closing makes room, fewest first. The rules, in
+    order: the share (`share` None: none to count), the audio table's
+    `rows` free for a run's session (a fifth source is refused), and the
+    tiers -- a Lua or compiled run holds its runtime's one session, so it
+    runs alone (phase 5 brings several)."""
+    need, py = new
+    if share is not None and need <= share:
+        total = need
+        for r in running:
+            total += r[1]
+        if total > share:
+            out = []
+            for r in sorted(running, key=lambda r: -r[1]):
+                out.append(r[0])
+                total -= r[1]
+                if total <= share:
+                    break
+            return out
+    if running and (len(running) >= rows or len(running) >= RUN_MAX):
+        return [running[0][0]]
+    if running and not py:
+        return [r[0] for r in running]
+    out = [r[0] for r in running if not r[2]]
+    return out or None

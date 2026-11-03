@@ -662,7 +662,11 @@ class DeleteConfirm:
     Its keys and taps go to the dialog's engine, which moves focus between
     the buttons and activates one; B, Esc, HOME, the console's key (the
     T-Deck's Mic) and a press outside the card cancel. The answer is read
-    as the dialog draws, and the delete runs at the frame's tail."""
+    as the dialog draws, and the delete runs at the frame's tail.
+
+    The same dialog asks the running set's one question (`ask_close`,
+    runtime/shell/procs.py): a game that does not fit beside the ones
+    running names what to close, Cancel and Close."""
 
     BUTTONS = ("Cancel", "Delete")
 
@@ -675,6 +679,36 @@ class DeleteConfirm:
         self._host = None
         self._key = 0                # the key typed last frame (a press is its change)
         self.focused = None          # the focused button as the last frame left it
+        self.line = self.UNDONE      # the line under the title
+        self.buttons = self.BUTTONS
+        self._act = None             # what the danger button does
+
+    UNDONE = "This can't be undone."
+    CLOSE = ("Cancel", "Close")
+
+    def _arm(self):
+        ws = self.ws
+        self.open = True
+        self.focused = None
+        self._key = getattr(ws.input, "last_key", 0) or 0
+        if self._host is None:
+            self._host = _ui_draw.AppHost()
+        else:
+            self._host.reset()
+        self._host.key = self._key   # the key that asked is no press of the dialog's
+        ws._dirty = True
+
+    def ask_close(self, title, line, then):
+        """Ask to close what `title` names so that what `line` says can
+        open; `then()` closes it and opens that."""
+        self.cart = None
+        self.title = title
+        self.line = line
+        self.buttons = self.CLOSE
+        self._then = None
+        self._act = then
+        self._arm()
+        return True
 
     def ask(self, cart, then=None):
         """Ask before `cart` (a cart dict, or None for the open cart) is
@@ -686,16 +720,11 @@ class DeleteConfirm:
         name = str(target.get("title") or "").strip()
         self.cart = cart
         self.title = "Delete %s?" % name if name else "Delete this cart?"
+        self.line = self.UNDONE
+        self.buttons = self.BUTTONS
         self._then = then
-        self.open = True
-        self.focused = None
-        self._key = getattr(ws.input, "last_key", 0) or 0
-        if self._host is None:
-            self._host = _ui_draw.AppHost()
-        else:
-            self._host.reset()
-        self._host.key = self._key   # the key that asked is no press of the dialog's
-        ws._dirty = True
+        self._act = self._delete
+        self._arm()
         return True
 
     def cancel(self):
@@ -703,7 +732,7 @@ class DeleteConfirm:
         if not self.open:
             return
         self.open = False
-        self.cart = self._then = None
+        self.cart = self._then = self._act = None
         self.ws._dirty = True
 
     def _delete(self):
@@ -769,16 +798,18 @@ class DeleteConfirm:
         cv = ws.sys_canvas
         ws.icon_spec()                # the theme's set in the engine, as the bar has it
         settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
-        pick = _ui.dialog(self.title, self.BUTTONS, "danger")
-        _ui.label("This can't be undone.")
+        pick = _ui.dialog(self.title, self.buttons, "danger")
+        _ui.label(self.line)
         _ui.dialog()
         self._unwash_strip(cv)
         self.focused = _ui.focus()
         if pick == 0:
             self.cancel()
         elif pick == 1:
-            self.open = False         # the answer is in: the tail deletes
-            ws.defer(self._delete, toast=False)
+            self.open = False         # the answer is in: the tail acts
+            act, self._act = self._act, None
+            if act is not None:
+                ws.defer(act, toast=False)
         elif not settled or self._host.moved:
             ws.request_frame()
 

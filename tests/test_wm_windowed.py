@@ -922,38 +922,51 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     assert names == ["close", "max", "min"]
 
 
-def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
-    """Minimising the player window holds the run (no tick while hidden, as
-    the pause menu holds it); a restore lands on the pause menu (D-25), whose
-    Resume gives the run back, and the held chip's icon is the pause glyph."""
+def test_a_minimised_game_updates_slowly_draws_nothing_and_hears_it(tmp_path, monkeypatch):
+    """Minimising the player window minimises the run
+    (docs/os_2026-11/processes.md §1): no pause, `_minimise()` heard, its
+    update at the minimised rate with the true dt and no draw; the chip
+    restores it, `_restore()` heard, its frames as before."""
+    from runtime import procs as procs_mod
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_desk()
     ws.open()
     ws.wm.play_in_window()
     drv.frame(1 / 30)
+    heard, ups, draws = [], [], [0]
+    p = ws.player
+    p.ns["_minimise"] = lambda: heard.append("min")
+    p.ns["_restore"] = lambda: heard.append("res")
+    upd, drw = p._update, p._draw
+    p._update = lambda dt: (ups.append(dt), upd(dt))
+    p._draw = lambda: (draws.__setitem__(0, draws[0] + 1), drw())
     win = ws.wm._wins["desktop"]
     mn = dict(ws.wm._strip_buttons(win))["min"]
     drv.touch(mn[0] + 2, mn[1] + 2)
-    drv.frame(1 / 30)
-    assert win.minimized and ws.player.paused and win.held
+    now = [100000]
+    monkeypatch.setattr(procs_mod, "_ticks_ms", lambda: now[0])
+    for _ in range(12):                 # 12 frames, 50 ms apart: 600 ms
+        now[0] += 50
+        drv.frame(1 / 20)
+    assert win.minimized and not ws.player.paused
+    assert heard == ["min"]
+    assert draws[0] == 0
+    assert 5 <= len(ups) <= 6, ups      # one update every MIN_UPDATE_MS
     ws.wm._minimize(win, False)
-    assert not win.minimized and ws.player.paused and ws.pause.open
-    ws.pause.close()
-    assert not ws.player.paused
-    # A run the pause menu holds stays held through a minimise and restore.
-    ws.player.pause()
-    ws.wm._minimize(win, True)
-    ws.wm._minimize(win, False)
-    assert ws.player.paused
-    ws.player.resume()
+    del ups[:]
+    for _ in range(3):
+        now[0] += 33
+        drv.frame(1 / 30)
+    assert heard == ["min", "res"] and not ws.pause.open
+    assert draws[0] >= 1 and ups
 
 
 @pytest.mark.parametrize("intent", ["dev", "play"])
 def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path, intent):
     """The player window's content is the game, inset from its frame as far
     at the sides as above the rounded foot (design review R4-25), and the
-    pause card over a restored game centres on it (R4-06)."""
+    pause card over the game in its window centres on it (R4-06)."""
     ws = _ws(tmp_path)
     ws.look.set_theme("moy", persist=False, variant="dark")
     drv = _drv(ws)
@@ -971,39 +984,13 @@ def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path
     right = win.x + win.w - (cx + cw)
     foot = win.y + win.h - (cy + ch)
     assert left == right == foot, (left, right, foot)
-    ws.wm._minimize(win, True)
-    ws.wm._minimize(win, False)
+    ws.pause.show()
     assert ws.pause.open
     for _ in range(3):
         drv.frame(1 / 30)
     bx, by, bw, bh = ws.pause._host.box("Pause")
     assert abs((bx + bw / 2) - (ox + gw / 2)) <= 1
     assert abs((by + bh / 2) - (oy + gh / 2)) <= 1
-    ws.pause.close()
-
-
-def test_a_held_games_chip_icon_is_the_pause_glyph(tmp_path, monkeypatch):
-    """The state is the icon (design review R4-12): a held game's chip
-    draws the pause glyph in its icon's place, and no badge over an icon."""
-    ws = _ws(tmp_path)
-    ws.look.set_theme("moy", persist=False, variant="light")
-    drv = _drv(ws)
-    ws.open_desk()
-    ws.open()
-    drv.frame(1 / 30)
-    win = ws.wm._wins["desktop"]
-    ws.wm._minimize(win, True)
-    assert win.held
-    glyphs, icons = [], []
-    monkeypatch.setattr(type(ws.wm), "_pause_glyph",
-                        staticmethod(lambda sc, slot, ink: glyphs.append(slot)))
-    draw_icon = ws.draw_icon
-    monkeypatch.setattr(ws, "draw_icon",
-                        lambda kind, *a, **k: icons.append(kind) or draw_icon(kind, *a, **k))
-    ws.wm._draw_look_chips(ws.sys_canvas, ws.theme_colors, ws.layout.fs, 8)
-    assert len(glyphs) == 1
-    assert "run" not in icons, "the held chip also drew the game's icon"
-    ws.wm._minimize(win, False)
     ws.pause.close()
 
 

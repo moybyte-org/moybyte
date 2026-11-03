@@ -170,6 +170,9 @@ class Wallpaper:
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
+        # The game canvas the wallpaper world lives on once a running set's
+        # game holds the stock one (`rehome`); None: the stock canvas.
+        self._home = None
         # Compiled wallpaper cart: its namespace + _update/_draw + the cart dict, or all
         # None for a solid-fill backdrop. `_wp_live` runs the wallpaper's _update too
         # (set False to save cost: a _draw-only static backdrop).
@@ -411,7 +414,7 @@ class Wallpaper:
         returns (restore_needed, previous) after pointing ws.canvas at stock --
         pair with _stock_unbracket in a finally."""
         ws = self.ws
-        stock = getattr(ws, "_run_canvas_stock", None)
+        stock = self._home or getattr(ws, "_run_canvas_stock", None)
         if stock is None or ws.canvas is stock:
             return (False, None)
         prev = ws.canvas
@@ -422,6 +425,32 @@ class Wallpaper:
         restore, prev = bracket
         if restore:
             self.ws.canvas = prev
+
+    def rehome(self):
+        """Move the wallpaper world off the stock game canvas, onto one of
+        its own, for good: a game of the running set keeps the stock one,
+        and its last frame must survive the backdrop's paint
+        (runtime/shell/procs.py). A compiled cart wallpaper starts again
+        there; a picture, a glass cart or the fill draws on no game canvas."""
+        if self._home is not None:
+            return
+        ws = self.ws
+        mk = getattr(ws, "make_game_canvas", None)
+        if mk is None:
+            return
+        stock = getattr(ws, "_run_canvas_stock", None) or ws.canvas
+        try:
+            cv = mk(stock.w, stock.h, "wallpaper.home")
+        except Exception:  # noqa: BLE001 -- no room: the backdrop stays where it is
+            cv = None
+        if cv is None:
+            return
+        self._home = cv
+        cart = self._wp_cart
+        if (cart is not None and self._wp_ns is not None and not self._wp_glass
+                and self._wp_pics is None):
+            self.clear()
+            self.compile(cart)
 
     def compile(self, cart):
         b = self._stock_bracket()

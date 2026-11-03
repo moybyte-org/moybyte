@@ -437,6 +437,9 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_night": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, theme="moy"),
+    "p4_1024x600_cs2_fs1_procs": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="procs"),
     "tdeck_320x240_fs1_moy_menus": dict(
         sys_size=None, font_scale=1, windowed=False, variant="light",
         diagonal_in=None, theme="moy", plan="menus"),
@@ -641,6 +644,8 @@ def _surface_plan(ws, cfg):
         return _parts_plan(ws)
     if cfg.get("plan") == "menus":
         return _menus_plan(ws, cfg)
+    if cfg.get("plan") == "procs":
+        return _procs_plan(ws)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -901,6 +906,46 @@ def _menus_plan(ws, cfg):
     return [("sysmenu", sysmenu), ("pause", pause(False)), ("pause_options", pause(True))]
 
 
+PROCS_SURFACES = ("desk_two_games", "desk_close_refusal")
+_PROCS_CARTS = ("Star Catcher", "Brick Siege")
+
+
+def _procs_plan(ws):
+    """Several games at once (runtime/shell/procs.py): two games in windows
+    on the desk -- Brick Siege the focused front, Star Catcher throttled
+    beside it -- each held after a fixed run of frames from a seeded `rnd`;
+    then the admission's refusal over them, naming what to close."""
+    import random
+
+    def two():
+        ws.open_desk()
+        for i, title in enumerate(_PROCS_CARTS):
+            random.seed(25 + i)
+            cart = _cart_by_title(ws, title)
+            assert ws.procs.launch(cart)       # the first game joins the running set
+            ws._open_workspace(cart)
+            ws.run(ws.project, ws.launcher_layer)
+            ws.frame(_DT)
+            win = ws.wm._wins["desktop"]
+            if win.saved is not None:
+                ws.wm._toggle_max(win)
+            ws.wm._resize_window(win, 344, 289)   # the game at 1x
+            ws.wm._move_window(win, 150 + 360 * i, 90 + 120 * i)
+            for _ in range(_PAUSE_FRAMES):
+                _quiesce(ws)
+                ws.frame(_DT)
+        assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
+        assert ws.wm._focus == "desktop" and ws.procs.list[0].state == "throttled"
+        ws.player._paused_at = 1               # both held where they are
+        ws.procs.list[0].player._paused_at = 1
+
+    def refusal():
+        ws.procs.refuse(_cart_by_title(ws, "Coin Quest"), ["run:1"])
+        assert ws.confirm.open
+
+    return [("desk_two_games", two), ("desk_close_refusal", refusal)]
+
+
 def _popover_plan(ws):
     """The desk with a Calc window, then each widget's popover over it. The
     popover stays open through the render (`_golden_popover`)."""
@@ -1026,6 +1071,8 @@ def surface_names(config_name):
         return ["parts_" + p for p in PARTS_PAGES]
     if cfg.get("plan") == "menus":
         return list(MENU_SURFACES)
+    if cfg.get("plan") == "procs":
+        return list(PROCS_SURFACES)
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]

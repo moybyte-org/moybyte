@@ -351,6 +351,10 @@
     "popover_menu": [2, 12],
     "popover_wifi": [26, 36]
   },
+  "p4_1024x600_cs2_fs1_procs": {
+    "desk_close_refusal": [6, 13],
+    "desk_two_games": [2, 9]
+  },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": [9, 6],
     "app_appearance": [37, 34],

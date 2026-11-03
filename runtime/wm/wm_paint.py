@@ -570,20 +570,22 @@ class WindowPaint:
         return n                          # every window is settled: draw none
 
     def _covers_player(self):
-        """Whether a shown window above the game window reaches it, its
+        """Whether a shown window above a game window reaches it, its
         shadow included (read once a shape change, by draw_stack's quiet
-        path)."""
+        path): the front's, or a running set's (another game's window
+        over it included)."""
         order = self._order
-        if "desktop" not in order:
-            return False
-        win = self._wins["desktop"]
-        if win.minimized:
-            return False
-        for k in order[order.index("desktop") + 1:]:
-            up = self._wins[k]
-            if not up.minimized and _overlap(self._pad_extent(up, up.x, up.y, up.w, up.h),
-                                             (win.x, win.y, win.w, win.h)):
-                return True
+        n = len(order)
+        for i in range(n):
+            win = self._wins[order[i]]
+            if win.minimized or win.kind != "desktop":
+                continue
+            for k in order[i + 1:]:
+                up = self._wins[k]
+                if not up.minimized and _overlap(
+                        self._pad_extent(up, up.x, up.y, up.w, up.h),
+                        (win.x, win.y, win.w, win.h)):
+                    return True
         return False
 
     def _frame_is_quiet(self, dt):
@@ -640,7 +642,11 @@ class WindowPaint:
                 if u:
                     touched.append(self._draw_under_gesture(win, i, u))
                 continue
-            if win.kind == "desktop":
+            if key != "desktop" and win.kind == "desktop":
+                # A running set's game: its last frame and its chrome; its
+                # frames are Procs.frame's (runtime/shell/procs.py).
+                self._proc_paint(win, key, focused, dt)
+            elif win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
                 # game keeps running while the editor beside it is typed in or

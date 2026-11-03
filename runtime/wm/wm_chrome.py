@@ -435,6 +435,9 @@ class WindowChrome:
 
     def _win_title(self, win):
         ws = self.ws
+        p = getattr(win, "proc", None)
+        if p is not None:
+            return p.title()                  # a running set's game
         if win.kind == "desktop":
             t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
             if getattr(self, "_play_intent", None) == "dev":
@@ -483,8 +486,8 @@ class WindowChrome:
 
     def _win_btns(self, win):
         """The frame's optional strip buttons for `win` (ui_draw.FRAME_*):
-        minimize on every window, a running game's too (`_minimize` holds
-        its run while it is hidden), so every frame has one control set; and
+        minimize on every window, a running game's too (`_minimize`
+        minimises its run while it is hidden), so every frame has one control set; and
         the back chevron while its app has a page of it open
         (docs/history/look_2026-10.md step 27a), which the chrome's freeze signature
         carries."""
@@ -753,8 +756,7 @@ class WindowChrome:
         sc = self._root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
-        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized,
-                     getattr(self._wins[k], "held", False))
+        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
@@ -782,8 +784,7 @@ class WindowChrome:
         focused window's chip raised under the current mark, another open
         window's in the dim ink. The focused chip's content takes the ink the
         look gives current content (Moy's accent), the plate's second cue. A
-        minimized window's chip keeps the chrome's ink, and a held game's
-        icon is the pause glyph: the state is the icon (D-25)."""
+        minimized window's chip keeps the chrome's ink."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
@@ -792,9 +793,7 @@ class WindowChrome:
             ink = (current if focused else
                    th["chrome_ink"] if win.minimized else th["chrome_ink_dim"])
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
-            if win.minimized and getattr(win, "held", False):
-                self._pause_glyph(sc, slot, ink)
-            elif not self.ws.draw_icon(self._icon_slot(win), slot, ink, sc):
+            if not self.ws.draw_icon(self._icon_slot(win), slot, ink, sc):
                 img = self._win_icon_img(win)
                 if img is not None:
                     iw = getattr(img, "w", 16) or 16
@@ -803,17 +802,6 @@ class WindowChrome:
                 else:
                     self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
-
-    @staticmethod
-    def _pause_glyph(sc, slot, ink):
-        """A held game's icon: the pause glyph, two bars in `ink` centred
-        in the icon's slot, as a media player shows a held track."""
-        x, y, w, h = slot
-        bw, bh, gap = w * 2 // 9, h * 2 // 3, w // 6
-        bx = x + (w - 2 * bw - gap) // 2
-        by = y + (h - bh) // 2
-        sc.rect(bx, by, bw, bh, ink)
-        sc.rect(bx + bw + gap, by, bw, bh, ink)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

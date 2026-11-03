@@ -351,6 +351,10 @@
     "popover_menu": "fa860b6e45c22fbb1c4994db2a29e5a5905e3fc50cdafaf0b5ceada26ee9205f",
     "popover_wifi": "376075958a559d984fde4fc9a6d33a9c30444d9183e193c76ccd3738c7960605"
   },
+  "p4_1024x600_cs2_fs1_procs": {
+    "desk_close_refusal": "71d1ab6657ca6fd5893fd79715d210dd165c2b1b2ecd4f2e741d5a519303a158",
+    "desk_two_games": "27fce801e7f89bf513bf4a0861a0f67575f764c63d87f3f2dc2ec5744a9c7815"
+  },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": "169d97a5f178abc00cd8dd9773f8cf5336d8047476f5e9ef6333327037bcdc90",
     "app_appearance": "c3c1d8a1dcf6ffebc15dbfba56a41436729980164b3d56421057987abaf571f7",

@@ -265,7 +265,7 @@ class ProjectStore:
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
         if ws.audio is not None:
             ws.audio.close()
-        ws.audio = AudioSession(bank, "cart")
+        ws.audio = AudioSession(bank, ws.player.owner)
 
     # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #

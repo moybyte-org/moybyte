@@ -98,7 +98,8 @@ class _Win:
         self.buf = buf                # SystemCanvas (apps) | None (player)
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
-        self.held = False             # its run held by the minimise (a game's)
+        self.proc = None              # the running set's Proc it shows, if any
+        self.held = False             # a docked playtest's run held while hidden
         self.saved = None             # full screen: the rect a restore puts
                                       # back (x, y, w, h); None while restored
         self._content = None          # content_rect's last answer
@@ -285,6 +286,16 @@ class _PlayerWindowLayer(Layer):
 
     def draw(self, dt):
         wm = self.wm
+        if wm.ws.procs.list:
+            # The running set's games under the front, bottom to top: each
+            # window its last frame owes (none overlaps another here).
+            order = wm._order
+            for i in range(len(order)):
+                k = order[i]
+                if k != "desktop":
+                    w = wm._wins[k]
+                    if w.kind == "desktop" and wm.game_shown(k):
+                        wm._proc_paint(w, k, False, dt, full=False)
         win = wm._wins.get("desktop")
         if win is not None and not win.minimized and not wm._lead_refused:
             # full=False: the letterbox bezel + strip/shadow chrome are static and

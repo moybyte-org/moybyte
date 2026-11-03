@@ -217,6 +217,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
+    from procs import Procs
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.procs import Procs
+try:
     from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
@@ -1014,6 +1018,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
         self.player = Player(self, NAMES)
+        # The running set beyond the front run: the games stepped beside it
+        # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
+        self.procs = Procs(self)
         # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
         # terminal scrollback after it. One instance for the console's life
         # (its ring is preallocated, so a run costs no allocation); `run_script`
@@ -2625,6 +2632,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # Editor's Config tab, which shows the break and offers the file.
             self.open_in_editor(selected)
             return
+        # Several games at once (runtime/shell/procs.py): the front one joins
+        # the running set, a game already running comes forward, or the
+        # admission names what to close.
+        if not self.procs.launch(selected):
+            return
         # The run's route is HOME (the launcher is its caller): what lets the
         # kernel stop the VM for it (docs/history/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
@@ -3263,7 +3275,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # lockstep match (#65) owns its clock in there: the world moves only on
         # the shared tick, so a frame that tick is not due for holds the last
         # agreed frame instead of repainting it.
-        if self.wm.top_is_player() and self.cart_error is None and not self.pause.open:
+        procs = self.procs
+        procs.frame(dt)               # the running set's games, by their states
+        if (self.wm.top_is_player() and self.cart_error is None and not self.pause.open
+                and not procs.front_minimised()):
             if not self.player.frame_plan(dt):
                 self.player.tick(dt, render=False)
                 return

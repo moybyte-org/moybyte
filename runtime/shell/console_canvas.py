@@ -38,7 +38,7 @@ class CanvasBinding:
         # The run's own: its pixels are on loan to the run ("cart"), so the
         # run's end returns them with its layers, after moycore has let go.
         try:
-            small = mk(w, h, "cart")
+            small = mk(w, h, self.player.owner)
         except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
             print("Moybyte run canvas failed:", _err_text(exc))
             small = None
@@ -104,7 +104,7 @@ class CanvasBinding:
             return False
         w, h = size()
         try:
-            cv = mk(w, h, "cart")
+            cv = mk(w, h, self.player.owner)
         except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
             print("Moybyte window canvas failed:", _err_text(exc))
             cv = None

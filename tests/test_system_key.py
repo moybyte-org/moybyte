@@ -622,7 +622,6 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     assert win.full() and wm._frame_buttons(win) == []
     assert ws.player.ns["n"] > n0 and ws.plays_fullscreen()
     wm._toggle_max(win)
-    wm._minimize(win, True)
-    wm._minimize(win, False)                     # a restore lands on the card
+    ws.pause.show()                              # the card over the windowed game
     assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS, \
         "a windowed game goes full screen by its maximise alone"
