@@ -83,6 +83,7 @@ moybyte_patch_import_cache
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
 # and a board takes it when a profile here shows the same path.
 moybyte_patch_gc_split_reserve
+moybyte_patch_gc_grow_step
 
 # 2d) esp_lcd tx_color no-acquire (#66), applied to the IDF tree.
 #     A continuation colour write (lcd_cmd < 0) is queue-only, but esp_lcd still

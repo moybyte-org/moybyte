@@ -1405,6 +1405,27 @@ class DeviceCanvas:
     # the windowed WM anyway.)
     letterbox_composite = True
 
+    def release_fold(self):
+        """A run's end (Player.release_world): give back the fold's snapshot
+        and the view crop's scratch, which only a game frame uses -- a
+        320x240 game's snapshot is 150 KB of PSRAM the desk would otherwise
+        keep until the next run. Waits out whatever still reads them first,
+        as the compiled cart's frame scratch does at its close. The next
+        blit_game makes them again."""
+        if self._snap_scratch is None and self._view_scratch is None:
+            return
+        comp = self._comp
+        for name in ("fold_fence", "snap_fence", "disarm_scale_fold"):
+            fn = getattr(comp, name, None)
+            if fn is not None:
+                fn()
+        self._snap_live = False
+        for name in ("_snap_scratch", "_view_scratch"):
+            scr = getattr(self, name)
+            if scr is not None:
+                setattr(self, name, None)
+                scr.release()
+
     def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
         """FullscreenStackWM's device composite for a cart-declared small canvas
         (SPEC.md 1/3.1): THIS canvas is the promoted system surface (the glass),

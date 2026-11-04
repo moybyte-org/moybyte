@@ -690,6 +690,19 @@ def test_the_gc_split_reserve_call_and_the_board_define_agree():
             "MOYBYTE_GC_SPLIT_RESERVE = %r" % (build, called, defined))
 
 
+def test_the_gc_grow_step_call_and_the_board_define_agree():
+    """The growth-step patch caps nothing without MOYBYTE_GC_GROW_MAX, so a
+    board that calls it and defines nothing is the stock doubling under a
+    patched name: the call and the define travel together, both ways."""
+    for build in _esp32_builds():
+        called = _opts_in(build, "moybyte_patch_gc_grow_step")
+        hdr = board_config.sdkconfig_path(build.parent).parent / "mpconfigboard.h"
+        defined = "MOYBYTE_GC_GROW_MAX" in hdr.read_text(encoding="utf-8")
+        assert called == defined, (
+            "%s: calls the grow-step patch = %r but defines "
+            "MOYBYTE_GC_GROW_MAX = %r" % (build, called, defined))
+
+
 def test_repr_c_unboxed_floats_wired():
     """REPR_C (unboxed 30-bit floats) is ONE body in the shared lib -- its sed
     and guard are executed in tests/test_esp32_build_lib.py -- and no board may

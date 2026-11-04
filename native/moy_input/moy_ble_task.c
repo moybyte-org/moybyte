@@ -443,6 +443,13 @@ bool moy_ble_start(void) {
         }
         return true;
     }
+    if (!s_h->enabled) {
+        // Keyboard input is off in Settings: the controller and the host stay
+        // down until it is turned on (modmoy_input.c's set_enabled starts
+        // them), which keeps their ~47 KB of internal SRAM free on an S3.
+        s_h->state = MOY_HID_DISABLED;
+        return true;
+    }
     #if defined(MOY_INPUT_BLE_HOSTED)
     // Since hosted ~2.8 the companion's BT controller is not initialised or
     // enabled by default: the host does both, with the transport up first,

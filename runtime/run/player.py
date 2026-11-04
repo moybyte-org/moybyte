@@ -649,6 +649,11 @@ class Player(PlayerDiag):
         # on the boot raster, so the small canvas dies with the run. (Also the
         # RESPONSIVE app-cart bind, #181: same field, same release.)
         self.ws.release_run_canvas()
+        # ...and the root's fold scratch its frames were shown through (a
+        # canvas without one has no release_fold).
+        rf = getattr(self.ws.sys_canvas, "release_fold", None)
+        if rf is not None:
+            rf()
         # A dirty EDITOR HANDLE is written HERE and nowhere else (#154): this
         # is the one place every exit path passes -- the tap on X,
         # quit(), a workspace swap, a crash -- so a kid's note is

@@ -425,6 +425,17 @@ moybyte_patch_sdcard_runs() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_sdcard_runs.py" "${MPY_DIR}" || exit 1
 }
 
+# Split-heap growth step. A growth adds an area as large as the whole heap,
+# so a small request a collect cannot place doubles it, and an area one
+# survivor holds is never given back: on an 8 MB board the step, not the need,
+# sets what the heap keeps. tools/patch_gc_grow_step.py caps one growth at the
+# board's MOYBYTE_GC_GROW_MAX (a bigger request still gets its own size); a
+# board that defines nothing keeps the stock doubling.
+moybyte_patch_gc_grow_step() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_grow_step.py" "${MPY_DIR}" || exit 1
+}
+
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
 # and the layer pool allocate from, and gives an area back only when a sweep

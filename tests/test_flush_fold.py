@@ -257,3 +257,36 @@ def test_the_twin_panel_verbs_stay_byte_identical(verb):
         encoding="utf-8")
     assert _normalised(lcd, "lcd", verb) == _normalised(axs, "axs", verb), (
         "moy_lcd_%s and moy_axs_%s have drifted apart" % (verb, verb))
+
+
+def test_a_runs_end_gives_the_fold_scratch_back_behind_its_fences():
+    """The fold's snapshot is a game-sized PSRAM buffer (150 KB for 320x240)
+    only a play frame uses, so Player.release_world gives it back through
+    DeviceCanvas.release_fold -- and only after every reader is waited out,
+    as the compiled cart's frame scratch closes (moycore_glue's close)."""
+    from types import SimpleNamespace
+    from device import device_canvas as dc
+    log = []
+
+    class Comp:
+        def __getattr__(self, name):
+            if name in ("fold_fence", "snap_fence", "disarm_scale_fold"):
+                return lambda: log.append(name)
+            raise AttributeError(name)
+
+    def scratch(tag):
+        return SimpleNamespace(release=lambda: log.append("release " + tag))
+
+    cv = SimpleNamespace(_comp=Comp(), _snap_scratch=scratch("snap"),
+                         _view_scratch=scratch("view"), _snap_live=True)
+    dc.DeviceCanvas.release_fold(cv)
+    assert log == ["fold_fence", "snap_fence", "disarm_scale_fold",
+                   "release snap", "release view"]
+    assert cv._snap_scratch is None and cv._view_scratch is None
+    assert cv._snap_live is False
+    log.clear()
+    dc.DeviceCanvas.release_fold(cv)        # nothing held: nothing waited on
+    assert log == []
+    player = runtime_file("player.py").read_text(encoding="utf-8")
+    world = player[player.index("def release_world"):]
+    assert world.index("release_run_canvas()") < world.index('"release_fold"')

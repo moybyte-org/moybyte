@@ -92,6 +92,8 @@ moybyte_patch_import_cache
 # P4 profile behind it.
 moybyte_patch_thread_state_tls
 
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap. A
+# P4's 32 MB keeps the stock doubling; MOYBYTE_GC_GROW_MAX is the S3 boards' alone.
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
 # so a call here reserves 0. Whether a P4 wants a reserve is unmeasured (#58).

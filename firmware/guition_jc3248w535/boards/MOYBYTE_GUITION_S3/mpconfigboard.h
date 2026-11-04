@@ -50,6 +50,15 @@
 // cart loadable behind that. See tools/esp32_build_lib.sh.
 #define MOYBYTE_GC_SPLIT_RESERVE            (3072 * 1024)
 
+// One growth of the Python heap adds at most this much (tools/patch_gc_grow_step.py):
+// the stock step is the whole heap, so a 20-32 KB request a collect could not
+// place among the desk's holes added a megabyte, and one survivor in it kept
+// that megabyte for the session. A request bigger than the cap still gets an
+// area of its own size. The step is the headroom a cart's garbage collects
+// in: measured on the T-Deck 2026-11-04, Brick Siege collected once in 120 s
+// on the stock 1 MB step and on this one, three times on a 256 KB step.
+#define MOYBYTE_GC_GROW_MAX                 (512 * 1024)
+
 // Paint SAVES pictures, and since 2026-09-07 a `.moyimg` is a deflate stream --
 // ONE format, the compressed one (runtime/carts/moy_image.py). The esp32 port sits at
 // MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES, which builds `deflate` READ-ONLY:

@@ -75,6 +75,7 @@ moybyte_patch_import_cache
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
 # and a board takes it when a profile here shows the same path.
 moybyte_patch_gc_split_reserve
+moybyte_patch_gc_grow_step
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free

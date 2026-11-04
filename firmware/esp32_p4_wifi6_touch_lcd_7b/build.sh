@@ -137,6 +137,8 @@ moybyte_patch_lfs_sizes
 # This console has no card in play: carts live on the internal flash VFS (the
 # moy_sd denial in board.toml says the same for the T-Deck's module).
 
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap. A
+# P4's 32 MB keeps the stock doubling; MOYBYTE_GC_GROW_MAX is the S3 boards' alone.
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
 # heap, and that define is set by the two S3 boards' mpconfigboard.h alone, so a

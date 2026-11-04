@@ -1748,3 +1748,43 @@ def test_the_configure_lock_is_held_until_the_first_compiled_step(tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout.split("\n")[:3] == ["before: held", "configuring: held",
                                         "compiling: free"]
+
+
+# The stock lines tools/patch_gc_grow_step.py anchors on: gc_try_add_heap's
+# rounding of the new area's size, between the doubling and the allocation.
+_GC_C_GROW_STOCK = (
+    "    // Round up size to the nearest multiple of BYTES_PER_BLOCK.\n"
+    "    total_heap = (total_heap + BYTES_PER_BLOCK - 1) & (~(BYTES_PER_BLOCK - 1));\n"
+    "\n"
+    "    DEBUG_printf(\"total_heap \" UINT_FMT \" bytes\\n\", total_heap);\n"
+    "\n"
+    "    size_t to_alloc = MIN(avail, MAX(total_heap, needed));\n"
+)
+
+
+def _grow(tmp_path, text=_GC_C_GROW_STOCK):
+    (tmp_path / "py").mkdir(exist_ok=True)
+    gc_c = tmp_path / "py" / "gc.c"
+    gc_c.write_text(text, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "patch_gc_grow_step.py"),
+                        str(tmp_path)], capture_output=True, text=True)
+    return gc_c, r
+
+
+def test_the_gc_grow_step_patch_caps_the_area_before_it_is_allocated(tmp_path):
+    gc_c, r = _grow(tmp_path)
+    assert r.returncode == 0, r.stderr
+    src = gc_c.read_text(encoding="utf-8")
+    cap = src.index("total_heap = (size_t)(MOYBYTE_GC_GROW_MAX);")
+    assert src.index("#ifdef MOYBYTE_GC_GROW_MAX") < cap < src.index("size_t to_alloc")
+    # `needed` still wins over the cap: the allocation line is stock.
+    assert "MIN(avail, MAX(total_heap, needed))" in src
+    _gc, again = _grow(tmp_path, src)
+    assert again.returncode == 0 and _gc.read_text(encoding="utf-8") == src
+
+
+def test_a_gc_grow_step_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    text = _GC_C_GROW_STOCK.replace("& (~(BYTES_PER_BLOCK - 1))", "& ~(BYTES_PER_BLOCK - 1)")
+    gc_c, r = _grow(tmp_path, text)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert gc_c.read_text(encoding="utf-8") == text

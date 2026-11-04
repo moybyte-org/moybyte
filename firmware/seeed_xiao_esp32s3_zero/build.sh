@@ -114,6 +114,9 @@ moybyte_patch_import_cache
 #    2026-08-25 on stock MicroPython, which carries no such patch at all.
 #    These two move together: take the 120MHz profile and take this with it.
 #
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap, for
+#    a console whose canvas and layers share PSRAM with the heap; headless, this
+#    board has neither.
 # DECLINED moybyte_patch_gc_split_reserve -- caps split-heap growth so PSRAM
 #    stays available to the C side (#66). What needs that PSRAM on a console is
 #    the canvas and the layer pool; this board is headless and has neither.
