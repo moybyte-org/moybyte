@@ -113,3 +113,15 @@ def test_the_row_and_its_absence_without_a_microphone():
     assert moybyte.mic is None
     assert "mic" not in P.services(Ws())
     assert P.check(cart, None, P.services(Ws()))[2] is not None
+
+
+def test_an_image_without_the_driver_has_no_microphone_and_ends_clean(monkeypatch):
+    """A console whose image has no audio (the Guition S3) stages the face but
+    not moy_mic: the face is absent, and every process's end still runs its
+    sweep through moybyte.ENDS."""
+    from runtime import dev_mic
+    monkeypatch.setattr(dev_mic, "_N", None)
+    assert not dev_mic.present() and moybyte.mic is None
+    pid = L.spawn("t.m")
+    assert dev_mic.sweep(pid) == 0
+    moybyte.end(pid)

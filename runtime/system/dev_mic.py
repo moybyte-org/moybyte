@@ -68,4 +68,4 @@ def present():
 
 
 def sweep(pid):
-    return _N.sweep(pid)
+    return _N.sweep(pid) if _N is not None else 0
