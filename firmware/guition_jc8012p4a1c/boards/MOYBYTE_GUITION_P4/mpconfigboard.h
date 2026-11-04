@@ -91,6 +91,10 @@
 #define MOY_WASM_STACK_BYTES                (16 * 1024)
 #define MOY_WASM_STACK_PSRAM                (1)
 
+// A compiled cart's timed lanes (native/moy_wasm/moy_wasm_session.h): the
+// P4-only set of docs/os_2026-11.md section 5.
+#define MOY_WASM_TIMED_LANES                (1)
+
 // The engine's runtime pool, its fixed part (moy_wasm_footprint.h). A RISC-V
 // load holds more than the S3's for the same cart -- its text relocations --
 // and the peak follows the data segments and relocations, not the text:

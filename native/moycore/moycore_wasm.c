@@ -399,11 +399,37 @@ static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
     return 0;
 }
 
+#if MOY_WASM
+static uint32_t no_ring(const uint8_t *pcm, uint32_t n)
+{
+    (void)pcm;
+    (void)n;
+    return 0;
+}
+
+// The cart's timed lanes, once _init has returned (moy_wasm_session.h): the
+// audio lane fills `snd`'s ring, which a struck lane mutes.
+static int lanes_start(char *err, size_t errlen)
+{
+    moy_wasm_tlane_sink_t sink = {no_ring, NULL};
+#if MOY_AUDIO_SND
+    if (WR->w.snd) {
+        sink.write = moy_audio_snd;
+        sink.mute = moy_audio_snd_mute;
+    }
+#endif
+    return moy_wasm_tlanes_start(WR->w.env, &sink, err, errlen) < 0;
+}
+#endif
+
 static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 {
     (void)user;
 #if MOY_WASM
-    if (what == WCALL_INIT) return moy_wasm_init(&WR->w, err, errlen);
+    if (what == WCALL_INIT) {
+        if (moy_wasm_init(&WR->w, err, errlen) != 0) return 1;
+        return lanes_start(err, errlen);
+    }
     if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
     return moy_wasm_draw(&WR->w, err, errlen);
 #else
@@ -426,6 +452,9 @@ static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 static void wo_unbound(void *user)
 {
     (void)user;
+#if MOY_WASM
+    moy_wasm_tlanes_stop();
+#endif
     moy_wasm_close(&WR->w);
 }
 

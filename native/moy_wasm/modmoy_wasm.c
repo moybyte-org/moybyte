@@ -1354,6 +1354,25 @@ static mp_obj_t mod_lanes(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lanes_obj, mod_lanes);
 
+// tlanes() -> [(name, ran, calls, frames, max_us, struck, why)] per timed lane
+// of the last session (moy_wasm_session.h), [] on a board without them.
+static mp_obj_t mod_tlanes(void)
+{
+    static const qstr names[MOY_WASM_TLANES] = { MP_QSTR_moy_audio, MP_QSTR_moy_timer };
+    moy_wasm_tlane_stats_t st[MOY_WASM_TLANES];
+    int n = moy_wasm_tlanes_stats(st);
+    mp_obj_t l = mp_obj_new_list(0, NULL);
+    for (int k = 0; k < n; k++) {
+        mp_obj_t t[7] = { MP_OBJ_NEW_QSTR(names[k]), mp_obj_new_bool(st[k].ran),
+                          INT(st[k].calls), INT(st[k].frames), INT(st[k].max_us),
+                          mp_obj_new_bool(st[k].struck),
+                          mp_obj_new_str(st[k].why, strlen(st[k].why)) };
+        mp_obj_list_append(l, mp_obj_new_tuple(7, t));
+    }
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_tlanes_obj, mod_tlanes);
+
 static MP_DEFINE_STR_OBJ(mod_key_obj, "format " MOY_WASM_FORMAT_VERSION "\n" KEY_TARGET);
 static MP_DEFINE_STR_OBJ(mod_format_obj, MOY_WASM_FORMAT_VERSION);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
@@ -1372,6 +1391,7 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&mod_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_lanes), MP_ROM_PTR(&mod_lanes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tlanes), MP_ROM_PTR(&mod_tlanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_interp_footprint_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code

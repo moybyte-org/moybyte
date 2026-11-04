@@ -190,6 +190,15 @@ reports 0 lanes whenever the live session is running main.wasm rather than an
 AOT module): no sibling-instance trick is attempted over the interpreter's
 module, so a cart's `par` items run in declaration order on the calling core.
 
+**A cart's timed lanes run on the P4s** (`MOY_WASM_TIMED_LANES`,
+`docs/os_2026-11/hardware.md` §2): where a module exports `moy_audio` or
+`moy_timer`, the OS calls it from a high-priority thread on the core the
+session is not on, each a sibling instance as `par`'s lanes are, AOT or
+interpreted alike, under a deadline monitor that strikes a lane whose call
+runs long. `moy_wasm_session.h` is the contract, `moy_wasm_tlane.c` the code,
+`moy_wasm.tlanes()` the meter; the interpreter's pool carries their room
+(`moy_wasm_footprint.h`). The S3s have none.
+
 Where a board finds a cart's compiled module is host policy: `<main>.<chip>.f<format>.aot`
 beside `main.wasm` in the cart's folder, `CHIP`/`FORMAT` naming this engine's
 chip and compiled-code format version (`tools/wasm_cart.py`'s `aot_name`

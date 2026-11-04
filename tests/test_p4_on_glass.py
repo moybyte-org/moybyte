@@ -839,6 +839,20 @@ def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
     on_glass.a_stuck_run_is_ended(board, runtime)
 
 
+# The timed lanes (native/moy_wasm/moy_wasm_session.h): moy_audio and moy_timer
+# run on their own core, AOT and interpreted, and a lane that spins is struck
+# at its deadline, the ring muted, the cart running on.
+@pytest.fixture(scope="module")
+def lanes_carts(board):
+    on_glass.lanes_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runaway", (False, True))
+@pytest.mark.parametrize("tier", ("aot", "interp"))
+def test_a_cart_s_timed_lanes_run_and_a_runaway_is_struck(board, lanes_carts, tier, runaway):
+    on_glass.timed_lanes_run(board, tier, runaway)
+
+
 # -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.

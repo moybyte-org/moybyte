@@ -143,4 +143,77 @@ int moy_wasm_session_lane_go(int lane, void (*fn)(void *arg), void *arg);
 // Wait for the fn lane `lane` was last given to return.
 void moy_wasm_session_lane_wait(int lane);
 
+// TIMED LANES (docs/os_2026-11/hardware.md section 2), a board's that sets
+// MOY_WASM_TIMED_LANES (the P4s; the S3s' wait on their core-0 spike): the OS
+// calling a cart's own exports on a high-priority thread on the core the
+// session is not on, AOT or interpreted, each on a sibling instance of the
+// cart over its memory (wasm_runtime_instantiate_sibling, as par's lanes):
+//
+//   i32 moy_audio(i32 buf, i32 n)   render up to `n` frames of signed 16-bit
+//                                   mono at 22,050 Hz into `buf`; how many.
+//                                   Called while the render-ahead ring has
+//                                   room (moy_audio_snd.h, the manifest's
+//                                   "audio_ring" deep), n at most
+//                                   MOY_WASM_TLANE_CHUNK; what it renders
+//                                   goes into the ring, never inside the
+//                                   feeder
+//   i32 moy_timer(i32 t_us)         called at the deadline it last asked for,
+//                                   `t_us` the wrapping microsecond clock
+//                                   (esp_timer: 1 us resolution, dispatched
+//                                   tens of microseconds late, no sooner than
+//                                   MOY_WASM_TLANE_TIMER_MIN); the
+//                                   microseconds to the next call, 0 or less
+//                                   for none. Called once as the lanes start
+//   i32 moy_lane_stack(i32 lane)    the top of lane `lane`'s own stack in the
+//                                   cart's memory (0 audio, 1 timer), called
+//                                   once on the session's thread; the lane's
+//                                   __stack_pointer (SPEC.md 16.10's export)
+//                                   starts there, below the audio lane's
+//                                   `buf`, which is the stack's top
+//                                   2 x n bytes
+//
+// A lane may call no import: one traps the lane (libmoy's binding refuses an
+// unbound instance). THE DEADLINE MONITOR, an esp_timer above every lane,
+// strikes a lane whose call has run past MOY_WASM_TLANE_DEADLINE_US: it
+// suspends the lane's task (AOT code reads a termination only at an import
+// return, so a spinning lane would otherwise hold its core), mutes the ring
+// and strikes the lane for the session's life; a trap strikes it too. Each
+// lane's task stack is MOY_WASM_STACK_BYTES taken from THE SHARES' LANES row.
+#define MOY_WASM_TLANE_AUDIO 0
+#define MOY_WASM_TLANE_TIMER 1
+#define MOY_WASM_TLANES 2
+#define MOY_WASM_TLANE_CHUNK 128
+#define MOY_WASM_TLANE_DEADLINE_US 10000
+#define MOY_WASM_TLANE_TIMER_MIN 100
+
+// The ring the audio lane fills: n frames queued, how many it took (n 0: the
+// room); and what mutes it once a lane is struck.
+typedef struct {
+    uint32_t (*write)(const uint8_t *pcm, uint32_t n);
+    void (*mute)(void);
+} moy_wasm_tlane_sink_t;
+
+// From the session's thread, once _init has returned: start a lane for each
+// of moy_audio and moy_timer the module exports (with moy_lane_stack and
+// __stack_pointer). The lanes started as a mask of 1 << MOY_WASM_TLANE_*, 0
+// for none (or a board without timed lanes), or -1 with `err` set (the LANES
+// row, the pool or a stack refused them; none runs).
+int moy_wasm_tlanes_start(moy_wasm_env env, const moy_wasm_tlane_sink_t *sink,
+                          char *err, size_t errlen);
+// From the session's thread, before the runtime goes: every lane stopped,
+// a struck one's task deleted, and the LANES row given back.
+void moy_wasm_tlanes_stop(void);
+
+// What a session's lanes did, kept past its end: per lane, whether it ran,
+// its calls, frames rendered, the longest call in microseconds, and whether
+// and why it was struck.
+typedef struct {
+    uint8_t ran, struck;
+    uint32_t calls, frames, max_us;
+    char why[48];
+} moy_wasm_tlane_stats_t;
+// The lanes' stats into `out` (MOY_WASM_TLANES of them): how many this board
+// runs (0 without timed lanes).
+int moy_wasm_tlanes_stats(moy_wasm_tlane_stats_t *out);
+
 #endif

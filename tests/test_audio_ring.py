@@ -1,11 +1,12 @@
 """The render-ahead audio ring (docs/os_2026-11/hardware.md section 2): the
 mix's stream at a depth the app chooses (native/moy_audio/moy_audio_snd.h),
 its Python face (`moybyte.snd_open`/`snd`/`snd_close`), a compiled cart's
-manifest field, and the row the C restates from THE SHARES.
+manifest field, and the constants the C restates from THE SHARES.
 
 The host's ctypes build of moy_aud.c is the same C a board runs, so the
 ring's depth, its room and its starvation are read here as a board reads
-them; what only a board has (the RINGS row's refusal) is a board's."""
+them; what only a board has (the RINGS row's refusal, the timed lanes and
+their deadline monitor) is its on-glass suite's."""
 
 import array
 import json
@@ -32,6 +33,8 @@ def _share_row(name):
 def test_the_c_that_restates_a_shares_row_names_the_same_row():
     assert int(re.search(r"#define AUD_SHARE_RINGS (\d+)",
                          _src("native/moy_audio/moy_aud.c")).group(1)) == _share_row("RINGS")
+    assert int(re.search(r"#define TL_SHARE_LANES (\d+)",
+                         _src("native/moy_wasm/moy_wasm_tlane.c")).group(1)) == _share_row("LANES")
 
 
 def test_the_python_face_restates_the_depths_the_c_takes():

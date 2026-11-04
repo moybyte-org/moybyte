@@ -817,6 +817,15 @@ uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {
     return r;
 }
 
+void moy_audio_snd_mute(void) {
+    moy_aud_lock();
+    if (A.pcm_on) {
+        moy_stream_clear(&A.pcm);
+    }
+    A.pcm_on = 0;
+    moy_aud_unlock();
+}
+
 void moy_audio_snd_close(void) {
     moy_aud_lock();
     if (A.pcm_on) {

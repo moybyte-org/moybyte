@@ -173,6 +173,7 @@ add_library(usermod_moy_wasm INTERFACE)
 
 target_sources(usermod_moy_wasm INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_wasm.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_wasm_tlane.c
 )
 
 target_include_directories(usermod_moy_wasm INTERFACE

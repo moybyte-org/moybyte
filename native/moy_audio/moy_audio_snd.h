@@ -1,6 +1,7 @@
 // The render-ahead stream (docs/os_2026-11/hardware.md section 2) into this
 // board's speaker: a compiled cart's `snd` (moy-spec SPEC.md 16.9), which
-// moycore reaches from the engine's thread, or a Python process's
+// moycore reaches from the engine's thread, its timed audio lane
+// (native/moy_wasm/moy_wasm_session.h) or a Python process's
 // `moybyte.snd`, one holder at a time. The stream is libmoy's moy_stream, and
 // the core-1 feeder adds it after the synth in every block it renders, under
 // the same master level.
@@ -43,5 +44,9 @@ uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n);
 
 // Drop what is queued and stop mixing. The counters stay readable.
 void moy_audio_snd_close(void);
+
+// The same from any task, the ring kept until the close: what a struck timed
+// lane's monitor calls (native/moy_wasm/moy_wasm_session.h).
+void moy_audio_snd_mute(void);
 
 #endif

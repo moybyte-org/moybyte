@@ -3797,6 +3797,75 @@ def a_stuck_run_is_ended(board, runtime):
     return err
 
 
+# -- the timed lanes (native/moy_wasm/moy_wasm_session.h, the P4s) -------------
+#
+# lanes.moy's moy_audio fills the render-ahead ring and its moy_timer asks for
+# every millisecond; lanes_runaway.moy's moy_audio spins after its 200th call,
+# which the deadline monitor strikes, muting the ring, while the timer lane
+# and the cart run on. Each runs AOT (its module built for this board's chip)
+# and interpreted (a copy with none).
+
+LANES = {("aot", False): "Lanes Wasm", ("aot", True): "Lanes Runaway Wasm",
+         ("interp", False): "Lanes Interp", ("interp", True): "Lanes Runaway Interp"}
+
+
+def lanes_carts_push(board, board_dir):
+    """The four lanes carts into the store, rescanned."""
+    import json
+    import shutil
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_lanes_")
+    for name in ("lanes", "lanes_runaway"):
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")), out,
+                        chips=(chip,))
+        _push_folder(board, board_dir, out, root + "/wasm_%s.moy" % name)
+        interp = os.path.join(tmp, name + "_interp.moy")
+        shutil.copytree(out, interp, ignore=shutil.ignore_patterns("*.aot"))
+        man = os.path.join(interp, "manifest.json")
+        m = json.load(open(man))
+        m["title"] = m["title"].replace("Wasm", "Interp")
+        json.dump(m, open(man, "w"))
+        _push_folder(board, board_dir, interp, root + "/wasm_%s_interp.moy" % name)
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+
+
+def timed_lanes_run(board, tier, runaway):
+    """The lanes cart for `tier` ("aot" or "interp"), run for three seconds:
+    both lanes ran, the timer near its asked-for rate and the audio lane
+    keeping the ring fed -- or, for the runaway, the audio lane struck at its
+    deadline with the ring muted while the timer lane and the cart run on.
+    Returns moy_wasm.tlanes()."""
+    title = LANES[(tier, runaway)]
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        lanes = board.pyval("__import__('moy_wasm').tlanes()", strict=True)
+        ring = board.pyval("__import__('moy_audio').snd_counts()", strict=True)
+        print("\nLANES %s%s: %r ring %r" % (tier, " runaway" if runaway else "", lanes, ring))
+        audio, timer = lanes
+        assert audio[1] and timer[1], lanes
+        assert timer[2] > 1000 and not timer[5], timer
+        if runaway:
+            assert audio[5] and audio[6].startswith("deadline"), audio
+            assert audio[2] == 200 and ring[4] is False, (audio, ring)
+        else:
+            assert audio[3] > 22050 and not audio[5], audio
+            assert ring[4] is True and ring[5] == 512, ring
+        return lanes
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+
+
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # The sub-line by cause (runtime/run/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than

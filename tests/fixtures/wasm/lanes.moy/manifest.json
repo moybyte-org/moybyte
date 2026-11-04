@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Lanes Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 1,
+  "moybyte": {"audio_ring": 512}
+}
