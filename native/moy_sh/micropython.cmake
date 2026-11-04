@@ -43,9 +43,13 @@ target_include_directories(moy_sh_core PRIVATE
     ${_moy_sh_cfg}
     "${_moy_sh_inc}")
 target_compile_definitions(moy_sh_core PRIVATE "${_moy_sh_defs}")
+# -Os after the build's own level (the consoles build -O2): a shell is typed
+# at, never on a frame's path, and its image cost is what each board's
+# headroom floor pays.
 target_compile_options(moy_sh_core PRIVATE
     "${_moy_sh_opts}"
-    $<$<COMPILE_LANGUAGE:C>:${_moy_sh_copts}>)
+    $<$<COMPILE_LANGUAGE:C>:${_moy_sh_copts}>
+    -Os)
 target_link_libraries(moy_sh_core PRIVATE
     idf::freertos idf::heap idf::newlib idf::vfs idf::esp_common idf::esp_system
     idf::esp_hw_support idf::soc idf::hal idf::log)

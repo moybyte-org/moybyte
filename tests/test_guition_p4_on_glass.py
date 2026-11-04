@@ -101,10 +101,7 @@ TF_CARD_SRAM = 756
 # scratch, the splash palette, the faces' lent scratch and the screens'
 # PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
 # 2026-10-26; the scratch and the band themselves are PSRAM.
-# And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
-# session's pointer; every session is PSRAM), 4 bytes of .bss by the
-# link map, 2026-11-05.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270 + 4
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
