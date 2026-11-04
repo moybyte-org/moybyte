@@ -456,6 +456,9 @@ def banner(loop, info):
     for _ in range(30):
         loop.step()
     info["banner_posted"] = notifications.NOTES.up() is not None
+    # Up for the whole window, however slowly a loaded machine paces its
+    # frames: a critical banner's ten seconds ran out under xdist.
+    notifications.NOTES.until = time.ticks_add(time.ticks_ms(), 600000)
     gc.collect()
     gc.disable()
     info["banner"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)

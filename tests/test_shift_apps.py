@@ -92,7 +92,7 @@ _LOG_SCRIPT = ("for i in range(40):\n    print('row %d of the log, a little long
                "        print('you said', s)\n")
 
 
-def _console(tmp_path, app, ships, desk=False):
+def _console(tmp_path, app, ships, desk=False, chip=False):
     import json
     from runtime import cart_index as ci
     root = tmp_path / ("ships" if ships else "whole")
@@ -106,6 +106,8 @@ def _console(tmp_path, app, ships, desk=False):
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
+    if chip:
+        ws.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
         ws.player.holds = lambda cv: False
@@ -174,9 +176,9 @@ class Pair:
     """The session on both consoles, frame by frame; the first's buffers
     presented in turn, `bufs` of them."""
 
-    def __init__(self, tmp_path, app, bufs, desk=False):
-        self.a = _console(tmp_path, app, True, desk)
-        self.b = _console(tmp_path, app, False, desk)
+    def __init__(self, tmp_path, app, bufs, desk=False, chip=False):
+        self.a = _console(tmp_path, app, True, desk, chip)
+        self.b = _console(tmp_path, app, False, desk, chip)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -385,7 +387,7 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     frame is a whole repaint's bytes. On a desk the run's canvas is its
     window's own (`Player.holds`), which holds the log whatever the glass's
     buffers do."""
-    p = Pair(tmp_path, "console", bufs, desk)
+    p = Pair(tmp_path, "console", bufs, desk, chip=True)
     assert p.a.show_fps
     if desk:
         assert p.a.player.holds(p.a.canvas)
@@ -461,7 +463,7 @@ def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
     lies in: a frame that moves nothing draws what lies under it again
     (its floor takes it), one that would move it draws whole, and every
     frame is a whole repaint's bytes."""
-    p = Pair(tmp_path, "console", 2)
+    p = Pair(tmp_path, "console", 2, chip=True)
     cx, top, _cw, _ch = p.a.app_content_rect()
     for ws in (p.a, p.b):
         def over(ws=ws):

@@ -26,6 +26,7 @@ def _running_cart(tmp_path):
     Pick the game by TYPE, not by position: a game runs fullscreen while an app
     runs with the bar, and which cart sorts first is alphabetical."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.set_show_fps(True, persist=False)      # the chip the HUD hangs off
     drv = host_app.ConsoleDriver(ws)
     assert ws.launcher.items, "system carts should be seeded"
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
