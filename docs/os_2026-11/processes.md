@@ -425,6 +425,15 @@ it holds one: a fifth source is refused with the same dialog, naming the
 oldest game, and the focused app's session has priority (it is the one
 focused, so the one heard).
 
+**A later phase, maybe: paused runs give back their session (owner,
+2026-11-04).** The cap of four is the audio table's, not memory's, and a
+minimised game is paused, so it is silent. A paused run could close its
+session and reopen it on resume. Only playing runs would then count against
+the table, leaving the share as the bound on a board, plus a fixed cap where
+there is no share (the browser). This is left out for now to keep admission
+simple. What it would need first is the cost of reopening a session (does
+it reload the cart's bank?) on a T-Deck resume.
+
 ## 7. Notifications
 
 **Decision (owner, 2026-11-03): app notifications, as on Android.** The verb
