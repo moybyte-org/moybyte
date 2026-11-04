@@ -109,6 +109,8 @@ typedef struct {
     StaticSemaphore_t mtx_buf;
     SemaphoreHandle_t mtx;
     TaskHandle_t task;
+    StaticTask_t *tcb;                  // internal, as a TCB must be
+    StackType_t *stack;                 // PSRAM, MOY_MEDIA_STACK
 #endif
 } media_t;
 
@@ -1200,9 +1202,15 @@ int moy_media_open(uint32_t owner, int rate) {
     mp3dec_init(&m->dec);
 #ifdef MEDIA_BOARD
     m->mtx = xSemaphoreCreateMutexStatic(&m->mtx_buf);
-    if (m->mtx == NULL
-        || xTaskCreatePinnedToCoreWithCaps(task, "moy_media", MOY_MEDIA_STACK, m, MOY_MEDIA_PRIO,
-                                           &m->task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    m->tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    m->stack = heap_caps_malloc(MOY_MEDIA_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (m->tcb != NULL && m->stack != NULL) {
+        m->task = xTaskCreateStaticPinnedToCore(task, "moy_media", MOY_MEDIA_STACK / sizeof(StackType_t),
+                                                m, MOY_MEDIA_PRIO, m->stack, m->tcb, 0);
+    }
+    if (m->mtx == NULL || m->task == NULL) {
+        heap_caps_free(m->tcb);
+        heap_caps_free(m->stack);
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, moy_media_share());
         return -MOY_MEDIA_ENOMEM;
@@ -1217,9 +1225,25 @@ int moy_media_open(uint32_t owner, int rate) {
     return 0;
 }
 
+#ifdef MEDIA_BOARD
+// The task ended and its memory freed. Suspended first, and deleted once core 0
+// has switched away from it, so the delete is immediate and nothing defers a
+// touch of the TCB to the idle task (vTaskDeleteWithCaps does the same with
+// eTaskGetState, which the S3s would carry in IRAM).
+static void task_end(media_t *m) {
+    vTaskSuspend(m->task);
+    for (int i = 0; i < 100 && xTaskGetCurrentTaskHandleForCore(0) == m->task; i++) {
+        vTaskDelay(1);
+    }
+    vTaskDelete(m->task);
+    heap_caps_free(m->tcb);
+    heap_caps_free(m->stack);
+}
+#endif
+
 static void reap(media_t *m) {
 #ifdef MEDIA_BOARD
-    vTaskDeleteWithCaps(m->task);       // it waits on its notification: it holds nothing
+    task_end(m);                        // idle: it waits on its notification and holds nothing
     moy_aud_bg(NULL);
     moy_aud_lock();
     s_m = NULL;
