@@ -13,11 +13,17 @@
 #define FETCH_EVENTS 1
 #include "moy_input.h"
 #endif
+// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
+// board is recognised by the header it has.
+#if __has_include("esp_heap_caps.h")
+#define FETCH_ON_BOARD 1
+#endif
 #endif
 
-#if defined(ESP_PLATFORM) && defined(MOY_API_HTTP)
+#if defined(FETCH_ON_BOARD) && defined(MOY_API_HTTP)
 #define FETCH_TASK 1
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 #define LOCK() portENTER_CRITICAL(&s_mux)
@@ -42,7 +48,7 @@ typedef struct {
     uint32_t n;
 } slot_t;
 
-static slot_t s_slot[MOY_FETCH_SLOTS];
+static slot_t *s_slot;                  // MOY_FETCH_SLOTS, kernel memory at the first open
 static uint32_t s_src;
 
 static uint32_t handle_of(int i) {
@@ -51,7 +57,7 @@ static uint32_t handle_of(int i) {
 
 static slot_t *slot_at(uint32_t h) {
     int i = (int)(h & 0xffu) - 1;
-    if (i < 0 || i >= MOY_FETCH_SLOTS || s_slot[i].state == MOY_FETCH_FREE
+    if (s_slot == NULL || i < 0 || i >= MOY_FETCH_SLOTS || s_slot[i].state == MOY_FETCH_FREE
         || s_slot[i].gen != (uint16_t)(h >> 8)) {
         return NULL;
     }
@@ -84,8 +90,13 @@ static void post(uint32_t h, uint8_t state, int status) {
 
 static void open_source(void) {
     #ifdef FETCH_EVENTS
+    moy_input_t *t = moy_input_kernel();
+    char was[8];
+    if (s_src != 0 && (t == NULL || moy_input_source_name(t, s_src, was, sizeof(was)) != MOY_INPUT_OK
+                       || strcmp(was, "http") != 0)) {
+        s_src = 0;                      // the table it was opened on is gone
+    }
     if (s_src == 0) {
-        moy_input_t *t = moy_input_kernel();
         uint32_t src;
         if (t != NULL && moy_input_ring_open(t, "http", MOY_EV_FIFO, 16, &src) == MOY_INPUT_OK) {
             s_src = src;
@@ -128,7 +139,7 @@ static void serve(int i) {
 }
 
 void moy_fetch_run(void) {
-    for (int i = 0; i < MOY_FETCH_SLOTS; i++) {
+    for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         serve(i);
     }
 }
@@ -156,7 +167,7 @@ static int start(void) {
 }
 
 int moy_fetch_present(void) {
-    #if defined(ESP_PLATFORM) && !defined(MOY_API_HTTP)
+    #if defined(FETCH_ON_BOARD) && !defined(MOY_API_HTTP)
     return 0;
     #else
     return 1;
@@ -181,6 +192,14 @@ int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t flags
     }
     if (moy_httpc_init() != 0) {
         return -MOY_FETCH_ENOMEM;
+    }
+    if (s_slot == NULL) {
+        slot_t *t = moy_net_alloc(sizeof(slot_t) * MOY_FETCH_SLOTS);
+        if (t == NULL) {
+            return -MOY_FETCH_ENOMEM;
+        }
+        memset(t, 0, sizeof(slot_t) * MOY_FETCH_SLOTS);
+        s_slot = t;
     }
     int i = 0;
     while (i < MOY_FETCH_SLOTS && s_slot[i].state != MOY_FETCH_FREE) {
@@ -261,7 +280,7 @@ int moy_fetch_close(uint32_t h) {
 
 uint32_t moy_fetch_sweep(uint32_t owner) {
     uint32_t k = 0;
-    for (int i = 0; i < MOY_FETCH_SLOTS; i++) {
+    for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         if (s_slot[i].state != MOY_FETCH_FREE && !s_slot[i].closing && s_slot[i].owner == owner
             && moy_fetch_close(handle_of(i)) == 0) {
             k++;
@@ -272,7 +291,7 @@ uint32_t moy_fetch_sweep(uint32_t owner) {
 
 uint32_t moy_fetch_count(uint32_t owner) {
     uint32_t k = 0;
-    for (int i = 0; i < MOY_FETCH_SLOTS; i++) {
+    for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         if (s_slot[i].state != MOY_FETCH_FREE && !s_slot[i].closing
             && (owner == 0 || s_slot[i].owner == owner)) {
             k++;
@@ -286,7 +305,7 @@ uint32_t moy_fetch_source(void) {
 }
 
 void moy_fetch_reset(void) {
-    for (int i = 0; i < MOY_FETCH_SLOTS; i++) {
+    for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         if (s_slot[i].state != MOY_FETCH_FREE) {
             slot_free(&s_slot[i]);
         }

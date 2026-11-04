@@ -25,7 +25,10 @@ a per-chip GPIO list (`CHIP_GPIO`) that names the strapping, flash, PSRAM
 and USB pads, none of which a `lease` row may hold; every `class` row names a
 device API (`DEVICE_APIS`), and where that API has a module the image stages
 it; every `os` and `never` row has a `why`. `tests/test_board_toml.py`
-holds each board to it. This is the Zero's pin allowlist
+holds each board to it. The table reaches the C as defines
+(`board_config.hw_defines`, staged into the board's build): `MOY_API_<API>`
+for each API a class row names and `MOY_HW_<ROW>_<PIN>` for each named pin,
+which the device APIs' drivers are built from. This is the Zero's pin allowlist
 generalised (`firmware/web_runner/gpio_link.py`: "the allowlist is the
 security model").
 
@@ -52,8 +55,10 @@ security model").
    on the P4's touch I²C (the codec) is a `class` row, and the kernel's I²C
    master (`native/moy_kernel/moy_bus.h`) is the only driver. **SPI has no
    arbiter**: the T-Deck's panel feed holds SPI2 for most of every frame
-   (#158), so a transaction gate that runs in the flush's band gaps is the
-   design for the LoRa `class` row (phase 2), and SPI2 is never leased.
+   (#158), so the LoRa radio's transactions run in the flush's band gaps
+   (`moy_flush_gate_take`/`_give`, `native/moy_flush/moy_flush.h`: the
+   feeder queues no band while one waits, lets the queued ones finish and
+   steps aside), and SPI2 is never leased.
    **A Python lease hands back MicroPython `machine`-compatible objects**
    (`UART`, `I2C`, `SPI`, `Pin`, `PWM`, `ADC`; owner, 2026-11-03), so
    existing MicroPython drivers (micropython-lib, GitHub) work unchanged:
@@ -90,6 +95,40 @@ object kept past its process raises `OSError(EBADF)`. **A VM stop is refused
 while a Python process holds a lease** (`MOY_LEASE_VM`, read by
 `native/moy_play/moy_play_stop.c` beside the WiFi leases); a Lua, wasm or ELF
 process's lease will live outside the VM, untouched by a stop.
+
+**The device APIs as built** are `runtime/system/devices.py`'s faces,
+`moybyte.http`, `.mic`, `.lora` and `.ble` (`None` where the console lacks
+the class), each over a C driver, each checking its permission row against
+the caller's grants and swept at the caller's end. The mic, the radio and
+BLE have one holder at a time (`EBUSY` for another); `http` requests are
+many. Their events are NET, LORA and BLE records on each driver's ring
+source, which a face's `on(fn)` or `on_done` wakes its process on.
+
+- **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
+  through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
+  stop leaves alone), its body kept up to a cap; `https` and a redirect to
+  it are refused for apps until TLS (P3.4), and a request holds the WiFi
+  lease's `http` tag while it runs.
+- **`mic`** (`native/moy_audio/moy_mic.h`): PCM16 mono at the speaker's
+  rate from the ES7210 on the kernel's I²C bus, on the T-Deck's own I2S1, on
+  a P4 the speaker's I2S0 opened full duplex, the ES7210's four inputs in
+  TDM and the two slots' mean (`moy_mic.c` says why).
+  `moybyte.mic.holder()` names the process recording, for the indicator.
+- **`lora`** (`native/moy_net/moy_lora.h`, the T-Deck): the SX1262 inside
+  the band-gap gate, raw packets with RSSI and SNR, and LoRaWAN 1.0.x class
+  A OTAA on EU868 over the OS's MAC (`moy_lorawan.h`, `moy_aes.h`), its
+  receive windows timed by the driver's task. MAC commands are read past,
+  not answered, and the DevNonce is random (1.0.2).
+- **`ble`** (`native/moy_input/moy_gatt.h`): a GATT central (scan, connect,
+  find by UUID, read, write, subscribe) and a non-connectable beacon, on the
+  NimBLE host the keyboard machine owns and only while it runs (keyboard
+  input on in Settings); an app's scan during the keyboard's ends `-EBUSY`.
+  An app's own GATT server is not offered: NimBLE takes its services before
+  the host starts.
+
+The host's stand-ins are `runtime/host/mic_sim.py`, `lora_sim.py` (with a
+LoRaWAN network server written apart from the C) and `gatt_sim.py`; `http`
+runs for real.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in
@@ -243,8 +282,10 @@ moybyte.battery() -> (percent, charging) | None
 moybyte.brightness(level=None) -> level   needs "brightness"
 moybyte.mic.read(buf) -> n             PCM16 mono at the board's rate; needs "mic"
 moybyte.gps() -> (lat, lon, alt, t_us) | None
-moybyte.lora.send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
-moybyte.lora.join() / uplink(port, bytes) / downlink(into) -> n | None   LoRaWAN over the OS MAC
+moybyte.http.get(url, cap, on_done) -> Request: state() / body() / readinto(buf) / close()
+moybyte.lora.config(...) / listen() / send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
+moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None
+moybyte.ble.scan() / connect(addr) / find(uuid) / read(h) / write(h, bytes) / subscribe(h) / advertise(name, data)
 moybyte.media.play(src) / pause() / resume() / stop() / volume(v) / now() -> dict   §3
 ```
 

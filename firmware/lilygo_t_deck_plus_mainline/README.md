@@ -750,6 +750,11 @@ Every one of these was learned by hanging or bricking a board.
   blocking flush could not overlap anything. If a first boot wedges with
   `SD > op` as the last serial line, this is the first place to look, and
   `ASYNC_FLUSH = False` is the test.
+  The LoRa radio, the host's third device, takes neither route: its driver
+  (`native/moy_net/moy_lora.c`) adds it to the live host after the panel and
+  wraps every transaction in the flush's band-gap gate
+  (`native/moy_flush/moy_flush.h`), which stops the feeder queuing bands and
+  lets the queued ones finish before the radio's command goes out.
   The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
   `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
   store read (`tests/test_cover_pipeline.py` pins the gate).

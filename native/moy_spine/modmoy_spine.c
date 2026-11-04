@@ -1552,7 +1552,7 @@ static const mp_rom_obj_tuple_t lease_tags_tuple = {
         MP_ROM_QSTR(MP_QSTR_web), MP_ROM_QSTR(MP_QSTR_update),
         MP_ROM_QSTR(MP_QSTR_settings), MP_ROM_QSTR(MP_QSTR_cart),
         MP_ROM_QSTR(MP_QSTR_link), MP_ROM_QSTR(MP_QSTR_carts),
-        MP_ROM_QSTR(MP_QSTR_dev),
+        MP_ROM_QSTR(MP_QSTR_dev), MP_ROM_QSTR(MP_QSTR_http),
     },
 };
 

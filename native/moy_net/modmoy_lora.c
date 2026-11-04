@@ -8,7 +8,9 @@
 //   send(owner, buf)   recv(owner, buf, meta) -> n   (meta: array('i', 3) <- rssi, snr x4, port)
 //   join(owner, dev_eui, join_eui, app_key, dr)   uplink(owner, port, buf, confirmed, dr)
 //   joined() -> (joined, dev_addr, fcnt_up)   mode()   step(now_ms) -> due   source()
-//   present()   gate_stats() -> (yields, us) | None
+//   present()   gate_stats() -> (yields, us, xfers, wait_us, wait_max_us) | None:
+//               the feeder's yields and time aside, the radio's commands and their
+//               wait for a band gap (the longest since the last call)
 //   sim(on)   sim_sent() -> (bytes, freq, sf, bw, sync, iq) | None
 //   sim_air(buf, freq, sf, rssi, snr) -> bool   reset()
 
@@ -151,10 +153,13 @@ static MP_DEFINE_CONST_FUN_OBJ_0(lora_present_obj, lora_present);
 
 static mp_obj_t lora_gate_stats(void) {
     #ifdef LORA_GATE
-    uint32_t n, us;
+    uint32_t n, us, x, w, wmax;
     moy_flush_gate_stats(&n, &us);
-    mp_obj_t t[2] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us) };
-    return mp_obj_new_tuple(2, t);
+    moy_lora_xfer_stats(&x, &w, &wmax);
+    mp_obj_t t[5] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
+                      mp_obj_new_int_from_uint(x), mp_obj_new_int_from_uint(w),
+                      mp_obj_new_int_from_uint(wmax) };
+    return mp_obj_new_tuple(5, t);
     #else
     return mp_const_none;
     #endif
@@ -188,7 +193,7 @@ static mp_obj_t lora_sim_air(size_t n_args, const mp_obj_t *a) {
     mp_get_buffer_raise(a[0], &b, MP_BUFFER_READ);
     return mp_obj_new_bool(moy_lora_sim_air(b.buf, b.len, u32(a[1]), (uint8_t)u32(a[2]),
                                             (int16_t)mp_obj_get_int(a[3]),
-                                            (int8_t)mp_obj_get_int(a[4]))));
+                                            (int8_t)mp_obj_get_int(a[4])));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lora_sim_air_obj, 5, 5, lora_sim_air);
 

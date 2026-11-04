@@ -55,6 +55,15 @@ static int gap_event(struct ble_gap_event *e, void *arg) {
         case BLE_GAP_EVENT_CONNECT:
             moy_gatt_on_connect(err_of(e->connect.status), e->connect.conn_handle);
             return 0;
+        #ifdef BLE_GAP_EVENT_LINK_ESTAB
+        case BLE_GAP_EVENT_LINK_ESTAB:
+            // NimBLE's second word on a connection; the first, when it came,
+            // already moved the machine on.
+            if (moy_gatt_state() == MOY_GATT_CONNECTING) {
+                moy_gatt_on_connect(err_of(e->link_estab.status), e->link_estab.conn_handle);
+            }
+            return 0;
+        #endif
         case BLE_GAP_EVENT_DISCONNECT:
             moy_gatt_on_disconnect(e->disconnect.conn.conn_handle);
             return 0;
@@ -102,27 +111,22 @@ static int op_disconnect(uint16_t conn) {
     return 0;
 }
 
+// The first characteristic of the UUID ends the procedure (a callback that
+// answers non-zero stops it); a procedure that ends with none found is ENOENT.
 static int chr_cb(uint16_t conn, const struct ble_gatt_error *err, const struct ble_gatt_chr *chr,
                   void *arg) {
     (void)conn;
-    int *found = arg;
+    (void)arg;
     if (err->status == 0 && chr != NULL) {
-        if (!*found) {
-            *found = 1;
-            moy_gatt_on_found(0, chr->val_handle);
-        }
-        return 0;
+        moy_gatt_on_found(0, chr->val_handle);
+        return 1;
     }
-    if (!*found) {
-        moy_gatt_on_found(-MOY_GATT_ENOENT, 0);
-    }
+    moy_gatt_on_found(err->status == BLE_HS_EDONE ? -MOY_GATT_ENOENT : err_of(err->status), 0);
     return 0;
 }
 
-static int s_found;
-
 static int op_find(uint16_t conn, const moy_gatt_uuid_t *u) {
-    static ble_uuid_any_t uuid;
+    ble_uuid_any_t uuid;                // NimBLE copies it into the procedure
     if (u->len == 2) {
         uuid.u16.u.type = BLE_UUID_TYPE_16;
         uuid.u16.value = (uint16_t)(u->v[0] | u->v[1] << 8);
@@ -130,8 +134,7 @@ static int op_find(uint16_t conn, const moy_gatt_uuid_t *u) {
         uuid.u128.u.type = BLE_UUID_TYPE_128;
         memcpy(uuid.u128.value, u->v, 16);
     }
-    s_found = 0;
-    return err_of(ble_gattc_disc_chrs_by_uuid(conn, 1, 0xffff, &uuid.u, chr_cb, &s_found));
+    return err_of(ble_gattc_disc_chrs_by_uuid(conn, 1, 0xffff, &uuid.u, chr_cb, NULL));
 }
 
 static int read_cb(uint16_t conn, const struct ble_gatt_error *err, struct ble_gatt_attr *attr,

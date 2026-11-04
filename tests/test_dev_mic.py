@@ -18,6 +18,7 @@ from runtime.host import mic_sim
 
 @pytest.fixture(autouse=True)
 def mic():
+    devices.grants = devices.console = None     # a console an earlier test built
     mic_sim.install(22050)
     yield
     for pid in range(1, 400):

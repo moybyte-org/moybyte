@@ -10,7 +10,8 @@
 // has its own I2S pins (MCLK, SCK, LRCK, DIN), so its channel is I2S1 as
 // master; a P4's shares the speaker's clocks and adds only DIN, so its
 // channel is the speaker's I2S0 opened full duplex (moy_aud_out.c's
-// moy_aud_out_rx). A task reads it and pushes the left slot (MIC1).
+// moy_aud_out_rx). A task reads it and pushes the mean of its two slots
+// (moy_mic.c says why).
 //
 // The host has no microphone: moy_mic_sim(rate) makes one, and a test or the
 // simulator pushes its samples (runtime/host/mic_sim.py).

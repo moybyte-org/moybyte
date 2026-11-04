@@ -293,9 +293,13 @@ esp_err_t moy_flush_take_err(void);
 // feeder holds this gate for its whole frame, and while a transaction waits it
 // queues no more bands, lets the queued ones finish, gives the gate, takes it
 // back once no transaction waits, and goes on feeding. Between frames the gate
-// is free. Before the first start() both calls do nothing. gate_stats is the
-// feeder's count of yields and the microseconds it stood aside: the flush's
-// cost of the other device.
+// is free. The device opens it before its first transaction (open answers
+// false before the first start(), and take and give then do nothing); it is
+// made then, in PSRAM, so an image whose device is never opened keeps its
+// internal RAM, and open waits out a frame begun without it. gate_stats is
+// the feeder's count of yields and the microseconds it stood aside: the
+// flush's cost of the other device.
+bool moy_flush_gate_open(void);
 void moy_flush_gate_take(void);
 void moy_flush_gate_give(void);
 void moy_flush_gate_stats(uint32_t *n, uint32_t *us);

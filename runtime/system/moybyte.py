@@ -140,7 +140,7 @@ class Wakes:
             elif w[_HOW] == _RING:
                 try:
                     w[_READER] = table.reader(w[_AT], w[_MS])
-                except OSError:  # the source is not this table's
+                except (OSError, ValueError):  # the source is not this table's
                     w[_READER] = -1
 
     def _add(self, how, ms, at, fn, reader):

@@ -11,5 +11,6 @@ void vTaskNotifyGiveFromISR(TaskHandle_t xTaskToNotify,
                             BaseType_t *pxHigherPriorityTaskWoken);
 void vTaskDelete(TaskHandle_t xTaskToDelete);
 void xTaskNotifyGive(TaskHandle_t xTaskToNotify);
+void vTaskDelay(TickType_t xTicksToDelay);
 
 #endif // H_STUB_FREERTOS_TASK_H

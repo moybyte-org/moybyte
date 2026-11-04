@@ -20,8 +20,13 @@ The holder's end (exit, crash, kill, a run's end) lets it go through
 
 try:
     import moy_mic as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_mic as _N
+except ImportError:  # host, or a console whose image has no audio
+    _N = None
+if _N is None:
+    try:
+        from runtime import moy_mic as _N
+    except ImportError:  # a console whose image has no audio: no microphone
+        _N = None
 
 try:
     import devices as _D
@@ -59,7 +64,7 @@ def holder():
 
 
 def present():
-    return _N.present()
+    return _N is not None and bool(_N.present())
 
 
 def sweep(pid):

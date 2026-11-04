@@ -28,6 +28,7 @@ EARLY = 20                      # MOY_LORA_WIN_EARLY_MS
 
 @pytest.fixture(autouse=True)
 def radio():
+    devices.grants = devices.console = None     # a console an earlier test built
     lora_sim.install()
     yield
     while N.owner():

@@ -111,6 +111,10 @@ uint32_t moy_lora_source(void);
 int moy_lora_present(void);
 // The radio's interrupt line rose (its ISR; the stand-in's air).
 void moy_lora_irq(void);
+// The radio's SPI commands since boot, the microseconds they waited for a band
+// gap, and the longest wait since the last call (zeroed by it); the host and a
+// board without the radio answer zeros.
+void moy_lora_xfer_stats(uint32_t *n, uint32_t *wait_us, uint32_t *wait_max_us);
 
 // -- the stand-in --
 void moy_lora_sim(int on);

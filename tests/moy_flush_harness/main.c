@@ -274,11 +274,35 @@ static void sc_normal_frame(void) {
     CHECK_EQ(h_pending_events(), 0);
 }
 
+// A gate opened while a frame runs without it: open returns only once that
+// frame is done, so the device's first transaction never meets a band; and
+// before it is opened take and give do nothing and cost no allocation.
+static void sc_gate_opened_mid_frame_waits_it_out(void) {
+    bd_start(&OPS2);
+    uint32_t n, us;
+    moy_flush_gate_stats(&n, &us);
+    CHECK_EQ(n, 0u);
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    h_block_us(1200);                             // the feeder is mid-frame, gateless
+    CHECK(moy_flush.frame_busy);
+    CHECK(moy_flush_gate_open());
+    CHECK(!moy_flush.frame_busy);                 // that frame ran out first
+    CHECK_EQ(B.nbands, FULL_BANDS);
+    CHECK_EQ(moy_flush.frame_clean, true);
+    moy_flush_gate_take();                        // between frames: at once
+    moy_flush_gate_give();
+    bd_clear_bands();
+    CHECK(run_frame(PANEL_ROWS));
+    CHECK_EQ(moy_flush.frame_clean, true);
+}
+
 // THE BAND-GAP GATE: a transaction asked for mid-frame runs only once every
 // band the feeder queued is done, the feeder queues nothing while it waits,
 // and the frame then finishes every band, clean.
 static void sc_gate_runs_in_a_band_gap(void) {
     bd_start(&OPS2);
+    CHECK(moy_flush_gate_open());
     B.expect_src = g_fb;
     moy_flush_kick(g_fb, PANEL_ROWS);
     h_block_us(1200);                             // the feeder is mid-frame
@@ -2111,6 +2135,7 @@ typedef struct {
 static const scenario_t SCENARIOS[] = {
     { "normal_frame", sc_normal_frame },
     { "gate_runs_in_a_band_gap", sc_gate_runs_in_a_band_gap },
+    { "gate_opened_mid_frame_waits_it_out", sc_gate_opened_mid_frame_waits_it_out },
     { "partial_last_band", sc_partial_last_band },
     { "band_count_rounds_up", sc_band_count_rounds_up },
     { "slot_pacing_two_slots", sc_slot_pacing_two_slots },

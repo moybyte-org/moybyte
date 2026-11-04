@@ -379,7 +379,7 @@ def sd(rounds=SD_ROUNDS):
 
       CS PINS ARE LEFT ALONE. `TFT_CS` (12) and `SD_CS` (39) are driver-owned;
       re-creating a `Pin` on either afterwards causes the same hang. Only the
-      unused LoRa `RADIO_CS` (9) is parked high.
+      LoRa `RADIO_CS` (9) is parked high, before moy_lora takes it.
 
       NO FLUSH INSIDE A SESSION. The desktop loop is single-threaded so SD ops
       run between frames; this smoke keeps that discipline and calls `comp.sync()`

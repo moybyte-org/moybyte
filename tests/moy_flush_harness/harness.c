@@ -493,6 +493,14 @@ void *heap_caps_malloc(size_t size, uint32_t caps) {
     return p;
 }
 
+void *heap_caps_calloc(size_t n, size_t size, uint32_t caps) {
+    return heap_caps_malloc(n * size, caps);    // heap_caps_malloc zeroes
+}
+
+void vTaskDelay(TickType_t xTicksToDelay) {
+    h_block_us((int64_t)xTicksToDelay * H_TICK_US);
+}
+
 // Poisoned, remembered, NOT returned to libc -- see harness.h. A write into a
 // freed bounce slot must be catchable, not merely lucky.
 void heap_caps_free(void *ptr) {
