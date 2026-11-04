@@ -97,12 +97,13 @@ while a Python process holds a lease** (`MOY_LEASE_VM`, read by
 process's lease will live outside the VM, untouched by a stop.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
-`moybyte.http`, `.mic`, `.lora` and `.ble` (`None` where the console lacks
-the class), each over a C driver, each checking its permission row against
-the caller's grants and swept at the caller's end. The mic, the radio and
-BLE have one holder at a time (`EBUSY` for another); `http` requests are
-many. Their events are NET, LORA and BLE records on each driver's ring
-source, which a face's `on(fn)` or `on_done` wakes its process on.
+`moybyte.http`, `.mic`, `.lora`, `.ble` and `.usb` (`None` where the
+console lacks the class), each over a C driver, each checking its permission
+row against the caller's grants and swept at the caller's end. The mic, the
+radio, BLE and USB have one holder at a time (`EBUSY` for another); `http`
+requests are many. Their events are NET, LORA, BLE and USB records on each
+driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
+on.
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -136,9 +137,22 @@ source, which a face's `on(fn)` or `on_done` wakes its process on.
   An app's own GATT server is not offered: NimBLE takes its services before
   the host starts.
 
+- **`usb`** (`native/p4/moy_usb/moy_usb.h`, #83, the P4 boards: their
+  `usb_host` row): the USB Host Library on the high-speed OTG port, which
+  MicroPython's TinyUSB device no longer takes (`MICROPY_HW_ENABLE_USBDEV`
+  0), started at the first open with its two tasks. Each device enumerates
+  into a table (address, class, VID, PID, product name); the OS drives the
+  first HID interface (a boot keyboard or mouse put in its boot protocol;
+  each report kept and announced), CDC-ACM serial (line coding, DTR and
+  RTS, bytes both ways) and USB-MIDI (its event packets, which `midi`
+  decodes), and lists any other device by its class. The console's own
+  keyboard and mouse over USB (#83's routing into the input table) are not
+  built: a report reaches only the API's holder. The S3s have no OTG host
+  port (their USB pads are the USB-Serial/JTAG) and no `usb`.
+
 The host's stand-ins are `runtime/host/mic_sim.py`, `lora_sim.py` (with a
-LoRaWAN network server written apart from the C) and `gatt_sim.py`; `http`
-runs for real.
+LoRaWAN network server written apart from the C), `gatt_sim.py` and
+`usb_sim.py`; `http` runs for real.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in
@@ -233,7 +247,7 @@ order of preference:
 typedef struct {          // version 1; 16 bytes
     uint32_t t_us;        // wrapping kernel clock
     uint16_t src;         // SRC handle: slot and generation
-    uint8_t  kind;        // KEY_DOWN, KEY_UP, TEXT, BTN, TOUCH_DOWN/MOVE/UP, EDGE, UART, LINK, MEDIA, NET, BLE, LORA, WINCH
+    uint8_t  kind;        // KEY_DOWN, KEY_UP, TEXT, BTN, TOUCH_DOWN/MOVE/UP, EDGE, UART, LINK, MEDIA, NET, BLE, LORA, WINCH, USB, MIDI
     uint8_t  prov;        // ISR, FIFO, POLL
     uint16_t a;           // KEY: USB HID usage (page 7, low byte) | modifier bits (high byte);
                           // BTN bit, EDGE pin, UART byte count, MEDIA consumer-page usage

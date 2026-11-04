@@ -26,7 +26,7 @@ link up. `bt status` names the machine's state. Settings' picker lists every
 nearby HOGP keyboard and reconnects only the one picked. Report-only keyboards
 are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
 Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
-USB-HID is #83's, out of sprint 3.
+The console's own USB keyboard and mouse are #83's.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
@@ -58,8 +58,12 @@ before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
 the whole lever existed for. Why, with numbers:
 `docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
 
-OTA is wired on this board like every other; wired USB-HID keyboard, mouse
-and gamepad is #83. Open performance work lives in #58 and #77.
+OTA is wired on this board like every other. The high-speed USB OTG port is
+the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`: HID reports,
+CDC-ACM serial and USB-MIDI for the process holding it), so MicroPython's
+TinyUSB device is off (`MICROPY_HW_ENABLE_USBDEV` 0 in `mpconfigboard.h`);
+the console's own USB keyboard, mouse and gamepad are #83's. Open
+performance work lives in #58 and #77.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 

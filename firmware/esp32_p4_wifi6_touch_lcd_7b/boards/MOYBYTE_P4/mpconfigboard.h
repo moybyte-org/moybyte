@@ -38,6 +38,11 @@
 // Enable UART REPL for modules that have an external USB-UART and don't use native USB.
 #define MICROPY_HW_ENABLE_UART_REPL     (1)
 
+// The high-speed OTG port is the `usb` device API's host (native/p4/moy_usb):
+// MicroPython's TinyUSB device, which mainline brings up there by default,
+// stays out of the image. The REPL is the CH343's UART either way.
+#define MICROPY_HW_ENABLE_USBDEV        (0)
+
 #define MICROPY_PY_MACHINE_I2S          (1)
 
 // Disable Wi-Fi and Bluetooth by default, these are re-enabled in the WIFI variants

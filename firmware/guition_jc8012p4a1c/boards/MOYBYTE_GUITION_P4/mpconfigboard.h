@@ -38,10 +38,11 @@
 #endif
 
 // The REPL is the P4's OWN USB-Serial/JTAG on this board (no CH343 -- the
-// USB-C goes straight to the SoC, enumerating 303a:1001). Mainline's P4 port
-// drives that peripheral whenever USBDEV is off, which it is on every P4
-// board def; the UART REPL stays on as upstream ships it (UART0 is on the
-// pin header) and costs nothing here.
+// USB-C goes straight to the SoC, enumerating 303a:1001). USBDEV is off: the
+// high-speed OTG port is the `usb` device API's host (native/p4/moy_usb), not
+// MicroPython's TinyUSB device; the UART REPL stays on as upstream ships it
+// (UART0 is on the pin header) and costs nothing here.
+#define MICROPY_HW_ENABLE_USBDEV        (0)
 #define MICROPY_HW_ENABLE_UART_REPL     (1)
 
 #define MICROPY_PY_MACHINE_I2S          (1)

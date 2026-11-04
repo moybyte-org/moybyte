@@ -29,7 +29,7 @@ one, `time.ticks_us()`.
                      offers no such row, another process holds it, or this
                      one lacks `lease:<row>` (runtime/system/leases.py)
   pins()             what the board leases and who holds what
-  http, mic, lora, ble
+  http, mic, lora, ble, usb
                      the device APIs (runtime/system/devices.py): each the
                      API's face where this console has its class, else None;
                      a verb without the API's permission raises
@@ -89,6 +89,7 @@ KEY_DOWN, KEY_UP, TEXT, BTN = _I.EV_KEY_DOWN, _I.EV_KEY_UP, _I.EV_TEXT, _I.EV_BT
 TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP = _I.EV_TOUCH_DOWN, _I.EV_TOUCH_MOVE, _I.EV_TOUCH_UP
 EDGE, LOST = _I.EV_EDGE, _I.EV_LOST
 NET, BLE, LORA = _I.EV_NET, _I.EV_BLE, _I.EV_LORA
+USB, MIDI = _I.EV_USB, _I.EV_MIDI
 PROV_ISR, PROV_FIFO, PROV_POLL = _I.PROV_ISR, _I.PROV_FIFO, _I.PROV_POLL
 EVENT_VERSION = _I.EV_VERSION
 
@@ -382,7 +383,7 @@ def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
 
 
 def __getattr__(name):
-    if name in ("http", "mic", "lora", "ble"):
+    if name in ("http", "mic", "lora", "ble", "usb"):
         try:
             import devices
         except ImportError:  # host: the runtime package

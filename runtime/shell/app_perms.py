@@ -19,7 +19,7 @@ A row is `(perm, grants, tiers, prompt, needs, py)`:
           (FULL, naming the lease's row: "full access" to it), or None: no
           line, nothing to consent to, and nothing Settings can turn off
   needs   the console's service it needs (`wifi`, `net`, `gpio`), a device
-          API the board has (`mic`, `lora`, `ble`: runtime/system/devices.py),
+          API the board has (`mic`, `lora`, `ble`, `usb`: runtime/system/devices.py),
           `lease` (the board offers the row: `services` names each as
           `lease:<row>`), or None
   py      the names a Python cart's namespace holds while it is granted
@@ -72,6 +72,7 @@ TABLE = (
     ("mic", "api:mic", PY, "Record with the microphone", "mic", ()),
     ("lora", "api:lora", PY, "Send and receive on the LoRa radio", "lora", ()),
     ("ble", "api:ble", PY, "Use Bluetooth devices", "ble", ()),
+    ("usb", "api:usb", PY, "Use USB devices plugged into the console", "usb", ()),
     ("editor", "marker", PY, None, None, ()),
     ("calc", "marker", PY, None, None, ()),
     ("getcarts", "marker", PY, None, None, ()),

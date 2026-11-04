@@ -1220,12 +1220,12 @@ def the_event_rings_keep_their_records(board):
                  "m1 = gc.mem_alloc()\n"
                  "t.reader_free(ws._er)\n"
                  "ws._eq = (kept, d0, n, first, m1 - m0, s.ring()[2] - dbase - d0, s.ring(), "
-                 "t.source('touch').ring()[3:5])",
+                 "t.source('touch').ring()[3:5], I.EV_LOST)",
                  strict=True)
-    kept, d0, n, first, alloc, drops, ring, touch = board.pyval("ws._eq", strict=True)
+    kept, d0, n, first, alloc, drops, ring, touch, lost = board.pyval("ws._eq", strict=True)
     depth, _count, _drops, prov, internal, _src = ring
     assert kept == 40 * 24 and d0 == 0, (kept, d0)
-    assert n == depth + 1 and first == (16, 100 - depth, 100 - depth), (n, first, depth)
+    assert n == depth + 1 and first == (lost, 100 - depth, 100 - depth), (n, first, depth)
     assert drops == 100 - depth, (drops, ring)
     assert (prov, internal) == (2, False), ring
     assert touch == (2, False), touch

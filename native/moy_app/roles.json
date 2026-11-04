@@ -187,6 +187,7 @@
     {"perm": "mic", "grants": "api:mic", "tiers": ["python"], "prompt": "Record with the microphone", "needs": "mic", "py": []},
     {"perm": "lora", "grants": "api:lora", "tiers": ["python"], "prompt": "Send and receive on the LoRa radio", "needs": "lora", "py": []},
     {"perm": "ble", "grants": "api:ble", "tiers": ["python"], "prompt": "Use Bluetooth devices", "needs": "ble", "py": []},
+    {"perm": "usb", "grants": "api:usb", "tiers": ["python"], "prompt": "Use USB devices plugged into the console", "needs": "usb", "py": []},
     {"perm": "editor", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "calc", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "getcarts", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
