@@ -74,10 +74,10 @@ boards' order.
 each image a command will flash that is missing or older than its
 worktree's HEAD is built: `tools/board.py pass BOARD... --build-only` in that
 worktree, one worktree after another, so the web console is built once and
-the P4s one at a time under the pass's build lock. A build that fails (or
-is refused, as in the main checkout) stops that board's gate and names its
-log; `--no-build` stops it instead of building. `run_one` refuses to flash
-an image still stale.
+the boards configure one at a time (the build's own lock). A build that
+fails (or is refused, as in the main checkout) stops that board's gate and
+names its log; `--no-build` stops it instead of building. `run_one`
+refuses to flash an image still stale.
 
 **Baselines.** A board's dev runs are kept under `--store` (default
 `~/.cache/moybyte/input_gate`, or MOY_INPUT_GATE_STORE), keyed by dev's commit
@@ -310,8 +310,8 @@ def bench(board, out, sel, bench_root, log):
 
 def build(wt, boards, log):
     """`tools/board.py pass BOARD... --build-only` in the worktree: the web
-    console once, the P4s one at a time (its build lock), a build that lost
-    the component cache's race run again."""
+    console once, the configure steps one at a time (the build's lock), a
+    build that lost the component cache's race run again."""
     with open(log, "w") as f:
         return subprocess.call([_py(wt), os.path.join(wt, "tools", "board.py"), "pass"]
                                + list(boards) + ["--build-only"],

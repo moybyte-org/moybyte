@@ -7,6 +7,7 @@
 #   sdkconfig_required  the stale-sdkconfig guard's list
 #   headroom_floor      the OTA-slot headroom the build's size guard demands
 #   stage               stage the Python modules
+#   mirror              the content-keyed tree copy both stagers write through
 #   Setting             one sdkconfig.board assignment and its prose
 #   TomlError           a board.toml the parser refuses
 """Read a board's `board.toml` and stage its modules (#161 Phase 3).
@@ -46,6 +47,7 @@ Usage from a test:
     staged_modules(TDECK)      # {"console.py": Path(".../runtime/shell/console.py")}
 """
 
+import fnmatch
 import os
 import re
 import shutil
@@ -559,6 +561,72 @@ def impls(board_dir):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Content-keyed copies. Every staged file is an input a build compiles by
+# mtime (ninja, MicroPython's makemanifest, make), so a copy that rewrites
+# identical bytes recompiles and relinks an image nothing changed in. A file
+# is written only when its bytes differ, and then as a fresh write: its mtime
+# is now, newer than whatever was compiled from the old text, wherever the
+# source's own mtime stands.
+# ---------------------------------------------------------------------------
+
+
+def write_if_changed(path, data):
+    """Write `data` (bytes) to `path` unless it already holds them; True when
+    it wrote."""
+    path = Path(path)
+    try:
+        if path.stat().st_size == len(data) and path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".staging")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    return True
+
+
+def put(src, dest):
+    """Copy `src` to `dest` unless `dest` already holds its bytes, mode
+    included; True when it wrote."""
+    wrote = write_if_changed(dest, Path(src).read_bytes())
+    if (os.stat(src).st_mode & 0o777) != (os.stat(dest).st_mode & 0o777):
+        shutil.copymode(src, dest)
+    return wrote
+
+
+def mirror(src, dest, ignore=(), keep=()):
+    """Make `dest` hold exactly `src`'s tree, less names matching `ignore`,
+    each file through `put`. Whatever else `dest` holds goes, except names
+    matching `keep` (files a build generates INTO the staged copy)."""
+    src, dest = Path(src), Path(dest)
+
+    def skip(name, patterns):
+        return any(fnmatch.fnmatch(name, p) for p in patterns)
+
+    want = set()
+    for dirpath, dirnames, filenames in os.walk(src):
+        dirnames[:] = sorted(d for d in dirnames if not skip(d, ignore))
+        rel = Path(dirpath).relative_to(src)
+        want.add(rel)
+        for f in filenames:
+            if not skip(f, ignore):
+                want.add(rel / f)
+                put(Path(dirpath) / f, dest / rel / f)
+    if not dest.exists():
+        dest.mkdir(parents=True)
+    for dirpath, dirnames, filenames in os.walk(dest, topdown=False):
+        rel = Path(dirpath).relative_to(dest)
+        for f in filenames:
+            if rel / f not in want and not skip(f, keep):
+                (Path(dirpath) / f).unlink()
+        for d in dirnames:
+            p = Path(dirpath) / d
+            if rel / d not in want and not any(p.iterdir()):
+                p.rmdir()
+
+
 def native_dest(board_dir):
     """Where `stage_native` puts the shared native modules, relative to the
     board dir -- board.toml `[native] dest`, or the default.
@@ -573,12 +641,9 @@ def native_dest(board_dir):
 
 # What a native source dir may hold that was GENERATED for another build (the
 # desktop binary's `moy_web_blob.gen.c`, written there by `make
-# unix-micropython`). Never staged: the copy keeps the source's mtime, so a
-# generated file would arrive carrying the time it was last written for someone
-# else -- older than the object a previous board build compiled from different
-# text -- and the generator, finding the text already right, leaves it. ninja
-# then keeps that object, and a removed web bundle ships as the old blob. The
-# board's build generates these into the staged copy, new every build.
+# unix-micropython`). Never staged from the source: it is another build's text.
+# The board's build generates its own into the staged copy, written only when
+# its text moved, and the staging keeps it there between builds.
 GENERATED = "*.gen.*"
 
 
@@ -615,10 +680,11 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     """Stage the shared native modules into <board>/<native.dest> and write the
     cmake include list the board's tracked native/micropython.cmake pulls in.
 
-    The whole dest tree is rebuilt from scratch each call, so a module that
-    stops being staged cannot linger in a warm checkout (the same stray-prune
-    argument as the Python side, solved here by demolition instead of a
-    prune -- nothing in .staged/ is ever authored).
+    The dest tree is mirrored from the sources each call (`mirror`): a module
+    that stops being staged, or a file a module drops, cannot linger in a warm
+    checkout, and an unchanged file keeps its mtime, so an unchanged build
+    compiles nothing. Nothing in .staged/ is ever authored; the generated
+    files a board build writes into it stay.
     """
     board_dir, root = Path(board_dir).resolve(), Path(root)
     mods = []
@@ -628,9 +694,14 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     if not mods:
         return []
     dest = board_dir / native_dest(board_dir)
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    staged = {m for m, _src in mods} | {"micropython.cmake"}
+    for p in dest.iterdir():
+        if p.name not in staged:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
     lines = ["# AUTO-GENERATED by tools/board_config.py from board.toml -- the"
              " shared native modules staged this build.",
              # Usermod sources are compiled TWICE and only one copy links: the
@@ -644,14 +715,13 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     for define, v in input_defines(board_dir):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
     for m, src in mods:
-        shutil.copytree(src, dest / m,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
-                                                      GENERATED))
+        mirror(src, dest / m, ignore=("__pycache__", "*.pyc", GENERATED),
+               keep=(GENERATED,))
         lines.append("include(${CMAKE_CURRENT_LIST_DIR}/%s/micropython.cmake)"
                      % m)
     mods = [m for m, _src in mods]
-    (dest / "micropython.cmake").write_text("\n".join(lines) + "\n",
-                                            encoding="utf-8")
+    write_if_changed(dest / "micropython.cmake",
+                     ("\n".join(lines) + "\n").encode("utf-8"))
     if not quiet:
         denied = sorted(native_denials(board_dir))
         print("staged %d shared native modules into %s%s"
@@ -822,14 +892,10 @@ def stage(board_dir, root=ROOT, quiet=False):
         raise SystemExit("board.toml stages files that do not exist: %s"
                          % ", ".join(missing))
     for name, src in sorted(wanted.items()):
-        shutil.copyfile(src, dest / name)
+        put(src, dest / name)
 
     for name, src in sorted(staged_packages(board_dir, root).items()):
-        pkg = dest / name
-        if pkg.exists():
-            shutil.rmtree(pkg)
-        shutil.copytree(src, pkg,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        mirror(src, dest / name, ignore=("__pycache__", "*.pyc"))
 
     removed = []
     if mods.get("prune"):
@@ -863,6 +929,16 @@ def main(argv):
         return 0
     if len(argv) >= 3 and argv[1] == "stage-native":
         stage_native(argv[2])
+        return 0
+    if len(argv) >= 4 and argv[1] == "mirror":
+        # mirror SRC DEST [--ignore PATTERN]...: a build script's content-keyed
+        # copy of a tree.
+        ignore = [argv[i + 1] for i in range(4, len(argv) - 1)
+                  if argv[i] == "--ignore"]
+        if Path(argv[2]).is_dir():
+            mirror(argv[2], argv[3], ignore=ignore)
+        else:
+            put(argv[2], argv[3])
         return 0
     if len(argv) >= 3 and argv[1] == "impls":
         for name, value in sorted(impls(argv[2]).items()):
@@ -903,6 +979,8 @@ def main(argv):
     print("usage: board_config.py stage|stage-native|list|list-native "
           "<board_dir>", file=sys.stderr)
     print("       board_config.py native-dest|impls|headroom-floor <board_dir>",
+          file=sys.stderr)
+    print("       board_config.py mirror SRC DEST [--ignore PATTERN]...",
           file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)

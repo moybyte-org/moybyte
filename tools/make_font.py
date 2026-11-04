@@ -422,8 +422,15 @@ def main(argv):
         return
     if cmd == "module":
         tier = board_fonts(argv[2])
-        with open(argv[3], "w") as f:
-            f.write(render_module(tier))
+        text = render_module(tier)
+        try:
+            with open(argv[3]) as f:
+                same = f.read() == text
+        except OSError:
+            same = False
+        if not same:                # an unchanged module recompiles nothing
+            with open(argv[3], "w") as f:
+                f.write(text)
         print("%s: the %s font set" % (argv[3], tier if isinstance(tier, str)
                                        else " and ".join(tier)))
         return

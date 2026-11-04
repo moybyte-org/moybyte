@@ -92,7 +92,7 @@ It is one job, however many boards: run it in the background and take its
 one notice; the table and the pass's wall time are its last lines. One row a
 board: the commit its image was built from (`+`: tracked changes on top), the
 headroom the build printed, passed/skipped/failed, the time each step took
-(`wait` is for the P4s' one-at-a-time build slot) and the failing tests by
+(`wait` is the build's wait for the machine's configure lock) and the failing tests by
 name; every step's log is a file under the directory it prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
@@ -124,10 +124,10 @@ tools/board.py tdeck reboot --soft  # Ctrl-C, then Ctrl-D: for a board sitting a
 tools/board.py guition_s3 wait      # until `state` answers (default 120 s)
 ```
 
-By hand, never start two builds at the same moment: every ESP32 build races
-on the component manager's cache while it configures
-(`.claude/rules/boards.md`); `pass` builds the P4s one at a time and reruns a
-build that lost. A board takes most of a minute to reach the desk after a
+Two builds may run at once, by hand or in a pass: every ESP32 build races on
+the component manager's cache while it configures, so each holds one
+machine-wide lock for its configure (`.claude/rules/boards.md`), and `pass`
+reruns a build that lost anyway. A board takes most of a minute to reach the desk after a
 reset — the Guition S3 from its card the longest — and `wait` is what knows
 when it has; a suite started earlier errors every test with "did not answer
 `state`".

@@ -482,6 +482,19 @@ def _default_app_decls():
     return str(runtime_file("app_decls.py"))
 
 
+
+def _write_if_changed(path, text):
+    """The module a board build freezes: rewritten only when its text moved,
+    so an unchanged roster recompiles nothing."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                return
+    except OSError:
+        pass
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
 def main(argv):
     """CLI.
 
@@ -542,8 +555,7 @@ def main(argv):
     else:
         text = render_module(build_carts(src))
     if out and out != "-":
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(text)
+        _write_if_changed(out, text)
     else:
         sys.stdout.write(text)
     return 0

@@ -94,9 +94,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   manager's one git cache** (`~/.cache/Espressif/ComponentManager`) while it
   configures, so two builds configuring at the same moment race on its
   `index.lock`: "Unable to create index.lock: File exists" (two P4s
-  2026-09-22, the T-Deck and a P4 2026-10-03), and a retry passes.
-  `tools/board.py pass` builds the two P4s one at a time and runs a build that
-  lost the race again.
+  2026-09-22, the T-Deck and a P4 2026-10-03), and a retry passes. So every
+  build holds one machine-wide flock while it configures and lets go at its
+  first compiled step (`moybyte_configure_lock` in `tools/esp32_build_lib.sh`):
+  the compiles of two builds overlap, their configures never do, and
+  `tools/board.py pass` still runs a build that lost the race again.
 
 ## Settled
 

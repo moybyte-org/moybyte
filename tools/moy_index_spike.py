@@ -702,10 +702,8 @@ def map_summary(path, comp=INDEX):
 def build_board(name, d, env, logdir):
     import board_pass
     log = os.path.join(logdir, "%s.build.log" % name)
-    chip = _board_file(d).get("board", {}).get("chip", "")
-    with board_pass.build_slot(chip):
-        rc = board_pass.build(lambda cmd, lg: board_pass.run_logged(cmd, lg, env),
-                              d, log)
+    rc = board_pass.build(lambda cmd, lg: board_pass.run_logged(cmd, lg, env),
+                          d, log)
     return rc, log
 
 

@@ -94,12 +94,14 @@ def test_board_py_hands_pass_to_the_pass(monkeypatch):
 class FakeSteps:
     """The runner: records each command, holds builds, writes junit XML."""
 
-    def __init__(self, fail=(), build_s=0.15, s3_barrier=None, build_rc=None):
+    def __init__(self, fail=(), build_s=0.15, s3_barrier=None, build_rc=None,
+                 build_barrier=None):
         self.cmds = []
         self.fail = dict(fail)
         self.build_s = build_s
         self.barrier = s3_barrier
         self.build_rc = build_rc or {}
+        self.build_barrier = build_barrier
         self.web_rc = 0
         self.live = {}
         self.peak = {}
@@ -131,6 +133,8 @@ class FakeSteps:
                 self.peak[chip] = max(self.peak.get(chip, 0), self.live[chip])
             if chip == "esp32s3" and self.barrier is not None:
                 self.barrier.wait()
+            if self.build_barrier is not None:
+                self.build_barrier.wait()
             time.sleep(self.build_s)
             with self.lock:
                 self.live[chip] -= 1
@@ -176,11 +180,22 @@ def run_pass(bench, steps, *argv):
                            run=steps, dirs=DIRS, main_checkout=False)
 
 
-def test_the_p4s_build_one_at_a_time_and_the_s3s_together(bench):
-    # The barrier breaks unless both S3 builds are in it at once.
-    steps = FakeSteps(s3_barrier=threading.Barrier(2, timeout=5))
+def test_every_board_builds_at_once(bench):
+    """The configure lock lives in the build itself (esp32_build_lib.sh), so
+    the pass holds none: the barrier breaks unless all four builds are in it
+    at once."""
+    steps = FakeSteps(build_barrier=threading.Barrier(4, timeout=5))
     assert run_pass(bench, steps, "--all") == 0
-    assert steps.peak == {"esp32p4": 1, "esp32s3": 2}
+    assert steps.peak == {"esp32p4": 2, "esp32s3": 2}
+
+
+def test_the_wait_column_is_the_builds_own_wait_for_the_configure_lock(tmp_path):
+    log = tmp_path / "build.log"
+    log.write_text("== time: patches 0.1s\n== time: lock 12.5s\n"
+                   "board pass: lost the component cache's lock; again\n"
+                   "== time: lock 1m02s\n== time: configure 3.0s\n")
+    assert board_pass.lock_wait(str(log)) == pytest.approx(74.5)
+    assert board_pass.lock_wait(str(tmp_path / "none.log")) == 0.0
 
 
 def test_each_step_gets_the_resolved_port_and_the_suite_its_variable(bench):
