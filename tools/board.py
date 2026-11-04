@@ -73,6 +73,16 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
+# Run bare (`tools/board.py ...`), the shebang finds the system python, which
+# has no esptool or pyserial; every flash and suite this tool starts runs in
+# sys.executable, so it re-runs itself under the checkout's venv.
+_VENV = os.path.join(ROOT, ".venv")
+if (__name__ == "__main__" and os.path.exists(os.path.join(_VENV, "bin", "python"))
+        and os.path.realpath(sys.prefix) != os.path.realpath(_VENV)):
+    os.execv(os.path.join(_VENV, "bin", "python"),
+             [os.path.join(_VENV, "bin", "python"), os.path.abspath(__file__)]
+             + sys.argv[1:])
+
 import p4_autotest as pa                                           # noqa: E402
 from p4_autotest import P4Board                                    # noqa: E402
 
