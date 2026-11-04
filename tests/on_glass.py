@@ -1276,6 +1276,74 @@ def the_scheduler_stops_a_runaway_service(board):
                      strict=True)
 
 
+def lease_pin(board_dir):
+    """A pin of the board's `lease` row (board.toml [hardware]): free, so a
+    test may drive it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import board_config
+    rows = board_config.hardware(str(ROOT / "firmware" / board_dir))[2]
+    return max(p for r in rows if r["class"] == "lease" for p in r["pins"])
+
+
+LOST_TAP = """\
+import array, gc, time, moy_input as I
+t = I.kernel()
+def burst(depth, n, period):
+    e = I.edge(PIN, depth, True)
+    r = t.reader(1 << I.EV_EDGE)
+    b = array.array('i', [0] * (I.EV_FIELDS * (n + 8)))
+    junk = [bytearray(48) for _ in range(3000)]
+    e.drive(n, period)
+    c0 = time.ticks_us()
+    junk = None
+    gc.collect()
+    gc_us = time.ticks_diff(time.ticks_us(), c0)
+    a0 = gc.mem_alloc()
+    while e.driving():
+        pass
+    a1 = gc.mem_alloc()
+    k = t.events(b, r)
+    recs = [tuple(b[i * I.EV_FIELDS:(i + 1) * I.EV_FIELDS]) for i in range(k)]
+    ring = e.ring()
+    name = t.src_name(ring[5])
+    e.close()
+    t.reader_free(r)
+    edges = [x for x in recs if x[I.EV_KIND] == I.EV_EDGE]
+    lost = sum(x[I.EV_B] for x in recs if x[I.EV_KIND] == I.EV_LOST)
+    gaps = [time.ticks_diff(y[I.EV_T], x[I.EV_T]) for x, y in zip(edges, edges[1:])]
+    lv = [x[I.EV_B] for x in edges]
+    return (len(edges), lost, ring[2], ring[3], ring[4], name, t.src_name(ring[5]), gc_us,
+            min(gaps) if gaps else 0, max(gaps) if gaps else 0,
+            all(lv[i] != lv[i + 1] for i in range(len(lv) - 1)),
+            all(x[I.EV_A] == PIN for x in edges), a1 - a0)
+"""
+
+
+def a_gpio_lease_loses_no_tap(board, board_dir):
+    """The lost-tap test (docs/os_2026-11.md phase 2 step 2) on the stand-in
+    GPIO source a lease will adopt (native/moy_input/moy_edge.h), in the real
+    C: a free pin of the board's lease row looped back on itself, its level
+    changed 400 times at 2 kHz by an esp_timer while the console's frame
+    collects its heap. A ring that covers the burst reads every edge, levels
+    alternating, each stamped ISR when the pin moved -- stamps a period
+    apart, through the collection -- with nothing lost; a ring of 32 drops
+    the oldest and reads the gap as LOST, the source counting each drop once.
+    Waiting out the drive allocates nothing, and a closed source is gone."""
+    pin = lease_pin(board_dir)
+    board.pyexec(LOST_TAP.replace("PIN", str(pin))
+                 + "ws._lt = (burst(512, 400, 500), burst(32, 400, 500))",
+                 timeout=60.0, strict=True)
+    whole, shallow = board.pyval("ws._lt", strict=True)
+    n, lost, drops, prov, internal, name, after, gc_us, lo, hi, alt, pins, alloc = whole
+    assert (n, lost, drops) == (400, 0, 0), whole
+    assert (prov, internal, name, after) == (0, True, "gpio%d" % pin, None), whole
+    assert alt and pins, whole
+    assert 300 <= lo and hi <= 1500, whole          # 500 us apart, through the collection
+    assert alloc == 0, whole
+    n, lost, drops = shallow[:3]
+    assert (n, lost, drops) == (32, 368, 368), shallow
+
+
 def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a

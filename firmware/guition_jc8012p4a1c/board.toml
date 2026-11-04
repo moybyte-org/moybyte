@@ -164,6 +164,14 @@ baud           = 921600
 otadata_offset = "0xd000"
 otadata_size   = "0x2000"
 
+[input]
+# The input table's parameters, each a compile definition
+# (tools/board_config.py INPUT_PARAMS). An ISR's event ring is internal RAM
+# (native/moy_input/moy_event.h MOY_EV_ISR_DEPTH_MAX, 64 by default): a P4's
+# internal RAM has room for a ring that covers a 2 kHz source across a
+# collection (the rings spike in #246), so its ceiling is 1024 records, 16 KiB.
+isr_ring_max = 1024
+
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
 # The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,

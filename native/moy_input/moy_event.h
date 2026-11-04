@@ -76,6 +76,13 @@ enum {
 #define MOY_EV_DEPTH 32u
 #endif
 #define MOY_EV_DEPTH_MAX 1024u
+// An ISR's ring is internal RAM, so its depth has a lower ceiling: 64 records
+// (1 KiB) by default, a quarter of the kernel's 4 KiB internal cap
+// (native/moy_play/moy_play.h); a board with internal RAM to spare raises it
+// (board.toml [input] isr_ring_max). A power of two.
+#ifndef MOY_EV_ISR_DEPTH_MAX
+#define MOY_EV_ISR_DEPTH_MAX 64u
+#endif
 // Readers a table keeps cursors for.
 #define MOY_EV_READERS 8u
 

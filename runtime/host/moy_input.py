@@ -14,6 +14,7 @@
 #   event                        a key event: its code and modifiers
 #   typed                        the byte a key event types
 #   InputTable.reader            the event rings' readers (moy_event.h): events, pending
+#   RingSource                   a source that is its ring alone: a lease's, a device API's
 #   pin_clock                    the records' clock, held for a test
 #   hid_usage                    a key event as its HID usage and modifiers
 """The input table (native/moy_input) on CPython, by ctypes: the module
@@ -64,6 +65,7 @@ HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 
 SOURCES = 8
+RING_SOURCES = 8              # sources that are a ring alone (moy_input.h)
 PLAYERS = 8
 UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
@@ -91,7 +93,7 @@ EV_VERSION = 1
 EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = range(7)
 EV_FIELDS = 7
 (EV_KEY_DOWN, EV_KEY_UP, EV_TEXT, EV_BTN, EV_TOUCH_DOWN, EV_TOUCH_MOVE, EV_TOUCH_UP,
- EV_EDGE) = range(1, 9)
+ EV_EDGE, EV_UART, EV_LINK, EV_MEDIA, EV_NET, EV_BLE, EV_LORA, EV_WINCH) = range(1, 16)
 EV_LOST = 16
 EV_KEYS = (1 << EV_KEY_DOWN) | (1 << EV_KEY_UP) | (1 << EV_TEXT)
 EV_TOUCH = (1 << EV_TOUCH_DOWN) | (1 << EV_TOUCH_MOVE) | (1 << EV_TOUCH_UP)
@@ -99,6 +101,7 @@ EV_PAD = 1 << EV_BTN
 EV_ALL = (1 << 17) - 2
 PROV_ISR, PROV_FIFO, PROV_POLL = 0, 1, 2
 EV_DEPTH = 32
+EV_ISR_DEPTH_MAX = 64         # an ISR ring's ceiling unless a board raises it
 
 P_NONE = 0
 P_LIVE = 1                     # there is a pointer at all
@@ -217,7 +220,18 @@ class _Ring(ctypes.Structure):
                 ("prov", _U8), ("internal", _B), ("src", ctypes.c_uint16)]
 
 
+class _Isr(ctypes.Structure):
+    _fields_ = [("mux", _P), ("ring", _P)]
+
+
 _EV_SIGS = (
+    ("moy_input_ring_open", [_P, ctypes.c_char_p, _U8, _U32, _PU32], _I),
+    ("moy_input_ring_close", [_P, _U32], _I),
+    ("moy_input_isr_attach", [_P, _U32, ctypes.POINTER(_Isr)], _I),
+    ("moy_input_isr_detach", [ctypes.POINTER(_Isr)], None),
+    ("moy_input_isr_put", [ctypes.POINTER(_Isr), _U8, ctypes.c_uint16, ctypes.c_uint16, _U32],
+     None),
+    ("moy_input_src_name", [_P, ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t], _I),
     ("moy_input_source_events", [_P, _U32, _U8, _U32], _I),
     ("moy_input_post", [_P, _U32, _U8, ctypes.c_uint16, ctypes.c_uint16, _U32], _I),
     ("moy_input_ring_info", [_P, _U32, ctypes.POINTER(_Ring)], _I),
@@ -378,6 +392,39 @@ class InputSource:
         g = _Ring()
         _check(_lib().moy_input_ring_info(self.state._t, self.h, ctypes.byref(g)), "ring")
         return (g.depth, g.count, g.drops, g.prov, g.internal, g.src)
+
+
+class RingSource:
+    """A source that is its ring alone (moy_input.h's ring sources). An ISR
+    source's post() is its ISR writer's put (moy_input_isr_put), which counts
+    its drops as readers find them."""
+
+    def __init__(self, table, h, prov):
+        self.table = table
+        self.h = h
+        self._isr = None
+        if prov == PROV_ISR:
+            self._isr = _Isr()
+            _check(_lib().moy_input_isr_attach(table._t, h, ctypes.byref(self._isr)), "isr")
+
+    def post(self, kind, a=0, id=0, b=0):
+        if self._isr is not None:
+            _lib().moy_input_isr_put(ctypes.byref(self._isr), kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF)
+            return
+        _check(_lib().moy_input_post(self.table._t, self.h, kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF), "post")
+
+    def ring(self):
+        """(depth, count, drops, prov, internal, src): this source's ring."""
+        g = _Ring()
+        _check(_lib().moy_input_ring_info(self.table._t, self.h, ctypes.byref(g)), "ring")
+        return (g.depth, g.count, g.drops, g.prov, g.internal, g.src)
+
+    def close(self):
+        if self._isr is not None:
+            _lib().moy_input_isr_detach(ctypes.byref(self._isr))
+        _check(_lib().moy_input_ring_close(self.table._t, self.h), "close")
 
 
 class InputTable:
@@ -694,6 +741,21 @@ class InputTable:
     def pending(self, r):
         """How many records reader `r` has waiting (a gap counting one)."""
         return _lib().moy_input_pending(self._t, r)
+
+    def ring_source(self, name, prov, depth=EV_DEPTH):
+        """A source that is its ring alone (a lease's, a device API's):
+        a RingSource, until its close()."""
+        h = _U32()
+        _check(_lib().moy_input_ring_open(self._t, name.encode(), prov, depth, ctypes.byref(h)),
+               "ring_source")
+        return RingSource(self, h.value, prov)
+
+    def src_name(self, src):
+        """The name of the source whose records carry `src`, or None."""
+        buf = ctypes.create_string_buffer(32)
+        if _lib().moy_input_src_name(self._t, src & 0xFFFF, buf, 32) != OK:
+            return None
+        return buf.value.decode()
 
     def player_count(self):
         return len(self.source_players())

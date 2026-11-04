@@ -8,6 +8,11 @@ one, `time.ticks_us()`.
                      fields are native/moy_input/moy_event.h's), oldest first,
                      a LOST record where some were dropped; answers how many.
                      EV_T is on time.ticks_us's clock. Allocates nothing.
+  source(src)        where a record came from: the name of the source whose
+                     records carry EV_SRC `src` ("kbd", "touch", "ble",
+                     "gpio5"), None once that source has ended; its EV_PROV
+                     says how good the stamp is (PROV_ISR, PROV_FIFO,
+                     PROV_POLL)
   on(source, fn)     wake `fn()` when `source` has records: "keys", "touch",
                      "pad" or "input" (all three); inside `fn`, events() reads
                      that source's records. Or wake `fn(*args)` for each
@@ -290,6 +295,11 @@ def bind(table):
 
 def events(into):
     return WAKES.events(into)
+
+
+def source(src):
+    t = WAKES.table
+    return None if t is None else t.src_name(src)
 
 
 def on(source, fn):

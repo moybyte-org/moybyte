@@ -99,8 +99,24 @@
 // that reader, which reads a LOST record where the gap was. A reader is a
 // cursor per source and a kind mask; it starts at the records written after it.
 //
-// A handle is the spine's: gen << 12 | MOY_KIND_SRC << 8 | slot, generation 1
-// (a source is never released). Slot 0 is the table's own source, "local".
+// RING SOURCES (hardware.md section 2): a source a lease or a device API
+// brings is its ring alone, no latch: made with moy_input_ring_open, ended
+// with moy_input_ring_close (its handle then stale), MOY_INPUT_RING_SOURCES of
+// them beside the latch sources, read by the same readers. A ring a task
+// writes (FIFO, POLL) is written with moy_input_post and taken from THE
+// SHARES' RINGS row (native/moy_play/moy_play.h) like every task's ring; an
+// ISR's is internal RAM, under the kernel's internal cap, and is written only
+// through a moy_input_isr_t (moy_input_isr_put), which touches nothing but the
+// ring, its lock and the clock, so it is safe from an IRAM ISR. Its drops are
+// counted where they are seen: a reader whose cursor the writer passed reads
+// a LOST record for every record it missed, whatever their kind, when it
+// reads any kind the ring has held, and the source counts each such record
+// once.
+//
+// A handle is the spine's: gen << 12 | MOY_KIND_SRC << 8 | slot. A latch
+// source's generation is 1 (it is never released), and slot 0 is the table's
+// own source, "local". A ring source's slot follows the latch slots and its
+// generation moves when it closes. A record's `src` is gen << 8 | slot.
 
 #ifndef MOY_INPUT_H
 #define MOY_INPUT_H
@@ -122,6 +138,8 @@
 #define MOY_INPUT_BUTTONS 16u
 #define MOY_INPUT_HOST_BUTTONS 8u
 #define MOY_INPUT_SOURCES 8u
+#define MOY_INPUT_RING_SOURCES 8u   // sources that are a ring alone
+#define MOY_INPUT_RINGS (MOY_INPUT_SOURCES + MOY_INPUT_RING_SOURCES)
 #define MOY_INPUT_PLAYERS 8u
 #define MOY_INPUT_UNION 0xFFu
 #define MOY_INPUT_KEYQ 8u           // one-shot keys a source queues
@@ -278,6 +296,31 @@ typedef struct {
     uint16_t src;                   // the records' `src`
 } moy_input_ring_info_t;
 int moy_input_ring_info(const moy_input_t *t, uint32_t h, moy_input_ring_info_t *out);
+// The name of the source whose records carry `src` (moy_event_t.src), or
+// MOY_INPUT_STALE when none does now.
+int moy_input_src_name(const moy_input_t *t, uint16_t src, char *out, size_t n);
+
+// A ring source (above): `name` (1 .. MOY_INPUT_NAME bytes), `prov` and `depth`
+// as moy_input_source_events takes them. MOY_INPUT_FULL when every ring slot is
+// taken, MOY_INPUT_NOMEM when its ring is not (RINGS refused it, or the heap).
+int moy_input_ring_open(moy_input_t *t, const char *name, uint8_t prov, uint32_t depth,
+                        uint32_t *h);
+// The source ended: its ring freed and given back, every reader's cursor on it
+// gone, its handle stale. An ISR writer is detached before this.
+int moy_input_ring_close(moy_input_t *t, uint32_t h);
+// An ISR's writer: internal RAM, the producer's. moy_input_isr_attach points it
+// at an ISR ring source (MOY_INPUT_BAD for a source that is not one);
+// moy_input_isr_detach makes every later put a no-op, under the ring's lock, so
+// an ISR still running on the other core writes nothing once it returns.
+typedef struct moy_input_ring moy_input_ring_t;
+typedef struct {
+    void *mux;                      // the table's lock (portMUX_TYPE on a board)
+    moy_input_ring_t *volatile ring;
+} moy_input_isr_t;
+int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w);
+void moy_input_isr_detach(moy_input_isr_t *w);
+// One record, stamped now; IRAM on a board, callable from an ISR.
+void moy_input_isr_put(moy_input_isr_t *w, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
 // A reader of `kinds` (MOY_EV_BIT of each; MOY_EV_ALL) into *r; MOY_INPUT_FULL
 // when MOY_EV_READERS are taken.
 int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);

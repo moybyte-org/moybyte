@@ -26,6 +26,7 @@
 
 #include "moy_ble.h"
 #include "moy_drivers.h"
+#include "moy_edge.h"
 #include "moy_hid.h"
 #include "moy_input.h"
 
@@ -533,6 +534,144 @@ static mp_obj_t table_pending(mp_obj_t self_in, mp_obj_t r) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(table_pending_obj, table_pending);
 
+// -- ring sources (moy_input.h): a lease's or a device API's ----------------------
+
+typedef struct {
+    mp_obj_base_t base;
+    mp_obj_t table;
+    uint32_t h;
+    bool edge;                      // a moy_edge pin's: close() is moy_edge_close
+    moy_input_isr_t w;              // an ISR source's writer, for post()
+} input_ring_obj_t;
+
+static const mp_obj_type_t input_ring_type;
+
+static input_ring_obj_t *ring_new_obj(mp_obj_t table, uint32_t h, bool edge) {
+    input_ring_obj_t *o = mp_obj_malloc(input_ring_obj_t, &input_ring_type);
+    o->table = table;
+    o->h = h;
+    o->edge = edge;
+    o->w.mux = NULL;
+    o->w.ring = NULL;
+    moy_input_isr_attach(table_of(table)->t, h, &o->w);     // BAD, and no writer, unless ISR
+    return o;
+}
+
+// ring_source(name, prov, depth=EV_DEPTH) -> a source that is its ring alone
+static mp_obj_t table_ring_source(size_t n_args, const mp_obj_t *args) {
+    uint32_t depth = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : MOY_EV_DEPTH;
+    uint32_t h;
+    check(moy_input_ring_open(table_of(args[0])->t, mp_obj_str_get_str(args[1]),
+                              (uint8_t)mp_obj_get_int(args[2]), depth, &h));
+    return MP_OBJ_FROM_PTR(ring_new_obj(args[0], h, false));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_ring_source_obj, 3, 4, table_ring_source);
+
+// src_name(src) -> the name of the source whose records carry `src`, or None
+static mp_obj_t table_src_name(mp_obj_t self_in, mp_obj_t src) {
+    char name[MOY_INPUT_NAME + 1];
+    if (moy_input_src_name(table_of(self_in)->t, (uint16_t)mp_obj_get_int(src), name,
+                           sizeof(name)) != MOY_INPUT_OK) {
+        return mp_const_none;
+    }
+    return mp_obj_new_str(name, strlen(name));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_src_name_obj, table_src_name);
+
+// post(kind, a=0, id=0, b=0): a record into the ring, through the ISR writer on
+// an ISR source.
+static mp_obj_t ring_post(size_t n_args, const mp_obj_t *args) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(args[0]);
+    mp_int_t v[4] = {0, 0, 0, 0};
+    for (size_t i = 1; i < n_args; i++) {
+        v[i - 1] = mp_obj_get_int_truncated(args[i]);
+    }
+    if (v[0] <= MOY_EV_NONE || v[0] >= MOY_EV_LOST) {
+        check(MOY_INPUT_BAD);
+    }
+    if (o->w.ring != NULL) {
+        moy_input_isr_put(&o->w, (uint8_t)v[0], (uint16_t)v[1], (uint16_t)v[2], (uint32_t)v[3]);
+        return mp_const_none;
+    }
+    check(moy_input_post(table_of(o->table)->t, o->h, (uint8_t)v[0], (uint16_t)v[1],
+                         (uint16_t)v[2], (uint32_t)v[3]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ring_post_obj, 2, 5, ring_post);
+
+// ring() -> (depth, count, drops, prov, internal, src)
+static mp_obj_t ring_ring(mp_obj_t self_in) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    moy_input_ring_info_t g;
+    check(moy_input_ring_info(table_of(o->table)->t, o->h, &g));
+    mp_obj_t items[6] = {
+        mp_obj_new_int_from_uint(g.depth), mp_obj_new_int_from_uint(g.count),
+        mp_obj_new_int_from_uint(g.drops), MP_OBJ_NEW_SMALL_INT(g.prov),
+        mp_obj_new_bool(g.internal), MP_OBJ_NEW_SMALL_INT(g.src),
+    };
+    return mp_obj_new_tuple(6, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ring_ring_obj, ring_ring);
+
+static mp_obj_t ring_close(mp_obj_t self_in) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    moy_input_isr_detach(&o->w);
+    #ifdef MOY_INPUT_BOARD
+    if (o->edge) {
+        check(moy_edge_close(o->h));
+        return mp_const_none;
+    }
+    #endif
+    check(moy_input_ring_close(table_of(o->table)->t, o->h));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ring_close_obj, ring_close);
+
+#ifdef MOY_INPUT_BOARD
+// drive(n, period_us): an edge loop pin's n level changes (moy_edge_drive).
+static mp_obj_t ring_drive(mp_obj_t self_in, mp_obj_t n, mp_obj_t period_us) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    check(o->edge ? moy_edge_drive(o->h, (uint32_t)mp_obj_get_int(n),
+                                   (uint32_t)mp_obj_get_int(period_us)) : MOY_INPUT_BAD);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ring_drive_obj, ring_drive);
+
+static mp_obj_t ring_driving(mp_obj_t self_in) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    return mp_obj_new_int_from_uint(moy_edge_driving(o->h));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ring_driving_obj, ring_driving);
+#endif
+
+static void ring_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] == MP_OBJ_NULL) {
+        if (attr == MP_QSTR_h) {
+            dest[0] = mp_obj_new_int_from_uint(o->h);
+        } else {
+            dest[1] = MP_OBJ_SENTINEL;      // the locals dict
+        }
+    }
+}
+
+static const mp_rom_map_elem_t ring_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_post), MP_ROM_PTR(&ring_post_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ring), MP_ROM_PTR(&ring_ring_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&ring_close_obj) },
+    #ifdef MOY_INPUT_BOARD
+    { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&ring_drive_obj) },
+    { MP_ROM_QSTR(MP_QSTR_driving), MP_ROM_PTR(&ring_driving_obj) },
+    #endif
+};
+static MP_DEFINE_CONST_DICT(ring_locals, ring_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    input_ring_type, MP_QSTR_RingSource, MP_TYPE_FLAG_NONE,
+    attr, ring_attr,
+    locals_dict, &ring_locals
+    );
+
 #define TABLE_LOCALS(buttons) \
     { MP_ROM_QSTR(MP_QSTR_BUTTONS), MP_ROM_PTR(buttons) }, \
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&table_del_obj) }, \
@@ -566,7 +705,9 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_pending_obj, table_pending);
     { MP_ROM_QSTR(MP_QSTR_reader), MP_ROM_PTR(&table_reader_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_reader_free), MP_ROM_PTR(&table_reader_free_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_events), MP_ROM_PTR(&table_events_obj) }, \
-    { MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&table_pending_obj) }
+    { MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&table_pending_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ring_source), MP_ROM_PTR(&table_ring_source_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_src_name), MP_ROM_PTR(&table_src_name_obj) }
 
 static const mp_rom_map_elem_t table_locals_table[] = { TABLE_LOCALS(&names_obj) };
 static MP_DEFINE_CONST_DICT(table_locals, table_locals_table);
@@ -710,6 +851,22 @@ static mp_obj_t input_kernel(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(input_kernel_obj, input_kernel);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_kernel_obj);
+
+#ifdef MOY_INPUT_BOARD
+// edge(pin, depth=EV_DEPTH, loop=False) -> the pin's edges as a RingSource of
+// the kernel table (moy_edge.h), stamped ISR; its close() frees the pin.
+static mp_obj_t input_edge(size_t n_args, const mp_obj_t *args) {
+    uint32_t depth = n_args > 1 ? (uint32_t)mp_obj_get_int(args[1]) : MOY_EV_DEPTH;
+    bool loop = n_args > 2 && mp_obj_is_true(args[2]);
+    mp_obj_t table = input_kernel();
+    uint32_t h;
+    check(moy_edge_open(mp_obj_get_int(args[0]), depth, loop, &h));
+    input_ring_obj_t *o = ring_new_obj(table, h, true);
+    moy_input_isr_detach(&o->w);    // the pin's ISR is its writer
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(input_edge_obj, 1, 3, input_edge);
+#endif
 
 // -- a source ----------------------------------------------------------------------
 
@@ -1912,6 +2069,9 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_InputSource), MP_ROM_PTR(&input_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Pointer), MP_ROM_PTR(&input_pointer_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&input_kernel_obj) },
+    #ifdef MOY_INPUT_BOARD
+    { MP_ROM_QSTR(MP_QSTR_edge), MP_ROM_PTR(&input_edge_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_pointer_state), MP_ROM_PTR(&input_pointer_state_obj) },
     #if MOY_INPUT_DRIVERS
     { MP_ROM_QSTR(MP_QSTR_keyboard), MP_ROM_PTR(&input_keyboard_obj) },
@@ -1925,6 +2085,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },
     { MP_ROM_QSTR(MP_QSTR_ball_coast), MP_ROM_PTR(&input_ball_coast_obj) },
     { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
+    { MP_ROM_QSTR(MP_QSTR_RING_SOURCES), MP_ROM_INT(MOY_INPUT_RING_SOURCES) },
     { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
     { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },
     { MP_ROM_QSTR(MP_QSTR_CURSOR_IDLE_MS), MP_ROM_INT(MOY_INPUT_CURSOR_IDLE_MS) },
@@ -1969,6 +2130,13 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_MOVE), MP_ROM_INT(MOY_EV_TOUCH_MOVE) },
     { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_UP), MP_ROM_INT(MOY_EV_TOUCH_UP) },
     { MP_ROM_QSTR(MP_QSTR_EV_EDGE), MP_ROM_INT(MOY_EV_EDGE) },
+    { MP_ROM_QSTR(MP_QSTR_EV_UART), MP_ROM_INT(MOY_EV_UART) },
+    { MP_ROM_QSTR(MP_QSTR_EV_LINK), MP_ROM_INT(MOY_EV_LINK) },
+    { MP_ROM_QSTR(MP_QSTR_EV_MEDIA), MP_ROM_INT(MOY_EV_MEDIA) },
+    { MP_ROM_QSTR(MP_QSTR_EV_NET), MP_ROM_INT(MOY_EV_NET) },
+    { MP_ROM_QSTR(MP_QSTR_EV_BLE), MP_ROM_INT(MOY_EV_BLE) },
+    { MP_ROM_QSTR(MP_QSTR_EV_LORA), MP_ROM_INT(MOY_EV_LORA) },
+    { MP_ROM_QSTR(MP_QSTR_EV_WINCH), MP_ROM_INT(MOY_EV_WINCH) },
     { MP_ROM_QSTR(MP_QSTR_EV_LOST), MP_ROM_INT(MOY_EV_LOST) },
     { MP_ROM_QSTR(MP_QSTR_EV_KEYS), MP_ROM_INT(MOY_EV_KEYS) },
     { MP_ROM_QSTR(MP_QSTR_EV_TOUCH), MP_ROM_INT(MOY_EV_TOUCH) },
@@ -1978,6 +2146,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PROV_FIFO), MP_ROM_INT(MOY_EV_FIFO) },
     { MP_ROM_QSTR(MP_QSTR_PROV_POLL), MP_ROM_INT(MOY_EV_POLL) },
     { MP_ROM_QSTR(MP_QSTR_EV_DEPTH), MP_ROM_INT(MOY_EV_DEPTH) },
+    { MP_ROM_QSTR(MP_QSTR_EV_ISR_DEPTH_MAX), MP_ROM_INT(MOY_EV_ISR_DEPTH_MAX) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

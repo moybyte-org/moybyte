@@ -766,6 +766,7 @@ INPUT_PARAMS = {
     "repeat_rate_ms": "MOY_INPUT_REPEAT_RATE_MS",
     "ball_coast": "MOY_INPUT_BALL_COAST",
     "ball_coast_rate": "MOY_INPUT_BALL_COAST_RATE",
+    "isr_ring_max": "MOY_EV_ISR_DEPTH_MAX",
 }
 
 

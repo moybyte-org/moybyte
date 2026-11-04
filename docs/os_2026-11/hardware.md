@@ -104,7 +104,14 @@ order of preference:
    ISR with the cache off is small and internal, as the latches are today,
    under the kernel's 4 KiB internal cap; a ring written by a task is PSRAM,
    a take from THE SHARES' RINGS row (`native/moy_play/moy_play.h`), and a
-   source whose ring the row cannot hold has none.
+   source whose ring the row cannot hold has none. A source a lease or a
+   device API brings is a **ring source** (`native/moy_input/moy_input.h`):
+   its ring alone, no latch, opened with the lease or the API and closed with
+   it, read by the same readers as the input table's sources. An ISR writes
+   its ring through a writer that touches only the ring, its lock and the
+   clock, so its drops are counted where its readers find them. A record's
+   `src` names its source (`moybyte.source(src)`), its `prov` how good its
+   stamp is.
    Ring depth is configuration: the source's peak rate × the worst frame (a
    GC frame). Each ring counts its drops. Carts get `ticks_us()` (wrapping,
    allocation-free) and `events(into)` filling a caller's buffer, since a
@@ -238,5 +245,6 @@ In C: `moy_lease_take(owner, res, cfg, &h)`, `moy_lease_drop(h)`,
 | design piece | today | what changes |
 |---|---|---|
 | hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1) | the lease table and sweep over those rows (P2.3) |
-| the link ring | `native/moy_net/moy_link.h`, counting its drops | the pattern for every ring |
+| the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
+| GPIO edges | `native/moy_input/moy_edge.h`: a free pin's edges as an ISR ring source, the stand-in a lease adopts (P2.2) | `lease:gpio` opens it, the lease table checking the pin and the sweep closing it (P2.3) |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

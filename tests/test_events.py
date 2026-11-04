@@ -185,6 +185,118 @@ def test_a_source_is_polled_unless_it_names_another_provenance():
         s.set_events(7, 8)
 
 
+# -- ring sources: what leases and device APIs bring --------------------------------
+
+def test_a_ring_source_names_where_its_records_came_from():
+    t = mi.InputTable()
+    g = t.ring_source("gpio5", mi.PROV_ISR, 8)
+    r = t.reader()
+    t.source("touch").point(1, 2, True, True)
+    g.post(mi.EV_EDGE, 5, 0, 1)
+    recs = read(t, r)
+    assert [(t.src_name(e[mi.EV_SRC]), e[mi.EV_KIND], e[mi.EV_PROV]) for e in recs] == [
+        ("touch", mi.EV_TOUCH_DOWN, mi.PROV_POLL), ("gpio5", mi.EV_EDGE, mi.PROV_ISR)]
+    src = g.ring()[5]
+    assert recs[1][mi.EV_SRC] == src and src & 0xFF >= mi.SOURCES
+    g.close()
+    assert t.src_name(src) is None
+    with pytest.raises(ValueError):
+        g.ring()
+    again = t.ring_source("gpio5", mi.PROV_ISR, 8)
+    assert again.ring()[5] != src                 # the slot's next generation
+    assert again.ring()[5] & 0xFF == src & 0xFF
+
+
+def test_an_isr_ring_is_internal_and_stops_at_its_ceiling():
+    t = mi.InputTable()
+    assert t.ring_source("gpio5", mi.PROV_ISR, 4096).ring()[0] == mi.EV_ISR_DEPTH_MAX
+    assert t.ring_source("uart1", mi.PROV_FIFO, 4096).ring()[0] == 1024
+
+
+def test_ring_sources_are_counted_and_a_closed_one_is_taken_again():
+    t = mi.InputTable()
+    rs = [t.ring_source("r%d" % i, mi.PROV_FIFO, 4) for i in range(mi.RING_SOURCES)]
+    with pytest.raises(OSError):
+        t.ring_source("one more", mi.PROV_FIFO, 4)
+    rs[3].close()
+    t.ring_source("one more", mi.PROV_FIFO, 4)
+    with pytest.raises(ValueError):
+        t.ring_source("", mi.PROV_FIFO, 4)
+    with pytest.raises(ValueError):
+        t.ring_source("bad", 7, 4)
+
+
+def test_a_task_ring_source_takes_from_the_rings_row_and_an_isr_ring_is_internal():
+    from runtime import moy_play as mp
+    assert mp.share_use("tdeck")
+    try:
+        t = mi.InputTable()
+        before = mp.share_held(mp.SHARE_RINGS)
+        f = t.ring_source("uart1", mi.PROV_FIFO, 64)
+        took = mp.share_held(mp.SHARE_RINGS) - before
+        assert took >= 64 * 16 and f.ring()[3:5] == (mi.PROV_FIFO, False)
+        i = t.ring_source("gpio5", mi.PROV_ISR, 64)
+        assert mp.share_held(mp.SHARE_RINGS) - before == took
+        assert i.ring()[3:5] == (mi.PROV_ISR, True)
+        f.close()
+        i.close()
+        assert mp.share_held(mp.SHARE_RINGS) == before
+        # the T-Deck's row is 16 KiB: a source whose ring it cannot hold has none
+        with pytest.raises(MemoryError):
+            t.ring_source("big", mi.PROV_FIFO, 1024)
+        assert mp.share_held(mp.SHARE_RINGS) == before
+    finally:
+        mp.share_use(None)
+
+
+def test_an_isr_ring_counts_its_drops_once_where_its_readers_find_them():
+    t = mi.InputTable()
+    g = t.ring_source("gpio5", mi.PROV_ISR, 4)
+    a, b = t.reader(), t.reader()
+    keys = t.reader(mi.EV_KEYS)
+    for i in range(10):
+        g.post(mi.EV_EDGE, 5, 0, i & 1)
+    assert g.ring()[1:3] == (4, 0)                # nothing counted until a reader looks
+    recs = read(t, a)
+    assert kinds(recs) == [(mi.EV_LOST, 0, 6)] + [(mi.EV_EDGE, 5, i & 1) for i in range(6, 10)]
+    assert g.ring()[2] == 6
+    assert kinds(read(t, b))[0] == (mi.EV_LOST, 0, 6)
+    assert g.ring()[2] == 6                       # the same six, counted once
+    assert read(t, keys) == [] and g.ring()[2] == 6
+    for i in range(4):                            # a reader that keeps up loses nothing
+        g.post(mi.EV_EDGE, 5, 0, i & 1)
+        assert len(read(t, a)) == 1
+    read(t, b)
+    assert g.ring()[2] == 6
+
+
+def test_a_tap_burst_the_ring_can_hold_arrives_whole_however_late_the_read():
+    """The lost-tap rule on the host: every edge an ISR writes while the frame
+    is away (a collection) is read when it comes back, in order, stamped when
+    it happened, as long as the ring's depth covers the burst."""
+    t = mi.InputTable()
+    g = t.ring_source("gpio5", mi.PROV_ISR, 64)
+    r = t.reader()
+    for i in range(60):
+        mi.pin_clock(1000 + 500 * i)
+        g.post(mi.EV_EDGE, 5, 0, (i + 1) & 1)
+    recs = read(t, r, cap=80)
+    assert [e[mi.EV_KIND] for e in recs] == [mi.EV_EDGE] * 60
+    assert [e[mi.EV_B] for e in recs] == [(i + 1) & 1 for i in range(60)]
+    stamps = [e[mi.EV_T] for e in recs]
+    assert {(b - a) & ((1 << 30) - 1) for a, b in zip(stamps, stamps[1:])} == {500}
+    assert g.ring()[2] == 0
+
+
+def test_a_closed_isr_writer_writes_nothing():
+    t = mi.InputTable()
+    g = t.ring_source("gpio5", mi.PROV_ISR, 4)
+    r = t.reader()
+    g.close()
+    g.post(mi.EV_EDGE, 5, 0, 1)                   # the detached writer: a no-op
+    assert read(t, r) == []
+
+
 # -- rings, drops and readers --------------------------------------------------------
 
 def test_a_full_ring_drops_its_oldest_and_the_reader_reads_the_gap():
@@ -366,6 +478,8 @@ def test_the_workstation_binds_the_registry_to_its_input():
     ws.input.source("local").set_button("a", True)
     n = moybyte.events(buf)
     assert n == 1 and buf[mi.EV_KIND] == mi.EV_BTN
+    assert moybyte.source(buf[mi.EV_SRC]) == "local" and buf[mi.EV_PROV] == moybyte.PROV_POLL
+    assert moybyte.source(0xFFFF) is None
 
 
 # -- the desktop MicroPython ---------------------------------------------------------
@@ -396,6 +510,22 @@ s.post(I.EV_EDGE, 7, 0, 1)
 n = t.events(buf, r)
 age = (time.ticks_us() - buf[I.EV_T]) & ((1 << 30) - 1)
 print("REC", n, buf[I.EV_KIND], buf[I.EV_A], buf[I.EV_PROV], 0 <= age < 1000000)
+g = t.ring_source("gpio5", I.PROV_ISR, 64)
+u = t.ring_source("uart1", I.PROV_FIFO, 64)
+def ring_frame(n):
+    while n:
+        g.post(I.EV_EDGE, 5, 0, n & 1)
+        u.post(I.EV_UART, 1, 0, n)
+        t.events(buf, r)
+        n -= 1
+ring_frame(4)
+gc.collect()
+before = gc.mem_alloc()
+ring_frame(400)
+print("RINGS", gc.mem_alloc() - before)
+print("NAMES", t.src_name(g.ring()[5]), t.src_name(u.ring()[5]), g.ring()[3:5], u.ring()[3:5])
+g.close()
+u.close()
 import moybyte
 moybyte.bind(t)
 moybyte.events(buf)
@@ -434,4 +564,7 @@ def test_on_the_vm_reading_events_and_the_registry_allocate_nothing(tmp_path):
         assert "ALLOC 0\n" in out, (tag, out)
         assert "MOYBYTE 0\n" in out, (tag, out)
         assert "DUE 0\n" in out, (tag, out)
+        assert "RINGS 0\n" in out, (tag, out)
+        assert "NAMES gpio5 uart1 (%d, True) (%d, False)" % (mi.PROV_ISR, mi.PROV_FIFO) in out, \
+            (tag, out)
         assert "REC 1 %d 7 %d True" % (mi.EV_EDGE, mi.PROV_POLL) in out, (tag, out)
