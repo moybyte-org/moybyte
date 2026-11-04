@@ -179,7 +179,7 @@ static void reader(void *arg) {
     int16_t *mono = M->mono;
     while (M->run) {
         size_t got = 0;
-        if (rx_read(frame, sizeof(frame), &got) != 0 || got == 0) {
+        if (rx_read(frame, sizeof(M->frame), &got) != 0 || got == 0) {
             vTaskDelay(1);
             continue;
         }
