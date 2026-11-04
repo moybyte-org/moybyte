@@ -390,9 +390,8 @@ them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
 fetch of any URL by an app that never asked for the network, child mode
 included). **A stream lives as long as its process (owner, 2026-11-03)**:
 closing the app ends it (its end sweeps it), minimising keeps it
-(`processes.md` §1), and the system menu's Stop music, there while a stream
-plays, stops it from anywhere; a control standing on the glass in kernel
-chrome, as the recording indicator does, is not built. A Python app making
+(`processes.md` §1); a control standing on the glass in kernel chrome, as the
+recording indicator does, is not built. A Python app making
 its own sound renders ahead from a thread or its loop (`processes.md` §3), at
 a depth greater than a GC pause.
 

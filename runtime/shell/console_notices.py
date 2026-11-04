@@ -52,10 +52,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.notifications import NOTES as _NOTES
 try:
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import devices as _devices
-try:
     import achievements_ui as _ach_ui
     import about_ui as _about_ui
     import achievements as _ach
@@ -1048,10 +1044,6 @@ class SystemMenuUI:
             sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
                    else "menu.search")
             rows.append(_row("item", sid, self.ws.toggle_search))
-        # The media service's stop control while a stream plays, whoever
-        # plays it (hardware.md section 3).
-        if _devices.MEDIA[0]:
-            rows.append(("item", "STOP MUSIC", self._menu_stop_media, "mute", "Stop music"))
         if not ws.wm.top_is("tasks"):
             rows.append(_row("item", "menu.tasks", ws.open_tasks))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
@@ -1062,11 +1054,6 @@ class SystemMenuUI:
             rows.append(_row("item", "menu.sleep", self._menu_sleep))
         rows.append(_row("item", "menu.reboot", self._menu_reboot))
         return rows
-
-    def _menu_stop_media(self):
-        media = _devices.api("media")
-        if media is not None:
-            media.stop()
 
     def card_rows(self, home=None):
         """A home's selected card as a menu group (the fullscreen home's,

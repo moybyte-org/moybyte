@@ -315,24 +315,6 @@ def test_the_parsers():
     assert os.path.getsize(TONE) == len(MP3)
 
 
-def test_the_system_menu_stops_a_stream_from_anywhere(media, tmp_path):
-    from ws_helpers import build_ws
-    ws = build_ws(tmp_path)
-    devices.grants = None
-
-    def labels():
-        return [r[4] for r in ws.menu_ui._sysmenu_items() if r[0] == "item"]
-
-    assert "Stop music" not in labels()
-    pid = L.spawn("t.menu")
-    _as(pid, lambda: moybyte.media.play(str(TONE)))
-    rows = [r for r in ws.menu_ui._sysmenu_items() if r[0] == "item" and r[4] == "Stop music"]
-    assert len(rows) == 1
-    _as(devices.SHELL, rows[0][2])
-    assert N.owner() == 0 and "Stop music" not in labels()
-    devices.console = None
-
-
 def test_the_vms_end_closes_its_processes_stream(media):
     """The kernel's moy_media_close_vm (a soft reset or a VM stop): the stream
     of a process the VM held ends with it and its row comes back, though the
