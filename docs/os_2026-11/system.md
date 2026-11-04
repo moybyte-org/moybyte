@@ -61,7 +61,13 @@ commands as their services land (`wifi`, `ifconfig`, `ping`, `http`, `ble`,
 VM is stopped** a command that needs a shell-served row is refused with
 "needs the console", the answer the ROLE door already gives
 (`MOY_APP_NEEDS_VM`), never queued (owner, 2026-11-03): a queued `install`
-that runs when the VM returns is a surprise.
+that runs when the VM returns is a surprise. On a board the session's host
+table is `native/moy_sh/moy_sh_board.h`: the log, memory, `reboot`, the
+kernel's row and the run in front (which `kill` ends) are served in C, and
+everything the console knows (its processes, /proc and /dev through
+`runtime/system/devfs.py`, the installed and role commands, `df`) crosses the
+ROLE door on the shell's own row to `runtime/shell/sh_door.py`, so with the VM
+stopped `ps` shows the console stopped and the run in front.
 
 **The screen face.** On a board with glass the terminal is a system app
 whose Layer is the **renderer** of the C shell's output: today's
@@ -103,7 +109,8 @@ rolls back an OTA update and `reboot`s, with no computer and no reflash.
 ## 3. Not tied to the screen: serial, the web terminal and SSH
 
 The same shell runs over the USB serial dev
-channel (today's line reader, `native/moy_kernel/moy_devch.h`), over a web
+channel (the kernel word `sh LINE`, `native/moy_kernel/moy_devch.c`, over one
+session the kernel keeps: `SH` a line of output, then `SH end <status>`), over a web
 terminal through the webhost (`device/moy_webhost.py`, a route beside
 `/run` and `/update`), and over **SSH**: `ssh moybyte.local` from any
 laptop, `scp`/`sftp` into the files tree, mDNS for the hostname (the IDF's
