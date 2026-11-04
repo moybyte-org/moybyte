@@ -149,7 +149,7 @@ RESET {
 static char *varnull(const char *s)
 {
 	/* Unset variables always end with two NUL chars. */
-	return strchrnul(s, '=') + 1;
+	return (char *)strchrnul(s, '=') + 1;
 }
 
 static void varfunc(struct var *vp)
@@ -332,7 +332,7 @@ lookupvar(const char *name)
 			fmtstr(linenovar+7, sizeof(linenovar)-7, "%d", lineno);
 		}
 #endif
-		return strchrnul(v->text, '=') + 1;
+		return (char *)strchrnul(v->text, '=') + 1;
 	}
 	return NULL;
 }

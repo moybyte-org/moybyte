@@ -29,6 +29,11 @@ dash as a session of the kernel's shell rather than a process of a Unix:
 - Signal names with no entry (NULL) are skipped.
 - Headers a chip's C library lacks and nothing uses go (sys/ioctl.h,
   sys/mman.h, arpa/inet.h: htonl is moy_sh_posix.h's).
+- A pointer a search function answers into a const string or table is kept
+  const or cast where dash returns it writable (find_builtin's bsearch,
+  readtoken1's strchr, varnull, lookupvar, expmeta_rmescapes): C23's
+  const-preserving bsearch, strchr and strchrnul refuse the
+  implicit drop.
 
 diff --git a/src/alias.c b/src/alias.c
 index 1b9b979..c52b5ff 100644
@@ -566,7 +571,7 @@ index 63e7d86..2fa45cc 100644
  /* reasons for skipping commands (see comment on breakcmd routine) */
  #define SKIPBREAK	(1 << 0)
 diff --git a/src/exec.c b/src/exec.c
-index 6fe0fed..aab720e 100644
+index 6fe0fed..02cc9e1 100644
 --- a/src/exec.c
 +++ b/src/exec.c
 @@ -70,6 +70,7 @@
@@ -677,7 +682,12 @@ index 6fe0fed..aab720e 100644
  
  int padvance_magic(const char **path, const char *name, int magic)
  {
-@@ -537,6 +486,8 @@ find_builtin(const char *name)
+@@ -533,10 +482,12 @@ find_builtin(const char *name)
+ {
+ 	struct builtincmd *bp;
+ 
+-	bp = bsearch(
++	bp = (struct builtincmd *)bsearch(
  		&name, builtincmd, NUMBUILTINS, sizeof(struct builtincmd),
  		pstrcmp
  	);
@@ -709,7 +719,7 @@ index 8707d36..45ab879 100644
  struct stat64;
  
 diff --git a/src/expand.c b/src/expand.c
-index 76e67ce..071ae02 100644
+index 76e67ce..e563e32 100644
 --- a/src/expand.c
 +++ b/src/expand.c
 @@ -90,18 +90,6 @@
@@ -770,6 +780,15 @@ index 76e67ce..071ae02 100644
  #define GLOB_ALTDIRFUNC 0
  #endif
  
+@@ -1615,7 +1603,7 @@ static char *expmeta_rmescapes(char *enddir, const char *name)
+ 
+ 	p = name;
+ 	do {
+-		char *q = strchrnul(p, '\\');
++		const char *q = strchrnul(p, '\\');
+ 
+ 		enddir = mempcpy(enddir, p, q - p + 1);
+ 		p = q;
 diff --git a/src/expand.h b/src/expand.h
 index 7bcff75..3c36795 100644
 --- a/src/expand.h
@@ -1914,7 +1933,7 @@ index c43d493..fbba01a 100644
  
  #define OUTPUT_ERR 01		/* error occurred on output */
 diff --git a/src/parser.c b/src/parser.c
-index e44b3c3..6954103 100644
+index e44b3c3..b1ddb62 100644
 --- a/src/parser.c
 +++ b/src/parser.c
 @@ -78,8 +78,8 @@
@@ -1991,6 +2010,15 @@ index e44b3c3..6954103 100644
  			heredoc->here = np;
  			if ((c = pgetc_eatbnl()) == '-') {
  				heredoc->striptabs = 1;
+@@ -1453,7 +1449,7 @@ varname:
+ 					STPUTC(c, out);
+ 				/*FALLTHROUGH*/
+ 			default:
+-				p = strchr(types, c);
++				p = (char *)strchr(types, c);
+ 				if (p == NULL)
+ 					break;
+ 				subtype |= p - types + VSNORMAL;
 @@ -1522,7 +1518,7 @@ badsub:
  
  parsebackq: {
@@ -2232,7 +2260,7 @@ index beaf660..b36a52b 100644
  int trapcmd(int, char **);
  void setsignal(int);
 diff --git a/src/var.c b/src/var.c
-index e76abe3..db47e6d 100644
+index e76abe3..f88c463 100644
 --- a/src/var.c
 +++ b/src/var.c
 @@ -72,37 +72,37 @@ struct localvar_list {
@@ -2336,6 +2364,15 @@ index e76abe3..db47e6d 100644
  }
  
  RESET {
+@@ -169,7 +149,7 @@ RESET {
+ static char *varnull(const char *s)
+ {
+ 	/* Unset variables always end with two NUL chars. */
+-	return strchrnul(s, '=') + 1;
++	return (char *)strchrnul(s, '=') + 1;
+ }
+ 
+ static void varfunc(struct var *vp)
 @@ -197,8 +177,14 @@ initvar(void)
  	struct var *end;
  	struct var **vpp;
@@ -2361,6 +2398,15 @@ index e76abe3..db47e6d 100644
  			n = vp->text;
  			sh_error("%.*s: is read only", strchrnul(n, '=') - n,
  				 n);
+@@ -346,7 +332,7 @@ lookupvar(const char *name)
+ 			fmtstr(linenovar+7, sizeof(linenovar)-7, "%d", lineno);
+ 		}
+ #endif
+-		return strchrnul(v->text, '=') + 1;
++		return (char *)strchrnul(v->text, '=') + 1;
+ 	}
+ 	return NULL;
+ }
 diff --git a/src/var.h b/src/var.h
 index 3d837a7..9eb30f0 100644
 --- a/src/var.h

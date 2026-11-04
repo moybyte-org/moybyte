@@ -1449,7 +1449,7 @@ varname:
 					STPUTC(c, out);
 				/*FALLTHROUGH*/
 			default:
-				p = strchr(types, c);
+				p = (char *)strchr(types, c);
 				if (p == NULL)
 					break;
 				subtype |= p - types + VSNORMAL;

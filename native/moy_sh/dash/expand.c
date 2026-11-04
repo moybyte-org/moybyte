@@ -1603,7 +1603,7 @@ static char *expmeta_rmescapes(char *enddir, const char *name)
 
 	p = name;
 	do {
-		char *q = strchrnul(p, '\\');
+		const char *q = strchrnul(p, '\\');
 
 		enddir = mempcpy(enddir, p, q - p + 1);
 		p = q;
