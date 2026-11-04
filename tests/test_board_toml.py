@@ -649,6 +649,7 @@ def test_flash_facts_are_declared_and_shaped(board):
     int(str(fl["otadata_offset"]), 16)
     int(str(fl["otadata_size"]), 16)
     assert not str(fl["image"]).startswith("/")
+    assert fl.get("stub", 2) in (1, 2), "%s [flash] stub is 1 or 2" % board
     assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
 
 

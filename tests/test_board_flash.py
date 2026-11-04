@@ -39,10 +39,12 @@ class _Esptool:
 
     def __init__(self, codes=()):
         self.calls = []
+        self.envs = []
         self._codes = list(codes)
 
-    def call(self, cmd):
+    def call(self, cmd, env=None):
         self.calls.append(list(cmd))
+        self.envs.append(env)
         return self._codes.pop(0) if self._codes else 0
 
 
@@ -107,6 +109,21 @@ def test_every_flash_argument_comes_from_the_board_file(
                           fl["otadata_size"]]
     assert write[-3:] == ["write_flash", fl["offset"],
                           str(tmp_path / fl["image"])]
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_esptool_run_takes_the_declared_stub(monkeypatch, tmp_path, board):
+    """`[flash] stub` picks the flasher stub esptool uploads, through the
+    environment variable every esptool from 4.12 reads (one that predates it
+    runs its own stub). A board that declares none gets esptool's default and
+    an untouched environment."""
+    fl = board_config.load(BOARDS[board])["flash"]
+    _rc, fake = _flash(monkeypatch, tmp_path, BOARDS[board])
+    for env in fake.envs:
+        if "stub" in fl:
+            assert env["ESPTOOL_STUB_VERSION"] == str(fl["stub"])
+        else:
+            assert env is None
 
 
 def test_the_tdeck_alone_asks_for_the_usb_reset_it_measured(
@@ -401,7 +418,7 @@ class _Board(_Esptool):
         super().__init__(codes)
         self.table = table
 
-    def call(self, cmd):
+    def call(self, cmd, env=None):
         rc = super().call(cmd)
         if "read_flash" in cmd and not rc:
             Path(cmd[-1]).write_bytes(self.table)

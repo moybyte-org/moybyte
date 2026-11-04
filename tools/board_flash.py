@@ -40,6 +40,13 @@ which reads exactly like an image that did not take, and the verb stayed when
 the board moved to USB-Serial/JTAG rather than changing two things at once.
 That fact lives in the board's own toml, which this file reads.
 
+`stub` picks the flasher stub esptool uploads, and every esptool run of a
+flash takes it as `ESPTOOL_STUB_VERSION` (read from 4.12, the variable behind
+esptool's hidden `--stub-version`; 5.x defaults to 2). An older esptool ignores
+it and runs its own stub, so the flash is slower, never wrong. A board without
+the key gets esptool's default. The Waveshare P4 declares 2, and its board.toml
+says why.
+
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
 current board (both of this session's T-Deck flashes ran plain esptool); it
@@ -47,6 +54,7 @@ survives for the legacy Makefile variants that still name it.
 """
 
 import argparse
+import os
 import struct
 import subprocess
 import sys
@@ -59,13 +67,17 @@ sys.path.insert(0, str(ROOT))
 from tools import board_config  # noqa: E402
 
 
-def _esptool(chip, port, baud, *args):
+def _esptool(chip, port, baud, *args, stub=None):
     cmd = [sys.executable, "-m", "esptool", "--chip", chip, "--port", port]
     if baud:
         cmd += ["--baud", str(baud)]
     cmd += list(args)
-    print("+", " ".join(cmd))
-    return subprocess.call(cmd)
+    if stub is None:
+        print("+", " ".join(cmd))
+        return subprocess.call(cmd)
+    env = dict(os.environ, ESPTOOL_STUB_VERSION=str(stub))
+    print("+ ESPTOOL_STUB_VERSION=%s" % stub, " ".join(cmd))
+    return subprocess.call(cmd, env=env)
 
 
 PT_OFFSET = 0x8000   # ESP-IDF's default table offset, which every board here keeps
@@ -129,13 +141,14 @@ def _image_table(image, offset):
     return blob if len(blob) == PT_SIZE else None
 
 
-def _read_board_table(chip, port, baud, before):
+def _read_board_table(chip, port, baud, before, stub=None):
     """(esptool's return code, the board's table sector)."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "table.bin"
         args = ["--before", str(before)] if before else []
         rc = _esptool(chip, port, baud, *args, "--after", "no_reset",
-                      "read_flash", hex(PT_OFFSET), hex(PT_SIZE), str(out))
+                      "read_flash", hex(PT_OFFSET), hex(PT_SIZE), str(out),
+                      stub=stub)
         return rc, out.read_bytes() if out.exists() else b""
 
 
@@ -193,11 +206,13 @@ def flash(board_dir, port, verify=True):
         sys.exit("no image at %s -- build it first (make firmware-build-...)"
                  % image)
     baud = fl.get("baud")
+    stub = fl.get("stub")
     # 0) where the image puts the store, against where the board has it.
     new_store = None
     image_table = _image_table(image, int(str(fl["offset"]), 0))
     if image_table:
-        rc, board_table = _read_board_table(chip, port, baud, fl.get("before"))
+        rc, board_table = _read_board_table(chip, port, baud, fl.get("before"),
+                                           stub)
         if rc:
             return rc
         new_store = moved_store(board_table, image_table)
@@ -211,12 +226,13 @@ def flash(board_dir, port, verify=True):
     #    docstring for why the order is load-bearing.
     if fl.get("otadata_offset"):
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
-                      str(fl["otadata_offset"]), str(fl.get("otadata_size", "0x2000")))
+                      str(fl["otadata_offset"]), str(fl.get("otadata_size", "0x2000")),
+                      stub=stub)
         if rc:
             return rc
     if new_store:
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
-                      hex(new_store[0]), hex(STORE_ERASE))
+                      hex(new_store[0]), hex(STORE_ERASE), stub=stub)
         if rc:
             return rc
     # 2) the merged image at the board's offset.
@@ -225,7 +241,7 @@ def flash(board_dir, port, verify=True):
         args += ["--before", str(fl["before"])]
     args += ["--after", str(fl.get("after", "hard_reset")), "write_flash",
              str(fl["offset"]), str(image)]
-    return _esptool(chip, port, baud, *args)
+    return _esptool(chip, port, baud, *args, stub=stub)
 
 
 def monitor(board_dir, port):

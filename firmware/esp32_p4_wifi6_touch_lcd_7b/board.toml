@@ -160,9 +160,19 @@ rasterizes from the same bytes the host draws from."""
 # board that has taken an OTA boots the slot the cable flash just wrote.
 # No `before`: the CH343 is an external USB-UART and esptool's default reset
 # is reliable on it.
+#
+# A flash is bound by the flasher stub's own write and read-back on this
+# board's 32 MB flash, not by the line: on the legacy stub a 6.6 MB image
+# wrote at ~115 KB/s whatever the rate or compression, and the MD5 read-back
+# after it took 24 s. The second-generation stub (`stub = 2`, esptool 4.12+)
+# writes ~40% faster and reads back in 14 s; at 3 Mbaud the line stops
+# mattering. Measured 2026-11-04, three flashes a setting, each booting to the
+# desk: 921600 legacy 101 s, 3 Mbaud legacy 84 s, 3 Mbaud stub 2 58 s,
+# 2 Mbaud stub 2 59 s.
 image          = "dist/p4/moybyte_p4.bin"
 offset         = "0x2000"
-baud           = 921600
+baud           = 3000000
+stub           = 2
 otadata_offset = "0xd000"
 otadata_size   = "0x2000"
 

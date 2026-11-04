@@ -212,7 +212,7 @@ BOARDS = [
         "chip": "ESP32-P4",
         "images": ("moybyte_p4.bin",),
         "offset": 0x2000,
-        "baud": 921600,
+        "baud": 3000000,
         "usb_otg": False,                   # a CH343 bridge, not native USB
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C debug port. It resets into "

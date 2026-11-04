@@ -10,7 +10,7 @@
 # SHARED half of the build lives in tools/esp32_build_lib.sh since 2026-08-17;
 # what stays here is this board's patch ladder and sdkconfig facts. Output
 # flashes at offset 0x2000:
-#   esptool --port /dev/ttyACM0 --baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin
+#   tools/board.py p4 flash   (board.toml [flash] has the offset, rate and stub)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

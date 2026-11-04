@@ -124,8 +124,9 @@ make firmware-flash-p4 PORT=/dev/ttyACM0           # esptool @0x2000 (the P4 app
 make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 ```
 
-(Raw equivalent: `.venv/bin/python -m esptool --chip esp32p4 --port /dev/ttyACM0
---baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin`.)
+(Raw equivalent: `ESPTOOL_STUB_VERSION=2 .venv/bin/python -m esptool --chip
+esp32p4 --port /dev/ttyACM0 --baud 3000000 write_flash 0x2000
+dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
 - `build.sh` clones MicroPython v1.28.0 into `.build/`, reuses the T-Deck
   build's ESP-IDF v5.5.1 checkout when present (clones its own otherwise),

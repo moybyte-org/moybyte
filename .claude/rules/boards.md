@@ -57,8 +57,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (`docs/board_ports_2026-08.md`).
 - **Flash and serial facts are board.toml data too**: `[flash]`/`[monitor]`
   (image, offset, baud, the otadata region erased FIRST so a board that has
-  taken an OTA boots the slot just written, and the reset strategy — the T-Deck
-  declares `usb_reset`) for `tools/board_flash.py`; `[serial]` (the line state
+  taken an OTA boots the slot just written, the reset strategy — the T-Deck
+  declares `usb_reset` — and the flasher stub — the Waveshare P4 declares the
+  second-generation one) for `tools/board_flash.py`; `[serial]` (the line state
   at open, `attach_only`, the `py` chunk, the `recv` window and, on the
   Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a

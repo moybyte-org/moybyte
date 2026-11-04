@@ -38,7 +38,10 @@ sim = [
 # Flashing/monitoring a real board. NOT installed by `make setup` -- it needs
 # hardware, and the T-Deck targets use the ESP-IDF toolchain's python instead.
 device = [
-  "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
+  # 4.13: the newest 4.x, whose second-generation flasher stub a board's
+  # `[flash] stub` selects (tools/board_flash.py). <5: tools/esptool_no_modem.py
+  # patches esptool 4.x internals.
+  "esptool>=4.13,<5",
   "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
 ]
 # A page in headless Chrome (tools/web.py shot). Not in `make setup`: no test
