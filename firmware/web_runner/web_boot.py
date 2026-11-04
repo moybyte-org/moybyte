@@ -829,7 +829,8 @@ def state_json():
     """The console's `state`: the dev channel's one-line snapshot -- the keys
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
-    audio pull mixed, frames it found none, the room, whether it is open) and
+    audio pull mixed, frames it found none, the room, whether it is open, its
+    depth) and
     the running cart's first eight pmem slots, the earned badges' ids, the
     Settings rows as the console holds them and whether the FPS chip shows,
     for a harness driving the page (`window.__moyState()`)."""

@@ -186,8 +186,9 @@ def test_a_compiled_cart_runs_in_the_browser_as_it_runs_on_the_host(tmp_path):
     assert before["err"] is None and before["notice"] is None, before
     assert _digest(shot) == tier_frame.golden(), \
         "the browser's frame is not the one the host shows (tests/tier_frame.py)"
-    queued, played, _starved, room, live = before["snd"]
-    assert live and queued > 0 and played > 0 and queued - played + room == 2048, before
+    queued, played, _starved, room, live, depth = before["snd"]
+    assert live and queued > 0 and played > 0 and depth == 2048, before
+    assert queued - played + room == depth, before
     assert pcm["frames"] > 0 and pcm["peak"] > 1000, \
         "the cart's samples did not reach the page's audio: %r" % pcm
     assert "unreachable" in (after["err"] or ""), after
