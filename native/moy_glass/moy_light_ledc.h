@@ -21,7 +21,9 @@
 #define MOY_LIGHT_LEDC_TIMER LEDC_TIMER_3
 #define MOY_LIGHT_LEDC_CHAN LEDC_CHANNEL_7
 #define MOY_LIGHT_LEDC_BITS 10
-#define MOY_LIGHT_LEDC_HZ 5000
+// Above hearing: at 5 kHz the Guition P4's backlight boost whined at any level
+// below full.
+#define MOY_LIGHT_LEDC_HZ 25000
 
 // A channel that would not configure leaves the pin a plain output, lit at any
 // level above off: a light that cannot dim, never one that stays dark.
