@@ -9,7 +9,7 @@ Phases 3 and 4 of the order of work. Read `docs/os_2026-11.md` first.
 The overview's real-OS principle (owner, 2026-11-03), for the terminal: **a
 bash-like shell in C, plus SSH** (§3).
 
-**The shell is C, at kernel level** (`+native/moy_sh/`), like the update
+**The shell is C, at kernel level** (`native/moy_sh/`), like the update
 screen's kernel chrome, and it fits "the kernel is C": it keeps working
 while an S3's Python VM is stopped (`ps`, `kill`, `log`, `reboot` stay
 available over the serial and web faces and on screen through the
@@ -20,8 +20,12 @@ and scripts, `&`/`jobs`/`fg`/`kill`, history and completion. **Where bash
 would fork and exec, the shell asks the OS to spawn a process** of any tier
 (`processes.md` §1). Real bash cannot be ported: it needs fork, exec, signals, process
 groups and termios, none of which the kernel has. **It derives from dash**
-(BSD-3-Clause; owner, 2026-11-03), vendored like WAMR, with its fork/exec,
-signal and job-control layer rewritten over the process table; BusyBox ash
+(BSD-3-Clause; owner, 2026-11-03), vendored like WAMR (`native/moy_sh/UPSTREAM.md`:
+a pinned commit and one patch), with its fork/exec, signal and job-control
+layer rewritten over the process table: a fork saves the session's arena and
+runs the child to its end, so a subshell's state goes as a forked one's and a
+pipeline's stages run one after another over pipe buffers; an exec is a spawn,
+and a program spawned with `&` is a job of its own (`native/moy_sh/moy_sh.h`); BusyBox ash
 is GPLv2 and cannot enter the FSL-1.1-MIT firmware (`docs/licensing_v1.md`).
 
 **Full access, per-command consent.** The shell runs with full access, a
