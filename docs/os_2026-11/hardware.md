@@ -265,6 +265,33 @@ order of preference:
    from `@micropython.viper` and `@micropython.native` over arrays.
    Low-latency lanes stay with wasm and ELF.
 
+   **As built (P2.5).** The ring is the mix's one render-ahead stream,
+   libmoy's `moy_stream` under the mix's lock (one writer at a time, the
+   feeder its reader), 22,050 Hz mono, `MOY_AUDIO_SND_MIN`..`_MAX` frames
+   deep (`native/moy_audio/moy_audio_snd.h`): a depth up to moy-spec's 2,048
+   uses the ring reserved at boot, a deeper one is PSRAM taken from THE
+   SHARES' RINGS row at the open and given back at the close. A compiled
+   cart's `snd` writes it, as deep as its manifest's `"moybyte":
+   {"audio_ring": n}` asks (the default and an out-of-range value being
+   2,048); a Python process opens it with `moybyte.snd_open(frames)` and
+   writes it with `moybyte.snd(buf)`, from its loop or a `_thread`, until
+   `snd_close` or its end (`runtime/system/moybyte.py`). One holder at a
+   time. Lua has no writer: its verb would be a row of moy-spec's table.
+   AUDIORATE's `snd=` field is the ring's queued/played/starved/room/depth.
+   The timed lanes are built on the P4s for wasm, AOT or interpreted
+   (`MOY_WASM_TIMED_LANES`; `native/moy_wasm/moy_wasm_session.h` is the
+   contract and `moy_wasm_tlane.c` the code): the OS finds a lane by its
+   export, `moy_audio(buf, n)` or `moy_timer(t_us)`, with
+   `moy_lane_stack(lane)` naming the lane's stack in linear memory; the
+   manifest's `"lanes"` is not read. Each lane is a pthread on the core the
+   session is not on, above the board's own tasks there and below the
+   esp_timer task, running a sibling instance of the cart; its stack is a
+   take from the LANES row. The monitor is a 1 ms esp_timer that strikes a
+   call past `MOY_WASM_TLANE_DEADLINE_US` (suspends the lane's task, mutes
+   the ring); a trap, an import among them, strikes too. `moy_wasm.tlanes()`
+   reads what each lane did. ELF's lanes arrive with P5.4; the S3s have
+   none.
+
 **The event record (sketch).**
 
 ```c
@@ -304,7 +331,12 @@ connection and decodes, on a 24 KiB PSRAM stack (a frame's decode takes 16.7
 KB) that never runs a flash operation: a file is read by the face's pump in
 the VM and its bytes fed to the C. The host has no task; the pump runs one
 pass of its loop. Decode cost is the stream's (internet radio is 44.1 kHz
-stereo), not the output's. While it plays the feeder is no longer lazy (the
+stereo), not the output's. On the T-Deck that cost reaches a heavy cart on
+core 1 through the cache and the memory bus the cores share, and the decode
+itself is the cost: its state in internal SRAM bought back a fifth of it for
+about 30 KiB the S3 cannot spare, and decoding in bursts or building the
+decoder for size bought nothing (A/B'd 2026-11-04; the numbers are #246's).
+The Waveshare P4 loses nothing. While it plays the feeder is no longer lazy (the
 open starts the output), its I²S DMA ring is permanent internal SRAM, and a
 stream whose list holds a URL holds the WiFi lease under `media`, whose
 internal cost never comes back (#158).
