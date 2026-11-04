@@ -1352,6 +1352,20 @@ int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy
     return MOY_UI_OK;
 }
 
+int moy_ui_rec(const moy_ui_sink_t *s, int right, int top, int fs, int desk, moy_ui_box_t *out) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int dia = (d.desk ? 8 : 6) * d.fs, line = d.fs;
+    moy_ui_box_t b = {(int16_t)(right - dia - 2 * line), (int16_t)top, (int16_t)(dia + 2 * line),
+                      (int16_t)(dia + 2 * line)};
+    if (out != NULL) {
+        *out = b;
+    }
+    rrect(&d, b.x, b.y, b.w, b.h, b.w / 2, 1, pal(&d, tok(&d, MOY_UI_T_DANGER, MOY_UI_T_ACCENT)),
+          line, pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE)));
+    return MOY_UI_OK;
+}
+
 // -- text blocks, empty pages, toasts ------------------------------------------------------
 
 #define TEXT_LINES 16

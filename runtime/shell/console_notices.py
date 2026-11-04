@@ -323,6 +323,13 @@ class Notices:
         self._note_rect = _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, self._note_top(),
                                           n.app, n.summary, n.icon, 0, _desk_class())
 
+    def _draw_rec(self):
+        """The recording indicator while a process holds the microphone
+        (`devices.MIC`): kernel chrome at the glass's top right, over
+        everything but the cursor, which nothing turns off."""
+        cv = self.sys_canvas
+        _ui_draw.rec(cv, self.theme_colors, cv.w - 2, 2, _desk_class())
+
     def _note_pointer(self, px, py, click):
         """A tap on the banner opens its notification; a press on it dragged
         up dismisses it, the app in front playing on. While a press on it is

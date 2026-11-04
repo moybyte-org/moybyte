@@ -24,7 +24,7 @@ def mic():
     for pid in range(1, 400):
         if N.owner() == 0:
             break
-        N.sweep(N.owner())
+        moybyte.end(N.owner())
     devices.grants = None
     mic_sim.remove()
 
@@ -125,3 +125,37 @@ def test_an_image_without_the_driver_has_no_microphone_and_ends_clean(monkeypatc
     pid = L.spawn("t.m")
     assert dev_mic.sweep(pid) == 0
     moybyte.end(pid)
+
+
+def test_the_recording_indicator_stands_while_a_process_holds_the_microphone():
+    """The shell's flag follows the holder through open, close and the end
+    (the `rec` overlay reads it, its pixels the shell goldens' rec_indicator),
+    and the kernel's copy draws over a run it drives, at the frame's top
+    right in the theme's `danger`, while the microphone is held."""
+    import ctypes
+    from runtime import moy_play
+    from runtime.chrome import NAMES, theme_colors
+    from runtime import chrome_ops
+    pid = L.spawn("t.rec")
+    w, h = 64, 48
+    pal = [0x1000 + i for i in range(64)]     # every index a colour of its own
+    th = theme_colors("moy", "dark")
+    chrome_ops.chrome_inks(th, NAMES)
+    now = 5000000
+    moy_play.chrome_notice("", "", True, now)
+    moy_play.chrome_note("", "", "", 0)
+    raw = (ctypes.c_uint16 * (w * h))()
+    assert devices.MIC[0] == 0
+    assert not moy_play.chrome_overlay_draw(raw, w, h, pal, now)
+    _as(pid, moybyte.mic.open)
+    assert devices.MIC[0] == pid
+    assert moy_play.chrome_overlay_draw(raw, w, h, pal, now)
+    lit = [i for i in range(w * h) if raw[i]]
+    assert lit and all(i % w >= w - 12 and i // w < 12 for i in lit)
+    _as(pid, moybyte.mic.close)
+    assert devices.MIC[0] == 0
+    _as(pid, moybyte.mic.open)
+    moybyte.end(pid)
+    assert devices.MIC[0] == 0 and N.owner() == 0
+    raw = (ctypes.c_uint16 * (w * h))()
+    assert not moy_play.chrome_overlay_draw(raw, w, h, pal, now)

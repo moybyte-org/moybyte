@@ -1844,6 +1844,19 @@ static mp_obj_t ui_unlock(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_unlock_obj, 10, 10, ui_unlock);
 
+// rec(cv, look, right, top, fs, desk) -> (x, y, w, h): the recording indicator
+static mp_obj_t ui_rec(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_box_t b;
+    check(moy_ui_rec(&s, num(a[2]), num(a[3]), num(a[4]), num(a[5]), &b));
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
+                     MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
+    return ret_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_rec_obj, 6, 6, ui_rec);
+
 // month_h(weeks, fs, desk) -> a month's height (moy_ui_month_h)
 static mp_obj_t ui_month_h(mp_obj_t weeks, mp_obj_t fs, mp_obj_t desk) {
     return mp_obj_new_int(moy_ui_month_h(num(weeks), num(fs), num(desk)));
@@ -4112,6 +4125,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
     { MP_ROM_QSTR(MP_QSTR_tile), MP_ROM_PTR(&ui_tile_obj) },
     { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&ui_unlock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rec), MP_ROM_PTR(&ui_rec_obj) },
     { MP_ROM_QSTR(MP_QSTR_modal), MP_ROM_PTR(&ui_modal_obj) },
     { MP_ROM_QSTR(MP_QSTR_month_h), MP_ROM_PTR(&ui_month_h_obj) },
     { MP_ROM_QSTR(MP_QSTR_modal_band), MP_ROM_PTR(&ui_modal_band_obj) },

@@ -386,6 +386,12 @@ def install(m, lib, tokens):
                                  int(burst), int(fs), int(desk), c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
+    def rec(cv, look, right, top, fs, desk):
+        out = _Box()
+        _check(lib.moy_ui_rec(c.byref(sink(cv, look)), int(right), int(top), int(fs), int(desk),
+                              c.byref(out)))
+        return (out.x, out.y, out.w, out.h)
+
     def month_h(weeks, fs, desk):
         return int(lib.moy_ui_month_h(int(weeks), int(fs), int(desk)))
 
@@ -504,7 +510,7 @@ def install(m, lib, tokens):
     for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock, modal, modal_band, month_h, perf,
+              scrim, tile, unlock, rec, modal, modal_band, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):

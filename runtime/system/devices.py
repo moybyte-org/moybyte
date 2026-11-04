@@ -43,6 +43,11 @@ console = None
 
 _FACES = {}
 
+# The pid holding the microphone, 0 for none: dev_mic keeps it, and the
+# shell's recording indicator (runtime/wm/wm.py's overlay signature) reads it
+# every frame without a call.
+MIC = [0]
+
 
 def pid():
     return _L.current() if _L is not None else SHELL

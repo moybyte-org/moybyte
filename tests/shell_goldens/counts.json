@@ -63,6 +63,7 @@
   },
   "guition_480x320_fs1_tasks": {
     "note_banner": [4, 3],
+    "rec_indicator": [1, 0],
     "tasks_crashed_service": [8, 24],
     "tasks_empty": [7, 15],
     "tasks_notes": [9, 16],
@@ -70,6 +71,7 @@
   },
   "guition_p4_1280x800_tasks": {
     "note_banner": [6, 27],
+    "rec_indicator": [3, 9],
     "tasks_crashed_service": [2, 12],
     "tasks_empty": [0, 5],
     "tasks_notes": [2, 13],
@@ -371,6 +373,7 @@
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": [6, 27],
+    "rec_indicator": [3, 9],
     "tasks_crashed_service": [2, 12],
     "tasks_empty": [0, 5],
     "tasks_notes": [2, 13],
@@ -799,6 +802,7 @@
   },
   "tdeck_320x240_fs1_tasks": {
     "note_banner": [6, 11],
+    "rec_indicator": [3, 8],
     "tasks_crashed_service": [8, 24],
     "tasks_empty": [7, 15],
     "tasks_notes": [9, 16],

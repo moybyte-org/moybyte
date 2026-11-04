@@ -964,7 +964,7 @@ def _procs_plan(ws):
 
 
 TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service",
-                  "note_banner", "tasks_notes")
+                  "note_banner", "tasks_notes", "rec_indicator")
 
 
 def _tasks_plan(ws, cfg):
@@ -1063,9 +1063,19 @@ def _tasks_plan(ws, cfg):
             ws.wm._sync_windows()
             ws.wm._move_window(ws.wm._wins["tasks"], 420, 120)
 
+    def rec():
+        # A process holds the microphone: the recording indicator, kernel
+        # chrome at the glass's top right, over the game in front and the
+        # banner still up.
+        from runtime import devices
+        ws.close_tasks()
+        if windowed:
+            ws.wm.bring_forward("desktop")
+        devices.MIC[0] = ws.player.pid or 2
+
     return [("tasks_empty", empty), ("tasks_two_games", two),
             ("tasks_crashed_service", crashed), ("note_banner", banner),
-            ("tasks_notes", notes)]
+            ("tasks_notes", notes), ("rec_indicator", rec)]
 
 
 def _popover_plan(ws):
@@ -1240,6 +1250,8 @@ def capture(config_name, carts_dir):
         scheduler.SCHED.reset()        # a service a plan started is process-wide too
         from runtime import notifications
         notifications.NOTES.reset()    # ...and so is what it posted
+        from runtime import devices
+        devices.MIC[0] = 0             # ...and the microphone's holder
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
     return out

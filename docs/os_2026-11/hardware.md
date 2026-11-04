@@ -113,7 +113,13 @@ source, which a face's `on(fn)` or `on_done` wakes its process on.
   rate from the ES7210 on the kernel's I²C bus, on the T-Deck's own I2S1, on
   a P4 the speaker's I2S0 opened full duplex, the ES7210's four inputs in
   TDM and the two slots' mean (`moy_mic.c` says why).
-  `moybyte.mic.holder()` names the process recording, for the indicator.
+  `moybyte.mic.holder()` names the process recording. While one holds it
+  the **recording indicator** stands at the glass's top right, a dot in the
+  theme's `danger` (native/moy_ui's `moy_ui_rec`): the shell's `rec`
+  overlay, drawn over everything but the cursor and turned off by nothing
+  (`devices.MIC`, read by the WM's overlay signature), and the kernel's
+  copy over a run it drives (`moy_chrome_overlay_draw`, which reads
+  `moy_mic_owner`).
 - **`lora`** (`native/moy_net/moy_lora.h`, the T-Deck): the SX1262 inside
   the band-gap gate, raw packets with RSSI and SNR, and LoRaWAN 1.0.x class
   A OTAA on EU868 over the OS's MAC (`moy_lorawan.h`, `moy_aes.h`), its

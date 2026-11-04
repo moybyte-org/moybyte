@@ -1389,6 +1389,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
         self._note_layer = L("note", "system", draw=lambda dt: self._draw_note(),
                              ptr=self._note_pointer)
+        self._rec_layer = L("rec", "system", draw=lambda dt: self._draw_rec())
         self._sysmenu_layer = _SysMenuLayer(self)
         self._pause_layer = _PauseLayer(self)
         self._confirm_layer = _ConfirmLayer(self)

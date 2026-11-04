@@ -63,6 +63,7 @@
   },
   "guition_480x320_fs1_tasks": {
     "note_banner": "a5f9d5ce389d0e4fff4a86aa121b94de0ebdcc271048e14994b74e95c94a598d",
+    "rec_indicator": "8079646f23b1f7c7ec5b9888679d203ba75ebaa682b069c7b66db2ab03a219c1",
     "tasks_crashed_service": "8239e507301df28516f24cfe2aceaab6221c1111b20dc0167b48a2706c73da7b",
     "tasks_empty": "e98802331dbb13a80e51bad3c2aef56a037e57eb5fdfb40d73109b59086c3ed6",
     "tasks_notes": "279ed476a4546acf27e1daad123f7a02cbba8171501b68b763e9cf3487e7daaf",
@@ -70,6 +71,7 @@
   },
   "guition_p4_1280x800_tasks": {
     "note_banner": "2ecab2ef05b20657384111fba6e6c21c9fee2149684c9cbcd84f5fff178fd4fb",
+    "rec_indicator": "d81753d309f87e4691e8745a94c6069bf02c33b295287c95df6fb204af21c776",
     "tasks_crashed_service": "24924c78aa7fe01f496fbe150c795febd909243db5d9d6ce252095a5c2f06fa9",
     "tasks_empty": "d1aa82d76d78efa570a5b517c00edc12dd621a78b565ee48bc4fb0afbcee8356",
     "tasks_notes": "82d177ffbce88f04cc8acc36f4862239b4168250a23e3894e3ad2a567a83646b",
@@ -371,6 +373,7 @@
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": "8a4a206ffefa3a1789cdeb68d1aa19bb16a8848de056ba6c156c57b797e20a58",
+    "rec_indicator": "be004649bef700865cd4d0240ab7dc9d37c07e23694b1e9f2b6a07f1162ba5bc",
     "tasks_crashed_service": "9ae96b36e04218ca45a22fbaee5a46d58e7b2a15f00d17525b498298642cc377",
     "tasks_empty": "0fa708dee303890b94ce3002d1421bd2be5f7fd73f4adcbfb233e5af32a936ca",
     "tasks_notes": "7ba0e38ca62ef8e4a6452b8dd4bb363b546045093ee1acf1a361057d3ef9ce64",
@@ -799,6 +802,7 @@
   },
   "tdeck_320x240_fs1_tasks": {
     "note_banner": "10606f0dda83bc1a383c82c9c05752c4e09864ad064756b21f6d74f1a9cd8e63",
+    "rec_indicator": "30b75d6cb8f1ab8234e03d3a2090da2c2eebe18f08770825b9a73d5c680e269b",
     "tasks_crashed_service": "879f1e977a548bfaaf0921283fc64e0711975d26472f486f2664fd9841e1c75c",
     "tasks_empty": "b3d02cdeb99a9cf800764546fdc1f4ea4851535455891ab53cfc24a251a1e9c1",
     "tasks_notes": "a89a729fb337c5b8313af138c5af54a07ec094fb01c8c289c4474f259286d178",

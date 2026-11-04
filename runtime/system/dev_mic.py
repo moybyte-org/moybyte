@@ -11,8 +11,11 @@ time.
   close()            let it go
   rate()             the samples a second
   drops()            samples lost because the holder read too late
-  holder()           the pid holding it, 0 for none: the shell's recording
-                     indicator reads it
+  holder()           the pid holding it, 0 for none
+
+While a process holds it the console shows the recording indicator, kernel
+chrome over everything (`devices.MIC`, the shell's `rec` overlay; the
+kernel's own over a run it drives).
 
 The holder's end (exit, crash, kill, a run's end) lets it go through
 `moybyte.ENDS`. The host has a microphone only under its stand-in
@@ -34,9 +37,14 @@ except ImportError:  # host: the runtime package
     from runtime import devices as _D
 
 
+def _held():
+    _D.MIC[0] = _N.owner()
+
+
 def open():  # noqa: A001 -- the verb's name
     p = _D.need("mic")
     _D.check(_N.open(p))
+    _held()
     return _N.rate()
 
 
@@ -44,11 +52,13 @@ def read(buf):
     p = _D.need("mic")
     if _N.owner() != p:
         _D.check(_N.open(p))
+        _held()
     return _D.check(_N.read(p, buf))
 
 
 def close():
     _N.close(_D.pid())
+    _held()
 
 
 def rate():
@@ -68,4 +78,8 @@ def present():
 
 
 def sweep(pid):
-    return _N.sweep(pid) if _N is not None else 0
+    if _N is None:
+        return 0
+    n = _N.sweep(pid)
+    _held()
+    return n

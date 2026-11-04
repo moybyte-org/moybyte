@@ -158,7 +158,8 @@ void moy_chrome_note(const char *head, const char *name, const char *icon, uint3
 // its palette `pal`) at the top centre in the kernel's look
 // (MOY_UI_LOOK_KERNEL: the theme chrome_inks last handed over), by
 // moy_ui_unlock: the notice, the unlock banner, then the notification
-// banner. False: nothing was.
+// banner; last, while a process holds the microphone, the recording
+// indicator (moy_ui_rec) at the top right. False: nothing was.
 bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now);
 
 #endif // MOY_CHROME_H

@@ -407,6 +407,12 @@ static moy_ui_span_t span(const char *s) {
     return (moy_ui_span_t){(const uint8_t *)s, (uint16_t)strlen(s)};
 }
 
+// The microphone's holder (native/moy_audio/moy_mic.h); an image without the
+// microphone's driver has this one, and no recording.
+__attribute__((weak)) uint32_t moy_mic_owner(void) {
+    return 0;
+}
+
 bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
     if (K.up && (int32_t)(K.until - now) <= 0) {
         K.up = false;
@@ -417,7 +423,8 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
     if (K.note_up && (int32_t)(K.note_until - now) <= 0) {
         K.note_up = false;
     }
-    if (!K.up && !K.toast_up && !K.note_up) {
+    bool rec = moy_mic_owner() != 0;
+    if (!K.up && !K.toast_up && !K.note_up && !rec) {
         return false;
     }
     // the run's canvas lent as a row of the shell's look: its palette below,
@@ -459,6 +466,9 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
         moy_ui_unlock(&s, w / 2, 6, span(K.note_head), span(K.note_name),
                       moy_ui_icon_slot((const uint8_t *)K.note_icon, n),
                       moy_ui_icon_glyph((const uint8_t *)K.note_icon, n), 0, 1, 0, NULL);
+    }
+    if (rec) {
+        moy_ui_rec(&s, w - 2, 2, 1, 0, NULL);
     }
     moy_ui_cart_text(was);
     return true;

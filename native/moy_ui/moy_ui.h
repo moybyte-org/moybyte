@@ -905,6 +905,10 @@ int moy_ui_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int
 // none). *out is the card.
 int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy_ui_span_t name,
                   int slot, int glyph, int burst, int fs, int desk, moy_ui_box_t *out);
+// The recording indicator (docs/os_2026-11/hardware.md section 1, the `mic`
+// API): a dot in `danger` ringed in `panel`, its top right corner at (right,
+// top). *out is its box.
+int moy_ui_rec(const moy_ui_sink_t *s, int right, int top, int fs, int desk, moy_ui_box_t *out);
 
 // The tones a line of text takes (ui.label's and ui.card's `tone`): the
 // part's ink, the dim ink, `value`, the danger ink (the look's `danger_ink`,

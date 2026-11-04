@@ -38,7 +38,9 @@ try:
     from moy_spine import BackStack, STAYED
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
     from notifications import NOTES as _NOTES
+    from devices import MIC as _MIC
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.devices import MIC as _MIC
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
     from runtime.moy_spine import BackStack, STAYED
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
@@ -358,6 +360,8 @@ class FullscreenStackWM:
             sig |= 1024
         if ws._about:
             sig |= 128
+        if _MIC[0]:
+            sig |= 4096                 # the recording indicator, while the mic is held
         # The banners up for a span of the clock: the unlock's is a flat
         # kernel deadline the unlock pushes at event time (#209 landing B) --
         # a plain int read, no call into ach from the hot path.
@@ -394,7 +398,7 @@ class FullscreenStackWM:
         self._rebuild(self.ws._content_layer(), sig)
 
     def _overlay_layers(self, sig):
-        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..2048,
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..4096,
         cursor appended last so it sits above everything). One copy: a new
         overlay layer (like #53's notice banner) registers here ONCE and
         reaches the windowed WM's stack too -- the two _rebuild bodies used to
@@ -416,6 +420,8 @@ class FullscreenStackWM:
             overlays.append(ws._notice_layer)
         if sig & 2048:
             overlays.append(ws._note_layer)
+        if sig & 4096:
+            overlays.append(ws._rec_layer)
         overlays.append(ws._cursor_layer)
         return overlays
 

@@ -1438,6 +1438,13 @@ def unlock(cv, th, cx, y, head, name, icon, burst=0, desk=False):
                      _fs(cv), _DESK if desk else 0)
 
 
+def rec(cv, th, right, top, desk=False):
+    """The recording indicator (moy_ui_rec), its top right corner at
+    (`right`, `top`). Its box."""
+    return _C.rec(cv, _LOOK if th is _TH else _look(th), right, top, _fs(cv),
+                  _DESK if desk else 0)
+
+
 def modal(cv, th, rect, desk=False):
     """A system card over `rect`, flat (the popover's and the pause card's:
     a hard drop in a shade of the ground, the surface and its edge), for a
