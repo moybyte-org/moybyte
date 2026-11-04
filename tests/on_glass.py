@@ -1338,7 +1338,10 @@ def a_gpio_lease_loses_no_tap(board, board_dir):
     assert (n, lost, drops) == (400, 0, 0), whole
     assert (prov, internal, name, after) == (0, True, "gpio%d" % pin, None), whole
     assert alt and pins, whole
-    assert 300 <= lo and hi <= 1500, whole          # 500 us apart, through the collection
+    # Stamped when the pin moved, through the collection: no gap past 1500 us.
+    # The drive is an esp_timer task, so a late tick is followed by a
+    # catch-up tick; the shortest gap measures that task, not the ISR.
+    assert 0 < lo and hi <= 1500, whole
     assert alloc == 0, whole
     n, lost, drops = shallow[:3]
     assert (n, lost, drops) == (32, 368, 368), shallow
