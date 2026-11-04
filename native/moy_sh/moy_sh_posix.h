@@ -154,6 +154,10 @@ const struct builtincmd *moy_sh_find_builtin(const char *name);
 #define tcgetpgrp(fd) (-1)
 #define tcsetpgrp(fd, pgrp) 0
 #define tcgetattr(fd, t) moy_sh_tcgetattr(fd, t)
+// formatting: the shell's own (moy_sh_fmt.h), never the nano formatter's
+#include "moy_sh_fmt.h"
+#define vsnprintf moy_sh_vsnprintf
+#define snprintf moy_sh_snprintf
 #define kill(pid, sig) moy_sh_kill(pid, sig)
 #define killpg(pgrp, sig) moy_sh_kill(-(pgrp), sig)
 // printf's \u escape stores UTF-8 big-endian; both chips are little-endian

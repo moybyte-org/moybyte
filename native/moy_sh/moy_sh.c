@@ -225,6 +225,18 @@ void moy_sh_free(moy_sh_t *s) {
     hfree(s->host.ctx, s);
 }
 
+moy_sh_t *moy_sh_running(void) {
+    return moy_sh_g != NULL ? moy_sh_g->sess : NULL;
+}
+
+void *moy_sh_ctx(const moy_sh_t *s) {
+    return s->host.ctx;
+}
+
+void moy_sh_park(moy_sh_t *s) {
+    moy_sh_g = s != NULL ? s->g : NULL;
+}
+
 int moy_sh_status(const moy_sh_t *s) {
     return s->status;
 }

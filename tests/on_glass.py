@@ -1189,6 +1189,78 @@ def the_log_word_reads_the_ring(board):
     assert got and " notice shell/1 on-glass probe" in got[-1], board.lines[n0:]
 
 
+def _sh(board, line, retry=True, timeout=10.0):
+    """`sh LINE` over the dev channel: (its status, its output lines)."""
+    n0 = len(board.lines)
+    end = board.cmd("sh " + line, wait_for="SH end ", timeout=timeout, retry=retry)
+    assert end is not None, ("no `SH end` for %r" % line, board.lines[n0:])
+    out = []
+    for l in board.lines[n0:]:
+        if l.startswith("SH end "):
+            break
+        if l.startswith("SH "):
+            out.append(l[3:])
+    return int(end.split("SH end ")[1]), out
+
+
+def the_shell_answers_over_serial(board):
+    """The C shell's serial face (native/moy_sh/moy_sh_board.h): the dev
+    channel's `sh` word runs a line in the kernel's session and answers it
+    `SH <line>` a line, then `SH end <status>`; the session keeps its state
+    from one line to the next, and the console's processes cross the ROLE
+    door (runtime/shell/sh_door.py)."""
+    assert _sh(board, "echo on-glass $((6 * 7))") == (0, ["on-glass 42"])
+    assert _sh(board, "X=kept; cd /proc")[0] == 0
+    assert _sh(board, "echo $X; pwd") == (0, ["kept", "/proc"])
+    st, ps = _sh(board, "ps")
+    assert st == 0 and ps[0].split() == ["PID", "PPID", "KIND", "STATE", "NAME"], ps
+    rows = {r.split()[0]: r.split() for r in ps[1:]}
+    assert rows["0"][2:] == ["kernel", "running", "kernel"], ps
+    assert rows["1"][2:4] == ["shell", "running"], ps
+    st, status = _sh(board, "cat /proc/1/status")
+    assert st == 0 and status[:2] == ["Name:\tshell", "Pid:\t1"], status
+    st, out = _sh(board, "perm list")
+    assert st == 1 and out == ["perm: not served here"], out
+    st, out = _sh(board, "free")
+    assert st == 0 and [r.split()[0] for r in out[1:]] == ["internal", "psram", "python"], out
+    assert _sh(board, "cd /")[0] == 0
+
+
+def the_shell_answers_with_the_vm_down(board, title="Doom"):
+    """docs/os_2026-11.md P3.1's check: with the VM stopped for a compiled
+    run, `ps`, `log` and `kill` answer over the serial face from the kernel
+    -- the console stopped, the run in front its own row -- the console's
+    commands say "needs the console", and `kill` of the run ends it and the
+    VM comes back."""
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    try:
+        board.ser.write(("run %s\r\n" % title.lower()).encode())
+        board.ser.flush()
+        assert board.wait_line("STOP 1/1 down", 60) is not None, "the VM never stopped"
+        assert board.wait_line("STOP running", 60) is not None, "the run never started"
+        st, ps = _sh(board, "ps")
+        rows = [r.split() for r in ps[1:]]
+        assert st == 0 and ["1", "0", "shell", "stopped", "console"] in rows, ps
+        run = [r for r in rows if r[2] == "app" and r[3] == "running"]
+        assert len(run) == 1, ps
+        pid = run[0][0]
+        st, log = _sh(board, "log %s" % run[0][4])
+        assert st == 0, log
+        st, out = _sh(board, "perm list")
+        assert st == 1 and out == ["perm: needs the console"], out
+        assert _sh(board, "kill %s" % pid, retry=False)[0] == 0
+        assert board.wait_line("STOP 1/1 ended", 30) is not None, "kill did not end the run"
+        _desk_back(board)
+        st, ps = _sh(board, "ps")
+        assert ["1", "0", "shell", "running", "shell"] in [r.split()[:5] for r in ps[1:]], ps
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
 def the_event_rings_keep_their_records(board):
     """The input table's event rings (native/moy_input/moy_event.h) in the
     real C on glass: the touch source's ring is POLL and in PSRAM (no internal

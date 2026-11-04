@@ -95,7 +95,10 @@ EXFAT_SRAM = 640
 # scratch, the splash palette, the faces' lent scratch and the screens'
 # PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
 # 2026-10-26; the scratch and the band themselves are PSRAM.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270
+# And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
+# session's pointer; every session is PSRAM), 4 bytes of .bss by the
+# link map, 2026-11-05.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270 + 4
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on
@@ -298,6 +301,10 @@ def test_py_probe_reaches_the_live_console(board):
 
 def test_the_log_word_reads_the_ring(board):
     on_glass.the_log_word_reads_the_ring(board)
+
+
+def test_the_shell_answers_over_serial(board):
+    on_glass.the_shell_answers_over_serial(board)
 
 
 def test_the_event_rings_keep_their_records(board):

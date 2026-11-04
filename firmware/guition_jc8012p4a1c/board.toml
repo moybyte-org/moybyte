@@ -421,6 +421,16 @@ link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
 nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
 takes it."""
 
+[[native.shared.take]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md, docs/os_2026-11/system.md
+section 1): dash, the session, the C built-ins, the board's host table and the
+serial face, the dev channel's `sh` word. It answers with the VM stopped, so
+it is the kernel's and every console takes it. Its writable data is one word
+(tests/test_moy_sh.py); a session is PSRAM, made when a face first runs."""
+
+
 
 [native.p4]
 source   = "native/p4"

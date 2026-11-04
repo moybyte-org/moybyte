@@ -1,0 +1,75 @@
+> sh echo the serial face
+SH the serial face
+SH end 0
+> sh ps
+SH   PID  PPID KIND     STATE      NAME
+SH   100     0 shell    running    sh
+SH     0     0 kernel   running    kernel
+SH     1     0 shell    stopped    console
+SH     9     1 app      running    moybyte.doom
+SH end 0
+> sh cat /proc/9/status
+SH Name:	moybyte.doom
+SH Pid:	9
+SH Kind:	app
+SH State:	running
+SH Leases:	uart1
+SH end 0
+> sh ls /proc
+SH 0/  1/  9/
+SH end 0
+> sh ls /dev
+SH gpio  null  tty  uart1
+SH end 0
+> sh log doom
+SH 1.500 warning moybyte.doom/9 a slow frame
+SH 1.500 warning moybyte.doom/9 and its second line
+SH end 0
+> sh cat /proc/9/log
+SH a slow frame
+SH and its second line
+SH end 0
+> sh perm list
+SH perm: needs the console
+SH end 1
+> sh service stop 7
+SH service: needs the console
+SH end 1
+> sh hello
+SH sh: 1: hello: not found
+SH end 127
+> sh cat /dev/uart1
+SH cat: /dev/uart1: Resource temporarily unavailable
+SH end 1
+> sh kill 1
+SH sh: 1: kill: Operation not permitted
+SH 
+SH end 1
+> sh kill 9
+[the run in front ends]
+SH end 0
+> sh ps
+SH   PID  PPID KIND     STATE      NAME
+SH   100     0 shell    running    sh
+SH     0     0 kernel   running    kernel
+SH     1     0 shell    stopped    console
+SH end 0
+> sh for i in 1 2; do
+SH more
+> sh echo $i
+SH more
+> sh done
+SH 1
+SH 2
+SH end 0
+> sh cd /proc
+SH end 0
+> sh pwd
+SH /proc
+SH end 0
+> sh exit 4
+SH exit 4
+> sh echo a new session
+SH a new session
+SH end 0
+[exit 0]

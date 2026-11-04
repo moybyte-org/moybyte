@@ -46,7 +46,11 @@ def _objects(cc, out):
                            "-I", SH, "-I", DASH, "-I", STORE]
     jobs = [(src, dash_flags) for src in shell_sources()]
     jobs.append((os.path.join(SH, "moy_sh_arena.c"), CFLAGS + ["-I", SH]))
+    jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
+    board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE]
+    jobs.append((os.path.join(SH, "moy_sh_board.c"), board))
+    jobs.append((os.path.join(SH, "host", "board_main.c"), board))
     jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(KERNEL, "moy_log.c"), CFLAGS + ["-I", KERNEL]))
@@ -79,21 +83,27 @@ def harness(tmp_path_factory):
                 h.update(f.read())
     base = tmp_path_factory.getbasetemp().parent / "moy_sh_host" / h.hexdigest()[:16]
     base.mkdir(parents=True, exist_ok=True)
-    exe = str(base / "sh_main")
+    exes = {name: str(base / name) for name in ("sh_main", "board_main")}
     with open(base / "lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not os.path.exists(exe):
+        if not all(os.path.exists(e) for e in exes.values()):
             objs = _objects(cc, str(base))
-            r = subprocess.run([cc] + CFLAGS + objs + ["-o", exe + ".tmp"],
-                               capture_output=True, text=True)
-            assert r.returncode == 0, r.stderr[-4000:]
-            os.replace(exe + ".tmp", exe)
-    return exe
+            mains = {name: os.path.join(str(base), name + ".o") for name in exes}
+            shared = [o for o in objs if o not in mains.values()
+                      and not o.endswith("moy_sh_board.o")]
+            for name, exe in exes.items():
+                own = [mains[name]] + ([os.path.join(str(base), "moy_sh_board.o")]
+                                       if name == "board_main" else [])
+                r = subprocess.run([cc] + CFLAGS + shared + own + ["-o", exe + ".tmp"],
+                                   capture_output=True, text=True)
+                assert r.returncode == 0, r.stderr[-4000:]
+                os.replace(exe + ".tmp", exe)
+    return exes
 
 
 def run(harness, script, root):
     # one stream, as a terminal shows them: the harness writes each unbuffered
-    r = subprocess.run([harness, "-t", str(root), script], stdout=subprocess.PIPE,
+    r = subprocess.run([harness["sh_main"], "-t", str(root), script], stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, timeout=60, env=dict(os.environ, TZ="UTC"))
     return r.stdout.decode("utf-8", "replace") + "[exit %d]\n" % r.returncode
 
@@ -108,6 +118,35 @@ def test_the_script_runs_as_its_transcript_says(harness, tmp_path, name):
     root = tmp_path / "root"
     root.mkdir()
     got = run(harness, script, root)
+    assert "Sanitizer" not in got and "runtime error" not in got, got
+    if os.environ.get("MOYBYTE_UPDATE_GOLDENS"):
+        with open(golden, "w", encoding="utf-8") as f:
+            f.write(got)
+    assert os.path.isfile(golden), "no transcript for %s: run with MOYBYTE_UPDATE_GOLDENS=1" % name
+    with open(golden, encoding="utf-8") as f:
+        assert got == f.read()
+
+
+SERIAL = os.path.join(SCRIPTS, "serial")
+SERIAL_NAMES = sorted(os.path.basename(p)[:-3] for p in glob.glob(os.path.join(SERIAL, "*.sh")))
+
+
+@pytest.mark.parametrize("name", SERIAL_NAMES)
+def test_the_serial_face_answers_as_its_transcript_says(harness, tmp_path, name):
+    """The board's host table (moy_sh_board.c) and the serial face, each
+    script line fed as the dev channel's `sh` word feeds it, each line the
+    face says printed as the channel carries it. A `vm_` script runs with a
+    stand-in console behind the ROLE door; the others with the VM stopped,
+    where `ps`, `kill` and `log` answer from the kernel and the console's
+    commands say "needs the console"."""
+    script = os.path.join(SERIAL, name + ".sh")
+    golden = os.path.join(SERIAL, name + ".out")
+    root = tmp_path / "root"
+    root.mkdir()
+    args = [harness["board_main"]] + (["-vm"] if name.startswith("vm_") else []) + [script]
+    r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60,
+                       env=dict(os.environ, TZ="UTC", MOY_SH_ROOT=str(root)))
+    got = r.stdout.decode("utf-8", "replace") + "[exit %d]\n" % r.returncode
     assert "Sanitizer" not in got and "runtime error" not in got, got
     if os.environ.get("MOYBYTE_UPDATE_GOLDENS"):
         with open(golden, "w", encoding="utf-8") as f:
@@ -132,17 +171,23 @@ def test_every_core_builtin_has_its_script():
 def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     """Every dash global is a field of the session's record (moy_sh_g.h), in
     the arena: compiled as a board compiles it (no PIC), the shell's objects
-    hold one writable word, moy_sh_g, and nothing in .data or .bss besides."""
+    hold one writable word, moy_sh_g, and nothing in .data or .bss besides.
+    The board's host table and the serial face (moy_sh_board.c) keep none:
+    the serial session is parked in that word (moy_sh_park)."""
     cc = shutil.which(os.environ.get("CC", "cc"))
     nm = shutil.which("nm")
     if cc is None or nm is None:
         pytest.skip("no C compiler or nm")
     flags = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
              "-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", DASH, "-I", STORE]
+    plain = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
+             "-I", SH, "-I", KERNEL, "-I", STORE]
     writable = []
-    for src in shell_sources() + [os.path.join(SH, "moy_sh_arena.c")]:
+    for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
+                                                                  "moy_sh_board.c")]:
         obj = str(tmp_path / (os.path.basename(src)[:-2] + ".o"))
-        r = subprocess.run([cc] + flags + ["-c", src, "-o", obj], capture_output=True, text=True)
+        own = flags if src in shell_sources() else plain
+        r = subprocess.run([cc] + own + ["-c", src, "-o", obj], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr[-2000:]
         for line in subprocess.check_output([nm, obj], text=True).splitlines():
             parts = line.split()

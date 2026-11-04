@@ -537,6 +537,9 @@ class InstallServer:
 
 # moy_app.h's codes the door answers with, negated.
 _DOOR_ABSENT, _DOOR_BAD = -8, -7
+# The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
+# MOY_SH_DOOR, runtime/shell/sh_door.py).
+SH_DOOR = 0x7368
 
 # The shell rows whose arguments and answers are numbers and text, by the
 # arguments each takes in the door's fields: `s` text, `o` text where empty is
@@ -601,6 +604,7 @@ class RoleDoor:
         self._ws = ws
         self._servers = servers
         self._table = table
+        self._sh = None
 
     def _cart(self, folder):
         for c in self._ws.carts.all:
@@ -609,6 +613,14 @@ class RoleDoor:
         return None
 
     def __call__(self, g, row, args):
+        if row == SH_DOOR:
+            if self._sh is None:
+                try:
+                    from sh_door import ShellDoor
+                except ImportError:  # host: the runtime package
+                    from runtime.sh_door import ShellDoor
+                self._sh = ShellDoor(self._ws)
+            return self._sh(args)
         name = self._table[row] if 0 <= row < len(self._table) else None
         kinds = DOOR_ARGS.get(name)
         if kinds is None:

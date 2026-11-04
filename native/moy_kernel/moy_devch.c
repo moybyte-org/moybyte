@@ -342,6 +342,26 @@ static bool w_log(int argc, char **argv, const char *line) {
     return true;
 }
 
+// `sh LINE`: LINE in the C shell's serial session (native/moy_sh/
+// moy_sh_board.h: weak, so an image without the shell hands it to the
+// console), answered `SH <line>` a line and `SH end <status>`, `SH more` or
+// `SH exit <status>`. The kernel's, so it answers with no VM running.
+bool moy_sh_board_line(const char *text) __attribute__((weak));
+
+static bool w_sh(int argc, char **argv, const char *line) {
+    (void)argc;
+    (void)argv;
+    if (moy_sh_board_line == NULL) {
+        return false;
+    }
+    line += 2;
+    if (*line == ' ' || *line == '\t') {
+        line++;
+    }
+    moy_sh_board_line(line);
+    return true;
+}
+
 static const moy_devch_word_t KERNEL_WORDS[] = {
     {"log", w_log},
     {"power", w_power},
@@ -349,6 +369,7 @@ static const moy_devch_word_t KERNEL_WORDS[] = {
     {"state", w_state},
     {"end", w_end},
     {"run", w_run},
+    {"sh", w_sh},
 };
 
 int moy_devch_kernel_words(const moy_devch_word_t **out) {

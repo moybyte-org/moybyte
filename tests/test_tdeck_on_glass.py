@@ -272,6 +272,14 @@ def test_the_log_word_reads_the_ring(board):
     on_glass.the_log_word_reads_the_ring(board)
 
 
+def test_the_shell_answers_over_serial(board):
+    on_glass.the_shell_answers_over_serial(board)
+
+
+def test_the_shell_answers_with_the_vm_down(board):
+    on_glass.the_shell_answers_with_the_vm_down(board)
+
+
 def test_the_event_rings_keep_their_records(board):
     on_glass.the_event_rings_keep_their_records(board)
 

@@ -33,7 +33,7 @@
 // MEMORY. The session's record and its arena come from the host's `alloc`
 // (PSRAM on a board) at moy_sh_new; a pipe's buffer, a file read whole and a
 // fork's snapshot come from it while a run needs them and go back after.
-// Nothing here is .bss but the running session's pointer.
+// Nothing here is .bss but the running (or parked) session's pointer.
 
 #ifndef MOY_SH_H
 #define MOY_SH_H
@@ -136,5 +136,15 @@ int moy_sh_complete(moy_sh_t *s, const char *prefix, moy_sh_ent_fn fn, void *arg
 
 // The arena's bytes below its top, for a face's diagnostics.
 size_t moy_sh_arena_in_use(const moy_sh_t *s);
+
+// The session a host callback was called from (spawn, role: a program's
+// streams are its), or between runs the parked one, or NULL.
+moy_sh_t *moy_sh_running(void);
+// The host table's ctx the session was made with.
+void *moy_sh_ctx(const moy_sh_t *s);
+// Park `s` (NULL: none): the session a face keeps between its runs, held in
+// the one writable word, so a face on a board keeps no root of its own. A
+// session's own runs leave the parked one parked; freeing it unparks it.
+void moy_sh_park(moy_sh_t *s);
 
 #endif // MOY_SH_H

@@ -522,6 +522,16 @@ the HTTP parser and response writer the webserver, the sync stack and the GPIO
 routes import; its JSON scanner is moy_store's, which this board takes."""
 
 [[native.shared.deny]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md). Its faces on a console are
+the screen and the dev channel; this board has neither (no glass, and its
+serial is a bare REPL with no dev channel). Its face is the network one, SSH
+and the web terminal (docs/os_2026-11/system.md section 3), and this board
+takes the shell with that face."""
+
+
+[[native.shared.deny]]
 module = "moy_png"
 why = """
 The cover reader (SPEC.md 3.6): a cart's cover.png decoded into a shelf's

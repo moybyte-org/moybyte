@@ -1,0 +1,8 @@
+echo $((6 * 7)) $((1 << 40)) $((-9223372036854775807 - 1)) $((0x7fffffffffffffff))
+printf '[%d] [%5d] [%-5d|] [%05d] [%+d] [% d]\n' 42 42 42 42 42 42
+printf '[%x] [%X] [%#x] [%o] [%#o] [%u]\n' 255 255 255 8 8 4294967296
+printf '[%s] [%8s] [%-8s|] [%.2s] [%c] [%%]\n' word word word word x
+printf '[%.3d] [%8.3d] [%*d] [%-*d|]\n' 7 7 4 7 4 7
+printf '%d\n' -12345678901234
+x=$((x + 3)); echo $x $? $#
+i=0; while [ $i -lt 3 ]; do i=$((i + 1)); done; echo $i

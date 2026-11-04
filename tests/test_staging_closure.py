@@ -97,7 +97,8 @@ NATIVE = {
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console
     # (moy_input compiles to nothing until its pass fills it); the Zero takes
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
-    # browser.
+    # browser. moy_sh, the terminal's C shell, is taken by every console; the
+    # Zero denies it until its network face (its board.toml says why).
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -108,7 +109,7 @@ NATIVE = {
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
-                       "moy_net", "moy_app", "moy_ui", "moy_media"},
+                       "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
@@ -119,7 +120,8 @@ NATIVE = {
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media"},
+           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
+           "moy_sh"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
@@ -129,14 +131,15 @@ NATIVE = {
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_usb", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
-                   "moy_net", "moy_app", "moy_ui", "moy_media"},
+                   "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml), and with it moy_media; moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui"},
+                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui",
+                   "moy_sh"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. Besides the store, the kernel's entry (a serial-only
     # floor) and moy_net, the links its webhost serves, `moy_web` is the

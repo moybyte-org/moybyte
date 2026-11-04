@@ -28,7 +28,7 @@ COUNTS what it swallowed (`rx=` on the SERIAL line), so "something is
 injecting into stdin" is a number rather than a mystery hang.
 
 THE READER IS THE KERNEL'S (native/moy_kernel/moy_devch.c): it takes the
-bytes, runs the kernel's own words (`power`, `bl`, `log`, `quit`) and hands every
+bytes, runs the kernel's own words (`power`, `bl`, `log`, `sh`, `quit`) and hands every
 other line to `run` here through the loop's word upcall. The gestures `tap`,
 `swipe` and `drag` play from C too; the words below find what they aim at.
 
@@ -1014,6 +1014,10 @@ class DevChannel:
                       severe, from record seq on, of the processes whose name
                       holds `name`, then `LOG end` -- a kernel word, answered
                       with no VM running too
+      sh <line>       the line in the C shell's serial session
+                      (native/moy_sh/moy_sh_board.h): `SH` a line of its
+                      output, then `SH end <status>` (`SH more`: send the
+                      command's next line) -- a kernel word too
       swipe x0 y0 x1 y1 [frames]   a touch gesture through the real pointer
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
