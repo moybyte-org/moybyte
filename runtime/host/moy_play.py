@@ -3,6 +3,7 @@
 #   census            the VM-free rule over a cart folder
 #   Files             a cart's written files by the C store
 #   launch            the Player: launch, bind, open, frame, end, info, lockstep
+#   shares            THE SHARES' rows: the lines, the fit check, the kill threshold
 #   front_ops         the run in the kernel loop's front, on the host
 #   Match             the radio link and its lockstep session
 #   chrome_panel      the chrome's pieces: panel, toast, banner, strip, menu
@@ -26,6 +27,10 @@ so this is what it finds.
                    (native/moy_store/moy_files.c), with files_key,
                    files_path_of, files_folder and files_live: the parity
                    suite's view of it beside runtime/carts/cart_files.py. Host only.
+  shares([board]), share_held(row), kill_below(held)
+                   THE SHARES' rows (moy_play.h), as on a board; with
+                   share_use(board), share_take and share_give (host only)
+                   a test stands in for a board's line.
   front_ops(buf, w, h), front_frame, front_end, state_json
                    the kernel loop's half of a run in front (a board's loop
                    calls the C), over a buffer standing in for a compositor.
@@ -50,7 +55,7 @@ _APP = os.path.join(native_build.ROOT, "native", "moy_app")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SHIM = os.path.join(_PLAY, "moy_play_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_play")    # the parity builds'
-_SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
+_SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_shares.c", "moy_rt.h", "moy_rt.c",
             "moy_tick.h", "moy_tick.c",
             "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_json.h",
             "moy_json.c", "moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
@@ -148,7 +153,13 @@ def _lib(real="float"):
                 ("moy_tick_plan", [P, R, ctypes.POINTER(_U8)], _B),
                 ("moy_tick_note", [P, R], None),
                 ("moy_tick_cycle", [P, ctypes.c_int], R),
-                ("moy_tick_fits", [P, ctypes.c_int], _B)):
+                ("moy_tick_fits", [P, ctypes.c_int], _B),
+                ("moy_share_use", [ctypes.c_char_p], ctypes.c_int),
+                ("moy_share_row", [ctypes.c_char_p, _U8], _U32),
+                ("moy_share_held", [_U8], _U32),
+                ("moy_share_take", [_U8, _U32], ctypes.c_int),
+                ("moy_share_give", [_U8, _U32], None),
+                ("moy_share_kill_below", [_U32], _U32)):
             f = getattr(d, name)
             f.argtypes = args
             f.restype = res
@@ -215,6 +226,54 @@ def census(path, lua=True, wasm=True):
         d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
     rt, verdict, why = out.value.decode().split(" ", 2)
     return rt, verdict == "free", why
+
+
+# -- THE SHARES' ROWS (native/moy_play/moy_play.h) ---------------------------
+
+SHARE_PROCS, SHARE_MEDIA, SHARE_RINGS, SHARE_ELF, SHARE_LANES = range(5)
+SHARE_ROWS = 5
+_ABSENT = 0xFFFFFFFF
+_NONE = 0xFFFFFFFE
+
+
+def _share(v):
+    return None if v >= _NONE else v
+
+
+def shares(board=None):
+    """(procs, media, rings, elf, lanes) in bytes for `board`'s line (None:
+    the line in use), None for an absent row; None when there is no line."""
+    d = _lib()
+    b = board.encode() if board is not None else None
+    if d.moy_share_row(b, SHARE_PROCS) == _NONE:
+        return None
+    return tuple(_share(d.moy_share_row(b, r)) for r in range(SHARE_ROWS))
+
+
+def share_held(row):
+    return _lib().moy_share_held(row)
+
+
+def kill_below(procs_held):
+    """The kill threshold with the running set holding `procs_held` of
+    PROCS, or None with no line."""
+    return _share(_lib().moy_share_kill_below(procs_held))
+
+
+def share_use(board=None):
+    """Host only: stand in for `board`'s line (None: the image's own, which
+    on the host is no line), its rows' holdings cleared. False for a board
+    no line has."""
+    return _lib().moy_share_use(board.encode() if board is not None else None) == 0
+
+
+def share_take(row, n):
+    """Host only: the fit check's take, True when the bytes fit."""
+    return _lib().moy_share_take(row, n) == 0
+
+
+def share_give(row, n):
+    _lib().moy_share_give(row, n)
 
 
 _IMG = [None]

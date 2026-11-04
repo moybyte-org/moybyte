@@ -265,6 +265,15 @@ schematic PNGs under `5-Schematic/`), plus the ESPHome community's board
 profile (<https://community.home-assistant.io/t/jc8012p4a1-guition-esp32-p4-esp32-c6/939971>)
 for the C6/audio pins, which agree with the BSP.
 
+## Free pins
+
+What the map above leaves unassigned is the `lease` row of this board's
+`[hardware]`: GPIO0, GPIO1, GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO28,
+GPIO29, GPIO30, GPIO31, GPIO32, GPIO33, GPIO45, GPIO46, GPIO47, GPIO48,
+GPIO49, GPIO50, GPIO51, GPIO52 and GPIO53. The strapping pins 34–38 (UART0's
+37/38 among them) and the USB pads 24–26 are never leased; 27 is the panel's
+reset.
+
 ## Hardware-confirmed at bring-up (2026-09-06, hands-off)
 
 - JD9365 init through the shared `moy_dsi`: **298ms**, three framebuffers,

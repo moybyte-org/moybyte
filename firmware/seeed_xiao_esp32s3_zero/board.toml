@@ -310,6 +310,47 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class`, `lease`, `never` -- or in `unused`.
+# The `lease` row is the pin allowlist (`MOY_NET_GPIO_PINS` in
+# boards/MOYBYTE_ZERO/mpconfigboard.h, README.md's "Pins"), which
+# tests/test_board_toml.py holds equal to it; `unused` is the pads the XIAO
+# does not bring out.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = [10, 11, 12, 13, 14, 15, 16, 17, 18, 38, 39, 40, 41, 42, 47, 48]
+
+[[hardware.resource]]
+name = "gpio"
+class = "lease"
+pins = [1, 2, 4, 5, 6, 7, 8, 9, 21]
+
+[[hardware.resource]]
+name = "uart0"
+class = "os"
+pins = {tx = 43, rx = 44}
+why = "D6/D7: MicroPython's REPL, the recovery path"
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = [0, 3, 45, 46]
+why = "strapping: boot mode, VDD_SPI, and 3 (D2) the JTAG source"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG this board is reached and flashed through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "the flash and the octal PSRAM"
+
 [native]
 dest = "native/.staged"
 

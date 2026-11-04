@@ -342,6 +342,19 @@ Xinyuan-LilyGO/T-Deck); the protocols are its examples'.
   with. Nothing in the console drives it yet; the module talks into U0RXD
   whenever the board's power rail (GPIO10) is up.
 
+## The pins and the expansion header
+
+Every GPIO pad of this ESP32-S3 is wired, and `board.toml`'s `[hardware]`
+holds each one's row (`docs/os_2026-11/hardware.md` §1), from the vendor's
+`utilities.h`: SPI2 (the panel, the SD card and the radio's CS), I2C0 (the
+keyboard with its interrupt on GPIO46, and the touch), the trackball, the
+speaker, the power rail, the backlight, the battery, the SX1262's reset,
+busy and DIO1 (17, 13, 45), the ES7210 mic (MCLK 48, LRCK 21, SCK 47,
+DIN 14), the GPS on UART0, USB, and the octal flash and PSRAM. The one
+expansion connector is the Grove port, UART0 on 43/44, which the T-Deck Plus
+gives to its GPS. So the board has no free GPIO and no `lease` row: its
+hardware reaches apps only through device APIs.
+
 ## The serial dev channel
 
 The console answers line commands on its USB serial through the one

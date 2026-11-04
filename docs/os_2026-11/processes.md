@@ -344,7 +344,12 @@ being the whole shell. Its heap comes out of the big cart's share, so it
 runs only if the cart's declared need leaves room; otherwise Python pauses.
 If the spike finds it too complex, it is dropped and "Python pauses" stands. A service that is killed under
 memory pressure (the threshold from the shares) gets its `moy_stop` hook
-first, and what it persists there is its contract.
+first, and what it persists there is its contract. The threshold is
+`moy_share_kill_below` (`native/moy_play/moy_play.h`): what every present row
+still owes, its cap less what it holds, PROCS's held being the running set's
+need. Nothing reads it yet: a Python service's memory is the VM heap's, which
+never gives an area back (#248), so killing one returns no PSRAM; the first
+reader is the first holder outside that heap (the media service, P2.4).
 
 **Services are managed like an init system (owner, 2026-11-03).** The
 process table holds, per service, its **autostart** state (a permission,
@@ -399,20 +404,21 @@ on the desk it is a window.
 **Admission.** An app that does not fit THE SHARES (`native/moy_play/moy_play.h`)
 beside what is already running is **refused with a message naming what to
 close**; nothing degrades silently. As built (`player_fit.admit`, asked by
-`Procs.launch` before a game opens on the desk), phase 1 counts one figure
-per board, the PSRAM share the running set's apps hold together
-(`player_fit.APP_SHARE`): 4 MiB on the S3s, the cart floor THE SHARES
-already give (one Doom), and 7 MiB on the P4s, under what a P4 desk keeps
-free beside its Python heap with a game running; a board with no row (the
-host, the browser, the Zero) has no share to count against. An app holds
+`Procs.launch` before a game opens on the desk), admission counts one row
+of THE SHARES per board, PROCS, the PSRAM the running set's apps hold
+together (`player_fit.board_share`, from `moy_play.shares()`): 4 MiB on the
+S3s, the cart floor THE SHARES already give (one Doom), and 7 MiB on the
+P4s, under what a P4 desk keeps free beside its Python heap's room to grow
+with a game running; a build with no line (the host, the browser, the Zero)
+has no share to count against. An app holds
 its compiled module's load footprint where its runtime reports one, else
 its canvas in RGB565, and a Python world (384 KiB) beside either. So on the
 S3s two big games do not fit, and a big one beside a Python game names the
 Python game. The refusal is the delete confirm's dialog
 (`DeleteConfirm.ask_close`): "Close <name>?", the game that does not fit
 beside it, Cancel and Close, whose Close closes what it names and opens the
-game. P2.1's shares rows replace the one figure. The Player's own fit check
-still runs at the load, as before.
+game. The Player's own fit check still runs at the load, against what is
+free.
 
 **Sessions.** Lua and wasm run one session at a time today
 (`native/moycore`, `native/moy_wasm`), so several Lua or wasm apps at once

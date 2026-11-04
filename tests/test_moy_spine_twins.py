@@ -16,7 +16,8 @@ sprint 2's harness (tools/moy_index_spike.py --component spine) CI runs.
   * the API-sequence fuzz (native/moy_spine/fuzz_spine.c) under AddressSanitizer
     and UndefinedBehaviorSanitizer: #224's containment;
   * the placement rule of native/moy_kernel/moy_kernel.h, asserted
-    in the sources: kernel data is PSRAM.
+    in the sources: kernel data is PSRAM, and a ring a task writes is a take
+    from THE SHARES' RINGS row (native/moy_play/moy_play.h).
 
 The spine trace over the native module is tests/test_semantic_traces.py's.
 """
@@ -579,6 +580,30 @@ def test_kernel_data_is_allocated_from_psram():
     outside = ALLOC_CALLS.findall(binding.replace(alloc, " "))
     # spine_alloc / spine_release off the board (calloc, free), the rows array
     assert sorted(outside) == ["calloc", "free", "m_new0"], outside
+
+
+def test_the_shares_rows_hold_what_the_kernel_places_in_psram():
+    """THE SHARES' ROWS (native/moy_play/moy_play.h): the ledger allocates
+    nothing of its own, and a ring a task writes -- PSRAM by the rule above
+    (native/moy_input/moy_input.c) -- is a take from the RINGS row before it
+    is allocated and a give when it is freed, while an ISR's internal ring
+    stays under the kernel's internal cap and takes nothing."""
+    play = os.path.join(ROOT, "native", "moy_play")
+    shares = _code(os.path.join(play, "moy_shares.c"))
+    assert not ALLOC_CALLS.findall(shares), "the ledger allocates"
+    header = open(os.path.join(play, "moy_play.h")).read()
+    rings = int(re.search(r"MOY_SHARE_RINGS = (\d+)", header).group(1))
+    raw = open(os.path.join(ROOT, "native", "moy_input", "moy_input.c")).read()
+    assert "#define RINGS_ROW %du" % rings in raw
+    code = _code(os.path.join(ROOT, "native", "moy_input", "moy_input.c"))
+    new = re.search(r"static moy_input_ring_t \*ring_new\(.*?\n\}", code, re.S).group(0)
+    assert new.index("moy_share_take(RINGS_ROW") < new.index("ring_alloc(")
+    assert "!internal && moy_share_take" in new
+    drop = re.search(r"static void ring_drop\(.*?\n\}", code, re.S).group(0)
+    assert "!g->internal && moy_share_give" in drop
+    # every ring the input table frees goes through the give
+    outside = code.replace(new, " ").replace(drop, " ")
+    assert re.findall(r"\bring_free\(", outside) == ["ring_free("] * 2   # the two definitions
 
 
 def test_the_cpython_host_runs_the_c_spine():

@@ -269,6 +269,71 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class` (with the device API it names), `lease`,
+# `never` -- or in `unused`. The pins are README.md's "Hardware facts". The
+# pins it does not name are `unused`, not leased: the speaker's amp pins are
+# among them and unverified (stage 5), and no header is recorded.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = [2, 6, 7, 9, 14, 15, 16, 17, 18, 38, 41, 42, 43, 44]
+
+[[hardware.resource]]
+name = "panel"
+class = "os"
+pins = {clk = 47, d0 = 21, d1 = 48, d2 = 40, d3 = 39, cs = 45}
+why = "the AXS15231B's QSPI on SPI2, fed by the kernel's banded present"
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 4, scl = 8, touch_int = 3}
+why = "the AXS15231 touch, read by the kernel's input task"
+
+[[hardware.resource]]
+name = "spi3"
+class = "os"
+pins = {cs = 10, mosi = 11, sclk = 12, miso = 13}
+why = "the TF card, the cart store; the bus is initialised once and never torn down"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 1}
+
+[[hardware.resource]]
+name = "radio"
+class = "class"
+api = ["http", "ble"]
+pins = []
+
+[[hardware.resource]]
+name = "battery"
+class = "never"
+pins = {adc = 5}
+why = "the cell's divider (~1.72x); this image stages no battery reader for it"
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = {boot = 0, vdd_spi = 46}
+why = "strapping; GPIO0 is the BOOT button"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG the console, its dev channel and the flasher are reached through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "the flash and the octal PSRAM"
+
 [native]
 dest = "native/.staged"
 

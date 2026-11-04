@@ -400,3 +400,12 @@ below, so re-check against those, not against it.
   ```
 - Factory firmware (xiaozhi AI assistant) backup: `dist/p4/factory_full_32MB_backup.bin`
   (local only, gitignored) — restore with `write_flash 0 <file>`.
+
+## Free pins
+
+`board.toml`'s `[hardware]` leases these, the pins the board map above gives
+nothing (`docs/os_2026-11/hardware.md` §1): GPIO0, GPIO1, GPIO2, GPIO3,
+GPIO4, GPIO5, GPIO6, GPIO20, GPIO21, GPIO22, GPIO23, GPIO28, GPIO29, GPIO30,
+GPIO31, GPIO45, GPIO46, GPIO47, GPIO48, GPIO49, GPIO50, GPIO51 and GPIO52.
+Every other pad has its own row there: the OS's buses, the strapping pins 34
+and 36, and both USB 1.1 PHYs (24–27).

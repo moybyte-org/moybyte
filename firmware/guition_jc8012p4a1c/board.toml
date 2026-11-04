@@ -208,6 +208,96 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class` (with the device API it names), `lease`,
+# `never` -- or in `unused`. The pins are README.md's board map; the flash,
+# the PSRAM, the MIPI lanes and the USB 2.0 port have pads of their own,
+# outside the GPIO matrix. The `lease` row is every pin that map assigns
+# nothing (README.md's "Free pins").
+
+[hardware]
+chip_gpio = "esp32p4"
+unused = []
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 7, scl = 8, touch_rst = 22, touch_int = 21}
+why = "the GSL3680 touch, the ES8311 and the ES7210 share it; the kernel's I2C master is its only driver"
+
+[[hardware.resource]]
+name = "speaker"
+class = "os"
+pins = {mclk = 13, bck = 12, ws = 10, dout = 9, pa = 20}
+why = "the ES8311 codec and its amp, which the console's mix plays through (no speaker fitted on the owner's unit)"
+
+[[hardware.resource]]
+name = "panel"
+class = "os"
+pins = {lcd_rst = 27}
+why = "the JD9365's reset; its DSI lanes are dedicated pads"
+
+[[hardware.resource]]
+name = "sdmmc0"
+class = "os"
+pins = {clk = 43, cmd = 44, d0 = 39, d1 = 40, d2 = 41, d3 = 42}
+why = "the TF card, the cart store, brought up once and never torn down"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [24, 25]
+why = "the USB-Serial/JTAG the console, its dev channel and the flasher are reached through"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 23}
+
+[[hardware.resource]]
+name = "mic"
+class = "class"
+api = "mic"
+bus = "i2c0"
+pins = {din = 11}
+
+[[hardware.resource]]
+name = "c6"
+class = "class"
+api = ["http", "ble"]
+pins = {clk = 18, cmd = 19, d0 = 14, d1 = 15, d2 = 16, d3 = 17, reset = 54}
+
+[[hardware.resource]]
+name = "camera"
+class = "class"
+api = "camera"
+pins = []
+
+[[hardware.resource]]
+name = "usb_host"
+class = "class"
+api = "usb"
+pins = []
+
+[[hardware.resource]]
+name = "gpio"
+class = "lease"
+pins = [0, 1, 2, 3, 4, 5, 6, 28, 29, 30, 31, 32, 33, 45, 46, 47, 48, 49, 50, 51, 52, 53]
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = [34, 35, 36, 37, 38]
+why = "strapping; 37 and 38 are UART0, which nothing on this board uses"
+
+[[hardware.resource]]
+name = "usb_phy"
+class = "never"
+pins = [26]
+why = "the full-speed OTG PHY's pad; its other pad, 27, is the panel's reset"
+
 [native]
 dest = "native/.staged"
 

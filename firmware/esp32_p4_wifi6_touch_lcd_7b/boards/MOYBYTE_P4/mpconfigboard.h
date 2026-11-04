@@ -136,6 +136,10 @@
 // never pooled (the desk re-mints at every size); a cart's worlds are.
 #define MOY_GLASS_POOL_BYTES                (2 * 1024 * 1024)
 
+// THE SHARES' ROWS (native/moy_play/moy_play.h): this image's line, named by
+// its board.toml OTA id (tests/test_board_toml.py holds the two together).
+#define MOY_SHARES_BOARD                    "p4"
+
 // The VM abort: the scheduler stops a background Python callback that never
 // returns while the shell goes on (native/moy_kernel/modmoy_guard.c).
 #define MICROPY_ENABLE_VM_ABORT             (1)

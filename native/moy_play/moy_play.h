@@ -147,6 +147,67 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 // internal figure on either board. A board's image headroom floor is
 // `[image] headroom_floor_kib` in its board.toml, with its reasons there.
 //
+// THE SHARES' ROWS (P2.1, 2026-11-04; configuration, KiB of PSRAM, read
+// against the budget each board's spike measured in #246): one line per
+// console board, named by its board.toml OTA id, and one row per kind of
+// memory the OS hands out beside the VM:
+//   PROCS  what the running set's apps hold together (admission,
+//          runtime/run/player_fit.py: a compiled cart's load footprint, else
+//          its canvas, and a Python world beside it). On the S3s it is the
+//          cart's floor above; on the P4s what a desk keeps free beside its
+//          Python heap's room to grow with a game running;
+//   MEDIA  the media service: its stream buffer, its decoder and its task's
+//          PSRAM stack;
+//   RINGS  every ring a task writes (an ISR's ring is internal, under the
+//          kernel's internal cap): the input table's event rings
+//          (native/moy_input/moy_input.c) and the render-ahead audio rings;
+//   ELF    loaded ELF text and data; a foreground C app's own counts in its
+//          PROCS need;
+//   LANES  the timed lanes' task stacks.
+// A row a board has no budget for is ABSENT (MOY_SHARE_ABSENT), never 0: the
+// fit check refuses every take from it, so nothing of that kind exists on
+// that board. On the S3s the cart floor, the native share and the Python
+// heap's share already spend all 8 MiB, so only the rings, out of the native
+// share, have a row. A P4's line is what its desk keeps free with WiFi up,
+// less 3 MiB for its Python heap's next two doublings: the Guition P4's
+// rotated desk keeps about 10 MiB less than the Waveshare's, so its MEDIA and
+// ELF rows are half the Waveshare's. The image's own line is the one its mpconfigboard.h
+// names (MOY_SHARES_BOARD); a build that names none (the host, the browser,
+// the Zero) has no shares, and nothing it takes is counted.
+#define MOY_SHARE_ABSENT 0xFFFFFFFFu
+#define MOY_SHARE_NONE 0xFFFFFFFEu      // the build has no shares line
+enum {
+    MOY_SHARE_PROCS = 0, MOY_SHARE_MEDIA = 1, MOY_SHARE_RINGS = 2,
+    MOY_SHARE_ELF = 3, MOY_SHARE_LANES = 4, MOY_SHARE_ROWS = 5,
+};
+#define MOY_SHARES_LINES(X)                                         \
+    /*  board          PROCS  MEDIA             RINGS ELF               LANES */ \
+    X("tdeck",         4096,  MOY_SHARE_ABSENT, 16,   MOY_SHARE_ABSENT, MOY_SHARE_ABSENT) \
+    X("guition_s3",    4096,  MOY_SHARE_ABSENT, 16,   MOY_SHARE_ABSENT, MOY_SHARE_ABSENT) \
+    X("p4",            7168,  1024,             256,  2048,             256)              \
+    X("guition_p4",    7168,  512,              256,  1024,             256)
+// The image's line: MOY_SHARES_BOARD, or the line `board` names when a host
+// stands in for a board (NULL: back to the image's own). 0, or -1 for a name
+// no line has (nothing changes).
+int moy_share_use(const char *board);
+// A row's cap in bytes on the line in use, MOY_SHARE_ABSENT, or MOY_SHARE_NONE.
+uint32_t moy_share_cap(uint8_t row);
+// `board`'s row (NULL: the line in use) in bytes, ABSENT or NONE.
+uint32_t moy_share_row(const char *board, uint8_t row);
+uint32_t moy_share_held(uint8_t row);
+// THE FIT CHECK: `n` more bytes of a row. 0 when they fit (and are counted
+// held), MOY_PLAY_FIT when the row is absent or they would pass its cap.
+// With no line everything fits and nothing is counted. The ledger takes no
+// lock: a take and its give happen where the taker is made and freed, on the
+// VM's task or at boot before it.
+int moy_share_take(uint8_t row, uint32_t n);
+void moy_share_give(uint8_t row, uint32_t n);
+// THE KILL THRESHOLD: the PSRAM free below which the shares can no longer be
+// kept, so a background process is killed (its moy_stop first): every
+// present row's cap less what it holds, PROCS's held being `procs_held`, the
+// running set's need. MOY_SHARE_NONE with no line.
+uint32_t moy_share_kill_below(uint32_t procs_held);
+//
 // THE STOP VERDICT: whether the launch stops the VM for the run, and when it
 // does not, the first clause that kept it, which the run's `info` names. The
 // policy is `need`: a VM-free run stops the VM only when its fit check fails

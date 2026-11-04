@@ -8,7 +8,7 @@
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
 #   _lua_cart_where       which of a Lua cart's scripts raised, and its line
-#   APP_SHARE             each board's share for the running set of apps
+#   board_share           the PROCS row admission counts (THE SHARES' rows)
 #   app_need              what one app of the running set holds
 #   admit                 whether a cart fits beside the running set, else what to close
 """What the Player decides about a cart before and after it runs, as
@@ -313,15 +313,11 @@ def _lua_cart_where(text, cart):
 
 # -- admission over the running set (docs/os_2026-11/processes.md §6) --------
 #
-# The slice of THE SHARES (native/moy_play/moy_play.h) a Python app's
-# admission counts, per board (`moy_ota.BOARD`): the PSRAM the running set's
-# apps hold together. On the S3s it is the cart's floor, the room one Doom
-# takes; on the P4s it is what a desk keeps free beside its Python heap, the
-# panel's buffers and the window stamps with a game running (read with
-# `heapcaps`, #246). A board absent from the table (the host, the browser,
-# the Zero) has no share to count against: None, never 0.
-APP_SHARE = {"tdeck": 4 << 20, "guition_s3": 4 << 20,
-             "p4": 7 << 20, "guition_p4": 7 << 20}
+# Admission counts THE SHARES' PROCS row (native/moy_play/moy_play.h): the
+# PSRAM the running set's apps hold together, from the image's own line
+# (`moy_play.shares()`), or a named board's when a host stands in for one. A
+# build with no line (the host, the browser, the Zero) has no share to count
+# against: None, never 0.
 # A Python run's world on the heap -- its namespace, its objects, the
 # closures of its _update and _draw (Player.release_world's figure).
 PY_WORLD = 384 << 10
@@ -329,14 +325,11 @@ RUN_MAX = 4         # the owner tags a run's loans and audio session take
 
 
 def board_share(board=None):
-    """This board's share for the running set, or None where it has none."""
-    if board is None:
-        try:
-            import moy_ota
-        except ImportError:
-            return None
-        board = getattr(moy_ota, "BOARD", None)
-    return APP_SHARE.get(board)
+    """The PROCS row of this image's line (`board`: that board's), or None
+    where there is none."""
+    fn = getattr(_moy_play, "shares", None)
+    rows = fn(board) if fn is not None else None
+    return rows[0] if rows else None
 
 
 def app_need(cart, make=None):

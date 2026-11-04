@@ -1016,3 +1016,108 @@ def test_every_board_decides_the_survival_modules(board, module):
         "%s/board.toml neither takes nor denies %s" % (board, module))
     if board in CONSOLE_BOARDS:
         assert module in takes, "%s does not take %s" % (board, module)
+
+
+# -- the hardware (docs/os_2026-11/hardware.md section 1) -------------------------
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_puts_each_pad_of_its_chip_in_exactly_one_row(board):
+    """board_config.hardware checks the table: each GPIO of the chip in one
+    row or `unused`, a why on every os and never row, a device API on every
+    class row, no strapping, flash, PSRAM or USB pad leased."""
+    chip, unused, rows = board_config.hardware(BOARDS[board])
+    assert chip == board_config.load(BOARDS[board])["board"]["chip"]
+    assert rows
+
+
+def test_the_browser_has_no_hardware_of_its_own():
+    assert board_config.hardware(ROOT / "firmware" / "web_runner") is None
+
+
+def _hw(tmp_path, body):
+    (tmp_path / "board.toml").write_text('[hardware]\nchip_gpio = "esp32s3"\n'
+                                         'unused = []\n' + body)
+    return tmp_path
+
+
+_ALL_S3 = ", ".join(str(p) for p in board_config.CHIP_GPIO["esp32s3"]["gpio"]
+                    if p not in (0, 21))
+
+
+@pytest.mark.parametrize("body, says", [
+    # a pad in no row
+    ('[[hardware.resource]]\nname = "x"\nclass = "lease"\npins = [21]\n', "in no row"),
+    # a pad twice
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s, 0, 21, 21]\n'
+     % _ALL_S3, "is in"),
+    # a pad the chip lacks
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s, 0, 21, 22]\n'
+     % _ALL_S3, "not a pad"),
+    # an os row with no why
+    ('[[hardware.resource]]\nname = "x"\nclass = "os"\npins = [%s, 0, 21]\n' % _ALL_S3,
+     "says no why"),
+    # a class row naming no device API
+    ('[[hardware.resource]]\nname = "x"\nclass = "class"\napi = "teleport"\npins = [%s, 0, 21]\n'
+     % _ALL_S3, "not a device API"),
+    # a strapping pad leased
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s]\n'
+     '[[hardware.resource]]\nname = "g"\nclass = "lease"\npins = [0, 21]\n' % _ALL_S3,
+     "strapping"),
+    # a class no one knows
+    ('[[hardware.resource]]\nname = "x"\nclass = "maybe"\npins = []\n', "class"),
+])
+def test_a_table_that_breaks_a_rule_is_refused(tmp_path, body, says):
+    with pytest.raises(ValueError, match=says):
+        board_config.hardware(_hw(tmp_path, body))
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_a_class_row_names_a_device_api_the_image_stages(board):
+    staged = board_config.staged_modules(BOARDS[board])
+    for row in board_config.hardware(BOARDS[board])[2]:
+        for api in row["api"]:
+            module = board_config.DEVICE_APIS[api]
+            if module is not None:
+                assert module in staged, (board, row["name"], api)
+
+
+def test_the_zeros_lease_is_its_pin_allowlist():
+    """The Zero's `/gpio` allowlist (MOY_NET_GPIO_PINS) is its lease row."""
+    text = (ZERO / "boards" / "MOYBYTE_ZERO" / "mpconfigboard.h").read_text()
+    m = re.search(r"#define MOY_NET_GPIO_PINS\s+\{([^}]*)\}", text)
+    allow = sorted(int(p) for p in m.group(1).split(","))
+    lease = [r for r in board_config.hardware(ZERO)[2] if r["class"] == "lease"]
+    assert [sorted(r["pins"]) for r in lease] == [allow]
+
+
+@pytest.mark.parametrize("board", ("p4", "guition-p4"))
+def test_a_p4_readme_lists_its_free_pins_as_its_lease_row(board):
+    lease = sorted(p for r in board_config.hardware(BOARDS[board])[2]
+                   if r["class"] == "lease" for p in r["pins"])
+    text = (BOARDS[board] / "README.md").read_text()
+    m = re.search(r"^## Free pins\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    assert m, "%s/README.md has no Free pins section" % board
+    listed = sorted(int(p) for p in re.findall(r"GPIO(\d+)", m.group(1)))
+    assert listed == lease
+
+
+# -- THE SHARES' lines (native/moy_play/moy_play.h) ----------------------------------
+
+def _shares_lines():
+    text = (ROOT / "native" / "moy_play" / "moy_play.h").read_text()
+    return re.findall(r'X\("(\w+)",', text)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_each_console_image_names_its_shares_line_by_its_ota_id(board):
+    """A console's mpconfigboard.h names its line (MOY_SHARES_BOARD) by its
+    OTA id, and moy_play.h has that line; the Zero names none."""
+    cfg = board_config.load(BOARDS[board])
+    ota = cfg["board"]["ota"]
+    headers = list((BOARDS[board] / "boards").glob("*/mpconfigboard.h"))
+    named = re.findall(r'#define MOY_SHARES_BOARD\s+"(\w+)"', headers[0].read_text())
+    if board in CONSOLE_BOARDS:
+        assert named == [ota]
+        assert ota in _shares_lines()
+    else:
+        assert named == [] and ota not in _shares_lines()

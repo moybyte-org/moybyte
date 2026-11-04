@@ -29,6 +29,15 @@
 //                                launch, 0 its slots' rule (a test's lever)
 //   QUIT, VIEW (a frame's bits); END_QUIT, END_CRASH (an end's why)
 //
+// THE SHARES' ROWS (moy_play.h), every image:
+//
+//   shares([board]) -> (procs, media, rings, elf, lanes) in bytes, None for
+//                     an absent row; None for no line (a build that names
+//                     none, or a board no line has). No board: the image's.
+//   share_held(row)   the bytes a row's takers hold
+//   kill_below(held)  the kill threshold with the running set holding `held`
+//                     of PROCS, None with no line
+//
 // The radio link and its lockstep session (modmoy_match.c has the list):
 //
 //   Match(...)       the kernel's link; seed_of(seed, frame)
@@ -470,6 +479,34 @@ static mp_obj_t mod_current(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_current_obj, mod_current);
 
+// THE SHARES' ROWS (moy_play.h).
+static mp_obj_t share_obj(uint32_t v) {
+    return v >= MOY_SHARE_NONE ? mp_const_none : mp_obj_new_int_from_uint(v);
+}
+
+static mp_obj_t mod_shares(size_t n_args, const mp_obj_t *args) {
+    const char *board = n_args > 0 && args[0] != mp_const_none ? mp_obj_str_get_str(args[0]) : NULL;
+    if (moy_share_row(board, MOY_SHARE_PROCS) == MOY_SHARE_NONE) {
+        return mp_const_none;
+    }
+    mp_obj_t rows[MOY_SHARE_ROWS];
+    for (uint8_t r = 0; r < MOY_SHARE_ROWS; r++) {
+        rows[r] = share_obj(moy_share_row(board, r));
+    }
+    return mp_obj_new_tuple(MOY_SHARE_ROWS, rows);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_shares_obj, 0, 1, mod_shares);
+
+static mp_obj_t mod_share_held(mp_obj_t row) {
+    return mp_obj_new_int_from_uint(moy_share_held((uint8_t)mp_obj_get_int(row)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_share_held_obj, mod_share_held);
+
+static mp_obj_t mod_kill_below(mp_obj_t procs_held) {
+    return share_obj(moy_share_kill_below((uint32_t)mp_obj_get_int(procs_held)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kill_below_obj, mod_kill_below);
+
 // The radio link and its lockstep session (modmoy_match.c).
 extern const mp_obj_type_t moy_play_match_type;
 extern const mp_obj_fun_builtin_fixed_t moy_play_seed_of_obj;
@@ -496,6 +533,9 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&mod_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_live), MP_ROM_PTR(&mod_front_live_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shares), MP_ROM_PTR(&mod_shares_obj) },
+    { MP_ROM_QSTR(MP_QSTR_share_held), MP_ROM_PTR(&mod_share_held_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kill_below), MP_ROM_PTR(&mod_kill_below_obj) },
     { MP_ROM_QSTR(MP_QSTR_END_MENU), MP_ROM_INT(MOY_PLAY_END_MENU) },
     { MP_ROM_QSTR(MP_QSTR_END_LINK), MP_ROM_INT(MOY_PLAY_END_LINK) },
     { MP_ROM_QSTR(MP_QSTR_END_SERIAL), MP_ROM_INT(MOY_PLAY_END_SERIAL) },

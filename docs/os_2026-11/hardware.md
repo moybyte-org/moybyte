@@ -12,17 +12,20 @@ what it uses; apps lease the rest.** Every resource is one of:
 
 | class | meaning | T-Deck examples |
 |---|---|---|
-| `os` | the OS drives it for itself | SPI2 (panel, SD **and the SX1262's CS 9, MISO 38**: `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c`), I2C0 (keyboard, touch), the backlight, the power rail |
+| `os` | the OS drives it for itself | SPI2 (panel, SD **and the SX1262's CS 9, MISO 38**: `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c`), I2C0 (keyboard, touch), the trackball, the speaker, the power rail |
 | `class` | the OS drives it and exposes a **device API** | the ES7210 mic, the LoRa radio (raw packets and LoRaWAN), the GPS on UART0, battery, brightness |
-| `lease` | handed raw to one process at a time | the header's free GPIO, a spare UART |
+| `lease` | handed raw to one process at a time | none on the T-Deck, whose every pad is wired; a P4's free pins |
 | `never` | present, off limits, with the reason | strapping, PSRAM and USB pins |
 
-The table is a `[hardware]` section of `board.toml` (sketch below); the file
-declares modules and the image today, not hardware. **A test forces every
-GPIO of the chip into exactly one row** (os, class, lease, never, or the
-board's `unused` list), from a per-chip GPIO list that includes strapping,
-PSRAM and USB pins; every `class` row names a device API the image stages;
-every `os` and `never` row has a `why`. This is the Zero's pin allowlist
+The table is the `[hardware]` section of every ESP32 board's `board.toml`
+(the browser has none of its own), read and checked by
+`tools/board_config.py`'s `hardware`. **Every GPIO of the chip is in exactly
+one row** (os, class, lease, never, or the board's `unused` list), against
+a per-chip GPIO list (`CHIP_GPIO`) that names the strapping, flash, PSRAM
+and USB pads, none of which a `lease` row may hold; every `class` row names a
+device API (`DEVICE_APIS`), and where that API has a module the image stages
+it; every `os` and `never` row has a `why`. `tests/test_board_toml.py`
+holds each board to it. This is the Zero's pin allowlist
 generalised (`firmware/web_runner/gpio_link.py`: "the allowlist is the
 security model").
 
@@ -77,45 +80,12 @@ exists, and offer no leases (refused at install, as on the wrong board). The
 browser's exception is pins over the Zero's sync RPC, which is the lease
 model with the board at the end of a cable.
 
-**The board's `[hardware]` table (sketch).** In `board.toml`, in the style of
-its `[[native.shared.take]]` rows. Pin numbers are illustrative; the board's
-README is the authority:
-
-```toml
-[hardware]
-chip_gpio = "esp32s3"                  # the per-chip pin list the test counts against
-unused = [1, 2]
-
-[[hardware.resource]]
-name = "spi2"
-class = "os"
-pins = {sck = 40, mosi = 41, miso = 38, tft_cs = 12, sd_cs = 39, radio_cs = 9}
-why = "the panel, the SD card and the LoRa radio share it; a per-op teardown hangs the board"
-
-[[hardware.resource]]
-name = "lora"
-class = "class"
-api = "lora"
-bus = "spi2"
-pins = {rst = 17, busy = 13, irq = 45}
-
-[[hardware.resource]]
-name = "uart0"
-class = "class"
-api = "gps"
-pins = {tx = 43, rx = 44}
-
-[[hardware.resource]]
-name = "gpio"
-class = "lease"
-pins = [4, 5]
-
-[[hardware.resource]]
-name = "strap"
-class = "never"
-pins = [0, 3, 45, 46]
-why = "strapping"
-```
+**The rows' shape.** `[hardware]` holds `chip_gpio` (the chip's list) and
+`unused`; each `[[hardware.resource]]` row a `name`, a `class`, its `pins`
+(a table of named pins or a list), a `why` on an `os` or `never` row, the
+device `api` (one name or a list) on a `class` row, and the `bus` it rides
+where that is another row. The T-Deck's (`firmware/lilygo_t_deck_plus_mainline/board.toml`)
+is a whole one; each board's README is the authority on its pins.
 
 ## 2. Timing
 
@@ -131,8 +101,10 @@ order of preference:
    T-Deck's keyboard and GT911 are **polled once per frame by design**
    (`.claude/rules/boards.md`, #69), so "no tap lost" holds for ISR and FIFO
    sources and a GPIO lease, not for a polled source. A ring written from an
-   ISR with the cache off is small and internal, as the latches are today; a
-   ring written by a task is PSRAM, against the kernel's 4 KiB internal cap.
+   ISR with the cache off is small and internal, as the latches are today,
+   under the kernel's 4 KiB internal cap; a ring written by a task is PSRAM,
+   a take from THE SHARES' RINGS row (`native/moy_play/moy_play.h`), and a
+   source whose ring the row cannot hold has none.
    Ring depth is configuration: the source's peak rate × the worst frame (a
    GC frame). Each ring counts its drops. Carts get `ticks_us()` (wrapping,
    allocation-free) and `events(into)` filling a caller's buffer, since a
@@ -166,7 +138,8 @@ order of preference:
    deadline is muted and struck: the risk is the app's, so an interpreted
    module is allowed and pays for its speed in misses. The latency target
    is at most the stream pipeline's (`moy_aud_out.c`'s shallow pipeline),
-   measured in #158. S3 lanes wait on the core-0 spike (phase 2).
+   measured in #158. S3 lanes wait on the core-0 spike (phase 2) and on a
+   LANES row, which THE SHARES do not give the S3s.
    **Python and Lua get no lanes**: a lane must run whenever its deadline
    says, and Python's threads share the one VM's GIL and stop for every GC
    (`processes.md` §3), while Lua's state runs on its own task. Lua renders
@@ -212,9 +185,11 @@ internal SRAM, and the stream holds the WiFi lease, whose internal cost never
 comes back (#158). **The output format (owner, 2026-11-03)**: 44.1 kHz
 stereo on the P4s, 22.05 kHz mono on the S3s (22,050 Hz mono everywhere
 today, `native/moy_audio/moy_audio_snd.h`), the synth resampled once in the
-mix; so a stream plays at 44.1 kHz stereo only on the P4s, the S3s decode
-below the flush priority to 22.05 kHz mono if the shares (phase 2) give it
-a line, and the Guition S3 (audio off) has none. Verbs: `media.play(src)`,
+mix; so a stream plays at 44.1 kHz stereo on the P4s. An S3 would decode
+below the flush priority to 22.05 kHz mono, but THE SHARES give neither S3
+a MEDIA row (`native/moy_play/moy_play.h`: the 8 MiB is spent, the budget in
+#246), so the service's fit check refuses it there until a row is given; the
+Guition S3 has no audio at all. Verbs: `media.play(src)`,
 `pause`, `resume`, `stop`, `volume`, `now`; `play` takes a file, an HTTP
 stream (with **ICY metadata**, the station's now-playing text) or an
 **M3U/PLS playlist**, and **media keys** (play, pause, next, previous) on a
@@ -262,6 +237,6 @@ In C: `moy_lease_take(owner, res, cfg, &h)`, `moy_lease_drop(h)`,
 
 | design piece | today | what changes |
 |---|---|---|
-| hardware declaration | `board.toml` declares modules and the image; the P4 READMEs record no free pins | `[hardware]` per board, every pin classified, tested |
+| hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1) | the lease table and sweep over those rows (P2.3) |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the pattern for every ring |
-| brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the `brightness` API once P2.1 classifies it |
+| brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

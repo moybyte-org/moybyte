@@ -6,6 +6,7 @@
 #   stage_native        stage the native modules and write their cmake list
 #   sdkconfig_required  the stale-sdkconfig guard's list
 #   headroom_floor      the OTA-slot headroom the build's size guard demands
+#   hardware            the [hardware] table, checked against its chip's GPIO list
 #   stage               stage the Python modules
 #   mirror              the content-keyed tree copy both stagers write through
 #   Setting             one sdkconfig.board assignment and its prose
@@ -170,6 +171,27 @@ class _Parser:
             if self.i < self.n and self.s[self.i] == ",":
                 self.i += 1
 
+    def _inline(self):
+        """An inline table, `{k = v, ...}`, on one line (TOML 1.0)."""
+        self._expect("{")
+        out = {}
+        while True:
+            self._skip(False)
+            if self.i < self.n and self.s[self.i] == "}" and not out:
+                self.i += 1
+                return out
+            key = self._bare_key()
+            self._skip(False)
+            self._expect("=")
+            if key in out:
+                raise TomlError("duplicate key %r at offset %d" % (key, self.i))
+            out[key] = self._value()
+            self._skip(False)
+            if self.i < self.n and self.s[self.i] == "}":
+                self.i += 1
+                return out
+            self._expect(",")
+
     def _value(self):
         self._skip(False)
         c = self.s[self.i]
@@ -177,6 +199,8 @@ class _Parser:
             return self._string()
         if c == "[":
             return self._array()
+        if c == "{":
+            return self._inline()
         if self.s.startswith("true", self.i):
             self.i += 4
             return True
@@ -184,7 +208,7 @@ class _Parser:
             self.i += 5
             return False
         start = self.i
-        while self.i < self.n and self.s[self.i] not in ",]\n#":
+        while self.i < self.n and self.s[self.i] not in ",]}\n#":
             self.i += 1
         raw = self.s[start:self.i].strip()
         try:
@@ -289,6 +313,94 @@ def headroom_floor(board_dir):
         raise ValueError("%s/board.toml: [image] headroom_floor_kib must be a "
                          "non-negative integer, got %r" % (board_dir, kib))
     return ota, kib * 1024
+
+
+# -- the hardware (docs/os_2026-11/hardware.md section 1) ---------------------
+#
+# Each chip's GPIO, and the pads no `lease` row may hold on any board: the
+# strapping pins, the flash's and the PSRAM's, and the USB PHYs'. The P4's
+# flash, PSRAM, MIPI lanes and USB 2.0 port have pads outside its GPIO matrix.
+CHIP_GPIO = {
+    "esp32s3": {
+        "gpio": tuple(range(0, 22)) + tuple(range(26, 49)),
+        "strapping": (0, 3, 45, 46),
+        "flash_psram": tuple(range(26, 38)),    # octal flash/PSRAM: 33-37 too
+        "usb": (19, 20),
+    },
+    "esp32p4": {
+        "gpio": tuple(range(0, 55)),
+        "strapping": (34, 35, 36, 37, 38),
+        "flash_psram": (),
+        "usb": (24, 25, 26, 27),                # the two USB 1.1 PHYs
+    },
+}
+HW_CLASSES = ("os", "class", "lease", "never")
+# The device APIs a `class` row may name (hardware.md section 1), and the
+# module that serves each where one exists: a board whose row names it stages
+# that module. The rest arrive with P2.3 and P2.4.
+DEVICE_APIS = {
+    "battery": "battery.py", "brightness": None, "alarms": None, "mic": None,
+    "http": None, "media": None, "gps": None, "lora": None, "ble": None,
+    "usb": None, "midi": None, "camera": None,
+}
+
+
+def _pins_of(row):
+    pins = row.get("pins", [])
+    return list(pins.values()) if isinstance(pins, dict) else list(pins)
+
+
+def hardware(board_dir):
+    """The board's `[hardware]` table, checked: `(chip_gpio, unused, rows)`,
+    each row a dict with its `pins` as a list and its `api` as a tuple, or
+    None for a target with no table (the browser). Raises ValueError for a
+    table that breaks a rule: an unknown chip or class, a pin outside the
+    chip or in two places, a pin of the chip in none, an `os` or `never` row
+    without its why, a `class` row naming no known device API, or a `lease`
+    row holding a strapping, flash, PSRAM or USB pad."""
+    hw = load(board_dir).get("hardware")
+    if hw is None:
+        return None
+    where = "%s/board.toml [hardware]" % board_dir
+    chip = CHIP_GPIO.get(hw.get("chip_gpio"))
+    if chip is None:
+        raise ValueError("%s: chip_gpio %r is not one of %s"
+                         % (where, hw.get("chip_gpio"), sorted(CHIP_GPIO)))
+    seen = {}
+    for pin in hw.get("unused", []):
+        seen.setdefault(pin, []).append("unused")
+    rows = []
+    banned = set(chip["strapping"]) | set(chip["flash_psram"]) | set(chip["usb"])
+    for r in hw.get("resource", []):
+        name, cls = r.get("name"), r.get("class")
+        if cls not in HW_CLASSES:
+            raise ValueError("%s: %s's class %r is not one of %s"
+                             % (where, name, cls, HW_CLASSES))
+        if cls in ("os", "never") and not str(r.get("why", "")).strip():
+            raise ValueError("%s: the %s row %s says no why" % (where, cls, name))
+        api = r.get("api", ())
+        api = (api,) if isinstance(api, str) else tuple(api)
+        if cls == "class" and (not api or any(a not in DEVICE_APIS for a in api)):
+            raise ValueError("%s: the class row %s names %r, not a device API"
+                             % (where, name, api))
+        pins = _pins_of(r)
+        if cls == "lease" and banned & set(pins):
+            raise ValueError("%s: the lease row %s holds %s, a strapping, "
+                             "flash, PSRAM or USB pad"
+                             % (where, name, sorted(banned & set(pins))))
+        for pin in pins:
+            seen.setdefault(pin, []).append(name)
+        rows.append(dict(r, pins=pins, api=api))
+    for pin, names in sorted(seen.items()):
+        if pin not in chip["gpio"]:
+            raise ValueError("%s: GPIO%s is not a pad of %s"
+                             % (where, pin, hw["chip_gpio"]))
+        if len(names) > 1:
+            raise ValueError("%s: GPIO%s is in %s" % (where, pin, names))
+    missing = sorted(set(chip["gpio"]) - set(seen))
+    if missing:
+        raise ValueError("%s: GPIO %s in no row and not unused" % (where, missing))
+    return hw["chip_gpio"], list(hw.get("unused", [])), rows
 
 
 def _shared(cfg):

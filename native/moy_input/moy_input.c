@@ -211,16 +211,40 @@ static uint32_t depth_of(uint32_t depth) {
     return d;
 }
 
+// A ring a task writes is a take from THE SHARES' RINGS row
+// (native/moy_play/moy_play.h, MOY_SHARE_RINGS): over the row, the source has
+// no ring. Weak: an image without the Player counts nothing.
+#define RINGS_ROW 2u
+int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
+void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+
+static uint32_t ring_bytes(uint32_t depth) {
+    return (uint32_t)(sizeof(moy_input_ring_t) + depth * sizeof(moy_event_t));
+}
+
 static moy_input_ring_t *ring_new(uint8_t prov, uint32_t depth) {
     depth = depth_of(depth);
     bool internal = prov == MOY_EV_ISR;
-    moy_input_ring_t *g = ring_alloc(sizeof(*g) + depth * sizeof(moy_event_t), internal);
+    uint32_t n = ring_bytes(depth);
+    if (!internal && moy_share_take && moy_share_take(RINGS_ROW, n) != 0) {
+        return NULL;
+    }
+    moy_input_ring_t *g = ring_alloc(n, internal);
     if (g != NULL) {
         g->mask = depth - 1u;
         g->prov = prov;
         g->internal = internal;
+    } else if (!internal && moy_share_give) {
+        moy_share_give(RINGS_ROW, n);
     }
     return g;
+}
+
+static void ring_drop(moy_input_ring_t *g) {
+    if (!g->internal && moy_share_give) {
+        moy_share_give(RINGS_ROW, ring_bytes(g->mask + 1u));
+    }
+    ring_free(g, g->internal);
 }
 
 #define SRC16(s) ((uint16_t)((1u << 8) | (s)))
@@ -326,7 +350,7 @@ void moy_input_free(moy_input_t *t) {
     }
     for (uint8_t i = 0; i < t->nsrc; i++) {
         if (t->ring[i] != NULL) {
-            ring_free(t->ring[i], t->ring[i]->internal);
+            ring_drop(t->ring[i]);
         }
     }
     front_free(t->front);
@@ -684,7 +708,7 @@ int moy_input_source_events(moy_input_t *t, uint32_t h, uint8_t prov, uint32_t d
     }
     UNLOCK(t);
     if (g != NULL) {
-        ring_free(g, g->internal);
+        ring_drop(g);
     }
     return MOY_INPUT_OK;
 }

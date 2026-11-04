@@ -317,6 +317,99 @@ ball_coast = 0
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os` (the OS drives it for itself), `class` (the OS
+# drives it and exposes the device API it names), `lease` (handed raw to one
+# process), `never` (off limits) -- or in `unused`. The pins are the vendor's
+# (`examples/UnitTest/utilities.h` in Xinyuan-LilyGO/T-Deck; README.md's "The
+# light, the battery and the GPS"). Every pad of this chip is wired, so the
+# board has no `lease` row: its one expansion connector, the Grove port, is
+# UART0, which the T-Deck Plus gives to its GPS.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = []
+
+[[hardware.resource]]
+name = "spi2"
+class = "os"
+pins = {sck = 40, mosi = 41, miso = 38, tft_dc = 11, tft_cs = 12, sd_cs = 39, radio_cs = 9}
+why = "the panel, the SD card and the LoRa radio share it; a per-op teardown hangs the board (README.md)"
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 18, scl = 8, touch_int = 16, kbd_int = 46}
+why = "the C3 keyboard and the GT911, read once a frame by the kernel's input task (#69)"
+
+[[hardware.resource]]
+name = "trackball"
+class = "os"
+pins = {up = 3, down = 15, left = 1, right = 2, click = 0}
+why = "the console's pointer and its button; the click is the recovery button and a strapping pin"
+
+[[hardware.resource]]
+name = "speaker"
+class = "os"
+pins = {bck = 7, ws = 5, dout = 6}
+why = "the MAX98357 amp the console's mix plays through (native/moy_audio/moy_aud_out.c)"
+
+[[hardware.resource]]
+name = "power"
+class = "os"
+pins = {poweron = 10}
+why = "the board's power rail: the panel, the radio, the GPS and the amp"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 42}
+
+[[hardware.resource]]
+name = "battery"
+class = "class"
+api = "battery"
+pins = {adc = 4}
+
+[[hardware.resource]]
+name = "lora"
+class = "class"
+api = "lora"
+bus = "spi2"
+pins = {rst = 17, busy = 13, irq = 45}
+
+[[hardware.resource]]
+name = "uart0"
+class = "class"
+api = "gps"
+pins = {tx = 43, rx = 44}
+
+[[hardware.resource]]
+name = "mic"
+class = "class"
+api = "mic"
+pins = {mclk = 48, lrck = 21, sck = 47, din = 14}
+
+[[hardware.resource]]
+name = "radio"
+class = "class"
+api = ["http", "ble"]
+pins = []
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG the console, its dev channel and the flasher are reached through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "octal flash and octal PSRAM"
+
 [native]
 dest = "native/.staged"
 
