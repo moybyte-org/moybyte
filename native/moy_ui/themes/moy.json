@@ -16,7 +16,8 @@
       "shade_dark": "#2b2f57", "ink_accent": "#b6a8f7",
       "value_ink": "#15123a", "sunk": "#0b0d1e", "lcd": "#0b0d1e", "lcd_ink": "#eef0fb",
       "code_text": "#eef0fb", "code_keyword": "#c9a2ff", "code_string": "#9be3a5",
-      "code_number": "#ffb070", "code_comment": "#abb0da", "code_builtin": "#7fd0ff"
+      "code_number": "#ffb070", "code_comment": "#abb0da", "code_builtin": "#7fd0ff",
+      "paused": "#828899"
     },
     "light": {
       "panel": "#eceef3", "edge": "#e2e5ec", "title": "#ffffff", "title_ink": "#15161d",

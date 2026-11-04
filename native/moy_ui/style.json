@@ -1075,7 +1075,7 @@
     "seeds": ["moy", "blocks", "contrast"],
     "bytes": 16384,
     "depth": 4,
-    "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment", "code_builtin", "block_events", "block_control", "block_actors", "block_looks", "block_draw", "block_input", "block_variables", "block_lists", "block_operators", "block_sound", "block_myblocks"],
+    "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment", "code_builtin", "block_events", "block_control", "block_actors", "block_looks", "block_draw", "block_input", "block_variables", "block_lists", "block_operators", "block_sound", "block_myblocks", "paused"],
     "metrics": {"radius": [0, 3], "press_dx": [-3, 3], "press_dy": [-3, 3]},
     "effects": ["none", "shadow", "emboss"],
     "effects_cap": 32,
@@ -1256,7 +1256,7 @@
         ["block_variables", 8], ["block_lists", 15], ["block_operators", 11],
         ["block_sound", 14], ["block_myblocks", 4],
         ["value", "selection"], ["value_ink", "selection_ink"], ["sunk", "surface_alt"],
-        ["lcd", "sunk"], ["lcd_ink", "ink"]
+        ["lcd", "sunk"], ["lcd_ink", "ink"], ["paused", "ink_dim"]
       ]
     },
     "pairs": [

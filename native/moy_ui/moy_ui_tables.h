@@ -254,7 +254,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_SEEDS 3
 #define MOY_THEME_BYTES 16384
 #define MOY_THEME_DEPTH 4
-#define MOY_THEME_RULES 72
+#define MOY_THEME_RULES 73
 #define MOY_THEME_PAIRS 10
 #define MOY_THEME_CONTRAST 30
 // The code roles, each held to its own floor on the code surface; bit
@@ -287,7 +287,7 @@ extern const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS];
 extern const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS];
 extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_FONT_FILES 2  // the seeds' fonts and their licence texts
-#define MOY_THEME_ROLES 55  // the tokens, then the content roles
+#define MOY_THEME_ROLES 56  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
 #define MOY_THEME_EFFECTS_CAP 32
@@ -441,7 +441,7 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 #define MOY_THEME_LEAVES 206
 #define MOY_THEME_LOOK_FIELDS 167
 #define MOY_THEME_LOOK_GROUPS 30
-#define MOY_THEME_ENUM_NAMES 122
+#define MOY_THEME_ENUM_NAMES 123
 #define MOY_THEME_BTN_KINDS 5
 #define MOY_THEME_BTN_LEAVES 8
 #define MOY_THEME_BTN_LEAF0 131  // buttons.normal's first leaf
