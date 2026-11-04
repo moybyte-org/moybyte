@@ -52,63 +52,63 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3960,
+   "bytes": 4260,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 10275,
+   "bytes": 11090,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 14557,
+   "bytes": 15614,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 5092,
+   "bytes": 5409,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 12979,
+   "bytes": 13794,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 17934,
+   "bytes": 18991,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 4072,
+   "bytes": 4383,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 10526,
+   "bytes": 11341,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 14585,
+   "bytes": 15642,
    "layer": "ink",
    "set": "luna",
    "size": 24
@@ -261,7 +261,17 @@
   "spark",
   "smile",
   "key",
-  "secret"
+  "secret",
+  "pause",
+  "prev",
+  "next",
+  "stop",
+  "retry",
+  "minus",
+  "plus",
+  "playlist",
+  "equalizer",
+  "pulse"
  ],
  "tiers": {
   "desktop": [

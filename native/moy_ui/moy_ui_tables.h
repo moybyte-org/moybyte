@@ -273,7 +273,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_SHEET_ICONS 1
 #define MOY_THEME_SHEET_W 128
 #define MOY_THEME_SPRITES_MAX_ROWS 256
-#define MOY_THEME_ICONS_MAX_ROWS 224
+#define MOY_THEME_ICONS_MAX_ROWS 240
 #define MOY_THEME_SLOT_BITS 30  // a `slots` leaf's icon slots
 #define MOY_THEME_SHEET_BYTES(rows) ((rows) * (MOY_THEME_SHEET_W + 2))
 #define MOY_THEME_SPRITE_ROWS 80

@@ -682,6 +682,8 @@ static const char *const s_icon_slots[] = {
     "paste", "layout", "slides", "background", "bubble", "align_l", "align_c", "align_r",
     "trans_none", "trans_fade", "trans_swipe", "brush", "resize", "pointer", "grid",
     "volume", "loop", "trophy", "lock", "heart", "spark", "smile", "key", "secret",
+    "pause", "prev", "next", "stop", "retry", "minus", "plus", "playlist",
+    "equalizer", "pulse",
 };
 #define ICON_SLOTS ((int)(sizeof(s_icon_slots) / sizeof(s_icon_slots[0])))
 _Static_assert(MOY_UI_ICON_FIRST + ICON_SLOTS <= MOY_FONT_INDEX,

@@ -1123,7 +1123,7 @@
     ],
     "sprite_nine": ["window", "button", "desk.icon"],
     "frame_button_names": ["close", "max", "min"],
-    "sheet_rows": {"sprites": 256, "icons": 224},
+    "sheet_rows": {"sprites": 256, "icons": 240},
     "reserved": ["images", "wallpapers", "sounds", "editor"],
     "look": {
       "fields": [
