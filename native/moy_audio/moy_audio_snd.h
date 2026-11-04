@@ -1,7 +1,9 @@
-// A compiled cart's sample stream (moy-spec SPEC.md 16.9, `snd`)
-// into this board's speaker: the C surface moycore reaches from the engine's
-// thread. The stream is libmoy's moy_stream, and the core-1 feeder adds it
-// after the synth in every block it renders, under the same master level.
+// The render-ahead stream (docs/os_2026-11/hardware.md section 2) into this
+// board's speaker: a compiled cart's `snd` (moy-spec SPEC.md 16.9), which
+// moycore reaches from the engine's thread, or a Python process's
+// `moybyte.snd`, one holder at a time. The stream is libmoy's moy_stream, and
+// the core-1 feeder adds it after the synth in every block it renders, under
+// the same master level.
 //
 // Built when moy_audio is in the image, whose cmake defines MOY_AUDIO_SND. A
 // board without it has no speaker to reach, and moycore leaves the binding's
@@ -17,9 +19,19 @@
 #define MOY_AUDIO_SND_RATE  22050
 #define MOY_AUDIO_SND_DEPTH 2048
 
-// Open an empty stream, its counters at zero. 1 when the feeder is running
-// and will play it; 0 when nothing would (no stream is opened).
-int moy_audio_snd_open(void);
+// The ring's depth in frames an app may choose (hardware.md section 2's
+// render-ahead ring): shallower is lower latency, deeper outlasts a longer
+// stall. MOY_AUDIO_SND_DEPTH is moy-spec's and the default.
+#define MOY_AUDIO_SND_MIN 64
+#define MOY_AUDIO_SND_MAX 65536
+
+// Open an empty stream `depth` frames deep (0: MOY_AUDIO_SND_DEPTH), its
+// counters at zero. 1 when the feeder is running and will play it; 0 when
+// nothing would, or the depth is outside MIN..MAX; -1 when a ring deeper than
+// the default does not fit THE SHARES' RINGS row (native/moy_play/moy_play.h)
+// or PSRAM. A deeper ring is the open's, taken from the row and given back at
+// the close; the default's and a shallower one's is the reserved ring.
+int moy_audio_snd_open(uint32_t depth);
 
 // Make the stream's ring ahead of the first open (the board's kernel, before
 // the VM's first area); the first open makes it otherwise.

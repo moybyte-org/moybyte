@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Snd Ring Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 1,
+  "moybyte": {"audio_ring": 2048}
+}

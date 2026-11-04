@@ -79,6 +79,7 @@ typedef struct {
         extensions, edit, permissions, required, writable, pictures;
     int writable_ok;            // a compiled cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
+    moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth
     int graduated;
     int glass;                  // a per-glass wallpaper: moybyte.glass is JSON true
     int icon_ok;                // the normalised icon: tile, w, h

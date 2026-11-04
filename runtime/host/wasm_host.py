@@ -153,7 +153,8 @@ class WasmHostRun:
             tilemap=getattr(project, "play_map", None) or getattr(project, "tilemap", None),
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
             flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
-            files=cart["path"], writable=cart.get("writable"))
+            files=cart["path"], writable=cart.get("writable"),
+            ring=cart.get("audio_ring"))
         self._ns = ns
         self._ws = ws
         self._layers = self._images = None

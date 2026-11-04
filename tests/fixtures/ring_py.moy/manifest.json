@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Ring Py",
+  "id": "local.ring_py",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {"type": "game", "permissions": ["graphics", "audio"]}
+}

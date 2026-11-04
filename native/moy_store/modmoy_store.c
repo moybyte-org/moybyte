@@ -716,6 +716,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
     put(d, MP_QSTR_memory, e->compiled ? int_or(&e->memory, mp_const_none) : mp_const_none);
     put(d, MP_QSTR_writable, e->compiled && e->writable_ok ? json_or(e->writable, mp_const_none)
                                                           : mp_const_none);
+    put(d, MP_QSTR_audio_ring, int_or(&e->audio_ring, mp_const_none));
     put(d, MP_QSTR_version, int_or(&e->version, MP_OBJ_NEW_SMALL_INT(0)));
     put(d, MP_QSTR_format, json_or(e->format, mp_obj_new_str(MOY_CAT_FORMAT,
                                                              strlen(MOY_CAT_FORMAT))));

@@ -49,7 +49,7 @@ typedef struct {
     int console;                // 0..7
     // the background stream (the media service)
     moy_aud_bg_fn bg;
-    // a compiled cart's stream
+    // the render-ahead stream (moy_audio_snd.h)
     moy_stream pcm;
     int16_t *pcm_ring;
     int pcm_on;
@@ -725,7 +725,7 @@ size_t moy_aud_trace_read(int32_t *rows, size_t max) {
     return n;
 }
 
-// -- a compiled cart's stream (moy_audio_snd.h) ------------------------------------
+// -- the render-ahead stream (moy_audio_snd.h) -------------------------------------
 
 // The stream's ring, made ahead of the first compiled cart (the kernel calls
 // it before the VM's first area, so a stopped run's ring is not left inside
@@ -736,19 +736,69 @@ void moy_aud_reserve(void) {
     }
 }
 
-int moy_audio_snd_open(void) {
-    size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
-    if (!moy_aud_out_plays()) {
+// THE SHARES' RINGS row (native/moy_play/moy_play.h's MOY_SHARE_RINGS;
+// tests/test_audio_ring.py holds the two equal). The ledger is weak: a build
+// without native/moy_play (the host's library, the browser) counts nothing.
+#define AUD_SHARE_RINGS 2
+int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
+void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+
+// A ring deeper than the reserved one: PSRAM alone on a board.
+static int16_t *deep_alloc(size_t bytes) {
+#if MOY_AUD_BOARD
+    return heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return calloc(1, bytes);
+#endif
+}
+
+// The open's own ring, if it took one, freed and its row given back. With the
+// stream off: the feeder no longer reads it.
+static void deep_free(void) {
+    if (A.pcm.ring == NULL || A.pcm.ring == A.pcm_ring) {
+        return;
+    }
+#if MOY_AUD_BOARD
+    heap_caps_free(A.pcm.ring);
+#else
+    free(A.pcm.ring);
+#endif
+    if (moy_share_give != NULL) {
+        moy_share_give(AUD_SHARE_RINGS, A.pcm.cap * (uint32_t)sizeof(int16_t));
+    }
+    A.pcm.ring = A.pcm_ring;
+}
+
+int moy_audio_snd_open(uint32_t depth) {
+    if (depth == 0u) {
+        depth = MOY_AUDIO_SND_DEPTH;
+    }
+    if (depth < MOY_AUDIO_SND_MIN || depth > MOY_AUDIO_SND_MAX || !moy_aud_out_plays()) {
         return 0;
     }
     if (A.pcm_ring == NULL) {
-        A.pcm_ring = aud_alloc(bytes);
+        A.pcm_ring = aud_alloc(MOY_AUDIO_SND_DEPTH * sizeof(int16_t));
         if (A.pcm_ring == NULL) {
             return 0;
         }
     }
+    moy_audio_snd_close();
+    int16_t *ring = A.pcm_ring;
+    if (depth > MOY_AUDIO_SND_DEPTH) {
+        uint32_t bytes = depth * (uint32_t)sizeof(int16_t);
+        if (moy_share_take != NULL && moy_share_take(AUD_SHARE_RINGS, bytes) != 0) {
+            return -1;
+        }
+        ring = deep_alloc(bytes);
+        if (ring == NULL) {
+            if (moy_share_give != NULL) {
+                moy_share_give(AUD_SHARE_RINGS, bytes);
+            }
+            return -1;
+        }
+    }
     moy_aud_lock();
-    moy_stream_init(&A.pcm, A.pcm_ring, MOY_AUDIO_SND_DEPTH, MOY_AUDIO_SND_RATE);
+    moy_stream_init(&A.pcm, ring, depth, MOY_AUDIO_SND_RATE);
     A.pcm_on = 1;
     moy_aud_unlock();
     return 1;
@@ -774,10 +824,11 @@ void moy_audio_snd_close(void) {
     }
     A.pcm_on = 0;
     moy_aud_unlock();
+    deep_free();
     moy_aud_out_shallow(0);
 }
 
-int moy_aud_snd_counts(uint32_t c[4], int *open) {
+int moy_aud_snd_counts(uint32_t c[5], int *open) {
     if (A.pcm_ring == NULL) {
         return 0;
     }
@@ -786,6 +837,7 @@ int moy_aud_snd_counts(uint32_t c[4], int *open) {
     c[1] = A.pcm.out;
     c[2] = A.pcm.starved;
     c[3] = moy_stream_room(&A.pcm);
+    c[4] = A.pcm.cap;
     *open = A.pcm_on;
     moy_aud_unlock();
     return 1;

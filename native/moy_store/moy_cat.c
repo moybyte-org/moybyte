@@ -913,6 +913,11 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             }
         }
     }
+    moy_cat_json_t ar = vfield(man, mend, "audio_ring");
+    if (ar.v != NULL) {
+        e->audio_ring.kind = moy_json_int(ar.v, ar.e, &e->audio_ring.value);
+        e->audio_ring.json = ar;
+    }
     moy_cat_json_t g = vfield(man, mend, "graduated");
     e->graduated = g.v != NULL && moy_json_truthy(g.v, g.e);
     moy_cat_json_t gl = vfield(man, mend, "glass");

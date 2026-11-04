@@ -1012,10 +1012,11 @@ class WasmRun(MoycoreRun):
         unknown_sources = bool(getattr(ws, "unknown_sources", False))
         writable = cart.get("writable") or ()
         joined = "\0".join(writable) if writable else None
+        ring = cart.get("audio_ring") or 0
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, unknown_sources, interp, joined)
+                                      swapped, unknown_sources, interp, joined, ring)
 
         try:
             if has_module:

@@ -814,7 +814,7 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
     moycore_whead_len = o->head_len;
     moycore_wpages = o->pages;
     int rc = moycore_wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
-                                o->swapped, o->allow_unsigned, o->interp, err, n);
+                                o->swapped, o->allow_unsigned, o->interp, o->ring, err, n);
     moycore_whead = NULL;
     moycore_whead_len = 0;
     return rc;

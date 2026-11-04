@@ -126,6 +126,7 @@ typedef struct {
     const char *writable;        // the manifest's "writable", NUL-joined, or NULL
     size_t writable_len;
     int swapped, allow_unsigned, interp;
+    uint32_t ring;               // the manifest's "audio_ring": `snd`'s depth, 0 the default
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);

@@ -8,14 +8,14 @@
 // own bank and its own libmoy state, both in PSRAM. FOCUS names the audible one;
 // the others are muted, not stopped: their verbs change their state and nothing
 // of it reaches the mix until they are focused. With no session focused the mix
-// is silence (plus a compiled cart's stream).
+// is silence (plus the render-ahead stream).
 //
 // The LEVEL a session plays at is the lower of the console's (moy_aud_volume,
 // the Settings row) and the session's own (moy_aud_level, SPEC.md 8.2's
 // volume() verb), so a cart can turn itself down but never past the console.
 //
 // THE MIX (moy_aud_render) is the focused session's synth, then its sample
-// voices, then the compiled cart's stream (moy_audio_snd.h), then the
+// voices, then the render-ahead stream (moy_audio_snd.h), then the
 // background stream (the media service, native/moy_media), under the one lock.
 // What pulls it is the board's feeder task (moy_aud_out.c) or, where there is
 // none, the host's or the browser's per-frame pull.
@@ -172,7 +172,7 @@ enum {
 int moy_aud_out_start(void);    // idempotent; the state it leaves
 int moy_aud_out_state(const char **why);
 // The AUDIORATE line (the speaker's rate against the mix's, the seam, the
-// ring's misses, the lock and the trigger latency, and a compiled cart's stream
+// ring's misses, the lock and the trigger latency, and the render-ahead stream
 // as queued/played/starved/room), written into `buf`, once
 // per call with at least a second since the last; 0 when there is nothing new.
 size_t moy_aud_out_probe(char *buf, size_t cap);
@@ -192,7 +192,8 @@ void moy_aud_out_shallow(int on);
 int moy_aud_out_rx_enable(int on);
 int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms);
 void moy_aud_count_out(uint32_t written, uint32_t underruns);
-// A compiled cart's stream: queued, played, starved, room; 0 before any opened.
-int moy_aud_snd_counts(uint32_t c[4], int *open);
+// The render-ahead stream (moy_audio_snd.h): queued, played, starved, room and
+// depth; 0 before any opened.
+int moy_aud_snd_counts(uint32_t c[5], int *open);
 
 #endif // MOY_AUD_H

@@ -239,6 +239,8 @@ def _lib():
             d.hw_set_cfg.argtypes = [_P, _P, _I]
             d.hw_set_files.argtypes = [_P, _C, _P, _I]
             d.hw_set_files.restype = _I
+            d.hw_set_ring.argtypes = [_P, ctypes.c_uint32]
+            d.hw_set_ring.restype = _I
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
@@ -340,7 +342,7 @@ class HostWasmRun:
 
     def __init__(self, buf, w, h, cart_dir, main, pages, sheet=None,
                  tilemap=None, wire=None, wire_swapped=False, flags=None,
-                 cfg=None, files=None, writable=None):
+                 cfg=None, files=None, writable=None, ring=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
@@ -391,6 +393,10 @@ class HostWasmRun:
                               ctypes.c_char_p(joined) if joined else None, len(joined)):
                 self.close()
                 raise MemoryError("host wasm: the store opened no files session")
+        # The manifest's "audio_ring": `snd`'s queue depth; one outside the
+        # boards' range keeps moy-spec's 2,048, as on a board.
+        if ring:
+            d.hw_set_ring(self._r, int(ring))
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):

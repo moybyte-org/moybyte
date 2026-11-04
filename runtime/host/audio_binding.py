@@ -153,6 +153,9 @@ def _load(path):
         ("moy_aud_out_start", [], i),
         ("moy_aud_out_state", [C.POINTER(C.c_char_p)], i),
         ("moy_aud_snd_counts", [pu32, C.POINTER(i)], i),
+        ("moy_audio_snd_open", [u32], i),
+        ("moy_audio_snd", [p, u32], u32),
+        ("moy_audio_snd_close", [], None),
         ("moy_aud_bg", [p], None),
     )
     for name, args, res in sigs:
@@ -307,12 +310,31 @@ class Module:
         none): the media service's (runtime/host/moy_media.py's attach)."""
         self._d.moy_aud_bg(fn)
 
+    SND_DEPTH, SND_MIN, SND_MAX = 2048, 64, 65536
+
     def snd_counts(self):
-        c = (self._C.c_uint32 * 4)()
+        c = (self._C.c_uint32 * 5)()
         o = self._C.c_int()
         if not self._d.moy_aud_snd_counts(c, self._C.byref(o)):
             return None
-        return (c[0], c[1], c[2], c[3], bool(o.value))
+        return (c[0], c[1], c[2], c[3], bool(o.value), c[4])
+
+    def snd_open(self, depth=0):
+        return self._d.moy_audio_snd_open(max(0, int(depth))) if int(depth) >= 0 else 0
+
+    def snd(self, buf=None):
+        if buf is None:
+            return self._d.moy_audio_snd(None, 0)
+        mv = memoryview(buf).cast("B")
+        n = len(mv) // 2
+        if n == 0:
+            return 0
+        raw = (self._C.c_char * len(mv)).from_buffer_copy(mv) if mv.readonly else \
+            (self._C.c_char * len(mv)).from_buffer(mv)
+        return self._d.moy_audio_snd(raw, n)
+
+    def snd_close(self):
+        self._d.moy_audio_snd_close()
 
 
 def get():

@@ -265,6 +265,7 @@ typedef struct {
     size_t cfg_len;
     char writable[512];
     size_t writable_len;
+    uint32_t ring;
     uint8_t *head;
     size_t head_len;
     char title[48];
@@ -298,6 +299,8 @@ static int entry_read(void *ctx, const moy_cat_entry_t *e) {
             S->title[tn] = 0;
         }
     }
+    S->ring = e->audio_ring.kind == 1 && e->audio_ring.value > 0
+                  && e->audio_ring.value <= 0xFFFFFFF ? (uint32_t)e->audio_ring.value : 0u;
     // "writable": its strings NUL-joined, as Python joined them.
     S->writable_len = 0;
     if (e->writable_ok) {
@@ -695,7 +698,7 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .pages = S->m.pages, .sha = S->m.interp ? NULL : S->sha, .dir = path,
         .writable = S->writable_len ? S->writable : NULL, .writable_len = S->writable_len,
         .swapped = MOY_KERNEL_PANEL_SWAP, .allow_unsigned = (flags & MOY_PLAY_UNSIGNED) != 0,
-        .interp = S->m.interp,
+        .interp = S->m.interp, .ring = S->ring,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
     if (rc != 0 && !S->m.interp && strncmp(S->err, "refused: bad signature", 22) != 0

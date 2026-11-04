@@ -171,8 +171,8 @@ MP_DECLARE_CONST_FUN_OBJ_0(moycore_perf_reset_obj);
 // moycore_wasm.c
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
-                       int swapped, int allow_unsigned, int interp, char *err,
-                       size_t errlen);
+                       int swapped, int allow_unsigned, int interp, uint32_t ring,
+                       char *err, size_t errlen);
 int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen);
 void moycore_wasm_end(void);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj);

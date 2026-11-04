@@ -487,7 +487,7 @@ static void wasm_trapped(void)
 
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
-                       int swapped, int allow_unsigned, int interp, char *err,
+                       int swapped, int allow_unsigned, int interp, uint32_t ring, char *err,
                        size_t errlen)
 {
     if (WR) {
@@ -523,7 +523,13 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     WR->w.lane_stack = MOY_WASM_EXEC_STACK;
 #endif
 #if MOY_AUDIO_SND
-    if (moy_audio_snd_open()) WR->w.snd = wo_snd;
+    // The queue is as deep as the manifest's "audio_ring" asks (moy_audio_snd.h),
+    // a depth outside the range being the default; a deep one the RINGS row
+    // refuses leaves `snd` to the binding's clock, silent.
+    if (ring < MOY_AUDIO_SND_MIN || ring > MOY_AUDIO_SND_MAX) ring = 0;
+    if (moy_audio_snd_open(ring) > 0) WR->w.snd = wo_snd;
+#else
+    (void)ring;
 #endif
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
     files_open(WR->dir);
@@ -588,7 +594,7 @@ void moycore_wasm_end(void)
 #endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           allow_unsigned=False, interp=False, writable=None)
+//           allow_unsigned=False, interp=False, writable=None, ring=0)
 //           -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
@@ -604,8 +610,9 @@ void moycore_wasm_end(void)
 // cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
 // sources check, and `wasm_sha` is ignored. `writable` is the manifest's
 // "writable" entries joined by NUL characters (moy-spec SPEC.md 16.12; the
-// cart's files are moy_files', above). A refusal or a trap closes nothing --
-// close() does.
+// cart's files are moy_files', above). `ring` is the manifest's "audio_ring",
+// the depth of `snd`'s queue in frames (0: moy-spec's 2,048). A refusal or a
+// trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -616,6 +623,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     size_t hlen = 0, wlen = 0;
     const char *writable = NULL;
     if (n_args > 8 && a[8] != mp_const_none) writable = mp_obj_str_get_data(a[8], &wlen);
+    mp_int_t ring = n_args > 9 && a[9] != mp_const_none ? mp_obj_get_int(a[9]) : 0;
     moycore_whead = (const uint8_t *)moycore_buf_r(a[1], &hlen);
     moycore_whead_len = hlen;
     moycore_wpages = (uint32_t)mp_obj_get_int(a[2]);
@@ -623,7 +631,8 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     int rc = moycore_wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
                                 writable, wlen,
                                 mp_obj_is_true(a[5]), n_args > 6 && mp_obj_is_true(a[6]),
-                                n_args > 7 && mp_obj_is_true(a[7]), err, sizeof(err));
+                                n_args > 7 && mp_obj_is_true(a[7]),
+                                ring > 0 ? (uint32_t)ring : 0u, err, sizeof(err));
     moycore_whead = NULL;
     moycore_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -635,7 +644,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 9, mod_wasm_open);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 10, mod_wasm_open);
 
 // files_keep(on): the page's keeper is listening, or not (the browser's,
 // firmware/web_runner/carts_link.py); turning it off drops the log.

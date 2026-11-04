@@ -139,9 +139,10 @@ def test_the_native_shelf_is_the_twins_over_every_cart(tmp_path):
 _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "required", "input", "canvas", "assets", "id",
-         "config", "sources", "description", "genre", "tags", "glass", "pictures")
+         "config", "sources", "description", "genre", "tags", "glass", "pictures",
+         "audio_ring")
 _VENDOR = ("type", "graduated", "edit", "permissions", "required", "assets", "config", "glass",
-           "pictures")
+           "pictures", "audio_ring")
 
 
 _LISTING = json.load(open(os.path.join(ROOT, "tests", "listing_vectors",

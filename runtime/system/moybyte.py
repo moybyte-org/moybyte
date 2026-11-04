@@ -34,6 +34,21 @@ one, `time.ticks_us()`.
                      API's face where this console has its class, else None;
                      a verb without the API's permission raises
                      OSError(EPERM)
+  snd_open(frames=0) the render-ahead audio ring (hardware.md section 2), this
+                     process's until snd_close or its end: `frames` deep at
+                     22,050 Hz mono (0: SND_DEPTH, 2,048; SND_MIN..SND_MAX),
+                     deeper outlasting a longer stall (a collection), shallower
+                     reaching the speaker sooner. True when it plays; False
+                     where nothing would play it or the depth is out of range;
+                     OSError(ENOSPC) where the board's RINGS row cannot hold
+                     it, OSError(EBUSY) while another process or a compiled
+                     cart holds the ring
+  snd(buf=None)      queue `buf` (signed 16-bit mono, little-endian: a
+                     bytearray or array('h')): how many frames it took, the
+                     rest being the caller's to offer again; with no buffer,
+                     the room. From the loop or a `_thread`; allocates nothing
+  snd_close()        the ring given back; snd_counts() its (queued, played,
+                     starved, room, open, depth) counters, None before any open
   notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
@@ -372,6 +387,72 @@ def _leases():
     except ImportError:  # host: the runtime package
         from runtime import leases
     return leases
+
+
+# The render-ahead ring's holder: its pid, 0 for none.
+SND = [0]
+SND_DEPTH, SND_MIN, SND_MAX = 2048, 64, 65536
+ENOSPC, EBUSY = 28, 16
+
+
+_AUD = [None]
+
+
+def _aud():
+    if _AUD[0] is None:
+        try:
+            import moy_audio
+            _AUD[0] = moy_audio
+        except ImportError:  # host: the runtime package's ctypes build of the same C
+            try:
+                from runtime import audio_binding
+            except ImportError:  # pragma: no cover - a host without its audio
+                return None
+            _AUD[0] = audio_binding.get()
+    return _AUD[0]
+
+
+def snd_open(frames=0):
+    a = _aud()
+    if a is None:
+        return False
+    p = _pid()
+    if SND[0] not in (0, p):
+        raise OSError(EBUSY, "the audio ring is another process's")
+    c = a.snd_counts()
+    if SND[0] == 0 and c is not None and c[4]:
+        raise OSError(EBUSY, "a compiled cart holds the audio ring")
+    rc = a.snd_open(int(frames))
+    if rc < 0:
+        SND[0] = 0
+        raise OSError(ENOSPC, "the audio ring does not fit")
+    SND[0] = p if rc else 0
+    return rc > 0
+
+
+def snd(buf=None):
+    if not SND[0]:
+        return 0
+    return _AUD[0].snd(buf)
+
+
+def snd_close():
+    if SND[0]:
+        SND[0] = 0
+        _AUD[0].snd_close()
+
+
+def snd_counts():
+    a = _aud()
+    return None if a is None else a.snd_counts()
+
+
+def _snd_end(pid):
+    if SND[0] == pid:
+        snd_close()
+
+
+ENDS.append(_snd_end)
 
 
 def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):

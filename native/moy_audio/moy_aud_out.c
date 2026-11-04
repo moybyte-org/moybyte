@@ -490,12 +490,12 @@ size_t moy_aud_out_probe(char *buf, size_t cap) {
     fixed(seam, sizeof seam, st.rendered_out - st0_rendered, st.written - st0_written, 4);
     last_w = st.written;
     last_t = now;
-    uint32_t sc[4];
+    uint32_t sc[5];
     int open = 0;
-    char snd[48] = "";
+    char snd[64] = "";
     if (moy_aud_snd_counts(sc, &open)) {
-        snprintf(snd, sizeof snd, " snd=%u/%u/%u/%u", (unsigned)sc[0],
-                 (unsigned)sc[1], (unsigned)sc[2], (unsigned)sc[3]);
+        snprintf(snd, sizeof snd, " snd=%u/%u/%u/%u/%u", (unsigned)sc[0],
+                 (unsigned)sc[1], (unsigned)sc[2], (unsigned)sc[3], (unsigned)sc[4]);
     }
     int n = snprintf(buf, cap,
                      "AUDIORATE eff=%u want=%u ratio=%s cum=%s seam=%s under=%u "

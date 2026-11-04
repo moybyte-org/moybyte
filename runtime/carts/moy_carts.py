@@ -750,6 +750,10 @@ def _load(path, whole, folder=None):
             # list as the manifest has it, which libmoy's binding holds every
             # path to; None for every other runtime and for a cart with none.
             "writable": _str_list(man.get("writable")) if compiled else None,
+            # The render-ahead audio ring's depth in frames ("moybyte":
+            # {"audio_ring": n}, docs/os_2026-11/hardware.md section 2): a
+            # compiled cart's `snd` queue, None for the default.
+            "audio_ring": _int_or(ven.get("audio_ring"), None),
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.

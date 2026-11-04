@@ -67,6 +67,7 @@ typedef struct {
     int         dead;        /* trapped: never called again */
     moy_stream  pcm;         /* the cart's `snd` */
     int16_t     pcm_ring[MOY_WASM_SND_DEPTH];
+    int16_t    *pcm_deep;    /* a deeper queue the manifest asked for, or NULL */
     moy_files_t *files;      /* the cart's written files (moy_files.h) */
     char       *writable;    /* the manifest's "writable", libmoy's form */
 } host_wasm;
@@ -494,6 +495,23 @@ void hw_pmem_load(host_wasm *r, const int32_t *in, int n)
 int hw_get_view(host_wasm *r, int *w, int *h)
 { return r == G_LIVE_W ? moycore_run_view(&moycore_RUN.c, w, h) : 0; }
 
+/* The manifest's "audio_ring": `snd`'s queue `depth` frames deep, in the
+ * boards' range (native/moy_audio/moy_audio_snd.h's 64..65536). 0, or -1
+ * with the default queue kept. Before the load. */
+int hw_set_ring(host_wasm *r, uint32_t depth)
+{
+    int16_t *ring = r->pcm_ring;
+    if (depth < 64u || depth > 65536u) return -1;
+    if (depth > MOY_WASM_SND_DEPTH) {
+        ring = (int16_t *)calloc(depth, sizeof(int16_t));
+        if (!ring) return -1;
+    }
+    free(r->pcm_deep);
+    r->pcm_deep = ring == r->pcm_ring ? NULL : ring;
+    moy_stream_init(&r->pcm, ring, depth, MOY_WASM_SND_RATE);
+    return 0;
+}
+
 void hw_free(host_wasm *r)
 {
     if (!r) return;
@@ -504,6 +522,7 @@ void hw_free(host_wasm *r)
     if (r->module) wasm_runtime_unload(r->module);
     free(r->bytes);
     free(r->writable);
+    free(r->pcm_deep);
     if (r->files) moy_files_close(r->files);
     free(r);
 }

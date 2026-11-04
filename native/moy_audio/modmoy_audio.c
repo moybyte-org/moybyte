@@ -16,6 +16,7 @@
 
 #include "moy_aud.h"
 #include "moy_audio.h"
+#include "moy_audio_snd.h"
 
 #if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
 #include "moy_codec_es8311.h"
@@ -304,22 +305,57 @@ static mp_obj_t mod_codec(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_codec_obj, mod_codec);
 
-// snd_counts() -> (queued, played, starved, room, open), or None before a
-// compiled cart opened its stream.
+// snd_counts() -> (queued, played, starved, room, open, depth), or None
+// before the render-ahead stream was first opened.
 static mp_obj_t mod_snd_counts(void) {
-    uint32_t c[4];
+    uint32_t c[5];
     int open = 0;
     if (!moy_aud_snd_counts(c, &open)) {
         return mp_const_none;
     }
-    mp_obj_t t[5];
+    mp_obj_t t[6];
     for (int i = 0; i < 4; i++) {
         t[i] = mp_obj_new_int_from_uint(c[i]);
     }
     t[4] = mp_obj_new_bool(open);
-    return mp_obj_new_tuple(5, t);
+    t[5] = mp_obj_new_int_from_uint(c[4]);
+    return mp_obj_new_tuple(6, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_snd_counts_obj, mod_snd_counts);
+
+// snd_open(depth=0) -> 1 opened, 0 nothing would play it (or a depth outside
+// SND_MIN..SND_MAX), -1 the RINGS row or PSRAM refused a deep ring: the
+// render-ahead stream (moy_audio_snd.h), `depth` frames at 22,050 Hz mono, 0
+// for the default. The output is started first, as a focused session would.
+static mp_obj_t mod_snd_open(size_t n_args, const mp_obj_t *args) {
+    mp_int_t depth = n_args > 0 ? mp_obj_get_int(args[0]) : 0;
+    if (depth < 0) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    moy_aud_out_start();
+    return MP_OBJ_NEW_SMALL_INT(moy_audio_snd_open((uint32_t)depth));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_snd_open_obj, 0, 1, mod_snd_open);
+
+// snd(buf=None) -> frames queued from `buf` (signed 16-bit mono, little
+// endian: a bytearray, bytes or array('h')), or the room with no buffer.
+// Allocates nothing.
+static mp_obj_t mod_snd(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 0 || args[0] == mp_const_none) {
+        return MP_OBJ_NEW_SMALL_INT(moy_audio_snd(NULL, 0));
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(args[0], &b, MP_BUFFER_READ);
+    uint32_t n = (uint32_t)(b.len / 2u);
+    return MP_OBJ_NEW_SMALL_INT(n ? moy_audio_snd((const uint8_t *)b.buf, n) : 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_snd_obj, 0, 1, mod_snd);
+
+static mp_obj_t mod_snd_close(void) {
+    moy_audio_snd_close();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_snd_close_obj, mod_snd_close);
 
 static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),     MP_ROM_QSTR(MP_QSTR_moy_audio) },
@@ -361,6 +397,13 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_trace),        MP_ROM_PTR(&mod_trace_obj) },
     { MP_ROM_QSTR(MP_QSTR_codec),        MP_ROM_PTR(&mod_codec_obj) },
     { MP_ROM_QSTR(MP_QSTR_snd_counts),   MP_ROM_PTR(&mod_snd_counts_obj) },
+    // the render-ahead stream (moy_audio_snd.h)
+    { MP_ROM_QSTR(MP_QSTR_snd_open),     MP_ROM_PTR(&mod_snd_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snd),          MP_ROM_PTR(&mod_snd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snd_close),    MP_ROM_PTR(&mod_snd_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_SND_DEPTH),    MP_ROM_INT(MOY_AUDIO_SND_DEPTH) },
+    { MP_ROM_QSTR(MP_QSTR_SND_MIN),      MP_ROM_INT(MOY_AUDIO_SND_MIN) },
+    { MP_ROM_QSTR(MP_QSTR_SND_MAX),      MP_ROM_INT(MOY_AUDIO_SND_MAX) },
 };
 static MP_DEFINE_CONST_DICT(moy_audio_globals, moy_audio_globals_table);
 

@@ -1830,7 +1830,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped,
-         allow_unsigned, interp, writable) = world.core.calls[1]
+         allow_unsigned, interp, writable, ring) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
@@ -1840,6 +1840,8 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert interp is False         # a module by this console's own name -- AOT
         # the cart declares no writable paths; its files are moycore's C
         assert writable is None
+        # nor an audio ring: `snd` keeps moy-spec's queue
+        assert ring == 0
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1863,7 +1865,22 @@ def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert len(call) == 10 and call[9] == "saves/\0options.cfg"
+        assert len(call) == 11 and call[9] == "saves/\0options.cfg"
+    finally:
+        world.close()
+
+
+def test_the_cart_s_audio_ring_reaches_the_binding(tmp_path):
+    """The manifest's "audio_ring" (docs/os_2026-11/hardware.md section 2) is
+    `snd`'s queue depth, which wasm_open hands moycore for the board's ring."""
+    cart, _main = _compiled(tmp_path)
+    cart["audio_ring"] = 256
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        world.mod.WasmRun(ws, make_ns(), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open" and call[10] == 256
     finally:
         world.close()
 
@@ -1956,7 +1973,7 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
-         _writable) = opens[0]
+         _writable, _ring) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:
