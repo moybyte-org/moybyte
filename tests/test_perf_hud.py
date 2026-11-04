@@ -95,22 +95,51 @@ def test_a_tap_away_from_the_corner_does_not_toggle_the_hud(tmp_path):
     assert ws.perf_hud is False
 
 
-def test_the_chip_paints_its_own_rect_a_frame_and_allocates_its_parts_once(tmp_path):
+def test_the_chip_is_one_native_draw_over_arrays_made_once(tmp_path, monkeypatch):
     """GAPS 54: the chip and its card are one native draw over arrays made
-    once, the rect they cover patched under them every frame."""
+    once; with no compiled cart's frame under it nothing is patched (#249:
+    each call into moy_ui is dear on a game frame)."""
+    from runtime.system import perf_hud
     ws, drv = _running_cart(tmp_path)
     ws.perf_hud = True
     hud = ws.perf_ui
     args, box = hud._args, hud._box
+    calls = []
+    real_perf = perf_hud._ui_draw.perf
+    monkeypatch.setattr(perf_hud._ui_draw, "perf",
+                        lambda *a: (calls.append(a[2][perf_hud._DRAW]), real_perf(*a)))
     patched = []
     real = ws.patch_cart_frame
     ws.patch_cart_frame = lambda *r: (patched.append(r), real(*r))
     for _ in range(3):
         drv.frame(DT)
+    assert ws.cart_frame is None
     assert hud._args is args and hud._box is box
-    assert patched and patched[-1] == tuple(box)
+    assert calls and set(calls) == {1} and not patched
+
+
+def test_over_a_cart_frame_the_chip_patches_its_rect_first(tmp_path):
+    """Over a compiled cart's frame the chip's rect is measured and patched
+    before it paints, so the flush takes that rect from the canvas."""
+    ws, drv = _running_cart(tmp_path)
+    ws.perf_hud = True
+    drv.frame(DT)
+    hud = ws.perf_ui
+    took = []
+
+    class _Frame:
+        def patch(self, x, y, w, h):
+            took.append((x, y, w, h))
+            return True
+
+    ws.cart_frame = _Frame()
+    try:
+        hud.draw()
+    finally:
+        ws.cart_frame = None
+    assert took == [tuple(hud._box)]
     cv = ws.canvas
-    x, y, w, h = patched[-1]
+    x, y, w, h = took[0]
     assert x + w <= cv.w and y + h <= cv.h and w > 0 and h > 0
 
 

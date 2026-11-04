@@ -56,33 +56,41 @@ class PerfHud:
         with the breakdown on (`ws.perf_hud`) its card over it: the frame
         against 33 ms, Draw, Flush and Logic each a hue of its own and their
         rows in ms. Drawn on the game canvas every game frame, in flat fills
-        and allocating nothing; its rect is patched under it first."""
+        and allocating nothing. Over a compiled cart's frame its rect is
+        measured and patched under it first; over anything else it is one
+        native call: a game frame reaches it with the caches cold, so every
+        call into moy_ui is dear there (#249). The card's parts are worked out
+        only while the card shows."""
         ws = self.ws
         cv = ws.canvas
         a = self._args
         fps = int(ws._fps + 0.5)
         fps = fps if fps > 0 else 0
-        logic = int(ws._upd_ms * 10 + 0.5)
-        flush = int(ws._flush_ms * 10 + 0.5)
-        draw = int(ws._draw_ms * 10 + 0.5) - logic
-        draw = draw if draw > 0 else 0
-        frame = (10000 + fps // 2) // fps if fps else draw + flush + logic
-        idle = frame - draw - flush - logic
         a[_RIGHT] = cv.w - 4
         a[_BOTTOM] = cv.h - 4
         a[_FPS] = fps
-        a[_FRAME] = frame
-        a[_DETAIL] = 1 if ws.perf_hud else 0
         a[_FS] = 1
-        a[_DRAW] = 0
-        a[_PARTS] = draw
-        a[_PARTS + 1] = flush
-        a[_PARTS + 2] = logic
-        a[_PARTS + 3] = idle if idle > 0 else 0
+        if ws.perf_hud:
+            logic = int(ws._upd_ms * 10 + 0.5)
+            flush = int(ws._flush_ms * 10 + 0.5)
+            draw = int(ws._draw_ms * 10 + 0.5) - logic
+            draw = draw if draw > 0 else 0
+            frame = (10000 + fps // 2) // fps if fps else draw + flush + logic
+            idle = frame - draw - flush - logic
+            a[_DETAIL] = 1
+            a[_FRAME] = frame
+            a[_PARTS] = draw
+            a[_PARTS + 1] = flush
+            a[_PARTS + 2] = logic
+            a[_PARTS + 3] = idle if idle > 0 else 0
+        else:
+            a[_DETAIL] = 0
         th = ws.theme_colors
         b = self._box
-        _ui_draw.perf(cv, th, a, _WORDS, b)
-        ws.patch_cart_frame(b[0], b[1], b[2], b[3])
+        if ws.cart_frame is not None:
+            a[_DRAW] = 0
+            _ui_draw.perf(cv, th, a, _WORDS, b)
+            ws.patch_cart_frame(b[0], b[1], b[2], b[3])
         a[_DRAW] = 1
         was = _ui_draw.cart_text(False)
         try:
