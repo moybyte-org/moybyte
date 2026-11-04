@@ -157,11 +157,12 @@ SETTINGS_TOGGLES = (
     # against a real per-frame CPU cost the async PPA path does not pay.
     ("crisp_pixels", "CRISP PIXELS", False, "set_crisp_pixels",
      _gate_crisp_scale, "crisp"),
-    # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME canvas and
+    # SHOW FPS: the in-game FPS chip (default OFF: it costs
+    # about 1.6 ms a frame on the T-Deck, #249). It rides the GAME canvas and
     # its composite scale, so on a small-canvas cart (celeste) it draws 2x big
     # -- which is what prompted the off switch. Purely cosmetic: the perf
     # fields keep updating and PERF DIAG is untouched.
-    ("show_fps", "SHOW FPS", True, "set_show_fps", None, None),
+    ("show_fps", "SHOW FPS", False, "set_show_fps", None, None),
     # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) writes nothing
     # periodic on any board -- no PERF line, no T-Deck diag tick, no audio
     # rate lines, no deep capture meters, no periodic diag->SD write -- because

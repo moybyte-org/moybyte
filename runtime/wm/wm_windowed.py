@@ -246,7 +246,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # the other would swap in its pre-change desktop (visible flicker between
         # old/new chrome). A still desk's debt frame copies the last painted
         # frame's buffer (`_repeat_stack`, surface model §14.6).
-        # The FPS chip (sig bit 2, show_fps default ON) draws on the GAME canvas
+        # The FPS chip (sig bit 2, show_fps, default OFF) draws on the GAME canvas
         # before the window blit, so it rides the quiet path too -- mirroring the
         # full stack's [.., perf, windows] order.
         _pw = _PlayerWindowLayer(self)
