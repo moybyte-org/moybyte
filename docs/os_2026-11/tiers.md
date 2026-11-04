@@ -73,8 +73,7 @@ The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 **A C app on an S3** is feasible within these limits: a foreground C app
 uses the **cart's** PSRAM share (its text counting in its PROCS need); a
 background C service's text is the ELF row of THE SHARES
-(`native/moy_play/moy_play.h`), which is absent on the S3s, so an S3 runs
-none until a spike gives it one; its code lives in PSRAM, so no ISR, no
+(`native/moy_play/moy_play.h`), 256 KiB on each S3; its code lives in PSRAM, so no ISR, no
 internal SRAM, and core 1 only; and all of it depends on the `elf_loader`
 spike.
 

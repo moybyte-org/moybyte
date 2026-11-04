@@ -255,8 +255,8 @@ order of preference:
    deadline is muted and struck: the risk is the app's, so an interpreted
    module is allowed and pays for its speed in misses. The latency target
    is at most the stream pipeline's (`moy_aud_out.c`'s shallow pipeline),
-   measured in #158. S3 lanes wait on the core-0 spike (phase 2) and on a
-   LANES row, which THE SHARES do not give the S3s.
+   measured in #158. S3 lanes wait on the core-0 spike (phase 2); THE
+   SHARES give each S3 a LANES row of 64 KiB.
    **Python and Lua get no lanes**: a lane must run whenever its deadline
    says, and Python's threads share the one VM's GIL and stop for every GC
    (`processes.md` §3), while Lua's state runs on its own task. Lua renders

@@ -37,14 +37,17 @@ def test_each_console_has_a_line_and_nothing_else_does():
     assert not mp.share_use("xiao_zero")
 
 
-def test_the_s3s_have_only_the_cart_floor_and_the_rings():
-    """The cart floor, the native share and the Python heap's share spend
-    the S3s' 8 MiB: media, ELF and lanes are ABSENT (None), never 0."""
+def test_the_s3s_rows_are_what_their_desks_keep_above_the_cart_floor():
+    """Both S3s have the cart floor, the rings, ELF and lanes; the T-Deck has
+    MEDIA, and the Guition S3, the one-running-thing tier for media, has
+    none: ABSENT (None), never 0."""
     for name in ("tdeck", "guition_s3"):
         procs, media, rings, elf, lanes = mp.shares(name)
         assert procs == 4 * MIB
-        assert media is None and elf is None and lanes is None
         assert rings is not None and 0 < rings <= 64 * KIB
+        assert elf == 256 * KIB and lanes == 64 * KIB
+    assert mp.shares("tdeck")[mp.SHARE_MEDIA] == 192 * KIB
+    assert mp.shares("guition_s3")[mp.SHARE_MEDIA] is None
 
 
 def test_the_p4s_have_every_row():
