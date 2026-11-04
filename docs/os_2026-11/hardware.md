@@ -97,8 +97,8 @@ while a Python process holds a lease** (`MOY_LEASE_VM`, read by
 process's lease will live outside the VM, untouched by a stop.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
-`moybyte.http`, `.mic`, `.lora`, `.ble`, `.usb` and `.midi` (`None` where
-the console lacks the class), each over a C driver, each checking its
+`moybyte.http`, `.mic`, `.lora`, `.ble`, `.usb`, `.midi` and `.camera`
+(`None` where the console lacks the class), each over a C driver, each checking its
 permission row against the caller's grants and swept at the caller's end. The
 mic, the radio, BLE, USB and MIDI have one holder at a time (`EBUSY` for
 another); `http` requests are many. Their events are NET, LORA, BLE, USB and
@@ -161,10 +161,17 @@ on.
   and timestamps read past). What an app sends is MIDI bytes, packed for the
   transport. The `midi` face's sweep runs ahead of the leases', so a UART's
   reader stops before its lease's driver goes.
+- **`camera`** (`runtime/system/dev_camera.py`): `size`, `capture` (the
+  latest frame, RGB565 in the glass's byte order) and `holder`, one holder.
+  No console has a camera: the P4s' MIPI-CSI sockets are empty (their
+  `camera` rows name the socket), so no image carries a driver and
+  `moybyte.camera` is `None` on every board. The driver's module,
+  `moy_camera`, is the host's stand-in alone (`runtime/host/moy_camera.py`).
 
 The host's stand-ins are `runtime/host/mic_sim.py`, `lora_sim.py` (with a
 LoRaWAN network server written apart from the C), `gatt_sim.py`,
-`usb_sim.py` and `midi_sim.py` (a UART port's wire); `http` runs for real.
+`usb_sim.py`, `midi_sim.py` (a UART port's wire) and `camera_sim.py`;
+`http` runs for real.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in

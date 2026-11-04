@@ -189,6 +189,7 @@
     {"perm": "ble", "grants": "api:ble", "tiers": ["python"], "prompt": "Use Bluetooth devices", "needs": "ble", "py": []},
     {"perm": "usb", "grants": "api:usb", "tiers": ["python"], "prompt": "Use USB devices plugged into the console", "needs": "usb", "py": []},
     {"perm": "midi", "grants": "api:midi", "tiers": ["python"], "prompt": "Play and hear MIDI instruments", "needs": "midi", "py": []},
+    {"perm": "camera", "grants": "api:camera", "tiers": ["python"], "prompt": "Take pictures with the camera", "needs": "camera", "py": []},
     {"perm": "editor", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "calc", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "getcarts", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},

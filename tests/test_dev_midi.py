@@ -34,6 +34,7 @@ IO = "7772e5db-3868-4112-a1a9-f2669d106bf3"
 @pytest.fixture(autouse=True)
 def wire():
     devices.grants = devices.console = None     # a console an earlier test built
+    leases.LEASES.grants = None
     leases.stand_in(lease_sim, SPEC)
     lease_sim.reset()
     usb_sim.install()

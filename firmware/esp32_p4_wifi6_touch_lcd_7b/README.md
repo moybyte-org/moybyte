@@ -388,7 +388,7 @@ below, so re-check against those, not against it.
   polling works.
 - Audio: ES8311 codec (0x18) + ES7210 quad-mic (0x40) on the same I2C bus;
   I2S MCLK13/WS10/BCLK12/DIN11/DOUT9; PA enable GPIO53.
-- Boot button GPIO35. No camera fitted (empty MIPI-CSI socket).
+- Boot button GPIO35. No camera fitted (empty MIPI-CSI socket); the image carries no camera driver, so `moybyte.camera` is None.
 - **Web Serial (the website's flasher) fails with "The device has been lost"
   after any pyserial tool has touched the port.** Not a hardware fault and not a
   disconnect — the port stays enumerated, and udev reports no remove event.

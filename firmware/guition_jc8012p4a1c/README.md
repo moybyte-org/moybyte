@@ -253,7 +253,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | C6 (WiFi/BLE) | ESP-Hosted SDIO: CLK18 CMD19 D0–D3 = 14–17, reset **GPIO54** — the Waveshare's wiring pin for pin |
 | Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Wired, with the Waveshare's driver (#82): the codec answers and the stream runs with 0 underruns, but our unit has no speaker fitted, so nobody has heard it |
 | TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
-| Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows |
+| Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows; the image carries no camera driver, so `moybyte.camera` is None |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`). The high-speed OTG port is the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`), TinyUSB's device off (`MICROPY_HW_ENABLE_USBDEV` 0); which connector, if any, reaches it on this unit is not known to the port |
 | Factory firmware | `JC8012P4A1C_I_W_Y_xiaozhi2.0.4.bin` (P4) + `JC-C6-slave_v2.3.2.bin` (C6) in the vendor's demo repo |
 

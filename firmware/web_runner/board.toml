@@ -136,6 +136,14 @@ A device API's face (runtime/system/devices.py): the browser has no hardware
 of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
 device driver, so `moybyte.midi` answers None there."""
 
+[[modules.shared.deny]]
+file = "dev_camera.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.camera` answers None there."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]
