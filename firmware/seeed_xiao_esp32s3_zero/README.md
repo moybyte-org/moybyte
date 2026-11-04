@@ -361,10 +361,12 @@ about somebody's house — and the page never needed it, because it probes with
 an empty `POST`, which was always gated.
 
 Digital in and out only. **The allowlist is the security model** — `1, 2, 4, 5,
-6, 7, 8, 9` (the pads `D0 D1 D3 D4 D5 D8 D9 D10`) plus `21`, the on-board user
+6` (the pads `D0 D1 D3 D4 D5`) plus `21`, the on-board user
 LED. A pin outside it is refused and never touched, because the pins left out
 are the ones the board is running on: `26–37` (flash + octal PSRAM), `19/20`
-(the USB device this board is reached through), `43/44` (`D6`/`D7`, UART0,
+(the USB device this board is reached through), `7/8/9` (`D8`–`D10`, the LoRa
+radio's SPI, with `38–42` behind the board-to-board connector: see LoRa
+below), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
 one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
@@ -375,6 +377,35 @@ reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
 leaves the LED lit — the other way round, reading a light turns it off), which
 means a written pin stays an output until reboot; and **an input is pulled up**,
 so an unwired pin reads 1 and a button to ground reads 0.
+
+## LoRa (`native/moy_net/moy_lora.h`)
+
+This Zero carries a Wio-SX1262 on the XIAO's board-to-board connector (the
+XIAO ESP32-S3 & Wio-SX1262 kit), declared as the `lora` row of `board.toml`'s
+`[hardware]`: SPI on `7/8/9` (SCK, MISO, MOSI — the `D8`–`D10` pads, which is
+why they left the pin allowlist), CS `41`, RESET `42`, BUSY `40`, DIO1 `39`
+and the module's receive switch on `38`. The SX1262 runs off its 1.8 V TCXO
+(DIO3), DIO2 switches its transmit path and the driver drives `38` high while
+it listens.
+
+The driver is the T-Deck's (`moy_lora.c`), built for a radio that owns its
+bus: it brings SPI2 up at the open and frees it at the close, with no band-gap
+gate (there is no panel), and `gate_stats()` answers `None`. This board runs
+no apps, so the `moybyte.lora` face is not here and nothing posts events: the
+module is reached from the REPL, by owner number, and `recv` is polled.
+
+```python
+import moy_lora as L
+from array import array
+L.open(1)                                              # -EIO: no radio fitted
+L.config(1, 868100000, 9, 125000, 5, 14, 0x12, 8)      # freq sf bw cr dBm sync preamble
+L.send(1, b"hello")                                    # -EBUSY while one is on the air
+L.listen(1, 1)
+buf, meta = bytearray(255), array("i", [0, 0, 0])
+n = L.recv(1, buf, meta)                               # meta: RSSI dBm, SNR x4, port
+L.close(1)                                             # before a soft reset: the
+                                                       # driver outlives the VM
+```
 
 ## Verified where
 
@@ -475,6 +506,12 @@ below used to hold:
   TLS to github.com, the request, and a real `http status=404` read back for a
   channel with nothing on it — which is the correct answer, and every layer
   under it had to work to produce it.
+
+- **LoRa round-trips with the T-Deck** (2026-11-04): raw packets at 868.1 MHz,
+  SF9, 125 kHz, sync `0x12`, 25 of 25 intact each way with the T-Deck at its
+  desk and with it running Brick Siege (its radio inside the band-gap gate), the
+  far end both this driver and an SX1262 script written apart from it; and a
+  ping-pong, the T-Deck listening between its own sends, 20 of 20.
 
 **NOT verified on hardware**, and each for its own reason:
 

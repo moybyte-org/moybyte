@@ -316,16 +316,24 @@ baud = 115200
 # The `lease` row is the pin allowlist (`MOY_NET_GPIO_PINS` in
 # boards/MOYBYTE_ZERO/mpconfigboard.h, README.md's "Pins"), which
 # tests/test_board_toml.py holds equal to it; `unused` is the pads the XIAO
-# does not bring out.
+# does not bring out. The `lora` row is the Wio-SX1262 on the XIAO's
+# board-to-board connector (the XIAO ESP32-S3 & Wio-SX1262 kit), which takes
+# the D8-D10 SPI pads with it.
 
 [hardware]
 chip_gpio = "esp32s3"
-unused = [10, 11, 12, 13, 14, 15, 16, 17, 18, 38, 39, 40, 41, 42, 47, 48]
+unused = [10, 11, 12, 13, 14, 15, 16, 17, 18, 47, 48]
 
 [[hardware.resource]]
 name = "gpio"
 class = "lease"
-pins = [1, 2, 4, 5, 6, 7, 8, 9, 21]
+pins = [1, 2, 4, 5, 6, 21]
+
+[[hardware.resource]]
+name = "lora"
+class = "class"
+api = "lora"
+pins = {sck = 7, miso = 8, mosi = 9, cs = 41, rst = 42, busy = 40, irq = 39, rxen = 38}
 
 [[hardware.resource]]
 name = "uart0"

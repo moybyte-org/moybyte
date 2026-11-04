@@ -1132,7 +1132,8 @@ def test_the_lease_rows_are_the_boards_offer_spec(tmp_path):
 def test_the_class_rows_are_the_drivers_defines():
     """A class row's API and the named pins of a class or os row reach the C
     (board_config.hw_defines, staged into the board's cmake): the T-Deck's
-    SX1262 and ES7210, a P4's mic sharing the speaker's clocks."""
+    SX1262 and ES7210, the Zero's SX1262, a P4's mic sharing the speaker's
+    clocks."""
     d = dict(board_config.hw_defines(BOARDS["tdeck"]))
     assert d["MOY_API_LORA"] == d["MOY_API_MIC"] == d["MOY_API_HTTP"] == d["MOY_API_BLE"] == 1
     assert (d["MOY_HW_LORA_RST"], d["MOY_HW_LORA_BUSY"], d["MOY_HW_LORA_IRQ"]) == (17, 13, 45)
@@ -1144,6 +1145,14 @@ def test_the_class_rows_are_the_drivers_defines():
         assert p4["MOY_HW_MIC_DIN"] == 11 and "MOY_HW_MIC_SCK" not in p4
         assert "MOY_API_LORA" not in p4
     assert "MOY_API_MIC" not in dict(board_config.hw_defines(BOARDS["guition-s3"]))
+    # The Zero's Wio-SX1262 names its own SPI pins, so its driver owns the bus
+    # (no panel, no band-gap gate) and switches the RX path itself.
+    z = dict(board_config.hw_defines(BOARDS["zero"]))
+    assert z["MOY_API_LORA"] == 1 and "MOY_HW_SPI2_RADIO_CS" not in z
+    assert (z["MOY_HW_LORA_SCK"], z["MOY_HW_LORA_MISO"], z["MOY_HW_LORA_MOSI"],
+            z["MOY_HW_LORA_CS"], z["MOY_HW_LORA_RST"], z["MOY_HW_LORA_BUSY"],
+            z["MOY_HW_LORA_IRQ"], z["MOY_HW_LORA_RXEN"]) == (7, 8, 9, 41, 42, 40, 39, 38)
+    assert "MOY_HW_LORA_SCK" not in d
 
 
 # -- THE SHARES' lines (native/moy_play/moy_play.h) ----------------------------------

@@ -122,15 +122,17 @@
 // is refused and never touched -- because the failure modes are not
 // survivable the way a 400 is.
 //     D0=1   D1=2   D2=3*  D3=4   D4=5(SDA)  D5=6(SCL)
-//     D6=43* D7=44* D8=7(SCK)  D9=8(MISO)  D10=9(MOSI)      * excluded, below
+//     D6=43* D7=44* D8=7*  D9=8*  D10=9*                  * excluded, below
 // 21 is not on a pad: it is the board's user LED (active LOW), the one
 // hello-world that needs no wiring. EXCLUDED, each a pin some other list would
 // hand out:
 //   3 (D2)         strapping (the JTAG source at reset): the strict call, the
 //                  one exposed pad held back;
+//   7, 8, 9        (D8-D10) the SPI bus of the Wio-SX1262 on the board-to-board
+//                  connector, the `lora` row of board.toml, with 38-42;
 //   43, 44 (D6/D7) UART0 TX/RX, the REPL that recovers a wedged USB image;
 //   19, 20         the native USB pair this board is reached through;
 //   0, 45, 46      boot-mode and VDD_SPI strapping (0 low at reset is the ROM
 //                  loader);
 //   26..37         SPI flash and the octal PSRAM: driving one stops the machine.
-#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 7, 8, 9, 21}
+#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 21}

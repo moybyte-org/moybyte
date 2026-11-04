@@ -6,14 +6,21 @@
 // catch, the windows timed here in C.
 //
 // THE RADIO is the board's `[hardware]` lora row (MOY_API_LORA,
-// MOY_HW_LORA_RST/_BUSY/_IRQ): the T-Deck's SX1262 on SPI2 with CS
-// MOY_HW_SPI2_RADIO_CS, the bus the panel's flush holds for most of every
-// frame. Every radio transaction runs in the flush's band gaps
-// (moy_flush_gate_take/_give, native/moy_flush/moy_flush.h): the feeder
-// stops queuing bands while a transaction waits, lets the bands in flight
-// finish, steps aside, and takes the bus back. The SX1262 runs off its TCXO
-// (DIO3, 1.8 V), DIO2 switching its RF path, DC-DC, and DIO1 raising its
-// interrupts, which wake the driver's task on core 0.
+// MOY_HW_LORA_RST/_BUSY/_IRQ), an SX1262 on SPI2, one of two shapes:
+// - the T-Deck's rides the panel's bus with CS MOY_HW_SPI2_RADIO_CS, the bus
+//   the flush holds for most of every frame. Every radio transaction runs in
+//   the flush's band gaps (moy_flush_gate_take/_give,
+//   native/moy_flush/moy_flush.h): the feeder stops queuing bands while a
+//   transaction waits, lets the bands in flight finish, steps aside, and takes
+//   the bus back;
+// - the Zero's (a Wio-SX1262) names its own bus (MOY_HW_LORA_SCK/_MISO/_MOSI/
+//   _CS): the driver brings SPI2 up at the open and frees it at the close,
+//   with no gate, and drives the module's receive switch (MOY_HW_LORA_RXEN)
+//   on while it listens.
+// The SX1262 runs off its TCXO (DIO3, 1.8 V), DIO2 switching its RF path,
+// DC-DC, and DIO1 raising its interrupts, which wake the driver's task on
+// core 0. Without the input table (the Zero) no events post: the holder
+// polls recv().
 //
 // THE STATE MACHINE is moy_lora_step(now_ms): the board's task calls it on
 // each interrupt and at each window's deadline; the host's stand-in calls it

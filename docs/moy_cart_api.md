@@ -726,9 +726,9 @@ is **refused, never driven** — the board needs some of its pins to stay alive
 (its flash, its USB, its serial console), and a typo must not be able to reach
 them. Ask for a pin outside the list and the console says so once, and nothing
 happens (on a P4, the verb answers `False` or `None`). On the Zero the list
-is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
-`D0`, `D1`, `D3`, `D4`, `D5`, `D8`, `D9`, `D10`) plus `21`, the board's own
-built-in LED; on a P4 it is the free pins its README lists.
+is `1, 2, 4, 5, 6` (the pads marked
+`D0`, `D1`, `D3`, `D4`, `D5`; `D8`–`D10` are its LoRa radio's) plus `21`, the
+board's own built-in LED; on a P4 it is the free pins its README lists.
 
 > **On or off, and that is all — for now.** There is no `pin_pwm`, no servo and
 > no motor verb yet: driving a motor takes a driver board between the pin and

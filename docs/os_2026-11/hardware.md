@@ -121,11 +121,16 @@ on.
   (`devices.MIC`, read by the WM's overlay signature), and the kernel's
   copy over a run it drives (`moy_chrome_overlay_draw`, which reads
   `moy_mic_owner`).
-- **`lora`** (`native/moy_net/moy_lora.h`, the T-Deck): the SX1262 inside
-  the band-gap gate, raw packets with RSSI and SNR, and LoRaWAN 1.0.x class
-  A OTAA on EU868 over the OS's MAC (`moy_lorawan.h`, `moy_aes.h`), its
-  receive windows timed by the driver's task. MAC commands are read past,
-  not answered, and the DevNonce is random (1.0.2).
+- **`lora`** (`native/moy_net/moy_lora.h`, the T-Deck and the Zero): the
+  SX1262, raw packets with RSSI and SNR, and LoRaWAN 1.0.x class A OTAA on
+  EU868 over the OS's MAC (`moy_lorawan.h`, `moy_aes.h`), its receive
+  windows timed by the driver's task. MAC commands are read past, not
+  answered, and the DevNonce is random (1.0.2). The T-Deck's radio rides the
+  panel's SPI2 inside the band-gap gate; the Zero's Wio-SX1262 names its own
+  bus in its `lora` row, so the driver brings SPI2 up itself, with no gate,
+  and switches the module's receive path (`rxen`). The Zero runs no apps, so
+  it carries the driver (the module `moy_lora`, reached from its REPL) and
+  not the face. The two radios round-trip raw packets with each other.
 - **`ble`** (`native/moy_input/moy_gatt.h`): a GATT central (scan, connect,
   find by UUID, read, write, subscribe) and a non-connectable beacon, on the
   NimBLE host the keyboard machine owns and only while it runs (keyboard

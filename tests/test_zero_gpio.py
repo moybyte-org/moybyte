@@ -83,14 +83,16 @@ def _touched(n):
     (43, "UART0"), (44, "UART0"),                        # the serial console
     (0, "boot strapping"), (45, "strapping"), (46, "strapping"),
     (3, "the strict call"),                              # D2, held back
+    (7, "LoRa SPI"), (8, "LoRa SPI"), (9, "LoRa SPI"),   # D8-D10, the Wio-SX1262
+    (38, "LoRa RF switch"), (41, "LoRa CS"),
 ])
 def test_a_pin_the_board_needs_is_not_in_the_allowlist(n, why):
     assert n not in PINS, why
 
 
 def test_the_allowlist_is_exactly_the_xiaos_spare_pads_plus_its_led():
-    # D0=1 D1=2 D3=4 D4=5 D5=6 D8=7 D9=8 D10=9, and 21 = the on-board user LED.
-    assert PINS == (1, 2, 4, 5, 6, 7, 8, 9, 21)
+    # D0=1 D1=2 D3=4 D4=5 D5=6, and 21 = the on-board user LED.
+    assert PINS == (1, 2, 4, 5, 6, 21)
 
 
 @pytest.mark.parametrize("op, word", [

@@ -29,7 +29,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
+// A radio row that names its own SPI pins owns its bus (the Zero's Wio-SX1262);
+// one that does not rides SPI2 beside the panel, inside the flush's band gaps
+// (the T-Deck).
+#ifdef MOY_HW_LORA_SCK
+#define LORA_OWN_BUS 1
+// portYIELD_FROM_ISR expands this IDF trace hook, whose empty default sits
+// past where a usermod's include order reaches (moy_flush.h carries the same
+// default for the boards that include it).
+#ifndef traceISR_EXIT_TO_SCHEDULER
+#define traceISR_EXIT_TO_SCHEDULER()
+#endif
+#else
 #include "moy_flush.h"
+#endif
 #endif
 
 #ifdef LORA_BOARD
@@ -67,6 +80,9 @@ typedef struct {
     TaskHandle_t task;
     volatile int run;
     uint32_t xfers, wait_us, wait_max;
+    #ifdef LORA_OWN_BUS
+    uint8_t bus;                        // the radio's own bus is up
+    #endif
     #endif
 } lora_t;
 static lora_t *R;
@@ -174,8 +190,26 @@ enum { RADIO_NONE = 0, RADIO_TX_DONE = 1, RADIO_RX_DONE = 2, RADIO_TIMEOUT = 3 }
 #define PIN_RST MOY_HW_LORA_RST
 #define PIN_BUSY MOY_HW_LORA_BUSY
 #define PIN_IRQ MOY_HW_LORA_IRQ
+#ifdef LORA_OWN_BUS
+#define PIN_CS MOY_HW_LORA_CS
+#define gate_take()
+#define gate_give()
+#else
 #define PIN_CS MOY_HW_SPI2_RADIO_CS
+#define gate_take() moy_flush_gate_take()
+#define gate_give() moy_flush_gate_give()
+#endif
 #define SPI_HZ 8000000
+
+// An RF switch the radio's DIO2 does not drive: its receive path on while it
+// listens, off otherwise.
+static void rx_path(int on) {
+    #ifdef MOY_HW_LORA_RXEN
+    gpio_set_level(MOY_HW_LORA_RXEN, on);
+    #else
+    (void)on;
+    #endif
+}
 
 
 static void wait_busy(void) {
@@ -190,11 +224,11 @@ static void wait_busy(void) {
 static int xfer(size_t n) {
     wait_busy();
     int64_t t0 = esp_timer_get_time();
-    moy_flush_gate_take();
+    gate_take();
     uint32_t w = (uint32_t)(esp_timer_get_time() - t0);
     spi_transaction_t t = { .length = n * 8, .tx_buffer = R->tx, .rx_buffer = R->rx };
     esp_err_t e = spi_device_polling_transmit(R->spi, &t);
-    moy_flush_gate_give();
+    gate_give();
     R->xfers++;
     R->wait_us += w;
     if (w > R->wait_max) {
@@ -281,7 +315,22 @@ static void task_fn(void *arg) {
 }
 
 static int radio_up(void) {
+    #ifdef LORA_OWN_BUS
+    spi_bus_config_t bc = { .mosi_io_num = MOY_HW_LORA_MOSI, .miso_io_num = MOY_HW_LORA_MISO,
+                            .sclk_io_num = MOY_HW_LORA_SCK, .quadwp_io_num = -1,
+                            .quadhd_io_num = -1, .max_transfer_sz = 264 };
+    if (spi_bus_initialize(SPI2_HOST, &bc, SPI_DMA_CH_AUTO) != ESP_OK) {
+        return -MOY_LORA_EIO;
+    }
+    R->bus = 1;
+    #else
     moy_flush_gate_open();
+    #endif
+    #ifdef MOY_HW_LORA_RXEN
+    gpio_config_t rxen = { .pin_bit_mask = 1ULL << MOY_HW_LORA_RXEN, .mode = GPIO_MODE_OUTPUT };
+    gpio_config(&rxen);
+    rx_path(0);
+    #endif
     R->tx = heap_caps_malloc(264, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     R->rx = heap_caps_malloc(264, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (R->tx == NULL || R->rx == NULL) {
@@ -368,6 +417,13 @@ static void radio_down(void) {
         spi_bus_remove_device(R->spi);
         R->spi = NULL;
     }
+    rx_path(0);
+    #ifdef LORA_OWN_BUS
+    if (R->bus) {
+        spi_bus_free(SPI2_HOST);
+        R->bus = 0;
+    }
+    #endif
     heap_caps_free(R->tx);
     heap_caps_free(R->rx);
     R->tx = R->rx = NULL;
@@ -411,6 +467,7 @@ static int radio_tx(const uint8_t *d, size_t n, uint8_t sf, uint16_t preamble, i
     static const uint8_t clr[2] = { 0xff, 0xff };
     rc |= cmd(0x02, clr, 2);
     static const uint8_t to[3] = { 0x02, 0xee, 0x00 };          // 3 s fence
+    rx_path(0);
     rc |= cmd(0x83, to, 3);
     return rc;
 }
@@ -420,6 +477,7 @@ static int radio_rx(uint32_t timeout_ms) {
     int rc = cmd(0x02, clr, 2);
     uint32_t t = timeout_ms == 0 ? 0xffffffu : timeout_ms * 64u;
     uint8_t to[3] = { (uint8_t)(t >> 16), (uint8_t)(t >> 8), (uint8_t)t };
+    rx_path(1);
     rc |= cmd(0x82, to, 3);
     return rc;
 }
@@ -427,6 +485,7 @@ static int radio_rx(uint32_t timeout_ms) {
 static void radio_standby(void) {
     uint8_t a = 0x00;
     cmd(0x80, &a, 1);
+    rx_path(0);
 }
 
 static int radio_event(uint8_t *buf, size_t *n, int16_t *rssi, int8_t *snr) {
