@@ -7,12 +7,12 @@
 #include "moy_edge.h"
 
 #include "driver/gpio.h"
-#include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "hal/gpio_ll.h"
 #include "soc/gpio_struct.h"
 
-// Internal RAM (.bss): the ISR reads it.
+// Internal RAM: the ISR reads it.
 typedef struct {
     moy_input_isr_t w;
     uint32_t h;                     // 0: the slot is free
@@ -23,15 +23,20 @@ typedef struct {
     esp_timer_handle_t timer;
 } edge_t;
 
-static edge_t s_edge[MOY_EDGE_PINS];
+// The slots, made at the first open and kept, as the GPIO ISR service is: a
+// board that never opens a pin pays no internal RAM for them.
+static edge_t *s_edge;
 
-static void IRAM_ATTR edge_isr(void *arg) {
+static void MOY_INPUT_ISR_TEXT edge_isr(void *arg) {
     edge_t *e = arg;
     moy_input_isr_put(&e->w, MOY_EV_EDGE, (uint16_t)e->pin, 0,
                       (uint32_t)gpio_ll_get_level(&GPIO, (uint32_t)e->pin));
 }
 
 static edge_t *edge_of(uint32_t h) {
+    if (s_edge == NULL) {
+        return NULL;
+    }
     for (uint32_t i = 0; i < MOY_EDGE_PINS; i++) {
         if (h != 0 && s_edge[i].h == h) {
             return &s_edge[i];
@@ -62,6 +67,13 @@ static void pin_safe(int pin) {
 int moy_edge_open(int pin, uint32_t depth, bool loop, uint32_t *h) {
     if (pin < 0 || !(loop ? GPIO_IS_VALID_OUTPUT_GPIO(pin) : GPIO_IS_VALID_GPIO(pin))) {
         return MOY_INPUT_BAD;
+    }
+    if (s_edge == NULL) {
+        s_edge = heap_caps_calloc(MOY_EDGE_PINS, sizeof(edge_t),
+                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (s_edge == NULL) {
+            return MOY_INPUT_NOMEM;
+        }
     }
     edge_t *e = NULL;
     for (uint32_t i = 0; i < MOY_EDGE_PINS; i++) {

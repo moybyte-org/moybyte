@@ -230,6 +230,20 @@ def test_an_isr_ring_is_internal_and_stops_at_its_ceiling():
     assert t.ring_source("uart1", mi.PROV_FIFO, 4096).ring()[0] == 1024
 
 
+def test_the_isr_writer_is_iram_only_where_a_board_takes_it():
+    """moy_input.h MOY_INPUT_ISR_IRAM: an idle S3 console pays no internal RAM
+    for an ISR it never opens (its wasm idle guard has a 2 KiB budget, and
+    this text cost 256 B of it), and both P4s keep the writer hot."""
+    from pathlib import Path
+    from tools import board_config
+    root = Path(__file__).resolve().parent.parent / "firmware"
+    takes = {d: ("MOY_INPUT_ISR_IRAM", 1) in board_config.input_defines(root / d)
+             for d in ("lilygo_t_deck_plus_mainline", "guition_jc3248w535",
+                       "esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c")}
+    assert takes == {"lilygo_t_deck_plus_mainline": False, "guition_jc3248w535": False,
+                     "esp32_p4_wifi6_touch_lcd_7b": True, "guition_jc8012p4a1c": True}
+
+
 def test_ring_sources_are_counted_and_a_closed_one_is_taken_again():
     t = mi.InputTable()
     rs = [t.ring_source("r%d" % i, mi.PROV_FIFO, 4) for i in range(mi.RING_SOURCES)]

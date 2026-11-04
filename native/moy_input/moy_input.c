@@ -12,7 +12,6 @@
 #include "moy_htab.h"
 
 #ifdef MOY_INPUT_BOARD
-#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -196,7 +195,7 @@ static void ring_free(void *p, bool internal) {
 static uint64_t clock_us(void) {
     return (uint64_t)esp_timer_get_time();
 }
-#define ISR_TEXT IRAM_ATTR
+#define ISR_TEXT MOY_INPUT_ISR_TEXT
 #define ISR_CLOCK() esp_timer_get_time()    // IRAM in ESP-IDF
 #define ISR_LOCK(w) portENTER_CRITICAL_SAFE((portMUX_TYPE *)(w)->mux)
 #define ISR_UNLOCK(w) portEXIT_CRITICAL_SAFE((portMUX_TYPE *)(w)->mux)

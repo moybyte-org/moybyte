@@ -311,7 +311,8 @@ baud = 115200
 # The input table's parameters, each a compile definition
 # (tools/board_config.py INPUT_PARAMS; native/moy_input/moy_input.h has the
 # defaults and what each means; isr_ring_max's are in moy_event.h):
-# repeat_delay_ms, repeat_rate_ms, ball_coast, ball_coast_rate, isr_ring_max. The trackball's coast ships at 0, no momentum
+# repeat_delay_ms, repeat_rate_ms, ball_coast, ball_coast_rate, isr_ring_max,
+# isr_iram. The trackball's coast ships at 0, no momentum
 # (docs/theme_and_shell_2026-11.md §1.4): a hand trial sets it here.
 ball_coast = 0
 

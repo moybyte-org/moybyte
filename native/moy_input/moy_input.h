@@ -107,7 +107,8 @@
 // SHARES' RINGS row (native/moy_play/moy_play.h) like every task's ring; an
 // ISR's is internal RAM, under the kernel's internal cap, and is written only
 // through a moy_input_isr_t (moy_input_isr_put), which touches nothing but the
-// ring, its lock and the clock, so it is safe from an IRAM ISR. Its drops are
+// ring, its lock and the clock, so it is safe from an IRAM ISR where its text
+// is IRAM (MOY_INPUT_ISR_IRAM) and from any other ISR anywhere. Its drops are
 // counted where they are seen: a reader whose cursor the writer passed reads
 // a LOST record for every record it missed, whatever their kind, when it
 // reads any kind the ring has held, and the source counts each such record
@@ -164,6 +165,20 @@
 #endif
 #ifndef MOY_INPUT_BALL_COAST_RATE
 #define MOY_INPUT_BALL_COAST_RATE 20
+#endif
+// The ISR writer's text (moy_input_isr_put, moy_edge's ISR): IRAM where a
+// board's board.toml [input] isr_iram says so (both P4s), so an ISR source
+// stays hot through a collection; elsewhere flash, which costs an idle board
+// no internal RAM and serves an ISR installed without ESP_INTR_FLAG_IRAM (the
+// cache-off window masks it). An IRAM ISR calls it only where it is IRAM.
+#ifndef MOY_INPUT_ISR_IRAM
+#define MOY_INPUT_ISR_IRAM 0
+#endif
+#if defined(MOY_INPUT_BOARD) && MOY_INPUT_ISR_IRAM
+#include "esp_attr.h"
+#define MOY_INPUT_ISR_TEXT IRAM_ATTR
+#else
+#define MOY_INPUT_ISR_TEXT
 #endif
 #define MOY_INPUT_REP_MAX 255u      // a frame's count for one button, saturated
 #define MOY_INPUT_POINTER_LINGER_MS 1500
@@ -319,7 +334,7 @@ typedef struct {
 } moy_input_isr_t;
 int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w);
 void moy_input_isr_detach(moy_input_isr_t *w);
-// One record, stamped now; IRAM on a board, callable from an ISR.
+// One record, stamped now; callable from an ISR (MOY_INPUT_ISR_TEXT).
 void moy_input_isr_put(moy_input_isr_t *w, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
 // A reader of `kinds` (MOY_EV_BIT of each; MOY_EV_ALL) into *r; MOY_INPUT_FULL
 // when MOY_EV_READERS are taken.

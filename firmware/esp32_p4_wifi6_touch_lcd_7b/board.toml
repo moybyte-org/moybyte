@@ -183,6 +183,9 @@ otadata_size   = "0x2000"
 # internal RAM has room for a ring that covers a 2 kHz source across a
 # collection (the rings spike in #246), so its ceiling is 1024 records, 16 KiB.
 isr_ring_max = 1024
+# The ISR writer's text is IRAM (moy_input.h MOY_INPUT_ISR_IRAM), so a lease
+# pin's ISR stays hot through a collection; a board without it pays none.
+isr_iram = 1
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
