@@ -144,6 +144,9 @@
 #define MOY_AUDIO_RATE                      (44100)
 #define MOY_AUDIO_STEREO                    (1)
 #define MOY_AUDIO_DAC_MONO                  (1)
+// The feeder on core 0, off the VM's: its stereo stage on core 1 cost a heavy
+// cart frames whether anything sounded or not (A/B'd 2026-11-05).
+#define MOY_AUDIO_CORE                      (0)
 
 // Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
 // central over NimBLE, its bonds in NVS. There is no `bluetooth` module.

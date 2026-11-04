@@ -242,7 +242,8 @@ order of preference:
    thread: wasm, AOT or interpreted, and ELF. Today's par lanes run on core 0
    *below* every task there and are taken back when late
    (`native/moy_wasm/README.md`), which a deadline cannot ride; the audio
-   feeder is on core 1 near the top priority (`native/moy_audio/moy_aud_out.c`).
+   feeder is near the top priority on its board's `MOY_AUDIO_CORE`, core 1 on
+   the T-Deck and core 0 on the P4s (`native/moy_audio/moy_aud_out.c`).
    A timed lane is therefore a new thing: `moy_audio(buf, n)` fills the
    app's ring (never inside the feeder), and
    `moy_timer(t_us)` runs from an OS-owned `esp_timer` with the tick's
@@ -340,9 +341,10 @@ core 1 through the cache and the memory bus the cores share, and the decode
 itself is the cost: its state in internal SRAM bought back a fifth of it for
 about 30 KiB the S3 cannot spare, and decoding in bursts or building the
 decoder for size bought nothing (A/B'd 2026-11-04; the numbers are #246's).
-On the Waveshare P4 a stream costs a heavy cart a few frames a second too,
-and the stereo stage the feeder runs on core 1 beside the VM costs some
-whether a stream plays or not (the A/B is #66's). While it plays the feeder
+On the Waveshare P4 a stream costs a heavy cart a few frames a second too.
+The P4s' feeder runs on core 0, off the VM's core: on core 1 its stereo
+stage cost a heavy cart frames whether a stream played or not (A/B'd
+2026-11-05). While it plays the feeder
 is no longer lazy (the open starts the output), its I²S DMA ring is permanent
 internal SRAM (6 KiB on the T-Deck, 24 KiB on a P4: 12 × 512 stereo
 frames), and a

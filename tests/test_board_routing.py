@@ -846,7 +846,8 @@ def test_web_runner_audio_pulls_the_kernels_mix():
 
 
 def test_the_feeder_task_is_pinned_lazy_and_chunked():
-    """The I2S feed is a native C task PINNED TO CORE 1 that owns the IDF
+    """The I2S feed is a native C task PINNED TO THE BOARD'S MOY_AUDIO_CORE
+    (core 1 unless named; the P4s name 0, off the VM's core) that owns the IDF
     i2s_std channel and feeds it continuously, decoupled from the frame: the VM
     cannot run Python there, only a pure-C task can. It is created at the
     first focus of a session (moy_aud_focus -> moy_aud_out_start), never at
@@ -857,7 +858,14 @@ def test_the_feeder_task_is_pinned_lazy_and_chunked():
     aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
     assert "xTaskCreatePinnedToCore(feeder" in out
-    assert "&s_task, 1)" in out                 # core 1, the last argument
+    assert "&s_task, MOY_AUDIO_CORE)" in out    # the core, the last argument
+    assert "#define MOY_AUDIO_CORE 1\n" in out
+    # Under the esp_timer task where the two share a core.
+    assert "#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)" in out
+    for board in ("esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
+                  "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
+        h = (Path("firmware") / board / "mpconfigboard.h").read_text(encoding="utf-8")
+        assert re.search(r"#define MOY_AUDIO_CORE\s+\(0\)", h), board
     for fn in ("i2s_new_channel(", "i2s_channel_init_std_mode(",
                "i2s_channel_write(", "xSemaphoreCreateMutex(",
                "xSemaphoreTake(", "xSemaphoreGive("):

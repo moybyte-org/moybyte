@@ -3,8 +3,8 @@
 // moycore reaches from the engine's thread, its timed audio lane
 // (native/moy_wasm/moy_wasm_session.h) or a Python process's
 // `moybyte.snd`, one holder at a time. The stream is libmoy's moy_stream, and
-// the core-1 feeder adds it after the synth in every block it renders, under
-// the same master level.
+// the feeder adds it after the synth in every block it renders, under the
+// same master level.
 //
 // Built when moy_audio is in the image, whose cmake defines MOY_AUDIO_SND. A
 // board without it has no speaker to reach, and moycore leaves the binding's

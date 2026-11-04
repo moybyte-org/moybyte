@@ -1,12 +1,13 @@
 // moy_aud_out: the board's speaker -- the I2S channel, the codec where the board
 // has one, and the feeder task that pulls the mix (moy_aud.h has the contract).
 //
-// THE FEEDER (#41's crackle fix) is a FreeRTOS task pinned to core 1 that
-// renders blocks out of moy_aud_render and writes them to I2S, blocking on the
-// DMA drain -- which is what paces it to the audio clock whatever the frame
-// loop is doing. It never touches the VM. A compiled cart's thread shares core
-// 1, so its work per block stays small: it renders in 32-frame chunks, taking
-// the lock per chunk, so a verb waits tens of microseconds, not a block.
+// THE FEEDER (#41's crackle fix) is a FreeRTOS task pinned to the board's
+// MOY_AUDIO_CORE that renders blocks out of moy_aud_render and writes them to
+// I2S, blocking on the DMA drain -- which is what paces it to the audio clock
+// whatever the frame loop is doing. It never touches the VM. It renders in
+// 32-frame chunks, taking the lock per chunk, so a verb waits tens of
+// microseconds, not a block. Its CPU comes out of whatever else shares its
+// core: on the VM's core (1) that is the frame.
 //
 // LAZY: nothing here runs, and no internal SRAM is spent (the task's stack, the
 // DMA ring, the mutex), until the first session is focused. A board whose
@@ -30,6 +31,7 @@
 //   MOY_AUDIO_STEREO                    16-bit stereo at MOY_AUDIO_RATE, twice the
 //                                       mix's (moy_aud_render_st); mono otherwise
 //   MOY_AUDIO_DAC_MONO                  the codec reads one slot: both carry the mean
+//   MOY_AUDIO_CORE                      the feeder's core, 1 (the VM's) unless named
 
 #include <stdio.h>
 #include <string.h>
@@ -44,6 +46,7 @@
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "esp_task.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -56,6 +59,17 @@
 
 #ifndef MOY_AUDIO_RATE
 #define MOY_AUDIO_RATE 22050
+#endif
+#ifndef MOY_AUDIO_CORE
+#define MOY_AUDIO_CORE 1
+#endif
+// Near the top, but under the esp_timer task where the two share a core: at
+// its priority a block's render held every timer callback for its length.
+#if (MOY_AUDIO_CORE == 0 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU0)) \
+    || (MOY_AUDIO_CORE == 1 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU1))
+#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)
+#else
+#define FEEDER_PRIO (configMAX_PRIORITIES - 3)
 #endif
 #ifndef MOY_AUDIO_I2S_MCLK
 #define MOY_AUDIO_I2S_MCLK (-1)
@@ -392,8 +406,7 @@ int moy_aud_out_start(void) {
     }
     s_running = 1;
     if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + OUT_SAMPLES * 2, NULL,
-                                configMAX_PRIORITIES - 3,
-                                &s_task, 1) != pdPASS) {
+                                FEEDER_PRIO, &s_task, MOY_AUDIO_CORE) != pdPASS) {
         s_running = 0;
         s_task = NULL;
         s_why = "no memory for the feeder task";
