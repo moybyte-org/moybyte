@@ -1,0 +1,2368 @@
+Moybyte's changes to dash v0.5.13.5 (native/moy_sh/UPSTREAM.md).
+
+dash as a session of the kernel's shell rather than a process of a Unix:
+
+- Every writable global is a field of the session's record, struct
+  moy_sh_globals (native/moy_sh/moy_sh_g.h): a definition becomes
+  `#define name (moy_sh_g->name)`, an aggregate `(*moy_sh_g->name)`, so the
+  objects keep no .data or .bss and a fork is a snapshot of one arena. The
+  types such fields need move from .c files into headers (struct ifsregion,
+  struct stdin_state, struct stack_block, MINSIZE); output's `output` is
+  `outputf`; tags and members a macro would rewrite are renamed (parsefile_s,
+  stdin_state_s, heredoc_s, a job's jctl); stackmark's members are mark_*.
+- The POSIX calls go to native/moy_sh/moy_sh_posix.h (included after the
+  system headers): there is no fork, exec, wait, signal or tty. forkshell
+  takes the child's body as a function (moy_sh_fork runs it to its end);
+  evalsubshell, evalpipe and evalbackcmd pass theirs; shellexec and the
+  default command case call moy_sh_exec; vforkexec, tryexec and the forked
+  here-document writer go (a pipe buffer holds the whole document); waitproc
+  waits through moy_sh_wait, nonblocking as wait3 was, and a waiting `wait`
+  blocks there; a blocking wait names its job (moy_sh_foreground) so Ctrl-C
+  reaches it; process groups and the tty go.
+- Input is pushed: the parser raises EXMORE (error.h) where it would read past
+  what the face sent, which the session answers with MOY_SH_MORE; the end of
+  that text is marked (input_eof). dotrap polls the host for Ctrl-C first.
+- main() and the profile go (the session starts dash, native/moy_sh/moy_sh.c);
+  cmdloop and setprompt are public. find_builtin falls back to the shell's own
+  table (moy_sh_find_builtin). The environment is not imported, PATH is /bin,
+  setlocale and putenv go, mail checking, times and dash_errno go.
+- Signal names with no entry (NULL) are skipped.
+
+diff --git a/src/alias.c b/src/alias.c
+index 1b9b979..c52b5ff 100644
+--- a/src/alias.c
++++ b/src/alias.c
+@@ -33,6 +33,7 @@
+  */
+ 
+ #include <stdlib.h>
++#include "moy_sh_posix.h"
+ #include "shell.h"
+ #include "input.h"
+ #include "output.h"
+@@ -46,7 +47,7 @@
+ 
+ #define ATABSIZE 39
+ 
+-struct alias *atab[ATABSIZE];
++#define atab (moy_sh_g->atab)
+ 
+ STATIC void setalias(const char *, const char *);
+ STATIC struct alias *freealias(struct alias *);
+diff --git a/src/arith_yacc.c b/src/arith_yacc.c
+index b978ef0..57669bf 100644
+--- a/src/arith_yacc.c
++++ b/src/arith_yacc.c
+@@ -34,6 +34,7 @@
+ 
+ #include <inttypes.h>
+ #include <stdlib.h>
++#include "moy_sh_posix.h"
+ #include "arith_yacc.h"
+ #include "expand.h"
+ #include "shell.h"
+@@ -45,12 +46,11 @@
+ #error Arithmetic tokens are out of order.
+ #endif
+ 
+-static const char *arith_startbuf;
++#define arith_startbuf (moy_sh_g->arith_startbuf)
++#define arith_buf (moy_sh_g->arith_buf)
+ 
+-const char *arith_buf;
+-union yystype yylval;
+ 
+-static int last_token;
++#define last_token (moy_sh_g->last_token)
+ 
+ #define ARITH_PRECEDENCE(op, prec) [op - ARITH_BINOP_MIN] = prec
+ 
+diff --git a/src/arith_yacc.h b/src/arith_yacc.h
+index ff34d52..233641d 100644
+--- a/src/arith_yacc.h
++++ b/src/arith_yacc.h
+@@ -84,6 +84,6 @@ union yystype {
+ 	char *name;
+ };
+ 
+-extern union yystype yylval;
++#define yylval (*moy_sh_g->yylval)
+ 
+ int yylex(void);
+diff --git a/src/arith_yylex.c b/src/arith_yylex.c
+index ec5b5b2..a34ea3c 100644
+--- a/src/arith_yylex.c
++++ b/src/arith_yylex.c
+@@ -47,7 +47,7 @@
+ #error Arithmetic tokens are out of order.
+ #endif
+ 
+-extern const char *arith_buf;
++#define arith_buf (moy_sh_g->arith_buf)
+ 
+ int
+ yylex()
+diff --git a/src/bltin/bltin.h b/src/bltin/bltin.h
+index f5ac06f..c5cb7fd 100644
+--- a/src/bltin/bltin.h
++++ b/src/bltin/bltin.h
+@@ -40,6 +40,7 @@
+  * routines to ash routines using defines.
+  */
+ 
++#include "moy_sh_posix.h"
+ #include "../shell.h"
+ #include "../mystring.h"
+ #include "../options.h"
+diff --git a/src/bltin/printf.c b/src/bltin/printf.c
+index 5355f5d..ed0c6d2 100644
+--- a/src/bltin/printf.c
++++ b/src/bltin/printf.c
+@@ -48,8 +48,8 @@ static char	*getstr(void);
+ static char	*mklong(const char *, const char *);
+ static void      check_conversion(const char *, const char *);
+ 
+-static int	rval;
+-static char  **gargv;
++#define rval (moy_sh_g->rval)
++#define gargv (moy_sh_g->gargv)
+ 
+ #define isodigit(c)	((c) >= '0' && (c) <= '7')
+ #define octtobin(c)	((c) - '0')
+diff --git a/src/bltin/test.c b/src/bltin/test.c
+index ac479bd..de97370 100644
+--- a/src/bltin/test.c
++++ b/src/bltin/test.c
+@@ -19,6 +19,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <unistd.h>
++#include "moy_sh_posix.h"
+ 
+ /* test(1) accepts the following grammar:
+ 	oexpr	::= aexpr | aexpr "-o" oexpr ;
+@@ -134,8 +135,8 @@ static struct t_op {
+ 	{0,	0,	0}
+ };
+ 
+-static char **t_wp;
+-static struct t_op const *t_wp_op;
++#define t_wp (moy_sh_g->t_wp)
++#define t_wp_op (moy_sh_g->t_wp_op)
+ 
+ static void syntax(const char *, const char *);
+ static int oexpr(enum token);
+diff --git a/src/builtins.def.in b/src/builtins.def.in
+index 95e420c..e65749f 100644
+--- a/src/builtins.def.in
++++ b/src/builtins.def.in
+@@ -78,7 +78,6 @@ readcmd		-u read
+ returncmd	-s return
+ setcmd		-s set
+ shiftcmd	-s shift
+-timescmd	-s times
+ trapcmd		-s trap
+ truecmd		-s : -u true
+ typecmd		-u type
+diff --git a/src/cd.c b/src/cd.c
+index bcd1484..c4af0c6 100644
+--- a/src/cd.c
++++ b/src/cd.c
+@@ -41,6 +41,7 @@
+ #ifdef __CYGWIN__
+ #include <sys/cygwin.h>
+ #endif
++#include "moy_sh_posix.h"
+ 
+ /*
+  * The cd and pwd commands.
+@@ -69,8 +70,8 @@ STATIC const char *updatepwd(const char *);
+ STATIC char *getpwd(void);
+ STATIC int cdopt(void);
+ 
+-STATIC char *curdir = nullstr;		/* current working directory */
+-STATIC char *physdir = nullstr;		/* physical working directory */
++#define curdir (moy_sh_g->curdir)
++#define physdir (moy_sh_g->physdir)
+ 
+ STATIC int
+ cdopt()
+@@ -313,7 +314,7 @@ setpwd(const char *val, int setold)
+ 	INTOFF;
+ 	if (physdir != nullstr) {
+ 		if (physdir != oldcur)
+-			free(physdir);
++			ckfree(physdir);
+ 		physdir = nullstr;
+ 	}
+ 	if (oldcur == val || !val) {
+@@ -324,7 +325,7 @@ setpwd(const char *val, int setold)
+ 	} else
+ 		dir = savestr(val);
+ 	if (oldcur != dir && oldcur != nullstr) {
+-		free(oldcur);
++		ckfree(oldcur);
+ 	}
+ 	curdir = dir;
+ 	INTON;
+diff --git a/src/error.c b/src/error.c
+index 728ff88..8121f0f 100644
+--- a/src/error.c
++++ b/src/error.c
+@@ -59,11 +59,6 @@
+  * Code to handle exceptions in C.
+  */
+ 
+-struct jmploc *handler;
+-int exception;
+-int suppressint;
+-volatile sig_atomic_t intpending;
+-int errlinno;
+ 
+ 
+ static void exverror(int, const char *, va_list)
+diff --git a/src/error.h b/src/error.h
+index 661a8a0..96d5f58 100644
+--- a/src/error.h
++++ b/src/error.h
+@@ -60,14 +60,15 @@ struct jmploc {
+ 	jmp_buf loc;
+ };
+ 
+-extern struct jmploc *handler;
+-extern int exception;
++#define handler (moy_sh_g->handler)
++#define exception (moy_sh_g->exception)
+ 
+ /* exceptions */
+ #define EXINT 0		/* SIGINT received */
+ #define EXERROR 1	/* a generic error */
+ #define EXEND 3		/* exit the shell */
+ #define EXEXIT 4	/* exit the shell via exitcmd */
++#define EXMORE 5	/* the face's input ended inside a command (moy_sh.h) */
+ 
+ 
+ /*
+@@ -77,8 +78,8 @@ extern int exception;
+  * more fun than worrying about efficiency and portability. :-))
+  */
+ 
+-extern int suppressint;
+-extern volatile sig_atomic_t intpending;
++#define suppressint (moy_sh_g->suppressint)
++#define intpending (moy_sh_g->intpending)
+ 
+ #define barrier() ({ __asm__ __volatile__ ("": : :"memory"); })
+ #define INTOFF \
+@@ -117,7 +118,7 @@ void __inton(void);
+ 
+ void exraise(int) __attribute__((__noreturn__));
+ void onint(void) __attribute__((__noreturn__));
+-extern int errlinno;
++#define errlinno (moy_sh_g->errlinno)
+ void sh_error(const char *, ...) __attribute__((__noreturn__));
+ void exerror(int, const char *, ...) __attribute__((__noreturn__));
+ const char *errmsg(int, int);
+diff --git a/src/eval.c b/src/eval.c
+index 0f2a7ba..a6c5812 100644
+--- a/src/eval.c
++++ b/src/eval.c
+@@ -36,6 +36,7 @@
+ #include <signal.h>
+ #include <unistd.h>
+ #include <sys/types.h>
++#include "moy_sh_posix.h"
+ 
+ /*
+  * Evaluate a command.
+@@ -67,21 +68,16 @@
+ #endif
+ 
+ 
+-int evalskip;			/* set if we are skipping commands */
+-STATIC int skipcount;		/* number of levels to skip */
+-MKINIT int loopnest;		/* current loop nesting level */
+-static int funcline;		/* starting line number of current function, or 0 if not in a function */
++#define skipcount (moy_sh_g->skipcount)
++#define loopnest (moy_sh_g->loopnest)
++#define funcline (moy_sh_g->funcline)
+ 
+ 
+-char *commandname;
+-int exitstatus;			/* exit status of last command */
+-int back_exitstatus;		/* exit status of backquoted command */
+-int savestatus = -1;		/* exit status of last command outside traps */
+ 
+ /* Prevent PS4 nesting. */
+-MKINIT int inps4;
++#define inps4 (moy_sh_g->inps4)
+ 
+-MKINIT int tpip[2] = { -1 };
++#define tpip (moy_sh_g->tpip)
+ 
+ #if !defined(__alpha__) || (defined(__GNUC__) && __GNUC__ >= 3)
+ STATIC
+@@ -106,7 +102,7 @@ STATIC int bltincmd(int, char **);
+ 
+ 
+ STATIC const struct builtincmd bltin = {
+-	.name = nullstr,
++	.name = "",
+ 	.builtin = bltincmd,
+ 	.flags = BUILTIN_REGULAR,
+ };
+@@ -484,9 +480,34 @@ out:
+  * Kick off a subshell to evaluate a tree.
+  */
+ 
++/*
++ * A subshell's body, in the child the shell asked the OS for (moy_sh.h).
++ */
++
++struct subshell_child {
++	union node *n;
++	int flags;
++};
++
++static void __attribute__((__noreturn__))
++evalsubshell_body(union node *n, int flags)
++{
++	INTON;
++	redirect(n->nredir.redirect, 0);
++	evaltreenr(n->nredir.n, flags);
++}
++
++static void evalsubshell_child(void *arg)
++{
++	struct subshell_child *c = arg;
++
++	evalsubshell_body(c->n, c->flags);
++}
++
+ STATIC int
+ evalsubshell(union node *n, int flags)
+ {
++	struct subshell_child child;
+ 	struct job *jp;
+ 	int backgnd = (n->type == NBACKGND);
+ 	int status;
+@@ -499,19 +520,15 @@ evalsubshell(union node *n, int flags)
+ 	INTOFF;
+ 	if (!backgnd && flags & EV_EXIT && !have_traps()) {
+ 		forkreset(NULL);
+-		goto nofork;
+-	}
+-	jp = makejob(1);
+-	if (forkshell(jp, n->nredir.n, backgnd) == 0) {
+-		flags |= EV_EXIT;
+-		if (backgnd)
+-			flags &=~ EV_TESTED;
+-nofork:
+-		INTON;
+-		redirect(n->nredir.redirect, 0);
+-		evaltreenr(n->nredir.n, flags);
++		evalsubshell_body(n, flags);
+ 		/* never returns */
+ 	}
++	jp = makejob(1);
++	child.n = n;
++	child.flags = flags | EV_EXIT;
++	if (backgnd)
++		child.flags &= ~EV_TESTED;
++	forkshell(jp, n->nredir.n, backgnd, evalsubshell_child, &child);
+ 	status = 0;
+ 	if (! backgnd)
+ 		status = waitforjob(jp);
+@@ -562,9 +579,38 @@ expredir(union node *n)
+  * of all the rest.)
+  */
+ 
++struct pipe_child {
++	union node *n;
++	int flags;
++	int prevfd;
++	int pip[2];
++};
++
++static void evalpipe_child(void *arg)
++{
++	struct pipe_child *c = arg;
++
++	INTON;
++	if (c->pip[1] >= 0) {
++		close(c->pip[0]);
++	}
++	if (c->prevfd > 0) {
++		reset_input();
++		dup2(c->prevfd, 0);
++		close(c->prevfd);
++	}
++	if (c->pip[1] > 1) {
++		dup2(c->pip[1], 1);
++		close(c->pip[1]);
++	}
++	evaltreenr(c->n, c->flags);
++	/* never returns */
++}
++
+ STATIC int
+ evalpipe(union node *n, int flags)
+ {
++	struct pipe_child child;
+ 	struct job *jp;
+ 	struct nodelist *lp;
+ 	int pipelen;
+@@ -589,23 +635,12 @@ evalpipe(union node *n, int flags)
+ 				sh_error("Pipe call failed");
+ 			}
+ 		}
+-		if (forkshell(jp, lp->n, n->npipe.backgnd) == 0) {
+-			INTON;
+-			if (pip[1] >= 0) {
+-				close(pip[0]);
+-			}
+-			if (prevfd > 0) {
+-				reset_input();
+-				dup2(prevfd, 0);
+-				close(prevfd);
+-			}
+-			if (pip[1] > 1) {
+-				dup2(pip[1], 1);
+-				close(pip[1]);
+-			}
+-			evaltreenr(lp->n, flags);
+-			/* never returns */
+-		}
++		child.n = lp->n;
++		child.flags = flags;
++		child.prevfd = prevfd;
++		child.pip[0] = pip[0];
++		child.pip[1] = pip[1];
++		forkshell(jp, lp->n, n->npipe.backgnd, evalpipe_child, &child);
+ 		if (prevfd >= 0)
+ 			close(prevfd);
+ 		prevfd = pip[0];
+@@ -629,12 +664,32 @@ evalpipe(union node *n, int flags)
+  * Should be called with interrupts off.
+  */
+ 
++struct backcmd_child {
++	union node *n;
++	int pip[2];
++};
++
++static void evalbackcmd_child(void *arg)
++{
++	struct backcmd_child *c = arg;
++
++	FORCEINTON;
++	close(c->pip[0]);
++	if (c->pip[1] != 1) {
++		dup2(c->pip[1], 1);
++		close(c->pip[1]);
++	}
++	ifsfree();
++	evaltreenr(c->n, EV_EXIT);
++	/* NOTREACHED */
++}
++
+ void
+ evalbackcmd(union node *n, struct backcmd *result)
+ {
++	struct backcmd_child child;
+ 	struct job *jp;
+ 	int pip[2];
+-	int pid;
+ 
+ 	result->fd = -1;
+ 	result->buf = NULL;
+@@ -648,19 +703,11 @@ evalbackcmd(union node *n, struct backcmd *result)
+ 	tpip[0] = pip[0];
+ 	tpip[1] = pip[1];
+ 	jp = makejob(1);
+-	pid = forkshell(jp, n, FORK_NOJOB);
++	child.n = n;
++	child.pip[0] = pip[0];
++	child.pip[1] = pip[1];
++	forkshell(jp, n, FORK_NOJOB, evalbackcmd_child, &child);
+ 	tpip[0] = -1;
+-	if (pid == 0) {
+-		FORCEINTON;
+-		close(pip[0]);
+-		if (pip[1] != 1) {
+-			dup2(pip[1], 1);
+-			close(pip[1]);
+-		}
+-		ifsfree();
+-		evaltreenr(n, EV_EXIT);
+-		/* NOTREACHED */
+-	}
+ 	close(pip[1]);
+ 	result->fd = pip[0];
+ 	result->jp = jp;
+@@ -736,7 +783,7 @@ evalcommand(union node *cmd, int flags)
+ #endif
+ {
+ 	struct localvar_list *localvar_stop;
+-	struct parsefile *file_stop;
++	struct parsefile_s *file_stop;
+ 	struct redirtab *redir_stop;
+ 	union node *argp;
+ 	struct arglist arglist;
+@@ -910,14 +957,9 @@ bail:
+ 	default:
+ 		flush_input();
+ 
+-		/* Fork off a child process if necessary. */
+-		if (!(flags & EV_EXIT) || have_traps()) {
+-			INTOFF;
+-			jp = vforkexec(cmd, argv, path, cmdentry.u.index);
+-			break;
+-		}
+-		shellexec(argv, path, cmdentry.u.index);
+-		/* NOTREACHED */
++		/* The OS runs it as a process of its own (moy_sh.h). */
++		exitstatus = moy_sh_exec(argv, path, cmdentry.u.index);
++		break;
+ 
+ 	case CMDBUILTIN:
+ 		if (evalbltin(cmdentry.u.cmd, argc, argv, flags) &&
+diff --git a/src/eval.h b/src/eval.h
+index 63e7d86..2fa45cc 100644
+--- a/src/eval.h
++++ b/src/eval.h
+@@ -34,10 +34,10 @@
+  *	@(#)eval.h	8.2 (Berkeley) 5/4/95
+  */
+ 
+-extern char *commandname;	/* currently executing command */
+-extern int exitstatus;		/* exit status of last command */
+-extern int back_exitstatus;	/* exit status of backquoted command */
+-extern int savestatus;		/* exit status of last command outside traps */
++#define commandname (moy_sh_g->commandname)
++#define exitstatus (moy_sh_g->exitstatus)
++#define back_exitstatus (moy_sh_g->back_exitstatus)
++#define savestatus (moy_sh_g->savestatus)
+ 
+ 
+ struct backcmd {		/* result of evalbackcmd */
+@@ -56,7 +56,7 @@ union node;	/* BLETCH for ansi C */
+ int evaltree(union node *, int);
+ void evalbackcmd(union node *, struct backcmd *);
+ 
+-extern int evalskip;
++#define evalskip (moy_sh_g->evalskip)
+ 
+ /* reasons for skipping commands (see comment on breakcmd routine) */
+ #define SKIPBREAK	(1 << 0)
+diff --git a/src/exec.c b/src/exec.c
+index 6fe0fed..aab720e 100644
+--- a/src/exec.c
++++ b/src/exec.c
+@@ -70,6 +70,7 @@
+ #include "show.h"
+ #include "jobs.h"
+ #include "alias.h"
++#include "trap.h"
+ #include "system.h"
+ 
+ 
+@@ -87,11 +88,10 @@ struct tblentry {
+ };
+ 
+ 
+-STATIC struct tblentry *cmdtable[CMDTABLESIZE];
+-STATIC int builtinloc = -1;		/* index in path of %builtin, or -1 */
++#define cmdtable (moy_sh_g->cmdtable)
++#define builtinloc (moy_sh_g->builtinloc)
+ 
+ 
+-STATIC void tryexec(char *, char **, char **);
+ STATIC void printentry(struct tblentry *);
+ STATIC void clearcmdentry(void);
+ STATIC struct tblentry *cmdlookup(const char *, int);
+@@ -105,70 +105,20 @@ STATIC int describe_command(struct output *, char *, const char *, int);
+  * have to change the find_command routine as well.
+  */
+ 
++/*
++ * `exec`: the OS runs the program as a process of its own (moy_sh.h), and
++ * the shell ends with its status, the program having replaced it.
++ */
++
+ void
+ shellexec(char **argv, const char *path, int idx)
+ {
+-	char *cmdname;
+-	int e;
+-	char **envp;
+-	int exerrno;
+-
+-	envp = environment();
+-	if (strchr(argv[0], '/') != NULL) {
+-		tryexec(argv[0], argv, envp);
+-		e = errno;
+-	} else {
+-		e = ENOENT;
+-		while (padvance(&path, argv[0]) >= 0) {
+-			cmdname = stackblock();
+-			if (--idx < 0 && pathopt == NULL) {
+-				tryexec(cmdname, argv, envp);
+-				if (errno != ENOENT && errno != ENOTDIR)
+-					e = errno;
+-			}
+-		}
+-	}
+-
+-	/* Map to POSIX errors */
+-	switch (e) {
+-	default:
+-		exerrno = 126;
+-		break;
+-	case ELOOP:
+-	case ENAMETOOLONG:
+-	case ENOENT:
+-	case ENOTDIR:
+-		exerrno = 127;
+-		break;
+-	}
+-	exitstatus = exerrno;
+-	TRACE(("shellexec failed for %s, errno %d, suppressint %d\n",
+-		argv[0], e, suppressint ));
+-	exerror(EXEND, "%s: %s", argv[0], errmsg(e, E_EXEC));
++	exitstatus = moy_sh_exec(argv, path, idx);
++	exitshell();
+ 	/* NOTREACHED */
+ }
+ 
+ 
+-STATIC void
+-tryexec(char *cmd, char **argv, char **envp)
+-{
+-	char *const path_bshell = _PATH_BSHELL;
+-
+-repeat:
+-#ifdef SYSV
+-	do {
+-		execve(cmd, argv, envp);
+-	} while (errno == EINTR);
+-#else
+-	execve(cmd, argv, envp);
+-#endif
+-	if (cmd != path_bshell && errno == ENOEXEC) {
+-		*argv-- = cmd;
+-		*argv = cmd = path_bshell;
+-		goto repeat;
+-	}
+-}
+-
+ static const char *legal_pathopt(const char *opt, const char *term, int magic)
+ {
+ 	switch (magic) {
+@@ -205,7 +155,6 @@ static const char *legal_pathopt(const char *opt, const char *term, int magic)
+  * pathopt.
+  */
+ 
+-const char *pathopt;
+ 
+ int padvance_magic(const char **path, const char *name, int magic)
+ {
+@@ -537,6 +486,8 @@ find_builtin(const char *name)
+ 		&name, builtincmd, NUMBUILTINS, sizeof(struct builtincmd),
+ 		pstrcmp
+ 	);
++	if (!bp)
++		bp = (struct builtincmd *)moy_sh_find_builtin(name);
+ 	return bp;
+ }
+ 
+@@ -642,7 +593,7 @@ clearcmdentry(void)
+  * Interrupts must be off if called with add != 0.
+  */
+ 
+-struct tblentry **lastcmdentry;
++#define lastcmdentry (moy_sh_g->lastcmdentry)
+ 
+ 
+ STATIC struct tblentry *
+diff --git a/src/exec.h b/src/exec.h
+index 8707d36..45ab879 100644
+--- a/src/exec.h
++++ b/src/exec.h
+@@ -60,7 +60,7 @@ struct cmdentry {
+ 
+ union node;
+ 
+-extern const char *pathopt;	/* set by padvance */
++#define pathopt (moy_sh_g->pathopt)
+ 
+ struct stat64;
+ 
+diff --git a/src/expand.c b/src/expand.c
+index 76e67ce..203df42 100644
+--- a/src/expand.c
++++ b/src/expand.c
+@@ -90,18 +90,6 @@
+ /* Add CTLESC when necessary. */
+ #define QUOTES_ESC	(EXP_FULL | EXP_CASE)
+ 
+-/*
+- * Structure specifying which parts of the string should be searched
+- * for IFS characters.
+- */
+-
+-struct ifsregion {
+-	struct ifsregion *next;	/* next region in list */
+-	int begoff;		/* offset of start of region */
+-	int endoff;		/* offset of end of region */
+-	int nulonly;		/* search for nul bytes only */
+-};
+-
+ struct ifs_state {
+ 	const char *ifs;
+ 	char *start;
+@@ -111,20 +99,20 @@ struct ifs_state {
+ };
+ 
+ /* output of current string */
+-static char *expdest;
++#define expdest (moy_sh_g->expdest)
+ /* list of back quote expressions */
+-static struct nodelist *argbackq;
++#define argbackq (moy_sh_g->argbackq)
+ /* first struct in list of ifs regions */
+-static struct ifsregion ifsfirst;
++#define ifsfirst (*moy_sh_g->ifsfirst)
+ /* last struct in list */
+-static struct ifsregion *ifslastp;
++#define ifslastp (moy_sh_g->ifslastp)
+ /* holds expanded arg list */
+-static struct arglist exparg;
++#define exparg (*moy_sh_g->exparg)
+ 
+-static char ifsmap[128];
+-static const char *ncifs;
+-static size_t ifsmb0len;
+-static wchar_t *wcifs;
++#define ifsmap (moy_sh_g->ifsmap)
++#define ncifs (moy_sh_g->ncifs)
++#define ifsmb0len (moy_sh_g->ifsmb0len)
++#define wcifs (moy_sh_g->wcifs)
+ 
+ static char *argstr(char *p, int flag);
+ static char *exptilde(char *startp, int flag);
+diff --git a/src/expand.h b/src/expand.h
+index 7bcff75..3c36795 100644
+--- a/src/expand.h
++++ b/src/expand.h
+@@ -42,6 +42,17 @@ struct strlist {
+ };
+ 
+ 
++/*
++ * Structure specifying which parts of the string should be searched
++ * for IFS characters.
++ */
++struct ifsregion {
++	struct ifsregion *next;	/* next region in list */
++	int begoff;		/* offset of start of region */
++	int endoff;		/* offset of end of region */
++	int nulonly;		/* search for nul bytes only */
++};
++
+ struct arglist {
+ 	struct strlist *list;
+ 	struct strlist **lastp;
+diff --git a/src/input.c b/src/input.c
+index e9b9d33..5a66edd 100644
+--- a/src/input.c
++++ b/src/input.c
+@@ -60,23 +60,11 @@
+ #include "system.h"
+ #include "trap.h"
+ 
+-#define IBUFSIZ (BUFSIZ + PUNGETC_MAX + 1)
+-
+-MKINIT
+-struct stdin_state {
+-	off_t seekable;
+-	int pip[2];
+-	int pending;
+-	tcflag_t bufferable;
+-};
+-
+-MKINIT struct parsefile basepf;	/* top level input file */
+-MKINIT char basebuf[IBUFSIZ];	/* buffer for top level input file */
+-MKINIT struct parsefile *toppf = &basepf;
+-MKINIT struct stdin_state stdin_state;
+-struct parsefile *parsefile = &basepf;	/* current input file */
+-int whichprompt;		/* 1 == PS1, 2 == PS2 */
+-int stdin_istty = -1;
++
++#define basepf (*moy_sh_g->basepf)
++#define basebuf (moy_sh_g->basebuf)
++#define toppf (moy_sh_g->toppf)
++#define stdin_state (*moy_sh_g->stdin_state)
+ 
+ STATIC void pushfile(void);
+ static void popstring(void);
+@@ -131,7 +119,7 @@ POSTEXITRESET {
+ 
+ void input_init(void)
+ {
+-	struct stdin_state *st = &stdin_state;
++	struct stdin_state_s *st = &stdin_state;
+ 	struct termios tios;
+ 	int istty;
+ 
+@@ -147,7 +135,7 @@ void input_init(void)
+ 
+ static bool stdin_bufferable(void)
+ {
+-	struct stdin_state *st = &stdin_state;
++	struct stdin_state_s *st = &stdin_state;
+ 
+ 	if (stdin_istty < 0)
+ 		input_init();
+@@ -385,6 +373,9 @@ static int preadbuffer(void)
+ 	if (parsefile->eof & 2) {
+ eof:
+ 		parsefile->eof = 3;
++		/* the end of what the face sent, not of a nested `...` */
++		if (parsefile->prev == &basepf)
++			moy_sh_g->input_eof = 1;
+ 		return PEOF;
+ 	}
+ 	flushall();
+@@ -618,9 +609,9 @@ setinputstring(char *string)
+ STATIC void
+ pushfile(void)
+ {
+-	struct parsefile *pf;
++	struct parsefile_s *pf;
+ 
+-	pf = (struct parsefile *)ckmalloc(sizeof (struct parsefile));
++	pf = (struct parsefile_s *)ckmalloc(sizeof (struct parsefile_s));
+ 	memset(pf, 0, sizeof(*pf));
+ 	pf->prev = parsefile;
+ 	pf->linno = 1;
+@@ -639,7 +630,7 @@ void pushstdin(void)
+ void
+ popfile(void)
+ {
+-	struct parsefile *pf = parsefile;
++	struct parsefile_s *pf = parsefile;
+ 
+ 	INTOFF;
+ 	parsefile = pf->prev;
+@@ -663,7 +654,7 @@ out:
+ }
+ 
+ 
+-void __attribute__((noinline)) unwindfiles(struct parsefile *stop)
++void __attribute__((noinline)) unwindfiles(struct parsefile_s *stop)
+ {
+ 	while (basepf.prev || parsefile != stop)
+ 		popfile();
+diff --git a/src/input.h b/src/input.h
+index 59dc5a1..b592ac6 100644
+--- a/src/input.h
++++ b/src/input.h
+@@ -36,6 +36,9 @@
+ 
+ #include <limits.h>
+ #include <stdbool.h>
++#include <stdio.h>
++#include <sys/types.h>
++#include <termios.h>
+ 
+ #ifdef SMALL
+ #define IS_DEFINED_SMALL 1
+@@ -74,8 +77,8 @@ struct strpush {
+  * contains information about the current file being read.
+  */
+ 
+-struct parsefile {
+-	struct parsefile *prev;	/* preceding file on stack */
++struct parsefile_s {
++	struct parsefile_s *prev;	/* preceding file on stack */
+ 	int linno;		/* current line */
+ 	int fd;			/* file descriptor (or -1 if string) */
+ 	int nleft;		/* number of chars left in this line */
+@@ -96,8 +99,17 @@ struct parsefile {
+ 	int unget;
+ };
+ 
+-extern struct parsefile *parsefile;
+-extern int stdin_istty;
++#define IBUFSIZ (BUFSIZ + PUNGETC_MAX + 1)
++
++struct stdin_state_s {
++	off_t seekable;
++	int pip[2];
++	int pending;
++	tcflag_t bufferable;
++};
++
++#define parsefile (moy_sh_g->parsefile)
++#define stdin_istty (moy_sh_g->stdin_istty)
+ 
+ /*
+  * The input line number.  Input.c just defines this variable, and saves
+@@ -115,13 +127,13 @@ int setinputfile(const char *, int);
+ void setinputstring(char *);
+ void pushstdin(void);
+ void popfile(void);
+-void unwindfiles(struct parsefile *);
++void unwindfiles(struct parsefile_s *);
+ void popallfiles(void);
+ void flush_input(void);
+ void reset_input(void);
+ void input_init(void);
+ 
+-static inline int input_get_lleft(struct parsefile *pf)
++static inline int input_get_lleft(struct parsefile_s *pf)
+ {
+ #ifdef SMALL
+ 	return 0;
+@@ -130,7 +142,7 @@ static inline int input_get_lleft(struct parsefile *pf)
+ #endif
+ }
+ 
+-static inline void input_set_lleft(struct parsefile *pf, int len)
++static inline void input_set_lleft(struct parsefile_s *pf, int len)
+ {
+ #ifndef SMALL
+ 	pf->lleft = len;
+diff --git a/src/jobs.c b/src/jobs.c
+index 914b383..c92a161 100644
+--- a/src/jobs.c
++++ b/src/jobs.c
+@@ -46,7 +46,6 @@
+ #include <sys/time.h>
+ #include <sys/resource.h>
+ #endif
+-#include <sys/ioctl.h>
+ 
+ #include "shell.h"
+ #if JOBS
+@@ -85,24 +84,22 @@
+ #define DOWAIT_WAITCMD_ALL 4
+ 
+ /* array of jobs */
+-static struct job *jobtab;
++#define jobtab (moy_sh_g->jobtab)
+ /* size of array */
+-static unsigned njobs;
++#define njobs (moy_sh_g->njobs)
+ /* pid of last background process */
+-pid_t backgndpid;
+ 
+ #if JOBS
+ /* pgrp of shell on invocation */
+-static int initialpgrp;
++#define initialpgrp (moy_sh_g->initialpgrp)
+ /* control terminal */
+-static int ttyfd = -1;
++#define ttyfd (moy_sh_g->ttyfd)
+ #endif
+ 
+ /* current job */
+-static struct job *curjob;
++#define curjob (moy_sh_g->curjob)
+ 
+ /* Set if we are in the vforked child */
+-int vforked;
+ 
+ STATIC void set_curjob(struct job *, unsigned);
+ STATIC int jobno(const struct job *);
+@@ -186,7 +183,6 @@ set_curjob(struct job *jp, unsigned mode)
+  * Called with interrupts off.
+  */
+ 
+-int jobctl;
+ 
+ static void xxtcsetpgrp(pid_t pgrp)
+ {
+@@ -198,64 +194,15 @@ static void xxtcsetpgrp(pid_t pgrp)
+ 	xtcsetpgrp(fd, pgrp);
+ }
+ 
++/*
++ * There is no terminal to hand over: job control is the shell's own
++ * bookkeeping over the processes the OS runs (moy_sh.h).
++ */
+ void
+ setjobctl(int on)
+ {
+-	int pgrp = -1;
+-	int fd;
+-
+ 	if (on == jobctl || rootshell == 0)
+ 		return;
+-	if (on) {
+-		int ofd;
+-		ofd = fd = sh_open(_PATH_TTY, O_RDWR, 1);
+-		if (fd < 0) {
+-			fd += 3;
+-			while (!isatty(fd))
+-				if (--fd < 0)
+-					goto out;
+-		}
+-		fd = savefd(fd, ofd);
+-		do { /* while we are in the background */
+-			if ((pgrp = tcgetpgrp(fd)) < 0) {
+-close:
+-				close(fd);
+-				fd = -1;
+-out:
+-				if (!iflag)
+-					break;
+-				sh_warnx("can't access tty; job control turned off");
+-				mflag = on = 0;
+-				return;
+-			}
+-			if (pgrp == getpgrp())
+-				break;
+-			if (!iflag)
+-				goto close;
+-			killpg(0, SIGTTIN);
+-		} while (1);
+-		initialpgrp = pgrp;
+-		pgrp = rootpid;
+-	} else {
+-		/* turning job control off */
+-		fd = ttyfd;
+-		pgrp = initialpgrp;
+-	}
+-
+-	setsignal(SIGTSTP);
+-	setsignal(SIGTTOU);
+-	setsignal(SIGTTIN);
+-	if (fd >= 0) {
+-		setpgid(0, pgrp);
+-		xtcsetpgrp(fd, pgrp);
+-
+-		if (!on) {
+-			close(fd);
+-			fd = -1;
+-		}
+-	}
+-
+-	ttyfd = fd;
+ 	jobctl = on;
+ }
+ #endif
+@@ -263,7 +210,7 @@ out:
+ 
+ int killcmd(int argc, char **argv)
+ {
+-	extern char *signal_names[];
++	extern const char *const signal_names[];
+ 	int signo = -1;
+ 	int list = 0;
+ 	int i;
+@@ -321,14 +268,15 @@ usage:
+ 		if (!*argv) {
+ 			outstr("0\n", out);
+ 			for (i = 1; i < NSIG; i++) {
+-				outfmt(out, snlfmt, signal_names[i]);
++				if (signal_names[i])
++					outfmt(out, snlfmt, signal_names[i]);
+ 			}
+ 			return 0;
+ 		}
+ 		signo = number(*argv);
+ 		if (signo > 128)
+ 			signo -= 128;
+-		if (0 < signo && signo < NSIG)
++		if (0 < signo && signo < NSIG && signal_names[signo])
+ 			outfmt(out, snlfmt, signal_names[signo]);
+ 		else
+ 			sh_error("invalid signal number or exit status: %s",
+@@ -748,7 +696,7 @@ check:
+ gotit:
+ #if JOBS
+ 	err_msg = "job %s not created under job control";
+-	if (getctl && jp->jobctl == 0)
++	if (getctl && jp->jctl == 0)
+ 		goto err;
+ #endif
+ 	return jp;
+@@ -789,7 +737,7 @@ struct job *makejob(int nprocs)
+ 		ps = ckmalloc(nprocs * sizeof(*ps));
+ #if JOBS
+ 	if (jobctl)
+-		jp->jobctl = 1;
++		jp->jctl = 1;
+ #endif
+ 	jp->prev_job = curjob;
+ 	curjob = jp;
+@@ -884,7 +832,7 @@ static void forkchild(struct job *jp, union node *n, int mode)
+ 	}
+ 
+ #if JOBS
+-	if (mode != FORK_NOJOB && jp->jobctl && !oldlvl) {
++	if (mode != FORK_NOJOB && jp->jctl && !oldlvl) {
+ 		pid_t pgrp;
+ 
+ 		if (jp->nprocs == 0)
+@@ -944,18 +892,7 @@ static void forkparent(struct job *jp, union node *n, int mode, pid_t pid)
+ 	TRACE(("In parent shell:  child = %d\n", pid));
+ 	if (!jp)
+ 		return;
+-#if JOBS
+-	if (mode != FORK_NOJOB && jp->jobctl) {
+-		int pgrp;
+-
+-		if (jp->nprocs == 0)
+-			pgrp = pid;
+-		else
+-			pgrp = jp->ps[0].pid;
+-		/* This can fail because we are doing it in the child also */
+-		(void)setpgid(pid, pgrp);
+-	}
+-#endif
++	/* no process groups: a job is the processes its table names */
+ 	if (mode == FORK_BG) {
+ 		backgndpid = pid;		/* set $! */
+ 		set_curjob(jp, CUR_RUNNING);
+@@ -970,47 +907,44 @@ static void forkparent(struct job *jp, union node *n, int mode, pid_t pid)
+ 	}
+ }
+ 
+-int
+-forkshell(struct job *jp, union node *n, int mode)
+-{
+-	int pid;
+-
+-	TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode));
++/*
++ * There is no fork: the OS runs the child on this stack, over a copy of the
++ * session it puts back when the child exits (moy_sh.h, moy_sh_fork). `child`
++ * runs in it after forkchild and never returns; the answer is its pid, in
++ * the parent, the child having run.
++ */
+ 
+-	flush_input();
++struct forkshell_child {
++	struct job *jp;
++	union node *n;
++	int mode;
++	void (*child)(void *);
++	void *arg;
++};
+ 
+-	pid = fork();
+-	if (pid == 0)
+-		forkchild(jp, n, mode);
+-	else
+-		forkparent(jp, n, mode, pid);
++static void forkshell_run(void *arg)
++{
++	struct forkshell_child *c = arg;
+ 
+-	return pid;
++	forkchild(c->jp, c->n, c->mode);
++	c->child(c->arg);
+ }
+ 
+-struct job *vforkexec(union node *n, char **argv, const char *path, int idx)
++int
++forkshell(struct job *jp, union node *n, int mode, void (*child)(void *),
++	  void *arg)
+ {
+-	struct job *jp;
++	struct forkshell_child c = { jp, n, mode, child, arg };
+ 	int pid;
+ 
+-	jp = makejob(1);
+-
+-	if (!mypid)
+-		mypid = getpid();
+-	vforked = mypid;
+-
+-	pid = vfork();
++	TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode));
+ 
+-	if (!pid) {
+-		forkchild(jp, n, FORK_FG);
+-		shellexec(argv, path, idx);
+-		/* NOTREACHED */
+-	}
++	flush_input();
+ 
+-	vforked = 0;
+-	forkparent(jp, n, FORK_FG, pid);
++	pid = moy_sh_fork(forkshell_run, &c, mode == FORK_BG);
++	forkparent(jp, n, mode, pid);
+ 
+-	return jp;
++	return pid;
+ }
+ 
+ /*
+@@ -1046,7 +980,7 @@ waitforjob(struct job *jp)
+ 
+ 	st = getstatus(jp);
+ #if JOBS
+-	if (jp->jobctl) {
++	if (jp->jctl) {
+ 		xxtcsetpgrp(rootpid);
+ 		/*
+ 		 * This is truly gross.
+@@ -1081,7 +1015,10 @@ static int waitone(int block, struct job *job)
+ 
+ 	INTOFF;
+ 	TRACE(("dowait(%d) called\n", block));
++	/* an interrupt while a foreground job runs is the job's */
++	moy_sh_foreground(block == DOWAIT_BLOCK ? job : NULL);
+ 	pid = waitproc(block, &status);
++	moy_sh_foreground(NULL);
+ 	TRACE(("wait returns pid %d, status=%d\n", pid, status));
+ 	if (pid <= 0)
+ 		goto out;
+@@ -1150,7 +1087,7 @@ out:
+ 
+ static int dowait(int block, struct job *jp)
+ {
+-	int gotchld = *(volatile int *)&gotsigchld;
++	int gotchld = *(volatile int *)&gotsigchld || moy_sh_children();
+ 	int rpid;
+ 	int pid;
+ 
+@@ -1202,26 +1139,17 @@ waitproc(int block, int *status)
+ 		flags |= WUNTRACED;
+ #endif
+ 
+-	do {
+-		gotsigchld = 0;
+-		do
+-#ifdef HAVE_WAIT3
+-			err = wait3(status, flags, NULL);
+-#else
+-			err = waitpid((pid_t)-1, status, flags, NULL);
+-#endif
+-		while (err < 0 && errno == EINTR);
+-
+-		if (err || (err = -!block))
+-			break;
+-
+-		sigblockall(&oldmask);
+-
+-		while (!gotsigchld && !pending_sig)
+-			sigsuspend(&oldmask);
+-
+-		sigclearmask();
+-	} while (gotsigchld);
++	(void)oldmask;
++	gotsigchld = 0;
++	err = moy_sh_wait(status, flags);
++	/* no child has exited: a waiting `wait` waits on, as sigsuspend did */
++	if (!err && block)
++		err = moy_sh_wait(status, flags & ~WNOHANG);
++	else if (!err)
++		err = -1;
++	/* the wait was interrupted: the interrupt is SIGINT's */
++	if (err < 0 && errno == EINTR && moy_sh_poll())
++		onsig(SIGINT);
+ 
+ 	return err;
+ }
+@@ -1229,7 +1157,6 @@ waitproc(int block, int *status)
+ /*
+  * return 1 if there are stopped jobs, otherwise 0
+  */
+-int job_warning;
+ int
+ stoppedjobs(void)
+ {
+@@ -1257,7 +1184,7 @@ out:
+  * jobs command).
+  */
+ 
+-STATIC char *cmdnextc;
++#define cmdnextc (moy_sh_g->cmdnextc)
+ 
+ STATIC char *
+ commandtext(union node *n)
+diff --git a/src/jobs.h b/src/jobs.h
+index 2832d64..cad31e9 100644
+--- a/src/jobs.h
++++ b/src/jobs.h
+@@ -75,7 +75,7 @@ struct job {
+ #define	JOBDONE		2	/* all procs are completed */
+ #if JOBS
+ 		sigint: 1,	/* job was killed by SIGINT */
+-		jobctl: 1,	/* job running under job control */
++		jctl: 1,	/* job running under job control */
+ #endif
+ 		waited: 1,	/* true if this entry has been waited for */
+ 		used: 1,	/* true if this entry is in used */
+@@ -85,14 +85,14 @@ struct job {
+ 
+ union node;
+ 
+-extern pid_t backgndpid;	/* pid of last background process */
+-extern int job_warning;		/* user was warned about stopped jobs */
++#define backgndpid (moy_sh_g->backgndpid)
++#define job_warning (moy_sh_g->job_warning)
+ #if JOBS
+-extern int jobctl;		/* true if doing job control */
++#define jobctl (moy_sh_g->jobctl)
+ #else
+ #define jobctl 0
+ #endif
+-extern int vforked;		/* Set if we are in the vforked child */
++#define vforked (moy_sh_g->vforked)
+ 
+ void setjobctl(int);
+ int killcmd(int, char **);
+@@ -103,8 +103,7 @@ struct output;
+ void showjobs(struct output *, int);
+ int waitcmd(int, char **);
+ struct job *makejob(int);
+-int forkshell(struct job *, union node *, int);
+-struct job *vforkexec(union node *n, char **argv, const char *path, int idx);
++int forkshell(struct job *, union node *, int, void (*)(void *), void *);
+ int waitforjob(struct job *);
+ int stoppedjobs(void);
+ 
+diff --git a/src/main.c b/src/main.c
+index 2ab506c..0b8b7c5 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -37,11 +37,11 @@
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <fcntl.h>
++#include "moy_sh_posix.h"
+ 
+ 
+ #include "shell.h"
+ #include "main.h"
+-#include "mail.h"
+ #include "options.h"
+ #include "output.h"
+ #include "parser.h"
+@@ -62,142 +62,23 @@
+ 
+ #define PROFILE 0
+ 
+-int rootpid;
+-int mypid;
+-int shlvl;
+ #ifdef __GLIBC__
+-int *dash_errno;
+ #endif
+ #if PROFILE
+ short profile_buf[16384];
+ extern int etext();
+ #endif
+-MKINIT struct jmploc main_handler;
++#define main_handler (*moy_sh_g->main_handler)
+ 
+-STATIC void read_profile(const char *);
+ STATIC char *find_dot_file(char *);
+-static int cmdloop(int);
+-int main(int, char **);
+-
+-/*
+- * Main routine.  We initialize things, parse the arguments, execute
+- * profiles if we're a login shell, and then call cmdloop to execute
+- * commands.  The setjmp call sets up the location to jump to when an
+- * exception occurs.  When an exception occurs the variable "state"
+- * is used to figure out how far we had gotten.
+- */
+-
+-int
+-main(int argc, char **argv)
+-{
+-	char *shinit;
+-	volatile int state;
+-	struct stackmark smark;
+-	int login;
+-
+-#ifdef __GLIBC__
+-	dash_errno = __errno_location();
+-#endif
+-
+-#if PROFILE
+-	monitor(4, etext, profile_buf, sizeof profile_buf, 50);
+-#endif
+-
+-	state = 0;
+-	if (unlikely(setjmp(main_handler.loc))) {
+-		int e;
+-		int s;
+-
+-		exitreset();
+-
+-		e = exception;
+-
+-		s = state;
+-		if (e == EXEND || e == EXEXIT || s == 0 || iflag == 0 || shlvl)
+-			goto exit;
+-
+-		reset();
+-
+-		if (e == EXINT
+-#if ATTY
+-		 && (! attyset() || equal(termval(), "emacs"))
+-#endif
+-		 ) {
+-			out2c('\n');
+-#ifdef FLUSHERR
+-			flushout(out2);
+-#endif
+-		}
+-		popstackmark(&smark);
+-		FORCEINTON;				/* enable interrupts */
+-		if (s == 1)
+-			goto state1;
+-		else if (s == 2)
+-			goto state2;
+-		else if (s == 3)
+-			goto state3;
+-		else
+-			goto state4;
+-	}
+-	handler = &main_handler;
+-#ifdef DEBUG
+-	opentrace();
+-	trputs("Shell args:  ");  trargs(argv);
+-#endif
+-	mypid = rootpid = getpid();
+-	init();
+-	setstackmark(&smark);
+-	login = procargs(argv);
+-	if (login) {
+-		state = 1;
+-		read_profile("/etc/profile");
+-state1:
+-		state = 2;
+-		read_profile("$HOME/.profile");
+-	}
+-state2:
+-	state = 3;
+-	if (
+-#ifndef linux
+-		getuid() == geteuid() && getgid() == getegid() &&
+-#endif
+-		iflag
+-	) {
+-		if ((shinit = lookupvar("ENV")) != NULL && *shinit != '\0') {
+-			read_profile(shinit);
+-		}
+-	}
+-	popstackmark(&smark);
+-state3:
+-	state = 4;
+-	if (minusc)
+-		evalstring(minusc, sflag ? 0 : EV_EXIT);
+-
+-	if (sflag || minusc == NULL) {
+-state4:	/* XXX ??? - why isn't this before the "if" statement */
+-		cmdloop(1);
+-	}
+-exit:
+-#if PROFILE
+-	monitor(0);
+-#endif
+-#if GPROF
+-	{
+-		extern void _mcleanup(void);
+-		_mcleanup();
+-	}
+-#endif
+-	exitshell();
+-	/* NOTREACHED */
+-}
+-
++int cmdloop(int);
+ 
+ /*
+  * Read and execute commands.  "Top" is nonzero for the top level command
+  * loop; it turns on prompting if the shell is interactive.
+  */
+ 
+-static int
++int
+ cmdloop(int top)
+ {
+ 	union node *n;
+@@ -216,7 +97,6 @@ cmdloop(int top)
+ 		inter = 0;
+ 		if (iflag && top) {
+ 			inter++;
+-			chkmail();
+ 		}
+ 		n = parsecmd(inter);
+ 		/* showtree(n); DEBUG */
+@@ -259,23 +139,6 @@ cmdloop(int top)
+ 
+ 
+ 
+-/*
+- * Read /etc/profile or .profile.  Return on error.
+- */
+-
+-STATIC void
+-read_profile(const char *name)
+-{
+-	name = expandstr(name);
+-	if (setinputfile(name, INPUT_PUSH_FILE | INPUT_NOFILE_OK) < 0)
+-		return;
+-
+-	cmdloop(0);
+-	popfile();
+-}
+-
+-
+-
+ /*
+  * Read a file containing shell functions.
+  */
+diff --git a/src/main.h b/src/main.h
+index ef242a1..1421b76 100644
+--- a/src/main.h
++++ b/src/main.h
+@@ -37,20 +37,14 @@
+ #include <errno.h>
+ 
+ /* pid of main shell */
+-extern int rootpid;
++#define rootpid (moy_sh_g->rootpid)
+ /* pid of current shell */
+-extern int mypid;
++#define mypid (moy_sh_g->mypid)
+ /* shell level: 0 for the main shell, 1 for its children, and so on */
+-extern int shlvl;
++#define shlvl (moy_sh_g->shlvl)
+ #define rootshell (!shlvl)
+ 
+-#ifdef __GLIBC__
+-/* glibc sucks */
+-extern int *dash_errno;
+-#undef errno
+-#define errno (*dash_errno)
+-#endif
+-
+ void readcmdfile(char *);
++int cmdloop(int);
+ int dotcmd(int, char **);
+ int exitcmd(int, char **);
+diff --git a/src/memalloc.c b/src/memalloc.c
+index 3275e51..18db064 100644
+--- a/src/memalloc.c
++++ b/src/memalloc.c
+@@ -63,7 +63,7 @@ __attribute__((__noinline__)) void *ckmalloc(size_t nbytes)
+ {
+ 	void *p;
+ 
+-	p = malloc(nbytes);
++	p = moy_sh_malloc(nbytes);
+ 	return checknull(p);
+ }
+ 
+@@ -74,7 +74,7 @@ __attribute__((__noinline__)) void *ckmalloc(size_t nbytes)
+ 
+ __attribute__((__noinline__)) void *ckrealloc(void *p, size_t nbytes)
+ {
+-	p = realloc(p, nbytes);
++	p = moy_sh_realloc(p, nbytes);
+ 	return checknull(p);
+ }
+ 
+@@ -86,7 +86,7 @@ __attribute__((__noinline__)) void *ckrealloc(void *p, size_t nbytes)
+ char *
+ savestr(const char *s)
+ {
+-	return checknull(strdup(s));
++	return checknull(moy_sh_strdup(s));
+ }
+ 
+ 
+@@ -99,19 +99,8 @@ savestr(const char *s)
+  * well.
+  */
+ 
+-/* minimum size of a block */
+-#define MINSIZE SHELL_ALIGN(504)
+-
+-struct stack_block {
+-	struct stack_block *prev;
+-	char space[MINSIZE];
+-};
+-
+-struct stack_block stackbase;
+-struct stack_block *stackp = &stackbase;
+-char *stacknxt = stackbase.space;
+-size_t stacknleft = MINSIZE;
+-char *sstrend = stackbase.space + MINSIZE;
++#define stackbase (*moy_sh_g->stackbase)
++#define stackp (moy_sh_g->stackp)
+ 
+ void *stalloc(size_t nbytes)
+ {
+@@ -163,9 +152,9 @@ void stunalloc(void *p)
+ __attribute__((__noinline__)) void pushstackmark(struct stackmark *mark,
+ 						 size_t len)
+ {
+-	mark->stackp = stackp;
+-	mark->stacknxt = stacknxt;
+-	mark->stacknleft = stacknleft;
++	mark->mark_stackp = stackp;
++	mark->mark_stacknxt = stacknxt;
++	mark->mark_stacknleft = stacknleft;
+ 	grabstackblock(len);
+ }
+ 
+@@ -181,14 +170,14 @@ popstackmark(struct stackmark *mark)
+ 	struct stack_block *sp;
+ 
+ 	INTOFF;
+-	while (stackp != mark->stackp) {
++	while (stackp != mark->mark_stackp) {
+ 		sp = stackp;
+ 		stackp = sp->prev;
+ 		ckfree(sp);
+ 	}
+-	stacknxt = mark->stacknxt;
+-	stacknleft = mark->stacknleft;
+-	sstrend = mark->stacknxt + mark->stacknleft;
++	stacknxt = mark->mark_stacknxt;
++	stacknleft = mark->mark_stacknleft;
++	sstrend = mark->mark_stacknxt + mark->mark_stacknleft;
+ 	INTON;
+ }
+ 
+diff --git a/src/memalloc.h b/src/memalloc.h
+index 1895c1e..10f3b65 100644
+--- a/src/memalloc.h
++++ b/src/memalloc.h
+@@ -37,16 +37,26 @@
+ #include <stddef.h>
+ #include <stdlib.h>
+ 
++#include "machdep.h"
++
+ struct stackmark {
+-	struct stack_block *stackp;
+-	char *stacknxt;
+-	size_t stacknleft;
++	struct stack_block *mark_stackp;
++	char *mark_stacknxt;
++	size_t mark_stacknleft;
++};
++
++/* minimum size of a block */
++#define MINSIZE SHELL_ALIGN(504)
++
++struct stack_block {
++	struct stack_block *prev;
++	char space[MINSIZE];
+ };
+ 
+ 
+-extern char *stacknxt;
+-extern size_t stacknleft;
+-extern char *sstrend;
++#define stacknxt (moy_sh_g->stacknxt)
++#define stacknleft (moy_sh_g->stacknleft)
++#define sstrend (moy_sh_g->sstrend)
+ 
+ void *ckmalloc(size_t);
+ void *ckrealloc(void *, size_t);
+@@ -98,4 +108,4 @@ static inline char *_STPUTC(int c, char *p) {
+ #define ungrabstackstr(s, p) stunalloc((s))
+ #define stackstrend() ((void *)sstrend)
+ 
+-#define ckfree(p)	free((void *)(p))
++#define ckfree(p)	moy_sh_mfree((void *)(p))
+diff --git a/src/miscbltin.c b/src/miscbltin.c
+index e66666c..56297ec 100644
+--- a/src/miscbltin.c
++++ b/src/miscbltin.c
+@@ -46,6 +46,7 @@
+ #include <sys/time.h>
+ #include <sys/resource.h>
+ #include <unistd.h>
++#include "moy_sh_posix.h"
+ 
+ #include "error.h"
+ #include "expand.h"
+diff --git a/src/mystring.c b/src/mystring.c
+index 97e240c..9d9f9ca 100644
+--- a/src/mystring.c
++++ b/src/mystring.c
+@@ -57,7 +57,6 @@
+ #include "system.h"
+ 
+ 
+-char nullstr[1];		/* zero length string */
+ const char spcstr[] = " ";
+ const char snlfmt[] = "%s\n";
+ const char dolatstr[] = { CTLQUOTEMARK, CTLVAR, VSNORMAL | VSBIT, '@', '=',
+diff --git a/src/nodes.c.pat b/src/nodes.c.pat
+index 636456c..45c3f05 100644
+--- a/src/nodes.c.pat
++++ b/src/nodes.c.pat
+@@ -47,10 +47,10 @@
+ #include "system.h"
+ 
+ 
+-int     funcblocksize;		/* size of structures in function */
+-int     funcstringsize;		/* size of strings in node */
+-pointer funcblock;		/* block to allocate function from */
+-char   *funcstring;		/* block to allocate strings from */
++#define funcblocksize (moy_sh_g->funcblocksize)
++#define funcstringsize (moy_sh_g->funcstringsize)
++#define funcblock (moy_sh_g->funcblock)
++#define funcstring (moy_sh_g->funcstring)
+ 
+ %SIZES
+ 
+diff --git a/src/options.c b/src/options.c
+index c4eedeb..d742ab5 100644
+--- a/src/options.c
++++ b/src/options.c
+@@ -35,6 +35,7 @@
+ #include <signal.h>
+ #include <unistd.h>
+ #include <stdlib.h>
++#include "moy_sh_posix.h"
+ 
+ #include "shell.h"
+ #define DEFINE_OPTIONS
+@@ -55,13 +56,7 @@
+ #endif
+ #include "show.h"
+ 
+-char *arg0;			/* value of $0 */
+-struct shparam shellparam;	/* current positional parameters */
+-char **argptr;			/* argument list for builtin commands */
+-char *optionarg;		/* set by nextopt (like getopt) */
+-char *optptr;			/* used by nextopt */
+ 
+-char *minusc;			/* argument to -c option */
+ 
+ static const char *const optnames[NOPTS] = {
+ 	"errexit",
+@@ -105,7 +100,6 @@ const char optletters[NOPTS] = {
+ 	0,
+ };
+ 
+-char optlist[NOPTS];
+ 
+ 
+ static int options(int);
+diff --git a/src/options.h b/src/options.h
+index 0ad5535..2842d41 100644
+--- a/src/options.h
++++ b/src/options.h
+@@ -66,15 +66,15 @@ struct shparam {
+ #define NOPTS	18
+ 
+ extern const char optletters[NOPTS];
+-extern char optlist[NOPTS];
++#define optlist (moy_sh_g->optlist)
+ 
+ 
+-extern char *minusc;		/* argument to -c option */
+-extern char *arg0;		/* $0 */
+-extern struct shparam shellparam;  /* $@ */
+-extern char **argptr;		/* argument list for builtin commands */
+-extern char *optionarg;		/* set by nextopt */
+-extern char *optptr;		/* used by nextopt */
++#define minusc (moy_sh_g->minusc)
++#define arg0 (moy_sh_g->arg0)
++#define shellparam (*moy_sh_g->shellparam)
++#define argptr (moy_sh_g->argptr)
++#define optionarg (moy_sh_g->optionarg)
++#define optptr (moy_sh_g->optptr)
+ 
+ int procargs(char **);
+ void optschanged(void);
+diff --git a/src/output.c b/src/output.c
+index e9ee9b4..cbbc924 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -45,7 +45,6 @@
+ 
+ #include <sys/types.h>		/* quad_t */
+ #include <sys/param.h>		/* BSD4_4 */
+-#include <sys/ioctl.h>
+ 
+ #include <stdio.h>	/* defines BUFSIZ */
+ #include <string.h>
+@@ -69,34 +68,7 @@
+ #define MEM_OUT -3		/* output to dynamically allocated memory */
+ 
+ 
+-#ifdef USE_GLIBC_STDIO
+-struct output output = {
+-	.stream = 0, .nextc = 0, .end = 0, .buf = 0, .bufsize = 0, .fd = 1, .flags = 0
+-};
+-struct output errout = {
+-	.stream = 0, .nextc = 0, .end = 0, .buf = 0, .bufsize = 0, .fd = 2, .flags = 0
+-}
+-#ifdef notyet
+-struct output memout = {
+-	.stream = 0, .nextc = 0, .end = 0, .buf = 0, .bufsize = 0, .fd = MEM_OUT, .flags = 0
+-};
+-#endif
+-#else
+-struct output output = {
+-	.nextc = 0, .end = 0, .buf = 0, .bufsize = OUTBUFSIZ, .fd = 1, .flags = 0
+-};
+-struct output errout = {
+-	.nextc = 0, .end = 0, .buf = 0, .bufsize = 0, .fd = 2, .flags = 0
+-};
+-struct output preverrout;
+-#ifdef notyet
+-struct output memout = {
+-	.nextc = 0, .end = 0, .buf = 0, .bufsize = 0, .fd = MEM_OUT, .flags = 0
+-};
+-#endif
+-#endif
+-struct output *out1 = &output;
+-struct output *out2 = &errout;
++/* output, errout and preverrout are the session's (moy_sh_g.h) */
+ 
+ 
+ static int xvsnprintf(char *, size_t, const char *, va_list);
+@@ -115,7 +87,7 @@ INIT {
+ 
+ RESET {
+ #ifdef notyet
+-	out1 = &output;
++	out1 = &outputf;
+ 	out2 = &errout;
+ #ifdef USE_GLIBC_STDIO
+ 	if (memout.stream != NULL)
+@@ -228,7 +200,7 @@ outcslow(int c, struct output *dest)
+ void
+ flushall(void)
+ {
+-	flushout(&output);
++	flushout(&outputf);
+ #ifdef FLUSHERR
+ 	flushout(&errout);
+ #endif
+@@ -379,7 +351,7 @@ xwrite(int fd, const void *p, size_t n)
+ #ifdef notyet
+ #ifdef USE_GLIBC_STDIO
+ void initstreams() {
+-	output.stream = stdout;
++	outputf.stream = stdout;
+ 	errout.stream = stderr;
+ }
+ 
+diff --git a/src/output.h b/src/output.h
+index c43d493..fbba01a 100644
+--- a/src/output.h
++++ b/src/output.h
+@@ -54,14 +54,14 @@ struct output {
+ 	int flags;
+ };
+ 
+-extern struct output output;
+-extern struct output errout;
+-extern struct output preverrout;
++#define outputf (*moy_sh_g->outputf)
++#define errout (*moy_sh_g->errout)
++#define preverrout (*moy_sh_g->preverrout)
+ #ifdef notyet
+ extern struct output memout;
+ #endif
+-extern struct output *out1;
+-extern struct output *out2;
++#define out1 (moy_sh_g->out1)
++#define out2 (moy_sh_g->out2)
+ 
+ void outmem(const char *, size_t, struct output *);
+ void outstr(const char *, struct output *);
+@@ -92,8 +92,8 @@ int __closememout(void);
+ static inline void
+ freestdout()
+ {
+-	output.nextc = output.buf;
+-	output.flags = 0;
++	outputf.nextc = outputf.buf;
++	outputf.flags = 0;
+ }
+ 
+ #define OUTPUT_ERR 01		/* error occurred on output */
+diff --git a/src/parser.c b/src/parser.c
+index e44b3c3..6954103 100644
+--- a/src/parser.c
++++ b/src/parser.c
+@@ -78,8 +78,8 @@
+ 
+ 
+ 
+-struct heredoc {
+-	struct heredoc *next;	/* next here document in list */
++struct heredoc_s {
++	struct heredoc_s *next;	/* next here document in list */
+ 	union node *here;		/* redirection node */
+ 	char *eofmark;		/* string indicating end of input */
+ 	int striptabs;		/* if set, strip leading tabs */
+@@ -100,17 +100,14 @@ struct synstack {
+ 
+ 
+ 
+-struct heredoc *heredoclist;	/* list of here documents to read */
+-int doprompt;			/* if set, prompt the user */
+-int needprompt;			/* true if interactive and at start of line */
+-int lasttoken;			/* last token read */
+-int tokpushback;		/* last token pushed back */
+-char *wordtext;			/* text of last word returned by readtoken */
+-int checkkwd;
+-struct nodelist *backquotelist;
+-union node *redirnode;
+-struct heredoc *heredoc;
+-int quoteflag;			/* set if (part of) last token was quoted */
++#define heredoclist (moy_sh_g->heredoclist)
++#define doprompt (moy_sh_g->doprompt)
++#define needprompt (moy_sh_g->needprompt)
++#define wordtext (moy_sh_g->wordtext)
++#define backquotelist (moy_sh_g->backquotelist)
++#define redirnode (moy_sh_g->redirnode)
++#define heredoc (moy_sh_g->heredoc)
++#define quoteflag (moy_sh_g->quoteflag)
+ 
+ 
+ STATIC union node *list(int);
+@@ -127,7 +124,6 @@ STATIC int pgetc_eatbnl();
+ STATIC int readtoken1(int, char const *, char *, int);
+ STATIC void synexpect(int) __attribute__((__noreturn__));
+ STATIC void synerror(const char *) __attribute__((__noreturn__));
+-STATIC void setprompt(int);
+ 
+ 
+ int isassignment(const char *p)
+@@ -647,8 +643,8 @@ parsefname(void)
+ 		synexpect(-1);
+ 	checkkwd &= ~CHKEOFMARK;
+ 	if (n->type == NHERE) {
+-		struct heredoc *here = heredoc;
+-		struct heredoc *p;
++		struct heredoc_s *here = heredoc;
++		struct heredoc_s *p;
+ 
+ 		if (quoteflag == 0)
+ 			n->type = NXHERE;
+@@ -677,7 +673,7 @@ parsefname(void)
+ STATIC void
+ parseheredoc(void)
+ {
+-	struct heredoc *here;
++	struct heredoc_s *here;
+ 	union node *n;
+ 
+ 	here = heredoclist;
+@@ -1324,7 +1320,7 @@ parseredir: {
+ 				np->nfile.fd = 0;
+ 			}
+ 			np->type = NHERE;
+-			heredoc = (struct heredoc *)stalloc(sizeof (struct heredoc));
++			heredoc = (struct heredoc_s *)stalloc(sizeof (struct heredoc_s));
+ 			heredoc->here = np;
+ 			if ((c = pgetc_eatbnl()) == '-') {
+ 				heredoc->striptabs = 1;
+@@ -1522,7 +1518,7 @@ badsub:
+ 
+ parsebackq: {
+ 	int uninitialized_var(saveprompt);
+-	struct heredoc *saveheredoclist;
++	struct heredoc_s *saveheredoclist;
+ 	struct nodelist **nlpp;
+ 	size_t savelen;
+ 	union node *n;
+@@ -1707,12 +1703,15 @@ synexpect(int token)
+ STATIC void
+ synerror(const char *msg)
+ {
++	/* The face sends more: the command goes on past what it has sent. */
++	if (moy_sh_g->input_more && moy_sh_g->input_eof)
++		exraise(EXMORE);
+ 	errlinno = plinno;
+ 	sh_error("Syntax error: %s", msg);
+ 	/* NOTREACHED */
+ }
+ 
+-static void __attribute__((noinline)) setprompt(int which)
++void __attribute__((noinline)) setprompt(int which)
+ {
+ 	struct stackmark smark;
+ 	int show;
+@@ -1735,9 +1734,9 @@ static void __attribute__((noinline)) setprompt(int which)
+ const char *
+ expandstr(const char *ps)
+ {
+-	struct parsefile *file_stop;
++	struct parsefile_s *file_stop;
+ 	struct jmploc *volatile savehandler;
+-	struct heredoc *saveheredoclist;
++	struct heredoc_s *saveheredoclist;
+ 	const char *result;
+ 	int saveprompt;
+ 	struct jmploc jmploc;
+diff --git a/src/parser.h b/src/parser.h
+index 7a9605b..d6e1615 100644
+--- a/src/parser.h
++++ b/src/parser.h
+@@ -80,16 +80,17 @@ union node;
+  * must be distinct from NULL, so we use the address of a variable that
+  * happens to be handy.
+  */
+-extern int lasttoken;
+-extern int tokpushback;
++#define lasttoken (moy_sh_g->lasttoken)
++#define tokpushback (moy_sh_g->tokpushback)
+ #define NEOF ((union node *)&tokpushback)
+-extern int whichprompt;		/* 1 == PS1, 2 == PS2 */
+-extern int checkkwd;
++#define whichprompt (moy_sh_g->whichprompt)
++#define checkkwd (moy_sh_g->checkkwd)
+ 
+ 
+ int isassignment(const char *p);
+ int issimplecmd(union node *n, const char *name);
+ union node *parsecmd(int);
++void setprompt(int);
+ void fixredir(union node *, const char *, int);
+ const char *getprompt(void *);
+ const char *const *findkwd(const char *);
+diff --git a/src/redir.c b/src/redir.c
+index e61d3da..b037ef4 100644
+--- a/src/redir.c
++++ b/src/redir.c
+@@ -78,10 +78,10 @@ struct redirtab {
+ };
+ 
+ 
+-MKINIT struct redirtab *redirlist;
++#define redirlist (moy_sh_g->redirlist)
+ 
+ /* Bit map of currently closed file descriptors. */
+-static unsigned closed_redirs;
++#define closed_redirs (moy_sh_g->closed_redirs)
+ 
+ STATIC int openredirect(union node *);
+ #ifdef notyet
+@@ -345,9 +345,7 @@ int sh_pipe(int pip[2], int memfd)
+ }
+ 
+ /*
+- * Handle here documents.  Normally we fork off a process to write the
+- * data to a pipe.  If the document is short, we can stuff the data in
+- * the pipe without forking.
++ * Handle here documents: the document goes into a pipe whole.
+  */
+ 
+ STATIC int
+@@ -367,25 +365,11 @@ openhere(union node *redir)
+ 	len = strlen(p);
+ 	memfd = sh_pipe(pip, len > PIPESIZE);
+ 
+-	if (memfd || len <= PIPESIZE) {
+-		xwrite(pip[1], p, len);
++	/* A pipe's buffer takes the whole document: no writer to fork. */
++	xwrite(pip[1], p, len);
++	if (memfd)
+ 		lseek(pip[1], 0, SEEK_SET);
+-		goto out;
+-	}
+ 
+-	if (forkshell((struct job *)NULL, (union node *)NULL, FORK_NOJOB) == 0) {
+-		close(pip[0]);
+-		signal(SIGINT, SIG_IGN);
+-		signal(SIGQUIT, SIG_IGN);
+-		signal(SIGHUP, SIG_IGN);
+-#ifdef SIGTSTP
+-		signal(SIGTSTP, SIG_IGN);
+-#endif
+-		signal(SIGPIPE, SIG_DFL);
+-		xwrite(pip[1], p, len);
+-		_exit(0);
+-	}
+-out:
+ 	close(pip[1]);
+ 	return pip[0];
+ }
+diff --git a/src/shell.h b/src/shell.h
+index 98edc8b..1d92e47 100644
+--- a/src/shell.h
++++ b/src/shell.h
+@@ -71,7 +71,7 @@ typedef void *pointer;
+ #define STATIC static
+ #define MKINIT	/* empty */
+ 
+-extern char nullstr[1];		/* null string */
++#define nullstr (moy_sh_g->nullstr)
+ 
+ 
+ #ifdef DEBUG
+diff --git a/src/system.h b/src/system.h
+index 8cb4726..0f80251 100644
+--- a/src/system.h
++++ b/src/system.h
+@@ -30,6 +30,7 @@
+ #include <signal.h>
+ #include <stdbool.h>
+ #include <sys/types.h>
++#include "moy_sh_posix.h"
+ 
+ #ifndef SSIZE_MAX
+ #define SSIZE_MAX ((ssize_t)((size_t)-1 >> 1))
+diff --git a/src/trap.c b/src/trap.c
+index 23829a5..e8d0038 100644
+--- a/src/trap.c
++++ b/src/trap.c
+@@ -36,6 +36,7 @@
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include "moy_sh_posix.h"
+ 
+ #include "builtins.h"
+ #include "shell.h"
+@@ -68,21 +69,17 @@
+ 
+ 
+ /* trap handler commands */
+-static char *trap[NSIG];
++#define trap (moy_sh_g->trap)
+ /* traps have not been fully cleared */
+-static int ptrap;
++#define ptrap (moy_sh_g->ptrap)
+ /* number of non-null traps */
+-int trapcnt;
+ /* current value of signal */
+-char sigmode[NSIG - 1];
+ /* indicates specified signal received */
+-static char gotsig[NSIG - 1];
++#define gotsig (moy_sh_g->gotsig)
+ /* last pending signal */
+-volatile sig_atomic_t pending_sig;
+ /* received SIGCHLD */
+-volatile sig_atomic_t gotsigchld;
+ 
+-extern char *signal_names[];
++extern const char *const signal_names[];
+ 
+ static int decode_signum(const char *);
+ MKINIT void clear_traps(union node *);
+@@ -345,6 +342,10 @@ void dotrap(void)
+ 	int i;
+ 	int status, last_status;
+ 
++	/* An interrupt is the face's (moy_sh.h, poll): it arrives as SIGINT. */
++	if (moy_sh_poll())
++		onsig(SIGINT);
++
+ 	if (!pending_sig)
+ 		return;
+ 
+@@ -389,7 +390,7 @@ void dotrap(void)
+ void
+ setinteractive(int on)
+ {
+-	static int is_interactive;
++#define is_interactive (moy_sh_g->is_interactive)
+ 
+ 	if (++on == is_interactive)
+ 		return;
+@@ -460,7 +461,7 @@ int decode_signal(const char *string, int minsig)
+ 		return signo;
+ 
+ 	for (signo = minsig; signo < NSIG; signo++) {
+-		if (!strcasecmp(string, signal_names[signo])) {
++		if (signal_names[signo] && !strcasecmp(string, signal_names[signo])) {
+ 			return signo;
+ 		}
+ 	}
+diff --git a/src/trap.h b/src/trap.h
+index beaf660..b36a52b 100644
+--- a/src/trap.h
++++ b/src/trap.h
+@@ -36,10 +36,10 @@
+ 
+ #include <signal.h>
+ 
+-extern int trapcnt;
+-extern char sigmode[];
+-extern volatile sig_atomic_t pending_sig;
+-extern volatile sig_atomic_t gotsigchld;
++#define trapcnt (moy_sh_g->trapcnt)
++#define sigmode (moy_sh_g->sigmode)
++#define pending_sig (moy_sh_g->pending_sig)
++#define gotsigchld (moy_sh_g->gotsigchld)
+ 
+ int trapcmd(int, char **);
+ void setsignal(int);
+diff --git a/src/var.c b/src/var.c
+index e76abe3..db47e6d 100644
+--- a/src/var.c
++++ b/src/var.c
+@@ -72,37 +72,37 @@ struct localvar_list {
+ 	struct localvar *lv;
+ };
+ 
+-MKINIT struct localvar_list *localvar_stack;
++#define localvar_stack (moy_sh_g->localvar_stack)
+ 
+ const char defpathvar[] =
+-	"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+-char defifsvar[] = "IFS= \t\n";
+-MKINIT char defoptindvar[] = "OPTIND=1";
++	"PATH=/bin";
++#define defoptindvar (moy_sh_g->defoptindvar)
+ 
+-int lineno;
+-char linenovar[sizeof("LINENO=")+sizeof(int)*CHAR_BIT/3+1] = "LINENO=";
+ 
+ static void changelocale(const char *val)
+ {
+-	putenv((char *)val);
+-	setlocale(LC_ALL, nullstr);
++	/* the locale is the board's: one, fixed */
+ }
+ 
+-/* Some macros in var.h depend on the order, add new variables to the end. */
+-struct var varinit[] = {
++/*
++ * Some macros in var.h depend on the order, add new variables to the end.
++ * The session's copy is varinit (moy_sh_g.h); the texts in the session's
++ * own buffers are filled in by initvar.
++ */
++static const struct var varinit_tmpl[] = {
+ #if ATTY
+ 	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"ATTY\0",	0 },
+ #endif
+-	{ 0,	VSTRFIXED|VTEXTFIXED,		defifsvar,	changeifs },
+-	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"MAIL\0",	changemail },
+-	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"MAILPATH\0",	changemail },
++	{ 0,	VSTRFIXED|VTEXTFIXED,		NULL,		changeifs },
++	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"MAIL\0",	0 },
++	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"MAILPATH\0",	0 },
+ 	{ 0,	VSTRFIXED|VTEXTFIXED,		defpathvar,	changepath },
+ 	{ 0,	VSTRFIXED|VTEXTFIXED,		"PS1=$ ",	0 },
+ 	{ 0,	VSTRFIXED|VTEXTFIXED,		"PS2=> ",	0 },
+ 	{ 0,	VSTRFIXED|VTEXTFIXED,		"PS4=+ ",	0 },
+-	{ 0,	VSTRFIXED|VTEXTFIXED|VNOFUNC,	defoptindvar,	getoptsreset },
++	{ 0,	VSTRFIXED|VTEXTFIXED|VNOFUNC,	NULL,		getoptsreset },
+ #ifdef WITH_LINENO
+-	{ 0,	VSTRFIXED|VTEXTFIXED,		linenovar,	0 },
++	{ 0,	VSTRFIXED|VTEXTFIXED,		NULL,		0 },
+ #endif
+ #ifndef SMALL
+ 	{ 0,	VSTRFIXED|VTEXTFIXED|VUNSET,	"TERM\0",	0 },
+@@ -115,9 +115,11 @@ struct var varinit[] = {
+ 	{ 0,	VSTRFIXED|VTEXTFIXED|VFULL|VUNSET, "LANG\0",	changelocale },
+ };
+ 
+-STATIC struct var *vartab[VTABSIZE];
++#define vartab (moy_sh_g->vartab)
+ 
+ STATIC struct var **hashvar(const char *);
++const unsigned varinit_n = sizeof(varinit_tmpl) / sizeof(varinit_tmpl[0]);
++
+ STATIC int vpcmp(const void *, const void *);
+ STATIC struct var **findvar(const char *);
+ 
+@@ -132,33 +134,11 @@ INCLUDE <sys/stat.h>
+ INCLUDE "cd.h"
+ INCLUDE "output.h"
+ INCLUDE "var.h"
+-MKINIT char **environ;
+ INIT {
+-	char **envp;
+-	static char ppid[32] = "PPID=";
+-	const char *p;
+-	struct stat64 st1, st2;
+-
+ 	initvar();
+-	for (envp = environ ; *envp ; envp++) {
+-		p = endofname(*envp);
+-		if (p != *envp && *p == '=') {
+-			setvareq(*envp, VEXPORT|VTEXTFIXED);
+-		}
+-	}
+-
+ 	setvareq(defifsvar, VTEXTFIXED);
+ 	setvareq(defoptindvar, VTEXTFIXED);
+-
+-	fmtstr(ppid + 5, sizeof(ppid) - 5, "%ld", (long) getppid());
+-	setvareq(ppid, VTEXTFIXED);
+-
+-	p = lookupvar("PWD");
+-	if (p)
+-		if (*p != '/' || stat64(p, &st1) || stat64(dotdir, &st2) ||
+-		    st1.st_dev != st2.st_dev || st1.st_ino != st2.st_ino)
+-			p = 0;
+-	setpwd(p, 0);
++	setpwd(NULL, 0);
+ }
+ 
+ RESET {
+@@ -197,8 +177,14 @@ initvar(void)
+ 	struct var *end;
+ 	struct var **vpp;
+ 
++	memcpy(varinit, varinit_tmpl, sizeof(varinit_tmpl));
++	vifs.text = defifsvar;
++	voptind.text = defoptindvar;
++#ifdef WITH_LINENO
++	vlineno.text = linenovar;
++#endif
+ 	vp = varinit;
+-	end = vp + sizeof(varinit) / sizeof(varinit[0]);
++	end = vp + varinit_n;
+ 	do {
+ 		vpp = hashvar(vp->text);
+ 		vp->next = *vpp;
+@@ -287,7 +273,7 @@ struct var *setvareq(char *s, int flags)
+ 			const char *n;
+ 
+ 			if (flags & VNOSAVE)
+-				free(s);
++				ckfree(s);
+ 			n = vp->text;
+ 			sh_error("%.*s: is read only", strchrnul(n, '=') - n,
+ 				 n);
+diff --git a/src/var.h b/src/var.h
+index 3d837a7..9eb30f0 100644
+--- a/src/var.h
++++ b/src/var.h
+@@ -73,7 +73,8 @@ struct localvar_list;
+ 
+ 
+ extern struct localvar *localvars;
+-extern struct var varinit[];
++#define varinit (moy_sh_g->varinit)
++extern const unsigned varinit_n;
+ 
+ #if ATTY
+ #define vatty varinit[0]
+@@ -100,13 +101,13 @@ extern struct var varinit[];
+ #define vhistsize (&vterm)[1]
+ #endif
+ 
+-extern char defifsvar[];
++#define defifsvar (moy_sh_g->defifsvar)
+ #define defifs (defifsvar + 4)
+ extern const char defpathvar[];
+-#define defpath (defpathvar + 36)
++#define defpath (defpathvar + 5)
+ 
+-extern int lineno;
+-extern char linenovar[];
++#define lineno (moy_sh_g->lineno)
++#define linenovar (moy_sh_g->linenovar)
+ 
+ /*
+  * The following macros access the values of the above variables.
