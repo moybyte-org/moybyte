@@ -10,10 +10,12 @@ string. Every verb answers at once; what it did arrives as an event, to
 `on(fn)`: fn(event, value, status), status 0 or a negative errno.
 
   scan(ms=3000)             EV_ADV (value: the device's index) as each
-                            device is first heard, then EV_SCAN_DONE (-EBUSY
-                            while the console's keyboard is scanning)
+                            device is first heard, then EV_SCAN_DONE; it
+                            shares the radio's one discovery with the
+                            console's keyboard
   devices() -> [(addr, rssi, name)]   what the last scan heard
-  connect(addr)             EV_CONNECTED
+  connect(addr)             EV_CONNECTED (-EBUSY while the console's keyboard
+                            is connecting)
   find(uuid)                EV_FOUND, value: the characteristic's handle
   read(handle)              EV_READ, value: its length; value(into) -> n
   write(handle, data, response=True)  EV_WRITTEN when it asks a response

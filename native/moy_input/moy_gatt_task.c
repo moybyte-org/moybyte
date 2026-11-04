@@ -1,8 +1,12 @@
-// moy_gatt's ops on NimBLE (moy_gatt.h): the calls start each procedure from
-// the caller's task (NimBLE's host API takes its own lock), and the GAP and
-// GATT callbacks, which run on the host task, complete them into the machine.
-// The app's procedures carry this file's GAP callback, so the keyboard
-// machine's (moy_ble_task.c) never sees them, nor it the keyboard's.
+// moy_gatt's ops on NimBLE (moy_gatt.h). A scan and a connection attempt are
+// GAP master procedures, shared with the keyboard machine through moy_scan.h:
+// they are handed to the host task (moy_ble_app_*), which runs the shared
+// master, delivers the discovery's advertisements and starts the app's
+// connection with this file's GAP callback behind the master's own. The GATT
+// procedures start from the caller's task (NimBLE's host API takes its own
+// lock), and their callbacks, on the host task, complete them into the
+// machine. The keyboard machine's events (moy_ble_task.c) never reach this
+// callback, nor the app's the keyboard's.
 
 #include "py/mpconfig.h"
 
@@ -42,16 +46,9 @@ static uint8_t own_type(void) {
     return t;
 }
 
-static int gap_event(struct ble_gap_event *e, void *arg) {
+int moy_gatt_gap_event(struct ble_gap_event *e, void *arg) {
     (void)arg;
     switch (e->type) {
-        case BLE_GAP_EVENT_DISC:
-            moy_gatt_on_adv(e->disc.addr.val, e->disc.addr.type, e->disc.rssi, e->disc.data,
-                            e->disc.length_data);
-            return 0;
-        case BLE_GAP_EVENT_DISC_COMPLETE:
-            moy_gatt_on_scan_done(0);
-            return 0;
         case BLE_GAP_EVENT_CONNECT:
             moy_gatt_on_connect(err_of(e->connect.status), e->connect.conn_handle);
             return 0;
@@ -85,28 +82,18 @@ static int gap_event(struct ble_gap_event *e, void *arg) {
 }
 
 static int op_scan(uint32_t ms) {
-    struct ble_gap_disc_params p = { .passive = 0, .filter_duplicates = 1 };
-    int rc = ble_gap_disc(own_type(), (int32_t)ms, &p, gap_event, NULL);
-    if (rc != 0) {
-        moy_gatt_on_scan_done(err_of(rc));
-    }
+    moy_ble_app_scan(ms);
     return 0;
 }
 
 static int op_connect(const uint8_t addr[6], uint8_t type) {
-    ble_addr_t a = { .type = type };
-    memcpy(a.val, addr, 6);
-    if (ble_gap_disc_active()) {
-        ble_gap_disc_cancel();
-    }
-    return err_of(ble_gap_connect(own_type(), &a, 5000, NULL, gap_event, NULL));
+    moy_ble_app_connect(addr, type);
+    return 0;
 }
 
 static int op_disconnect(uint16_t conn) {
-    int rc = ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
-    if (rc != 0) {
-        ble_gap_conn_cancel();
-        moy_gatt_on_disconnect(conn);
+    if (ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM) != 0) {
+        moy_ble_app_cancel(conn);       // an attempt not yet a link
     }
     return 0;
 }
@@ -185,7 +172,7 @@ static int op_advertise(const uint8_t *ad, size_t n, uint32_t interval_ms) {
             .itvl_min = (uint16_t)(interval_ms * 1000u / 625u),
             .itvl_max = (uint16_t)(interval_ms * 1000u / 625u),
         };
-        rc = ble_gap_adv_start(own_type(), NULL, BLE_HS_FOREVER, &p, gap_event, NULL);
+        rc = ble_gap_adv_start(own_type(), NULL, BLE_HS_FOREVER, &p, moy_gatt_gap_event, NULL);
     }
     moy_gatt_on_advertising(err_of(rc));
     return 0;

@@ -33,4 +33,11 @@ bool moy_ble_up(void);
 // Queue a verb for the host task.
 bool moy_ble_verb(uint8_t verb, const moy_hid_addr_t *addr);
 
+// The `ble` API's GAP master procedures (moy_gatt_task.c), run on the host
+// task over the master the keyboard machine shares (moy_scan.h); each outcome
+// comes back through moy_gatt_on_*. A scan of 0 ms ends the app's scan.
+void moy_ble_app_scan(uint32_t ms);
+void moy_ble_app_connect(const uint8_t addr[6], uint8_t type);
+void moy_ble_app_cancel(uint16_t conn);
+
 #endif // MOY_BLE_H

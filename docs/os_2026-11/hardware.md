@@ -122,7 +122,11 @@ source, which a face's `on(fn)` or `on_done` wakes its process on.
 - **`ble`** (`native/moy_input/moy_gatt.h`): a GATT central (scan, connect,
   find by UUID, read, write, subscribe) and a non-connectable beacon, on the
   NimBLE host the keyboard machine owns and only while it runs (keyboard
-  input on in Settings); an app's scan during the keyboard's ends `-EBUSY`.
+  input on in Settings). The two share NimBLE's one GAP master procedure
+  (`native/moy_input/moy_scan.h`): an app's scan joins the keyboard's
+  discovery, the union of the two scans' kinds on the air and every
+  advertisement to both, and a connection attempt pauses it, the other
+  side's attempt answering `-EBUSY` until it ends.
   An app's own GATT server is not offered: NimBLE takes its services before
   the host starts.
 

@@ -11,6 +11,12 @@
 // posted to the host's default queue), so the machine is single-threaded; the
 // only shared state is the report latch, moy_hid's lock.
 //
+// THE GAP MASTER IS SHARED with the `ble` API (moy_gatt.h) through moy_scan.h:
+// one discovery on the air for the keyboard's scan and the app's, each
+// advertisement to the scans on it, and a connection attempt of either
+// pausing it. Its state rides the machine's allocation (ble_t), so the
+// sharing costs the S3s no internal SRAM.
+//
 // PERSISTENCE is NVS: the bonds are NimBLE's own store (CONFIG_BT_NIMBLE_NVS_PERSIST),
 // and the machine's settings -- enabled, the picked keyboard's address and
 // name -- are namespace "moy_ble".
@@ -18,6 +24,8 @@
 #include "py/mpconfig.h"
 
 #include "moy_ble.h"
+#include "moy_gatt.h"
+#include "moy_scan.h"
 
 #if defined(MOY_INPUT_BOARD) && defined(MOY_INPUT_BLE)
 
@@ -46,8 +54,20 @@
 void ble_store_config_init(void);
 
 // The machine is PSRAM: nothing an ISR touches is in it, and its ~800 bytes are
-// internal SRAM the share does not have.
+// internal SRAM the share does not have. The shared master rides with it.
+typedef struct {
+    moy_hid_t h;                        // first: s_h is the block
+    moy_scan_t scan;
+    struct ble_npl_callout scan_due;    // the next scan's end
+    struct ble_npl_event app_ev;
+    // the app's requests, under s_verb_lock, run by app_run on the host task
+    uint8_t app_req;
+    uint32_t app_ms;
+    ble_addr_t app_peer;
+    uint16_t app_conn;
+} ble_t;
 static moy_hid_t *s_h;
+#define B ((ble_t *)s_h)
 static bool s_up;                   // the host runs
 static volatile bool s_synced;
 static uint8_t s_own_type;
@@ -127,18 +147,71 @@ static void addr_from_ble(const ble_addr_t *b, moy_hid_addr_t *a) {
     memcpy(a->a, b->val, 6);
 }
 
-static int op_scan(void *ctx, bool picker) {
+static uint32_t now_ms(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+// The next scan's end, armed after every change to the master.
+static void arm(void) {
+    int32_t due = moy_scan_due(&B->scan, now_ms());
+    if (due < 0) {
+        ble_npl_callout_stop(&B->scan_due);
+    } else {
+        ble_npl_callout_reset(&B->scan_due, ble_npl_time_ms_to_ticks32((uint32_t)due + 1u));
+    }
+}
+
+static void scan_due_run(struct ble_npl_event *ev) {
+    (void)ev;
+    moy_scan_tick(&B->scan, now_ms());
+    arm();
+}
+
+static int scan_event(struct ble_gap_event *event, void *arg);
+
+static int disc(void *ctx, int flags) {
     (void)ctx;
     // Background scans are PASSIVE at 10% duty (30 ms in every 300 ms): the
-    // radio is shared with WiFi and ESP-NOW (#7). The picker's is active and
-    // continuous: user-facing, brief, and it wants the names.
+    // radio is shared with WiFi and ESP-NOW (#7). The picker's and an app's
+    // are active and continuous: user-facing, brief, and they want the names.
     struct ble_gap_disc_params p = {
-        .itvl = picker ? 48 : 480,          // 0.625 ms units
+        .itvl = (flags & MOY_SCAN_DENSE) ? 48 : 480,        // 0.625 ms units
         .window = 48,
-        .passive = picker ? 0 : 1,
+        .passive = (flags & MOY_SCAN_ACTIVE) ? 0 : 1,
         .filter_duplicates = 0,
     };
-    return ble_gap_disc(s_own_type, MOY_HID_SCAN_MS, &p, gap_event, NULL) == 0 ? 0 : -1;
+    return ble_gap_disc(s_own_type, BLE_HS_FOREVER, &p, scan_event, NULL);
+}
+
+static int disc_cancel(void *ctx) {
+    (void)ctx;
+    return ble_gap_disc_cancel();
+}
+
+static int gatt_err(int rc) {
+    return rc == 0 ? 0
+         : rc == BLE_HS_EALREADY || rc == BLE_HS_EBUSY ? -MOY_GATT_EBUSY : -MOY_GATT_EIO;
+}
+
+static void scan_done(void *ctx, int client, int err) {
+    (void)ctx;
+    if (client == MOY_SCAN_KBD) {
+        // The machine hears its scan's end after the call that ended it.
+        ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_scan_done_ev);
+    } else {
+        moy_gatt_on_scan_done(gatt_err(err));
+    }
+}
+
+static const moy_scan_ops_t s_scan_ops = { disc, disc_cancel, scan_done };
+
+static int op_scan(void *ctx, bool picker) {
+    (void)ctx;
+    int rc = moy_scan_start(&B->scan, MOY_SCAN_KBD,
+                            picker ? MOY_SCAN_ACTIVE | MOY_SCAN_DENSE : 0, MOY_HID_SCAN_MS,
+                            now_ms());
+    arm();
+    return rc == 0 ? 0 : -1;
 }
 
 static void scan_done_run(struct ble_npl_event *ev) {
@@ -148,13 +221,25 @@ static void scan_done_run(struct ble_npl_event *ev) {
 
 static int op_scan_stop(void *ctx) {
     (void)ctx;
-    // A cancelled discovery reports no completion of its own: the machine
-    // hears it as one, after this call returns.
-    if (ble_gap_disc_cancel() != 0) {
+    if (!moy_scan_on(&B->scan, MOY_SCAN_KBD)) {
         return -1;
     }
-    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_scan_done_ev);
+    moy_scan_stop(&B->scan, MOY_SCAN_KBD);
+    arm();
     return 0;
+}
+
+int moy_gatt_gap_event(struct ble_gap_event *e, void *arg);
+
+// A connection's events: the attempt's end gives the master back, and every
+// event goes on to the side that made it, for the connection's life.
+static int conn_event(struct ble_gap_event *event, void *arg) {
+    int client = (int)(intptr_t)arg;
+    if (event->type == BLE_GAP_EVENT_CONNECT || event->type == BLE_GAP_EVENT_DISCONNECT) {
+        moy_scan_connected(&B->scan, client);
+        arm();
+    }
+    return client == MOY_SCAN_KBD ? gap_event(event, NULL) : moy_gatt_gap_event(event, NULL);
 }
 
 static int op_connect(void *ctx, const moy_hid_addr_t *peer) {
@@ -168,7 +253,16 @@ static int op_connect(void *ctx, const moy_hid_addr_t *peer) {
         .latency = 0, .supervision_timeout = 400,
         .min_ce_len = 0, .max_ce_len = 0,
     };
-    return ble_gap_connect(s_own_type, &a, MOY_HID_CONNECT_MS, &cp, gap_event, NULL) == 0 ? 0 : -1;
+    if (moy_scan_connect(&B->scan, MOY_SCAN_KBD) != 0) {
+        return -1;                      // the app's attempt holds the master
+    }
+    int rc = ble_gap_connect(s_own_type, &a, MOY_HID_CONNECT_MS, &cp, conn_event,
+                             (void *)(intptr_t)MOY_SCAN_KBD);
+    if (rc != 0) {
+        moy_scan_connected(&B->scan, MOY_SCAN_KBD);
+    }
+    arm();
+    return rc == 0 ? 0 : -1;
 }
 
 static int op_disconnect(void *ctx, uint16_t conn) {
@@ -379,6 +473,110 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     }
 }
 
+// The shared discovery's events: each advertisement to every scan on it.
+static int scan_event(struct ble_gap_event *event, void *arg) {
+    (void)arg;
+    if (event->type == BLE_GAP_EVENT_DISC) {
+        if (moy_scan_on(&B->scan, MOY_SCAN_KBD)) {
+            moy_hid_addr_t a;
+            addr_from_ble(&event->disc.addr, &a);
+            moy_hid_on_scan_result(s_h, &a, event->disc.rssi, event->disc.data,
+                                   event->disc.length_data);
+        }
+        if (moy_scan_on(&B->scan, MOY_SCAN_APP)) {
+            moy_gatt_on_adv(event->disc.addr.val, event->disc.addr.type, event->disc.rssi,
+                            event->disc.data, event->disc.length_data);
+        }
+    } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
+        moy_scan_lost(&B->scan, event->disc_complete.reason);
+        arm();
+    }
+    return 0;
+}
+
+// -- the app's GAP master procedures (moy_ble.h) -------------------------------------
+
+enum { REQ_SCAN = 1, REQ_STOP = 2, REQ_CONNECT = 4, REQ_CANCEL = 8 };
+
+static void app_run(struct ble_npl_event *ev) {
+    (void)ev;
+    MOY_DRV_LOCK(&s_verb_lock);
+    uint8_t req = B->app_req;
+    uint32_t ms = B->app_ms;
+    ble_addr_t peer = B->app_peer;
+    uint16_t conn = B->app_conn;
+    B->app_req = 0;
+    MOY_DRV_UNLOCK(&s_verb_lock);
+    if (req & REQ_STOP) {
+        moy_scan_stop(&B->scan, MOY_SCAN_APP);
+    }
+    if (req & REQ_SCAN) {
+        int rc = moy_scan_start(&B->scan, MOY_SCAN_APP, MOY_SCAN_ACTIVE | MOY_SCAN_DENSE, ms,
+                                now_ms());
+        if (rc != 0) {
+            moy_gatt_on_scan_done(gatt_err(rc));
+        }
+    }
+    if (req & REQ_CANCEL) {
+        if (moy_scan_connecting(&B->scan) == MOY_SCAN_APP) {
+            ble_gap_conn_cancel();      // its CONNECT event ends the attempt
+        } else {
+            moy_gatt_on_disconnect(conn);
+        }
+    }
+    if (req & REQ_CONNECT) {
+        int rc = moy_scan_connect(&B->scan, MOY_SCAN_APP);
+        if (rc == 0) {
+            rc = ble_gap_connect(s_own_type, &peer, 5000, NULL, conn_event,
+                                 (void *)(intptr_t)MOY_SCAN_APP);
+            if (rc != 0) {
+                moy_scan_connected(&B->scan, MOY_SCAN_APP);
+                rc = gatt_err(rc);
+            }
+        }
+        if (rc != 0) {
+            moy_gatt_on_connect(rc, 0);
+        }
+    }
+    arm();
+}
+
+static void app_request(uint8_t req, uint32_t ms, const uint8_t *addr, uint8_t type,
+                        uint16_t conn) {
+    if (!s_up || s_h == NULL) {
+        return;
+    }
+    MOY_DRV_LOCK(&s_verb_lock);
+    if (req & (REQ_SCAN | REQ_STOP)) {
+        B->app_req &= (uint8_t)~(REQ_SCAN | REQ_STOP);
+        B->app_ms = ms;
+    }
+    if (req & REQ_CONNECT) {
+        B->app_req &= (uint8_t)~REQ_CANCEL;
+        B->app_peer.type = type;
+        memcpy(B->app_peer.val, addr, 6);
+    }
+    if (req & REQ_CANCEL) {
+        B->app_req &= (uint8_t)~REQ_CONNECT;    // an attempt not yet started never starts
+        B->app_conn = conn;
+    }
+    B->app_req |= req;
+    MOY_DRV_UNLOCK(&s_verb_lock);
+    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &B->app_ev);
+}
+
+void moy_ble_app_scan(uint32_t ms) {
+    app_request(ms ? REQ_SCAN : REQ_STOP, ms, NULL, 0, 0);
+}
+
+void moy_ble_app_connect(const uint8_t addr[6], uint8_t type) {
+    app_request(REQ_CONNECT, 0, addr, type, 0);
+}
+
+void moy_ble_app_cancel(uint16_t conn) {
+    app_request(REQ_CANCEL, 0, NULL, 0, conn);
+}
+
 // -- the host's lifecycle -------------------------------------------------------------
 
 static void tick_run(struct ble_npl_event *ev) {
@@ -412,9 +610,9 @@ moy_hid_t *moy_ble_hid(void) {
     if (!s_inited) {
         moy_input_t *t = moy_input_kernel();
         if (s_h == NULL) {
-            s_h = heap_caps_calloc(1, sizeof(*s_h), MALLOC_CAP_SPIRAM);
+            s_h = heap_caps_calloc(1, sizeof(ble_t), MALLOC_CAP_SPIRAM);
             if (s_h == NULL) {
-                s_h = heap_caps_calloc(1, sizeof(*s_h), MALLOC_CAP_8BIT);
+                s_h = heap_caps_calloc(1, sizeof(ble_t), MALLOC_CAP_8BIT);
             }
             if (s_h == NULL) {
                 return NULL;
@@ -480,6 +678,10 @@ bool moy_ble_start(void) {
     ble_npl_callout_init(&s_tick, nimble_port_get_dflt_eventq(), tick_run, NULL);
     ble_npl_event_init(&s_verb_ev, verb_run, NULL);
     ble_npl_event_init(&s_scan_done_ev, scan_done_run, NULL);
+    ble_npl_callout_init(&B->scan_due, nimble_port_get_dflt_eventq(), scan_due_run, NULL);
+    ble_npl_event_init(&B->app_ev, app_run, NULL);
+    B->app_req = 0;
+    moy_scan_init(&B->scan, &s_scan_ops, NULL);
     nimble_port_freertos_init(host_task);
     s_up = true;
     return true;
@@ -520,6 +722,8 @@ bool moy_ble_stop(void) {
     ble_npl_callout_deinit(&s_tick);
     ble_npl_event_deinit(&s_verb_ev);
     ble_npl_event_deinit(&s_scan_done_ev);
+    ble_npl_callout_deinit(&B->scan_due);
+    ble_npl_event_deinit(&B->app_ev);
     nimble_port_deinit();
     #if defined(MOY_INPUT_BLE_HOSTED)
     esp_hosted_bt_controller_disable();

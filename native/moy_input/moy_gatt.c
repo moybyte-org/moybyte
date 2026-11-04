@@ -112,6 +112,7 @@ int moy_gatt_close(uint32_t owner) {
     if (!held(owner)) {
         return -MOY_GATT_EBADF;
     }
+    ops()->scan(0);
     if (G->state != MOY_GATT_IDLE) {
         ops()->disconnect(G->conn);
     }
@@ -497,7 +498,9 @@ static uint8_t s_sim_ad[MOY_GATT_ADV];
 static size_t s_sim_adn;
 
 static int sim_scan(uint32_t ms) {
-    (void)ms;
+    if (ms == 0) {
+        return 0;
+    }
     for (int i = 0; i < s_ndev; i++) {
         uint8_t ad[MOY_GATT_ADV];
         size_t nl = strlen(s_dev[i].name);

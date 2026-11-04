@@ -16,11 +16,14 @@
 // its value (a table index, a handle, a length), `b` its status (0, or a
 // negative errno) or, for an advertisement, its RSSI.
 //
-// SHARING THE HOST WITH THE KEYBOARD. The keyboard machine's background scan
-// and the app's cannot run at once: a scan that finds the radio scanning
-// ends at once with -EBUSY. The host runs only where the keyboard machine
-// started it (Settings' keyboard input on: moy_ble_up), and where it does not
-// the API is absent (moy_gatt_present), never started for an app.
+// SHARING THE HOST WITH THE KEYBOARD. The keyboard machine and the app share
+// NimBLE's one GAP master procedure through moy_scan.h: an app's scan joins
+// the keyboard's discovery (the union of the two scans' kinds on the air,
+// every advertisement to both), and a connection attempt pauses it, the
+// other side's attempt answering -EBUSY until it ends. The host runs only
+// where the keyboard machine started it (Settings' keyboard input on:
+// moy_ble_up), and where it does not the API is absent (moy_gatt_present),
+// never started for an app.
 //
 // The machine is this file's; what drives NimBLE is moy_gatt_task.c's
 // moy_gatt_ops_t, run on the host task. The host's stand-in ops are
@@ -81,7 +84,7 @@ typedef struct {
 // What drives the radio: every call starts a procedure and answers 0 or a
 // negative errno; its outcome comes back through the moy_gatt_on_* calls.
 typedef struct {
-    int (*scan)(uint32_t ms);
+    int (*scan)(uint32_t ms);           // 0: the scan running ends, quietly
     int (*connect)(const uint8_t addr[6], uint8_t type);
     int (*disconnect)(uint16_t conn);
     int (*find)(uint16_t conn, const moy_gatt_uuid_t *u);
