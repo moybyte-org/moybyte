@@ -25,6 +25,8 @@ dev = [
   "pyflakes",     # the undefined-name gate (tests/test_undefined_names.py):
                   # a moved body naming a symbol its new namespace never
                   # imported NameErrors only when the line runs, on glass
+  "cryptography", # the AES the LoRaWAN network stand-in checks moy_aes against
+                  # (runtime/host/lora_sim.py, tests/test_dev_lora.py)
 ]
 sim = [
   "pygame>=2.5",  # the live simulator window (tools/simulate_desktop.py, moybyte run)
