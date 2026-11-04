@@ -359,10 +359,12 @@ at stage 5 with the pins in mpconfigboard.h."""
 [[native.shared.deny]]
 module = "moy_media"
 why = """
-The media service plays into moy_audio's mix, which this board denies (no
-speaker), and THE SHARES give this board no MEDIA row: it is the "one running
-thing" tier for media (owner, 2026-11-04; native/moy_play/moy_play.h), so
-`moybyte.media` is None here."""
+The media service plays into moy_audio's mix, which this board denies until
+its speaker header's amp and pins are verified (audio, stage 5 above). Its
+MEDIA row in THE SHARES (native/moy_play/moy_play.h) is absent with it, so
+`moybyte.media` is None here. RAM is not what stops it: after a Brick Siege
+run the desk is 507 KB above the 4 MiB cart floor (#246, 2026-11-04), so the
+row is the T-Deck's 192 KiB once audio is taken."""
 
 [[native.shared.take]]
 module = "moy_wasm"
