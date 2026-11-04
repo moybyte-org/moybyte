@@ -65,6 +65,17 @@
 #define WRITE_TIMEOUT_MS 100
 
 static i2s_chan_handle_t s_tx;
+
+// The microphone's receive half, where it shares the speaker's clocks (a
+// P4's ES7210: only DIN of its own, native/moy_audio/moy_mic.h): the channel
+// opens full duplex, its receive half enabled while the mic is held. A swap
+// remakes both under s_rx_lock, which a read holds.
+#if defined(MOY_API_MIC) && defined(MOY_HW_MIC_DIN) && !defined(MOY_HW_MIC_SCK)
+#define AUD_DUPLEX 1
+static i2s_chan_handle_t s_rx;
+static SemaphoreHandle_t s_rx_lock;
+static volatile int s_rx_on;
+#endif
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_mutex;
 static volatile int s_running;
@@ -117,10 +128,18 @@ static int chan_open(int desc, int frames) {
     cc.dma_desc_num = desc;
     cc.dma_frame_num = frames;
     cc.auto_clear = true;       // silence, not stale DMA, on an under-run
+#ifdef AUD_DUPLEX
+    if (i2s_new_channel(&cc, &s_tx, &s_rx) != ESP_OK) {
+        s_tx = NULL;
+        s_rx = NULL;
+        return -1;
+    }
+#else
     if (i2s_new_channel(&cc, &s_tx, NULL) != ESP_OK) {
         s_tx = NULL;
         return -1;
     }
+#endif
     i2s_std_config_t sc = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)MOY_AUDIO_RATE),
 #if MOY_AUDIO_CODEC_ES8311
@@ -151,26 +170,108 @@ static int chan_open(int desc, int frames) {
         || i2s_channel_enable(s_tx) != ESP_OK) {
         i2s_del_channel(s_tx);
         s_tx = NULL;
+#ifdef AUD_DUPLEX
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+#endif
         return -1;
     }
+#ifdef AUD_DUPLEX
+    // The receive half on the same clocks, both slots: the ES7210's MIC1 and
+    // MIC2.
+    i2s_std_config_t rc = sc;
+    rc.slot_cfg = (i2s_std_slot_config_t)I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
+        I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+    rc.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    rc.gpio_cfg.din = (gpio_num_t)MOY_HW_MIC_DIN;
+    if (i2s_channel_init_std_mode(s_rx, &rc) != ESP_OK) {
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+    } else if (s_rx_on) {
+        i2s_channel_enable(s_rx);
+    }
+#endif
     return 0;
 }
 
+#ifdef AUD_DUPLEX
+static void rx_drop(void) {
+    if (s_rx != NULL) {
+        if (s_rx_on) {
+            i2s_channel_disable(s_rx);
+        }
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+    }
+}
+#endif
+
 static void chan_swap(void) {
     int want = s_shallow_want;
+#ifdef AUD_DUPLEX
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    rx_drop();
+#endif
     i2s_channel_disable(s_tx);
     i2s_del_channel(s_tx);
     s_tx = NULL;
     if (want && chan_open(STREAM_DESC, STREAM_BLOCK) == 0) {
         s_shallow = 1;
-        return;
+    } else {
+        s_shallow = 0;
+        if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
+            s_running = 0;
+            s_state = MOY_AUD_OUT_FAILED;
+            s_why = "the I2S channel would not re-open";
+        }
     }
-    s_shallow = 0;
-    if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
-        s_running = 0;
-        s_state = MOY_AUD_OUT_FAILED;
-        s_why = "the I2S channel would not re-open";
+#ifdef AUD_DUPLEX
+    xSemaphoreGive(s_rx_lock);
+#endif
+}
+
+int moy_aud_out_rx_enable(int on) {
+#ifdef AUD_DUPLEX
+    if (s_rx_lock == NULL) {
+        return -1;
     }
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    int rc = 0;
+    if (s_rx == NULL) {
+        rc = on ? -1 : 0;
+    } else if (on && !s_rx_on) {
+        rc = i2s_channel_enable(s_rx) == ESP_OK ? 0 : -1;
+    } else if (!on && s_rx_on) {
+        i2s_channel_disable(s_rx);
+    }
+    s_rx_on = on && rc == 0;
+    xSemaphoreGive(s_rx_lock);
+    return rc;
+#else
+    (void)on;
+    return -1;
+#endif
+}
+
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms) {
+#ifdef AUD_DUPLEX
+    *got = 0;
+    if (s_rx_lock == NULL || xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return -1;
+    }
+    int rc = -1;
+    if (s_rx != NULL && s_rx_on) {
+        rc = i2s_channel_read(s_rx, buf, bytes, got, pdMS_TO_TICKS(timeout_ms)) == ESP_OK ? 0 : -1;
+    }
+    xSemaphoreGive(s_rx_lock);
+    return rc;
+#else
+    (void)buf;
+    (void)bytes;
+    (void)timeout_ms;
+    *got = 0;
+    return -1;
+#endif
 }
 
 static void feeder(void *arg) {
@@ -218,6 +319,12 @@ int moy_aud_out_start(void) {
     }
     s_state = MOY_AUD_OUT_FAILED;
     moy_aud_set_rate(MOY_AUDIO_RATE);
+#ifdef AUD_DUPLEX
+    if (s_rx_lock == NULL && (s_rx_lock = xSemaphoreCreateMutex()) == NULL) {
+        s_why = "no memory for the lock";
+        return s_state;
+    }
+#endif
     if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
         s_why = "the I2S channel would not open";
         return s_state;
@@ -316,6 +423,19 @@ int moy_aud_out_plays(void) {
 
 void moy_aud_out_shallow(int on) {
     (void)on;
+}
+
+int moy_aud_out_rx_enable(int on) {
+    (void)on;
+    return -1;
+}
+
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms) {
+    (void)buf;
+    (void)bytes;
+    (void)timeout_ms;
+    *got = 0;
+    return -1;
 }
 
 int moy_aud_out_start(void) {

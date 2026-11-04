@@ -180,6 +180,11 @@ void moy_aud_unlock(void);
 uint64_t moy_aud_now_us(void);
 int moy_aud_out_plays(void);
 void moy_aud_out_shallow(int on);
+// The microphone's receive half where it shares the speaker's I2S (a P4's
+// ES7210, moy_mic.h): enabled while the mic is held, read by its task. -1
+// where this build has none.
+int moy_aud_out_rx_enable(int on);
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms);
 void moy_aud_count_out(uint32_t written, uint32_t underruns);
 // A compiled cart's stream: queued, played, starved, room; 0 before any opened.
 int moy_aud_snd_counts(uint32_t c[4], int *open);

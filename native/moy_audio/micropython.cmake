@@ -1,6 +1,7 @@
 # moy_audio: the kernel's audio -- sessions and the mix (moy_aud.c), the
 # speaker (moy_aud_out.c), the ES8311 codec where a board names it
-# (moy_codec_es8311.c), the MicroPython binding (modmoy_audio.c) -- over
+# (moy_codec_es8311.c), the microphone (moy_mic.c, the module moy_mic), the
+# MicroPython binding (modmoy_audio.c) -- over
 # libmoy/, moy-spec's SPEC.md 8 synth, vendored verbatim and compiled in
 # (libmoy/UPSTREAM.md). The table discipline is moy_spine's (moy_htab.h); the
 # codec's bus is the kernel's (moy_kernel/moy_bus.h).
@@ -14,6 +15,8 @@ target_sources(usermod_moy_audio INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_aud.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_aud_out.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_codec_es8311.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_mic.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_mic.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_audio.c
 )
 
