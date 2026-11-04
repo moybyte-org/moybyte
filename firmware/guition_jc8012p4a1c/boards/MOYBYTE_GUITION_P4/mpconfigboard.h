@@ -137,6 +137,13 @@
 #define MOY_AUDIO_I2S_WS                    (10)
 #define MOY_AUDIO_I2S_DOUT                  (9)
 #define MOY_AUDIO_PA_GPIO                   (20)
+// 44.1 kHz stereo out (docs/os_2026-11/hardware.md section 3): the mix,
+// 22,050 Hz mono as on every board, upsampled 2x by the feeder, the streams
+// added after it. The ES8311 is a mono DAC that reads one slot, so the two
+// channels reach it as their mean.
+#define MOY_AUDIO_RATE                      (44100)
+#define MOY_AUDIO_STEREO                    (1)
+#define MOY_AUDIO_DAC_MONO                  (1)
 
 // Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
 // central over NimBLE, its bonds in NVS. There is no `bluetooth` module.

@@ -46,7 +46,7 @@ class _St(ctypes.Structure):
 _SIGS = (
     ("moy_media_share", [], _U32),
     ("moy_media_present", [], _I),
-    ("moy_media_open", [_U32, _I], _I),
+    ("moy_media_open", [_U32, _I, _I], _I),
     ("moy_media_close", [_U32], _I),
     ("moy_media_owner", [], _U32),
     ("moy_media_clear", [_U32], _I),
@@ -96,8 +96,8 @@ def share():
     return _lib().moy_media_share()
 
 
-def open(owner, rate):  # noqa: A001 -- the board module's name
-    return _lib().moy_media_open(owner, rate)
+def open(owner, rate, channels=1):  # noqa: A001 -- the board module's name
+    return _lib().moy_media_open(owner, rate, channels)
 
 
 def close(owner):

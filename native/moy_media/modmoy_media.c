@@ -1,7 +1,8 @@
 // moy_media's MicroPython binding: the media service (moy_media.h) as the
 // module `moy_media`, the names runtime/host/moy_media.py gives CPython. A
 // refusal is a negative errno, which the face (runtime/system/dev_media.py)
-// raises. `rate` in open() is the host's: a board decodes to its mix's rate.
+// raises. `rate` in open() is the host's: a board decodes to its output's rate
+// and channels (moy_aud_out_rate and _channels).
 //
 //   present() share() open(owner, rate) close(owner) owner()
 //   clear(owner) add(owner, src, title) playlist(owner, text, base)
@@ -44,7 +45,7 @@ static mp_obj_t media_share(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(media_share_obj, media_share);
 
 static mp_obj_t media_open(mp_obj_t owner, mp_obj_t rate) {
-    return rc(moy_media_open(u32(owner), mp_obj_get_int(rate)));
+    return rc(moy_media_open(u32(owner), mp_obj_get_int(rate), 1));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(media_open_obj, media_open);
 

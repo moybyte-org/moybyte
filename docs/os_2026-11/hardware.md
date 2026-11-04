@@ -111,7 +111,8 @@ on.
   it are refused for apps until TLS (P3.4), and a request holds the WiFi
   lease's `http` tag while it runs.
 - **`mic`** (`native/moy_audio/moy_mic.h`): PCM16 mono at the speaker's
-  rate from the ES7210 on the kernel's I²C bus, on the T-Deck's own I2S1, on
+  rate (44,100 Hz on a P4, 22,050 on the T-Deck: a reader takes `rate()`)
+  from the ES7210 on the kernel's I²C bus, on the T-Deck's own I2S1, on
   a P4 the speaker's I2S0 opened full duplex, the ES7210's four inputs in
   TDM and the two slots' mean (`moy_mic.c` says why).
   `moybyte.mic.holder()` names the process recording. While one holds it
@@ -267,7 +268,8 @@ order of preference:
 
    **As built (P2.5).** The ring is the mix's one render-ahead stream,
    libmoy's `moy_stream` under the mix's lock (one writer at a time, the
-   feeder its reader), 22,050 Hz mono, `MOY_AUDIO_SND_MIN`..`_MAX` frames
+   feeder its reader), 22,050 Hz mono (moy-spec's) added to the mix at the
+   output's rate, `MOY_AUDIO_SND_MIN`..`_MAX` frames
    deep (`native/moy_audio/moy_audio_snd.h`): a depth up to moy-spec's 2,048
    uses the ring reserved at boot, a deeper one is PSRAM taken from THE
    SHARES' RINGS row at the open and given back at the close. A compiled
@@ -322,8 +324,10 @@ A KEY's `b` is the console key event; TEXT is its own record.
 An **OS service** in C (`native/moy_media/moy_media.h`, the module
 `moy_media`; its face `runtime/system/dev_media.py`, `moybyte.media`): one
 background stream for one process, from an HTTP stream or a file. MP3 is
-decoded by minimp3 (vendored, `native/moy_media/UPSTREAM.md`), mixed down to
-mono and resampled once to the mix's rate, and the mix pulls it as its
+decoded by minimp3 (vendored, `native/moy_media/UPSTREAM.md`) and resampled
+once to the output's rate and channels (below: on a P4 a 44.1 kHz stereo
+stream is copied as it is, its channels kept; on the T-Deck it is mixed down
+to mono), and the mix pulls it as its
 **background stream** (`moy_aud_bg`, `native/moy_audio/moy_aud.h`), at a
 quarter of its level while the focused session sounds (**ducked**). On a
 board a task on core 0 below the flush priority (`MOY_MEDIA_PRIO`) reads the
@@ -336,26 +340,38 @@ core 1 through the cache and the memory bus the cores share, and the decode
 itself is the cost: its state in internal SRAM bought back a fifth of it for
 about 30 KiB the S3 cannot spare, and decoding in bursts or building the
 decoder for size bought nothing (A/B'd 2026-11-04; the numbers are #246's).
-The Waveshare P4 loses nothing. While it plays the feeder is no longer lazy (the
-open starts the output), its I²S DMA ring is permanent internal SRAM, and a
+On the Waveshare P4 a stream costs a heavy cart a few frames a second too,
+and the stereo stage the feeder runs on core 1 beside the VM costs some
+whether a stream plays or not (the A/B is #66's). While it plays the feeder
+is no longer lazy (the open starts the output), its I²S DMA ring is permanent
+internal SRAM (6 KiB on the T-Deck, 24 KiB on a P4: 12 × 512 stereo
+frames), and a
 stream whose list holds a URL holds the WiFi lease under `media`, whose
 internal cost never comes back (#158).
 
 **Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the
-open takes `moy_media.share()` from it (155,748 bytes: the service's state,
-its 32 KiB stream buffer, its 16 KiB decoder window, the decoder, a decoded
-ring of 16,384 frames and the list, one PSRAM block; the task's stack; the
+open takes `moy_media.share()` from it (155,876 bytes on the T-Deck,
+188,644 on a P4: the service's state, its 32 KiB stream buffer, its 16 KiB
+decoder window, the decoder, a decoded ring of 16,384 frames, 32 KiB mono or
+64 KiB stereo, and the list, one PSRAM block; the task's stack; the
 URL client's buffers) and the close gives it back. Where the row is absent
 the open is refused (ENOSPC) and `moybyte.media` is `None`: the T-Deck has a
 MEDIA row of 192 KiB, the Guition S3 none (owner, 2026-11-04: the one
 running thing tier for media; it has no speaker, and its image denies the
 module).
 
-**The output format (owner, 2026-11-03)**: 44.1 kHz stereo on the P4s, 22.05
-kHz mono on the S3s, the synth resampled once in the mix. As built every
-board's mix is 22,050 Hz mono (`native/moy_audio/moy_audio_snd.h`), so a
-stream plays at 22.05 kHz mono on the P4s too; their 44.1 kHz stereo output
-is not built.
+**The output format (owner, 2026-11-03; two rates, 2026-11-04)**: 44.1 kHz
+stereo on the P4s, 22.05 kHz mono on the S3s, the host and the browser. Every
+board's sessions (the synth and the sample voices) mix at 22,050 Hz mono, so
+a cart sounds the same everywhere; on a P4 the feeder upsamples that mix
+once, 2× (`moy_aud_render_st` and `moy_aud_up2`, `native/moy_audio/moy_aud.h`:
+a half-band FIR flat to 10 kHz whose images at or above 12.05 kHz are 74 dB
+down, `tests/test_audio_upsample.py`), then adds the render-ahead ring and
+the media's stereo stream at 44.1 kHz (`MOY_AUDIO_STEREO` in the board's
+`mpconfigboard.h`). The ES8311 on both P4s is a mono DAC that reads one I²S
+slot, so the feeder hands it the two channels' mean (`MOY_AUDIO_DAC_MONO`):
+the stereo stops at the codec, and an output that plays two slots takes it
+whole. The microphone, on the speaker's clocks, records at 44.1 kHz there.
 
 **Verbs:** `play(src)`, `pause`, `resume`, `stop`, `next`, `prev`, `volume`,
 `now`. `play` takes a file (an MP3), an `http://` stream (asked for its **ICY

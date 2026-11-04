@@ -44,7 +44,9 @@ _FILES = ((_LIBMOY, "moy_audio.c", True), (_LIBMOY, "moy_audio.h", True),
           (_AUDIO, "moy_aud.c", True), (_AUDIO, "moy_aud.h", True),
           (_AUDIO, "moy_aud_out.c", False), (_AUDIO, "moy_audio_snd.h", False),
           (_SPINE, "moy_htab.c", False), (_SPINE, "moy_htab.h", False))
-_CFLAGS = ["-std=gnu99", "-O2", "-ffp-contract=off", "-fPIC", "-shared"]
+# MOY_AUDIO_STEREO builds the P4s' stereo output (moy_aud_render_st and its
+# upsampler) for the tests to play; the host's own mix stays mono.
+_CFLAGS = ["-std=gnu99", "-O2", "-ffp-contract=off", "-fPIC", "-shared", "-DMOY_AUDIO_STEREO=1"]
 
 OK, STALE, FULL, NOMEM, BANK, BAD = range(6)
 OUT_NONE, OUT_RUNNING, OUT_FAILED, OUT_ABSENT = range(4)
@@ -157,6 +159,10 @@ def _load(path):
         ("moy_audio_snd", [p, u32], u32),
         ("moy_audio_snd_close", [], None),
         ("moy_aud_bg", [p], None),
+        ("moy_aud_render_st", [p, i], None),
+        ("moy_aud_up2", [p, p, i, p], None),
+        ("moy_aud_out_rate", [], i),
+        ("moy_aud_out_channels", [], i),
     )
     for name, args, res in sigs:
         fn = getattr(d, name)

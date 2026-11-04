@@ -18,6 +18,11 @@
 
 #if MOY_AUD_BOARD
 #include "esp_heap_caps.h"
+#include "py/mpconfig.h"        // the board's MOY_AUDIO_STEREO (mpconfigboard.h)
+#endif
+
+#if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
+#define AUD_STEREO 1
 #endif
 
 typedef struct {
@@ -60,6 +65,9 @@ typedef struct {
     int32_t *trace;
     uint32_t trace_n;
     int trace_on;
+#ifdef AUD_STEREO
+    moy_aud_up_t up;            // the stereo output's upsampler
+#endif
 } aud_t;
 
 static aud_t A = {.rate = 22050, .console = 7};
@@ -628,10 +636,8 @@ void moy_aud_bg(moy_aud_bg_fn fn) {
     moy_aud_unlock();
 }
 
-void moy_aud_render(int16_t *out, int n) {
-    if (n <= 0) {
-        return;
-    }
+// The lock for a render, the longest wait for it counted.
+static void render_lock(void) {
     if (!moy_aud_trylock()) {           // held: time how long for
         uint64_t t0 = moy_aud_now_us();
         moy_aud_lock();
@@ -640,21 +646,24 @@ void moy_aud_render(int16_t *out, int n) {
             A.st.lock_wait_us_max = (uint32_t)wait;
         }
     }
-    aud_sess_t *r = A.focus;
+}
+
+// What the mix's rate carries, `n` frames: the focused session's synth and
+// sample voices, or silence.
+static void render_sessions(aud_sess_t *r, int16_t *out, int n) {
     if (r != NULL) {
         moy_audio_render(r->a, out, n);
         mix_samples(r, out, n);
     } else {
         memset(out, 0, (size_t)n * sizeof(int16_t));
     }
-    if (A.pcm_on) {
-        moy_stream_mix(&A.pcm, out, n, A.rate, r != NULL ? effective(r) : A.console);
-    }
-    if (A.bg != NULL) {
-        A.bg(out, n, A.console, r != NULL && sounding(r));
-    }
+}
+
+// `n` output frames rendered, `samples` of them in `out`: the counters, and
+// then the lock let go.
+static void render_done(const int16_t *out, int samples, int n) {
     A.st.rendered += (uint32_t)n;
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < samples; i++) {
         if (out[i] != 0) {
             A.st.loud_at = A.st.rendered;
             break;
@@ -671,6 +680,80 @@ void moy_aud_render(int16_t *out, int n) {
     }
     moy_aud_unlock();
 }
+
+void moy_aud_render(int16_t *out, int n) {
+    if (n <= 0) {
+        return;
+    }
+    render_lock();
+    aud_sess_t *r = A.focus;
+    render_sessions(r, out, n);
+    if (A.pcm_on) {
+        moy_stream_mix(&A.pcm, out, n, A.rate, r != NULL ? effective(r) : A.console);
+    }
+    if (A.bg != NULL) {
+        A.bg(out, n, A.console, r != NULL && sounding(r));
+    }
+    render_done(out, n, n);
+}
+
+#ifdef AUD_STEREO
+
+// The interpolated phase's taps, one side, nearest first: sinc at half an
+// input frame and on, under a Kaiser window (beta 7.5) 2 x MOY_AUD_UP_TAPS
+// frames wide, in Q14, the two sides summing to exactly 16384. Q14 keeps the
+// sum in 32 bits whatever the input: |a pair| <= 65,535 and one side's |taps|
+// sum to 22,666, so |acc| < 2^31.
+static const int16_t UP_G[MOY_AUD_UP_TAPS] = {
+    10419, -3442, 2029, -1411, 1058, -828, 663, -539, 442, -363, 299, -246,
+    201, -163, 132, -106, 84, -65, 50, -38, 28, -21, 15, -10, 7, -4, 2, -1,
+};
+
+void moy_aud_up2(moy_aud_up_t *u, const int16_t *in, int n, int16_t *out) {
+    const uint32_t span = 2u * MOY_AUD_UP_TAPS;
+    for (int i = 0; i < n; i++) {
+        u->h[u->at] = u->h[u->at + span] = in[i];
+        u->at = u->at + 1u == span ? 0u : u->at + 1u;
+        // The history, oldest first, is h[at .. at + span): the frame
+        // MOY_AUD_UP_TAPS back plays as it was, then the point between it
+        // and the next, its taps reaching out to both sides.
+        const int16_t *lo = &u->h[u->at + MOY_AUD_UP_TAPS - 1u];
+        const int16_t *hi = lo + 1;
+        int32_t acc = 8192;
+        for (int m = 0; m < MOY_AUD_UP_TAPS; m++) {
+            acc += UP_G[m] * ((int32_t)lo[-m] + hi[m]);
+        }
+        acc >>= 14;
+        out[2 * i] = *lo;
+        out[2 * i + 1] = (int16_t)(acc > 32767 ? 32767 : acc < -32768 ? -32768 : acc);
+    }
+}
+
+#define ST_PIECE 64             // output frames rendered under one hold of the lock
+
+void moy_aud_render_st(int16_t *out, int n) {
+    int16_t mono[ST_PIECE / 2], up[ST_PIECE];
+    for (int off = 0; off + 1 < n; off += ST_PIECE) {
+        int k = (n - off < ST_PIECE ? n - off : ST_PIECE) & ~1;
+        int16_t *o = out + 2 * off;
+        render_lock();
+        aud_sess_t *r = A.focus;
+        render_sessions(r, mono, k / 2);
+        moy_aud_up2(&A.up, mono, k / 2, up);
+        if (A.pcm_on) {
+            moy_stream_mix(&A.pcm, up, k, 2 * A.rate, r != NULL ? effective(r) : A.console);
+        }
+        for (int i = 0; i < k; i++) {
+            o[2 * i] = o[2 * i + 1] = up[i];
+        }
+        if (A.bg != NULL) {
+            A.bg(o, k, A.console, r != NULL && sounding(r));
+        }
+        render_done(o, 2 * k, k);
+    }
+}
+
+#endif
 
 int moy_aud_dump(uint32_t s, int16_t *out, int n) {
     aud_sess_t *r = sess_of(s);

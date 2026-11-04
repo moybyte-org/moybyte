@@ -39,8 +39,9 @@ _Static_assert((MOY_MEDIA_PCM_FRAMES & OUT_MASK) == 0, "the decoded ring is a po
 
 typedef struct {
     uint32_t owner;
-    int out_rate;
+    int out_rate, out_ch;
     uint32_t out_need;              // the decoded ring's room one frame may take
+    uint32_t share;                 // what the open took from the MEDIA row
 
     // the list and the commands: under the lock
     uint16_t e_src[MOY_MEDIA_ENTRIES], e_title[MOY_MEDIA_ENTRIES];
@@ -87,17 +88,17 @@ typedef struct {
     int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
     int rs_hz;
     uint32_t rs_inc, rs_step, rs_pos;
-    int32_t rs_acc, rs_cnt, rs_prev;
+    int32_t rs_acc[2], rs_cnt, rs_prev[2];
 
     // the decoded ring: one writer (the task), one reader (the pull)
     volatile uint32_t out_w, out_r;
     volatile uint32_t flush_gen, flush_at;
     uint32_t flush_seen;
-    int16_t out[MOY_MEDIA_PCM_FRAMES];
+    int16_t *out;                   // MOY_MEDIA_PCM_FRAMES x out_ch, after the state
 
     // the pull's
     volatile int volume, paused, muted;
-    int32_t gain;
+    int32_t gain, ramp;
     int started;
     volatile uint32_t decoded, pulled, starved;
 
@@ -145,8 +146,17 @@ static void block_free(void *p) {
 #endif
 }
 
+static uint32_t share_of(int ch) {
+    return (uint32_t)sizeof(media_t) + MOY_MEDIA_PCM_FRAMES * (uint32_t)ch * sizeof(int16_t)
+           + MOY_MEDIA_STACK + MOY_MEDIA_CONN;
+}
+
 uint32_t moy_media_share(void) {
-    return (uint32_t)sizeof(media_t) + MOY_MEDIA_STACK + MOY_MEDIA_CONN;
+#ifdef MEDIA_BOARD
+    return share_of(moy_aud_out_channels());
+#else
+    return share_of(1);
+#endif
 }
 
 int moy_media_present(void) {
@@ -998,38 +1008,64 @@ static uint32_t out_room(const media_t *m) {
     return MOY_MEDIA_PCM_FRAMES - (m->out_w - LOAD(&m->out_r));
 }
 
-// A decoded frame mixed down to mono and resampled into the decoded ring:
-// averaged into each output sample going down, linear between two going up.
+static void put_frame(media_t *m, uint32_t w, int32_t l, int32_t r) {
+    if (m->out_ch == 2) {
+        m->out[2u * (w & OUT_MASK)] = (int16_t)l;
+        m->out[2u * (w & OUT_MASK) + 1u] = (int16_t)r;
+    } else {
+        m->out[w & OUT_MASK] = (int16_t)l;
+    }
+}
+
+// A decoded frame resampled into the decoded ring in the output's channels
+// (a mono output takes the mean of a stereo stream's two, a stereo one a mono
+// stream's one twice): averaged into each output frame going down, linear
+// between two going up, a frame's channels apart. At the stream's own rate
+// each frame is copied.
 static void resample(media_t *m, const int16_t *pcm, int frames, int ch, int hz) {
     if (hz != m->rs_hz) {
         m->rs_hz = hz;
         m->rs_inc = (uint32_t)(((uint64_t)(uint32_t)m->out_rate << 16) / (uint32_t)hz);
         m->rs_step = (uint32_t)(((uint64_t)(uint32_t)hz << 16) / (uint32_t)m->out_rate);
         m->rs_pos = 0;
-        m->rs_acc = 0;
+        m->rs_acc[0] = m->rs_acc[1] = 0;
         m->rs_cnt = 0;
     }
     uint32_t w = m->out_w;
     for (int i = 0; i < frames; i++) {
-        int32_t x = ch == 2 ? ((int32_t)pcm[2 * i] + pcm[2 * i + 1]) >> 1 : pcm[i];
-        if (m->rs_inc <= ONE) {
-            m->rs_acc += x;
+        int32_t x[2];
+        if (ch == 2) {
+            x[0] = pcm[2 * i];
+            x[1] = pcm[2 * i + 1];
+            if (m->out_ch == 1) {
+                x[0] = (x[0] + x[1]) >> 1;
+            }
+        } else {
+            x[0] = x[1] = pcm[i];
+        }
+        if (m->rs_inc == ONE) {
+            put_frame(m, w++, x[0], x[1]);
+        } else if (m->rs_inc < ONE) {
+            m->rs_acc[0] += x[0];
+            m->rs_acc[1] += x[1];
             m->rs_cnt++;
             m->rs_pos += m->rs_inc;
             if (m->rs_pos >= ONE) {
                 m->rs_pos -= ONE;
-                m->out[w++ & OUT_MASK] = (int16_t)(m->rs_acc / m->rs_cnt);
-                m->rs_acc = 0;
+                put_frame(m, w++, m->rs_acc[0] / m->rs_cnt, m->rs_acc[1] / m->rs_cnt);
+                m->rs_acc[0] = m->rs_acc[1] = 0;
                 m->rs_cnt = 0;
             }
         } else {
             while (m->rs_pos < ONE) {
-                m->out[w++ & OUT_MASK] =
-                    (int16_t)(m->rs_prev + (int32_t)(((int64_t)(x - m->rs_prev) * m->rs_pos) >> 16));
+                int32_t l = m->rs_prev[0] + (int32_t)(((int64_t)(x[0] - m->rs_prev[0]) * m->rs_pos) >> 16);
+                int32_t r = m->rs_prev[1] + (int32_t)(((int64_t)(x[1] - m->rs_prev[1]) * m->rs_pos) >> 16);
+                put_frame(m, w++, l, r);
                 m->rs_pos += m->rs_step;
             }
             m->rs_pos -= ONE;
-            m->rs_prev = x;
+            m->rs_prev[0] = x[0];
+            m->rs_prev[1] = x[1];
         }
     }
     m->decoded += w - m->out_w;
@@ -1164,7 +1200,7 @@ static void task(void *arg) {
 
 // -- open and close ---------------------------------------------------------------------
 
-int moy_media_open(uint32_t owner, int rate) {
+int moy_media_open(uint32_t owner, int rate, int channels) {
     if (owner == 0u) {
         return -MOY_MEDIA_EINVAL;
     }
@@ -1176,24 +1212,30 @@ int moy_media_open(uint32_t owner, int rate) {
     }
 #ifdef MEDIA_BOARD
     moy_aud_out_start();
-    rate = moy_aud_rate();
+    rate = moy_aud_out_rate();
+    channels = moy_aud_out_channels();
 #endif
     if (!moy_media_present()) {
         return -MOY_MEDIA_ENODEV;
     }
-    if (rate < 8000 || rate > 96000) {
+    if (rate < 8000 || rate > 96000 || channels < 1 || channels > 2) {
         return -MOY_MEDIA_EINVAL;
     }
-    if (moy_share_take(MOY_SHARE_MEDIA, moy_media_share()) != MOY_PLAY_OK) {
+    uint32_t share = share_of(channels);
+    if (moy_share_take(MOY_SHARE_MEDIA, share) != MOY_PLAY_OK) {
         return -MOY_MEDIA_ENOSPC;
     }
-    media_t *m = block_alloc(sizeof(media_t));
+    media_t *m = block_alloc(sizeof(media_t) + MOY_MEDIA_PCM_FRAMES * (size_t)channels * sizeof(int16_t));
     if (m == NULL) {
-        moy_share_give(MOY_SHARE_MEDIA, moy_media_share());
+        moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
     m->owner = owner;
+    m->share = share;
+    m->out = (int16_t *)(m + 1);
     m->out_rate = rate;
+    m->out_ch = channels;
+    m->ramp = 64 * 22050 / rate;
     m->out_need = (uint32_t)(1152u * (uint32_t)rate / 8000u + 4u);
     m->entry = -1;
     m->cur = -1;
@@ -1212,7 +1254,7 @@ int moy_media_open(uint32_t owner, int rate) {
         heap_caps_free(m->tcb);
         heap_caps_free(m->stack);
         block_free(m);
-        moy_share_give(MOY_SHARE_MEDIA, moy_media_share());
+        moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
     moy_aud_lock();
@@ -1252,9 +1294,10 @@ static void reap(media_t *m) {
 #else
     s_m = NULL;
 #endif
+    uint32_t share = m->share;
     conn_close(m);
     block_free(m);
-    moy_share_give(MOY_SHARE_MEDIA, moy_media_share());
+    moy_share_give(MOY_SHARE_MEDIA, share);
 }
 
 int moy_media_close(uint32_t owner) {
@@ -1316,7 +1359,7 @@ void moy_media_mix(int16_t *out, int n, int console, int duck) {
     if (duck) {
         target = (target * MOY_MEDIA_DUCK_Q15) >> 15;
     }
-    const int32_t ramp = 64;            // about 23 ms from silence to full at 22,050 Hz
+    const int32_t ramp = m->ramp;       // about 23 ms from silence to full
     int32_t g = m->gain;
     uint32_t r = m->out_r, w = LOAD(&m->out_w), took = 0, short_ = 0;
     for (int i = 0; i < n; i++) {
@@ -1326,11 +1369,18 @@ void moy_media_mix(int16_t *out, int n, int console, int duck) {
             short_++;
             continue;
         }
-        int32_t v = m->out[r & OUT_MASK];
+        if (m->out_ch == 2) {
+            const int16_t *v = &m->out[2u * (r & OUT_MASK)];
+            int32_t l = out[2 * i] + ((v[0] * g) >> 15);
+            int32_t rr = out[2 * i + 1] + ((v[1] * g) >> 15);
+            out[2 * i] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
+            out[2 * i + 1] = (int16_t)(rr > 32767 ? 32767 : rr < -32768 ? -32768 : rr);
+        } else {
+            int32_t o = out[i] + ((m->out[r & OUT_MASK] * g) >> 15);
+            out[i] = (int16_t)(o > 32767 ? 32767 : o < -32768 ? -32768 : o);
+        }
         r++;
         took++;
-        int32_t o = out[i] + ((v * g) >> 15);
-        out[i] = (int16_t)(o > 32767 ? 32767 : o < -32768 ? -32768 : o);
     }
     STORE(&m->out_r, r);
     m->gain = g;

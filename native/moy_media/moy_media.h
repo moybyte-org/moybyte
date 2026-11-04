@@ -2,9 +2,11 @@
 // service in C. It plays one background stream for one process: an HTTP
 // stream (ICY metadata read, the station's now-playing text) or bytes the
 // process's face feeds it from a file, each an entry of a list an M3U or PLS
-// playlist fills. MP3 is decoded (minimp3.h, vendored), mixed down to mono
-// and resampled to the mix's rate, and the mix (native/moy_audio/moy_aud.h's
-// background stream) pulls it, ducked under the focused session.
+// playlist fills. MP3 is decoded (minimp3.h, vendored) and resampled to the
+// output's rate and channels (moy_aud_out_rate and _channels: 44.1 kHz stereo
+// on a P4, its stream's channels kept; 22.05 kHz mono elsewhere, a stereo
+// stream mixed down), and the mix (native/moy_audio/moy_aud.h's background
+// stream) pulls it, ducked under the focused session.
 //
 // THE MEMORY is the MEDIA row of THE SHARES (native/moy_play/moy_play.h):
 // open() takes MOY_MEDIA_SHARE from it and refuses with -ENOSPC where the row
@@ -43,7 +45,7 @@
 #define MOY_MEDIA_IN_BYTES (32u * 1024u)    // the stream buffer, compressed bytes
 #define MOY_MEDIA_WIN_BYTES (16u * 1024u)   // the decoder's window
 #define MOY_MEDIA_WIN_MIN (8u * 1024u)      // a frame is decoded with this much ahead
-#define MOY_MEDIA_PCM_FRAMES 16384u         // decoded, mono at the mix's rate
+#define MOY_MEDIA_PCM_FRAMES 16384u         // decoded, in the output's rate and channels
 #define MOY_MEDIA_STACK (24u * 1024u)       // the task's stack: a frame's decode takes 16.7 KB
 #define MOY_MEDIA_CONN (20u * 1024u)        // a URL's client: its head and URL buffers
 #define MOY_MEDIA_ENTRIES 32
@@ -92,22 +94,24 @@ typedef struct {
     int volume;
     uint32_t in_bytes, in_room;             // the stream buffer
     uint32_t pcm_frames;                    // decoded, not yet pulled
-    uint32_t decoded, played, starved;      // since open, at the mix's rate
+    uint32_t decoded, played, starved;      // since open, frames at the output's rate
     int err;                                // the last entry's failure (positive errno), 0
     uint32_t text_gen;                      // bumps when a text changes
     int idle;                               // stopped and let go: close() frees
 } moy_media_status_t;
 
-// The bytes open() takes from the MEDIA row.
+// The bytes open() takes from the MEDIA row on this image (a stereo output's
+// decoded ring is twice a mono one's).
 uint32_t moy_media_share(void);
 // Whether this image plays a stream: its output exists (a board's speaker, or
 // the host's and the browser's per-frame pull).
 int moy_media_present(void);
 
-// The service for `owner`, decoding to `rate` Hz: 0, -EBUSY when another
-// owner holds it, -ENOSPC when the MEDIA row is absent or full, -ENOMEM. The
-// same owner again is 0 and changes nothing.
-int moy_media_open(uint32_t owner, int rate);
+// The service for `owner`, decoding to `rate` Hz and `channels` (1 or 2), the
+// host's: a board's are its output's. 0, -EBUSY when another owner holds it,
+// -ENOSPC when the MEDIA row is absent or full, -ENOMEM. The same owner again
+// is 0 and changes nothing.
+int moy_media_open(uint32_t owner, int rate, int channels);
 // The service freed and the row given back: 0, -EAGAIN while the task still
 // holds what it opened (stop() first), -EBADF for an owner that holds none.
 int moy_media_close(uint32_t owner);
@@ -149,8 +153,9 @@ int moy_media_entry(int i, char *src, size_t src_cap, char *title, size_t title_
 // One pass of the task's loop (the host's task): 1 when it did work.
 int moy_media_run(void);
 
-// THE PULL (moy_aud.h's background stream): `n` frames added into `out`,
-// at the console's level 0..7 and ducked while `duck`.
+// THE PULL (moy_aud.h's background stream): `n` frames in the open's
+// channels (interleaved when two) added into `out`, at the console's level
+// 0..7 and ducked while `duck`.
 void moy_media_mix(int16_t *out, int n, int console, int duck);
 
 // -- the parsers, pure ---------------------------------------------------------

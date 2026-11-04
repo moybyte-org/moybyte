@@ -1,6 +1,7 @@
 // moy_mic: the `mic` device API's driver (docs/os_2026-11/hardware.md section
 // 1). One process at a time holds the microphone; while it does, a producer
-// pushes PCM16 mono at the board's rate (moy_mic_rate) into a ring of kernel
+// pushes PCM16 mono at the board's rate (moy_mic_rate: the speaker's where
+// the two share clocks, so 44,100 Hz on a P4, 22,050 on the T-Deck) into a ring of kernel
 // memory the holder reads, the oldest samples dropped (and counted) when it
 // falls behind.
 //
@@ -21,7 +22,7 @@
 
 #include <stdint.h>
 
-#define MOY_MIC_RING 16384u             // samples: ~0.7 s at 22.05 kHz
+#define MOY_MIC_RING 16384u             // samples: ~0.37 s at 44.1 kHz, ~0.74 s at 22.05
 #define MOY_MIC_ES7210_ADDR 0x40
 #define MOY_MIC_GAIN_DB 30
 
