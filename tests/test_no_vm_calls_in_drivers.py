@@ -83,7 +83,7 @@ def test_only_the_station_fallback_constructs_the_ports_wlan():
 # The kernel's audio (section 5.5): the session table, the mix and the feeder
 # task, and the codec's register sequence.
 AUDIO = (os.path.join(ROOT, "native", "moy_audio", n)
-         for n in ("moy_aud.c", "moy_aud_out.c", "moy_codec_es8311.c"))
+         for n in ("moy_aud.c", "moy_aud_out.c", "moy_codec_es8311.c", "moy_mic.c"))
 
 
 @pytest.mark.parametrize("path", sorted(AUDIO))
@@ -98,14 +98,16 @@ def test_the_audio_feed_names_nothing_of_the_vm(path):
 # -- input's drivers (native/moy_input) ----------------------------------------------
 #
 # The table, the drivers, the input task with its ISRs and the BLE central run
-# below the VM and outlive it. The one VM file in the directory is the binding,
-# modmoy_input.c, which runs on the VM's task.
+# below the VM and outlive it, the `ble` API's machine and its NimBLE ops with
+# them. The VM files in the directory are the bindings, modmoy_input.c and
+# modmoy_gatt.c, which run on the VM's task.
 
 INPUT = os.path.join(ROOT, "native", "moy_input")
-INPUT_BINDING = {"modmoy_input.c", "fuzz_input.c"}
+INPUT_BINDING = {"modmoy_input.c", "modmoy_gatt.c", "fuzz_input.c"}
 INPUT_DRIVERS = ("moy_input.c", "moy_input.h", "moy_kbd.c", "moy_touchdev.c", "moy_touch.c",
                  "moy_touch.h", "moy_drivers.h", "moy_input_task.c", "moy_hid.c", "moy_hid.h",
-                 "moy_ble_task.c", "moy_ble.h", "moy_event.h", "moy_edge.c", "moy_edge.h")
+                 "moy_ble_task.c", "moy_ble.h", "moy_event.h", "moy_edge.c", "moy_edge.h",
+                 "moy_gatt.c", "moy_gatt.h", "moy_gatt_task.c")
 
 
 def test_every_input_source_but_the_binding_is_checked():

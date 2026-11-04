@@ -4,8 +4,8 @@
 
 MOY_INPUT_DIR := $(USERMOD_DIR)
 
-SRC_USERMOD_C += $(MOY_INPUT_DIR)/modmoy_input.c
-SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_input.c $(MOY_INPUT_DIR)/moy_input_task.c $(MOY_INPUT_DIR)/moy_edge.c $(MOY_INPUT_DIR)/moy_hid.c
+SRC_USERMOD_C += $(MOY_INPUT_DIR)/modmoy_input.c $(MOY_INPUT_DIR)/modmoy_gatt.c
+SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_input.c $(MOY_INPUT_DIR)/moy_input_task.c $(MOY_INPUT_DIR)/moy_edge.c $(MOY_INPUT_DIR)/moy_hid.c $(MOY_INPUT_DIR)/moy_gatt.c
 ifeq ($(MOY_INPUT_DRIVERS),0)
 CFLAGS_USERMOD += -DMOY_INPUT_DRIVERS=0
 else
