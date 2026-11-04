@@ -286,6 +286,20 @@ bool moy_flush_kdrain(void);
 // the next one over).
 esp_err_t moy_flush_take_err(void);
 
+// THE BAND-GAP GATE. A device sharing the panel's SPI host (the T-Deck's
+// SX1262 on SPI2: native/moy_net/moy_lora.h) brackets each transaction with
+// take/give. The continuation bands hold no bus lock (the no-acquire patch),
+// so the bus lock alone cannot keep a transaction off a band in flight: the
+// feeder holds this gate for its whole frame, and while a transaction waits it
+// queues no more bands, lets the queued ones finish, gives the gate, takes it
+// back once no transaction waits, and goes on feeding. Between frames the gate
+// is free. Before the first start() both calls do nothing. gate_stats is the
+// feeder's count of yields and the microseconds it stood aside: the flush's
+// cost of the other device.
+void moy_flush_gate_take(void);
+void moy_flush_gate_give(void);
+void moy_flush_gate_stats(uint32_t *n, uint32_t *us);
+
 // The (flushes, last_flush_us) and (pump, idle, gaps, feed, bands, blocked,
 // timeouts, errs, stopfails) tuples both boards export verbatim. `bands` is
 // the board's full-frame band count -- a REPORTED constant, passed in because

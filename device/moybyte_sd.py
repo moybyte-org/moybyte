@@ -6,8 +6,9 @@ per-op teardown -- which corrupts the bus and DMA state `esp_lcd` needs -- both
 hang the board on the NEXT panel flush. No panic, no message: gray screen, dead
 USB. So the card is ATTACHED to the already-initialized host through the native
 `moy_sd` module (ESP-IDF "Sharing the SPI Bus"), mounted ONCE, and kept resident
-for the rest of the session. Only the unused LoRa radio CS is parked; the panel's
-CS and sdspi's CS are driver-owned and never touched here.
+for the rest of the session. Only the LoRa radio's CS is parked, before its
+driver opens it; the panel's CS and sdspi's CS are driver-owned and never
+touched here.
 
 The desktop loop is single-threaded, so `with_sd_live()` runs between frames and
 never overlaps a panel flush.
@@ -57,7 +58,7 @@ def with_sd_live(fn):
         try:
             from machine import Pin
 
-            Pin(RADIO_CS, Pin.OUT, value=1)  # park the unused LoRa radio CS only
+            Pin(RADIO_CS, Pin.OUT, value=1)  # the radio off the bus until moy_lora takes its CS
         except Exception:
             pass
         try:

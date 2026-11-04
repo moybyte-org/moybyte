@@ -5,7 +5,7 @@ one SPI host, so tearing the sdspi device down between ops -- or reconfiguring
 the panel's CS -- corrupts the bus and DMA state `esp_lcd` needs, and the NEXT
 panel flush hangs the board. No panic, no message: gray screen, dead USB. So
 there is ONE lifecycle: `with_sd_live` / `mount_sd_live` ATTACH the card to the
-host `esp_lcd` already owns, park only the unused LoRa CS, mount ONCE and never
+host `esp_lcd` already owns, park only the LoRa radio's CS, mount ONCE and never
 tear down.
 
 `moybyte_sd` has no top-level imports at all -- `machine`, `os`, `vfs` and
@@ -246,7 +246,7 @@ def w():
 def test_the_live_session_parks_the_radio_CS_and_nothing_else(w):
     """The documented rule, and the one a grep cannot check: `TFT_CS` and
     `SD_CS` are driver-owned once the panel is up, and reconfiguring either
-    through `Pin(...)` corrupts the shared bus. Only the unused LoRa CS is
+    through `Pin(...)` corrupts the shared bus. Only the LoRa radio's CS is
     parked. The same file DOES drive all three -- in the pre-display path."""
     w.mod.with_sd_live(lambda: None)
     assert w.pins() == [RADIO_CS]

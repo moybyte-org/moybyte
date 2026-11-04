@@ -368,6 +368,19 @@ void vTaskNotifyGiveFromISR(TaskHandle_t xTaskToNotify,
     }
 }
 
+// A task's notify from another task: no ISR latency, and the gate's waker may
+// find the feeder gone (it reads the handle once, as the done-ISR does).
+void xTaskNotifyGive(TaskHandle_t xTaskToNotify) {
+    h_task_t *t = xTaskToNotify;
+    if (t == NULL || t->state == H_DONE) {
+        return;
+    }
+    t->notify++;
+    if (t->state == H_BLOCKED && t->waiting_on == &g_notify_obj) {
+        t->state = H_RUNNABLE;
+    }
+}
+
 void mp_hal_delay_ms(uint32_t ms) { h_block_us((int64_t)ms * 1000); }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +411,14 @@ SemaphoreHandle_t xSemaphoreCreateBinary(void) {
     struct h_sem *s = &g_sems[g_nsems++];
     s->count = 0;
     s->created = 1;
+    return s;
+}
+
+SemaphoreHandle_t xSemaphoreCreateMutex(void) {
+    SemaphoreHandle_t s = xSemaphoreCreateBinary();
+    if (s != NULL) {
+        s->count = 1;
+    }
     return s;
 }
 

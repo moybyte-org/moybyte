@@ -274,6 +274,40 @@ static void sc_normal_frame(void) {
     CHECK_EQ(h_pending_events(), 0);
 }
 
+// THE BAND-GAP GATE: a transaction asked for mid-frame runs only once every
+// band the feeder queued is done, the feeder queues nothing while it waits,
+// and the frame then finishes every band, clean.
+static void sc_gate_runs_in_a_band_gap(void) {
+    bd_start(&OPS2);
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    h_block_us(1200);                             // the feeder is mid-frame
+    CHECK(moy_flush.bnc_next > 0 && moy_flush.bnc_next < FULL_BANDS);
+    moy_flush_gate_take();
+    CHECK(moy_flush.done >= moy_flush.target);    // nothing on the wire
+    int fed = moy_flush.bnc_next;
+    CHECK(fed < FULL_BANDS);
+    h_block_us(3000);                             // held: the feeder waits
+    CHECK_EQ(moy_flush.bnc_next, fed);
+    CHECK(moy_flush.done >= moy_flush.target);
+    moy_flush_gate_give();
+    CHECK(moy_flush_drain());
+    if (B.nbands != FULL_BANDS) { dump_bands(); }
+    CHECK_EQ(B.nbands, FULL_BANDS);
+    CHECK_EQ(moy_flush.frame_clean, true);
+    CHECK_EQ(moy_flush.timeouts, 0);
+    uint32_t n, us;
+    moy_flush_gate_stats(&n, &us);
+    CHECK_EQ(n, 1u);
+    CHECK(us >= 3000u);
+    // Between frames the gate is free at once.
+    moy_flush_gate_take();
+    moy_flush_gate_give();
+    bd_clear_bands();
+    CHECK(run_frame(PANEL_ROWS));
+    CHECK_EQ(moy_flush.frame_clean, true);
+}
+
 static void sc_partial_last_band(void) {
     bd_start(&OPS2);
     CHECK(run_frame(250));
@@ -2076,6 +2110,7 @@ typedef struct {
 
 static const scenario_t SCENARIOS[] = {
     { "normal_frame", sc_normal_frame },
+    { "gate_runs_in_a_band_gap", sc_gate_runs_in_a_band_gap },
     { "partial_last_band", sc_partial_last_band },
     { "band_count_rounds_up", sc_band_count_rounds_up },
     { "slot_pacing_two_slots", sc_slot_pacing_two_slots },

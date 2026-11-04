@@ -175,7 +175,7 @@
 #define MOY_LCD_PIN_BL       42
 #define MOY_LCD_PIN_POWERON  10          // board power rail (peripherals + panel)
 #define MOY_LCD_PIN_SD_CS    39
-#define MOY_LCD_PIN_RADIO_CS 9           // unused LoRa module; park it high
+#define MOY_LCD_PIN_RADIO_CS 9           // the SX1262 off the bus until moy_lora adds its device
 
 // The light's driver state (moy_lcd_kbacklight).
 static int s_bl_step;               // 0 off, 1..16

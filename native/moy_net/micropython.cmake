@@ -1,6 +1,7 @@
 # moy_net: the links: WiFi, the ESP-NOW link, the HTTP core, the webhost, the
-# sync RPC, the updater and the `http` device API (moy_fetch.c, the module
-# moy_http) (docs/history/kernel_survival_2026-10.md section 6). Its
+# sync RPC, the updater, the `http` device API (moy_fetch.c, the module
+# moy_http) and the `lora` one (moy_lora.c over the LoRaWAN MAC moy_lorawan.c
+# and moy_aes.c, the module moy_lora) (docs/history/kernel_survival_2026-10.md section 6). Its
 # CPython face is runtime/host/net_binding.py over the same C.
 #
 # The JSON scanner it reads a batch with is native/moy_spine/moy_json.c, and
@@ -24,6 +25,10 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_dns.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_fetch.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_http.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_aes.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_lorawan.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_lora.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_lora.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_net.c)
 
 target_include_directories(usermod_moy_net INTERFACE

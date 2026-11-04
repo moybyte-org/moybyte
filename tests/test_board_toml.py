@@ -1129,6 +1129,23 @@ def test_the_lease_rows_are_the_boards_offer_spec(tmp_path):
     assert board_config.lease_spec(BOARDS["tdeck"]) is None
 
 
+def test_the_class_rows_are_the_drivers_defines():
+    """A class row's API and the named pins of a class or os row reach the C
+    (board_config.hw_defines, staged into the board's cmake): the T-Deck's
+    SX1262 and ES7210, a P4's mic sharing the speaker's clocks."""
+    d = dict(board_config.hw_defines(BOARDS["tdeck"]))
+    assert d["MOY_API_LORA"] == d["MOY_API_MIC"] == d["MOY_API_HTTP"] == d["MOY_API_BLE"] == 1
+    assert (d["MOY_HW_LORA_RST"], d["MOY_HW_LORA_BUSY"], d["MOY_HW_LORA_IRQ"]) == (17, 13, 45)
+    assert d["MOY_HW_SPI2_RADIO_CS"] == 9
+    assert (d["MOY_HW_MIC_MCLK"], d["MOY_HW_MIC_SCK"], d["MOY_HW_MIC_LRCK"],
+            d["MOY_HW_MIC_DIN"]) == (48, 47, 21, 14)
+    for b in ("p4", "guition-p4"):
+        p4 = dict(board_config.hw_defines(BOARDS[b]))
+        assert p4["MOY_HW_MIC_DIN"] == 11 and "MOY_HW_MIC_SCK" not in p4
+        assert "MOY_API_LORA" not in p4
+    assert "MOY_API_MIC" not in dict(board_config.hw_defines(BOARDS["guition-s3"]))
+
+
 # -- THE SHARES' lines (native/moy_play/moy_play.h) ----------------------------------
 
 def _shares_lines():

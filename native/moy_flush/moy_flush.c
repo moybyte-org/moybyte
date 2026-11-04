@@ -19,6 +19,55 @@ moy_flush_state_t moy_flush = { .frame_clean = true, .feed_us = -1,
 
 static const moy_flush_ops_t *s_ops;
 
+// THE BAND-GAP GATE (moy_flush.h): a mutex the feeder holds for its frame
+// and steps out of between bands while another device's transaction waits.
+static SemaphoreHandle_t s_gate;
+static volatile uint32_t s_gate_want;
+static volatile uint32_t s_gate_n, s_gate_us;
+
+static void gate_wake(void) {
+    TaskHandle_t t = (TaskHandle_t)moy_flush.task;
+    if (t != NULL) {
+        xTaskNotifyGive(t);
+    }
+}
+
+void moy_flush_gate_take(void) {
+    if (s_gate == NULL) {
+        return;
+    }
+    __atomic_add_fetch(&s_gate_want, 1u, __ATOMIC_SEQ_CST);
+    gate_wake();
+    xSemaphoreTake(s_gate, portMAX_DELAY);
+}
+
+void moy_flush_gate_give(void) {
+    if (s_gate == NULL) {
+        return;
+    }
+    xSemaphoreGive(s_gate);
+    __atomic_sub_fetch(&s_gate_want, 1u, __ATOMIC_SEQ_CST);
+    gate_wake();
+}
+
+void moy_flush_gate_stats(uint32_t *n, uint32_t *us) {
+    *n = s_gate_n;
+    *us = s_gate_us;
+}
+
+// The feeder steps aside, every band it queued done: the waiters run their
+// transactions, then it takes the bus back.
+static void gate_yield(int64_t deadline) {
+    uint32_t t0 = (uint32_t)esp_timer_get_time();
+    xSemaphoreGive(s_gate);
+    while (s_gate_want != 0 && esp_timer_get_time() < deadline) {
+        ulTaskNotifyTake(pdTRUE, 1);
+    }
+    xSemaphoreTake(s_gate, portMAX_DELAY);
+    s_gate_n++;
+    s_gate_us += (uint32_t)esp_timer_get_time() - t0;
+}
+
 // ---------------------------------------------------------------------------
 // The feeder
 // ---------------------------------------------------------------------------
@@ -83,6 +132,9 @@ static void moy_flush_pump(void) {
 // or waiting out a timer -- then wait the tail out, then release.
 static void moy_flush_run_frame(void) {
     bool ok = true;
+    if (s_gate != NULL) {
+        xSemaphoreTake(s_gate, portMAX_DELAY);
+    }
     esp_err_t err = s_ops->frame_begin();
     if (err != ESP_OK) {
         moy_flush.tx_err = err;
@@ -102,6 +154,20 @@ static void moy_flush_run_frame(void) {
     // runs: already-queued bands are unaffected and still reading a slot.
     while (moy_flush.bnc_next < moy_flush.bnc_total
             && moy_flush.tx_err == ESP_OK) {
+        if (s_gate_want != 0) {
+            // A transaction waits for the bus: queue nothing more, let the
+            // bands in flight finish, then step aside.
+            if (moy_flush.done >= moy_flush.target) {
+                gate_yield(deadline);
+                continue;
+            }
+            if (esp_timer_get_time() > deadline) {
+                ok = false;
+                break;
+            }
+            ulTaskNotifyTake(pdTRUE, 2);
+            continue;
+        }
         int before = moy_flush.bnc_next;
         moy_flush_pump();
         if (moy_flush.bnc_next == before && moy_flush.tx_err == ESP_OK) {
@@ -159,6 +225,9 @@ static void moy_flush_run_frame(void) {
 done:
     // Runs on EVERY handoff, including a failed frame_begin.
     s_ops->frame_end(ok);
+    if (s_gate != NULL) {
+        xSemaphoreGive(s_gate);
+    }
     moy_flush.bnc_total = 0;
     moy_flush.bnc_next = 0;
     moy_flush.bnc_src = NULL;
@@ -229,6 +298,9 @@ bool moy_flush_start(const moy_flush_ops_t *ops) {
     if (moy_flush.kick_sem == NULL || moy_flush.done_sem == NULL) {
         moy_flush_free_bounce();
         return false;
+    }
+    if (s_gate == NULL) {
+        s_gate = xSemaphoreCreateMutex();   // none: no gate, the bus lock alone
     }
     if (moy_flush.task == NULL) {
         moy_flush.task_exit = false;
