@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   Notices                     the achievements wiring, the notice banner, the unlock banner
+#   Notices                     the achievements process's start, the notice banner, the unlock banner
 #   Notices._draw_note          the notification banner (notifications.py) and its input
 #   PauseMenu                   the card over a held game: Resume, Options, Quit
 #   DeleteConfirm               "Delete <title>?" before any cart is deleted
@@ -8,8 +8,8 @@
 #   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
 #   SystemMenuUI._draw_look     the rows as the look's popover card
 #   AboutCard                   the system menu's About: Moy, the version, the board, two rows
-"""What the console SAYS on its own: the achievements wiring (the tracker,
-the unlock banner's deadline + beep), the timed system notice and the
+"""What the console SAYS on its own: the achievements process's start and
+its unlock banner (deadline + beep), the timed system notice and the
 firmware-update verdict that rides it, the banners -- the notice, the unlock
 and an app's notification (runtime/system/notifications.py), each
 native/moy_ui's `moy_ui_unlock` -- and the notification's input. A mixin
@@ -24,10 +24,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_diff)
 try:
-    from widgets import (Achievements, TOAST_MS,
+    from widgets import (TOAST_MS,
                          DANGER_ICON as _DANGER_ICON)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, TOAST_MS,
+    from runtime.widgets import (TOAST_MS,
                                  DANGER_ICON as _DANGER_ICON)
 try:
     import chrome_ops as _ch
@@ -54,9 +54,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     import achievements_ui as _ach_ui
     import about_ui as _about_ui
+    import achievements as _ach
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import achievements_ui as _ach_ui
     from runtime import about_ui as _about_ui
+    from runtime import achievements as _ach
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
@@ -109,17 +111,19 @@ class _CardVerb:
 class Notices:
 
     def load_achievements(self):
-        """Wire a fresh Achievements over the badges the store remembers (#21).
+        """(Re)start the achievements process over the badges the store
+        remembers (#21; runtime/system/achievements.py,
+        docs/os_2026-11/processes.md section 8). Call after the store +
+        carts_root are injected (host build_workstation / device
+        run_desktop)."""
+        self.ach.start()
 
-        The read is `prefs`'; the WIRING is kernel -- persistence goes back to
-        the store, the day a badge is found comes off the bar's clock, and the
-        unlock effects (the banner's deadline + the beep) are the kernel's
-        own. Call after the store + carts_root are injected (host
-        build_workstation / device run_desktop)."""
-        self.ach = Achievements(self.prefs.load_achievements(),
-                                on_save=self.prefs.save_achievements,
-                                on_unlock=self._achievement_unlocked,
-                                today=self._today_ymd)
+    def service_env(self, cart):
+        """What the console hands service `cart` in its namespace: the
+        achievements process's document, write and day; None for any other."""
+        if _ach.is_proc(cart):
+            return self.ach.env()
+        return None
 
     def _today_ymd(self):
         """Today as YYYYMMDD off the bar's wall clock, 0 without one (a board
@@ -129,24 +133,24 @@ class Notices:
 
     def _achievement_unlocked(self, ach_id):
         """A fresh unlock's EFFECTS: arm the banner, then celebrate with a
-        short rising beep when audio is wired (#21, rev-3 event push).
+        short rising beep when audio is wired (#21, rev-3 event push). The
+        achievements process's notification brings it (`_note_shown`).
 
-        `Achievements` generates the effect and the kernel executes it. The
-        deadline is written HERE, at the unlock, rather than polled per frame off
+        The deadline is written HERE, at the unlock, rather than polled per frame off
         the object -- `_animating` and the WM's overlay signature read the flat
         field and never call into `ach` on the frame path. There is no banner
-        QUEUE to preserve: `award()` overwrites its payload, so a second unlock
+        QUEUE to preserve: each unlock overwrites the payload, so a second unlock
         inside the window replaces the banner and extends the deadline, which is
         exactly what a later write to this field does. A badge found again
         awards nothing, so it reaches neither the banner nor the beep.
 
         The deadline is armed BEFORE the beep so a silent (or broken) backend
         cannot cost the kid the banner; the beep itself is best-effort."""
+        t = self.ach.toast = self.ach.payload(ach_id)
         now = _ticks_ms()
         self._toast_at = now
         self._toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
-        t = getattr(self.ach, "toast", None)
         if t:
             _ch._moy_play().chrome_toast_arm(
                 _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE, t[1], t[2], bool(t[3]),
@@ -249,8 +253,15 @@ class Notices:
 
     def _note_shown(self, n, until):
         """The banner went up (`n`) or down: the kernel's copy, which a run
-        it drives draws over its frames, follows."""
+        it drives draws over its frames, follows. The achievements process's
+        banner is the unlock banner: its card with the kernel's words and a
+        secret's burst, and the beep; the notification stays in the list."""
         self._dirty = True
+        badge = self.ach.badge_of(n)
+        if badge is not None:
+            self._achievement_unlocked(badge)
+            _NOTES.dismiss()
+            return
         if n is None:
             self._note_rect = None
             _ch._moy_play().chrome_note("", "", "", 0)

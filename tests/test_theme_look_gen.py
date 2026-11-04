@@ -18,6 +18,7 @@ import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import chrome, ui_draw
 from ws_helpers import build_desktop_ws, build_ws, fixture_theme, install_theme, use_theme
+from ws_helpers import settle_badges  # noqa: E402
 
 THEME = "mine"
 BASE = "berry"
@@ -47,6 +48,7 @@ def _pkg(**change):
 
 def _quiet(ws):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws.bar_layer._clock_text = lambda: _CLOCK
 

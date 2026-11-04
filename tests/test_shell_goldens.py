@@ -224,7 +224,7 @@ from pathlib import Path
 import pytest
 
 from cart_store_fixtures import INDEX_URL, MemNet, snapshot
-from ws_helpers import open_cart
+from ws_helpers import open_cart, settle_badges
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
@@ -529,6 +529,7 @@ def _quiesce(ws):
         ws.pointer.visible = False
         ws.pointer.hovers = True
     if not getattr(ws, "_golden_toast", False):
+        settle_badges(ws)
         ws._toast_until = 0
     ws.show_fps = False
     ws.perf_hud = False
@@ -688,7 +689,7 @@ def _surface_plan(ws, cfg):
     # home; then the unlock banner over the home, a secret's with its confetti
     # out whole.
     def achievements():
-        ws.ach.unlocked = dict(GOLDEN_BADGES)
+        ws.ach.tracker().unlocked = dict(GOLDEN_BADGES)
         ws.open_settings()
         ws.settings_layer.open_page("achievements")
 
@@ -726,6 +727,7 @@ def _surface_plan(ws, cfg):
         ws.ach.unlocked.pop("konami", None)
         ws._golden_toast = True
         ws.ach.award("konami")
+        settle_badges(ws)
         ws._toast_at -= 10000
 
     plan.append(("settings_achievements", achievements))
@@ -740,6 +742,7 @@ def _surface_plan(ws, cfg):
     for tab in TABS:
         def enter(tab=tab):
             ws._golden_toast = False
+            settle_badges(ws)
             ws._toast_until = 0
             # Re-open per tab. That alone does NOT buy independence -- the layouts
             # are ws singletons another tab can bind (#216); what pins it is

@@ -23,7 +23,7 @@ import types
 import pytest
 
 from runtime import crash_guard, host_app, moy_carts, system_store
-from ws_helpers import build_ws
+from ws_helpers import build_ws, settle_badges
 
 DT = 1 / 30.0
 
@@ -33,6 +33,7 @@ def _ws(tmp_path):
     answering about the overlays and nothing else."""
     ws = build_ws(tmp_path)
     ws.look.select_wallpaper(None, persist=False)
+    settle_badges(ws)
     ws._toast_until = 0
     ws._splash_until = None
     return ws
@@ -260,6 +261,7 @@ def test_an_unlock_arms_the_toast_deadline(tmp_path):
     ws = _ws(tmp_path)
     assert ws._toast_until == 0
     assert ws.ach.award("first_open") is True
+    settle_badges(ws)                       # the achievements process's post
     assert ws._toast_until, "the unlock hook did not arm the banner"
     assert ws.ach.toast[0] == "first_open"
     assert ws._animating(DT) is True
@@ -271,9 +273,11 @@ def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
     second banner would inherit the first one's remaining time."""
     ws = _ws(tmp_path)
     ws.ach.award("first_open")
+    settle_badges(ws)
     first = ws._toast_until
     ws._toast_until = first - 1000          # as if 1s of it had elapsed
     ws.ach.award("konami")
+    settle_badges(ws)
     assert ws.ach.toast[0] == "konami"
     assert ws._toast_until >= first
 
@@ -296,10 +300,13 @@ def test_the_three_eggs_arm_the_banner_once(tmp_path):
                 for name in au._KONAMI:
                     au._konami_step(name)
         run()
+        settle_badges(ws)
         assert ws._toast_until and ws.ach.toast[3], trigger     # a secret's banner
         assert ws._animating(DT) is True, trigger
+        settle_badges(ws)
         ws._toast_until = 0
         run()
+        settle_badges(ws)
         assert ws._toast_until == 0, trigger
 
 
@@ -347,6 +354,7 @@ def test_the_toast_still_draws_while_its_deadline_is_up(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.pointer.visible = False
     ws.ach.award("first_open")
+    settle_badges(ws)
     assert ws._toast_layer in ws.wm.overlay_stack()
     drv.frame(DT)                           # draws it -- an unset payload raises
     ws._toast_until = host_app.console._ticks_ms() - 1

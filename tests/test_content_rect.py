@@ -19,7 +19,7 @@ import pytest
 from runtime import layout_base
 from runtime.layout_base import LayoutBase
 from ws_helpers import build_ws, build_desktop_ws, select_on_home
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -195,6 +195,7 @@ def _settle(ws, n=6):
     prev = None
     for _ in range(n):
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         ws.bar_layer._clock_text = lambda: "12:34"
         ws._dirty = True

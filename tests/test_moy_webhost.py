@@ -32,6 +32,7 @@ sys.path.insert(0, str(MODULES))
 import moy_webhost as wh                                       # noqa: E402
 from runtime import net_binding as nb                           # noqa: E402
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -1480,6 +1481,7 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     ws.toggle_webhost()
     ws.frame(1 / 30.0)
     ws._splash_until = None                  # the boot logo animates on its own
+    settle_badges(ws)
     ws._toast_until = 0
     ws._dirty = False
     ws.pointer.visible = False

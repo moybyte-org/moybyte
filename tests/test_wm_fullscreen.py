@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from ws_helpers import build_desktop_ws, open_cart  # noqa: E402
+from ws_helpers import build_desktop_ws, open_cart, settle_badges  # noqa: E402
 
 DT = 1 / 30
 _TAP_FLOOR = 32
@@ -41,6 +41,7 @@ def _frames(ws, n=3):
     for _ in range(n):
         if ws.pointer is not None:
             ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         ws.show_fps = False
         ws._dirty = True

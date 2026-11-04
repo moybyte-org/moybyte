@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from runtime import host_app, moy_carts
-from ws_helpers import select_on_home  # noqa: E402
+from ws_helpers import select_on_home, settle_badges  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +19,7 @@ def _open_paint(ws):
     try:
         return _opened_paint(ws)
     finally:
+        settle_badges(ws)
         ws.ach.toast = None
 
 
@@ -942,9 +943,11 @@ def test_a_banner_over_the_page_makes_every_frame_whole(tmp_path):
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
     ws.ach.award("first_run")
+    drv.frame(1 / 30)                   # the achievements process's slice raises it
     drv.frame(1 / 30)
     assert ws._toast_until and ws.sys_canvas.covered
     assert not app._may(ws.sys_canvas)
+    settle_badges(ws)
     ws._toast_until = 0
     drv.frame(1 / 30)
     assert not ws.sys_canvas.covered

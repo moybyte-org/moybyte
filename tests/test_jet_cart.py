@@ -48,7 +48,7 @@ import sys
 import pytest
 
 from runtime import host_app
-from ws_helpers import open_cart
+from ws_helpers import open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN_FILE = os.path.join(ROOT, "tests", "shell_goldens", "jet_teapot.json")
@@ -109,6 +109,7 @@ def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
 def _frames(ws, n, hold=(), dt=DT):
     for _ in range(n):
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         ws.show_fps = ws.perf_hud = ws.perf_capture = False
         for b in CART_BUTTONS:

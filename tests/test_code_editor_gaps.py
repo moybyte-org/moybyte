@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 from ws_helpers import device_frames as _dframe  # noqa: E402
 import pytest
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -299,6 +299,7 @@ def _ws(tmp_path, **kw):
     ws.open()
     # the opening's "First Steps" banner stays up, so every frame draws, but
     # draws nothing over the lines these tests read
+    settle_badges(ws)
     ws.ach.toast = None
     return ws
 
@@ -1094,6 +1095,7 @@ def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatc
     drv = _enter_code(ws)
     ws.editor.set_text("\n".join("line %d = %d" % (i, i * 7) for i in range(300)))
 
+    settle_badges(ws)
     ws._toast_until = 0                # no unlock banner: the gate is the view's
 
     def frame():

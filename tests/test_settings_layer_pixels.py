@@ -49,6 +49,7 @@ import pytest
 # than the silent divergence a copied dict would give.
 from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 # The sub-surfaces are rendered on every config that renders the whole
 # surface list; a `plan` config holds a few named surfaces alone, and a
@@ -283,7 +284,7 @@ def capture(cfg, carts_dir):
 
     # The Achievements page (locked AND found cards) with a badge opened,
     # the unlock banner (a secret's, its confetti out whole) and the notice.
-    ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
+    ws.ach.tracker().unlocked = {"first_open": 20261012, "secret_door": 0}
     ws.open_settings()
     sl.open_page("achievements")
     out["ach_page"] = page(sl._sub)
@@ -296,6 +297,7 @@ def capture(cfg, carts_dir):
     sl.close_page()
     ws.go_home()
     ws.ach.award("konami")
+    settle_badges(ws)
     ws._toast_at -= 10000
     out["banner"] = _shot(ws, lambda: ws._draw_toast())
     ws._notice = ("Moybyte updated", "Now 0.8", "ok")

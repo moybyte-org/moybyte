@@ -5,6 +5,7 @@ My Art)."""
 import os
 
 from runtime import artwork, host_app, moy_carts
+from ws_helpers import settle_badges  # noqa: E402
 
 _DT = 1.0 / 30.0
 
@@ -30,6 +31,7 @@ def _idle(ws, n=40):
     """Frames with nothing marked: the console's idle branch, where My Art
     makes the pictures its cards owe (an unlock banner on a wall clock
     would hold the frames painting)."""
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(n):
         ws.frame(_DT)

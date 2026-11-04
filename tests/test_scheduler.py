@@ -44,7 +44,7 @@ class Guard:
 
 
 def _clear(wakes):
-    for pid in {w[1] for w in wakes.list}:
+    for pid in {w[1] for w in wakes.list + wakes.mail}:
         wakes.end(pid)
 
 
@@ -369,7 +369,10 @@ def console(tmp_path):
 
 
 def _running():
-    return sorted(p.name for p in S.SCHED.services() if p.state != S.EXITED)
+    """The services running but the achievements process, which every
+    console starts with its store (tests/test_achievements_proc.py)."""
+    return sorted(p.name for p in S.SCHED.services()
+                  if p.state != S.EXITED and p.name != "moybyte.achievements")
 
 
 def test_autostart_starts_what_holds_it_at_the_first_frame(console):
@@ -400,7 +403,7 @@ def test_a_vm_stop_starts_its_services_again_after_it(console):
     assert S.start_cart(ws, manual) is not None
     rec = json.loads(ws.resume_record())
     assert sorted(p.rsplit("/", 1)[-1] for p in rec["svc"]) == [
-        "t.auto.moy", "t.manual.moy", "t.off.moy"]
+        "moybyte.achievements.moy", "t.auto.moy", "t.manual.moy", "t.off.moy"]
     S.SCHED.pause()                             # the Player's, before the stop
     assert _running() == []
     S.SCHED.reset()

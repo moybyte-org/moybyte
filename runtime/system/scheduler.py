@@ -11,7 +11,8 @@ and at least MOY_BG_SLICE_US every MOY_BG_SLICE_EVERY frames, so an unpaced
 game (no slack) still leaves background work its slice. A callback is never
 split: the first due one runs whatever the budget, and the wakes left over
 run first on the next tick. With no wakes registered a tick returns at once,
-and on a board the service upcall is not made at all. The tick allocates
+and on a board the service upcall is not made at all; a message wake with
+no message queued (moybyte's `mail`) counts as none. The tick allocates
 nothing (tests/test_frame_alloc.py).
 
 THE RUNGS. Each callback runs with its process current in the OS log (its
@@ -29,6 +30,11 @@ collections inside it. A callback over MOY_BG_CALLBACK_US is an OVERRUN:
 The shell's own wakes (pid 1) are never struck. The rungs count over a run;
 a new start is a new process. An abort skips the callback's `finally` and
 `__exit__` (the guard's header says what it puts back).
+
+MESSAGES (moybyte's `mail`) are served by `mail()`, which the console calls
+at the start of its frame while one is queued, so a message sent by the
+frame's input is served before the frame draws, and by a tick that runs
+first, as any wake is. A send asks a board for no upcall of its own.
 
 A callback's exception is a crash: its traceback goes to the OS log at crit
 and a service exits with EXIT_CRASHED; a wake of any other process is
@@ -120,8 +126,8 @@ def allocated():
         return _tm.get_traced_memory()[0] & _WRAP
     return None
 
-_W = _moybyte._OWNER, _moybyte._HOW, _moybyte._AFTER
-_OWNER, _HOW, _AFTER = _W
+_W = _moybyte._OWNER, _moybyte._HOW, _moybyte._AFTER, _moybyte._AT
+_OWNER, _HOW, _AFTER, _AT = _W
 
 ABORTED = _guard.ABORTED if _guard is not None else object()
 
@@ -183,7 +189,8 @@ class Scheduler:
         """The frame's background work; answers the microseconds spent."""
         f = self.frame + 1
         self.frame = f = 0 if f >= MOY_BG_SLICE_EVERY else f
-        if not self.wakes.list:
+        w = self.wakes
+        if not w.list and not w.queued:
             self._n = self._i = 0
             self.spent_us = 0
             return 0
@@ -209,6 +216,21 @@ class Scheduler:
         spent = _ticks_diff(_ticks_us(), t0)
         self.spent_us = spent
         return spent
+
+    def mail(self):
+        """The messages queued, served now, each wake under the guard and
+        the rungs: the console calls it at the start of its frame, before
+        it draws, while `queued` is not 0, so what a message raises shows
+        in the frame of the input that sent it. Answers the microseconds
+        spent."""
+        w = self.wakes
+        if not w.queued:
+            return 0
+        t0 = _ticks_us()
+        for wake in list(w.mail):
+            if wake[_AT]:
+                self._run(wake[0])
+        return _ticks_diff(_ticks_us(), t0)
 
     def _call_wid(self):
         self.wakes.call(self._wid)
@@ -338,9 +360,11 @@ class Scheduler:
 
     # -- services -----------------------------------------------------------
 
-    def start(self, cart, rec=None, have=()):
+    def start(self, cart, rec=None, have=(), env=None):
         """Start service `cart` (a cart dict carrying `src`), under consent
-        record `rec` on a console with the services `have`. Answers its pid,
+        record `rec` on a console with the services `have`, its namespace
+        holding the names of `env` (what the console hands a system
+        process). A cart already running answers its pid. Answers its pid,
         or None when the launch was refused or it ended in its start."""
         try:
             import app_perms
@@ -360,6 +384,8 @@ class Scheduler:
             return None
         _log(INFO, pid, "start", name)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
+        if env:
+            ns.update(env)
         for n in app_perms.absent_names(absent, rec):
             ns[n] = None
         p.ns = ns
@@ -493,7 +519,8 @@ def tick(slack_us=0):
 
 def start_cart(ws, cart):
     """Start service `cart` of console `ws` under its consent: its source
-    read from the store when the shelf holds it slim."""
+    read from the store when the shelf holds it slim, its namespace holding
+    what the console hands it (`ws.service_env(cart)`, a system process's)."""
     carts = getattr(ws, "carts", None)
     full = carts.rehydrate(cart) if carts is not None else cart
     src = full.get("src")
@@ -513,7 +540,8 @@ def start_cart(ws, cart):
         have = app_perms.services(ws)
     else:
         rec, have = None, ()
-    return SCHED.start(run, rec, have)
+    env_of = getattr(ws, "service_env", None)
+    return SCHED.start(run, rec, have, env_of(run) if env_of is not None else None)
 
 
 def wants_autostart(ws, cart):

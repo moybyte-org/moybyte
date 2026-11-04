@@ -10,6 +10,9 @@ restates it equal to it:
 - `app_context.ROLES` is the table's roles, in its order;
 - every role object `AppContext` builds answers exactly the table's verbs, and
   every shell row is a method of the server the console registers for it;
+- a `proc:<name>` row is the process's (system_carts/moybyte.<name>.moy): a
+  message it wakes on, or a function of its main, and a method of the link the
+  console registers for the role;
 - the grant column is the C policy's permission map (`moy_app.perms()`);
 - the C rows are native/moy_app's, in the table's order, and its role
   objects answer exactly them;
@@ -35,6 +38,7 @@ import moy_app
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "native" / "moy_app" / "roles.json"
 SERVERS = ("shell", "c")
+PROC = "proc:"
 
 
 def _rows():
@@ -59,7 +63,7 @@ def test_the_table_is_well_formed():
         key = (r["role"], r["verb"])
         assert key not in seen, "row twice: %s.%s" % key
         seen.add(key)
-        assert r["server"] in SERVERS, r
+        assert r["server"] in SERVERS or r["server"].startswith(PROC), r
         assert r["wasm"] is None or isinstance(r["wasm"], str), r
 
 
@@ -138,11 +142,12 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
     import inspect
     from runtime import shell_servers as ss
     rows = {r["role"] + "." + r["verb"]: r for r in _rows()}
+    from runtime import achievements
     servers = {"theme": ss.ThemeServer, "nav": ss.NavServer,
-               "notify": ss.NotifyServer, "wallpaper": ss.WallpaperServer}
+               "notify": achievements.NotifyRole, "wallpaper": ss.WallpaperServer}
     for name, kinds in ss.DOOR_ARGS.items():
         r = rows[name]
-        assert r["server"] == "shell", name
+        assert r["server"] == "shell" or r["server"].startswith(PROC), name
         role, verb = name.split(".")
         params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
         assert len(params) >= len(kinds), (name, kinds)
@@ -159,7 +164,7 @@ def test_the_shell_rows_are_the_servers_methods():
     from runtime import shell_servers as ss
     servers = {"theme": ss.ThemeServer,
                "carts": ss.CartsServer,
-               "nav": ss.NavServer, "notify": ss.NotifyServer,
+               "nav": ss.NavServer,
                "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
     shell = {}
     for r in _rows():
@@ -173,6 +178,53 @@ def test_the_shell_rows_are_the_servers_methods():
         for v in have:
             params = list(inspect.signature(getattr(cls, v)).parameters)
             assert params[:2] == ["self", "g"], (role, v, params)
+
+
+def _proc_rows():
+    out = {}
+    for r in _rows():
+        if r["server"].startswith(PROC):
+            out.setdefault(r["server"][len(PROC):], []).append(r)
+    return out
+
+
+def test_the_achievements_process_serves_the_notify_role():
+    """The notify role's rows moved to the achievements process
+    (docs/os_2026-11/processes.md section 8): every one of them, and none
+    else, is `proc:achievements`, and the grant stays `never`."""
+    procs = _proc_rows()
+    assert set(procs) == {"achievements"}
+    assert [r["verb"] for r in procs["achievements"]] == [
+        "achieve", "award", "count", "has", "found_on", "progress", "today"]
+    assert all(r["role"] == "notify" and r["grant"] == "never" and r["wasm"] is None
+               for r in procs["achievements"])
+
+
+def test_the_proc_rows_are_the_processs_and_the_links():
+    """Each `proc:<name>` row is the process's: a message it wakes on
+    (`moybyte.on(verb, fn)`, moybyte.MESSAGES) or a function of its main;
+    and a method of the role's link, taking the grant first (the link is
+    what the console registers, runtime/system/achievements.py)."""
+    import ast
+    import inspect
+    from runtime import achievements, moybyte
+    links = {"achievements": achievements.NotifyRole}
+    for name, rows in _proc_rows().items():
+        src = (ROOT / "system_carts" / ("moybyte.%s.moy" % name) / "main.py").read_text()
+        tree = ast.parse(src)
+        fns = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        ons = {c.args[0].value for c in ast.walk(tree)
+               if isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "on"
+               and isinstance(c.args[0], ast.Constant)}
+        verbs = {r["verb"] for r in rows}
+        assert ons <= set(moybyte.MESSAGES)
+        assert verbs == ons | (fns & verbs), sorted(verbs - ons - fns)
+        assert not ons & fns
+        cls = links[name]
+        have = {n for n in dir(cls) if not n.startswith("_") and callable(getattr(cls, n))}
+        assert have == verbs, sorted(have ^ verbs)
+        for v in have:
+            assert list(inspect.signature(getattr(cls, v)).parameters)[:2] == ["self", "g"]
 
 
 def test_the_grant_column_is_the_permission_map():

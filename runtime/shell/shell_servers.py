@@ -4,7 +4,6 @@
 #   _Session         the readiness pair and the session of the cart store
 #   CartsServer      the cart store: projects, not documents
 #   NavServer        where the console goes next
-#   NotifyServer     achievement events
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
@@ -12,7 +11,9 @@
 """The console's servers for the app ABI's rows it serves (native/moy_app/
 roles.json's "shell" rows, native/moy_app/README.md): the
 verbs whose state is the Python console's -- the look, the live cart list, the
-wallpaper cart, the achievements, the routes, Get Carts' transport. The files
+wallpaper cart, the routes, Get Carts' transport. The notify role's rows are
+the achievements process's (`"proc:achievements"`), served through its link
+(runtime/system/achievements.py's `NotifyRole`). The files
 role and the wallpaper's copy are C over the user-files layer
 (native/moy_store/moy_ufiles.h) the console binds (`StoreHandle.bind`), and
 none of theirs is here.
@@ -46,8 +47,10 @@ door copies back.
 
 try:
     from app_context import NO_STORE
+    from achievements import NotifyRole
 except ImportError:  # pragma: no cover - host package lane
     from runtime.app_context import NO_STORE
+    from runtime.achievements import NotifyRole
 
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
 
@@ -339,52 +342,6 @@ class NavServer:
         cover landed, or the cache let one go."""
         covers = getattr(self.__ws, "covers", None)
         return 0 if covers is None else covers.gen
-
-
-# -- notifications ---------------------------------------------------------------
-
-class NotifyServer:
-    """Achievement events (#21)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def achieve(self, g, kind, key=None):
-        """Note an achievement event. Silent when the build carries none."""
-        ach = getattr(self.__ws, "ach", None)
-        if ach is not None:
-            ach.note(kind, key)
-
-    def award(self, g, ach_id):
-        """Award badge `ach_id` (a hidden one's find): True when it is new."""
-        ach = getattr(self.__ws, "ach", None)
-        return False if ach is None else bool(ach.award(ach_id))
-
-    def count(self, g):
-        """How many badges are found."""
-        ach = getattr(self.__ws, "ach", None)
-        return 0 if ach is None else ach.count()
-
-    def has(self, g, ach_id):
-        """Whether badge `ach_id` is found."""
-        ach = getattr(self.__ws, "ach", None)
-        return ach is not None and ach.has(ach_id)
-
-    def found_on(self, g, ach_id):
-        """The day (YYYYMMDD) badge `ach_id` was found, 0 for a day nobody
-        knows, None while it is not found."""
-        ach = getattr(self.__ws, "ach", None)
-        return None if ach is None else ach.found_on(ach_id)
-
-    def progress(self, g, ach_id):
-        """(done, goal) of a counted badge, None for one that is not."""
-        ach = getattr(self.__ws, "ach", None)
-        return None if ach is None else ach.progress(ach_id)
-
-    def today(self, g):
-        """Today as the badges record it (YYYYMMDD off the bar's clock), 0
-        without a clock."""
-        return self.__ws._today_ymd()
 
 
 # -- the desktop backdrop ----------------------------------------------------------
@@ -704,7 +661,7 @@ def serve_all(ws):
     servers = {
         "theme": ThemeServer(ws),
         "carts": CartsServer(ws), "nav": NavServer(ws),
-        "notify": NotifyServer(ws), "wallpaper": WallpaperServer(ws),
+        "notify": NotifyRole(ws), "wallpaper": WallpaperServer(ws),
         "install": InstallServer(ws),
     }
     for role, server in servers.items():

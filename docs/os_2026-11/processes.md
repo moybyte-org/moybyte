@@ -26,8 +26,8 @@ audio sessions, leases); the row itself, like a grant, outlives a stop.
 **The shell is process 1**: the Python console (`runtime/shell/console.py`,
 the window managers), where every shipped app runs. It is privileged by
 holding the grants the policy marks `never` (`native/moy_app/roles.json`:
-`carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface`, `ui`, and `notify`
-until it becomes the achievements process's API, §8).
+`carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface` and `ui`; `notify`,
+also `never`, is the achievements process's API, §8).
 
 **Several apps, games included, run at once (owner, 2026-11-03).** The user
 chooses what runs and sees what it costs (§6: "it's the user's choice; we
@@ -431,9 +431,9 @@ focused, so the one heard).
 is `moybyte.notify(summary, body, icon, actions, urgency, replaces_id)`,
 the freedesktop notification fields (owner, 2026-11-03), behind a **`notifications`**
 permission granted at install (§2). The name is deliberately not
-`notify`: today's `notify` ROLE (`native/moy_app/roles.json`) is the
-achievements surface, stays ungrantable, and becomes the achievements
-process's API (§8), so the two never collide.
+`notify`: the `notify` ROLE (`native/moy_app/roles.json`) is the
+achievements process's API (§8) and stays ungrantable, so the two never
+collide.
 
 - **The OS draws the banner**, over whatever is running, games included:
   kernel chrome where the kernel draws (the toast and banner state of
@@ -492,28 +492,57 @@ notifications, updated in place under its id.
 ## 8. Achievements, the first background process
 
 **Decision (owner, 2026-11-03): achievements become a small background
-process**, not part of the shell. Today the core is
-`runtime/toolkit/widgets.py`'s `Achievements` over its `ACHIEVEMENTS` table,
-wired by `runtime/shell/console_notices.py`'s `load_achievements`, served to
-apps by `NotifyServer` in `runtime/shell/shell_servers.py` (`ws.ach`), stored
-as `achievements.json` by `runtime/carts/moy_docs.py`, drawn by
-`runtime/system/achievements_ui.py` (Settings' page and the eggs) and
-announced by the kernel's toast.
+process**, not part of the shell. Because the portable draw and UI API exist
+it could be written in any tier; it is Python for now. It is the first user
+of background processes, events, notifications and the task manager on every
+board, and it is testable with no LoRa.
 
-What moves: `Achievements`, `load_achievements` and `NotifyServer` leave the
-shell for a system cart, `+system_carts/moybyte.achievements.moy`, a Python
-background process (§3) that **wakes only on events**: a cart's
-`achieve(id)` becomes an event to it (`moybyte.on("achieve", fn)`, an
-OS-routed message, not a ring record), with no per-frame cost; it records into its own store (the same document, now the
-process's) and posts through the notification service. The `notify` role's
-verbs (`achieve`, `award`, `count`, `has`, `found_on`, `progress`, `today`)
-become that process's API: in `roles.json` their `server` changes from
-`shell` to the process (a server value naming a process, sketch
-`"proc:achievements"`), the grant stays `never` for apps, and Settings'
-Achievements page reads them through the role as it does now. The toast's
-words stay the kernel's. It is the first user of background processes,
-events, notifications and the task manager on every board, and it is
-testable with no LoRa.
+As built, the process is the system cart
+`system_carts/moybyte.achievements.moy`, a Python service (§3, §5) holding
+the tracker (`Achievements` in `runtime/toolkit/widgets.py`, over its
+`ACHIEVEMENTS` catalogue, which the console keeps for drawing). The console's
+end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
+`NotifyRole`, the `notify` role's server.
+
+- **It wakes only on events.** A cart's `achieve(kind, key)` and `award(id)`
+  are OS-routed MESSAGES, not ring records: the process holds
+  `moybyte.on("achieve", fn)` and `moybyte.on("award", fn)`, and the link
+  queues each call on them (`moybyte`'s `send`). A message wake waits apart
+  from the timer and input wakes and costs no frame while nothing is queued:
+  a tick returns at once and a board makes no service upcall, and a send
+  asks for none. A queued message is served under the guard and the rungs
+  at the start of the console's next frame, before it draws
+  (`Scheduler.mail`), so the banner an unlock raises shows in the frame of
+  the input that earned it, or by a tick that runs first. A run the kernel
+  drives (a compiled cart) makes no crossing for the `open` its launch
+  sent: the process takes it when the console frames again.
+- **The `notify` role is its API.** In `roles.json` its rows' `server` is
+  `"proc:achievements"` and the grant stays `never`. The console registers
+  the link for the role (to `native/moy_app` the row is served as a shell
+  row): `achieve` and `award` are the messages, and `count`, `has`,
+  `found_on`, `progress` and `today` call the process's functions of those
+  names. Settings' Achievements page reads them through the role as before.
+  `award` answers True where the badge is unfound and the process took the
+  message.
+- **Its store.** The console starts the process when it loads its store
+  (`load_achievements`, again on a reload; one process a host, so a second
+  console on a host stops the first's), handing it, in its namespace, the
+  document `achievements.json` holds, the write and the day off the bar's
+  clock (`Workstation.service_env`). The process records into its document
+  and hands it back; the console writes it at its next frame, outside any
+  slice, because a store write on a card can outlast a callback's 20 ms and
+  its abort. Before a VM stop the console writes what is waiting.
+- **It posts.** A fresh find is a `moybyte.notify` of the badge's title, how
+  it was found and its glyph. The console shows the process's banner as the
+  unlock banner: its card with the kernel's words ("You found a badge!", a
+  secret's "You found a secret!" and its burst), the beep and the kernel's toast copy; the
+  notification stays in the task manager's list. A badge kept from another
+  console (the web console's sync, `quiet`) is recorded and not posted.
+- **The task manager** lists it as a service, with its CPU and memory, and
+  can stop it.
+- **When it is not running** (stopped, crashed, a build without its cart),
+  an event goes nowhere and the reads answer the last document the console
+  holds; the next store load starts it again.
 
 ## 9. The system log and crash reports
 

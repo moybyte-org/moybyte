@@ -20,7 +20,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import ui_draw
-from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner, seed_stories
+from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner, seed_stories, settle_badges
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -125,6 +125,7 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
     ws.bar_layer._clock_text = lambda: "10:30"
     ws.wallpaper.is_animating = lambda dt: False
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws.open_desk()
     if not ships:

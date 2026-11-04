@@ -10,7 +10,10 @@ one, `time.ticks_us()`.
                      EV_T is on time.ticks_us's clock. Allocates nothing.
   on(source, fn)     wake `fn()` when `source` has records: "keys", "touch",
                      "pad" or "input" (all three); inside `fn`, events() reads
-                     that source's records
+                     that source's records. Or wake `fn(*args)` for each
+                     MESSAGE the OS routes to this process by that name
+                     ("achieve", "award": the notify role's events, which the
+                     shell sends the achievements process, section 8)
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   cancel(wid)        a wake undone
@@ -35,6 +38,16 @@ slice is the scheduler's (runtime/system/scheduler.py).
 
 The rings are the input table the shell binds (`bind`, the Workstation's
 input), so a host and a board read the same records.
+
+MESSAGES are not ring records: `send(pid, name, args)`, the OS's, queues
+`args` (a tuple) on process `pid`'s wakes on `name` (MAIL_MAX a wake, the
+oldest dropped). A message wake waits in `mail`, apart from `list`: while
+none has a message queued (`queued` is 0) it costs a frame nothing, so the
+scheduler's tick and a board's upcall look at `list` and `queued` alone. A
+send does not ask a board for the service upcall: the console serves what is
+queued at the start of its next frame (scheduler.Scheduler.mail), and a tick
+that runs first serves it too, so a run the kernel drives makes no crossing
+for a message its launch sent.
 """
 
 try:
@@ -64,9 +77,13 @@ EVENT_VERSION = _I.EV_VERSION
 SOURCES = {"keys": _I.EV_KEYS, "touch": _I.EV_TOUCH, "pad": _I.EV_PAD,
            "input": _I.EV_KEYS | _I.EV_TOUCH | _I.EV_PAD}
 
+MESSAGES = ("achieve", "award")
+MAIL_MAX = 16
+
 SHELL = 1
-_ON, _EVERY, _AFTER = 0, 1, 2
-# A wake: [wid, owner, how, ms, deadline, fn, reader]
+_ON, _EVERY, _AFTER, _MAIL = 0, 1, 2, 3
+# A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
+# `ms` is its name and its `deadline` the queue of its messages.
 _WID, _OWNER, _HOW, _MS, _AT, _FN, _READER = range(7)
 
 
@@ -81,6 +98,8 @@ class Wakes:
     def __init__(self):
         self.table = None
         self.list = []              # the wakes, in the order they were made
+        self.mail = []              # the message wakes, likewise
+        self.queued = 0             # messages queued on them
         self.by_id = {}
         self.readers = {}           # pid -> its events() reader
         self.cur = [-1]             # the reader events() reads; -1: the current process's
@@ -104,13 +123,18 @@ class Wakes:
         wid = self.next_id
         self.next_id += 1
         w = [wid, _pid(), how, ms, at, fn, reader]
-        self.list.append(w)
         self.by_id[wid] = w
+        if how == _MAIL:
+            self.mail.append(w)
+            return wid
+        self.list.append(w)
         if self.added is not None:
             self.added()
         return wid
 
     def on(self, source, fn):
+        if source in MESSAGES:
+            return self._add(_MAIL, source, [], fn, -1)
         kinds = SOURCES.get(source)
         if kinds is None:
             raise ValueError("no wake source %r" % (source,))
@@ -126,10 +150,30 @@ class Wakes:
         ms = max(0, int(ms))
         return self._add(_AFTER, ms, _ticks_add(_ticks_ms(), ms), fn, -1)
 
+    def send(self, pid, name, args):
+        """The OS routes message `name` with `args` to process `pid`: queued
+        on each of its wakes on `name`. False where it holds none. It makes
+        no upcall wanted (`added` is not told)."""
+        took = False
+        for w in self.mail:
+            if w[_OWNER] == pid and w[_MS] == name:
+                q = w[_AT]
+                if len(q) >= MAIL_MAX:
+                    q.pop(0)
+                else:
+                    self.queued += 1
+                q.append(args)
+                took = True
+        return took
+
     def cancel(self, wid):
         w = self.by_id.pop(wid, None)
         if w is None:
             return False
+        if w[_HOW] == _MAIL:
+            self.mail.remove(w)
+            self.queued -= len(w[_AT])
+            return True
         self.list.remove(w)
         if w[_READER] >= 0 and self.table is not None:
             self.table.reader_free(w[_READER])
@@ -139,7 +183,8 @@ class Wakes:
         """Process `pid` ended: its wakes and its reader go."""
         if pid is None:
             return
-        for w in [w for w in self.list if w[_OWNER] == pid]:
+        for w in [w for w in self.list if w[_OWNER] == pid] + \
+                [w for w in self.mail if w[_OWNER] == pid]:
             self.cancel(w[_WID])
         r = self.readers.pop(pid, None)
         if r is not None and self.table is not None:
@@ -151,6 +196,9 @@ class Wakes:
         """How many wakes process `pid` holds. Allocates nothing."""
         n = 0
         for w in self.list:
+            if w[_OWNER] == pid:
+                n += 1
+        for w in self.mail:
             if w[_OWNER] == pid:
                 n += 1
         return n
@@ -182,6 +230,13 @@ class Wakes:
                     w[_AT] = None
             out[n] = w[_WID]
             n += 1
+        if self.queued:
+            for w in self.mail:
+                if n == cap:
+                    break
+                if w[_AT]:
+                    out[n] = w[_WID]
+                    n += 1
         return n
 
     def call(self, wid):
@@ -190,6 +245,13 @@ class Wakes:
         by the call."""
         w = self.by_id.get(wid)
         if w is None:
+            return
+        if w[_HOW] == _MAIL:
+            q = w[_AT]
+            fn = w[_FN]
+            while q and self.by_id.get(wid) is w:
+                self.queued -= 1
+                fn(*q.pop(0))
             return
         cur = self.cur
         was = cur[0]

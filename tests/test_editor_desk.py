@@ -14,6 +14,7 @@ sys.path.insert(0, ROOT)
 from runtime import editor_panes as P      # noqa: E402
 from runtime import host_app                # noqa: E402
 from runtime import ui                      # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 FULL_1024 = (6, 46, 1012, 548)              # full screen: the row is the top 40 px
 STRIP_1024 = (6, 90, 1012, 504)             # the pictures' title-strip frame
@@ -196,6 +197,7 @@ def test_moving_focus_commits_nothing_and_a_switch_commits_only_dirty_panes(desk
 
 def _painted(ws, drv, n=4):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     drawn = ws._frames_drawn
     for _ in range(n):
@@ -255,6 +257,7 @@ def _shows_what_a_whole_repaint_shows(ws, drv):
     """The frames after an input, with no input of their own, leave the
     glass as a whole repaint of the same state draws it."""
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -381,6 +384,7 @@ def test_a_settled_workspace_paints_nothing(desk):
     for key in P.KEYS:
         ws.editor_desk.switch(key)
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
@@ -881,6 +885,7 @@ def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     ws, drv, d, me, S = _sound(desk)
     S.open_rename(d)
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -973,6 +978,7 @@ def test_a_blocks_carts_panes_hide_the_cards_body_too(blocks_desk, monkeypatch):
 def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
     ws, drv = blocks_desk
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -1065,6 +1071,7 @@ def test_a_settled_reference_paints_nothing_on_any_tab(desk):
     for tab in ("sounds", "maps", "log"):
         _ws, _drv, d = _reference(desk, tab)
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
@@ -1122,6 +1129,7 @@ def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
     _tap(drv, ord("2"), 1)
     _press(drv, d, "pane 0 code more")
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -1134,6 +1142,7 @@ def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
 def _code_ready(ws, drv):
     _tap(drv, ord("2"), 1)                      # Code: the Code pane focused
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -1347,6 +1356,7 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     assert d.paused and ws.player.paused and win.minimized
     assert d._still is not None                  # the still, dimmed under Play
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
@@ -1464,6 +1474,7 @@ def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
     _press(drv, d, "pane %d head more" % _scene_game(d))
     assert d.part_state.get("head more") is not None
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)

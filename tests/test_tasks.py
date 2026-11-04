@@ -53,6 +53,12 @@ def _clocked(monkeypatch):
     return us, ms, spend
 
 
+
+def _rows(ws):
+    """The task manager's rows but the achievements process's, the service
+    every console runs (tests/test_achievements_proc.py holds its row)."""
+    return [r for r in ws.procs.rows() if r[6] is None or r[6] != ws.ach.pid]
+
 def test_a_cart_of_known_cost_reads_its_cpu_and_memory(tmp_path, monkeypatch):
     tracemalloc.start()
     try:
@@ -76,7 +82,7 @@ def test_a_cart_of_known_cost_reads_its_cpu_and_memory(tmp_path, monkeypatch):
     ws.procs.account(ms[0] + procs_mod.METER_MS)   # one sample over 3000 ms
     assert pl.cpu == 90000 // (1000 + procs_mod.METER_MS)
     assert pl.us_upd == 0 and pl.us_draw == 0
-    row = ws.procs.rows()[0]
+    row = _rows(ws)[0]
     assert row[:4] == ("desktop", "Known", "game", "running")
     assert row[4] == pl.cpu and row[5] == pl.mem
 
@@ -110,11 +116,11 @@ def test_a_services_callbacks_are_its_cpu_and_its_start_its_memory(tmp_path):
         ws.procs._acct_t = 1
         ws.procs.account(1 + 2000)
         assert sp.cpu == 2
-        rows = [r for r in ws.procs.rows() if r[2] == "service"]
+        rows = [r for r in _rows(ws) if r[2] == "service"]
         assert rows == [("svc:%d" % pid, "Svc", "service", "background", 2, sp.mem, pid)]
         assert tasks_ui.verbs(rows[0]) == ["Stop"]
         ws.procs.stop_service(pid)
-        assert [r for r in ws.procs.rows() if r[2] == "service"] == []
+        assert [r for r in _rows(ws) if r[2] == "service"] == []
     finally:
         sched.reset()
         moybyte.WAKES.end(pid)
@@ -128,7 +134,7 @@ def test_a_crashed_service_offers_its_log(tmp_path):
                            "src": "raise ValueError('no')\n"})
         assert pid is None
         sp = next(p for p in sched.procs.values() if p.name == "t.bad")
-        row = next(r for r in ws.procs.rows() if r[2] == "service")
+        row = next(r for r in _rows(ws) if r[2] == "service")
         assert row[3] == "crashed"
         assert tasks_ui.verbs(row) == ["Details", "Close"]
         opened = []
@@ -136,7 +142,7 @@ def test_a_crashed_service_offers_its_log(tmp_path):
         ws.tasks_layer._do("Details", row)
         assert opened == [sp.pid]
         ws.tasks_layer._do("Close", row)
-        assert [r for r in ws.procs.rows() if r[2] == "service"] == []
+        assert [r for r in _rows(ws) if r[2] == "service"] == []
     finally:
         sched.reset()
 
@@ -180,14 +186,14 @@ def test_the_desk_lists_both_games_and_switches_and_closes(tmp_path):
     ws.open_tasks()
     drv.frame(_DT)
     assert "tasks" in ws.wm._wins
-    rows = ws.procs.rows()
+    rows = _rows(ws)
     assert [(r[0], r[1], r[3]) for r in rows] == [
         ("desktop", "Brick Siege", "running"), ("run:1", "Star Catcher", "throttled")]
     assert tasks_ui.verbs(rows[0]) == ["Switch to", "Close"]
     assert tasks_ui.verbs(rows[1]) == ["Switch to", "Close"]
     ws.tasks_layer._do("Switch to", rows[1])
     assert ws.cart["title"] == "Star Catcher"
-    ws.tasks_layer._do("Close", ws.procs.rows()[1])
+    ws.tasks_layer._do("Close", _rows(ws)[1])
     assert ws.procs.list == [] and ws.cart["title"] == "Star Catcher"
     ws.close_tasks()
     drv.frame(_DT)
@@ -257,7 +263,7 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     ws.open_tasks()
     drv.frame(_DT)
     assert ws.screen == "tasks" and ws.player.paused   # it holds the front game
-    rows = ws.procs.rows()
+    rows = _rows(ws)
     assert [(r[1], r[3]) for r in rows] == [("Brick Siege", "paused"),
                                             ("Star Catcher", "minimised")]
     assert tasks_ui.verbs(rows[1]) == ["Switch to", "Close"]
@@ -293,7 +299,7 @@ def test_the_task_manager_goes_back_to_the_game_it_held_and_home_keeps_it(tmp_pa
     assert ws.screen == "desktop" and not ws.player.paused
     ws.open_tasks()
     drv.frame(_DT)
-    rows = ws.procs.rows()
+    rows = _rows(ws)
     ws.tasks_layer._do("Home", rows[0])
     drv.frame(_DT)
     assert ws.screen == "launcher"
@@ -307,9 +313,9 @@ def test_closing_the_front_run_keeps_the_task_manager(tmp_path):
     drv.frame(_DT)
     ws.open_tasks()
     drv.frame(_DT)
-    ws.tasks_layer._do("Close", ws.procs.rows()[0])
+    ws.tasks_layer._do("Close", _rows(ws)[0])
     drv.frame(_DT)
-    assert ws.screen == "tasks" and ws.procs.rows() == []
+    assert ws.screen == "tasks" and _rows(ws) == []
     assert not ws.wm.stack.has("desktop")
     ws.tasks_layer.back()
     assert ws.screen == "launcher"

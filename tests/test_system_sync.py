@@ -247,7 +247,9 @@ def test_a_document_that_is_not_an_object_is_refused():
 
 def test_badges_are_a_union_never_the_last_writers_list():
     saved = []
-    ach = Achievements({"found": {"first_run": 0}}, on_save=saved.append)
+    armed = []
+    ach = Achievements({"found": {"first_run": 0}}, on_save=saved.append,
+                       on_unlock=armed.append)
     n = moy_sync.merge_achievements(
         _badges(first_open=20261003, no_such_badge=1),
         lambda i, day: ach.award(i, quiet=True, day=day))
@@ -255,7 +257,7 @@ def test_badges_are_a_union_never_the_last_writers_list():
     assert sorted(ach.unlocked) == ["first_open", "first_run"]
     assert ach.found_on("first_open") == 20261003, "the day it was found there"
     assert saved == [{"found": {"first_run": 0, "first_open": 20261003}, "count": {}}]
-    assert ach.toast is None, "a badge earned in the page is not celebrated twice"
+    assert armed == [], "a badge earned in the page is not celebrated twice"
     # A page whose list lacks a badge the board has takes nothing away.
     assert moy_sync.merge_achievements(_badges(), ach.award) == 0
     assert sorted(ach.unlocked) == ["first_open", "first_run"]

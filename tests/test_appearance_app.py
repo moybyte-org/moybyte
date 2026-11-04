@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from runtime import appearance_app as page, host_app, ui_draw
-from ws_helpers import select_on_home, use_theme  # noqa: E402
+from ws_helpers import select_on_home, use_theme, settle_badges  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -452,6 +452,7 @@ def test_the_page_is_idle_once_drawn(tmp_path):
     ws = _ws(tmp_path)
     app = _open(ws)
     _frame(ws)
+    settle_badges(ws)
     ws._toast_until = 0
     before = bytes(ws.sys_canvas._buf)
     ws.input.begin_frame()

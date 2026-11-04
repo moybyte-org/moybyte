@@ -277,7 +277,7 @@ class _Keep:
 
 
 def _badges(ws, state):
-    ws.ach.unlocked = {k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]}
+    ws.ach.tracker().unlocked = {k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]}
     ws.ach.toast = None
 
 

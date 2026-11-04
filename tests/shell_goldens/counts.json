@@ -64,9 +64,9 @@
   "guition_480x320_fs1_tasks": {
     "note_banner": [4, 3],
     "tasks_crashed_service": [8, 24],
-    "tasks_empty": [7, 9],
+    "tasks_empty": [7, 15],
     "tasks_notes": [9, 16],
-    "tasks_two_games": [8, 20]
+    "tasks_two_games": [8, 24]
   },
   "guition_p4_1280x800_tasks": {
     "note_banner": [6, 27],
@@ -800,9 +800,9 @@
   "tdeck_320x240_fs1_tasks": {
     "note_banner": [6, 11],
     "tasks_crashed_service": [8, 24],
-    "tasks_empty": [7, 9],
+    "tasks_empty": [7, 15],
     "tasks_notes": [9, 16],
-    "tasks_two_games": [8, 20]
+    "tasks_two_games": [8, 24]
   },
   "tdeck_320x240_fs1_ui_page": {
     "ui_page": [18, 11]

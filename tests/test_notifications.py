@@ -15,7 +15,8 @@ from runtime import moy_play
 from runtime import notifications as N
 from runtime import scheduler as S
 from runtime import tasks_ui
-from ws_helpers import build_desktop_ws, build_ws, boot_on_fixture, make_drv, open_cart
+from ws_helpers import (build_desktop_ws, build_ws, boot_on_fixture, make_drv, no_unlock_banner,
+                        open_cart)
 
 _DT = 1 / 30
 
@@ -59,7 +60,7 @@ def _poster_cart(carts_dir, title="Mesh", perms=("notifications",), type="app"):
 
 def _ws(tmp_path, perms=("notifications",)):
     _poster_cart(str(tmp_path / "carts"), perms=perms)
-    ws = build_ws(tmp_path)
+    ws = no_unlock_banner(build_ws(tmp_path))     # no badge posts of its own
     drv = make_drv(ws)
     for _ in range(3):
         drv.frame(_DT)
@@ -224,7 +225,7 @@ def test_acting_on_the_handheld_minimises_the_game_and_focuses_the_app(tmp_path)
 def test_acting_on_the_desk_throttles_the_game(tmp_path):
     carts = str(tmp_path / "carts")
     _poster_cart(carts, type="game")
-    ws = build_desktop_ws(tmp_path)
+    ws = no_unlock_banner(build_desktop_ws(tmp_path))
     drv = make_drv(ws)
     ws.open_desk()
     drv.frame(_DT)

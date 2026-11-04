@@ -184,22 +184,23 @@ GOALS = {"play_five": _PLAY_GOAL, "toolbox": len(_TOOLBOX_VIEWS)}
 ACH_TITLE = {a[0]: a[1] for a in ACHIEVEMENTS}
 ACH_GLYPH = {a[0]: a[2] for a in ACHIEVEMENTS}
 ACH_HIDDEN = {a[0]: a[3] for a in ACHIEVEMENTS}
+ACH_HINT = {a[0]: a[4] for a in ACHIEVEMENTS}
 
 TOAST_MS = 2600          # how long the unlock banner stays on screen
 
 
 class Achievements:
     """Tracks which milestones a kid has found and on which day, awards each
-    exactly once, keeps the counters' progress, persists both, and queues
-    the unlock banner on a fresh find.
+    exactly once, keeps the counters' progress, and hands both back to be
+    persisted.
 
-    Backend-agnostic + MicroPython-safe. The Workstation owns one of these, calls
-    note(event[, key]) at the existing flow points (open/run/paint-save/...), and
-    draws `toast` while the deadline its own `on_unlock` hook armed is up (#209
-    landing B). Persistence, the day and the unlock EFFECTS are injected
-    callbacks so this class stays free of the SD wrapper, the clock, the audio
-    backend and the overlay stack (the Workstation wires them), which also
-    makes it trivially unit-testable.
+    Backend-agnostic + MicroPython-safe. The achievements process
+    (system_carts/moybyte.achievements.moy, docs/os_2026-11/processes.md
+    section 8) holds one, fed the notify role's events: note(event[, key]) at
+    the console's flow points (open/run/paint-save/...) and award(id) for a
+    badge by its id. Persistence, the day and what a fresh find does are
+    injected callbacks, so this class stays free of the store, the clock and
+    the notifications, which also makes it trivially unit-testable.
 
     `doc` is achievements.json as the store's strict reader answers it
     (moy_carts.load_achievements): {"found": {id: YYYYMMDD, 0 an unknown
@@ -219,16 +220,8 @@ class Achievements:
             for k in count.get("toolbox", ()):
                 self._seen_views[k] = True
         self._on_save = on_save            # called(doc) to persist; None = volatile
-        self._on_unlock = on_unlock        # called(id) on a FRESH unlock (e.g. a beep)
+        self._on_unlock = on_unlock        # called(id) on a FRESH unlock (the notification)
         self._today = today                # () -> YYYYMMDD, 0 without a clock
-        # The banner's PAYLOAD only: (id, name, icon, hidden) of the live
-        # banner, or None. Its deadline is the shell's (`ws._toast_until`,
-        # written by the `on_unlock` hook at the unlock -- #209 landing B): the
-        # console's redraw gate and the WM's overlay signature run every loop
-        # and must not have to ask an object whether a banner is still up. This
-        # payload is read only while that deadline is live, and a later award
-        # simply replaces it.
-        self.toast = None
 
     # -- queries -------------------------------------------------------------
     def has(self, ach_id):
@@ -272,10 +265,10 @@ class Achievements:
     def award(self, ach_id, quiet=False, day=None):
         """Unlock `ach_id` if it isn't already and is a known achievement. Returns
         True only on the FIRST unlock (so a milestone awards exactly once), and then
-        persists + raises the banner + fires the on_unlock hook. A repeat is a no-op:
-        nothing shows. `quiet` keeps a badge earned on another console (the page a
-        board serves) with the `day` it was found there: persisted, never
-        celebrated a second time."""
+        persists + fires the on_unlock hook. A repeat is a no-op: nothing shows.
+        `quiet` keeps a badge earned on another console (the page a board serves)
+        with the `day` it was found there: persisted, never celebrated a second
+        time."""
         if ach_id in self.unlocked or ach_id not in ACH_TITLE:
             return False
         if day is None:
@@ -289,10 +282,6 @@ class Achievements:
         self._save()
         if quiet:
             return True
-        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"),
-                      ACH_HIDDEN.get(ach_id, False))
-        # The payload is set BEFORE the hook, which is what arms the banner: a
-        # live deadline must never point at a stale (or absent) payload.
         if self._on_unlock is not None:
             try:
                 self._on_unlock(ach_id)

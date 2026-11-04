@@ -18,7 +18,7 @@ from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, settle_badges
 
 
 def _tap(drv, rect):
@@ -68,7 +68,7 @@ def test_achievements_store_is_strict(tmp_path):
     assert moy_carts.load_achievements(carts) == {"found": {"a": 1}, "count": {}}
 
 
-# -- the Achievements helper (award-once + toast) ---------------------------
+# -- the Achievements helper (award-once + the unlock hook) -------------------
 
 def test_award_once_and_toast():
     saved = []
@@ -81,12 +81,9 @@ def test_award_once_and_toast():
     assert ach.count() == 1
     assert ach.found_on("first_open") == 20261012
     assert saved == [{"found": {"first_open": 20261012}, "count": {}}]   # persisted once
-    # The fresh unlock raised a toast naming the achievement, and fired the
-    # unlock hook EXACTLY once -- the hook is what arms the shell's overlay
-    # deadline (#209 landing B), so a second firing would re-raise a banner the
-    # kid already saw and a missing one would leave the payload undrawn.
-    assert ach.toast is not None
-    assert ach.toast[0] == "first_open"
+    # The fresh unlock fired the unlock hook EXACTLY once -- the hook is the
+    # achievements process's notification, which raises the shell's banner,
+    # so a second firing would re-raise a banner the kid already saw.
     assert armed == ["first_open"]
 
 
@@ -138,10 +135,11 @@ def test_progress_and_days_survive_a_reboot():
 
 
 def test_a_badge_from_another_console_keeps_its_day():
-    ach = C.Achievements(today=lambda: 20261020)
+    armed = []
+    ach = C.Achievements(today=lambda: 20261020, on_unlock=armed.append)
     assert ach.award("decorator", quiet=True, day=20261003)
     assert ach.found_on("decorator") == 20261003
-    assert ach.toast is None                       # quiet: no banner
+    assert armed == []                             # quiet: no banner
 
 
 # -- integration: an event unlocks + persists across reboot -----------------
@@ -152,6 +150,7 @@ def test_open_cart_unlocks_and_persists(tmp_path):
     assert not ws.ach.has("first_open")
     ws.launcher.sel = 0
     ws.open()
+    host_app.ConsoleDriver(ws).frame(1 / 30)   # the process's message, the console's write
     assert ws.ach.has("first_open")
     # Reboot: a fresh workstation on the same store remembers it.
     ws2 = host_app.build_workstation(carts)
@@ -166,6 +165,7 @@ def test_save_code_unlocks_code_wizard(tmp_path):
     ws.set_menu_view("code")
     assert ws.editor is not None
     ws.save_code()
+    settle_badges(ws)
     assert ws.ach.has("first_code")
 
 
@@ -175,6 +175,7 @@ def test_save_sprites_unlocks_little_artist(tmp_path):
     ws.open()
     ws.set_menu_view("paint")
     ws.save_sprites()
+    settle_badges(ws)
     assert ws.ach.has("first_paint")
 
 
@@ -185,6 +186,7 @@ def test_toast_renders(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()                                # raises the "First Steps" banner
+    settle_badges(ws)                        # ...through the achievements process
     assert ws.ach.toast is not None
     assert ws._toast_until                   # the unlock armed the shell overlay
     drv.frame(1 / 30)                        # frame() draws the banner
@@ -198,7 +200,7 @@ def test_the_achievements_page_opens_from_about(tmp_path):
     leaves the page."""
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.ach.unlocked = {"first_open": 20261012}
+    ws.ach.tracker().unlocked = {"first_open": 20261012}
     ws.open_settings()
     sl = ws.settings_layer
     sl._want = "Achievements"
@@ -245,8 +247,8 @@ def test_konami_egg_fires_and_awards(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     armed = []
-    hook = ws.ach._on_unlock
-    ws.ach._on_unlock = lambda i: (armed.append(i), hook(i))
+    hook = ws._achievement_unlocked
+    ws._achievement_unlocked = lambda i: (armed.append(i), hook(i))
     for b in ws.ach_ui._KONAMI:
         _press(drv, b)
     assert ws.ach.has("konami")              # hidden "Secret Coder" awarded
@@ -257,6 +259,7 @@ def test_konami_egg_fires_and_awards(tmp_path):
     del armed[:]
     for b in ws.ach_ui._KONAMI:
         ws.ach_ui._konami_step(b)
+    settle_badges(ws)
     assert armed == []
     # Persisted across reboot.
     ws2 = host_app.build_workstation(carts)
@@ -316,7 +319,7 @@ def test_a_settled_achievements_page_paints_nothing(tmp_path):
     press that moves nothing draws one frame of the same pixels."""
     from ws_helpers import quiesce
     ws = _ws(tmp_path)
-    ws.ach.unlocked = {"first_open": 20261012, "first_run": 0}
+    ws.ach.tracker().unlocked = {"first_open": 20261012, "first_run": 0}
     ws.open_settings()
     ws.settings_layer.open_page("achievements")
     quiesce(ws)
@@ -345,6 +348,7 @@ def test_the_unlock_banner_over_a_game_sits_at_the_glass_top(tmp_path):
     ui_draw.unlock = lambda cv, th, cx, y, *a, **k: got.append((cx, y)) or real(cv, th, cx, y, *a, **k)
     try:
         ws.ach.award("decorator")
+        settle_badges(ws)
         ws._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, ws.layout.cy + 6)
         ws.launcher.sel = [it.get("title") for it in ws.launcher.items].index("Star Catcher")

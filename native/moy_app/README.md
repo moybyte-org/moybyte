@@ -9,7 +9,7 @@ role table (one row per verb, its `server` saying where it is served), and
 
 | file | what it is |
 |---|---|
-| `roles.json` | the role table: role, verb, server (`c`, or `shell`: the Python console's), the permission that grants it, its wasm import type; and the permission table (`"permissions"`: name, what it grants, tiers, install prompt line, the service it needs, its Python names), whose `role:` rows are this module's allowlist (`runtime/shell/app_perms.py`, `docs/os_2026-11/processes.md` §2) |
+| `roles.json` | the role table: role, verb, server (`c`, `shell`: the Python console's, or `proc:<name>`: a process's), the permission that grants it, its wasm import type; and the permission table (`"permissions"`: name, what it grants, tiers, install prompt line, the service it needs, its Python names), whose `role:` rows are this module's allowlist (`runtime/shell/app_perms.py`, `docs/os_2026-11/processes.md` §2) |
 | `moy_app.h`, `moy_app.c` | the state (`moy_appabi_t`): the grant table (kind GRANT, rows keyed by the app's id, SHIPPED idempotent by id, RUN ended with its run, each with the surface row the shell writes), the damage flags, the live token table under its generation (the theme's vocabulary, `moy_app_token_name`), the pointer the surface rows read (a `moy_input_ptr_t` the console binds, let go when the VM ends), Paint's open picture (its `paint_doc` and `paint_doc_kind` settings rows, JSON strings, read and followed by the artwork rows), the clipboard's 4 KiB of text, the user-files store the files and wallpaper-copy rows reach (the layer's verb table `moy_uf_ops`, the carts root, readable and writable, the session count, the copy's generation), the per-row counters, prefs written into a settings store; the ROLE door (`moy_app_role`: any table row by its index, its arguments packed as length-prefixed fields, a C row run here with a blob the layer allocated copied out and freed, a shell row handed to the door `moy_app_door_bind` binds, the kernel's counted `moy_loop_role`); the policy (permission to role, the files kinds, the two-kinds refusal, the key a cart's grant is made under); the C rows, each store row taking the bus gate around its own op (`moy_vol_gate_enter`) and a grant made with a files kind reaching that kind alone |
 | `moy_app_wasm.h`, `moy_app_wasm.c` | the wasm import adapter: one native per row with a wasm type, imported from module `moybyte.app` as `<role>_<verb>`, each packing its arguments for the ROLE door; writes, prefs, the files rows and shell rows hop to the VM's task (`moy_wasm_on_vm`, weak: a call where there is none), the look's and the clipboard's reads run in place under the seqlock (`moy_app_seq_begin`/`end`); the run's grant and role mask (`moy_app_wasm_bind`), the load's grant check (`moy_app_wasm_admit`), a module's import walk (`moy_app_wasm_imports`, which the VM-free verdict reads too) and the hops' count and microseconds |
 | `modmoy_app.c` | the MicroPython binding, module `moy_app`: `App(settings)`, `kernel(fresh)`, the shell's writes (`surface_write`, `bind_pointer`, `theme_write`, `serve`, `store_bind`), the role types over a grant -- `Damage`, `Surface`, `Theme`, `Files`, `Prefs`, `Artwork`, `Clipboard` with C rows, `Carts`, `Nav`, `Notify`, `Wallpaper` (its copy's two rows C), `Install` served in Python -- `grant_id`, `app.role` (the ROLE door), `table()` and `door_bind(on)`, `app.wasm_bind(g, roles)`, `app.wasm_end()`, `wasm_rows()` and `wasm_hops()`, and the policy. A shell row checks the grant holds its role (`moy_app_holds`), counts the call in `served()` and calls the server the console registered for the role (`runtime/shell/shell_servers.py`) with the grant first, allocation-free once the row has been called |
@@ -24,13 +24,19 @@ The role table is data, and every verb has one of three servers:
   is its own C function taking the grant; there is no by-name dispatcher.
 - **`shell`**: the state is the Python console's (the routes' surfaces, the
   look and its caches, the wallpaper cart's namespace, the shelf's live list,
-  the achievements, Get Carts' transport). There is no resident C catalogue,
+  Get Carts' transport). There is no resident C catalogue,
   so every cart and wallpaper read is shell-served, and none is per-frame. A
   Python app's binding calls the registered Python server straight, counted,
   with no trip through C. A compiled app reaches one through the ROLE door
   (the row's index, an argument buffer, an answer buffer), counted as its own
   upcall class in `native/moy_play/upcall_sites.txt`, entering MicroPython only
   on the VM's task and answering `MOY_APP_NEEDS_VM` with no VM.
+- **`proc:<name>`**: the state is a background process's, the cart
+  `moybyte.<name>` (`notify`'s rows, the achievements process,
+  `docs/os_2026-11/processes.md` §8). The console registers its link to the
+  process for the role (`runtime/system/achievements.py`), so this module serves
+  the row as a shell row; the link sends the process its events as messages and
+  reads its answers off its functions.
 - **Python-only**: a row with no wasm type, whose only consumer is Python on
   paths and objects (`install.net`, `install.keep`, `install.op`).
 

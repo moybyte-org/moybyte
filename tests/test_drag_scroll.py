@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from ws_helpers import boot_on_fixture                    # noqa: E402
 from runtime import ui_draw                               # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1 / 30
 
@@ -54,6 +55,7 @@ def _code_ws(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
+    settle_badges(ws)
     ws.ach.toast = None
     ws.screen = "menu"
     ws.set_menu_view("code")

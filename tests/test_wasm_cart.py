@@ -39,7 +39,7 @@ import pytest
 
 from runtime import audio_session, host_app
 from tools import wasm_cart, wat
-from ws_helpers import open_cart
+from ws_helpers import open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "wasm")
@@ -95,6 +95,7 @@ def _wat_cart(title, src, pages, **manifest):
 
 def _quiesce(ws):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0

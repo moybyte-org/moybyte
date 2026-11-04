@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import host_app, moy_carts  # noqa: E402
 from runtime.moy_carts import _canvas_str, _normalize_canvas  # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -131,6 +132,7 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     assert stock is not ws.canvas
     # No view: 128x128 on 320x240 composites at 1x, centered (96, 56).
     assert ws.wm.viewport() == (96, 56, 1)
+    settle_badges(ws)
     ws._toast_until = 0                  # the first-play achievement toast is
     for _ in range(3):                   # wall-clock timed -- clear, don't wait
         drv.frame(DT)

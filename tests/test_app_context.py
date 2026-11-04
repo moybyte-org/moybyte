@@ -43,6 +43,7 @@ from runtime import chrome as _chrome
 from runtime import moy_carts as _store
 from runtime import system_api as _api
 from runtime.app_decls import APPS
+from ws_helpers import settle_badges  # noqa: E402
 
 
 # Every (module, class) on the app side of the seam: the registered apps, from
@@ -220,6 +221,7 @@ def _quiesce_frame(ws):
     and every redraw-gate assertion reads as a failure of whatever changed last."""
     if ws.pointer is not None:
         ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
@@ -751,13 +753,14 @@ def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
 # -- ctx.nav -------------------------------------------------------------------
 
 def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
-    """The badge rows answer the console's tracker as it is NOW: a store load
-    replaces `ws.ach`, and a role that had captured the old one would count
+    """The badge rows answer the achievements process as it is NOW: a store
+    load restarts it, and a role that had captured the old one would count
     badges nobody can see."""
     ws = _ws(tmp_path)
     notify = ws.app_context("probe_badges", ("notify",)).notify
     assert notify.count() == ws.ach.count()
     assert notify.award("konami") is True
+    settle_badges(ws)                                  # the achievements process takes it
     assert notify.award("konami") is False             # a repeat is no find
     assert notify.has("konami") and notify.count() == ws.ach.count()
     assert notify.found_on("konami") == ws.ach.found_on("konami")

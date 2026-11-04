@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import host_app  # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -118,10 +119,12 @@ def test_hud_does_not_force_an_idle_redraw(tmp_path):
     which already animates every frame, so it must not add any extra redraws. With a
     cart running, every frame draws (60 of 60) whether the HUD is on or off."""
     ws, drv = _running_cart(tmp_path)
+    settle_badges(ws)
     ws._toast_until = 0
     ws.perf_hud = True
     for _ in range(3):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0
     drv.frame(DT)
     base = ws._frames_drawn

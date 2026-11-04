@@ -13,7 +13,7 @@ import pytest
 
 from runtime import host_app
 from runtime import moy_input as mi
-from ws_helpers import no_unlock_banner, quiesce
+from ws_helpers import no_unlock_banner, quiesce, settle_badges
 
 DT = 1 / 30
 _NOW = [100000]
@@ -81,6 +81,7 @@ class Pair:
         for _ in range(6):
             self.frame(check=False)
         for ws in (self.a, self.b):
+            settle_badges(ws)
             ws._toast_until = 0
             ws._dirty = True
         for _ in range(3):

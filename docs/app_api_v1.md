@@ -104,7 +104,9 @@ Every context holds a **grant**, a row of native/moy_app's grant table keyed by
 the app's id, and every role is native/moy_app's role object over it: a C row
 reads the kernel's state, and a shell row checks the grant and calls the server
 the console registers for the role (`runtime/shell/shell_servers.py`) with the grant
-first (the table's `server` column says which). The rows with a `wasm` type
+first (the table's `server` column says which); `notify`'s rows are the
+achievements process's (`proc:achievements`), whose link the console registers
+(`runtime/system/achievements.py`, `docs/os_2026-11/processes.md` §8). The rows with a `wasm` type
 are what a compiled app imports ("A compiled user app" below).
 Four things about the roles are load-bearing:
 

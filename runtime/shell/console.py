@@ -230,14 +230,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
-# achievement CORE (ach, load_achievements/_achievement_unlocked) is the
-# Workstation's, on the Notices mixin (console_notices.py), and the banner's
+# badges are the achievements process's (`ach`, its link); starting it and the
+# unlock's effects (load_achievements/_achievement_unlocked) are on the Notices
+# mixin (console_notices.py), and the banner's
 # DEADLINE the unlock pushes into at event time is created in _init_overlays
 # below (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
+    from achievements import Link as _AchLink
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements_ui import AchievementsUI
+    from runtime.achievements import Link as _AchLink
 
 # The Layer protocol + the self-contained surface adapters (extracted from this
 # file -- see layers.py): the router builds the stack from these. layers.py is a
@@ -1213,11 +1216,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._toast_until = 0          # _ticks_ms the unlock banner hides at
         self._toast_at = 0             # _ticks_ms it was armed (a secret's confetti bursts from it)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
-        # rewards. Starts empty/volatile; load_achievements() adds the SD store.
-        # The unlock hook is wired from the START, not at that load: persistence
-        # waits for a store, but arming the banner is kernel behavior a build
-        # with no card still owes the kid.
-        self.ach = Achievements(on_unlock=self._achievement_unlocked, today=self._today_ymd)
+        # rewards, held by the achievements process (runtime/system/achievements.py),
+        # which load_achievements() starts over the store's document.
+        self.ach = _AchLink(self)
         # The three Easter eggs (#21, achievements_ui.py): their trigger state
         # (_konami_pos/_clock_taps/_secret_taps), reset on screen changes
         # (go_home/settings/desktop tap) so a stray sequence never carries
@@ -3328,6 +3329,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self._services_due and self._frames_drawn:
             self._services_due = False
             self.boot_services()
+        if _scheduler.SCHED.wakes.queued:
+            _scheduler.SCHED.mail()   # messages the input sent: served before the draw
+        if self.ach.pending is not None:
+            self.ach.flush()          # the badges the achievements process handed back
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:

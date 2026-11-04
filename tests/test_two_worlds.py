@@ -9,7 +9,7 @@ from runtime import host_app, ui_draw
 
 
 from ws_helpers import build_desktop_ws as _ws, select_on_home
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -74,6 +74,7 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     ws.look.select_wallpaper("moybyte.open_machine", persist=False)
     ws.open_desk()
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)

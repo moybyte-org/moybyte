@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, settle_badges
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,7 @@ def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
     # cursor (hidden), and the achievement toast that "Lift Off!" raised on open
     # (a real system overlay -- dismiss it so the compare is the pure composite).
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws.frame(1 / 30)
     assert bytes(ws.sys_canvas._buf) == bytes(ws.canvas._buf)

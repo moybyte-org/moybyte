@@ -16,6 +16,7 @@ try:
     from settings_layer import SETTINGS_TOGGLES
     from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
     from ui_draw import AppHost
+    from achievements import is_proc as _is_ach_proc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
     from runtime.chrome import DEFAULT_VARIANT, NAMES
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
                                    ROUTE_WINDOW)
     from runtime.ui_draw import AppHost
+    from runtime.achievements import is_proc as _is_ach_proc
 import moy_app as _moy_app
 
 
@@ -460,9 +462,12 @@ class SpineVerbs:
         return True
 
     def is_system_app(self, cart):
-        """True when a registered system app's identity claims `cart` -- the
-        registry-side predicate (services use it to keep app carts out of
-        project lists)."""
+        """True when a registered system app's identity claims `cart`, or it
+        is the achievements process's -- the registry-side predicate
+        (services use it to keep the console's own carts out of project
+        lists and App permissions)."""
+        if _is_ach_proc(cart):
+            return True
         for app, _text in getattr(self, "_apps", ()):
             if app.is_app(cart):
                 return True

@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from runtime import host_app                # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1 / 30
 
@@ -28,6 +29,7 @@ def _open(hh, tab):
     ws, drv = hh
     ws.set_menu_view(tab)
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)

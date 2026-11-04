@@ -212,7 +212,7 @@ def _want_sched(loop):
     def added():
         services(services() | SVC_SCHED)
     moybyte.WAKES.added = added
-    if moybyte.WAKES.list:
+    if moybyte.WAKES.list or moybyte.WAKES.queued:
         added()
 
 
@@ -220,8 +220,8 @@ def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
     says goodbye, the OTA confirm's pending marker, once, and the background
-    scheduler while any wake is registered, with the frame's slack. Answers
-    the bits it still wants."""
+    scheduler while any wake is registered or a message queued, with the
+    frame's slack. Answers the bits it still wants."""
     slack = loop.slack
     wakes = moybyte.WAKES
     tick = scheduler.SCHED.tick
@@ -244,7 +244,7 @@ def make_service(ws, loop):
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
         if bits & SVC_SCHED:
             tick(slack())
-            if wakes.list:
+            if wakes.list or wakes.queued:
                 keep |= SVC_SCHED
         return keep
     return service

@@ -155,6 +155,15 @@ def make_drv(ws):
     return host_app.ConsoleDriver(ws)
 
 
+def settle_badges(ws=None):
+    """Serve the achievements process's queued events now (the console's
+    next frame would, before it draws): an unlock banner they raise is then
+    up before a test takes it down."""
+    from runtime import scheduler
+    scheduler.SCHED.mail()
+    return ws
+
+
 def quiesce(ws):
     """Hide the cursor + take down the achievement toast so a rendered frame is
     deterministic chrome. (Suites that also pin the OS bar's live clock keep
@@ -162,7 +171,8 @@ def quiesce(ws):
 
     The DEADLINE is what takes an overlay down (#209 landing B) -- the shell's
     own flat field, not the payload on `ws.ach`, which is read only while that
-    deadline is up."""
+    deadline is up. The badges' queued events run first (`settle_badges`)."""
+    settle_badges(ws)
     ws.pointer.visible = False
     ws._toast_until = 0
 
@@ -172,6 +182,7 @@ def no_unlock_banner(ws):
     banner (achievements_ui), whose card at the top of the glass would cover
     the pixels it reads."""
     from runtime.widgets import ACHIEVEMENTS
+    settle_badges(ws)
     for a in ACHIEVEMENTS:
         ws.ach.unlocked.setdefault(a[0], 0)
     return ws

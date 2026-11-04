@@ -27,6 +27,7 @@ try:
     from cart_manager import today_ymd as _today_ymd
     from chrome import NAMES
     import scheduler as _scheduler
+    from achievements import is_proc as _is_ach_proc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_icons import IconHome
     from runtime.home_carousel import Carousel
@@ -36,6 +37,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_manager import today_ymd as _today_ymd
     from runtime.chrome import NAMES
     from runtime import scheduler as _scheduler
+    from runtime.achievements import is_proc as _is_ach_proc
 
 # The home's arrangements by the layout's `home` value
 # (docs/theme_and_shell_2026-11.md §8.10); an unknown one is the carousel.
@@ -595,8 +597,9 @@ class HomeVerbs:
         (the same is_app() check the desk icons and launcher dispatch use), so a
         kid-made cart of type "app" -- which no shell app claims -- still shows.
         Note this departs from shell_ux_v1's "everything is editable"; the spec
-        line is right again once #181 lands."""
-        carts = [c for c in carts if c.get("type") != "theme"]
+        line is right again once #181 lands. The achievements process's cart
+        is the console's own as well (docs/os_2026-11/processes.md §8)."""
+        carts = [c for c in carts if c.get("type") != "theme" and not _is_ach_proc(c)]
         apps = getattr(self, "_apps", ())
         if apps:
             keep = []

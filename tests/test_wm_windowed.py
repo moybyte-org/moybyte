@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_desktop_ws, select_on_home, use_theme
+from ws_helpers import build_desktop_ws, select_on_home, use_theme, settle_badges
 
 
 def _ws(tmp_path, **kw):
@@ -58,6 +58,7 @@ def _open_editor(ws):
 
 def _quiesce(ws):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
 
 
@@ -550,6 +551,7 @@ def _settle(ws, n=4):
     first open's achievement)."""
     ws.show_fps = False
     for _ in range(n):
+        settle_badges(ws)
         ws._toast_until = 0
         ws.frame(1 / 30)
 

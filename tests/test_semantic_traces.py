@@ -2256,10 +2256,16 @@ def roles_trace(ws):
     ws.go_home()
 
     # -- notify
+    # achieve and award are messages to the achievements process, served at
+    # the start of the console's next frame (`mail`)
+    import scheduler
     nt = ctx.notify
     nt.achieve("open", "trace")
+    scheduler.SCHED.mail()
     c0 = nt.count()
-    say("notify", nt.award("konami"), nt.award("konami"), nt.count() - c0,
+    a1 = nt.award("konami")
+    scheduler.SCHED.mail()
+    say("notify", a1, nt.award("konami"), nt.count() - c0,
         nt.has("konami"), nt.found_on("konami") == nt.today(),
         nt.progress("play_five") is not None, nt.found_on("decorator"))
 

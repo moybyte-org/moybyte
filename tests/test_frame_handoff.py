@@ -37,7 +37,7 @@ from types import SimpleNamespace
 from runtime import host_app
 from runtime.console import Workstation
 from runtime.wm_windowed import WindowedWM
-from ws_helpers import select_first_game  # noqa: E402
+from ws_helpers import select_first_game, settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -84,10 +84,12 @@ def _playing(tmp_path, **kw):
     select_first_game(ws)
     ws.open()
     ws._splash_until = None
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     for _ in range(3):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0
     return ws, drv
 
@@ -362,6 +364,7 @@ def _desk_playing(tmp_path):
     drv.frame(DT)
     ws.open_desk()
     open_cart(ws, "Star Catcher")
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     ws.pointer.visible = False
@@ -461,6 +464,7 @@ def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
     drv.frame(DT)
     ws.open_library()
     open_cart(ws, "Star Catcher")
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     for _ in range(3):

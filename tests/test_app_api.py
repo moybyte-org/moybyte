@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from ws_helpers import build_ws as _build_ws, select_on_home, use_theme
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 
 def _ws(tmp_path, **kw):
@@ -410,6 +411,7 @@ def _quiesce_frame(ws):
     recipe): two renders taken a moment apart must differ only by the bar."""
     if ws.pointer is not None:
         ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0

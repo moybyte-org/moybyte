@@ -64,16 +64,16 @@
   "guition_480x320_fs1_tasks": {
     "note_banner": "a5f9d5ce389d0e4fff4a86aa121b94de0ebdcc271048e14994b74e95c94a598d",
     "tasks_crashed_service": "8239e507301df28516f24cfe2aceaab6221c1111b20dc0167b48a2706c73da7b",
-    "tasks_empty": "3d600e6624c6b4924c9a9576f5a5d03c37e43bb3fce381b51912e5413f0c5eca",
+    "tasks_empty": "e98802331dbb13a80e51bad3c2aef56a037e57eb5fdfb40d73109b59086c3ed6",
     "tasks_notes": "279ed476a4546acf27e1daad123f7a02cbba8171501b68b763e9cf3487e7daaf",
-    "tasks_two_games": "a35b6f27cdf5b23481375193191beb1d1ef38a459cdf9ff040ba99f7d598f81d"
+    "tasks_two_games": "afd182f14a1874b8952417dc2902c8cb2c4a6dd221f07f03e39bd07d05f3aaa4"
   },
   "guition_p4_1280x800_tasks": {
     "note_banner": "2ecab2ef05b20657384111fba6e6c21c9fee2149684c9cbcd84f5fff178fd4fb",
     "tasks_crashed_service": "24924c78aa7fe01f496fbe150c795febd909243db5d9d6ce252095a5c2f06fa9",
-    "tasks_empty": "e8a4b422c653dd2fcfd9ad1d376c1af0f4000d70c09096c824f34a2e97d4d53e",
+    "tasks_empty": "d1aa82d76d78efa570a5b517c00edc12dd621a78b565ee48bc4fb0afbcee8356",
     "tasks_notes": "82d177ffbce88f04cc8acc36f4862239b4168250a23e3894e3ad2a567a83646b",
-    "tasks_two_games": "96f4a32a22731a359ab1a26d244e9f061e9fbb19cdd5a4de31a887dad71c6582"
+    "tasks_two_games": "4329be16cc6d255365c0c967577ca82ac6bf12c08cb31997ddc1fd893f64e1de"
   },
   "guition_p4_1280x800_windowed": {
     "about": "0c5b9f3d2cfedf137b3c61fbedde5e9c0cf7a9a51c3c0f7b567fa94e1c96530c",
@@ -372,9 +372,9 @@
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": "8a4a206ffefa3a1789cdeb68d1aa19bb16a8848de056ba6c156c57b797e20a58",
     "tasks_crashed_service": "9ae96b36e04218ca45a22fbaee5a46d58e7b2a15f00d17525b498298642cc377",
-    "tasks_empty": "ecc656a8114b3c144b2b2f5bbbbf762a1a207f57e05a081c8d75b949a115d869",
+    "tasks_empty": "0fa708dee303890b94ce3002d1421bd2be5f7fd73f4adcbfb233e5af32a936ca",
     "tasks_notes": "7ba0e38ca62ef8e4a6452b8dd4bb363b546045093ee1acf1a361057d3ef9ce64",
-    "tasks_two_games": "917f981d85aec8cb27c74524c20d4f546d6060890af92cb1c97862e0fcb929a0"
+    "tasks_two_games": "846225ce8a51904c49f2afe3c5945cb832ff325f4dbe6b8b0dde50c12a8d3742"
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": "169d97a5f178abc00cd8dd9773f8cf5336d8047476f5e9ef6333327037bcdc90",
@@ -800,9 +800,9 @@
   "tdeck_320x240_fs1_tasks": {
     "note_banner": "10606f0dda83bc1a383c82c9c05752c4e09864ad064756b21f6d74f1a9cd8e63",
     "tasks_crashed_service": "879f1e977a548bfaaf0921283fc64e0711975d26472f486f2664fd9841e1c75c",
-    "tasks_empty": "dd059c3c741cf1dd61c92ecc944473b5d59bd8e3df966b628cc57896e89a8c36",
+    "tasks_empty": "b3d02cdeb99a9cf800764546fdc1f4ea4851535455891ab53cfc24a251a1e9c1",
     "tasks_notes": "a89a729fb337c5b8313af138c5af54a07ec094fb01c8c289c4474f259286d178",
-    "tasks_two_games": "ee92e94b820a85fe701632ec073360dea0fcca38ba9d1d590bf31aca82568a9d"
+    "tasks_two_games": "266699f636d46ec373c5992dd72b36f15d22dda720dbce276c37c74073f92c56"
   },
   "tdeck_320x240_fs1_ui_page": {
     "ui_page": "3f1af4c51d2ccc1e9f4dbdd1c2d77a9154e353f021ab29e8a842782305b3f24f"

@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 from ws_helpers import select_first_game  # noqa: E402
 import pytest
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -53,6 +53,7 @@ def _quiesce(ws):
     """
     if ws.pointer is not None:
         ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws.bar_layer._clock_text = lambda: "00:00"
 
