@@ -226,7 +226,9 @@ the device API rows `http`, `mic`, `lora` and `ble`, `api:<name>`, Python's
 for now, with no names: `moybyte.http` and the rest are the faces
 `runtime/system/devices.py` hands out, each checking the caller's grant the
 same way. `http` needs `wifi`; the others need the board's class, which
-`devices.apis()` adds to the console's services. The later rows (USB host,
+`devices.apis()` adds to the console's services. P2.4 adds `media` (it
+needs the board's media service, `hardware.md` §3) and `media:url` (it needs
+`wifi`), both granting `api:media`. The later rows (USB host,
 `midi`, `camera`, `native`) arrive with their APIs, each saying whether it
 is enforced on its tier or informational (above).
 

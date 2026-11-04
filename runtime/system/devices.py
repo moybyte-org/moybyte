@@ -1,10 +1,11 @@
 """The device APIs (docs/os_2026-11/hardware.md sections 1 and 4): what a
 board's `class` rows name, each a C driver with a Python face, reached as
 `moybyte.http`, `moybyte.mic`, `moybyte.lora`, `moybyte.ble`,
-`moybyte.usb`, `moybyte.midi` and `moybyte.camera`.
+`moybyte.usb`, `moybyte.midi` and `moybyte.camera`; and the media service's
+face, `moybyte.media` (hardware.md section 3).
 
   api(name)       the face of device API `name` ("http", "mic", "lora",
-                  "ble", "usb", "midi", "camera"), or None where this console has not the class
+                  "ble", "usb", "midi", "camera", "media"), or None where this console has not the class
   present(name)   whether it has
   apis()          the device APIs this console has, as the permission
                   table's `needs` names them (runtime/shell/app_perms.py)
@@ -31,10 +32,10 @@ except ImportError:  # host: the runtime package
 
 EPERM, EBADF, ENODEV, EBUSY, EINVAL = 1, 9, 19, 16, 22
 SHELL = 1
-NAMES = ("http", "mic", "lora", "ble", "usb", "midi", "camera")
+NAMES = ("http", "mic", "lora", "ble", "usb", "midi", "camera", "media")
 # The permission each face checks.
 PERM = {"http": "http", "mic": "mic", "lora": "lora", "ble": "ble", "usb": "usb",
-        "midi": "midi", "camera": "camera"}
+        "midi": "midi", "camera": "camera", "media": "media"}
 
 # fn(pid) -> the granted permissions, None for an ungated process: the
 # console's Procs.granted. None: nothing is gated (a bare host).
@@ -49,6 +50,8 @@ _FACES = {}
 # shell's recording indicator (runtime/wm/wm.py's overlay signature) reads it
 # every frame without a call.
 MIC = [0]
+# The pid whose stream the media service plays, 0 for none: dev_media keeps it.
+MEDIA = [0]
 
 
 def pid():

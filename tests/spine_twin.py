@@ -339,7 +339,7 @@ class Returns:
         return b
 
 
-LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http")
+LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media")
 
 
 def _lease_bit(tag):

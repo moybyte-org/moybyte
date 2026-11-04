@@ -292,33 +292,59 @@ A KEY's `b` is the console key event; TEXT is its own record.
 
 ## 3. The media service
 
-An **OS service** in C (`+native/moy_media/`): fetches a stream or opens a
-file, decodes it (MP3 first, minimp3, on a PSRAM task stack that never runs a
-flash operation), and feeds a **background stream** into the mix
-(`native/moy_audio/moy_aud.h`) **ducked** under the focused session. Decode
-cost is the stream's (internet radio is 44.1 kHz stereo), not the output's.
-While it plays the feeder is no longer lazy, its I²S DMA ring is permanent
-internal SRAM, and the stream holds the WiFi lease, whose internal cost never
-comes back (#158). **The output format (owner, 2026-11-03)**: 44.1 kHz
-stereo on the P4s, 22.05 kHz mono on the S3s (22,050 Hz mono everywhere
-today, `native/moy_audio/moy_audio_snd.h`), the synth resampled once in the
-mix; so a stream plays at 44.1 kHz stereo on the P4s. An S3 would decode
-below the flush priority to 22.05 kHz mono, but THE SHARES give neither S3
-a MEDIA row (`native/moy_play/moy_play.h`: the 8 MiB is spent, the budget in
-#246), so the service's fit check refuses it there until a row is given; the
-Guition S3 has no audio at all. Verbs: `media.play(src)`,
-`pause`, `resume`, `stop`, `volume`, `now`; `play` takes a file, an HTTP
-stream (with **ICY metadata**, the station's now-playing text) or an
-**M3U/PLS playlist**, and **media keys** (play, pause, next, previous) on a
-keyboard arrive as events of kind `MEDIA` (§2) the service answers when
-no focused app takes them (owner, 2026-11-03). **Permissions:** `media` for a
-file or the console's own library; `media:url` and `http` for a URL (a
-`play(url)` without `http` would be a fetch of any URL by an app that never
-asked for the network, child mode included). **A stream lives as long as
-its process (owner, 2026-11-03)**: closing the app ends it, minimising
-keeps it (`processes.md` §1), and a visible stop control in kernel chrome
-stops it from anywhere. A Python app making its own sound renders ahead from
-a thread or its loop (`processes.md` §3), at a depth greater than a GC pause.
+An **OS service** in C (`native/moy_media/moy_media.h`, the module
+`moy_media`; its face `runtime/system/dev_media.py`, `moybyte.media`): one
+background stream for one process, from an HTTP stream or a file. MP3 is
+decoded by minimp3 (vendored, `native/moy_media/UPSTREAM.md`), mixed down to
+mono and resampled once to the mix's rate, and the mix pulls it as its
+**background stream** (`moy_aud_bg`, `native/moy_audio/moy_aud.h`), at a
+quarter of its level while the focused session sounds (**ducked**). On a
+board a task on core 0 below the flush priority (`MOY_MEDIA_PRIO`) reads the
+connection and decodes, on a 24 KiB PSRAM stack (a frame's decode takes 16.7
+KB) that never runs a flash operation: a file is read by the face's pump in
+the VM and its bytes fed to the C. The host has no task; the pump runs one
+pass of its loop. Decode cost is the stream's (internet radio is 44.1 kHz
+stereo), not the output's. While it plays the feeder is no longer lazy (the
+open starts the output), its I²S DMA ring is permanent internal SRAM, and a
+stream whose list holds a URL holds the WiFi lease under `media`, whose
+internal cost never comes back (#158).
+
+**Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the
+open takes `moy_media.share()` from it (155,748 bytes: the service's state,
+its 32 KiB stream buffer, its 16 KiB decoder window, the decoder, a decoded
+ring of 16,384 frames and the list, one PSRAM block; the task's stack; the
+URL client's buffers) and the close gives it back. Where the row is absent
+the open is refused (ENOSPC) and `moybyte.media` is `None`: the T-Deck has a
+MEDIA row of 192 KiB, the Guition S3 none (owner, 2026-11-04: the one
+running thing tier for media; it has no speaker, and its image denies the
+module).
+
+**The output format (owner, 2026-11-03)**: 44.1 kHz stereo on the P4s, 22.05
+kHz mono on the S3s, the synth resampled once in the mix. As built every
+board's mix is 22,050 Hz mono (`native/moy_audio/moy_audio_snd.h`), so a
+stream plays at 22.05 kHz mono on the P4s too; their 44.1 kHz stereo output
+is not built.
+
+**Verbs:** `play(src)`, `pause`, `resume`, `stop`, `next`, `prev`, `volume`,
+`now`. `play` takes a file (an MP3), an `http://` stream (asked for its **ICY
+metadata**: `icy-name` is the station, `StreamTitle` the now-playing text) or
+an **M3U/PLS playlist** (a file, or a URL known by its content type or path),
+whose entries play in turn: an entry that ends or fails moves to the next,
+and a live stream (no Content-Length) that drops after playing is opened
+again twice first. `https` is refused, as `http` refuses it until P3.4.
+**Media keys** (play, pause, next, previous) on a keyboard are to arrive as
+events of kind `MEDIA` (§2) the service answers when no focused app takes
+them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
+**Permissions:** `media` for a file or the console's own library;
+`media:url` and `http` for a URL (a `play(url)` without `http` would be a
+fetch of any URL by an app that never asked for the network, child mode
+included). **A stream lives as long as its process (owner, 2026-11-03)**:
+closing the app ends it (its end sweeps it), minimising keeps it
+(`processes.md` §1), and the system menu's Stop music, there while a stream
+plays, stops it from anywhere; a control standing on the glass in kernel
+chrome, as the recording indicator does, is not built. A Python app making
+its own sound renders ahead from a thread or its loop (`processes.md` §3), at
+a depth greater than a GC pause.
 
 ## 4. Verbs (sketch)
 
@@ -334,7 +360,7 @@ moybyte.http.get(url, cap, on_done) -> Request: state() / body() / readinto(buf)
 moybyte.lora.config(...) / listen() / send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
 moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None
 moybyte.ble.scan() / connect(addr) / find(uuid) / read(h) / write(h, bytes) / subscribe(h) / advertise(name, data)
-moybyte.media.play(src) / pause() / resume() / stop() / volume(v) / now() -> dict   §3
+moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / volume(v) / now() -> dict   §3
 ```
 
 Leases (Python gets them as `machine` objects, §1:

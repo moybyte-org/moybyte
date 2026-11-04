@@ -297,7 +297,7 @@ def test_the_app_return_only_sets_and_only_for_an_app(sp):
 
 def test_the_lease_tags_are_the_closed_set(sp):
     assert tuple(sp.LEASE_TAGS) == ("web", "update", "settings", "cart", "link",
-                                    "carts", "dev", "http")
+                                    "carts", "dev", "http", "media")
     ls = sp.Leases()
     for i, tag in enumerate(sp.LEASE_TAGS):
         assert ls.hold(tag) == (1 << (i + 1)) - 1 and ls.held(tag)

@@ -687,6 +687,7 @@ typedef struct {
     uint8_t open;
     void *conn;
     char *head;                     // MOY_HTTPC_HEAD_MAX: the head, then the body's first bytes
+    size_t head_n;                  // the final response's head
     size_t rest, rest_n;            // the body bytes still in `head`
 } client_t;
 
@@ -737,8 +738,8 @@ static int get_once(client_t *c, const char *url, const char *agent, uint32_t fl
         return rc;
     }
     int k = snprintf(c->head, MOY_HTTPC_HEAD_MAX,
-                     "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: close\r\n\r\n",
-                     path, host, agent);
+                     "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\n%sConnection: close\r\n\r\n",
+                     path, host, agent, (flags & MOY_HTTPC_ICY) ? "Icy-MetaData: 1\r\n" : "");
     if (k <= 0 || k >= MOY_HTTPC_HEAD_MAX) {
         return -EINVAL_;
     }
@@ -763,6 +764,7 @@ static int get_once(client_t *c, const char *url, const char *agent, uint32_t fl
             break;
         }
     }
+    c->head_n = r->head_end;
     c->rest = r->head_end;
     c->rest_n = n - r->head_end;
     return 0;
@@ -789,8 +791,9 @@ int moy_httpc_open_ex(const char *url, const char *agent, uint32_t flags, int *s
     if (moy_httpc_init() != 0) {
         return -ENOMEM_;
     }
-    int i = (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS - 1 : 0;
-    int end = (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS : MOY_HTTPC_SLOTS - 1;
+    int i = (flags & MOY_HTTPC_MEDIA) ? MOY_HTTPC_SLOTS - 1
+            : (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS - 2 : 0;
+    int end = i + ((flags & (MOY_HTTPC_MEDIA | MOY_HTTPC_WORKER)) ? 1 : MOY_HTTPC_SLOTS - 2);
     while (i < end && s_cl[i].open) {
         i++;
     }
@@ -875,6 +878,51 @@ int moy_httpc_read(int h, void *buf, size_t n) {
         n = 0x7fffffffu;
     }
     return moy_conn_read(c->conn, buf, n);
+}
+
+int moy_httpc_read_wait(int h, void *buf, size_t n, uint32_t ms) {
+    client_t *c = client_at(h);
+    if (c == NULL) {
+        return -EBADF_;
+    }
+    if (c->rest_n > 0 || n == 0) {
+        return moy_httpc_read(h, buf, n);
+    }
+    if (n > 0x7fffffffu) {
+        n = 0x7fffffffu;
+    }
+    return moy_conn_read_wait(c->conn, buf, n, ms);
+}
+
+int moy_httpc_header(int h, const char *name, char *out, size_t cap) {
+    client_t *c = client_at(h);
+    if (c == NULL || cap == 0) {
+        return -1;
+    }
+    size_t nl = strlen(name);
+    const char *p = c->head, *end = c->head + c->head_n;
+    while (p < end) {
+        const char *eol = memchr(p, '\n', (size_t)(end - p));
+        if (eol == NULL) {
+            eol = end;
+        }
+        const char *colon = memchr(p, ':', (size_t)(eol - p));
+        if (colon != NULL && (size_t)(colon - p) == nl && name_is(p, nl, name)) {
+            const char *v = colon + 1, *ve = eol;
+            while (v < ve && is_ws(*v)) {
+                v++;
+            }
+            while (ve > v && (is_ws(ve[-1]) || ve[-1] == '\r')) {
+                ve--;
+            }
+            size_t k = (size_t)(ve - v) < cap - 1 ? (size_t)(ve - v) : cap - 1;
+            memcpy(out, v, k);
+            out[k] = '\0';
+            return (int)k;
+        }
+        p = eol + 1;
+    }
+    return -1;
 }
 
 void moy_httpc_close(int h) {

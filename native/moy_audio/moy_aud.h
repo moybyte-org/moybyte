@@ -15,7 +15,8 @@
 // volume() verb), so a cart can turn itself down but never past the console.
 //
 // THE MIX (moy_aud_render) is the focused session's synth, then its sample
-// voices, then the compiled cart's stream (moy_audio_snd.h), under the one lock.
+// voices, then the compiled cart's stream (moy_audio_snd.h), then the
+// background stream (the media service, native/moy_media), under the one lock.
 // What pulls it is the board's feeder task (moy_aud_out.c) or, where there is
 // none, the host's or the browser's per-frame pull.
 //
@@ -111,6 +112,11 @@ void moy_aud_set_rate(int rate);
 int moy_aud_rate(void);
 // Mix `n` frames into `out` (overwritten): what the speaker plays next.
 void moy_aud_render(int16_t *out, int n);
+// THE BACKGROUND STREAM: `fn` adds `n` frames into the mix at the console's
+// level, ducked while the focused session sounds (`duck`); it runs on the
+// feeder's task under the lock. NULL: none. The media service sets it.
+typedef void (*moy_aud_bg_fn)(int16_t *out, int n, int console, int duck);
+void moy_aud_bg(moy_aud_bg_fn fn);
 // The self-dump: `n` frames of session `s`'s synth alone, rendered from its
 // state into `out` without the speaker's mix. STALE, or BAD for the focused
 // session, whose state the feeder is advancing.

@@ -41,6 +41,11 @@ int moy_conn_read(void *conn, void *p, size_t n) {
     return -5;
 }
 
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    (void)conn, (void)p, (void)n, (void)ms;
+    return -5;
+}
+
 int moy_conn_write(void *conn, const void *p, size_t n) {
     (void)conn, (void)p, (void)n;
     return -5;

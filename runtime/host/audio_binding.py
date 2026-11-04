@@ -153,6 +153,7 @@ def _load(path):
         ("moy_aud_out_start", [], i),
         ("moy_aud_out_state", [C.POINTER(C.c_char_p)], i),
         ("moy_aud_snd_counts", [pu32, C.POINTER(i)], i),
+        ("moy_aud_bg", [p], None),
     )
     for name, args, res in sigs:
         fn = getattr(d, name)
@@ -300,6 +301,11 @@ class Module:
 
     def codec(self):
         return None
+
+    def bg(self, fn):
+        """The background stream's pull (a C function's address, None for
+        none): the media service's (runtime/host/moy_media.py's attach)."""
+        self._d.moy_aud_bg(fn)
 
     def snd_counts(self):
         c = (self._C.c_uint32 * 4)()

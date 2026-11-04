@@ -114,12 +114,17 @@ int moy_ota_judge_c6(const char *text, size_t n, int require_sig,
 #define MOY_HTTPC_HOPS 4            // redirects followed
 #define MOY_HTTPC_HEAD_MAX 16384    // GitHub's redirect head measured 5147 bytes
 #define MOY_HTTPC_IO_MS 15000       // a connect, or a read that has no byte this long
-// The VM's clients, and one more the http device API's worker holds
-// (MOY_HTTPC_WORKER, native/moy_net/moy_fetch.h), which the VM's stop leaves.
-#define MOY_HTTPC_SLOTS 3
+// The VM's two clients, one the http device API's worker holds
+// (MOY_HTTPC_WORKER, native/moy_net/moy_fetch.h) and one the media service's
+// task holds (MOY_HTTPC_MEDIA, native/moy_media/moy_media.h), which the VM's
+// stop leaves.
+#define MOY_HTTPC_SLOTS 4
 #define MOY_HTTPC_PLAIN 0x01        // refuse https, a redirect's hop too
 #define MOY_HTTPC_WORKER 0x02       // the worker's slot
+#define MOY_HTTPC_MEDIA 0x04        // the media service's slot
+#define MOY_HTTPC_ICY 0x08          // ask for ICY metadata (Icy-MetaData: 1)
 #define MOY_HTTPC_ETLS 93           // the refusal: EPROTONOSUPPORT
+#define MOY_HTTPC_EAGAIN 11         // moy_httpc_read_wait: nothing came in time
 
 // GET `url` with redirects followed: a handle (> 0), or -errno (EINVAL for a
 // URL that does not parse, EIO for a head that never ends). `*status` and
@@ -129,6 +134,13 @@ int moy_httpc_open(const char *url, const char *agent, int *status,
 // Up to `n` body bytes: their count, 0 at the end, -errno on a failure or a
 // handle that is not open.
 int moy_httpc_read(int h, void *buf, size_t n);
+// The same, waiting at most `ms` for a first byte: -MOY_HTTPC_EAGAIN when
+// none came, so a task that reads a stream can be told to stop between waits.
+int moy_httpc_read_wait(int h, void *buf, size_t n, uint32_t ms);
+// The final response's header `name` (lower case; the head's in any case)
+// into `out`, trimmed and NUL-ended: its length (cut to cap - 1), or -1 when
+// the head has none.
+int moy_httpc_header(int h, const char *name, char *out, size_t cap);
 void moy_httpc_close(int h);
 // The same with MOY_HTTPC_* `flags`; the client table made by moy_httpc_init
 // (0, or -ENOMEM), which a thread other than the VM's calls before its first
@@ -149,6 +161,8 @@ int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t 
 int moy_conn_open(const char *host, uint16_t port, int tls, void **conn);
 // >0 bytes, 0 at the end, -errno (ETIMEDOUT after MOY_HTTPC_IO_MS of nothing).
 int moy_conn_read(void *conn, void *p, size_t n);
+// The same, waiting at most `ms` for a first byte: -MOY_HTTPC_EAGAIN when none came.
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms);
 int moy_conn_write(void *conn, const void *p, size_t n);
 void moy_conn_close(void *conn);
 

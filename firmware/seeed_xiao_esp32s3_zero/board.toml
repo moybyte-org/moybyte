@@ -449,6 +449,12 @@ console does its own audio through an AudioWorklet, on the machine the kid is
 sitting at."""
 
 [[native.shared.deny]]
+module = "moy_media"
+why = """
+The media service, which plays into moy_audio's mix: this board denies the
+mix (no speaker) and has no shares line, so a stream has nowhere to play."""
+
+[[native.shared.deny]]
 module = "moy_lua"
 why = """
 libmoy's Lua binding -- the #67 auto-native cart tier. Carts run in the

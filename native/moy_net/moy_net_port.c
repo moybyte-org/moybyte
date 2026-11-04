@@ -98,6 +98,8 @@ void moy_net_free(void *p) {
 #include <unistd.h>
 #if defined(ESP_PLATFORM)
 #include "lwip/sockets.h"
+#else
+#include <sys/select.h>
 #endif
 
 #ifndef MSG_NOSIGNAL
@@ -508,6 +510,29 @@ int moy_conn_read(void *conn, void *p, size_t n) {
     }
 }
 
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    conn_t *c = conn;
+    if (c->tls) {
+        return moy_conn_read(conn, p, n);
+    }
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(c->fd, &r);
+    struct timeval tv = {(long)(ms / 1000u), (long)(ms % 1000u) * 1000L};
+    int k = select(c->fd + 1, &r, NULL, NULL, &tv);
+    if (k == 0) {
+        return -MOY_HTTPC_EAGAIN;
+    }
+    if (k < 0) {
+        return -errno;
+    }
+    k = recv(c->fd, p, n, 0);
+    if (k >= 0) {
+        return k;
+    }
+    return errno == EAGAIN || errno == EWOULDBLOCK ? -MOY_HTTPC_EAGAIN : -errno;
+}
+
 int moy_conn_write(void *conn, const void *p, size_t n) {
     conn_t *c = conn;
     const unsigned char *b = p;
@@ -659,6 +684,22 @@ int moy_conn_read(void *conn, void *p, size_t n) {
         return errno == EAGAIN || errno == EWOULDBLOCK ? -ETIMEDOUT : -errno;
     }
     return (int)k;
+}
+
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    int fd = ((conn_t *)conn)->fd;
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(fd, &r);
+    struct timeval tv = {(long)(ms / 1000u), (long)(ms % 1000u) * 1000L};
+    int k = select(fd + 1, &r, NULL, NULL, &tv);
+    if (k == 0) {
+        return -MOY_HTTPC_EAGAIN;
+    }
+    if (k < 0) {
+        return -errno;
+    }
+    return moy_conn_read(conn, p, n);
 }
 
 int moy_conn_write(void *conn, const void *p, size_t n) {

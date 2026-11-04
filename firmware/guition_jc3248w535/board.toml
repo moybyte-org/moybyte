@@ -356,6 +356,14 @@ definition drives no audio. moy_audio's synth half is board-agnostic; its I2S
 plumbing wants pins nobody has measured (mpconfigboard.h names none). Take it
 at stage 5 with the pins in mpconfigboard.h."""
 
+[[native.shared.deny]]
+module = "moy_media"
+why = """
+The media service plays into moy_audio's mix, which this board denies (no
+speaker), and THE SHARES give this board no MEDIA row: it is the "one running
+thing" tier for media (owner, 2026-11-04; native/moy_play/moy_play.h), so
+`moybyte.media` is None here."""
+
 [[native.shared.take]]
 module = "moy_wasm"
 why = """

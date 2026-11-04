@@ -47,6 +47,8 @@ typedef struct {
     uint32_t focus_h;
     int rate;
     int console;                // 0..7
+    // the background stream (the media service)
+    moy_aud_bg_fn bg;
     // a compiled cart's stream
     moy_stream pcm;
     int16_t *pcm_ring;
@@ -601,6 +603,31 @@ int moy_aud_rate(void) {
     return A.rate;
 }
 
+// Whether the focused session makes a sound: a voice, a track, the beep or a
+// sample voice (moy_aud_active's mask, read under the lock the caller holds).
+static int sounding(const aud_sess_t *r) {
+    for (int i = 0; i < MOY_A_CHANNELS; i++) {
+        if (r->a->v[i].owner) {
+            return 1;
+        }
+    }
+    if (r->a->track != NULL || r->a->bleft > 0) {
+        return 1;
+    }
+    for (int i = 0; i < MOY_AUD_SAMPLE_VOICES; i++) {
+        if (r->sv[i].pcm != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void moy_aud_bg(moy_aud_bg_fn fn) {
+    moy_aud_lock();
+    A.bg = fn;
+    moy_aud_unlock();
+}
+
 void moy_aud_render(int16_t *out, int n) {
     if (n <= 0) {
         return;
@@ -622,6 +649,9 @@ void moy_aud_render(int16_t *out, int n) {
     }
     if (A.pcm_on) {
         moy_stream_mix(&A.pcm, out, n, A.rate, r != NULL ? effective(r) : A.console);
+    }
+    if (A.bg != NULL) {
+        A.bg(out, n, A.console, r != NULL && sounding(r));
     }
     A.st.rendered += (uint32_t)n;
     for (int i = 0; i < n; i++) {
