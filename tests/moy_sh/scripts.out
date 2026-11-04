@@ -1,0 +1,16 @@
+$ # scripts by sh, by path and on the PATH, with their own arguments
+$ echo 'echo script $0 $# "$1"; exit 7' > s.sh
+$ sh s.sh a b; echo s=$?
+script /s.sh 2 a
+s=7
+$ ./s.sh q; echo direct=$?
+script ./s.sh 1 q
+direct=7
+$ sh -c 'echo c $0 $1' name one
+c name one
+$ mkdir tools; echo 'echo from-path "$@"' > tools/tool
+$ PATH=/tools:$PATH; tool x y
+from-path x y
+$ . ./s.sh; echo never
+script sh 0 
+[exit 7]

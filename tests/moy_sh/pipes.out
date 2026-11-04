@@ -1,0 +1,17 @@
+$ # pipelines run stage by stage over pipe buffers
+$ echo one two three | wc -w
+3
+$ printf 'b\na\nc\n' | grep -v a | wc -l
+2
+$ lines() { i=0; while [ $i -lt 3000 ]; do echo line $i; i=$((i + 1)); done; }
+$ lines | tail -n 2
+line 2998
+line 2999
+$ lines | wc -l
+3000
+$ { echo g1; echo g2; } | cat
+g1
+g2
+$ false | true; echo last=$?
+last=0
+[exit 0]

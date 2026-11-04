@@ -1,0 +1,18 @@
+$ # here-documents, expanded and quoted, whole or fed line by line
+$ name=moy
+$ cat <<END
+> hello $name
+>   $((1 + 2))
+> END
+hello moy
+  3
+$ cat <<'END'
+> not $name
+> END
+not $name
+$ cat <<-END | wc -l
+> 	one
+> 	two
+> 	END
+2
+[exit 0]

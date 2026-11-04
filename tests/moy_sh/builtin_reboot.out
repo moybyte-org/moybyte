@@ -1,0 +1,4 @@
+$ reboot; echo status=$?
+reboot: not here
+status=1
+[exit 0]

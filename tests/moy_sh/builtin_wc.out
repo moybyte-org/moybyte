@@ -1,0 +1,10 @@
+$ printf 'one two\nthree\n' > t
+$ wc t
+      2       3      14 t
+$ wc -l t
+2 t
+$ wc -w < t
+3
+$ wc -c t
+14 t
+[exit 0]

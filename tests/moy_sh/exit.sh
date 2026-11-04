@@ -1,0 +1,4 @@
+# exit ends the session with its status, after the EXIT trap
+trap 'echo bye' EXIT
+exit 4
+echo never

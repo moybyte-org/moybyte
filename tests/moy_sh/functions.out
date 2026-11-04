@@ -1,0 +1,14 @@
+$ # functions persist across lines, take arguments and return a status
+$ greet() { echo "hello $1 ($#)"; return 3; }
+$ greet world x
+hello world (2)
+$ echo status=$?
+status=3
+$ count() { local n=0; for a in "$@"; do n=$((n + 1)); done; echo $n; }
+$ count a b c
+3
+$ echo local-gone=[$n]
+local-gone=[]
+$ type greet
+greet is a shell function
+[exit 0]

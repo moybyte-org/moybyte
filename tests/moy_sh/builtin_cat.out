@@ -1,0 +1,15 @@
+$ printf 'a\nb\n' > one; echo c > two
+$ cat one two
+a
+b
+c
+$ echo piped | cat - one
+piped
+a
+b
+$ cat nosuch one; echo status=$?
+cat: nosuch: No such file or directory
+a
+b
+status=1
+[exit 0]

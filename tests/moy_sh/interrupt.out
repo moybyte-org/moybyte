@@ -1,0 +1,15 @@
+$ # Ctrl-C stops the running command and the rest of its line
+$ touch /.interrupt; sleep 5; echo not-after
+
+$ echo slept=$?
+slept=130
+$ touch /.interrupt; while true; do :; done
+
+$ echo loop=$?
+loop=130
+$ trap 'echo caught' INT
+$ touch /.interrupt; sleep 5
+caught
+$ echo trapped=$?
+trapped=0
+[exit 0]

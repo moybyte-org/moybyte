@@ -1,0 +1,10 @@
+$ # command substitution is a child whose output the parent reads
+$ echo $(echo inner) "$(echo two words)" `echo back`
+inner two words back
+$ n=$(printf 'a\nb\n' | wc -l); echo n=$n
+n=2
+$ x=$(cd /; pwd; exit 3); echo "x=$x status=$?"
+x=/ status=3
+$ echo nested=$(echo $(echo deep))
+nested=deep
+[exit 0]

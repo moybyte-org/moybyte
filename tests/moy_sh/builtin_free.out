@@ -1,0 +1,6 @@
+$ free
+               total       used       free
+internal      512000     412000     100000
+psram        8388608    4388608    4000000
+python       2000000     500000    1500000
+[exit 0]

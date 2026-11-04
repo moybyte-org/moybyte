@@ -1,0 +1,16 @@
+$ # errors are reported and the session goes on
+$ if then
+sh: 1: Syntax error: "then" unexpected
+$ echo after=$?
+after=2
+$ nosuch-command; echo nf=$?
+sh: 1: nosuch-command: not found
+nf=127
+$ cd /nowhere; echo cd=$?
+sh: 1: cd: can't cd to /nowhere
+cd=2
+$ echo ${x?unset here}; echo never
+sh: 1: x: unset here
+$ echo still here
+still here
+[exit 0]

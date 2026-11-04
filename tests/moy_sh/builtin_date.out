@@ -1,0 +1,5 @@
+$ date +%Y | wc -c
+5
+$ date | wc -w
+6
+[exit 0]

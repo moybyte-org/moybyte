@@ -1,0 +1,7 @@
+$ mkdir a b; echo f > b/f
+$ rmdir a; ls
+b/  bin/  dev/  proc/
+$ rmdir b/f; echo notdir=$?
+rmdir: b/f: Not a directory
+notdir=1
+[exit 0]

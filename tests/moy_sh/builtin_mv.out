@@ -1,0 +1,11 @@
+$ echo data > a; mkdir d
+$ mv a b; ls
+b  bin/  d/  dev/  proc/
+$ mv b d; ls d
+b
+$ mv d e; ls
+bin/  dev/  e/  proc/
+$ mv nosuch x; echo status=$?
+mv: nosuch: No such file or directory
+status=1
+[exit 0]

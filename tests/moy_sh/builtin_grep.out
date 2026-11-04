@@ -1,0 +1,17 @@
+$ printf 'Apple\nbanana\napple pie\n' > f
+$ grep apple f
+apple pie
+$ grep -i apple f
+Apple
+apple pie
+$ grep -v apple f
+Apple
+banana
+$ grep -n -c apple f
+1
+$ grep -q pear f; echo none=$?
+none=1
+$ grep; echo usage=$?
+usage: grep [-ivncq] TEXT [FILE...]
+usage=2
+[exit 0]

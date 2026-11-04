@@ -1,0 +1,12 @@
+$ echo 'echo in-script "$@"' > s
+$ sh s a b
+in-script a b
+$ sh -c 'echo $0 $1' n one
+n one
+$ sh; echo usage=$?
+usage: sh FILE [ARG...] | sh -c TEXT [NAME [ARG...]]
+usage=1
+$ sh nosuch; echo missing=$?
+sh: 1: sh: nosuch: cannot open
+missing=127
+[exit 0]

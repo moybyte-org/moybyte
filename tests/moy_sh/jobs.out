@@ -1,0 +1,23 @@
+$ # background programs are processes of their own; jobs, fg, kill, wait
+$ daemon &
+$ echo pid=$!
+pid=40
+$ jobs -l
+[1] + 40 Running                 daemon
+$ ps | grep daemon
+   40     1 command  background daemon
+$ kill %1
+[1] + Terminated                 daemon
+$ jobs
+$ ( echo shell-code ) &
+shell-code
+[1] + Done                       (echo shell-code)
+$ wait; echo waited=$?
+waited=0
+$ daemon &
+$ echo 3 > /.interrupt; fg %1
+daemon
+
+$ echo fg=$?
+fg=130
+[exit 0]

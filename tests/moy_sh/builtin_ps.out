@@ -1,0 +1,6 @@
+$ ps
+  PID  PPID KIND     STATE      NAME
+  100     0 shell    running    sh
+    1     0 shell    running    console
+    7     1 service  background achievements
+[exit 0]
