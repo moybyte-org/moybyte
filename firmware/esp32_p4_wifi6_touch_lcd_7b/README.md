@@ -409,3 +409,8 @@ GPIO4, GPIO5, GPIO6, GPIO20, GPIO21, GPIO22, GPIO23, GPIO28, GPIO29, GPIO30,
 GPIO31, GPIO45, GPIO46, GPIO47, GPIO48, GPIO49, GPIO50, GPIO51 and GPIO52.
 Every other pad has its own row there: the OS's buses, the strapping pins 34
 and 36, and both USB 1.1 PHYs (24–27).
+
+UART1 and SPI2 are leased on these pins too (`uart1`: TX GPIO47, RX GPIO48;
+`spi2`: SCK GPIO49, MOSI GPIO50, MISO GPIO51), rows that ride the gpio row:
+those are their defaults, and a lease may route either unit to other pins of
+the row through the GPIO matrix.

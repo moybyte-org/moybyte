@@ -274,6 +274,10 @@ GPIO49, GPIO50, GPIO51, GPIO52 and GPIO53. The strapping pins 34–38 (UART0's
 37/38 among them) and the USB pads 24–26 are never leased; 27 is the panel's
 reset.
 
+Its `uart1` (47, 48) and `spi2` (49, 50, 51) rows ride that one, with the
+Waveshare P4's default pins (`firmware/esp32_p4_wifi6_touch_lcd_7b/README.md`,
+Free pins).
+
 ## Hardware-confirmed at bring-up (2026-09-06, hands-off)
 
 - JD9365 init through the shared `moy_dsi`: **298ms**, three framebuffers,

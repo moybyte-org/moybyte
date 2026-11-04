@@ -7,15 +7,20 @@ JSON row for row, and whose `role:` rows are native/moy_app's allowlist
 
 A row is `(perm, grants, tiers, prompt, needs, py)`:
 
-  perm    the manifest name; `files` also matches `files:<kind>`
+  perm    the manifest name; `files` also matches `files:<kind>`, `lease`
+          only `lease:<row>`, a row of the board's resource table
   grants  `floor` (ungated), `role:<role>` (the app ABI's grant policy),
           `api:<service>` (a device API the Player hands the run), `boot`
-          (started with the console) or `marker` (names a shipped app's cart,
-          grants nothing)
+          (started with the console), `lease` (a raw lease, taken through
+          `moybyte.lease`, runtime/system/leases.py) or `marker` (names a
+          shipped app's cart, grants nothing)
   tiers   the cart runtimes that may hold it
-  prompt  its line in the install prompt (`%s` takes a files kind), or None:
-          no line, nothing to consent to, and nothing Settings can turn off
-  needs   the console's service it needs (`wifi`, `net`, `gpio`), or None
+  prompt  its line in the install prompt (`%s` takes a files kind), `full`
+          (FULL, naming the lease's row: "full access" to it), or None: no
+          line, nothing to consent to, and nothing Settings can turn off
+  needs   the console's service it needs (`wifi`, `net`, `gpio`), `lease`
+          (the board offers the row: `services` names each as
+          `lease:<row>`), or None
   py      the names a Python cart's namespace holds while it is granted
 
 A permission is ABSENT for a run when Settings turned it off, when an update
@@ -61,6 +66,7 @@ TABLE = (
     ("console", "api:console", ALL, None, None, ()),
     ("notifications", "api:notify", ALL, "Show notifications", None, ()),
     ("autostart", "boot", ALL, "Start when the console starts", None, ()),
+    ("lease", "lease", PY, "full", "lease", ()),
     ("editor", "marker", PY, None, None, ()),
     ("calc", "marker", PY, None, None, ()),
     ("getcarts", "marker", PY, None, None, ()),
@@ -77,6 +83,10 @@ TRUSTED = "A trusted app: Python can reach the whole console"
 
 KEY = "consent"
 
+# A raw lease's line: full access to one of the board's resources (the
+# overview's section 4).
+FULL = "Full access to the console's %s"
+
 _BY = {r[PERM]: r for r in TABLE}
 
 
@@ -88,6 +98,8 @@ def row(perm):
     r = _BY.get(perm)
     if r is None and perm.startswith("files:"):
         r = _BY["files"]
+    elif perm == "lease" or (r is None and perm.startswith("lease:") and len(perm) > 6):
+        r = None if perm == "lease" else _BY["lease"]
     return r
 
 
@@ -96,6 +108,8 @@ def line(perm):
     r = row(perm)
     if r is None or r[PROMPT] is None:
         return None
+    if r[PROMPT] == "full":
+        return FULL % perm[6:]
     if "%s" in r[PROMPT]:
         kind = perm[6:] if perm.startswith("files:") else "docs"
         return r[PROMPT] % kind
@@ -117,12 +131,25 @@ def tier_of(cart):
 
 
 def services(ws):
-    """The services of the console `ws` the table's `needs` names, present."""
+    """The services of the console `ws` the table's `needs` names, present,
+    and `lease:<row>` for each row the board leases."""
     out = []
     for name in ("wifi", "net", "gpio"):
         if getattr(ws, name, None) is not None:
             out.append(name)
-    return tuple(out)
+    return tuple(out) + leasable()
+
+
+def leasable():
+    """`lease:<row>` for each row this console leases: none where it has no
+    machine objects to hand out (a host)."""
+    try:
+        from leases import LEASES
+    except ImportError:  # pragma: no cover - host fallback
+        from runtime.leases import LEASES
+    if LEASES.machine is None:
+        return ()
+    return tuple("lease:" + o[0] for o in LEASES.offers())
 
 
 def _why_absent(perm, tier, have, rec):
@@ -132,7 +159,10 @@ def _why_absent(perm, tier, have, rec):
         return "unknown"
     if tier not in r[TIERS]:
         return "tier"
-    if r[NEEDS] is not None and r[NEEDS] not in have:
+    if r[NEEDS] == "lease":
+        if perm not in have:
+            return "needs"
+    elif r[NEEDS] is not None and r[NEEDS] not in have:
         return "needs"
     if rec is not None:
         if perm in rec["off"]:

@@ -667,15 +667,15 @@ and are `None` while it is turned off in Settings.
 
 ## Pins — wires, lights and buttons (`#9`)
 
-Some consoles have a **spare pin header**: the Moybyte Zero is one, a little
-board with no screen that serves this console to your browser over WiFi. When
-your cart is running on a console like that, it gets two extra verbs and can
-turn things on and off in the real world.
+Some consoles have **spare pins**: both P4 consoles do, and so does the
+Moybyte Zero, a little board with no screen that serves this console to your
+browser over WiFi. When your cart is running on a console like that, it gets
+two extra verbs and can turn things on and off in the real world.
 
 | call | does |
 |---|---|
 | `pin_write(n, v)` | pin `n` goes high (`v` = 1) or low (`v` = 0). `True`/`False` work too |
-| `pin_read(n)` | the last level pin `n` reported — `0`, `1`, or `None` before the first answer |
+| `pin_read(n)` | the level of pin `n` — `0`, `1`; through the Zero the last level it reported, or `None` before the first answer |
 
 ```python
 LED = 21          # the Zero's own little light
@@ -695,12 +695,17 @@ can read it before running it. Without it the names are absent even on a console
 that has pins.
 
 **And the names are only there when the console has pins.** On moybyte.com, on a
-T-Deck or a P4, or in a browser tab you opened from a file, `pin_write` does
+T-Deck or a Guition S3, or in a browser tab you opened from a file, `pin_write` does
 not exist at all and using it is a `NameError` — the same rule as `wifi` and
 `net`. That is on purpose: a verb that pretends to work while nothing happens
 is the hardest possible bug for a kid to see.
 
-**They are not instant, and you should know how much.** Your cart runs in the
+**On a P4 they are instant**: the pin is the console's own, and your cart
+holds it until it stops (another cart asking for the same pin gets `False` and
+`None`). The first `pin_write` makes a pin an output, the first `pin_read` an
+input with nothing pulling it.
+
+**Through the Zero they are not instant, and you should know how much.** Your cart runs in the
 browser and the pins are on the board across the room, so a `pin_write` does
 not go down a wire — it is **queued**, and the page sends everything that piled
 up about **30 times a second**. So:
@@ -720,9 +725,10 @@ fast enough to bit-bang a protocol, and it is not meant to be.
 is **refused, never driven** — the board needs some of its pins to stay alive
 (its flash, its USB, its serial console), and a typo must not be able to reach
 them. Ask for a pin outside the list and the console says so once, and nothing
-happens. On the Zero the list is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
+happens (on a P4, the verb answers `False` or `None`). On the Zero the list
+is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
 `D0`, `D1`, `D3`, `D4`, `D5`, `D8`, `D9`, `D10`) plus `21`, the board's own
-built-in LED.
+built-in LED; on a P4 it is the free pins its README lists.
 
 > **On or off, and that is all — for now.** There is no `pin_pwm`, no servo and
 > no motor verb yet: driving a motor takes a driver board between the pin and

@@ -345,6 +345,50 @@ DEVICE_APIS = {
 }
 
 
+# The lease rows a board may offer, by name (native/moy_kernel/moy_lease.h):
+# `gpio`, a pin set; `uart<n>` and `spi<n>`, a unit riding the gpio row
+# (`bus = "gpio"`), its pins named in this order, the defaults a take may
+# replace with other pins of the gpio row.
+LEASE_PINS = {"gpio": None, "uart": ("tx", "rx"), "spi": ("sck", "mosi", "miso")}
+
+
+def _lease_kind(name):
+    for kind in LEASE_PINS:
+        rest = name[len(kind):] if name.startswith(kind) else None
+        if rest is not None and (rest == "" if kind == "gpio" else
+                                 len(rest) == 1 and rest.isdigit()):
+            return kind
+    return None
+
+
+def _lease_row(where, r, pins):
+    name = r.get("name", "")
+    kind = _lease_kind(name)
+    if kind is None:
+        raise ValueError("%s: the lease row %r is not gpio, uart<n> or spi<n>"
+                         % (where, name))
+    want = LEASE_PINS[kind]
+    if want is not None:
+        named = r.get("pins")
+        if not isinstance(named, dict) or tuple(named) != want or r.get("bus") is None:
+            raise ValueError("%s: the lease row %s rides a bus and names its pins %s"
+                             % (where, name, ", ".join(want)))
+
+
+def lease_spec(board_dir):
+    """The board's lease rows as moy_lease_offer's spec ("gpio:0,1/uart1:4,5"),
+    or None where it offers none."""
+    hw = hardware(board_dir)
+    if hw is None:
+        return None
+    out = []
+    for r in hw[2]:
+        if r["class"] != "lease":
+            continue
+        out.append("%s:%s" % (r["name"], ",".join(str(p) for p in r["pins"])))
+    return "/".join(out) or None
+
+
 def _pins_of(row):
     pins = row.get("pins", [])
     return list(pins.values()) if isinstance(pins, dict) else list(pins)
@@ -388,9 +432,19 @@ def hardware(board_dir):
             raise ValueError("%s: the lease row %s holds %s, a strapping, "
                              "flash, PSRAM or USB pad"
                              % (where, name, sorted(banned & set(pins))))
-        for pin in pins:
-            seen.setdefault(pin, []).append(name)
+        if cls == "lease":
+            _lease_row(where, r, pins)
+        if not (cls == "lease" and r.get("bus")):
+            for pin in pins:
+                seen.setdefault(pin, []).append(name)
         rows.append(dict(r, pins=pins, api=api))
+    for r in rows:
+        if r["class"] == "lease" and r.get("bus"):
+            bus = [b for b in rows if b["name"] == r["bus"] and b["class"] == "lease"
+                   and not b.get("bus")]
+            if not bus or not set(r["pins"]) <= set(bus[0]["pins"]):
+                raise ValueError("%s: the lease row %s rides %r, which must be a "
+                                 "lease row holding its pins" % (where, r["name"], r["bus"]))
     for pin, names in sorted(seen.items()):
         if pin not in chip["gpio"]:
             raise ValueError("%s: GPIO%s is not a pad of %s"
@@ -827,6 +881,10 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
     for define, v in input_defines(board_dir):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
+    spec = lease_spec(board_dir)
+    if spec is not None:
+        lines.append('target_compile_definitions(usermod INTERFACE "MOY_LEASE_ROWS=\\"%s\\"")'
+                     % spec)
     for m, src in mods:
         mirror(src, dest / m, ignore=("__pycache__", "*.pyc", GENERATED),
                keep=(GENERATED,))

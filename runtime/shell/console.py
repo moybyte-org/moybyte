@@ -178,6 +178,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import scheduler as _scheduler
 
+# The hardware leases (leases.py): the `pins` verbs' local service, and the
+# grants a lease checks; devfs.py's process rows.
+try:
+    import leases as _hwleases
+    import devfs as _devfs
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import leases as _hwleases
+    from runtime import devfs as _devfs
+
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
 try:
@@ -898,12 +907,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Transport-neutral is the point, because there will be two backends. The
         # browser tier injects a `gpio_link.GpioLink`, which QUEUES writes and
         # answers reads from the last batch because a frame may not wait on a
-        # network round trip; a board that grows pins of its own would inject a
-        # direct driver instead. The cart verbs are the same two names either way.
+        # network round trip; a board whose [hardware] has a gpio lease row
+        # gets the lease table's direct driver (leases.LocalPins). The cart verbs
+        # are the same two names either way.
         # The CONTRACT is written at the remote backend's level (a write is
         # queued, a read may be one round trip stale), so a native backend is a
         # strict improvement and no cart has to know which it got.
-        self.gpio = None
+        self.gpio = _hwleases.local_pins()
         # #65 Phase 2: the live two-console LOCKSTEP session (players.LockstepSession,
         # a view of the kernel's moy_match), set by the link once two consoles have
         # agreed on a cart and a seed, and torn down with the run. None = solo, and
@@ -1031,6 +1041,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # The running set beyond the front run: the games stepped beside it
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
         self.procs = Procs(self)
+        _hwleases.LEASES.grants = self.procs.granted
+        _devfs.RUNS = self.procs.runs
         # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
         # terminal scrollback after it. One instance for the console's life
         # (its ring is preallocated, so a run costs no allocation); `run_script`

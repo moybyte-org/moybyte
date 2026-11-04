@@ -1046,7 +1046,7 @@ _ALL_S3 = ", ".join(str(p) for p in board_config.CHIP_GPIO["esp32s3"]["gpio"]
 
 @pytest.mark.parametrize("body, says", [
     # a pad in no row
-    ('[[hardware.resource]]\nname = "x"\nclass = "lease"\npins = [21]\n', "in no row"),
+    ('[[hardware.resource]]\nname = "gpio"\nclass = "lease"\npins = [21]\n', "in no row"),
     # a pad twice
     ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s, 0, 21, 21]\n'
      % _ALL_S3, "is in"),
@@ -1093,12 +1093,40 @@ def test_the_zeros_lease_is_its_pin_allowlist():
 @pytest.mark.parametrize("board", ("p4", "guition-p4"))
 def test_a_p4_readme_lists_its_free_pins_as_its_lease_row(board):
     lease = sorted(p for r in board_config.hardware(BOARDS[board])[2]
-                   if r["class"] == "lease" for p in r["pins"])
+                   if r["class"] == "lease" and not r.get("bus") for p in r["pins"])
     text = (BOARDS[board] / "README.md").read_text()
     m = re.search(r"^## Free pins\n(.*?)(?=^## |\Z)", text, re.S | re.M)
     assert m, "%s/README.md has no Free pins section" % board
-    listed = sorted(int(p) for p in re.findall(r"GPIO(\d+)", m.group(1)))
+    listed = sorted({int(p) for p in re.findall(r"GPIO(\d+)", m.group(1))})
     assert listed == lease
+
+
+_GPIO_ROW = ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s]\n'
+             '[[hardware.resource]]\nname = "gpio"\nclass = "lease"\npins = [1, 2, 21]\n'
+             % ", ".join(str(p) for p in board_config.CHIP_GPIO["esp32s3"]["gpio"]
+                         if p not in (1, 2, 21)))
+
+
+@pytest.mark.parametrize("row, says", [
+    ('name = "i2c0"\nclass = "lease"\nbus = "gpio"\npins = {sda = 1, scl = 2}\n',
+     "not gpio, uart<n> or spi<n>"),
+    ('name = "uart1"\nclass = "lease"\npins = {tx = 1, rx = 2}\n', "rides a bus"),
+    ('name = "uart1"\nclass = "lease"\nbus = "gpio"\npins = {rx = 1, tx = 2}\n', "rides a bus"),
+    ('name = "spi2"\nclass = "lease"\nbus = "gpio"\npins = {sck = 1, mosi = 2, miso = 4}\n',
+     "holding its pins"),
+    ('name = "uart1"\nclass = "lease"\nbus = "nope"\npins = {tx = 1, rx = 2}\n',
+     "holding its pins"),
+])
+def test_a_unit_lease_row_rides_the_gpio_row_and_names_its_pins(tmp_path, row, says):
+    with pytest.raises(ValueError, match=says):
+        board_config.hardware(_hw(tmp_path, _GPIO_ROW + "[[hardware.resource]]\n" + row))
+
+
+def test_the_lease_rows_are_the_boards_offer_spec(tmp_path):
+    body = _GPIO_ROW + ('[[hardware.resource]]\nname = "uart1"\nclass = "lease"\nbus = "gpio"\n'
+                        'pins = {tx = 2, rx = 1}\n')
+    assert board_config.lease_spec(_hw(tmp_path, body)) == "gpio:1,2,21/uart1:2,1"
+    assert board_config.lease_spec(BOARDS["tdeck"]) is None
 
 
 # -- THE SHARES' lines (native/moy_play/moy_play.h) ----------------------------------

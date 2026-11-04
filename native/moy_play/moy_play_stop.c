@@ -51,6 +51,7 @@
 #include "moy_fs.h"
 #include "moy_input.h"
 #include "moy_json.h"
+#include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_play.h"
 #include "moy_route.h"
@@ -208,6 +209,9 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
         if (moy_leases_mask(k->leases) & ~kernel_holders) {
             return MOY_PLAY_KEEP_LEASE;
         }
+    }
+    if (moy_lease_held(MOY_LEASE_VM) != 0) {
+        return MOY_PLAY_KEEP_LEASE;
     }
     if (moy_ota_state != NULL) {
         stop_ota_state_t st;

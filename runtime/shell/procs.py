@@ -7,7 +7,7 @@
 #   -- launching             launch, refuse, title_of
 #   -- worlds                _fresh, detach, minimise, switch, promote, close
 #   -- the frame             frame, _step, _front_state, _pace
-#   -- the accounting        account, rows, stop_service, forget, _meter
+#   -- the accounting        account, rows, granted, runs, stop_service, forget, _meter
 """The running set: several apps at once (docs/os_2026-11/processes.md §1, §6).
 
 A run's WORLD is what the shell holds of it on the Workstation: its Player,
@@ -877,6 +877,28 @@ class Procs:
         if sp is not None and sp.kind == _sched.SERVICE and sp.state != _sched.EXITED:
             return _poster(sp.cart, sp.granted)
         return (None, None, False)
+
+    def granted(self, pid):
+        """The permissions process `pid`'s run or service was granted, as a
+        lease checks them (runtime/system/leases.py): None for the shell,
+        which is not gated, () for a pid with no live run."""
+        if pid == _sched.SHELL:
+            return None
+        pl = self.ws.player
+        if pl is not None and pl.pid == pid:
+            return pl.granted
+        for p in self.list:
+            if p.world.player.pid == pid:
+                return p.world.player.granted
+        sp = _sched.SCHED.procs.get(pid)
+        if sp is not None and sp.kind == _sched.SERVICE and sp.state != _sched.EXITED:
+            return sp.granted
+        return ()
+
+    def runs(self):
+        """[(pid, name, kind, state)]: the task manager's rows that are runs,
+        as /proc names them (runtime/system/devfs.py)."""
+        return [(r[6], r[1], r[2], r[3]) for r in self.rows() if r[2] != "service"]
 
     def stop_service(self, pid):
         """The task manager's Stop: the service's TERM, then KILL (§5)."""

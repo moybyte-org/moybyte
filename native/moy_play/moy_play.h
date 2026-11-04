@@ -221,7 +221,7 @@ enum {
     MOY_PLAY_KEEP_LEVER = 2,    // the board has no stop (the P4s: ABSENCE)
     MOY_PLAY_KEEP_FITS = 3,     // it fits with the VM up, or has no fit to check
     MOY_PLAY_KEEP_PLACE = 4,    // its route is not HOME: only the launcher comes back
-    MOY_PLAY_KEEP_LEASE = 5,    // a Python owner holds a WiFi lease
+    MOY_PLAY_KEEP_LEASE = 5,    // a Python owner holds a WiFi lease or a hardware lease
     MOY_PLAY_KEEP_OTA = 6,      // an update is being written
     MOY_PLAY_KEEP_FRONT = 7,    // the board's kernel present cannot show its canvas
     MOY_PLAY_KEEP_BIG = 8,      // it would not fit with the VM stopped either: the

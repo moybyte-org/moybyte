@@ -4,7 +4,8 @@
 # moy_perf.c, moy_devch.c, the module `moy_loop`), and the OS log (moy_log.c,
 # the module `moy_log`), and the scheduler's callback guard (modmoy_guard.c,
 # the module `moy_guard`, built where the board's mpconfigboard.h turns on
-# MICROPY_ENABLE_VM_ABORT). A board TAKES it in
+# MICROPY_ENABLE_VM_ABORT), and the lease table (moy_lease.c, the module
+# `moy_lease`, offering the board's MOY_LEASE_ROWS). A board TAKES it in
 # board.toml ([[native.shared.take]]), and taking it is what makes the kernel
 # own app_main.
 #
@@ -31,6 +32,8 @@ target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_loop.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_guard.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_loop_board.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_lease.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_lease.c
 )
 
 target_include_directories(usermod_moy_kernel INTERFACE ${CMAKE_CURRENT_LIST_DIR})

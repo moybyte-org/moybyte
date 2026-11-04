@@ -365,6 +365,10 @@ def test_a_gpio_lease_loses_no_tap(board):
     on_glass.a_gpio_lease_loses_no_tap(board, "guition_jc8012p4a1c")
 
 
+def test_a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board):
+    on_glass.a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, "guition_jc8012p4a1c")
+
+
 def test_the_scheduler_stops_a_runaway_service(board):
     on_glass.the_scheduler_stops_a_runaway_service(board)
 

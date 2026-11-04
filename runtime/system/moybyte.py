@@ -22,6 +22,13 @@ one, `time.ticks_us()`.
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   cancel(wid)        a wake undone
+  lease(name, **cfg) a resource the board leases, held by this process until
+                     it ends: "gpio<n>" a machine.Pin, "uart<n>" a
+                     machine.UART, "spi<n>" a machine.SPI, each
+                     MicroPython's own API; refused (OSError) where the board
+                     offers no such row, another process holds it, or this
+                     one lacks `lease:<row>` (runtime/system/leases.py)
+  pins()             what the board leases and who holds what
   notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
@@ -86,9 +93,10 @@ MESSAGES = ("achieve", "award")
 MAIL_MAX = 16
 
 SHELL = 1
-_ON, _EVERY, _AFTER, _MAIL = 0, 1, 2, 3
+_ON, _EVERY, _AFTER, _MAIL, _RING = 0, 1, 2, 3, 4
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
-# `ms` is its name and its `deadline` the queue of its messages.
+# `ms` is its name and its `deadline` the queue of its messages, a ring
+# wake's `ms` the ring source it reads alone.
 _WID, _OWNER, _HOW, _MS, _AT, _FN, _READER = range(7)
 
 
@@ -123,6 +131,11 @@ class Wakes:
         for w in self.list:
             if w[_HOW] == _ON:
                 w[_READER] = table.reader(SOURCES[w[_MS]])
+            elif w[_HOW] == _RING:
+                try:
+                    w[_READER] = table.reader(1 << EDGE, w[_MS])
+                except OSError:  # the source is not this table's
+                    w[_READER] = -1
 
     def _add(self, how, ms, at, fn, reader):
         wid = self.next_id
@@ -146,6 +159,13 @@ class Wakes:
         if self.table is None:
             raise OSError("no input table bound")
         return self._add(_ON, source, 0, fn, self.table.reader(kinds))
+
+    def on_ring(self, src, fn):
+        """Wake `fn()` when ring source `src` (a lease's edges) has
+        records; inside `fn`, events() reads that source alone."""
+        if self.table is None:
+            raise OSError("no input table bound")
+        return self._add(_RING, src, 0, fn, self.table.reader(1 << EDGE, src))
 
     def every(self, ms, fn):
         ms = max(1, int(ms))
@@ -185,9 +205,12 @@ class Wakes:
         return True
 
     def end(self, pid):
-        """Process `pid` ended: its wakes and its reader go."""
+        """Process `pid` ended: what ENDS sweeps (its leases) first, then its
+        wakes and its reader go."""
         if pid is None:
             return
+        for fn in ENDS:
+            fn(pid)
         for w in [w for w in self.list if w[_OWNER] == pid] + \
                 [w for w in self.mail if w[_OWNER] == pid]:
             self.cancel(w[_WID])
@@ -219,8 +242,8 @@ class Wakes:
             if n == cap:
                 break
             how = w[_HOW]
-            if how == _ON:
-                if t is None or not t.pending(w[_READER]):
+            if how == _ON or how == _RING:
+                if t is None or w[_READER] < 0 or not t.pending(w[_READER]):
                     continue
             else:
                 at = w[_AT]
@@ -286,6 +309,10 @@ class Wakes:
         return t.events(into, r)
 
 
+# fn(pid) told when a process ends, before its wakes go: the lease sweep
+# (runtime/system/leases.py) registers here.
+ENDS = []
+
 WAKES = Wakes()
 
 
@@ -320,6 +347,22 @@ def cancel(wid):
 
 def end(pid):
     WAKES.end(pid)
+
+
+def lease(name, **cfg):
+    return _leases().lease(name, **cfg)
+
+
+def pins():
+    return _leases().pins()
+
+
+def _leases():
+    try:
+        import leases
+    except ImportError:  # host: the runtime package
+        from runtime import leases
+    return leases
 
 
 def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):

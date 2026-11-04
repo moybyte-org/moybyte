@@ -207,6 +207,23 @@ def test_a_ring_source_names_where_its_records_came_from():
     assert again.ring()[5] & 0xFF == src & 0xFF
 
 
+def test_a_reader_of_one_source_reads_it_alone_and_nothing_once_it_closes():
+    """A lease's edges reach its own process's wake (moy_input_reader_only)."""
+    t = mi.InputTable()
+    a = t.ring_source("gpio4", mi.PROV_ISR, 8)
+    b = t.ring_source("gpio5", mi.PROV_ISR, 8)
+    r = t.reader(1 << mi.EV_EDGE, a.h)
+    b.post(mi.EV_EDGE, 5, 0, 1)
+    a.post(mi.EV_EDGE, 4, 0, 1)
+    assert t.pending(r) == 1 and [e[mi.EV_A] for e in read(t, r)] == [4]
+    a.close()
+    again = t.ring_source("gpio6", mi.PROV_ISR, 8)      # the closed slot, taken again
+    again.post(mi.EV_EDGE, 6, 0, 1)
+    assert t.pending(r) == 0 and read(t, r) == []
+    with pytest.raises(ValueError):
+        t.reader(1 << mi.EV_EDGE, a.h)
+
+
 def test_an_isr_ring_is_internal_and_stops_at_its_ceiling():
     t = mi.InputTable()
     assert t.ring_source("gpio5", mi.PROV_ISR, 4096).ring()[0] == mi.EV_ISR_DEPTH_MAX

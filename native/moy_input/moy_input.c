@@ -117,9 +117,12 @@ struct moy_input {
     moy_input_ring_t *ring[MOY_INPUT_RINGS];   // the latch sources', then the ring sources'
     uint8_t ev_used;                        // a bit a reader
     uint32_t ev_kinds[MOY_EV_READERS];
+    uint8_t ev_only[MOY_EV_READERS];        // the one source a reader reads, slot + 1; 0: every
     uint32_t ev_cur[MOY_EV_READERS][MOY_INPUT_RINGS];    // the seq each reads next
     uint32_t ev_lost[MOY_EV_READERS][MOY_INPUT_RINGS];   // its records dropped unread
 };
+
+#define ONLY_NONE 0xFFu      // a reader's one source closed: it reads nothing
 
 #define HANDLE(slot) ((1u << MOY_HTAB_GEN_SHIFT) | ((uint32_t)MOY_KIND_SRC << MOY_HTAB_KIND_SHIFT) | (slot))
 
@@ -852,6 +855,11 @@ int moy_input_ring_close(moy_input_t *t, uint32_t h) {
     LOCK(t);
     moy_input_ring_t *g = t->ring[s];
     t->ring[s] = NULL;
+    for (uint8_t r = 0; r < MOY_EV_READERS; r++) {
+        if (t->ev_only[r] == (uint8_t)(s + 1)) {
+            t->ev_only[r] = ONLY_NONE;
+        }
+    }
     UNLOCK(t);
     ring_drop(g);
     return MOY_INPUT_OK;
@@ -903,6 +911,7 @@ int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r) {
         if (!(t->ev_used & (1u << i))) {
             t->ev_used |= (uint8_t)(1u << i);
             t->ev_kinds[i] = kinds & MOY_EV_ALL;
+            t->ev_only[i] = 0;
             for (uint8_t s = 0; s < MOY_INPUT_RINGS; s++) {
                 t->ev_cur[i][s] = t->ring[s] ? t->ring[s]->head : 0;
                 t->ev_lost[i][s] = 0;
@@ -918,6 +927,25 @@ int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r) {
 
 static bool reader_ok(const moy_input_t *t, int r) {
     return r >= 0 && r < (int)MOY_EV_READERS && (t->ev_used & (1u << r));
+}
+
+int moy_input_reader_only(moy_input_t *t, int r, uint32_t h) {
+    if (!reader_ok(t, r)) {
+        return MOY_INPUT_STALE;
+    }
+    int s = h == 0 ? -1 : any_slot_of(t, h);
+    if (h != 0 && s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    LOCK(t);
+    t->ev_only[r] = (uint8_t)(s + 1);
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
+// Does reader r read source slot s?
+static inline bool reads(const moy_input_t *t, int r, uint8_t s) {
+    return t->ev_only[r] == 0 || t->ev_only[r] == (uint8_t)(s + 1);
 }
 
 int moy_input_reader_free(moy_input_t *t, int r) {
@@ -964,7 +992,7 @@ size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n) {
         uint32_t best_t = 0;
         for (uint8_t s = 0; s < MOY_INPUT_RINGS; s++) {
             const moy_input_ring_t *g = t->ring[s];
-            if (g == NULL) {
+            if (g == NULL || !reads(t, r, s)) {
                 continue;
             }
             uint32_t c = *cursor_locked(t, r, s);
@@ -1011,7 +1039,7 @@ size_t moy_input_pending(moy_input_t *t, int r) {
     uint32_t kinds = t->ev_kinds[r];
     for (uint8_t s = 0; s < MOY_INPUT_RINGS; s++) {
         const moy_input_ring_t *g = t->ring[s];
-        if (g == NULL) {
+        if (g == NULL || !reads(t, r, s)) {
             continue;
         }
         uint32_t *c = cursor_locked(t, r, s);

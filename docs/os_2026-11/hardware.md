@@ -64,19 +64,40 @@ security model").
    PWM and ADC are raw leases, prompted as "full access".
 3. **Native code**: `tiers.md` §1.
 
-**Revocation.** A lease is a row of `MOY_KIND_LEASE` (a new handle kind,
-beside `MOY_KIND_PROC`) under the process's
-OWNER, so the sweep that ends a run's loans ends its leases: on exit, crash,
-strike-out and kill. Ending a lease returns its pins to a safe state (input,
-no pull, PWM stopped, the UART driver uninstalled). **A VM stop is refused
-while a Python process holds a lease**, the rule the WiFi leases already
-follow (`native/moy_kernel/moy_kernel.h`); a Lua, wasm or ELF process's lease
-lives outside the VM and is untouched by a stop.
+**The lease table** is `native/moy_kernel/moy_lease.h` (P2.3): a lease is a
+row of `MOY_KIND_LEASE` owned by the process's pid, holding a unit (a UART,
+an SPI host) or a set of pins, each at most once. A board offers its `lease`
+rows as one spec its build defines (`MOY_LEASE_ROWS`, from
+`tools/board_config.py`'s `lease_spec`); a UART or SPI row rides the gpio row
+(`bus = "gpio"`), its named pins the defaults a take may replace with others
+of that row, since the P4's GPIO matrix routes a unit to any pin. A Python
+process takes one with `moybyte.lease(name, **cfg)` (`runtime/system/leases.py`):
+`"gpio<n>"` a `machine.Pin`, `"uart<n>"` a `machine.UART`, `"spi<n>"` a
+`machine.SPI`, MicroPython's own object behind a wrapper that checks the
+lease on every call. A leased Pin's `irq` opens its edges (`moy_edge.h`) as a
+ring source read by a wake of the process alone (`moy_input_reader_only`).
+`moybyte.pins()` lists each offered row and who holds it, and the `pins`
+permission's `pin_write`/`pin_read` take their pins through the same table
+(`leases.LocalPins`, the consoles' `ws.gpio`).
+
+**Revocation.** The sweep that ends a process ends its leases: on exit, crash,
+strike-out and kill (`moybyte.end`, which the Player's run end and the
+scheduler's exit both reach). The Python sweep deinits each object, then drops
+its lease, which closes its edge sources and returns its pins to a safe state
+(input, no pull, interrupt off, no peripheral driving it, the UART driver
+uninstalled); `moy_lease_pin_state` reads a pin back from the GPIO matrix. An
+object kept past its process raises `OSError(EBADF)`. **A VM stop is refused
+while a Python process holds a lease** (`MOY_LEASE_VM`, read by
+`native/moy_play/moy_play_stop.c` beside the WiFi leases); a Lua, wasm or ELF
+process's lease will live outside the VM, untouched by a stop.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in
 for a named board), answer device APIs with `None` unless a host stand-in
-exists, and offer no leases (refused at install, as on the wrong board). The
+exists, and offer no leases (refused at install, as on the wrong board); a
+host test offers a named board's rows over the stand-in
+(`leases.stand_in`, `runtime/host/lease_sim.py`), whose pins live in the C
+table's own stand-in. The
 browser's exception is pins over the Zero's sync RPC, which is the lease
 model with the board at the end of a cable.
 
@@ -84,6 +105,8 @@ model with the board at the end of a cable.
 `unused`; each `[[hardware.resource]]` row a `name`, a `class`, its `pins`
 (a table of named pins or a list), a `why` on an `os` or `never` row, the
 device `api` (one name or a list) on a `class` row, and the `bus` it rides
+(a `lease` row named `uart<n>` or `spi<n>` rides the `gpio` row and names its
+pins `tx, rx` or `sck, mosi, miso`, pins of that row)
 where that is another row. The T-Deck's (`firmware/lilygo_t_deck_plus_mainline/board.toml`)
 is a whole one; each board's README is the authority on its pins.
 
@@ -225,8 +248,10 @@ moybyte.lora.join() / uplink(port, bytes) / downlink(into) -> n | None   LoRaWAN
 moybyte.media.play(src) / pause() / resume() / stop() / volume(v) / now() -> dict   §3
 ```
 
-Leases (Python gets them as `machine` objects, §1; wasm and ELF through
-these verbs; `pins` is the digital subset every tier may hold):
+Leases (Python gets them as `machine` objects, §1:
+`moybyte.lease(name, **cfg)` and `moybyte.pins()`; wasm and ELF through
+these verbs, which arrive with those tiers; `pins` is the digital subset every
+tier may hold):
 
 ```
 lease.open(name, cfg) -> h            refused if held; cfg is a versioned struct
@@ -237,14 +262,16 @@ gpio.edges(h, pin, on)                events of kind EDGE, stamped in the ISR
 pwm.start(h, pin, hz, duty); adc.sample(h, pin, hz, into)
 ```
 
-In C: `moy_lease_take(owner, res, cfg, &h)`, `moy_lease_drop(h)`,
-`moy_lease_sweep(owner)`.
+In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
+pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
+`moy_lease_edge(h, pin, depth, loop, &src)`; the module `moy_lease` binds them.
 
 ## 5. How it maps onto what exists
 
 | design piece | today | what changes |
 |---|---|---|
-| hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1) | the lease table and sweep over those rows (P2.3) |
+| hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1), with `uart1` and `spi2` riding them, offered as `MOY_LEASE_ROWS` | |
+| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects, `pins` (P2.3; `tests/test_leases.py`) | I²C, PWM and ADC leases; the wasm and ELF verbs |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
-| GPIO edges | `native/moy_input/moy_edge.h`: a free pin's edges as an ISR ring source, the stand-in a lease adopts (P2.2) | `lease:gpio` opens it, the lease table checking the pin and the sweep closing it (P2.3) |
+| GPIO edges | `native/moy_input/moy_edge.h`: a leased pin's edges as an ISR ring source, opened through `moy_lease_edge` and closed by the drop (P2.3) | |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

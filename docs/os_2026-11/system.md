@@ -147,8 +147,12 @@ strict readers with a seed bump (no migration: a legacy `system.json` reads
 as absent until wiped by hand), so `cat`, `settings get/set` and an editor
 all reach them. `/proc/<pid>/status` and `/proc/<pid>/log` are virtual
 files over the process table and the log ring, and a leased device is
-`/dev/uart1`, `/dev/gpio4`, registered through ESP-IDF's VFS so a line
-program reads it with `open`/`read` (phase 2, with the leases). Nothing
+`/dev/uart1`, `/dev/gpio4`: `runtime/system/devfs.py` is their file face
+(`open`, `listdir`, `cat`), which the shell mounts (P3); opening a device
+takes its lease for the opener and closing gives it back, or reads through a
+lease the opener already holds. A C line program reaches them with
+`open`/`read` once they are registered through ESP-IDF's VFS, with the ELF
+tier. Nothing
 else gets a file face until a command needs one.
 
 ## 6. The package index

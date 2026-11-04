@@ -444,6 +444,10 @@ def test_a_gpio_lease_loses_no_tap(board):
     on_glass.a_gpio_lease_loses_no_tap(board, "esp32_p4_wifi6_touch_lcd_7b")
 
 
+def test_a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board):
+    on_glass.a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, "esp32_p4_wifi6_touch_lcd_7b")
+
+
 def test_the_scheduler_stops_a_runaway_service(board):
     on_glass.the_scheduler_stops_a_runaway_service(board)
 

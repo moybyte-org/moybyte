@@ -475,14 +475,23 @@ static inline uint32_t ev_ticks_mask(void) {
     return p == 0 || p > (1u << 30) ? (1u << 30) - 1u : (uint32_t)(p - 1u);
 }
 
-// reader(kinds=EV_ALL) -> a reader's number
+// reader(kinds=EV_ALL, only=0) -> a reader's number; `only` a ring source's
+// handle, the one source it reads (moy_input_reader_only)
 static mp_obj_t table_reader(size_t n_args, const mp_obj_t *args) {
     int r;
+    moy_input_t *t = table_of(args[0])->t;
     uint32_t kinds = n_args > 1 ? (uint32_t)mp_obj_get_int(args[1]) : MOY_EV_ALL;
-    check(moy_input_reader(table_of(args[0])->t, kinds, &r));
+    check(moy_input_reader(t, kinds, &r));
+    if (n_args > 2) {
+        int rc = moy_input_reader_only(t, r, (uint32_t)mp_obj_get_int(args[2]));
+        if (rc != MOY_INPUT_OK) {
+            moy_input_reader_free(t, r);
+            check(rc);
+        }
+    }
     return MP_OBJ_NEW_SMALL_INT(r);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_reader_obj, 1, 2, table_reader);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_reader_obj, 1, 3, table_reader);
 
 static mp_obj_t table_reader_free(mp_obj_t self_in, mp_obj_t r) {
     check(moy_input_reader_free(table_of(self_in)->t, mp_obj_get_int(r)));

@@ -47,7 +47,8 @@
 // task, the BLE central, the ESP-NOW link and its ring, the WiFi station and
 // its lease table, the card's FATFS and the internal flash volume, the driver
 // buffers and native tasks (the audio task silences the cart's sound). A stop
-// is refused while a Python owner holds a WiFi lease or an OTA write runs.
+// is refused while a Python owner holds a WiFi lease or a hardware lease
+// (moy_lease.h's MOY_LEASE_VM) or an OTA write runs.
 // An app that is stopped comes back from persisted state: close() is the
 // leaving hook, commit() the forced save, open() re-enters.
 

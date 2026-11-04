@@ -1344,6 +1344,86 @@ def a_gpio_lease_loses_no_tap(board, board_dir):
     assert (n, lost, drops) == (32, 368, 368), shallow
 
 
+SSD1306 = ("lib", "micropython-lib", "micropython", "drivers", "display", "ssd1306", "ssd1306.py")
+
+LEASED_DRIVER = """\
+import moy_lease as N, moy_log, moybyte, leases
+mod = {'__name__': 'ssd1306'}
+exec(DRIVER, mod)
+pid = moy_log.spawn('t.oled')
+was = moy_log.current()
+grants = leases.LEASES.grants
+leases.LEASES.grants = None         # a process the console runs no row for
+moy_log.current(pid)
+try:
+    spi = moybyte.lease('spi2', baudrate=1000000)
+    dc, res, cs = moybyte.lease('gpio45'), moybyte.lease('gpio46'), moybyte.lease('gpio2')
+    oled = mod['SSD1306_SPI'](128, 64, spi, dc, res, cs)
+    oled.fill(0)
+    oled.text('moybyte', 0, 0, 1)
+    oled.show()
+    rows = leases.LEASES.rows()
+    held = ([N.pin_state(p) & N.PIN_PERIPH for p in (49, 50)], cs.value(), N.held(N.VM),
+            [r[3] for r in rows if r[0] in ('spi2', 'gpio45')])
+finally:
+    moy_log.current(was)
+    leases.LEASES.grants = grants
+moybyte.end(pid)
+safe = [N.pin_state(p) for p in (49, 50, 51, 45, 46, 2)]
+try:
+    oled.show()
+    kept = 'showed'
+except OSError as e:
+    kept = e.errno
+ws._ld = (held, safe, kept, N.held())
+"""
+
+LEASE_CRASH = """\
+import moy_lease as N, scheduler as S, app_perms
+SRC = ('import moybyte, leases\\n'
+       'p = moybyte.lease(\\'gpioPIN\\', mode=leases.Pin.OUT, value=1)\\n'
+       'def boom():\\n    p.on()\\n    raise ValueError(\\'crash\\')\\n'
+       'moybyte.every(50, boom)\\n')
+ws._lp = S.SCHED.start({'id': 't.lease', 'title': 'lease', 'type': 'service', 'src': SRC,
+                        'runtime': 'python', 'permissions': ['lease:gpio'], 'required': []},
+                       None, app_perms.services(ws))
+ws._lc = (N.pin_state(PIN), N.sim_get(PIN), N.held())
+"""
+
+
+def a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, board_dir):
+    """Leases on glass (docs/os_2026-11/hardware.md section 1, the lease table
+    in the real C): micropython-lib's SSD1306 driver, unchanged, on a leased
+    SPI2 and three leased pins (no panel attached: SPI has no ack), its
+    process ending with its SPI's pins driven by the peripheral and its pins
+    then read back safe from the GPIO matrix, and the driver kept past its
+    process raising EBADF; then a service holding a pin it drove high crashes
+    in its wake, and the sweep leaves that pin an input with no pull."""
+    import time
+    mp = ROOT / "firmware" / board_dir / ".build" / "micropython"
+    src = (mp.joinpath(*SSD1306)).read_text()
+    board.pyexec("DRIVER = %r\n" % src + LEASED_DRIVER, timeout=60.0, strict=True)
+    held, safe, kept, left = board.pyval("ws._ld", strict=True)
+    periph, cs, n_held, holders = held
+    assert periph == [16, 16] and cs == 1 and n_held == 4, held
+    assert holders == ["t.oled", "t.oled"], holders
+    assert safe == [1] * 6, safe                    # PIN_SAFE: an input, nothing else
+    assert kept == 9 and left == 0, (kept, left)
+    pin = lease_pin(board_dir)
+    try:
+        board.pyexec(LEASE_CRASH.replace("PIN", str(pin)), strict=True)
+        state, level, n = board.pyval("ws._lc", strict=True)
+        assert state & 2 and level == 1 and n == 1, (state, level, n)
+        time.sleep(1.0)
+        board.pyexec("import moy_lease as N, scheduler as S\n"
+                     "ws._lc = (S.SCHED.procs[ws._lp].code, N.pin_state(%d), N.held())" % pin,
+                     strict=True)
+        code, state, n = board.pyval("ws._lc", strict=True)
+        assert (code, state, n) == (1, 1, 0), (code, state, n)
+    finally:
+        board.pyexec("import scheduler as S\nS.SCHED.reset()", strict=True)
+
+
 def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a

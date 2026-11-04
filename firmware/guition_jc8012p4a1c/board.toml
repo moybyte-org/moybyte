@@ -295,6 +295,18 @@ class = "lease"
 pins = [0, 1, 2, 3, 4, 5, 6, 28, 29, 30, 31, 32, 33, 45, 46, 47, 48, 49, 50, 51, 52, 53]
 
 [[hardware.resource]]
+name = "uart1"
+class = "lease"
+bus = "gpio"
+pins = {tx = 47, rx = 48}
+
+[[hardware.resource]]
+name = "spi2"
+class = "lease"
+bus = "gpio"
+pins = {sck = 49, mosi = 50, miso = 51}
+
+[[hardware.resource]]
 name = "strap"
 class = "never"
 pins = [34, 35, 36, 37, 38]

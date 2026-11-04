@@ -325,6 +325,9 @@ void moy_input_isr_put(moy_input_isr_t *w, uint8_t kind, uint16_t a, uint16_t id
 // when MOY_EV_READERS are taken.
 int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);
 int moy_input_reader_free(moy_input_t *t, int r);
+// Reader r reads source `h` alone (a lease's ring, routed to its process), or
+// every source again for h 0. Once that source closes the reader reads nothing.
+int moy_input_reader_only(moy_input_t *t, int r, uint32_t h);
 // Up to `n` of the reader's records, oldest first across its sources, its
 // cursors past them; a LOST record stands where a gap was. Allocates nothing.
 size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n);

@@ -150,6 +150,7 @@ class Pointer(ctypes.Structure):
 
 _SIGS = (
     ("moy_input_new", [_U8], _P),
+    ("moy_input_kernel", [], _P),
     ("moy_input_free", [_P], None),
     ("moy_input_source", [_P, ctypes.c_char_p, _U8, _PU32], _I),
     ("moy_input_source_player", [_P, _U32, ctypes.POINTER(_U8)], _I),
@@ -237,6 +238,7 @@ _EV_SIGS = (
     ("moy_input_ring_info", [_P, _U32, ctypes.POINTER(_Ring)], _I),
     ("moy_input_reader", [_P, _U32, ctypes.POINTER(_I)], _I),
     ("moy_input_reader_free", [_P, _I], _I),
+    ("moy_input_reader_only", [_P, _I, _U32], _I),
     ("moy_input_events", [_P, _I, ctypes.POINTER(_Event), ctypes.c_size_t], ctypes.c_size_t),
     ("moy_input_pending", [_P, _I], ctypes.c_size_t),
     ("moy_input_now_us", [], _U32),
@@ -434,12 +436,13 @@ class InputTable:
 
     BUTTONS = NAMES
 
-    def __init__(self):
+    def __init__(self, _table=None):
         self.pointer = None         # the screen-space Pointer, once wired
         n = len(self.BUTTONS)
         assert self.BUTTONS == NAMES[:n]
         self._n = n
-        self._t = _lib().moy_input_new(n)
+        self._kept = _table is not None     # the kernel's: never freed
+        self._t = _table if _table is not None else _lib().moy_input_new(n)
         if not self._t:
             raise MemoryError("moy_input: no table")
         self._srcs = {}
@@ -449,7 +452,7 @@ class InputTable:
 
     def __del__(self):
         t = getattr(self, "_t", None)
-        if t and _LIB[0] is not None:
+        if t and _LIB[0] is not None and not self._kept:
             _LIB[0].moy_input_free(t)
             self._t = None
 
@@ -706,10 +709,16 @@ class InputTable:
         return _lib().moy_input_multi(self._t)
 
     # -- the event rings -----------------------------------------------------
-    def reader(self, kinds=EV_ALL):
-        """A reader of `kinds` (a mask of 1 << kind): its number."""
+    def reader(self, kinds=EV_ALL, only=0):
+        """A reader of `kinds` (a mask of 1 << kind): its number. `only`, a
+        ring source's handle, is the one source it reads."""
         r = _I()
         _check(_lib().moy_input_reader(self._t, kinds, ctypes.byref(r)), "reader")
+        if only:
+            rc = _lib().moy_input_reader_only(self._t, r.value, only)
+            if rc != OK:
+                _lib().moy_input_reader_free(self._t, r.value)
+                _check(rc, "reader")
         return r.value
 
     def reader_free(self, r):
@@ -861,8 +870,10 @@ _KERNEL = [None]
 
 
 def kernel():
+    """The kernel's table (moy_input_kernel): the one the boards' drivers, the
+    lease table's edge sources and a board's wakes share."""
     if _KERNEL[0] is None:
-        _KERNEL[0] = InputTable()
+        _KERNEL[0] = InputTable(_lib().moy_input_kernel())
     return _KERNEL[0]
 
 

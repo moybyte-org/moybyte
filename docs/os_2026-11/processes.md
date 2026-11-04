@@ -216,11 +216,14 @@ off.
 The rows Python holds in phase 1 are the floor, the roles, `network`,
 `multiplayer`, `pins`, `console`, `notifications`, `autostart` and the
 markers (`notifications` with no names: its verb lives on the shared
-`moybyte` module and checks the poster's grant, §7); a Python app's prompt also says it is a trusted app. The later
-phases' rows (`mic` and the other device APIs, the leases, `native`) arrive
-with their APIs, and with them a prompt line of `"full"` ("full access to
-the console", the overview's §4) and whether the row is enforced on its
-tier or informational (above).
+`moybyte` module and checks the poster's grant, §7); a Python app's prompt also says it is a trusted app. Phase 2 adds
+`lease` (P2.3): `lease:<row>`, granting `lease`, Python's for now, its
+prompt `"full"` ("Full access to the console's uart1", `app_perms.FULL`; the
+overview's §4), needing the board to offer the row (`app_perms.leasable`
+names each as `lease:<row>`), with no names: `moybyte.lease` checks the
+caller's grant (`Procs.granted`), the shell's always passing. The later
+rows (`mic` and the other device APIs, `native`) arrive with their APIs, each
+saying whether it is enforced on its tier or informational (above).
 
 ## 3. Python: one VM, stepped cooperatively
 
