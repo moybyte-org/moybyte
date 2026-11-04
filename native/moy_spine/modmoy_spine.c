@@ -511,10 +511,15 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- BackStack ---------------------------------------------------------------------
 
+// `top_q` is the top's kind as a qstr, interned when the top last changed
+// (`top_kind`): the console asks `top()` several times a frame, and interning
+// searches the qstr pools, a few tens of us a call on cold caches.
 typedef struct {
     mp_obj_base_t base;
     moy_back_t *b;
     bool own;
+    qstr top_q;
+    moy_kind_t top_kind;
 } back_obj_t;
 
 static moy_back_t *back_of(mp_obj_t self) {
@@ -530,6 +535,7 @@ static mp_obj_t back_make_new(const mp_obj_type_t *type, size_t n_args,
         no_memory();
     }
     o->own = true;
+    o->top_q = MP_QSTRnull;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -583,7 +589,13 @@ static mp_obj_t back_restore(mp_obj_t self, mp_obj_t kinds) {
 static MP_DEFINE_CONST_FUN_OBJ_2(back_restore_obj, back_restore);
 
 static mp_obj_t back_top(mp_obj_t self) {
-    return kind_obj(moy_back_top(back_of(self)));
+    back_obj_t *o = MP_OBJ_TO_PTR(self);
+    const moy_kind_t *k = moy_back_top(o->b);
+    if (o->top_q == MP_QSTRnull || !moy_kind_is(&o->top_kind, k->s, k->len)) {
+        o->top_q = qstr_from_strn(k->s, k->len);
+        o->top_kind = *k;
+    }
+    return MP_OBJ_NEW_QSTR(o->top_q);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(back_top_obj, back_top);
 
@@ -1495,6 +1507,7 @@ static mp_obj_t mod_kernel(mp_obj_t fresh) {
     back_obj_t *b = mp_obj_malloc_with_finaliser(back_obj_t, &back_type);
     b->b = k->back;
     b->own = false;
+    b->top_q = MP_QSTRnull;
     returns_obj_t *r = mp_obj_malloc_with_finaliser(returns_obj_t, &returns_type);
     r->r = k->returns;
     r->apps = MP_OBJ_FROM_PTR(a);

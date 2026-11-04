@@ -692,6 +692,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     _menu_over = False              # a menu holds the keys over the surface (`_menu_keys`)
     _text_back = None               # `_text_sets` when that menu took text mode away
     _text_sets = 0                  # `_set_text_mode` calls, counted
+    _pf_home = None                 # the home frame's split, under perf_capture (home_band)
     # A soft keyboard the board offers beside its inputs (the browser page's).
     soft_keyboard = False
     no_keyboard_text = NO_KEYBOARD_TEXT
@@ -3191,7 +3192,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         player = self.player
         # (The Player's own fields: ws._update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
-        if kind == "desktop" and self.cart_error is None and not self.pause.open \
+        if kind == "desktop" and player.cart_error is None and not self.pause.open \
                 and not player.paused and (
                     player._update is not None or player._draw is not None) \
                 and (pages or not player._on_change) and player.animates():
@@ -3337,7 +3338,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._press_owed = False
             if not self._press_taken:
                 self._dirty = True        # the press handle_input left owed
-        self._press_taken = False
+        # A store on the Workstation looks through all its classes for a
+        # property (about 60 us on a T-Deck), so the frame path stores a
+        # per-frame flag only when it changes.
+        if self._press_taken:
+            self._press_taken = False
         st = self.store
         if st.open:
             st.end_all()
@@ -3362,7 +3367,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         covers = self.covers
         covers.begin_frame()          # the per-frame cover-build budget, which is
                                       # a TIME slice, not a count
-        self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
+        if self._pf_home is not None:
+            self._pf_home = None      # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
         # redraw gate below, so it fires even on a static (redraw-skipped) editor
         # frame. The router is called DIRECTLY here (#209 landing E, doc 3b: the
@@ -3407,7 +3413,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # agreed frame instead of repainting it.
         procs = self.procs
         procs.frame(dt)               # the running set's games, by their states
-        if (self.wm.top_is_player() and self.cart_error is None and not self.pause.open
+        if (self.wm.top_is_player() and self.player.cart_error is None and not self.pause.open
                 and not procs.front_minimised()):
             if not self.player.frame_plan(dt):
                 self.player.tick(dt, render=False)
@@ -3485,7 +3491,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                         self._idle_warned = True
                         print("Moybyte idle work failed:", _err_text(exc))
             return
-        self._quiet_frames = 0
+        if self._quiet_frames:
+            self._quiet_frames = 0
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.
@@ -3693,12 +3700,17 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
-        self._dirty = False
+        if self._dirty:
+            self._dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
-        self.ui_moving = _ui_draw.moving_take()
+        mv = _ui_draw.moving_take()
+        if mv != self.ui_moving:
+            self.ui_moving = mv
         if _ui_draw.again_take():
             self._dirty = True        # a pass owes the frame after it (`AppHost.again`)
-        self.frame_change = _ui_draw.change_take()
+        ch = _ui_draw.change_take()
+        if ch != self.frame_change:
+            self.frame_change = ch
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the

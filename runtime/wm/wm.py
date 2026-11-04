@@ -286,9 +286,9 @@ class FullscreenStackWM:
         and the chrome around it is unchanged by cart-bound keys). On this
         fullscreen tier a running cart on top owns ALL input; the crash panel
         (cart_error) hands keys back to the system chrome."""
-        ws = self.ws
-        return (self.stack.top() == "desktop" and ws.cart_error is None
-                and (ws._update is not None or ws._draw is not None))
+        pl = self.ws.player
+        return (self.stack.top() == "desktop" and pl.cart_error is None
+                and (pl._update is not None or pl._draw is not None))
 
     def goto(self, kind):
         """Navigate the back-stack so `kind` is on top -- the mechanism behind the
@@ -342,19 +342,14 @@ class FullscreenStackWM:
         transient overlays are gated ON this frame. Together with the content-layer
         identity + content_gen it is the memo key: while it is unchanged the cached
         stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
-        alloc), so computing it every access is free on the hot path."""
+        alloc). It runs twice a frame on a game's cold caches, so a frame
+        with no banner armed reads flags only: no clock, no call."""
         ws = self.ws
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
         if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
-        # The unlock banner is a flat kernel deadline the unlock pushes at
-        # event time (#209 landing B) -- a plain int read, no call into ach
-        # from the hot path.
-        now = _ticks_ms()
-        if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
-            sig |= 32
         if ws.sysmenu.open:
             sig |= 64
         if ws.pause.open:
@@ -363,10 +358,18 @@ class FullscreenStackWM:
             sig |= 1024
         if ws._about:
             sig |= 128
-        if ws.notice_active():
-            sig |= 256
-        if _NOTES.banner is not None and _NOTES.up(now) is not None:
-            sig |= 2048
+        # The banners up for a span of the clock: the unlock's is a flat
+        # kernel deadline the unlock pushes at event time (#209 landing B) --
+        # a plain int read, no call into ach from the hot path.
+        tu = ws._toast_until
+        if tu or ws._notice is not None or _NOTES.banner is not None:
+            now = _ticks_ms()
+            if tu and _ticks_diff(tu, now) > 0:
+                sig |= 32
+            if ws.notice_active(now):
+                sig |= 256
+            if _NOTES.banner is not None and _NOTES.up(now) is not None:
+                sig |= 2048
         return sig
 
     def _ensure_stack(self):

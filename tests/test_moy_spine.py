@@ -199,6 +199,22 @@ def test_goto_pushes_returns_and_stays(sp):
     assert st.goto("launcher") == sp.RETURNED and st.kinds() == ["launcher"]
 
 
+def test_top_follows_every_change(sp):
+    """top() is asked after every op, the way the frame loop asks it: the
+    native binding keeps the last top's interned name, and a new top of the
+    same length ("menu" after "desk") must still read as itself."""
+    st = sp.BackStack()
+    seen = [st.top()]
+    for op, arg in (("goto", "desk"), ("goto", "menu"), ("goto", "desk"),
+                    ("goto", "file"), ("remove", "file"), ("restore", ["menu"]),
+                    ("restore", ["desk", "menu", "file"]), ("goto", "launcher")):
+        getattr(st, op)(arg)
+        seen.append(st.top())
+        assert st.top() == st.kinds()[-1]
+    assert seen == ["launcher", "desk", "menu", "desk", "file", "desk", "menu",
+                    "file", "launcher"]
+
+
 def test_remove_takes_one_kind_and_never_the_root(sp):
     st = sp.BackStack()
     for k in ("desk", "menu", "desktop", "settings"):

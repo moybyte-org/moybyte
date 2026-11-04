@@ -45,8 +45,12 @@ class InputVerbs:
         # content layer is at the bottom and always consumes.
         i = self.input
         # Whether a change was reported since the last painted frame, before
-        # this input's own (`Hold.opened`).
-        self._dirty_in = self._dirty or self._press_owed
+        # this input's own (`Hold.opened`). Stored only on a change: a store
+        # on the Workstation looks through all its classes for a property,
+        # about 60 us on a T-Deck.
+        d = self._dirty or self._press_owed
+        if d != self._dirty_in:
+            self._dirty_in = d
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
         # ran. A no-op (empty loop) with no extra controllers registered, so the
@@ -62,11 +66,13 @@ class InputVerbs:
         # A desk keyboard's letters are a GAME's buttons only while it owns
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
-        ck = self.wm.keys_to_cart() and not self.player._is_tool
+        kc = self.wm.keys_to_cart()
+        ck = kc and not self.player._is_tool
         if ck != self._cart_keys:
             self._cart_keys = ck
             i.cart_keys = ck
-        self._menu_keys()
+        if self._menu_over or self.pause.open or self.confirm.open or self.sysmenu.open:
+            self._menu_keys()
         # Super (the `start` button) is the console's from every surface, before
         # any layer, and acts when it comes up: a tap is the system menu, or
         # the pause menu over a fullscreen game (a T-Deck text field's Cancel);
@@ -122,7 +128,7 @@ class InputVerbs:
             return
         if (pressed or i.last_key or getattr(i, "wheel_y", 0) or getattr(i, "wheel_x", 0)
                 or getattr(i, "pointer_buttons", 0)):
-            if not self.wm.keys_to_cart() and not self.wm.popover_takes_keys():
+            if not kc and not self.wm.popover_takes_keys():
                 if pressed or i.last_key or getattr(i, "wheel_y", 0) \
                         or getattr(i, "wheel_x", 0):
                     self._dirty = True
@@ -143,7 +149,10 @@ class InputVerbs:
                 and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
                 and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
-        if self._bar_keys(i, pressed):
+        bl = self.bar_layer
+        edge = _ui_draw.edge_take()
+        if ((bl.focus is not None or edge or (pressed and i.steps("up")))
+                and self._bar_keys(i, pressed, edge)):
             return
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
@@ -558,17 +567,16 @@ class InputVerbs:
             return "app"
         return None
 
-    def _bar_keys(self, i, pressed):
+    def _bar_keys(self, i, pressed, edge):
         """The keys on the bar (`BarLayer.focus_keys`), and the ways onto
         it: up from a surface at its top (its `at_top`: a home's tab row
         below the bar, a list's first row; the handheld home's tabs walk on
         to it sideways, `BarLayer.focus_beside_tabs`) or an up that went past the top of a page drawn
-        last frame (`ui_draw.edge_take`). Neither under a menu, a popover or
-        a dialog, which hold the keys. True where the bar took them."""
+        last frame (`edge`, this frame's `ui_draw.edge_take`). Neither under a menu, a popover or
+        a dialog, which hold the keys. True where the bar took them.
+        `handle_input` calls it only while the bar holds the keys or one of
+        those ways is taken."""
         bl = self.bar_layer
-        edge = _ui_draw.edge_take()
-        if bl.focus is None and not edge and not (pressed and i.steps("up")):
-            return False
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
             return False
@@ -641,7 +649,9 @@ class InputVerbs:
         handheld, the keyboard is out of text mode, so the T-Deck's W A S D
         step its rows (moy_kbd.c, THE MOVE KEYS) and K is its back. The
         surface's text mode comes back as the menu closes, unless what the
-        menu did set a mode of its own (a row that opened another surface)."""
+        menu did set a mode of its own (a row that opened another surface).
+        `handle_input` calls it only while one of the three shows or
+        `_menu_over` says one did."""
         over = not self.windowed_chrome and self._modal_layer() is not None
         if over == self._menu_over:
             return

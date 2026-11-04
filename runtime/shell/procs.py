@@ -655,13 +655,17 @@ class Procs:
         """Once a loop frame, before the front's: promote a Proc the focus
         reached, step every Proc by its state and the front by its own when
         minimised, move the divisor by the loop's period and sample the
-        accounting. Allocates nothing on a frame with no Proc."""
+        accounting. Allocates nothing on a frame with no Proc, and with no
+        Proc and no window to minimise the front reads a clock and two
+        flags."""
+        now = _ticks_ms()
+        if _ticks_diff(now, self._acct_t) >= METER_MS:
+            self.account(now)
         ws = self.ws
         wm = ws.wm
-        now = _ticks_ms()
-        self.account(now)
         if not self.list:
-            self._front_state(wm, dt)
+            if self._front_min is not None or getattr(wm, "_wins", None) is not None:
+                self._front_state(wm, dt)
             return
         f = getattr(wm, "_focus", None)
         if f is not None and f in self.by_key:
