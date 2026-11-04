@@ -194,3 +194,34 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
             if len(parts) == 3 and parts[1] in "bBdDcC":
                 writable.append("%s: %s" % (os.path.basename(src), parts[2]))
     assert writable == ["moy_sh.c: moy_sh_g"], writable
+
+
+def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
+    """A newer C library's C23 bsearch, strchr, strchrnul ... answer a const
+    pointer for a const argument, and CI's compiler refused dash's implicit
+    drops of it (exec.c's bsearch over the const builtin table). Every shell
+    source compiles here with tests/moy_sh/c23_const.h force-included, which
+    defines them so, under -Werror: this machine refuses what CI refuses, and
+    a re-vendor of dash cannot bring the error back unseen. Syntax only, in
+    parallel: it reads, never generates code."""
+    cc = shutil.which(os.environ.get("CC", "cc"))
+    if cc is None:
+        pytest.skip("no C compiler")
+    guard = ["-include", os.path.join(SCRIPTS, "c23_const.h")]
+    base = ["-std=gnu99", "-fsyntax-only", "-Wall", "-Werror"] + guard
+    dash = base + ["-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", DASH,
+                   "-I", STORE]
+    plain = base + ["-I", SH, "-I", KERNEL, "-I", STORE]
+    jobs = [(src, dash) for src in shell_sources()]
+    jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
+                                                     "moy_sh_board.c", "host/sh_main.c",
+                                                     "host/board_main.c")]
+
+    def one(job):
+        src, flags = job
+        r = subprocess.run([cc] + flags + [src], capture_output=True, text=True)
+        return src, r
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        bad = [(src, r.stderr[-1500:]) for src, r in pool.map(one, jobs) if r.returncode]
+    assert not bad, bad
