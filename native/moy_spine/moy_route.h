@@ -148,7 +148,7 @@ int moy_returns_take_back(moy_returns_t *r, moy_kind_t *out);
 // -- the WiFi leases ---------------------------------------------------------
 
 // A mask over a closed tag table, bit i the tag moy_lease_tag(i) names.
-#define MOY_LEASE_TAGS 7u
+#define MOY_LEASE_TAGS 8u
 
 typedef struct moy_leases moy_leases_t;
 

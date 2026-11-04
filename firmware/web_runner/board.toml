@@ -88,6 +88,38 @@ cart-wallpaper panel drew nothing). Deleted 2026-11-01: libmoy's `moy_data.c`
 is the table, `device_canvas.PAL565`/`MOY64_RGB` its baked twins. Named so
 that its return is a decision."""
 
+[[modules.shared.deny]]
+file = "dev_http.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.http` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_mic.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.mic` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_lora.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.lora` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_ble.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.ble` answers None there."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]

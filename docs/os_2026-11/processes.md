@@ -221,9 +221,14 @@ markers (`notifications` with no names: its verb lives on the shared
 prompt `"full"` ("Full access to the console's uart1", `app_perms.FULL`; the
 overview's §4), needing the board to offer the row (`app_perms.leasable`
 names each as `lease:<row>`), with no names: `moybyte.lease` checks the
-caller's grant (`Procs.granted`), the shell's always passing. The later
-rows (`mic` and the other device APIs, `native`) arrive with their APIs, each
-saying whether it is enforced on its tier or informational (above).
+caller's grant (`Procs.granted`), the shell's always passing. P2.3 adds
+the device API rows `http`, `mic`, `lora` and `ble`, `api:<name>`, Python's
+for now, with no names: `moybyte.http` and the rest are the faces
+`runtime/system/devices.py` hands out, each checking the caller's grant the
+same way. `http` needs `wifi`; the others need the board's class, which
+`devices.apis()` adds to the console's services. The later rows (USB host,
+`midi`, `camera`, `native`) arrive with their APIs, each saying whether it
+is enforced on its tier or informational (above).
 
 ## 3. Python: one VM, stepped cooperatively
 

@@ -166,8 +166,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   WLAN-vs-LCD-DMA internal-RAM fight to when the network is needed. The holders
   are `web` (released when the webhost's socket closes), `update` (taken before
   the hand-off releases `web`), `settings` (the WIFI panel), `cart` (a run with
-  the "network" permission), `link` (a match; taken before `link.start()`)
-  and `carts` (the Get Carts app while it fetches an index or a cart).
+  the "network" permission), `link` (a match; taken before `link.start()`),
+  `carts` (the Get Carts app while it fetches an index or a cart) and `http`
+  (an app's `moybyte.http` request while it runs, `runtime/system/dev_http.py`).
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
   guard and `state`'s `wifi_held` names the holders. On the consoles the

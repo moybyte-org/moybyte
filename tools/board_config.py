@@ -336,8 +336,10 @@ CHIP_GPIO = {
 }
 HW_CLASSES = ("os", "class", "lease", "never")
 # The device APIs a `class` row may name (hardware.md section 1), and the
-# module that serves each where one exists: a board whose row names it stages
-# that module. The rest arrive with P2.3 and P2.4.
+# device-tier module that serves each where one exists: a board whose row names
+# it stages that module. `http`, `mic`, `lora` and `ble` are served by shared
+# runtime modules (runtime/system/devices.py) over C drivers every image
+# compiles, which read the board's `hw_defines`.
 DEVICE_APIS = {
     "battery": "battery.py", "brightness": None, "alarms": None, "mic": None,
     "http": None, "media": None, "gps": None, "lora": None, "ble": None,
@@ -387,6 +389,30 @@ def lease_spec(board_dir):
             continue
         out.append("%s:%s" % (r["name"], ",".join(str(p) for p in r["pins"])))
     return "/".join(out) or None
+
+
+def hw_defines(board_dir):
+    """The `[hardware]` table as C defines, for the drivers a `class` row's
+    device API names: `MOY_API_<API>` 1 for each API a class row names, and
+    `MOY_HW_<ROW>_<PIN>` for each named pin of a class or os row (the LoRa
+    row's `MOY_HW_LORA_RST`, its bus's `MOY_HW_SPI2_RADIO_CS`). Empty for a
+    target with no table."""
+    hw = hardware(board_dir)
+    if hw is None:
+        return []
+    apis, pins = [], []
+    for r in hw[2]:
+        if r["class"] == "class":
+            for a in r["api"]:
+                d = "MOY_API_" + a.upper()
+                if (d, 1) not in apis:
+                    apis.append((d, 1))
+        named = load(board_dir)["hardware"]["resource"]
+        row = [x for x in named if x.get("name") == r["name"]][0]
+        if r["class"] in ("class", "os") and isinstance(row.get("pins"), dict):
+            for k, v in row["pins"].items():
+                pins.append(("MOY_HW_%s_%s" % (r["name"].upper(), k.upper()), v))
+    return apis + pins
 
 
 def _pins_of(row):
@@ -881,6 +907,8 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              # the unix and wasm ports put -DNDEBUG in their own CFLAGS.
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
     for define, v in input_defines(board_dir):
+        lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
+    for define, v in hw_defines(board_dir):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
     spec = lease_spec(board_dir)
     if spec is not None:

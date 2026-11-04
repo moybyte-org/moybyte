@@ -1,5 +1,6 @@
 # moy_net: the links: WiFi, the ESP-NOW link, the HTTP core, the webhost, the
-# sync RPC and the updater (docs/history/kernel_survival_2026-10.md section 6). Its
+# sync RPC, the updater and the `http` device API (moy_fetch.c, the module
+# moy_http) (docs/history/kernel_survival_2026-10.md section 6). Its
 # CPython face is runtime/host/net_binding.py over the same C.
 #
 # The JSON scanner it reads a batch with is native/moy_spine/moy_json.c, and
@@ -21,12 +22,15 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_webconsole.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_gpio.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_dns.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_fetch.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_http.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_net.c)
 
 target_include_directories(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store
-    ${CMAKE_CURRENT_LIST_DIR}/../moy_web)
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_web
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_input)
 
 target_link_libraries(usermod INTERFACE usermod_moy_net)

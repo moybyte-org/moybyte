@@ -18,8 +18,9 @@ A row is `(perm, grants, tiers, prompt, needs, py)`:
   prompt  its line in the install prompt (`%s` takes a files kind), `full`
           (FULL, naming the lease's row: "full access" to it), or None: no
           line, nothing to consent to, and nothing Settings can turn off
-  needs   the console's service it needs (`wifi`, `net`, `gpio`), `lease`
-          (the board offers the row: `services` names each as
+  needs   the console's service it needs (`wifi`, `net`, `gpio`), a device
+          API the board has (`mic`, `lora`, `ble`: runtime/system/devices.py),
+          `lease` (the board offers the row: `services` names each as
           `lease:<row>`), or None
   py      the names a Python cart's namespace holds while it is granted
 
@@ -67,6 +68,10 @@ TABLE = (
     ("notifications", "api:notify", ALL, "Show notifications", None, ()),
     ("autostart", "boot", ALL, "Start when the console starts", None, ()),
     ("lease", "lease", PY, "full", "lease", ()),
+    ("http", "api:http", PY, "Fetch pages from the internet", "wifi", ()),
+    ("mic", "api:mic", PY, "Record with the microphone", "mic", ()),
+    ("lora", "api:lora", PY, "Send and receive on the LoRa radio", "lora", ()),
+    ("ble", "api:ble", PY, "Use Bluetooth devices", "ble", ()),
     ("editor", "marker", PY, None, None, ()),
     ("calc", "marker", PY, None, None, ()),
     ("getcarts", "marker", PY, None, None, ()),
@@ -132,12 +137,17 @@ def tier_of(cart):
 
 def services(ws):
     """The services of the console `ws` the table's `needs` names, present,
-    and `lease:<row>` for each row the board leases."""
+    the device APIs its board has, and `lease:<row>` for each row the board
+    leases."""
     out = []
     for name in ("wifi", "net", "gpio"):
         if getattr(ws, name, None) is not None:
             out.append(name)
-    return tuple(out) + leasable()
+    try:
+        import devices
+    except ImportError:  # pragma: no cover - host fallback
+        from runtime import devices
+    return tuple(out) + devices.apis() + leasable()
 
 
 def leasable():

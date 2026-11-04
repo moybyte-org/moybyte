@@ -558,7 +558,7 @@ static struct {
 } ls;
 
 static const char *const TAGS[] = {
-    "web", "update", "settings", "cart", "link", "carts", "dev",
+    "web", "update", "settings", "cart", "link", "carts", "dev", "http",
     "", "wasm", "webx", "we", "carts ", "Dev",
 };
 

@@ -179,13 +179,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import scheduler as _scheduler
 
 # The hardware leases (leases.py): the `pins` verbs' local service, and the
-# grants a lease checks; devfs.py's process rows.
+# grants a lease and a device API (devices.py) check; devfs.py's process rows.
 try:
     import leases as _hwleases
     import devfs as _devfs
+    import devices as _devices
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import leases as _hwleases
     from runtime import devfs as _devfs
+    from runtime import devices as _devices
 
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
@@ -1042,6 +1044,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
         self.procs = Procs(self)
         _hwleases.LEASES.grants = self.procs.granted
+        _devices.grants = self.procs.granted
+        _devices.console = self
         _devfs.RUNS = self.procs.runs
         # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
         # terminal scrollback after it. One instance for the console's life

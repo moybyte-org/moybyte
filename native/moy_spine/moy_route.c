@@ -5,7 +5,7 @@
 #include "moy_route.h"
 
 static const char *const lease_tags[MOY_LEASE_TAGS] = {
-    "web", "update", "settings", "cart", "link", "carts", "dev",
+    "web", "update", "settings", "cart", "link", "carts", "dev", "http",
 };
 
 static int kind_ok(size_t n) {

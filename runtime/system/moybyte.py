@@ -29,6 +29,11 @@ one, `time.ticks_us()`.
                      offers no such row, another process holds it, or this
                      one lacks `lease:<row>` (runtime/system/leases.py)
   pins()             what the board leases and who holds what
+  http, mic, lora, ble
+                     the device APIs (runtime/system/devices.py): each the
+                     API's face where this console has its class, else None;
+                     a verb without the API's permission raises
+                     OSError(EPERM)
   notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
@@ -83,6 +88,7 @@ EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = (
 KEY_DOWN, KEY_UP, TEXT, BTN = _I.EV_KEY_DOWN, _I.EV_KEY_UP, _I.EV_TEXT, _I.EV_BTN
 TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP = _I.EV_TOUCH_DOWN, _I.EV_TOUCH_MOVE, _I.EV_TOUCH_UP
 EDGE, LOST = _I.EV_EDGE, _I.EV_LOST
+NET, BLE, LORA = _I.EV_NET, _I.EV_BLE, _I.EV_LORA
 PROV_ISR, PROV_FIFO, PROV_POLL = _I.PROV_ISR, _I.PROV_FIFO, _I.PROV_POLL
 EVENT_VERSION = _I.EV_VERSION
 
@@ -96,7 +102,7 @@ SHELL = 1
 _ON, _EVERY, _AFTER, _MAIL, _RING = 0, 1, 2, 3, 4
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
 # `ms` is its name and its `deadline` the queue of its messages, a ring
-# wake's `ms` the ring source it reads alone.
+# wake's `ms` the ring source it reads alone and its `deadline` the kinds.
 _WID, _OWNER, _HOW, _MS, _AT, _FN, _READER = range(7)
 
 
@@ -133,7 +139,7 @@ class Wakes:
                 w[_READER] = table.reader(SOURCES[w[_MS]])
             elif w[_HOW] == _RING:
                 try:
-                    w[_READER] = table.reader(1 << EDGE, w[_MS])
+                    w[_READER] = table.reader(w[_AT], w[_MS])
                 except OSError:  # the source is not this table's
                     w[_READER] = -1
 
@@ -160,12 +166,14 @@ class Wakes:
             raise OSError("no input table bound")
         return self._add(_ON, source, 0, fn, self.table.reader(kinds))
 
-    def on_ring(self, src, fn):
-        """Wake `fn()` when ring source `src` (a lease's edges) has
-        records; inside `fn`, events() reads that source alone."""
+    def on_ring(self, src, fn, kinds=0):
+        """Wake `fn()` when ring source `src` (a lease's edges, a device
+        API's records) has records of `kinds` (a mask of 1 << kind; EDGE's
+        by default); inside `fn`, events() reads that source alone."""
         if self.table is None:
             raise OSError("no input table bound")
-        return self._add(_RING, src, 0, fn, self.table.reader(1 << EDGE, src))
+        kinds = kinds or 1 << EDGE
+        return self._add(_RING, src, kinds, fn, self.table.reader(kinds, src))
 
     def every(self, ms, fn):
         ms = max(1, int(ms))
@@ -371,3 +379,13 @@ def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
     except ImportError:  # host: the runtime package
         from runtime.notifications import NOTES
     return NOTES.post(_pid(), summary, body, icon, actions, urgency, replaces_id)
+
+
+def __getattr__(name):
+    if name in ("http", "mic", "lora", "ble"):
+        try:
+            import devices
+        except ImportError:  # host: the runtime package
+            from runtime import devices
+        return devices.api(name)
+    raise AttributeError(name)

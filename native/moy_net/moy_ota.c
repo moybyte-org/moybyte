@@ -719,7 +719,7 @@ static void client_drop(client_t *c) {
 }
 
 // One GET: the connection open with its head read into c->head. 0, or -errno.
-static int get_once(client_t *c, const char *url, const char *agent,
+static int get_once(client_t *c, const char *url, const char *agent, uint32_t flags,
                     moy_http_resp_t *r) {
     char host[MOY_URL_HOST_MAX];
     int tls;
@@ -727,6 +727,9 @@ static int get_once(client_t *c, const char *url, const char *agent,
     const char *path;
     if (moy_url_parse(url, &tls, host, sizeof(host), &port, &path) != 0) {
         return -EINVAL_;
+    }
+    if (tls && (flags & MOY_HTTPC_PLAIN)) {
+        return -MOY_HTTPC_ETLS;
     }
     int rc = moy_conn_open(host, port, tls, &c->conn);
     if (rc != 0) {
@@ -765,19 +768,33 @@ static int get_once(client_t *c, const char *url, const char *agent,
     return 0;
 }
 
-int moy_httpc_open(const char *url, const char *agent, int *status,
-                   uint32_t *clen) {
+int moy_httpc_init(void) {
     if (s_cl == NULL) {
         s_cl = moy_net_alloc(sizeof(client_t) * MOY_HTTPC_SLOTS);
         if (s_cl == NULL) {
             return -ENOMEM_;
         }
+        memset(s_cl, 0, sizeof(client_t) * MOY_HTTPC_SLOTS);
     }
-    int i = 0;
-    while (i < MOY_HTTPC_SLOTS && s_cl[i].open) {
+    return 0;
+}
+
+int moy_httpc_open(const char *url, const char *agent, int *status,
+                   uint32_t *clen) {
+    return moy_httpc_open_ex(url, agent, 0, status, clen);
+}
+
+int moy_httpc_open_ex(const char *url, const char *agent, uint32_t flags, int *status,
+                      uint32_t *clen) {
+    if (moy_httpc_init() != 0) {
+        return -ENOMEM_;
+    }
+    int i = (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS - 1 : 0;
+    int end = (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS : MOY_HTTPC_SLOTS - 1;
+    while (i < end && s_cl[i].open) {
         i++;
     }
-    if (i == MOY_HTTPC_SLOTS) {
+    if (i == end) {
         return -EBADF_;
     }
     client_t *c = &s_cl[i];
@@ -794,7 +811,7 @@ int moy_httpc_open(const char *url, const char *agent, int *status,
     int rc;
     for (int hop = 0;; hop++) {
         moy_http_resp_t r;
-        rc = get_once(c, cur, agent, &r);
+        rc = get_once(c, cur, agent, flags, &r);
         if (rc != 0) {
             break;
         }
@@ -869,10 +886,15 @@ void moy_httpc_close(int h) {
 
 int moy_httpc_get(const char *url, const char *agent, size_t cap, int *status,
                   char **body, size_t *n) {
+    return moy_httpc_get_ex(url, agent, 0, cap, status, body, n);
+}
+
+int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t cap,
+                     int *status, char **body, size_t *n) {
     uint32_t clen = 0;
     *body = NULL;
     *n = 0;
-    int h = moy_httpc_open(url, agent, status, &clen);
+    int h = moy_httpc_open_ex(url, agent, flags, status, &clen);
     if (h < 0) {
         return h;
     }
@@ -1350,7 +1372,7 @@ void moy_net_vm_stop(void) {
     if (s_up != NULL && (s_u.st.phase == MOY_OTA_FETCHING || s_u.st.phase == MOY_OTA_WRITING)) {
         moy_ota_cancel();
     }
-    for (int i = 0; s_cl != NULL && i < MOY_HTTPC_SLOTS; i++) {
+    for (int i = 0; s_cl != NULL && i < MOY_HTTPC_SLOTS - 1; i++) {
         if (s_cl[i].open) {
             client_drop(&s_cl[i]);
         }

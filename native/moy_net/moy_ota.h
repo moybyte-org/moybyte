@@ -114,7 +114,12 @@ int moy_ota_judge_c6(const char *text, size_t n, int require_sig,
 #define MOY_HTTPC_HOPS 4            // redirects followed
 #define MOY_HTTPC_HEAD_MAX 16384    // GitHub's redirect head measured 5147 bytes
 #define MOY_HTTPC_IO_MS 15000       // a connect, or a read that has no byte this long
-#define MOY_HTTPC_SLOTS 2
+// The VM's clients, and one more the http device API's worker holds
+// (MOY_HTTPC_WORKER, native/moy_net/moy_fetch.h), which the VM's stop leaves.
+#define MOY_HTTPC_SLOTS 3
+#define MOY_HTTPC_PLAIN 0x01        // refuse https, a redirect's hop too
+#define MOY_HTTPC_WORKER 0x02       // the worker's slot
+#define MOY_HTTPC_ETLS 93           // the refusal: EPROTONOSUPPORT
 
 // GET `url` with redirects followed: a handle (> 0), or -errno (EINVAL for a
 // URL that does not parse, EIO for a head that never ends). `*status` and
@@ -125,10 +130,18 @@ int moy_httpc_open(const char *url, const char *agent, int *status,
 // handle that is not open.
 int moy_httpc_read(int h, void *buf, size_t n);
 void moy_httpc_close(int h);
+// The same with MOY_HTTPC_* `flags`; the client table made by moy_httpc_init
+// (0, or -ENOMEM), which a thread other than the VM's calls before its first
+// open.
+int moy_httpc_open_ex(const char *url, const char *agent, uint32_t flags, int *status,
+                      uint32_t *clen);
+int moy_httpc_init(void);
 // The body whole, up to `cap` bytes, into a kernel buffer the caller frees
 // with moy_net_free: 0, or -errno; `*status` the final response's.
 int moy_httpc_get(const char *url, const char *agent, size_t cap, int *status,
                   char **body, size_t *n);
+int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t cap,
+                     int *status, char **body, size_t *n);
 
 // The platform's connection (moy_net_port.c): 0 and a connection, or -errno.
 // A board speaks TLS; the host, the unix port and the browser refuse it with
