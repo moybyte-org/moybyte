@@ -32,7 +32,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/param.h>	/* PIPE_BUF */

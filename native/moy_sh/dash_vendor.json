@@ -7,7 +7,7 @@
     "native/moy_sh/dash/arith_yacc.h": "6b7ed664394d4b0e0ecc877b6c514ce4a8ffe0330f35f116ce3930b7e7de7fef",
     "native/moy_sh/dash/arith_yylex.c": "8a667e872ecde3ed8494a2d266eaee8f4dfae632a3486fdde31cf4d490355eef",
     "native/moy_sh/dash/bltin/bltin.h": "544204735192c407b1f4232883c7cbce0dd89eda99c5abb6f241232e96191866",
-    "native/moy_sh/dash/bltin/printf.c": "4a94d1ed666acb9c72d56814046d689c2016d613ea540d9b89e3debccbdfba65",
+    "native/moy_sh/dash/bltin/printf.c": "90ac2aa2f99a4081bec737b6369db2d931f7f606752e922917651c324b989455",
     "native/moy_sh/dash/bltin/test.c": "ac27ac5b767dfd24916d8b8fdf5f152478233cbc71050706af32aeda46c6727c",
     "native/moy_sh/dash/builtins.c": "11a1c3c1d222dee9bec7df846e350b03e6d63ffa2d3a4c9ae7ff69956a743612",
     "native/moy_sh/dash/builtins.def.in": "2875e91738208806f1a427c1798219395603ddcc6814a1589d65d6d8bfe1b11d",
@@ -20,7 +20,7 @@
     "native/moy_sh/dash/eval.h": "df5b24ed7676451696ba838b26e87023fbde337c63b4e3c2d13109657cc8a215",
     "native/moy_sh/dash/exec.c": "23ee149ada62945573724e88edbfe7a9a9e80f827a81cc4a15beaafcbb68971d",
     "native/moy_sh/dash/exec.h": "e35c0b2391d77606e36933488418328ddfc9e2917d7bad0c7430f118e3f33e31",
-    "native/moy_sh/dash/expand.c": "a3c8dabd9e78c83b81c0a9bb818a4916c96a55503e033a41aba56ecee70b7f83",
+    "native/moy_sh/dash/expand.c": "39abb5fc13d7dea6ddc62ba6ba0a036c3f2b70368c006ba5138defcb7d3656b2",
     "native/moy_sh/dash/expand.h": "19e0e54c4aa914fdcd833a1bb3c1de628434ab1ab2a074390b9e36ce856d0fe0",
     "native/moy_sh/dash/init.c": "62009329674ff210b54f7f524a13b26f386fe30929cb4e345cfb41cb7db3eb3d",
     "native/moy_sh/dash/init.h": "8ed686e21fc394d0bcecd4a6701c7bf85aff62360e77426a1bb1bb4c4648d2d7",
@@ -50,7 +50,7 @@
     "native/moy_sh/dash/output.h": "4b37f0c74a31fc573f80f4221e5eb3da70e0819febc069aa34bf34a765c2f921",
     "native/moy_sh/dash/parser.c": "698ac58be87b545f11ec1c1e807206230f8e2de708395444509bebdc7363c92f",
     "native/moy_sh/dash/parser.h": "2a0bc2dbaf84c5ed2e00e7a0b8e420e9203b8328a79cbbee9b5eddb1ce56e7a5",
-    "native/moy_sh/dash/redir.c": "85942bf33af094ba9da826a1ed63c48ddf15d048fd948d2d7a8b33b01452fca7",
+    "native/moy_sh/dash/redir.c": "2c8cba5c990cef5aed726a9033e9c174c0e8c3b0b4b183f0ab8e96a629531d00",
     "native/moy_sh/dash/redir.h": "35597633d778b0fc180d3f906e5e671eb87f8f796626fde147c20878c7eefd23",
     "native/moy_sh/dash/shell.h": "9df1045a484918b346341099134d36f43f1bf157f3c43ecdc126606d9e05df9a",
     "native/moy_sh/dash/show.h": "0aca8cf4ab81daa5fac8aaa49b090673fda9a7e45d4eeceb505e430c8359da9a",
@@ -66,7 +66,7 @@
     "native/moy_sh/dash/var.h": "41d1e397d19d25b502ba15c3ff7d9117768509bd1c5b2367a06bc7a6d239bc4a"
   },
   "patches": {
-    "native/moy_sh/patches/moybyte.patch": "2aace37cb5cb36b07a494c4029b51f9d2f0c912eb8fae3675d3feef6333d2286"
+    "native/moy_sh/patches/moybyte.patch": "916cee376bb50baaa8b95aa6f23cb790e49c86cbe260a036ff5d5585d40d0551"
   },
   "upstream": {
     "commit": "037bbdfd330017c368caf6242f977974123239b5",

@@ -156,6 +156,11 @@ const struct builtincmd *moy_sh_find_builtin(const char *name);
 #define tcgetattr(fd, t) moy_sh_tcgetattr(fd, t)
 #define kill(pid, sig) moy_sh_kill(pid, sig)
 #define killpg(pgrp, sig) moy_sh_kill(-(pgrp), sig)
+// printf's \u escape stores UTF-8 big-endian; both chips are little-endian
+#undef htonl
+#define htonl(v) __builtin_bswap32(v)
+_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "htonl above assumes a little-endian chip");
+
 // dash installs its handlers with sigaction; signal() only restores defaults
 typedef void (*moy_sh_sig_t)(int);
 static inline moy_sh_sig_t moy_sh_signal(int sig, moy_sh_sig_t fn) {

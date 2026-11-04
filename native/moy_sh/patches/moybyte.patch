@@ -27,6 +27,8 @@ dash as a session of the kernel's shell rather than a process of a Unix:
   table (moy_sh_find_builtin). The environment is not imported, PATH is /bin,
   setlocale and putenv go, mail checking, times and dash_errno go.
 - Signal names with no entry (NULL) are skipped.
+- Headers a chip's C library lacks and nothing uses go (sys/ioctl.h,
+  sys/mman.h, arpa/inet.h: htonl is moy_sh_posix.h's).
 
 diff --git a/src/alias.c b/src/alias.c
 index 1b9b979..c52b5ff 100644
@@ -115,10 +117,18 @@ index f5ac06f..c5cb7fd 100644
  #include "../mystring.h"
  #include "../options.h"
 diff --git a/src/bltin/printf.c b/src/bltin/printf.c
-index 5355f5d..ed0c6d2 100644
+index 5355f5d..6812737 100644
 --- a/src/bltin/printf.c
 +++ b/src/bltin/printf.c
-@@ -48,8 +48,8 @@ static char	*getstr(void);
+@@ -29,7 +29,6 @@
+  * SUCH DAMAGE.
+  */
+ 
+-#include <arpa/inet.h>
+ #include <ctype.h>
+ #include <errno.h>
+ #include <inttypes.h>
+@@ -48,8 +47,8 @@ static char	*getstr(void);
  static char	*mklong(const char *, const char *);
  static void      check_conversion(const char *, const char *);
  
@@ -699,7 +709,7 @@ index 8707d36..45ab879 100644
  struct stat64;
  
 diff --git a/src/expand.c b/src/expand.c
-index 76e67ce..203df42 100644
+index 76e67ce..071ae02 100644
 --- a/src/expand.c
 +++ b/src/expand.c
 @@ -90,18 +90,6 @@
@@ -751,6 +761,15 @@ index 76e67ce..203df42 100644
  
  static char *argstr(char *p, int flag);
  static char *exptilde(char *startp, int flag);
+@@ -1472,7 +1460,7 @@ static void *opendir_interruptible(const char *pathname)
+ 
+ 	return opendir(pathname);
+ }
+-#else
++#elif !defined(GLOB_ALTDIRFUNC)
+ #define GLOB_ALTDIRFUNC 0
+ #endif
+ 
 diff --git a/src/expand.h b/src/expand.h
 index 7bcff75..3c36795 100644
 --- a/src/expand.h
@@ -2037,10 +2056,18 @@ index 7a9605b..d6e1615 100644
  const char *getprompt(void *);
  const char *const *findkwd(const char *);
 diff --git a/src/redir.c b/src/redir.c
-index e61d3da..b037ef4 100644
+index e61d3da..be8ba17 100644
 --- a/src/redir.c
 +++ b/src/redir.c
-@@ -78,10 +78,10 @@ struct redirtab {
+@@ -32,7 +32,6 @@
+  * SUCH DAMAGE.
+  */
+ 
+-#include <sys/mman.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/param.h>	/* PIPE_BUF */
+@@ -78,10 +77,10 @@ struct redirtab {
  };
  
  
@@ -2053,7 +2080,7 @@ index e61d3da..b037ef4 100644
  
  STATIC int openredirect(union node *);
  #ifdef notyet
-@@ -345,9 +345,7 @@ int sh_pipe(int pip[2], int memfd)
+@@ -345,9 +344,7 @@ int sh_pipe(int pip[2], int memfd)
  }
  
  /*
@@ -2064,7 +2091,7 @@ index e61d3da..b037ef4 100644
   */
  
  STATIC int
-@@ -367,25 +365,11 @@ openhere(union node *redir)
+@@ -367,25 +364,11 @@ openhere(union node *redir)
  	len = strlen(p);
  	memfd = sh_pipe(pip, len > PIPESIZE);
  

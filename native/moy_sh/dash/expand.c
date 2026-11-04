@@ -1460,7 +1460,7 @@ static void *opendir_interruptible(const char *pathname)
 
 	return opendir(pathname);
 }
-#else
+#elif !defined(GLOB_ALTDIRFUNC)
 #define GLOB_ALTDIRFUNC 0
 #endif
 
