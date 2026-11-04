@@ -35,7 +35,12 @@ target_include_directories(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store
-    ${CMAKE_CURRENT_LIST_DIR}/../moy_web
-    ${CMAKE_CURRENT_LIST_DIR}/../moy_input)
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_web)
+
+# The ring sources the device APIs post to (moy_fetch.c, moy_lora.c), where
+# the image takes moy_input; the headless Zero does not, and they post nothing.
+if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/../moy_input)
+    target_include_directories(usermod_moy_net INTERFACE ${CMAKE_CURRENT_LIST_DIR}/../moy_input)
+endif()
 
 target_link_libraries(usermod INTERFACE usermod_moy_net)
