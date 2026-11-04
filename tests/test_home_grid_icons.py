@@ -281,10 +281,10 @@ def test_an_idle_home_paints_nothing(tmp_path, arrangement):
     ws, drv = _home(tmp_path, arrangement, 10)
     for _ in range(80):
         drv.frame(1 / 30)
-    n = ws._frames_drawn
+    n = ws.frame_state.frames_drawn
     for _ in range(30):
         drv.frame(1 / 30)
-    assert ws._frames_drawn == n
+    assert ws.frame_state.frames_drawn == n
 
 
 def test_a_tap_on_a_card_runs_it(tmp_path):

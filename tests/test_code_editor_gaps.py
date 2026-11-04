@@ -1101,9 +1101,9 @@ def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatc
     def frame():
         now[0] += 33
         ws.pointer.visible = False
-        k = ws._frames_drawn
+        k = ws.frame_state.frames_drawn
         drv.frame(DT)
-        return ws._frames_drawn != k
+        return ws.frame_state.frames_drawn != k
 
     for _ in range(4):
         frame()

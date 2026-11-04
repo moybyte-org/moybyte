@@ -166,13 +166,13 @@ if not hasattr(ws, '_bench_installed'):
         if ws._recording and ws._force:
             ws.mark_dirty()        # --repaint: every frame paints the surface
         a = ws._T()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         r = _of(dt)
         # Record only frames that actually PAINTED. The redraw gate makes an
         # idle frame a ~0ms no-op, and those dominate any sample window -- a
         # median over all frames reads 0 even while every painted frame takes
         # 174ms. What the eye judges is the painted-frame cadence.
-        if ws._recording and ws._frames_drawn != n0:
+        if ws._recording and ws.frame_state.frames_drawn != n0:
             ws._ft.append(ws._D(ws._T(), a))
         return r
     ws.frame = _f

@@ -194,7 +194,7 @@ class _BackdropLayer(Layer):
             bar = self.ws.bar_layer
             wm._desk_clock()
             if bar.tile_on() != wm._desk_tile:
-                wm._outside_f = self.ws._frames_drawn
+                wm._outside_f = self.ws.frame_state.frames_drawn
                 bar.redraw_tile("desk")        # the cache holds the button's other state
             return
         wm._desk_streak = 0

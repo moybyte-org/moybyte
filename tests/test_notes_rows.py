@@ -131,9 +131,9 @@ class Pair:
             if not idle:
                 ws._dirty = True
             ws.pointer.visible = False
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             drv.frame(_DT)
-            ws.painted = ws._frames_drawn != k
+            ws.painted = ws.frame_state.frames_drawn != k
         a, b = self.a, self.b
         assert a.painted == b.painted, "the two consoles' gates parted"
         if not a.painted:
@@ -474,8 +474,8 @@ def _chip(p):
         draw = hud.draw
 
         def counted(ws=ws, draw=draw):
-            n = ws._frames_drawn
-            ws._fps = (n * 7) % 120
+            n = ws.frame_state.frames_drawn
+            ws.frame_state.fps = (n * 7) % 120
             ws._upd_ms = ws._draw_ms = ws._flush_ms = 1.0
             draw()
         hud.draw = counted

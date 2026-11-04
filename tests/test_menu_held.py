@@ -49,9 +49,9 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
     held = [bytes(root._buf)]
 
     def frame():
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if ws._frames_drawn == n:
+        if ws.frame_state.frames_drawn == n:
             return None
         held.append(bytes(root._buf))
         if bufs > 1:

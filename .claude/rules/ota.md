@@ -48,7 +48,7 @@ paths:
     the board's table first and does this when the store moved.
   - **The rollback confirm fires from the FRAME LOOP**, not the boot path
     (`device/moy_ota_health.py`, the updater's base class):
-    `confirm_when_healthy(ws._frames_drawn)` needs `HEALTHY_PAINTS` frames on the
+    `confirm_when_healthy(ws.frame_state.frames_drawn)` needs `HEALTHY_PAINTS` frames on the
     glass AND `HEALTHY_LOOPS` iterations survived. Confirming where the desktop is
     merely CONSTRUCTED certifies an image that never drew a pixel (#56). **The
     paint threshold cannot be raised** — the console repaints only on change, so

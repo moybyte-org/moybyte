@@ -341,7 +341,7 @@ class InputVerbs:
 
         On a backend that samples every frame (the host's mouse, the scripted
         remote gestures) every frame is fresh, so this is exactly
-        `self._frame_dt_ms`. Every touch driver holds + flags
+        `self.frame_state.frame_dt_ms`. Every touch driver holds + flags
         (native/moy_input/moy_touch.c).
 
         (A "third rule" -- charge stale stretches past a threshold as real dt
@@ -356,13 +356,14 @@ class InputVerbs:
         the AXS driver's per-controller bound. The rule meanwhile killed
         real flicks dead: a lift's 400ms silence crossed the threshold and
         decayed the velocity to zero before the release ever fired.)"""
-        dt = self._frame_dt_ms
+        fs = self.frame_state
+        dt = fs.frame_dt_ms
         if getattr(p, "fresh", True):
-            self._pointer_dt_ms = min(dt + self._stale_ptr_ms, 100.0)
-            self._stale_ptr_ms = 0.0
+            fs.pointer_dt_ms = min(dt + fs.stale_ptr_ms, 100.0)
+            fs.stale_ptr_ms = 0.0
         else:
-            self._pointer_dt_ms = None
-            self._stale_ptr_ms = min(self._stale_ptr_ms + dt, 100.0)
+            fs.pointer_dt_ms = None
+            fs.stale_ptr_ms = min(fs.stale_ptr_ms + dt, 100.0)
 
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
@@ -481,7 +482,7 @@ class InputVerbs:
         if not on:
             r.stop()
             return
-        r.tick(0.0 if self._coast_fed else self._frame_dt_ms)
+        r.tick(0.0 if self._coast_fed else self.frame_state.frame_dt_ms)
         self._coast_fed = False
         k = r.offset // self.COAST_UNIT - self._coast_got
         if k > 0:

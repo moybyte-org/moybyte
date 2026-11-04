@@ -701,7 +701,7 @@ def test_the_rollback_confirm_comes_from_the_frame_loop(board):
     assert board.pyval("ws.updater.confirmed") is True
     frames = board.pyval("__import__('moy_loop').frames()")
     assert frames >= 120, "confirmed after %s loop frames" % frames
-    assert board.pyval("ws._frames_drawn") >= 1
+    assert board.pyval("ws.frame_state.frames_drawn") >= 1
 
 
 def test_a_pending_marker_becomes_a_verdict_on_this_board(board):

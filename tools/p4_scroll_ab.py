@@ -38,9 +38,9 @@ if not hasattr(ws, '_abhook'):
     _of = ws.frame
     def _f(dt, _of=_of):
         a = _tk()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         r = _of(dt)
-        if ws._rec and ws._frames_drawn != n0:
+        if ws._rec and ws.frame_state.frames_drawn != n0:
             ws._fr.append(_td(_tk(), a))
         return r
     ws.frame = _f

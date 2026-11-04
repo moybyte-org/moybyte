@@ -20,6 +20,7 @@ import types
 import pytest
 
 from runtime import moy_input
+from runtime.console_perf import FrameState
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
                                  heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
@@ -86,6 +87,7 @@ class FakeWS:
         self._psave_ms = 300000
         self._psave_asleep = False
         self.input = moy_input.HostInputTable()
+        self.frame_state = FrameState()
 
 
 def make(ws=None, **kw):

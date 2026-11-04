@@ -2975,7 +2975,7 @@ class _Ring:
 
     def frame(self, drv):
         ws, wm = self.ws, self.ws.wm
-        before = ws._frames_drawn
+        before = ws.frame_state.frames_drawn
         got = []
         real = wm.draw_stack
         wm.draw_stack = lambda: got.append(real()) or got[-1]
@@ -2983,7 +2983,7 @@ class _Ring:
             drv.frame(1 / 30)
         finally:
             del wm.draw_stack
-        if ws._frames_drawn == before:
+        if ws.frame_state.frames_drawn == before:
             return None
         st = got[-1]
         self.stacks.append("pop" if st is wm._pop_stack else

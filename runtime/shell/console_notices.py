@@ -1182,7 +1182,7 @@ class SystemMenuUI:
         card is held washed (`ui_draw.Hold`, surface model §14.5): a
         frame that put it back draws the card alone."""
         ws = self.ws
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         if self._put_f != f:
             cv = ws.sys_canvas
             # the key the home's put asked this frame, before it drew
@@ -1205,7 +1205,7 @@ class SystemMenuUI:
         """Put the home under the open menu back washed, as the frame that
         held it left it: True when it was, and the home draws nothing."""
         key = self._key = self._home_key(cv)
-        self._key_f = self.ws._frames_drawn
+        self._key_f = self.ws.frame_state.frames_drawn
         if key is None or not self._held.put(self.ws, cv, (0, 0, cv.w, cv.h), key, dt):
             return False
         self._put_f = self._key_f

@@ -109,11 +109,11 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
 
     def frame(n=1):
         for _ in range(n):
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             if force:
                 ws._dirty = True
             drv.frame(1 / 30)
-            if ws._frames_drawn == k:
+            if ws.frame_state.frames_drawn == k:
                 continue
             if ws.frame_change == "rows":
                 puts[2] += 1

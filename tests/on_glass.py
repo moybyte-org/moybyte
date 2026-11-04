@@ -1167,7 +1167,7 @@ def the_font_set_is_the_tiers(board, tier):
 
 
 def py_probe_reaches_the_console(board):
-    line = board.cmd("py ws._frames_drawn", wait_for="PY ")
+    line = board.cmd("py ws.frame_state.frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line
     assert int(line.split("PY ", 1)[1]) > 0
     # The loop objects are in the py scope (comp/boot/pump).
@@ -1251,7 +1251,7 @@ def the_scheduler_stops_a_runaway_service(board):
                  "ws._sa = moy_guard.stats()[1]\n"
                  "ws._sp = S.SCHED.start({'id': 't.runaway', 'title': 'runaway', "
                  "'src': SRC, 'permissions': []})\n"
-                 "ws._sf = ws._frames_drawn",
+                 "ws._sf = ws.frame_state.frames_drawn",
                  strict=True)
     try:
         time.sleep(2.5)
@@ -1317,11 +1317,11 @@ def a_leaked_session_leaves_the_panel_flushing(board):
     assert board.pyval(files + ".begin()", strict=True) == (True, None)
     n, err = board.pyval(files + ".count('drawings')", strict=True)
     assert err is None and isinstance(n, int), (n, err)
-    d0 = board.pyval("ws._frames_drawn", strict=True)
+    d0 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     for _ in range(4):
         board.pyval("setattr(ws, '_dirty', True)", strict=True)
         time.sleep(0.25)
-    d1 = board.pyval("ws._frames_drawn", strict=True)
+    d1 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
     assert board.pyval("ws.store.open", strict=True) == 0, "a frame left the session open"
 
@@ -1929,7 +1929,7 @@ def idle_saver_and_wake(board):
     after its seconds of silence the console shows the saver -- a cover cycle
     fullscreen, the desk's wallpaper on a desk -- and the input that wakes it
     is swallowed and moves the kernel epoch, so the console repaints every
-    buffer the saver held (`_frames_drawn` advances by at least the backend's
+    buffer the saver held (`frame_state.frames_drawn` advances by at least the backend's
     RETAINED_FRAMES) and comes back on the stack it left."""
     stack = board.state()["stack"]
     board.cmd("power blank 0", wait_for="REMOTE power")

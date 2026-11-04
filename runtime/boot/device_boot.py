@@ -227,7 +227,7 @@ class DeviceBoot(BootCarts):
         """Hand the glass over, once, and say how long the desktop took to
         reach it -- the number that was missing when a black screen had to be
         diagnosed by guesswork. Returns True on the frame it fires."""
-        if self.done or getattr(ws, "_frames_drawn", 0) <= 0:
+        if self.done or ws.frame_state.frames_drawn <= 0:
             return False
         self.done = True
         self.say("first frame in %dms" % _ticks_diff(_ticks_ms(), self._first_at))

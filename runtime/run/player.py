@@ -1816,17 +1816,23 @@ class Player(PlayerDiag):
         tool/app or a crashed cart ticks and draws with the loop it serves. A
         lockstep match (#65) owns its own clock: its due tick decides, and the
         draw divisor stays 1 there -- composing the two is its own step."""
+        # Each store is skipped when it changes nothing: a store on the Player
+        # looks through its classes for a property setter.
         if not self.tick_ms:
-            self._n_ticks = 1
+            if self._n_ticks != 1:
+                self._n_ticks = 1
             return True
         np = self._netplay
         if np is not None:
-            self._n_ticks = 1
+            if self._n_ticks != 1:
+                self._n_ticks = 1
             return bool(np.pending(_ticks_ms()))
         s = self.sched
         s.plan(dt)
-        self._n_ticks = s.n
-        if s.n == 0 and self._keep_edges is not None:
+        n = s.n
+        if n != self._n_ticks:
+            self._n_ticks = n
+        if n == 0 and self._keep_edges is not None:
             self._keep_edges()
         return s.draw
 
@@ -1836,7 +1842,8 @@ class Player(PlayerDiag):
         and _draw (the Lua tier)."""
         play = self._play
         if play is not None:
-            self._keyp_latch = 0
+            if self._keyp_latch:
+                self._keyp_latch = 0
             if n:
                 play(n, dt, draw)
             return
@@ -1851,8 +1858,10 @@ class Player(PlayerDiag):
             i += 1
             if te is not None:
                 te()
-            inp.cart_keyp = self._keyp_latch
-            self._keyp_latch = 0
+            k = self._keyp_latch
+            inp.cart_keyp = k
+            if k:
+                self._keyp_latch = 0
             if lua is not None:
                 lua.draw_next = draw and i == n
             if upd is not None:
@@ -2184,7 +2193,8 @@ class Player(PlayerDiag):
                 if r in (8, 9, 10, 13, 127) or 32 <= r < 127:
                     for _ in range(n):
                         fed.key(r)
-        self._cart_key_prev = k
+        if k != self._cart_key_prev:
+            self._cart_key_prev = k
 
     def _lockstep_step(self, ws, dt):
         """The #65 lockstep gate for this frame: (dt, stalled, session). With

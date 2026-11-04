@@ -3,7 +3,7 @@ API the device diag reads (`perf_sample`/`perf_breakdown`/`perf_backdrop`/
 `perf_pointer`/`perf_batch`/...), the perf-capture frame tail that fills
 them, and the expensive-event counter `note_cost`. A mixin of `Workstation`;
 every field it writes is a flat attribute the frame loop and both WMs read
-directly.
+directly, but for what changes every frame, which lives on `FrameState`.
 """
 
 try:
@@ -27,6 +27,24 @@ _CONSOLE_METERS = ("draw", "flush", "logic", "render", "chrome", "wmr", "wmw",
                    "wms", "home", "tick", "miss")
 
 
+class FrameState:
+    """The fields the frame loop writes every frame, on a plain object the
+    Workstation holds as `frame_state` and never rebinds. A store on the
+    Workstation looks through all its classes for a property setter (about
+    57 us on a T-Deck); a store here costs under 2. A base class or a
+    property would bring that walk back; `__slots__` changes nothing on
+    MicroPython."""
+
+    def __init__(self):
+        self.frames_drawn = 0       # frames that drew and flushed (test witness)
+        self.since_draw = 0.0       # seconds since the last drawn frame
+        self.fps = 0.0              # smoothed frames/sec DRAWN (EMA, #217)
+        self.frame_dt_ms = 33.0     # last loop tick in ms (kinetic velocity, #113)
+        self.pointer_dt_ms = 33.0   # ...as charged to the pointer SAMPLE
+                                    # (_tick_pointer_dt), None on a repeat
+        self.stale_ptr_ms = 0.0     # the repeats' time, banked for the next sample
+
+
 class PerfMeters:
 
     def _init_perf(self):
@@ -39,15 +57,14 @@ class PerfMeters:
         # at boot.
         for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
             setattr(self, _key, _default)
-        self._fps = 0.0               # smoothed frames/sec DRAWN (EMA, #217)
-        self._since_draw = 0.0        # seconds since the last drawn frame
+        self.frame_state = FrameState()
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
         # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
         # records the per-frame split in ms -- _flush_ms is the compositor's panel
         # DMA flush (comp.flush(); ~0 on the host's _NullComp), _draw_ms is the
         # rest (cart _update/_draw + the console's own draw = total minus flush).
-        # All EMA-smoothed like _fps so the numbers read steady, not single-frame
-        # jitter. This tells us whether the wall is the SPI flush or the per-frame
+        # All EMA-smoothed like frame_state.fps so the numbers read steady, not
+        # single-frame jitter. This tells us whether the wall is the SPI flush or the per-frame
         # MicroPython draw cost on device. Measurement only -- no render-path change.
         self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
         self._uncap = False           # the serial `uncap` diag (the tick model): a cart
@@ -219,7 +236,7 @@ class PerfMeters:
             return None
         cart = self.cart
         name = cart.get("title") or cart.get("path") or "?"
-        return (name, self._fps, self._flush_ms, self._draw_ms)
+        return (name, self.frame_state.fps, self._flush_ms, self._draw_ms)
 
     def perf_push(self, loop, front=False):
         """The console's half of the PERF line into the kernel's sampler

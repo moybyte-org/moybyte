@@ -769,10 +769,10 @@ def _idle_paints(ws):
     ws._dirty = True
     for _ in range(4):
         drv.frame(1 / 30)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(1 / 30)
-    return ws._frames_drawn - drawn
+    return ws.frame_state.frames_drawn - drawn
 
 
 def test_a_settled_canvas_and_a_settled_view_paint_nothing(tmp_path):
@@ -836,9 +836,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         app.shape = shape
 
     def frame():
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if bufs > 1 and ws._frames_drawn != n:
+        if bufs > 1 and ws.frame_state.frames_drawn != n:
             held.append(bytes(root._buf))
             root._comp.last = held[-1]
             root._buf[:] = held[-bufs] if len(held) >= bufs else held[0]
@@ -883,9 +883,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         drv.hold("right", True)
         for i in range(40):
             drv.hold("down", i % 3 == 0)
-            n = ws._frames_drawn
+            n = ws.frame_state.frames_drawn
             frame()
-            shots.append(bytes((held[-1] if bufs > 1 and ws._frames_drawn != n
+            shots.append(bytes((held[-1] if bufs > 1 and ws.frame_state.frames_drawn != n
                                 else root._buf)[top:]))
         drv.hold("down", False)
         drv.hold("right", False)
@@ -898,9 +898,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     frame()
     for px, py in pts[1:]:
         drv.touch_drag(ox + px, oy + py)
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         frame()
-        shots.append(bytes((held[-1] if bufs > 1 and ws._frames_drawn != n else root._buf)[top:]))
+        shots.append(bytes((held[-1] if bufs > 1 and ws.frame_state.frames_drawn != n else root._buf)[top:]))
     drv.touch_up()
     frame()
     shots.append(bytes((held[-1] if bufs > 1 else root._buf)[top:]))

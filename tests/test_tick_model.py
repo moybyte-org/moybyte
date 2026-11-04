@@ -478,11 +478,11 @@ def test_a_game_holds_its_rate_on_a_faster_loop(tmp_path):
     _open(ws, PACED_GAME)
     assert ws.cart["type"] == "game" and ws.player.tick_ms == 33
     calls = _count(ws)
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 60, 1 / 60)
     assert calls["upd"] == 30                     # 30Hz logic on a 60Hz loop
     assert calls["draw"] == 30
-    assert ws._frames_drawn - drawn0 == 30        # a frame that does not draw does not flush
+    assert ws.frame_state.frames_drawn - drawn0 == 30        # a frame that does not draw does not flush
     assert set(calls["dts"]) == {1 / 30}          # the tick period, not the loop's dt
 
 
@@ -500,7 +500,7 @@ def test_the_fps_chip_reads_the_drawn_rate(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
     _frames(ws, 240, 1 / 60)
-    assert 29 <= ws._fps <= 31
+    assert 29 <= ws.frame_state.fps <= 31
 
 
 def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
@@ -514,10 +514,10 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     _open(ws, tool)
     assert ws.player.tick_ms == 0
     calls = _count(ws)
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 20, 1 / 60)
     assert calls["upd"] == 20 and calls["draw"] == 20
-    assert ws._frames_drawn - drawn0 == 20
+    assert ws.frame_state.frames_drawn - drawn0 == 20
     assert set(calls["dts"]) == {1 / 60}
 
 
@@ -532,10 +532,10 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     _frames(ws, 4, 1 / 60)
     assert ws.cart_error is not None
     assert ws.player.tick_ms == 0 and not ws.input.kept_names()
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     ws._dirty = True
     ws.frame(1 / 60)
-    assert ws._frames_drawn - drawn0 == 1
+    assert ws.frame_state.frames_drawn - drawn0 == 1
 
 
 def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
@@ -545,9 +545,9 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     ws.go_home()
     assert ws.player.tick_ms == 0 and not ws.input.kept_names()
     ws._dirty = True
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     ws.frame(1 / 60)
-    assert ws._frames_drawn - drawn0 == 1
+    assert ws.frame_state.frames_drawn - drawn0 == 1
 
 
 def test_a_press_between_ticks_reaches_the_next_tick_exactly_once(tmp_path):
@@ -683,14 +683,14 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     np = _FakeSession()
     ws.player._netplay = np
     calls = _count(ws)
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 5, 1 / 30)
-    assert calls["upd"] == 0 and ws._frames_drawn == drawn0
+    assert calls["upd"] == 0 and ws.frame_state.frames_drawn == drawn0
     assert np.resent == 5
     np.on = True
     _frames(ws, 3, 1 / 30)
     assert calls["upd"] == 3 and np.advanced == 3
-    assert ws._frames_drawn - drawn0 == 3
+    assert ws.frame_state.frames_drawn - drawn0 == 3
     assert set(calls["dts"]) == {np.dt}
     assert ws.player.sched.div == 1 and ws.player.sched.ticks == 0
     ws.player._netplay = None
@@ -812,10 +812,10 @@ def test_a_free_seed_game_runs_with_the_loop(tmp_path):
     _open(ws, "Star Catcher")
     assert ws.player.tick_ms == 0 and ws.player._free is True
     calls = _count(ws)
-    drawn0 = ws._frames_drawn
+    drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 20, 1 / 45)
     assert calls["upd"] == 20 and calls["draw"] == 20
-    assert ws._frames_drawn - drawn0 == 20
+    assert ws.frame_state.frames_drawn - drawn0 == 20
     assert set(calls["dts"]) == {1 / 45}
 
 

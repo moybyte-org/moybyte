@@ -231,10 +231,10 @@ class Pair:
         painted = False
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             ws.pointer.visible = False
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             r = ws.wm._repeats_n
             self._drive(ws, drv)
-            if ws._frames_drawn != k:
+            if ws.frame_state.frames_drawn != k:
                 painted = True
                 root = ws.wm._root_canvas
                 h = self.held[id(ws)]
@@ -394,9 +394,9 @@ def test_the_p4_desk_shifts_its_apps_pages_byte_for_byte(tmp_path, app, bufs):
     p.settle()
     p.keys("down", 12)
     p.settle()
-    a, b = p.a._frames_drawn, p.b._frames_drawn
+    a, b = p.a.frame_state.frames_drawn, p.b.frame_state.frames_drawn
     p.hold("down", 40)                # at the end: its steps move nothing
-    a, b = p.a._frames_drawn - a, p.b._frames_drawn - b
+    a, b = p.a.frame_state.frames_drawn - a, p.b.frame_state.frames_drawn - b
     assert a < b, "the held steps at %s's end painted %d frames, every step %d" % (app, a, b)
     p.settle()
     assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
@@ -719,12 +719,12 @@ def _held_at_the_end(ws, drv, n=40):
     drv.hold("down", True)
     drv.press("down")
     drv.frame(_DT)
-    k = ws._frames_drawn
+    k = ws.frame_state.frames_drawn
     for _ in range(n):
         quiesce(ws)
         drv.frame(_DT)
     drv.hold("down", False)
-    return ws._frames_drawn - k
+    return ws.frame_state.frames_drawn - k
 
 
 @pytest.mark.parametrize("app", ("settings", "licences", "files"))
@@ -797,7 +797,7 @@ def test_a_frame_whose_change_is_the_window_repaints_no_desk_or_chrome(tmp_path)
         if p.frame() and w._repeats_n == r0:
             assert p.direct == d0 + 1, "a %s frame did not draw into the glass" % cls
             assert not w._desk_painted and w._chrome_quiet, "a %s frame laid the desk" % cls
-            assert w._outside_f != p.a._frames_drawn - 1, "a %s frame drew outside" % cls
+            assert w._outside_f != p.a.frame_state.frames_drawn - 1, "a %s frame drew outside" % cls
             seen[cls] = seen.get(cls, 0) + 1
     x, y = p.at("settings")
     p.both("touch", x, y)

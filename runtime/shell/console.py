@@ -1270,18 +1270,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # `_last_ptr` snapshots the pointer state actually drawn so a cursor move/hide/
         # click triggers exactly one redraw. A running cart and a live wallpaper /
         # overlay effect animate every frame -> always dirty -> unchanged full-redraw
-        # behaviour for them. `_frames_drawn` counts the frames that actually painted
-        # (idle frames are skipped) -- a host-testable witness of the win.
+        # behaviour for them. `frame_state.frames_drawn` counts the frames that
+        # actually painted (idle frames are skipped) -- a host-testable witness
+        # of the win.
         self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
-        self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
-        self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
         self.ui_moving = False        # a verbs page the last painted frame drew moves on its own
         # what the last painted frame's change was, as its shift frames said:
         # "shift", "rows", None (whole, or nothing spoke); tools/input_bench.py
         self.frame_change = None
-        self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
-        self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._dirty_in = True         # a change reported before this input (handle_input)
         self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
         self._services_due = True     # the services start at the first drawn frame
@@ -3327,7 +3324,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # row's count; `carts.begin`, the handle's) ends here, at the next
         # frame: it holds no gate, so this is bookkeeping, never a flush held
         # off (native/moy_app/README.md).
-        if self._services_due and self._frames_drawn:
+        fs = self.frame_state
+        if self._services_due and fs.frames_drawn:
             self._services_due = False
             self.boot_services()
         if _scheduler.SCHED.wakes.queued:
@@ -3339,8 +3337,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             if not self._press_taken:
                 self._dirty = True        # the press handle_input left owed
         # A store on the Workstation looks through all its classes for a
-        # property (about 60 us on a T-Deck), so the frame path stores a
-        # per-frame flag only when it changes.
+        # property (about 57 us on a T-Deck), so the frame path stores a
+        # per-frame flag only when it changes, and what changes every frame
+        # lives on `fs`, a plain object.
         if self._press_taken:
             self._press_taken = False
         st = self.store
@@ -3352,13 +3351,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if lk is not None and getattr(lk, "_m", None) is not None:
             lk.sync(self)             # the session the link formed, the cart it asked for
         if dt > 0:
-            self._since_draw += dt
+            fs.since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
-            self._frame_dt_ms = min(dt * 1000.0, 100.0)
+            ms = min(dt * 1000.0, 100.0)
+            fs.frame_dt_ms = ms
             # ... and the verbs engine's clock, the scrolling pages' motion
-            _ui_draw.frame_dt(self._frame_dt_ms)
+            _ui_draw.frame_dt(ms)
         # The cover collaborator's two per-frame touches: this budget reset and
         # the deferred drain at the tail. Bound once, here, so both cost a call
         # and no second lookup (#209 landing C -- nothing else in the loop
@@ -3430,7 +3430,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 if self._half is not None:
                     self._present_half()
                 self.comp.flush()
-                self._frames_drawn += 1
+                fs.frames_drawn += 1
             return
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
@@ -3496,9 +3496,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.
-        if self._since_draw > 0:
-            self._fps = _ema(self._fps, 1.0 / self._since_draw)
-            self._since_draw = 0.0
+        if fs.since_draw > 0:
+            fs.fps = _ema(fs.fps, 1.0 / fs.since_draw)
+            fs.since_draw = 0.0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
@@ -3622,7 +3622,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # but for the FPS chip, which names where it drew (`overdrew`).
         _ring = self.wm.CONTENT_RING
         _alone = _ring and self.wm.content_alone()
-        _ui_draw.paint_frame(self._frames_drawn, _alone, self,
+        _ui_draw.paint_frame(fs.frames_drawn, _alone, self,
                              not _alone and _ring and self.show_fps
                              and self.wm.content_alone(_SIG_FPS))
         for layer in _stack:
@@ -3723,7 +3723,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._dirty = True
         if self._ptr_changed():          # rebuilt only when it moved: no tuple
             self._last_ptr = self._ptr_state()   # on a static-pointer frame
-        self._frames_drawn += 1
+        fs.frames_drawn += 1
         if self._deferred:
             # #184: the flush above PRESENTED this frame's LOADING
             # acknowledgment -- now run the queued transition(s) behind it.

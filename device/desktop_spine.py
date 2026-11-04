@@ -120,6 +120,7 @@ class Desktop:
         drawn = [0]
         rung = [0]
         idle_state = moy_loop.idle_state
+        fs = ws.frame_state
 
         def frame(dt):
             st = idle_state()
@@ -127,7 +128,7 @@ class Desktop:
                 rung[0] = st
                 ws.saver_state(st == moy_loop.SAVER)
             ws.frame(dt)
-            n = ws._frames_drawn
+            n = fs.frames_drawn
             if not boot.done:
                 boot.first_frame(ws)
             if ws.perf_capture and moy_loop.perf_due():

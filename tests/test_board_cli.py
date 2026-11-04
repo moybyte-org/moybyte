@@ -273,7 +273,7 @@ class WS:
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False
-        self._frames_drawn = 5
+        self.frame_state = types.SimpleNamespace(frames_drawn=5)
         self._apps = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
@@ -334,7 +334,7 @@ class Pump:
 
     @property
     def drawn(self):
-        return self.ws._frames_drawn
+        return self.ws.frame_state.frames_drawn
 
 
 class Wire:
@@ -355,7 +355,7 @@ class Wire:
         self.sent = []
         self.fps = list(fps)
         self.next_perf = clock.now + 2.0
-        self._drawn = float(ws._frames_drawn)
+        self._drawn = float(ws.frame_state.frames_drawn)
 
     def _tick(self, dt):
         """The console's frames over `dt` s: a cart draws at the head rate,
@@ -363,7 +363,7 @@ class Wire:
         self.clock.now += dt
         if self.ws.cart and self.fps:
             self._drawn += self.fps[0] * dt
-            self.ws._frames_drawn = int(self._drawn)
+            self.ws.frame_state.frames_drawn = int(self._drawn)
 
     def write(self, data):
         self.pending += data
@@ -578,7 +578,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
         ws.frame(1 / 60.0)
         if moy_loop.perf_due():
             ws.perf_push(moy_loop)
-        return ws._frames_drawn
+        return ws.frame_state.frames_drawn
 
     moy_loop.register(ws.input.begin_frame, lambda: None, frame)
     moy_loop.capture(True)

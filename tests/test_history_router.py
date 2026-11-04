@@ -338,10 +338,10 @@ def test_the_idle_tick_fires_on_a_frame_the_console_does_not_paint(tmp_path):
     quiesce(ws)                           # a visible cursor animates every frame
     ws.frame(1 / 30.0)                    # paint once, then let it go quiet
     ws.frame(1 / 30.0)
-    painted = ws._frames_drawn
+    painted = ws.frame_state.frames_drawn
     ws.history.edit_ms = C._ticks_ms() - 5000
     ws.frame(1 / 30.0)
-    assert ws._frames_drawn == painted, "the frame was not a quiet one"
+    assert ws.frame_state.frames_drawn == painted, "the frame was not a quiet one"
     assert not ws.editor.dirty
     assert "# quiet" in (Path(ws.cart["path"]) / "main.py").read_text()
 

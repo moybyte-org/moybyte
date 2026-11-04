@@ -329,11 +329,11 @@ def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
 
     for _ in range(3):                    # the entry paint + any settling
         quiet_loop()
-    before = ws._frames_drawn
-    assert before >= 1, "the app never painted -- is _frames_drawn still wired?"
+    before = ws.frame_state.frames_drawn
+    assert before >= 1, "the app never painted -- is frame_state.frames_drawn still wired?"
     for _ in range(12):
         quiet_loop()
-    painted = ws._frames_drawn - before
+    painted = ws.frame_state.frames_drawn - before
     assert painted <= 1, \
         "%s painted %d of 12 quiet frames: something calls damage.all() per frame" \
         % (kind, painted)
@@ -627,11 +627,11 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     carts.begin()                                  # never ended
     files.save("docs", "leak", _store.encode_text("x"))
     assert carts.images({"path": str(tmp_path / "nope.moy")}) == ({}, None)
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     for _ in range(4):
         ws._dirty = True
         ws.frame(1 / 30.0)
-    assert ws._frames_drawn - before == 4, "the panel stopped presenting"
+    assert ws.frame_state.frames_drawn - before == 4, "the panel stopped presenting"
     assert held_at_present and set(held_at_present) == {0}, held_at_present
     assert ws.app_abi.files_end_all() == 0 and ws.store.open == 0
 

@@ -745,14 +745,14 @@ class Hold:
         alone = getattr(ws.wm, "content_alone", None)
         ok = (still and not getattr(cv, "covered", False) and alone is not None
               and alone() and not ws._animating(dt) and _whole_retained(cv))
-        self._shown = ws._frames_drawn if ok else -1
+        self._shown = ws.frame_state.frames_drawn if ok else -1
 
     def opened(self, ws):
         """A dialog opened over the page from an input that changed nothing
         else in it: its first frame may take the page from the last frame
         (`last`), where that frame drew it (`shown`) and no change was
         reported since (the console's `_dirty_in`)."""
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
@@ -764,7 +764,7 @@ class Hold:
         over = self._over
         self._over = -1
         self._src = None
-        if over != ws._frames_drawn or ws._animating(dt) or not _whole_retained(cv):
+        if over != ws.frame_state.frames_drawn or ws._animating(dt) or not _whole_retained(cv):
             return False
         if cv.RETAINED_FRAMES == 1:
             return True

@@ -207,9 +207,9 @@ class Pair:
             if not idle:
                 ws._dirty = True
             ws.pointer.visible = False
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             self._drive(ws, drv)
-            ws.painted = ws._frames_drawn != k
+            ws.painted = ws.frame_state.frames_drawn != k
         a, b = self.a, self.b
         assert a.painted == b.painted, "the two consoles' gates parted"
         if not a.painted:

@@ -164,7 +164,7 @@ class WindowPaint:
             return self._drag
         if self._resize is not None:
             return self._resize
-        if self._rest is not None and self.ws._frames_drawn >= self._rest_end:
+        if self._rest is not None and self.ws.frame_state.frames_drawn >= self._rest_end:
             self._rest = None
         return self._rest
 
@@ -196,7 +196,7 @@ class WindowPaint:
         back to the full copy when the canvas lacks blit_strip_rect (the web
         RecordingLayer) or via the `union` A/B knob."""
         self._restored = False
-        self._restored_f = self.ws._frames_drawn
+        self._restored_f = self.ws.frame_state.frames_drawn
         if self._backdrop is None:
             return
         rc = self._root_canvas
@@ -483,7 +483,7 @@ class WindowPaint:
         Library frames rotate/flicker behind the game (P4, 2026-08-01,
         measured as 0/32/24 bytes differing between the three
         framebuffers)."""
-        drawn = self.ws._frames_drawn
+        drawn = self.ws.frame_state.frames_drawn
         if drawn == getattr(self, "_bezel_frame", -2):
             return              # a declined frame's composite, same frame
         bkey = (ox, oy, scale, sc.w, sc.h, src)
@@ -660,7 +660,7 @@ class WindowPaint:
                 self._draw_app_window(win, focused, dt)
             self._cast_onto(i)
             if self._win_touched and not focused:
-                self._outside_f = self.ws._frames_drawn
+                self._outside_f = self.ws.frame_state.frames_drawn
             if self._win_touched:
                 pt = self._part
                 if pt[4] and not self._chrome_drew and pt[2] > pt[0] and pt[3] > pt[1]:
@@ -697,7 +697,7 @@ class WindowPaint:
         changed, its focus mark), a full-screen one, a restore of the whole
         glass."""
         r = self._restored
-        if not r or self._restored_f != self.ws._frames_drawn or win is top:
+        if not r or self._restored_f != self.ws.frame_state.frames_drawn or win is top:
             return None
         g = self._gesture()
         if g is None or self._wins.get(g[0]) is not top:
@@ -724,7 +724,7 @@ class WindowPaint:
         ws = self.ws
         bar = ws.bar_layer
         t = bar._clock_text()
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         h = self._clock_held
         r = self._restored if self._restored_f == f else False
         over = r is None
@@ -747,7 +747,7 @@ class WindowPaint:
         first of the RETAINED_FRAMES frames that hold its text."""
         h = self._clock_held
         h[0] = self.ws.bar_layer._clock_text()
-        h[1] = self.ws._frames_drawn
+        h[1] = self.ws.frame_state.frames_drawn
         h[2] = 1
 
     def _chips_untouched(self, dt):
@@ -755,7 +755,7 @@ class WindowPaint:
         gesture's restore laid the desk away from it, and no cursor or
         animation draws over it."""
         r = self._restored
-        if not r or self._restored_f != self.ws._frames_drawn:
+        if not r or self._restored_f != self.ws.frame_state.frames_drawn:
             return False
         if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt, False):
             return False
@@ -823,7 +823,7 @@ class WindowPaint:
             # ring's word for it, else the window's buffer stamped into it
             # (the page, but for the buffer's own lag).
             u[0] = u[1] = u[2] = u[3] = 0
-            f = ws._frames_drawn
+            f = ws.frame_state.frames_drawn
             if self._shown_ok(win) and self._shown_chain(win, f, u):
                 known = 1
                 chain = True
@@ -942,7 +942,7 @@ class WindowPaint:
         per region)."""
         if not self._shown_ok(win):
             return False
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[(f - 1) % (_SHOWN + 1)]
         if e[0] != f - 1 or e[1] is not win or e[11] != self.ws.look.look_gen:
             return False
@@ -1022,7 +1022,7 @@ class WindowPaint:
                 win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
         if self._chip_streak < n:
             self._chip_streak += 1
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         h = self._clock_held              # ...and the desk clock's text
         if h[1] == f - 1:
             h[1] = f
@@ -1055,7 +1055,7 @@ class WindowPaint:
         focused window's content rect changed on the glass (no other window,
         clock, tile or chip drew), so what the frame changed is the page's
         part alone (`_debt_rows`)."""
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[f % (_SHOWN + 1)]
         if e[0] == f:
             e[12] = 1 if e[1] is not None and self._outside_f != f else 0
@@ -1070,7 +1070,7 @@ class WindowPaint:
         r[0] = r[1] = 0
         r[2] = 1
         n = self._pop_n()
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         if n > _SHOWN:
             return r
         ring = self._shown
@@ -1122,7 +1122,7 @@ class WindowPaint:
         buf = win.buf
         if cli is None or buf is None:
             return False
-        last = self.ws._frames_drawn - 1
+        last = self.ws.frame_state.frames_drawn - 1
         e = self._shown[last % (_SHOWN + 1)]
         gen = self.ws.look.look_gen
         if e[0] != last or e[1] is not win or e[11] != gen:
@@ -1171,7 +1171,7 @@ class WindowPaint:
             return False
         c = self._sc
         c[0] = c[1] = c[2] = c[3] = 0
-        if not self._shown_chain(win, self.ws._frames_drawn, c):
+        if not self._shown_chain(win, self.ws.frame_state.frames_drawn, c):
             return False
         t = getattr(content, "takes_lag", None)
         return t is None or bool(t(c))
@@ -1183,7 +1183,7 @@ class WindowPaint:
         over it and nothing lagging (the shown ring)."""
         if not self._content_static(win, False) or not self._shown_ok(win):
             return False
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[(f - 1) % (_SHOWN + 1)]
         if e[0] != f - 1 or e[11] != self.ws.look.look_gen:
             return False
@@ -1329,7 +1329,7 @@ class WindowPaint:
                     own = self._own
                     own[0] = own[1] = own[2] = own[3] = 0
                     own[4] = 1
-                    self._shown_note(win, self.ws._frames_drawn, True, False)
+                    self._shown_note(win, self.ws.frame_state.frames_drawn, True, False)
                     self._win_chrome(win, focused, quiet=self._chrome_quiet)
                     return
                 if self._direct_render(win, dt):
@@ -1339,7 +1339,7 @@ class WindowPaint:
                         own = self._own
                         if ok and own[4]:
                             self._shown_part(win, own[0], own[1], own[2], own[3])
-                        self._shown_note(win, self.ws._frames_drawn, ok, held)
+                        self._shown_note(win, self.ws.frame_state.frames_drawn, ok, held)
                     self._win_chrome(win, focused, quiet=self._chrome_quiet)
                     return
             # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
@@ -1387,7 +1387,7 @@ class WindowPaint:
             # buffer this frame paints, the stamp copies only what the page
             # changed since that buffer last held it -- nothing at all on a
             # frame that changed nothing.
-            f = self.ws._frames_drawn
+            f = self.ws.frame_state.frames_drawn
             ok = (held or speaks) and self._shown_ok(win)
             if ok and own[4]:
                 sc = self._sc
@@ -1542,7 +1542,7 @@ class WindowPaint:
         ws = self.ws
         p = ws.player
         ch = p.change
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         own = self._own
         ok = self._shown_ok(win)
         cx, cy, _cw, _ch = win.content_rect()

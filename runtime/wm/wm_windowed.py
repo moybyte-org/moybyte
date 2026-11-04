@@ -1876,10 +1876,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         retained buffer carries the change before partial frames resume."""
         ws = self.ws
         self._ensure_stack()
-        follows = self._painted_f == ws._frames_drawn - 1
+        follows = self._painted_f == ws.frame_state.frames_drawn - 1
         same_pop = self._pop_seq == self._pop_seq_f
         same_wash = self._wash_seq == self._wash_seq_f
-        self._painted_f = ws._frames_drawn
+        self._painted_f = ws.frame_state.frames_drawn
         self._pop_seq_f = self._pop_seq
         self._wash_seq_f = self._wash_seq
         self._repeating = self._wash_repeats = False

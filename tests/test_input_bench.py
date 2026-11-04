@@ -177,7 +177,7 @@ class HostBoard:
             if ws.ball_owed:
                 ws.ball(0, 0, False)
             moy_loop.drive(ws.handle_input, ws.handle_pointer,
-                           lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
+                           lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
             self.frames += 1
         return []
 

@@ -243,7 +243,8 @@ class HomeHints:
         selected card's favourite star."""
         k = self.ws.input.last_key
         prev = self._kprev
-        self._kprev = k
+        if k != prev:
+            self._kprev = k     # a store on the layer walks its classes: only on a change
         if not k or k == prev or not (32 < k < 127):
             return False
         ch = chr(k).lower()

@@ -206,7 +206,7 @@ def test_a_stuck_compiled_run_paints_its_stop_card_on_the_next_frame(tmp_path, w
             ws.open()
     painted = []
     draw = ws._pause_layer.draw
-    ws._pause_layer.draw = lambda dt: (painted.append(ws._frames_drawn), draw(dt))
+    ws._pause_layer.draw = lambda dt: (painted.append(ws.frame_state.frames_drawn), draw(dt))
     for _ in range(4):
         ws.frame(1 / 30)
         if ws.pause.open:

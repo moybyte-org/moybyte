@@ -46,10 +46,10 @@ def _tap(drv, rect, dx=None):
 def _settles(ws, drv):
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    return ws._frames_drawn == drawn
+    return ws.frame_state.frames_drawn == drawn
 
 
 # -- Music ------------------------------------------------------------------------------

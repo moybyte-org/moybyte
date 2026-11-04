@@ -420,7 +420,7 @@ class WindowOverlays:
             # The last frame's card, as it was: inside the wash this frame
             # copied, or copied itself.
             w = self._pop_wash[1]
-            if ((self._pop_wash_f == self.ws._frames_drawn and _inside(r, w))
+            if ((self._pop_wash_f == self.ws.frame_state.frames_drawn and _inside(r, w))
                     or self._root_canvas.copy_last(r[0], r[1], r[2], r[3])):
                 self._pop_note(r)
                 s[2] -= 1
@@ -484,7 +484,7 @@ class WindowOverlays:
             # what that frame's card left over it, which the card's own
             # paint puts back first where it changed.
             self._pop_note(w[1])
-            self._pop_wash_f = self.ws._frames_drawn
+            self._pop_wash_f = self.ws.frame_state.frames_drawn
             w[2] -= 1
             if self._pause_owed > 0:
                 self._pause_paint(self._repeating)
@@ -538,7 +538,7 @@ class WindowOverlays:
             if r is not None:
                 _grow(sp, r[0], r[1], r[0] + r[2], r[1] + r[3])
             s = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
-            if s[2] > 0 and ((self._pop_wash_f == ws._frames_drawn
+            if s[2] > 0 and ((self._pop_wash_f == ws.frame_state.frames_drawn
                               and _inside(s, self._pop_wash[1]))
                              or self._root_canvas.copy_last(s[0], s[1], s[2], s[3])):
                 self._pop_note(s)

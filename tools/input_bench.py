@@ -332,10 +332,10 @@ def _fr(dt):
     o0 = ov() if ov is not None else None
     ib.shifted = False
     ib.tf = -1
-    n0 = ws._frames_drawn
+    n0 = ws.frame_state.frames_drawn
     r = ib.of(dt)
     e = _T()
-    if ws._frames_drawn != n0 and ib.n < ib.cap:
+    if ws.frame_state.frames_drawn != n0 and ib.n < ib.cap:
         o1 = ov() if ov is not None else None
         i = ib.n * _NS
         rec = ib.rec

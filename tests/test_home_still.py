@@ -57,9 +57,9 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
     stats = {"frames": 0}
 
     def frame():
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if ws._frames_drawn == n:
+        if ws.frame_state.frames_drawn == n:
             return None
         stats["frames"] += 1
         held.append(bytes(root._buf))

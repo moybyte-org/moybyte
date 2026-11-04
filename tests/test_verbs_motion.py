@@ -324,9 +324,9 @@ def test_a_walk_to_the_end_over_a_hint_band_comes_to_rest(tmp_path):
             drv.frame(1 / 30)
         assert _C.api_offset(h.ctx, 160, 150) > 0
         assert not _C.api_moving(h.ctx), "the page came to rest at its end"
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(10):
             drv.frame(1 / 30)
-        assert ws._frames_drawn == drawn, "and paints nothing more"
+        assert ws.frame_state.frames_drawn == drawn, "and paints nothing more"
     finally:
         ui_draw.input_kind(was)

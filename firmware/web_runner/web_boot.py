@@ -778,9 +778,9 @@ def step_frame_json(dt, audio_ahead=-1.0):
     au = getattr(ws, "audio_out", None)
     if au is not None and hasattr(au, "ahead"):
         au.ahead = float(audio_ahead)
-    painted_before = ws._frames_drawn
+    painted_before = ws.frame_state.frames_drawn
     _S["driver"].frame(dt)
-    painted = ws._frames_drawn != painted_before
+    painted = ws.frame_state.frames_drawn != painted_before
     # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
     # frame) -- the page plays it through its AudioWorklet ring.
     pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""

@@ -17,7 +17,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
   * shared (non-privileged):   ws.canvas, ws.theme_colors, ws.perf_hud,
-                               ws._fps, ws._flush_ms, ws._draw_ms, ws._upd_ms
+                               ws.frame_state.fps, ws._flush_ms, ws._draw_ms, ws._upd_ms
 `NAMES` is injected at construction (same reason as BlockEditorUI: importing it
 back from console.py would be a circular import, since console.py builds the one
 PerfHud a Workstation holds). It draws through native/moy_ui's `moy_ui_perf`
@@ -64,7 +64,7 @@ class PerfHud:
         ws = self.ws
         cv = ws.canvas
         a = self._args
-        fps = int(ws._fps + 0.5)
+        fps = int(ws.frame_state.fps + 0.5)
         fps = fps if fps > 0 else 0
         a[_RIGHT] = cv.w - 4
         a[_BOTTOM] = cv.h - 4

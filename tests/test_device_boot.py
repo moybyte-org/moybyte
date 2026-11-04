@@ -21,6 +21,7 @@ that board printed before the change.
 
 import ast
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,7 @@ class FakePlayer:
 
 class FakeWs:
     def __init__(self, frames=0, tick_ms=0):
-        self._frames_drawn = frames
+        self.frame_state = types.SimpleNamespace(frames_drawn=frames)
         self.player = FakePlayer(tick_ms)
         self.armed = 0
         self.announced = 0
@@ -223,7 +224,7 @@ def test_the_desktop_takes_the_glass_and_the_splash_stops_painting(capsys):
     before = canvas.paints
 
     assert boot.first_frame(ws) is False       # nothing painted yet
-    ws._frames_drawn = 1
+    ws.frame_state.frames_drawn = 1
     assert boot.first_frame(ws) is True
     assert boot.first_frame(ws) is False       # once, not every frame
 

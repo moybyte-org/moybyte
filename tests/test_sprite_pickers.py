@@ -141,11 +141,11 @@ class Pair:
     def frame(self, check=True):
         _NOW[0] += 33
         a, b = self.a, self.b
-        n = a._frames_drawn
+        n = a.frame_state.frames_drawn
         a.took[0] = False
         self._drive(a, self.da)
         self._drive(b, self.db)
-        if a._frames_drawn == n:
+        if a.frame_state.frames_drawn == n:
             return
         root = self._root(a)
         shot = bytes(root._buf)
@@ -157,7 +157,7 @@ class Pair:
                 xs = [q % w for q in px]
                 ys = [q // w for q in px]
                 raise AssertionError("frame %d (%d buffers) differs from a whole draw in "
-                                     "x %d-%d, y %d-%d" % (a._frames_drawn, self.bufs, min(xs),
+                                     "x %d-%d, y %d-%d" % (a.frame_state.frames_drawn, self.bufs, min(xs),
                                                            max(xs), min(ys), max(ys)))
         self.alone.append(a.took[0])
         self.held.append(shot)

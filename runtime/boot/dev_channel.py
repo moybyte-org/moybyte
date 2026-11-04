@@ -715,7 +715,7 @@ def _remote_state(ws):
     st = {}
     try:
         st["screen"] = ws.screen
-        st["frames"] = getattr(ws, "_frames_drawn", None)
+        st["frames"] = ws.frame_state.frames_drawn
         st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
         # A fit notice is a panel too, and not an error: a compiled cart this
         # console cannot hold, refused before it loaded (Player.notice).

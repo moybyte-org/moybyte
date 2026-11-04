@@ -120,13 +120,13 @@ def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, 
     keys = _keys(ws, desk)
     gen = ws.look.look_gen
     edited = _pkg(**{role: (first + 9) % 64})
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     assert ws.look.install_theme(edited)[0] == 0
     assert ws.look.look_gen > gen
     assert ws.look.theme_name == THEME
     assert ws._dirty                      # the edit is one Class A dirty
     after = _settle(ws, force=False)      # no forced repaint: the edit's own
-    assert ws._frames_drawn > drawn
+    assert ws.frame_state.frames_drawn > drawn
     assert after != before, "the edited role shows nowhere on this world"
     for name, key in _keys(ws, desk).items():
         assert key != keys[name], name
@@ -135,11 +135,11 @@ def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, 
             == {w.kind: ws.look.look_gen for w in ws.wm._wins.values() if w.buf is not None}
 
     # Idle after the edit: nothing paints.
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(4):
         _quiet(ws)
         ws.frame(1 / 30)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
     moy_ui.theme_uninstall()
     chrome.forget_themes()
@@ -187,17 +187,17 @@ def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, d
     accent = next(a for _n, a, _d in moy_ui.theme_accents()
                   if a != ws.theme_colors["accent"])
     assert ws.look.change("accent", accent) == 0
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     after = _settle(ws, force=False)      # the change's own repaint
     assert ws.look.theme_name == "custom" and ws.look.look_gen > gen
-    assert ws._frames_drawn > drawn and after != before
+    assert ws.frame_state.frames_drawn > drawn and after != before
     for name, key in _keys(ws, desk).items():
         assert key != keys[name], name
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(4):
         _quiet(ws)
         ws.frame(1 / 30)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
     ws.look.commit()
 
     moy_ui.theme_uninstall()
@@ -239,16 +239,16 @@ def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
     assert ok
     path.write_text(text)
     ws.look.file_saved(text)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     after = _settle(ws, force=False)      # the save's own repaint
-    assert ws.look.look_gen > gen and ws._frames_drawn > drawn and after != before
+    assert ws.look.look_gen > gen and ws.frame_state.frames_drawn > drawn and after != before
     for name, key in _keys(ws, desk).items():
         assert key != keys[name], name
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(4):
         _quiet(ws)
         ws.frame(1 / 30)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
     moy_ui.theme_uninstall()
     chrome.forget_themes()

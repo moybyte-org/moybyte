@@ -178,9 +178,9 @@ def test_the_windowed_log_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch
 
     def frame():
         now[0] += 33
-        k = ws._frames_drawn
+        k = ws.frame_state.frames_drawn
         drv.frame(DT)
-        return ws._frames_drawn != k
+        return ws.frame_state.frames_drawn != k
 
     for _ in range(6):
         frame()

@@ -601,7 +601,7 @@ def _perf(detail):
             # the HUD's numbers, set after the goldens' quiesce turns it off
             ws.show_fps = True
             ws.perf_hud = detail
-            ws._fps, ws._flush_ms, ws._draw_ms, ws._upd_ms = 30.0, 9.6, 19.3, 5.1
+            ws.frame_state.fps, ws._flush_ms, ws._draw_ms, ws._upd_ms = 30.0, 9.6, 19.3, 5.1
             return frame(dt)
         ws.frame = held
     return setup

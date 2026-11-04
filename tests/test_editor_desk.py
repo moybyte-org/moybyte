@@ -199,10 +199,10 @@ def _painted(ws, drv, n=4):
     ws.pointer.visible = False
     settle_badges(ws)
     ws._toast_until = 0
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(n):
         drv.frame(DT)
-    return ws._frames_drawn - drawn
+    return ws.frame_state.frames_drawn - drawn
 
 
 def test_a_clean_switch_paints_once_and_a_commit_paints_again(desk):
@@ -388,10 +388,10 @@ def test_a_settled_workspace_paints_nothing(desk):
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(8):
             drv.frame(DT)
-        assert ws._frames_drawn == drawn, "an idle %s workspace painted" % key
+        assert ws.frame_state.frames_drawn == drawn, "an idle %s workspace painted" % key
 
 
 def test_a_handheld_never_loads_the_desk_editor(tmp_path):
@@ -889,10 +889,10 @@ def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 # -- the Blocks workspace's palette and made code --------------------------------------
@@ -982,10 +982,10 @@ def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 def test_an_actor_picked_in_the_scene_pane_opens_its_scripts(blocks_desk):
@@ -1075,10 +1075,10 @@ def test_a_settled_reference_paints_nothing_on_any_tab(desk):
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(8):
             drv.frame(DT)
-        assert ws._frames_drawn == drawn, tab
+        assert ws.frame_state.frames_drawn == drawn, tab
 
 
 # -- the Code pane's header ------------------------------------------------------------
@@ -1133,10 +1133,10 @@ def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 def _code_ready(ws, drv):
@@ -1230,12 +1230,12 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
     root.shift_last = shift_last
 
     def frame():
-        n = a._frames_drawn
+        n = a.frame_state.frames_drawn
         da.frame(DT)
         db.frame(DT)
-        if a._frames_drawn != n:
+        if a.frame_state.frames_drawn != n:
             shot = bytes(root._buf)
-            assert shot == bytes(b.wm._root_canvas._buf), "frame %d" % a._frames_drawn
+            assert shot == bytes(b.wm._root_canvas._buf), "frame %d" % a.frame_state.frames_drawn
             held.append(shot)
             root._comp.last = shot
             root._buf[:] = held[-2]
@@ -1360,10 +1360,10 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn, "a paused Run slot painted"
+    assert ws.frame_state.frames_drawn == drawn, "a paused Run slot painted"
     gx, gy, gw, gh = d._still
     _click(drv, gx + gw // 2, gy + gh // 2)      # the still's Play goes on
     drv.frame(DT)
@@ -1478,10 +1478,10 @@ def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 # -- the pad's rows -------------------------------------------------------------------------

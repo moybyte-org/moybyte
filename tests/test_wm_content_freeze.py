@@ -72,11 +72,11 @@ def test_cursor_move_skips_focused_content_render(tmp_path):
     ws, drv, win = _settled_settings(tmp_path)
     assert win._buf_stale is False
     calls = _count_draws(ws, "settings")
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     drv.pan(1, 0)                     # trackball nudge: visible cursor moves
     drv.frame(0.0)
     drv.pan(0, 0)
-    assert ws._frames_drawn == drawn + 1   # the frame DID paint (not gated off)
+    assert ws.frame_state.frames_drawn == drawn + 1   # the frame DID paint (not gated off)
     assert calls[0] == 0                   # ...but the content did not re-render
 
 

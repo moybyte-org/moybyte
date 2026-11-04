@@ -212,9 +212,9 @@ def test_calc_arrows_move_focus_and_enter_presses(tmp_path):
     # A tap owes its release and rest frames, and then Calc paints nothing.
     _quiesce_frame(ws)
     _tap(ws, calc, "4")
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     _settle_calc(ws, calc, 8)
-    assert ws._frames_drawn == before
+    assert ws.frame_state.frames_drawn == before
 
 
 def test_calc_keeps_a_tape(tmp_path):

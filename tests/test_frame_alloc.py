@@ -519,13 +519,13 @@ def notes(loop, info):
         loop.step()
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
-    d1 = ws._frames_drawn
+    d1 = ws.frame_state.frames_drawn
     info["notes_text0"] = len(ws.player._focus_editor.text())
     info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
-    info["notes_typing_drawn"] = ws._frames_drawn - d1
+    info["notes_typing_drawn"] = ws.frame_state.frames_drawn - d1
     info["notes_text"] = len(ws.player._focus_editor.text())
     gc.enable()
     notes_swiped(loop, info)
@@ -552,11 +552,11 @@ def notes_swiped(loop, info):
         gc.collect()
         gc.disable()
         for _ in range(40):
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
             if rep:
-                out.append((mem_alloc() - m, ws._frames_drawn - d0,
+                out.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0,
                             ws.frame_change == "shift"))
         gc.enable()
     info["notes_swipe"] = out
@@ -775,10 +775,10 @@ def apps(loop, info):
             gc.disable()
             for _ in range(30):
                 cards[0] = 0
-                d0 = ws._frames_drawn
+                d0 = ws.frame_state.frames_drawn
                 m = mem_alloc()
                 loop.step()
-                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0],
+                drag.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0, cards[0],
                              ws.frame_change == "shift"))
             gc.enable()
         info[app + "_drag"] = drag
@@ -829,10 +829,10 @@ def editor(loop, info):
         for d in (1,) * 24 + (-1,) * 24:
             move(d)
             ws.mark_dirty()
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
-            walk.append((mem_alloc() - m, ws._frames_drawn - d0))
+            walk.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0))
         gc.enable()
         info[tab + "_walk"] = walk
         info[tab + "_page"] = drew[0]
@@ -843,10 +843,10 @@ def editor(loop, info):
             gc.collect()
             gc.disable()
             for _ in range(30):
-                d0 = ws._frames_drawn
+                d0 = ws.frame_state.frames_drawn
                 p0 = drew[0]
                 loop.step()
-                drag.append((drew[0] - p0, ws._frames_drawn - d0,
+                drag.append((drew[0] - p0, ws.frame_state.frames_drawn - d0,
                              ws.frame_change == "shift"))
             gc.enable()
         page.draw = draw
@@ -978,11 +978,11 @@ def achievements(loop, info):
         gc.collect()
         gc.disable()
         for _ in range(30):
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
             if rep:
-                drag.append((mem_alloc() - m, ws._frames_drawn - d0,
+                drag.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0,
                              ws.frame_change == "shift"))
         gc.enable()
     info["settings_drag"] = drag
@@ -1021,9 +1021,9 @@ def home(loop, info):
     info["home_top"] = ws.wm.top_kind()
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
-    info["home_idle_drawn"] = ws._frames_drawn - d0
+    info["home_idle_drawn"] = ws.frame_state.frames_drawn - d0
     gc.enable()
     # A card right, then back, BAND_STEPS frames each (the move the home's
     # left and right keys make, `nav2d`): the carousel glides, its moving
@@ -1032,21 +1032,21 @@ def home(loop, info):
     g = ws.launcher
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     band = []
     drew = []
     for k in range(@BAND_MOVES@):
         g.nav2d(1 if k % 2 == 0 else -1, 0)
         ws.mark_dirty()
         for _ in range(@BAND_STEPS@):
-            n = ws._frames_drawn
+            n = ws.frame_state.frames_drawn
             a = gc.mem_alloc()
             loop.step()
             band.append(gc.mem_alloc() - a)
-            drew.append(ws._frames_drawn != n)
+            drew.append(ws.frame_state.frames_drawn != n)
     info["home_band"] = band
     info["home_band_drew"] = drew
-    info["home_band_drawn"] = ws._frames_drawn - d0
+    info["home_band_drawn"] = ws.frame_state.frames_drawn - d0
     gc.enable()
     for _ in range(60):
         loop.step()
@@ -1443,7 +1443,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
     try:
         drv.touch(400, 420)
         drv.frame(dt)
-        painted = ws._frames_drawn
+        painted = ws.frame_state.frames_drawn
         for i in range(12):
             drv.touch_drag(400, 400 - 20 * i)
             drv.frame(dt)
@@ -1451,7 +1451,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
         drv.frame(dt)
     finally:
         ui_draw.input_kind(was)
-    assert ws._frames_drawn - painted >= 10, "the drag painted too few frames to say"
+    assert ws.frame_state.frames_drawn - painted >= 10, "the drag painted too few frames to say"
     assert len(rebuilt) <= 1, "the Code layout was rebuilt %d times in a drag" % len(rebuilt)
 
 

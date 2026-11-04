@@ -478,15 +478,15 @@ def test_a_settled_files_page_paints_nothing(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     for _ in range(4):
         drv.frame(_DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn, "an idle Files page painted"
+    assert ws.frame_state.frames_drawn == drawn, "an idle Files page painted"
     before = bytes(ws.sys_canvas._buf)
     drv.press("left")                   # on a place with nothing beside it
     for _ in range(6):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
+    assert ws.frame_state.frames_drawn == drawn + 1, "one frame for the press, then none"
     assert bytes(ws.sys_canvas._buf) == before
 
 

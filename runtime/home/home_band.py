@@ -132,7 +132,9 @@ def _band_key(layer, cv, dt, grid, vouch, calm=False):
     and the band is not its alone on the glass (`_band_alone`)."""
     ws = layer.ws
     k = layer._keys
-    layer._keyed_gen = gen = ws.covers.gen
+    gen = ws.covers.gen
+    if gen != layer._keyed_gen:
+        layer._keyed_gen = gen
     if vouch and not _band_alone(ws, dt, layer.id, calm):
         k[0] = k[1] = -1
         return k

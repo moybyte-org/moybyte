@@ -333,7 +333,7 @@ _items = _l = None
 EXIT_HOOK = """
 import time as _t
 ws._census_exit = None
-_f0 = ws._frames_drawn
+_f0 = ws.frame_state.frames_drawn
 ws._census_t0 = _t.ticks_ms()
 ws.exit()
 ws._census_t1 = _t.ticks_ms()
@@ -356,7 +356,7 @@ def launcher(b, title="Star Catcher"):
         t_host = time.time()
         frames = None
         while time.time() - t_host < 10:
-            got = val(b, "(ws.screen, ws._frames_drawn - ws._census_f0, "
+            got = val(b, "(ws.screen, ws.frame_state.frames_drawn - ws._census_f0, "
                          "__import__('time').ticks_diff(__import__('time').ticks_ms(), "
                          "ws._census_t0), ws._census_t1 - ws._census_t0)")
             if got[0] == "launcher" and got[1] > 0:

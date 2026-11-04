@@ -512,7 +512,7 @@ def test_ball_coast_ships_off_and_carries_a_fast_roll_on_when_set(tmp_path, monk
     assert got == [("right", 2)]
     assert ws._coast_r._vel / ws.COAST_UNIT == pytest.approx(0.4)    # steps a ms
     per = []
-    ws._frame_dt_ms = 33.0                      # the loop's dt, which the coast takes
+    ws.frame_state.frame_dt_ms = 33.0                      # the loop's dt, which the coast takes
     for _ in range(400):
         t[0] += 33
         got.clear()

@@ -157,8 +157,8 @@ def test_hud_does_not_force_an_idle_redraw(tmp_path):
     settle_badges(ws)
     ws._toast_until = 0
     drv.frame(DT)
-    base = ws._frames_drawn
+    base = ws.frame_state.frames_drawn
     for _ in range(60):
         drv.frame(DT)
-    drawn = ws._frames_drawn - base
+    drawn = ws.frame_state.frames_drawn - base
     assert drawn == 60, "running-cart HUD frame drew %d of 60 (should be 60)" % drawn

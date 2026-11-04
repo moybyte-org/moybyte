@@ -57,11 +57,11 @@ if not hasattr(ws, '_hhook'):
     _of = ws.frame
     def _f(dt, _of=_of):
         a = _tk()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         g0 = gc.mem_alloc()
         ws._cur = {}
         r = _of(dt)
-        if ws._rec and ws._frames_drawn != n0:
+        if ws._rec and ws.frame_state.frames_drawn != n0:
             ws._fr.append((_td(_tk(), a), ws._cur,
                            (gc.mem_alloc() - g0) // 1024))
         return r

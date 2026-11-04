@@ -326,15 +326,15 @@ def test_a_settled_achievements_page_paints_nothing(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     for _ in range(6):
         drv.frame(1 / 30)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(1 / 30)
-    assert ws._frames_drawn == drawn, "an idle Achievements page painted"
+    assert ws.frame_state.frames_drawn == drawn, "an idle Achievements page painted"
     before = bytes(ws.sys_canvas._buf)
     drv.press("left")                   # on the first card: nothing to move to
     for _ in range(6):
         drv.frame(1 / 30)
-    assert ws._frames_drawn <= drawn + 1, "one frame for the press, then none"
+    assert ws.frame_state.frames_drawn <= drawn + 1, "one frame for the press, then none"
     assert bytes(ws.sys_canvas._buf) == before
 
 

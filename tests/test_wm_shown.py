@@ -41,9 +41,9 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
     held = []
 
     def frame():
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if ws._frames_drawn == n:
+        if ws.frame_state.frames_drawn == n:
             return False
         if bufs > 1:
             held.append(bytes(root._buf))
@@ -214,8 +214,8 @@ def test_a_content_that_says_nothing_is_stamped_whole(tmp_path, monkeypatch):
     monkeypatch.setattr(type(app), "HELD", False)
     monkeypatch.setattr(type(app), "UI", False)     # nor an app whose pages say it
     got = _spy(monkeypatch, ws, app, root, win)
-    n = ws._frames_drawn
+    n = ws.frame_state.frames_drawn
     r = ws.wm._repeats_n
     _key_stroke(drv, frame, shot, 6)
-    painted = ws._frames_drawn - n - (ws.wm._repeats_n - r)
+    painted = ws.frame_state.frames_drawn - n - (ws.wm._repeats_n - r)
     assert painted and got["stamped"] >= win.buf.w * win.buf.h * painted

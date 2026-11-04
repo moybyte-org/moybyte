@@ -77,27 +77,27 @@ def test_settings_shows_the_rows_only_where_the_kernel_drives_frames(tmp_path):
 def test_the_saver_cycles_covers_on_a_fullscreen_console(tmp_path):
     ws = build_ws(tmp_path)
     ws.frame(1 / 30)
-    n = ws._frames_drawn
+    n = ws.frame_state.frames_drawn
     ws.saver_state(True)
     assert ws._saver is not None and not ws._saver.wallpaper
     ws.frame(1 / 30)
-    assert ws._frames_drawn == n + 1                      # the first card drew
+    assert ws.frame_state.frames_drawn == n + 1                      # the first card drew
     ws.frame(1 / 30)
-    assert ws._frames_drawn == n + 1                      # held until its period ends
+    assert ws.frame_state.frames_drawn == n + 1                      # held until its period ends
     ws.saver_state(False)
     assert ws._saver is None and ws._dirty
     ws.frame(1 / 30)
-    assert ws._frames_drawn == n + 2                      # the console repaints
+    assert ws.frame_state.frames_drawn == n + 2                      # the console repaints
 
 
 def test_the_saver_is_the_wallpaper_on_a_desk(tmp_path):
     ws = build_desktop_ws(tmp_path)
     ws.saver_state(True)
     assert ws._saver is not None and ws._saver.wallpaper
-    n = ws._frames_drawn
+    n = ws.frame_state.frames_drawn
     ws.frame(1 / 30)
     ws.frame(1 / 30)
-    assert ws._frames_drawn == n + 2
+    assert ws.frame_state.frames_drawn == n + 2
 
 
 def test_the_saver_never_covers_a_running_cart(tmp_path):
