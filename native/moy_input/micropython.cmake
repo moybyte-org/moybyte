@@ -19,6 +19,8 @@ target_sources(usermod_moy_input INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_scan.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_gatt_task.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_gatt.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_midi.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_midi.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_input.c)
 
 target_include_directories(usermod_moy_input INTERFACE

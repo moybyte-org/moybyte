@@ -97,12 +97,12 @@ while a Python process holds a lease** (`MOY_LEASE_VM`, read by
 process's lease will live outside the VM, untouched by a stop.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
-`moybyte.http`, `.mic`, `.lora`, `.ble` and `.usb` (`None` where the
-console lacks the class), each over a C driver, each checking its permission
-row against the caller's grants and swept at the caller's end. The mic, the
-radio, BLE and USB have one holder at a time (`EBUSY` for another); `http`
-requests are many. Their events are NET, LORA, BLE and USB records on each
-driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
+`moybyte.http`, `.mic`, `.lora`, `.ble`, `.usb` and `.midi` (`None` where
+the console lacks the class), each over a C driver, each checking its
+permission row against the caller's grants and swept at the caller's end. The
+mic, the radio, BLE, USB and MIDI have one holder at a time (`EBUSY` for
+another); `http` requests are many. Their events are NET, LORA, BLE, USB and
+MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
 on.
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
@@ -149,10 +149,22 @@ on.
   keyboard and mouse over USB (#83's routing into the input table) are not
   built: a report reaches only the API's holder. The S3s have no OTG host
   port (their USB pads are the USB-Serial/JTAG) and no `usb`.
+- **`midi`** (`native/moy_input/moy_midi.h`): ports on three transports,
+  each message a MIDI record (status, two data bytes, the port). A UART
+  port is a leased UART row (the P4s' `uart1`; `lease:uart1` beside
+  `midi`), its bytes read off the FIFO by the driver's own task and parsed
+  with running status, realtime bytes through whole and system exclusive
+  read past. A USB port is a USB-MIDI device `usb` enumerated (its event
+  packets reach the driver from `moy_usb`'s IN completions). A BLE port is
+  a BLE-MIDI peripheral the face drives through `ble`'s central (connect,
+  find the MIDI I/O characteristic, subscribe; each notification's header
+  and timestamps read past). What an app sends is MIDI bytes, packed for the
+  transport. The `midi` face's sweep runs ahead of the leases', so a UART's
+  reader stops before its lease's driver goes.
 
 The host's stand-ins are `runtime/host/mic_sim.py`, `lora_sim.py` (with a
-LoRaWAN network server written apart from the C), `gatt_sim.py` and
-`usb_sim.py`; `http` runs for real.
+LoRaWAN network server written apart from the C), `gatt_sim.py`,
+`usb_sim.py` and `midi_sim.py` (a UART port's wire); `http` runs for real.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in

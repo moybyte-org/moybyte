@@ -49,7 +49,7 @@ def test_the_table_is_well_formed():
         kind = grants.split(":")[0]
         assert kind in ("floor", "role", "api", "boot", "lease", "marker"), grants
         assert tiers and set(tiers) <= set(P.ALL), tiers
-        assert needs in (None, "wifi", "net", "gpio", "lease", "mic", "lora", "ble", "usb"), needs
+        assert needs in (None, "wifi", "net", "gpio", "lease", "mic", "lora", "ble", "usb", "midi"), needs
         assert (kind == "lease") == (prompt == "full") == (needs == "lease"), perm
         # a line is what can be consented to and turned off: never the floor
         # or a marker

@@ -4,8 +4,8 @@
 // THE CLASSES the OS drives: HID (a boot keyboard or mouse in its boot
 // protocol, any other HID in its report protocol: each report as it comes),
 // CDC-ACM serial (line coding, bytes both ways) and USB-MIDI (the class's
-// 4-byte event packets both ways, which the `midi` API decodes,
-// native/moy_input/moy_midi.h). Another device is listed, its class named,
+// 4-byte event packets both ways; a device's packets also reach the `midi`
+// API's port on it, native/moy_input/moy_midi.h's moy_midi_usb_in). Another device is listed, its class named,
 // and not driven.
 //
 // Every device the host enumerates is in a table of MOY_USB_DEVS (its bus
@@ -95,9 +95,6 @@ int moy_usb_write(uint32_t owner, uint8_t addr, const uint8_t *d, size_t n);
 // A serial or MIDI device's bytes, oldest first: how many.
 int moy_usb_read(uint32_t owner, uint8_t addr, uint8_t *out, size_t cap);
 uint32_t moy_usb_source(void);
-// A MIDI device's packets go to `fn` as they come, beside the holder's ring
-// (the `midi` API's USB transport); NULL stops it.
-void moy_usb_midi_sink(void (*fn)(uint8_t addr, const uint8_t *d, size_t n));
 
 // -- what the bus reports (the class drivers' completions) --
 void moy_usb_on_attach(const moy_usb_dev_t *d);

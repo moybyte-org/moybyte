@@ -9,6 +9,7 @@ SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_input.c $(MOY_INPUT_DIR)/moy_input_tas
 ifeq ($(MOY_INPUT_DRIVERS),0)
 CFLAGS_USERMOD += -DMOY_INPUT_DRIVERS=0
 else
-SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_touch.c $(MOY_INPUT_DIR)/moy_kbd.c $(MOY_INPUT_DIR)/moy_touchdev.c $(MOY_INPUT_DIR)/moy_ble_task.c
+SRC_USERMOD_C += $(MOY_INPUT_DIR)/modmoy_midi.c
+SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_midi.c $(MOY_INPUT_DIR)/moy_touch.c $(MOY_INPUT_DIR)/moy_kbd.c $(MOY_INPUT_DIR)/moy_touchdev.c $(MOY_INPUT_DIR)/moy_ble_task.c
 endif
 CFLAGS_USERMOD += -I$(MOY_INPUT_DIR) -I$(MOY_INPUT_DIR)/../moy_spine

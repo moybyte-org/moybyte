@@ -1,0 +1,313 @@
+"""`moybyte.midi`: the `midi` device API's face (docs/os_2026-11/hardware.md
+section 1) over its driver (native/moy_input/moy_midi.h, the module
+moy_midi): MIDI over a leased UART, a USB-MIDI device and a BLE-MIDI
+peripheral, every message a MIDI record on the driver's ring. Needs the
+`midi` permission (and `lease:<row>` for a UART); one process holds it, and
+its end closes every port.
+
+  uart(row="uart1", baud=31250) -> port
+                        the board's UART row leased to the caller, its bytes
+                        read off the FIFO by the driver
+  usb(addr) -> port     a USB-MIDI device (its address, as moybyte.usb
+                        lists it)
+  ble(addr) -> port     a BLE-MIDI peripheral: connected, its MIDI I/O
+                        characteristic found and subscribed (moybyte.ble's
+                        host, which must be up); messages flow once it is
+  send(port, data)      MIDI bytes, whole messages (no system exclusive)
+  on(fn)                fn(port, status, data1, data2) for each message
+  ports() -> [(port, transport, unit)]   transport UART, USB or BLE
+  close(port=None)      one port, or all of them and the API
+
+A transport the console lacks refuses with OSError(ENODEV); `present()` is
+whether any is there."""
+
+try:
+    import moy_midi as _N
+except ImportError:  # host: the runtime package
+    from runtime import moy_midi as _N
+
+try:
+    import devices as _D
+except ImportError:  # host: the runtime package
+    from runtime import devices as _D
+
+try:
+    import moybyte as _moybyte
+    from ticks import _ticks_ms
+except ImportError:  # host: the runtime package
+    from runtime import moybyte as _moybyte
+    from runtime.ticks import _ticks_ms
+
+UART, USB, BLE = _N.UART, _N.USB, _N.BLE
+# The BLE-MIDI service's data I/O characteristic.
+MIDI_IO = "7772e5db-3868-4112-a1a9-f2669d106bf3"
+
+# devices' sweep order: this one runs before the leases', so a UART's reader
+# stops before its driver goes.
+SWEEP_FIRST = True
+
+_wakes = {}         # pid -> wake id
+_gatt_wakes = {}    # pid -> the BLE port's wake id
+_took = {}          # pid -> the USB and BLE drivers it took through this API
+_ports = {}         # pid -> {port: [transport, unit, the UART lease | the BLE state]}
+
+
+def _usb():
+    try:
+        import moy_usb
+    except ImportError:
+        try:
+            from runtime import moy_usb
+        except ImportError:  # a console with no USB host
+            return None
+    return moy_usb if moy_usb.present() else None
+
+
+def _gatt():
+    try:
+        import moy_gatt
+    except ImportError:  # host: the runtime package
+        from runtime import moy_gatt
+    return moy_gatt if moy_gatt.present() else None
+
+
+def _ble():
+    try:
+        import dev_ble
+    except ImportError:  # host: the runtime package
+        from runtime import dev_ble
+    return dev_ble
+
+
+def _leases():
+    try:
+        import leases
+    except ImportError:  # host: the runtime package
+        from runtime import leases
+    return leases
+
+
+def _uart_rows():
+    return [o[0] for o in _leases().LEASES.offers() if o[0].startswith("uart")]
+
+
+def _take():
+    p = _D.need("midi")
+    if _N.owner() != p:
+        _D.check(_N.open(p))
+    _ports.setdefault(p, {})
+    return p
+
+
+def _err(e):
+    return _D.error(e)
+
+
+def uart(row="uart1", baud=31250):
+    p = _take()
+    L = _leases().LEASES
+    o = L.offer(row)
+    if o is None or not row.startswith("uart"):
+        raise _err(_D.ENODEV)
+    u = L.take(p, row, {"baudrate": baud})
+    port = _N.port(p, UART, o[2])
+    if port < 0:
+        L.drop(u)
+        raise _err(-port)
+    rc = _N.uart(p, port)
+    if rc < 0:
+        _N.unport(p, port)
+        L.drop(u)
+        raise _err(-rc)
+    _ports[p][port] = [UART, o[2], u]
+    return port
+
+
+def usb(addr):
+    p = _take()
+    U = _usb()
+    if U is None:
+        raise _err(_D.ENODEV)
+    if U.owner() != p:
+        _D.check(U.open(p))
+        _took.setdefault(p, []).append(U)
+    for i in range(U.count()):
+        d = U.device(i)
+        if d is not None and d[0] == addr and d[1] == U.MIDI:
+            port = _D.check(_N.port(p, USB, addr))
+            _ports[p][port] = [USB, addr, None]
+            return port
+    raise _err(_D.ENODEV)
+
+
+def ble(addr):
+    p = _take()
+    G = _gatt()
+    if G is None:
+        raise _err(_D.ENODEV)
+    if G.owner() != p:
+        _D.check(G.open(p))
+        _took.setdefault(p, []).append(G)
+    a = _ble().addr_bytes(addr)
+    t = 0
+    for i in range(G.seen_count()):
+        s = G.seen(i)
+        if s is not None and s[0] == a:
+            t = s[1]
+    port = _D.check(_N.port(p, BLE, 0))
+    _ports[p][port] = [BLE, 0, {"handle": 0, "state": "connecting"}]
+    _gatt_wake(p, G)
+    rc = G.connect(p, a, t)
+    if rc < 0:
+        _N.unport(p, port)
+        del _ports[p][port]
+        raise _err(-rc)
+    return port
+
+
+def _ble_port(p):
+    for port, v in _ports.get(p, {}).items():
+        if v[0] == BLE:
+            return port, v[2]
+    return None, None
+
+
+def _gatt_wake(p, G):
+    """The BLE port's steps on the `ble` driver's events: connected, its
+    characteristic found, subscribed; then each notification a packet."""
+    from array import array
+    buf = array("i", [0] * (_moybyte.EV_FIELDS * 4))
+    note = bytearray(244)
+    meta = array("i", [0])
+    F, K, ID, B = _moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_B
+    A = _moybyte.EV_A
+    kind = _moybyte.BLE
+
+    def step(ev, a, status):
+        port, st = _ble_port(p)
+        if st is None:
+            return
+        if ev == G.EV_CONNECTED:
+            if status == 0:
+                st["state"] = "finding"
+                G.find(p, _ble().uuid_bytes(MIDI_IO))
+            else:
+                st["state"] = "failed"
+        elif ev == G.EV_FOUND:
+            if status == 0:
+                st["handle"] = a
+                st["state"] = "ready"
+                G.subscribe(p, a, True)
+            else:
+                st["state"] = "failed"
+        elif ev == G.EV_NOTIFY:
+            while True:
+                n = G.notified(p, note, meta)
+                if n <= 0:
+                    break
+                _N.ble_in(p, port, memoryview(note)[:n])
+        elif ev == G.EV_DISCONNECTED:
+            st["state"] = "gone"
+
+    def wake():
+        n = _moybyte.events(buf)
+        while n:
+            for i in range(n):
+                k = i * F
+                if buf[k + K] == kind:
+                    step(buf[k + ID], buf[k + A], buf[k + B])
+            n = _moybyte.events(buf) if n == 4 else 0
+    w = _gatt_wakes.get(p)
+    if w is not None:
+        _moybyte.WAKES.cancel(w)
+    _gatt_wakes[p] = _moybyte.WAKES.on_ring(G.source(), wake, 1 << kind)
+
+
+def send(port, data):
+    p = _take()
+    v = _ports[p].get(port)
+    if v is None:
+        raise _err(_D.EBADF)
+    if v[0] == UART:
+        _D.check(_N.usb_pack(data, bytearray(4 * len(data) + 4)))   # whole messages only
+        v[2].write(data)
+    elif v[0] == USB:
+        out = bytearray(4 * len(data) + 4)
+        n = _D.check(_N.usb_pack(data, out))
+        _D.check(_usb().write(p, v[1], memoryview(out)[:n]))
+    else:
+        st = v[2]
+        if st["state"] != "ready":
+            raise _err(107)                 # ENOTCONN
+        out = bytearray(2 * len(data) + 2)
+        n = _D.check(_N.ble_pack(data, _ticks_ms(), out))
+        _D.check(_gatt().write(p, st["handle"], memoryview(out)[:n], False))
+
+
+def on(fn):
+    """Wake `fn(port, status, data1, data2)` for each MIDI message."""
+    p = _take()
+    w = _wakes.get(p)
+    if w is not None:
+        _moybyte.WAKES.cancel(w)
+    from array import array
+    buf = array("i", [0] * (_moybyte.EV_FIELDS * 8))
+    F, K, ID, A, B = (_moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_A,
+                      _moybyte.EV_B)
+    midi = _moybyte.MIDI
+
+    def wake():
+        n = _moybyte.events(buf)
+        while n:
+            for i in range(n):
+                k = i * F
+                if buf[k + K] == midi:
+                    a = buf[k + A]
+                    fn(buf[k + ID], a & 0xff, (a >> 8) & 0x7f, buf[k + B])
+            n = _moybyte.events(buf) if n == 8 else 0
+    _wakes[p] = _moybyte.WAKES.on_ring(_N.source(), wake, 1 << midi)
+    return _wakes[p]
+
+
+def ports():
+    p = _D.pid()
+    return [(k, v[0], v[1]) for k, v in sorted(_ports.get(p, {}).items())]
+
+
+def _drop(p, port, v):
+    _N.unport(p, port)
+    if v[0] == UART:
+        _leases().LEASES.drop(v[2])
+
+
+def close(port=None):
+    p = _D.pid()
+    if port is None:
+        sweep(p)
+        return
+    v = _ports.get(p, {}).pop(port, None)
+    if v is None:
+        raise _err(_D.EBADF)
+    _drop(p, port, v)
+
+
+def present():
+    return bool(_uart_rows()) or _usb() is not None or _gatt() is not None
+
+
+def sweep(pid):
+    """The process's ports closed -- each UART's reader stopped before its
+    lease goes, which is why this runs ahead of the leases' sweep -- and the
+    API let go."""
+    w = _wakes.pop(pid, None)
+    if w is not None:
+        _moybyte.WAKES.cancel(w)
+    held = _ports.pop(pid, {})
+    w = _gatt_wakes.pop(pid, None)
+    if w is not None:
+        _moybyte.WAKES.cancel(w)
+    for port, v in held.items():
+        _drop(pid, port, v)
+    for d in _took.pop(pid, ()):
+        d.sweep(pid)
+    return _N.sweep(pid)

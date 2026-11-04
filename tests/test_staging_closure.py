@@ -156,12 +156,12 @@ NATIVE = {
 # user-files layer it serves the files role over, the module `moy_ufiles`; the
 # device APIs' drivers register beside the module of the directory they live
 # in (`moy_http` and `moy_lora` in moy_net, `moy_mic` in moy_audio, `moy_gatt`
-# in moy_input).
+# and `moy_midi` in moy_input).
 USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop", "moy_lease"},
                    "moy_app": {"moy_app", "moy_ufiles"},
                    "moy_net": {"moy_net", "moy_http", "moy_lora"},
                    "moy_audio": {"moy_audio", "moy_mic"},
-                   "moy_input": {"moy_input", "moy_gatt"}}
+                   "moy_input": {"moy_input", "moy_gatt", "moy_midi"}}
 
 
 def _native_modules(target):

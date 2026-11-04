@@ -7,6 +7,7 @@
 
 #include "moy_drivers.h"
 #include "moy_input.h"
+#include "moy_midi.h"
 
 #if defined(MOY_INPUT_BOARD)
 #include "esp_heap_caps.h"
@@ -16,7 +17,6 @@ static moy_drv_lock_t s_lock;
 #endif
 
 static volatile uint32_t s_owner;
-static void (*volatile s_midi)(uint8_t addr, const uint8_t *d, size_t n);
 
 // What the API keeps, taken at the first open (a board's PSRAM).
 typedef struct {
@@ -70,6 +70,17 @@ static int find(uint8_t addr) {
     return -1;
 }
 
+static int alloc(void) {
+    if (U == NULL) {
+        #if defined(MOY_INPUT_BOARD)
+        U = heap_caps_calloc(1, sizeof(*U), MALLOC_CAP_SPIRAM);
+        #else
+        U = calloc(1, sizeof(*U));
+        #endif
+    }
+    return U != NULL;
+}
+
 int moy_usb_open(uint32_t owner) {
     if (owner == 0 || !moy_usb_present()) {
         return -MOY_USB_ENODEV;
@@ -80,15 +91,8 @@ int moy_usb_open(uint32_t owner) {
     if (s_owner != 0) {
         return -MOY_USB_EBUSY;
     }
-    if (U == NULL) {
-        #if defined(MOY_INPUT_BOARD)
-        U = heap_caps_calloc(1, sizeof(*U), MALLOC_CAP_SPIRAM);
-        #else
-        U = calloc(1, sizeof(*U));
-        #endif
-        if (U == NULL) {
-            return -MOY_USB_ENODEV;
-        }
+    if (!alloc()) {
+        return -MOY_USB_ENODEV;
     }
     moy_input_t *t = moy_input_kernel();
     char was[8];
@@ -225,10 +229,6 @@ int moy_usb_read(uint32_t owner, uint8_t addr, uint8_t *out, size_t cap) {
     return (int)n;
 }
 
-void moy_usb_midi_sink(void (*fn)(uint8_t addr, const uint8_t *d, size_t n)) {
-    s_midi = fn;
-}
-
 // -- what the bus reports ------------------------------------------------------------
 
 void moy_usb_on_attach(const moy_usb_dev_t *d) {
@@ -295,9 +295,8 @@ void moy_usb_on_in(uint8_t addr, const uint8_t *d, size_t n) {
         b = U->io[i].n;
     }
     MOY_DRV_UNLOCK(&s_lock);
-    void (*midi)(uint8_t, const uint8_t *, size_t) = s_midi;
-    if (cls == MOY_USB_MIDI && midi != NULL) {
-        midi(addr, d, n);
+    if (cls == MOY_USB_MIDI) {
+        moy_midi_usb_in(addr, d, n);    // the `midi` API's port on it, if one is open
     }
     if (cls >= 0 && s_owner != 0) {
         post(cls == MOY_USB_HID ? MOY_USB_EV_REPORT : MOY_USB_EV_DATA, addr, b);
@@ -371,7 +370,7 @@ void moy_usb_sim(int on) {
 int moy_usb_sim_attach(uint8_t addr, uint8_t cls, uint8_t kind, uint16_t vid, uint16_t pid,
                        const char *name) {
     int i = sim_at(0);
-    if (addr == 0 || i < 0) {
+    if (addr == 0 || i < 0 || !alloc()) {
         return -MOY_USB_EINVAL;
     }
     memset(&s_sim[i], 0, sizeof(s_sim[i]));
@@ -451,12 +450,15 @@ int moy_usb_sim_out(uint8_t addr, uint8_t *out, size_t cap, uint32_t *baud) {
 
 void moy_usb_reset(void) {
     s_owner = 0;
-    s_midi = NULL;
     #if !defined(MOY_INPUT_BOARD)
     memset(s_sim, 0, sizeof(s_sim));
     #endif
     if (U != NULL) {
         U->ndev = 0;
         U->started = 0;
+        if (U->src != 0) {
+            moy_input_ring_close(moy_input_kernel(), U->src);
+            U->src = 0;
+        }
     }
 }
