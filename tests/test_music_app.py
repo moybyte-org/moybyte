@@ -111,6 +111,40 @@ def test_a_station_plays_and_its_status_item_follows_the_stream(tmp_path, face):
     assert face.n is None and ITEMS.count() == 0
 
 
+class StampedFace(Face):
+    """A face with the board's stamp: one int over what now() shows, and a
+    count of the now() reads."""
+
+    def __init__(self):
+        Face.__init__(self)
+        self.reads = 0
+
+    def now(self):
+        self.reads += 1
+        return Face.now(self)
+
+    def stamp(self):
+        n = self.n
+        return None if n is None else hash((n["paused"], n["volume"], n["title"]))
+
+
+def test_a_still_stamp_skips_the_read_and_a_moved_one_reads(tmp_path, face):
+    """A station playing on under a game: the poll reads the stamp alone;
+    a pause moves it and the card follows."""
+    f = StampedFace()
+    M.STREAM.face = f
+    build_ws(tmp_path)
+    M.STREAM.play("radio", "Groove Salad", GROOVE[2])
+    M.STREAM.poll()
+    reads = f.reads
+    for _ in range(5):
+        M.STREAM.poll()
+    assert f.reads == reads
+    f.n["paused"] = True
+    M.STREAM.poll()
+    assert f.reads == reads + 1 and M.STREAM.card["paused"]
+
+
 def test_a_station_that_fails_shows_the_danger_state_and_tries_again(tmp_path, face):
     ws = build_ws(tmp_path)
     ws.open_app(_app(ws))

@@ -165,6 +165,18 @@ def status():
     return tuple(getattr(st, f) for f in FIELDS)
 
 
+def stamp():
+    st = status()
+    if st is None:
+        return None
+    s = dict(zip(FIELDS, st))
+    h = s["state"] * 2 + (1 if s["paused"] else 0)
+    for v in (s["entry"], s["volume"], s["err"], s["text_gen"],
+              s["at_ms"] // 1000, s["len_ms"] // 1000):
+        h = (h * 31 + v) & 0xffffffff
+    return h & 0x3fffffff
+
+
 def text(which):
     buf = ctypes.create_string_buffer(512)
     n = _lib().moy_media_text(which, buf, len(buf))

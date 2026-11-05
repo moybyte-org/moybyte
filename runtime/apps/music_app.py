@@ -154,6 +154,7 @@ class Stream:
         self.section = None
         self.wake = None
         self.sig = None
+        self.stamp = None           # the face's stamp the last full read saw
         self.tick = 0
         self.gen = 0                # moves with anything the card shows
         self.on_change = None       # fn() the app sets: a frame owed
@@ -174,6 +175,7 @@ class Stream:
         """Play `src` as `kind` named `name`: the stream starts connecting
         (a station) or playing; False with the card failed when the face
         refuses it."""
+        self.stamp = None
         m = self.media()
         if m is None:
             return False
@@ -191,6 +193,7 @@ class Stream:
 
     def toggle(self):
         """Pause or play; a stream that failed is tried again."""
+        self.stamp = None
         m = self.media()
         c = self.card
         if m is None or c is None:
@@ -216,6 +219,7 @@ class Stream:
 
     def step(self, d):
         """The next (`d` 1) or previous station, song or list entry."""
+        self.stamp = None
         w = self.what
         m = self.media()
         if w is None or m is None:
@@ -238,6 +242,7 @@ class Stream:
         self.play(kind, p[0], p[2] if kind == "radio" else p[1])
 
     def volume(self, v=None):
+        self.stamp = None
         m = self.media()
         if m is None:
             return 0
@@ -269,13 +274,21 @@ class Stream:
         self.card = None
         self.what = None
         self.sig = None
+        self.stamp = None
         self._changed()
 
     def poll(self):
         """The face read: the card, the status item's state and a frame
         where what shows moved. A stream gone (stopped elsewhere, its list
-        ended) takes the item out."""
+        ended) takes the item out. While the face's stamp holds still
+        (a station playing on under a game) it reads nothing else and
+        allocates nothing."""
         m = self.media()
+        if m is not None and self.sig is not None and self.sig[0] != OPENING:
+            st = m.stamp() if hasattr(m, "stamp") else None
+            if st is not None and st == self.stamp:
+                return
+            self.stamp = st
         n = None
         if m is not None:
             try:

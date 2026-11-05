@@ -398,6 +398,7 @@ def measure(loop):
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     background(loop, info)
+    music(loop, info)
     banner(loop, info)
     notes(loop, info)
     code(loop, info)
@@ -434,6 +435,54 @@ def background(loop, info):
     p = scheduler.SCHED.procs[pid]
     info["bg_ran"] = p.ns["n"][0] if p.ns else -1
     scheduler.SCHED.stop(pid)
+
+
+class _Face:
+    """The media face as a station playing on: this binary has no
+    moy_media, so the stamp is still and counts its reads."""
+
+    def __init__(self):
+        self.reads = [0]
+        self.n = {"state": "playing", "paused": False, "src": "http://x/s.mp3",
+                  "station": "", "title": "Dayvan Cowboy", "entry": 0,
+                  "entries": 1, "volume": 60, "at": 0, "len": 0}
+
+    def now(self):
+        return dict(self.n)
+
+    def stamp(self):
+        self.reads[0] += 1
+        return 12345
+
+    def play(self, src):
+        pass
+
+    def stop(self):
+        pass
+
+    def volume(self, v=None):
+        return 60
+
+
+def music(loop, info):
+    """The play frame again with Music's station playing on behind it: its
+    poll every POLL_MS finds the stamp still."""
+    import music_app
+    s = music_app.STREAM
+    f = _Face()
+    s.face = f
+    s.play("radio", "Groove Salad", "http://x/s.mp3")
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    r0 = f.reads[0]
+    info["music"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    info["music_polls"] = f.reads[0] - r0
+    gc.enable()
+    info["music_item"] = s.item is not None
+    s.stop()
+    s.face = None
 
 
 POSTER = """
@@ -1334,6 +1383,12 @@ def test_a_play_frame_with_a_background_service_allocates_nothing(result):
     info, text = result
     assert info["bg_ran"] > len(info["bg"]) // 2, text[-3000:]
     _assert_quiet(info["bg"], "a background service", text)
+
+
+def test_a_play_frame_with_music_playing_allocates_nothing(result):
+    info, text = result
+    assert info["music_item"] and info["music_polls"] > 2, text[-3000:]
+    _assert_quiet(info["music"], "music playing on", text)
 
 
 def test_a_play_frame_under_a_notification_banner_allocates_nothing(result):

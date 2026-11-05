@@ -140,6 +140,26 @@ static mp_obj_t media_status(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 
+// One small int over what a player shows -- the state, pause, entry,
+// volume, error, the texts' generation and the place and length in whole
+// seconds -- that moves when any of them does: a poll that finds it still
+// allocates nothing. None with no service.
+static mp_obj_t media_stamp(void) {
+    moy_media_status_t s;
+    if (!moy_media_status(&s)) {
+        return mp_const_none;
+    }
+    uint32_t h = (uint32_t)s.state * 2u + (s.paused ? 1u : 0u);
+    h = h * 31u + (uint32_t)s.entry;
+    h = h * 31u + (uint32_t)s.volume;
+    h = h * 31u + (uint32_t)s.err;
+    h = h * 31u + s.text_gen;
+    h = h * 31u + s.at_ms / 1000u;
+    h = h * 31u + s.len_ms / 1000u;
+    return MP_OBJ_NEW_SMALL_INT(h & 0x3fffffffu);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(media_stamp_obj, media_stamp);
+
 static mp_obj_t media_text(mp_obj_t which) {
     char buf[MOY_MEDIA_SRC_MAX];
     int n = moy_media_text(mp_obj_get_int(which), buf, sizeof(buf));
@@ -203,6 +223,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_feed_end), MP_ROM_PTR(&media_feed_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_size), MP_ROM_PTR(&media_feed_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&media_stamp_obj) },
     { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&media_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_entry), MP_ROM_PTR(&media_entry_obj) },
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&media_run_obj) },

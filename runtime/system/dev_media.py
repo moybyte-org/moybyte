@@ -19,6 +19,9 @@ One stream at a time, one process's.
                      rate, channels, kbps, volume, err, pid, and a file's
                      place and length heard, `at` and `len` in seconds
                      (0 for a stream, and `len` 0 until a frame decodes)
+  stamp() -> int | None  one small int that moves when what now() shows
+                     does (its place by the second): a poll that finds it
+                     still reads nothing else and allocates nothing
 
 A stream lives as long as its process (owner, 2026-11-03): the process's end
 stops it (`sweep`), and the shell (pid 1) may stop it from anywhere. While a
@@ -379,6 +382,12 @@ def volume(v=None):
     if v is not None:
         _N.volume(p, int(v))
     return _N.status()[_VOL]
+
+
+def stamp():
+    if not _s["pid"] or _s["stopping"]:
+        return None
+    return _N.stamp()
 
 
 def now():
