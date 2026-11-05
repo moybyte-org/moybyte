@@ -3766,8 +3766,10 @@ int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     mua_group_close(c, s);
     if (kind == 1) {
         mua_foot_fade(c, s);
+        // a thumb where the region never shifts: one under the app's gen
+        // shifts its rows on a shift frame, and the thumb is no row
         moy_ui_keep_t *kk = mua_page_keep(c);
-        if (kk != NULL && !mua_no_foot) {
+        if (kk != NULL && !mua_no_foot && !(kk->kd & MOY_UI_KD_GEN)) {
             mua_thumb(c, s, c->page, kk->b, c->scroll);
         }
     } else if (kind == 3 && mua_page_keep(c) != NULL) {

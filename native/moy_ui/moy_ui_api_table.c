@@ -743,7 +743,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             // Files ends its view half a row into one); a part's table
             // draws them over its parts (mua_parts_close)
             mua_edge_fades(c, s, view, count * rh, offset, MOY_UI_DEFAULT, 1, rh);
-            mua_thumb(c, s, view, count * rh, offset);
+            if (!o->has_gen && !carry) {
+                mua_thumb(c, s, view, count * rh, offset);   // as a region's (mua_nest_close)
+            }
         }
         mua_clip_out(&kv);
         mua_clip_out(&k);

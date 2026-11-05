@@ -13,12 +13,14 @@ try:
     import ui_draw as _ui_draw        # the desk's tiles and labels
     import layout_base as _layout_base
     import iconsets as _iconsets
+    from status_items import ITEMS as _ITEMS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
     from runtime import iconsets as _iconsets
+    from runtime.status_items import ITEMS as _ITEMS
 
 # A desk label over a wallpaper (a picture or a cart, pixels the theme does
 # not know): white over a black shadow (chrome.FIXED's), 80% and one pixel
@@ -216,6 +218,8 @@ class _BackdropLayer(Layer):
         """Everything the desk's wallpaper + icon column depends on, the
         layout's content rect among it (the bars a mode switch moves).
 
+        The apps' status items are in its bar (their `gen`).
+
         Deliberately NOT the clock (repainted over the cache instead) and NOT
         ws.covers.gen: a cover landing in the picker would otherwise invalidate
         the desk on the very frames a scroll is trying to stay cheap. Cheap to
@@ -226,7 +230,7 @@ class _BackdropLayer(Layer):
         return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
                 ws.look.wallpaper_id,
                 len(getattr(ws, "_apps", ())), len(ws.carts.all),
-                lay.cx, lay.cy, lay.cw, lay.ch)
+                lay.cx, lay.cy, lay.cw, lay.ch, _ITEMS.gen)
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt, quiet=self.quiet())

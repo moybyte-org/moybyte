@@ -278,7 +278,10 @@ renders the owner chose from):
    the box, and take a caller's border in place of their own (`o.border`,
    the danger ink for a field in error).
 5. **Scrolled views** carry a 2 px thumb in the dim ink on a track in the
-   border's (scroll regions and tables) and 8 px fades.
+   border's and 8 px fades. The thumb is the engine's on a scroll region or
+   placed table the app gives no gen (the control center's): a view under a
+   gen moves its pixels on a shift frame (`docs/surface_model_v1.md` §14.7),
+   and a thumb moving along it is no row the move carries.
 6. **Apps put status items in the bar** (`moybyte.status`,
    `runtime/system/status_items.py`): one preallocated record an item, swept
    with its process, its section drawn as that process. On the desk an

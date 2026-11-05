@@ -416,7 +416,8 @@ class StatusMenu:
 
     def size(self):
         w = 404
-        foot = _ui_draw.metrics("value_row")[_HINTS_DESK]
+        # under touch alone there are no hints, and no room kept for them
+        foot = 0 if _ui.input_kind() == "touch" else _ui_draw.metrics("value_row")[_HINTS_DESK]
         it = self.item
         h = _ITEMS.height(it, w - 2 * _pad(self.ws), True) if it is not None else 0
         return (w, 2 * _pad(self.ws) + h + foot)
