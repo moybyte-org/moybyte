@@ -3,9 +3,9 @@
 #   Sheet               the state sheet: one surface a page, drawn with the ui verbs
 #   _sheet_setup        a sheet frame's setup (SURFACES lists each page's frames)
 #   _cc                 the control center opened (SHELL lists the shell's screens)
-#   _proposal_theme     the proposed grammar as a seed's package (PROPOSAL's data)
-#   _overlay            what the proposal draws that the engine does not yet
+#   _engine_has_marks   whether this checkout carries the prototype (PATCH)
 #   _cc_inset           the control center's inset, as the proposal draws it
+#   checks              the legibility checks on the declared marks
 #   shoot               one run's renders
 #   sheets              the contact sheets
 #   findings            the README's numbered crops (FINDINGS)
@@ -17,7 +17,7 @@ workstation (`tests/test_shell_goldens.py`, through `tools/look_shots.py`'s
 `render`), written as PNGs.
 
 usage: .venv/bin/python tools/focus_shots.py OUT [FILTER ...] [--work DIR]
-                                             [--runs today,proposal,findings]
+                                             [--runs today|proposal|findings|checks]
 
 Two kinds of render:
 
@@ -31,21 +31,23 @@ Two kinds of render:
   menu, the control center, Files, Calc, the desk's PROJECTS window, the
   delete's question), each with a stop focused.
 
-Two runs draw them: `today` as dev draws them, and `proposal` with the
-proposed grammar -- each theme's focus and current marks as look data
-(`PROPOSAL`, installed as a store package over the seed) and the engine
-changes the data cannot say drawn over the render by `_overlay` and
-`_cc_inset` the way the build is to draw them. Each run writes OUT/RUN/
+Two runs draw them: `today` from a checkout as dev draws them, and
+`proposal` from a checkout with `PATCH` applied (`git apply` it in a scratch
+worktree, then run tools/gen_ui_tables.py): the toolkit's `marks` look keys,
+the engine fixes and the seed themes' declarations, drawn by the toolkit
+itself, with the control center's inset (`_cc_inset`, the shell's Python)
+patched in at run time. The built-in themes carry the proposal, so the theme
+picker shows the active one as a seed. `checks` prints the legibility checks
+on the checkout's declared marks. Each run writes OUT/RUN/
 surface_SURFACE_{tdeck,desk,shell}.png (one surface across the
 theme-modes) and theme_THEME-MODE_{tdeck,shell}.png (one theme-mode's
 surfaces), every cell captioned with its theme-mode, surface and state;
-`findings` crops FINDINGS' panels from both runs into OUT/findings/. The
-single frames and whole renders stay in --work (a temporary directory by
-default).
+`findings` crops FINDINGS' panels from both runs' --work into
+OUT/findings/. The single frames and whole renders stay in --work (a
+temporary directory by default).
 """
 
 import argparse
-import copy
 import fnmatch
 import json
 import os
@@ -59,7 +61,6 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import look_shots as L  # noqa: E402  -- the review kit's renderer
 
 MODES = L.KIT_MODES
-SEEDS = os.path.join(ROOT, "native", "moy_ui", "themes")
 
 # --------------------------------------------------------------------------
 # the state sheet
@@ -157,8 +158,6 @@ class Sheet:
         self.vals["toggle"] = ui.toggle("Toggle", self.vals["toggle"])
         ui.slider("Slider", 3, 0, 7, {"steps": True})
         ui.group()
-        from runtime import ui_draw
-        BOXES["Selected"] = ui_draw._C.api_box(self.ctx, "Selected") or BOXES.get("Selected")
 
     def _list(self, ui, rect):
         ui.hints(("confirm", "Open", "back", "Back"))
@@ -178,15 +177,16 @@ class Sheet:
         ui.hints(("confirm", "Press", "back", "Back"))
         x, y, w, _h = rect
         fs = self.ws.layout.fs
-        bw, bh, gap = 70 * fs, 24 * fs, 6 * fs
+        bw, bh, gap = 66 * fs, 24 * fs, 10 * fs
         x0, y0 = x + 8 * fs, y + 10 * fs
         names = (("Normal", "normal", None), ("Primary", "primary", None),
                  ("Danger", "danger", None), ("Disabled", "normal", {"disabled": True}),
                  ("Tonal", "tonal", None), ("Toggle on", "toggle", {"current": True}))
         for i, (label, kind, o) in enumerate(names):
-            ui.at(x0 + (i % 4) * (bw + gap), y0 + (i // 4) * (bh + 3 * gap), bw, bh)
+            w2 = bw if i < 4 else bw * 3 // 2       # the second row's labels are longer
+            ui.at(x0 + (i % 4) * (w2 + gap), y0 + (i // 4) * (bh + 2 * gap), w2, bh)
             ui.button(label, kind, o)
-        ui.at(x0, y0 + 2 * (bh + 3 * gap), 3 * bw, bh)
+        ui.at(x0, y0 + 2 * (bh + 2 * gap), 3 * bw, bh)
         ui.button("Wide button")
 
     def _dialog(self, ui, rect):
@@ -218,7 +218,7 @@ class Sheet:
         for i, (icon, label, o) in enumerate((("undo", "Undo", None),
                                               ("pencil", "Pen", {"current": True}),
                                               ("redo", "Redo", {"disabled": True}))):
-            ui.at(tx + i * 30 * fs, ty, 26 * fs, 26 * fs)
+            ui.at(tx + i * 36 * fs, ty, 26 * fs, 26 * fs)
             ui.tool(icon, label, o)
 
     def _fields(self, ui, rect):
@@ -238,11 +238,7 @@ LAST = {"group": "Slider", "list": "files", "table": "", "buttons": "Wide button
         "tabs": "Mode", "cells": "Redo", "fields": "Address"}
 
 # where the desk's sheet window stands, in glass pixels
-DESK_WIN = (112, 52, 440, 250)
-
-
-# the boxes the last sheet frame drew its marked stops in (the overlay's)
-BOXES = {}
+DESK_WIN = (112, 52, 560, 270)
 
 
 # surface -> [(state, focus stop or None, keys, press stop, input)]
@@ -420,7 +416,7 @@ FULL = {}
 # The findings (README): id, title, panels (run, (theme-mode, config tag,
 # surface, state), crop in glass pixels or None, scale).
 _TMS = ["%s-%s" % m for m in MODES]
-_CARD = (0, 42, 320, 152)
+_CARD = (0, 32, 320, 162)
 _CC = (80, 22, 320, 150)
 
 
@@ -479,15 +475,33 @@ FINDINGS = [
      _across("today", "tdeck", "cells", "focus-rest", (0, 22, 320, 130), 2,
              ["moy-dark", "blocks-light", "contrast-dark"])),
     ("11_the-proposal-in-every-theme",
-     "11. The proposal: one focused row (bar), one selected row (fill), rules kept, "
-     "in every theme-mode",
-     _across("proposal", "tdeck", "group", "focus-rest", _CARD, 2)),
+     "11. The proposal's rows, each theme's declared marks: focus on 'Rest' (left), "
+     "focus on the selected row (right); rules kept",
+     [p for tm in _TMS for p in _across("proposal", "tdeck", "group", "focus-rest", _CARD, 2,
+                                         [tm])
+      + _across("proposal", "tdeck", "group", "focus-selected", _CARD, 2, [tm])], 2),
     ("12_the-proposal-on-cells",
-     "12. The proposal on cells: the ring outside, the part's own fill and ink kept",
+     "12. The proposal on cells: the ring outside, the part's own fill and ink kept; a "
+     "tab strip rings its current tab",
      _across("proposal", "tdeck", "dialog", "focus-verb", (0, 70, 320, 180), 2,
              ["moy-dark", "blocks-light", "contrast-dark", "contrast-light"])
      + _across("proposal", "tdeck", "tabs", "focus-tabs", (0, 22, 320, 70), 2,
-               ["moy-light", "blocks-light", "contrast-dark", "contrast-light"])),
+               ["moy-light", "blocks-light", "contrast-dark", "contrast-light"]), 2),
+    ("13_control-center-in-every-theme",
+     "13. The control center on the T-Deck, proposed: the card inset on all four sides, "
+     "the rules kept beside the focused row",
+     _across("proposal", "shell-tdeck", "control-center", "focus-brightness", _CC, 2)),
+    ("14_danger-keeps-its-ink",
+     "14. A focused danger row keeps its red: where a fill focus would hide it (Contrast "
+     "Night), the focus is an inset line",
+     _across("proposal", "tdeck", "menu", "focus-danger", (0, 20, 200, 80), 3,
+             ["moy-dark", "blocks-light", "contrast-dark", "contrast-light"]), 2),
+    ("15_list-and-table-selection",
+     "15. A list's selection stays where it was chosen (left); a table's follows its "
+     "cursor (right)",
+     [p for tm in ("moy-dark", "blocks-light", "contrast-light")
+      for p in _across("proposal", "tdeck", "list", "focus-rest", (0, 20, 320, 150), 2, [tm])
+      + _across("proposal", "tdeck", "table", "focus-down", (0, 20, 320, 150), 2, [tm])], 2),
 ]
 
 
@@ -496,7 +510,7 @@ def findings(work, out):
     the whole renders of `work`'s runs, each labelled."""
     from PIL import Image, ImageDraw
     os.makedirs(out, exist_ok=True)
-    for fid, title, panels in FINDINGS:
+    for fid, title, panels, *cols in FINDINGS:
         cells = []
         for run, key, crop, scale in panels:
             path = os.path.join(work, run, "full", "%s_%s_%s_%s.png" % key)
@@ -511,7 +525,7 @@ def findings(work, out):
             continue
         f, hf = _font(14), _font(18)
         gap = 12
-        cols = min(len(cells), 3 if cells[0][1].width < 700 else 2)
+        cols = cols[0] if cols else min(len(cells), 3 if cells[0][1].width < 700 else 2)
         rows = [cells[i:i + cols] for i in range(0, len(cells), cols)]
         W = max(sum(im.width + gap for _c, im in r) for r in rows) + gap
         H = 44 + sum(max(im.height for _c, im in r) + 24 + gap for r in rows)
@@ -536,7 +550,6 @@ def shoot(out, filters=(), proposal=False, shell=True, sheets=True):
     _cc_inset(proposal)
     for theme, mode in MODES:
         tm = "%s-%s" % (theme, mode)
-        name = _proposal_theme(theme) if proposal else theme
         if sheets:
             for surface, states in SURFACES.items():
                 if filters and not any(fnmatch.fnmatch("%s_%s" % (tm, surface), f)
@@ -545,11 +558,9 @@ def shoot(out, filters=(), proposal=False, shell=True, sheets=True):
                 for tag, config in SHEET_CONFIGS:
                     got = []
                     for state, focus, keys, press, inputs in states:
-                        img, _ok, _r = L.render(g, config, name, mode,
+                        img, _ok, _r = L.render(g, config, theme, mode,
                                                 _sheet_setup(surface, focus, keys, press),
                                                 False, inputs)
-                        if proposal:
-                            img = _overlay(img, surface, state, theme, mode)
                         got.append((state, img))
                     box = _content(got[0][1].size, config)
                     if surface != "dialog" and config == L.HANDHELD:
@@ -564,10 +575,7 @@ def shoot(out, filters=(), proposal=False, shell=True, sheets=True):
                     if filters and not any(fnmatch.fnmatch(key, f) or f in key
                                            for f in filters):
                         continue
-                    BOXES.clear()
-                    img, _ok, _r = L.render(g, config, name, mode, setup, False)
-                    if proposal:
-                        img = _overlay(img, surface, state, theme, mode)
+                    img, _ok, _r = L.render(g, config, theme, mode, setup, False)
                     tag = "tdeck" if config == L.HANDHELD else "desk"
                     frames[(tm, "shell-" + tag, surface, state)] = img
                     FULL[(tm, "shell-" + tag, surface, state)] = img
@@ -704,285 +712,119 @@ def sheets(out, frames, label):
 # the proposal
 # --------------------------------------------------------------------------
 
-#: The proposed grammar as each seed's look data (README, "The package
-#: entries"): every theme's focus is the row's bar and the cell's ring, its
-#: card a ring too; its selection a fill.
-PROPOSAL = {
-    "moy": {"look": {"focus": {"style": "edge", "card": "ring", "small": "edge",
-                               "ring": {"w": 2, "gap": 2}, "edge": {"w": 4}}}},
-    "blocks": {"look": {"focus": {"style": "edge", "card": "ring", "small": "edge",
-                                  "ring": {"w": 3, "gap": 2}, "edge": {"w": 4}},
-                        "current": {"style": "fill", "row": "plate"}}},
-    "contrast": {"look": {"focus": {"style": "edge", "card": "ring", "small": "edge",
-                                    "ring": {"w": 3, "gap": 2}, "edge": {"w": 4}}}},
-}
-
-_PROP_DIRS = {}
+#: The prototype the proposal renders through: the marks system and the seed
+#: themes' declarations (README, "The marks"), as a patch over native/moy_ui.
+PATCH = os.path.join(ROOT, "docs", "media", "focus_2026-11", "marks_prototype.patch")
 
 
-def _merge(a, b):
-    for k, v in b.items():
-        if isinstance(v, dict) and isinstance(a.get(k), dict):
-            _merge(a[k], v)
-        else:
-            a[k] = copy.deepcopy(v)
+def _engine_has_marks():
+    """True when this checkout's toolkit carries the prototype (the patch
+    applied): its schema names the `marks` look keys."""
+    with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as f:
+        return '"marks.row.focus.mark"' in f.read()
 
 
-def _proposal_package(theme):
-    """The seed with PROPOSAL's entries over it, as a store package's
-    theme.json text, named THEMEp."""
-    with open(os.path.join(SEEDS, theme + ".json")) as f:
-        d = json.load(f)
-    d["name"] = theme + "p"
-    _merge(d, PROPOSAL[theme])
-    return d
+# -- the legibility checks the loader is to hold, on the declarations --------
 
-
-def _proposal_theme(theme):
-    """The store package the proposal draws `theme` with (installed by
-    `render` from its directory, as a kid's theme is)."""
-    name = theme + "p"
-    if name not in _PROP_DIRS:
-        d = tempfile.mkdtemp(prefix="focus_shots_")
-        with open(os.path.join(d, "theme.json"), "w") as f:
-            json.dump(_proposal_package(theme), f)
-        _PROP_DIRS[name] = d
-        L.STORE_THEMES[name] = d
-    return name
-
-
-# -- what the proposal draws that the engine does not yet ----------------------
-
-def _hex(c):
-    """A theme colour as the glass shows it: through RGB565, widened as the
-    renders' PNGs widen it."""
+def _rgb(c):
     c = c.lstrip("#")
-    r, g, b = int(c[0:2], 16) >> 3, int(c[2:4], 16) >> 2, int(c[4:6], 16) >> 3
-    return (r * 255 // 31, g * 255 // 63, b * 255 // 31)
-
-
-def _colours(theme, mode):
-    with open(os.path.join(SEEDS, theme + ".json")) as f:
-        d = json.load(f)
-    c = dict(d["colors"].get(mode) or d["colors"][d["modes"][0]])
-    look = dict(d.get("look", {}))
-    _merge(look, look.get(mode, {}))
-    _merge(look, PROPOSAL[theme]["look"])
-    return c, look
-
-
-def _bars(img, f, w):
-    """Each run of the focus colour `f` exactly `w` wide and 6 to 40 tall: the
-    rows' bars, as (x, y, w, h)."""
-    W, H = img.size
-    px = img.load()
-    seen = set()
-    out = []
-    for y in range(H):
-        for x in range(W):
-            if (x, y) in seen or px[x, y] != f:
-                continue
-            x1 = x
-            while x1 < W and px[x1, y] == f:
-                x1 += 1
-            y1 = y
-            while y1 < H and px[x, y1] == f:
-                y1 += 1
-            for yy in range(y, y1):
-                for xx in range(x, x1):
-                    seen.add((xx, yy))
-            if x1 - x == w and 12 <= y1 - y <= 40 and (x < 60 or y1 - y >= 14):
-                out.append((x, y, w, y1 - y))
-    return out
-
-
-def _run(px, y, x0, x1, c, W):
-    """The run of colour `c` on row y through the first such pixel in
-    [x0, x1): (start, end) or None."""
-    for x in range(max(0, x0), min(W, x1)):
-        if px[x, y] == c:
-            a = x
-            while a > 0 and px[a - 1, y] == c:
-                a -= 1
-            b = x
-            while b < W and px[b, y] == c:
-                b += 1
-            return a, b
-    return None
-
-
-def _span(px, x, y, c, dx, dy, W, H):
-    """How long the run of colour c through (x, y) is along (dx, dy)."""
-    n = 1
-    for s in (1, -1):
-        i, j = x + s * dx, y + s * dy
-        while 0 <= i < W and 0 <= j < H and px[i, j] == c:
-            n += 1
-            i, j = i + s * dx, j + s * dy
-    return n
-
-
-def _lerp(a, b, t):
-    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
-
-
-def _t_on(p, a, b):
-    """Where p lies on the line a -> b (0 at a, 1 at b), clamped."""
-    d = [b[i] - a[i] for i in range(3)]
-    n = sum(v * v for v in d)
-    if n == 0:
-        return 0.0
-    t = sum((p[i] - a[i]) * d[i] for i in range(3)) / n
-    return 0.0 if t < 0 else 1.0 if t > 1 else t
-
-
-# the surfaces whose rows wear the bar (a theme whose focus colour is its ink
-# has glyph stems the bar's shape elsewhere: Blocks)
-ROWED = ("group", "list", "table", "menu", "fields", "tabs", "control-center")
-
-
-def _overlay(img, surface, state, theme, mode):
-    """The engine changes the look data cannot say, drawn the way the build
-    is to draw them (README, change list 2-6): the selected fill on a group
-    row; the rules kept beside a row's bar; the bar 2 px clear of a card's
-    frame; the theme's outline round the bar; a field's own border kept
-    under the bar; and the ring round the current tab in place of a bar
-    beside the strip. The control center's inset is `_cc_inset`'s."""
-    from PIL import ImageDraw
-    img = img.copy()
-    c, look = _colours(theme, mode)
-    f = _hex(c.get("focus") or c["accent"])
-    border = _hex(c.get("border") or c["edge"])
-    px = img.load()
-    W, H = img.size
-    d = ImageDraw.Draw(img)
-    box = BOXES.get("Selected")
-    if surface == "group" and box is not None and state != "pressed" and \
-            not state.startswith("touch") and box[2] > 0:
-        _selected_fill(img, box, c, look, f)
-    for (bx, by, bw, bh) in (_bars(img, f, 4) if surface in ROWED else ()):
-        g = px[bx + bw + 1, by + bh // 2]
-        if surface == "tabs" and state == "focus-tabs":
-            d.rectangle((bx, by, bx + bw - 1, by + bh - 1), fill=g)
-            _tab_ring(img, by, bh, g, f, look)
-            continue
-        # the rules above and below the row, where a rule of the same card
-        # shows their extent
-        ext = None
-        for dy in range(1, 60):
-            for y in (by - dy, by + bh + dy):
-                if 0 <= y < H:
-                    r = _run(px, y, bx + bw + 2, bx + 40, border, W)
-                    if r is not None and r[1] - r[0] > 40:
-                        ext = r
-                        break
-            if ext is not None:
-                break
-        if ext is not None:
-            # a row stands there when the card's edge beside the bar runs on
-            # past the rule (on a first or last row it turns into the corner)
-            ex = max(0, bx - 1)
-            side = px[ex, by + bh // 2]
-            for y, beyond in ((by - 2, by - 5), (by + bh + 2, by + bh + 5)):
-                if 0 <= beyond < H and px[ext[0] + 3, y] != border and px[ex, beyond] == side:
-                    d.line((ext[0], y, ext[1] - 1, y), fill=border)
-        # the bar stands 2 px clear of a card's frame, as the ring stands clear
-        left = px[bx - 1, by + bh // 2] if bx > 0 else g
-        nx = bx
-        if left != g and bx > 2:
-            d.rectangle((bx, by, bx + bw - 1, by + bh - 1), fill=g)
-            nx = bx + 2
-            d.rectangle((nx, by, nx + bw - 1, by + bh - 1), fill=f)
-        out = look.get("focus", {}).get("outline")
-        if out:
-            d.rectangle((nx - 1, by - 1, nx + bw, by + bh), outline=_hex(out[1]))
-        # a field on the row keeps its own border: the bar is its focus
-        if surface not in ("fields",) and "name" not in state:
-            continue
-        fb = look.get("field", {}).get("border")
-        fc = _hex(fb) if fb else border
-        # the box: the focus colour's long runs across, then its sides
-        ys = range(max(0, by - 5), min(H, by + bh + 5))
-        hits = [(x, y) for y in ys for x in range(nx + bw + 12, W)
-                if px[x, y] == f and _span(px, x, y, f, 1, 0, W, H) >= 12]
-        if hits:
-            x0, x1 = min(x for x, _y in hits), max(x for x, _y in hits)
-            y0, y1 = min(y for _x, y in hits), max(y for _x, y in hits)
-            hits += [(x, y) for y in range(y0, y1 + 1)
-                     for x in list(range(x0 - 3, x0 + 3)) + list(range(x1 - 2, x1 + 4))
-                     if 0 <= x < W and px[x, y] == f]
-        for x, y in hits:
-            px[x, y] = fc
-    return img
-
-
-def _selected_fill(img, box, c, look, f):
-    """The selected fill on the group row in `box`: Moy's `value` plate,
-    Blocks' selection fill with its ink, Contrast's solid plate and its ink,
-    each the look's own `current`, the text recoloured along its ground."""
-    px = img.load()
-    x, y, w, h = box
-    g = px[x + w // 2, y + 3]
-    ink = _hex(c["ink"])
-    cur = look.get("current", {})
-    style = cur.get("style", "bar")
-    if style == "fill":
-        fill, ink2 = _hex(c["selection"]), _hex(c["selection_ink"])
-    else:
-        val = _hex(c.get("value") or c["accent"])
-        a = float(cur.get("alpha", 1 if style == "plate" and cur.get("ink") == "value_ink"
-                          else 0.24 if c is not None and _lum(g) < 0.5 else 0.14))
-        fill = _lerp(g, val, a if a <= 1 else a / 100)
-        ink2 = _hex(c[cur["ink"]]) if cur.get("ink") in c else ink
-    for yy in range(y + 1, y + h - 1):
-        for xx in range(x + 2, x + w - 2):
-            p = px[xx, yy]
-            if p == f and xx < x + 12:
-                continue
-            t = _t_on(p, g, ink)
-            px[xx, yy] = _lerp(fill, ink2, t)
+    return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
 
 
 def _lum(c):
-    return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255
+    v = [x / 255 for x in c]
+    v = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in v]
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
 
 
-def _tab_ring(img, by, bh, g, f, look):
-    """The ring round the current tab (its pill, the band's commonest colour
-    besides the ground), `ring.w` wide `ring.gap` out, and the theme's
-    outline round it."""
-    from PIL import ImageDraw
-    W, _H = img.size
-    px = img.load()
-    best = None
-    for yy in range(by - 2, by + bh + 2):
-        x = 0
-        while x < W:
-            c = px[x, yy]
-            x1 = x
-            while x1 < W and px[x1, yy] == c:
-                x1 += 1
-            if c != g and 16 <= x1 - x <= 90 and (best is None or x1 - x > best[1] - best[0]):
-                best = (x, x1, yy, c)
-            x = x1
-    x0, x1, yy, pill = best
-    x1 -= 1
-    y0 = yy
-    while px[x0 + 1, y0 - 1] == pill:
-        y0 -= 1
-    y1 = yy
-    while px[x0 + 1, y1 + 1] == pill:
-        y1 += 1
-    ring = look.get("focus", {}).get("ring", {})
-    rw, gap = int(ring.get("w", 2)), int(ring.get("gap", 2))
-    o = gap + rw
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle((x0 - o, y0 - o, x1 + o, y1 + o), radius=4 + o, outline=f, width=rw)
-    out = look.get("focus", {}).get("outline")
-    if out:
-        e = o + int(out[0])
-        d.rounded_rectangle((x0 - e, y0 - e, x1 + e, y1 + e), radius=4 + e,
-                            outline=_hex(out[1]), width=int(out[0]))
+def _cr(a, b):
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _mix(a, b, t):
+    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _deep(a, b):
+    out = dict(a)
+    for k, v in b.items():
+        out[k] = _deep(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def _declared(theme, mode):
+    """(colours, marks): a seed's role colours and its `marks`, its mode's
+    over its own."""
+    with open(os.path.join(ROOT, "native", "moy_ui", "themes", theme + ".json")) as f:
+        d = json.load(f)
+    look = d.get("look", {})
+    look = _deep(look, look.get(mode, {}))
+    cols = dict(d["colors"][mode])
+    # the roles a seed leaves to the derivation: value is the accent; the
+    # danger ink is the look's menu or button danger ink, else the palette's red
+    cols.setdefault("value", cols["accent"])
+    cols.setdefault("danger", look.get("danger_ink")
+                    or look.get("buttons", {}).get("danger", {}).get("ink") or "#ff004d")
+    return cols, look.get("marks", {})
+
+
+def _ink_over(c):
+    return max((_cr(c, k), k) for k in ((0, 0, 0), (255, 255, 255)))[1]
+
+
+def checks():
+    """The L-checks (README, "The legibility checks") on each theme-mode's
+    declared marks, as a markdown table: each cell the ratio and its verdict."""
+    head = ("theme-mode", "L1 row focus on card / page", "L1 ink on a focus fill",
+            "L1 cell ring on panel", "L3 selected against rest", "L4 the both cue",
+            "L5 danger ink on focus")
+    rows = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for theme, mode in MODES:
+        cols, marks = _declared(theme, mode)
+        if not marks:
+            continue
+
+        def col(v, under=None):
+            if v is None:
+                return _ink_over(under) if under is not None else _rgb(cols["accent"])
+            return _rgb(v if v.startswith("#") else cols[v])
+        card, panel = _rgb(cols["surface"]), _rgb(cols["panel"])
+        rf, ro = marks["row"]["focus"], marks["row"].get("on", {})
+        rb = marks["row"].get("both")
+        cf = marks["cell"]["focus"]
+        cells = []
+
+        def verdict(r, need):
+            return "%.2f %s" % (r, "pass" if r >= need else "FAIL")
+
+        def keyed(mark, c, ground):
+            key = mark.get("key")
+            r = _cr(c, ground)
+            if r < 3 and key:
+                kc = col(key[1])
+                return "%s (keyline %s)" % ("%.2f" % r, verdict(min(_cr(kc, ground), _cr(kc, c)),
+                                                                    3))
+            return verdict(r, 3)
+        fc = col(rf.get("c"))
+        cells.append(" / ".join(keyed(rf, fc, g) for g in (card, panel)))
+        cells.append(verdict(_cr(_ink_over(fc), fc), 4.5) if rf["mark"] == "fill" else "-")
+        cells.append(keyed(cf, col(cf.get("c")), panel))
+        oc = col(ro.get("c", "value"))
+        if ro.get("mark") == "tint":
+            oc = _mix(card, oc, ro.get("alpha", 1))
+        cells.append(verdict(_cr(oc, card), 1.3))
+        if rf["mark"] == "fill":
+            bc = col(rb.get("c"), fc) if rb else oc
+            cells.append(verdict(_cr(bc, fc), 3))
+        else:
+            under = oc if ro.get("mark") in ("fill", "tint") else card
+            bc = col(rb.get("c"), under) if rb else fc
+            cells.append(verdict(_cr(bc, under), 3))
+        cells.append(verdict(_cr(_rgb(cols["danger"]), fc), 4.5) if rf["mark"] == "fill"
+                     else verdict(_cr(_rgb(cols["danger"]), card), 4.5))
+        rows.append("| %s-%s | " % (theme, mode) + " | ".join(cells) + " |")
+    return "\n".join(rows)
 
 
 def _cc_inset(on):
@@ -1034,15 +876,21 @@ def main(argv=None):
     ap.add_argument("filters", nargs="*")
     ap.add_argument("--work", help="where the frames and whole renders go (default: a "
                     "temporary directory)")
-    ap.add_argument("--runs", default="today,proposal,findings")
+    ap.add_argument("--runs", default="today")
     a = ap.parse_args(argv)
     work = a.work or tempfile.mkdtemp(prefix="focus_shots_")
     runs = a.runs.split(",")
     for run in ("today", "proposal"):
         if run in runs:
+            if (run == "proposal") != _engine_has_marks():
+                ap.error("the %s run needs a checkout %s %s" % (
+                    run, "with" if run == "proposal" else "without",
+                    os.path.relpath(PATCH, ROOT)))
             frames = shoot(os.path.join(work, run), a.filters, run == "proposal")
             os.makedirs(os.path.join(a.out, run), exist_ok=True)
             sheets(os.path.join(a.out, run), frames, run.upper())
+    if "checks" in runs:
+        print(checks())
     if "findings" in runs:
         findings(work, os.path.join(a.out, "findings"))
     print("frames and whole renders in", work)
