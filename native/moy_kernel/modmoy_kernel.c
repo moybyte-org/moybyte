@@ -27,6 +27,8 @@
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
 //   moy_crash.take()               this boot's fresh record, once, or None
+//   moy_crash.crash_limit([n])     (limit, crashes): the console's crashes in a
+//                                  row that open the recovery console, set first
 //   moy_crash.panic(how)           DEV: 'fault' (a store to 0) or 'abort', now
 
 #include <string.h>
@@ -339,6 +341,16 @@ static mp_obj_t mod_take(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_take_obj, mod_take);
 
+// crash_limit([n]) -> (limit, crashes): the console's crashes in a row that open
+// the recovery console (0 never), set first with `n` (0..32), and the count.
+static mp_obj_t mod_limit(size_t n_args, const mp_obj_t *args) {
+    int count = 0;
+    int lim = moy_kernel_crash_limit(n_args ? (int)mp_obj_get_int(args[0]) : -1, &count);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(lim), MP_OBJ_NEW_SMALL_INT(count)};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_limit_obj, 0, 1, mod_limit);
+
 static mp_obj_t mod_panic(mp_obj_t how) {
     const char *h = mp_obj_str_get_str(how);
     if (strcmp(h, "fault") != 0 && strcmp(h, "abort") != 0) {
@@ -355,6 +367,7 @@ static const mp_rom_map_elem_t moy_crash_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_last), MP_ROM_PTR(&mod_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&mod_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_panic), MP_ROM_PTR(&mod_panic_obj) },
+    { MP_ROM_QSTR(MP_QSTR_crash_limit), MP_ROM_PTR(&mod_limit_obj) },
     { MP_ROM_QSTR(MP_QSTR_APP), MP_ROM_INT(MOY_ROLE_APP) },
     { MP_ROM_QSTR(MP_QSTR_WALLPAPER), MP_ROM_INT(MOY_ROLE_WALLPAPER) },
     { MP_ROM_QSTR(MP_QSTR_GAME), MP_ROM_INT(MOY_ROLE_GAME) },

@@ -73,6 +73,7 @@ const char *moy_crash_why_name(int why) {
         case MOY_WHY_VM_START: return "vm_start";
         case MOY_WHY_BOOT_LOOP: return "boot_loop";
         case MOY_WHY_HEAP: return "heap";
+        case MOY_WHY_CRASHES: return "crashes";
         default: return "none";
     }
 }
@@ -88,8 +89,14 @@ const char *moy_crash_role_name(int role) {
 
 void moy_kstate_open(moy_kstate_t *st) {
     if (st->magic == MOY_KSTATE_MAGIC
-            && st->next <= MOY_BOOT_RECOVERY && st->reason <= MOY_WHY_HEAP
+            && st->next <= MOY_BOOT_RECOVERY && st->reason <= MOY_WHY_CRASHES
             && st->test <= MOY_TEST_HEAP) {
+        // A state an older image left has no count: its bytes past the ids
+        // were never written.
+        if (st->crash_limit > 32 || st->crashes > 32) {
+            st->crashes = 0;
+            st->crash_limit = MOY_CRASH_LIMIT;
+        }
         // The OPEN ids were the last boot's VM's; the record already took
         // them, and this boot's ledger arms its own.
         st->boot++;
@@ -101,6 +108,16 @@ void moy_kstate_open(moy_kstate_t *st) {
     memset(st, 0, sizeof(*st));
     st->magic = MOY_KSTATE_MAGIC;
     st->boot = 1;
+    st->crash_limit = MOY_CRASH_LIMIT;
+}
+
+void moy_kstate_intake(moy_kstate_t *st, const moy_crash_rec_t *rec) {
+    if (rec == NULL) {
+        st->crashes = 0;
+    } else if (rec->role == MOY_ROLE_NONE && rec->kind != MOY_CRASH_RESET
+               && st->crashes < 255) {
+        st->crashes++;
+    }
 }
 
 moy_boot_decision_t moy_boot_decide(moy_kstate_t *st) {
@@ -111,12 +128,16 @@ moy_boot_decision_t moy_boot_decide(moy_kstate_t *st) {
     st->test = MOY_TEST_NONE;
     if (next == MOY_BOOT_START || next == MOY_BOOT_SAFE || next == MOY_BOOT_REPL) {
         // A choice on the recovery screen: somebody is watching, so the
-        // boot-loop count starts over.
+        // boot-loop count and the crash count start over.
         st->unproven = 0;
+        st->crashes = 0;
         d.action = next;
     } else if (next == MOY_BOOT_RECOVERY) {
         d.action = MOY_BOOT_RECOVERY;
         d.reason = reason != MOY_WHY_NONE ? reason : MOY_WHY_VM_START;
+    } else if (st->crash_limit != 0 && st->crashes >= st->crash_limit) {
+        d.action = MOY_BOOT_RECOVERY;
+        d.reason = MOY_WHY_CRASHES;
     } else if (st->unproven >= MOY_BOOT_LOOP_STARTS) {
         d.action = MOY_BOOT_RECOVERY;
         d.reason = MOY_WHY_BOOT_LOOP;

@@ -269,6 +269,7 @@ void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,
     switch (why) {
         case MOY_WHY_BOOT_LOOP: add(v, moy_str(MOY_S_RECOVERY_BOOT_LOOP)); break;
         case MOY_WHY_HEAP:      add(v, moy_str(MOY_S_RECOVERY_NO_MEMORY)); break;
+        case MOY_WHY_CRASHES:   add(v, moy_str(MOY_S_RECOVERY_CRASHES)); break;
         default:                add(v, moy_str(MOY_S_RECOVERY_NOT_STARTED)); break;
     }
     if (rec != NULL) {

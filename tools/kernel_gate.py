@@ -2,7 +2,7 @@
 """The kernel's sprint-2 gate on glass (docs/history/kernel_spine_2026-10.md §10), on
 one console board.
 
-    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update] [card]   # default: all six
+    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update] [card] [crashes]   # default: all
 
 Each step reboots the board, which a suite's held-open session cannot survive
 on an attach-only board, so the gate is a tool that opens the port per step:
@@ -29,6 +29,12 @@ on an attach-only board, so the gate is a tool that opens the port per step:
          shell reads system/settings off it (`settings`, a `cat` of the file
          beside it agreeing) and lists what pkg installed (`pkg list`);
          `retry` brings the console back.
+  crashes the console crashes with nothing open (`moy_crash.panic`, every
+         role's OPEN id cleared first) as many boots in a row as the crash
+         count's limit (`moy_crash.crash_limit`): the boots before the last come
+         back to the desk with the count climbing, the last lands on the
+         floor saying `reason=crashes`, an `sh` line runs there with no VM,
+         and `retry` brings the console back with the count at 0.
 
 One line a step, exit 1 on the first failure. The board is left at its
 launcher, on an ordinary start, whatever happened.
@@ -47,7 +53,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import board as bd  # noqa: E402
 
-STEPS = ("crash", "hang", "floor", "safe", "update", "card")
+STEPS = ("crash", "hang", "floor", "safe", "update", "card", "crashes")
 OFFER = re.compile(r"KERNEL update (offers version=\d+ channel=\w* size=\d+|none published)")
 REPORT = re.compile(r"KERNEL recovery reason=(\w+) sel=(\w+) crc=([0-9a-f]{8})")
 CHOICES = ("RETRY", "SAFE", "REPL")
@@ -245,6 +251,39 @@ def step_card(name, dirs):
         len(rows), len(pkgs))
 
 
+_SHELL_CRASH = ("py (__import__('moy_crash').arm(1, None), __import__('moy_crash').arm(2, None), "
+                "__import__('moy_crash').arm(3, None), __import__('moy_crash').panic('fault'))")
+
+
+def step_crashes(name, dirs):
+    limit, count = _vals(name, dirs, "__import__('moy_crash').crash_limit()")[0]
+    if count:
+        raise GateError("%s: the count is %d before the step" % (name, count))
+    for i in range(1, limit + 1):
+        _send(name, dirs, _SHELL_CRASH)
+        if i < limit:
+            bd.wait_for_desk(name, dirs, quiet=True)
+            got = _vals(name, dirs, "__import__('moy_crash').crash_limit()[1]")[0]
+            if got != i:
+                raise GateError("%s: after %d crashes the count is %r" % (name, i, got))
+    why, _sel, _crc, lines, _hint = _floor(name, dirs)
+    if why != "crashes":
+        raise GateError("%s: the floor says reason=%s" % (name, why))
+    try:
+        code, out, _said = _sh(name, dirs, "echo floor-$((6 * 7))", secs=10.0)
+        if code != 0 or "floor-42" not in out:
+            raise GateError("%s: the floor's shell said %r %r" % (name, code, out))
+    finally:
+        _send(name, dirs, "retry")
+        bd.wait_for_desk(name, dirs, quiet=True)
+    mode, after = _vals(name, dirs, "__import__('moy_kernel').mode()",
+                        "__import__('moy_crash').crash_limit()[1]")
+    if mode != "start" or after != 0:
+        raise GateError("%s: RETRY started %r with the count at %r" % (name, mode, after))
+    return "%d crashes -> floor reason=crashes (%s), sh ran, RETRY -> start, count 0" % (
+        limit, lines[0] if lines else "?")
+
+
 def _reboot(name, dirs):
     bd.main([name, "reboot"])
 
@@ -255,16 +294,17 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("board", choices=sorted(dirs), help="a console board's id")
     ap.add_argument("steps", nargs="*", metavar="step",
-                    help="crash, hang, floor, safe, update, card (default: all six)")
+                    help="crash, hang, floor, safe, update, card, crashes (default: all)")
     a = ap.parse_args(argv)
     name, steps = a.board, a.steps or list(STEPS)
     if not bd.is_console(dirs[name]):
         ap.error("%s is not a console board" % name)
     bad = [s for s in steps if s not in STEPS]
     if bad:
-        ap.error("unknown step %s (crash, hang, floor, safe, update, card)" % ", ".join(bad))
+        ap.error("unknown step %s (%s)" % (", ".join(bad), ", ".join(STEPS)))
     run = {"crash": step_crash, "hang": step_hang, "floor": step_floor,
-           "safe": step_safe, "update": step_update, "card": step_card}
+           "safe": step_safe, "update": step_update, "card": step_card,
+           "crashes": step_crashes}
     for s in steps:
         try:
             print("%-6s %-10s ok  %s" % (s, name, run[s](name, dirs)))

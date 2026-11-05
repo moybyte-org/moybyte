@@ -73,6 +73,9 @@ void moy_kernel_boot_failed(const char *what);
 
 // The ledger's OPEN id for a role, mirrored into RTC memory.
 void moy_kernel_arm(int role, const char *id);
+// The crash count's limit (moy_crash.h's THE CRASH COUNT): `n` 0..32 sets it
+// (0: never), -1 reads it; the limit, and the count so far at *count.
+int moy_kernel_crash_limit(int n, int *count);
 
 // The last crash this board recorded (NVS), or NULL. `fresh`: the record this
 // boot's intake took, once.

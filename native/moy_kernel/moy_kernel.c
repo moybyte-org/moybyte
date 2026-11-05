@@ -367,8 +367,12 @@ static void moy_kernel_intake(void) {
     esp_reset_reason_t rr = esp_reset_reason();
     bool have = moy_crash_valid(&s_krec);
     if (!have && !moy_kernel_unclean(rr)) {
+        moy_kstate_intake(&s_kst, NULL);
         memset(&s_krec, 0, sizeof(s_krec));
         return;
+    }
+    if (have) {
+        moy_kstate_intake(&s_kst, &s_krec);
     }
     moy_crash_rec_t *r = moy_kernel_rec_buf();
     if (r == NULL) {
@@ -445,6 +449,16 @@ void moy_kernel_boot_failed(const char *what) {
 
 void moy_kernel_arm(int role, const char *id) {
     moy_kstate_arm(&s_kst, role, id);
+}
+
+int moy_kernel_crash_limit(int n, int *count) {
+    if (n >= 0 && n <= 32) {
+        s_kst.crash_limit = (uint8_t)n;
+    }
+    if (count != NULL) {
+        *count = s_kst.crashes;
+    }
+    return s_kst.crash_limit;
 }
 
 void moy_kernel_test_restart(int test) {

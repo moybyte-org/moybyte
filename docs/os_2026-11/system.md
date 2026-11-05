@@ -154,8 +154,12 @@ moybyte.term.size() -> (cols, rows)   the one thing the standards lack; args and
 one: when the GUI breaks, the C shell over a small **kernel text renderer**
 (the kernel's font into the framebuffer, keys from the C input task), the
 same renderer that shows the shell on screen while the VM is stopped. It is
-entered automatically after N consecutive shell crashes (N configuration;
-the strike ledger counts them), by a key held at boot (the T-Deck's Mic
+entered automatically after N consecutive shell crashes (the kernel's crash
+count in RTC memory, `native/moy_kernel/moy_crash.h`: a crash with no app,
+wallpaper or game open counts one, a clean boot starts it over, an app's,
+a wallpaper's or a game's crash is the strike ledger's; N is 3 unless the
+console sets another through `moy_crash.crash_limit`, and a choice made on the
+floor starts the count over), by a key held at boot (the T-Deck's Mic
 key, which the kernel reads on the raw matrix; the trackball click is
 GPIO0 and belongs to the ROM loader), or by a chord while running (Mic +
 Backspace held on the T-Deck, which has no Ctrl, Alt, Esc or Tab;

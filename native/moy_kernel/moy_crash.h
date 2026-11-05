@@ -112,10 +112,20 @@ enum {
     MOY_WHY_VM_START,                // the console's boot ended before boot_ok
     MOY_WHY_BOOT_LOOP,               // MOY_BOOT_LOOP_STARTS starts, none proven
     MOY_WHY_HEAP,                    // the VM's first heap area was not there
+    MOY_WHY_CRASHES,                 // the console crashed `crash_limit` boots in a row
 };
 
 // Dev-only one-shots, armed over the dev channel for the gate.
 enum { MOY_TEST_NONE = 0, MOY_TEST_VM_START, MOY_TEST_HEAP };
+
+// THE CRASH COUNT: a boot whose intake takes a record of the console's own
+// (a crash no app, wallpaper or game was open in: role NONE, a record the
+// panic wrapper or the VM service wrote) counts one; a clean boot starts the
+// count over; an app's, a wallpaper's or a game's crash leaves it, the strike
+// ledger's to count. At `crash_limit` crashes in a row (MOY_CRASH_LIMIT
+// unless the console set another, 0 never) the next boot opens the recovery
+// console, and a choice made there starts the count over.
+#define MOY_CRASH_LIMIT 3
 
 // Four starts in a row with no boot_ok send the next boot to the recovery
 // screen. Four, not three: a wallpaper that kills the board strikes out in the
@@ -133,6 +143,8 @@ typedef struct {
     char open_app[MOY_CRASH_ID_LEN];
     char open_wallpaper[MOY_CRASH_ID_LEN];
     char open_game[MOY_CRASH_ID_LEN];
+    uint8_t crashes;                 // the console's crashes in a row (THE CRASH COUNT)
+    uint8_t crash_limit;             // the count that opens the recovery console, 0 never
 } moy_kstate_t;
 
 typedef struct {
@@ -156,6 +168,10 @@ void moy_kstate_open(moy_kstate_t *st);
 // This boot's decision, from what the last boots left; consumes the
 // one-shots and counts the start it decides on.
 moy_boot_decision_t moy_boot_decide(moy_kstate_t *st);
+
+// This boot's intake into the crash count: `rec` the record it took, NULL
+// for a clean boot.
+void moy_kstate_intake(moy_kstate_t *st, const moy_crash_rec_t *rec);
 
 // The console painted its first frame: the boot-loop count starts over.
 void moy_boot_proven(moy_kstate_t *st);

@@ -28,7 +28,7 @@ u8, u16, u32 = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32
 CRASH_FAULT, CRASH_ABORT, CRASH_VM = 1, 2, 7
 ROLE_APP, ROLE_WALLPAPER, ROLE_GAME = 1, 2, 3
 BOOT_START, BOOT_SAFE, BOOT_REPL, BOOT_RECOVERY = 1, 2, 3, 4
-WHY_VM_START, WHY_BOOT_LOOP, WHY_HEAP = 1, 2, 3
+WHY_VM_START, WHY_BOOT_LOOP, WHY_HEAP, WHY_CRASHES = 1, 2, 3, 4
 TEST_VM_START, TEST_HEAP = 1, 2
 BOOT_LOOP_STARTS = 4
 
@@ -68,7 +68,8 @@ class Rec(ctypes.Structure):
 class KState(ctypes.Structure):
     _fields_ = [("magic", u32), ("boot", u32), ("unproven", u8), ("next", u8),
                 ("reason", u8), ("test", u8), ("open_app", ctypes.c_char * 24),
-                ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24)]
+                ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24),
+                ("crashes", u8), ("crash_limit", u8)]
 
 
 class Decision(ctypes.Structure):
@@ -105,6 +106,7 @@ def _lib():
     lib.moy_crash_crc32.argtypes = [u32, ctypes.c_void_p, ctypes.c_size_t]
     lib.moy_boot_decide.restype = Decision
     lib.moy_kstate_open_id.argtypes = [ctypes.POINTER(KState), ctypes.POINTER(ctypes.c_char_p)]
+    lib.moy_kstate_intake.argtypes = [ctypes.POINTER(KState), ctypes.POINTER(Rec)]
     lib.moy_recovery_hit.argtypes = [ctypes.POINTER(Geom), ctypes.c_int, ctypes.c_int]
     lib.moy_recovery_view.argtypes = [ctypes.POINTER(View), ctypes.c_int, ctypes.POINTER(Rec),
                                       ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
@@ -152,7 +154,7 @@ def _record(**kw):
 # ---- the record -----------------------------------------------------------------
 
 def test_the_record_is_128_bytes_and_its_crc_is_zlibs(lib):
-    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 84
+    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 88
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
     assert (r.magic, r.version, r.size) == (0x4D4F5943, 1, 128)
@@ -204,6 +206,57 @@ def test_a_power_on_starts_the_count_over(lib):
     assert (st.magic, st.boot, st.unproven, st.next) == (0x4D4F594B, 1, 0, 0)
     lib.moy_kstate_open(ctypes.byref(st))
     assert st.boot == 2
+
+
+def _crashed(lib, st, role=0, kind=1):
+    """A boot whose intake took a record of `role` and `kind` (1: a fault),
+    its decision, and the console it started proving itself before it
+    crashed."""
+    lib.moy_kstate_open(ctypes.byref(st))
+    r = Rec()
+    r.role, r.kind = role, kind
+    lib.moy_kstate_intake(ctypes.byref(st), ctypes.byref(r))
+    d = _decide(lib, st)
+    lib.moy_boot_proven(ctypes.byref(st))
+    return d
+
+
+def test_the_consoles_own_crashes_in_a_row_open_the_recovery_console(lib):
+    """THE CRASH COUNT (moy_crash.h): a crash no app, wallpaper or game was
+    open in counts one a boot, and the third in a row sends the next boot to
+    the recovery console; a choice made there starts the count over."""
+    st = _state(lib)
+    assert (st.crashes, st.crash_limit) == (0, 3)
+    assert _crashed(lib, st)[0] == BOOT_START
+    assert _crashed(lib, st)[0] == BOOT_START
+    assert _crashed(lib, st)[:2] == (BOOT_RECOVERY, WHY_CRASHES) and st.crashes == 3
+    lib.moy_kstate_open(ctypes.byref(st))              # reset on the floor: still the floor
+    assert _decide(lib, st)[:2] == (BOOT_RECOVERY, WHY_CRASHES)
+    st.next = BOOT_START                                # the floor's Try again
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert _decide(lib, st)[0] == BOOT_START and st.crashes == 0
+
+
+def test_a_clean_boot_starts_the_crash_count_over_and_the_ledgers_crashes_leave_it(lib):
+    st = _state(lib)
+    _crashed(lib, st)
+    _crashed(lib, st)
+    for role in (ROLE_APP, ROLE_WALLPAPER, ROLE_GAME):  # the strike ledger's, or a game's
+        assert _crashed(lib, st, role)[0] == BOOT_START and st.crashes == 2
+    assert _crashed(lib, st, kind=6)[0] == BOOT_START and st.crashes == 2   # a brownout's
+    lib.moy_kstate_open(ctypes.byref(st))
+    lib.moy_kstate_intake(ctypes.byref(st), None)
+    assert st.crashes == 0
+
+
+def test_a_crash_limit_of_0_never_opens_the_console_and_an_old_state_takes_the_default(lib):
+    st = _state(lib)
+    st.crash_limit = 0
+    for _ in range(5):
+        assert _crashed(lib, st)[0] == BOOT_START
+    st.crashes, st.crash_limit = 200, 200              # an older image's bytes past the ids
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert (st.crashes, st.crash_limit) == (0, 3)
 
 
 def test_a_boot_forgets_the_last_boots_open_ids(lib):

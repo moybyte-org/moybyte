@@ -56,6 +56,7 @@
     "recovery.boot_loop": "It restarted 3 times in a row.",
     "recovery.no_memory": "There was no memory to start it.",
     "recovery.not_started": "The console did not start.",
+    "recovery.crashes": "The console kept crashing.",
     "recovery.last": "Last: %s in %s",
     "recovery.role": "%s: %s",
     "recovery.pc": "PC %08x at %08x",
