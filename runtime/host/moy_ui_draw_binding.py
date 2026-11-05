@@ -46,7 +46,11 @@ def install(m, lib, tokens):
         return tuple(None if v < 0 else v for v in bs.c) + (
             bs.edge_w, bs.shape, bs.r, bs.font, bs.bevel)
 
+    btn_leaves = (c.c_int * 10).in_dll(lib, "moy_theme_look_dims")[5]
+
     def buttons_set(app, kind_, leaves):
+        if len(leaves) != btn_leaves:       # the C reads them all, as the module's own check
+            raise ValueError("buttons_set takes %d leaves" % btn_leaves)
         b = None if app is None else _b(app)
         arr = (c.c_int32 * len(leaves))(*[int(v) for v in leaves])
         _check(lib.moy_ui_buttons_set(b, 0 if b is None else len(b), int(kind_), arr))
