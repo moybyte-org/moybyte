@@ -15,8 +15,8 @@ docs/media/look_2026-10/APPS_RESTYLE.md, Get Carts).
 The screens, in the order a kid meets them:
 
   CHECKING   the radio comes up under the "carts" lease and every index is
-             fetched -- moybyte-org's carts repository unless `indexes.json`
-             beside the carts folder names others (runtime/carts/cart_index.py) --
+             fetched -- moybyte-org's carts repository unless `system/sources`
+             names others (runtime/carts/pkg.py, the shell's `pkg`) --
              then the covers they name that this session has not drawn yet:
              one busy page, the shelves counted as they come.
   LIST       the shelf: a card per cart, its whole cover (the 128 x 128
@@ -106,13 +106,13 @@ try:
     import cart_listing as _cl
     from moy_fs import _exists, _read
     from ticks import _ticks_ms, _ticks_diff
-    from player_fit import fit_notice as _fit_notice
+    import pkg as _pkg
 except ImportError:  # pragma: no cover - direct host import
     from runtime import cart_index as _ci
     from runtime import cart_listing as _cl
     from runtime.moy_fs import _exists, _read
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.player_fit import fit_notice as _fit_notice
+    from runtime import pkg as _pkg
 
 
 # An index fetched this session is reused for this long before the app checks
@@ -148,7 +148,7 @@ TOAST_MS = 2000
 # (and their flash store writes slowly); on an S3 the archive would sit in a
 # Python heap that never shrinks, out of reach of the cart it was fetched for
 # until a reboot, while its card writes fast.
-ARCHIVE_RAM_SHARE = 4
+ARCHIVE_RAM_SHARE = _pkg.ARCHIVE_RAM_SHARE
 
 # The phases whose work runs a slice per frame from draw().
 BUSY = ("checking", "licence_fetch", "probing", "picked", "connecting", "getting")
@@ -158,12 +158,7 @@ _PAGES = ("licence", "pick", "cart", "done", "failed", "consent")
 _AWAY = ("nonet", "nowifi", "unreached", "nomemory")
 
 
-def _mb(n):
-    """A size the way the screens say it: whole KB below a megabyte, one
-    decimal above. Integer arithmetic, so every tier prints the same."""
-    if n < 1048576:
-        return "%d KB" % max(1, (n + 1023) // 1024)
-    return "%d.%d MB" % (n // 1048576, (n % 1048576) * 10 // 1048576)
+_mb = _pkg.size_text
 
 
 def _host_of(url):
@@ -335,8 +330,8 @@ class GetCartsAppLayer(ListShellApp):
     APP_PERM = "getcarts"
     APP_FOLDER = "moybyte.get_carts.moy"
     # `install` is the network, its lease, the store an install writes and the
-    # Wi-Fi page; `nav` is Play.
-    NEEDS = ("surface", "theme", "damage", "install", "nav")
+    # Wi-Fi page; `nav` is Play; `carts` the shelf an install is checked against.
+    NEEDS = ("surface", "theme", "damage", "install", "nav", "carts")
     UI = True
 
     def __init__(self, ctx, names):
@@ -346,6 +341,7 @@ class GetCartsAppLayer(ListShellApp):
         self._damage = ctx.damage
         self._inst = ctx.install
         self._nav = ctx.nav
+        self._carts_role = ctx.carts
         self._ui = ctx.ui
         self.names = names
         # the shelf region's override table and the cards' gens
@@ -727,8 +723,11 @@ class GetCartsAppLayer(ListShellApp):
             rows = [{"cart": c, "plan": _ci.plan(c, chip, fmt, ranges), "state": "get",
                      "had": None, "runs": False, "fit": None} for c in carts]
             free = None
+        have = _pkg.installed_ids(self._carts_role.all())
         for r in rows:
-            r["fit"] = self._fit_why(r)
+            c = r["cart"]
+            r["fit"] = (_pkg.fit_why(self._inst, c, r["plan"])
+                        or _pkg.depends_why(carts, c, have))
         rows.sort(key=lambda r: r["cart"]["name"].lower())
         self.rows = rows
         self.free = free
@@ -766,36 +765,10 @@ class GetCartsAppLayer(ListShellApp):
             return ("REMOVE", self._go_verb(), "UPDATE")
         return ()
 
-    def _fit_why(self, row):
-        """The Player's own refusal, asked before the download: a compiled
-        cart whose load -- its declared memory and this console's module (or
-        main.wasm, interpreted), by the engine's sizing -- needs more than the
-        engine reports free. None when it fits, or nobody can say."""
-        c, p = row["cart"], row["plan"]
-        if c["runtime"] != "wasm" or not c.get("memory") or p["load_bytes"] is None:
-            return None
-        fit = self._inst.fit("wasm", c["memory"], p["load_bytes"], p["module"] is None)
-        if fit is None:
-            return None
-        need, have = fit
-        if need[0] > have[0] or need[1] > have[1]:
-            return _fit_notice(c["name"], need, have)
-        return None
-
     def blocker(self, row):
-        """Why `row` cannot be installed here, or None."""
-        if not self._inst.writable() or self._inst.root() is None:
-            return "This console has nowhere to keep carts."
-        if not row["runs"]:
-            return "This console can't play this kind of cart."
-        if row.get("fit"):
-            return row["fit"]
-        if self.free is not None:
-            need = _ci.need_bytes(row["plan"], self.free[1])
-            if need > self.free[0]:
-                return "Not enough room: needs %s, %s free." % (_mb(need),
-                                                               _mb(self.free[0]))
-        return None
+        """Why `row` cannot be installed here, or None (pkg.blocker)."""
+        return _pkg.blocker(self._inst, row["cart"], row["plan"], self.free,
+                            row["runs"], row.get("fit"))
 
     def _press(self, verb):
         ph = self.phase
@@ -1011,20 +984,10 @@ class GetCartsAppLayer(ListShellApp):
         (`cart_index.Install`'s `ask`): the prompt's lines, or None to go
         on. A permission the cart requires that this console lacks refuses
         the install."""
-        folder = self.cur["cart"]["folder"]
-        try:
-            man = json.loads(_read(stage + "/manifest.json"))
-        except (OSError, ValueError):
-            man = {}
-        cart = _perms.manifest_cart(man if isinstance(man, dict) else {}, folder)
-        consent = self._inst.consent()
-        _g, _a, refusal = consent.check(cart, install=True)
-        if refusal is not None:
-            raise _ci.InstallError("Not for this console: " + refusal,
-                                   "%s: %s" % (folder, refusal))
-        aid = _perms.app_id(cart)
-        self._consented = (aid, list(cart["permissions"]))
-        return _perms.prompt(cart, consent.get(aid))
+        aid, perms, lines = _pkg.install_check(self._inst, stage, self.cur["cart"]["folder"],
+                                               self._carts_role.all())
+        self._consented = (aid, perms)
+        return lines
 
     def _pump_get(self):
         job = self.job
@@ -1112,19 +1075,13 @@ class GetCartsAppLayer(ListShellApp):
         what Remove's dialog said; and the consent it was installed with."""
         self.asking = False
         row = self.cur
-        had = self._inst.find(row["cart"]["folder"])
-        root = self._inst.root()
-        keep = self._inst.keep()
         try:
-            self._inst.op(lambda: _ci.remove(root, row["cart"]["folder"], keep))
+            _pkg.removed(self._inst, row["cart"]["folder"])
         except Exception as exc:  # noqa: BLE001 -- the folder stays; say so
             _ci._log("remove failed: %s" % exc)
             self._say("Can't remove it", "warn")
             self._damage.all()
             return
-        if had is not None:
-            self._inst.consent().forget(_perms.app_id(had))
-        self._inst.rescan()
         self._build_rows()
         self.cur = None
         self._say("Removed " + row["cart"]["name"])

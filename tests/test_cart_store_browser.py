@@ -694,7 +694,7 @@ class _Pick:
 def _app_ws(tmp_path, net, indexes, keep=None, pick=None, home=None):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
+    ci.save_sources(str(tmp_path / "carts"), indexes)
     ws.cart_net = net
     ws.cart_keep = keep
     ws.cart_pick = pick

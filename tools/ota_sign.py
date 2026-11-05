@@ -38,6 +38,7 @@ native/moy_net/moy_ota.c) builds the same lines from the fields, and
     make ota-keygen                      # once: your key + what to paste where
     tools/ota_sign.py sign latest.json   # needs MOYBYTE_OTA_SIGNING_KEY
     tools/ota_sign.py verify latest.json  --public-key <n-hex>
+    tools/ota_sign.py sign-index index.json  # a carts repository's index, same key
 
 Signing needs `cryptography` (the `release` extra). Verifying does not: it is
 the same arithmetic the device does, in the same shape, so the tests can prove
@@ -172,6 +173,33 @@ def _sign_bytes(payload, key_pem):
     return sig.hex()
 
 
+# A carts repository's index (runtime/carts/cart_index.py's "AN INDEX MAY BE
+# SIGNED"): the signature covers INDEX_SCHEME and the document's bytes as they
+# were, and rides in the document as its last member, in place of the closing
+# brace -- so nothing re-serializes the index on either side.
+INDEX_SCHEME = b"moybyte-index-v1\n"
+INDEX_TAIL = b', "sig": "'
+
+
+def index_unsigned(data):
+    """An index document's bytes with any signature this tool appended taken
+    off, its trailing whitespace too."""
+    data = data.rstrip()
+    at = data.rfind(INDEX_TAIL)
+    if at >= 0 and data.endswith(b'"}'):
+        return data[:at] + b"}"
+    return data
+
+
+def sign_index(data, key_pem):
+    """The signed document for index bytes `data`."""
+    body = index_unsigned(data)
+    if not body.endswith(b"}"):
+        raise SystemExit("not a JSON object")
+    sig = _sign_bytes(INDEX_SCHEME + body, key_pem)
+    return body[:-1] + INDEX_TAIL + sig.encode() + b'"}\n'
+
+
 def canonical_c6(manifest):
     """The bytes c6_sig covers: the c6 block plus the board (an image for one
     co-processor must not replay onto another board's manifest). Mirrored by
@@ -243,7 +271,22 @@ def main(argv=None):
     v.add_argument("manifest")
     v.add_argument("--public-key", required=True, help="modulus n, in hex")
 
+    si = sub.add_parser("sign-index", help="sign a carts repository's index, in place")
+    si.add_argument("index")
+    si.add_argument("--key", help="PEM or a path to one (default: $%s)" % ENV_KEY)
+
     args = ap.parse_args(argv)
+
+    if args.cmd == "sign-index":
+        key_pem = read_key(args.key)
+        if not key_pem:
+            raise SystemExit("no signing key: set $%s or pass --key" % ENV_KEY)
+        with open(args.index, "rb") as f:
+            data = f.read()
+        with open(args.index, "wb") as f:
+            f.write(sign_index(data, key_pem))
+        print("signed %s" % args.index)
+        return 0
 
     if args.cmd == "keygen":
         if os.path.exists(args.out):

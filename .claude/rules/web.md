@@ -125,11 +125,11 @@ nor those docs will warn you about:
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
 - **The console's own documents are a THIRD root** (`moy_sync.SYSTEM_ROOT`,
-  owner 2026-10-20): `system.json` (the theme and every Setting),
+  owner 2026-10-20): `system/settings` (the theme and every Setting),
   `achievements.json`, the edited bar icons and the shared sheet ride the
   same sweep into a site-mode page's OPFS, so a reload comes back on the same
   theme, Settings and badges. Each lands old-or-new (`moy_store.commitFile`),
-  because a torn `system.json` boots the console on its defaults. **On a
+  because a torn `system/settings` boots the console on its defaults. **On a
   board the root is the VM's, never the C's**: the page seeds from `GET
   /console.json` and pushes `{"v": 2, "root": "system"}` batches, which the C
   parks (pin checked) for `moy_webhost.ConsoleSystem`; the board is of record
@@ -167,7 +167,8 @@ nor those docs will warn you about:
     shipping it. `store_test.mjs` interrupts an update at every change it
     makes.
   - **The shelves are the serving host's**: an `indexes.json` beside the page
-    replaces the defaults, read once at boot.
+    replaces the defaults, read once at boot and written as the console's
+    `system/sources`.
   - **A page keeps no compiled module**, so a release asset is read by RANGE
     (`ranges` on the page's transport, `cart_unpack._Ranged`): the zip's
     directory, then the runs of members it keeps -- a cart's modules are most
@@ -239,7 +240,7 @@ nor those docs will warn you about:
   into the row's label. Only the dev word `web` waits for the outcome. The QR encoder is ours because there is no library on a board and
   the pin is not a constant anything could be baked with. **The pin is read at
   `start()`, never at construction** — boards build the webhost before
-  system.json is loaded, so a pin captured then is one minted against an empty
+  system/settings is loaded, so a pin captured then is one minted against an empty
   store.
 - **Two Makefile patches are load-bearing and non-obvious.** `-Wno-unknown-pragmas`
   must be appended to the PORT's CFLAGS, not `CFLAGS_USERMOD`: py.mk folds usermod

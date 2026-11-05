@@ -141,7 +141,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
         assert ws.open_app(ws._apps_by_id["myart"])
     elif app == "getcarts":
         repo, net = _shelf_net()
-        (root / ci.INDEXES_NAME).write_text(json.dumps({"indexes": [repo.url("index.json")]}))
+        ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = net
         app_ = ws._apps_by_id["getcarts"]
         app_._inst = _SameFree(app_._inst)

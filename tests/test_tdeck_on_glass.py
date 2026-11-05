@@ -284,6 +284,10 @@ def test_the_shell_answers_over_serial(board):
     on_glass.the_shell_answers_over_serial(board)
 
 
+def test_pkg_installs_a_cart_from_the_carts_repo(board):
+    on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
+
+
 def test_the_shell_answers_with_the_vm_down(board):
     on_glass.the_shell_answers_with_the_vm_down(board)
 

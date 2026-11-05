@@ -1244,6 +1244,32 @@ def the_shell_answers_over_serial(board):
     assert _sh(board, "cd /")[0] == 0
 
 
+def pkg_installs_a_cart_from_the_carts_repo(board, ident="teapot"):
+    """docs/os_2026-11.md P3.2's check: `pkg install` over the serial face
+    fetches moybyte-org/carts' index (its source the default, no
+    system/sources), installs `ident` through the one installer, and the
+    shelf has it; `pkg remove` takes it off again. A board with no network
+    skips."""
+    st, out = _sh(board, "pkg sources")
+    assert st == 0 and out, out
+    _sh(board, "pkg remove %s" % ident, timeout=60)
+    st, out = _sh(board, "pkg update", timeout=120)
+    if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
+        pytest.skip("no network: %r" % out)
+    assert st == 0 and "carts" in out[-1], out
+    st, out = _sh(board, "pkg list", timeout=60)
+    assert st == 0 and any(l.split()[0] == ident for l in out), out
+    st, out = _sh(board, "pkg install -y %s" % ident, timeout=600)
+    assert st == 0 and ("%s " % ident) in out[-1] and "installed" in out[-1], out
+    print("pkg install:", out[-1])
+    folders = board.pyval("[str(c.get('path', '')).rsplit('/', 1)[-1] for c in ws.carts.all]",
+                          strict=True)
+    assert ident + ".moy" in folders, folders
+    st, out = _sh(board, "pkg list", timeout=60)
+    assert any(l.split()[:3][::2] == [ident, "installed"] for l in out), out
+    assert _sh(board, "pkg remove %s" % ident, timeout=60) == (0, [ident + " removed"])
+
+
 def the_shell_answers_with_the_vm_down(board, title="Doom"):
     """docs/os_2026-11.md P3.1's check: with the VM stopped for a compiled
     run, `ps`, `log` and `kill` answer over the serial face from the kernel

@@ -290,7 +290,7 @@ class _In:
 
 def _store_ws(tmp_path, repo):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": [repo.url("index.json")]}))
+    ci.save_sources(str(tmp_path / "carts"), [repo.url("index.json")])
     ws.cart_net = MemNet(repo.routes())
     ws.pointer.visible = False
     return ws, ws._apps_by_id["getcarts"]

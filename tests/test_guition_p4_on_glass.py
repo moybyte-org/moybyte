@@ -364,6 +364,10 @@ def test_the_shell_answers_over_serial(board):
     on_glass.the_shell_answers_over_serial(board)
 
 
+def test_pkg_installs_a_cart_from_the_carts_repo(board):
+    on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
+
+
 def test_the_event_rings_keep_their_records(board):
     on_glass.the_event_rings_keep_their_records(board)
 

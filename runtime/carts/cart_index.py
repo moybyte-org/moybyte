@@ -1,7 +1,10 @@
 # Map (grep -n a name to jump there):
 #   InstallError                a failure: the kid's text and serial's detail
 #   -- references               is_url, resolve, plain_name, mirror_ok
-#   -- the index                check_cart, cover_ref, parse_index (_read_listing), load_indexes
+#   -- the sources              parse_sources, sources_text, load_indexes, save_sources
+#   -- the signature            split_signed, check_signature
+#   -- the index                check_cart, cover_ref, parse_index (_read_listing)
+#   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
 #   -- the record               load_record, save_record, record_entry
 #   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
@@ -63,8 +66,21 @@ The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
 module, every file's sha256), and `install/`, where an install is built. A cart
 folder holds only its index's files; the record is what says which version it
-is. An `indexes.json` there replaces DEFAULT_INDEXES ({"indexes": [url, ...]}),
-the way /sd/update/ota.json points the OTA check at a LAN host.
+is. `system/sources` there (docs/os_2026-11/system.md §6), one index URL a
+line, replaces DEFAULT_INDEXES, the way /sd/update/ota.json points the OTA
+check at a LAN host; a legacy `indexes.json` reads as absent.
+
+AN INDEX MAY BE SIGNED as OTA manifests are (device/moy_ota.py's keys, RSA-2048
+PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends
+`, "sig": "<hex>"}` in place of the document's closing brace, and the signature
+covers SIG_SCHEME and the document as it was before. A signed index whose
+signature does not verify is refused, wherever this console can verify (the
+kernel's `moy_net.ota_verify` on a board, its host twin on CPython); the
+browser has no verifier and needs none, its fetch checking the server's
+certificate. An unsigned index is read.
+
+An entry's `depends` (a list of cart ids, optional) names the carts it needs
+on the console first; `needs` resolves them over the indexes.
 
 A crash at any point leaves the old cart or the new one, never half of either:
 `recover`, which the app runs when it opens, removes an unfinished build and
@@ -134,7 +150,7 @@ try:
     from ticks import _ticks_ms, _ticks_diff
     from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
                                 cart_path)
-    from moy_fs import _exists, _mkdir
+    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic
     import moy_carts as _store
     import cart_files as _cart_files
     import cart_listing as _cl
@@ -142,7 +158,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
                                         COVER_MAX_BYTES, cart_path)
-    from runtime.moy_fs import _exists, _mkdir
+    from runtime.moy_fs import _exists, _mkdir, _read_recover, _write_atomic
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
     from runtime import cart_listing as _cl
@@ -152,8 +168,11 @@ INDEX_VERSION = 1
 DEFAULT_INDEXES = (
     "https://moybyte-org.github.io/carts/index.json",
 )
-INDEXES_NAME = "indexes.json"
+SOURCES_NAME = "system/sources"
 RECORD_NAME = "installed.json"
+SIG_SCHEME = b"moybyte-index-v1\n"
+SIG_TAIL = b', "sig": "'
+INDEX_KEYS = None             # the keys an index verifies against; None: the image's
 STAGE_DIR = "install"
 RUNTIMES = ("wasm", "lua", "theme")
 
@@ -203,6 +222,7 @@ NO_WRITE = "Can't write to the store."
 NO_LICENCE = "Its licence wasn't accepted."
 NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
+BAD_SIGNATURE = "The cart shelf's signature is wrong."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -344,6 +364,12 @@ def check_cart(c):
             return "no %s" % key
     if not isinstance(c.get("version"), int):
         return "no version"
+    deps = c.get("depends", ())
+    if not isinstance(deps, list) and deps != ():
+        return "depends"
+    for d in deps:
+        if not isinstance(d, str) or not d:
+            return "depends"
     folder = c["folder"]
     if not plain_name(folder) or not folder.endswith(".moy"):
         return "folder %r" % folder
@@ -405,14 +431,21 @@ def parse_index(data, url):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
     cannot read is left out and logged, and so is a `cover` it cannot (the
-    cart stays); a document that is not an index is an InstallError."""
+    cart stays); a document that is not an index, or whose signature does not
+    verify (`check_signature`), is an InstallError."""
+    if isinstance(data, str):
+        data = data.encode()
+    signed = check_signature(data, url)
     try:
-        index = json.loads(data.decode() if isinstance(data, (bytes, bytearray)) else data)
+        index = json.loads(data.decode())
     except (ValueError, UnicodeError) as exc:
         raise InstallError(UNREACHABLE, "%s is not JSON: %s" % (url, exc))
     if not isinstance(index, dict) or index.get("version") != INDEX_VERSION:
         raise InstallError(UNREACHABLE, "%s is not a version %d index"
                            % (url, INDEX_VERSION))
+    if "sig" in index and signed is False:
+        raise InstallError(BAD_SIGNATURE, "%s: a sig that is not the last member"
+                           % url)
     out = []
     for c in index.get("carts") or ():
         why = check_cart(c)
@@ -445,24 +478,127 @@ def parse_index(data, url):
             c["external"] = exts
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
+        c["signed"] = bool(signed)
         out.append(c)
     return out
 
 
+# -- the sources ------------------------------------------------------------------
+
+def parse_sources(text):
+    """The index URLs a `system/sources` text names: one a line, blank lines
+    and `#` comments passed over, a line that is not a URL left out."""
+    out = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line and line[0] != "#" and is_url(line) and line not in out:
+            out.append(line)
+    return out
+
+
+def sources_text(urls):
+    return "".join(u + "\n" for u in urls)
+
+
 def load_indexes(root):
-    """The indexes this console browses: `indexes.json` beside the carts
+    """The indexes this console browses: `system/sources` beside the carts
     folder when it names any, else DEFAULT_INDEXES."""
-    def pick(d):
-        got = d.get("indexes") if isinstance(d, dict) else None
-        if not isinstance(got, list):
-            return None
-        urls = [u for u in got if is_url(u)]
-        return urls or None
     try:
-        got = _store._load_store_json(_sibling_path(root, INDEXES_NAME), pick)
+        got = parse_sources(_read_recover(_sibling_path(root, SOURCES_NAME)))
     except Exception:  # noqa: BLE001 -- an unreadable override is no override
         got = None
-    return list(got) if got else list(DEFAULT_INDEXES)
+    return got or list(DEFAULT_INDEXES)
+
+
+def save_sources(root, urls):
+    """Write `system/sources`; an empty list is the defaults."""
+    _mkdir(_sibling_path(root, "system"))
+    _write_atomic(_sibling_path(root, SOURCES_NAME), sources_text(urls))
+
+
+# -- the signature ----------------------------------------------------------------
+
+def split_signed(data):
+    """`(payload, sig)` of a signed index's bytes -- the bytes its signature
+    covers and the signature's hex -- or None for an unsigned one."""
+    end = len(data)
+    while end and data[end - 1] in (32, 9, 13, 10):
+        end -= 1
+    if end < 2 or data[end - 2:end] != b'"}':
+        return None
+    at = data.rfind(SIG_TAIL, 0, end)
+    if at < 0:
+        return None
+    sig = data[at + len(SIG_TAIL):end - 2]
+    if not sig:
+        return None
+    for b in sig:
+        if not (48 <= b <= 57 or 97 <= b <= 102 or 65 <= b <= 70):
+            return None
+    return SIG_SCHEME + data[:at] + b"}", sig.decode()
+
+
+def _verifier():
+    try:
+        import moy_net
+    except ImportError:
+        try:
+            from runtime import net_binding as moy_net
+        except ImportError:  # the browser: its fetch checks the certificate
+            return None
+    return getattr(moy_net, "ota_verify", None)
+
+
+def check_signature(data, url):
+    """True for an index whose signature verifies, False for an unsigned one,
+    None for a signed one where nothing can verify it (the browser). An
+    InstallError for a signature that does not verify."""
+    got = split_signed(data)
+    if got is None:
+        return False
+    verify = _verifier()
+    if verify is None:
+        return None
+    ok = verify(got[0], got[1]) if INDEX_KEYS is None \
+        else verify(got[0], got[1], INDEX_KEYS)
+    if not ok:
+        raise InstallError(BAD_SIGNATURE, "%s: its signature does not verify" % url)
+    return True
+
+
+# -- depends ----------------------------------------------------------------------
+
+def needs(carts, cart, have):
+    """The carts installing `cart` takes, dependencies first and `cart` last:
+    each of its `depends` (and theirs) the console does not `have` (a set of
+    ids), found in `carts` (the indexes' entries; the first with an id wins).
+    An InstallError when one is in no index or the chain comes back on
+    itself."""
+    by_id = {}
+    for c in carts:
+        by_id.setdefault(c["id"], c)
+    out = []
+    seen = []
+
+    def visit(c, path):
+        if c["id"] in seen:
+            return
+        for d in c.get("depends") or ():
+            if d in have:
+                continue
+            if d in path:
+                raise InstallError("It depends on itself.", "%s: a cycle through %s"
+                                   % (cart["id"], d))
+            dep = by_id.get(d)
+            if dep is None:
+                raise InstallError("It needs %s, which no cart shelf has." % d,
+                                   "%s needs %s" % (c["id"], d))
+            visit(dep, path + [d])
+        seen.append(c["id"])
+        out.append(c)
+
+    visit(cart, [cart["id"]])
+    return out
 
 
 # -- what this console takes ------------------------------------------------------

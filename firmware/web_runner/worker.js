@@ -881,7 +881,7 @@ async function init(search, coarse, channel, scheme) {
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
     // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES this
-    // page -- the browser's twin of a board's indexes.json beside its carts.
+    // page -- written as the console's system/sources, a board's twin.
     // Absent (moybyte.com, a board) means the console's default shelves.
     //
     // Every body is READ as soon as its head arrives, carts.json's included. A
@@ -921,8 +921,11 @@ async function init(search, coarse, channel, scheme) {
     }
     await initStore({ carts: carts, files: files, system: system });
     if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
-        mp.FS.writeFile(CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/indexes.json",
-                        JSON.stringify({ indexes: shelves.indexes }));
+        const sys = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/system";
+        mkdirs(sys);
+        mp.FS.writeFile(sys + "/sources",
+                        shelves.indexes.filter((u) => typeof u === "string")
+                            .map((u) => u + "\n").join(""));
     }
     say("booting console...");
 

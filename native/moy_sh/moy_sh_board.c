@@ -259,7 +259,7 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
 // for each (tests/test_sh_door.py holds the two equal).
 static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
-    "python", "service", "snd", "usb", NULL,
+    "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
 
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {

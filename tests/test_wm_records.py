@@ -102,7 +102,7 @@ def _open(ws, root, app):
         repo = Repo("https://mit.example/carts", "Test carts")
         for i in range(24):
             repo.add("c%02d" % i, name="Cart %02d" % i)
-        (root / ci.INDEXES_NAME).write_text(json.dumps({"indexes": [repo.url("index.json")]}))
+        ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
         a = ws._apps_by_id["getcarts"]
         a._inst = _SameFree(a._inst)

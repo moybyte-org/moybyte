@@ -202,11 +202,15 @@ def test_a_document_that_is_not_an_index_is_refused(doc):
     assert exc.value.text == ci.UNREACHABLE
 
 
-def test_an_indexes_file_beside_the_carts_folder_replaces_the_defaults(tmp_path):
+def test_system_sources_replaces_the_defaults_and_a_legacy_indexes_file_is_absent(tmp_path):
     root = _store(tmp_path)
     assert ci.load_indexes(root) == list(ci.DEFAULT_INDEXES)
-    (Path(root).parent / ci.INDEXES_NAME).write_text(json.dumps(
-        {"indexes": ["http://192.168.1.5:8000/index.json", "not a url"]}))
+    (Path(root).parent / "indexes.json").write_text(json.dumps(
+        {"indexes": ["http://192.168.1.5:8000/index.json"]}))
+    assert ci.load_indexes(root) == list(ci.DEFAULT_INDEXES)
+    (Path(root).parent / "system").mkdir()
+    (Path(root).parent / ci.SOURCES_NAME).write_text(
+        "# the LAN mirror\nhttp://192.168.1.5:8000/index.json\nnot a url\n\n")
     assert ci.load_indexes(root) == ["http://192.168.1.5:8000/index.json"]
 
 
@@ -952,7 +956,7 @@ def _app_ws(tmp_path, net, indexes=None):
     from ws_helpers import no_unlock_banner
     ws = no_unlock_banner(host_app.build_workstation(str(carts)))
     if indexes is not None:
-        (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
+        ci.save_sources(str(tmp_path / "carts"), indexes)
     ws.cart_net = net
     return ws, ws._apps_by_id["getcarts"]
 
@@ -1470,8 +1474,7 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
         d = tmp_path / ("s%d" % len(kw))
         d.mkdir()
         ws = host_app.build_workstation(str(d / "carts"), **kw)
-        (d / ci.INDEXES_NAME).write_text(json.dumps(
-            {"indexes": [gpl.url("index.json"), mit.url("index.json")]}))
+        ci.save_sources(str(d / "carts"), [gpl.url("index.json"), mit.url("index.json")])
         ws.cart_net = net
         app = ws._apps_by_id["getcarts"]
         _open(ws, app)

@@ -49,8 +49,10 @@ future SSH client and a laptop's `ssh` session all speak one standard. The
 
 As built, a Python line program is a command cart's `main(argv)` in the
 shell's VM (`runtime/shell/sh_door.py` says how it runs): its name on the
-PATH is its id's name (`local.hello` is `hello`; until install refuses a
-collision, two carts sharing a name leave it to the first id) and
+PATH is its id's name (`local.hello` is `hello`; an install through `pkg`
+or Get Carts refuses a name already taken (§6), and two carts that share one
+by another way in, a cart pushed or made on the console, leave it to the
+first id) and
 `<id>/<name>` runs that one; it is a process of its own (kind `command`)
 holding the permissions its consent grants, its `print` and `input` the
 session's streams over the door, its exit code `main`'s answer, under the
@@ -186,16 +188,31 @@ over SFTP only (owner, 2026-11-03).
 ## 5. Settings as files
 
 **`system/`** holds the console's documents **as plain-text files like
-`/etc`** (owner, 2026-11-03): `settings` (one `key = value` a line, today's
-`system.json` rows), `wifi`, `authorized_keys`, `ssh`, `crontab`,
-`hostname`, `sources` (§6); the shell reaches them, and `settings get/set`
-works over them.
+`/etc`** (owner, 2026-11-03), beside the carts folder (`/sd/moybyte/system/`
+on a card): `settings` and `sources` (§6) today, and `wifi`,
+`authorized_keys`, `ssh`, `crontab` and `hostname` as the phases that need
+them arrive; the shell reaches them, and `settings` works over them.
+
+**`system/settings`** (P3.2, `runtime/carts/moy_docs.py`) is every row
+`ws.system` holds, one `key = value` a line, sorted by key, each value the
+row's JSON on one line (`theme = "blocks"`, `font_scale = 2`,
+`favorites = ["/sd/moybyte/carts/moybyte.paint.moy"]`). The reader is
+strict: a line that is not `key = <JSON>` (blank lines and `#` comments
+aside) is passed over and logged. It is written atomically and read through
+the store's crash-safe reader, like every store write. The shell's
+`settings` (`runtime/shell/sh_roles.py`) lists the file, `get`s a value,
+`set`s one (a JSON value, or the words as a string) and `unset`s one,
+re-applying the key live where the console applies it (Settings' own verbs),
+and `reload` reads a file edited by hand back into the console, which
+otherwise writes its rows over the edit at its next change. The web sync's
+system root carries the file as `system/settings` (`moy_sync.SYSTEM_FILES`,
+`.claude/rules/web.md`).
 
 **Everything is a file, where it is cheap (owner, 2026-11-03).** The
-settings move from `system.json` to these plain-text files, read by
-strict readers with a seed bump (no migration: a legacy `system.json` reads
-as absent until wiped by hand), so `cat`, `settings get/set` and an editor
-all reach them. `/proc/<pid>/status` and `/proc/<pid>/log` are virtual
+settings moved from `system.json` to the plain-text file with no migration:
+a legacy `system.json` reads as absent until wiped by hand (no seed content
+carries settings, so no seed version moved), and `cat`, `settings` and an
+editor all reach them. `/proc/<pid>/status` and `/proc/<pid>/log` are virtual
 files over the process table and the log ring, and a leased device is
 `/dev/uart1`, `/dev/gpio4`: `runtime/system/devfs.py` is their file face
 (`open`, `listdir`, `cat`), which the shell mounts (P3); opening a device
@@ -208,24 +225,51 @@ else gets a file face until a command needs one.
 ## 6. The package index
 
 `pkg` (owner, 2026-11-03) is apt-shaped: a repository is a URL serving an
-index and the carts it lists; moybyte-org/carts is the first. The store app
-(Get Carts, `runtime/apps/getcarts_app.py`) is its GUI face over the same
-implementation (`native/moy_store`, the `install` role), and a `.moy` is the
-package. The index (sketch), one JSON document signed as OTA manifests are
-(`.claude/rules/ota.md`):
+index and the carts it lists; moybyte-org/carts is the first. A `.moy` is the
+package. As built (P3.2), one installer has two faces: `runtime/carts/pkg.py`
+holds the verbs and the checks over `runtime/carts/cart_index.py` (with the
+`install` role's store, network and radio lease), and Get Carts
+(`runtime/apps/getcarts_app.py`) is its GUI face, making the same checks
+(`pkg.blocker`, `pkg.install_check`) and the same removal (`pkg.removed`).
 
-```json
-{"v": 1, "repo": "moybyte-org/carts", "generated": 1762128000,
- "packages": [
-   {"id": "moybyte.doom", "version": "1.2.0", "tiers": ["wasm"], "chips": ["esp32s3", "esp32p4"],
-    "size": 2310144, "sha256": "…", "url": "carts/moybyte.doom-1.2.0.moy",
-    "permissions": ["files:documents", "notifications"], "depends": [], "summary": "…"}
- ],
- "sig": "…"}
-```
+**The index** is moy-spec's (`cartindex.py`, version 1), read as it is, with
+two additions read here: an entry's `depends`, a list of cart ids, and the
+signature. **An index is signed as OTA manifests are** (the same keys,
+RSA-2048 PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends
+`, "sig": "<hex>"}` in place of the document's closing brace, covering
+`moybyte-index-v1\n` and the document as it was, so neither side
+re-serializes JSON. A signed index whose signature does not verify is
+refused, and so is a `sig` that is not the last member; an unsigned index is
+read. A board verifies in the kernel (`moy_net.ota_verify`), the host through
+its twin; the browser has no verifier and needs none, its fetch checking the
+server's certificate.
 
-`pkg install <id>` resolves `depends`, checks the chip and the shares' fit
-(`processes.md` §6), prompts the permissions (`processes.md` §2), downloads
-and installs; `upgrade` walks the installed set against the indexes; `search`
-and `list` read the cached indexes; `remove` is the store's delete. The
-console keeps a `system/sources` file of repository URLs.
+**`system/sources`** names the repositories, one index URL a line (`#`
+comments); absent or empty, the console reads moybyte-org/carts. A legacy
+`indexes.json` reads as absent. A page served from a static host writes the
+host's `indexes.json` there at boot.
+
+**The verbs** (the shell's `pkg`, `runtime/shell/sh_roles.py`):
+
+| verb | does |
+|---|---|
+| `pkg update` | fetches every source's index, checks it and caches it in `pkg/` beside the carts folder |
+| `pkg list` | every cart the cached indexes list: id, version, where it stands here (`-`, `installed`, `update`, `taken`), name |
+| `pkg search WORD...` | those whose id, name, description or tags hold every word |
+| `pkg install [-y] ID...` | each with its `depends` first (`cart_index.needs`: one no index lists, or a cycle, refuses), the checks, an external file's licence, the download and the permission prompt (`processes.md` §2); `-y` answers yes, else each is asked on stdin |
+| `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent |
+| `pkg upgrade [-y]` | every installed cart the indexes list newer |
+| `pkg sources` | the sources in use |
+
+A verb that reads the indexes fetches a source the cache does not hold yet.
+**The checks**, the same in Get Carts: a store to keep it in; a runtime this
+console carries; the chip, a compiled cart with neither a module for this
+chip nor a `main.wasm` being refused; the engine's own fit and THE SHARES'
+(`processes.md` §6: a cart whose load needs more than this board's share for
+the running set could never be admitted); room in the store; and at the
+install prompt a permission this console lacks, and **a command-name
+collision**: a `"type": "command"` cart (§1) whose name, its id's part after
+the first dot, the shell already answers to (a built-in or a role command,
+`pkg.SHELL_NAMES`) or another installed command holds is not installed. Get
+Carts installs one cart at a time, so a cart whose dependency is not yet on
+the console says to get that one first.

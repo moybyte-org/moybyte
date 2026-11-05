@@ -39,6 +39,16 @@ on the serial face and the screen face alike.
   media play SRC | stop | pause | resume | next | prev | volume [V]
   snd                        the audio ring's counters
   snd play [FRAMES]          stdin (PCM16 mono, 22,050 Hz) through the ring
+  pkg update | list | sources the package verbs (runtime/carts/pkg.py), over the
+  pkg search WORD...         store's one installer, Get Carts' (cart_index):
+  pkg install [-y] ID...     -y answers a licence and the install prompt yes,
+  pkg remove ID...           else each is asked on stdin (y/N)
+  pkg upgrade [-y]
+  settings [list]            every row of system/settings, `key = value`
+  settings get KEY           its value, as JSON
+  settings set KEY VALUE...  a JSON value, or the words as a string; applied
+  settings unset KEY         at once where the console applies the key live
+  settings reload            read the file again (an edit by hand) and apply it
   python [-c CODE]           a REPL over stdin into the shell's VM (an
                              expression's value printed, a block ended by a
                              blank or unindented line), or CODE run
@@ -297,6 +307,121 @@ def r_service(d, a):
             d.err("service", "%s did not start: its log says why" % name)
             return 1
     return 0
+
+
+# -- settings ---------------------------------------------------------------------------
+
+
+def _settings_text(rows):
+    try:
+        from moy_carts import settings_text
+    except ImportError:  # host: the runtime package
+        from runtime.moy_carts import settings_text
+    return settings_text(rows.dump() or "{}")
+
+
+def r_settings(d, a):
+    ws = d.ws
+    rows = ws.system
+    if not a or a == ["list"]:
+        d.out(_settings_text(rows))
+        return 0
+    verb = a[0]
+    if verb == "get" and len(a) == 2:
+        text = rows.text(a[1]) if hasattr(rows, "text") else None
+        if text is None:
+            d.err("settings", "%s: not set" % a[1])
+            return 1
+        d.out(text + "\n")
+        return 0
+    if verb == "set" and len(a) >= 3:
+        import json
+        words = " ".join(a[2:])
+        try:
+            value = json.loads(words)
+        except ValueError:
+            value = words
+        rows.set(a[1], value)
+        ws.apply_system_keys((a[1],))
+        return 0
+    if verb == "unset" and len(a) == 2:
+        if not rows.delete(a[1]):
+            d.err("settings", "%s: not set" % a[1])
+            return 1
+        ws.apply_system_keys((a[1],))
+        return 0
+    if verb == "reload" and len(a) == 1:
+        ws.load_system()
+        ws._dirty = True
+        return 0
+    return _usage(d, "settings", "[list] | get KEY | set KEY VALUE... | unset KEY | reload")
+
+
+# -- pkg --------------------------------------------------------------------------------
+
+
+class _Bound:
+    """The install role's server with its grant argument bound, the object
+    Get Carts holds as `ctx.install`, and `carts()`, the shelf, which Get
+    Carts reads through its carts role."""
+
+    def __init__(self, server, ws):
+        self._s = server
+        self._ws = ws
+
+    def carts(self):
+        return self._ws.carts.all
+
+    def __getattr__(self, name):
+        fn = getattr(self._s, name)
+        return lambda *a: fn(None, *a)
+
+
+def _yes(d, question):
+    d.out(question + " [y/N] ")
+    line = _door.In(d.io).readline().strip().lower()
+    if d.io is not None and not line:
+        d.out("\n")
+    return line in ("y", "yes")
+
+
+def r_pkg(d, a):
+    try:
+        import pkg
+        from shell_servers import InstallServer
+    except ImportError:  # host: the runtime package
+        from runtime import pkg
+        from runtime.shell_servers import InstallServer
+    yes = "-y" in a
+    a = [w for w in a if w != "-y"]
+    p = pkg.Pkg(_Bound(InstallServer(d.ws), d.ws), d.out, lambda line: d.err("pkg", line),
+                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d))
+    verb, rest = (a[0], a[1:]) if a else ("", [])
+    try:
+        if verb == "update" and not rest:
+            return p.update()
+        if verb == "list" and not rest:
+            return p.list()
+        if verb == "search" and rest:
+            return p.list(rest)
+        if verb == "sources" and not rest:
+            d.out("".join(u + "\n" for u in p.sources()))
+            return 0
+        if verb == "install" and rest:
+            return p.install(rest, yes)
+        if verb == "remove" and rest:
+            return p.remove(rest)
+        if verb == "upgrade" and not rest:
+            return p.upgrade(yes)
+    except pkg.Stopped:
+        return INTERRUPTED
+    except pkg.InstallError as exc:
+        d.err("pkg", exc.text)
+        return 1
+    finally:
+        p.release()
+    return _usage(d, "pkg", "update | list | search WORD... | sources | "
+                  "install [-y] ID... | remove ID... | upgrade [-y]")
 
 
 # -- lease ------------------------------------------------------------------------------

@@ -275,8 +275,7 @@ def get_carts_taps(n=3):
         return [r[0] + r[2] // 2, r[1] + r[3] // 2]
     with tempfile.TemporaryDirectory() as d:
         ws = host_app.build_workstation(os.path.join(d, "carts"))
-        with open(os.path.join(d, cart_index.INDEXES_NAME), "w") as f:
-            json.dump({"indexes": [repo.url("index.json")]}, f)
+        cart_index.save_sources(os.path.join(d, "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
         app = ws._apps_by_id["getcarts"]
         ws.open_app(app)

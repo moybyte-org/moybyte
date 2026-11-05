@@ -38,7 +38,7 @@ def _ws(tmp_path, net, urls, **kw):
     import json
     from runtime import cart_index as ci
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-    (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": urls}))
+    ci.save_sources(str(tmp_path / "carts"), urls)
     ws.cart_net = net
     ws.pointer.visible = False
     return ws, ws._apps_by_id["getcarts"]
