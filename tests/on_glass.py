@@ -1208,12 +1208,7 @@ def the_shell_answers_over_serial(board):
     channel's `sh` word runs a line in the kernel's session and answers it
     `SH <line>` a line, then `SH end <status>`; the session keeps its state
     from one line to the next, and the console's processes cross the ROLE
-    door (runtime/shell/sh_door.py). A board that denies the module (its
-    board.toml says why) has no word: the console answers it unknown."""
-    board.pyexec("try:\n    import moy_sh\n    ws._g['_sh'] = True\n"
-                 "except ImportError:\n    ws._g['_sh'] = False", strict=True)
-    if not board.pyval("ws._g['_sh']", strict=True):
-        pytest.skip("this board's image denies moy_sh (its board.toml says why)")
+    door (runtime/shell/sh_door.py)."""
     assert _sh(board, "echo on-glass $((6 * 7))") == (0, ["on-glass 42"])
     assert _sh(board, "X=kept; cd /proc")[0] == 0
     assert _sh(board, "echo $X; pwd") == (0, ["kept", "/proc"])

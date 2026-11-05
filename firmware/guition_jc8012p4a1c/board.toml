@@ -184,6 +184,9 @@ isr_iram = 1
 # the 2026-10 look's font set took the image near the floor they grew to
 # 7.5 MiB on this board's 16 MB (owner, 2026-10-15): the theme fonts stay in the
 # image, and the store (the card, the internal vfs its fallback) gives the room.
+# They grew to 7.75 MiB (owner, 2026-11-05) for the terminal's C shell
+# (native/moy_sh, +85 KB at -Os), which at 7.5 MiB left the image 28 KB under
+# the floor; the internal vfs went from 960 KiB to 448 KiB for it.
 headroom_floor_kib = 1024
 
 [serial]
@@ -421,14 +424,14 @@ link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
 nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
 takes it."""
 
-[[native.shared.deny]]
+[[native.shared.take]]
 module = "moy_sh"
 why = """
-The terminal's C shell (native/moy_sh/README.md), which every other console
-takes. This board's image has no room for it above its 1024 KB headroom
-floor ([image]): with the shell at -Os the image is 6844448 bytes, 1019872
-bytes of headroom, 28704 short (2026-11-05). It takes the shell when the
-floor or the slots make the room, an owner call ([image]'s history)."""
+The terminal's C shell (native/moy_sh/README.md, docs/os_2026-11/system.md
+section 1): dash, the session, the C built-ins, the board's host table and the
+serial face, the dev channel's `sh` word. It answers with the VM stopped, so
+it is the kernel's and every console takes it. Its writable data is one word
+(tests/test_moy_sh.py); a session is PSRAM, made when a face first runs."""
 
 
 
