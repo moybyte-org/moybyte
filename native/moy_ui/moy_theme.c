@@ -769,6 +769,25 @@ static int field_of(const moy_theme_field_t *fs, int count, const char *path) {
     return -1;
 }
 
+// A look field by its path: a binary search of moy_theme_field_order (every
+// key a theme names is looked up, its objects' paths too).
+static int look_field(const char *path) {
+    int lo = 0, hi = MOY_THEME_LOOK_FIELDS - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2, i = moy_theme_field_order[mid];
+        int d = strcmp(moy_theme_fields[i].path, path);
+        if (d == 0) {
+            return i;
+        }
+        if (d < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return -1;
+}
+
 // A map key (a tile's app, an app_buttons app): 1 to MOY_THEME_MAPNAME_MAX of
 // [a-z0-9_].
 static int mapname_ok(const char *s, int n, int over) {
@@ -1160,7 +1179,7 @@ static int look_key(rd_t *r, const char *key, int over, void *ctx) {
         lpath_t sp = {&sub, ""};
         return keys(r, &sp, look_key);
     }
-    int f = field_of(moy_theme_fields, MOY_THEME_LOOK_FIELDS, path);
+    int f = look_field(path);
     if (f >= 0) {
         const moy_theme_field_t *fd = &moy_theme_fields[f];
         int32_t vals[8];
