@@ -54,6 +54,7 @@
 #include "moy_load.h"
 #include "moy_pack.h"
 #include "moy_seed.h"
+#include "moy_shelf.h"
 
 // -- the allocator -------------------------------------------------------------
 //
@@ -1179,6 +1180,82 @@ static mp_obj_t mod_copy_files(mp_obj_t src, mp_obj_t dst, mp_obj_t main) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_copy_files_obj, mod_copy_files);
 
+// -- the shelf's record (moy_shelf.h) ---------------------------------------------------
+
+// shelf_record(root) -> the record's text, or None when there is none.
+static mp_obj_t mod_shelf_record(mp_obj_t root) {
+    const char *r = path_arg(root);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_record(r, &b);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_shelf_record_obj, mod_shelf_record);
+
+// shelf_without(root, folder) -> the record without `folder`, or None when it
+// does not hold it.
+static mp_obj_t mod_shelf_without(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_without(r, f, &b);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_without_obj, mod_shelf_without);
+
+// shelf_remove(root, folder, text) -> None: `folder` off the shelf, `text`
+// (or None) the record without it.
+static mp_obj_t mod_shelf_remove(mp_obj_t root, mp_obj_t folder, mp_obj_t text) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder), *t = NULL;
+    size_t n = 0;
+    if (text != mp_const_none) {
+        t = mp_obj_str_get_data(text, &n);
+    }
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_remove(r, f, t, n);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_shelf_remove_obj, mod_shelf_remove);
+
+// shelf_find(root, ident) -> the folder of the entry `ident` names, or None.
+static mp_obj_t mod_shelf_find(mp_obj_t root, mp_obj_t ident) {
+    const char *r = path_arg(root), *i = mp_obj_str_get_str(ident);
+    char folder[MOY_SHELF_PATH];
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_find(r, i, folder, sizeof folder);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(folder, strlen(folder));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_find_obj, mod_shelf_find);
+
 // canon(text): what json.dumps(json.loads(text)) writes, the C's way.
 static mp_obj_t mod_canon(mp_obj_t text) {
     size_t n;
@@ -1401,6 +1478,10 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_journal_restore), MP_ROM_PTR(&mod_journal_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_graduate), MP_ROM_PTR(&mod_graduate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rmtree), MP_ROM_PTR(&mod_rmtree_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_record), MP_ROM_PTR(&mod_shelf_record_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_without), MP_ROM_PTR(&mod_shelf_without_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_remove), MP_ROM_PTR(&mod_shelf_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_find), MP_ROM_PTR(&mod_shelf_find_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_files), MP_ROM_PTR(&mod_copy_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_canon), MP_ROM_PTR(&mod_canon_obj) },
     { MP_ROM_QSTR(MP_QSTR_seed), MP_ROM_PTR(&mod_seed_obj) },

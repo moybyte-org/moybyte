@@ -39,7 +39,7 @@ SH end 1
 > sh settings frob
 SH usage: settings [list] | get KEY | set KEY VALUE... | unset KEY | reload
 SH end 2
-> sh pkg list
+> sh pkg update
 SH pkg: needs the console
 SH end 1
 [exit 0]

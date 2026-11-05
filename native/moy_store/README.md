@@ -4,7 +4,8 @@ The store in C (`docs/history/kernel_store_2026-10.md`; #224), linked by every i
 the boards, the browser and the desktop MicroPython. `runtime/carts/moy_fs.py`,
 `runtime/carts/moy_carts.py` and `runtime/carts/moy_store_base.py` delegate to it wherever
 the module imports; CPython (the simulator, the tools, the tests) keeps the
-Python twins, the reference the C is held to.
+Python twins, the reference the C is held to, except where the C is the one
+implementation and CPython reaches it over ctypes (the shelf's record).
 
 | file | what it is |
 |---|---|
@@ -19,6 +20,7 @@ Python twins, the reference the C is held to.
 | `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
 | `moy_arena.h` | a store call's scratch, freed at once |
 | `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
+| `moy_shelf.h`, `moy_shelf.c` | the shelf's record (`installed.json`: its one reader, the record without a cart as `json.dumps` writes it, an installed cart found by folder or id) and a cart's removal (the rename out of the carts folder, the delete, the record, its written files); `runtime/carts/cart_index.py` calls it on every tier (CPython through `runtime/host/moy_shelf_binding.py`) and the C shell's `pkg list` and `pkg remove` with no VM |
 | `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
 | `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table resolve (the kernel's own `lfs2_t` under a `KVfs`, VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), every call under `nlr_push`, scratch and the marker cache in PSRAM on a board |
 | `moy_kvfs.c` | the internal flash volume, the kernel's: its `lfs2_t` over the "vfs" partition (a RAM medium on the unix port, for the host's tests) and `KVfs`, the VFS type each VM's start mounts at `/` |

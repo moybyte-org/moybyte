@@ -27,8 +27,11 @@
 // WITH NO VM the store's commands are served in C (moy_sh_store.c), over the
 // same C the console calls: `settings` (list, get, set, unset) reads and
 // writes system/settings through the settings rows' file reader and writer
-// (native/moy_spine/moy_settings.h) and the store's crash-safe write. Every
-// other role command, and `settings reload`, needs the console.
+// (native/moy_spine/moy_settings.h) and the store's crash-safe write; `pkg
+// list` and `pkg remove` read and change the shelf's record through
+// native/moy_store/moy_shelf.h, the removal forgetting the cart's consent in
+// the settings rows. Every other role command, `settings reload` and the
+// other `pkg` verbs need the console.
 //
 // THE SERIAL FACE is the dev channel's `sh` word (moy_devch.c): `sh LINE`
 // runs LINE in the boot's serial session, made the first time and parked

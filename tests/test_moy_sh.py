@@ -61,6 +61,8 @@ def _objects(cc, out):
     jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(STORE, "moy_fs.c"), CFLAGS + ["-I", STORE]))
+    for name in ("moy_shelf.c", "moy_cat.c", "moy_files.c"):
+        jobs.append((os.path.join(STORE, name), CFLAGS + ["-I", STORE, "-I", SPINE]))
     jobs.append((os.path.join(SPINE, "moy_settings.c"), CFLAGS + ["-I", SPINE]))
     jobs.append((os.path.join(SPINE, "moy_json.c"), CFLAGS + ["-I", SPINE]))
     jobs.append((os.path.join(KERNEL, "moy_log.c"), CFLAGS + ["-I", KERNEL]))

@@ -163,6 +163,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import cart_files as _cart_files
     from runtime import cart_listing as _cl
 
+# The record and the removal are native/moy_store/moy_shelf.h's on every tier:
+# the image's moy_store, or the same C over ctypes on CPython.
+try:
+    import moy_store as _shelf
+    _shelf.shelf_record
+except (ImportError, AttributeError):  # CPython
+    from runtime import moy_shelf_binding as _shelf
+
 
 INDEX_VERSION = 1
 DEFAULT_INDEXES = (
@@ -705,15 +713,16 @@ def need_bytes(p, block):
 # -- the record -------------------------------------------------------------------
 
 def load_record(root):
-    """{folder: entry} for every cart this store installed."""
-    def pick(d):
-        carts = d.get("carts") if isinstance(d, dict) else None
-        return carts if isinstance(carts, dict) else None
-    try:
-        got = _store._load_store_json(_sibling_path(root, RECORD_NAME), pick)
-    except Exception:  # noqa: BLE001 -- no record reads as nothing installed
-        got = None
-    return dict(got) if got else {}
+    """{folder: entry} for every cart this store installed: the record as
+    moy_shelf.h reads it (the file, else its backup healed into place)."""
+    text = _shelf.shelf_record(root)
+    return dict(json.loads(text)["carts"]) if text is not None else {}
+
+
+def find_installed(root, ident):
+    """The folder of the installed cart `ident` names (its folder or its id),
+    or None."""
+    return _shelf.shelf_find(root, ident)
 
 
 def record_text(rec):
@@ -798,26 +807,17 @@ def remove(root, folder, keep=None):
     """Take `folder` off the shelf: one rename out of the carts folder (so a
     crash mid-delete never leaves half a cart listed), then the delete, then
     the record, then the files the cart wrote (runtime/carts/cart_files.py), which
-    live beside the store and go with it. Call inside one store session.
+    live beside the store and go with it -- native/moy_store/moy_shelf.h's,
+    the C shell's `pkg remove` with no VM. Call inside one store session.
 
     With a keeper the record without the cart goes to the store of record
     FIRST, ahead of the folder's deletion: a record that outlives its folder
     would one day offer an UPDATE over a kid's own cart of the same name,
     while a folder that outlives its record is only offered again."""
-    rec = load_record(root)
-    had = rec.pop(folder, None) is not None
-    if keep is not None and had:
-        keep.record(record_text(rec))
-    base = stage_root(root)
-    _mkdir(base)
-    gone = base + "/" + folder + ".gone"
-    if _exists(gone):
-        _rmtree(gone)
-    os.rename(cart_path(root, folder), gone)
-    _rmtree(gone)
-    if had:
-        save_record(root, rec)
-    _cart_files.remove(root, folder)
+    text = _shelf.shelf_without(root, folder)
+    if keep is not None and text is not None:
+        keep.record(text)
+    _shelf.shelf_remove(root, folder, text)
     erased = getattr(keep, "erased", None)
     if erased is not None:
         erased(_cart_files.cart_id(folder), None)

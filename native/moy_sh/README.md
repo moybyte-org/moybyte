@@ -18,7 +18,7 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh_int.h` | what the three `.c` files share |
 | `dash/`, `patches/`, `dash_vendor.json`, `dash_pin.h` | the vendored dash (`UPSTREAM.md`) |
 | `moy_sh_board.c`, `moy_sh_board.h` | a board's host table (the kernel's figures in C, the console's across the ROLE door: `runtime/shell/sh_door.py` serves the processes, /proc, /dev, /bin and the installed commands, `runtime/shell/sh_roles.py` the role commands) and the serial face, the dev channel's `sh` word |
-| `moy_sh_store.c` | the console's commands the shell serves from the store while no VM runs (`settings`), over the C the console calls (`moy_sh_board.h`) |
+| `moy_sh_store.c` | the console's commands the shell serves from the store while no VM runs (`settings`; `pkg list` and `pkg remove` over `native/moy_store/moy_shelf.h`), over the C the console calls (`moy_sh_board.h`) |
 | `moy_sh_screen.c`, `moy_sh_screen.h` | the screen face: a session over the board's table whose terminal is a grid, its Ctrl-C read from the kernel input table's latches while a run holds the frame; the Terminal app (`runtime/apps/terminal_app.py`) draws and feeds it |
 | `moy_term.c`, `moy_term.h` | the terminal's cell grid: the VT100 subset a line program and a full-screen app write, a scrollback ring, its lines as SGR text for `ui.text_view` |
 | `modmoy_sh.c`, `micropython.cmake` | the MicroPython module (a door command's streams, `line`, `interrupted`, the screen face's `Screen`) and the board build: the shell is its own static library, so dash's shim reaches no other file |

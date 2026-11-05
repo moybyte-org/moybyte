@@ -93,9 +93,10 @@ what it took before it ends, a media stream excepted;
 mostly C, one implementation moved down, Python calling it). With the VM
 stopped these answer, each over the C the console itself calls: the file
 commands, `ps`, `kill` (the run in front), `free`, `log`/`dmesg`, `reboot`,
-`date`, `sleep`, `clear`, `help`, and `settings` `list`, `get`, `set` and
-`unset` (§5; `native/moy_sh/moy_sh_store.c`). Everything else needs the
-console: `settings reload` (it applies the file), `pkg`, `perm`, `notify`,
+`date`, `sleep`, `clear`, `help`, `settings` `list`, `get`, `set` and
+`unset` (§5), and `pkg list` and `pkg remove` (§6), the last two in
+`native/moy_sh/moy_sh_store.c`. Everything else needs the console:
+`settings reload` (it applies the file), the other `pkg` verbs, `perm`, `notify`,
 `service`, `lease`, `python`, the device faces, the installed commands, `df`
 and the console's /proc, /dev and /bin rows.
 
@@ -274,6 +275,7 @@ host's `indexes.json` there at boot.
 | `pkg search WORD...` | those whose id, name, description or tags hold every word |
 | `pkg install [-y] ID...` | each with its `depends` first (`cart_index.needs`: one no index lists, or a cycle, refuses), the checks, an external file's licence, the download and the permission prompt (`processes.md` §2); `-y` answers yes, else each is asked on stdin |
 | `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent |
+| `pkg list` with no VM | the carts the record holds, `installed` (the indexes need the console) |
 | `pkg upgrade [-y]` | every installed cart the indexes list newer |
 | `pkg sources` | the sources in use |
 
@@ -289,3 +291,12 @@ the first dot, the shell already answers to (a built-in or a role command,
 `pkg.SHELL_NAMES`) or another installed command holds is not installed. Get
 Carts installs one cart at a time, so a cart whose dependency is not yet on
 the console says to get that one first.
+
+**The record and the removal are C** (`native/moy_store/moy_shelf.h`):
+`installed.json`'s one reader (the file, else its backup healed into place),
+the record without a cart (written as `json.dumps` writes it, and handed to
+a keeper before anything is deleted), the folder's rename out of the carts
+folder and delete, and the cart's written files. `cart_index`'s
+`load_record`, `find_installed` and `remove` call it on every tier, and with
+the VM stopped the C shell's `pkg list` and `pkg remove` serve it, the
+removal forgetting the cart's consent through the settings rows.

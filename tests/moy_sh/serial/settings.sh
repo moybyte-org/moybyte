@@ -12,4 +12,4 @@ settings unset favorites
 cat /sd/moybyte/system/settings
 settings reload
 settings frob
-pkg list
+pkg update

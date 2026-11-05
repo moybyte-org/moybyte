@@ -8,7 +8,8 @@ kept, a write that is whole or not at all, and the listing.
 WHERE: beside the carts store, `written/<cart>/` -- <cart> the cart folder's
 name less ".moy" (`cart_id`) -- so an install, an update or a push replaces
 the cart's folder and never touches them, and Get Carts' REMOVE takes them
-with the cart (`remove`, from runtime/carts/cart_index.py's).
+with the cart (native/moy_store/moy_shelf.h, runtime/carts/cart_index.py's
+`remove`).
 
 ONE FLAT FOLDER PER CART: a path is one file named by its key (`key`), the
 rule moy-spec's libmoy/port/moy_files.c keeps for the desktop player: a-z,
@@ -31,8 +32,8 @@ THE TIERS: a run's requests are native/moy_store/moy_files.c's on every
 tier -- the boards' and the browser's moycore on the MicroPython task
 (native/moycore/moycore_wasm.c, through moy_wasm_on_vm), the host's run by
 ctypes (runtime/host/moyhost_wasm.c). This module is the reference
-tests/test_moy_files.py holds that C to, rule for rule, and the store's half:
-`remove` and `cart_id`, which Get Carts' REMOVE calls. `gate(fn)` runs fn
+tests/test_moy_files.py holds that C to, rule for rule, and `cart_id`, the
+name a browser's keeper erases on a REMOVE. `gate(fn)` runs fn
 inside the store's session -- the T-Deck's SD gate. In the browser `keep` is
 the page's keeper (firmware/web_runner/carts_link.py's WebCartKeep).
 
@@ -46,10 +47,10 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_store_base import _sibling_path, _rmtree, _is_dir
+    from moy_store_base import _sibling_path, _is_dir
     from moy_fs import _mkdir, _remove
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import _sibling_path, _rmtree, _is_dir
+    from runtime.moy_store_base import _sibling_path, _is_dir
     from runtime.moy_fs import _mkdir, _remove
 
 WRITTEN_DIR = "written"
@@ -126,11 +127,6 @@ def folder_of(cart_path):
     parts = cart_path.rstrip("/").rsplit("/", 1)
     root, folder = (parts[0], parts[1]) if len(parts) == 2 else ("", parts[0])
     return written_root(root) + "/" + cart_id(folder)
-
-
-def remove(carts_root, folder):
-    """Every file the cart in `folder` wrote. Inside the store's session."""
-    _rmtree(written_root(carts_root) + "/" + cart_id(folder))
 
 
 def _errno(exc):

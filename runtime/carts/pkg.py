@@ -470,13 +470,9 @@ class Pkg:
 
     def remove(self, idents):
         inst = self.inst
-        rec = inst.op(lambda: _ci.load_record(inst.root()))
         code = 0
         for ident in idents:
-            folder = None
-            for f, entry in rec.items():
-                if ident in (f, entry.get("id")):
-                    folder = f
+            folder = inst.op(lambda: _ci.find_installed(inst.root(), ident))
             if folder is None:
                 self.err("%s: not installed by pkg" % ident)
                 code = 1

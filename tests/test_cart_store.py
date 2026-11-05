@@ -783,6 +783,95 @@ def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     assert keep.said == [("record",), ("erased", "jet", None)]
 
 
+def test_the_record_a_remove_writes_is_what_json_dumps_writes(tmp_path):
+    """The C makes the record without the cart (moy_shelf.h): byte for byte
+    what record_text made of the record with the cart popped, the text the
+    keeper is handed the same as the file."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    for cid in ("jet", "doom", "zed"):
+        repo.add(cid)
+        _install(_cart(repo, cid), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    rec = json.loads(path.read_text())["carts"]
+    rec["doom.moy"]["name"] = "Doom été \"2\""     # an escape and non-ASCII
+    path.write_text(ci.record_text(rec))
+    want = dict(rec)
+    want.pop("doom.moy")
+
+    class Keep:
+        said = []
+
+        def record(self, text):
+            self.said.append(text)
+    ci.remove(root, "doom.moy", Keep())
+    assert path.read_text() == ci.record_text(want) == Keep.said[0]
+    ci.remove(root, "jet.moy")
+    ci.remove(root, "zed.moy")
+    assert path.read_text() == ci.record_text({})
+
+
+def test_a_cart_the_record_does_not_hold_goes_and_the_record_stays(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    before = path.read_bytes()
+    mine = Path(root) / "mine.moy"
+    mine.mkdir()
+    (mine / "main.py").write_text("x")
+    ci.remove(root, "mine.moy")
+    assert not mine.exists() and path.read_bytes() == before
+    with pytest.raises(OSError):
+        ci.remove(root, "mine.moy")                       # no folder to rename
+
+
+def test_the_record_reads_its_backup_when_the_file_is_torn(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    good = path.read_text()
+    path.write_text(good[:len(good) // 2])                # a publish cut short
+    assert "jet.moy" in ci.load_record(root)
+    assert path.read_text() == good                       # healed in place
+    path.write_text('{"version": 1, "carts": []}')       # the wrong shape
+    (Path(str(path) + ".bak")).unlink()
+    assert ci.load_record(root) == {}
+
+
+def test_an_installed_cart_is_found_by_its_folder_or_its_id(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    cid = ci.load_record(root)["jet.moy"]["id"]
+    assert ci.find_installed(root, "jet.moy") == "jet.moy"
+    assert ci.find_installed(root, cid) == "jet.moy"
+    assert ci.find_installed(root, "nope") is None
+
+
+def test_the_record_and_the_removal_are_the_c_shelf(tmp_path, monkeypatch):
+    """cart_index keeps no reader of the record and no removal of its own:
+    with native/moy_store/moy_shelf.h's calls taken away, none of them works."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+
+    def gone(*_a):
+        raise RuntimeError("the C shelf")
+    for name in ("shelf_record", "shelf_without", "shelf_remove", "shelf_find"):
+        monkeypatch.setattr(ci._shelf, name, gone)
+    for call in (lambda: ci.load_record(root), lambda: ci.find_installed(root, "jet.moy"),
+                 lambda: ci.remove(root, "jet.moy")):
+        with pytest.raises(RuntimeError):
+            call()
+    assert (Path(root) / "jet.moy").exists()
+
+
 def test_room_is_counted_in_the_stores_blocks():
     repo = Repo(BASE)
     repo.add("jet")
@@ -1662,6 +1751,9 @@ job = ci.Install(bad, ci.plan(bad, "esp32p4", "2"), Net(), root, lambda fn: fn()
 while job.step():
     pass
 print("refused", job.error == ci.MISMATCH, "bad.moy" in os.listdir(root))
+ci.remove(root, "jet.moy")
+print("removed", ci.find_installed(root, "jet"), sorted(ci.load_record(root)),
+      "jet.moy" in os.listdir(root))
 '''
 
 
@@ -1702,6 +1794,7 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     # an InstallError raised and caught on MicroPython, which has no
     # Exception.__init__ for a subclass to call
     assert lines[4] == "refused True False", out.stdout
+    assert lines[5] == "removed None ['dm.moy', 'wm.moy'] False", out.stdout
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
     assert (Path(root) / "wm.moy" / "level.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []
