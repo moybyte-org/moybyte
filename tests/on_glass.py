@@ -1392,6 +1392,91 @@ def the_scheduler_stops_a_runaway_service(board):
                      strict=True)
 
 
+def an_asyncio_service_runs_beside_the_desk(board):
+    """The shell's asyncio loop (runtime/system/aio.py) on glass: a service
+    whose main is `asyncio.run(main())` steps on the scheduler, each step its
+    callback, while the desk keeps answering; its stop cancels the task,
+    which cleans up."""
+    import time
+    board.pyexec("import scheduler as S, aio\n"
+                 "SRC = 'import asyncio\\nn = [0]\\nclean = []\\n"
+                 "async def main():\\n    try:\\n        while True:\\n"
+                 "            n[0] += 1\\n            await asyncio.sleep_ms(50)\\n"
+                 "    finally:\\n        clean.append(1)\\nasyncio.run(main())\\n'\n"
+                 "ws._ap = S.SCHED.start({'id': 't.aio', 'title': 'aio', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "ws._an = S.SCHED.procs[ws._ap].ns",
+                 strict=True)
+    try:
+        time.sleep(1.0)
+        line = board.cmd("state", wait_for="STATE ")
+        time.sleep(1.0)
+        board.pyexec("import scheduler as S, aio\n"
+                     "p = S.SCHED.procs[ws._ap]\n"
+                     "ws._aq = (p.state, ws._an['n'][0], p.calls, aio.count(ws._ap))\n"
+                     "S.SCHED.stop(ws._ap)",
+                     strict=True)
+        time.sleep(0.5)
+        board.pyexec("import aio\n"
+                     "ws._aq2 = (ws._an['clean'], aio.count(ws._ap), aio.LOOP.w is None)",
+                     strict=True)
+        state, n, calls, tasks = board.pyval("ws._aq", strict=True)
+        clean, left, wake = board.pyval("ws._aq2", strict=True)
+        assert (state, tasks) == ("background", 1), (state, tasks)
+        assert n >= 20 and calls > n, (n, calls)         # about 40 in 2 s
+        assert line is not None, "the desk did not answer beside the service"
+        assert (clean, left, wake) == ([1], 0, True), (clean, left, wake)
+    finally:
+        board.pyexec("import scheduler as S\nS.SCHED.stop(ws._ap)", strict=True)
+
+
+def an_on_crash_service_restarts_after_a_forced_crash(board):
+    """Init restart policies (runtime/system/scheduler.py) on glass: an
+    `on-crash` service whose wake raises is started again after its back-off
+    as a new process. The policy is held in a store of the test's, so the
+    board's settings are not written."""
+    import time
+    board.pyexec("import scheduler as S\n"
+                 "class _St:\n"
+                 "    def __init__(self): self.rows = {}\n"
+                 "    def get(self, k, d=None): return self.rows.get(k, d)\n"
+                 "    def set(self, k, v): self.rows[k] = v\n"
+                 "ws._rs = S.SCHED.store\n"
+                 "S.SCHED.store = _St()\n"
+                 "S.SCHED.set_policy('t.oncrash', S.ON_CRASH)\n"
+                 "SRC = 'import moybyte, scheduler\\ndef tick():\\n"
+                 "    if getattr(scheduler, \"CRASH_NOW\", 0):\\n"
+                 "        scheduler.CRASH_NOW = 0\\n"
+                 "        raise ValueError(\"forced\")\\n"
+                 "moybyte.every(50, tick)\\n'\n"
+                 "ws._rp = S.SCHED.start({'id': 't.oncrash', 'title': 'oncrash', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "S.CRASH_NOW = 1",
+                 strict=True)
+    try:
+        time.sleep(0.5)
+        board.pyexec("import scheduler as S\n"
+                     "ws._r1 = (S.SCHED.procs[ws._rp].code, 't.oncrash' in S.SCHED.pending)",
+                     strict=True)
+        time.sleep(1.5)                                 # the first back-off, 1 s
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.find('t.oncrash')\n"
+                     "ws._r2 = (p.pid != ws._rp, p.state) if p else None",
+                     strict=True)
+        first = board.pyval("ws._r1", strict=True)
+        again = board.pyval("ws._r2", strict=True)
+        assert first == (1, True), first
+        assert again == (True, "background"), again
+        line = board.cmd("state", wait_for="STATE ")
+        assert line is not None, "the desk did not answer after the restart"
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "S.SCHED.forgive('t.oncrash')\n"
+                     "p = S.SCHED.find('t.oncrash')\n"
+                     "if p:\n    S.SCHED.stop(p.pid)\n"
+                     "S.SCHED.store = ws._rs", strict=True)
+
+
 def lease_pin(board_dir):
     """A pin of the board's `lease` row (board.toml [hardware]): free, so a
     test may drive it."""

@@ -387,6 +387,14 @@ def test_the_scheduler_stops_a_runaway_service(board):
     on_glass.the_scheduler_stops_a_runaway_service(board)
 
 
+def test_an_asyncio_service_runs_beside_the_desk(board):
+    on_glass.an_asyncio_service_runs_beside_the_desk(board)
+
+
+def test_an_on_crash_service_restarts_after_a_forced_crash(board):
+    on_glass.an_on_crash_service_restarts_after_a_forced_crash(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
