@@ -202,9 +202,14 @@ jobs:
           done
           exit "$rc"
 
-      # master's first: its build.py replaces the whole --out directory.
+      # master's first: its build.py replaces the whole --out directory. The
+      # stills are captured with dev's browsershot.mjs: it is tooling, not
+      # the site, and dev's waits out a runner whose Chrome is slow to report
+      # its port, which failed master's capture and with it both sites.
       - name: Assemble the stable site
-        run: python3 site/build.py --out _site --firmware dist/ci-firmware
+        run: |
+          cp _dev/firmware/web_runner/browsershot.mjs firmware/web_runner/browsershot.mjs
+          python3 site/build.py --out _site --firmware dist/ci-firmware
 
       # A dev tree whose build.py breaks must not take the stable site down
       # with it: the deploy goes out without /dev/ and player-check goes red.
