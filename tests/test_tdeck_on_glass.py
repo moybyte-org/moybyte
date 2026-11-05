@@ -45,10 +45,12 @@ def board():
 # same tree: board.toml's moy_wasm `take` turned to `deny`, built from an
 # EMPTY build dir (a configured one keeps the engine in its module table and
 # fails to link; a fresh `tools/worktree.py new` has one). Measured
-# 2026-10-31 on 1993fb0c, two fresh boots alike: 126791 free, 86016 largest;
-# the image with the engine read 125243 / 81920. A change that adds internal
-# statics re-measures it the same way.
-WASM_IDLE_BASELINE = (126791, 86016)
+# 2026-11-05 on 687c296a5, two fresh boots: 125843 and 125863 free, 86016
+# largest; the image with the engine read 124683 free. The idle desk's bar
+# reads the battery gauge (its low glyph), so the baseline holds what the
+# ADC driver keeps in internal SRAM once read. A change that adds internal
+# statics, or internal RAM the idle desk holds, re-measures it the same way.
+WASM_IDLE_BASELINE = (125863, 86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
