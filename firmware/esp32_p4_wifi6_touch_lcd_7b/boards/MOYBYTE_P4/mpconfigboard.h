@@ -103,15 +103,12 @@
 #define MOY_WASM_POOL_BYTES                 (320 * 1024)
 
 // The kernel's recovery floor (native/moy_kernel): moy_dsi's entry points, the
-// 1024x600 DPI framebuffer, and the BOOT button (GPIO35, active low) as its one
-// button.
+// 1024x600 DPI framebuffer. Its input is the GT911 touch below (MOY_INPUT_TOUCH_*).
 #define MOY_KERNEL_PANEL(fn)                moy_dsi_k##fn
 #define MOY_KERNEL_PANEL_W                  (1024)
 #define MOY_KERNEL_PANEL_H                  (600)
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (0)
-#define MOY_KERNEL_BUTTON_GPIO              (35)
-#define MOY_KERNEL_BUTTON_NAME              "BOOT"
 
 // The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GT911 touch
 // and the ES8311/ES7210 codecs.

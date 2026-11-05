@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -537,7 +538,21 @@ void nlr_jump_fail(void *val) {
 
 #define K_POLL_MS        20
 #define K_REPORT_MS      5000
-#define K_BUTTON_HOLD_MS 1000
+#define K_INJECT         160      // the bytes serial's `type` queues for the screen
+
+// The floor's choices, as its screen numbers them (moy_sh_floor.h), and the
+// serial words that pick them.
+enum { K_RETRY = 0, K_SAFE, K_REBOOT, K_REPL };
+static const char *const K_WORDS[] = {"retry", "safe", "reboot", "repl"};
+
+static int k_word(const char *w) {
+    for (int i = 0; i < (int)(sizeof(K_WORDS) / sizeof(K_WORDS[0])); i++) {
+        if (strcmp(w, K_WORDS[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 static void k_out(const char *s) {
     size_t n = strlen(s);
@@ -572,49 +587,6 @@ static int k_getc(void) {
     return c;
 }
 
-#if defined(MOY_KERNEL_TOUCH_AXS15231)
-#include "driver/i2c.h"
-// The AXS15231's touch, the same read as input's driver
-// (native/moy_input/moy_touchdev.c), on the
-// port's legacy I2C driver (the one this MicroPython links; the new driver
-// beside it aborts the boot). The VM never runs in a floor's boot, so the
-// floor owns I2C0.
-static bool s_touch_up;
-static void k_touch_init(void) {
-    i2c_config_t c = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = MOY_KERNEL_TOUCH_SDA,
-        .scl_io_num = MOY_KERNEL_TOUCH_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000,
-    };
-    s_touch_up = i2c_param_config(I2C_NUM_0, &c) == ESP_OK
-                 && i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK;
-}
-
-// A press as a logical (x, y); returns whether a finger is down.
-static bool k_touch(int *x, int *y) {
-    static const uint8_t cmd[11] = {
-        0xb5, 0xab, 0xa5, 0x5a, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-    };
-    uint8_t d[8];
-    if (!s_touch_up
-            || i2c_master_write_to_device(I2C_NUM_0, MOY_KERNEL_TOUCH_ADDR, cmd, sizeof(cmd),
-                                          pdMS_TO_TICKS(20)) != ESP_OK
-            || i2c_master_read_from_device(I2C_NUM_0, MOY_KERNEL_TOUCH_ADDR, d, sizeof(d),
-                                           pdMS_TO_TICKS(20)) != ESP_OK
-            || d[0] != 0 || d[1] == 0) {
-        return false;
-    }
-    int rx = ((d[2] & 0x0F) << 8) | d[3];
-    int ry = ((d[4] & 0x0F) << 8) | d[5];
-    *x = (MOY_KERNEL_PANEL_W - 1) - ry;      // axs_touch's rot-0 map: SWAP_XY + FLIP_X
-    *y = rx;
-    return true;
-}
-#endif
-
 #ifdef MOY_KERNEL_PANEL
 // What the kernel's screens draw with (moy_recovery.h): the outline faces'
 // scratch, lent for the draw, and on a turned panel the band each pass
@@ -643,8 +615,8 @@ static void k_scr_reserve(void) {
 static void k_geom(moy_rgeom_t *g) {
     moy_rgeom_init(g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
                    MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
-    #if defined(MOY_KERNEL_TOUCH_AXS15231)
-    g->touch = 1;
+    #if defined(MOY_INPUT_TOUCH_KIND) && !defined(MOY_INPUT_KBD_TDECK)
+    g->touch = 1;                       // touch only: the web screen's handheld sizes
     #endif
     k_scr_reserve();
     if (s_scr_mem == NULL) {
@@ -714,45 +686,132 @@ bool moy_kernel_splash_keep(const uint16_t *pal) {
     #endif
 }
 
+// The floor's screen (native/moy_sh/moy_sh_floor.h): the Terminal's face
+// under the reason and the choices, drawn through the toolkit's engine and
+// fed by the board's C input drivers (native/moy_input/moy_drivers.h). An
+// image without the panel (the headless Zero) has a serial floor only.
+#if defined(MOY_KERNEL_PANEL) && __has_include("moy_sh_floor.h")
+#define K_FLOOR 1
+#include "moy_drivers.h"
+#include "moy_sh_floor.h"
+#include "moy_ui.h"
+_Static_assert((int)K_RETRY == (int)MOY_SH_FLOOR_RETRY && (int)K_SAFE == (int)MOY_SH_FLOOR_SAFE
+               && (int)K_REBOOT == (int)MOY_SH_FLOOR_REBOOT
+               && (int)K_REPL == (int)MOY_SH_FLOOR_REPL,
+               "the floor's choices are the screen's");
+#else
+#define K_FLOOR 0
+#endif
+
 typedef struct {
     moy_rgeom_t g;
     moy_rview_t v;
     uint16_t *fb;
     int why;
+    int sel;                            // the choice the floor takes on its own
     uint32_t crc;
+    bool crc_owed;                      // drawn since the crc was taken
+    uint32_t frame_ms;                  // the last drawn frame's cost
+    int card;                           // the card's bring-up: 0 mounted, -1 not tried
+    const char *card_what;
+    bool idle;                          // no input came up: SAFE after the idle time
+    char hint[MOY_RV_COLS];
+    #if K_FLOOR
+    moy_sh_floor_t *fl;
+    moy_input_t *t;
+    uint32_t touch_src, devch_src;
+    moy_touchdev_t *touch;
+    moy_kbd_t *kbd;
+    moy_ball_t *ball;
+    bool click, down;
+    int32_t ax, ay;
+    char inject[K_INJECT];
+    uint16_t in_head, in_n;
+    int tap;                            // an injected tap's frames left
+    int32_t tap_x, tap_y;
+    uint32_t tick;
+    #endif
 } k_floor_t;
 
-static void k_draw(k_floor_t *k) {
-    if (k->fb == NULL) {
+#if K_FLOOR
+// The floor's logical pixels onto the panel's framebuffer, turned as
+// moy_recovery.h says (the PPA's counter-clockwise convention).
+static void k_blit(uint16_t *fb, const uint16_t *px, const moy_rgeom_t *g) {
+    int w = g->w, h = g->h, fw = g->fb_w;
+    if (g->rot == 0) {
+        memcpy(fb, px, (size_t)w * h * 2);
         return;
     }
-    #ifdef MOY_KERNEL_PANEL
-    int fails = moy_recovery_render(k->fb, &k->g, &k->v);
-    if (fails != 0) {
-        k_printf("KERNEL recovery draw fails=%d\r\n", fails);
+    for (int y = 0; y < h; y++) {
+        const uint16_t *row = px + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            int fx, fy;
+            if (g->rot == 90) {
+                fx = y;
+                fy = w - 1 - x;
+            } else if (g->rot == 270) {
+                fx = h - 1 - y;
+                fy = x;
+            } else {
+                fx = w - 1 - x;
+                fy = h - 1 - y;
+            }
+            fb[(size_t)fy * fw + fx] = row[x];
+        }
     }
-    k->crc = moy_crash_crc32(0, k->fb, (size_t)k->g.fb_w * k->g.fb_h * 2);
+}
+#endif
+
+static void k_draw(k_floor_t *k) {
+    #if K_FLOOR
+    if (k->fb == NULL || k->fl == NULL) {
+        return;
+    }
+    k->crc_owed = true;
+    k_blit(k->fb, moy_sh_floor_pixels(k->fl), &k->g);
     int e = MOY_KERNEL_PANEL(present)();
     if (e != 0) {
         k_printf("KERNEL recovery present err=0x%x\r\n", e);
     }
+    #else
+    (void)k;
     #endif
 }
 
-static void k_report(const k_floor_t *k) {
+static void k_report(k_floor_t *k) {
+    #if K_FLOOR
+    if (k->crc_owed && k->fl != NULL) {
+        k->crc_owed = false;
+        k->crc = moy_crash_crc32(0, moy_sh_floor_pixels(k->fl), (size_t)k->g.w * k->g.h * 2);
+    }
+    #endif
     k_printf("KERNEL recovery reason=%s sel=%s crc=%08x fw=%s\r\n",
-             moy_crash_why_name(k->why), moy_recovery_choice_name(k->v.sel),
+             moy_crash_why_name(k->why), moy_recovery_choice_name(k->sel),
              (unsigned)(k->fb ? k->crc : 0), MOY_FW_LABEL);
     for (int i = 0; i < k->v.nlines; i++) {
         k_printf("KERNEL line %d %s\r\n", i, k->v.line[i]);
     }
-    k_printf("KERNEL hint %s\r\n", k->v.hint);
+    #if K_FLOOR
+    if (k->fl != NULL) {
+        k_printf("KERNEL input %s touch=%s kbd=%s ball=%s frame=%ums\r\n",
+                 moy_ui_input() == MOY_UI_INPUT_TDECK ? "tdeck" : "touch",
+                 k->touch == NULL ? "none" : k->touch->available ? "up" : "down",
+                 k->kbd == NULL ? "none" : k->kbd->available ? "up" : "down",
+                 k->ball == NULL ? "none" : "up", (unsigned)k->frame_ms);
+        int32_t b[4];
+        for (int i = 0; moy_sh_floor_row(k->fl, i, b); i++) {
+            k_printf("KERNEL row %d %s %d %d %d %d\r\n", i, moy_sh_floor_word(i),
+                     (int)b[0], (int)b[1], (int)b[2], (int)b[3]);
+        }
+    }
+    #endif
+    k_printf("KERNEL hint %s\r\n", k->hint);
 }
 
 static void k_state(const k_floor_t *k) {
     const moy_crash_rec_t *r = moy_kernel_last_crash();
     k_printf("STATE {\"screen\": \"recovery\", \"recovery\": \"%s\", \"sel\": \"%s\", "
-             "\"crash\": ", moy_crash_why_name(k->why), moy_recovery_choice_name(k->v.sel));
+             "\"crash\": ", moy_crash_why_name(k->why), moy_recovery_choice_name(k->sel));
     if (r == NULL) {
         k_out("null}\r\n");
     } else {
@@ -884,16 +943,53 @@ static void k_choose(int choice) {
     esp_restart();
 }
 
-// `sh LINE` on the floor: LINE in the C shell's serial session, answered as
-// the dev channel's `sh` word answers it (moy_devch.c), with the shell's
-// commands that need no VM. The first one brings the card up from C
-// (moy_store_card_up, native/moy_sd), so system/ and the carts on it are the
-// shell's on a boot no VM has run in; on a board whose card rides the panel's
+// Reboot: a restart with the floor's counts started over and nothing
+// chosen, so the next boot decides as a power-on would and starts the
+// console. The shell's own `reboot` keeps the counts, which would bring a
+// floor boot straight back here.
+static void k_reboot(void) {
+    s_kst.next = MOY_BOOT_NONE;
+    s_kst.crashes = 0;
+    s_kst.unproven = 0;
+    k_out("KERNEL recovery choice=REBOOT\r\n");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    esp_restart();
+}
+
+static void k_act(int choice) {
+    switch (choice) {
+        case K_RETRY: k_choose(0); break;
+        case K_SAFE: k_choose(1); break;
+        case K_REPL: k_choose(2); break;
+        case K_REBOOT: k_reboot(); break;
+        default: break;
+    }
+}
+
+// The card, brought up from C (moy_store_card_up, native/moy_sd) for the
+// shell's commands on screen and over serial: system/ and the carts on it are
+// theirs on a boot no VM has run in. On a board whose card rides the panel's
 // bus (the T-Deck's SPI2) only once the panel came up. Weak, so an image
 // without the shell or the card links.
 bool moy_sh_board_line(const char *text) __attribute__((weak));
 int moy_store_card_up(const char **what) __attribute__((weak));
 
+static void k_card(k_floor_t *k) {
+    #if defined(MOY_HW_SPI2_SD_CS)
+    bool bus = k->fb != NULL;
+    #else
+    bool bus = true;
+    #endif
+    k->card_what = bus ? "no card" : "the panel";
+    k->card = -1;
+    if (bus && moy_store_card_up != NULL) {
+        k->card = moy_store_card_up(&k->card_what);
+    }
+}
+
+// `sh LINE` on the floor: LINE in the C shell's serial session, answered as
+// the dev channel's `sh` word answers it (moy_devch.c), with the shell's
+// commands that need no VM. The first says what became of the card.
 static void k_sh(const k_floor_t *k, const char *line, bool *ready) {
     if (moy_sh_board_line == NULL) {
         k_out("SH error no shell\r\n");
@@ -902,30 +998,176 @@ static void k_sh(const k_floor_t *k, const char *line, bool *ready) {
     if (!*ready) {
         *ready = true;
         moy_loop_board_down();          // the shell's lines out through moy_kernel_say
-        const char *what = "no card";
-        int e = -1;
-        #if defined(MOY_HW_SPI2_SD_CS)
-        bool bus = k->fb != NULL;
-        #else
-        bool bus = true;
-        (void)k;
-        #endif
-        if (bus && moy_store_card_up != NULL) {
-            e = moy_store_card_up(&what);
-        }
-        if (e == 0) {
+        if (k->card == 0) {
             k_out("KERNEL card mounted\r\n");
         } else {
-            k_printf("KERNEL card err=%d at %s\r\n", e, bus ? what : "the panel");
+            k_printf("KERNEL card err=%d at %s\r\n", k->card, k->card_what);
         }
     }
     moy_sh_board_line(line);
 }
 
+#if K_FLOOR
+#define K_BALL_STEP 2                   // trackball pulses a step (console_input.py's BALL_STEP)
+#define K_TAP_FRAMES 3                  // an injected tap: down two frames, then up
+
+// The screen: the face, the board's input on the kernel's table, the hint
+// that names it. Where no input comes up, the idle countdown to SAFE stands.
+static void k_floor_up(k_floor_t *k) {
+    moy_input_t *t = moy_input_kernel();
+    k->t = t;
+    if (t == NULL) {
+        return;
+    }
+    moy_input_set_text_mode(t, true);
+    moy_input_source(t, "devch", 0, &k->devch_src);
+    bool any = false;
+    int input = MOY_UI_INPUT_TOUCH;
+    #if defined(MOY_INPUT_KBD_TDECK)
+    vTaskDelay(pdMS_TO_TICKS(400));     // the keyboard's C3 boots on the panel's rail
+    input = MOY_UI_INPUT_TDECK;
+    #endif
+    if (moy_input_board_kbd(&k->kbd)) {
+        moy_kbd_game_mode(k->kbd, false);
+        any |= k->kbd->available;
+    }
+    bool click;
+    if (moy_input_board_ball(&k->ball, &click)) {
+        k->click = click;
+        any = true;
+    }
+    if (moy_input_board_touch(&k->touch, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H)) {
+        moy_input_source(t, "touch", 0, &k->touch_src);
+        any |= k->touch->available;
+    }
+    #if defined(MOY_KERNEL_IDLE_SAFE_MS)
+    k->idle = !any;
+    #else
+    (void)any;
+    #endif
+    if (k->idle) {
+        k->sel = 1;
+    } else if (input == MOY_UI_INPUT_TDECK) {
+        moy_str_copy(k->hint, sizeof(k->hint), MOY_S_RECOVERY_HINT_TYPE);
+    } else {
+        moy_str_copy(k->hint, sizeof(k->hint), MOY_S_RECOVERY_HINT_TOUCH);
+    }
+    int desk = MOY_KERNEL_PANEL_W >= 800;
+    moy_sh_floor_geom_t fg = {MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H, desk, desk ? 2 : 1,
+                              MOY_KERNEL_PANEL_SWAP, input};
+    k->fl = moy_sh_floor_new(&fg, NULL);
+    if (k->fl == NULL) {
+        k_out("KERNEL recovery screen no memory\r\n");
+        return;
+    }
+    const char *lines[MOY_RV_LINES];
+    for (int i = 0; i < k->v.nlines; i++) {
+        lines[i] = k->v.line[i];
+    }
+    moy_sh_floor_say(k->fl, lines, k->v.nlines, k->hint);
+}
+
+// A frame's input from the kernel's table: the drivers' pass, the touch
+// polled into its source, what serial injected into the dev channel's, the
+// merge, and the trackball's pulses as steps and its click as Enter.
+static bool k_floor_input(k_floor_t *k, uint32_t now, moy_sh_floor_in_t *in) {
+    memset(in, 0, sizeof(*in));
+    moy_input_t *t = k->t;
+    moy_input_board_kick();
+    if (k->touch != NULL && k->touch->available) {
+        moy_touch_pt_t pt;
+        moy_touchdev_poll(k->touch, now, &pt);
+        moy_input_point(t, k->touch_src, pt.x, pt.y, pt.down, pt.edge, k->touch->held.fresh);
+    }
+    k->tick++;
+    if (k->in_n > 0) {
+        moy_input_key(t, k->devch_src, (uint8_t)k->inject[k->in_head]);
+        k->in_head = (uint16_t)((k->in_head + 1) % K_INJECT);
+        k->in_n--;
+    }
+    if (k->tap > 0) {
+        moy_input_point(t, k->devch_src, k->tap_x, k->tap_y, k->tap > 1, k->tap == K_TAP_FRAMES,
+                        true);
+        k->tap--;
+    }
+    moy_input_begin_frame(t, now);
+    in->key = moy_input_typed(moy_input_key_event(t));
+    int32_t ev = 0;
+    in->repeats = (int32_t)moy_input_key_repeats(t, &ev);
+    in->repeat_key = in->repeats ? moy_input_typed(ev) : 0;
+    uint32_t held, pressed;
+    moy_input_masks(t, MOY_INPUT_UNION, &held, &pressed);
+    int32_t *dir[4] = {&in->left, &in->right, &in->up, &in->down};
+    for (int b = 0; b < 4; b++) {
+        *dir[b] = (int32_t)(((pressed >> b) & 1u) + moy_input_repeats(t, (uint8_t)b));
+    }
+    if (k->ball != NULL) {
+        uint32_t c[4];
+        bool click;
+        moy_input_board_ball(&k->ball, &click);
+        moy_ball_take(k->ball, c);
+        if (click && !k->click && in->key == 0) {
+            in->key = '\r';
+        }
+        k->click = click;
+        k->ax += (int32_t)c[3] - (int32_t)c[2];
+        k->ay += (int32_t)c[1] - (int32_t)c[0];
+        int32_t ax = k->ax < 0 ? -k->ax : k->ax, ay = k->ay < 0 ? -k->ay : k->ay;
+        if (ax >= ay && ax >= K_BALL_STEP) {
+            *(k->ax > 0 ? &in->right : &in->left) += ax / K_BALL_STEP;
+            k->ax = k->ax % K_BALL_STEP;
+            k->ay = 0;
+        } else if (ay >= K_BALL_STEP) {
+            *(k->ay > 0 ? &in->down : &in->up) += ay / K_BALL_STEP;
+            k->ay = k->ay % K_BALL_STEP;
+            k->ax = 0;
+        }
+    }
+    moy_input_sample_t sp;
+    moy_input_sample(t, &sp);
+    if (sp.down) {
+        in->ptr = 3 | (sp.edge ? 4 : 0);
+    } else if (k->down) {
+        in->ptr = 1;
+    }
+    k->down = sp.down;
+    in->x = sp.x;
+    in->y = sp.y;
+    return in->key || in->repeats || in->left || in->right || in->up || in->down || in->ptr;
+}
+
+// Serial's input for the screen: `type TEXT` its bytes, `key N` one key by
+// its code (13 Enter, 9 Tab, 3 Ctrl-C), `tap X Y` a press and release at a
+// logical point, each through the dev channel's source on the kernel's table.
+static void k_inject(k_floor_t *k, const char *s, size_t n) {
+    for (size_t i = 0; i < n && k->in_n < K_INJECT; i++) {
+        k->inject[(k->in_head + k->in_n) % K_INJECT] = s[i];
+        k->in_n++;
+    }
+}
+
+// `screen`: what the face shows, a line each, and the prompt's line.
+static void k_screen(k_floor_t *k) {
+    if (k->fl == NULL) {
+        return;
+    }
+    moy_sh_face_t *f = moy_sh_floor_face(k->fl);
+    char b[160];
+    int32_t n = moy_sh_face_lines(f);
+    for (int32_t i = 0; i < n; i++) {
+        moy_sh_face_log_line(f, i, b, sizeof(b));
+        k_printf("KERNEL screen %d %s\r\n", (int)i, b);
+    }
+    int32_t col;
+    k_printf("KERNEL screen line %s\r\n", moy_sh_face_line(f, &col));
+}
+#endif
+
 // The floor: never returns. Runs on the VM task's stack, with no VM.
 static void moy_kernel_recovery(int why) {
-    // PSRAM, which no VM has taken on a floor's boot: the view is most of a
-    // kilobyte that internal SRAM would hold from boot on every console.
+    // PSRAM, which no VM has taken on a floor's boot: the view and the
+    // screen's state are kilobytes that internal SRAM would hold from boot on
+    // every console.
     k_floor_t *k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (k == NULL) {
         k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_8BIT);
@@ -935,62 +1177,36 @@ static void moy_kernel_recovery(int why) {
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     }
-    char hint[MOY_RV_COLS];
-    #if defined(MOY_KERNEL_TOUCH_AXS15231)
-    moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_TOUCH);
-    #elif defined(MOY_KERNEL_BUTTON_GPIO)
-    moy_str_fmt(hint, sizeof(hint), MOY_S_RECOVERY_HINT_BUTTON, MOY_KERNEL_BUTTON_NAME);
-    #else
-    moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_SERIAL);
-    #endif
     k->why = why;
+    k->card = -1;
+    moy_str_copy(k->hint, sizeof(k->hint), MOY_S_RECOVERY_HINT_SERIAL);
+    moy_recovery_view(&k->v, why, moy_kernel_last_crash(), MOY_FW_LABEL, k->hint, 0);
+    #if defined(MOY_KERNEL_IDLE_SAFE_MS)
+    k->idle = true;
+    k->sel = 1;
+    #endif
     #ifdef MOY_KERNEL_PANEL
     k_geom(&k->g);
-    #endif
-    #if defined(MOY_KERNEL_BUTTON_GPIO)
-    int serial = 1;              // the foot names the button, so serial gets a line
-    #else
-    int serial = 0;
-    #endif
-    moy_recovery_view(&k->v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint, serial);
-    #if defined(MOY_KERNEL_IDLE_SAFE_MS)
-    k->v.sel = 1;
-    #endif
-    #ifdef MOY_KERNEL_PANEL
     int e = MOY_KERNEL_PANEL(init)();
     if (e == 0) {
         k->fb = MOY_KERNEL_PANEL(fb)();
     } else {
         k_printf("KERNEL recovery panel err=0x%x\r\n", e);
     }
-    k_draw(k);
+    #endif
+    k_card(k);
+    #if K_FLOOR
+    k_floor_up(k);
+    #endif
+    #ifdef MOY_KERNEL_PANEL
     MOY_KERNEL_PANEL(backlight)(255);
-    #endif
-    k_report(k);
-
-    #if defined(MOY_KERNEL_BUTTON_GPIO)
-    gpio_config_t bc = {
-        .pin_bit_mask = 1ULL << MOY_KERNEL_BUTTON_GPIO,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&bc);
-    int64_t pressed_at = -1;
-    bool held = false;
-    #endif
-    #if defined(MOY_KERNEL_TOUCH_AXS15231)
-    k_touch_init();
-    int touch_choice = -1;
     #endif
 
     char line[208];
     size_t n = 0;
-    bool sh_ready = false;
-    int64_t t0 = esp_timer_get_time(), last_report = t0, last_input = t0;
-    #if defined(MOY_KERNEL_IDLE_SAFE_MS)
+    bool sh_ready = false, report = true;
+    int64_t t0 = esp_timer_get_time(), last_report = t0, last_input = t0, last_frame = t0;
     int shown_left = -1;
-    #endif
     for (;;) {
         int64_t now = esp_timer_get_time();
         int c;
@@ -998,79 +1214,92 @@ static void moy_kernel_recovery(int why) {
             last_input = now;
             if (c == '\r' || c == '\n') {
                 line[n] = '\0';
-                if (n > 0) {
-                    if (strcmp(line, "retry") == 0) {
-                        k_choose(0);
-                    } else if (strcmp(line, "safe") == 0) {
-                        k_choose(1);
-                    } else if (strcmp(line, "repl") == 0) {
-                        k_choose(2);
-                    } else if (strcmp(line, "state") == 0) {
-                        k_state(k);
-                    } else if (strncmp(line, "sh", 2) == 0
-                               && (line[2] == '\0' || line[2] == ' ')) {
-                        k_sh(k, line[2] ? line + 3 : line + 2, &sh_ready);
-                        now = last_input = esp_timer_get_time();
-                    #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
-                    } else if (strncmp(line, "update", 6) == 0
-                               && (line[6] == '\0' || line[6] == ' ')) {
-                        k_update(line + 6);
-                        last_input = esp_timer_get_time();
-                    #endif
-                    } else {
-                        k_report(k);
-                    }
+                int choice = n > 0 ? k_word(line) : -1;
+                if (choice >= 0) {
+                    k_act(choice);
+                } else if (strcmp(line, "state") == 0) {
+                    k_state(k);
+                } else if (strncmp(line, "sh", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
+                    k_sh(k, line[2] ? line + 3 : line + 2, &sh_ready);
+                    now = last_input = esp_timer_get_time();
+                #if K_FLOOR
+                } else if (strncmp(line, "type ", 5) == 0) {
+                    k_inject(k, line + 5, n - 5);
+                } else if (strncmp(line, "key ", 4) == 0) {
+                    char b = (char)atoi(line + 4);
+                    k_inject(k, &b, 1);
+                } else if (strncmp(line, "tap ", 4) == 0) {
+                    char *end;
+                    k->tap_x = (int32_t)strtol(line + 4, &end, 10);
+                    k->tap_y = (int32_t)strtol(end, NULL, 10);
+                    k->tap = K_TAP_FRAMES;
+                } else if (strcmp(line, "screen") == 0) {
+                    k_screen(k);
+                #endif
+                #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+                } else if (strncmp(line, "update", 6) == 0
+                           && (line[6] == '\0' || line[6] == ' ')) {
+                    k_update(line + 6);
+                    last_input = esp_timer_get_time();
+                #endif
+                } else if (n > 0) {
+                    report = true;
                 }
                 n = 0;
             } else if (c >= 0x20 && c < 0x7F && n + 1 < sizeof(line)) {
                 line[n++] = (char)c;
             }
         }
-        #if defined(MOY_KERNEL_BUTTON_GPIO)
-        bool down = gpio_get_level(MOY_KERNEL_BUTTON_GPIO) == 0;
-        if (down && pressed_at < 0) {
-            pressed_at = now;
-            held = false;
-        } else if (down && !held && now - pressed_at >= K_BUTTON_HOLD_MS * 1000LL) {
-            held = true;
-            k_choose(k->v.sel);
-        } else if (!down && pressed_at >= 0) {
-            if (!held && now - pressed_at >= 30000) {   // a press, not a bounce
-                k->v.sel = (k->v.sel + 1) % MOY_RV_CHOICES;
-                k_draw(k);
-                k_report(k);
+        #if K_FLOOR
+        if (k->fl != NULL) {
+            moy_sh_floor_in_t in;
+            if (k_floor_input(k, (uint32_t)(now / 1000), &in)) {
+                last_input = now;
             }
-            pressed_at = -1;
-            last_input = now;
-        }
-        #endif
-        #if defined(MOY_KERNEL_TOUCH_AXS15231)
-        int tx, ty;
-        if (k_touch(&tx, &ty)) {
-            int hit = moy_recovery_hit(&k->g, tx, ty);
-            if (hit >= 0 && hit != k->v.sel) {
-                k->v.sel = hit;
+            in.dt = (int32_t)((now - last_frame) / 1000);
+            last_frame = now;
+            int choice;
+            if (moy_sh_floor_frame(k->fl, &in, &choice)) {
                 k_draw(k);
+                k->frame_ms = (uint32_t)((esp_timer_get_time() - now) / 1000);
+                if (report) {
+                    report = false;
+                    last_report = now;
+                    k_report(k);
+                }
             }
-            touch_choice = hit;
-            last_input = now;
-        } else if (touch_choice >= 0) {
-            k_choose(touch_choice);
+            if (choice != MOY_SH_FLOOR_NONE) {
+                k_act(choice);
+            }
+            now = esp_timer_get_time();
         }
         #endif
         #if defined(MOY_KERNEL_IDLE_SAFE_MS)
-        int left = (int)((MOY_KERNEL_IDLE_SAFE_MS * 1000LL - (now - last_input) + 999999) / 1000000);
-        if (left <= 0) {
-            k_printf("KERNEL recovery idle %ds\r\n", MOY_KERNEL_IDLE_SAFE_MS / 1000);
-            k_choose(1);
-        }
-        if (left != shown_left) {
-            shown_left = left;
-            moy_str_fmt(k->v.hint, sizeof(k->v.hint), MOY_S_RECOVERY_SAFE_IN, left);
-            k_draw(k);
+        if (k->idle) {
+            int left = (int)((MOY_KERNEL_IDLE_SAFE_MS * 1000LL - (now - last_input) + 999999)
+                             / 1000000);
+            if (left <= 0) {
+                k_printf("KERNEL recovery idle %ds\r\n", MOY_KERNEL_IDLE_SAFE_MS / 1000);
+                k_choose(1);
+            }
+            if (left != shown_left) {
+                shown_left = left;
+                moy_str_fmt(k->hint, sizeof(k->hint), MOY_S_RECOVERY_SAFE_IN, left);
+                #if K_FLOOR
+                if (k->fl != NULL) {
+                    const char *lines[MOY_RV_LINES];
+                    for (int i = 0; i < k->v.nlines; i++) {
+                        lines[i] = k->v.line[i];
+                    }
+                    moy_sh_floor_say(k->fl, lines, k->v.nlines, k->hint);
+                }
+                #endif
+            }
         }
         #endif
-        if (now - last_report >= K_REPORT_MS * 1000LL) {
+        (void)shown_left;
+        if (report || now - last_report >= K_REPORT_MS * 1000LL) {
+            report = false;
             last_report = now;
             k_report(k);
         }

@@ -116,9 +116,9 @@
 
 // The kernel's recovery floor (native/moy_kernel): moy_dsi's entry points, and
 // the landscape 1280x800 floor turned onto the 800x1280 portrait framebuffer by
-// guition_p4_display.ROTATION (270, counter-clockwise). No input reaches the
-// floor -- the GSL3680 needs its firmware uploaded -- so serial drives it, and
-// with no input for 30 s it starts SAFE.
+// guition_p4_display.ROTATION (270, counter-clockwise). Its input is the GSL3680
+// touch below, its firmware uploaded by the floor's bring-up; where it does not
+// come up, serial drives the floor and with no input for 30 s it starts SAFE.
 #define MOY_KERNEL_PANEL(fn)                moy_dsi_k##fn
 #define MOY_KERNEL_PANEL_W                  (1280)
 #define MOY_KERNEL_PANEL_H                  (800)

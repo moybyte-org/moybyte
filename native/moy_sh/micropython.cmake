@@ -15,7 +15,8 @@
 # the IDF build's flags explicitly. The screen face (moy_sh_screen.c) and its
 # grid (moy_term.c) ride in it beside the serial face, without the shim too,
 # and on an image that carries the toolkit (native/moy_ui staged beside it)
-# the Terminal's face (moy_sh_face.c), which draws through its engine.
+# the Terminal's face (moy_sh_face.c), which draws through its engine, and
+# the recovery floor's screen over it (moy_sh_floor.c).
 
 set(MOY_SH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SH_DASH_SRCS ${MOY_SH}/dash/*.c)
@@ -34,7 +35,7 @@ add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_store.c
     ${MOY_SH}/moy_term.c)
 if(EXISTS ${MOY_SH}/../moy_ui/moy_ui_api.h)
-    target_sources(moy_sh_core PRIVATE ${MOY_SH}/moy_sh_face.c)
+    target_sources(moy_sh_core PRIVATE ${MOY_SH}/moy_sh_face.c ${MOY_SH}/moy_sh_floor.c)
 endif()
 set_source_files_properties(${MOY_SH_DASH_SRCS} PROPERTIES
     COMPILE_OPTIONS "-include;${MOY_SH}/dash_config.h;-I${MOY_SH}/dash")

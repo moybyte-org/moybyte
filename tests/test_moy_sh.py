@@ -45,9 +45,10 @@ def shell_sources():
 # The board's side, compiled without dash's shim: its host table and the
 # serial face, the screen face and its grid.
 BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c")
-# The Terminal's face draws through the toolkit's engine, so it compiles
-# against native/moy_ui and the harnesses, which have no toolkit, leave it out.
-FACE_SOURCES = ("moy_sh_face.c",)
+# The Terminal's face and the recovery floor's screen over it draw through the
+# toolkit's engine, so they compile against native/moy_ui and the harnesses,
+# which have no toolkit, leave them out.
+FACE_SOURCES = ("moy_sh_face.c", "moy_sh_floor.c")
 UI_INCLUDES = [a for n in ("moy_ui", "moy_gfx", "moy_glass")
                for a in ("-I", os.path.join(ROOT, "native", n))]
 

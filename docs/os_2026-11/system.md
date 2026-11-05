@@ -168,15 +168,34 @@ crash count or over the dev channel. From it the owner reads the `log`,
 `kill`s a process, `pkg remove`s an app, fixes a `system/` file, takes or
 rolls back an OTA update and `reboot`s, with no computer and no reflash.
 
+**The screen** is the Terminal's C face (`native/moy_sh/moy_sh_face.h`), no
+second copy, under a head that says why the floor is up ("The console kept
+crashing.", the boot loop's, a start that failed) with the crash record's
+lines, and the choices as buttons: Try again, Safe start, Reboot (a restart
+with the counts started over, where the shell's own `reboot` keeps them and
+comes back here). The same words typed at the prompt pick them, and `repl`
+too. It draws through the toolkit's engine on a RUN sink (`moy_sh_floor.h`):
+the default seed theme's dark look, every role in petme128, because the
+theme's faces are a frozen Python module no C reaches with the VM down.
+`tests/test_recovery_floor.py` renders it on the host, at 320×240 and at
+desk size, and `tools/kernel_gate.py BOARD crashes` holds a board's screen to
+that render, types a command into it and taps Try again. Each board's own
+input feeds it through the kernel's input table: the T-Deck's keyboard
+(its raw matrix, typing), trackball (steps, its click Enter) and GT911 touch;
+the touch of the Waveshare P4 (GT911), the Guition S3 (AXS15231) and the
+Guition P4 (GSL3680, its firmware uploaded by the floor's bring-up). A
+board on which no input comes up and which names an idle time
+(`MOY_KERNEL_IDLE_SAFE_MS`: the Guition P4) starts SAFE after it.
+
 **The card from C.** A floor boot has run no VM, so nothing Python mounted
 the card; the store's FATFS is mounted from C instead (`moy_store_card_up`,
 `native/moy_store/moy_card.c`, over the board's card bring-up in
 `native/moy_sd/moy_sd.h`, whose pins are the board.toml `[hardware]` card
 row's). The console's Python calls the same C (`moy_sd.up()`, then
-`moy_store.card`). The floor's serial takes `sh LINE` for the C shell; its
-first line brings the card up, on the T-Deck only once the panel is (the card
-rides the panel's SPI2), so `settings` and `pkg list`/`pkg remove` reach
-`system/` and the carts with no VM.
+`moy_store.card`). The floor brings the card up as it opens, on the T-Deck
+once the panel is (the card rides the panel's SPI2), so `settings` and
+`pkg list`/`pkg remove` reach `system/` and the carts with no VM, on the
+screen and in the serial's `sh LINE` alike.
 
 ## 3. Not tied to the screen: serial, the web terminal and SSH
 

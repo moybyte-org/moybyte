@@ -136,15 +136,13 @@
 #define MOY_SERIAL_RING_BYTES               (32768)
 
 // The kernel's recovery floor (native/moy_kernel): moy_lcd's entry points, the
-// landscape 320x240 framebuffer it already scans in wire order, and the
-// trackball click (GPIO0, active low) as its one button.
+// landscape 320x240 framebuffer it already scans in wire order. Its input is the
+// keyboard, the trackball and the GT911 touch below (MOY_INPUT_*).
 #define MOY_KERNEL_PANEL(fn)                moy_lcd_k##fn
 #define MOY_KERNEL_PANEL_W                  (320)
 #define MOY_KERNEL_PANEL_H                  (240)
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (1)
-#define MOY_KERNEL_BUTTON_GPIO              (0)
-#define MOY_KERNEL_BUTTON_NAME              "the trackball"
 
 // The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM

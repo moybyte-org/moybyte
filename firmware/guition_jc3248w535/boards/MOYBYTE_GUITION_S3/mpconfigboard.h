@@ -102,16 +102,13 @@
 
 // The kernel's recovery floor (native/moy_kernel): moy_axs's entry points, its
 // landscape 480x320 framebuffer in wire order (the module turns the bands onto
-// the portrait glass), and the AXS15231's touch on I2C0, polled from C.
+// the portrait glass). Its input is the AXS15231's touch below (MOY_INPUT_TOUCH_*),
+// brought up by the floor on the kernel's bus.
 #define MOY_KERNEL_PANEL(fn)                moy_axs_k##fn
 #define MOY_KERNEL_PANEL_W                  (480)
 #define MOY_KERNEL_PANEL_H                  (320)
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (1)
-#define MOY_KERNEL_TOUCH_AXS15231           (1)
-#define MOY_KERNEL_TOUCH_SDA                MICROPY_HW_I2C0_SDA
-#define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
-#define MOY_KERNEL_TOUCH_ADDR               (0x3B)
 
 // The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM

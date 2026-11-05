@@ -54,6 +54,11 @@ and its sprint docs beside it.
   cancelled (owner, 2026-11-01, #246), its memory motive met by the VM stop.
 - **The recovery floor is native**, because a kernel that reboots into a
   Python launcher has no floor when the VM cannot start (`moy_recovery.h`).
+  Its screen is the recovery console (owner, #246: the terminal is mostly C,
+  and the console is the same component): the Terminal's C face under the
+  reason and the choices (`native/moy_sh/moy_sh_floor.h`), fed by the board's
+  C input drivers through the kernel's input table, the card mounted from C
+  as it opens.
 - **Not built, by decision (2026-09-27):** a retained widget tree, in any
   language (`docs/surface_model_v1.md` L7); an interim memory mechanism (a
   release protocol, a soft-reset backstop and heap arenas were drafted and

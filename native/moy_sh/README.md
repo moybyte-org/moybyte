@@ -21,6 +21,7 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh_store.c` | the console's commands the shell serves from the store while no VM runs (`settings`; `pkg list` and `pkg remove` over `native/moy_store/moy_shelf.h`), over the C the console calls (`moy_sh_board.h`) |
 | `moy_sh_screen.c`, `moy_sh_screen.h` | the screen face: a session over the board's table whose terminal is a grid, its Ctrl-C read from the kernel input table's latches while a run holds the frame; the Terminal's face draws and feeds it |
 | `moy_sh_face.c`, `moy_sh_face.h` | the Terminal's face: a screen session with its prompt line, history, completion and key rows, and their input, drawn through the toolkit's engine (`native/moy_ui/moy_ui_api.h`) on a frame the caller begins; the Terminal app (`runtime/apps/terminal_app.py`) hands it the console's frames and the kernel's recovery console its own. Built where the image carries the toolkit |
+| `moy_sh_floor.c`, `moy_sh_floor.h` | the recovery console's screen: the Terminal's face under the reason, the crash record's lines and the choices (Try again, Safe start, Reboot) as buttons, its words at the prompt the floor's; the default seed theme's dark look in the kernel's look, petme128 through a RUN sink, drawn whole into a logical buffer the kernel turns onto its panel (`native/moy_kernel/moy_kernel.c`'s `moy_kernel_recovery`); `tests/test_recovery_floor.py` renders the same C on the host. Built with the face |
 | `moy_term.c`, `moy_term.h` | the terminal's cell grid: the VT100 subset a line program and a full-screen app write, a scrollback ring, its lines as SGR text for `ui.text_view` |
 | `modmoy_sh.c`, `micropython.cmake` | the MicroPython module (a door command's streams, `line`, `interrupted`, the screen face's `Screen`) and the board build: the shell is its own static library, so dash's shim reaches no other file |
 | `host/sh_main.c`, `host/board_main.c` | the host harnesses the suite runs: a session over a folder, and the serial face (or with `-screen` the screen face) over the board's table |
@@ -39,7 +40,7 @@ its session and its grid the same way at its first open (`moy_sh_screen_new`)
 and gives them back at `close`. The objects hold one writable word,
 `moy_sh_g` (the running session's state, and between runs the serial face's,
 parked there so the board keeps no root of its own): `tests/test_moy_sh.py`
-compiles them as a board does and fails on any other `.data` or `.bss`. The Terminal's face takes its record (the line, the history, the candidates and the log's row buffers) the same way at `moy_sh_face_new` and gives it back at `moy_sh_face_free`; a frame allocates nothing but the log's row buffers when the grid grows.
+compiles them as a board does and fails on any other `.data` or `.bss`. The Terminal's face takes its record (the line, the history, the candidates and the log's row buffers) the same way at `moy_sh_face_new` and gives it back at `moy_sh_face_free`; a frame allocates nothing but the log's row buffers when the grid grows. The recovery floor's screen takes its record, its UI context, its shape and its pixels the same way at `moy_sh_floor_new`.
 
 ## The suite
 

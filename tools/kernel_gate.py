@@ -15,8 +15,8 @@ on an attach-only board, so the gate is a tool that opens the port per step:
          after the reboot `state`'s `crash` is a `task_wdt` naming kernel-test with
          the reason `console hung`, and the notice banner is up (#160).
   floor  `kfail vm_start`: the board lands on the recovery screen, which says
-         `KERNEL recovery reason=vm_start`; the crc32 of its framebuffer is the
-         host's render of the lines it printed (tests/test_moy_kernel.py), and
+         `KERNEL recovery reason=vm_start`; the crc32 of its screen is the
+         host's render of the lines it printed (tests/test_recovery_floor.py), and
          `retry` brings the console back with mode 'start'.
   safe   the same floor, then `safe`: mode 'safe' with no wallpaper cart, then
          a reboot to an ordinary start.
@@ -33,8 +33,12 @@ on an attach-only board, so the gate is a tool that opens the port per step:
          role's OPEN id cleared first) as many boots in a row as the crash
          count's limit (`moy_crash.crash_limit`): the boots before the last come
          back to the desk with the count climbing, the last lands on the
-         floor saying `reason=crashes`, an `sh` line runs there with no VM,
-         and `retry` brings the console back with the count at 0.
+         floor saying `reason=crashes`, its screen's crc32 the host's render
+         of the lines it printed (tests/test_recovery_floor.py), an `sh` line
+         runs there with no VM, a command typed into the screen (`type`,
+         `key 13`, through the kernel's input table) shows its output on it
+         (`screen`), and a tap on Try again (`tap` at the button's centre)
+         brings the console back with the count at 0.
 
 One line a step, exit 1 on the first failure. The board is left at its
 launcher, on an ordinary start, whatever happened.
@@ -56,7 +60,6 @@ import board as bd  # noqa: E402
 STEPS = ("crash", "hang", "floor", "safe", "update", "card", "crashes")
 OFFER = re.compile(r"KERNEL update (offers version=\d+ channel=\w* size=\d+|none published)")
 REPORT = re.compile(r"KERNEL recovery reason=(\w+) sel=(\w+) crc=([0-9a-f]{8})")
-CHOICES = ("RETRY", "SAFE", "REPL")
 
 
 class GateError(RuntimeError):
@@ -99,7 +102,8 @@ def _vals(name, dirs, *exprs):
 
 
 def _floor(name, dirs, timeout=60.0):
-    """(reason, selected, crc, lines, hint) from the floor's next full report."""
+    """(reason, selected, crc, lines, hint, rows, input) from the floor's next
+    full report: rows {word: (x, y, w, h)}, the input line's words."""
     end = time.time() + timeout
     while time.time() < end:
         try:
@@ -115,21 +119,32 @@ def _floor(name, dirs, timeout=60.0):
             m = REPORT.search(ln)
             if not m:
                 continue
-            lines, hint = [], None
+            lines, hint, rows, inp = [], None, {}, ""
             for nxt in got[i + 1:]:
                 if nxt.startswith("KERNEL line "):
                     lines.append(nxt.split(" ", 3)[3] if nxt.count(" ") >= 3 else "")
+                elif nxt.startswith("KERNEL row "):
+                    _k, _r, _i, word, x, y, w, h = nxt.split()
+                    rows[word] = (int(x), int(y), int(w), int(h))
+                elif nxt.startswith("KERNEL input "):
+                    inp = nxt[len("KERNEL input "):]
                 elif nxt.startswith("KERNEL hint "):
                     hint = nxt[len("KERNEL hint "):]
                     break
             if hint is not None:
-                return m.group(1), m.group(2), int(m.group(3), 16), lines, hint
+                return m.group(1), m.group(2), int(m.group(3), 16), lines, hint, rows, inp
     raise GateError("%s: no recovery report within %.0fs" % (name, timeout))
 
 
-def _host_crc(name, lines, hint, sel):
-    import test_moy_kernel as tk
-    return tk.render(tk._lib(), name, lines, hint, CHOICES.index(sel))[0]
+def _host_crc(name, lines, hint):
+    """The crc of the floor the host renders for these lines and hint, with the
+    same C (tests/test_recovery_floor.py). MOY_FLOOR_SHOT=<dir> keeps the
+    render as <dir>/floor_<board>.png: where the crcs agree it is the board's
+    screen, pixel for pixel (the floor has no `shot`)."""
+    import test_recovery_floor as tf
+    d = os.environ.get("MOY_FLOOR_SHOT")
+    return tf.render(name, lines, hint,
+                     png=os.path.join(d, "floor_%s.png" % name) if d else None)["crc"]
 
 
 def step_crash(name, dirs):
@@ -169,10 +184,10 @@ def step_hang(name, dirs):
 
 def _to_floor(name, dirs):
     _send(name, dirs, "kfail vm_start")
-    why, sel, crc, lines, hint = _floor(name, dirs)
+    why, _sel, crc, lines, hint, _rows, _inp = _floor(name, dirs)
     if why != "vm_start":
         raise GateError("%s: the floor says reason=%s" % (name, why))
-    host = _host_crc(name, lines, hint, sel)
+    host = _host_crc(name, lines, hint)
     if host != crc:
         raise GateError("%s: the floor's crc %08x is not the host's %08x"
                         % (name, crc, host))
@@ -266,22 +281,48 @@ def step_crashes(name, dirs):
             got = _vals(name, dirs, "__import__('moy_crash').crash_limit()[1]")[0]
             if got != i:
                 raise GateError("%s: after %d crashes the count is %r" % (name, i, got))
-    why, _sel, _crc, lines, _hint = _floor(name, dirs)
+    why, _sel, crc, lines, hint, rows, inp = _floor(name, dirs)
     if why != "crashes":
         raise GateError("%s: the floor says reason=%s" % (name, why))
+    host = _host_crc(name, lines, hint)
+    if host != crc:
+        raise GateError("%s: the floor's crc %08x is not the host's %08x" % (name, crc, host))
     try:
         code, out, _said = _sh(name, dirs, "echo floor-$((6 * 7))", secs=10.0)
         if code != 0 or "floor-42" not in out:
             raise GateError("%s: the floor's shell said %r %r" % (name, code, out))
-    finally:
+        typed = "echo screen-$((6 * 7))"
+        _send(name, dirs, "type " + typed, secs=0.5)
+        _screen(name, dirs, lambda s: "KERNEL screen line " + typed in s, "the line typed")
+        _send(name, dirs, "key 13", secs=0.5)
+        _screen(name, dirs, lambda s: any("screen-42" in ln and "$((" not in ln for ln in s),
+                "the command's output")
+        x, y, w, h = rows["retry"]
+        _send(name, dirs, "tap %d %d" % (x + w // 2, y + h // 2), secs=0.5)
+    except Exception:
         _send(name, dirs, "retry")
         bd.wait_for_desk(name, dirs, quiet=True)
+        raise
+    bd.wait_for_desk(name, dirs, quiet=True)
     mode, after = _vals(name, dirs, "__import__('moy_kernel').mode()",
                         "__import__('moy_crash').crash_limit()[1]")
     if mode != "start" or after != 0:
-        raise GateError("%s: RETRY started %r with the count at %r" % (name, mode, after))
-    return "%d crashes -> floor reason=crashes (%s), sh ran, RETRY -> start, count 0" % (
-        limit, lines[0] if lines else "?")
+        raise GateError("%s: Try again started %r with the count at %r" % (name, mode, after))
+    return ("%d crashes -> floor reason=crashes (%s), crc %08x = host, sh ran, a typed command "
+            "ran on screen, a tap on Try again -> start, count 0; input %s" % (
+                limit, lines[0] if lines else "?", crc, inp))
+
+
+def _screen(name, dirs, ok, what, timeout=20.0):
+    """What the floor's screen shows (`screen`), asked until `ok` of its lines."""
+    end = time.time() + timeout
+    shown = []
+    while time.time() < end:
+        shown = [ln for ln in _send(name, dirs, "screen", secs=1.0)
+                 if ln.startswith("KERNEL screen ")]
+        if ok(shown):
+            return shown
+    raise GateError("%s: %s never showed on screen: %r" % (name, what, shown))
 
 
 def _reboot(name, dirs):

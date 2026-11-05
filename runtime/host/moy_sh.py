@@ -53,7 +53,7 @@ def _sources():
     dash += [os.path.join(SH, n) for n in ("moy_sh.c", "moy_sh_sys.c", "moy_sh_cmds.c")]
     own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_board.c",
                                          "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c",
-                                         "moy_sh_face.c")]
+                                         "moy_sh_face.c", "moy_sh_floor.c")]
     return [(s, shim) for s in dash] + [(s, plain) for s in own]
 
 
