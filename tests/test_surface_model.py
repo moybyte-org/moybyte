@@ -101,7 +101,7 @@ def test_desk_still_offers_system_apps(tmp_path):
         if app.id in ws.wm._backdrop_layer.HIDDEN_APPS:
             continue
         if not getattr(app, "DESK_TILE", True):
-            continue                     # Music: the home's Apps and its status item
+            continue                     # reached from the home's Apps
         assert app.id in ids, "%s must stay reachable from the desk" % app.id
     # ...and each claimed cart still supplies its icon art to that column.
     arts = [row[2] for row in ws.wm._backdrop_layer._icon_catalog() if row[2] is not None]

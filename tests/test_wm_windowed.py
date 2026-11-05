@@ -2474,8 +2474,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "3e9dd316ff1eb9a7d39f4d9e39dff345f2f235095b9c8a8b33200ec666204838",
-    "8c331c10242b054a3188d7a784f33ac0c316fce864b2330380130d167f48736d",
+    "9eb306736f63191bff3c40081625464d592ea03c1eb09424d9c27ecf90758920",
+    "8e017c0fb642189fdbafc40d25ae80eadff9547fa8979536286ff619230ab687",
 )
 
 
@@ -3549,8 +3549,8 @@ def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
 
 def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
     """The desk is the windowed tier's launch surface for apps, so its column
-    holds the Apps tab's carts: the registered apps' (but an app that
-    declares no DESK_TILE, Music) and the app carts no app claims, Notes
+    holds the Apps tab's carts: the registered apps' (but one that declares
+    no DESK_TILE) and the app carts no app claims, Notes
     among them, whose tile is its icon set slot and whose tap runs the cart
     in a window."""
     ws = _moy_desk(tmp_path)
@@ -3558,7 +3558,7 @@ def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
     rows = desk._icon_catalog()
     shown = {id(c) for _k, _l, c in rows if c is not None}
     off = [a for a, _t in ws._apps if not getattr(a, "DESK_TILE", True)]
-    assert [a.id for a in off] == ["jukebox"]
+    assert off == []                    # every shipped app has its tile
     apps = [c for c in ws._launcher_items(ws.carts.all, "apps")
             if not any(a.is_app(c) for a in off)]
     assert apps and all(id(c) in shown for c in apps), \

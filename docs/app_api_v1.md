@@ -224,7 +224,7 @@ Two things follow for an app author:
   has open (where K types a letter) asks the app first; True where it
   cancelled one (Music's Add a station).
 - **Optional `DESK_TILE`**, a class attribute: False leaves the app out of
-  the desk's column while the home's Apps still lists it (Music).
+  the desk's column while the home's Apps still lists it.
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 

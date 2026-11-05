@@ -220,9 +220,6 @@ as they are. Three things change:
 Build step 2 (`runtime/apps/music_app.py`, cart
 `system_carts/moybyte.music.moy`) differs from the renders in these places:
 - Its process kind is `jukebox`: `music` is the Editor's Music tab.
-- It has no tile in the desk's column (`DESK_TILE`). A ninth tile wraps the
-  1024×600 desk's column into a third. The desk reaches Music from the
-  home's Apps and from its status item.
 - A list's current row draws no fill once the focus leaves the table.
 - The volume meter changes by a tap or by its − and + buttons. It takes no
   ← → of its own.

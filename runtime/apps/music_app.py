@@ -880,10 +880,6 @@ class MusicAppLayer:
     # Back on its first page leaves the app; on the desk it minimises the
     # window. Either way the stream plays on.
     BACK_MINIMISES = True
-    # No tile in the desk's column: a ninth tile wraps the 1024x600 desk's
-    # column into a third and the windows lose its width. The desk reaches
-    # Music from the home's Apps and from its status item while it plays.
-    DESK_TILE = False
 
     def __init__(self, ctx, names):
         self.ctx = ctx
