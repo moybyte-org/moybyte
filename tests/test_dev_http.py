@@ -1,8 +1,8 @@
 """The `http` device API (runtime/system/dev_http.py over
 native/moy_net/moy_fetch.h; docs/os_2026-11/hardware.md section 1): a GET
 served off the VM's thread by the kernel's client against a local server, its
-NET record waking the process, https refused for apps (a redirect's hop too),
-the permission, the sweep, and the radio lease taken on every way in and let
+NET record waking the process, https refused where the console cannot verify
+a certificate (the host; a redirect's hop too), the permission, the sweep, and the radio lease taken on every way in and let
 go on every way out."""
 
 import errno
@@ -95,7 +95,8 @@ def test_a_404_is_a_response_and_a_refused_connection_an_errno(ws, server):
     assert ws.leases.holders() == []
 
 
-def test_https_is_refused_for_an_app_and_so_is_a_redirect_to_it(ws, server):
+def test_https_is_refused_where_nothing_verifies_and_so_is_a_redirect_to_it(ws, server):
+    assert moybyte.http.tls() is False and N.tls() == 0      # the host's client is plain TCP
     pid = L.spawn("t.http")
     with pytest.raises(OSError) as e:
         _as(pid, lambda: moybyte.http.get("https://example.com/"))

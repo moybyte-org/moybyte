@@ -92,9 +92,10 @@ paths:
   - **The manifest is SIGNED, and the BOARD is inside the signature** (scheme
     `moybyte-ota-v2`): an OTA payload is an app-partition image, so another
     board's is a valid image that cannot boot, and a manifest naming one is
-    refused BY NAME before the signature is even checked. The kernel's TLS
-    verifies no certificate, which is *why* the manifest is signed rather than
-    trusted for arriving over TLS.
+    refused BY NAME before the signature is even checked. The updater's TLS
+    verifies no certificate (`MOY_HTTPC_SIGNED`, the one request that skips
+    the CA bundle), which is *why* the manifest is signed rather than trusted
+    for arriving over TLS.
   - **RSA, not Ed25519**: the verifier is seventeen Montgomery
     multiplications in `moy_ota.c`, and `moy_ota.verify_sig` is the same
     arithmetic in Python for the host's tools and the wasm tier. **Signing

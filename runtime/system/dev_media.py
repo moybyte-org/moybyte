@@ -6,10 +6,13 @@ One stream at a time, one process's.
                      (an MP3, or an .m3u/.pls playlist) under `media`, an
                      http:// URL (a stream, its ICY now-playing text read, or
                      a playlist) under `media:url` and `http`. OSError: EPERM
-                     without them, EPROTONOSUPPORT for https (as `http`
-                     refuses it until P3.4), EBUSY while another process's
-                     stream plays, ENOSPC where THE SHARES give no MEDIA row
-                     or it is full, ENOENT for a file that is not there
+                     without them, EPROTONOSUPPORT for https where
+                     `tls()` is False (an https stream verifies the
+                     server's certificate as `http` does), EBUSY while
+                     another process's stream plays, ENOSPC where THE
+                     SHARES give no MEDIA row or it is full, ENOENT for a
+                     file that is not there
+  tls() -> bool      whether an https:// URL plays here
   pause() resume() stop()
   next() prev()      the list's next or previous entry: False at its end
   volume(v=None)     the stream's level, 0..100 (the console's caps it)
@@ -107,6 +110,15 @@ def _need(perms):
         if not _D.may(p, perm):
             raise OSError(EPERM, 'needs "%s"' % perm)
     return p
+
+
+def tls():
+    """Whether an https stream plays here: its certificate verifies."""
+    try:
+        import moy_http
+    except ImportError:  # host: the runtime package
+        from runtime import moy_http
+    return bool(moy_http.tls())
 
 
 def _is_url(src):
@@ -287,7 +299,7 @@ def play(src):
     src = str(src)
     url = _is_url(src)
     p = _need(("media:url", "http") if url else ("media",))
-    if url and src[:8].lower() == "https://":
+    if url and src[:8].lower() == "https://" and not tls():
         raise OSError(EPROTONOSUPPORT, "https is refused")
     if _s["stopping"]:
         _try_close()

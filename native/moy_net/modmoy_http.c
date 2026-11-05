@@ -3,11 +3,11 @@
 // A refusal is a negative errno (Linux's numbers), which the Python face
 // (runtime/system/devices.py) raises.
 //
-//   open(owner, url, cap, flags) -> h | -errno
+//   open(owner, url, cap) -> h | -errno   tls() -> 1 where https verifies, else 0
 //   state(h) -> (state, status, n, err) | -errno
 //   read(h, off, buf) -> n | -errno     close(h)   sweep(owner) -> n
 //   count(owner) -> n   source() -> src   run()   present()   reset()
-//   QUEUED RUNNING DONE FAILED, APP, CAP_MAX, ETLS
+//   QUEUED RUNNING DONE FAILED, CAP_MAX, ETLS, ECERT
 
 #include "py/runtime.h"
 
@@ -17,11 +17,15 @@
 static mp_obj_t http_open(size_t n_args, const mp_obj_t *args) {
     uint32_t h = 0;
     int rc = moy_fetch_open((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
-                            (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]),
-                            &h);
+                            (uint32_t)mp_obj_get_int(args[2]), &h);
     return mp_obj_new_int(rc < 0 ? rc : (mp_int_t)h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(http_open_obj, 4, 4, http_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(http_open_obj, 3, 3, http_open);
+
+static mp_obj_t http_tls(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_fetch_tls());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(http_tls_obj, http_tls);
 
 static mp_obj_t http_state(mp_obj_t h) {
     int status = 0, err = 0;
@@ -94,13 +98,14 @@ static const mp_rom_map_elem_t http_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&http_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_present), MP_ROM_PTR(&http_present_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&http_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tls), MP_ROM_PTR(&http_tls_obj) },
     { MP_ROM_QSTR(MP_QSTR_QUEUED), MP_ROM_INT(MOY_FETCH_QUEUED) },
     { MP_ROM_QSTR(MP_QSTR_RUNNING), MP_ROM_INT(MOY_FETCH_RUNNING) },
     { MP_ROM_QSTR(MP_QSTR_DONE), MP_ROM_INT(MOY_FETCH_DONE) },
     { MP_ROM_QSTR(MP_QSTR_FAILED), MP_ROM_INT(MOY_FETCH_FAILED) },
-    { MP_ROM_QSTR(MP_QSTR_APP), MP_ROM_INT(MOY_FETCH_APP) },
     { MP_ROM_QSTR(MP_QSTR_CAP_MAX), MP_ROM_INT(MOY_FETCH_CAP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_ETLS), MP_ROM_INT(MOY_HTTPC_ETLS) },
+    { MP_ROM_QSTR(MP_QSTR_ECERT), MP_ROM_INT(MOY_HTTPC_ECERT) },
 };
 static MP_DEFINE_CONST_DICT(http_globals, http_globals_table);
 

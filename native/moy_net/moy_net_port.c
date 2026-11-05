@@ -304,15 +304,24 @@ int moy_gpio_sense(int pin) {
 #if defined(ESP_PLATFORM)
 #include <netdb.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "esp_flash_partitions.h"
 #include "esp_image_format.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_random.h"
 #include "mbedtls/net_sockets.h"
+#include "mbedtls/platform_time.h"
 #include "mbedtls/ssl.h"
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_USE_PSA_CRYPTO)
 #include "psa/crypto.h"
+#endif
+#if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+#include "esp_crt_bundle.h"
+// The bundle's own check, which esp_crt_bundle_attach installs and the
+// image's verify callback below wraps.
+extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth,
+                                   uint32_t *flags);
 #endif
 
 // The kernel's task watchdog, fed while the frame loop has it armed: a
@@ -346,6 +355,74 @@ static int rng(void *ctx, unsigned char *out, size_t n) {
     return 0;
 }
 
+int moy_conn_verifies(void) {
+    #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+    return 1;
+    #else
+    return 0;
+    #endif
+}
+
+#if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+// A certificate's dates read the clock, and a board's clock is the uptime
+// unless something set it. So the clock mbedtls reads is never earlier than
+// the day this image was built: a certificate that expired before the build is
+// refused on every board, one that expired after it is refused once the clock
+// is set past that, and while the clock is behind the build a not-yet-valid
+// date is not held against a certificate (one issued after the build is the
+// usual case for 90-day certificates).
+static mbedtls_time_t (*s_clock)(mbedtls_time_t *);
+static mbedtls_time_t s_floor;
+
+static mbedtls_time_t build_day(void) {
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *d = __DATE__;                   // "Mmm dd yyyy"
+    int m = 0;
+    while (m < 12 && strncmp(mon + 3 * m, d, 3) != 0) {
+        m++;
+    }
+    int day = (d[4] == ' ' ? 0 : d[4] - '0') * 10 + (d[5] - '0');
+    int y = atoi(d + 7);
+    // Days from 1970-01-01 to y-(m+1)-day (the civil-from-days inverse).
+    int yy = y - (m < 2), era = yy / 400, yoe = yy - era * 400;
+    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
+    long days = (long)era * 146097 + (long)yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    return (mbedtls_time_t)days * 86400;
+}
+
+static mbedtls_time_t tls_now(mbedtls_time_t *t) {
+    mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
+    if (n < s_floor) {
+        n = s_floor;
+    }
+    if (t != NULL) {
+        *t = n;
+    }
+    return n;
+}
+
+static int verify(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+    if (s_clock == NULL || s_clock(NULL) < s_floor) {
+        *flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_FUTURE;
+    }
+    return esp_crt_verify_callback(ctx, crt, depth, flags);
+}
+
+static int verify_setup(mbedtls_ssl_config *conf) {
+    if (mbedtls_time != tls_now) {
+        s_floor = build_day();
+        s_clock = mbedtls_time;
+        mbedtls_platform_set_time(tls_now);
+    }
+    if (esp_crt_bundle_attach(conf) != ESP_OK) {
+        return -1;
+    }
+    mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_verify(conf, verify, NULL);
+    return 0;
+}
+#endif
+
 static int bio_send(void *ctx, const unsigned char *b, size_t n) {
     int k = send(((conn_t *)ctx)->fd, b, n, 0);
     if (k < 0) {
@@ -377,6 +454,9 @@ static void conn_free(conn_t *c) {
 
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
+    if (tls == MOY_CONN_TLS && !moy_conn_verifies()) {
+        return -MOY_HTTPC_ETLS;
+    }
     char ps[8];
     snprintf(ps, sizeof(ps), "%u", (unsigned)port);
     struct addrinfo hints, *ai = NULL;
@@ -435,7 +515,7 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     fcntl(c->fd, F_SETFL, fcntl(c->fd, F_GETFL, 0) & ~O_NONBLOCK);
     timeout(c->fd, SO_RCVTIMEO, CONN_WAIT_MS);
     timeout(c->fd, SO_SNDTIMEO, MOY_HTTPC_IO_MS);
-    if (!tls) {
+    if (tls == MOY_CONN_PLAIN) {
         *out = c;
         return 0;
     }
@@ -448,8 +528,18 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     rc = mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT,
                                      MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (rc == 0) {
-        // No certificate is verified: the manifest's signature decides (moy_ota.h).
-        mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
+        if (tls == MOY_CONN_TLS_SIGNED) {
+            // The updater's: no certificate is verified, the manifest's
+            // signature decides what installs (moy_ota.h).
+            mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
+        }
+        #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+        else if (verify_setup(&c->conf) != 0) {
+            rc = -1;
+        }
+        #endif
+    }
+    if (rc == 0) {
         mbedtls_ssl_conf_rng(&c->conf, rng, NULL);
         rc = mbedtls_ssl_setup(&c->ssl, &c->conf);
     }
@@ -467,7 +557,10 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
         if ((rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE)
             || moy_net_ms() - t0 >= MOY_HTTPC_IO_MS) {
             conn_free(c);
-            return rc == MBEDTLS_ERR_SSL_WANT_READ ? -ETIMEDOUT : -ECONNABORTED;
+            return rc == MBEDTLS_ERR_SSL_WANT_READ ? -ETIMEDOUT
+                   : rc == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED
+                     || rc == MBEDTLS_ERR_X509_FATAL_ERROR ? -MOY_HTTPC_ECERT
+                   : -ECONNABORTED;
         }
     }
     *out = c;
@@ -512,7 +605,7 @@ int moy_conn_read(void *conn, void *p, size_t n) {
 
 int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
     conn_t *c = conn;
-    if (c->tls) {
+    if (c->tls && mbedtls_ssl_get_bytes_avail(&c->ssl) > 0) {
         return moy_conn_read(conn, p, n);
     }
     fd_set r;
@@ -525,6 +618,9 @@ int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
     }
     if (k < 0) {
         return -errno;
+    }
+    if (c->tls) {
+        return moy_conn_read(conn, p, n);   // a record's bytes have begun to arrive
     }
     k = recv(c->fd, p, n, 0);
     if (k >= 0) {
@@ -647,9 +743,13 @@ typedef struct {
     int fd;
 } conn_t;
 
+int moy_conn_verifies(void) {
+    return 0;
+}
+
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
-    if (tls) {
+    if (tls != MOY_CONN_PLAIN) {
         return -EPROTONOSUPPORT;
     }
     char ps[8];

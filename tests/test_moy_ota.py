@@ -690,6 +690,39 @@ def test_https_is_the_boards_and_the_host_says_so(board):
     assert board.u.error == "net error %d" % 93          # EPROTONOSUPPORT
 
 
+def test_only_the_signed_updater_skips_the_certificate():
+    """VERIFY_NONE is the updater's alone (its manifest is signed): the one
+    mode that sets it is MOY_CONN_TLS_SIGNED, which only MOY_HTTPC_SIGNED
+    asks for, and only the updater's two fetches pass that; every other
+    client verifies or is refused."""
+    import re
+    net = ROOT / "native" / "moy_net"
+    port = (net / "moy_net_port.c").read_text()
+    assert port.count("MBEDTLS_SSL_VERIFY_NONE") == 1
+    at = port.index("MBEDTLS_SSL_VERIFY_NONE")
+    assert "if (tls == MOY_CONN_TLS_SIGNED) {" in port[at - 300:at]
+    ota = (net / "moy_ota.c").read_text()
+    users = [m.start() for m in re.finditer(r"MOY_HTTPC_SIGNED", ota)]
+    owners = sorted({re.findall(r"\n(?:static )?int (\w+)\(", ota[:i])[-1] for i in users})
+    assert owners == ["get_once", "moy_ota_check", "moy_ota_dl_begin"]
+    for path in list(ROOT.glob("native/**/*.c")) + list(ROOT.glob("native/**/*.h")):
+        if "wamr" in path.parts or path.name in ("moy_ota.c", "moy_ota.h"):
+            continue
+        assert "MOY_HTTPC_SIGNED" not in path.read_text(errors="replace"), path
+
+
+def test_the_consoles_carry_the_ca_bundle():
+    """docs/os_2026-11/hardware.md section 1: every console verifies, so
+    each one's sdkconfig turns on the bundle MicroPython's base turns off."""
+    for board in ("lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK",
+                  "guition_jc3248w535/boards/MOYBYTE_GUITION_S3",
+                  "esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
+                  "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
+        lines = (ROOT / "firmware" / board / "sdkconfig.board").read_text().splitlines()
+        assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in lines, board
+        assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y" in lines, board
+
+
 # == the client ====================================================================
 
 CSP = ("default-src 'none'; " * 180).strip()

@@ -15,10 +15,13 @@
 // and a generation (native/moy_kernel/moy_kernel.h), and the VM's
 // stop closes what it left open (moy_net_vm_stop).
 //
-// TLS verifies no certificate. What decides an install is the manifest's
-// signature under a key baked into the image (OTA_PUBLIC_KEYS, tools/ota_sign.py)
-// and the image's sha256, which that signature covers; what Get Carts installs
-// is checked against its index's sha256.
+// TLS verifies the server's certificate against the image's CA bundle
+// (esp_crt_bundle), on every request but the updater's, which asks for none
+// (MOY_HTTPC_SIGNED): what decides an install is the manifest's signature
+// under a key baked into the image (OTA_PUBLIC_KEYS, tools/ota_sign.py) and the
+// image's sha256, which that signature covers. A build without the bundle
+// refuses every other https request (moy_conn_verifies). What Get Carts
+// installs is checked against its index's sha256 besides.
 
 #ifndef MOY_OTA_H
 #define MOY_OTA_H
@@ -119,11 +122,12 @@ int moy_ota_judge_c6(const char *text, size_t n, int require_sig,
 // task holds (MOY_HTTPC_MEDIA, native/moy_media/moy_media.h), which the VM's
 // stop leaves.
 #define MOY_HTTPC_SLOTS 4
-#define MOY_HTTPC_PLAIN 0x01        // refuse https, a redirect's hop too
+#define MOY_HTTPC_SIGNED 0x01       // the payload is signed: TLS checks no certificate
 #define MOY_HTTPC_WORKER 0x02       // the worker's slot
 #define MOY_HTTPC_MEDIA 0x04        // the media service's slot
 #define MOY_HTTPC_ICY 0x08          // ask for ICY metadata (Icy-MetaData: 1)
-#define MOY_HTTPC_ETLS 93           // the refusal: EPROTONOSUPPORT
+#define MOY_HTTPC_ETLS 93           // https this build cannot verify: EPROTONOSUPPORT
+#define MOY_HTTPC_ECERT 129         // a certificate that does not verify: EKEYREJECTED
 #define MOY_HTTPC_EAGAIN 11         // moy_httpc_read_wait: nothing came in time
 
 // GET `url` with redirects followed: a handle (> 0), or -errno (EINVAL for a
@@ -156,9 +160,16 @@ int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t 
                      int *status, char **body, size_t *n);
 
 // The platform's connection (moy_net_port.c): 0 and a connection, or -errno.
-// A board speaks TLS; the host, the unix port and the browser refuse it with
-// EPROTONOSUPPORT.
+// `tls` is MOY_CONN_PLAIN, MOY_CONN_TLS (the certificate verified: its chain
+// to a root of the bundle, the host's name, its dates; -MOY_HTTPC_ECERT when
+// it does not) or MOY_CONN_TLS_SIGNED (no certificate checked). A board speaks
+// TLS; the host, the unix port and the browser refuse it with EPROTONOSUPPORT.
+#define MOY_CONN_PLAIN 0
+#define MOY_CONN_TLS 1
+#define MOY_CONN_TLS_SIGNED 2
 int moy_conn_open(const char *host, uint16_t port, int tls, void **conn);
+// 1 where MOY_CONN_TLS verifies (the build carries a CA bundle), else 0.
+int moy_conn_verifies(void);
 // >0 bytes, 0 at the end, -errno (ETIMEDOUT after MOY_HTTPC_IO_MS of nothing).
 int moy_conn_read(void *conn, void *p, size_t n);
 // The same, waiting at most `ms` for a first byte: -MOY_HTTPC_EAGAIN when none came.

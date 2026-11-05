@@ -85,8 +85,9 @@ class CartNet:
                    302 to its CDN)
 
     and `out_of_memory()`, which cart_index asks after a fetch fails, so a
-    console whose internal RAM is spent says so. TLS verifies no certificate:
-    cart_index checks every file against its index's sha256. The radio is the
+    console whose internal RAM is spent says so. TLS verifies the server's
+    certificate (native/moy_net/moy_ota.h), and cart_index checks every file
+    against its index's sha256 besides. The radio is the
     app's lease (`ws.wifi_hold("carts")`), never this."""
 
     def __init__(self, wifi, autoconnect=None):

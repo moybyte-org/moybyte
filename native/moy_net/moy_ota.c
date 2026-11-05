@@ -729,10 +729,12 @@ static int get_once(client_t *c, const char *url, const char *agent, uint32_t fl
     if (moy_url_parse(url, &tls, host, sizeof(host), &port, &path) != 0) {
         return -EINVAL_;
     }
-    if (tls && (flags & MOY_HTTPC_PLAIN)) {
+    int mode = !tls ? MOY_CONN_PLAIN : (flags & MOY_HTTPC_SIGNED) ? MOY_CONN_TLS_SIGNED
+               : MOY_CONN_TLS;
+    if (mode == MOY_CONN_TLS && !moy_conn_verifies()) {
         return -MOY_HTTPC_ETLS;
     }
-    int rc = moy_conn_open(host, port, tls, &c->conn);
+    int rc = moy_conn_open(host, port, mode, &c->conn);
     if (rc != 0) {
         c->conn = NULL;
         return rc;
@@ -1090,7 +1092,8 @@ int moy_ota_check(const char *url, const char *board, int require_sig,
     int status = 0;
     char *body;
     size_t got;
-    int rc = moy_httpc_get(url, AGENT, MOY_OTA_MANIFEST_MAX, &status, &body, &got);
+    int rc = moy_httpc_get_ex(url, AGENT, MOY_HTTPC_SIGNED, MOY_OTA_MANIFEST_MAX, &status,
+                              &body, &got);
     if (rc != 0) {
         fail("net error %d", -rc);
         return MOY_OTA_ERR;
@@ -1147,7 +1150,7 @@ int moy_ota_dl_begin(const char *url, uint32_t size, const char *sha_hex,
     }
     int status = 0;
     uint32_t clen = 0;
-    int h = moy_httpc_open(url, AGENT, &status, &clen);
+    int h = moy_httpc_open_ex(url, AGENT, MOY_HTTPC_SIGNED, &status, &clen);
     if (h < 0) {
         return fail("net error %d", -h);
     }

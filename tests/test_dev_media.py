@@ -301,6 +301,19 @@ def test_permissions_one_owner_https_and_the_end_of_the_process(media, tmp_path)
     assert N.owner() == 0 and devices.MEDIA[0] == 0 and moybyte.media.now() is None
 
 
+def test_an_https_stream_is_refused_at_play_only_where_nothing_verifies(media, monkeypatch):
+    pid = L.spawn("t.tls")
+    assert moybyte.media.tls() is False                  # the host: plain TCP
+    with pytest.raises(OSError) as e:
+        _as(pid, lambda: moybyte.media.play("https://127.0.0.1:1/x.mp3"))
+    assert e.value.errno == errno.EPROTONOSUPPORT and N.owner() == 0
+    # A console that verifies plays it through the client, which is where the
+    # host's refusal then lands: the stream fails, it is not refused.
+    monkeypatch.setattr(dev_media, "tls", lambda: True)
+    _as(pid, lambda: moybyte.media.play("https://127.0.0.1:1/x.mp3"))
+    assert _drive(lambda: moybyte.media.now()["state"] == "failed")
+
+
 def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
     from ws_helpers import build_ws
     ws = build_ws(tmp_path)

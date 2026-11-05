@@ -913,7 +913,7 @@ static void open_url(media_t *m) {
     UNLOCK(m);
     int status = 0;
     uint32_t clen = 0;
-    int h = moy_httpc_open_ex(m->url, MOY_MEDIA_AGENT, MOY_HTTPC_PLAIN | MOY_HTTPC_MEDIA | MOY_HTTPC_ICY,
+    int h = moy_httpc_open_ex(m->url, MOY_MEDIA_AGENT, MOY_HTTPC_MEDIA | MOY_HTTPC_ICY,
                               &status, &clen);
     if (h < 0) {
         advance(m, -h);

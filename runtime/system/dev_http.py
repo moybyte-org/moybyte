@@ -5,9 +5,12 @@ Needs the `http` permission.
   get(url, cap=16384, on_done=None) -> Request
                      a GET served off the VM's thread, its body kept up to
                      `cap` bytes (at most CAP_MAX); `on_done(req)` is woken
-                     when it finishes. `https` is refused (OSError
-                     EPROTONOSUPPORT), a redirect to it too, until TLS
-                     verifies for apps (P3.4)
+                     when it finishes. `https` verifies the server's
+                     certificate (a failure: OSError EKEYREJECTED); a
+                     console that cannot verify one (`tls()` False: the
+                     host) refuses it, a redirect to it too (OSError
+                     EPROTONOSUPPORT)
+  tls() -> bool      whether this console's https verifies
   Request.state()    None while it runs, else (status, length); OSError
                      with its errno when it got no response
   Request.body()     the body as bytes (None while it runs)
@@ -161,7 +164,7 @@ def _moybyte_buf():
 def get(url, cap=16384, on_done=None):
     p = _D.need("http")
     _hold()
-    h = _N.open(p, str(url), int(cap), _N.APP)
+    h = _N.open(p, str(url), int(cap))
     if h < 0:
         _settle()
         raise _D.error(-h)
@@ -172,6 +175,10 @@ def get(url, cap=16384, on_done=None):
     if auto_run:
         _N.run()
     return req
+
+
+def tls():
+    return bool(_N.tls())
 
 
 def present():

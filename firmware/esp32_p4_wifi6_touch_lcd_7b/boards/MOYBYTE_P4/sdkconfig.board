@@ -178,3 +178,13 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 # bounce, a record at a time. docs/history/kernel_survival_2026-10.md section 8; the
 # figures are #224's.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- the CA bundle -----------------------------------------------------------
+# Every https request but the updater's verifies the server's certificate
+# against ESP-IDF's bundle (esp_crt_bundle; native/moy_net/moy_net_port.c), the
+# common set: the roots of the CAs that issue nearly every public site's
+# certificate, kept in flash and read a root at a time. MicroPython's base
+# config turns the bundle off; a board without these lines refuses https for
+# apps (docs/os_2026-11/hardware.md section 1). Its flash cost is #246's.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y

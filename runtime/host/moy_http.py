@@ -21,14 +21,15 @@ _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 PART = native_build.Part("http", ("moy_fetch.h", "moy_fetch.c"), (_NET, _INPUT))
 
 QUEUED, RUNNING, DONE, FAILED = 1, 2, 3, 4
-APP = 0x01
 CAP_MAX = 256 * 1024
 ETLS = 93
+ECERT = 129
 
 _U32, _I = ctypes.c_uint32, ctypes.c_int
 
 _SIGS = (
-    ("moy_fetch_open", [_U32, ctypes.c_char_p, _U32, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_fetch_open", [_U32, ctypes.c_char_p, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_fetch_tls", [], _I),
     ("moy_fetch_state", [_U32, ctypes.POINTER(_I), ctypes.POINTER(_U32), ctypes.POINTER(_I)], _I),
     ("moy_fetch_read", [_U32, _U32, ctypes.c_void_p, _U32], _I),
     ("moy_fetch_close", [_U32], _I),
@@ -57,10 +58,14 @@ def _lib():
     return _LIB[0]
 
 
-def open(owner, url, cap, flags):  # noqa: A001 -- the board module's name
+def open(owner, url, cap):  # noqa: A001 -- the board module's name
     h = _U32()
-    rc = _lib().moy_fetch_open(owner, url.encode(), cap, flags, ctypes.byref(h))
+    rc = _lib().moy_fetch_open(owner, url.encode(), cap, ctypes.byref(h))
     return rc if rc < 0 else h.value
+
+
+def tls():
+    return _lib().moy_fetch_tls()
 
 
 def state(h):

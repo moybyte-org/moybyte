@@ -39,7 +39,6 @@ typedef struct {
     uint16_t gen;
     uint8_t state;
     uint8_t closing;                // closed while the worker serves it
-    uint32_t flags;
     uint32_t cap;
     int status;
     int err;
@@ -118,9 +117,8 @@ static void serve(int i) {
     int status = 0;
     char *body = NULL;
     size_t n = 0;
-    int rc = moy_httpc_get_ex(s->url, MOY_FETCH_AGENT,
-                              MOY_HTTPC_WORKER | ((s->flags & MOY_FETCH_APP) ? MOY_HTTPC_PLAIN : 0),
-                              s->cap, &status, &body, &n);
+    int rc = moy_httpc_get_ex(s->url, MOY_FETCH_AGENT, MOY_HTTPC_WORKER, s->cap, &status,
+                              &body, &n);
     uint32_t h = handle_of(i);
     LOCK();
     if (s->closing) {
@@ -174,7 +172,11 @@ int moy_fetch_present(void) {
     #endif
 }
 
-int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t flags, uint32_t *h) {
+int moy_fetch_tls(void) {
+    return moy_conn_verifies();
+}
+
+int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h) {
     int tls;
     char host[MOY_URL_HOST_MAX];
     uint16_t port;
@@ -187,7 +189,7 @@ int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t flags
         || moy_url_parse(url, &tls, host, sizeof(host), &port, &path) != 0) {
         return -MOY_FETCH_EINVAL;
     }
-    if (tls && (flags & MOY_FETCH_APP)) {
+    if (tls && !moy_conn_verifies()) {
         return -MOY_HTTPC_ETLS;
     }
     if (moy_httpc_init() != 0) {
@@ -216,7 +218,6 @@ int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t flags
     memcpy(s->url, url, ul + 1);
     open_source();
     s->owner = owner;
-    s->flags = flags;
     s->cap = cap;
     s->status = 0;
     s->err = 0;

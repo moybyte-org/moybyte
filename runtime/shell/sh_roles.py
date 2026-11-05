@@ -75,7 +75,8 @@ POLL_MS = 10
 _WHY = {1: "not permitted", 2: "not found", 5: "i/o error", 9: "not open",
         12: "out of memory", 16: "busy", 19: "this console has none",
         22: "invalid argument", 28: "no room", 93: "https is refused",
-        107: "not connected", 110: "timed out", 113: "unreachable"}
+        107: "not connected", 110: "timed out", 113: "unreachable",
+        129: "the server's certificate is not trusted"}
 
 
 def why(e):

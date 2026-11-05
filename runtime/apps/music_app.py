@@ -11,7 +11,8 @@ service's face, `moybyte.media` (runtime/system/dev_media.py). Its design is
 docs/media/music_2026-11/README.md.
 
   * Radio: the curated stations and the ones the person added (Add a
-    station: an http:// address, a name), kept in the app's prefs;
+    station: an http:// address, or https:// where the console verifies
+    it, and a name), kept in the app's prefs;
   * My music: the MP3s and the .m3u/.pls playlists in the music folder of
     the user files (`files/music/` on the SD card);
   * Now playing: the media card at its full density, its keys the page's
@@ -1578,13 +1579,21 @@ def _state(c, name, kind):
     return PAUSED_ if c["paused"] else PLAYING
 
 
+def _https():
+    m = _media()
+    return m is not None and bool(m.tls())
+
+
 def _check(url, final):
     """The Address field's error: an address that names another scheme,
-    and on Add one that is not http:// at all; None where it plays."""
+    and on Add one that is not http:// (or https:// where the media face
+    verifies it) at all; None where it plays."""
     low = url.strip().lower()
     if not low:
         return ERR_ADDRESS if final else None
     if low.startswith("http://") and len(low) > 7:
+        return None
+    if low.startswith("https://") and len(low) > 8 and _https():
         return None
     if "://" in low or final or low.startswith("https"):
         return ERR_ADDRESS

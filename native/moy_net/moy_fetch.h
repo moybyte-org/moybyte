@@ -5,8 +5,9 @@
 // NET record on the ring source "http" (moy_input.h): `a` the request's
 // handle, `id` its state, `b` its HTTP status, or the negative errno.
 //
-// An app's request is MOY_FETCH_APP: `https` is refused, a redirect's hop
-// too, with -MOY_HTTPC_ETLS, the rule until TLS verifies for apps (P3.4).
+// An `https` request verifies the server's certificate (moy_ota.h); a build
+// that cannot verify one refuses it, a redirect's hop too, with
+// -MOY_HTTPC_ETLS (moy_fetch_tls).
 // The worker is a task on a board; the host serves a queued request when
 // moy_fetch_run is called (the Python face calls it), the same code.
 //
@@ -23,7 +24,6 @@
 #define MOY_FETCH_URL_MAX 512
 #define MOY_FETCH_CAP_MAX (256u * 1024u)
 #define MOY_FETCH_AGENT "moybyte-app"
-#define MOY_FETCH_APP 0x01u             // an app's: no https
 
 enum {
     MOY_FETCH_FREE = 0,
@@ -41,9 +41,11 @@ enum {
 
 // A GET of `url` for `owner`, its body kept up to `cap` bytes: 0 and the
 // handle, or -errno (EINVAL for a URL that does not parse or a cap past
-// MOY_FETCH_CAP_MAX, MOY_HTTPC_ETLS for an app's https, ENOSPC with every
-// slot taken).
-int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t flags, uint32_t *h);
+// MOY_FETCH_CAP_MAX, MOY_HTTPC_ETLS for https where moy_fetch_tls is 0,
+// ENOSPC with every slot taken).
+int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h);
+// 1 where an https request verifies, 0 where it is refused.
+int moy_fetch_tls(void);
 // The request's state, its HTTP status (0 until DONE) and body length, or
 // the errno of a FAILED one: the state, or -EBADF for a stale handle.
 int moy_fetch_state(uint32_t h, int *status, uint32_t *n, int *err);

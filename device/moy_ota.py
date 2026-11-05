@@ -155,7 +155,8 @@ def default_manifest_url(channel, board=None):
 
 # -- manifest signing (the anti-MITM measure) --------------------------------
 #
-# TLS verifies no certificate, so anyone who can answer for github.com on the
+# The updater's TLS verifies no certificate (MOY_HTTPC_SIGNED,
+# native/moy_net/moy_ota.h), so anyone who can answer for github.com on the
 # kid's network can serve any bytes they like, and the manifest's sha256 cannot
 # help when the same attacker writes the manifest. So a manifest from the BAKED
 # urls must carry a signature by a key whose public half is here: RSA-2048,

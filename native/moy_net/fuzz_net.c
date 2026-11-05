@@ -36,6 +36,10 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **conn) {
     return -111;
 }
 
+int moy_conn_verifies(void) {
+    return 0;
+}
+
 int moy_conn_read(void *conn, void *p, size_t n) {
     (void)conn, (void)p, (void)n;
     return -5;

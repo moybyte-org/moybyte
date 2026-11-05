@@ -58,9 +58,9 @@ What it does differently, because a console is not a PC:
     a compiled cart, whose native module a board loads only by its
     signature, a Lua cart, or a theme package ("runtime": "theme"), data
     the theme loader parses, validates and clamps (docs/theme_and_shell_2026-11.md
-    §6) and nothing runs. A board fetches over TLS without checking
-    certificates (the OTA's arrangement), so an index is not proof of
-    anything; what lands is sandboxed, signed or validated data.
+    §6) and nothing runs. A board's TLS checks the server's certificate,
+    but a server is not proof of what it serves; what lands is sandboxed,
+    signed or validated data.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,

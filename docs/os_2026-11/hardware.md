@@ -49,6 +49,18 @@ security model").
    bundle on the P4s; on the S3s, verification when the bundle fits
    `headroom_floor_kib`, otherwise `https` is refused for apps, and
    `VERIFY_NONE` (`native/moy_net/moy_net_port.c`) stays for signed OTA only.
+   As built (P3.4), every console carries ESP-IDF's common bundle
+   (`esp_crt_bundle`, in each `sdkconfig.board`), the S3s' included: every
+   https request but the updater's (`MOY_HTTPC_SIGNED`, `moy_ota.h`) checks
+   the chain to a root of it, the host's name and the dates, `http`, media
+   streams, Get Carts and `pkg` alike. A board's clock is its uptime unless
+   something set it, so the dates are read against a clock never earlier
+   than the image's build day: a certificate that expired before the build
+   is refused everywhere, and a not-yet-valid one is let pass while the
+   clock is behind that day. A build without the bundle (the host, the Zero)
+   refuses those requests with `EPROTONOSUPPORT`, and a certificate that
+   does not verify fails with `EKEYREJECTED`. The bundle's flash cost and
+   the handshake's memory are #246's.
 2. **Bus leases**: a named UART, I²C, SPI or GPIO set from the board's
    `lease` rows, with PWM, ADC and edge timestamps on GPIO. Exclusive, for
    the process's life. On a bus the OS also uses there is no lease: a device
@@ -107,8 +119,8 @@ on.
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
-  stop leaves alone), its body kept up to a cap; `https` and a redirect to
-  it are refused for apps until TLS (P3.4), and a request holds the WiFi
+  stop leaves alone), its body kept up to a cap; `https` verifies (above),
+  `moybyte.http.tls()` says whether it can here, and a request holds the WiFi
   lease's `http` tag while it runs.
 - **`mic`** (`native/moy_audio/moy_mic.h`): PCM16 mono at the speaker's
   rate (44,100 Hz on a P4, 22,050 on the T-Deck: a reader takes `rate()`)
@@ -381,7 +393,8 @@ metadata**: `icy-name` is the station, `StreamTitle` the now-playing text) or
 an **M3U/PLS playlist** (a file, or a URL known by its content type or path),
 whose entries play in turn: an entry that ends or fails moves to the next,
 and a live stream (no Content-Length) that drops after playing is opened
-again twice first. `https` is refused, as `http` refuses it until P3.4.
+again twice first. An `https` stream verifies as `http` does, and
+`moybyte.media.tls()` says whether one plays here.
 **Media keys** (play, pause, next, previous) on a keyboard are to arrive as
 events of kind `MEDIA` (§2) the service answers when no focused app takes
 them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
