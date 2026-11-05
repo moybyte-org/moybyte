@@ -1557,7 +1557,7 @@ SCENES = {
         "page": "add", "url": "http://ice1.somafm.com/lush-128-mp3", "focus": "Address"}),
     "handheld_add-https": (L.HANDHELD, None, D, {
         "page": "add", "url": "https://stream.example.org/live.mp3", "focus": "Address",
-        "err": "This address won't play. Ask a grown-up for one that starts with http://"}),
+        "err": "This address won't play. Use one that starts with http://"}),
     "guition-s3_noaudio": (GUITION_S3, "touch", D, {"page": "noaudio"}),
     "desktop_music": (L.DESK, None, DL, {"page": "desk", "tab": 0, "cur": 3, "now": RADIO,
                                          "focus": "stations"}),
