@@ -139,9 +139,8 @@ def test_a_group_is_a_caption_and_a_card_its_corners_rounded_by_the_depth():
         assert r.px(x, y) == ground, "a card corner at (%d, %d) is cut" % (x, y)
     assert r.px(INSET, top + ROW + 10) != ground, "the card's side is square between its corners"
     assert r.px(INSET + PAD + 40, top + 2 * ROW) != card, "a rule heads the third row"
-    # the focused first row's plate is the line between it and the second
-    assert r.px(INSET + PAD + 40, top + ROW) == card, "no rule under the focused row"
-    assert r.px(INSET + PAD + 40, top) != card, "the focused row is on its plate"
+    # the focused first row wears its bar alone: no plate under it
+    assert r.px(INSET + PAD + 40, top + ROW // 2) == card, "the focused row wears no plate"
 
 
 def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
@@ -1226,8 +1225,8 @@ def test_a_tables_picture_column_draws_the_named_icon():
     assert pic and _ink_cols(b, y0 + 2, y0 + ROW - 2, INSET, 40) != pic
 
 
-def _band(r, y0, y1):
-    return [r.px(x, y) for y in range(y0, y1) for x in range(r.cv.w)]
+def _band(r, y0, y1, w=None):
+    return [r.px(x, y) for y in range(y0, y1) for x in range(w or r.cv.w)]
 
 
 def test_a_tables_rows_fade_where_they_run_on_past_its_rect():
@@ -1244,7 +1243,10 @@ def test_a_tables_rows_fade_where_they_run_on_past_its_rect():
     foot = top + CAPTION + HEAD + 3 * ROW
     head = top + CAPTION + HEAD
     assert _band(fits, foot - 8, foot) != _band(runs, foot - 8, foot), "no fade at its foot"
-    assert _band(fits, head, head + ROW) == _band(runs, head, head + ROW)
+    # its top rows are the same, but for the thumb inside the right edge
+    # of the one that runs on
+    assert _band(fits, head, head + ROW, 312) == _band(runs, head, head + ROW, 312)
+    assert _band(fits, head, head + ROW) != _band(runs, head, head + ROW), "no thumb"
 
 
 def test_a_scrolled_table_fades_its_head():
@@ -1689,9 +1691,10 @@ def _files_script(ws):
             drv.type_char(step)
         else:
             drv.press(step)
-        _frame(drv)
-        _frame(drv)
-        _frame(drv)
+        # every runtime's glide settled: a run's paced ticks fall on the
+        # loop's frames at its own phase
+        for _ in range(8):
+            _frame(drv)
         shots.append((_pixels(ws), _pmem(ws)))
     return shots
 

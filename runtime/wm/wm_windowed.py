@@ -332,7 +332,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._backdrop_layer = _BackdropLayer(self)
         self._backdrop = None
         self._backdrop_valid = False
-        self._desk_tile = False           # the system button's state the cache holds
+        self._desk_tile = 0               # the system button's state the cache holds
+        self._tile_shown = 0              # ...and the one the buffers last took
         self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
         self._backdrop_unsupported = False  # the root canvas can't snapshot pixels
                                             # (the web CommandCanvas, #113): stop

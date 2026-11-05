@@ -53,6 +53,13 @@ one, `time.ticks_us()`.
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
                      process does not hold it (runtime/system/notifications.py)
+  status(icon, section, order=0)
+                     a status item in the bar for this process, its section
+                     drawn in the item's menu (the desk) or the control
+                     center (a handheld): an item with show(state),
+                     changed() and remove(), None where the bar is full
+                     (runtime/system/status_items.py). The process's end
+                     takes it out
 
 on/every/after answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
@@ -461,6 +468,25 @@ def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
     except ImportError:  # host: the runtime package
         from runtime.notifications import NOTES
     return NOTES.post(_pid(), summary, body, icon, actions, urgency, replaces_id)
+
+
+def _items():
+    try:
+        from status_items import ITEMS
+    except ImportError:  # host: the runtime package
+        from runtime.status_items import ITEMS
+    return ITEMS
+
+
+def status(icon, section, order=0):
+    return _items().add(_pid(), icon, section, order)
+
+
+def _status_end(pid):
+    _items().sweep(pid)
+
+
+ENDS.append(_status_end)
 
 
 def __getattr__(name):

@@ -28,7 +28,7 @@
 #define NO_PAGE 0xffu
 // A fade's rows at the scale: its first two barely tint, so ten read as
 // D-09's eight (docs/history/look_2026-10.md).
-#define FADE_H 10
+#define FADE_H 8
 
 // A stop's flags.
 enum {
@@ -174,6 +174,8 @@ void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int u
                    int flags, const moy_ui_over_t *o);
 void mua_edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
                     int scroll, int ci, int head, int h);
+void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
+               int scroll);
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind);
 

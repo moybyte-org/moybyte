@@ -25,9 +25,11 @@ packs.
 """
 
 try:
-    from layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bar_rows, bars as _bars
+    from layout_base import (BAR_ROWS, DEFAULT_BARS, DESK, bar_rects_of, bar_rows,
+                             bars as _bars, metric_class)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bar_rows, bars as _bars
+    from runtime.layout_base import (BAR_ROWS, DEFAULT_BARS, DESK, bar_rects_of, bar_rows,
+                                     bars as _bars, metric_class)
 
 EDGES = ("top", "bottom", "left", "right")
 REQUIRED = ("menu", "zone")
@@ -157,31 +159,64 @@ def _along(name, horiz, cs, fs, clock_w, text, sys_len=0):
 # The status widgets: two side by side are a status cluster, a status gap
 # apart (`pack`'s `sg`), which the bar evens out by their ink.
 STATUS = ("wifi", "battery", "clock")
+# The apps' status items (`runtime/system/status_items.py`): how many the bar
+# shows, which `pack` reserves a `status` cell for ahead of the Wi-Fi (or the
+# battery) wherever a bar places one. The console sets it where the count
+# moves, then packs again.
+ITEMS = [0]
+# A handheld's status cluster -- the items, Wi-Fi and battery, one focus stop
+# -- keeps its focus ring's room on every side whether or not the keys are on
+# it (docs/theme_and_shell_2026-11.md §8.6): RING_ROOM of clearance and
+# stroke, RING_ROOM + CLOCK_CLEAR from the clock past it, and ZONE_CLEAR
+# between the ring and what stands left of it (the zone), all at the font
+# scale.
+RING_ROOM = 5
+CLOCK_CLEAR = 6
+ZONE_CLEAR = 2
 
 
-def _gap(a, b, gap, sg):
+def _gap(a, b, gap, sg, ring=0):
+    if a[0] == "status":
+        return sg if a[4] else 0
+    if ring and b[0] == "clock" and a[0] in ("wifi", "battery"):
+        return ring
     return sg if a[0] in STATUS and b[0] in STATUS else gap
 
 
-def _run(items, start, gap, sg):
+def _run(items, start, gap, sg, ring=0):
     prev = None
     for it in items:
         if prev is not None:
-            start += _gap(prev, it, gap, sg)
+            start += _gap(prev, it, gap, sg, ring)
         it[3] = start
         start += it[1]
         prev = it
 
 
-def _ends(items, gap, sg):
+def _ends(items, gap, sg, ring=0):
     n = 0
     prev = None
     for it in items:
         if prev is not None:
-            n += _gap(prev, it, gap, sg)
+            n += _gap(prev, it, gap, sg, ring)
         n += it[1]
         prev = it
     return n
+
+
+def _status_cell(slots, n, ic, sg, lead):
+    """Put a `status` item ahead of the first Wi-Fi or battery in `slots`
+    (a bar's items by slot): `n` icons `ic` wide a status gap apart after
+    `lead` pixels of the cluster's ring room. Its text field holds `n`."""
+    for k in range(len(slots)):
+        items = slots[k]
+        for j in range(len(items)):
+            if items[j][0] in ("wifi", "battery"):
+                ln = lead + n * ic + max(0, n - 1) * sg
+                if ln <= 0:
+                    return
+                items.insert(j, ["status", ln, False, 0, n, k])
+                return
 
 
 def _grow(items, slack):
@@ -196,7 +231,8 @@ def _grow(items, slack):
     flex[-1][1] += slack - each * len(flex)
 
 
-def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
+def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0, cluster=None,
+         items=None):
     """The bars of `of` (default: the bars in force) on a `w` x `h` surface
     whose BAR_ROWS-row bar is `rows` tall, at chrome scale `cs` and font
     scale `fs`: ((edge, rect, dy, cells), ...), the rect on the surface,
@@ -216,9 +252,19 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
     Across, a 16-pixel icon sits 1 pixel in on an 18-row bar and keeps that
     inset centred on a thicker one; a side bar centres it. `sys_len`, where
     set, is the `menu` cell's length along its bar: a theme's system button
-    larger than an icon (the 2026-10 look's tile)."""
+    larger than an icon (the 2026-10 look's tile).
+
+    `items` (default `ITEMS`) is how many apps' status items the bars show:
+    a `status` cell holds them ahead of the Wi-Fi, each an icon a status
+    gap apart. `cluster` (default: on a handheld, `layout_base.metric_class`)
+    reserves the status cluster's focus ring room on a horizontal bar: the
+    `status` cell opens with it, and the Wi-Fi or battery before the clock
+    stands that and CLOCK_CLEAR off it."""
     if of is None:
         of = _bars()
+    n_items = ITEMS[0] if items is None else items
+    if cluster is None:
+        cluster = metric_class() != DESK
     rects = bar_rects_of(w, h, rows, of)
     m = g = 2 * cs
     sg = max(g, 4 * fs)
@@ -243,22 +289,29 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
                 items.append([name, _along(name, horiz, cs, fs, clock_w, tw, sys_len),
                               name in FLEX, 0, text, len(slots)])
             slots.append(items)
+        ring = 0
+        if horiz:
+            lead = 0
+            if cluster:
+                ring = (RING_ROOM + CLOCK_CLEAR) * fs
+                lead = (RING_ROOM + ZONE_CLEAR) * fs - g
+            _status_cell(slots, n_items, ic, sg, lead)
         left, center, right = slots
         floats = bool(center) and all(it[2] for it in center)
         if center and not floats:
-            cstart = (length - _ends(center, g, sg)) // 2
+            cstart = (length - _ends(center, g, sg, ring)) // 2
             if left:
-                _grow(left, cstart - g - (m + _ends(left, g, sg)))
+                _grow(left, cstart - g - (m + _ends(left, g, sg, ring)))
             if right:
-                cend = cstart + _ends(center, g, sg)
-                _grow(right, (length - m - _ends(right, g, sg)) - g - cend)
+                cend = cstart + _ends(center, g, sg, ring)
+                _grow(right, (length - m - _ends(right, g, sg, ring)) - g - cend)
         else:
-            a = m + _ends(left, g, sg) + (g if left and right else 0)
-            slack = length - m - _ends(right, g, sg) - a
+            a = m + _ends(left, g, sg, ring) + (g if left and right else 0)
+            slack = length - m - _ends(right, g, sg, ring) - a
             both = left + right
             _grow(both, slack)
-        _run(left, m, g, sg)
-        _run(right, length - m - _ends(right, g, sg), g, sg)
+        _run(left, m, g, sg, ring)
+        _run(right, length - m - _ends(right, g, sg, ring), g, sg, ring)
         rstart = right[0][3] if right else length - m
         if floats:
             q = length // 4
@@ -266,7 +319,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
                 it[1] = max(0, rstart - q)
                 it[3] = q
         else:
-            _run(center, (length - _ends(center, g, sg)) // 2, g, sg)
+            _run(center, (length - _ends(center, g, sg, ring)) // 2, g, sg, ring)
         dy = (thick - BAR_ROWS * fs) // 2
         iy = 1 + (thick - BAR_ROWS * cs) // 2 if horiz else (thick - ic) // 2
         cells = []
@@ -277,7 +330,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
                     r = (at, iy, n, ic)
                 elif name in ("close", "wifi", "battery"):
                     r = (at, iy, ic, ic)
-                elif name in ("zone", "title", "separator"):
+                elif name in ("zone", "title", "separator", "status"):
                     r = (at, iy, n, ic)
                 else:
                     r = (at, 0, n, thick)

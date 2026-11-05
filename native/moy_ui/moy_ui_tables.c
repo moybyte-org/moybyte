@@ -830,7 +830,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "               \"right\": [\"wifi\", \"battery\", \"clock\"] }]\012"
     "  },\012"
     "  \"look\": {\012"
-    "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"underline\" },\012"
+    "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"edge\", \"ring\": { \"w\": 2, \"gap\": 2 } },\012"
     "    \"current\": { \"style\": \"plate\", \"ink\": \"ink_accent\" }, \"shadow_back\": 0.3,\012"
     "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
     "    \"app_buttons\": { \"calc\": { \"normal\": { \"font\": \"key\" }, \"tonal\": { \"font\": \"op\" },\012"
@@ -1050,7 +1050,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5468, 4359, 4339};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5493, 4359, 4339};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1449,7 +1449,7 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // field.border
     {MOY_THEME_LK_BOOL, 0, 1, 1},  // accents
     {MOY_THEME_LK_COLOUR, 0, 0, 16777216},  // scrim.c
-    {MOY_THEME_LK_NUM, 0, 100, 40},  // scrim.alpha
+    {MOY_THEME_LK_NUM, 0, 100, 70},  // scrim.alpha
     {MOY_THEME_LK_ENUM, 121, 2, INT32_MIN},  // icons.kind
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap

@@ -1468,17 +1468,21 @@ def perf(cv, th, args, words, out):
     _C.perf(cv, _LOOK if th is _TH else _look(th), args, words, out)
 
 
-def scrim(cv, th, rect, src=None, also=None):
+def scrim(cv, th, rect, src=None, also=None, alpha=None):
     """What a modal dims under it (D-01): `rect` washed in the look's
     `scrim`, drawn once a full frame, before the modal's card. `src`: a
     buffer laid out as the canvas's whose pixels it washes instead of the
     canvas's (the frame a buffer of the ring holds); `also`: one each result
-    is stored to as well (the layer a hold keeps)."""
+    is stored to as well (the layer a hold keeps); `alpha` (0..255) a
+    strength of the surface's own in place of the look's."""
     look = _LOOK if th is _TH else _look(th)
+    was = None if alpha is None else _C.scrim_alpha(alpha)
     if src is None and also is None:
         _C.scrim(cv, look, rect)
     else:
         _C.scrim(cv, look, rect, src, also)
+    if was is not None:
+        _C.scrim_alpha(was)
 
 
 def bar_part(cv, th, part, rect, on=0, fill=None):

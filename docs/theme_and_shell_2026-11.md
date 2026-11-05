@@ -150,8 +150,8 @@ Nothing is pending the owner.
 - **Focus and current are theme properties** (owner, 2026-10-15: "make it a
   property, easy to change later"): `focus` draws by size class and
   `current` is a plate, a fill or a bar (`DESIGN.md`, the marks). Moy lifts
-  its cards, edge-bars its rows on a light plate, underlines its small
-  parts and marks current with a `value` plate; Blocks and Contrast keep a
+  its cards, edge-bars its rows, rings its small parts and marks current
+  with a `value` plate (§1.5); Blocks and Contrast keep a
   ring on cards and `invert` elsewhere, Blocks' current an underline and
   Contrast's a solid ink plate.
 - **Button kinds replace per-app roles** (owner, 2026-10-15).
@@ -187,10 +187,7 @@ Nothing is pending the owner.
     it. A popover hung from its own control (an app's picker, a bar
     widget's calendar, Wi-Fi or power) does not dim, and keeps painting its
     rect alone over a playtest's quiet frames.
-  - D-04: Moy keeps its focus edge and lays a light accent plate under the
-    focused part (0.12 in Day, 0.14 in Night), which takes a card's
-    corners on its first and last rows and is the line between the focused
-    row and its neighbours, which draw no rule against it; Day's lifted
+  - D-04: Moy keeps its focus edge (its plate went with §1.5); Day's lifted
     hero wears an accent rim; a window behind takes `win.fill_back` on a
     `bar` header (Day `#e3e6ed`, Night `#0f1127`), a smaller shadow
     (`shadow_back` 0.3) and its controls in the `disabled` ink.
@@ -207,8 +204,7 @@ Nothing is pending the owner.
     hierarchy weight and size (`dim` is its ink), its desk tiles and Moy
     button framed always (`tile_outline`, `bar.sys_line`), and Appearance
     offers it no accents (`accents: false`).
-  - m04: a disabled key's plate fades half way to the surface with its
-    ink. m07 and m17: Blocks' current is the underline -- a row's label
+  - m04: a disabled key is drawn as §1.5's disabled button. m07 and m17: Blocks' current is the underline -- a row's label
     underlined (`current.row: underline`), a ring the chosen swatch, a fill
     focus. m08: Calc's display ink is the plain ink (Moy's `lcd_ink`). m15:
     a toggle's knob is one colour in a mode, the state on the track. A
@@ -259,6 +255,54 @@ Nothing is pending the owner.
 6. The text area is a public `ui` verb (`ui.text_view`), consistent with the rest of the API,
    so any app (a chat app, a terminal) gets a text area and restyles it
    through the theme and the per-call overrides.
+
+### 1.5 Focus, status items and the control center (owner, 2026-11-05)
+
+Decided over the Music mock-ups (`docs/media/music_2026-11/README.md`, the
+renders the owner chose from):
+
+1. **One focus grammar.** Selected is a FILL (the pills and fills already
+   there). A focused ROW is the left accent bar alone, 4 px on the T-Deck,
+   with no fill; focused and selected is the fill and the bar. A focused
+   button, tab or cell is a 2 px ring 2 px clear of it (`focus.ring` in a
+   theme, `MOY_UI_MARK_CELL` in the engine); the bar's items and the home's
+   tabs take the same ring, with no plate, and the bar keeps the ring's
+   room so nothing moves on focus. Touch shows neither.
+2. **Dialogs** wash the page at 70%. Their bodies wrap, and a dialog's verb
+   can be disabled (`o.disabled`). A disabled button keeps the surface and
+   its border, its label dimmed.
+3. **Hint strips** stand 8 px in from both edges and drop their lesser
+   hints before Back. A field shows no letter key's hint, Mic is a field's
+   cancel only (`ACT_KEYS`), and a pad's change is ← →.
+4. **Fields** fill their rect outside a group, stand their text 8 px inside
+   the box, and take a caller's border in place of their own (`o.border`,
+   the danger ink for a field in error).
+5. **Scrolled views** carry a 2 px thumb in the dim ink on a track in the
+   border's (scroll regions and tables) and 8 px fades.
+6. **Apps put status items in the bar** (`moybyte.status`,
+   `runtime/system/status_items.py`): one preallocated record an item, swept
+   with its process, its section drawn as that process. On the desk an
+   item is a cell in the bar's right zone, its icon in its state's ink (the
+   accent, the `paused` content role, the danger ink), which opens its
+   menu, a popover hung from it, and wears the selected fill while that is
+   open. On a handheld the items' icons join the status cluster (the T-Deck
+   shows Music's ♫ while it plays), and the cluster -- items, Wi-Fi,
+   battery -- is ONE focus stop that opens the control center.
+7. **The handheld control center** grew from the battery's component
+   (`popover.ControlCenter`): the console's card (Volume, Brightness,
+   Wi-Fi), then each app's section as a card under its app's name, in one
+   scroll region with a thumb, its first view ending 6 px under the first
+   app's card, over a 50% scrim. The battery has no row: the bar's glyph
+   shows it low (the danger ink under 15%) and charging (a bolt), and
+   Settings keeps its exact level.
+8. **A paused game shows the bar** on a handheld, so the cluster and the
+   control center are reachable from the pause card.
+9. **Stop & play.** When the VM must stop for a compiled game and the
+   music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
+   Cancel (focused) and Stop & play, which stops the stream and opens the
+   game (`Player._music_keeps_the_vm`, `Workstation.ask_stop_music`).
+10. The system menu has no Stop music row: the music app's status item is
+    where a stream stops.
 
 ## 2. The theme package
 
@@ -1776,33 +1820,35 @@ lent tools and the zone's targets (the Editor's tabs, undo, redo and Play,
 them, confirm opens one as a tap on it does (a widget's popover over the
 bar, focus staying on the widget under it; a tab, the keys going down into
 it), down, back and stop come off
-it; the focused item takes the bar's focus pill (below), and
+it; the focused item takes the bar's focus ring (below), and
 the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
 confirm and back, in the input's own keys). A caret keeps up for itself, so
 the Code tab and the theme mode's Config walk no focus onto the bar: their
 bar is a touch's, and the system menu's Home is their way out. The desk's
 windows keep their own ways.
 
-**The bar's focus mark is the pill** (owner call 2026-10-27), in the tabs'
-shape whatever the theme's focus style (`ui_draw.focus`'s `pill`,
-`MOY_UI_MARK_PILL`): a plate of the focus colour under the item and a ring
-round it, the theme's `focus.outline` outside the ring, so the item keeps its
-own ink -- an invert theme's mark would blot a 16-pixel icon out. On the OS
-widgets it is one height, the system tile's and its ring, centred across the
-bar (`BarLayer._pill`); on the zone's targets it is their rect and a ring
-round it.
+**The bar's focus mark is the ring** (owner calls 2026-10-27 and 2026-11-05),
+in the tabs' shape whatever the theme's focus style (`ui_draw.focus`'s
+`pill`, `MOY_UI_MARK_PILL`): a ring round the item and the theme's
+`focus.outline` outside it, with no plate, so the item keeps its own ink --
+an invert theme's mark would blot a 16-pixel icon out. On the OS widgets it
+is one height, the system tile's, centred across the bar
+(`BarLayer._pill`); on a handheld the status cluster wears one ring round
+its icons; on the zone's targets it is their rect and a ring round it. The
+bar's item whose popover is open (the cluster's control center, a desk
+status item's menu) wears the selected fill (§1.5).
 
 **The home's tabs and the bar's items are one row** (owner calls
 2026-10-27). Where the bar holds the tabs (the handheld's home: the T-Deck,
 the Guition S3, the browser), left and right walk the bar's items and the
 tabs in their order on the screen -- on the T-Deck the system button, Games,
-Mine, Apps, Make, Wi-Fi, the battery and the clock -- and stop at the row's
+Mine, Apps, Make, the status cluster and the clock -- and stop at the row's
 ends (`BarLayer.focus_beside_tabs`, `_tabs_split`); up stays, the row being
 the top line, and down and back go to the cards from anywhere on it. The
 walk moves a focus and opens nothing: confirm opens the tab the focus is on
 and takes the keys to its cards, or opens a bar item as a tap on it does; Q
 and E open the previous and the next tab at once, and a tap opens a tab at
-once (`LauncherHomeLayer.focused_tab`). The focused tab wears the pill and
+once (`LauncherHomeLayer.focused_tab`). The focused tab wears the ring and
 the open one its current mark, so the two read apart; the hint strip names
 the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
 bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
@@ -1814,11 +1860,11 @@ along the row that drifts a pulse or two down stays on it; a pause frees it
 **The Editor's tabs and the bar's items are one row too** (owner call
 2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
 system button, Config, Blocks, Code, Sprites, Map, Scene, Music, undo, redo,
-Play, the battery and the clock, walked in that order and stopping at the
-ends. The walk moves the focus pill and opens nothing; confirm on a tab opens
+Play, the status cluster and the clock, walked in that order and stopping at the
+ends. The walk moves the focus ring and opens nothing; confirm on a tab opens
 it and takes the keys down into it (`EditorApp.zone_opened`, the theme
 mode's two tabs the same), confirm on undo or redo runs it and the keys stay
-on the row, and a tap opens a tab at once. The focused tab wears the pill and
+on the row, and a tap opens a tab at once. The focused tab wears the ring and
 the open one its current mark. The desk Editor's workspaces are a window's
 row, switched by their chords (`EditorDesk._chord`), and the keys do not walk
 it.

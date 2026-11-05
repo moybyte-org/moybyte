@@ -97,7 +97,11 @@ to whoever called it.
   `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
   — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
   its unit of 2 at chrome size 1 (docs/history/look_2026-10.md step 9). RIGHT
-  zone = OS status (clock/wifi/batt). The LEFT zone opens with the **back
+  zone = OS status (clock/wifi/batt) and the apps' status items
+  (`runtime/system/status_items.py`; how they read on each tier is
+  docs/theme_and_shell_2026-11.md §1.5). An item allocates nothing per
+  frame and draws its section AS its process; a handheld's cluster is one
+  stop, and the bar reserves its focus ring's room. The LEFT zone opens with the **back
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
   gets its X instead): one level back, as Esc and B (`ws.app_back` for a
   registered app, whose `back()` steps its own pages); the launcher root draws
@@ -111,7 +115,8 @@ to whoever called it.
   set, a tile a slot of its `SLOTS`), else 16×16 sprites from the shell's baked `IconSheet`; the slots a
   theme's `icons.pixel_slots` names draw from its own tiles, painted in the Editor's theme mode
   (`runtime/editors/theme_editor.py`). **The bar hides entirely while a GAME plays** (the cart
-  owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
+  owns all 320×240) and shows again over its pause card on a handheld;
+  tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
 - **Exit model (#71's BACKSPACE pause machinery is retired).** A game is left
   through the pause menu, which the console's one key opens (`start`:

@@ -3734,8 +3734,20 @@ void mua_edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int
     }
 }
 
-// The page's (or a scroll region's) foot, its groups closed: where its rows
-// run on below what shows, a fade over its last FADE_H rows of the scale.
+void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
+               int scroll) {
+    if (rows <= v.h) {
+        return;
+    }
+    clip_t k;
+    EACH_PIECE(c, k, s, v) {
+        moy_ui_thumb(s, v, rows, scroll, c->fs, mua_ground_of(c));
+    }
+}
+
+// The page's (or a scroll region's) edges, its groups closed: where its rows
+// run on below what shows, a fade over its last FADE_H rows of the scale,
+// and where they are scrolled off above it, one over its first.
 int mua_no_foot;               // the region closing draws no fade at its foot
 
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
@@ -3754,6 +3766,10 @@ int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     mua_group_close(c, s);
     if (kind == 1) {
         mua_foot_fade(c, s);
+        moy_ui_keep_t *kk = mua_page_keep(c);
+        if (kk != NULL && !mua_no_foot) {
+            mua_thumb(c, s, c->page, kk->b, c->scroll);
+        }
     } else if (kind == 3 && mua_page_keep(c) != NULL) {
         // a popover's body cut to its room: a fade toward the card at each
         // edge its rows run on past

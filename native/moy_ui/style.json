@@ -1187,7 +1187,7 @@
         ["keycap.fill", "paint"], ["keycap.alpha", "num", 0, 1, 1], ["keycap.border", "line"],
         ["keycap.grad", "paint"], ["keycap.ink", "colour"], ["keycap.r", "int", 0, 99, 4],
         ["keycap.bevel", "bool", false], ["field.border", "colour"], ["accents", "bool", true],
-        ["scrim", "ring", "#000000", 0.4],
+        ["scrim", "ring", "#000000", 0.7],
         ["icons.kind", "enum", ["smooth", "pixel"], null], ["icons.set", "text"],
         ["icons.swap", "text"], ["icons.pixel_slots", "slots"],
         ["fam", "text"], ["w_med", "int", 100, 900], ["w_semi", "int", 100, 900],

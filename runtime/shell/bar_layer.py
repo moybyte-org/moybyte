@@ -113,6 +113,9 @@ _ZONE_LEFT_GAME = (2, _BAR_Y, _ZONE_CLOCK[0] - 4, _BAR_ICON)     # the app-lent 
 # owner draws (`BarLayer._make_room`), in the order they give it: the battery
 # first, then the Wi-Fi. The clock never does.
 _YIELD = ("battery", "wifi")
+# Under this charge the bar's battery is drawn low, all in the danger ink;
+# its exact level is Settings' (owner, 2026-11-05).
+LOW_BATTERY = 15
 
 
 try:                                    # device: ticks is frozen flat
@@ -134,12 +137,15 @@ try:
     import ui_draw as _ui_draw
     import layout_base as _layout_base
     import iconsets as _iconsets
-    from shell_layout import STATUS as _STATUS
+    from shell_layout import STATUS as _STATUS, ITEMS as _SL_ITEMS, RING_ROOM as _RING_ROOM
+    from status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui, ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
     from runtime import iconsets as _iconsets
-    from runtime.shell_layout import STATUS as _STATUS
+    from runtime.shell_layout import (STATUS as _STATUS, ITEMS as _SL_ITEMS,
+                                      RING_ROOM as _RING_ROOM)
+    from runtime.status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
 
 
 def _bar_text_w(s):
@@ -152,10 +158,14 @@ _BAND_SIDE = {"top": _ui_draw.BAND_BOTTOM, "bottom": _ui_draw.BAND_TOP,
               "left": _ui_draw.BAND_RIGHT, "right": _ui_draw.BAND_LEFT}
 # The OS widgets a bar paints itself (the zone is its owner's, the chips the
 # WM's, a spacer nothing).
-_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator")
+_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator",
+            "status")
 # The widgets whose tap is the OS's (§4): the system menu, the X, and the
 # three that open a component (§8).
-_TAPPED = ("clock", "menu", "wifi", "battery", "close")
+_TAPPED = ("clock", "menu", "wifi", "battery", "close", "status")
+# The widgets a handheld's status cluster joins into one focus stop, which
+# opens the control center (the `battery` widget's component).
+_CLUSTER = ("status", "wifi", "battery")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "webconsole": "Web console", "tasks": "Tasks"}
@@ -163,8 +173,9 @@ _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
 # whether focus marks draw, which the lent zone's current tab shows).
 _KEY_ALWAYS = (0, 3, 4, 10, 12)
 _KEY_OF = {"clock": (1,), "zone": (2, 5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
-           "menu": (11,)}
-_KEY_N = 13                 # 12: the item keys focus (`focus_item`)
+           "menu": (11,), "status": (13,), "battery": (13,)}
+_KEY_N = 14                 # 12: the item keys focus (`focus_item`); 13: the status
+                            # items and the selected widget (`_status_key`)
 _KEY_ALL = (1 << _KEY_N) - 1
 _KEY_UNDO = 1 << 9          # drawn only by the Editor's zone ("menu")
 _KEY_PARTS = (1 << 6) | (1 << 12)   # the fields drawn in a part of the bar: the zone, the pill
@@ -317,6 +328,7 @@ class BarLayer:
         self.focus_where = None
         self.focus_from = None
         self.focus_item = None
+        self._items_lgen = -1         # the status items' count the packing holds
         _ui_draw.on_bar(False)
 
     def invalidate(self):
@@ -490,7 +502,25 @@ class BarLayer:
     # the bars in force once per placement, at that canvas's 320x240 and
     # scale 1.
 
+    def _sync_items(self):
+        """Pack the bars again where the apps' status items came or went
+        (`status_items.ITEMS.layout_gen`): the count `shell_layout.pack`
+        reserves their cell for."""
+        lg = _ITEMS.layout_gen
+        if lg == self._items_lgen:
+            return
+        self._items_lgen = lg
+        n = _ITEMS.count()
+        if _SL_ITEMS[0] != n:
+            _SL_ITEMS[0] = n
+            self._game_of = None
+            repack = getattr(self.ws.layout, "repack", None)
+            if repack is not None:
+                repack()
+        self.invalidate()
+
     def _packed(self, where, game=None):
+        self._sync_items()
         if game is None:
             game = self._zone_is_game(where)
         if where == "tool" and not game:
@@ -925,11 +955,40 @@ class BarLayer:
         if need & 2048:
             m = getattr(ws, "sysmenu", None)       # the system button's open plate
             key[11] = m is not None and m.open and m.widget == "menu"
+        if need & 8192:
+            key[13] = self._status_key()
         if blk is not None:
             for i in range(_KEY_N):
                 # (the title and what the app lent by the count of times the
                 # tuple was made: only where one of them is another object)
                 _ui.block_set(blk, i, self._k8[3] if i == 8 else key[i])
+
+    def _status_key(self):
+        """Key field 13: the status items' generation, and which bar item is
+        selected (its popover open): 1 the control center (the `battery`
+        widget's, on a handheld), 2 + k item k's menu (the desk), 0 none."""
+        m = getattr(self.ws, "sysmenu", None)
+        sel = 0
+        if m is not None and m.open:
+            if m.widget == "battery" and self._cluster():
+                sel = 1
+            elif m.widget == "status":
+                sel = 2 + self.ws.status_open_k
+        return (_ITEMS.gen * 8 + sel) * 4 + self._battery_state()
+
+    def _battery_state(self):
+        """The battery glyph's state: 0 as drawn, 1 low (under LOW_BATTERY
+        percent), 2 charging, where the board's gauge reads them."""
+        ws = self.ws
+        if ws.battery_charging():
+            return 2
+        lvl = ws.battery_level()
+        return 1 if lvl is not None and lvl < LOW_BATTERY else 0
+
+    def _cluster(self, game=False):
+        """Whether the bars hold a handheld's status cluster: the status
+        items, Wi-Fi and battery, one focus stop opening the control center."""
+        return not game and _layout_base.metric_class() != _layout_base.DESK
 
     def _render_cart_bar(self, cv, key, i=0):
         """Bar `i` (`_render_bar`), and the focus mark on the item the keys
@@ -937,7 +996,7 @@ class BarLayer:
         pill, its plate under the item and its ring round it."""
         f = key[12]
         pill = self._pill(key[0], i, f) if f is not None and f[0] == i else None
-        self._render_bar(cv, key, i, pill)
+        self._render_bar(cv, key, i)
         if pill is not None:
             _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
                            after=True, pill=True)
@@ -974,7 +1033,7 @@ class BarLayer:
         if rect[2] <= 0 or rect[3] <= 0:
             return
         cv.clip(rect[0], rect[1], rect[2], rect[3])
-        self._render_bar(cv, key, i, pill, rect)
+        self._render_bar(cv, key, i, None, rect)
         if pill is not None:
             _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
                            after=True, pill=True)
@@ -991,13 +1050,18 @@ class BarLayer:
         their rect and a ring round it. The corners are the home's tabs'
         (`LauncherHomeLayer._draw_zone_tabs`)."""
         _bi, r, name = item
-        bar = self._packed(where)[i][1]
+        packed = self._packed(where)[i]
+        bar = packed[1]
         bar = (0, 0, bar[2], bar[3])
         u = _layout_base.unit()
         fs = self.ws.layout.fs
         rad = 5 * fs
-        across = self._packed(where)[i][0] in ("left", "right")
-        t = 2 * u
+        across = packed[0] in ("left", "right")
+        if name == "cluster" and not across:
+            got = self._cluster_box(packed[3])
+            if got is not None:
+                return got, 6 * fs, u
+        t = 4 * u
         if across or name not in ("menu", "wifi", "battery", "clock"):
             y0 = max(0, r[1] - t)
             y1 = min(bar[3], r[1] + r[3] + t)
@@ -1056,7 +1120,13 @@ class BarLayer:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
             show_x = self._show_x(where)
-            self._ink_dx = self._status_dx(cells) if looked and not across else None
+            self._ink_dx = self._status_dx(cells, self._cluster(game)) \
+                if looked and not across else None
+            sel = None if game or across else self._selected_box(where, cells)
+            if sel is not None:
+                # the bar item whose popover is open: selected, the tabs' fill
+                fs = ws.layout.fs
+                _ui_draw.current(cv, ws.theme_colors, sel, r=5 * fs, fs=fs)
             for name, r, text, _slot in cells:
                 if name in _PAINTED and (show_x or name != "close"):
                     if only is not None and not _meets(r, only):
@@ -1302,6 +1372,9 @@ class BarLayer:
         """One OS widget's cell, through the kernel's painter."""
         ws = self.ws
         s = None
+        if name == "status":
+            self._paint_status(cv, r, text, game)
+            return
         if name == "clock":
             s = self._clock_text()
             if across:
@@ -1347,6 +1420,9 @@ class BarLayer:
             if img is not None:
                 cv.spr(img, tx + (tw - 16 * sc) // 2, ty + (tht - 16 * sc) // 2, sc)
             return
+        if name == "status":
+            self._paint_status(cv, r, text)
+            return
         if name in ("wifi", "battery", "close"):
             kind = name
             if name == "wifi":
@@ -1356,6 +1432,10 @@ class BarLayer:
             side = 16 * u                              # the theme's icon set, centred
             gx = x + (w - side) // 2 if not across else (thick - side) // 2
             gy = (thick - side) // 2 if not across else y + (h - side) // 2
+            st = self._battery_state() if name == "battery" else 0
+            if st:
+                self._battery_glyph(cv, gx, gy, side, u, st)
+                return
             if ws.draw_icon(kind, (gx, gy, side, side), ink, cv):
                 return
             side = 12 * u
@@ -1382,6 +1462,114 @@ class BarLayer:
         if name == "title":
             s = s[:max(0, w // max(1, L.font_w))]
         cv.print(s, x, (thick - L.line_h) // 2, ink, 1)
+
+    def _battery_glyph(self, cv, x, y, side, u, st):
+        """The battery low (`st` 1: its body all in the danger ink, a sliver
+        of charge) or charging (2: a charge in the accent with a bolt cut out
+        of it) in the `side`-square at (x, y), unit `u`."""
+        th = self.ws.theme_colors
+        ink = th["danger"] if st == 1 else th["chrome_ink"]
+        cx, cy = x + side // 2, y + side // 2
+        x0, x1 = cx - 7 * u, cx + 5 * u
+        for k in range(u):
+            cv.rectb(x0 + k, cy - 4 * u + k, x1 - x0 + u - 2 * k, 8 * u - 2 * k, ink)
+        cv.rect(x1 + u, cy - u, 2 * u, 2 * u, ink)
+        if st == 1:
+            cv.rect(x0 + 2 * u, cy - 2 * u, 2 * u, 4 * u, ink)
+            return
+        cv.rect(x0 + 2 * u, cy - 2 * u, x1 - x0 - 3 * u, 4 * u, th["accent"])
+        cut = th.get("bar", 0)
+        for k, (dx, dy) in enumerate(((1, -2), (0, -1), (-1, 0), (0, 0), (1, 0), (0, 1))):
+            cv.rect(cx + dx * u, cy + dy * u, u, u, cut)
+
+    def _status_x(self, r, n, game=False):
+        """(x of the first icon, icon side, stride) of the `n` icons of
+        status cell `r`: right-aligned in it, past the cluster's ring room,
+        a status gap apart (`shell_layout.pack`'s)."""
+        side = r[3]
+        L = self.ws.layout
+        cs, fs = (1, 1) if game else (L.cs, L.fs)
+        sg = max(2 * cs, 4 * fs)
+        x0 = r[0] + r[2] - (n * side + max(0, n - 1) * sg)
+        return x0, side, side + sg
+
+    def _paint_status(self, cv, r, n, game=False):
+        """The apps' status items in their cell `r`: each its icon in its
+        state's ink (the accent, the paused ink, the danger ink)."""
+        if not n:
+            return
+        ws = self.ws
+        th = ws.theme_colors
+        x, side, step = self._status_x(r, n, game)
+        for k in range(n):
+            it = _ITEMS.at(k)
+            if it is None:
+                break
+            st = it.state
+            ink = th["danger"] if st == _ERROR else \
+                ws.look.content_colors().get("paused", th["ink_dim"]) if st == _PAUSED \
+                else th["accent"]
+            g = 16 * _layout_base.unit()
+            if game or not ws.draw_icon(it.icon, (x + (side - g) // 2, r[1] + (side - g) // 2,
+                                                  g, g), ink, cv):
+                ws._icon(it.icon, x, r[1], cv, scale=max(1, side // 16), ink=ink)
+            x += step
+
+    def status_hit(self, r, n, px):
+        """The index of the status item under bar x `px` in status cell `r`
+        holding `n`, or None."""
+        if not n:
+            return None
+        x, side, step = self._status_x(r, n)
+        k = (px - x) // step if px >= x else -1
+        return k if 0 <= k < n and px < x + k * step + side else None
+
+    def _cluster_box(self, cells):
+        """The handheld's status cluster's focus ring, (x, y, w, h) in its
+        bar's coordinates: RING_ROOM out from the ink of the items, Wi-Fi
+        and battery across, three units out from their icons' row down."""
+        fs = self.ws.layout.fs
+        u = _layout_base.unit()
+        x0 = x1 = None
+        y = side = 0
+        for name, r, text, _slot in cells:
+            if name == "status" and text:
+                a = self._status_x(r, text)[0] + u
+                b = a
+            elif name in ("wifi", "battery"):
+                dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
+                a, b = self._ink(name, r)
+                a += dx
+                b += dx
+            else:
+                continue
+            x0 = a if x0 is None else min(x0, a)
+            x1 = b if x1 is None else max(x1, b)
+            y, side = r[1], r[3]
+        if x0 is None:
+            return None
+        o = _RING_ROOM * fs
+        t = 3 * fs
+        return (x0 - o, y - t, x1 - x0 + 1 + 2 * o, side + 2 * t)
+
+    def _selected_box(self, where, cells):
+        """The box of the bar item whose popover is open, which wears the
+        selected fill: the cluster (the control center) on a handheld, a
+        status item (its menu) on the desk. None for none."""
+        m = getattr(self.ws, "sysmenu", None)
+        if m is None or not m.open or self._in_window(where):
+            return None
+        if m.widget == "battery" and self._cluster():
+            return self._cluster_box(cells)
+        if m.widget != "status":
+            return None
+        k = self.ws.status_open_k
+        for name, r, text, _slot in cells:
+            if name == "status" and text and 0 <= k < text:
+                x, side, step = self._status_x(r, text)
+                u = _layout_base.unit()
+                return (x + k * step - 3 * u, r[1] - (3 * u) // 2, side + 6 * u, side + 3 * u)
+        return None
 
     def _ink(self, name, r):
         """(first, last) column of status widget `name`'s ink in its cell `r`
@@ -1411,7 +1599,7 @@ class BarLayer:
             return (bx, bx + 12 * u - 1)
         return (gx, gx + side - 1)
 
-    def _status_dx(self, cells):
+    def _status_dx(self, cells, cluster=False):
         """{name: dx} for the status widgets (`shell_layout.STATUS`) of a
         horizontal bar's runs: where two or more sit side by side, the
         middle ones move so the ink of each is as far from the next as the
@@ -1423,7 +1611,8 @@ class BarLayer:
         out = None
         run = []
         for c in cells + (("", (0, 0, 0, 0), None, -1),):
-            if c[0] in _STATUS and (not run or run[-1][3] == c[3]):
+            if c[0] in _STATUS and (not run or run[-1][3] == c[3]) \
+                    and not (cluster and c[0] == "clock"):
                 run.append(c)
                 continue
             if len(run) > 2 and all(n != "clock" for n, _r, _t, _s in run[1:-1]):
@@ -1441,7 +1630,7 @@ class BarLayer:
                         out = {}
                     out[run[i][0]] = at - inks[i][0]
                     at += inks[i][1] - inks[i][0] + 1
-            run = [c] if c[0] in _STATUS else []
+            run = [c] if c[0] in _STATUS and not (cluster and c[0] == "clock") else []
         return out
 
     def sys_tile(self, r, bar, across):
@@ -1547,10 +1736,17 @@ class BarLayer:
         return cv, bar, (x, y, w, h), looked
 
     def tile_on(self):
-        """Whether the system button's tile shows open: its menu is up (the
-        one state of the button's pixels)."""
+        """What of the bar's pixels an open popover selects: 1 the system
+        button's tile (its menu is up), 2 + k status item k's cell (its
+        menu), 0 none."""
         m = self.ws.sysmenu
-        return m.open and m.widget == "menu"
+        if not m.open:
+            return 0
+        if m.widget == "menu":
+            return 1
+        if m.widget == "status":
+            return 2 + self.ws.status_open_k
+        return 0
 
     def redraw_tile(self, where):
         """Repaint JUST the system button's cell of an already-drawn bar, its
@@ -1569,6 +1765,35 @@ class BarLayer:
                               (0, 0, bw, bh), edge in ("left", "right"))
         cv.camera(0, 0)
         self._strip_moved(cv, x, y, w, h)
+        self._redraw_status(where)
+
+    def _redraw_status(self, where):
+        """Repaint the status items' cell of an already-drawn bar, the open
+        menu's item selected as it now stands (`tile_on`)."""
+        got = self.repaint_cell(where, "status", self._status_span)
+        if got is None:
+            return
+        cv, bar, (x, y, w, h), looked = got
+        edge, (bx, by, bw, bh), _dy, cells = bar
+        if not looked or edge in ("left", "right"):
+            return
+        cv.camera(-bx, -by)
+        sel = self._selected_box(where, cells)
+        if sel is not None:
+            fs = self.ws.layout.fs
+            _ui_draw.current(cv, self.ws.theme_colors, sel, r=5 * fs, fs=fs)
+        for name, r, text, _slot in cells:
+            if name == "status":
+                self._paint_status(cv, r, text)
+        cv.camera(0, 0)
+        sx, sy, sw, sh = self._status_span((x - bx, y - by, w, h), bar)
+        self._strip_moved(cv, sx + bx, sy + by, sw, sh)
+
+    def _status_span(self, r, bar):
+        """The status cell and the selected fill's reach past it, in its
+        bar."""
+        u = _layout_base.unit()
+        return (r[0] - 3 * u, r[1] - 2 * u, r[2] + 6 * u, r[3] + 4 * u)
 
     def _tile_span(self, r, bar):
         """The system button's cell and its tile, whose corners reach past
@@ -1675,9 +1900,21 @@ class BarLayer:
         for bi in range(len(packed)):
             bar = packed[bi]
             rects = []
+            cluster = None
+            hh = self._cluster(game) and bar[0] in ("top", "bottom")
             for c in bar[3]:
-                if c[0] in _TAPPED and (show_x or c[0] != "close"):
+                if hh and c[0] in _CLUSTER:
+                    cluster = c[1] if cluster is None else _union(cluster, c[1])
+                elif c[0] == "status":
+                    n = c[2] or 0
+                    if n:
+                        x, side, step = self._status_x(c[1], n)
+                        for k in range(n):
+                            rects.append(((x + k * step, c[1][1], side, side), "status"))
+                elif c[0] in _TAPPED and (show_x or c[0] != "close"):
                     rects.append((c[1], c[0]))
+            if cluster is not None:
+                rects.append((cluster, "cluster"))
             zone = self.lent_zone(where, bar)
             if zone is not None:
                 owner = self._zone_owner(where)
@@ -1889,6 +2126,15 @@ class BarLayer:
         # is, the rest a popover hung from the widget, in both modes -- wifi's
         # the Settings WIFI panel, the one wifi implementation. Consumed, so a tap never
         # leaks to the lent zone.
+        if name in _CLUSTER and self._cluster(self._zone_is_game(where)) \
+                and bar[0] in ("top", "bottom"):
+            ws.widget_tap("battery")         # the cluster opens the control center
+            return True
+        if name == "status":
+            k = self.status_hit(hit[1], hit[2] or 0, px)
+            if k is not None:
+                ws.open_status_menu(_ITEMS.at(k))
+            return True
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)
             return True

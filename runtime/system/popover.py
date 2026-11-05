@@ -5,7 +5,11 @@ its content on the public UI API's verbs.
 
   `clock`    MonthView   the month (`ui.month`), today marked; left/right page
   `wifi`     WifiPanel   Settings' Wi-Fi page, the one implementation
-  `battery`  PowerRows   the battery's line, then Volume and Brightness
+  `battery`  PowerRows   on the desk: the battery's line, then Volume and
+                         Brightness
+             ControlCenter  on a handheld, opened by the status cluster:
+                         the console's card, then each app's status section
+  `status`   StatusMenu  on the desk: an app's status item's menu, its section
 
 The system menu is the popover's ROWS, not a component (`widgets.Popup`).
 
@@ -22,10 +26,12 @@ try:
     import ui as _ui
     import ui_draw as _ui_draw
     import layout_base as _lb
+    from status_items import ITEMS as _ITEMS
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _lb
+    from runtime.status_items import ITEMS as _ITEMS
 
 
 def shift_month(y, m, n):
@@ -65,6 +71,8 @@ _MONTH_KEYS = ("change", "Month", "back", "Close")
 _MONTH_KEYS_DESK = ("change", "Month", "back", "Close")
 _POWER_KEYS = ("change", "Change", "scroll", "Row", "back", "Close")
 _WIFI_KEYS = ("confirm", "Join", "back", "Close")
+_MENU_KEYS = ("change", "Button", "back", "Close")
+_MENU_POINTER = ("back", "Close")
 
 
 class MonthView:
@@ -280,6 +288,172 @@ class PowerRows:
         self.host.reset()
 
 
+class ControlCenter:
+    """A handheld's control center, the `battery` widget's component there,
+    which the bar's status cluster opens (docs/theme_and_shell_2026-11.md
+    §8.6): one column in a scroll region, the console's card first (Volume,
+    Brightness, Wi-Fi), then each app's status section as a card under its
+    app's name, in the bar's order. Its first view ends FIRST_FOOT under the
+    first app's card; the region scrolls the rest, its thumb and fades
+    saying so. The battery has no row: the bar's glyph shows it low and
+    charging, and Settings keeps its exact level."""
+
+    KEYS = ("volume", "brightness")
+    _LABELS = ("Volume", "Brightness")
+    W = 232                     # at the font scale
+    FIRST_FOOT = 6
+    SCRIM = 128                 # the page beside it dims by half, in both themes
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.rect = None
+        self.host = _ui_draw.AppHost()
+        self.gen = _ITEMS.gen
+
+    def _metrics(self):
+        fs = self.ws.layout.fs
+        row = _ui_draw.metrics("row")
+        grp = _ui_draw.metrics("group")
+        return fs, (row[5] + row[7]) * fs, grp[3] * fs, 2 * grp[1] * fs + grp[5] * fs
+
+    def column(self):
+        """(the first view's height, the column's), from the card's top."""
+        fs, rh, cap, card = self._metrics()
+        w = (self.W - 2 * 12) * fs
+        y = 12 * fs + 3 * rh + card
+        first = None
+        for it in _ITEMS.shown:
+            y += cap + _ITEMS.height(it, w, False) + card
+            if first is None:
+                first = y + self.FIRST_FOOT * fs
+        y += 12 * fs
+        return (y if first is None else min(first, y)), y
+
+    def size(self):
+        ws = self.ws
+        first, _end = self.column()
+        lay = ws.layout
+        room = lay.ch
+        strip = ws.menu_ui.about._strip()
+        if strip is not None and lay.cy < strip[1] < lay.cy + room:
+            room = strip[1] - lay.cy           # above the hint strip
+        return (self.W * lay.fs, min(first, room - 4 * lay.fs))
+
+    def keys(self):
+        return _POWER_KEYS
+
+    def draw(self, cv, rect):
+        ws = self.ws
+        self.rect = rect
+        sl = ws.settings_layer
+        fs = ws.layout.fs
+        x, y, w, h = rect
+        self.host.begin(cv, ws.theme_colors, (x + fs, y + fs, w - 2 * fs, h - 2 * fs), False)
+        _ui.at(x + fs, y + fs, w - 2 * fs, h - 2 * fs)
+        _ui.scroll("cc")
+        _ui.group("", {"card": True})
+        for k in range(len(self.KEYS)):
+            key = self.KEYS[k]
+            cur, lo, hi = sl.level(key)
+            _ui.icon("mute" if key == "volume" and cur == lo
+                     else "volume" if key == "volume" else "spark")
+            got = _ui.slider(self._LABELS[k], cur, lo, hi, {"steps": True})
+            if got != cur:
+                sl.set_level(key, got)
+                ws._dirty = True
+        _ui.icon("wifi" if ws._wifi_icon_kind() == "wifi" else "wifi_off")
+        if _ui.link("Wi-Fi", self._network()):
+            ws.close_popover()
+            ws.toggle_popover("wifi")
+            return
+        for it in _ITEMS.shown:
+            _ui.group(it.app or "")
+            _ITEMS.draw(it, False)
+        _ui.group()
+        _ui.scroll()
+        if self.gen != _ITEMS.gen:
+            self.gen = _ITEMS.gen
+            _fit(ws, self)
+        if self.host.owed or self.host.tap == 2 or self.host.moved:
+            ws.popover_touch()
+
+    def _network(self):
+        """The Wi-Fi row's value: the network joined, else Off."""
+        w = self.ws.wifi
+        try:
+            st = w.status() if w is not None else None
+        except Exception:  # noqa: BLE001 -- a status hiccup reads as no link
+            st = None
+        return st[1] if st and st[0] and st[1] else "Off"
+
+    def handle_input(self, i):
+        if self.host.keys(i):
+            return "local"
+        return None
+
+    def click(self, px, py, rect):
+        self.host.point(px, py, True)
+        return "local"
+
+    def typing(self):
+        return False
+
+    def closed(self):
+        self.host.reset()
+
+
+class StatusMenu:
+    """An app's status item's menu on the desk, hung from its cell in the
+    bar's right zone: the app's section in the popover's card, its keys'
+    hints under it. No wash: the desk's menus take none."""
+
+    def __init__(self, ws, item):
+        self.ws = ws
+        self.item = item
+        self.rect = None
+        self.host = _ui_draw.AppHost()
+        self.gen = _ITEMS.gen
+
+    def size(self):
+        w = 404
+        foot = _ui_draw.metrics("value_row")[_HINTS_DESK]
+        it = self.item
+        h = _ITEMS.height(it, w - 2 * _pad(self.ws), True) if it is not None else 0
+        return (w, 2 * _pad(self.ws) + h + foot)
+
+    def keys(self):
+        return _MENU_KEYS
+
+    def draw(self, cv, rect):
+        ws = self.ws
+        self.rect = rect
+        it = self.item
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), True)
+        if it is not None and it.pid:
+            _ITEMS.draw(it, True)
+        _ui.hints(_MENU_POINTER if _ui.input_kind() == "touch" else _MENU_KEYS)
+        if self.gen != _ITEMS.gen:
+            self.gen = _ITEMS.gen
+            _fit(ws, self)
+        if self.host.owed or self.host.tap == 2 or self.host.moved:
+            ws.popover_touch()
+
+    def handle_input(self, i):
+        if self.host.keys(i):
+            return "local"
+        return None
+
+    def click(self, px, py, rect):
+        self.host.point(px, py, True)
+        return "local"
+
+    def typing(self):
+        return False
+
+    def closed(self):
+        self.host.reset()
+
+
 def component_for(ws, widget):
     """The component a bar widget opens (§8's table, fixed per widget)."""
     if widget == "clock":
@@ -287,5 +461,7 @@ def component_for(ws, widget):
     if widget == "wifi":
         return WifiPanel(ws)
     if widget == "battery":
-        return PowerRows(ws)
+        return PowerRows(ws) if _desk() else ControlCenter(ws)
+    if widget == "status":
+        return StatusMenu(ws, ws.status_open)
     return None

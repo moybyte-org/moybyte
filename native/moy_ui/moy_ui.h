@@ -423,7 +423,7 @@ enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
     MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
     MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
-    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048,
+    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048, MOY_UI_MARK_CELL = 4096,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {
@@ -666,8 +666,10 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
 // tile's own fill.
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
 // What a modal dims under it (docs/history/look_2026-10.md, D-01): box `b` washed in
-// the look's `scrim` colour at its alpha (black at 40% where it is silent).
+// the look's `scrim` colour at its alpha (black at 70% where it is silent).
 int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b);
+// The scrim's alpha (0..255) set until set again, answering the one it was.
+int moy_ui_scrim_alpha(int a);
 // The scrim over the pixels of `src` instead of the sink's, each result
 // stored to `also` as well (moy_shape_shadow_io); either NULL: the sink's
 // own pixels, no second store. Both are `len` bytes laid out as the sink's
@@ -968,8 +970,11 @@ int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
 // the row from the label to its right. Focused, the row wears the focus mark
 // a value row does (`first`: the card's first row) and the field the focus
 // colour's ring. An empty field shows `hint` (n 0: none) in the disabled ink.
+// Outside a group the box fills the row, its ring's room kept; its text
+// stands 8 pixels at the scale inside it. `edge`, a colour index or -1, is
+// the box's border in place of its own (a field in error: the danger ink).
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
-                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first);
+                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first, int edge);
 // The height a field row takes outside a group (at least the stacked row's):
 // the field's box, its letters' ink with 3 pixels at the scale above and
 // below inside its ring, and room round it for its focus ring. In a group
@@ -1026,6 +1031,12 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
 #define MOY_UI_FADE_WELL (-3)
 #define MOY_UI_FADE_CARD (-4)
 int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk);
+
+// A scrolled view's thumb (owner, 2026-11-05): where rows `rows` high
+// overflow view `v`, a 2-pixel thumb in the dim ink on a track in the
+// border's, inside v's right edge, at `scroll` along it.
+int moy_ui_thumb(const moy_ui_sink_t *s, moy_ui_box_t v, int rows, int scroll, int fs,
+                 int desk);
 // A group's caption in band `b`.
 int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
 // A rule across band `b` (inside the group pad), one unit thick, centred in
@@ -1072,10 +1083,10 @@ int moy_ui_key_moves(int input, moy_ui_span_t k);
 // legend). An action the input has no key for draws nothing, and the input
 // touch draws no hints at all. The theme's `keycap` look styles the caps
 // (moy_ui_keycap); a one-glyph legend's cap is square. They lead in by
-// MOY_UI_HINT_LEAD at the scale, the handheld's the top bar's own margin (its
-// system button's and its clock's ink, 5 at the T-Deck's scale), so the bar
-// and the strip share one side margin.
-#define MOY_UI_HINT_LEAD(desk) ((desk) ? 8 : 5)
+// MOY_UI_HINT_LEAD at the scale and stay as far off the strip's right edge;
+// where they run past it, the pairs before the last drop, the one before it
+// first, so the last (Back, or Close) always shows (owner, 2026-11-05).
+#define MOY_UI_HINT_LEAD(desk) (8)
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                  int fs, int desk);
 // The same hints, drawn when `draw`, with each pair's span across the band

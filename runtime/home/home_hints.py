@@ -37,8 +37,8 @@ _FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
 _TAB_KEYS = ("tabs", "Tabs")
-_HINT_LEAD = 5       # the handheld's margin ui.hints leads with, at the font
-                     # scale: the top bar's (MOY_UI_HINT_LEAD)
+_HINT_LEAD = 8       # the handheld's margin ui.hints leads with, at the font
+                     # scale (MOY_UI_HINT_LEAD)
 _HINT_LEAD_DESK = 8  # the desk's
 _MENU_KEYS = ("back", "Close")   # the strip under the system menu
 # The strip while the keys are on the tab row: left and right move the focus

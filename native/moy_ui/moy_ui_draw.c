@@ -442,7 +442,7 @@ static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs
             }
             return;
         }
-        moy_ui_focus_in(s, b, cls, r, how, fs, NULL, &mi, 0);
+        moy_ui_focus_in(s, b, cls, r, how | (side ? 0 : MOY_UI_MARK_CELL), fs, NULL, &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
     }
@@ -961,6 +961,15 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
             bs.c[i] = (int16_t)moy_theme_nearest(bs.c[i]);
         }
     }
+    if (state == MOY_UI_DISABLED && k->colors[0] == MOY_UI_FROM_STYLE && bs.bevel <= 0) {
+        // a disabled button of any kind is the surface, its border and its
+        // label in the dim ink (owner, 2026-11-05): it reads as there, and
+        // off, never as a washed-out primary
+        bs.c[0] = (int16_t)moy_ui_token(d.look, MOY_UI_T_SURFACE);
+        bs.c[1] = (int16_t)moy_ui_token(d.look, MOY_UI_T_INK_DIM);
+        bs.c[2] = (int16_t)moy_ui_token(d.look, MOY_UI_T_BORDER);
+        bs.edge_w = (int8_t)(bs.edge_w > 0 ? bs.edge_w : fs);
+    }
     int bg = bs.c[0], ink = bs.c[1], edge = bs.c[2];
     int on = -1, ring = 0;      // the field this call filled under the text, its rings
     // A shaped kind (a radius, a circle, a bevel: a theme with a look) is its
@@ -968,7 +977,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     int shaped = (bs.shape != BTN_SQUARE && bs.r > 0) || bs.shape == BTN_CIRCLE || bs.bevel > 0;
     if ((phase & MOY_UI_PHASE_FRAME) && (shaped || !surface(&d, b, kind, state, bg, edge))) {
         button_body(&d, b, &bs, &on, &ring);
-        if (state == MOY_UI_DISABLED && on >= 0) {
+        if (state == MOY_UI_DISABLED && on >= 0 && k->colors[0] != MOY_UI_FROM_STYLE) {
             // a disabled key's plate is faded too, half way to the surface
             // under it, as its ink is the disabled ink
             int r = bs.shape == BTN_SQUARE || bs.r < 0 ? 0 : bs.r;

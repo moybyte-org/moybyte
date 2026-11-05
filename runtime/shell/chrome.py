@@ -511,6 +511,18 @@ class Layout(LayoutBase):
         got = _shell_layout.cell_of(self.bars, name)
         return got[1] if got is not None else None
 
+    def repack(self):
+        """Pack the bars again where what they hold moved but the glass did
+        not (an app's status item came or went, `shell_layout.ITEMS`): the
+        cells, the surfaces' rooms and the named rects."""
+        of, cs, fs, sys_len = self._pack_of
+        self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs, self.clock_w,
+                                       _bar_text_w, of=of, sys_len=sys_len)
+        self.room = {}
+        self.batt_btn = self._cell("battery")
+        self.wifi_btn = self._cell("wifi")
+        self.zone_left = self._cell("zone") or self.zone_left
+
     def bars_without(self, names):
         """`bars` packed again with the widgets `names` left out, their room
         the flex widgets' (`BarLayer._make_room`): the same bars in force,

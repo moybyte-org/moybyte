@@ -52,6 +52,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.notifications import NOTES as _NOTES
 try:
+    import devices as _devices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import devices as _devices
+try:
+    from status_items import ITEMS as _ITEMS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.status_items import ITEMS as _ITEMS
+try:
     import achievements_ui as _ach_ui
     import about_ui as _about_ui
     import achievements as _ach
@@ -247,6 +255,64 @@ class Notices:
         _NOTES.acted = self._note_acted
         self._note_rect = None          # the banner's card where it last drew
         self._note_y0 = None            # where a press on it went down
+
+    # -- the apps' status items (docs/theme_and_shell_2026-11.md §8.6) --------
+
+    def _init_status(self):
+        """The status items' hooks are this console's: an item's caption is
+        its process's title, and its menu closes with it."""
+        _ITEMS.title_of = self._status_title
+        _ITEMS.closed = self._status_closed
+        self.status_open = None         # the item whose desk menu is open
+        self.status_open_k = 0          # ...its place in the bar
+
+    def _status_title(self, pid):
+        try:
+            return self.procs.who(pid)[0]
+        except Exception:  # noqa: BLE001 -- a caption is never worth a crash
+            return ""
+
+    def _status_closed(self, item):
+        m = self.sysmenu
+        if m.open and ((m.widget == "status" and self.status_open is item)
+                       or (m.widget == "battery" and not self.wm.desk_open())):
+            self.close_popover()
+        if self.status_open is item:
+            self.status_open = None
+        self._dirty = True
+
+    def ask_stop_music(self, cart):
+        """A compiled game the VM must stop for while the music holds the
+        Wi-Fi (the Player's `_music_keeps_the_vm`): the running set's
+        dialog asks first, Cancel focused; Stop & play stops the stream as
+        the shell, then opens the game again, now free to stop the VM."""
+        title = str((cart or {}).get("title") or "this game")[:18]
+
+        def then():
+            media = _devices.api("media")
+            if media is not None:
+                media.stop()
+            self.open(cart)
+        self.confirm.ask_close("Stop the music to play %s?" % title,
+                               "%s needs the music's memory. You can start the music "
+                               "again after." % title, then, _STOP_PLAY)
+
+    def open_status_menu(self, item):
+        """Status item `item`'s menu on the desk, hung from its cell; the
+        same item again closes it (`toggle_popover`)."""
+        if item is None:
+            return
+        m = self.sysmenu
+        same = m.open and m.widget == "status" and self.status_open is item
+        if m.open and m.widget == "status" and not same:
+            self.close_popover()
+        self.status_open = item
+        sh = _ITEMS.shown
+        for k in range(len(sh)):
+            if sh[k] is item:
+                self.status_open_k = k
+        self.toggle_popover("status")
+        self._dirty = True
 
     def _note_who(self, pid):
         return self.procs.who(pid)
@@ -615,9 +681,24 @@ class PauseMenu:
         elif i.pressed("a") or i.pressed("run"):
             self.choose(self.sel)
 
+    def shows_bar(self):
+        """Whether the bar shows over the paused game (owner, 2026-11-05):
+        on a handheld, over a game full screen, so the status cluster and
+        the control center are reachable while it is paused."""
+        ws = self.ws
+        return (self.open and not self.stopped and ws.wm.top_is_player()
+                and not ws.windowed_chrome and not _desk_class())
+
+    def at_top(self):
+        """The keys are on the card's first row: up walks onto the bar."""
+        return not self.page and self.sel == 0
+
     def handle_pointer(self, px, py, click):
         host = self._host
         ws = self.ws
+        if click and self.shows_bar() and ws.bar_layer.handle_bar_tap("pause", px, py):
+            ws.pause_touch()
+            return
         if self.page:
             if click and not _in_box(px, py, host.box("Pause")):
                 self.back()
@@ -660,6 +741,24 @@ class PauseMenu:
         cv = ws.sys_canvas
         hold = self._hold
         top = ws.wm.top_is_player()
+        if self._capture and top and ws.sysmenu.open and self.shows_bar():
+            self._capture = False
+            if self.prealloc() is not None:
+                hold.snap(ws, cv)
+                _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
+                hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
+        if ws.sysmenu.open and self.shows_bar():
+            # a popover the bar opened over the paused game (the control
+            # center): over the paused game kept washed, the bar and the
+            # popover, which the pause draws (the popover's own layer is
+            # under this one); the card waits
+            if not (hold.snapped and hold.put(ws, cv, (0, 0, cv.w, cv.h),
+                                              self._washed_key(cv))):
+                _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
+            ws.icon_spec()
+            self._bar()
+            ws.menu_ui._draw_sysmenu()
+            return
         if not top:
             self._capture = False         # a notice over the screen it opened from
         elif self._capture:
@@ -669,6 +768,7 @@ class PauseMenu:
         elif hold.snapped and hold.put(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv)):
             ws.icon_spec()
             self._card()                  # over the frame kept washed
+            self._bar()
             return
         else:
             hold.unsnap(ws, cv)
@@ -681,6 +781,12 @@ class PauseMenu:
             if hold.snapped and top:
                 hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
         self._card()
+        self._bar()
+
+    def _bar(self):
+        """The bar over the paused game, where it shows (`shows_bar`)."""
+        if self.shows_bar():
+            self.ws.bar_layer._draw_status_strip("pause")
 
     def _washed_key(self, cv):
         """What the kept frame washed is a function of: the frame kept, the
@@ -794,6 +900,8 @@ class PauseMenu:
 _STOP_SENTENCE = {"wrap": True, "lines": 2}
 _STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
 _STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
+_WRAP = {"wrap": True, "lines": 3}
+_STOP_PLAY = ("Cancel", "Stop & play")
 
 
 class DeleteConfirm:
@@ -813,7 +921,9 @@ class DeleteConfirm:
 
     The same dialog asks the running set's one question (`ask_close`,
     runtime/shell/procs.py): a game that does not fit beside the ones
-    running names what to close, Cancel and Close."""
+    running names what to close, Cancel and Close; and the Player's before
+    a compiled game the VM must stop for while the music holds the Wi-Fi,
+    Cancel and Stop & play. Its line wraps, the card growing to fit."""
 
     BUTTONS = ("Cancel", "Delete")
 
@@ -845,13 +955,14 @@ class DeleteConfirm:
         self._host.key = self._key   # the key that asked is no press of the dialog's
         ws._dirty = True
 
-    def ask_close(self, title, line, then):
+    def ask_close(self, title, line, then, buttons=None):
         """Ask to close what `title` names so that what `line` says can
-        open; `then()` closes it and opens that."""
+        open; `then()` closes it and opens that. `buttons` (Cancel, then
+        the verb) name the answers where Close does not."""
         self.cart = None
         self.title = title
         self.line = line
-        self.buttons = self.CLOSE
+        self.buttons = buttons or self.CLOSE
         self._then = None
         self._act = then
         self._arm()
@@ -946,7 +1057,7 @@ class DeleteConfirm:
         ws.icon_spec()                # the theme's set in the engine, as the bar has it
         settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
         pick = _ui.dialog(self.title, self.buttons, "danger")
-        _ui.label(self.line)
+        _ui.label(self.line, _WRAP)
         _ui.dialog()
         self._unwash_strip(cv)
         self.focused = _ui.focus()
@@ -962,7 +1073,7 @@ class DeleteConfirm:
 
 
 # A popover's fade, rows at the scale (native/moy_ui/moy_ui_api_int.h's FADE_H).
-_FADE_H = 10
+_FADE_H = 8
 
 
 def _peek(rows, cut, fade, rh):
@@ -1177,11 +1288,12 @@ class SystemMenuUI:
         """Whether a system modal's scrim is up: this menu or a card's menu,
         ABOUT, the pause menu, the delete confirm. A bar widget's popover (the calendar, Wi-Fi,
         power) hangs from its widget as an app's picker does, and dims
-        nothing (docs/history/look_2026-10.md, D-01)."""
+        nothing (docs/history/look_2026-10.md, D-01), but a handheld's
+        control center, which dims the page beside it."""
         ws = self.ws
         m = ws.sysmenu
-        return (m.open and m.comp is None) or ws._about or ws.pause.open \
-            or ws.confirm.open
+        return (m.open and (m.comp is None or getattr(m.comp, "SCRIM", None) is not None)) \
+            or ws._about or ws.pause.open or ws.confirm.open
 
     def draw_full(self, dt):
         """The menu on a frame of the whole glass: the scrim, then the card.
@@ -1242,16 +1354,27 @@ class SystemMenuUI:
         rect alone keeps it. `also`: a buffer each washed pixel is stored
         to as well (the held layer's)."""
         ws = self.ws
+        m = ws.sysmenu
+        a = getattr(m.comp, "SCRIM", None) if m.open else None
         for rect in self.scrim_rects():
-            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect, None, also)
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect, None, also, a)
 
     def scrim_rects(self):
         """The rects `scrim` washes, on the glass: none for a bar widget's
-        popover, ABOUT's content, or the system menu's bands."""
+        popover but the control center (a component with a `SCRIM` of its
+        own), which dims the page under the bar down to the hint strip,
+        ABOUT's content, or the system menu's bands."""
         ws = self.ws
         m = ws.sysmenu
         if m.open and m.comp is not None and not ws._about:
-            return ()
+            if getattr(m.comp, "SCRIM", None) is None:
+                return ()
+            lay = ws.layout
+            h = lay.ch
+            strip = self.about._strip()
+            if strip is not None and lay.cy < strip[1] < lay.cy + h:
+                h = strip[1] - lay.cy
+            return ((lay.cx, lay.cy, lay.cw, h),)
         if ws._about:
             lay = ws.layout
             return ((lay.cx, lay.cy, lay.cw, lay.ch),)

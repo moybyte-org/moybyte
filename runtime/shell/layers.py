@@ -411,6 +411,9 @@ class _SysMenuLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
+        p = self.ws.pause
+        if p.open and p.shows_bar():
+            return                    # over the paused game the pause draws it
         paint = getattr(self.ws.wm, "_pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu

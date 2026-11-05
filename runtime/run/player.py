@@ -266,6 +266,7 @@ class Player(PlayerDiag):
     def __init__(self, ws, NAMES):
         self.ws = ws
         self.NAMES = NAMES
+        self.declined = False         # the last start asked first (`_music_keeps_the_vm`)
         # The run's owner tag: its layer loans, its run canvas and its audio
         # session are lent to it (runtime/shell/procs.py hands each world one).
         self.owner = "cart"
@@ -808,6 +809,8 @@ class Player(PlayerDiag):
             # would sit inside the free run the stop is about to widen.
             run = self._launch_play(cart)
             self._run_handle = run
+            if run and self._music_keeps_the_vm(run, cart):
+                return False
             if run and self._stop_for(run, cart):
                 return True
         t_reclaim, t_audio = self._prepare_world(ws, project, cart, t0)
@@ -1606,6 +1609,30 @@ class Player(PlayerDiag):
         except RuntimeError as exc:
             print("PLAY launch:", exc)
             return 0
+
+    def _music_keeps_the_vm(self, run, cart):
+        """True when the kernel would stop the VM for the run but the media
+        stream's radio lease kept it (the verdict's `lease`, the lease the
+        media service's): the launch ends unrun and the shell asks first,
+        "Stop the music to play <game>?", whose Stop & play stops the stream
+        and opens the cart again (`Workstation.ask_stop_music`). The Player
+        stays where it was: `declined` tells the opener not to run it."""
+        info_of = getattr(_moy_play, "info", None)
+        info = info_of(run) if info_of is not None else None
+        if info is None or len(info) < 13 or info[11] != "lease":
+            return False
+        ws = self.ws
+        leases = getattr(ws, "leases", None)
+        if leases is None or "media" not in leases.holders():
+            return False
+        try:
+            _moy_play.end(run)
+        except RuntimeError:
+            pass
+        self._run_handle = 0
+        self.declined = True
+        ws.ask_stop_music(cart)
+        return True
 
     def _stop_for(self, run, cart):
         """True when the kernel decided at the launch to stop the VM for the

@@ -743,6 +743,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             // Files ends its view half a row into one); a part's table
             // draws them over its parts (mua_parts_close)
             mua_edge_fades(c, s, view, count * rh, offset, MOY_UI_DEFAULT, 1, rh);
+            mua_thumb(c, s, view, count * rh, offset);
         }
         mua_clip_out(&kv);
         mua_clip_out(&k);
@@ -932,8 +933,10 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
             fb.h = (int16_t)(b.h - caph);
             lb.n = 0;
         }
+        int edge = o->border >= MOY_UI_O_ROLE ? moy_ui_token(s->look, o->border - MOY_UI_O_ROLE)
+                                              : -1;
         moy_ui_field(s, fb, lb, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
-                     c->cls, c->grp_open, c->grp_open && c->grp_first);
+                     c->cls, c->grp_open, c->grp_open && c->grp_first, edge);
         mua_clip_out(&k);
     }
     return (int32_t)len | (done ? MOY_UI_FIELD_DONE : 0);
@@ -997,7 +1000,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     int pad = moy_ui_modal_band(fs, c->cls);
     int nb = moy_ui_fields(buttons, len);
-    int foot = nb ? rh + 2 * pad : pad;     // no buttons: the keys are the hint strip's
+    // the foot pads the buttons' focus ring as the top pads the title
+    int reach = moy_ui_mark_reach(MOY_UI_MARK_PART) * fs;
+    int foot = nb ? rh + 2 * pad + reach : pad;     // no buttons: the keys are the hint strip's
     int top = pad + rh + pad / 2;
     moy_ui_box_t sf = c->surface;
     int w = mua_pmetric(c, MOY_UI_M_VALUE_ROW_MODAL);
@@ -1099,7 +1104,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     uint8_t body_stop = c->page_stop;
     c->page_stop = NO_PAGE;             // a button is no row of the body's
     int x = card.x + w - pad - total;
-    int by = card.y + h - pad - rh;
+    int by = card.y + h - pad - reach - rh;
     for (int i = 0; i < nb; i++) {
         size_t at = 0;
         int k = 0;
@@ -1116,7 +1121,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
             }
         }
         moy_ui_box_t bb = {(int16_t)x, (int16_t)by, (int16_t)bw[i], (int16_t)rh};
-        int st = mua_stop(c, mua_hash(t.p, t.n, id), bb, STOP_DLG_BTN, t);
+        // `o.disabled`: the last button (the dialog's verb) is off, no stop
+        int off = o->disabled == 1 && i == nb - 1;
+        int st = off ? 0 : mua_stop(c, mua_hash(t.p, t.n, id), bb, STOP_DLG_BTN, t);
         if (st < 0) {
             st = 0;
         }
@@ -1134,7 +1141,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         bt.icon = -1;
         clip_t bk_;
         EACH_PIECE(c, bk_, s, bb) {
-            moy_ui_button(s, bb, moy_ui_button_kind(kn, strlen(kn)), mua_mark_flags(st, &none),
+            moy_ui_button(s, bb, moy_ui_button_kind(kn, strlen(kn)),
+                          mua_mark_flags(st, &none) | (off ? MOY_UI_F_DISABLED : 0),
                           mua_interact(st), &bt, MOY_UI_PHASE_ALL);
         }
         x += bw[i] + gap;

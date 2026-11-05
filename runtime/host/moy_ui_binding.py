@@ -251,6 +251,7 @@ _DRAW_SIGS = (
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_scrim", [c.POINTER(_Sink), _Box], _I),
+    ("moy_ui_scrim_alpha", [_I], _I),
     ("moy_ui_scrim_io", [c.POINTER(_Sink), _Box, c.c_void_p, c.c_void_p, c.c_size_t], _I),
     ("moy_ui_tile", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,

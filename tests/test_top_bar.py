@@ -270,15 +270,19 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
 
 
 def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
-    """The wifi widget's target is the Settings WIFI panel, the one wifi
-    implementation (docs/theme_and_shell_2026-11.md §8.6): in console mode too
-    its popover hung from the widget (docs/history/look_2026-10.md step 33), over
-    whatever ran; never a cart."""
+    """On a handheld the Wi-Fi is part of the status cluster, which opens the
+    control center; its Wi-Fi row opens the Settings WIFI panel, the one wifi
+    implementation (docs/theme_and_shell_2026-11.md §8.6), in its popover
+    hung from the widget, over whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open and ws.sysmenu.widget == "battery"   # the control center
+    ws.close_popover()
+    ws.toggle_popover("wifi")                   # its Wi-Fi row's way
     drv.frame(1 / 30)
     assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
     assert ws.screen == "launcher" and ws.cart is None   # nothing was launched
@@ -294,7 +298,7 @@ def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path
     widget, no Settings window, the lease held while it is open."""
     from ws_helpers import build_desktop_ws
     from runtime import host_app
-    ws = build_desktop_ws(tmp_path)
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     lay = ws.wm._root_ctx.layout

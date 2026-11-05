@@ -559,6 +559,8 @@ class InputVerbs:
         a running cart, a surface with no bar."""
         if self.windowed_chrome:
             return None
+        if self.pause.open and self.pause.shows_bar():
+            return "pause"
         kind = self.wm.top_kind()
         if kind == "launcher":
             return "home"
@@ -581,7 +583,7 @@ class InputVerbs:
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
             return False
-        held = self._modal_layer() is not None or self._about
+        held = (self._modal_layer() is not None and not self._pause_bar()) or self._about
         if bl.focus is not None:
             took = False
             if pressed and not held:
@@ -598,8 +600,8 @@ class InputVerbs:
         where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
-        layer = self._content_layer()
-        if edge:
+        layer = self.pause if where == "pause" else self._content_layer()
+        if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
             steps = getattr(layer, "ball_steps", True)
             if not (steps() if callable(steps) else steps):
@@ -614,6 +616,12 @@ class InputVerbs:
         if where == "home":
             self.ach_ui.konami_watch(i)
         return True
+
+    def _pause_bar(self):
+        """The pause menu holds the keys and the bar shows over it, nothing
+        else over them: the bar's keys are the pause menu's to share."""
+        return (self.pause.open and self.pause.shows_bar() and not self.sysmenu.open
+                and not self.confirm.open)
 
     def bar_open_x(self, where):
         """Where on `where`'s bar the keys land (an x in its bar's

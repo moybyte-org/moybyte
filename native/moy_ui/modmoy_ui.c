@@ -1814,6 +1814,12 @@ static mp_obj_t ui_scrim(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrim_obj, 3, 5, ui_scrim);
 
+// scrim_alpha(a) -> the alpha it replaces: the scrim's strength until set again
+static mp_obj_t ui_scrim_alpha(mp_obj_t a) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_scrim_alpha(mp_obj_get_int(a)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_scrim_alpha_obj, ui_scrim_alpha);
+
 // tile(cv, look, rect, icon, tone, r, fs, desk): a badge's tile on a card's surface
 static mp_obj_t ui_tile(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -4123,6 +4129,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_part), MP_ROM_PTR(&ui_bar_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scrim_alpha), MP_ROM_PTR(&ui_scrim_alpha_obj) },
     { MP_ROM_QSTR(MP_QSTR_tile), MP_ROM_PTR(&ui_tile_obj) },
     { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&ui_unlock_obj) },
     { MP_ROM_QSTR(MP_QSTR_rec), MP_ROM_PTR(&ui_rec_obj) },

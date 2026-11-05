@@ -175,7 +175,7 @@ const moy_ui_display_t *moy_ui_display(void) {
 
 // The look's scrim (moy_ui_scrim): its colour (a look value) and alpha.
 static int32_t s_scrim_c = MOY_THEME_NONE;
-static uint8_t s_scrim_a = 102;
+static uint8_t s_scrim_a = 178;
 
 static void display_of(const moy_theme_look_t *lk) {
     s_display.border_w = whole(lk, "lcd_border.w", 0);
@@ -183,7 +183,7 @@ static void display_of(const moy_theme_look_t *lk) {
     s_display.bevel = num(leaf(lk, "lcd_bevel"), MOY_UI_BEVEL_NONE);
     s_display.field_c = leaf(lk, "field.border");
     s_scrim_c = leaf(lk, "scrim.c");
-    s_scrim_a = alpha_of(lk, "scrim.alpha", 40);
+    s_scrim_a = alpha_of(lk, "scrim.alpha", 70);
 }
 
 void moy_ui_depth_use(const char *name, size_t n, int light) {
@@ -195,7 +195,7 @@ void moy_ui_depth_use(const char *name, size_t n, int light) {
     s_display.bevel = MOY_UI_BEVEL_NONE;
     s_display.field_c = MOY_THEME_NONE;
     s_scrim_c = MOY_THEME_NONE;
-    s_scrim_a = 102;
+    s_scrim_a = 178;
     uint8_t active = s_marks.active;
     uint32_t drawn = s_marks.drawn;
     memset(&s_marks, 0, sizeof(s_marks));
@@ -711,6 +711,8 @@ int moy_ui_mark_reach(int cls) {
             return (cls == MOY_UI_MARK_CARD ? m->grow + m->rise : 2) + 1;
         case MOY_UI_FOCUS_INVERT:
             return cls == MOY_UI_MARK_CARD ? 5 : 0;
+        case MOY_UI_FOCUS_EDGE:
+            return m->ring_gap + m->ring_w;
         default:
             return 0;
     }
@@ -862,29 +864,22 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
             break;
         }
         case MOY_UI_FOCUS_EDGE: {
-            int t = m->edge_w * (fs < 1 ? 1 : fs);
+            // the owner's grammar (2026-11-05): focus is never a fill. A
+            // row (three times as wide as tall, not a cell) wears the bar
+            // at its left alone, `edge.w` wide; a cell -- a button, a tab,
+            // a key, a chip -- wears the theme's ring round it. Selection
+            // is the current mark's fill, drawn apart (both on a row that
+            // is both).
+            int f = fs < 1 ? 1 : fs;
+            int t = m->edge_w * f;
             if (after) {
                 break;
             }
-            // the part on a light plate of the mark's colour, the edge on it;
-            // on a card's first or last row the plate takes the card's
-            // corners, over the card's surface: solid, in the colour the
-            // tint leaves there, since the corners are redrawn over a row
-            // the tint already plated (moy_ui_group_end)
-            int cm = (flags & MOY_UI_MARK_TOP ? MOY_SHAPE_TL | MOY_SHAPE_TR : 0)
-                     | (flags & MOY_UI_MARK_FOOT ? MOY_SHAPE_BL | MOY_SHAPE_BR : 0);
-            if (cm) {
-                uint16_t g = moy_shape_wire(tok(&d, MOY_UI_T_SURFACE));
-                moy_shape_paint_t p =
-                    solid(moy_shape_wire(moy_shape_over(moy_shape_wire(c), g, m->plate_alpha)));
-                rrect(&d, x, y, w, h, r, cm, s_depth.stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            if (w >= 3 * h && !(flags & MOY_UI_MARK_CELL)) {
+                int in = h > 8 * f ? 2 * f : 0;
+                tint(&d, x, y + in, t, h - 2 * in, 0, c, 255, NULL);
             } else {
-                tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);
-            }
-            if (w >= 3 * h) {
-                tint(&d, x, y, t, h, t / 2, c, 255, NULL);
-            } else {
-                tint(&d, x + 2, y + h - t, w - 4, t, t / 2, c, 255, NULL);
+                focus_ring_of(&d, m, x, y, w, h, r, c);
             }
             break;
         }
@@ -1090,6 +1085,15 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
         default:
             return 0;
     }
+}
+
+// The scrim's strength, 0..255, for the draws until it is set back (a
+// surface that names its own: the control center's half): the one it
+// replaces.
+int moy_ui_scrim_alpha(int a) {
+    int was = s_scrim_a;
+    s_scrim_a = (uint8_t)(a < 0 ? 0 : a > 255 ? 255 : a);
+    return was;
 }
 
 int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b) {

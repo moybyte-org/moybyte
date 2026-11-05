@@ -368,6 +368,9 @@ def install(m, lib, tokens):
             n = min(n, k)
         _check(lib.moy_ui_scrim_io(c.byref(s), box_of(rect), ps, pa, n))
 
+    def scrim_alpha(a):
+        return lib.moy_ui_scrim_alpha(int(a))
+
     def _icon(name):
         b = _b(name or "")
         return lib.moy_ui_icon_slot(b, len(b)), lib.moy_ui_icon_glyph(b, len(b))
@@ -510,7 +513,7 @@ def install(m, lib, tokens):
     for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock, rec, modal, modal_band, month_h, perf,
+              scrim, scrim_alpha, tile, unlock, rec, modal, modal_band, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):

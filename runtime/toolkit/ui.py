@@ -934,7 +934,8 @@ def text_view(id, lines, o=None, err=None, find=None, into=None):
 def field(label, text, max=32, o=None):
     """A line of text the keyboard types into while it is focused, at most
     `max` bytes: `(text, done)`, `done` True the frame Enter is pressed in
-    it. An empty field shows `o`'s `hint`, dim."""
+    it. An empty field shows `o`'s `hint`, dim; `o.border` (a role, "danger"
+    for a field in error) is its box's border in place of its own."""
     t = _T
     raw = str(text).encode("utf-8")[:max]
     b = bytearray(max)
@@ -948,7 +949,9 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
     its `buttons` at its foot (the last of `kind`, the others normal) and its
     body the rows stacked until `dialog()` ends it; while it is drawn nothing
     under it takes input, and focus opens on its body's first stop, else its
-    first button. The button activated this frame (from 0), -1 none."""
+    first button. `o.disabled` turns its last button (its verb) off: drawn
+    as there and off, never a stop. The button activated this frame (from 0),
+    -1 none."""
     t = _T
     if title is None:
         return _C.api_dialog(t[0], t[1], t[2], "", b"", 0, None)

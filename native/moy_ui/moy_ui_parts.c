@@ -1767,6 +1767,27 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
     return MOY_UI_OK;
 }
 
+int moy_ui_thumb(const moy_ui_sink_t *s, moy_ui_box_t v, int rows, int scroll, int fs,
+                 int desk) {
+    if (rows <= v.h || v.h <= 0) {
+        return MOY_UI_OK;
+    }
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int w = 2 * fs;
+    int x = v.x + v.w - w - fs;
+    int th = (int)((int32_t)v.h * v.h / rows);
+    if (th < 8 * fs) {
+        th = 8 * fs;
+    }
+    int room = rows - v.h;
+    scroll = scroll < 0 ? 0 : (scroll > room ? room : scroll);
+    int ty = v.y + (int)((int32_t)(v.h - th) * scroll / room);
+    fill(&d, x, v.y, w, v.h, pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+    fill(&d, x, ty, w, th, pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_DIM)));
+    return MOY_UI_OK;
+}
+
 int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk) {
     if (b.w <= 0 || b.h <= 0) {
         return MOY_UI_OK;
@@ -2145,11 +2166,65 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
     return MOY_UI_OK;
 }
 
+static int hints_in(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                    int fs, int desk, int draw, int16_t *spans, int cap, int *end);
+
+// The pairs of a strip that fits `b`, its lead off both edges: `items` as
+// they are where they fit, else with the pair before the last dropped, then
+// the one before that, until they do (a copy on the stack, HINTS_MAX bytes).
+#define HINTS_MAX 192
+
 int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                     int fs, int desk, int draw, int16_t *spans, int cap) {
     if (s_keys == MOY_UI_INPUT_TOUCH) {
         return 0;
     }
+    int end = 0;
+    int f = fs < 1 ? 1 : fs;
+    int right = b.x + b.w - MOY_UI_HINT_LEAD(desk) * f;
+    hints_in(s, b, items, len, fs, desk, 0, NULL, 0, &end);
+    if (end <= right || len > HINTS_MAX) {
+        return hints_in(s, b, items, len, fs, desk, draw, spans, cap, &end);
+    }
+    // the fields' starts: a pair is two fields
+    uint16_t at[33];
+    int n = 0;
+    for (size_t i = 0; i < len && n < 32; n++) {
+        at[n] = (uint16_t)i;
+        while (i < len && items[i] != 0) {
+            i++;
+        }
+        i++;
+    }
+    at[n] = (uint16_t)(len + 1);
+    int pairs = n / 2;
+    uint8_t buf[HINTS_MAX];
+    for (int drop = 1; drop < pairs; drop++) {
+        // keep pairs [0, pairs - 1 - drop) and the last
+        size_t o = 0;
+        int keep = pairs - 1 - drop;
+        for (int k = 0; k < pairs; k++) {
+            if (k >= keep && k != pairs - 1) {
+                continue;
+            }
+            size_t a = at[2 * k], e = at[2 * k + 2] - 1;
+            e = e > len ? len : e;
+            memcpy(buf + o, items + a, e - a);
+            o += e - a;
+            if (k != pairs - 1) {
+                buf[o++] = 0;
+            }
+        }
+        hints_in(s, b, buf, o, fs, desk, 0, NULL, 0, &end);
+        if (end <= right || drop == pairs - 1) {
+            return hints_in(s, b, buf, o, fs, desk, draw, spans, cap, &end);
+        }
+    }
+    return hints_in(s, b, items, len, fs, desk, draw, spans, cap, &end);
+}
+
+static int hints_in(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                    int fs, int desk, int draw, int16_t *spans, int cap, int *end) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_keycap_t *kc = moy_ui_keycap();
@@ -2269,6 +2344,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
             }
             pairs++;
             if (shown) {
+                *end = x;
                 x += hgap;
             }
         }
@@ -2556,7 +2632,7 @@ int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk) {
 }
 
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text_,
-                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first) {
+                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first, int edge) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_marks_t *m = moy_ui_marks();
@@ -2595,6 +2671,12 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
             fh = most;
         }
         fy = b.y + d.fs + moy_ui_fdiv(room - fh, 2);
+    } else if (b.h - 4 * d.fs > fh) {
+        // elsewhere the box fills its rect, its focus ring's room kept
+        int grow = b.h - 4 * d.fs - fh;
+        line_dy += moy_ui_fdiv(grow, 2);
+        fh += grow;
+        fy = b.y + 2 * d.fs;
     }
     int ty = fy + line_dy;
     int x = b.x + pad, right = b.x + b.w - pad;
@@ -2630,16 +2712,18 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
         rrect(&d, f.x - d.fs, f.y - d.fs, f.w + 2 * d.fs, f.h + 2 * d.fs, r ? r + d.fs : 0, 0, 0,
               d.fs, ring);
     }
+    // a border the caller names (a field in error: the danger ink) is the
+    // box's own, focused or not
     rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
-          d.fs, ring);
+          d.fs, edge >= 0 ? pal(&d, edge) : ring);
     if (focused) {
         int fi = -1;
         moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &fi, 0);
     }
-    // the text from the corner's radius and 3 pixels at the scale, the
-    // caret's room kept inside the ring on the right
-    int inner = 3 * d.fs + d.fs;
-    int tx = f.x + (r > d.fs ? r : d.fs) + 3 * d.fs;
+    // the text 8 pixels at the scale inside the box each side, the caret's
+    // room kept inside that on the right
+    int inner = 8 * d.fs;
+    int tx = f.x + inner;
     int room = f.x + f.w - inner - tx - (focused ? 2 * d.fs : 0);
     uint16_t tink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
     // the text's tail shows where it is wider than the field
@@ -2775,7 +2859,7 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
     }
     if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active) {
         int mi = -1;
-        moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
+        moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, MOY_UI_MARK_CELL, d.fs, NULL, &mi, 0);
         if (mi >= 0) {
             ink_i = mi;
         }

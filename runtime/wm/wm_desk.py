@@ -170,6 +170,12 @@ class _BackdropLayer(Layer):
                 # cursors across the desk (measured on the host: from the third
                 # consecutive moving frame on). Finger gestures keep the #155
                 # skip -- the cursor is hidden there, nothing to erase.
+                tile = self.ws.bar_layer.tile_on()
+                if tile != wm._tile_shown:
+                    # a popover opened or closed over a bar item it selects:
+                    # every buffer takes the item as it now stands
+                    wm._tile_shown = tile
+                    wm._desk_streak = 0
                 ptr = self.ws._ptr_state()
                 last = self.ws._last_ptr
                 cursor_live = ((ptr is not None and ptr[2])

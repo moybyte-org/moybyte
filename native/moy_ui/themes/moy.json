@@ -38,7 +38,7 @@
                "right": ["wifi", "battery", "clock"] }]
   },
   "look": {
-    "focus": { "style": "edge", "card": "lift", "small": "underline" },
+    "focus": { "style": "edge", "card": "lift", "small": "edge", "ring": { "w": 2, "gap": 2 } },
     "current": { "style": "plate", "ink": "ink_accent" }, "shadow_back": 0.3,
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },

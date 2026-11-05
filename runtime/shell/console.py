@@ -1251,6 +1251,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # An app's notifications (runtime/system/notifications.py): the
         # banner over whatever is up, and what acting on one does.
         self._init_notes()
+        self._init_status()
         # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is
@@ -2045,7 +2046,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         the screen, the pause menu's, the delete confirm's or the system
         menu's (on the desk a popover frame paints it from its own layer),
         or None."""
-        if self.pause.open:
+        if self.pause.open and not self.sysmenu.open:
             return _PAUSE_LAYERS
         if self.confirm.open:
             return _CONFIRM_LAYERS
@@ -2220,6 +2221,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """The battery's charge in percent, or None where the board reads none
         (no `battery` gauge: the glyph is the widget's whole value)."""
         return None if self.battery is None else self.battery.level()
+
+    def battery_charging(self):
+        """Whether a charger feeds the battery, or None where the board's
+        gauge cannot tell (the T-Deck's has no charge-status line)."""
+        b = self.battery
+        f = getattr(b, "charging", None) if b is not None else None
+        return None if f is None else f()
 
     # -- firmware update screen (#53) -----------------------------------------
     #
@@ -2777,10 +2785,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # The run's route is HOME (the launcher is its caller): what lets the
         # kernel stop the VM for it (docs/history/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
+        self.player.declined = False
         try:
             self._open_workspace(selected)
         finally:
             self._home_launch = False
+        if self.player.declined:
+            self.player.declined = False      # the shell asked first (ask_stop_music)
+            return
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
     def run_script(self, kind, name):

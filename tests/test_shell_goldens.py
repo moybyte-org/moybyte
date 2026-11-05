@@ -437,6 +437,12 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_night": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, theme="moy"),
+    "tdeck_320x240_fs1_status": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="status"),
+    "p4_1024x600_cs2_fs1_status": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="status"),
     "p4_1024x600_cs2_fs1_procs": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="procs"),
@@ -595,6 +601,10 @@ def _cart_by_title(ws, title):
 
 def _build(cfg, carts_dir):
     from runtime import host_app
+    from runtime.status_items import ITEMS
+    for it in ITEMS.slots:              # no app's status item outlives its config
+        if it.pid:
+            ITEMS._free(it)
     if cfg.get("plan") == "ui_page":
         host_app.moy_carts.ensure_dirs(str(carts_dir))
         shutil.copytree(UI_PAGE[0], os.path.join(str(carts_dir), os.path.basename(UI_PAGE[0])))
@@ -661,6 +671,8 @@ def _surface_plan(ws, cfg):
         return _procs_plan(ws)
     if cfg.get("plan") == "tasks":
         return _tasks_plan(ws, cfg)
+    if cfg.get("plan") == "status":
+        return _status_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -963,6 +975,123 @@ def _procs_plan(ws):
     return [("desk_two_games", two), ("desk_close_refusal", refusal)]
 
 
+STATUS_HANDHELD = ("status_bar_music", "status_bar_focus", "status_cc", "status_cc_scrolled",
+                   "status_vmstop", "status_paused_bar", "status_battery_low",
+                   "status_battery_charging")
+STATUS_DESK = ("status_desk_bar", "status_desk_menu")
+
+
+class _StatusSection:
+    """A status item's section as an app draws one (`moybyte.status`): what
+    plays, then two verbs, its rows the public UI verbs', their ids its
+    app's own (`ns`)."""
+
+    def __init__(self, ns="music"):
+        self.ids = ({"id": ns + ".pause"}, {"id": ns + ".stop"})
+
+    def height(self, w, desk):
+        from runtime import ui_draw
+        row = ui_draw.metrics("row")
+        return 3 * (row[6 if desk else 5] + row[7])
+
+    def draw(self, desk):
+        from runtime import ui
+        ui.info("Dayvan Cowboy", "Groove Salad")
+        ui.link("Pause", "", self.ids[0])
+        ui.link("Stop", "", self.ids[1])
+
+
+def _status_item(ws, state=0):
+    from runtime.status_items import ITEMS
+    for it in ITEMS.slots:
+        if it.pid:
+            ITEMS._free(it)
+    it = ITEMS.add(5, "music", _StatusSection(), 0)
+    it.app = "Music"
+    it.show(state)
+    return it
+
+
+def _status_plan(ws, cfg):
+    """The apps' status items (docs/theme_and_shell_2026-11.md §8.6): on the
+    desk, Music's item in the bar's right zone and its menu open; on a
+    handheld, the bar with its icon, the status cluster focused, the control
+    center at rest and scrolled, the Stop & play question, the bar over a
+    paused game, and the battery low and charging."""
+    from runtime import host_app
+    drv = host_app.ConsoleDriver(ws)
+
+    def press(name, n=1):
+        for _ in range(n):
+            drv.press(name)
+            drv.frame(_DT)
+            drv.frame(_DT)
+
+    if cfg["windowed"]:
+        def desk_bar():
+            ws.open_desk()
+            _status_item(ws)
+
+        def desk_menu():
+            from runtime.status_items import ITEMS
+            ws._golden_popover = True
+            ws.open_status_menu(ITEMS.at(0))
+            assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+        return [("status_desk_bar", desk_bar), ("status_desk_menu", desk_menu)]
+
+    def music():
+        ws.go_home()
+        _status_item(ws)
+
+    def focus():
+        bl = ws.bar_layer
+        items = bl.focus_items("home")
+        k = [j for j, it in enumerate(items) if it[2] == "cluster"][0]
+        assert bl.focus_enter("home", "row", k=k)
+
+    def cc():
+        ws.bar_layer.focus_leave()
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
+    def scrolled():
+        from runtime.status_items import ITEMS
+        it = ITEMS.add(6, "pulse", _StatusSection("radio"), 1)
+        it.app = "Radio"
+        it.show()
+        press("down", 10)
+
+    def vmstop():
+        ws.close_popover()
+        ws._golden_popover = False
+        ws.ask_stop_music({"title": "Doom"})
+        assert ws.confirm.open
+
+    def paused():
+        ws.confirm.cancel()
+        open_cart(ws, "Sky Run")
+        for _ in range(3):
+            ws.frame(_DT)
+        ws.pause.show()
+        ws.player._paused_at = 1
+
+    def low():
+        ws.pause.close()
+        ws.go_home()
+        ws.battery_level = lambda: 9
+        ws.bar_layer.invalidate()
+
+    def charging():
+        ws.battery_charging = lambda: True
+        ws.bar_layer.invalidate()
+
+    return [("status_bar_music", music), ("status_bar_focus", focus), ("status_cc", cc),
+            ("status_cc_scrolled", scrolled), ("status_vmstop", vmstop),
+            ("status_paused_bar", paused), ("status_battery_low", low),
+            ("status_battery_charging", charging)]
+
+
 TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service",
                   "note_banner", "tasks_notes", "rec_indicator")
 
@@ -1207,6 +1336,8 @@ def surface_names(config_name):
         return list(PROCS_SURFACES)
     if cfg.get("plan") == "tasks":
         return list(TASKS_SURFACES)
+    if cfg.get("plan") == "status":
+        return list(STATUS_DESK if cfg["windowed"] else STATUS_HANDHELD)
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
