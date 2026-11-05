@@ -71,7 +71,7 @@ def _at(ws):
     return None if it is None else it[2]
 
 
-_ROW = ["menu", "games", "mine", "apps", "make", "wifi", "battery", "clock"]
+_ROW = ["menu", "games", "mine", "apps", "make", "cluster", "clock"]
 
 
 def test_the_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
@@ -102,7 +102,7 @@ def test_the_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
     assert ws.launcher.tab == "games", "the walk opens no tab"
 
 
-@pytest.mark.parametrize("on", ["games", "make", "wifi", "menu"])
+@pytest.mark.parametrize("on", ["games", "make", "cluster", "menu"])
 def test_up_stays_on_the_row_and_down_goes_to_the_cards(tmp_path, on):
     ws, drv = _home(tmp_path)
     _press(drv, "up")
@@ -119,7 +119,7 @@ def test_up_stays_on_the_row_and_down_goes_to_the_cards(tmp_path, on):
 def test_confirm_on_a_tab_reached_from_the_bar_opens_it(tmp_path):
     ws, drv = _home(tmp_path)
     _press(drv, "up")
-    while _at(ws) != "wifi":
+    while _at(ws) != "cluster":
         _press(drv, "right")
     _press(drv, "left")
     assert _at(ws) == "make"
@@ -235,7 +235,7 @@ def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path):
         for _ in range(4):
             drv.frame(1 / 30)
     roll(1)
-    assert _at(ws) == "wifi"
+    assert _at(ws) == "cluster"
     roll(-1)
     assert _at(ws) == "make" and ws.launcher.tab == "games"
 
@@ -244,7 +244,7 @@ def test_the_cards_let_their_mark_go_while_the_bar_holds_the_keys(tmp_path):
     """One focus mark a screen, anywhere on the row."""
     ws, drv = _home(tmp_path)
     _press(drv, "up")
-    while _at(ws) != "wifi":
+    while _at(ws) != "cluster":
         assert ws.launcher.tab_focus, _at(ws)
         _press(drv, "right")
     assert ws.launcher.tab_focus

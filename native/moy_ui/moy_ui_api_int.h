@@ -28,7 +28,7 @@
 #define NO_PAGE 0xffu
 // A fade's rows at the scale: its first two barely tint, so ten read as
 // D-09's eight (docs/history/look_2026-10.md).
-#define FADE_H 8
+#define FADE_H 10
 
 // A stop's flags.
 enum {

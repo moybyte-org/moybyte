@@ -546,6 +546,7 @@ class PauseMenu:
         self.page = 0
         self._key = getattr(ws.input, "last_key", 0)
         self._hold.drop()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self._capture = True
         if self._host is None:
             self._host = _ui_draw.AppHost()
@@ -563,6 +564,7 @@ class PauseMenu:
         self.open = False
         self._hold.unsnap(self.ws, self.ws.sys_canvas)   # the frame as the game left it
         self._hold.drop()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self.ws.player.resume()
         self.ws.pause_touch()
 
@@ -586,6 +588,7 @@ class PauseMenu:
         self.stopped = False
         self._hold.unsnap(self.ws, self.ws.sys_canvas)
         self._hold.drop()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self.ws.pause_touch()
         self.ws._dirty = True
 
@@ -1073,7 +1076,7 @@ class DeleteConfirm:
 
 
 # A popover's fade, rows at the scale (native/moy_ui/moy_ui_api_int.h's FADE_H).
-_FADE_H = 8
+_FADE_H = 10
 
 
 def _peek(rows, cut, fade, rh):

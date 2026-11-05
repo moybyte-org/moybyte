@@ -536,7 +536,7 @@ def _marked(name, light, draw, size=(120, 40)):
 def test_on_is_the_current_mark_and_focus_the_focus_mark():
     """Under Moy Day a row's `on` is the current plate (value at 0.14 over the
     surface), not the ON field, and its `focus` the 4 px edge bar on its
-    leading edge."""
+    leading edge, with no plate of its own (owner, 2026-11-05)."""
     from runtime import ui_draw
     try:
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
@@ -549,9 +549,9 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
         ui_draw.marks(None, True)
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
-        # the focus edge stands on a light accent plate across the row (D-04)
-        lit = _px(cv, 60, 15)
-        assert lit not in (_word(th["surface"]), _word(th["accent"])) and ui_draw.marks()[1] == 1
+        # focused alone, the row is the edge bar and nothing under it
+        assert _px(cv, 60, 15) == _word(th["surface"]) and ui_draw.marks()[1] == 1
+        assert _px(cv, 11, 15) == _word(th["accent"])
     finally:
         ui_draw.use_depth(None, False)
 
@@ -577,7 +577,7 @@ def test_a_current_bar_is_beside_a_row_and_under_a_chip():
 
 def test_the_focus_style_follows_the_size_class():
     """Moy lifts a card (grown and raised, its rim the accent in Day), edge-bars a
-    part and underlines a small part; Contrast rings a card and inverts a
+    part and rings a small part (2 px, 2 px clear); Contrast rings a card and inverts a
     part, its ink flipped to black on yellow."""
     from runtime import ui_draw
     try:
@@ -590,8 +590,9 @@ def test_the_focus_style_follows_the_size_class():
         rim = _px(cv, 34, 50)                                  # the accent rim
         assert rim not in (0xffff, _px(cv, 2, 50)) and rim & 0x1f > rim // 2048
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.focus(
-            cv, th, (20, 20, 20, 20), size="small"))
-        assert _px(cv, 30, 37) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 37)
+            cv, th, (20, 20, 20, 20), size="small"), (60, 60))
+        assert _px(cv, 30, 42) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 42)
+        assert _px(cv, 30, 40) != _word(th["accent"]), "the ring stands clear"
         cv, th = _marked("contrast", False, lambda d, cv, th: ui_draw.focus(
             cv, th, (20, 10, 60, 60), size="card"), (100, 80))
         assert _px(cv, 15, 40) == _word(th["accent"])         # ring 3 wide, 2 out

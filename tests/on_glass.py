@@ -165,7 +165,8 @@ def wifi_is_off_at_rest(board):
 
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
     """A tap on the bar's wifi widget opens Settings' WIFI panel -- the one
-    wifi implementation -- as a popover hung from the widget, in console mode
+    wifi implementation -- as a popover hung from the widget (on a handheld
+    through the control center the status cluster opens), in console mode
     and desktop mode alike (docs/theme_and_shell_2026-11.md §8.6, look step 33),
     holding the radio; closing the popover lets the radio go."""
     _home_desk(board)
@@ -181,6 +182,14 @@ def the_bar_wifi_widget_opens_the_wifi_panel(board):
     board.drain(1.5)
     try:
         got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
+        if tuple(got) == (True, "battery"):
+            # a handheld's status cluster opens the control center, whose
+            # Wi-Fi row opens the panel (docs/theme_and_shell_2026-11.md §1.5)
+            assert board.pyval("type(ws.sysmenu.comp).__name__", strict=True) == \
+                "ControlCenter"
+            board.pyexec("ws.close_popover()\nws.toggle_popover('wifi')", strict=True)
+            board.drain(1.5)
+            got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
         assert tuple(got) == (True, "wifi"), got
         assert "settings" in (board.state().get("wifi_held") or []), \
             "the panel does not hold the radio"
@@ -2546,11 +2555,12 @@ PAUSE_PSRAM_MAX = 160 * 1024
 PAUSE_PSRAM_LEAK_MAX = 4096
 
 
-def _strip_light(px, w, h, margin):
+def _strip_light(px, w, h, margin, top=0):
     """(brightest, mean) luma of the pixels in the `margin` columns at both
-    ends of a frame -- the part a centred card never covers."""
+    ends of a frame, from row `top` down -- the part a centred card never
+    covers, under the bar a handheld shows over a paused game."""
     seen = []
-    for y in range(h):
+    for y in range(top, h):
         row = y * w
         for x in tuple(range(margin)) + tuple(range(w - margin, w)):
             v = px[row + x]
@@ -2581,12 +2591,13 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert st.get("cart") and not st.get("cart_error"), st
         title = st["cart"]
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
+        top = board.pyval("ws.layout.cy", strict=True)
         # The first grab of a session grows the Python heap by what its frame
         # copies need, and keeps it grown: take that before the baseline.
         board_tool.grab(board, "screen")
         sram0, psram0 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit0 = _strip_light(px, w, h, margin)
+        lit0 = _strip_light(px, w, h, margin, top)
         assert lit0[0] > 120, "the game shows nothing bright to dim: %r" % (lit0,)
 
         board.pyexec("ws.system_key()", strict=True)
@@ -2596,7 +2607,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert board.pyval("ws.player.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit1 = _strip_light(px, w, h, margin)
+        lit1 = _strip_light(px, w, h, margin, top)
 
         board.pyexec("ws.system_key()", strict=True)
         paused = False
@@ -2610,7 +2621,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert board.state()["frames"] > f0, "the game is not ticking after resume"
         sram2, psram2 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit2 = _strip_light(px, w, h, margin)
+        lit2 = _strip_light(px, w, h, margin, top)
     finally:
         if paused:
             board.pyexec("ws.pause.close()")

@@ -1439,8 +1439,9 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
 def test_bar_wifi_icon_opens_the_wifi_panel_as_a_popover(tmp_path):
     """On the desk the bar's wifi widget opens the Settings WIFI panel as a
     popover over whatever runs (docs/theme_and_shell_2026-11.md §8.6): the game
-    keeps its slot, no Settings window opens."""
-    ws = _ws(tmp_path)
+    keeps its slot, no Settings window opens. (A desk's: a handheld's
+    status cluster opens the control center, tests/test_top_bar.py.)"""
+    ws = _ws(tmp_path, panel_diagonal_in=7.0)
     drv = _drv(ws)
     ws.open()                                  # a game is running
     drv.frame(1 / 30)
@@ -2468,8 +2469,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "971104d7fe543fcfb19aa684cacec9fece63959979ac9d0727d4d228af5145d7",
-    "b98866d823781cc12ea989aadfd727446edfdf581e95e5fafd1b241a41c95faa",
+    "023113715d65d02dbc049869a0a89b25e0fa293def93c6e8f3ab9f91da2e85e4",
+    "2377c20dc76e3a8aa9d30426c6c93799a63e590c8d15a27200d65dcf4a930759",
 )
 
 

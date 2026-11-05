@@ -278,7 +278,7 @@ renders the owner chose from):
    the box, and take a caller's border in place of their own (`o.border`,
    the danger ink for a field in error).
 5. **Scrolled views** carry a 2 px thumb in the dim ink on a track in the
-   border's and 8 px fades. The thumb is the engine's on a scroll region or
+   border's. The thumb is the engine's on a scroll region or
    placed table the app gives no gen (the control center's): a view under a
    gen moves its pixels on a shift frame (`docs/surface_model_v1.md` §14.7),
    and a thumb moving along it is no row the move carries.

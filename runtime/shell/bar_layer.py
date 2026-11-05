@@ -1735,6 +1735,16 @@ class BarLayer:
         cv.clip()
         return cv, bar, (x, y, w, h), looked
 
+    def drop_strips(self, where):
+        """Give back `where`'s cached strips: a bar shown only for a while
+        (over the pause card) leaves nothing behind it."""
+        bars = self._bar_strips.pop(where, None)
+        for slots in bars or ():
+            for slot in slots:
+                if slot:
+                    _release_layer(slot[0])
+        self._keys.pop(where, None)
+
     def tile_on(self):
         """What of the bar's pixels an open popover selects: 1 the system
         button's tile (its menu is up), 2 + k status item k's cell (its

@@ -1691,10 +1691,9 @@ def _files_script(ws):
             drv.type_char(step)
         else:
             drv.press(step)
-        # every runtime's glide settled: a run's paced ticks fall on the
-        # loop's frames at its own phase
-        for _ in range(8):
-            _frame(drv)
+        _frame(drv)
+        _frame(drv)
+        _frame(drv)
         shots.append((_pixels(ws), _pmem(ws)))
     return shots
 

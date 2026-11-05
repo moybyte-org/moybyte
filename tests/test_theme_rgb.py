@@ -228,7 +228,7 @@ def test_the_moy_seed_sets_its_marks():
         lk = moy_ui.theme_look("moy", light)[0]
         styles = KINDS[LEAF["focus.style"]][1]
         assert [styles[lk[LEAF["focus." + k]]] for k in ("style", "card", "small")] == [
-            "edge", "lift", "underline"]
+            "edge", "lift", "edge"]
         assert KINDS[LEAF["current.style"]][1][lk[LEAF["current.style"]]] == "plate"
         rim = (lk[LEAF["focus.lift.rim.c"]], lk[LEAF["focus.lift.rim.alpha"]])
         assert rim == ((RGB | 0x4c3fd6, 60) if light else (RGB | 0xb6a8f7, 60))
