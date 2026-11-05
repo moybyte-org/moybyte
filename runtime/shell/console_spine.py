@@ -86,7 +86,7 @@ class SpineVerbs:
 
         The other half of three-strikes, and without it the refusal panel's
         "EDIT it" was a dead end: nothing called `CrashGuard.forgive`, so the
-        only ways back were renaming the cart or hand-editing `system.json`.
+        only ways back were renaming the cart or hand-editing `system/settings`.
 
         Called from `Project.commit_code`, and deliberately from there ALONE.
         A code commit is the one edit that can change whether the cart hangs,
@@ -94,7 +94,7 @@ class SpineVerbs:
         of which a sprite, a map or a config tweak can fix or cause. Forgiving
         on every asset save would hand a boot-looping app a fresh set of
         strikes for repainting a tile; forgiving only on a hand-edited
-        `system.json` is what we had.
+        `system/settings` is what we had.
 
         Strikes are cleared, not decremented: the kid's next open starts from
         zero and gets the full three, exactly like a cart the guard has never
@@ -153,7 +153,7 @@ class SpineVerbs:
             from runtime.console import keep_splash
         keep_splash(self.theme_colors)
         # Every persisted ON/OFF setting, through the verb its registry entry
-        # names (#209 section 7): the key is the system.json key, the default is
+        # names (#209 section 7): the key is the system/settings key, the default is
         # declared beside it, and a board that cannot serve one gets the honest
         # answer from the setter rather than a silent flag. A new toggle is one
         # registry entry, not a line here.

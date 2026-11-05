@@ -2,7 +2,7 @@
 canvas (carts + the cart API, UNCHANGED) composited as a centered, integer-scaled
 viewport into a responsive SYSTEM canvas (the desktop/launcher/settings + status
 strip), with a settings-resizable system font (petme128 x1/x2/x3, persisted
-in system.json).
+in system/settings).
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver), so these assert host==device behavior.
@@ -200,7 +200,7 @@ def test_font_scale_1x_is_identical_to_plain_canvas(tmp_path):
 
 
 def test_font_scale_persists_across_reboot(tmp_path):
-    """The Settings font-size choice lands in system.json and a fresh boot restores
+    """The Settings font-size choice lands in system/settings and a fresh boot restores
     it (mirrors the wallpaper persistence, #28)."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")

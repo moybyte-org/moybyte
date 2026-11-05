@@ -518,7 +518,7 @@ in format 2, each with its modes' tables, embedded in every image by
 `runtime/shell/chrome.py`'s `theme_colors(name, variant)` is its Python face.
 `runtime/shell/appearance.py`'s `set_theme` installs a set and writes it into
 native/moy_app's live token table. The persisted settings are `theme` and
-`theme_variant` in `system.json`; the wallpaper is the theme's (D6) and has
+`theme_variant` in `system/settings`; the wallpaper is the theme's (D6) and has
 no row. There is no reader for old settings beyond that: under the no-migrations rule a stored name that no
 package provides (a seed `docs/history/look_2026-10.md` step 27 deleted: `night`,
 `indigo`, `berry`, `forest`, `slate`, `machine`, `platinum`, `win95`,
@@ -1946,7 +1946,7 @@ is dropped from its slot and noted; the bar stays; then §8.7's rule runs on
 what is left. A value the key does not take resolves up the inheritance
 chain and ends at the seed. Only §8.7's rule and a structural failure replace
 the whole layout. The same rule applies to the user's pick (§8.9): a
-`system.json` copied from a `--windowed` host onto a T-Deck resolves its
+`system/settings` copied from a `--windowed` host onto a T-Deck resolves its
 layout the T-Deck's way. Every rule is exercised on every golden config
 with one fixture layout that triggers each drop.
 

@@ -64,7 +64,7 @@ OTA_UPDATE_DIR = "/moy/update"
 # VFS (device identity, not cart data). A WiFi update stages nothing: it streams
 # into the inactive slot, because this VFS cannot hold the image. The store on a
 # card is moy_carts.CARTS_DIR, so the system documents beside the carts
-# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte, not at the
+# (system/settings, wifi.json, shared.moygfx) land in /sd/moybyte, not at the
 # card's root.
 # slot=2 IS SPI3_HOST -- machine_sdcard.c's spi table lists SPI3 FIRST, so
 # SPI slot numbers map in the OPPOSITE order of the host numbers (slot 2 ->

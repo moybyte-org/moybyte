@@ -1,4 +1,4 @@
-"""`system.json`'s owner (#209 landing B) -- `StoreHandle` + `SystemStore`.
+"""`system/settings`' owner (#209 landing B) -- `StoreHandle` + `SystemStore`.
 
 `Workstation.prefs`. Every persisted Settings choice, the achievement badges,
 the crash guard's strikes, the pairing pin, favorites and recents all live in
@@ -140,7 +140,7 @@ class StoreHandle:
 
 
 class SystemStore:
-    """The `system.json` rows and the hook that writes them.
+    """The `system/settings` rows and the hook that writes them.
 
     Holds the `Settings` `ws.system` aliases (see the module docstring) plus the
     achievements list's two store halves. What it deliberately does NOT own is
@@ -156,10 +156,10 @@ class SystemStore:
         self.rows = _rows(self._write)
         self.safe = safe_mode()
 
-    # -- system.json ---------------------------------------------------------
+    # -- system/settings ---------------------------------------------------------
 
     def load(self):
-        """Read `system.json` into the rows, IN PLACE. Safe no-op if no store or
+        """Read `system/settings` into the rows, IN PLACE. Safe no-op if no store or
         root is wired (an embedded boot keeps whatever it already had).
 
         A store that raises leaves the settings EMPTY rather than half-read: a
@@ -168,7 +168,7 @@ class SystemStore:
         if not self.store.ready():
             return self.rows
         if self.safe:
-            print("Moybyte SAFE start: system.json ignored")
+            print("Moybyte SAFE start: system/settings ignored")
             return self.rows
         # A return start's rows may carry a write the stopped VM never saved:
         # it reaches the file before the file is read back.

@@ -205,7 +205,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_manager import CartManager
 
-# system.json's owner (#209 landing B, system_store.py): the settings rows
+# system/settings' owner (#209 landing B, system_store.py): the settings rows
 # `ws.system` aliases (written through one persisting setter), and the
 # achievements list's store halves -- over a StoreHandle that reads the
 # store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
@@ -852,7 +852,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # the storage roles' servers. It captures nothing; every field is read
         # through `self` at the moment of use, because none of them is wired yet.
         self.store = StoreHandle(self)
-        # system.json (#209 landing B): the store owns the rows and the hook
+        # system/settings (#209 landing B): the store owns the rows and the hook
         # that writes them; `self.system` is a plain ALIAS of the rows and
         # neither name is ever rebound -- prefs.load() replaces them in place,
         # which keeps the launcher's per-paint favorites read, the prefs role
@@ -3978,7 +3978,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     `before_slim(ws)`. can_manage defaults to "the store root is known"; the
     host passes True. `first_variant` ("dark" or "light") is the theme variant
     a console with no saved `theme_variant` row boots in -- a page's colour
-    scheme; None keeps `DEFAULT_VARIANT`, and a saved row always wins. Ends with the three boot loads (system.json settings /
+    scheme; None keeps `DEFAULT_VARIANT`, and a saved row always wins. Ends with the three boot loads (system/settings settings /
     icon theme / achievements) -- install a WindowedWM AFTER this returns, so
     the persisted font scale is applied before the root layout context is
     captured (#73/#58)."""
@@ -4010,7 +4010,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.sync_keyboard_mode()
     if first_variant in THEME_VARIANTS:
         ws.look.theme_variant = first_variant   # load_system's absent-row default
-    ws.load_system()            # #28: system.json, the theme and its wallpaper
+    ws.load_system()            # #28: system/settings, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))
     except (TypeError, ValueError):

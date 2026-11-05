@@ -1,7 +1,7 @@
 // The settings store, the C twin (moy_settings.h has the contract).
 //
 // The rows are an array of {one allocation holding key then text, lengths}
-// that grows by doubling. Lookup is a linear scan: system.json has dozens of
+// that grows by doubling. Lookup is a linear scan: system/settings has dozens of
 // keys, and the scan touches the lengths first.
 
 #include <string.h>

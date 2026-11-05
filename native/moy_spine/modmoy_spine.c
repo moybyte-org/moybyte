@@ -1020,7 +1020,7 @@ static mp_obj_t settings_decode(const char *j, size_t n) {
 
 static mp_obj_t settings_load(mp_obj_t self, mp_obj_t text) {
     size_t n;
-    const char *s = str_arg(text, &n, MP_ERROR_TEXT("system.json is a str"));
+    const char *s = str_arg(text, &n, MP_ERROR_TEXT("the settings text is a str"));
     uint32_t rows;
     int rc = moy_settings_load(settings_of(self), s, n, &rows);
     if (rc != MOY_SETTINGS_OK) {
@@ -1525,7 +1525,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
 // rows (moy_spine_kernel's), which outlive the VM, writing through `save`. Its
 // finaliser frees no row and takes its saver away, so with no VM a dirty row
 // waits for the next start's view. `fresh` empties the rows, as every start but
-// a return start asks (the console loads system.json into them next).
+// a return start asks (the console loads system/settings into them next).
 static mp_obj_t mod_kernel_settings(mp_obj_t save, mp_obj_t fresh) {
     const moy_spine_kernel_t *k = moy_spine_kernel(&spine_mem);
     if (k == NULL) {

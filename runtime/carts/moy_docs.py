@@ -1,12 +1,13 @@
 # Map (grep -n a name to jump there):
 #   _load_store_json        a system JSON store's value, healed from its backup
 #   -- known WiFi networks  load_wifi, save_wifi, remember_wifi, forget_wifi
-#   -- system settings      load_system, save_system
+#   -- system settings      parse_settings, settings_text, load_system, save_system
 #   -- achievements         achievements_doc, load_achievements, save_achievements
 """The console's own documents beside the carts folder: the known WiFi
-networks, the system settings and the achievements, each one JSON file
-written atomically and read back through `_load_store_json`, which heals a
-truncated store from the backup `_write_atomic` leaves.
+networks and the achievements, each one JSON file read back through
+`_load_store_json`, and the settings, the plain-text `system/settings`; each
+written atomically and read back through a reader that heals a truncated
+store from the backup `_write_atomic` leaves.
 
 moy_carts re-exports every name here (`moy_carts.load_system` and the
 rest), so its callers are unchanged. A leaf over moy_store_base and moy_fs;
@@ -17,10 +18,11 @@ import json
 
 try:
     from moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
-    from moy_fs import _read, _read_bak, _write, _write_atomic
+    from moy_fs import _mkdir, _read, _read_bak, _read_recover, _write, _write_atomic
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
-    from runtime.moy_fs import _read, _read_bak, _write, _write_atomic
+    from runtime.moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write,
+                                _write_atomic)
 
 
 def _load_store_json(path, pick):
@@ -147,39 +149,91 @@ def forget_wifi(ssid, root=CARTS_DIR):
     return kept
 
 
-# --- system settings (desktop shell, #28) -----------------------------------
+# --- system settings: system/settings (#28; docs/os_2026-11/system.md §5) -----
 #
-# A single system-level config (the theme, the font scale, the toggles, later
-# volume/brightness/name) that is NOT tied to any one cart -- today config is per-cart only
-# (cart["cfg"] / save_config). It lives BESIDE the carts dir (a sibling of
-# `root`, like wifi.json and the shared sheet) so it is system state. Written
-# atomically (same crash-safe path as the cart saves) so an interrupted write can
-# never truncate the kid's settings, and written through the same with_sd_live
-# path on device. MicroPython-safe (json + os only).
+# The console's settings (the theme, the font scale, the toggles, the pin, the
+# consent record, favorites and recents: every row `ws.system` holds) live in
+# ONE plain-text file under the console's `system/` folder BESIDE the carts dir,
+# so `cat`, the shell's `settings` and an editor all reach it:
+#
+#   brightness = 7
+#   theme = "blocks"
+#   favorites = ["/sd/moybyte/carts/moybyte.paint.moy"]
+#
+# One `key = value` a line, sorted by key; the value is the row's JSON on one
+# line. The reader is strict: a line that is not `key = <JSON>` (a blank line
+# and a `#` comment aside) is passed over and logged, the rest still read. The
+# legacy `system.json` beside the carts dir reads as ABSENT (CLAUDE.md, no store
+# migrations): a console with only that file starts on the defaults and writes
+# this one. Written atomically and read through `_read_recover`, so an
+# interrupted publish heals from its backup like every store write.
 
-SYSTEM_STORE_NAME = "system.json"
+SYSTEM_DIR = "system"
+SETTINGS_NAME = SYSTEM_DIR + "/settings"
 
 
 def system_store_path(root=CARTS_DIR):
-    """Well-known path of the system settings store."""
-    return _sibling_path(root, SYSTEM_STORE_NAME)
+    """Well-known path of the settings file."""
+    return _sibling_path(root, SETTINGS_NAME)
+
+
+def _settings_key_ok(key):
+    if not key or key[0] == "#":
+        return False
+    for ch in key:
+        if ch in " \t=\r\n":
+            return False
+    return True
+
+
+def parse_settings(text):
+    """The rows a settings file's `text` holds, {key: value}."""
+    out = {}
+    for n, line in enumerate(text.split("\n")):
+        line = line.strip()
+        if not line or line[0] == "#":
+            continue
+        key, eq, value = line.partition("=")
+        key = key.strip()
+        try:
+            if not eq or not _settings_key_ok(key):
+                raise ValueError("not key = value")
+            out[key] = json.loads(value.strip())
+        except ValueError:
+            try:
+                print("Moybyte settings: line %d passed over" % (n + 1))
+            except Exception:  # noqa: BLE001 -- a log line never stops a read
+                pass
+    return out
+
+
+def settings_text(settings):
+    """A settings file's text for `settings`: a dict of plain JSON-able data,
+    or the rows' JSON object text (what the settings store's rows dump)."""
+    if isinstance(settings, str):
+        settings = json.loads(settings) if settings.strip() else {}
+    lines = []
+    for key in sorted(settings):
+        if _settings_key_ok(key):
+            lines.append("%s = %s\n" % (key, json.dumps(settings[key])))
+    return "".join(lines)
 
 
 def load_system(root=CARTS_DIR):
-    """Read the system settings dict. Returns {} when nothing usable has ever been
-    saved (a corrupt store must never crash boot); recovers from the .bak like
-    load_wifi, so a half-published file is not read as "no settings"."""
-    return _load_store_json(system_store_path(root),
-                            lambda d: d if isinstance(d, dict) else None) or {}
+    """The settings rows, {key: value}; {} when the file was never written (a
+    corrupt store must never crash boot)."""
+    try:
+        text = _read_recover(system_store_path(root))
+    except OSError:
+        return {}
+    return parse_settings(text)
 
 
 def save_system(settings, root=CARTS_DIR):
-    """Persist the system settings, atomically. Ensures the parent dir exists.
-    `settings` is a dict of plain JSON-able data, or the object's JSON text
-    (what the settings store's rows dump)."""
+    """Persist the settings, atomically. Ensures `system/` exists."""
     ensure_dirs(root)
-    _write_atomic(system_store_path(root), settings if isinstance(settings, str)
-                  else json.dumps(dict(settings)))
+    _mkdir(_sibling_path(root, SYSTEM_DIR))
+    _write_atomic(system_store_path(root), settings_text(settings))
 
 
 # --- achievements (#21) -----------------------------------------------------

@@ -423,7 +423,7 @@ def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
 
 def test_paints_document_pointer_keeps_its_on_disk_key(tmp_path):
     """The namespace is a constructor argument and not a hard-wired app id for
-    exactly one reason: `paint_doc` has been the key in real cards' system.json
+    exactly one reason: `paint_doc` has been the key in real cards' system/settings
     since #108. Renaming it would lose every kid's open drawing on the next
     boot, silently."""
     ws = _ws(tmp_path)
@@ -461,11 +461,11 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
 
 
 def _system_json(ws):
-    """`system.json` as it is ON DISK -- `ws.system` is the live dict every
+    """`system/settings` as it is ON DISK -- `ws.system` is the live dict every
     persist verb also mutates, so reading it back proves nothing about the
     write."""
     with open(_store.system_store_path(ws.carts_root)) as fh:
-        return json.load(fh)
+        return _store.parse_settings(fh.read())
 
 
 def _trash_dir(ws, kind):
@@ -711,7 +711,7 @@ def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     """The DARK/LIGHT half of the theme (docs/history/visual_identity_v1.md §4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
     reads -- follows; the app's colour dict is a new one, rebuilt at the
-    table's new generation; and the choice reaches system.json or it is gone
+    table's new generation; and the choice reaches system/settings or it is gone
     at the next boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
@@ -741,7 +741,7 @@ def test_the_shells_unpersisted_variant_leaves_the_stored_choice_alone(tmp_path)
 def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
     """It must land on the DEFAULT, not keep the current one: the tokens are
     looked up by this string on every theme swap, and an unknown value stored
-    in system.json would be re-applied at every boot."""
+    in system/settings would be re-applied at every boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
     theme.set_variant("light")

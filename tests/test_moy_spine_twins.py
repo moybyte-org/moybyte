@@ -42,7 +42,9 @@ NATIVE = moy_spine_binding.host_bindings()
 SPINE_DIR = os.path.join(ROOT, "native", "moy_spine")
 
 # Tests that need the host (a tmp store, the workstation), not a VM.
-HOST_ONLY = ("test_system_json_on_the_card_is_byte_identical",
+HOST_ONLY = ("test_the_settings_file_on_the_card_is_byte_identical",
+             "test_a_legacy_system_json_reads_as_absent",
+             "test_a_line_the_settings_reader_cannot_read_is_passed_over",
              "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call")
 # MicroPython's dict has no order, so the Python twin there reads a file's
 # rows in the VM's order; the native twin keeps the file's.

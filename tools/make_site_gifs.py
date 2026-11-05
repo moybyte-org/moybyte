@@ -82,7 +82,7 @@ class Recorder:
         # same id the Appearance app persists, so `--wallpaper open_machine` records
         # exactly what a kid who picked it would see. None keeps the boot default
         # (the first wallpaper cart in the store). persist=False: a recording must
-        # not depend on -- or leave -- a system.json, and the store is a temp dir.
+        # not depend on -- or leave -- a system/settings, and the store is a temp dir.
         if wallpaper:
             self.ws.look.select_wallpaper(wallpaper, persist=False)
             if self.ws.look.wallpaper_id != wallpaper:

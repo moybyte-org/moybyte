@@ -1859,7 +1859,7 @@ class DevChannel:
             # Through set_diag_live, not around it: the 3s diag tick re-syncs
             # perf_capture FROM diag_live, so poking perf_capture alone would be
             # silently undone. persist=False -- a serial A/B must not rewrite the
-            # kid's system.json.
+            # kid's system/settings.
             try:
                 ws.set_diag_live(on, persist=False)
             except Exception:  # noqa: BLE001 -- older console: flag only
@@ -1886,7 +1886,7 @@ class DevChannel:
             # capability gate is EXPRESSED here too: a board that cannot serve
             # the setting declines the word instead of flipping a flag nothing
             # reads. persist=False -- a serial A/B must never rewrite the kid's
-            # system.json -- and the reported state is the one the console
+            # system/settings -- and the reported state is the one the console
             # actually reached, not the one that was asked for.
             key, _label, _default, setter, gate, _dev = tog
             if gate is not None and not gate(ws):

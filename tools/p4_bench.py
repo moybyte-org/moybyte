@@ -56,7 +56,7 @@ page's ACCENT row, its `right` handled once a frame for three seconds from
 the live theme (an image without the page calls `ws.look.change("accent",
 ...)` instead), so the first change makes `custom`: the key's ms and the
 painted frames per change, then the frames after release; it counts the store's
-writes (the package and system.json) and asserts none while held and exactly
+writes (the package and system/settings) and asserts none while held and exactly
 one package write once it settles. The live theme is put back after, and
 `custom` stays on the store.
 
@@ -390,7 +390,7 @@ def edit_thrash(b, bench):
     bench.stop("edit thrash (after release)")
     after = pyval(b, "list(ws._th_writes)") or [None, None]
     ok = held == [0, 0] and after[0] == 1
-    print("  edit thrash: writes held=%r settled=%r (package, system.json) -> %s"
+    print("  edit thrash: writes held=%r settled=%r (package, system/settings) -> %s"
           % (held, after, "PASS" if ok else "FAIL"))
     pyexec(b, "ws.look.set_theme(ws._th_was)")
     if keys:

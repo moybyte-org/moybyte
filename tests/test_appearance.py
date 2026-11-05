@@ -451,7 +451,7 @@ def _accent(i):
 
 
 def _writes(ws, monkeypatch):
-    """Count the store's writes: custom's package and system.json."""
+    """Count the store's writes: custom's package and system/settings."""
     n = {"package": 0, "system": 0}
     real_pkg, real_sys = moy_carts.save_package, moy_carts.save_system
 

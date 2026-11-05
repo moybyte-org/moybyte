@@ -312,7 +312,7 @@ def main():
     ap.add_argument("--size", default="320x240", metavar="WxH",
                     help="system canvas size (default 320x240 = the T-Deck panel)")
     ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
-                    help="initial system-UI font scale 1/2/3 (system.json overrides)")
+                    help="initial system-UI font scale 1/2/3 (system/settings overrides)")
     # The Picotron-style windowed WM (#73, the P4 "One" presentation tier): the
     # launcher is the desktop and every app opens as a draggable window. Needs a
     # big --size (ignored at 320x240).

@@ -479,7 +479,7 @@ def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
 
 
 def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
-    """system.json and achievements.json are the same read-modify-write over the
+    """system/settings and achievements.json are the same read-modify-write over the
     same _write_atomic. One loader, one rule -- and the backup carries the LAST
     save, so a publish lost to a crash costs nothing (#154)."""
     import os

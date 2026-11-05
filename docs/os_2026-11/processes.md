@@ -190,7 +190,7 @@ absent, or is refused with a message if it requires it. An update that adds
 a permission prompts again, all or nothing; one that adds none, and a cart
 that asks for nothing a game does not, install unasked.
 
-**Consent is recorded with the grant's key**: the console's `system.json`
+**Consent is recorded with the grant's key**: the console's `system/settings`
 holds one record per app id (`moy_app.id_for`, what the grant, the prefs
 namespace and the crash strikes are keyed by), the permissions consented
 at install and the ones turned off since (`runtime/shell/app_perms.py`,

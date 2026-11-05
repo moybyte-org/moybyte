@@ -1202,7 +1202,7 @@ def _mode_ws(tmp_path):
 # -- the pin -----------------------------------------------------------------
 
 def test_the_pin_is_minted_once_and_persisted(tmp_path):
-    """Four digits, kept in system.json beside every other Settings choice. A
+    """Four digits, kept in system/settings beside every other Settings choice. A
     pin that changed per boot would mean re-scanning after every power cycle,
     and a phone holding the old url would look like a broken board."""
     ws = _ws(tmp_path)
@@ -1226,7 +1226,7 @@ def test_a_board_that_never_serves_never_writes_a_pin(tmp_path):
 
 def test_the_pin_is_read_at_START_not_at_construction():
     """THE ORDERING BUG THIS EXISTS TO PREVENT. Boards build the webhost before
-    system.json is loaded, so a pin captured at construction is one minted
+    system/settings is loaded, so a pin captured at construction is one minted
     against an empty store -- the QR would show a pin the store does not agree
     with, and every batch the page sent would come back 403."""
     seen = []

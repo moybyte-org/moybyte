@@ -294,7 +294,7 @@ def ensure_dirs(root=CARTS_DIR):
     _mkdir(root)
     # The publish marker (#154) goes at the PARENT, because that is what covers
     # the whole store in one file: the cart folders and their journals under
-    # `root`, the #108 files layer and the sibling stores (system.json,
+    # `root`, the #108 files layer and the sibling stores (system/settings,
     # wifi.json, shared.moygfx) beside it. One marker, one read per boot.
     set_publish_root(parent or root)
 

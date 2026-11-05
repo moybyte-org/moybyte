@@ -720,7 +720,7 @@ class ArtworkService:
     is how the console reaches it; the copy-on-use verbs are Paint's
     `PictureCopies` (runtime/apps/picture_copies.py), over the same roles. The open
     picture lives in Paint's prefs, whose namespace is "paint" (`paint_doc` has
-    been the key in real cards' system.json since #108), which the `artwork`
+    been the key in real cards' system/settings since #108), which the `artwork`
     role's C rows read for every other app."""
 
     # The largest document Paint holds -- and it is Paint's OWN largest, the

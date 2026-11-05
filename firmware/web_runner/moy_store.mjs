@@ -108,7 +108,7 @@ export function skipLocal(name) {
 // The per-root behaviour the browser store needs is the whole-folder delete
 // ARITY (a cart is one segment, a files item is a kind/name or a folder below
 // it; null: no folder delete at all), and for the console's own documents the
-// named top-level files the store IS (`top`, moy_sync.SYSTEM_FILES), which a
+// named files the store IS, each a path in it (`top`, moy_sync.SYSTEM_FILES), which a
 // board serves through its VM (`console.json`) when its firmware has the root.
 // Kinds are not validated here -- these ops are the browser's own
 // sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
@@ -117,7 +117,7 @@ export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
     { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
-      top: ["system.json", "achievements.json", "shared.moygfx"] },
+      top: ["system/settings", "achievements.json", "shared.moygfx"] },
 ];
 
 export function rootById(id) {
@@ -149,7 +149,7 @@ export function safeSegments(rel, skip = skipName) {
 function localParts(root, rel) {
     const parts = safeSegments(rel, skipLocal);
     if (!parts) return null;
-    if (root.top) return parts.length === 1 && root.top.includes(parts[0]) ? parts : null;
+    if (root.top) return root.top.includes(parts.join("/")) ? parts : null;
     return parts.length < 2 ? null : parts;
 }
 
@@ -321,6 +321,13 @@ async function dirFor(store, segs, create) {
     return d;
 }
 
+// A named file of a root of named files: the directory it sits in (made when
+// `create`) and its name there.
+async function namedAt(store, key, create) {
+    const parts = key.split("/");
+    return [await dirFor(store, parts.slice(0, -1), create), parts[parts.length - 1]];
+}
+
 async function writeText(store, parts, text) {
     const dir = await dirFor(store, parts.slice(0, -1), true);
     await writeIn(dir, parts[parts.length - 1], text);
@@ -393,19 +400,21 @@ async function applyOne(store, op) {
         try { await removeAt(store, parts, true); } catch (e) { /* already gone */ }
         return null;
     }
-    // A cart store never takes a top-level file (system.json / wifi.json are
+    // A cart store never takes a top-level file (wifi.json and its siblings are
     // system state beside the carts, not the kid's work: moy_sync draws the
     // same line), and the console's own store takes its named files alone.
     if (!localParts(r, op.p)) return r.top ? "not a system file" : "not a cart file";
     const key = parts.join("/");
     // The console's own documents are written so a reload at any moment finds
-    // the old copy or the new one (`commitFile`): a torn system.json would boot
+    // the old copy or the new one (`commitFile`): a torn settings file would boot
     // the console on its defaults and lose every Setting. Cart files keep the
     // plain write: a cart's undo journal is the record of its last commits.
-    const put = r.top ? (data) => commitFile(store.carts, key, data)
+    const put = r.top ? async (data) => commitFile(...await namedAt(store, key, true), data)
                       : (data) => writeText(store, parts, data);
     if (op.d) {
-        if (r.top) await dropFile(store.carts, key);
+        if (r.top) {
+            try { await dropFile(...await namedAt(store, key, false)); } catch (e) { /* none */ }
+        }
         else try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
         store.parts.delete(key);
         return null;
@@ -451,11 +460,24 @@ async function applyOne(store, op) {
 export async function readAll(store) {
     const out = {};
     if (store.root.top) {
-        // A write a reload interrupted is finished or discarded first.
-        const have = await settleFiles(store.carts);
+        // A write a reload interrupted is finished or discarded first, in
+        // each folder a named file sits in.
+        const settled = new Map();
         for (const name of store.root.top) {
-            if (!have.includes(name)) continue;
-            const fh = await store.carts.getFileHandle(name);
+            const cut = name.lastIndexOf("/");
+            const head = cut < 0 ? "" : name.slice(0, cut);
+            if (!settled.has(head)) {
+                let got = null;
+                try {
+                    const dir = await dirFor(store, head ? head.split("/") : [], false);
+                    got = [dir, await settleFiles(dir)];
+                } catch (e) { /* no such folder yet */ }
+                settled.set(head, got);
+            }
+            const at = settled.get(head);
+            const leaf = name.slice(cut + 1);
+            if (!at || !at[1].includes(leaf)) continue;
+            const fh = await at[0].getFileHandle(leaf);
             out[name] = asValue(name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
         }
         return out;
@@ -529,7 +551,7 @@ export async function seed(store, carts) {
         const parts = localParts(store.root, rel);
         const data = fileData(carts[rel]);
         if (!parts || data === null) continue;
-        if (store.root.top) await commitFile(store.carts, rel, data);
+        if (store.root.top) await commitFile(...await namedAt(store, rel, true), data);
         else await writeText(store, parts, data);
         n++;
     }
@@ -654,7 +676,7 @@ export async function readRecord(store) {
 // then says they are whole, and only then do they replace "<key>" -- so a
 // reload at any moment finds the old copy or the new one, and `settleFiles`
 // finishes or discards what one left. A compiled cart's written files and the
-// console's own documents (system.json and its siblings) are kept this way.
+// console's own documents (system/settings and its siblings) are kept this way.
 // ---------------------------------------------------------------------------
 
 const PART = "~part", DONE = "~done";

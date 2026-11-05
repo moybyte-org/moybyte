@@ -13,7 +13,7 @@ object outlives a call into one (native/moy_kernel/moy_kernel.h):
   BackStack    the process back-stack: kinds, launcher root at the bottom
   Returns      where a leaving surface lands: a run's caller, an app's return
   Leases       the WiFi radio's holders, a closed set of tags
-  Settings     system.json as the store holds it: key -> the value's JSON text,
+  Settings     system/settings as the store holds it: key -> the value's JSON text,
                written through one setter that persists
 
 A handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, always
@@ -448,7 +448,7 @@ def _value(text):
 
 
 class Settings:
-    """system.json as rows: one per top-level key, holding that value's JSON
+    """system/settings as rows: one per top-level key, holding that value's JSON
     text. `dump` is the file: the object json.dumps writes, keys in row order
     (a new key goes last). The rows are the store of record: `get` decodes a
     row to a fresh value, so nothing a caller does to what it got can change a
@@ -475,7 +475,7 @@ class Settings:
         was read is what is on disk, so the store is clean."""
         d = json.loads(text)
         if not isinstance(d, dict):
-            raise ValueError("system.json is not an object")
+            raise ValueError("system/settings is not an object")
         self.adopt(d)
         return len(self._keys)
 

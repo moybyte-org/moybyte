@@ -257,7 +257,7 @@ def test_settings_shows_volume_brightness_and_name(tmp_path):
 
 def test_the_volume_row_sets_the_console_level(tmp_path):
     """Volume is the console's level: a step on its slider stores it in
-    system.json and reaches the audio kernel's level, the one every session
+    system/settings and reaches the audio kernel's level, the one every session
     mixes at (`audio_session.console_volume`)."""
     from runtime import audio_session
     if audio_session.native() is None:
@@ -315,7 +315,7 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
 
 def test_brightness_and_name_are_stored(tmp_path):
     """Brightness and Name apply nothing yet, but what they are set to is in
-    system.json: a fresh session reads it back. Name is typed (the keyboard
+    system/settings: a fresh session reads it back. Name is typed (the keyboard
     in text mode while it holds focus), Brightness stepped in 0..7."""
     from runtime import host_app
     ws, drv = _settings_page(tmp_path)
@@ -422,7 +422,7 @@ def test_going_home_stores_a_name_being_typed(tmp_path):
 
 def test_a_reboot_stores_a_name_being_typed_first(tmp_path):
     """The system menu's Reboot resets the board through its hook: the Name
-    being typed is in system.json before it runs."""
+    being typed is in system/settings before it runs."""
     ws, drv = _settings_page(tmp_path)
     _type_name(ws, drv, "Kit")
     seen = []
@@ -970,7 +970,7 @@ def test_launcher_grid_runs_to_the_canvas_floor(tmp_path):
 
 def test_ota_channel_toggle_persists(tmp_path):
     # #53 two-channel OTA: when an OTA-capable updater with WiFi is wired, Settings gains
-    # a CHANNEL toggle (STABLE <-> BETA). Toggling persists to system.json so a fresh
+    # a CHANNEL toggle (STABLE <-> BETA). Toggling persists to system/settings so a fresh
     # boot remembers it. (build_workstation injects no updater on the host, so fake one.)
     from runtime import host_app
     carts_dir = str(tmp_path / "carts")

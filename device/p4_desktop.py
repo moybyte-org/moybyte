@@ -38,7 +38,7 @@ import wire_links
 # The TF slot, wired the same on both boards: SDMMC slot 0 on GPIO39-44. (Slot 1
 # is the C6's transport; constructing it panics the board.) A card's store is
 # `moy_carts.CARTS_DIR`, the T-Deck's, so the system documents beside the carts
-# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte and not at the
+# (system/settings, wifi.json, shared.moygfx) land in /sd/moybyte and not at the
 # card's root.
 SD_SLOT = 0
 SD_CLK = 43

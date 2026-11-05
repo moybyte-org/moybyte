@@ -103,7 +103,7 @@ class SettingsToggles:
         nearest-neighbour instead of the PPA's fixed-bilinear scaler, and
         leaves a compiled cart's direct-colour frame bilinear); a canvas without the hook
         never shows the row, so this setter is then only ever the boot apply
-        of a stale system.json key."""
+        of a stale system/settings key."""
         on = bool(on)
         self._set_toggle("crisp_pixels", on, persist)
         hook = getattr(self.sys_canvas, "set_crisp_scale", None)
@@ -135,7 +135,7 @@ class SettingsToggles:
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
-        manifest UPDATE ONLINE checks; persisted in system.json once chosen.
+        manifest UPDATE ONLINE checks; persisted in system/settings once chosen.
 
         The default is the channel this FIRMWARE was built on, not a constant. A
         board that took a beta is running `unstable`, and defaulting it to

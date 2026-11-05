@@ -5,7 +5,7 @@
 #   apply_ops           apply one batch into a store (the kernel's C)
 #   key_class           which Settings cross between a board and its page
 #   system_pull         a board's /console.json document
-#   merge_system        a browser's system.json into a board's Settings
+#   merge_system        a browser's system/settings into a board's Settings
 #   SystemReceiver      a board's apply of a system batch (the VM's)
 #   StoreWatcher        detect a store's changes and queue them as batches
 #   StoreWatcher.sweep  one pass over the store
@@ -89,13 +89,13 @@ One body, three consumers, so the two sides cannot disagree about the wire:
     variant, and it is a watcher argument rather than a second wire rule.
 
 What deliberately does NOT sync, recorded so it is not read as a gap:
-  * Top-level files beside the cart folders (system.json, wifi.json, the
+  * The files beside the cart folders (system/settings, wifi.json, the
     shared sheet) never cross the WIRE: each console keeps its own, a board's
-    system.json carries its pin and its crash ledger, and wifi.json is a
+    settings carry its pin and its crash ledger, and wifi.json is a
     secret. The pull skips non-directories at the root and `apply_ops`
     refuses single-segment file paths outright. The console's own documents
     (`SYSTEM_FILES`) are the third root, `SYSTEM_ROOT`: a SITE-mode browser
-    keeps all of them in its own OPFS; a board serves system.json's portable
+    keeps all of them in its own OPFS; a board serves its settings' portable
     rows and achievements.json through its VM (`system_pull`) and merges a
     page's changes to those two (`merge_system`, `merge_achievements`), while
     the edited icons and the shared sheet stay on each console.
@@ -156,7 +156,7 @@ A system batch names the third root the same way, and carries the two
 documents a board takes from its page:
 
     {"v": 2, "root": "system", "ops": [
-      {"p": "system.json", "t": "<the page's whole system.json>"},
+      {"p": "system/settings", "t": "<the page's whole settings file>"},
       {"p": "achievements.json", "t": "{\"unlocked\": [...]}"}]}
 
     -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
@@ -393,9 +393,9 @@ class Root:
                sweeps `journal/` too, so the kid's undo history survives the tab.
                Only carts relaxes; the files layer's history is `.history/`
                sidecars, a different mechanism that stays home either way.
-      top      None, or the store is these TOP-LEVEL FILES of its directory and
-               nothing else: no folder, no other name (`SYSTEM_FILES`). A
-               whole-folder delete never applies to one.
+      top      None, or the store is these NAMED FILES of its directory and
+               nothing else, each a path in it (`SYSTEM_FILES`: one is
+               `system/settings`). A whole-folder delete never applies to one.
       wire_top
                None, or the files of `top` a BOARD-mode batch may carry (the
                rest stay on each console): `SYSTEM_WIRE_FILES`.
@@ -445,21 +445,24 @@ FILES_ROOT = Root(
     "/files.json", kinds=True)
 
 # The console's own documents, the files a board keeps BESIDE its carts
-# folder (moy_carts' sibling stores): the Settings rows and everything else
-# `ws.system` holds, the earned badges and the shared sprite sheet. A site-mode browser is its own
+# folder (moy_carts' sibling stores): `system/settings` (the Settings rows and
+# everything else `ws.system` holds), the earned badges and the shared sprite
+# sheet. A site-mode browser is its own
 # console, so it keeps them in its own OPFS the way a board keeps them on its
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
-# indexes.json (the serving host's, read at boot), installed.json and written/
+# system/sources (the serving host's, written at boot), pkg/ (the cached
+# indexes), installed.json and written/
 # (each has its own crash-safe keeper, moy_store.commitInstall /
 # commitWritten), and install/ (staging).
 SYSTEM_ROOT_ID = "system"
-SYSTEM_FILES = ("system.json", "achievements.json", "shared.moygfx")
+SYSTEM_SETTINGS = "system/settings"
+SYSTEM_FILES = (SYSTEM_SETTINGS, "achievements.json", "shared.moygfx")
 # What crosses between a board and the page it serves: the pull, and the
 # documents a system batch may carry. The shared sheet stays on each console
 # in board mode.
 SYSTEM_PULL = "/console.json"
-SYSTEM_WIRE_FILES = ("system.json", "achievements.json")
+SYSTEM_WIRE_FILES = (SYSTEM_SETTINGS, "achievements.json")
 
 
 def system_root(carts_root):
@@ -471,8 +474,8 @@ def system_root(carts_root):
 SYSTEM_ROOT = Root(
     # v2 + its own root name: a board's C parks a batch of it for the VM
     # (`SystemReceiver`), and firmware older than this root REFUSES it (its
-    # moy_sync.c named only carts and files), never reading `system.json` as a
-    # cart path. A board-served page watches it only when the board answered
+    # moy_sync.c named only carts and files), never reading `system/settings`
+    # as a cart path. A board-served page watches it only when the board answered
     # its pull, so no batch of it is aimed at such firmware at all.
     SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, SYSTEM_PULL,
     top=SYSTEM_FILES, wire_top=SYSTEM_WIRE_FILES)
@@ -704,7 +707,7 @@ CART_PATH_KEYS = ("favorites", "desk_mru", "plays")
 
 
 def key_class(key):
-    """PORTABLE, LOCAL or BOARD for a system.json key."""
+    """PORTABLE, LOCAL or BOARD for a settings key."""
     got = SYSTEM_KEYS.get(key)
     if got is not None:
         return got[0]
@@ -750,44 +753,41 @@ def rebase_value(key, value, carts_root):
 
 
 def system_pull(rows, badges):
-    """The /console.json document: `{"system.json": text, "achievements.json":
-    text}` -- the PORTABLE rows of `rows` (a Settings), cart paths as folder
-    names, and `badges` (an `Achievements.doc()`) as achievements.json holds
-    it."""
+    """The /console.json document: `{"system/settings": text,
+    "achievements.json": text}` -- the PORTABLE rows of `rows` (a Settings)
+    as the settings file holds them, cart paths as folder names, and `badges`
+    (an `Achievements.doc()`) as achievements.json holds it."""
     doc = {}
     for key in rows.keys():
         if key_class(key) == PORTABLE:
             doc[key] = rebase_value(key, rows.get(key), None)
-    return {"system.json": _json.dumps(doc),
-            "achievements.json": _moy_carts().achievements_text(badges)}
+    mc = _moy_carts()
+    return {SYSTEM_SETTINGS: mc.settings_text(doc),
+            "achievements.json": mc.achievements_text(badges)}
 
 
 def rebase_system(text, carts_root):
-    """A pulled system.json's text with its cart folders re-rooted under this
-    console's `carts_root`, or None when it is not a JSON object."""
-    try:
-        doc = _json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(doc, dict):
-        return None
+    """A pulled settings file's text with its cart folders re-rooted under
+    this console's `carts_root`."""
+    mc = _moy_carts()
+    doc = mc.parse_settings(text)
     for key in CART_PATH_KEYS:
         if key in doc:
             doc[key] = rebase_value(key, doc[key], carts_root)
-    return _json.dumps(doc)
+    return mc.settings_text(doc)
 
 
 def merge_system(rows, text, carts_root):
-    """Merge a browser's system.json `text` into the Settings `rows`: each
+    """Merge a browser's settings file `text` into the Settings `rows`: each
     PORTABLE key whose value differs is set (cart paths re-rooted under
     `carts_root`), and a PORTABLE key the document no longer has is deleted --
     unless the document is empty, which says nothing. LOCAL and BOARD keys,
     and a value of the wrong shape, are passed over. One write for the lot.
-    Returns the keys that changed; ValueError when `text` is not a JSON object.
+    Returns the keys that changed; TypeError when `text` is not text.
     """
-    doc = _json.loads(text)
-    if not isinstance(doc, dict):
-        raise ValueError("not an object")
+    if not isinstance(text, str):
+        raise TypeError("not text")
+    doc = _moy_carts().parse_settings(text)
     changed = []
     for key in doc:
         if key_class(key) != PORTABLE or not _shape_ok(key, doc[key]):
@@ -824,7 +824,7 @@ def merge_achievements(text, award):
 
 class SystemReceiver:
     """A board's apply for system batches (the C parks them for the VM): a
-    `system.json` goes through `merge_system`, an `achievements.json` through
+    `system/settings` goes through `merge_system`, an `achievements.json` through
     `merge_achievements`, a document sent in parts is held here until its
     `pub` (a part 0 starts it again). A delete, a binary op and any other file
     are refused: a page cannot take a console's documents away."""
@@ -872,7 +872,7 @@ class SystemReceiver:
         if type(text) is not str:
             return "not a document"
         try:
-            if p == "system.json":
+            if p == SYSTEM_SETTINGS:
                 for key in merge_system(rows, text, carts_root):
                     if key not in changed:
                         changed.append(key)
@@ -1051,8 +1051,13 @@ class StoreWatcher:
         FILES are never syncable, and in the files root a top-level dir must be
         a known kind -- which is what leaves `.history` and `trash` unwalked."""
         if self.top is not None:
-            for name, isdir in self._sorted_entries(self.root):
-                if isdir or name not in self.top:
+            listed = {}
+            for name in sorted(self.top):
+                head, _, leaf = name.rpartition("/")
+                if head not in listed:
+                    listed[head] = self._sorted_entries(
+                        store_path(self.root, head) if head else self.root)
+                if (leaf, False) not in listed[head]:
                     continue
                 full = store_path(self.root, name)
                 st = _stat_file(full) if self._listdir is None else (0, 0)

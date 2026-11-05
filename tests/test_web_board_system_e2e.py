@@ -5,7 +5,7 @@ The page seeds its console from the board's GET /console.json and sends its
 changes back as system batches; the twin merges them through the same bodies a
 board's VM runs (runtime/carts/moy_sync.py's SystemReceiver). So a theme named
 through Appearance and a badge earned by opening a cart land in the twin's
-system.json and achievements.json beside its carts, and the next page load --
+system/settings and achievements.json beside its carts, and the next page load --
 a fresh profile, since board mode keeps nothing in the browser -- comes back
 on them. The keys the board keeps for itself never reach the page and are
 never moved. A twin flashed before the root (--no-system) is sent no system
@@ -28,6 +28,7 @@ import pytest
 
 import web_e2e
 from web_e2e import RUNNER, ROOT
+from runtime.moy_carts import parse_settings, settings_text  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
@@ -47,7 +48,8 @@ def _twin(tmp_path, port, *extra):
     # A board's whole seed set: the apps (Appearance among them) ride it.
     for cart in sorted((ROOT / "system_carts").glob("*.moy")):
         shutil.copytree(cart, store / cart.name)
-    (top / "system.json").write_text(json.dumps(BOARD_ROWS))
+    (top / "system").mkdir()
+    (top / "system" / "settings").write_text(settings_text(BOARD_ROWS))
     log = tmp_path / "twin.log"
     p = subprocess.Popen(
         [sys.executable, "serve.py", str(port), "dist", "--carts", str(store),
@@ -103,7 +105,7 @@ def test_the_theme_and_badges_a_page_picks_live_on_the_board(tmp_path):
             "%r\n%s" % (opened, out[-3000:])
 
         # THE BOARD has them, beside its carts, as a board keeps them...
-        rows = json.loads((top / "system.json").read_text())
+        rows = parse_settings((top / "system" / "settings").read_text())
         assert rows["theme"] == "nikola", (rows, log.read_text()[-2000:])
         assert "first_open" in json.loads(
             (top / "achievements.json").read_text())["found"]
@@ -144,5 +146,5 @@ def test_a_board_without_the_system_root_is_sent_no_system_batch(tmp_path):
         server.wait(timeout=10)
     said = log.read_text()
     assert "system batch refused" not in said, said[-2000:]
-    assert json.loads((top / "system.json").read_text()) == BOARD_ROWS
+    assert parse_settings((top / "system" / "settings").read_text()) == BOARD_ROWS
     assert not (top / "achievements.json").exists()

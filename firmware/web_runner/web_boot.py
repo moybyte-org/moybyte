@@ -24,8 +24,8 @@ Scope: the FULL console, both presentation tiers -- `can_manage=True`, so the
 Make tile and the editors are reachable in the browser. Every write lands in the
 browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
 page's store of record is: a site-mode page's OPFS -- the carts with their
-journals and pmem, the drawings, and the console's own documents (system.json,
-achievements.json, the shared sheet), so a reload comes back on the same shelf,
+journals and pmem, the drawings, and the console's own documents
+(system/settings, achievements.json, the shared sheet), so a reload comes back on the same shelf,
 theme, Settings and badges -- or the serving board for its carts, files,
 portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
 /console.json leaves them in the tab). A page with no OPFS keeps everything in
@@ -358,7 +358,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     #
     # A caller that wants clean frames passes hud=False. Otherwise the chip is
     # the Settings SHOW FPS row's, as on a board: the boot's settings apply
-    # (wire_workstation_core) already set it from the stored system.json.
+    # (wire_workstation_core) already set it from the stored settings.
     if not hud:
         ws.show_fps = False
         ws.perf_hud = False
@@ -459,17 +459,16 @@ def carts_event_json(text):
 
 
 def _rebase_system(carts_root):
-    """The pulled system.json's cart folders under this VFS's `carts_root`
-    (they cross as folder names, `moy_sync.CART_PATH_KEYS`), before the
-    Workstation reads it."""
+    """The pulled settings' cart folders under this VFS's `carts_root` (they
+    cross as folder names, `moy_sync.CART_PATH_KEYS`), before the Workstation
+    reads them."""
     import moy_sync
-    path = moy_sync.system_root(carts_root) + "/system.json"
+    path = moy_sync.system_root(carts_root) + "/" + moy_sync.SYSTEM_SETTINGS
     try:
         with open(path) as f:
             text = moy_sync.rebase_system(f.read(), carts_root)
-        if text is not None:
-            with open(path, "w") as f:
-                f.write(text)
+        with open(path, "w") as f:
+            f.write(text)
     except OSError:
         pass                             # nothing pulled: the defaults
 

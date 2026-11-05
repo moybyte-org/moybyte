@@ -697,7 +697,7 @@ def test_a_cart_that_raises_on_every_open_is_disabled_after_three(tmp_path):
 
 
 def test_the_strikes_survive_a_reboot(tmp_path):
-    """The strike lives in `system.json`, which is the whole point: an
+    """The strike lives in `system/settings`, which is the whole point: an
     in-process counter cannot outlive the hang it is counting."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
@@ -741,7 +741,7 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
 
     Nothing called `CrashGuard.forgive` when the guard shipped, and saving
     fixed code cleared nothing -- the only escapes were renaming the cart or
-    hand-editing `system.json`, i.e. the panel's one instruction was a lie.
+    hand-editing `system/settings`, i.e. the panel's one instruction was a lie.
     A COMMITTED code change is the hook (`Project.commit_code` ->
     `ws.forgive_app`), because code is the only edit that can change whether
     the cart hangs, faults or eats the heap."""

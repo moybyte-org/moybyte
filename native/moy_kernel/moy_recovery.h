@@ -4,7 +4,7 @@
 // THE FLOOR comes up when the VM fails to start (its first heap area is not
 // there, or the console's boot ends before boot_ok) or the boot-loop guard
 // trips (moy_crash.h), and only on a boot no VM ran in (moy_kernel.c). It
-// offers Try again (RETRY: the VM as usual), Safe start (SAFE: system.json
+// offers Try again (RETRY: the VM as usual), Safe start (SAFE: system/settings
 // neither read nor written, the defaults, a fill for the wallpaper) and
 // Developer console (REPL: main.py skipped); the serial words and the `sel=`
 // names stay RETRY, SAFE and REPL whatever the rows say. The minimum on every

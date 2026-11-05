@@ -83,7 +83,7 @@ re-slimmed.
 ## Reading late-injected things through `ws`, per call
 
 Same rule the other four collaborators follow (doc 3c). This object is built in
-`Workstation.__init__`, before the store is wired, before `system.json` is
+`Workstation.__init__`, before the store is wired, before `system/settings` is
 read, before the layer stack exists -- so `carts_store`, `carts_root`,
 `_with_sd`, `launcher`, `projects_grid` and `bar_layer` are all reached through `ws`
 at the moment of use and never captured here.
@@ -276,7 +276,7 @@ class Appearance:
     # -- system font scale (#39) ---------------------------------------------
     #
     # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
-    # persisted in system.json and applied live.
+    # persisted in system/settings and applied live.
     # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
     # canvas + the responsive Layout, so a cart is never affected.
 

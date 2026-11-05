@@ -19,7 +19,7 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # directory. The no-hardware way to
                                             # watch a browser edit land as files
                                             # on disk. The console's own
-                                            # documents beside D (system.json,
+                                            # documents beside D (system/settings,
                                             # achievements.json) are the
                                             # board's too: GET /console.json,
                                             # and a system batch merged key by
@@ -153,7 +153,7 @@ else:
 
     class TwinConsole:
         """The board's Settings and badges, as a board keeps them beside its
-        carts (D/../system.json, D/../achievements.json), merged through the
+        carts (D/../system/settings, D/../achievements.json), merged through the
         same bodies a board's VM runs (moy_webhost.ConsoleSystem's): what a
         page served by this twin may change is moy_sync.SYSTEM_KEYS'."""
 

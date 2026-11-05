@@ -440,7 +440,7 @@ Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
 a module with **no** signature load AT FULL SPEED (native trust), so someone
 who rebuilds a cart from its source -- Doom from moybyte-org/carts, their
 own game -- runs it on their own console. The setting is the console's
-(`ws.unknown_sources`, persisted in `system.json`, on every tier); the engine
+(`ws.unknown_sources`, persisted in `system/settings`, on every tier); the engine
 is told it per load: `moycore_glue.WasmRun` hands it to `moycore.wasm_open`,
 which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
 `verify_module` reads it on the MicroPython task before the runtime sees a

@@ -259,7 +259,7 @@ def test_name_on_the_desk_survives_a_phone_keyboards_enter(tmp_path):
 def test_the_theme_and_badges_survive_a_reload(tmp_path):
     """The console's own documents in a real browser's OPFS: a theme named
     through Appearance on the desk (the UI, end to end), then a cart opened
-    (First Steps, and the run in system.json), then a third load in the same
+    (First Steps, and the run in system/settings), then a third load in the same
     profile, which boots on that theme with that badge and that run. A
     console that kept its Settings in the tab came back on the default theme
     with nothing earned (owner, 2026-10-20)."""

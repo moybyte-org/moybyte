@@ -436,7 +436,7 @@ def test_the_launcher_takes_the_collaborators_bound_method(tmp_path):
 
 
 def test_toggling_a_favorite_persists_through_prefs(tmp_path):
-    """The star badge rides system.json's ONE persist funnel -- no new store
+    """The star badge rides system/settings' ONE persist funnel -- no new store
     surface, and it survives a reboot."""
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c.get("path"))

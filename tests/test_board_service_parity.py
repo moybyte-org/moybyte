@@ -413,7 +413,7 @@ WIRING = {
 # hole. Nothing may be added without saying why it is not an attachment point.
 NOT_A_SERVICE = {
     "show_fps": "a user PREFERENCE with a default in Workstation.__init__, a "
-                "Settings toggle and a persisted system.json key. web_boot sets "
+                "Settings toggle and a persisted system/settings key. web_boot sets "
                 "it from its `hud` argument so a conformance capture has no FPS "
                 "chip in the golden frame; the P4 flips it from `diag 0|1`. "
                 "Neither is a capability the other target lacks",

@@ -33,7 +33,7 @@ lists refuses the launch with a message naming it. A cart with no consent record
 Editor, a seed, a cart brought in by hand -- never prompts and runs on its
 manifest as written, less what Settings turned off.
 
-The consent record lives in system.json under `KEY`, one entry per app id
+The consent record lives in system/settings under `KEY`, one entry per app id
 (`moy_app.id_for`, the grant's key): `{"perms": [...], "off": [...]}`, the
 manifest permissions consented at install (None where nothing was
 installed: a Settings switch on an Editor cart) and the ones turned off

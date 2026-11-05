@@ -156,13 +156,17 @@ for (const sync of [true, false]) {
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
 }
 
-// ---- the console's own documents: system.json and its siblings ---------------
+// ---- the console's own documents: system/settings and its siblings ----------
 // A site-mode browser is its own console, so it keeps what a board keeps
 // beside its carts -- the Settings rows, the badges, the shared sheet -- in an
 // OPFS store of its own, and takes nothing else into it.
-const dirNames = async (d) => {
+const SET = "system/settings";
+const dirNames = async (d, pre = "") => {
     const out = [];
-    for await (const [n] of d.entries()) out.push(n);
+    for await (const [n, h] of d.entries()) {
+        if (h.kind === "directory") out.push(...await dirNames(h, pre + n + "/"));
+        else out.push(pre + n);
+    }
     return out.sort();
 };
 for (const sync of [true, false]) {
@@ -177,7 +181,7 @@ for (const sync of [true, false]) {
     const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
     const ACH = '{"unlocked": ["first_open", "first_run"]}';
     const r = await store.applyOps(s, [
-        { p: "system.json", t: SYS },
+        { p: SET, t: SYS },
         { p: "achievements.json", t: ACH },
         { p: "shared.moygfx", b: store.toBase64(sheet) },
     ]);
@@ -185,12 +189,12 @@ for (const sync of [true, false]) {
        JSON.stringify(r.errors));
     let all = await store.readAll(s);
     ok("...and read back, the sheet as bytes (" + label + ")",
-       all["system.json"] === SYS && all["achievements.json"] === ACH
+       all[SET] === SYS && all["achievements.json"] === ACH
        && store.fileData(all["shared.moygfx"]).every((x, i) => x === sheet[i]),
        JSON.stringify(Object.keys(all)));
     ok("a committed write leaves nothing beside the file (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "achievements.json,shared.moygfx,system.json",
+       "achievements.json,shared.moygfx,system/settings",
        (await dirNames(s.carts)).join());
     ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
     ok("...and the carts store never saw any of it (" + label + ")",
@@ -198,38 +202,39 @@ for (const sync of [true, false]) {
 
     const big = "{\"name\": \"" + "z".repeat(40) + "\"}";
     const chunked = await store.applyOps(s, [
-        { p: "system.json", t: big.slice(0, 20), part: 0 },
-        { p: "system.json", t: big.slice(20), part: 1 },
-        { p: "system.json", pub: 1 },
+        { p: SET, t: big.slice(0, 20), part: 0 },
+        { p: SET, t: big.slice(20), part: 1 },
+        { p: SET, pub: 1 },
         { p: "achievements.json", d: 1 },
     ]);
     all = await store.readAll(s);
     ok("chunks publish whole and a delete lands (" + label + ")",
-       chunked.applied === 4 && all["system.json"] === big && !("achievements.json" in all),
+       chunked.applied === 4 && all[SET] === big && !("achievements.json" in all),
        JSON.stringify(chunked.errors) + " " + JSON.stringify(Object.keys(all)));
 
     const bad = await store.applyOps(s, [
         { p: "wifi.json", t: "[]" },
         { p: "installed.json", t: "{}" },
+        { p: "system.json", t: "{}" },
         { p: "indexes.json", t: "{}" },
         { p: "a.moy/main.py", t: "x" },
-        { p: "system.json.bak", t: "x" },
-        { p: "system.json~part", t: "x" },
-        { p: "../system.json", t: "x" },
-        { p: "system.json", dc: 1 },
-        { p: "carts/a.moy", dc: 1 },
-        { p: "system.json", b: store.toBase64(sheet) },
+        { p: "system/settings.bak", t: "x" },
+        { p: "system/settings~part", t: "x" },
+        { p: "../system/settings", t: "x" },
+        { p: SET, dc: 1 },
+
+        { p: SET, b: store.toBase64(sheet) },
     ]);
     ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
        + " text file are all refused (" + label + ")",
        bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
     ok("...and nothing they named was written (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "shared.moygfx,system.json",
+       "shared.moygfx,system/settings",
        (await dirNames(s.carts)).join());
 }
 
-// ---- an interrupted write never corrupts system.json -------------------------
+// ---- an interrupted write never corrupts system/settings ---------------------
 // A reload can land between any two changes the store makes. Whatever it
 // interrupted, the next boot reads the old document or the new one, whole,
 // and finds nothing else beside them.
@@ -238,30 +243,30 @@ for (const sync of [true, false]) {
     const NEW = '{"theme": "night", "show_fps": true, "name": "nikola", "volume": 5}';
     const fresh = async () => {
         const s = await store.openStore(fakeNav(true), "system");
-        await store.applyOps(s, [{ p: "system.json", t: OLD }]);
+        await store.applyOps(s, [{ p: SET, t: OLD }]);
         return s;
     };
     const probe = await fresh();
     crash.at = { left: 1e9 };
-    await store.applyOps(probe, [{ p: "system.json", t: NEW }]);
+    await store.applyOps(probe, [{ p: SET, t: NEW }]);
     const total = 1e9 - crash.at.left;
     crash.at = null;
     let olds = 0, news = 0, bad = [];
     for (let k = 0; k < total; k++) {
         const s = await fresh();
         crash.at = { left: k };
-        const r = await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        const r = await store.applyOps(s, [{ p: SET, t: NEW }]);
         crash.at = null;
         if (!r.errors.length) { bad.push(k + ": no crash"); continue; }
         const all = await store.readAll(s);           // the next boot
-        if (all["system.json"] === OLD) olds++;
-        else if (all["system.json"] === NEW) news++;
-        else bad.push(k + ": " + JSON.stringify(all["system.json"]));
+        if (all[SET] === OLD) olds++;
+        else if (all[SET] === NEW) news++;
+        else bad.push(k + ": " + JSON.stringify(all[SET]));
         const left = await dirNames(s.carts);
-        if (left.join() !== "system.json") bad.push(k + ": left " + left.join());
+        if (left.join() !== SET) bad.push(k + ": left " + left.join());
     }
     ok("a reload at any of a Settings write's " + total + " changes leaves the old"
-       + " system.json or the new", !bad.length && olds > 0 && news > 0,
+       + " settings or the new", !bad.length && olds > 0 && news > 0,
        bad.slice(0, 4).join(" | ") + " old=" + olds + " new=" + news);
 
     // A boot whose own settle is interrupted is finished by the boot after it.
@@ -269,13 +274,13 @@ for (const sync of [true, false]) {
     for (let k = 0; k < total; k++) {
         const s = await fresh();
         crash.at = { left: k };
-        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        await store.applyOps(s, [{ p: SET, t: NEW }]);
         for (let j = 0; j < 12; j++) {
             crash.at = { left: j };
             try { await store.readAll(s); crash.at = null; break; } catch (e) { }
         }
         crash.at = null;
-        const v = (await store.readAll(s))["system.json"];
+        const v = (await store.readAll(s))[SET];
         if (v !== OLD && v !== NEW) twice.push(k + ":" + v);
     }
     ok("an interrupted settle is finished by the next one", !twice.length, twice.join(","));
@@ -287,10 +292,10 @@ for (const sync of [true, false]) {
     for (let k = 0; k < total; k++) {
         const s = await fresh();
         crash.at = { left: k };
-        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        await store.applyOps(s, [{ p: SET, t: NEW }]);
         crash.at = null;
-        const r = await store.applyOps(s, [{ p: "system.json", t: NEWER }]);
-        const v = (await store.readAll(s))["system.json"];
+        const r = await store.applyOps(s, [{ p: SET, t: NEWER }]);
+        const v = (await store.readAll(s))[SET];
         if (r.errors.length || v !== NEWER) next.push(k + ":" + v);
     }
     ok("the write after a failed one lands whole", !next.length, next.join(","));

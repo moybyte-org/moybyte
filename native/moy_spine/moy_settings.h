@@ -1,4 +1,4 @@
-// The settings store as a C ABI: system.json as rows of JSON text.
+// The settings store as a C ABI: system/settings as rows of JSON text.
 //
 // runtime/moy_spine.py's Settings is the interface and the reference; this is
 // its native form. One row per

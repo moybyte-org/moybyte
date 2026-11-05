@@ -590,35 +590,65 @@ def test_adopt_encodes_a_dict_into_rows(sp):
     assert json.loads(s.dump()) == d                  # a refused adopt changes nothing
 
 
-def test_system_json_on_the_card_is_byte_identical(tmp_path):
-    """The format's pin through the shell's store (no migration, CLAUDE.md): a
-    card written the way json.dumps wrote it reads, and writes back, as the same
-    bytes, and every change through the one setter leaves the file json.dumps
-    of the same dict would."""
+def test_the_settings_file_on_the_card_is_byte_identical(tmp_path):
+    """The format's pin through the shell's store: system/settings, one
+    `key = <JSON>` a line sorted by key, reads and writes back as the same
+    bytes, and every change through the one setter leaves the file
+    settings_text of the same dict would."""
     from ws_helpers import build_ws
     from runtime import moy_carts
 
     ws = build_ws(tmp_path)
     path = moy_carts.system_store_path(ws.carts_root)
+    assert path.endswith("/system/settings")
     old = json.loads(GOLDEN)
-    moy_carts.save_system(old, ws.carts_root)       # json.dumps(dict): the old writer
+    moy_carts.save_system(old, ws.carts_root)
+    want = moy_carts.settings_text(old)
     with open(path) as f:
-        assert f.read() == GOLDEN
+        assert f.read() == want
+    assert want.startswith("app_guard = {") and "\ntheme = \"outline\"\n" in want
     ws.prefs.load()
     ws.system.set("theme", "outline")               # a write that changes nothing
     with open(path) as f:
-        assert f.read() == GOLDEN
+        assert f.read() == want
     for key, value in (("font_scale", 3), ("brand_new", {"a": [1, None]}),
                        ("favorites", ["/carts/b.moy"]), ("theme_variant", "light")):
         ws.system.set(key, value)
         old[key] = value
         with open(path) as f:
-            assert f.read() == json.dumps(old), key
+            assert f.read() == moy_carts.settings_text(old), key
     ws.system.delete("desk_mru")
     del old["desk_mru"]
     with open(path) as f:
-        assert f.read() == json.dumps(old)
+        assert f.read() == moy_carts.settings_text(old)
     assert moy_carts.load_system(ws.carts_root) == old
+
+
+def test_a_legacy_system_json_reads_as_absent(tmp_path):
+    """No store migrations (CLAUDE.md): a console with only the old
+    system.json starts on the defaults and writes system/settings beside it,
+    leaving the old file as it was."""
+    from ws_helpers import build_ws
+    from runtime import moy_carts
+
+    ws = build_ws(tmp_path)
+    legacy = tmp_path / "system.json"
+    legacy.write_text(json.dumps({"theme": "dusk", "font_scale": 3}))
+    assert moy_carts.load_system(ws.carts_root) == {}
+    ws.prefs.load()
+    assert ws.system.get("theme") is None and ws.system.get("font_scale") is None
+    ws.system.set("name", "Zed")
+    assert moy_carts.load_system(ws.carts_root) == {"name": "Zed"}
+    assert json.loads(legacy.read_text()) == {"theme": "dusk", "font_scale": 3}
+
+
+def test_a_line_the_settings_reader_cannot_read_is_passed_over(tmp_path):
+    from runtime import moy_carts
+    rows = moy_carts.parse_settings(
+        '# a comment\n\ntheme = "dusk"\nvolume=3\nnot a row\nname = Zed\n'
+        'bad key = 1\n = 2\nfavorites = ["/a.moy"]\n')
+    assert rows == {"theme": "dusk", "volume": 3, "favorites": ["/a.moy"]}
+    assert moy_carts.parse_settings(moy_carts.settings_text(rows)) == rows
 
 
 def test_a_write_through_the_setter_reaches_the_card_with_no_persist_call(tmp_path):

@@ -15,7 +15,7 @@ name: Web console E2E
 #                                  round trip, and the negative case -- a
 #                                  BOARD-served page must keep nothing locally.
 #   tests/test_web_board_system_e2e.py  a board-served page's theme and badges
-#                                  land in the board twin's system.json and
+#                                  land in the board twin's system/settings and
 #                                  achievements.json, key by key, and a fresh
 #                                  browser comes back on them; a twin without
 #                                  the system root is sent no system batch.

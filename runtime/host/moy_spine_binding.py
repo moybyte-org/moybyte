@@ -492,7 +492,7 @@ def binding(sanitize=False):
                 self._p = None
 
         def load(self, text):
-            b = raw(text, "system.json is a str")
+            b = raw(text, "the settings text is a str")
             rows = c.c_uint32()
             rc = lib.moy_settings_load(self._p, b, len(b), c.byref(rows))
             if rc != OK:

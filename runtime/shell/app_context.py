@@ -24,7 +24,7 @@ on a cart's manifest permissions rather than on a class constant.
     ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
-    ctx.prefs       persisted per-app settings (system.json, namespaced)
+    ctx.prefs       persisted per-app settings (system/settings, namespaced)
     ctx.notify      achievement events, and the badges (award, count, found_on)
     ctx.wallpaper   the desktop backdrop (Appearance, Paint, Files' WALL)
     ctx.artwork     Paint's open picture: which it is, and following a rename

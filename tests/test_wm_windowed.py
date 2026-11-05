@@ -1515,7 +1515,7 @@ def test_settings_keyboard_close_is_surgical_too(tmp_path):
 def test_theme_setting_cycles_and_persists(tmp_path):
     """Settings -> THEME cycles chrome.THEME_NAMES, retints the panel chrome
     everywhere (settings panel, window strips, chips, selection accents), and
-    persists to system.json; the default is Moy in its Day mode."""
+    persists to system/settings; the default is Moy in its Day mode."""
     ws = build_desktop_ws(tmp_path)               # aliases the bare-name modules
     from runtime.chrome import THEME_NAMES, live_colors
     drv = _drv(ws)
@@ -2126,7 +2126,7 @@ def test_direct_render_matches_the_stamp_path_pixel_for_pixel(tmp_path):
     gesture with the direct path forced off must produce the same screen."""
     def run(direct, sub):
         # A DISTINCT save dir per run: two workstations sharing one would have
-        # the second start from state the first persisted (selection, system.json),
+        # the second start from state the first persisted (selection, system/settings),
         # which shows up as a pixel diff that has nothing to do with the path.
         ws = _ws(tmp_path / sub)
         drv = _drv(ws)

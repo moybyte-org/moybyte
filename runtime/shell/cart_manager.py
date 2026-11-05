@@ -76,7 +76,7 @@ class CartManager:
 
     # -- favorites + recents (#105) -------------------------------------------
     #
-    # Both ride the SAME system.json persistence Settings already uses for
+    # Both ride the SAME system/settings persistence Settings already uses for
     # theme/font/OTA channel (ws.system.set, which persists) -- no new
     # store surface. `favorites` is a plain path list (order = the order a kid
     # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
@@ -86,7 +86,7 @@ class CartManager:
     # many times it was run and the day of the last run as YYYYMMDD, 0 where
     # the board had no wall clock. A value of any other shape reads as absent.
 
-    _MRU_CAP = 8          # how many recents system.json remembers
+    _MRU_CAP = 8          # how many recents system/settings remembers
     _PLAYS_CAP = 64       # how many carts' play records it keeps
 
     def __init__(self, ws, handle, carts=None):
@@ -399,7 +399,7 @@ class CartManager:
 
     def note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of
-        system.json's `desk_mru` list (issue #105's naming), capped at
+        system/settings' `desk_mru` list (issue #105's naming), capped at
         _MRU_CAP. Called from every launcher-driven run/open (open/open_app) --
         a pseudo tile (no path) is never recorded."""
         path = cart.get("path") if cart else None
@@ -460,7 +460,7 @@ class CartManager:
         """The desk_mru path list resolved back to live cart dicts (newest first),
         silently dropping any path that no longer scans (deleted/renamed since).
         Read-only convenience for a future recents surface; #105 only settled the
-        system.json key, not where it renders."""
+        system/settings key, not where it renders."""
         by_path = {c.get("path"): c for c in self.all if c.get("path")}
         out = []
         for path in self.ws.system.get("desk_mru", []):

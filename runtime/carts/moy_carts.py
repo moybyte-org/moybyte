@@ -1734,7 +1734,8 @@ def delete(cart):
 try:
     from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                           _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
-                          SYSTEM_STORE_NAME, system_store_path, load_system, save_system,
+                          SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
+                          settings_text, load_system, save_system,
                           ACHIEVEMENTS_STORE_NAME, ACHIEVEMENTS_FORMAT,
                           achievements_store_path, achievements_doc, achievements_text,
                           load_achievements, save_achievements)
@@ -1743,7 +1744,8 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                                   _wifi_networks, load_wifi, save_wifi, remember_wifi,
-                                  forget_wifi, SYSTEM_STORE_NAME, system_store_path,
+                                  forget_wifi, SYSTEM_DIR, SETTINGS_NAME,
+                                  system_store_path, parse_settings, settings_text,
                                   load_system, save_system, ACHIEVEMENTS_STORE_NAME,
                                   ACHIEVEMENTS_FORMAT, achievements_store_path,
                                   achievements_doc, achievements_text, load_achievements,

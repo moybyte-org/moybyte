@@ -131,7 +131,7 @@ left:
   deliberately: carts authors executable content, so granting it to a cart is
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
   +5.1µs) — live state reads through a method. `prefs_ns` exists because
-  `paint_doc` is the real key in kids' `system.json` since #108.
+  `paint_doc` is the real key in kids' `system/settings` since #108.
 - **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
   C, with `runtime/toolkit/ui_draw.py` its face (sprint 6, `docs/history/kernel_toolkit_2026-10.md`);
   `runtime/toolkit/ui.py` is the public UI API over it (`docs/ui_api_2026-10.md`), and

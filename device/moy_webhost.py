@@ -35,7 +35,7 @@ turns into `on_sync` (the launcher re-scans), and the listener closing after
 its goodbye window is the event that releases the radio lease (`on_stop`).
 
 THE PIN is read at START, never at construction: a board builds this before
-system.json is loaded, and a pin minted then would not be the one the
+system/settings is loaded, and a pin minted then would not be the one the
 connection screen's QR carries. A host built with `pin=None` (a test, the dev
 server) is open end to end.
 

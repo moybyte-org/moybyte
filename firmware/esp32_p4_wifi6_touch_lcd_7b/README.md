@@ -253,7 +253,7 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 - **A card that mounts IS the cart store** (`device/card_store.py`; the T-Deck's
   and the Guition S3's model, minus their bus-sharing machinery — this slot
   shares nothing). Mounted once at `/sd`; the carts and the system documents
-  beside them (`system.json`, `wifi.json`, `shared.moygfx`) live under
+  beside them (`system/settings`, `wifi.json`, `shared.moygfx`) live under
   **`/sd/moybyte/`** — the T-Deck's layout, so nothing lands at the card's root.
   FAT32 and **exFAT** both mount: the esp32 port leaves FatFS's exFAT off
   (`MICROPY_FATFS_EXFAT`, set in `mpconfigboard.h`), and a card over 32GB ships

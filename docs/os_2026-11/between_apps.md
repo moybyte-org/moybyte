@@ -28,7 +28,7 @@ carts under `/sd/moybyte/carts` (`runtime/carts/moy_store_base.py`'s
 `CARTS_DIR`); a person's creations beside them as `files/<kind>/<name>`
 (`native/moy_store/moy_ufiles.h`); a compiled cart's writable files in
 `written/<cart>/` (`runtime/carts/cart_files.py`); the console's documents
-(`system.json`, `wifi.json`, `achievements.json`, `runtime/carts/moy_docs.py`)
+(`system/settings`, `wifi.json`, `achievements.json`, `runtime/carts/moy_docs.py`)
 beside the carts; every volume one library behind `native/moy_store/moy_vol.h`.
 #231 decided (2026-10-03) that a user's own files reach a compiled cart
 through a console-drawn picker.

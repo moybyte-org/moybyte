@@ -27,7 +27,7 @@ panel is also what the bar's wifi popover holds (`wifi_page`,
 runtime/system/popover.py).
 
 Boundary: SettingsLayer owns NO config. Every value it steps or shows is
-CART/SYSTEM state on Workstation -- ws.system (the system.json rows),
+CART/SYSTEM state on Workstation -- ws.system (the system/settings rows),
 ws.look.font_scale, ws.diag_live, the updater queries -- and every mutation
 goes through the ws setters (ws.look.cycle_font_scale / _cycle_channel /
 ws.system.set / the SETTINGS_TOGGLES verbs). The module-level
@@ -92,12 +92,12 @@ _SET_ROW_H = 26
 # absorb.
 #
 # Per entry:
-#   key      the ONE name -- the system.json key, the flat `ws.<key>` mirror,
+#   key      the ONE name -- the system/settings key, the flat `ws.<key>` mirror,
 #            and the Settings row's dispatch key. All six were already the same
 #            string in three places; the registry is what pins that.
 #   label    the row text. THIS ORDER IS THE ON-SCREEN ORDER (the block sits
 #            below NAME, above the injected web/OTA rows).
-#   default  the value before system.json is read, and the fallback when the
+#   default  the value before system/settings is read, and the fallback when the
 #            store says nothing about this key.
 #   setter   the `ws` verb every path goes through. Never a raw attribute
 #            write -- a toggle that only set its mirror would skip its apply.
@@ -262,7 +262,7 @@ _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "slider": _HINT_CHANGE,
 # A toggle's: what Enter does to it, by whether it is on.
 _HINT_TOGGLE = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", "back", "Back"))
 
-# The level rows, by system.json key: (lowest, highest, the value with none
+# The level rows, by system/settings key: (lowest, highest, the value with none
 # stored). Volume is the console's level (`audio_session.console_volume`,
 # the one the boot applies and the dev channel's `vol` sets); Brightness is
 # the panel light's, which the idle ladder applies at boot and on a change.
@@ -334,7 +334,7 @@ class SettingsLayer:
         ("appearance", "APPEARANCE", "action"),
         ("font_scale", "FONT SIZE", "font"),
         # VOLUME applies the console's level, BRIGHTNESS the panel light's
-        # top; NAME is stored in system.json and applied by nothing yet.
+        # top; NAME is stored in system/settings and applied by nothing yet.
         ("volume", "VOLUME", "level"),
         ("brightness", "BRIGHTNESS", "level"),
         ("name", "NAME", "name"),

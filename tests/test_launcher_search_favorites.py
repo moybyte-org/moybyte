@@ -1,6 +1,6 @@
 """Tests for the #105 launcher-feature gaps that are host-side and decision-free:
 search/filter across the run-grid, favorites (a corner-star badge toggle on the
-selected card), and recents (the issue's own `desk_mru` system.json naming note).
+selected card), and recents (the issue's own `desk_mru` system/settings naming note).
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball, type_char == a typed ASCII

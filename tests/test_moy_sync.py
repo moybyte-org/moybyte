@@ -793,7 +793,7 @@ def test_sync_off_stops_both_roots(tmp_path):
 
 # ---------------------------------------------------------------------------
 # The console's own documents (moy_sync.SYSTEM_ROOT): a site-mode browser keeps
-# system.json, the badges and the edited icons in its OPFS. The JS half (the
+# system/settings, the badges and the edited icons in its OPFS. The JS half (the
 # OPFS apply and its crash-safety) is firmware/web_runner/store_test.mjs; the
 # reload itself is tests/test_web_system_persist.py. Their board half -- the
 # per-key merge, the pull, the parked batch -- is tests/test_system_sync.py.
@@ -807,12 +807,15 @@ def _console_dir(tmp_path):
     (top / "carts" / "hop.moy").mkdir(parents=True)
     (top / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
     (top / "files" / "drawings").mkdir(parents=True)
-    (top / "system.json").write_text('{"theme": "dusk", "show_fps": false}')
+    (top / "system").mkdir()
+    (top / "system" / "settings").write_text('show_fps = false\ntheme = "dusk"\n')
+    (top / "system.json").write_text('{"theme": "dusk"}')
     (top / "achievements.json").write_text('{"unlocked": ["first_open"]}')
     (top / "shared.moygfx").write_bytes(bytes(range(40)))
     (top / "wifi.json").write_text('[{"ssid": "Home", "pw": "secret"}]')
     (top / "installed.json").write_text("{}")
-    (top / "system.json.bak").write_text("{}")
+    (top / "system" / "settings.bak").write_text("x")
+    (top / "system" / "sources").write_text("https://x/index.json\n")
     return top
 
 
@@ -825,7 +828,7 @@ def test_the_system_root_is_the_carts_folders_parent():
     assert moy_sync.SYSTEM_ROOT.path("/moy/carts") == "/moy"
     assert moy_sync.SYSTEM_ROOT.path("/sd/moybyte/carts") == "/sd/moybyte"
     assert moy_sync.SYSTEM_ROOT.endpoint == moy_sync.SYSTEM_PULL
-    assert moy_sync.SYSTEM_ROOT.wire_top == ("system.json", "achievements.json")
+    assert moy_sync.SYSTEM_ROOT.wire_top == ("system/settings", "achievements.json")
 
 
 def test_the_system_files_are_the_stores_own_names():
@@ -833,7 +836,7 @@ def test_the_system_files_are_the_stores_own_names():
     leave the browser keeping a file nothing writes."""
     from runtime import moy_carts
     assert moy_sync.SYSTEM_FILES == (
-        moy_carts.SYSTEM_STORE_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
+        moy_carts.SETTINGS_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
         moy_carts.SHARED_SHEET_NAME)
     assert moy_carts.WIFI_STORE_NAME not in moy_sync.SYSTEM_FILES
 
@@ -841,9 +844,10 @@ def test_the_system_files_are_the_stores_own_names():
 def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    assert set(w._snap) == {"system.json", "achievements.json", "shared.moygfx"}
+    assert set(w._snap) == {"system/settings", "achievements.json", "shared.moygfx"}
     assert not w.sweep(), "the store as seeded has nothing to tell"
-    for name in ("wifi.json", "installed.json", "system.json.bak"):
+    for name in ("wifi.json", "installed.json", "system.json", "system/settings.bak",
+                 "system/sources"):
         p = top / name
         p.write_text('{"changed": true}')
         _bump_mtime(p)
@@ -851,14 +855,14 @@ def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     c.write_text("x = 2\n")
     _bump_mtime(c)
     assert not w.sweep(), "a cart or a secret is not the console's own document"
-    p = top / "system.json"
-    p.write_text('{"theme": "night", "show_fps": false}')
+    p = top / "system" / "settings"
+    p.write_text('show_fps = false\ntheme = "night"\n')
     _bump_mtime(p)
     assert w.sweep()
     doc = json.loads(w.take_json())
     assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED and doc["root"] == "system"
-    assert doc["ops"] == [{"p": "system.json",
-                           "t": '{"theme": "night", "show_fps": false}'}]
+    assert doc["ops"] == [{"p": "system/settings",
+                           "t": 'show_fps = false\ntheme = "night"\n'}]
 
 
 def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
@@ -874,7 +878,7 @@ def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
 
 
 def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
-    """Each file is its own unit: `dc system.json` would ask a store to remove
+    """Each file is its own unit: `dc system/settings` would ask a store to remove
     a folder by that name."""
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
@@ -885,17 +889,17 @@ def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
 
 def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):
     """A system batch parses as its own root and is never read as a carts
-    batch with `system.json` for a cart path: the C apply has no store for it,
+    batch with `system/settings` for a cart path: the C apply has no store for it,
     so nothing lands even where a caller hands it one (the VM merges it)."""
     body = json.dumps({"v": moy_sync.PROTOCOL_V_ROOTED, "root": "system",
-                       "ops": [{"p": "system.json", "t": "{}"}]})
+                       "ops": [{"p": "system/settings", "t": ""}]})
     ops, _pin, root_id = parse_batch(body)
-    assert root_id == "system" and ops == [{"p": "system.json", "t": "{}"}]
+    assert root_id == "system" and ops == [{"p": "system/settings", "t": ""}]
     root = _store(tmp_path)
     applied, errors, _shelf = apply_ops(str(root), ops, root_id)
     assert applied == 0 and errors == [(0, "no such store")]
-    assert not (root / "system.json").exists()
-    assert not (tmp_path / "system.json").exists()
+    assert not (root / "system").exists()
+    assert not (tmp_path / "system").exists()
 
 
 def test_a_board_page_watches_its_documents_only_when_the_board_served_them(
@@ -925,7 +929,7 @@ def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
     wb._S["watchers"] = wb._build_watchers(str(top / "carts"), True)
     wb._S.pop("sync_took", None)
     wb._S.pop("sync_pin", None)
-    for p, text in ((top / "system.json", '{"theme": "night"}'),
+    for p, text in ((top / "system" / "settings", 'theme = "night"\n'),
                     (top / "carts" / "hop.moy" / "main.py", "x = 3\n")):
         p.write_text(text)
         _bump_mtime(p)
@@ -934,7 +938,7 @@ def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
     wb.sync_ack(True)
     second = json.loads(wb.sync_poll_json())
     assert second["root"] == "system"
-    assert second["ops"] == [{"p": "system.json", "t": '{"theme": "night"}'}]
+    assert second["ops"] == [{"p": "system/settings", "t": 'theme = "night"\n'}]
     wb.sync_ack(True)
     assert wb.sync_poll_json() == ""
     wb._S["store_mode"] = None

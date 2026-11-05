@@ -39,7 +39,7 @@ GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the 7"
                                    # 1024x600 fits CONTENT, not magnification --
                                    # geometry is resolution-driven; persisted
-                                   # system.json still overrides (Settings FONT SIZE)
+                                   # system/settings still overrides (Settings FONT SIZE)
 PANEL_DIAGONAL_IN = 7.0            # the glass, in inches -- board.toml [panel] is
                                    # the authority and tests/test_board_toml.py
                                    # pins the two together. It buys the #203 chrome

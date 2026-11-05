@@ -167,7 +167,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
 
 
 def test_the_crash_guard_persists_through_the_store(tmp_path):
-    """`arm` writes a strike to system.json through the rows' save hook -- so a
+    """`arm` writes a strike to system/settings through the rows' save hook -- so a
     board that DIED holding one still knows on the next boot."""
     ws = _ws(tmp_path)
     ws.app_guard.arm("some_app")

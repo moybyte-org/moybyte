@@ -91,7 +91,7 @@ roles it declared:
 | `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made with a files kind (a user app's) reaches that kind alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
-| `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
+| `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
 | `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
 | `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
@@ -398,7 +398,7 @@ The Player turns a cart exception into the stop card (its See why opens the
 code on the line; docs/history/look_2026-10.md step 33). What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
 itself, the next boot runs it again. `runtime/shell/crash_guard.py` marks the app id in
-`system.json` BEFORE the cart's code is compiled and clears it after three
+`system/settings` BEFORE the cart's code is compiled and clears it after three
 painted frames (a compiled app whose frames the kernel's Player drew clears it
 at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
 the next tap on the ordinary stop card, whose See why opens its code. The

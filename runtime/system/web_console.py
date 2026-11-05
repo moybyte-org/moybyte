@@ -14,7 +14,7 @@ The webhost is read THROUGH `ws` on every call and never captured here: it is
 `None` at construction and injected later by `wire_workstation_core`, and the
 settings load later still (the same ordering `make_webhost` respects by reading
 the pin at `start()` rather than at construction). The pin's own persistence
-goes to the sibling collaborator that owns system.json (`ws.prefs`, #209
+goes to the sibling collaborator that owns system/settings (`ws.prefs`, #209
 landing B); `ws.system` stays a plain alias of the rows it holds, so reading and
 writing a key through it (`get`, and `set`, which persists) needs nothing from
 this object.
@@ -79,7 +79,7 @@ class WebConsole:
     def pin(self):
         """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
 
-        MINTED ONCE, LAZILY, and then persisted in system.json beside every
+        MINTED ONCE, LAZILY, and then persisted in system/settings beside every
         other Settings choice. Lazily because a board that never serves the web
         console should never have written a secret to its store; once because a
         pin that changed per boot would mean re-scanning the QR after every

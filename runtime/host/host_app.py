@@ -296,7 +296,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     fixed 320x240 the carts + cart API draw on. When `sys_size` is None or 320x240
     (the T-Deck default) the system canvas IS the game canvas (one object), so the
     desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
-    system-UI font size (the persisted system.json value overrides it on load).
+    system-UI font size (the persisted system/settings value overrides it on load).
 
     `windowed=True` installs the Picotron-style windowed WM (wm_windowed.py --
     the big-screen / P4 presentation, #73/#58): the launcher is the desktop and
