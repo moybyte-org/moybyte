@@ -231,8 +231,8 @@ off, the state a cart plays in.
 ## Where the memory goes
 
 Nothing is held between runs: the module allocates no memory at boot, so what
-it costs the idle desk is its static data (about 0.6 KB of internal RAM) and
-nothing else. During a run:
+it costs the idle desk is its static data (about 0.25 KB of internal RAM) and
+nothing else; a run's state is PSRAM, taken by the first `start`. During a run:
 
 | what | where |
 |---|---|

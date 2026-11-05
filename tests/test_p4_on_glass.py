@@ -108,7 +108,10 @@ TF_CARD_SRAM = 844
 # And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
 # session's pointer; every session is PSRAM), 4 bytes of .bss by the
 # link map, 2026-11-05.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270 + 4
+# Less the floor's state (native/moy_kernel: the recovery view and its
+# geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
+# by the link map.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270 + 4 - 640
 # And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
 # moy_ui_api_text.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
 # face's line cursor and the pointers to the block the views share, which

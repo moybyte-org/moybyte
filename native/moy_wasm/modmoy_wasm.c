@@ -136,7 +136,9 @@ typedef struct {
     size_t sram_before;            // internal free when the run was started
 } run_t;
 
-static run_t g_run;
+// PSRAM, taken by the first start: an idle console holds none of it in
+// internal SRAM.
+static run_t *g_run;
 static SemaphoreHandle_t g_lock;
 static StaticSemaphore_t g_lock_buf;
 
@@ -642,7 +644,13 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, a);
 
-    run_t *r = &g_run;
+    if (g_run == NULL) {
+        g_run = heap_caps_calloc(1, sizeof(run_t), PSRAM_CAPS);
+        if (g_run == NULL) {
+            mp_raise_type(&mp_type_MemoryError);
+        }
+    }
+    run_t *r = g_run;
     if (r->started) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a run is live; collect it with result()"));
     }
@@ -719,7 +727,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(mod_start_obj, 2, mod_start);
 
 static mp_obj_t mod_done(void)
 {
-    return mp_obj_new_bool(!g_run.started || g_run.finished);
+    return mp_obj_new_bool(g_run == NULL || !g_run->started || g_run->finished);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_done_obj, mod_done);
 
@@ -728,9 +736,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_done_obj, mod_done);
 // notices it.
 static mp_obj_t mod_terminate(void)
 {
-    run_t *r = &g_run;
+    run_t *r = g_run;
     bool told = false;
-    if (r->started && g_lock) {
+    if (r != NULL && r->started && g_lock) {
         xSemaphoreTake(g_lock, portMAX_DELAY);
         if (r->live) {
             wasm_runtime_terminate(r->live);
@@ -1136,7 +1144,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
                           int allow_unsigned, int interp, const moy_wasm_ops *ops,
                           char *err, size_t errlen)
 {
-    if (moy_wasm_session_live() || g_run.started) {
+    if (moy_wasm_session_live() || (g_run != NULL && g_run->started)) {
         snprintf(err, errlen, "a wasm run is already live");
         return 1;
     }
@@ -1235,8 +1243,8 @@ static void put(mp_obj_t d, qstr k, mp_obj_t v)
 // while it waits). None when nothing was started.
 static mp_obj_t mod_result(void)
 {
-    run_t *r = &g_run;
-    if (!r->started) {
+    run_t *r = g_run;
+    if (r == NULL || !r->started) {
         return mp_const_none;
     }
     size_t sram_min = r->sram_before;

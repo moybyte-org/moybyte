@@ -910,7 +910,17 @@ static void k_sh(const k_floor_t *k, const char *line, bool *ready) {
 
 // The floor: never returns. Runs on the VM task's stack, with no VM.
 static void moy_kernel_recovery(int why) {
-    static k_floor_t k;
+    // PSRAM, which no VM has taken on a floor's boot: the view is most of a
+    // kilobyte that internal SRAM would hold from boot on every console.
+    k_floor_t *k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (k == NULL) {
+        k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_8BIT);
+    }
+    if (k == NULL) {
+        k_out("KERNEL recovery no memory\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
     char hint[MOY_RV_COLS];
     #if defined(MOY_KERNEL_TOUCH_AXS15231)
     moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_TOUCH);
@@ -919,30 +929,30 @@ static void moy_kernel_recovery(int why) {
     #else
     moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_SERIAL);
     #endif
-    k.why = why;
+    k->why = why;
     #ifdef MOY_KERNEL_PANEL
-    k_geom(&k.g);
+    k_geom(&k->g);
     #endif
     #if defined(MOY_KERNEL_BUTTON_GPIO)
     int serial = 1;              // the foot names the button, so serial gets a line
     #else
     int serial = 0;
     #endif
-    moy_recovery_view(&k.v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint, serial);
+    moy_recovery_view(&k->v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint, serial);
     #if defined(MOY_KERNEL_IDLE_SAFE_MS)
-    k.v.sel = 1;
+    k->v.sel = 1;
     #endif
     #ifdef MOY_KERNEL_PANEL
     int e = MOY_KERNEL_PANEL(init)();
     if (e == 0) {
-        k.fb = MOY_KERNEL_PANEL(fb)();
+        k->fb = MOY_KERNEL_PANEL(fb)();
     } else {
         k_printf("KERNEL recovery panel err=0x%x\r\n", e);
     }
-    k_draw(&k);
+    k_draw(k);
     MOY_KERNEL_PANEL(backlight)(255);
     #endif
-    k_report(&k);
+    k_report(k);
 
     #if defined(MOY_KERNEL_BUTTON_GPIO)
     gpio_config_t bc = {
@@ -982,10 +992,10 @@ static void moy_kernel_recovery(int why) {
                     } else if (strcmp(line, "repl") == 0) {
                         k_choose(2);
                     } else if (strcmp(line, "state") == 0) {
-                        k_state(&k);
+                        k_state(k);
                     } else if (strncmp(line, "sh", 2) == 0
                                && (line[2] == '\0' || line[2] == ' ')) {
-                        k_sh(&k, line[2] ? line + 3 : line + 2, &sh_ready);
+                        k_sh(k, line[2] ? line + 3 : line + 2, &sh_ready);
                         now = last_input = esp_timer_get_time();
                     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
                     } else if (strncmp(line, "update", 6) == 0
@@ -994,7 +1004,7 @@ static void moy_kernel_recovery(int why) {
                         last_input = esp_timer_get_time();
                     #endif
                     } else {
-                        k_report(&k);
+                        k_report(k);
                     }
                 }
                 n = 0;
@@ -1009,12 +1019,12 @@ static void moy_kernel_recovery(int why) {
             held = false;
         } else if (down && !held && now - pressed_at >= K_BUTTON_HOLD_MS * 1000LL) {
             held = true;
-            k_choose(k.v.sel);
+            k_choose(k->v.sel);
         } else if (!down && pressed_at >= 0) {
             if (!held && now - pressed_at >= 30000) {   // a press, not a bounce
-                k.v.sel = (k.v.sel + 1) % MOY_RV_CHOICES;
-                k_draw(&k);
-                k_report(&k);
+                k->v.sel = (k->v.sel + 1) % MOY_RV_CHOICES;
+                k_draw(k);
+                k_report(k);
             }
             pressed_at = -1;
             last_input = now;
@@ -1023,10 +1033,10 @@ static void moy_kernel_recovery(int why) {
         #if defined(MOY_KERNEL_TOUCH_AXS15231)
         int tx, ty;
         if (k_touch(&tx, &ty)) {
-            int hit = moy_recovery_hit(&k.g, tx, ty);
-            if (hit >= 0 && hit != k.v.sel) {
-                k.v.sel = hit;
-                k_draw(&k);
+            int hit = moy_recovery_hit(&k->g, tx, ty);
+            if (hit >= 0 && hit != k->v.sel) {
+                k->v.sel = hit;
+                k_draw(k);
             }
             touch_choice = hit;
             last_input = now;
@@ -1042,13 +1052,13 @@ static void moy_kernel_recovery(int why) {
         }
         if (left != shown_left) {
             shown_left = left;
-            moy_str_fmt(k.v.hint, sizeof(k.v.hint), MOY_S_RECOVERY_SAFE_IN, left);
-            k_draw(&k);
+            moy_str_fmt(k->v.hint, sizeof(k->v.hint), MOY_S_RECOVERY_SAFE_IN, left);
+            k_draw(k);
         }
         #endif
         if (now - last_report >= K_REPORT_MS * 1000LL) {
             last_report = now;
-            k_report(&k);
+            k_report(k);
         }
         vTaskDelay(pdMS_TO_TICKS(K_POLL_MS));
     }

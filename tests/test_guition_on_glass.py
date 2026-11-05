@@ -98,7 +98,10 @@ EXFAT_SRAM = 640
 # And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
 # session's pointer; every session is PSRAM), 4 bytes of .bss by the
 # link map, 2026-11-05.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270 + 4
+# Less the floor's state (native/moy_kernel: the recovery view and its
+# geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
+# by the link map.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270 + 4 - 640
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on
