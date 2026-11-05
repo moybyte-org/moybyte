@@ -76,6 +76,10 @@ typedef struct {
     uint32_t skip;                  // bytes to drop (an ID3v2 tag)
     int head_seen;
     volatile int rate, channels, kbps;
+    // the entry's place: frames decoded at the output's rate, the MP3 bytes
+    // they took, and a fed file's size (the face's, under the lock)
+    volatile uint32_t e_dec, e_used;
+    uint32_t e_size;
 
     // the stream buffer: one writer (the task, or the VM's feed under the lock), one reader
     volatile uint32_t in_w, in_r;
@@ -660,6 +664,19 @@ int moy_media_feed_end(uint32_t owner, uint32_t gen) {
     return 0;
 }
 
+int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size) {
+    media_t *m = mine(owner);
+    if (m == NULL) {
+        return -MOY_MEDIA_EBADF;
+    }
+    LOCK(m);
+    if (gen != 0 && m->armed == gen) {
+        m->e_size = size;
+    }
+    UNLOCK(m);
+    return 0;
+}
+
 int moy_media_status(moy_media_status_t *st) {
     memset(st, 0, sizeof(*st));
     media_t *m = s_m;
@@ -682,7 +699,17 @@ int moy_media_status(moy_media_status_t *st) {
     st->err = m->err;
     st->text_gen = m->text_gen;
     st->idle = m->idle;
+    uint32_t size = m->e_size;
     UNLOCK(m);
+    uint32_t dec = m->e_dec, used = m->e_used;
+    uint32_t held = LOAD(&m->out_w) - LOAD(&m->out_r);
+    uint32_t heard = dec > held ? dec - held : 0;
+    if (m->out_rate > 0) {
+        st->at_ms = (uint32_t)((uint64_t)heard * 1000u / (uint32_t)m->out_rate);
+        if (size > 0 && used > 0) {
+            st->len_ms = (uint32_t)((uint64_t)size * dec / used * 1000u / (uint32_t)m->out_rate);
+        }
+    }
     st->in_bytes = LOAD(&m->in_w) - LOAD(&m->in_r);
     st->in_room = MOY_MEDIA_IN_BYTES - st->in_bytes;
     st->pcm_frames = LOAD(&m->out_w) - LOAD(&m->out_r);
@@ -796,6 +823,12 @@ static void begin(media_t *m) {
     STORE(&m->in_r, LOAD(&m->in_w));
     m->cur = e;
     int kind = e >= 0 && e < m->n ? (is_url(m->pool + m->e_src[e]) ? MOY_MEDIA_URL : MOY_MEDIA_FEED) : 0;
+    if (kind != 0) {
+        // a new entry's place; past the list's end the last one's stays
+        m->e_size = 0;
+        m->e_dec = 0;
+        m->e_used = 0;
+    }
     if (kind == MOY_MEDIA_FEED) {
         m->armed = m->seen;
     }
@@ -1069,6 +1102,7 @@ static void resample(media_t *m, const int16_t *pcm, int frames, int ch, int hz)
         }
     }
     m->decoded += w - m->out_w;
+    m->e_dec += w - m->out_w;
     STORE(&m->out_w, w);
 }
 
@@ -1116,6 +1150,7 @@ static int decode_one(media_t *m) {
         m->rate = info.hz;
         m->channels = info.channels;
         m->kbps = info.bitrate_kbps;
+        m->e_used += (uint32_t)info.frame_bytes;
         resample(m, m->pcm, s, info.channels, info.hz);
         if (!m->played) {
             m->played = 1;

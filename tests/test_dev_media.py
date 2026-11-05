@@ -220,6 +220,23 @@ def test_a_file_decodes_into_the_mix_and_reads_back_as_its_tone(media):
     assert N.status()[17] == 0                           # never starved
 
 
+def test_a_files_place_and_length_and_a_streams_none(media, server):
+    """now()'s `at` and `len` for a file (#110: Now playing's bar): its
+    length from its size at the bytes its frames take, its place what the
+    mix has pulled of it; a stream has neither."""
+    pid = L.spawn("t.place")
+    _as(pid, lambda: moybyte.media.play(str(TONE)))
+    assert _drive(lambda: moybyte.media.now()["len"] > 0)
+    assert moybyte.media.now()["len"] == 2           # the fixture's two seconds
+    assert _drive(lambda: moybyte.media.now()["at"] >= 1)
+    n = moybyte.media.now()
+    assert 1 <= n["at"] <= n["len"]
+    _as(pid, lambda: moybyte.media.play(server + "/radio"))
+    assert _drive(lambda: moybyte.media.now()["state"] == "playing")
+    n = moybyte.media.now()
+    assert n["at"] == 0 and n["len"] == 0
+
+
 def test_the_stream_is_ducked_while_the_focused_session_sounds(media):
     pid = L.spawn("t.duck")
     _as(pid, lambda: moybyte.media.play(str(TONE)))
@@ -327,3 +344,4 @@ def test_the_vms_end_closes_its_processes_stream(media):
     assert N.owner() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0
     assert N.close_vm() == 0                             # nothing left: nothing to do
     dev_media._end()
+

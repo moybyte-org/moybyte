@@ -7,7 +7,7 @@
 //   present() share() open(owner, rate) close(owner) owner()
 //   clear(owner) add(owner, src, title) playlist(owner, text, base)
 //   go(owner, i) stop(owner) pause(owner, on) volume(owner, v)
-//   feed(owner, gen, buf) -> n  feed_end(owner, gen)
+//   feed(owner, gen, buf) -> n  feed_end(owner, gen)  feed_size(owner, gen, size)
 //   status() -> tuple (FIELDS' order) | None   text(which) -> str
 //   entry(i) -> (src, title) | None   run() -> bool
 //   icy_title(meta) -> str | None   list_kind(ctype, path, text) -> int
@@ -112,12 +112,17 @@ static mp_obj_t media_feed_end(mp_obj_t owner, mp_obj_t gen) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_end_obj, media_feed_end);
 
+static mp_obj_t media_feed_size(mp_obj_t owner, mp_obj_t gen, mp_obj_t size) {
+    return rc(moy_media_feed_size(u32(owner), u32(gen), u32(size)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_size_obj, media_feed_size);
+
 static mp_obj_t media_status(void) {
     moy_media_status_t s;
     if (!moy_media_status(&s)) {
         return mp_const_none;
     }
-    mp_obj_t t[21] = {
+    mp_obj_t t[23] = {
         MP_OBJ_NEW_SMALL_INT(s.state), MP_OBJ_NEW_SMALL_INT(s.paused),
         mp_obj_new_int_from_uint(s.owner), mp_obj_new_int_from_uint(s.gen),
         MP_OBJ_NEW_SMALL_INT(s.entry), MP_OBJ_NEW_SMALL_INT(s.entries),
@@ -128,9 +133,10 @@ static mp_obj_t media_status(void) {
         mp_obj_new_int_from_uint(s.pcm_frames), mp_obj_new_int_from_uint(s.decoded),
         mp_obj_new_int_from_uint(s.played), mp_obj_new_int_from_uint(s.starved),
         MP_OBJ_NEW_SMALL_INT(s.err), mp_obj_new_int_from_uint(s.text_gen),
-        MP_OBJ_NEW_SMALL_INT(s.idle),
+        MP_OBJ_NEW_SMALL_INT(s.idle), mp_obj_new_int_from_uint(s.at_ms),
+        mp_obj_new_int_from_uint(s.len_ms),
     };
-    return mp_obj_new_tuple(21, t);
+    return mp_obj_new_tuple(23, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 
@@ -195,6 +201,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_volume), MP_ROM_PTR(&media_volume_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed), MP_ROM_PTR(&media_feed_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_end), MP_ROM_PTR(&media_feed_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feed_size), MP_ROM_PTR(&media_feed_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&media_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_entry), MP_ROM_PTR(&media_entry_obj) },

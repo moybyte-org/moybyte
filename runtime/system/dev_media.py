@@ -16,7 +16,9 @@ One stream at a time, one process's.
   now() -> dict | None  state ("opening", "playing", "ended", "failed",
                      "idle"), paused, src, title (the station's now-playing
                      text, else the entry's own), station, entry, entries,
-                     rate, channels, kbps, volume, err, pid
+                     rate, channels, kbps, volume, err, pid, and a file's
+                     place and length heard, `at` and `len` in seconds
+                     (0 for a stream, and `len` 0 until a frame decodes)
 
 A stream lives as long as its process (owner, 2026-11-03): the process's end
 stops it (`sweep`), and the shell (pid 1) may stop it from anywhere. While a
@@ -64,7 +66,8 @@ FEED_MAX = 8192
 STATES = ("idle", "opening", "playing", "ended", "failed")
 _HOST = _N is not None and hasattr(_N, "PART")
 (_STATE, _PAUSED, _OWNER, _GEN, _ENTRY, _ENTRIES, _KIND, _ARMED, _RATE, _CH, _KBPS,
- _VOL, _INB, _INR, _PCM, _DEC, _PLAYED, _STARVED, _ERR, _TGEN, _IDLE) = range(21)
+ _VOL, _INB, _INR, _PCM, _DEC, _PLAYED, _STARVED, _ERR, _TGEN, _IDLE, _AT_MS,
+ _LEN_MS) = range(23)
 
 # The stream's process and what the pump holds for it.
 _s = {"pid": 0, "wake": None, "radio": False, "file": None, "gen": 0, "eof": False,
@@ -211,8 +214,14 @@ def _feed(gen):
         _s["eof"] = False
         src = _N.text(_N.T_SRC)
         try:
-            _s["file"] = open(src, "rb")
+            f = open(src, "rb")
+            _s["file"] = f
+            size = f.seek(0, 2)
+            f.seek(0)
+            _N.feed_size(p, gen, size)
         except OSError:
+            _close_file()
+            _s["gen"] = gen
             _s["eof"] = True
             _N.feed_end(p, gen)
             return
@@ -377,12 +386,14 @@ def now():
     if st is None or not _s["pid"] or _s["stopping"]:
         return None
     title = _N.text(_N.T_TITLE) or _N.text(_N.T_ENTRY)
+    fed = st[_LEN_MS] > 0             # a file's: only a fed entry has a size
     return {
         "state": STATES[st[_STATE]], "paused": bool(st[_PAUSED]),
         "src": _N.text(_N.T_SRC), "title": title, "station": _N.text(_N.T_STATION),
         "entry": st[_ENTRY], "entries": st[_ENTRIES], "rate": st[_RATE],
         "channels": st[_CH], "kbps": st[_KBPS], "volume": st[_VOL],
         "err": st[_ERR], "pid": _s["pid"],
+        "at": st[_AT_MS] // 1000 if fed else 0, "len": st[_LEN_MS] // 1000 if fed else 0,
     }
 
 

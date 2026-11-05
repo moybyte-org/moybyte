@@ -98,6 +98,8 @@ typedef struct {
     int err;                                // the last entry's failure (positive errno), 0
     uint32_t text_gen;                      // bumps when a text changes
     int idle;                               // stopped and let go: close() frees
+    uint32_t at_ms;                         // the current entry heard, ms
+    uint32_t len_ms;                        // a fed file's length, ms; 0 unknown (a stream)
 } moy_media_status_t;
 
 // The bytes open() takes from the MEDIA row on this image (a stereo output's
@@ -140,6 +142,9 @@ int moy_media_volume(uint32_t owner, int v);
 // says the file has no more.
 int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n);
 int moy_media_feed_end(uint32_t owner, uint32_t gen);
+// The file's size in bytes for entry generation `gen`, which its length is
+// read from: the bytes its decoded frames took against the frames they made.
+int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size);
 
 int moy_media_status(moy_media_status_t *st);
 enum { MOY_MEDIA_T_SRC = 0, MOY_MEDIA_T_TITLE, MOY_MEDIA_T_STATION, MOY_MEDIA_T_ENTRY };

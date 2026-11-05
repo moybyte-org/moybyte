@@ -29,7 +29,7 @@ URL, FEED = 1, 2
 T_SRC, T_TITLE, T_STATION, T_ENTRY = range(4)
 FIELDS = ("state", "paused", "owner", "gen", "entry", "entries", "kind", "armed", "rate",
           "channels", "kbps", "volume", "in_bytes", "in_room", "pcm_frames", "decoded",
-          "played", "starved", "err", "text_gen", "idle")
+          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms")
 
 _U32, _I, _P, _SZ = ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t
 
@@ -40,7 +40,8 @@ class _St(ctypes.Structure):
                 ("rate", _I), ("channels", _I), ("kbps", _I), ("volume", _I),
                 ("in_bytes", _U32), ("in_room", _U32), ("pcm_frames", _U32),
                 ("decoded", _U32), ("played", _U32), ("starved", _U32),
-                ("err", _I), ("text_gen", _U32), ("idle", _I)]
+                ("err", _I), ("text_gen", _U32), ("idle", _I), ("at_ms", _U32),
+                ("len_ms", _U32)]
 
 
 _SIGS = (
@@ -58,6 +59,7 @@ _SIGS = (
     ("moy_media_volume", [_U32, _I], _I),
     ("moy_media_feed", [_U32, _U32, _P, _SZ], _I),
     ("moy_media_feed_end", [_U32, _U32], _I),
+    ("moy_media_feed_size", [_U32, _U32, _U32], _I),
     ("moy_media_status", [ctypes.POINTER(_St)], _I),
     ("moy_media_text", [_I, ctypes.c_char_p, _SZ], _I),
     ("moy_media_entry", [_I, ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
@@ -150,6 +152,10 @@ def feed(owner, gen, buf):
 
 def feed_end(owner, gen):
     return _lib().moy_media_feed_end(owner, gen)
+
+
+def feed_size(owner, gen, size):
+    return _lib().moy_media_feed_size(owner, gen, size)
 
 
 def status():
