@@ -1,7 +1,7 @@
 """The C shell (native/moy_sh/) on CPython, by ctypes: the module `moy_sh` as
 the boards import it, name for name (native/moy_sh/modmoy_sh.c has the list),
 so the console's door handler (runtime/shell/sh_door.py), its role commands
-and the terminal app (runtime/apps/text_console.py) run a session in the
+and the Terminal app (runtime/apps/terminal_app.py) run a session in the
 simulator and in host tests.
 
 The shell is its own static archive (`archive()`), as a board builds it its
@@ -35,6 +35,7 @@ _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 
 DOOR = 0x7368
+HOST = True                             # a host face names its files tree (Screen's root)
 _FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w"]
 _COLS_BYTES = 9                         # a cell's most bytes in a line: its SGR and UTF-8
 

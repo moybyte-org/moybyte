@@ -121,7 +121,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
 DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536),
               "notes": (900, 536), "artwork": (900, 536), "myart": (900, 536),
-              "storybook": (900, 536), "jukebox": (820, 490)}
+              "storybook": (900, 536), "jukebox": (820, 490), "terminal": (720, 480)}
 
 # A dev playtest's scale where the desk holds it (D-03.4).
 _DEV_SCALE = 2

@@ -194,6 +194,7 @@
     {"perm": "media:url", "grants": "api:media", "tiers": ["python"], "prompt": "Play radio streams from the internet", "needs": "wifi", "py": []},
     {"perm": "editor", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "calc", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
+    {"perm": "terminal", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "getcarts", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "storybook", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "myart", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},

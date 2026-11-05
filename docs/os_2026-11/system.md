@@ -87,19 +87,37 @@ face of its service's one implementation run as the shell (pid 1), giving back
 what it took before it ends, a media stream excepted;
 `runtime/shell/sh_roles.py` lists their forms.
 
-**The screen face.** On a board with glass the terminal is a system app
-whose Layer is the **renderer** of the C shell's output: today's
-`TextConsole` (`runtime/apps/text_console.py`) becomes that renderer, its
-scrollback fed by the shell's output ring and its prompt line (the shared
-`CodeEditor` of `runtime/editors/editors_code.py`, the symbol palette for a
-keyboard without `| > <`) feeding the shell's input; the VT100 grid is drawn
-through the toolkit's `text_view`, so there is no new drawing path and it
-works on the T-Deck's keyboard. The shell itself holds no pixels.
+**The screen face** is the Terminal, a system app (`runtime/apps/terminal_app.py` on its
+identity cart `system_carts/moybyte.terminal.moy`,
+the code icon, after the other built-in apps): a session of the C shell whose
+output fills a VT100 cell grid in C (`native/moy_sh/moy_term.h`, kept in
+PSRAM and taken at the first open), which the app draws through `ui.text_view`
+as its log, with a one-row text view under it for the prompt, edited by the
+shared `CodeEditor` (`native/moy_sh/moy_sh_screen.h` is the face's C). There
+is no new drawing path, and the shell holds no pixels. A typed line is echoed
+into the grid and run; Tab completes a command's name (`moy_sh_complete`) or a
+path, up and down walk the history. Where the input lacks keys (the T-Deck's
+Tab, Ctrl and arrows; a gamepad's and touch's every one) a key row under the
+prompt has Tab, Ctrl-C, the arrows and Run, a completion with several
+candidates offers them there to pick, and under touch the shell's symbols sit
+under it. A run holds the VM's thread until its commands end, so **Ctrl-C
+reaches it in C**: the face's poll kicks the input drivers and reads the
+kernel input table's latches between merges for a key that types 0x03, the
+T-Deck's Mic (`start`) or a gamepad's B. A role command that waits (`http
+get`, `mic read`, `lora recv`, `ble scan`, `snd play`) asks the same poll
+between its polls through `moy_sh.interrupted()`, which on the serial face is
+the channel's 0x03, gives back what it took and exits 130. The simulator and
+the host tests run the same session through the host's ctypes binding
+(`runtime/host/moy_sh.py`); `tests/test_moy_sh.py` replays every serial and
+suite transcript through the screen face and holds its grid's lines to the
+serial face's output.
 
-**The terminal emulation (sketch)**, a full-screen text app's surface: the app
+**The terminal emulation**, a full-screen text app's surface: the app
 writes an ANSI/VT100 subset to its stdout and reads keys from stdin, as on
-any Unix; the C shell's emulator keeps the cell grid, and the screen face
-draws that grid through `ui.text_view`:
+any Unix; the C shell's emulator keeps the cell grid (`moy_term.h` lists the
+subset it reads: cursor motion, erase, SGR inks, scrolling and wrap), and the
+screen face draws that grid through `ui.text_view`, whose SGR tones are the
+theme's. The input half below is still a sketch:
 
 ```
 ESC[row;colH  ESC[K  ESC[2J  ESC[3xm/4xm  ESC[?25l/h   cursor, erase, 16 colours as theme tokens, cursor show/hide

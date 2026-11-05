@@ -1,7 +1,7 @@
 // moy_sh_screen: the shell's screen face (docs/os_2026-11/system.md section
 // 1): a session over the board's host table (moy_sh_board.h) whose terminal
 // is a cell grid (moy_term.h), which the console's terminal app draws and
-// feeds (runtime/apps/text_console.py's ShellConsole).
+// feeds (runtime/apps/terminal_app.py).
 //
 // A RUN holds the VM's thread until its commands end, so no frame is drawn
 // and no input merged while one goes. Ctrl-C reaches it in C: the face's

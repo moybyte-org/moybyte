@@ -79,6 +79,7 @@ TABLE = (
     ("media:url", "api:media", PY, "Play radio streams from the internet", "wifi", ()),
     ("editor", "marker", PY, None, None, ()),
     ("calc", "marker", PY, None, None, ()),
+    ("terminal", "marker", PY, None, None, ()),
     ("getcarts", "marker", PY, None, None, ()),
     ("storybook", "marker", PY, None, None, ()),
     ("myart", "marker", PY, None, None, ()),

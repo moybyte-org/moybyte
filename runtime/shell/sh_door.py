@@ -79,8 +79,9 @@ def _row(ws, pid):
 def _io():
     try:
         import moy_sh
+        moy_sh.DOOR
         return moy_sh
-    except ImportError:
+    except (ImportError, AttributeError):   # a folder of that name on CPython's path
         pass
     try:                # CPython: the ctypes binding (runtime/host/moy_sh.py)
         from runtime import moy_sh

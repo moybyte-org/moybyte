@@ -32,4 +32,5 @@ APPS = [
     {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'moybyte.calc', 'title': 'Calc'},
     {'id': 'getcarts', 'entry': 'getcarts_app:GetCartsAppLayer', 'text_mode': False, 'order': 80, 'folder': 'moybyte.get_carts', 'title': 'Get Carts'},
     {'id': 'jukebox', 'entry': 'music_app:MusicAppLayer', 'text_mode': False, 'order': 85, 'folder': 'moybyte.music', 'title': 'Music'},
+    {'id': 'terminal', 'entry': 'terminal_app:TerminalAppLayer', 'text_mode': True, 'order': 90, 'folder': 'moybyte.terminal', 'title': 'Terminal'},
 ]

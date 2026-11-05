@@ -46,12 +46,15 @@ The log draws through `ui.text_view` (docs/history/scroll_and_text_2026-10.md §
 drag scrolls it by pixels and its release coasts, and while it shows its foot
 new rows glide it down to the new foot; scrolled up, it stays where it is.
 
-## What the terminal (#115) inherits
+`on_line` is a REPL's seam: set it and every entered line goes to that
+handler instead of an `input()` call.
 
-All of it. `on_line` is the seam: set it and every entered line goes to that
-handler instead of an `input()` call, which is what a REPL prompt is. `write`
-is its scrollback, `draw` is its surface, and `api()` is what `run` hands a
-script it starts.
+## The terminal
+
+The Terminal app (`terminal_app.py`) is the C shell's screen face. It keeps
+none of this ring: its scrollback is the shell's cell grid in C
+(`moy_sh.Screen`), and what it shares with the script console is the typing
+(the `CodeEditor` prompt) and the drawing (`ui.text_view`).
 """
 
 from array import array as _array
@@ -554,3 +557,4 @@ def _missing_name(text):
     a = text.find("'")
     b = text.find("'", a + 1)
     return text[a + 1:b] if 0 <= a < b else ""
+

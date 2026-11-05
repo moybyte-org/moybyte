@@ -276,7 +276,8 @@ GOLDEN_EXCLUDE = {}
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts", "jukebox")
+APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts", "jukebox",
+        "terminal")
 
 # Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
 # so what these hash is the app bar over a cart's own 320x240 raster, composited
@@ -782,6 +783,8 @@ def _surface_plan(ws, cfg):
         plan.append(("editor_" + tab, enter))
     pages = False
     for app in APPS:
+        if app == "terminal":
+            continue                     # last: its session's lines are its own
         enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
         if app == "getcarts":
             enter = _open_get_carts(ws)
@@ -827,6 +830,46 @@ def _surface_plan(ws, cfg):
 
     plan.append(("script_console", run_script))
     plan.append(("web_console", park))
+    plan += _terminal_plan(ws, cfg)
+    return plan
+
+
+def _terminal_plan(ws, cfg):
+    """The Terminal (runtime/apps/terminal_app.py): its prompt on a fresh
+    session, and where a config pins an app's pages, a long listing at the
+    log's foot, a completion's candidates and, under touch, the key rows."""
+    app = ws._apps_by_id["terminal"]
+
+    def typed(text, tab=False):
+        def enter():
+            app.ed.set_text(text)
+            app.ed.move(0, len(text))
+            if tab:
+                app.complete()
+            else:
+                app.submit()
+        return enter
+
+    def open_it():
+        # on the desk, a window on the desk alone (the plan before left
+        # console mode and its windows behind)
+        if cfg["windowed"] and not cfg.get("console"):
+            ws.open_desk()
+        ws.open_app(app)
+
+    plan = [("app_terminal", open_it)]
+    if cfg.get("appearance"):
+        plan.append(("app_terminal_listing", typed("help")))
+        plan.append(("app_terminal_completion", typed("e", tab=True)))
+
+        def keys():
+            from runtime import ui_draw
+            ui_draw.input_kind("touch")
+            app.cands = []
+            app.ed.set_text("ls /c")
+            app.ed.move(0, 5)
+            app._damage.all()
+        plan.append(("app_terminal_keys", keys))
     return plan
 
 
@@ -1538,6 +1581,8 @@ def surface_names(config_name):
               "settings_log", "settings_permissions", "about", "unlock_banner"]
     names += ["editor_" + t for t in TABS]
     for a in APPS:
+        if a == "terminal":
+            continue
         names.append("app_" + a)
         if a == "getcarts":
             names.append("app_getcarts_consent")
@@ -1546,7 +1591,9 @@ def surface_names(config_name):
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
     names += ["app_notes_note", "app_notes_script"]
-    names += ["web_console"]
+    names += ["web_console", "app_terminal"]
+    if cfg.get("appearance"):
+        names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
     return names
 
 
@@ -1561,6 +1608,8 @@ def capture(config_name, carts_dir):
     ws = _build(cfg, carts_dir)
     expect_bytes = ws.glass_canvas.w * ws.glass_canvas.h * 2  # RGB565
     out = {}
+    from runtime import ui_draw
+    kind = ui_draw.input_kind()
     try:
         for name, enter in _surface_plan(ws, cfg):
             enter()
@@ -1577,6 +1626,8 @@ def capture(config_name, carts_dir):
         devices.MIC[0] = 0             # ...and the microphone's holder
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
+        ui_draw.input_kind(kind)       # ...and the input in use
+        ws.terminal_app.close_session()   # ...and the shell's session
     return out
 
 
