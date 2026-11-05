@@ -96,11 +96,14 @@ as its log, with a one-row text view under it for the prompt, edited by the
 shared `CodeEditor` (`native/moy_sh/moy_sh_screen.h` is the face's C). There
 is no new drawing path, and the shell holds no pixels. A typed line is echoed
 into the grid and run; Tab completes a command's name (`moy_sh_complete`) or a
-path, up and down walk the history. Where the input lacks keys (the T-Deck's
-Tab, Ctrl and arrows; a gamepad's and touch's every one) a key row under the
-prompt has Tab, Ctrl-C, the arrows and Run, a completion with several
-candidates offers them there to pick, and under touch the shell's symbols sit
-under it. A run holds the VM's thread until its commands end, so **Ctrl-C
+path, left and right move the caret and up and down walk the history. A desk
+has a keyboard and draws no key row. On a handheld a key row under the prompt
+holds what the input cannot type, and a completion with several candidates
+offers them there to pick: the T-Deck's holds Tab and the shell's symbols its
+keyboard has no key for (`TDECK_SYMBOLS`), its trackball being the arrows,
+Enter the run and Mic the stop, and down past the newest line enters it;
+a gamepad's and touch's hold Tab, Ctrl-C, the arrows and Run, and under touch
+the shell's symbols sit under it. A run holds the VM's thread until its commands end, so **Ctrl-C
 reaches it in C**: the face's poll kicks the input drivers and reads the
 kernel input table's latches between merges for a key that types 0x03, the
 T-Deck's Mic (`start`) or a gamepad's B. A role command that waits (`http

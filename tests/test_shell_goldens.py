@@ -837,8 +837,13 @@ def _surface_plan(ws, cfg):
 def _terminal_plan(ws, cfg):
     """The Terminal (runtime/apps/terminal_app.py): its prompt on a fresh
     session, and where a config pins an app's pages, a long listing at the
-    log's foot, a completion's candidates and, under touch, the key rows."""
+    log's foot, a completion's candidates and the key row. The T-Deck's
+    configs run under its keyboard (its row: Tab and the symbols it has no
+    key for), and add the touch-only handheld's rows; the desk's draws no
+    row, under touch either."""
+    from runtime import ui_draw
     app = ws._apps_by_id["terminal"]
+    tdeck = bool(cfg.get("appearance")) and not cfg["windowed"]
 
     def typed(text, tab=False):
         def enter():
@@ -855,21 +860,30 @@ def _terminal_plan(ws, cfg):
         # console mode and its windows behind)
         if cfg["windowed"] and not cfg.get("console"):
             ws.open_desk()
+        if tdeck:
+            ui_draw.input_kind("tdeck")
+            ui_draw.hint_kind("tdeck")
         ws.open_app(app)
+
+    def line(kind, in_row=False):
+        def enter():
+            if kind is not None:
+                ui_draw.input_kind(kind)
+                ui_draw.hint_kind(kind)
+            app.cands = []
+            app.in_row = in_row
+            app.ed.set_text("ls /c")
+            app.ed.move(0, 5)
+            app._damage.all()
+        return enter
 
     plan = [("app_terminal", open_it)]
     if cfg.get("appearance"):
         plan.append(("app_terminal_listing", typed("help")))
         plan.append(("app_terminal_completion", typed("e", tab=True)))
-
-        def keys():
-            from runtime import ui_draw
-            ui_draw.input_kind("touch")
-            app.cands = []
-            app.ed.set_text("ls /c")
-            app.ed.move(0, 5)
-            app._damage.all()
-        plan.append(("app_terminal_keys", keys))
+        plan.append(("app_terminal_keys", line(None, True) if tdeck else line("touch")))
+        if tdeck:
+            plan.append(("app_terminal_touch", line("touch")))
     return plan
 
 
@@ -1594,6 +1608,8 @@ def surface_names(config_name):
     names += ["web_console", "app_terminal"]
     if cfg.get("appearance"):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
+        if not cfg["windowed"]:
+            names.append("app_terminal_touch")
     return names
 
 
@@ -1609,7 +1625,7 @@ def capture(config_name, carts_dir):
     expect_bytes = ws.glass_canvas.w * ws.glass_canvas.h * 2  # RGB565
     out = {}
     from runtime import ui_draw
-    kind = ui_draw.input_kind()
+    kind = ui_draw.input_kind(), ui_draw.hint_kind()
     try:
         for name, enter in _surface_plan(ws, cfg):
             enter()
@@ -1626,7 +1642,8 @@ def capture(config_name, carts_dir):
         devices.MIC[0] = 0             # ...and the microphone's holder
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
-        ui_draw.input_kind(kind)       # ...and the input in use
+        ui_draw.input_kind(kind[0])    # ...and the input in use
+        ui_draw.hint_kind(kind[1])     # ...and the keys its hints name
         ws.terminal_app.close_session()   # ...and the shell's session
     return out
 

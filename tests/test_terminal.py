@@ -173,3 +173,116 @@ def test_the_grid_follows_the_view(term):
     app.draw(0)
     run(app, "printf '%0100d\\n' 0")
     assert max(len(x) for x in plain(app)) == app.cols
+
+
+# -- the key row ------------------------------------------------------------------
+
+SHELL_SYMBOLS = "|><&;$~/-*\"'\\{}[]()=!#?:"
+
+
+def _tdeck_types():
+    """The bytes the T-Deck's keyboard types, plain and with Sym (its matrix
+    as native/moy_input/moy_kbd.c's RAW_KEYS decodes it)."""
+    import os
+    import re
+    src = open(os.path.join(os.path.dirname(__file__), "..", "native", "moy_input",
+                            "moy_kbd.c")).read()
+    table = src[src.index("RAW_KEYS[][4] = {"):]
+    table = table[:table.index("};")]
+    out = set()
+    for m in re.finditer(r"\{\d+, 0x[0-9a-fA-F]+, ('(?:\\.|[^'])'|0x[0-9A-Fa-f]+|\d+), "
+                         r"('(?:\\.|[^'])'|0x[0-9A-Fa-f]+|\d+)\}", table):
+        for v in m.groups():
+            if v.startswith("'"):
+                out.add(v[1:-1].replace("\\'", "'").replace("\\\\", "\\"))
+    return out
+
+
+def test_the_tdeck_row_holds_the_shell_symbols_its_keyboard_lacks():
+    from runtime.apps.terminal_app import TDECK_SYMBOLS, _TDECK_ROW
+    typed = _tdeck_types()
+    assert "$" in typed and "/" in typed and ";" in typed       # the parse reads the table
+    assert sorted(TDECK_SYMBOLS) == sorted(c for c in SHELL_SYMBOLS if c not in typed)
+    assert _TDECK_ROW == ("Tab",) + tuple(TDECK_SYMBOLS)
+
+
+def test_a_desk_draws_no_key_row(tmp_path):
+    from runtime import ui_draw
+    from test_shell_goldens import CONFIGS, _build
+    ws = _build(CONFIGS["p4_1024x600_cs2_fs1_windowed"], tmp_path)
+    app = ws.terminal_app
+    kind = ui_draw.input_kind()
+    try:
+        for k in ("keys", "touch", "pad", "tdeck"):
+            ui_draw.input_kind(k)
+            assert app.row_kind() is None, k
+    finally:
+        ui_draw.input_kind(kind)
+        app.close_session()
+
+
+def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
+    """On the T-Deck the trackball moves the caret and walks the history; down
+    past the newest line enters the key row, along it a roll moves, Enter
+    presses the key, and up goes back to the prompt."""
+    from runtime import ui_draw
+    from runtime.host_app import build_workstation, ConsoleDriver
+    ws = build_workstation(str(tmp_path / "carts"))
+    drv = ConsoleDriver(ws)
+    ws.open_app(ws._apps_by_id["terminal"])
+    drv.frame(1 / 30)
+    app = ws.terminal_app
+    kinds = ui_draw.input_kind(), ui_draw.hint_kind()
+    ui_draw.input_kind("tdeck")
+    ui_draw.hint_kind("tdeck")
+
+    def roll(dx, dy):
+        time.sleep(0.16)                # a hand's pause: the roll's axis is forgotten
+        drv.pan(dx, dy)
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        drv.pan(0, 0)
+        drv.frame(1 / 30)
+
+    def enter():
+        drv.ball_click()
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+
+    try:
+        assert app.row_kind() == "tdeck"
+        run(app, "echo one")
+        for ch in "ls":
+            drv.type_char(ord(ch))
+            drv.frame(1 / 30)
+        roll(-1, 0)
+        assert app.ed.col == 1                    # the caret, left
+        roll(0, -1)
+        assert app.ed.text() == "echo one"        # the history, up
+        roll(0, 1)
+        assert app.ed.text() == "" and not app.in_row
+        roll(0, 1)
+        assert app.in_row                         # down past the newest line
+        roll(1, 0)
+        roll(1, 0)
+        enter()                                   # the trackball's click
+        assert app.ed.text() == ">" and app.in_row
+        roll(1, 0)
+        drv.type_char(13)                         # the keyboard's Enter
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        assert app.ed.text() == "><" and app.in_row
+        roll(0, -1)
+        assert not app.in_row
+        drv.type_char(ord("x"))
+        drv.frame(1 / 30)
+        assert app.ed.text() == "><x"
+        roll(0, 1)
+        assert app.in_row
+        drv.type_char(ord("y"))                   # a typed key goes back to the prompt
+        drv.frame(1 / 30)
+        assert app.ed.text() == "><xy" and not app.in_row
+    finally:
+        ui_draw.input_kind(kinds[0])
+        ui_draw.hint_kind(kinds[1])
+        app.close_session()

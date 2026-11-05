@@ -10,12 +10,19 @@ thread until its commands end, and Ctrl-C reaches it in C (the screen face's
 poll reads Ctrl+C, the T-Deck's Mic or a gamepad's B from the input latches).
 
 Tab completes the word left of the caret: a command's name from the shell's
-built-ins (moy_sh_complete), a path's from its folder. Up and down step
-through the lines run before. Where the input lacks keys (the T-Deck: Tab,
-Ctrl and arrows; a gamepad and touch: every one) a KEY ROW under the prompt
-has them, and a completion with more than one candidate shows them there to
-pick, which is how a gamepad or a finger writes a command; under touch a row
-of the shell's symbols sits under it.
+built-ins (moy_sh_complete), a path's from its folder. Left and right move the
+caret, up and down step through the lines run before. A desk has a keyboard
+and draws no key row. A handheld draws a KEY ROW under the prompt, and a
+completion with more than one candidate shows them there to pick:
+- the T-Deck's (its keyboard's hint input, whatever the last input was) holds
+  only what its keyboard cannot type: Tab and `TDECK_SYMBOLS`. Its trackball
+  moves the caret and walks the history, Enter runs and Mic stops, so those
+  keys are not on it. Down past the newest line enters the row: the trackball
+  then moves along it, Enter presses a key, and up (or a typed key) goes back
+  to the prompt;
+- a gamepad's and a finger's hold every key the line needs (Tab, Ctrl-C, the
+  arrows, Run), which is how they write a command, and under touch a row of
+  the shell's symbols sits under it.
 
 The grid takes the log view's columns and rows, and its lines are taken when
 its generation moves, the prompt row made again when what it shows does: an
@@ -55,6 +62,9 @@ _KEYS = ("Tab", "^C", "left", "right", "up", "down", "Run")
 _SIGNS = {"left": "←", "right": "→", "up": "↑", "down": "↓"}
 _ASCII = {"left": "<", "right": ">", "up": "^", "down": "v"}
 SYMBOLS = "|><&;$~/-*\"'"
+TDECK_SYMBOLS = "|><&~\\{}[]="  # the shell's symbols the T-Deck's keyboard has no key for
+_TDECK_ROW = ("Tab",) + tuple(TDECK_SYMBOLS)
+_ROW_HINTS = ("confirm", "Press")
 _HINTS = {
     "keys": ("confirm", "Run", "Tab", "Complete", "Ctrl C", "Stop"),
     "tdeck": ("confirm", "Run", "cancel", "Stop"),
@@ -118,6 +128,8 @@ class TerminalAppLayer:
         self.history = []
         self._hi = 0
         self.cands = []             # a completion's candidates, for the key row
+        self.in_row = False         # the T-Deck's keys on its key row, not the prompt
+        self._enter = False         # a typed Enter owed to the row's focused key
         self.cols, self.rows = 40, 12
         sc = self._surf.canvas()
         self.layout = TerminalLayout(sc.w, sc.h, getattr(sc, "font_scale", 1),
@@ -142,6 +154,7 @@ class TerminalAppLayer:
     def open(self):
         if self.ed is None:
             self.ed = CodeEditor("", cols=40, rows=1)
+        self.in_row = False
         self._ui.reset()
         self._gen = -1
         self.ensure()
@@ -330,13 +343,33 @@ class TerminalAppLayer:
 
     # -- input --------------------------------------------------------------------
 
+    def row_kind(self):
+        """Which key row the page draws: None (a desk, a keyboard), "tdeck",
+        "pad" or "touch"."""
+        if self.layout.desk:
+            return None
+        if _ui_draw.hint_kind() == "tdeck":
+            return "tdeck"
+        kind = _ui.input_kind()
+        return None if kind == "keys" else kind
+
     def handle_input(self, inp):
         k = getattr(inp, "last_key", 0) or 0
         if not isinstance(k, int):
             k = ord(k[0]) if k else 0
+        row = self.row_kind()
+        if row != "tdeck":
+            self.in_row = False
         hit = False
+        enter = False
         if k and k != self._key:
-            hit = self.key(k)
+            if self.in_row and k in (0x0D, 0x0A):
+                enter = self._enter = True  # the draw presses the row's focused key
+                hit = True
+            else:
+                if self.in_row:
+                    self.in_row = False
+                hit = self.key(k)
         self._key = k
         n = getattr(inp, "key_repeats", 0)
         if n:
@@ -344,8 +377,14 @@ class TerminalAppLayer:
             if r in (8, 127) or 32 <= r < 127:
                 for _ in range(n):
                     hit = self.ed.key(r) or hit
-        if _ui.input_kind() == "pad":
+        if row == "pad":
             if self._ui.keys(inp):
+                hit = True
+        elif self.in_row:
+            if inp.steps("up"):
+                self.in_row = False
+                hit = True
+            elif not enter and self._ui.keys(inp):
                 hit = True
         else:
             dx = inp.steps("right") - inp.steps("left")
@@ -353,7 +392,10 @@ class TerminalAppLayer:
             if dx:
                 self.ed.move(0, dx)
                 hit = True
-            if dy:
+            if dy > 0 and row == "tdeck" and self._hi >= len(self.history):
+                self.in_row = True
+                hit = True
+            elif dy:
                 self.recall(1 if dy > 0 else -1)
                 hit = True
         if hit:
@@ -424,25 +466,34 @@ class TerminalAppLayer:
         lay = self.layout
         th = self._theme.colors()
         fs = lay.fs
-        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
+        rk = self.row_kind()
+        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed,
+                       rk != "pad" and not self.in_row)
         ui = _ui
         ui.page("")
         page = (lay.cx, lay.cy, lay.cw, lay.ch)
-        kind = ui.input_kind()
-        hints = _HINTS.get(kind)
+        hints = _ROW_HINTS if self.in_row else _HINTS.get(ui.input_kind())
         if hints and not lay.desk and ui.hints_width(hints) > 0:
             band, page = ui.cut_bottom(page, 20 * fs)
             ui.at(*band)
             ui.hints(hints)
-        if kind != "keys":
-            if kind == "touch":
+        if rk is not None:
+            if rk == "touch":
                 row, page = ui.cut_bottom(page, lay.key_h)
-                self._row(row, [c for c in SYMBOLS], None)
+                self._row(row, SYMBOLS, None)
             row, page = ui.cut_bottom(page, lay.key_h)
-            if self.cands:
-                self._row(row, [label for _n, _at, label in self.cands], True)
-            else:
-                self._row(row, _KEYS, False)
+            labels = [label for _n, _at, label in self.cands] if self.cands \
+                else _TDECK_ROW if rk == "tdeck" else _KEYS
+            self._row(row, labels, bool(self.cands))
+            if self._enter:
+                self._enter = False
+                at = ui.focus()
+                if self.in_row and at in labels:
+                    if self.cands:
+                        self.pick(labels.index(at))
+                    else:
+                        self.press(at)
+                    self._ui.again()
         fid, cell, line, _asc = _ui_draw.font("mono")
         fw = max(1, cell * fs)
         pad = 8 * fs
@@ -470,8 +521,27 @@ class TerminalAppLayer:
         n = len(labels)
         if not n:
             return
-        fit = max(1, rect[2] // (28 * self.layout.fs))
-        cells = _ui.hsplit(rect, min(n, fit), gap=2 * self.layout.fs)
+        fs = self.layout.fs
+        gap = 2 * fs
+        if cands:
+            n = min(n, max(1, rect[2] // (24 * fs)))
+            cells = _ui.hsplit(rect, n, gap=gap)
+        else:
+            # a key of a word (Tab, Run) two units wide, a glyph's one
+            units = 0
+            for name in labels:
+                units += 2 if len(name) > 2 else 1
+            unit = (rect[2] - gap * (n - 1)) // units
+            cells = []
+            rest = rect
+            for i in range(n):
+                w = unit * (2 if len(labels[i]) > 2 else 1)
+                if i == n - 1:
+                    w = rest[2]
+                cell, rest = _ui.cut_left(rest, w)
+                cells.append(cell)
+                if i < n - 1:
+                    rest = _ui.cut_left(rest, gap)[1]
         signs = _SIGNS if _ui.has_symbols() else _ASCII
         for i in range(len(cells)):
             name = labels[i]
