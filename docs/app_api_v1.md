@@ -214,6 +214,17 @@ Two things follow for an app author:
 - **Optional `page_title()`**: the page the app has open, by name. The
   handheld bar shows it after the back chevron; on the desk it is the window's
   title (its chip keeps the app's name).
+- **Optional `leave_asked`**, an attribute: an app sets it True for its own way
+  out (a page's button, Music's Back to home); the host takes it after the
+  app's `handle_input` as the bar's back (`app_back`) and clears it.
+- **Optional `BACK_MINIMISES`**, a class attribute: on the desk a back on
+  the app's first page minimises its window instead of closing it (Music,
+  whose stream plays on); `WindowedWM.minimise_kind`.
+- **Optional `cancel_field()`**: the T-Deck's Mic inside a field the app
+  has open (where K types a letter) asks the app first; True where it
+  cancelled one (Music's Add a station).
+- **Optional `DESK_TILE`**, a class attribute: False leaves the app out of
+  the desk's column while the home's Apps still lists it (Music).
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 

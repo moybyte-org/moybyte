@@ -286,7 +286,7 @@ class _BackdropLayer(Layer):
         carts = ws.carts.all
         apps = getattr(ws, "_apps", ())
         for app, _text in apps:
-            if app.id in self.HIDDEN_APPS:
+            if app.id in self.HIDDEN_APPS or not getattr(app, "DESK_TILE", True):
                 continue
             cart = None
             for c in carts:

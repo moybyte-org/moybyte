@@ -2750,6 +2750,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         commit = getattr(app, "commit", None)
         if commit is not None:
             commit()
+        if getattr(app, "BACK_MINIMISES", False) and self.wm.minimise_kind(app.id):
+            return
         self._exit_to_caller()
 
     def open(self, cart=None):

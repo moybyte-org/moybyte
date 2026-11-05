@@ -166,6 +166,9 @@ class InputVerbs:
                 self.app_back(layer)
                 return
             if layer.handle_input(i):
+                if getattr(layer, "leave_asked", False):
+                    layer.leave_asked = False         # the app's own way out (a page's button)
+                    self.app_back(layer)
                 return
 
     # (The "desktop" content layer routes the running cart's frame to

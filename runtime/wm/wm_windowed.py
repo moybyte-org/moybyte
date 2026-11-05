@@ -121,7 +121,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
 DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536),
               "notes": (900, 536), "artwork": (900, 536), "myart": (900, 536),
-              "storybook": (900, 536)}
+              "storybook": (900, 536), "jukebox": (820, 490)}
 
 # A dev playtest's scale where the desk holds it (D-03.4).
 _DEV_SCALE = 2
@@ -1608,6 +1608,18 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         FullscreenStackWM.goto(self, kind)
         if self.mode == "desktop":
             self._front = kind
+
+    def minimise_kind(self, kind):
+        """On the desk, window `kind` hidden to its chip and the focus off
+        it (an app whose Back minimises: Music, whose stream plays on)."""
+        win = self._wins.get(kind)
+        if self.mode != "desktop" or win is None or win.minimized:
+            return False
+        self._minimize(win, True)
+        if self._focus == kind:
+            self._move_focus(None)
+        self.ws._dirty = True
+        return True
 
     def bring_forward(self, kind):
         """On the desk, a process that already has a window is opened by

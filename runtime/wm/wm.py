@@ -302,6 +302,12 @@ class FullscreenStackWM:
         if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
             self._on_nav()
 
+    def minimise_kind(self, kind):
+        """Hide process `kind`'s window to its chip, the focus leaving it:
+        True when this WM did (a desk's window), False where it has none
+        (every fullscreen tier)."""
+        return False
+
     def bring_forward(self, kind):
         """Show the window process `kind` already has, in front, with no
         navigation: True when this WM did (a desk's window), False when it

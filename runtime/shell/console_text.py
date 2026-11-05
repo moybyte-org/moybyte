@@ -111,6 +111,11 @@ class TextVerbs:
                 and self.settings_layer.cancel_field():
             self._dirty = True
             return True
+        app = self._apps_by_id.get(self.wm.top_kind())
+        cancel = getattr(app, "cancel_field", None) if app is not None else None
+        if cancel is not None and cancel():
+            self._dirty = True
+            return True
         return False
 
     def sync_keyboard_mode(self):
