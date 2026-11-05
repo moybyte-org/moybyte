@@ -75,38 +75,56 @@ const profile = process.env.MOY_PROFILE
 // The page under test is served from 127.0.0.1 out of our own dist/, so the
 // sandbox is not what is keeping anything out.
 const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
-const chrome = spawn(CHROME, [
-    "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
-    "--no-first-run", "--no-default-browser-check", "--disable-gpu",
-    "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
-], { stdio: ["ignore", "ignore", "pipe"] });
-
-const wsUrl = await new Promise((ok, err) => {
-    let buf = "";
-    // ON TIMEOUT, SAY WHAT CHROME SAID. Without this the message is "chrome
-    // did not report a debug port" and nothing else, which is true of a
-    // missing browser, a dead zygote, a locked profile and a runner that was
-    // merely slow -- four different fixes behind one sentence. It cost a CI
-    // session on 2026-09-10: the job failed twice, reproducibly, and the log
-    // could not distinguish "Chrome is broken here" from "20s was not enough",
-    // while a container proved the FLAGS were fine (Chrome 153 prints the URL
-    // under both `--headless=new` and `--headless`).
-    const t = setTimeout(() => err(new Error(
-        "chrome did not report a debug port in 20s.\n" +
-        "  chrome:  " + CHROME + "\n" +
-        "  flags:   " + EXTRA.join(" ") + "\n" +
-        "  profile: " + profile + "\n" +
-        "  exited:  " + (chrome.exitCode === null
-            ? "no, still running" : "yes, code " + chrome.exitCode) + "\n" +
-        "  stderr:  " + (buf ? buf.slice(-1200) : "(nothing at all)"))), 20000);
-    chrome.on("error", (e) => { clearTimeout(t); err(
-        new Error("chrome would not start (" + CHROME + "): " + e.message)); });
-    chrome.stderr.on("data", (d) => {
-        buf += d;
-        const m = buf.match(/ws:\/\/[^\s]+/);
-        if (m) { clearTimeout(t); ok(m[0]); }
+// A runner slow enough to print nothing for the whole wait ("exited: no, still
+// running", "stderr: (nothing at all)") gets one more launch with a longer wait:
+// it failed two Pages builds on 2026-11-05 and passed on rerun both times. A
+// Chrome that exits or prints an error is not retried.
+function launch(waitMs) {
+    const chrome = spawn(CHROME, [
+        "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
+        "--no-first-run", "--no-default-browser-check", "--disable-gpu",
+        "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+    const url = new Promise((ok, err) => {
+        let buf = "";
+        // ON TIMEOUT, SAY WHAT CHROME SAID. Without this the message is "chrome
+        // did not report a debug port" and nothing else, which is true of a
+        // missing browser, a dead zygote, a locked profile and a runner that was
+        // merely slow -- four different fixes behind one sentence.
+        const t = setTimeout(() => { const e = new Error(
+            "chrome did not report a debug port in " + waitMs / 1000 + "s.\n" +
+            "  chrome:  " + CHROME + "\n" +
+            "  flags:   " + EXTRA.join(" ") + "\n" +
+            "  profile: " + profile + "\n" +
+            "  exited:  " + (chrome.exitCode === null
+                ? "no, still running" : "yes, code " + chrome.exitCode) + "\n" +
+            "  stderr:  " + (buf ? buf.slice(-1200) : "(nothing at all)"));
+            e.silent = chrome.exitCode === null && !buf; err(e); }, waitMs);
+        chrome.on("error", (e) => { clearTimeout(t); err(
+            new Error("chrome would not start (" + CHROME + "): " + e.message)); });
+        chrome.stderr.on("data", (d) => {
+            buf += d;
+            const m = buf.match(/ws:\/\/[^\s]+/);
+            if (m) { clearTimeout(t); ok(m[0]); }
+        });
     });
-});
+    return { chrome, url };
+}
+
+let { chrome, url: firstUrl } = launch(20000);
+let wsUrl;
+try {
+    wsUrl = await firstUrl;
+} catch (e) {
+    if (!e.silent) throw e;
+    console.error(e.message + "\n  -- launching once more, waiting 60s");
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill();
+    await gone;
+    const again = launch(60000);
+    chrome = again.chrome;
+    wsUrl = await again.url;
+}
 
 let msgId = 0;
 const pending = new Map();
