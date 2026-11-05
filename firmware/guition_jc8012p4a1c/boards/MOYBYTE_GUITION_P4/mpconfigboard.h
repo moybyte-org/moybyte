@@ -26,6 +26,10 @@
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 
+// The TF card's power (native/moy_sd/moy_sd.h; its SDMMC slot 0 pins are
+// board.toml's `sdmmc0` row): LDO channel 4, which PMU_EXT_LDO_P1_0P2A owns.
+#define MOY_SD_MMC_LDO_REG                  (0x501151D8u)
+
 // exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
 // leave it off). A card over 32 GB ships exFAT, and without it a read-only
 // vfs.mount of one fails with ENODEV: the TF slot is the console's cart store

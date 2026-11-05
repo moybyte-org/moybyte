@@ -352,8 +352,10 @@ ever needs a push path is a new decision, not a flip of this one."""
 module = "moy_sd"
 why = """
 The card driver under the store's own card volume (docs/history/kernel_store_2026-10.md
-slice 8): `moy_sd.mmc` brings the TF card up on SDMMC slot 0 (GPIO39-44, LDO4
-powered; slot 1 is the C6's) once and never tears it down, and
+slice 8): `moy_sd.up()` -- native/moy_sd's C, from the `sdmmc0` row, which the
+kernel's recovery floor calls with no VM -- brings the TF card up on SDMMC
+slot 0 (GPIO39-44, LDO4 powered; slot 1 is the C6's) once and never tears it
+down, and
 native/moy_store's card -- the kernel's FATFS and read cache -- reads it
 through `moy_sd_card_io`, with each transfer's bounce in PSRAM, which this
 host's DMA reaches. `device/p4_desktop.p4_card` builds it and

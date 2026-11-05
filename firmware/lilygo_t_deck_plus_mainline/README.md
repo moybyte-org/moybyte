@@ -225,7 +225,7 @@ Moybyte sd: rounds=10 bad=0 write_max=NNms read_max=NNms
 
 **With no card in the slot** the mount fails, and the smoke deliberately keeps
 going: it flushes the panel and reports `SD = panel ok after a failed mount`.
-That is a real check, not politeness — `moy_sd.init()` calls `sdspi_host_deinit()`
+That is a real check, not politeness — `moy_sd.up()` calls `sdspi_host_deinit()`
 on a failed attach, which is the one teardown in this design, and it must not
 poison the bus.
 

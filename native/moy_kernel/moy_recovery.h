@@ -10,7 +10,9 @@
 // names stay RETRY, SAFE and REPL whatever the rows say. The minimum on every
 // console is the panel brought up, presented and lit from C, one font, and
 // serial: while the VM is down the kernel drains the console's RX ring, reads
-// `retry`, `safe` and `repl`, answers `state` with "screen": "recovery", and
+// `retry`, `safe` and `repl`, runs `sh LINE` in the C shell (the card brought
+// up from C at the first, moy_store_card_up), answers `state` with "screen":
+// "recovery", and
 // prints `KERNEL recovery reason=<r> sel=<choice> crc=<framebuffer crc32>`
 // with the lines it drew every five seconds, which is how the gate drives a
 // board with no input on the floor. A one-button board moves the highlight on

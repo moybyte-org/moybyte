@@ -242,11 +242,14 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
   MicroPython never enables it, so without it the card times out
-  card-or-no-card. `device/p4_desktop.py` (`p4_card`, shared with the Guition
-  P4) does the pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)`
-  then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on),
-  then `moy_sd.mmc(0, 43, 44, (39, 40, 41, 42))` brings slot 0 up once (4-bit,
-  20 MHz; never torn down) and `moy_store.card` mounts the store's own volume
+  card-or-no-card. `native/moy_sd/moy_sd.c` pokes it before the card's first
+  command: `0x501151D8 |= (1<<7)|(1<<14)` then `|= (1<<8)`
+  (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on; the register is
+  `MOY_SD_MMC_LDO_REG` in `mpconfigboard.h`), then brings slot 0 up once from
+  the board.toml `sdmmc0` row (4-bit, 20 MHz; never torn down). The console
+  calls it as `moy_sd.up()` from `device/p4_desktop.py`'s `p4_card` (shared
+  with the Guition P4), and the kernel's recovery floor with no VM; then
+  `moy_store.card` mounts the store's own volume
   over it — the kernel's FATFS with the card's read cache
   (`native/moy_store/moy_card.c`), each transfer's bounce in PSRAM, which this
   host's DMA reaches.

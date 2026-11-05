@@ -594,11 +594,8 @@ STAGE 4 (SD). The mount lifecycle for a card that SHARES SPI2 with the panel:
 `moy_lcd.init()` already initialised (`sdspi_host_init_device`, no bus re-init)
 and keeps the card RESIDENT for the session, because tearing the sdspi device
 down between ops corrupts the shared bus and silent-hangs the next panel flush.
-
-Its legacy `machine.SDCard` paths (`mount_sd`, `with_sd`, `read_first_project_source`)
-are dead on this build -- they reach `tdeck_display.get_spi_bus` and
-`machine.SPI.Bus`, neither of which exists on mainline -- but both lookups are
-already inside `try/except` there, and nothing on this board calls them."""
+The attach itself is native/moy_sd's C (`moy_sd.up()`), from the `spi2` row's
+`sd_cs` and `radio_cs`."""
 
 [[modules.device.group]]
 files = ["device_api.py", "moycore_glue.py"]

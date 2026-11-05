@@ -200,7 +200,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
     the panel inside a session. `tests/test_moybyte_sd.py` pins which lifecycle
     touches which pin.
 - **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so
-  `moy_runtime.tf_card` opens it with `moy_sd.open(2, ...)` (the bus
+  `moy_runtime.tf_card` opens it with `moy_sd.up()` on host 2 (the bus
   initialised once, never torn down) and mounts the store's card volume over
   it under `device/card_store.py`, once at boot. Host 2 is SPI3; host 1 is the
   PANEL's SPI2 (as `machine.SDCard` slots, the numbers run opposite: slot 3 is
@@ -271,15 +271,17 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   VFS shadowing rule (the internal store root is `/moy/carts`) are the
   Waveshare README's.
 - **A TF card is the P4 boards' cart store when one mounts**
-  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, then
-  `moy_sd.mmc` bringing SDMMC slot 0 up once, never torn down (slot 1 is
+  (`device/card_store.py` over `p4_desktop.p4_card`: `moy_sd.up()`, the LDO4
+  poke and then SDMMC slot 0 brought up once, never torn down (slot 1 is
   ESP-Hosted's), then the store's card volume `moy_store.card` with its read
   cache; FAT32 and exFAT, the latter being `MICROPY_FATFS_EXFAT` in each
   `mpconfigboard.h`). The store is
   `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a dead
   one or a filesystem the build cannot read all boot on the internal store with
   one line, and `card_store.STATUS` is the verdict. An EMPTY slot surfaces as
-  `moy_sd.mmc`'s `card_init` error, named the way a failed mount is.
+  `moy_sd.up()`'s `card_init` error, named the way a failed mount is. The
+  bring-up is native/moy_sd's C from each board's board.toml card row
+  (`moy_sd.h`), which the kernel's recovery floor calls with no VM.
   The OTA directory and the BLE bond store stay internal. Never format or erase
   a card from the console.
 - **A compiled cart's blit565 frame skips the game canvas**

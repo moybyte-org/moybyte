@@ -110,13 +110,19 @@ def test_micropython_native_sd_shares_display_spi_host():
     machine.SDCard, which hangs the shared bus once the panel is up. The Python
     half is executed in tests/test_moybyte_sd.py; the C module and the board's
     session routing are pinned here."""
-    mod = (NATIVE / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    face = (NATIVE / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    mod = (NATIVE / "moy_sd" / "moy_sd.c").read_text(encoding="utf-8")
     cmake = (NATIVE / "moy_sd" / "micropython.cmake").read_text(encoding="utf-8")
     runtime = _device_backend_src()
 
-    # Native module attaches (init_device) rather than re-initializing the bus.
-    assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in mod
+    # The card's C attaches (init_device) to the panel's SPI2 rather than
+    # re-initializing the bus; the module is its Python face.
+    assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in face
     assert "sdspi_host_init_device" in mod
+    attach = mod[mod.index("#elif defined(MOY_HW_SPI2_SD_CS)"):mod.index("#elif defined(MOY_HW_SPI3_CS)")]
+    assert "SD_SPI_ATTACH" in attach
+    spi_up = mod[mod.index("static int spi_up("):mod.index("err = sdspi_host_init();")]
+    assert spi_up.index("#if !defined(SD_SPI_ATTACH)") < spi_up.index("spi_bus_initialize")
     assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
     assert "target_link_libraries(usermod INTERFACE usermod_moy_sd)" in cmake
 

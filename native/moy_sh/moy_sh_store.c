@@ -264,8 +264,18 @@ static int list_one(void *ctx, const moy_shelf_entry_t *e) {
     if (n <= 0 || (size_t)n >= sizeof path || !moy_fs_exists(path)) {
         return 0;
     }
-    n = snprintf(line, sizeof line, "%s %lld installed %s\n", e->id, (long long)e->version,
-                 e->name);
+    // The version by hand: a board's printf (newlib nano) has no %lld.
+    char ver[24], *v = ver + sizeof ver;
+    uint64_t u = e->version < 0 ? 0u - (uint64_t)e->version : (uint64_t)e->version;
+    *--v = '\0';
+    do {
+        *--v = (char)('0' + u % 10u);
+        u /= 10u;
+    } while (u);
+    if (e->version < 0) {
+        *--v = '-';
+    }
+    n = snprintf(line, sizeof line, "%s %s installed %s\n", e->id, v, e->name);
     if (n > 0) {
         say(l->s, 1, line, (size_t)n < sizeof line ? (size_t)n : sizeof line - 1);
     }

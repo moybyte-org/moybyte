@@ -158,6 +158,16 @@ crash count or over the dev channel. From it the owner reads the `log`,
 `kill`s a process, `pkg remove`s an app, fixes a `system/` file, takes or
 rolls back an OTA update and `reboot`s, with no computer and no reflash.
 
+**The card from C.** A floor boot has run no VM, so nothing Python mounted
+the card; the store's FATFS is mounted from C instead (`moy_store_card_up`,
+`native/moy_store/moy_card.c`, over the board's card bring-up in
+`native/moy_sd/moy_sd.h`, whose pins are the board.toml `[hardware]` card
+row's). The console's Python calls the same C (`moy_sd.up()`, then
+`moy_store.card`). The floor's serial takes `sh LINE` for the C shell; its
+first line brings the card up, on the T-Deck only once the panel is (the card
+rides the panel's SPI2), so `settings` and `pkg list`/`pkg remove` reach
+`system/` and the carts with no VM.
+
 ## 3. Not tied to the screen: serial, the web terminal and SSH
 
 The same shell runs over the USB serial dev

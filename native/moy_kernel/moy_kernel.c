@@ -870,6 +870,44 @@ static void k_choose(int choice) {
     esp_restart();
 }
 
+// `sh LINE` on the floor: LINE in the C shell's serial session, answered as
+// the dev channel's `sh` word answers it (moy_devch.c), with the shell's
+// commands that need no VM. The first one brings the card up from C
+// (moy_store_card_up, native/moy_sd), so system/ and the carts on it are the
+// shell's on a boot no VM has run in; on a board whose card rides the panel's
+// bus (the T-Deck's SPI2) only once the panel came up. Weak, so an image
+// without the shell or the card links.
+bool moy_sh_board_line(const char *text) __attribute__((weak));
+int moy_store_card_up(const char **what) __attribute__((weak));
+
+static void k_sh(const k_floor_t *k, const char *line, bool *ready) {
+    if (moy_sh_board_line == NULL) {
+        k_out("SH error no shell\r\n");
+        return;
+    }
+    if (!*ready) {
+        *ready = true;
+        moy_loop_board_down();          // the shell's lines out through moy_kernel_say
+        const char *what = "no card";
+        int e = -1;
+        #if defined(MOY_HW_SPI2_SD_CS)
+        bool bus = k->fb != NULL;
+        #else
+        bool bus = true;
+        (void)k;
+        #endif
+        if (bus && moy_store_card_up != NULL) {
+            e = moy_store_card_up(&what);
+        }
+        if (e == 0) {
+            k_out("KERNEL card mounted\r\n");
+        } else {
+            k_printf("KERNEL card err=%d at %s\r\n", e, bus ? what : "the panel");
+        }
+    }
+    moy_sh_board_line(line);
+}
+
 // The floor: never returns. Runs on the VM task's stack, with no VM.
 static void moy_kernel_recovery(int why) {
     static k_floor_t k;
@@ -924,6 +962,7 @@ static void moy_kernel_recovery(int why) {
 
     char line[208];
     size_t n = 0;
+    bool sh_ready = false;
     int64_t t0 = esp_timer_get_time(), last_report = t0, last_input = t0;
     #if defined(MOY_KERNEL_IDLE_SAFE_MS)
     int shown_left = -1;
@@ -944,6 +983,10 @@ static void moy_kernel_recovery(int why) {
                         k_choose(2);
                     } else if (strcmp(line, "state") == 0) {
                         k_state(&k);
+                    } else if (strncmp(line, "sh", 2) == 0
+                               && (line[2] == '\0' || line[2] == ' ')) {
+                        k_sh(&k, line[2] ? line + 3 : line + 2, &sh_ready);
+                        now = last_input = esp_timer_get_time();
                     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
                     } else if (strncmp(line, "update", 6) == 0
                                && (line[6] == '\0' || line[6] == ' ')) {

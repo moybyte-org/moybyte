@@ -5,8 +5,8 @@ one SPI host, so tearing the sdspi device down between ops -- or reconfiguring
 the panel's CS -- corrupts the bus and DMA state `esp_lcd` needs, and the NEXT
 panel flush hangs the board. No panic, no message: gray screen, dead USB. So
 there is ONE lifecycle: `with_sd_live` / `mount_sd_live` ATTACH the card to the
-host `esp_lcd` already owns, park only the LoRa radio's CS, mount ONCE and never
-tear down.
+host `esp_lcd` already owns (native/moy_sd's C, `moy_sd.up()`, which parks the
+LoRa radio's CS), mount ONCE and never tear down.
 
 `moybyte_sd` has no top-level imports at all -- `machine`, `os`, `vfs` and
 `moy_sd` are all pulled in lazily inside the functions -- so the real file runs
@@ -29,9 +29,6 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 SD_SRC = ROOT / "device" / "moybyte_sd.py"
 
-TFT_CS = 12
-SD_CS = 39
-RADIO_CS = 9
 
 
 # -- the doubles ---------------------------------------------------------------
@@ -153,13 +150,13 @@ def _moy_sd(log, sectors=15_523_840, sector_size=512, init_error=None):
     m = types.ModuleType("moy_sd")
     m.SECTOR_SIZE = sector_size
 
-    def init(host, cs, khz):
-        log.append(("moy_sd.init", host, cs, khz))
+    def up():
+        log.append(("moy_sd.up",))
         if init_error is not None:
             raise init_error
         return sectors
 
-    m.init = init
+    m.up = up
     m.read = lambda block, buf, n: log.append(("moy_sd.read", block, len(buf), n))
     m.write = lambda block, buf, n: log.append(("moy_sd.write", block, len(buf), n))
     m.deinit = lambda: log.append(("moy_sd.deinit",))
@@ -243,22 +240,21 @@ def w():
 # -- the live path: what it must NOT touch -------------------------------------
 
 
-def test_the_live_session_parks_the_radio_CS_and_nothing_else(w):
+def test_the_live_session_touches_no_pin(w):
     """The documented rule, and the one a grep cannot check: `TFT_CS` and
     `SD_CS` are driver-owned once the panel is up, and reconfiguring either
-    through `Pin(...)` corrupts the shared bus. Only the LoRa radio's CS is
-    parked. The same file DOES drive all three -- in the pre-display path."""
+    through `Pin(...)` corrupts the shared bus. The LoRa radio's CS is parked
+    by moy_sd's C attach, so the Python session creates no Pin at all."""
     w.mod.with_sd_live(lambda: None)
-    assert w.pins() == [RADIO_CS]
-    assert TFT_CS not in w.pins() and SD_CS not in w.pins()
+    assert w.pins() == []
 
 
 def test_the_live_mount_attaches_and_never_re_initialises_the_bus(w):
     """`machine.SDCard` re-runs `spi_bus_initialize()` on the host `esp_lcd`
-    already owns; `moy_sd.init` attaches to it. Constructing either a bus or an
+    already owns; `moy_sd.up` attaches to it. Constructing either a bus or an
     SDCard here is the hang."""
     w.mod.with_sd_live(lambda: None)
-    assert ("moy_sd.init", 1, SD_CS, 20000) in w.log
+    assert ("moy_sd.up",) in w.log
     assert "SDCard" not in w.kinds()
     assert "SPI.Bus" not in w.kinds()
 
@@ -279,7 +275,7 @@ def test_the_card_is_mounted_once_across_many_sessions(w):
     for _ in range(4):
         w.mod.with_sd_live(lambda: ran.append(1))
     assert len(ran) == 4
-    assert w.kinds().count("moy_sd.init") == 1
+    assert w.kinds().count("moy_sd.up") == 1
     assert w.kinds().count("vfs.mount") == 1
 
 
@@ -304,7 +300,7 @@ def test_a_failing_op_leaves_the_card_resident(w):
     with pytest.raises(ValueError):
         w.mod.with_sd_live(lambda: (_ for _ in ()).throw(ValueError("boom")))
     assert w.mod._live_mounted is True
-    assert "moy_sd.init" not in w.kinds()
+    assert "moy_sd.up" not in w.kinds()
 
 
 def test_the_resident_session_imports_nothing(w):
@@ -321,22 +317,8 @@ def test_the_resident_session_imports_nothing(w):
 def test_a_card_someone_else_already_mounted_is_not_mounted_twice(w):
     w.os(mounted=True)
     w.mod.with_sd_live(lambda: None)
-    assert "moy_sd.init" not in w.kinds()
+    assert "moy_sd.up" not in w.kinds()
     assert w.mod._live_mounted is True
-
-
-def test_the_radio_CS_is_parked_before_the_card_is_attached(w):
-    """A LoRa module still selected on the shared bus corrupts the first sdspi
-    transaction, so the park cannot follow the mount."""
-    w.mod.with_sd_live(lambda: None)
-    assert w.kinds().index("Pin") < w.kinds().index("moy_sd.init")
-
-
-def test_a_board_with_no_radio_pin_still_mounts(w):
-    """The park is best-effort; losing it must not cost the card."""
-    w.machine(pin_error=RuntimeError("no such pin"))
-    w.mod.with_sd_live(lambda: None)
-    assert "moy_sd.init" in w.kinds()
 
 
 def test_an_existing_mount_directory_is_not_an_error(w):
@@ -354,15 +336,6 @@ def test_a_failed_attach_does_not_leave_the_session_marked_resident(w):
 
 
 # -- mount_sd_live ------------------------------------------------------------
-
-
-def test_the_live_mount_uses_the_display_host_and_the_live_frequency(w):
-    """Host 1 is the PANEL's host -- attaching there is the whole mechanism --
-    and 20MHz is the attached device's rate."""
-    w.mod.mount_sd_live()
-    assert ("moy_sd.init", w.mod.SPI_HOST, w.mod.SD_CS, 20000) in w.log
-    assert w.mod.SPI_HOST == 1
-    assert w.mod.SD_LIVE_FREQ_KHZ == 20000
 
 
 def test_the_live_mount_publishes_the_card_at_slash_sd(w):
