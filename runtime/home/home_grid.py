@@ -1301,7 +1301,7 @@ class Launcher:
         r = c.r + g if c.r else 0
         self._face(cv, it, pic, r, self._cover_of(it, self._face_div(n)))
         if focus:
-            _ui_draw.focus(cv, self.theme, pic, size="card", r=r, flat=True)
+            _ui_draw.focus(cv, self.theme, pic, item="card", r=r, flat=True)
         if self._titled(c):
             self._draw_title(cv, it, x + n // 2, y + c.title_dy, c.title_w, focus)
 

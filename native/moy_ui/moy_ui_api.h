@@ -312,7 +312,7 @@ typedef struct {
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
     uint8_t keys, reveal, cls, fs;
-    uint8_t win;                    // the page lies in a window's body
+    uint8_t win;                    // the page lies in a window's body (1), on a panel (2)
     uint8_t elsewhere;              // the keys are another surface's: no focus
     uint8_t app;                    // its buttons' row of app_buttons + 1, 0 none
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a scroll, 3 sideways
@@ -339,7 +339,7 @@ typedef struct {
     // rows stacked on it, its last row's box and that row's marks, and the
     // marks of the row before it.
     int16_t grp_top;
-    uint16_t grp_flags, grp_prev;
+    uint16_t grp_flags;
     uint8_t grp_open, grp_n, grp_any, grp_first;
     moy_ui_box_t grp_last;
     // ui.icon's: the next row's icon, then the row's being drawn (an icon

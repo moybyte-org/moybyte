@@ -809,7 +809,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         lay = self.ws.layout
         q = g.quiet()[0]
         d = _ui_draw.depth()
-        m = _ui_draw.mark_reach("part") + 1
+        m = _ui_draw.mark_reach("cell") + 1
         if d[5]:
             m += d[8] + max(abs(d[9]), abs(d[10]))    # the hero's shadow
         x0 = max(lay.cx, q[0] - m)

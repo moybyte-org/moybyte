@@ -275,7 +275,8 @@ class AppHost:
 
     def begin(self, cv, th, rect, desk=False, window=False, elsewhere=False):
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
-        window's body when `window`): whether it is settled. `elsewhere`:
+        window's body when `window`, on a popover's panel when it is
+        "panel"): whether it is settled. `elsewhere`:
         the keys are a part's the app drives itself (a story's slide), so no
         stop holds focus this frame, as while the keys are on the shell's
         bar (`on_bar`): one focus mark a screen."""
@@ -332,9 +333,9 @@ class AppHost:
             self._canvas(cv)
             fs = _fs(cv)
         hp[_HP_TAP] = tap
-        flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
+        flags = ((_DESK if desk else 0) | (_PANEL if window == "panel" else _WINDOW if window else 0)
                  | (_ELSEWHERE if away else 0) | (_KEY_EDGE if edge else 0))
-        self._t3 = u[3] = flags & (_DESK | _WINDOW)
+        self._t3 = u[3] = flags & (_DESK | _WINDOW | _PANEL)
         if self.app is not None:
             flags |= (_app_row(self.app) + 1) << _APP_SHIFT
         # The frame begun last noted, this one begun, and the shift frame it
@@ -954,7 +955,7 @@ try:
     from ui_draw import (
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
+        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
         _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
         window_frame, within)
     from ui_scroll import PaintRing
@@ -962,7 +963,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import (
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
+        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
         _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
         window_frame, within)
     from runtime.ui_scroll import PaintRing

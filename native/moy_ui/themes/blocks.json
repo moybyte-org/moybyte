@@ -16,7 +16,8 @@
       "sunk": "#f6ead2", "lcd": "#c9f2dd", "lcd_ink": "#1a1530",
       "surface_light": true, "bar_light": true, "band_light": true,
       "code_text": "#1a1530", "code_keyword": "#6a2cff", "code_string": "#1f7a3a",
-      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8"
+      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8",
+      "paused": "#7a7085"
     },
     "light": {
       "panel": "#fff3dc", "edge": "#eadcc0", "title": "#ffffff", "title_ink": "#1a1530",
@@ -29,7 +30,8 @@
       "shade_dark": "#eadcc0", "ink_accent": "#6a2cff", "value_ink": "#ffffff",
       "sunk": "#f6ead2", "lcd": "#c9f2dd", "lcd_ink": "#1a1530",
       "code_text": "#1a1530", "code_keyword": "#6a2cff", "code_string": "#1f7a3a",
-      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8"
+      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8",
+      "paused": "#7a7085"
     }
   },
   "layout": {
@@ -38,9 +40,14 @@
   },
   "look": {
     "fam": "atkinson", "w_semi": 700, "w_bold": 800,
-    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 },
-               "outline": [1, "#ffffff"] },
-    "current": { "row": "underline" },
+    "marks": {
+      "row": { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
+               "on": { "mark": "fill", "c": "selection" },
+               "both": { "mark": "bar", "w": 4, "gap": 2, "c": "selection_ink" } },
+      "cell": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "accent" },
+                "on": { "mark": "underline", "w": 3, "gap": 2, "c": "value" } },
+      "card": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "accent" },
+                "on": { "mark": "underline", "w": 3, "gap": 2, "c": "value" } } },
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
                                "primary": { "font": "op" } } },
@@ -57,7 +64,7 @@
     "disabled": "#9c95a4", "danger_ink": "#b3261e",
     "buttons": { "normal": { "fill": "#f4ecdc", "border": [0, "#1a1530"] },
                  "tonal": { "fill": "#ffd23f", "ink": "#1a1530", "border": [0, "#1a1530"] },
-                 "danger": { "ink": "#1a1530" } },
+                 "danger": { "ink": "#b3261e" } },
     "lcd_border": [2, "#1a1530"],
     "keycap": { "fill": "#ffffff", "border": [1.25, "#1a1530"] },
     "backdrop": {

@@ -141,8 +141,7 @@ int mua_clip_row(moy_ui_ctx_t *c, clip_t *k, const moy_ui_sink_t *s, moy_ui_box_
 int mua_clip_next(clip_t *k);
 moy_ui_box_t mua_card_of(const moy_ui_ctx_t *c);
 void mua_band_mark(moy_ui_ctx_t *c, moy_ui_box_t b, int stacked, int marks);
-void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
-              int marks);
+void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked);
 void mua_group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 int mua_in_dialog(const moy_ui_ctx_t *c);
 void mua_sig_mix(moy_ui_ctx_t *c, const void *p, size_t n);

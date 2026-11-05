@@ -137,7 +137,11 @@ def widget_state(on=False, hot=False, disabled=False, interact=None):
     if interact == HOVER:
         return HOVER
     return REST
-_STATE_ALIAS = {'hover': ('dim',), 'hover_cue': ('focus', 'accent'), 'pressed': ('selection', 'hilite'), 'pressed_ink': ('selection_ink', 'ink'), 'disabled_ink': ('ink_dim',), 'disabled_edge': ('dim',)}
+# Edited with the focus and selection marks (docs/media/focus_2026-11): pressed
+# is the part's own sunk step, never the selection's colour, and a primary,
+# a tonal and a danger button keep their own fill or ink pressed; a row's pad
+# keeps a 4 px focus bar 4 px clear of its first glyph.
+_STATE_ALIAS = {'hover': ('dim',), 'hover_cue': ('focus', 'accent'), 'pressed': ('sunk', 'hilite'), 'pressed_ink': ('ink',), 'disabled_ink': ('ink_dim',), 'disabled_edge': ('dim',)}
 
 def state_token(th, role, fallback=None):
     v = th.get(role)
@@ -169,7 +173,7 @@ ALIGN_RIGHT = 2
 (GI_PAD, GI_GLYPH, GI_LABEL, GI_RING, GI_INK) = (0, 1, 2, 3, 4)
 (MB_PADX, MB_PADY, MB_INK) = (0, 1, 2)
 (DLG_EDGE, DLG_FILL, DLG_RING) = (0, 1, 2)
-DEFAULT_METRICS = {'button': (2, 16, 12, 1, ALIGN_CENTER, 6), 'chip': (4, 2, 1, 1, ALIGN_CENTER), 'row': (4, 16, 14, 1, 1, 20, 28, 2), 'cell': (2, 14, 2, 16, 14, 1), 'tab': (2, 3, 16), 'status': (1, 3, 2, 1), 'panel': (1, 1, 12, 3), 'focus': (2, 1), 'scrollbar': (4, 8), 'text_field': (4, 3, 6, 8, _BLACK, 6, _WHITE, 5, 10), 'game_btn': (6, _WHITE, _BLACK), 'game_icon_btn': (2, 16, 19, _WHITE, _BLACK), 'mini_btn': (2, 2, _BLACK), 'dialog': (1, 2, _WHITE)}
+DEFAULT_METRICS = {'button': (2, 16, 12, 1, ALIGN_CENTER, 6), 'chip': (4, 2, 1, 1, ALIGN_CENTER), 'row': (10, 16, 14, 1, 1, 20, 28, 2), 'cell': (2, 14, 2, 16, 14, 1), 'tab': (2, 3, 16), 'status': (1, 3, 2, 1), 'panel': (1, 1, 12, 3), 'focus': (2, 1), 'scrollbar': (4, 8), 'text_field': (4, 3, 6, 8, _BLACK, 6, _WHITE, 5, 10), 'game_btn': (6, _WHITE, _BLACK), 'game_icon_btn': (2, 16, 19, _WHITE, _BLACK), 'mini_btn': (2, 2, _BLACK), 'dialog': (1, 2, _WHITE)}
 _PANEL = ('panel', 60)
 _TITLE = ('title', 13)
 _TITLE_INK = ('title_ink', _BLACK)
@@ -204,18 +208,18 @@ _ROW_CHROME_STATES = _chrome_row_states(_CHROME_INK)
 _ROW_CHROME_STATES[DISABLED] = (None, _CHROME_DIM, None)
 _ROW_CTA_STATES = {REST: (_HILITE, _BLACK, _DIM), HOVER: (_HILITE, _BLACK, _HOVER_CUE), ON: (_ACCENT, _BLACK, _ACCENT), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _ACCENT), DISABLED: (_HILITE, _DIS_INK, _DIM)}
 
-def _button_states(bg, ink):
-    return {REST: (bg, ink, _SHADE_DARK), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, _SHADE_DARK), HOT: (bg, ink, _SHADE_DARK), PRESSED: (_PRESS, _PRESS_INK, _SHADE_DARK), DISABLED: (bg, _DIS_INK, _SHADE_DARK)}
+def _button_states(bg, ink, pressed_ink=_PRESS_INK):
+    return {REST: (bg, ink, _SHADE_DARK), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, _SHADE_DARK), HOT: (bg, ink, _SHADE_DARK), PRESSED: (_PRESS, pressed_ink, _SHADE_DARK), DISABLED: (bg, _DIS_INK, _SHADE_DARK)}
 _BUTTON_KIND_KEY = {'normal': 'button', 'primary': 'button_primary', 'tonal': 'button_tonal', 'danger': 'button_danger', 'toggle': 'cell'}
 _VALUE = ('value', 13)
 
 def _primary_states():
     bg, ink = _VALUE, ('value_ink', _WHITE)
-    return {REST: (bg, ink, None), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, None), HOT: (bg, ink, None), PRESSED: (_PRESS, _PRESS_INK, None), DISABLED: (bg, _DIS_INK, None)}
+    return {REST: (bg, ink, None), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, None), HOT: (bg, ink, None), PRESSED: (bg, ink, None), DISABLED: (bg, _DIS_INK, None)}
 # Edited with the 2026-10 look's step 10 (button kinds): the kinds' own
 # states whose (field, ink) misses the contrast floor take these forms.
 FLOORS = {'button_tonal': ((('surface', _WHITE), ('ink', _BLACK)),), 'button_danger': ((('danger', 8), _WHITE), (('danger', 8), _BLACK))}
-DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_primary': _primary_states(), 'button_tonal': _button_states(('surface', _WHITE), _VALUE), 'button_danger': _button_states(('surface', _WHITE), ('danger', 8)), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
+DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_primary': _primary_states(), 'button_tonal': _button_states(('surface', _WHITE), _VALUE, _VALUE), 'button_danger': _button_states(('surface', _WHITE), ('danger', 8), ('danger', 8)), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
 # Edited with theming phase 4 step 2 (docs/theme_and_shell_2026-11.md §3.3): the
 # mini_btn and chip quirks' rulings, re-ruled; the pixels they describe are
 # the same.

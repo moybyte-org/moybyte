@@ -107,8 +107,12 @@ def test_the_prompts_field_and_buttons_draw_apart_and_outlined(tmp_path, theme):
     # dialog's card under it 3:1 (the field under its caption, the stop's
     # lower part)
     mid = fy + fh * 3 // 4
-    card = px(fx + fw - 1, mid)
-    ring = next(px(x, mid) for x in range(fx + fw - 1, fx, -1) if px(x, mid) != card)
+    row = [px(x, mid) for x in range(fx, fx + fw)]
+    card = max(set(row), key=row.count)
+    x = fx + fw - 1
+    while px(x, mid) != card:          # the stop's end may lie on the card's own edge
+        x -= 1
+    ring = next(px(x, mid) for x in range(x, fx, -1) if px(x, mid) != card)
     assert _ratio(ring, card) >= 3.0, "the field's outline %.2f:1" % _ratio(ring, card)
 
 

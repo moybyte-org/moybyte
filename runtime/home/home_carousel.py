@@ -931,7 +931,7 @@ class Carousel(Launcher):
         card's current lift (`ui_draw.focus`)."""
         w, h = at[2], at[3]
         _ink, box = _ui_draw.focus(cv, self.theme, (-4 * w - 64, -4 * h - 64, w, h),
-                                   size="card", after=True, selected=selected)
+                                   item="card", after=True, selected=selected)
         g = (box[2] - w) // 2
         if g <= 0:
             return at
@@ -952,7 +952,7 @@ class Carousel(Launcher):
         at = rect
         if mark or sel:
             at = self._mark_rect(cv, rect, sel)
-            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
+            _ink, rect = _ui_draw.focus(cv, self.theme, at, item="card",
                                         r=self._corner_r(rect[2]), selected=sel)
         cr = self._corner_r(rect[2])
         self._draw_picture(cv, it, rect, centre, sheet_for, cr)
@@ -965,5 +965,5 @@ class Carousel(Launcher):
         if not cr:
             self._card_frame(cv, rect)
         if mark or sel:
-            _ui_draw.focus(cv, self.theme, at, size="card", r=cr,
+            _ui_draw.focus(cv, self.theme, at, item="card", r=cr,
                            after=True, selected=sel)

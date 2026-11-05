@@ -459,17 +459,17 @@ def install(m, lib, tokens):
                                 c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
-    def focus(cv, look, rect, cls, r, flags, fs):
+    def focus(cv, look, rect, kind, r, flags, fs):
         s = sink(cv, look)
         out, ink = _Box(), _I()
-        _check(lib.moy_ui_focus(c.byref(s), box_of(rect), int(cls), int(r), int(flags),
+        _check(lib.moy_ui_focus(c.byref(s), box_of(rect), int(kind), int(r), int(flags),
                                 fs_or(fs, s), c.byref(out), c.byref(ink)))
         return (None if ink.value < 0 else ink.value, (out.x, out.y, out.w, out.h))
 
-    def current(cv, look, rect, r, flags, fs):
+    def current(cv, look, rect, kind, r, flags, fs):
         s = sink(cv, look)
         ink = _I()
-        _check(lib.moy_ui_current(c.byref(s), box_of(rect), int(r), int(flags),
+        _check(lib.moy_ui_current(c.byref(s), box_of(rect), int(kind), int(r), int(flags),
                                   fs_or(fs, s), c.byref(ink)))
         return None if ink.value < 0 else ink.value
 
@@ -477,10 +477,10 @@ def install(m, lib, tokens):
         if active is not None:
             lib.moy_ui_marks_active(1 if active else 0)
         return (bool(lib.moy_ui_marks_shown()), lib.moy_ui_marks_drawn(1 if reset else 0),
-                lib.moy_ui_mark_reach(1))
+                lib.moy_ui_mark_reach(2), bool(lib.moy_ui_mark_solid(1)))
 
-    def mark_reach(cls):
-        return lib.moy_ui_mark_reach(int(cls))
+    def mark_reach(kind):
+        return lib.moy_ui_mark_reach(int(kind))
 
     def inset(rect, dx, dy):
         out = _R4()

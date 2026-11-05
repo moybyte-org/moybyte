@@ -225,8 +225,8 @@ Build step 2 (`runtime/apps/music_app.py`, cart
   ← → of its own.
 - On a pad, Y opens Now playing. L and R do not switch tabs: the input
   table has no shoulder keys.
-- No theme names the `paused` role yet, so the paused ink is `ink_dim`
-  everywhere.
+- Every seed names the `paused` role in both modes; a theme that does not
+  falls back to `ink_dim`.
 - The Radio tab shows its no-Wi-Fi page when the console has a Wi-Fi radio
   that is not up and knows no network.
 - Its prefs keep only the stations added (`music_stations`); there is no

@@ -106,7 +106,7 @@ def _keys(ws, desk):
 # and behind), the windows' content, the desk.
 _CASES = [(False, "desktop"), (False, "panel"), (False, "value"), (False, "surface"),
           (True, "bar"), (True, "title_active"), (True, "title_inactive"),
-          (True, "panel"), (True, "accent"), (True, "title_ink")]
+          (True, "surface"), (True, "accent"), (True, "title_ink")]
 
 
 @pytest.mark.parametrize("desk,role", _CASES,

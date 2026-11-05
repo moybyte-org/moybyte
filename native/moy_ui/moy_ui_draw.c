@@ -404,12 +404,6 @@ static int mark_flags(int flags) {
     return flags & ~MOY_UI_F_ON;
 }
 
-// The marks of a part with `flags` on box b: drawn where `draw`, and *ink
-// and *on (the field under the text, none over a mark) follow them. A row
-// takes a current `bar` beside it (`side`, MOY_UI_MARK_SIDE), a part under it;
-// `r` is the part's corner radius, which a focus ring follows. The focus mark
-// is classed by the box's size, but a button or a chip (`card` 0) is a part
-// however big: a desk's keypad key wears the part's mark, never a card's.
 // Whether colour `a` clears colour `b` 3:1 (both colour values).
 static int clears(int a, int b) {
     int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
@@ -417,32 +411,39 @@ static int clears(int a, int b) {
     return hi + 500 >= 3 * (lo + 500);
 }
 
+// The marks of a part of item kind `kind` with `flags` on box b: drawn where
+// `draw`, and *ink and *on (the field under the text, none over a mark)
+// follow them; `r` is the part's corner radius, which its marks follow, and
+// `danger` says its ink is a danger ink, which a focus fill keeps (L5).
 static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs, int draw,
-                       int side, int r, int card, int *ink, int *on) {
+                       int kind, int r, int danger, int *ink, int *on) {
     const moy_ui_marks_t *m = moy_ui_marks();
     int field = *on;
-    int mi, how = (draw ? 0 : MOY_UI_MARK_INK) | side;
+    int mi, how = draw ? 0 : MOY_UI_MARK_INK;
     if (flags & MOY_UI_F_ON) {
-        moy_ui_current_in(s, b, 0, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK), fs, &mi,
-                          0);
+        moy_ui_current_in(s, b, kind, r, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK), fs,
+                          &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
     }
     if ((flags & MOY_UI_F_FOCUS) && m->active) {
-        int cls = moy_ui_mark_class(b, MOY_UI_MARK_AUTO, fs);
-        cls = cls == MOY_UI_MARK_CARD && !card ? MOY_UI_MARK_PART : cls;
-        int st = m->style[cls];
-        // a mark drawn on the part in its own fill's colour (Moy's edge on
-        // its accent primary) would not show: the theme's ring round it then
-        if (field >= 0 && st != MOY_UI_FOCUS_RING && st != MOY_UI_FOCUS_INVERT
-            && !clears(moy_ui_token(s->look, m->color), field)) {
+        const moy_ui_mark_t *k = moy_ui_mark_of(kind, MOY_UI_MS_FOCUS);
+        // a mark inside the part in its own fill's colour (Moy's bar on its
+        // accent primary) would not show: a ring round it then
+        int fc = moy_ui_mark_colour(s, kind, MOY_UI_MS_FOCUS);
+        if (field >= 0 && fc >= 0 && k->mark != MOY_UI_MK_RING && k->mark != MOY_UI_MK_FILL
+            && !clears(fc, field)) {
             if (draw) {
-                moy_ui_focus_in(s, b, cls, r, MOY_UI_MARK_RING | MOY_UI_MARK_COUNT, fs, NULL,
+                moy_ui_focus_in(s, b, kind, r, MOY_UI_MARK_RING | MOY_UI_MARK_COUNT, fs, NULL,
                                 &mi, 0);
             }
             return;
         }
-        moy_ui_focus_in(s, b, cls, r, how | (side ? 0 : MOY_UI_MARK_CELL), fs, NULL, &mi, 0);
+        mi = danger ? *ink : -1;
+        moy_ui_focus_in(s, b, kind, r,
+                        how | ((flags & MOY_UI_F_ON) ? MOY_UI_MARK_BOTH : 0)
+                            | (danger ? MOY_UI_MARK_DANGER : 0),
+                        fs, NULL, &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
     }
@@ -471,7 +472,7 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
             ring = n;
         }
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_MARK_SIDE, 0, 1, &ink, &on);
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_ITEM_ROW, 0, 0, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
@@ -506,10 +507,6 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
         size_t ln = (size_t)t_fit(&d.f, r->label, right - tx, ts);
         if (ln) {
             text_over(&d, r->label.p, ln, tx, ty, ink, on, span_box(tx, right, b, ring));
-            if ((flags & MOY_UI_F_ON) && moy_ui_current_rows_under()) {
-                moy_ui_box_t u = {(int16_t)tx, b.y, (int16_t)t_w(&d.f, r->label.p, ln, ts), b.h};
-                moy_ui_current_under(s, u, fs);
-            }
         }
     }
     return MOY_UI_OK;
@@ -527,7 +524,7 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
     colours(&d, kind, state, k->colors, c);
     int field = c[0], ink = c[1], edge = c[2];
     int on = -1;
-    part_marks(s, b, flags, fs, 0, 0, 0, 1, &ink, &on);
+    part_marks(s, b, flags, fs, 0, MOY_UI_ITEM_CELL, 0, 0, &ink, &on);
     (void)on;
     int pad = dflt(k->pad, metric(MOY_UI_K_CELL, MOY_UI_M_CELL_PAD) * fs);
     int has_label = (flags & MOY_UI_F_LABEL) != 0;
@@ -540,7 +537,7 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
         } else if (field >= 0) {
             fill(&d, x, y, w, h, field);
         }
-        part_marks(s, b, flags, fs, 1, 0, 0, 1, &ink, &on);
+        part_marks(s, b, flags, fs, 1, MOY_UI_ITEM_CELL, 0, 0, &ink, &on);
         use_part(&d, kind, state, fs);
         if (has_label && cap > 0) {
             int cap_y = y + h - cap;
@@ -992,21 +989,31 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
             on = -1;
         }
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, shaped ? bs.r : 0, 0, &ink, &on);
+    int br = !shaped ? 0 : bs.shape == BTN_CIRCLE ? (w < h ? w : h) / 2 : bs.r;
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_ITEM_CELL, br,
+               kind == MOY_UI_K_BUTTON_DANGER, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
     use_part(&d, kind, state, fs);
     label_font(&d, &bs, k->label);
+    int icon = k->icon, gl = k->glyph;
+    if (bs.check > 0 && (flags & MOY_UI_F_ON) && !(flags & (MOY_UI_F_ICON | MOY_UI_F_GLYPH))
+        && k->label.n) {
+        // an ON button the theme checks: a check before its label
+        static const uint8_t s_check[] = "check";
+        icon = moy_ui_icon_slot(s_check, sizeof(s_check) - 1);
+        gl = -1;
+        flags |= icon >= 0 ? MOY_UI_F_ICON : 0;
+    }
     int iw = button_iw(flags, fs);
     int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
     int ln = t_fit(&d.f, k->label, w - 2 * pad - iw, fs);
     int tx = x + button_off(b, iw, t_w(&d.f, k->label.p, (size_t)ln, fs), fs);
-    if (!(flags & MOY_UI_F_ICON) && (flags & MOY_UI_F_GLYPH) && k->glyph >= 0) {
-        glyph(&d, k->glyph, tx, y, metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs, h, ink,
-              d.tfs);
+    if (!(flags & MOY_UI_F_ICON) && (flags & MOY_UI_F_GLYPH) && gl >= 0) {
+        glyph(&d, gl, tx, y, metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs, h, ink, d.tfs);
     }
-    if ((flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0)) {
+    if ((flags & MOY_UI_F_ICON) && (icon >= 0 || gl >= 0)) {
         int side = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs;
         if (!ln && !d.run && bs.font >= 0) {
             // an icon alone on a key whose kind names a face (a calculator's
@@ -1018,7 +1025,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
         int ix = ln ? tx : x + moy_ui_fdiv(w - side, 2);
         moy_ui_box_t ib = {(int16_t)ix, (int16_t)(y + moy_ui_fdiv(h - side, 2)), (int16_t)side,
                            (int16_t)side};
-        moy_ui_icon_in(s, k->icon, k->glyph, ib, ink, fs);
+        moy_ui_icon_in(s, icon, gl, ib, ink, fs);
     }
     if (ln) {
         int lw = t_w(&d.f, k->label.p, (size_t)ln, fs);
@@ -1053,7 +1060,7 @@ int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
             rings(&d, x, y, w, h, edge, n);
         }
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, 0, &ink, &on);
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_ITEM_CELL, 0, 0, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
@@ -1155,7 +1162,8 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
         // the current tab's mark is a pill, as the home's and the bar's tabs
         // wear it (their plate's radius, 5 at the scale)
         int mi = -1, how = (phase & MOY_UI_PHASE_FRAME) ? 0 : MOY_UI_MARK_INK;
-        moy_ui_current_in(s, r, 5 * fs, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK),
+        moy_ui_current_in(s, r, MOY_UI_ITEM_CELL, 5 * fs,
+                          how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK),
                           fs, &mi, 0);
         ink_i = mi >= 0 ? mi : ink_i;
     }

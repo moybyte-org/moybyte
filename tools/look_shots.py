@@ -94,7 +94,7 @@ shows -- cut to its window or the content under the bar, less the hint band
 is held to 4.5:1, a part to 3:1, the structure ramp's hairlines
 (`STRUCTURE_TOKENS`) to 1.5:1 and an Off or a rest track to 1.6:1 (D-05);
 a toggle's knob is measured on its track; a current
-mark by the look's `current.style`, a faint plate passing on its label's
+mark by the cell's declared `on` mark, a faint plate passing on its label's
 ink; a swatch only has to show, and a preview card is measured by its ring.
 A measure with a known, filed gap (`KNOWN`) names it in the CSV's owner
 column and is no FLAG; the run and each index.txt count the FLAGs and the
@@ -3091,10 +3091,13 @@ def _tab_ink(img, r, plate):
 
 def _current_pairs(ws, probe, img):
     """The open tab's current mark against the ground beside it, by the
-    look's `current.style`: a bar under the tab, else a plate -- and where
-    a plate is faint, its second cue, the label's ink against a plain
-    tab's, which is flagged only when both miss."""
-    style = (_theme_look(ws).get("current") or {}).get("style", "bar")
+    cell's declared `on` mark (`marks.cell.on`): an underline under the
+    tab, else a plate -- and where a plate is faint, its second cue, the
+    label's ink against a plain tab's, which is flagged only when both
+    miss."""
+    import moy_ui
+    mark = moy_ui.theme_marks(ws.look.theme_name, ws.look.theme_variant == "light")[2][4][0]
+    style = "bar" if mark == 7 else "plate"           # MOY_UI_MK_UNDERLINE
     tabs = probe.last["tabs"]
     out = []
     for r, active in tabs:
@@ -3178,7 +3181,7 @@ def _mark_pairs(ws, img, box, view, kind=None):
     th = ws.theme_colors
     focus = _token_rgbs(ws, ("focus",))
     px = img.load()
-    reach = max(2, ui_draw.mark_reach("part"))
+    reach = max(2, ui_draw.mark_reach("cell"))
     # the row's leading edge: where an edge, a bar beside a row, a ring and
     # a plate all lie, and a field's own ring inside the row does not
     x0, x1 = max(0, r[0] - reach), min(img.width, r[0] + reach + 4)
@@ -3377,7 +3380,9 @@ def _rim_pairs(ws, probe, img):
     """A lifted card's rim hugs its cover (design review R3-05): between
     the hero's cover and its rim no run of the card's plate (Moy's lift)."""
     look = _theme_look(ws)
-    if (look.get("focus") or {}).get("card") != "lift" or ws.screen != "launcher" \
+    lift = [lk.get("marks", {}).get("card", {}).get("focus", {}).get("lift")
+            for lk in (look, look.get(ws.look.theme_variant, {}))]
+    if not any(lift) or ws.screen != "launcher" \
             or ws.sysmenu.open or ws.pause.open or ws.confirm.open:
         return []           # a menu or a dialog over the home takes the hero's lift
     covers = probe.last["covers"]

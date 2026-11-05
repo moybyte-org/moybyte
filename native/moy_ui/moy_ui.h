@@ -87,11 +87,13 @@ int moy_ui_buttons_app(const char *name, size_t n);
 int moy_ui_button_of(int kind);
 // A button's resolved style in `state` for app row `app` (-1 none): its
 // (field, ink, edge), -1 for nothing; the ring width in pixels, the shape (an
-// index of the field's enum), the radius, the font (key, op) and the bevel,
-// -1 where silent (the style's).
+// index of the field's enum), the radius, the font (key, op), the bevel and
+// whether an ON button wears a check before its label (`check`, a theme whose
+// ON fill is shared with other parts: Contrast's Toggle on), -1 where silent
+// (the style's).
 typedef struct {
     int16_t c[3];
-    int8_t edge_w, shape, r, font, bevel;
+    int8_t edge_w, shape, r, font, bevel, check;
 } moy_ui_btn_style_t;
 int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style_t *out);
 
@@ -392,58 +394,67 @@ int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
 // the theme casts one.
 int moy_ui_soft(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int k);
 
-// -- the marks (moy_ui_depth.c; docs/media/look_2026-10/DESIGN.md, the marks) ----
+// -- the marks (moy_ui_depth.c; docs/theme_and_shell_2026-11.md §3.3) ------------------
 //
-// Focus and current are theme properties the engine draws: `focus` by the
-// part's size class (a CARD 48 px and up, a SMALL part under 28 px both ways,
-// any other a PART), `current` as a plate, a fill or a bar. They resolve with
-// the depth (moy_ui_depth_use) from the look's focus.*, current.* and
-// sel_back. Focus is drawn only while the marks are ACTIVE: the shell clears that while
-// a window behind draws, so a screen shows one focus mark, in the focused
-// window. `drawn` counts the focus marks drawn, for the nets.
-enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI_MARK_AUTO = 3 };
-// A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
-// window behind, a current bar at the SIDE of a row rather than under it.
-// INK draws nothing and answers only the ink (a part's CONTENT phase); AGAIN
-// draws a focus mark once more under a clip and counts no mark; RING draws
-// the theme's `focus.ring` whatever its focus style, and counts no mark (a
-// cursor: the sprite editor's) unless COUNT says it is the focus mark (a part
-// whose fill would hide the theme's own mark). TOP and FOOT: the box is a
-// card's first or last row, and a mark that fills it rounds those corners as
-// the card's, by the radius given. KEEP: the current content keeps its own
-// colours (a code line's), so an opaque current plate beside a row is the
-// row's outline instead. SELECTED: the card the screen describes while focus
-// is elsewhere or does not draw (touch): its card mark draws whatever the
-// shell says of focus, as a current mark -- no rim, and no focus mark counted.
-// PILL: the pill, whatever the theme's focus style -- a plate of the mark's
-// colour under the part's content, and AFTER it a ring two units wide on the
-// box's edge and the theme's `focus.outline` round it -- the mark of a part
-// on a bar (an OS widget, a tab of the home's), whose own ink stays.
+// Focus and selection are marks a theme DECLARES (its look's `marks`): one
+// per item kind (ROW, CELL, CARD) and state (FOCUS, ON -- selected, the
+// current state -- and BOTH, an extra mark over the two on an item focused
+// and selected), each a mark type in a role colour with its numbers and an
+// optional keyline. The engine draws what is declared and supplies a default
+// for what is not (row focus a bar, cell and card focus a ring, on a tint of
+// `value`); the theme loader holds the declarations to legibility
+// (moy_theme_marks_check, docs/media/focus_2026-11/README.md L1-L9) and drops
+// a failing one to the default. The kind is the part's, named by every
+// caller. Focus draws only while the marks are ACTIVE: the shell clears that
+// while a window behind draws, so a screen shows one focus mark, in the
+// focused window. `drawn` counts the focus marks drawn, for the nets.
+enum { MOY_UI_ITEM_ROW = 0, MOY_UI_ITEM_CELL = 1, MOY_UI_ITEM_CARD = 2, MOY_UI_ITEMS = 3 };
+enum { MOY_UI_MS_FOCUS = 0, MOY_UI_MS_ON = 1, MOY_UI_MS_BOTH = 2, MOY_UI_MSTATES = 3 };
+// marks.<kind>.<state>.mark's values, in style.json's order
 enum {
-    MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
+    MOY_UI_MK_NONE = 0, MOY_UI_MK_FILL = 1, MOY_UI_MK_TINT = 2, MOY_UI_MK_BAR = 3,
+    MOY_UI_MK_RING = 4, MOY_UI_MK_INSET = 5, MOY_UI_MK_OUTLINE = 6, MOY_UI_MK_UNDERLINE = 7,
+};
+// One declared mark: its type, its colour and the ink the item's content
+// takes on it (tokens, -1 unset: the mark's state's own), its width, gap and
+// alpha (0..255), and its keyline (`key`: width, look colour).
+typedef struct {
+    int8_t mark, w, gap, key_w;
+    int16_t c, ink;
+    uint8_t alpha, declared;
+    int32_t key_c;
+} moy_ui_mark_t;
+// The mark of `kind` in `state` the installed look draws.
+const moy_ui_mark_t *moy_ui_mark_of(int kind, int state);
+// A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
+// window behind. INK draws nothing and answers only the ink (a part's CONTENT
+// phase); AGAIN draws a focus mark once more under a clip and counts no mark;
+// RING draws a ring in the cell's focus colour whatever the marks, and
+// counts no mark (a cursor: the sprite editor's) unless COUNT says it is the
+// focus mark (a part whose fill would hide the theme's own mark). TOP and
+// FOOT: the box is a card's first or last row, and a mark that fills it
+// rounds those corners as the card's, by the radius given. KEEP: the
+// current content keeps its own colours (a code line's), so an opaque ON
+// fill is its outline instead. SELECTED: the card the screen describes while
+// focus is elsewhere or does not draw (touch): its card mark draws whatever
+// the shell says of focus -- no rim, and no focus mark counted. PILL: the
+// pill, whatever the marks -- a plate of the cell focus colour under the
+// part's content, and AFTER it a ring two units wide on the box's edge and
+// the cell focus mark's keyline round it -- the mark of a part on a bar (an
+// OS widget, a tab of the home's), whose own ink stays. BOTH: the item is
+// selected too, its ON mark drawn under this one, so the BOTH mark draws over
+// it. DANGER: the part's ink is a danger ink, the colour index *ink holds on
+// the call; a focus fill it would not clear 4.5:1 is drawn as a 3 px line
+// inside the part in the fill's colour, and the part keeps its ink.
+enum {
+    MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_INK = 8,
     MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
     MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
-    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048, MOY_UI_MARK_CELL = 4096,
+    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048, MOY_UI_MARK_BOTH = 4096,
+    MOY_UI_MARK_DANGER = 8192,
 };
-// focus.style's and current.style's values, in style.json's order
-enum {
-    MOY_UI_FOCUS_RING = 0, MOY_UI_FOCUS_PLATE = 1, MOY_UI_FOCUS_LIFT = 2, MOY_UI_FOCUS_EDGE = 3,
-    MOY_UI_FOCUS_UNDERLINE = 4, MOY_UI_FOCUS_INVERT = 5,
-};
-enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
-// current.row's: how a row's current mark draws -- the style's own (under the
-// plate style the plate), the row's outline, which leaves the row's ground
-// (and every code colour on it) as it is, or an underline under the row's
-// label (moy_ui_current_under), the mark a theme's parts wear as current
-enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1, MOY_UI_CUR_ROW_UNDERLINE = 2 };
 typedef struct {
-    uint8_t active, dark, ink_accent;
-    uint8_t style[3];               // per class: PART, CARD, SMALL
-    uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w, cur_row;
-    int16_t color, cur_color;       // tokens
-    int16_t cur_ink;                // the token the current content takes (-1: its own)
-    int16_t ring_w, ring_gap, grow, rise, edge_w, underline_w;
-    int32_t outline_c, rim_c, sel_back;     // look colours
+    uint8_t active, dark, plate_alpha;
     uint32_t drawn;
 } moy_ui_marks_t;
 const moy_ui_marks_t *moy_ui_marks(void);
@@ -456,28 +467,33 @@ int moy_ui_marks_shown(void);
 void moy_ui_marks_refresh(void);
 // The focus marks drawn since the last reset.
 uint32_t moy_ui_marks_drawn(int reset);
-// How far class `cls`'s focus mark reaches past its box's top edge (0: inside it).
-int moy_ui_mark_reach(int cls);
-// The size class of box `b` at scale fs, or `cls` where it names one.
-int moy_ui_mark_class(moy_ui_box_t b, int cls, int fs);
-// The focus mark on box `b` (corner radius r), drawn after the part's fill
-// and before its content; a lifted card's rim is a second call, AFTER its
-// content. *content gets the box the content draws in (a lifted card's,
-// grown and raised), *ink the colour index the content takes (-1: its own).
-int moy_ui_focus(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+// How far `kind`'s focus mark reaches past its box (0: inside it): a ring's
+// gap, width and keyline, a lifted card's growth and rise.
+int moy_ui_mark_reach(int kind);
+// Whether `kind`'s ON mark is an opaque fill (Contrast's): its parts take the
+// inverted treatment, a tile its colour and the ink on it.
+int moy_ui_mark_solid(int kind);
+// The colour index `kind`'s mark in `state` paints in (-1: none).
+int moy_ui_mark_colour(const moy_ui_sink_t *s, int kind, int state);
+// The focus mark of `kind` on box `b` (corner radius r), drawn after the
+// part's fill and before its content; a lifted card's rim is a second call,
+// AFTER its content. *content gets the box the content draws in (a lifted
+// card's, grown and raised), *ink the colour index the content takes (-1:
+// its own).
+int moy_ui_focus(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int flags, int fs,
                  moy_ui_box_t *content, int *ink);
-// The current mark under box `b`'s content; *ink as moy_ui_focus's.
-int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink);
-// Whether a row's current mark is an underline under its label
-// (current.row `underline`): the row draws it with moy_ui_current_under,
-// across the label's columns `b.x`..`b.x + b.w`, at the foot of the row `b`.
-int moy_ui_current_rows_under(void);
-int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
+// The ON mark of `kind` under box `b`'s content; *ink as moy_ui_focus's.
+int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int flags, int fs,
+                   int *ink);
+// A plate in colour index `ci` at `alpha` (0..255) on box b, its radius r
+// rounding the corners MOY_UI_MARK_TOP and MOY_UI_MARK_FOOT in `flags` name
+// (all four with neither): a pressed row's step.
+int moy_ui_plate(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int ci, int alpha);
 // The two as a primitive draws them, inside its own crossing.
-int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int flags, int fs,
                     moy_ui_box_t *content, int *ink, int crossing);
-int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink,
-                      int crossing);
+int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int flags, int fs,
+                      int *ink, int crossing);
 
 #define MOY_UI_DEFAULT INT16_MIN
 #define MOY_UI_FROM_STYLE (-2)
@@ -486,7 +502,7 @@ enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
     MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024, MOY_UI_F_WRAP = 2048,
-    MOY_UI_F_PART = 4096, MOY_UI_F_BAR = 8192,
+    MOY_UI_F_PART = 4096, MOY_UI_F_BAR = 8192, MOY_UI_F_PRESSED = 16384,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other
@@ -793,8 +809,9 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // legends), petme128 on a run. A progress row a row and its bar tall or
 // taller sets its label and percent on a line, the bar across under them.
 // The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
-// size class (MOY_UI_DESK): the page lies in a window's body.
-enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
+// size class (MOY_UI_DESK): the page lies in a window's body; MOY_UI_PANEL:
+// it lies on a popover's panel, whose ground is the panel part's field.
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_PANEL = 32 };
 // moy_ui_api_begin's: the keys are another surface's this frame (a cart's
 // editor handle holds them), so no stop holds focus.
 #define MOY_UI_ELSEWHERE 4
@@ -813,7 +830,8 @@ typedef struct {
     int16_t n, cur;                 // seg, swatch: the count and the current (-1 none);
                                     // toggle: cur is on
     int32_t v, lo, hi;              // slider; progress: v of hi done (lo 0)
-    int16_t fs, desk, card;         // card: on a group's card
+    int16_t fs, desk, card;         // desk: the ground (MOY_UI_DESK | WINDOW | PANEL);
+                                    // card: on a group's card
     int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
     int16_t steps;                  // slider: a segment per step, no number;
                                     // progress: a count, its label alone (no percent)

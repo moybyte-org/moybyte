@@ -35,7 +35,8 @@ The images are in three folders:
 
 - `today/` shows what dev draws, at `810f6d445`.
 - `proposal/` shows the proposal: the seeds' declared marks, drawn by the
-  prototype engine (`marks_prototype.patch`).
+  prototype engine (`marks_prototype.patch`). The build (below, "As
+  built") draws them from this checkout: `--runs proposal` needs no patch.
 - `findings/` holds the numbered crops this README cites.
 
 Each run has these sheets:
@@ -265,7 +266,7 @@ The picks, theme by theme:
 
 - **Moy** keeps the owner's grammar. Moy Day's selected tint rises from the
   engine's default 0.14 to 0.18 (about `#DEDCF7` on white, 1.33:1, L3). Its cards ring; a lift with
-  the ring is legal under the checks, and is the owner's call (question 2).
+  the ring is legal under the checks; the owner chose the ring (answer 2).
 - **Blocks** keeps the marks the first pass proposed: the ink bar (17.6:1 on
   the card) and the purple fill (6.2:1). On the purple fill the ink bar is
   2.9:1, so `both` turns the bar white. Its danger buttons take the red ink
@@ -409,15 +410,44 @@ Each item lands with its golden re-bake. The prototype patch draws items 1,
     test over the state sheet's pages for every seed theme-mode, from
     `tools/focus_shots.py`'s `Sheet` and its `checks`.
 
-## Open questions for the owner
+## As built (2026-11-05)
 
-1. **Contrast's selected mark.** The proposal makes it a 3 px frame, so its
-   one fill (yellow) means focus and nothing else. The alternative keeps the
-   solid white or black plate and gives "both" the frame instead, which fails
-   L4 (yellow beside white is 1.27:1) and L8 (the plate is also Primary's and
-   Toggle-on's fill).
-2. **Moy's cards: ring, or lift with the ring?** Both pass the checks. The
-   proposal rings them, as every other Moy cell rings.
-3. **L3's floor of 1.3:1** is below WCAG's 3:1 on purpose (an area tint, not
-   a line). Moy Day's 0.18 tint is the lightest that passes; a firmer floor
-   would darken every Day selection.
+Change list (a) landed first, then (b): the `marks` key
+(`docs/theme_and_shell_2026-11.md` §3.3), every call site naming its item
+kind (`MOY_UI_ITEM_ROW`, `_CELL`, `_CARD`), the loader's checks
+(`moy_theme_marks`, L1-L4 and the L8 warning) and the rendered test
+(`tests/test_focus_marks.py`: L1/L2, L3, L5, L6, L9; `MOYBYTE_MARKS_FULL=1`
+sweeps every sheet on both sizes). Where the build differs from the text
+above:
+
+- **Contrast's selected frame** is 3 px at gap 0, and on a card's middle row
+  it takes the rule above the row as its top edge, so the row's text keeps
+  three pixels to the frame on the T-Deck (the frame at gap 1 left it one).
+  `both` is the same frame in the ink over the yellow fill.
+- **Moy's selected tint** is 0.18 on every kind in Day (the seed set 0.14 on
+  cells and cards, which L3 refuses at 1.25:1). A tint too faint for L3 is
+  raised to the least alpha that reads instead of dropped, so a picked
+  accent paler than Moy's own (Slate) still marks a selection.
+- **A danger part keeps its ink under a focus fill** whether or not the
+  fill clears it 4.5:1 (Contrast Day's "Delete cart" turned black).
+- **A frame or fill under content that keeps its own colours** (the code
+  editor's current line) is a one-unit outline.
+- **The control center's corners** (finding 13): a value row on a panel's
+  card read its ground as the window's while the card's foot read the
+  panel's, so the foot's redrawn bar stood a pixel off; a row now takes the
+  ground the group does.
+- `buttons.<kind>.check` is the Toggle-on's check (Contrast), and
+  `["sunk", "ink"]` joins the theme's pairs, the pressed field's.
+- Moy Day names `paused`, Blocks and Contrast too; Moy Day's
+  `code_comment` is `#5b6074`, 4.5:1 on its selected tint.
+
+## The owner's answers (2026-11-05)
+
+1. **Contrast's selected mark is the 3 px frame**, not the plate: its one
+   fill (yellow) means focus and nothing else.
+2. **Moy's cards ring, without the lift.** Lift-and-ring stays legal data
+   (`marks.card.focus.lift`).
+3. **L3's floor is 1.3:1**, below WCAG's 3:1 on purpose (an area tint, not
+   a line).
+4. **The marks stay at the strength the renders show** ("they seem visible
+   enough"): no mark is made heavier.

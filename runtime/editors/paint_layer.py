@@ -970,10 +970,10 @@ class PaintLayer:
             x, y = self._cursor_xy(pe, gx0, gy0, cell)
             box = (x - 1, y - 1, cell + 1, cell + 1)
             cv.rectb(box[0], box[1], box[2], box[3], keyline)
-            for o in range(1, _ui_draw.mark_reach("part") + 2):
+            for o in range(1, _ui_draw.mark_reach("cell") + 2):
                 cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o,
                          th["surface"])
-            _ui_draw.focus(cv, th, box, "part", ring=True)
+            _ui_draw.focus(cv, th, box, "cell", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
         # colour in use two-toned at its edge -- a line of `ink`, then one of
         # `surface` within -- never a palette colour, so one tone reads

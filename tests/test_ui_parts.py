@@ -106,7 +106,7 @@ class _Run:
 
 
 # The handheld's geometry (style.json's `group` and `value_row` metrics at fs 1).
-INSET, PAD, CAPTION, ROW, GAP = 6, 10, 19, 20, 3
+INSET, PAD, CAPTION, ROW, GAP = 6, 12, 19, 20, 3
 HINTS = 20      # the hint band a page's foot gives up
 
 
@@ -150,11 +150,12 @@ def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
         last.frame()
     assert ui_draw.marks()[1] == 1, "one focus mark a frame"
     top = last.out["rect"][1] + CAPTION
-    y = top + 3 * ROW - 4                 # inside the foot's corner, on the edge bar
-    bar = last.px(INSET + 1, y)
-    mid = last.px(INSET + 1, top + 2 * ROW + 10)
-    assert bar == mid, "the edge bar runs into the rounded foot"
-    assert last.px(INSET + 1, top + ROW + 10) != mid, "only the focused row wears it"
+    y = top + 3 * ROW - 4                 # inside the foot's corner, on the bar
+    x = INSET + 1 + 2 + 1                 # the card's line, the bar's gap, into the bar
+    bar = last.px(x, y)
+    mid = last.px(x, top + 2 * ROW + 10)
+    assert bar == mid, "the bar runs into the rounded foot"
+    assert last.px(x, top + ROW + 10) != mid, "only the focused row wears it"
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
@@ -352,13 +353,11 @@ def test_a_label_on_a_current_plate_clears_it_for_text(theme, ground):
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
-    """Where a look gives the current content an ink of its own
-    (`current.ink`, the second cue beside a soft plate: Moy's plate alone is
-    1.15 to 1.32:1 on its ground), the mark answers it in front and in a
-    window behind, and it holds the theme floor's 3:1 on the plate as drawn
-    (theme.contrast; the plate's readability bit holds it too). Moy gives
-    it one. A solid plate (Contrast's) is its outline in a window behind,
-    the content there in its own ink."""
+    """Where a theme gives the on mark's content an ink of its own (`ink`,
+    the second cue beside a soft tint), the mark answers it in front and in
+    a window behind, and it holds the theme floor's 3:1 on the tint as
+    drawn (theme.contrast). Moy gives it one. A fill (Contrast's) is its
+    outline in a window behind, the content there in its own ink."""
     th = _theme(*theme)
     cv = make_system_canvas(40, 20)
     cv.rect(0, 0, 40, 20, th["surface"])
@@ -367,8 +366,7 @@ def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
         assert theme[0] != "moy", "Moy's current names an ink"
         return
     assert ink != th["ink"]
-    from runtime.chrome import theme_look
-    solid = theme_look(*theme)["current.alpha"] >= 100
+    solid = ui_draw.marks()[3]           # a cell's on mark an opaque fill
     behind = ui_draw.current(cv, th, (2, 2, 36, 16), back=True)
     assert behind == (None if solid else ink)
     cv.rect(0, 0, 40, 20, th["surface"])
@@ -409,7 +407,7 @@ def test_slider_maps_the_pointer_over_its_track_and_steps_by_arrow():
     r.frame()
     r.frame(("right",))
     assert st["v"] == 6
-    right = 320 - 4                       # the row's pad off the group
+    right = 320 - 10                      # the row's pad off the group
     r.frame(ptr=(right - 84, 10, 1 | 2 | 4))
     r.frame(ptr=(right - 84, 10, 1 | 2))
     assert st["v"] == 6, "a press that has not moved is no drag yet"
@@ -515,7 +513,7 @@ def test_a_sideways_drag_moves_a_slider_and_does_not_scroll():
     assert st["v"] == 10, "the knob followed the pointer to the track's end"
     assert _box(r, "Level")[1] == y, "the page did not scroll"
     x, y, w, h = _box(r, "Mode")[:4]
-    r.tap(x + w - 10, y + h // 2)
+    r.tap(x + w - 14, y + h // 2)         # inside the row's pad
     assert st["mode"] == 2, "a tap on a seg still takes the option tapped"
 
 
@@ -619,9 +617,9 @@ def _value_rows_page(theme, focus):
     return r
 
 
-# The seeds whose part focus mark is a plate in the theme's focus colour
-# (`look.focus` invert): the row's controls lie on it.
-_INVERT_ROWS = (("contrast", "dark"), ("contrast", "light"), ("blocks", "light"))
+# The seeds whose row focus mark is a fill in the theme's focus colour
+# (`marks.row.focus` fill): the row's controls lie on it.
+_INVERT_ROWS = (("contrast", "dark"), ("contrast", "light"))
 
 
 @pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
@@ -1477,20 +1475,17 @@ def test_a_focused_field_row_wears_the_value_rows_focus_mark(theme, last):
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
-def test_a_focused_fields_ring_is_the_focus_colour_and_reads_on_its_row(theme):
-    """Focused (being typed in), the field's ring is two pixels where its
-    rest ring is one, the second outside the box, in the focus colour (the
-    mark's ink on an invert mark), and clears what lies round it 3:1 --
-    Contrast's stayed its one pixel of border colour, so only the caret
-    told it was being typed in."""
+def test_a_focused_fields_box_keeps_its_rest_border_in_a_group(theme):
+    """In a group a focused field wears the row's focus mark, and its box
+    keeps its rest border (docs/media/focus_2026-11/README.md, change 6 and
+    L6): one mark, not the row's and a ring too. A field standing alone
+    rings its box (tests/test_settings_wifi_prompt.py)."""
     on = _row_or_field_page(theme, True)
     off = _row_or_field_page(theme, True, focus=False)
     _x, y0, _w, h = _box(on, "Name")
     y = y0 + h // 2
     x = 320 - INSET - PAD - TRACK
-    ring = on.px(x, y)
-    assert on.px(x - 1, y) == ring and off.px(x - 1, y) != off.px(x, y), "two pixels, not one"
-    assert _ratio(ring, on.px(x - 2, y)) >= 3.0, "%.2f:1" % _ratio(ring, on.px(x - 2, y))
+    assert [on.px(x + k, y) for k in (0, 1)] == [off.px(x + k, y) for k in (0, 1)]
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
@@ -1914,8 +1909,7 @@ def test_a_grid_lays_its_cards_in_centred_columns_and_rows():
     r.frame()
     st = r.frame()
     b = st["boxes"]
-    assert [c[2:4] for c in b[1:]] == [(66, 50)] * 3
-    assert b[0][2] > 66, "the focused card is lifted: grown, its picture with it"
+    assert [c[2:4] for c in b] == [(66, 50)] * 4, "a ringed card keeps its box (no lift)"
     assert b[1][1] == b[2][1] and b[3][1] > b[2][1], "three columns, then a row"
     assert b[3][0] == b[1][0] - (b[2][0] - b[1][0]), "the second row starts under the first"
     left, right = b[3][0], 320 - (b[2][0] + b[2][2])

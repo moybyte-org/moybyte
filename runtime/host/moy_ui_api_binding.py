@@ -896,6 +896,21 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = _b(name)
         return int(lib.moy_theme_modes(b, len(b)))
 
+    class _Mark(c.Structure):
+        _fields_ = [("mark", c.c_int8), ("w", c.c_int8), ("gap", c.c_int8),
+                    ("key_w", c.c_int8), ("c", c.c_int16), ("ink", c.c_int16),
+                    ("alpha", c.c_uint8), ("declared", c.c_uint8), ("key_c", c.c_int32)]
+
+    def theme_marks(name, light):
+        b = _b(name)
+        row = (c.c_int32 * n_roles)()
+        lib.moy_theme_resolve(b, len(b), 1 if light else 0, row, None)
+        out = (_Mark * 9)()
+        warn = c.c_int()
+        failed = lib.moy_theme_marks(b, len(b), 1 if light else 0, row, out, c.byref(warn))
+        return (int(failed), bool(warn.value),
+                tuple((m.mark, m.c, m.ink, m.w, m.gap, m.alpha, m.key_w, m.key_c) for m in out))
+
     def theme_install(src):
         b = bytes(src)
         notes = c.c_uint8()
@@ -1161,6 +1176,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     m.theme = theme
     m.theme_modes = theme_modes
+    m.theme_marks = theme_marks
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve

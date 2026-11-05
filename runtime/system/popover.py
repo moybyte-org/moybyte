@@ -113,7 +113,8 @@ class MonthView:
         p = _pad(ws)
         top = p if desk else 6 * ws.layout.fs
         x0, y0, w0, h0 = rect
-        self.host.begin(cv, ws.theme_colors, (x0 + p, y0 + top, w0 - 2 * p, h0 - top), desk)
+        self.host.begin(cv, ws.theme_colors, (x0 + p, y0 + top, w0 - 2 * p, h0 - top), desk,
+                        "panel")
         if y:
             _ui.at(x0 + p, y0 + top, w0 - 2 * p,
                    _ui.month_h(y, m, 1 if desk else ws.layout.fs, desk))
@@ -184,7 +185,7 @@ class WifiPanel:
         self.rect = rect
         before = self._radio()
         _fit(ws, self)
-        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk())
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk(), "panel")
         ws.settings_layer.wifi_page(popover=True)
         if self._radio() != before:
             ws._dirty = True          # the radio's state shows outside the panel
@@ -253,7 +254,7 @@ class PowerRows:
         desk = _desk()
         self.rect = rect
         sl = ws.settings_layer
-        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), desk)
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), desk, "panel")
         lvl = ws.battery_level()
         _ui.icon("battery")
         _ui.info("Battery" if lvl is None else "%d%%" % lvl, "")
@@ -311,22 +312,29 @@ class ControlCenter:
         self.gen = _ITEMS.gen
 
     def _metrics(self):
+        """(fs, a stacked row's height, a caption's, the gap after a card)."""
         fs = self.ws.layout.fs
         row = _ui_draw.metrics("row")
         grp = _ui_draw.metrics("group")
-        return fs, (row[5] + row[7]) * fs, grp[3] * fs, 2 * grp[1] * fs + grp[5] * fs
+        return fs, (row[5] + row[7]) * fs, grp[3] * fs, grp[5] * fs
+
+    def _inset(self):
+        """How far the console's card stands in from the panel's edges, the
+        top and the foot as the sides: the group's inset."""
+        return _ui_draw.metrics("group")[0] * self.ws.layout.fs
 
     def column(self):
-        """(the first view's height, the column's), from the card's top."""
-        fs, rh, cap, card = self._metrics()
+        """(the first view's height, the column's), from the panel's top."""
+        fs, rh, cap, gap = self._metrics()
+        i = self._inset()
         w = (self.W - 2 * 12) * fs
-        y = 12 * fs + 3 * rh + card
+        y = fs + i + 3 * rh             # the panel's frame, the inset, the card
         first = None
         for it in _ITEMS.shown:
-            y += cap + _ITEMS.height(it, w, False) + card
+            y += gap + cap + _ITEMS.height(it, w, False)
             if first is None:
                 first = y + self.FIRST_FOOT * fs
-        y += 12 * fs
+        y += i + fs
         return (y if first is None else min(first, y)), y
 
     def size(self):
@@ -348,8 +356,10 @@ class ControlCenter:
         sl = ws.settings_layer
         fs = ws.layout.fs
         x, y, w, h = rect
-        self.host.begin(cv, ws.theme_colors, (x + fs, y + fs, w - 2 * fs, h - 2 * fs), False)
-        _ui.at(x + fs, y + fs, w - 2 * fs, h - 2 * fs)
+        i = self._inset()
+        self.host.begin(cv, ws.theme_colors, (x + fs, y + fs, w - 2 * fs, h - 2 * fs), False,
+                        "panel")
+        _ui.at(x + fs, y + fs + i, w - 2 * fs, h - 2 * fs - i)
         _ui.scroll("cc")
         _ui.group("", {"card": True})
         for k in range(len(self.KEYS)):
@@ -429,7 +439,7 @@ class StatusMenu:
         ws = self.ws
         self.rect = rect
         it = self.item
-        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), True)
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), True, "panel")
         if it is not None and it.pid:
             _ITEMS.draw(it, True)
         _ui.hints(_MENU_POINTER if _ui.input_kind() == "touch" else _MENU_KEYS)

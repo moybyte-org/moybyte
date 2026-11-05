@@ -102,6 +102,32 @@ static mp_obj_t ui_theme(mp_obj_t name, mp_obj_t light) {
     return mp_obj_new_tuple(3, out);
 }
 
+// theme_marks(name, light) -> (dropped bits, L8 warning, marks): the marks
+// theme `name` draws (moy_theme_marks), each kind's states in turn a tuple
+// (mark, colour token, ink token, w, gap, alpha, key width, key colour).
+static mp_obj_t ui_theme_marks(mp_obj_t name, mp_obj_t light) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    int v = mp_obj_is_true(light) ? MOY_THEME_LIGHT : MOY_THEME_DARK;
+    int32_t row[MOY_THEME_ROLES];
+    moy_theme_resolve(s, n, v, row, NULL);
+    moy_ui_mark_t m[MOY_UI_ITEMS * MOY_UI_MSTATES];
+    int warn = 0;
+    uint32_t failed = moy_theme_marks(s, n, v, row, m, &warn);
+    mp_obj_t items[MOY_UI_ITEMS * MOY_UI_MSTATES];
+    for (int i = 0; i < MOY_UI_ITEMS * MOY_UI_MSTATES; i++) {
+        mp_obj_t t[8] = {MP_OBJ_NEW_SMALL_INT(m[i].mark), MP_OBJ_NEW_SMALL_INT(m[i].c),
+                         MP_OBJ_NEW_SMALL_INT(m[i].ink), MP_OBJ_NEW_SMALL_INT(m[i].w),
+                         MP_OBJ_NEW_SMALL_INT(m[i].gap), MP_OBJ_NEW_SMALL_INT(m[i].alpha),
+                         MP_OBJ_NEW_SMALL_INT(m[i].key_w), mp_obj_new_int(m[i].key_c)};
+        items[i] = mp_obj_new_tuple(8, t);
+    }
+    mp_obj_t out[3] = {mp_obj_new_int_from_uint(failed), mp_obj_new_bool(warn),
+                       mp_obj_new_tuple(MOY_UI_ITEMS * MOY_UI_MSTATES, items)};
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_marks_obj, ui_theme_marks);
+
 // theme_modes(name) -> the MOY_THEME_MODE_* bits theme `name` has
 static mp_obj_t ui_theme_modes(mp_obj_t name) {
     size_t n;
@@ -2046,7 +2072,7 @@ static mp_obj_t ui_panel(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_panel_obj, 5, 5, ui_panel);
 
-// focus(cv, look, rect, cls, r, flags, fs) -> (ink or None, content rect)
+// focus(cv, look, rect, kind, r, flags, fs) -> (ink or None, content rect)
 static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
@@ -2060,35 +2086,37 @@ static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_obj, 7, 7, ui_focus);
 
-// current(cv, look, rect, r, flags, fs) -> ink or None
+// current(cv, look, rect, kind, r, flags, fs) -> ink or None
 static mp_obj_t ui_current(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     int ink;
     check(moy_ui_current(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
-                         fs_or(a[5], &s), &ink));
+                         mp_obj_get_int(a[5]), fs_or(a[6], &s), &ink));
     return ink < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(ink);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 6, 6, ui_current);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 7, 7, ui_current);
 
 // marks(active=None, reset=False) -> (active, focus marks drawn, a card's
-// focus reach)
+// focus reach, whether a cell's ON mark is an opaque fill)
 static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
     if (active != mp_const_none) {
         moy_ui_marks_active(mp_obj_is_true(active));
     }
-    mp_obj_t out[3] = {mp_obj_new_bool(moy_ui_marks_shown()),
+    mp_obj_t out[4] = {mp_obj_new_bool(moy_ui_marks_shown()),
                        mp_obj_new_int_from_uint(moy_ui_marks_drawn(mp_obj_is_true(reset))),
-                       MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_MARK_CARD))};
-    return mp_obj_new_tuple(3, out);
+                       MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_ITEM_CARD)),
+                       mp_obj_new_bool(moy_ui_mark_solid(MOY_UI_ITEM_CELL))};
+    return mp_obj_new_tuple(4, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_marks_obj, ui_marks);
 
-// mark_reach(cls) -> how far class `cls`'s focus mark reaches past its box
-// (moy_ui_mark_reach): the ring's gap, width and outline as the look sets them.
-static mp_obj_t ui_mark_reach(mp_obj_t cls) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(mp_obj_get_int(cls)));
+// mark_reach(kind) -> how far item kind `kind`'s focus mark reaches past its
+// box (moy_ui_mark_reach): a ring's gap, width and keyline as the look
+// declares them.
+static mp_obj_t ui_mark_reach(mp_obj_t kind) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(mp_obj_get_int(kind)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_mark_reach_obj, ui_mark_reach);
 
@@ -4145,6 +4173,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&ui_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_marks), MP_ROM_PTR(&ui_marks_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_reach), MP_ROM_PTR(&ui_mark_reach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_marks), MP_ROM_PTR(&ui_theme_marks_obj) },
     { MP_ROM_QSTR(MP_QSTR_inset), MP_ROM_PTR(&ui_inset_obj) },
     { MP_ROM_QSTR(MP_QSTR_cut), MP_ROM_PTR(&ui_cut_obj) },
     { MP_ROM_QSTR(MP_QSTR_split), MP_ROM_PTR(&ui_split_obj) },

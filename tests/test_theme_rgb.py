@@ -197,26 +197,27 @@ def _bare():
 
 def test_the_look_defaults_are_the_model():
     lk = moy_ui.theme_look(_bare(), False)[0]
-    assert lk[LEAF["focus.ring.w"]] == 250 and lk[LEAF["win_r"]] == 12
+    assert lk[LEAF["marks.row.focus.w"]] == NONE and lk[LEAF["win_r"]] == 12
     assert lk[LEAF["win.h"]] == 44 and lk[LEAF["win_corners"]] == 15
     assert lk[LEAF["dock.fill"]] == RGB | 0xffffff and lk[LEAF["dock.alpha"]] == 32
     assert lk[LEAF["shadow.kind"]] == 0 and lk[LEAF["win.icon"]] == 1
-    assert lk[LEAF["sel_back"]] == NONE and lk[LEAF["buttons.normal.shape"]] == NONE
+    assert lk[LEAF["buttons.normal.shape"]] == NONE
 
 
-def test_focus_and_current_are_the_models_properties():
+def test_the_marks_are_the_models_properties():
+    """Each item kind (row, cell, card) declares a mark per state (focus, on,
+    both) from one vocabulary (docs/theme_and_shell_2026-11.md §3.3); a theme
+    silent on one leaves it to the engine's default."""
     light = moy_ui.theme_look(_bare(), True)[0]
     dark = moy_ui.theme_look(_bare(), False)[0]
-    styles = KINDS[LEAF["focus.style"]][1]
-    assert styles == ("ring", "plate", "lift", "edge", "underline", "invert")
-    assert KINDS[LEAF["focus.card"]][1] == styles == KINDS[LEAF["focus.small"]][1]
-    assert light[LEAF["focus.style"]] == 0 and light[LEAF["focus.card"]] == NONE
-    roles = KINDS[LEAF["focus.color"]][1]
-    assert roles[light[LEAF["focus.color"]]] == "accent"
-    assert roles[light[LEAF["current.color"]]] == "value"
+    vocab = KINDS[LEAF["marks.row.focus.mark"]][1]
+    assert vocab == ("none", "fill", "tint", "bar", "ring", "inset", "outline", "underline")
+    for k in ("row", "cell", "card"):
+        for st in ("focus", "on", "both"):
+            assert KINDS[LEAF["marks.%s.%s.mark" % (k, st)]][1] == vocab
+            assert light[LEAF["marks.%s.%s.mark" % (k, st)]] == NONE
     assert (light[LEAF["focus.plate.alpha"]], dark[LEAF["focus.plate.alpha"]]) == (14, 22)
-    assert (light[LEAF["current.alpha"]], dark[LEAF["current.alpha"]]) == (14, 24)
-    assert light[LEAF["focus.lift.grow"]] == 5 and light[LEAF["focus.edge.w"]] == 4
+    assert light[LEAF["marks.card.focus.lift.grow"]] == NONE
     assert KINDS[LEAF["win.controls"]][1][light[LEAF["win.controls"]]] == "three"
     assert light[LEAF["icons.kind"]] == NONE      # no set: the bar's IconSheet
     moy = moy_ui.theme_look("moy", True)[0]
@@ -224,39 +225,44 @@ def test_focus_and_current_are_the_models_properties():
 
 
 def test_the_moy_seed_sets_its_marks():
+    """Moy: a row's focus is the 4 px bar, a cell's and a card's the 2 px
+    ring 2 px clear, all three kinds' `on` a tint of `value` (owner,
+    2026-11-05: cards ring, without the lift)."""
+    vocab = KINDS[LEAF["marks.row.focus.mark"]][1]
     for light in (True, False):
         lk = moy_ui.theme_look("moy", light)[0]
-        styles = KINDS[LEAF["focus.style"]][1]
-        assert [styles[lk[LEAF["focus." + k]]] for k in ("style", "card", "small")] == [
-            "edge", "lift", "edge"]
-        assert KINDS[LEAF["current.style"]][1][lk[LEAF["current.style"]]] == "plate"
-        rim = (lk[LEAF["focus.lift.rim.c"]], lk[LEAF["focus.lift.rim.alpha"]])
-        assert rim == ((RGB | 0x4c3fd6, 60) if light else (RGB | 0xb6a8f7, 60))
+        got = [vocab[lk[LEAF["marks.%s.%s.mark" % (k, st)]]]
+               for k in ("row", "cell", "card") for st in ("focus", "on")]
+        assert got == ["bar", "tint", "ring", "tint", "ring", "tint"]
+        assert lk[LEAF["marks.row.focus.w"]] == 4 and lk[LEAF["marks.cell.focus.w"]] == 2
+        assert lk[LEAF["marks.card.focus.lift.grow"]] == NONE
         assert KINDS[LEAF["win.header"]][1][lk[LEAF["win.header"]]] == "bar"
 
 
 def test_a_set_plate_alpha_holds_in_both_modes():
-    _install(look={"focus": {"plate": {"alpha": 0.3}}, "current": {"alpha": 0.5}})
+    _install(look={"focus": {"plate": {"alpha": 0.3}},
+                   "marks": {"row": {"on": {"alpha": 0.5}}}})
     for light in (True, False):
         assert _leaf("rgb", "focus.plate.alpha", light) == 30
-        assert _leaf("rgb", "current.alpha", light) == 50
+        assert _leaf("rgb", "marks.row.on.alpha", light) == 50
 
 
 def test_a_variants_object_comes_before_the_shared_one_and_inherits():
-    _install(look={"win_r": 4, "focus": {"ring": {"w": 2}}, "dark": {"win_r": 20},
+    _install(look={"win_r": 4, "marks": {"cell": {"focus": {"w": 2}}}, "dark": {"win_r": 20},
                    "win": {"header": "fill", "frame": [1, "#2b2f57"]}})
     assert _leaf("rgb", "win_r") == 20 and _leaf("rgb", "win_r", True) == 4
-    assert _leaf("rgb", "focus.ring.w") == 200
+    assert _leaf("rgb", "marks.cell.focus.w") == 2
     assert _leaf("rgb", "win.frame.w") == 100
     assert _leaf("rgb", "win.frame.c") == RGB | 0x2b2f57
     assert _leaf("rgb", "win.header", True) == 1
 
 
 def test_the_leaves_clamp_and_drop_and_note():
-    notes = _install(look={"win_r": 400, "focus": {"ring": {"alpha": 7.5}}, "win": {"header": "zigzag"},
+    notes = _install(look={"win_r": 400, "marks": {"row": {"on": {"alpha": 7.5}}},
+                           "win": {"header": "zigzag"},
                            "shadow": ["soft", "#000000"], "teapot": 3})
     assert notes == N_CLAMPED | N_DROPPED | N_UNKNOWN
-    assert _leaf("rgb", "win_r") == 99 and _leaf("rgb", "focus.ring.alpha") == 100
+    assert _leaf("rgb", "win_r") == 99 and _leaf("rgb", "marks.row.on.alpha") == 100
     assert _leaf("rgb", "win.header") == 0 and _leaf("rgb", "shadow.kind") == 0
 
 

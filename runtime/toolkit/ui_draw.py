@@ -1541,39 +1541,39 @@ def autoscroll_mark(cv, th, x, y, s=1):
     cv.tri(x - 2 * s, y + s, x + 2 * s, y + s, x, y + 4 * s, th["ink"])
 
 
-# The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
-_MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
-_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 4, 8, 32, 64
-_MARK_KEEP, _MARK_SELECTED, _MARK_PILL = 512, 1024, 2048
+# The marks' item kinds and flags (native/moy_ui/moy_ui.h, the marks).
+_MARK_KIND = {"row": 0, "cell": 1, "card": 2}
+_MARK_AFTER, _MARK_BACK, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 8, 32, 64
+_MARK_KEEP, _MARK_SELECTED, _MARK_PILL, _MARK_BOTH = 512, 1024, 2048, 4096
 
 
-def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False,
-          pill=False, flat=False):
-    """The focus mark on `rect`, the theme's by its size class
-    (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
-    "part", or None to class it by its size. Drawn after the part's own fill
-    and before its content; a lifted card's rim is a second call with
-    `after`, once its content is drawn. Returns (ink, box): the colour the
-    content takes (None: its own) and the box it draws in (a lifted card's,
-    grown and raised). A part drawn by `row`, `cell`, `chip` or `button`
-    takes `focus=True` instead. In a window behind it draws nothing. `ring`
-    draws the theme's ring whatever its focus style, and is no focus mark (a
-    cursor's: the sprite editor's). `selected` marks the card a screen
-    describes while focus is elsewhere or does not draw (touch): the card's
-    mark as a current mark, drawn whatever the shell says of focus, with no
-    rim and no focus mark counted (the desk shelf's selected card). `pill`
-    draws the bar's mark whatever the theme's style (an OS widget's, a tab's
-    of the home): a plate of the mark's colour under the content, and with
-    `after` a ring two units (`fs`) wide on `rect`'s edge, radius `r`; the
-    content keeps its own ink. `flat` draws the theme's ring as the focus
-    mark, counted, whatever its style: a mark that moves with every focus
-    step and must not lift or shadow its neighbours (the home's grid and
-    icons, docs/history/look_2026-10.md step 33)."""
+def focus(cv, th, rect, item="cell", r=0, after=False, fs=None, ring=False, selected=False,
+          pill=False, flat=False, both=False):
+    """The focus mark the theme declares for item kind `item` ("row", "cell"
+    or "card", docs/theme_and_shell_2026-11.md §3.3) on `rect`. Drawn after
+    the part's own fill and before its content; a lifted card's rim is a
+    second call with `after`, once its content is drawn. Returns (ink, box):
+    the colour the content takes (None: its own) and the box it draws in (a
+    lifted card's, grown and raised). A part drawn by `row`, `cell`, `chip`
+    or `button` takes `focus=True` instead. In a window behind it draws
+    nothing. `both`: the item is selected too, its `current` drawn under. `ring`
+    draws a ring in the cell's focus colour whatever the marks, and is no
+    focus mark (a cursor's: the sprite editor's). `selected` marks the card a
+    screen describes while focus is elsewhere or does not draw (touch): the
+    card's mark, drawn whatever the shell says of focus, with no rim and no
+    focus mark counted (the desk shelf's selected card). `pill` draws the
+    bar's mark whatever the marks (an OS widget's, a tab's of the home): a
+    plate of the cell's focus colour under the content, and with `after` a
+    ring two units (`fs`) wide on `rect`'s edge, radius `r`; the content
+    keeps its own ink. `flat` draws that ring as the focus mark, counted: a
+    mark that moves with every focus step and must not lift or shadow its
+    neighbours (the home's grid and icons, docs/history/look_2026-10.md step
+    33)."""
     if flat:
         ring = True
-    return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
+    return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_KIND[item], r,
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
-                    | (_MARK_COUNT if flat else 0)
+                    | (_MARK_COUNT if flat else 0) | (_MARK_BOTH if both else 0)
                     | (_MARK_SELECTED if selected else 0) | (_MARK_PILL if pill else 0), fs)
 
 
@@ -1595,24 +1595,21 @@ def cursor(cv, rect, keyline=0):
     cv.rrect(x - 5, y - 5, w + 10, h + 10, 4, None, s)
 
 
-def current(cv, th, rect, r=0, back=False, side=False, fs=None, keep=False):
-    """The current mark under `rect`'s content: the theme's plate, fill or
-    bar (`side`: a bar beside a row, not under it; `back`: in a window
-    behind; `keep`: the content keeps its own colours, a code line's, so an
-    opaque plate is the row's outline instead). Returns the ink the content
-    takes, or None for its own. A part drawn by `row`, `cell`, `chip` or
-    `tab` marks its `on` itself."""
-    return _C.current(cv, _LOOK if th is _TH else _look(th), rect, r,
-                      (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0)
-                      | (_MARK_KEEP if keep else 0), fs)
+def current(cv, th, rect, r=0, back=False, item="cell", fs=None, keep=False):
+    """The ON mark the theme declares for item kind `item` under `rect`'s
+    content (`back`: in a window behind; `keep`: the content keeps its own
+    colours, a code line's, so an opaque fill is its outline instead).
+    Returns the ink the content takes, or None for its own. A part drawn by
+    `row`, `cell`, `chip` or `tab` marks its `on` itself."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), rect, _MARK_KIND[item], r,
+                      (_MARK_BACK if back else 0) | (_MARK_KEEP if keep else 0), fs)
 
 
-def current_ink(cv, th, back=False):
-    """The ink the current content takes under the theme's current mark, as
-    `current` answers it, without drawing the mark (a caller that draws its
-    own, the desk bar's chips): the look's `current.ink`, a fill's selection
-    ink, or None for its own."""
-    return _C.current(cv, _LOOK if th is _TH else _look(th), (0, 0, 0, 0), 0,
+def current_ink(cv, th, back=False, item="cell"):
+    """The ink the content takes on `item`'s ON mark, as `current` answers
+    it, without drawing the mark (a caller that draws its own, the desk bar's
+    chips): the mark's `ink`, a fill's ink, or None for its own."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), (0, 0, 0, 0), _MARK_KIND[item], 0,
                       _MARK_INK | (_MARK_BACK if back else 0), None)
 
 
@@ -1620,11 +1617,12 @@ _MARKS_ON = [True]   # what `marks` last set, read with no tuple made (`marks_on
 
 
 def marks(active=None, reset=False):
-    """(active, focus marks drawn, reach): whether focus draws (`active` sets it: the shell clears it
+    """(active, focus marks drawn, reach, solid): whether focus draws (`active` sets it: the shell clears it
     while a window behind draws; under touch, `input_kind`, no focus draws
     whatever it says, as on a phone), the count of focus marks drawn (`reset`
-    zeroes it after reading), and how far a card's focus mark reaches past
-    the card's top edge."""
+    zeroes it after reading), how far a card's focus mark reaches past
+    the card's top edge, and whether a cell's ON mark is an opaque fill
+    (Contrast's), whose content takes the fill's ink."""
     if active is not None:
         _MARKS_ON[0] = bool(active)
         _PF[_PF_KEY] = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
@@ -1636,12 +1634,12 @@ def marks_on():
     return _MARKS_ON[0]
 
 
-def mark_reach(size="part"):
-    """How far a focus mark of size class `size` ("part", "card", "small")
-    reaches past its box: the ring's gap, width and outline as the live look
-    rounds and defaults them (0 for a mark inside its box). What a part that
-    keeps room for its ring lays out by."""
-    return _C.mark_reach(_MARK_CLASS[size])
+def mark_reach(item="cell"):
+    """How far item kind `item`'s focus mark ("row", "cell", "card")
+    reaches past its box: a ring's gap, width and keyline as the live look
+    declares them (0 for a mark inside its box). What a part that keeps room
+    for its ring lays out by."""
+    return _C.mark_reach(_MARK_KIND[item])
 
 
 # -- the public UI API's host side (docs/ui_api_2026-10.md) ----------------------
@@ -1655,6 +1653,7 @@ def mark_reach(size="part"):
 UI_TARGET = [None, None, 0, 0]  # the frame's context, canvas, look and desk flags
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
+_PANEL = 32                             # ... and MOY_UI_PANEL
 _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
@@ -1872,9 +1871,9 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
             rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
-    flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
+    flags = ((_DESK if desk else 0) | (_PANEL if window == "panel" else _WINDOW if window else 0)
              | (_ELSEWHERE if elsewhere else 0) | (_KEY_EDGE if edge else 0))
-    t[3] = flags & (_DESK | _WINDOW)
+    t[3] = flags & (_DESK | _WINDOW | _PANEL)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
     if inp is not None:

@@ -1,5 +1,6 @@
 // moy_theme: the theme loader (moy_theme.h).
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2356,7 +2357,6 @@ static int resolve_row(const char *name, size_t n, int variant, int32_t row[MOY_
     return rc;
 }
 
-static int plate_reads(const char *name, size_t n, int variant, const int32_t *row);
 
 // A code role on the code surface, at the code floor (style.json's
 // theme.code): a set colour of either that reaches MOY_THEME_CODE_CONTRAST.
@@ -2398,8 +2398,11 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
             bad |= 1u << i;
         }
     }
-    if (rc == MOY_THEME_OK && !plate_reads(name, n, variant, row)) {
-        bad |= 1u << MOY_THEME_PAIRS;
+    if (rc == MOY_THEME_OK) {
+        moy_ui_mark_t m[MOY_UI_ITEMS * MOY_UI_MSTATES];
+        if (moy_theme_marks(name, n, variant, row, m, NULL)) {
+            bad |= 1u << MOY_THEME_PAIRS;
+        }
     }
     for (int i = 0; i < MOY_THEME_CODE; i++) {
         if (!code_reads(row[moy_theme_code[i]], row[MOY_THEME_CODE_BG])) {
@@ -2849,57 +2852,257 @@ static int look_leaf(const char *name) {
     return -1;
 }
 
-// The current plate's pair (docs/media/look_2026-10/DESIGN.md, Colour): where
-// a theme's current mark is a plate, its focus colour clears
-// MOY_THEME_CONTRAST on the plate (current.color at current.alpha over
-// `surface`); where the focus mark has an outline (`focus.outline`, Contrast's
-// light mode, whose yellow is 1.3:1 on white) the outline is its edge on the
-// plate, so the outline's colour is held instead. A focus mark that fills the
-// part (`invert`) lies on no plate: it takes the part's place, and only the
-// ink the current content takes is held. 1 where it does or the current is
-// no plate.
-static int plate_reads(const char *name, size_t n, int variant, const int32_t *row) {
-    int ls = look_leaf("current.style"), lc = look_leaf("current.color");
-    int la = look_leaf("current.alpha"), lf = look_leaf("focus.color");
-    int lfs = look_leaf("focus.style");
-    int low = look_leaf("focus.outline.w"), loc = look_leaf("focus.outline.c");
-    moy_theme_look_t *lk = THEME_ALLOC(sizeof(moy_theme_look_t));
-    if (lk == NULL || ls < 0 || lc < 0 || la < 0 || lf < 0) {
-        free(lk);
+// -- the marks (moy_ui.h, the marks; docs/media/focus_2026-11/README.md) -------
+
+// A look leaf's value, MOY_THEME_NONE where the look has no such leaf.
+static int32_t lk_at(const moy_theme_look_t *lk, const char *name) {
+    int i = look_leaf(name);
+    return i < 0 ? MOY_THEME_NONE : lk->v[i];
+}
+
+static int lk_set(int32_t v) {
+    return v != MOY_THEME_NONE && v != MOY_THEME_OFF;
+}
+
+// The ratio of two colour values' luminances, x100.
+static int32_t ratio100(int32_t a, int32_t b) {
+    int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
+    int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
+    return (hi + 500) * 100 / (lo + 500);
+}
+
+// k/255 of colour value c over g, as RGB.
+static int32_t over(int32_t g, int32_t c, int k) {
+    uint16_t a = moy_theme_rgb565(g), b = moy_theme_rgb565(c);
+    int r = ((a >> 11) * (255 - k) + (b >> 11) * k + 127) / 255;
+    int gg = (((a >> 5) & 63) * (255 - k) + ((b >> 5) & 63) * k + 127) / 255;
+    int bl = ((a & 31) * (255 - k) + (b & 31) * k + 127) / 255;
+    return MOY_THEME_RGB | (int32_t)((r * 255 / 31) << 16 | (gg * 255 / 63) << 8 | bl * 255 / 31);
+}
+
+// The engine's mark for `kind` in `state` (moy_ui.h): focus a bar on a row
+// and a ring round a cell or a card, in the accent; on a tint of `value`;
+// both none.
+static moy_ui_mark_t mark_default(int kind, int state, int light) {
+    moy_ui_mark_t m;
+    memset(&m, 0, sizeof(m));
+    m.ink = -1;
+    m.key_c = MOY_THEME_NONE;
+    m.alpha = 255;
+    if (state == MOY_UI_MS_FOCUS) {
+        m.mark = kind == MOY_UI_ITEM_ROW ? MOY_UI_MK_BAR : MOY_UI_MK_RING;
+        m.c = MOY_UI_T_ACCENT;
+        m.w = kind == MOY_UI_ITEM_ROW ? 4 : 2;
+        m.gap = 2;
+    } else if (state == MOY_UI_MS_ON) {
+        m.mark = MOY_UI_MK_TINT;
+        m.c = MOY_UI_T_VALUE;
+        m.alpha = (uint8_t)(light ? 36 : 61);         // 14% light, 24% dark
+    } else {
+        m.mark = MOY_UI_MK_NONE;
+        m.c = -1;
+    }
+    return m;
+}
+
+static const char *const s_kinds[MOY_UI_ITEMS] = {"row", "cell", "card"};
+static const char *const s_states[MOY_UI_MSTATES] = {"focus", "on", "both"};
+
+// The mark look `lk` declares for kind k in state st over the default: each
+// number the type draws with, where the look leaves it out, the default's
+// for that type.
+static moy_ui_mark_t mark_read(const moy_theme_look_t *lk, int k, int st, int light) {
+    moy_ui_mark_t m = mark_default(k, st, light);
+    char n[40];
+#define LEAF(f) (snprintf(n, sizeof(n), "marks.%s.%s." f, s_kinds[k], s_states[st]), lk_at(lk, n))
+    int32_t v = LEAF("mark");
+    if (!lk_set(v)) {
+        return m;
+    }
+    m.declared = 1;
+    m.mark = (int8_t)v;
+    static const int8_t w0[8] = {0, 0, 0, 4, 2, 2, 2, 3};
+    static const int8_t g0[8] = {0, 0, 0, 2, 2, 2, 0, 2};
+    m.w = w0[m.mark & 7];
+    m.gap = g0[m.mark & 7];
+    m.alpha = 255;
+    if (m.mark == MOY_UI_MK_TINT) {
+        m.alpha = (uint8_t)(light ? 36 : 61);
+    }
+    if (st == MOY_UI_MS_BOTH) {
+        m.c = -1;               // the ink over the fill it lands on
+    }
+    if (lk_set(v = LEAF("c")) && v < MOY_UI_TOKENS) {
+        m.c = (int16_t)v;
+    }
+    if (lk_set(v = LEAF("ink")) && v < MOY_UI_TOKENS) {
+        m.ink = (int16_t)v;
+    }
+    if (lk_set(v = LEAF("w"))) {
+        m.w = (int8_t)v;
+    }
+    if (lk_set(v = LEAF("gap"))) {
+        m.gap = (int8_t)v;
+    }
+    if (lk_set(v = LEAF("alpha"))) {
+        m.alpha = (uint8_t)((v < 0 ? 0 : v > 100 ? 100 : v) * 255 / 100);
+    }
+    if (lk_set(v = LEAF("key.w")) && lk_set(LEAF("key.c"))) {
+        m.key_w = (int8_t)((v + 50) / 100);
+        m.key_c = LEAF("key.c");
+    }
+#undef LEAF
+    return m;
+}
+
+// The colour value mark m paints in on `row`, over a ground `under` (a tint's
+// blend), MOY_THEME_NONE where it has none.
+static int32_t mark_rgb(const moy_ui_mark_t *m, const int32_t *row, int32_t under) {
+    if (m->mark == MOY_UI_MK_NONE || m->c < 0 || row[m->c] < 0) {
+        return MOY_THEME_NONE;
+    }
+    return m->mark == MOY_UI_MK_TINT ? over(under, row[m->c], m->alpha) : row[m->c];
+}
+
+// The ink the engine puts on a fill of colour value c: black or white, the
+// one that clears it (moy_ui_depth.c's ink_over).
+static int32_t ink_on(int32_t c) {
+    uint16_t w = moy_theme_rgb565(c);
+    int r = (w >> 11) * 255 / 31, g = ((w >> 5) & 63) * 255 / 63, b = (w & 31) * 255 / 31;
+    return 2126 * r + 7152 * g + 722 * b > 1400000 ? 0 : 7;
+}
+
+// A focus mark of colour value c on ground g reads (L1): 3:1, or a keyline
+// two pixels or wider that clears both 3:1.
+static int focus_reads(const moy_ui_mark_t *m, int32_t c, int32_t g) {
+    if (ratio100(c, g) >= 300) {
         return 1;
     }
-    int ok = 1;
-    moy_theme_look(name, n, variant, 1, lk);
-    int32_t st = lk->v[ls], cr = lk->v[lc], al = lk->v[la], fr = lk->v[lf];
-    if (st == 1 && cr >= 0 && cr < MOY_THEME_ROLES && fr >= 0 && fr < MOY_THEME_ROLES
-        && al >= 0 && row[MOY_UI_T_SURFACE] >= 0 && row[cr] >= 0 && row[fr] >= 0) {
-        uint16_t g = moy_theme_rgb565(row[MOY_UI_T_SURFACE]), c = moy_theme_rgb565(row[cr]);
-        int k = al > 100 ? 100 : al;
-        int gr = g >> 11, gg = (g >> 5) & 63, gb = g & 31;
-        int cr5 = c >> 11, cg = (c >> 5) & 63, cb = c & 31;
-        uint16_t p = (uint16_t)(((gr + (cr5 - gr) * k / 100) << 11)
-                                | ((gg + (cg - gg) * k / 100) << 5) | (gb + (cb - gb) * k / 100));
-        int32_t edge = row[fr];
-        if (low >= 0 && loc >= 0 && lk->v[low] > 0
-            && lk->v[loc] >= 0) {
-            edge = lk->v[loc];
-        }
-        int32_t lp = lum565(p), la2 = moy_theme_lum_of(edge);
-        int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
-        ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500)
-             || (lfs >= 0 && lk->v[lfs] == MOY_UI_FOCUS_INVERT);
-        // and the ink the current content takes on it (`current.ink`)
-        int li = look_leaf("current.ink");
-        int32_t ci = li >= 0 ? lk->v[li] : -1;
-        if (ok && ci >= 0 && ci < MOY_THEME_ROLES && row[ci] >= 0) {
-            int32_t lq = moy_theme_lum_of(row[ci]);
-            hi = lp > lq ? lp : lq;
-            lo = lp > lq ? lq : lp;
-            ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+    return m->key_w >= 2 && lk_set(m->key_c) && ratio100(m->key_c, g) >= 300
+           && ratio100(m->key_c, c) >= 300;
+}
+
+uint32_t moy_theme_marks(const char *name, size_t n, int variant, const int32_t *row,
+                         moy_ui_mark_t *out, int *warn) {
+    int light = variant == MOY_THEME_LIGHT;
+    uint32_t failed = 0;
+    if (warn != NULL) {
+        *warn = 0;
+    }
+    moy_theme_look_t *lk = THEME_ALLOC(sizeof(moy_theme_look_t));
+    for (int k = 0; k < MOY_UI_ITEMS; k++) {
+        for (int st = 0; st < MOY_UI_MSTATES; st++) {
+            out[k * MOY_UI_MSTATES + st] = mark_default(k, st, light);
         }
     }
+    if (lk == NULL) {
+        return 0;
+    }
+    moy_theme_look(name, n, variant, 1, lk);
+    int32_t surface = row[MOY_UI_T_SURFACE], panel = row[MOY_UI_T_PANEL];
+    int32_t ink = row[MOY_UI_T_INK];
+    for (int k = 0; k < MOY_UI_ITEMS; k++) {
+        moy_ui_mark_t *o = &out[k * MOY_UI_MSTATES];
+        moy_ui_mark_t m[MOY_UI_MSTATES];
+        for (int st = 0; st < MOY_UI_MSTATES; st++) {
+            m[st] = mark_read(lk, k, st, light);
+        }
+        int bad[MOY_UI_MSTATES] = {0, 0, 0};
+        // L2: a bar 3 px or wider, a ring and an underline 2
+        for (int st = 0; st < MOY_UI_MSTATES; st++) {
+            int t = m[st].mark, w = m[st].w;
+            if ((t == MOY_UI_MK_BAR && w < 3) || (t == MOY_UI_MK_RING && w < 2)
+                || (t == MOY_UI_MK_UNDERLINE && w < 2)) {
+                bad[st] = 1;
+            }
+        }
+        // L1: focus 3:1 on the card and the page, or keyed; a fill's ink 4.5:1
+        const moy_ui_mark_t *f = &m[MOY_UI_MS_FOCUS];
+        int32_t fc = MOY_THEME_NONE;
+        if (f->mark != MOY_UI_MK_NONE) {
+            for (int gi = 0; gi < 2; gi++) {
+                int32_t g = gi ? panel : surface;
+                int32_t c = mark_rgb(f, row, g);
+                if (g >= 0 && lk_set(c) && !focus_reads(f, c, g)) {
+                    bad[MOY_UI_MS_FOCUS] = 1;
+                }
+            }
+            fc = mark_rgb(f, row, surface);
+            if (f->mark == MOY_UI_MK_FILL && lk_set(fc)) {
+                int32_t fi = f->ink >= 0 ? row[f->ink] : ink_on(fc);
+                if (ratio100(fi, fc) < 450) {
+                    bad[MOY_UI_MS_FOCUS] = 1;
+                }
+            }
+        } else {
+            bad[MOY_UI_MS_FOCUS] = m[MOY_UI_MS_FOCUS].declared;     // focus never goes unseen
+        }
+        // L3: on 1.3:1 on the rest ground, or 1.2:1 with an ink 3:1 apart;
+        // a tint too faint for it (a picked accent paler than the theme's
+        // own) takes the least strength that reads
+        moy_ui_mark_t *on = &m[MOY_UI_MS_ON];
+        int32_t oc = mark_rgb(on, row, surface);
+        while (on->mark == MOY_UI_MK_TINT && lk_set(oc) && surface >= 0 && on->alpha < 255
+               && ratio100(oc, surface) < 130) {
+            on->alpha = (uint8_t)(on->alpha > 250 ? 255 : on->alpha + 5);
+            oc = mark_rgb(on, row, surface);
+        }
+        if (on->mark != MOY_UI_MK_NONE && lk_set(oc) && surface >= 0) {
+            int32_t r = ratio100(oc, surface);
+            int32_t oi = on->ink >= 0 ? row[on->ink] : on->mark == MOY_UI_MK_FILL ? ink_on(oc)
+                                                                                  : ink;
+            if (r < 130 && !(r >= 120 && ratio100(oi, ink) >= 300)) {
+                bad[MOY_UI_MS_ON] = 1;
+            }
+        } else if (on->declared) {
+            bad[MOY_UI_MS_ON] = 1;
+        }
+        // L4: focus and on apart; two fills 3:1 apart; the mark over an on
+        // fill (both's, else focus's) 3:1 against it
+        if (on->mark == f->mark && on->c == f->c && on->w == f->w && on->gap == f->gap) {
+            bad[MOY_UI_MS_ON] = 1;
+        }
+        int ofill = on->mark == MOY_UI_MK_FILL && lk_set(oc);
+        if (f->mark == MOY_UI_MK_FILL && ofill && lk_set(fc) && ratio100(fc, oc) < 300) {
+            bad[MOY_UI_MS_ON] = 1;
+        }
+        const moy_ui_mark_t *b = &m[MOY_UI_MS_BOTH];
+        int32_t under = f->mark == MOY_UI_MK_FILL ? fc : ofill ? oc : MOY_THEME_NONE;
+        if (b->mark != MOY_UI_MK_NONE && lk_set(under)) {
+            int32_t bc = b->c >= 0 ? row[b->c] : ink_on(under);
+            if (ratio100(bc, under) < 300) {
+                bad[MOY_UI_MS_BOTH] = 1;
+            }
+        } else if (ofill && f->mark != MOY_UI_MK_FILL && f->mark != MOY_UI_MK_RING
+                   && lk_set(fc) && ratio100(fc, oc) < 300) {
+            bad[MOY_UI_MS_ON] = 1;      // the focus mark would sink into the on fill
+        }
+        for (int st = 0; st < MOY_UI_MSTATES; st++) {
+            if (bad[st] && m[st].declared) {
+                failed |= 1u << (k * MOY_UI_MSTATES + st);
+            } else {
+                o[st] = m[st];
+            }
+        }
+    }
+    // L8 (a warning): one fill means one thing -- the selected row's, the
+    // Primary's and a Toggle-on's fills apart
+    if (warn != NULL) {
+        int32_t sel = out[MOY_UI_ITEM_ROW * MOY_UI_MSTATES + MOY_UI_MS_ON].mark == MOY_UI_MK_FILL
+                      ? mark_rgb(&out[MOY_UI_ITEM_ROW * MOY_UI_MSTATES + MOY_UI_MS_ON], row,
+                                 surface) : MOY_THEME_NONE;
+        int32_t tog = out[MOY_UI_ITEM_CELL * MOY_UI_MSTATES + MOY_UI_MS_ON].mark == MOY_UI_MK_FILL
+                      ? mark_rgb(&out[MOY_UI_ITEM_CELL * MOY_UI_MSTATES + MOY_UI_MS_ON], row,
+                                 surface) : MOY_THEME_NONE;
+        int32_t pf = lk_at(lk, "buttons.primary.fill");
+        int32_t prim = lk_set(pf) && pf < MOY_THEME_PAINT ? pf : row[MOY_UI_T_VALUE];
+        int same = (lk_set(sel) && lk_set(prim) && ratio100(sel, prim) < 110)
+                   || (lk_set(tog) && lk_set(prim) && ratio100(tog, prim) < 110)
+                   || (lk_set(sel) && lk_set(tog) && ratio100(sel, tog) < 110);
+        *warn = same;
+    }
     free(lk);
-    return ok;
+    return failed;
 }
 
 int32_t moy_theme_nearest(int32_t v) {
@@ -4393,7 +4596,7 @@ int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
     moy_theme_derive((const int32_t(*)[MOY_THEME_ROLES])base, accent, tint, rows);
     // A lifted card's rim the source tied to its accent follows the pick, as
     // the roles it tied do (a rim of any other colour stays).
-    int lr = look_leaf("focus.lift.rim.c");
+    int lr = look_leaf("marks.card.focus.lift.rim.c");
     for (int v = 0; v < 2 && lr >= 0; v++) {
         if (looks[v].v[lr] == base[v][MOY_UI_T_ACCENT]) {
             looks[v].v[lr] = rows[v][MOY_UI_T_ACCENT];

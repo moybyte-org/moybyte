@@ -235,7 +235,7 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
     ws.set_menu_view("code")
     ws.screen = "menu"
     want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1b6e34,
-            _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5f6478, _HL_BUILTIN: 0x1662a8}
+            _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5b6074, _HL_BUILTIN: 0x1662a8}
     c = ws.look.content_colors()            # the roles the text view's tones take
     hl = {_HL_TEXT: c["code_text"], _HL_KEYWORD: c["code_keyword"],
           _HL_STRING: c["code_string"], _HL_NUMBER: c["code_number"],

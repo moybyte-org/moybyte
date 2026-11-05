@@ -14,9 +14,9 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
   the window's colour under a 4 px `value` bar across its top
   (`win.header: bar`), a window behind's on the ground's colour
   (`win.fill_back`) with a smaller shadow (`shadow_back` 0.3); `tonal`
-  keys sit one step off `raised`; the lift has an `accent` rim at 0.6
-  (`focus.lift.rim`); the focus edge stands on a light accent plate
-  (`focus.plate.alpha`); a field's outline is 3:1 (`field.border`); the
+  keys sit one step off `raised`; a row's focus is a 4 px bar, a cell's
+  and a card's a 2 px ring, and selected is a `value` tint (`marks`); a
+  field's outline is 3:1 (`field.border`); the
   Calc display's ink is the plain ink (`lcd_ink`).
 - **Moy, Day:** the desk is two pale discs (`backdrop.desk`), with no
   gradient. `tonal` keys are `sunk`; keycaps are ringed in `line`.
@@ -28,17 +28,19 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
   pale halo behind the hero and mint and coral discs at its edges, each app
   owns a tile colour (Play coral, Paint sunflower, Files sky, Calc
   tangerine), the Calc display is mint and the operators sunflower. Keys
-  have no outline; a focused key inverts to ink; a current row's label is
-  underlined (`current.row: underline`).
+  have no outline; a row's focus is the ink bar and selected the purple
+  fill, a selected cell underlined in `value` (`marks`).
 - **Contrast:** every size of Calc and the window titles two to six pixels
   larger, 2 px white borders on `normal`, `tonal` and `danger`, a #262626
   `tonal` fill, a black bar ruled in white, keycaps ringed in white, the
   desk's tiles and the Moy button framed in white (`tile_outline`,
-  `bar.sys_line`), its `dim` its ink, no accent picks (`accents`), and the
-  current mark a solid `plate` of the ink under `value_ink` text. Its light
-  mode is the mirror (white ground, black text, lines, borders and
-  `value`, a #e6e6e6 `tonal` fill), and its yellow focus takes a 2 px black
-  `focus.outline`.
+  `bar.sys_line`), its `dim` its ink, no accent picks (`accents`), a
+  Primary that is a 3 px border, a Toggle on that wears a check
+  (`buttons.toggle.check`), a row's focus the yellow fill, a selected row a
+  3 px frame, a selected cell a fill of the ink under `value_ink` text
+  (`marks`). Its light mode is the mirror (white ground, black text, lines,
+  borders and `value`, a #e6e6e6 `tonal` fill), and its yellow focus takes
+  a 2 px black keyline.
 
 ## Ricing proof: Luna and Coast
 
@@ -47,6 +49,9 @@ Two themes in the style of two desktop OSes, `luna_*` (Windows XP) and
 renderer, glyph pipeline and RGB565 output. Everything is drawn with open
 fonts; there is no Microsoft or Apple artwork, logo or font: the
 start-style button carries Moy and "moy", and the menu bar carries Moy.
+The proofs name `mockups.py`'s fields, among them its `focus.*` and
+`current.*` styles; a theme package declares the same marks as `marks`
+(the model below).
 
 **Luna**
 
@@ -260,14 +265,13 @@ In the package format (`docs/theme_and_shell_2026-11.md` §2, style.json's
 | edges | `edges` (`flat`/`bevel`), `hi`, `lo` | flat |
 | type | `fam`; `w_body`, `w_med`, `w_semi`, `w_bold` and a per-role `w_<role>`; `sizes.hh` and `sizes.dk` per role | the size tables in the script (HH, DK) |
 | rendering | `render.text` (`aa`/`crisp`), `render.shapes` (`smooth`/`stepped`), `render.scale` (1/2) | aa, smooth, 1 |
-| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.outline` (width, colour), `focus.ring.w`, `.gap`, `.alpha`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.rim` (colour or role, alpha), `focus.edge.w` (its bar, on a plate at `focus.plate.alpha`), `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; no outline; 2.5, 3, 1; (0.14, 0.22); 5, 3, no rim; 4; 3 |
+| marks | `marks.<row/cell/card>.<focus/on/both>`: `mark` (`fill`/`tint`/`bar`/`ring`/`inset`/`outline`/`underline`/`none`), `c` and `ink` (roles), `w`, `gap`, `alpha`, `key` (width, colour); `marks.card.focus.lift` (`grow`, `rise`, `rim`); `focus.plate.alpha` (light, dark: an OS widget's pill) (`docs/theme_and_shell_2026-11.md` §3.3) | the engine's: a row's focus a 4 px bar, a cell's and card's a 2 px ring 2 px clear, `on` a `value` tint |
 | radii | `win_r`, `card_r`, `key_r`, `win_corners` (four flags) | 12, 10, 10, all |
-| card | `card.frame` (width, colour): a group card's frame, which an invert focus mark keeps inside (or covers with an outline as wide) | a dark card's 1 px rule, a light card's where it meets its ground's colour |
+| card | `card.frame` (width, colour): a group card's frame, which a fill focus mark keeps inside | a dark card's 1 px rule, a light card's where it meets its ground's colour |
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |
 | home | `dim_neighbours`; `on_backdrop.ink`, `.dim`, `.shadow` | no veil; `text`, `dim` |
 | window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`three`/`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back` (a `bar` header's too: a window behind), `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon`; a window behind draws its controls in `disabled` | plain, 44, left, three (minimize, maximize, close) |
-| current | `current.style` (`plate`/`fill`/`bar`), `current.color` (a role), `current.alpha` (light, dark), `current.row` (`plate`/`outline`/`underline`: a row's mark -- the style's own, the row's outline, or an underline under its label; the code editor's current line is a row whose code keeps its colours, so an opaque plate outlines it, and a translucent plate holds every code role to 4.5:1 on it; an opaque plate in a window behind is its outline), `current.ink` (a role: the current content's ink, its second cue beside a soft plate, held to the floor on the plate); `sel`, `sel_ink`, `sel_back` for `fill` | bar, `value`, (0.14, 0.24), plate, the content's own |
 | disabled | `disabled`: the ink every disabled part draws in, about 3:1 on the surface and under the ink and its dim; an empty field's placeholder too | `ink_dim` |
 | modal | `scrim` (colour, alpha): what dims everything under a system modal and a dialog | black at 0.4 |
 | fields | `field.border`: a text field's outline at rest, 3:1 or better on its ground | `line` |

@@ -684,7 +684,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     clip_t k;
     mua_band_mark(c, b, stacked, 0);
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, 0);
+        mua_band(c, s, b, stacked);
         if (cap_h) {
             moy_ui_caption(s, (moy_ui_box_t){b.x, b.y, b.w, (int16_t)cap_h}, label, c->fs, c->cls);
         }
@@ -729,7 +729,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 int f = table_flags(c, o, id, i, cur, st, disabled, grp) | (part ? MOY_UI_F_PART : 0);
                 if (grp) {
                     moy_ui_group_band(s, gcard, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh},
-                                      i == 0 && c->grp_first, c->fs, c->cls);
+                                      i == 0 && c->grp_first, c->fs, mua_ground_of(c));
                 }
                 size_t end = e < cells_n ? e : cells_n;
                 moy_ui_table_row(s, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh}, &g,
@@ -921,7 +921,7 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         mua_sig_mix(c, buf, len);
     }
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, f);
+        mua_band(c, s, b, stacked);
         moy_ui_span_t t = {buf, (uint16_t)len};
         moy_ui_box_t fb = b;
         moy_ui_span_t lb = label;
@@ -1003,7 +1003,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     int pad = moy_ui_modal_band(fs, c->cls);
     int nb = moy_ui_fields(buttons, len);
     // the foot pads the buttons' focus ring as the top pads the title
-    int reach = moy_ui_mark_reach(MOY_UI_MARK_PART) * fs;
+    int reach = moy_ui_mark_reach(MOY_UI_ITEM_CELL) * fs;
     int foot = nb ? rh + 2 * pad + reach : pad;     // no buttons: the keys are the hint strip's
     int top = pad + rh + pad / 2;
     moy_ui_box_t sf = c->surface;
@@ -1046,8 +1046,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     c->dlg_id = id;
     c->dlg_card = card;
-    // the buttons at its foot, right-aligned, recorded left to right
-    int gap = 8 * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
+    // the buttons at its foot, right-aligned, recorded left to right, a
+    // focus ring's reach and 4 pixels clear between them
+    int gap = (reach / fs + 4 > 8 ? reach / fs + 4 : 8) * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
     int bw[8];
     int total = 0;
     if (nb > 8) {

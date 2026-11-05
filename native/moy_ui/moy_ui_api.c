@@ -859,7 +859,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->page = surface;
     c->page_new = 0;
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
-    c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : 0);
+    c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : (flags & MOY_UI_PANEL) ? 2 : 0);
     c->elsewhere = (uint8_t)((flags & MOY_UI_ELSEWHERE) ? 1 : 0);
     c->tp_id = 0;                       // the parts a last frame left open are done
     c->tp_open = 0;
@@ -1389,7 +1389,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // The parts' `desk` for what lies on the page's ground: the size class and
 // whether the page is a window's body.
 int mua_ground_of(const moy_ui_ctx_t *c) {
-    return (c->cls ? MOY_UI_DESK : 0) | (c->win ? MOY_UI_WINDOW : 0);
+    return (c->cls ? MOY_UI_DESK : 0) | (c->win == 1 ? MOY_UI_WINDOW : 0)
+           | (c->win == 2 ? MOY_UI_PANEL : 0);
 }
 
 moy_ui_keep_t *mua_page_keep(moy_ui_ctx_t *c) {
@@ -1445,7 +1446,6 @@ moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
             c->grp_n++;
         }
         c->grp_last = b;
-        c->grp_prev = c->grp_first ? 0 : c->grp_flags;
         c->grp_flags = 0;
     }
     if (row) {
@@ -1716,7 +1716,7 @@ void mua_ground_fill(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t
             moy_ui_modal(s, c->dw_card, (moy_ui_span_t){none, 0}, c->fs, c->cls, mua_row_h(c));
         } else {
             moy_ui_page_ground(s, b, (moy_ui_span_t){none, 0}, c->fs,
-                               (c->cls ? MOY_UI_DESK : 0) | (c->win ? MOY_UI_WINDOW : 0), NULL);
+                               mua_ground_of(c), NULL);
         }
     }
     memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
@@ -1853,31 +1853,22 @@ moy_ui_box_t mua_card_of(const moy_ui_ctx_t *c) {
 // frame's floor draws the row.
 void mua_band_mark(moy_ui_ctx_t *c, moy_ui_box_t b, int stacked, int marks) {
     if (stacked && c->grp_open && b.y + b.h > c->page.y && b.y < c->page.y + c->page.h) {
-        c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
+        c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON | MOY_UI_F_PRESSED
+                                           | MOY_UI_F_HOT));
     }
 }
 
 // The card behind stacked row b, drawn under the row's clip (mua_band_mark
 // keeps its marks).
-void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
-              int marks) {
+void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked) {
     if (!stacked || !c->grp_open) {
         return;
     }
-    // a focus mark that fills its row (invert, or the edge's plate) is the
-    // line between it and its neighbours: neither it nor the row under it
-    // draws a rule
-    const moy_ui_marks_t *m = moy_ui_marks();
-    int st = m->style[MOY_UI_MARK_PART];
-    int fills = m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
-    int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && fills;
-    int own = (marks & MOY_UI_F_FOCUS) && fills;
     // a row the page's foot cuts inside its fade draws no rule: the fade
     // says the rows run on, and a rule there reads as a second foot line
     int foot = c->page.y + c->page.h;
     int cut = b.y + b.h > foot && b.y >= foot - FADE_H * c->fs;
-    moy_ui_group_band(s, mua_card_of(c), b, c->grp_first || after_mark || own || cut, c->fs,
-                      c->cls);
+    moy_ui_group_band(s, mua_card_of(c), b, c->grp_first || cut, c->fs, mua_ground_of(c));
 }
 
 // The open group ends: its card's foot under its last row, and the gap the
@@ -1891,7 +1882,8 @@ void mua_group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     if (c->grp_n) {
         clip_t k;
         EACH_ROW(c, k, s, c->grp_last, 1, c->page) {
-            moy_ui_group_end(s, mua_card_of(c), c->grp_last, c->grp_flags, c->fs, c->cls);
+            moy_ui_group_end(s, mua_card_of(c), c->grp_last, c->grp_flags, c->fs,
+                             mua_ground_of(c));
             mua_clip_out(&k);
         }
     }
@@ -2188,7 +2180,7 @@ void mua_vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t label)
     r->label = label;
     r->cur = -1;
     r->fs = c->fs;
-    r->desk = c->cls;
+    r->desk = (int16_t)mua_ground_of(c);
     r->card = c->grp_open;
     r->first = c->grp_open && c->grp_first;
     r->icon_slot = c->row_slot;
@@ -2198,7 +2190,8 @@ void mua_vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t label)
 void mua_vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
                    int kind, int st, const moy_ui_over_t *o, const moy_ui_vrow_t *r) {
     clip_t k;
-    int f = mua_mark_flags(st, o) & ~MOY_UI_F_ON;
+    int f = mua_mark_flags(st, o) | ((st & MOY_UI_ST_PRESSED) ? MOY_UI_F_PRESSED : 0);
+    int danger = r->kind == MOY_UI_VROW_DANGER ? MOY_UI_F_HOT : 0;
     if (mua_audit_on && c->n_cur > 0) {
         const moy_ui_box_t sb = c->cur[c->n_cur - 1].b;
         if (sb.x == b.x && sb.y == b.y && sb.w == b.w && sb.h == b.h) {
@@ -2207,9 +2200,9 @@ void mua_vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int 
             mua_sig_mix(c, r->value.p, r->value.n);
         }
     }
-    mua_band_mark(c, b, stacked, f);
+    mua_band_mark(c, b, stacked, f | danger);
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, f);
+        mua_band(c, s, b, stacked);
         moy_ui_vrow(s, b, kind, f | (o->disabled == 1 ? MOY_UI_F_DISABLED : 0), r);
         mua_clip_out(&k);
     }
@@ -2732,7 +2725,7 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     EACH_ROW(c, k, s, b, stacked, c->page) {
         // a group's row, or a label on the page's ground: the parts' ink
         if ((stacked && c->grp_open) || o->ink == MOY_UI_O_NONE) {
-            mua_band(c, s, b, stacked, 0);
+            mua_band(c, s, b, stacked);
             moy_ui_vrow_t r;
             mua_vrow_init(c, &r, text);
             moy_ui_vrow(s, b, MOY_UI_V_LABEL, 0, &r);
@@ -2775,7 +2768,7 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     clip_t k;
     mua_band_mark(c, b, stacked, mua_mark_flags(st, o));
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, mua_mark_flags(st, o));
+        mua_band(c, s, b, stacked);
         moy_ui_button_t bt;
         bt.label = label;
         bt.glyph = -1;
@@ -3144,7 +3137,7 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     clip_t k;
     mua_band_mark(c, b, stacked, 0);
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, 0);
+        mua_band(c, s, b, stacked);
         clip_t kb;
         int any = mua_clip_in(&kb, s, b);
         int16_t col[3];
@@ -3241,7 +3234,7 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     clip_t k;
     mua_band_mark(c, b, stacked, mua_mark_flags(st, o));
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked, mua_mark_flags(st, o));
+        mua_band(c, s, b, stacked);
         int16_t oc[3];
         colours(s, o, oc);
         moy_ui_well(s, b, mua_mark_flags(st, o), oc[0] == MOY_UI_FROM_STYLE ? -1 : oc[0], c->fs,

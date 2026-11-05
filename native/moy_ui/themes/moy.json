@@ -30,7 +30,8 @@
       "shade_dark": "#cfd3dc", "ink_accent": "#4c3fd6",
       "value_ink": "#ffffff", "sunk": "#e3e6ed", "lcd": "#f1f2f6", "lcd_ink": "#15161d",
       "code_text": "#15161d", "code_keyword": "#6a35c4", "code_string": "#1b6e34",
-      "code_number": "#9a4a09", "code_comment": "#5f6478", "code_builtin": "#1662a8"
+      "code_number": "#9a4a09", "code_comment": "#5b6074", "code_builtin": "#1662a8",
+      "paused": "#8a8fa3"
     }
   },
   "layout": {
@@ -38,14 +39,22 @@
                "right": ["wifi", "battery", "clock"] }]
   },
   "look": {
-    "focus": { "style": "edge", "card": "lift", "small": "edge", "ring": { "w": 2, "gap": 2 } },
-    "current": { "style": "plate", "ink": "ink_accent" }, "shadow_back": 0.3,
+    "marks": {
+      "row": { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
+               "on": { "mark": "tint", "c": "value", "ink": "ink_accent" } },
+      "cell": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" },
+                "on": { "mark": "tint", "c": "value", "ink": "ink_accent" } },
+      "card": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" },
+                "on": { "mark": "tint", "c": "value", "ink": "ink_accent" } } },
+    "shadow_back": 0.3,
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
                                "primary": { "font": "op" } } },
     "dark": {
       "fam": "inter",
-      "focus": { "lift": { "rim": ["#b6a8f7", 0.6] }, "plate": { "alpha": 0.14 } },
+      "focus": { "plate": { "alpha": 0.14 } },
+      "marks": { "row": { "on": { "alpha": 0.24 } }, "cell": { "on": { "alpha": 0.24 } },
+                 "card": { "on": { "alpha": 0.24 } } },
       "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
       "win": { "header": "bar", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"],
                "fill_back": "#0f1127" },
@@ -62,7 +71,9 @@
     },
     "light": {
       "fam": "daysans",
-      "focus": { "lift": { "rim": ["#4c3fd6", 0.6] }, "plate": { "alpha": 0.12 } },
+      "focus": { "plate": { "alpha": 0.12 } },
+      "marks": { "row": { "on": { "alpha": 0.18 } }, "cell": { "on": { "alpha": 0.18 } },
+                 "card": { "on": { "alpha": 0.18 } } },
       "shadow": ["soft", "#1b2040", 0.18, 16, 8],
       "win": { "header": "bar", "fill_back": "#e3e6ed" },
       "field": { "border": "#8f94a3" },

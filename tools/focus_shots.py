@@ -3,8 +3,6 @@
 #   Sheet               the state sheet: one surface a page, drawn with the ui verbs
 #   _sheet_setup        a sheet frame's setup (SURFACES lists each page's frames)
 #   _cc                 the control center opened (SHELL lists the shell's screens)
-#   _engine_has_marks   whether this checkout carries the prototype (PATCH)
-#   _cc_inset           the control center's inset, as the proposal draws it
 #   checks              the legibility checks on the declared marks
 #   shoot               one run's renders
 #   sheets              the contact sheets
@@ -31,14 +29,12 @@ Two kinds of render:
   menu, the control center, Files, Calc, the desk's PROJECTS window, the
   delete's question), each with a stop focused.
 
-Two runs draw them: `today` from a checkout as dev draws them, and
-`proposal` from a checkout with `PATCH` applied (`git apply` it in a scratch
-worktree, then run tools/gen_ui_tables.py): the toolkit's `marks` look keys,
-the engine fixes and the seed themes' declarations, drawn by the toolkit
-itself, with the control center's inset (`_cc_inset`, the shell's Python)
-patched in at run time. The built-in themes carry the proposal, so the theme
-picker shows the active one as a seed. `checks` prints the legibility checks
-on the checkout's declared marks. Each run writes OUT/RUN/
+A run draws the checkout it runs in, under its name: the README's `today`
+is dev before the marks landed (02bc69e20), `proposal` the declared marks
+as the toolkit draws them. `checks` prints the legibility checks on the
+checkout's declared marks, as the README's table states them; the loader
+holds L1-L4 (moy_theme_marks) and tests/test_focus_marks.py the rendered
+sheets. Each run writes OUT/RUN/
 surface_SURFACE_{tdeck,desk,shell}.png (one surface across the
 theme-modes) and theme_THEME-MODE_{tdeck,shell}.png (one theme-mode's
 surfaces), every cell captioned with its theme-mode, surface and state;
@@ -280,10 +276,14 @@ SURFACES = {
 SHEET_CONFIGS = (("tdeck", L.HANDHELD), ("desk", L.DESK))
 
 
-def _sheet_setup(page, focus, keys, press):
+def _sheet_setup(page, focus, keys, press, apps=None):
+    """A sheet frame's setup; `apps` (a list) gets the sheet app, whose
+    context answers its stops' boxes (`api_box`) once the frame is drawn."""
     def setup(g, ws):
         from runtime import ui_draw
         app = Sheet(ws, page)
+        if apps is not None:
+            apps.append(app)
         ws.register_app(app)
         app.open()
         ws.wm.goto(app.id)
@@ -314,7 +314,7 @@ def _open(app_id, then=None):
     return setup
 
 
-def _cc(focus=None, touch=False):
+def _cc(focus=None):
     """The handheld's control center, opened from the bar's cluster, `focus`
     its stop focused (None: where it opens)."""
     def setup(g, ws):
@@ -547,7 +547,6 @@ def shoot(out, filters=(), proposal=False, shell=True, sheets=True):
     g = L._goldens()
     frames = {}         # (tm, config tag, surface, state) -> PIL image (cropped)
     FULL.clear()
-    _cc_inset(proposal)
     for theme, mode in MODES:
         tm = "%s-%s" % (theme, mode)
         if sheets:
@@ -709,22 +708,8 @@ def sheets(out, frames, label):
 
 
 # --------------------------------------------------------------------------
-# the proposal
+# the legibility checks on the declarations, as the README tabulates them
 # --------------------------------------------------------------------------
-
-#: The prototype the proposal renders through: the marks system and the seed
-#: themes' declarations (README, "The marks"), as a patch over native/moy_ui.
-PATCH = os.path.join(ROOT, "docs", "media", "focus_2026-11", "marks_prototype.patch")
-
-
-def _engine_has_marks():
-    """True when this checkout's toolkit carries the prototype (the patch
-    applied): its schema names the `marks` look keys."""
-    with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as f:
-        return '"marks.row.focus.mark"' in f.read()
-
-
-# -- the legibility checks the loader is to hold, on the declarations --------
 
 def _rgb(c):
     c = c.lstrip("#")
@@ -827,49 +812,6 @@ def checks():
     return "\n".join(rows)
 
 
-def _cc_inset(on):
-    """The control center's console card stands as far in from the panel's
-    top and foot as from its sides (the group's inset), in the proposal."""
-    import importlib
-    popover = importlib.import_module("runtime.popover")
-    cls = popover.ControlCenter
-    if not on:
-        if hasattr(cls, "_focus_shots_draw"):
-            cls.draw, cls.size = cls._focus_shots_draw, cls._focus_shots_size
-            del cls._focus_shots_draw, cls._focus_shots_size
-        return
-    if hasattr(cls, "_focus_shots_draw"):
-        return
-    cls._focus_shots_draw, cls._focus_shots_size = cls.draw, cls.size
-    draw, size = cls.draw, cls.size
-
-    def at(self):
-        from runtime import ui_draw
-        return ui_draw.metrics("group")[0] * self.ws.layout.fs
-
-    def new_draw(self, cv, rect):
-        x, y, w, h = rect
-        real = popover._ui.at
-        i = at(self)
-
-        def shifted(ax, ay, aw, ah):
-            real(ax, ay + i, aw, ah - i)
-        popover._ui.at = shifted
-        try:
-            draw(self, cv, rect)
-        finally:
-            popover._ui.at = real
-
-    def new_size(self):
-        w, h = size(self)
-        if not popover._ITEMS.shown:
-            fs = self.ws.layout.fs
-            rows = 3 * 20 * fs + 2 * fs
-            h = 2 * fs + 2 * at(self) + rows
-        return (w, h)
-    cls.draw, cls.size = new_draw, new_size
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("out")
@@ -882,10 +824,6 @@ def main(argv=None):
     runs = a.runs.split(",")
     for run in ("today", "proposal"):
         if run in runs:
-            if (run == "proposal") != _engine_has_marks():
-                ap.error("the %s run needs a checkout %s %s" % (
-                    run, "with" if run == "proposal" else "without",
-                    os.path.relpath(PATCH, ROOT)))
             frames = shoot(os.path.join(work, run), a.filters, run == "proposal")
             os.makedirs(os.path.join(a.out, run), exist_ok=True)
             sheets(os.path.join(a.out, run), frames, run.upper())

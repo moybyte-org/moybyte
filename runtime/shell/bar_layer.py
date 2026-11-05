@@ -303,6 +303,7 @@ class BarLayer:
         self._strip_cv = None
         self._clock_drawn = None
         self._ink_dx = None           # {status widget: dx} the strip last laid out
+        self._sel_ink = None          # (box, ink): the open item's opaque fill and its ink
         # The game canvas's packing (_packed) and what it was packed from;
         # each packing's per-bar key fields (_key_fields).
         self._game_of = None
@@ -1123,10 +1124,14 @@ class BarLayer:
             self._ink_dx = self._status_dx(cells, self._cluster(game)) \
                 if looked and not across else None
             sel = None if game or across else self._selected_box(where, cells)
+            self._sel_ink = None
             if sel is not None:
-                # the bar item whose popover is open: selected, the tabs' fill
+                # the bar item whose popover is open: selected, the tabs' fill;
+                # on an opaque fill (Contrast's) the items in it take its ink
                 fs = ws.layout.fs
-                _ui_draw.current(cv, ws.theme_colors, sel, r=5 * fs, fs=fs)
+                got = _ui_draw.current(cv, ws.theme_colors, sel, r=5 * fs, fs=fs)
+                if got is not None and _ui_draw.marks()[3]:
+                    self._sel_ink = (sel, got)
             for name, r, text, _slot in cells:
                 if name in _PAINTED and (show_x or name != "close"):
                     if only is not None and not _meets(r, only):
@@ -1403,7 +1408,7 @@ class BarLayer:
         draw in the bar's ink, centred across the bar."""
         ws = self.ws
         th = ws.theme_colors
-        ink = th["chrome_ink"]
+        ink = self._inverse(r, th["chrome_ink"])
         x, y, w, h = r
         thick = bar[2] if across else bar[3]
         u = _layout_base.unit()
@@ -1493,6 +1498,16 @@ class BarLayer:
         x0 = r[0] + r[2] - (n * side + max(0, n - 1) * sg)
         return x0, side, side + sg
 
+    def _inverse(self, r, ink):
+        """`ink`, or the open item's fill's ink where box `r` lies on that
+        opaque fill (Contrast's open status cluster)."""
+        s = self._sel_ink
+        if s is None:
+            return ink
+        b, got = s
+        cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
+        return got if b[0] <= cx < b[0] + b[2] and b[1] <= cy < b[1] + b[3] else ink
+
     def _paint_status(self, cv, r, n, game=False):
         """The apps' status items in their cell `r`: each its icon in its
         state's ink (the accent, the paused ink, the danger ink)."""
@@ -1509,6 +1524,7 @@ class BarLayer:
             ink = th["danger"] if st == _ERROR else \
                 ws.look.content_colors().get("paused", th["ink_dim"]) if st == _PAUSED \
                 else th["accent"]
+            ink = self._inverse((x, r[1], side, side), ink)
             g = 16 * _layout_base.unit()
             if game or not ws.draw_icon(it.icon, (x + (side - g) // 2, r[1] + (side - g) // 2,
                                                   g, g), ink, cv):

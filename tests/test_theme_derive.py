@@ -198,20 +198,30 @@ def test_moys_appearance_accents_read_in_day_and_night():
 
 
 def test_a_picked_accent_sets_value_and_the_rim_tied_to_the_accent():
-    """`value` (a slider's fill, a switch) is an accent fill, and Moy's
-    lifted-card rim is its accent in both modes (D-04, 2026-10-19): both
-    follow the pick; with no pick the source's own stand."""
+    """`value` (a slider's fill, a switch) is an accent fill, and a lifted
+    card's rim the source ties to its accent (lift-and-ring stays legal
+    data, docs/theme_and_shell_2026-11.md §3.3): both follow the pick; with
+    no pick the source's own stand."""
+    src = json.loads(open(os.path.join(os.path.dirname(gen_ui_tables.__file__), "..",
+                                       "native", "moy_ui", "themes", "moy.json")).read())
     for v in ("dark", "light"):
-        own = json.loads(_custom("moy"))["look"][v]["focus"]["lift"]["rim"][0]
-        assert _val(own) == _val(json.loads(_custom("moy"))["colors"][v]["accent"])
+        src["look"][v].setdefault("marks", {})["card"] = {"focus": {"lift": {
+            "grow": 5, "rise": 3, "rim": [src["colors"][v]["accent"], 0.6]}}}
+    src["name"] = "lifted"
+    src = json.dumps(src).encode()
+
+    def rim(pkg, v):
+        lift = (pkg["look"].get(v, {}).get("marks", {}).get("card", {}).get("focus", {})
+                .get("lift") or pkg["look"]["marks"]["card"]["focus"]["lift"])
+        return _val(lift["rim"][0])
+    own = json.loads(_custom(src))
+    for v in ("dark", "light"):
+        assert rim(own, v) == _val(own["colors"][v]["accent"])
     for _n, a, _d in TH["accents"]:
-        b = _custom("moy", a)
+        b = _custom(src, a)
         pkg = json.loads(b)
-        # a rim both modes share is written once, in the shared look
-        lift = lambda v: (pkg["look"][v].get("focus", {}).get("lift")    # noqa: E731
-                          or pkg["look"]["focus"]["lift"])["rim"][0]
-        assert _val(lift("dark")) == _val(pkg["colors"]["dark"]["accent"]) == _val(a)
-        assert _val(lift("light")) == _val(pkg["colors"]["light"]["accent"])
+        assert rim(pkg, "dark") == _val(pkg["colors"]["dark"]["accent"]) == _val(a)
+        assert rim(pkg, "light") == _val(pkg["colors"]["light"]["accent"])
         resolved = moy_ui.theme_resolve(b)
         for v in (3, 4):
             row = dict(zip(ROLES, resolved[v][0]))
@@ -369,15 +379,15 @@ def _half_effects(src):
 
 
 def _padded(src):
-    """`src` with an `images` value (custom carries it whole) grown to 1000
+    """`src` with an `images` value (custom carries it whole) grown to 1400
     bytes under the cap: a source the cap lets in whose custom, with its
     rows, does not fit."""
     pkg = json.loads(src)
     pkg["images"] = {"pad": ""}
-    room = TH["bytes"] - 1000 - len(json.dumps(pkg, separators=(",", ":")))
+    room = TH["bytes"] - 1400 - len(json.dumps(pkg, separators=(",", ":")))
     pkg["images"]["pad"] = "x" * room
     out = json.dumps(pkg, separators=(",", ":")).encode()
-    assert len(out) == TH["bytes"] - 1000
+    assert len(out) == TH["bytes"] - 1400
     return out
 
 

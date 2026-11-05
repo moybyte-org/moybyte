@@ -825,7 +825,7 @@ def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     use_theme(ws, "mint", store=True)
     ed = _edit(ws)
     d = json.loads(ed.text())
-    ed.set_text(json.dumps(d, indent=32))
+    ed.set_text(json.dumps(d, indent=24))
     assert _THEME_BYTES < len(ed.text()) <= ws.look.max_chars   # Config's cap
     assert ed.save(soft=True) == (True, "")
     saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()

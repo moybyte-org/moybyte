@@ -1086,7 +1086,7 @@ static void current(dr_t *d, const int32_t in[4], int y, int x0, int x1) {
     }
     int ink;
     moy_ui_box_t b = {(int16_t)left, (int16_t)y, (int16_t)(right - left), (int16_t)lh};
-    moy_ui_current(d->s, b, 0, MOY_UI_MARK_SIDE | MOY_UI_MARK_KEEP, d->s->fs, &ink);
+    moy_ui_current(d->s, b, MOY_UI_ITEM_ROW, 0, MOY_UI_MARK_KEEP, d->s->fs, &ink);
     if (!whole) {
         clip_back(d, in);
     }

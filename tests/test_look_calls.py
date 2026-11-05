@@ -119,15 +119,16 @@ def _list(theme):
     return r
 
 
-def test_blocks_underlines_the_current_rows_label():
+def test_blocks_fills_the_current_row():
+    """Blocks declares a row's `on` as the selection fill (its purple), the
+    row's label in the selection ink."""
     r = _list(("blocks", "light"))
-    value = _c565(r, r.th["value"])
-    hits = [(x, y) for y in range(0, 240) for x in range(0, 320) if r.px(x, y) == value]
-    assert hits, "the current row is marked in the value colour"
+    sel = _c565(r, r.th["selection"])
+    hits = [(x, y) for y in range(0, 240) for x in range(0, 320) if r.px(x, y) == sel]
+    assert hits, "the current row is filled"
     xs = sorted({x for x, _y in hits})
     ys = sorted({y for _x, y in hits})
-    assert len(ys) <= 3 and xs[-1] - xs[0] > 20, "an underline, not a bar beside the row"
-    assert xs[-1] < 200, "under the label alone"
+    assert len(ys) >= 12 and xs[-1] - xs[0] > 200, "a fill across the row"
 
 
 @pytest.mark.parametrize("mode", ("light", "dark"))

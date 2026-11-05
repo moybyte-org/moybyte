@@ -258,7 +258,7 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
 // -- button kinds (docs/history/look_2026-10.md step 10) ------------------------------------
 
 // The `button` fields' leaves, in style.json's theme.look.button order.
-enum { BL_FILL = 0, BL_INK, BL_BORDER_W, BL_BORDER_C, BL_SHAPE, BL_R, BL_FONT, BL_BEVEL };
+enum { BL_FILL = 0, BL_INK, BL_BORDER_W, BL_BORDER_C, BL_SHAPE, BL_R, BL_FONT, BL_BEVEL, BL_CHECK };
 
 // The leaves a kind does not take from `normal` (DESIGN.md, "Button kinds"):
 // primary its fill, ink, border and font; tonal its ink and font; danger its
@@ -358,7 +358,7 @@ static int8_t btn_small(int32_t v) {
 
 int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style_t *out) {
     int rc = moy_ui_colors(look, kind, state, out->c);
-    out->edge_w = out->shape = out->r = out->font = out->bevel = -1;
+    out->edge_w = out->shape = out->r = out->font = out->bevel = out->check = -1;
     ui_t *u = ui();
     int bk = moy_ui_button_of(kind);
     if (rc != MOY_UI_OK || u == NULL || bk < 0) {
@@ -399,6 +399,7 @@ int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style
     out->font = btn_small(btn_leaf(u, app, bk, BL_FONT));
     v8 = btn_small(btn_leaf(u, app, bk, BL_BEVEL));
     out->bevel = v8 >= 0 ? v8 : (int8_t)(dp->edges == 1);
+    out->check = btn_small(btn_leaf(u, app, bk, BL_CHECK));
     return MOY_UI_OK;
 }
 

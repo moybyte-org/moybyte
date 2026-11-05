@@ -148,12 +148,8 @@ Nothing is pending the owner.
   installed from the store brings its own font files in its package, as
   packages do.
 - **Focus and current are theme properties** (owner, 2026-10-15: "make it a
-  property, easy to change later"): `focus` draws by size class and
-  `current` is a plate, a fill or a bar (`DESIGN.md`, the marks). Moy lifts
-  its cards, edge-bars its rows, rings its small parts and marks current
-  with a `value` plate (§1.5); Blocks and Contrast keep a
-  ring on cards and `invert` elsewhere, Blocks' current an underline and
-  Contrast's a solid ink plate.
+  property, easy to change later"); since 2026-11-05 a theme declares them
+  per item kind and state as `marks` (§3.3, `DESIGN.md`, the marks).
 - **Button kinds replace per-app roles** (owner, 2026-10-15).
 - **Theme colours are RGB** (2026-10-15, GAPS 1). This reverses theming's
   2026-09 decline of RGB (§12.1). A cart's colour stays `& 63`.
@@ -187,8 +183,8 @@ Nothing is pending the owner.
     it. A popover hung from its own control (an app's picker, a bar
     widget's calendar, Wi-Fi or power) does not dim, and keeps painting its
     rect alone over a playtest's quiet frames.
-  - D-04: Moy keeps its focus edge (its plate went with §1.5); Day's lifted
-    hero wears an accent rim; a window behind takes `win.fill_back` on a
+  - D-04: Moy keeps its focus bar (its plate went with §1.5); a window
+    behind takes `win.fill_back` on a
     `bar` header (Day `#e3e6ed`, Night `#0f1127`), a smaller shadow
     (`shadow_back` 0.3) and its controls in the `disabled` ink.
   - D-05 ("don't be too harsh"): a field's outline 3:1 or better
@@ -198,15 +194,17 @@ Nothing is pending the owner.
     and the empty Name field's "Your name" in the `disabled` ink (the
     override block's `hint`, `docs/ui_api_2026-10.md` §3).
   - D-12: no rim on any cover, Contrast's included; none had one.
-  - D-14: Contrast's current is a solid ink plate with inverse text
-    (`current.ink: value_ink`; an outline in a window behind and on the
-    code editor's current line, whose code keeps its colours), its
+  - D-14: Contrast's selected cell is a fill of the ink with inverse text
+    (`value_ink`) and its selected row the 3 px frame (§1.5, owner
+    2026-11-05), each an outline in a window behind and on the code
+    editor's current line, whose code keeps its colours; its
     hierarchy weight and size (`dim` is its ink), its desk tiles and Moy
     button framed always (`tile_outline`, `bar.sys_line`), and Appearance
     offers it no accents (`accents: false`).
-  - m04: a disabled key is drawn as §1.5's disabled button. m07 and m17: Blocks' current is the underline -- a row's label
-    underlined (`current.row: underline`), a ring the chosen swatch, a fill
-    focus. m08: Calc's display ink is the plain ink (Moy's `lcd_ink`). m15:
+  - m04: a disabled key is drawn as §1.5's disabled button. m07 and m17:
+    Blocks' selected cell is the underline and a ring the chosen swatch;
+    its rows are §1.5's (2026-11-05): the ink bar for focus, the purple fill
+    for selected. m08: Calc's display ink is the plain ink (Moy's `lcd_ink`). m15:
     a toggle's knob is one colour in a mode, the state on the track. A
     current mark draws as in a window behind only where the shell says so,
     never because the input is touch.
@@ -261,13 +259,19 @@ Nothing is pending the owner.
 Decided over the Music mock-ups (`docs/media/music_2026-11/README.md`, the
 renders the owner chose from):
 
-1. **One focus grammar.** Selected is a FILL (the pills and fills already
-   there). A focused ROW is the left accent bar alone, 4 px on the T-Deck,
-   with no fill; focused and selected is the fill and the bar. A focused
-   button, tab or cell is a 2 px ring 2 px clear of it (`focus.ring` in a
-   theme, `MOY_UI_MARK_CELL` in the engine); the bar's items and the home's
-   tabs take the same ring, with no plate, and the bar keeps the ring's
-   room so nothing moves on focus. Touch shows neither.
+1. **One focus grammar, declared per theme** (owner, 2026-11-05;
+   `docs/media/focus_2026-11/README.md`). Each theme declares its marks per
+   item kind (row, cell, card) and state (focus, on, both) in `marks`
+   (§3.3); nothing is hard-coded, and the loader holds them legible. Moy's
+   default: selected is a `value` tint; a focused ROW is the left accent
+   bar alone, 4 px on the T-Deck; focused and selected is the tint and the
+   bar; a focused button, tab, cell or card is a 2 px ring 2 px clear of it
+   (its cards ring, without the lift; lift-and-ring stays legal data). The
+   bar's items and the home's tabs take the cell's ring, with no plate, and
+   the bar keeps the ring's room so nothing moves on focus. Contrast's
+   selected row is a 3 px frame inside the row, not a second fill, so its
+   one fill (yellow) means focus. Marks stay at the strength the renders
+   show (owner: "they seem visible enough"). Touch shows neither.
 2. **Dialogs** wash the page at 70%. Their bodies wrap, and a dialog's verb
    can be disabled (`o.disabled`). A disabled button keeps the surface and
    its border, its label dimmed.
@@ -385,9 +389,9 @@ frozen 2026-10-11, `surfaces` and `frame` defined 2026-10-12, `fonts` and
   ones, then a `dark` and a `light` object of the mode's own, which come
   first. A field is a colour, a paint (a colour, `"vibrancy"`, a list of
   colours or `[t, colour]` stops, or `{"stops", "mode"}` with `smooth`,
-  `dither` or `steps:N`), a name of its list (`focus.color` and
-  `current.color` name a role), an integer or a number (in hundredths, each
-  clamped to its range; `focus.plate.alpha` and `current.alpha` default
+  `dither` or `steps:N`), a name of its list (a mark's `c` and `ink` name a
+  role), an integer or a number (in hundredths, each
+  clamped to its range; `focus.plate.alpha` and a tint's `alpha` default
   differently per mode), a bool, a short text, or an array
   of those (`[width, colour]` for a line, `["soft", colour, alpha, blur,
   dy]` or `["hard", colour, dx, dy]` for a shadow); `null` is explicitly
@@ -601,6 +605,58 @@ parts that paint surfaces (§3.4). Ruled 2026-10-12: an emboss is three
 draws, the effect's copy up and left, the label's colour down and right, then
 the label; an effect draws only in a role of the token row, since a content
 role is not in the row a look resolves against.
+
+**Marks** (owner, 2026-11-05; the design and its renders are
+`docs/media/focus_2026-11/README.md`). A theme declares how focus and
+selection look under `look.marks`, per item kind and state, shared or per
+mode (a `dark` or `light` look's `marks` wins leaf by leaf):
+
+```json
+"marks": {
+  "row":  { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
+            "on":    { "mark": "tint", "c": "value", "alpha": 0.18 } },
+  "cell": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" } },
+  "card": { "focus": { "mark": "ring", "w": 2, "gap": 2,
+                       "lift": { "grow": 5, "rise": 3, "rim": ["#4c3fd6", 0.6] } } }
+}
+```
+
+- **Kinds.** A `row` is a value row, a list, table or menu row and a
+  field's row; a `cell` a button, chip, tab, segment, tool or swatch; a
+  `card` a grid's card or a home tile. Every call site names its kind (the
+  engine's `MOY_UI_ITEM_*`, `ui_draw.focus(item=...)`), never its size.
+- **States.** `focus` (where the keys act), `on` (selected, current) and
+  `both` (focused and selected: drawn over the two, its `c` by default the
+  ink that reads on the focus or on fill under it).
+- **Marks.** `fill` (the item's box in `c`, its content in `ink`, by
+  default the ink that reads on it), `tint` (`c` at `alpha` over the
+  ground), `bar` (`w` wide, `gap` in from the leading edge, inset 2 px top
+  and foot), `ring` (outside the box, `gap` clear), `inset` (a frame `w`
+  wide, `gap` inside the box), `outline` (a frame on the box's edge),
+  `underline` (`w` high, `gap` above the foot) and `none`. `key` is a
+  keyline `[width, colour]`: inside a fill, tint or frame, outside a ring
+  or bar. `w`, `gap` and `alpha` default by mark.
+- **Defaults.** A slot a theme leaves silent is the engine's: a row's focus
+  the 4 px bar, a cell's and a card's a 2 px ring 2 px clear, all in
+  `accent`; `on` a `value` tint (0.14 light, 0.24 dark); `both` none.
+- **The checks.** The loader (`moy_theme_marks`) holds a theme's marks to
+  the README's L1-L4 per mode: a focus mark 3:1 on the card and the panel
+  or carried by a keyline that clears both (L1), with a fill's ink 4.5:1
+  on it; a bar 3 px or wider, a ring and an underline 2 (L2); `on` 1.3:1 on
+  the rest ground, or 1.2:1 with an ink 3:1 apart (L3); rest, focus, on and
+  both apart, two fills 3:1 apart, a mark over an on fill 3:1 against it
+  (L4). A declared slot that fails is dropped to the default and noted,
+  as a bad surface is (§6); a tint too faint for L3 (a picked accent paler
+  than the theme's own) takes the least alpha that reads instead. One fill
+  colour for selected, Primary and Toggle on is a warning (L8), which a
+  Primary's border or a Toggle's check (`buttons.<kind>.check`) answers.
+  The rendered checks (L1/L2, L3, L5, L6, L9) are
+  `tests/test_focus_marks.py`'s, over `tools/focus_shots.py`'s sheets.
+- **The lift.** `marks.card.focus.lift` raises a focused card on a shadow,
+  grown by `grow`, up by `rise`, with a `rim` ring after its content; no
+  seed lifts (Moy's cards ring), and the data stays legal.
+- `focus.plate.alpha` is the bar's pill plate: an OS widget's or a home
+  tab's focus, drawn in the cell's focus colour.
 
 ### 3.4 Surfaces: a one-line grammar, compiled once
 
@@ -1134,7 +1190,7 @@ Per variant, with B the source's row and R the result, R starting as B:
    true.
 2. **Accent** (none when the source's own is kept). `accent`, `title`,
    `title_active`, `selection` and `value` take A, and so does a lifted
-   card's rim (`look.focus.lift.rim`) where the source's is its `accent`. Each of `edge`, `border`,
+   card's rim (`look.marks.card.focus.lift.rim`) where the source's is its `accent`. Each of `edge`, `border`,
    `hilite`, `shade_hi`, `bar_edge` and `desktop_pattern` whose B value is
    B's `title` or B's `accent` — a role the source tied to its identity
    colour — takes A. `focus` and `ink_accent` take the first of A, deep and
@@ -1831,15 +1887,16 @@ bar is a touch's, and the system menu's Home is their way out. The desk's
 windows keep their own ways.
 
 **The bar's focus mark is the ring** (owner calls 2026-10-27 and 2026-11-05),
-in the tabs' shape whatever the theme's focus style (`ui_draw.focus`'s
-`pill`, `MOY_UI_MARK_PILL`): a ring round the item and the theme's
-`focus.outline` outside it, with no plate, so the item keeps its own ink --
-an invert theme's mark would blot a 16-pixel icon out. On the OS widgets it
+in the tabs' shape whatever the theme's marks (`ui_draw.focus`'s `pill`,
+`MOY_UI_MARK_PILL`): a ring in the cell's focus colour round the item and
+the cell's focus keyline outside it, with no plate, so the item keeps its
+own ink -- a fill would blot a 16-pixel icon out. On the OS widgets it
 is one height, the system tile's, centred across the bar
 (`BarLayer._pill`); on a handheld the status cluster wears one ring round
 its icons; on the zone's targets it is their rect and a ring round it. The
 bar's item whose popover is open (the cluster's control center, a desk
-status item's menu) wears the selected fill (§1.5).
+status item's menu) wears the cell's `on` mark (§1.5); on an opaque fill
+(Contrast's) the items in it take the fill's ink.
 
 **The home's tabs and the bar's items are one row** (owner calls
 2026-10-27). Where the bar holds the tabs (the handheld's home: the T-Deck,
