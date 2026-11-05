@@ -215,9 +215,12 @@ class Notices:
         """The system notice: the unlock banner's card at the top centre of
         the content, its tile a check (a warning's, the warning sign), the
         title in `value` over the line under it. The card's rect."""
+        notice = self._notice
+        if notice is None:      # expired between the frame's check and its draw
+            return None
         cv = self.sys_canvas
         lay = self.layout
-        title, sub, kind = self._notice
+        title, sub, kind = notice
         desk = _desk_class()
         return _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, lay.cy + (12 if desk else 6 * lay.fs),
                         title, sub or "", "check" if kind == "ok" else "warn", 0, desk)
