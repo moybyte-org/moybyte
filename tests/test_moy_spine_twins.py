@@ -45,10 +45,15 @@ SPINE_DIR = os.path.join(ROOT, "native", "moy_spine")
 HOST_ONLY = ("test_the_settings_file_on_the_card_is_byte_identical",
              "test_a_legacy_system_json_reads_as_absent",
              "test_a_line_the_settings_reader_cannot_read_is_passed_over",
-             "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call")
+             "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call",
+             "test_the_settings_file_functions_are_the_c_rows")
 # MicroPython's dict has no order, so the Python twin there reads a file's
 # rows in the VM's order; the native twin keeps the file's.
-VM_NATIVE_ONLY = ("test_the_file_is_the_bytes_json_dumps_writes",)
+# The settings file's reader and writer are C's alone: the twin has neither.
+VM_NATIVE_ONLY = ("test_the_file_is_the_bytes_json_dumps_writes",
+                  "test_the_settings_file_is_its_rows_sorted_one_a_line",
+                  "test_the_settings_files_reader_passes_over_what_it_cannot_read",
+                  "test_the_settings_file_keeps_only_keys_and_lines_it_can_read_back")
 
 
 def _vm_suite(exe, tmp_path, native):

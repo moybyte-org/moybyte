@@ -102,9 +102,35 @@ uint32_t moy_settings_count(const moy_settings_t *s);
 int moy_settings_at(const moy_settings_t *s, uint32_t i, const char **key,
                     size_t *key_len, const char **json, size_t *json_len);
 
-// The file: "{" rows joined with ", " as `"key": text` "}". Writes up to `cap`
-// bytes (no NUL) and returns the length the whole needs, as snprintf does; `out`
-// may be NULL when `cap` is 0.
+// THE SETTINGS FILE, system/settings (docs/os_2026-11/system.md section 5),
+// is the rows as plain text: one `key = <JSON text>` a line, sorted by key's
+// bytes (code point order), each line ending in a newline. Reading it, a
+// blank line and a `#` comment are skipped; a line that is not `key = value`
+// with a key moy_settings_key_ok takes and a value moy_settings_validate
+// takes is passed over and counted, the rest still read; the spaces and tabs
+// around the key and the value are dropped. This is the one reader and the
+// one writer of the file: runtime/carts/moy_docs.py's parse_settings and
+// settings_text call them, and the C shell's `settings` reads and writes the
+// file through them while no VM runs (native/moy_sh/moy_sh_board.c).
+
+// A key the file can hold: not empty, not starting with `#`, and no space,
+// tab, `=`, CR or LF in it.
+int moy_settings_key_ok(const char *key, size_t len);
+// Replace every row with the lines of the file `text` holds: OK, the rows in
+// `rows` and the lines passed over in `passed` (NULL: not asked), or NOMEM
+// with the store as it was. A repeated key keeps its first position and its
+// last value. The store is clean after it.
+int moy_settings_load_file(moy_settings_t *s, const char *text, size_t len,
+                           uint32_t *rows, uint32_t *passed);
+// The file's text for the rows, a row whose key the file cannot hold left
+// out and a line break in a value's JSON written as a space (JSON holds one
+// only between tokens): up to `cap` bytes (no NUL), and the length the whole
+// needs.
+size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap);
+
+// The rows as one JSON object, the saver's text: "{" rows joined with ", "
+// as `"key": text` "}". Writes up to `cap` bytes (no NUL) and returns the
+// length the whole needs, as snprintf does; `out` may be NULL when `cap` is 0.
 size_t moy_settings_dump(const moy_settings_t *s, char *out, size_t cap);
 
 #endif // MOY_SETTINGS_H

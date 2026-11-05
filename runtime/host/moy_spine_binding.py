@@ -112,6 +112,8 @@ _SIGS = (
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
                          c.POINTER(_SIZE)], c.c_int),
     ("moy_settings_dump", [_P, c.c_char_p, _SIZE], _SIZE),
+    ("moy_settings_load_file", [_P, _PCHAR, _SIZE, _PU32, _PU32], c.c_int),
+    ("moy_settings_file", [_P, c.c_char_p, _SIZE], _SIZE),
     ("moy_settings_saver", [_P, _P, _P], None),
     ("moy_settings_flush", [_P], c.c_int),
     ("moy_settings_saver_ctx", [_P], _P),
@@ -568,6 +570,21 @@ def binding(sanitize=False):
             n = lib.moy_settings_dump(self._p, None, 0)
             buf = c.create_string_buffer(n + 1)
             lib.moy_settings_dump(self._p, buf, n)
+            return buf.raw[:n].decode()
+
+        def load_file(self, text):
+            b = raw(text, "the settings text is a str")
+            rows, passed = c.c_uint32(), c.c_uint32()
+            rc = lib.moy_settings_load_file(self._p, b, len(b), c.byref(rows),
+                                            c.byref(passed))
+            if rc != OK:
+                settings_error(rc)
+            return passed.value
+
+        def file(self):
+            n = lib.moy_settings_file(self._p, None, 0)
+            buf = c.create_string_buffer(n + 1)
+            lib.moy_settings_file(self._p, buf, n)
             return buf.raw[:n].decode()
 
     def view(cls, p, **extra):

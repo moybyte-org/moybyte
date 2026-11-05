@@ -262,10 +262,25 @@ static const char *const ROLES[] = {
     "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
 
+// The files tree's root, as moy_sh_board_host gives it.
+static const char *files_root(void) {
+#ifdef MOY_SH_ON_BOARD
+    return "";
+#else
+    return getenv("MOY_SH_ROOT") != NULL ? getenv("MOY_SH_ROOT") : "";
+#endif
+}
+
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
-    (void)s;
-    return code_of(door_int("role", argc, argv));
+    int32_t r = door_int("role", argc, argv);
+    if (r == DOOR_NEEDS_VM) {
+        int k = moy_sh_store_role(s, files_root(), argc, argv);
+        if (k != MOY_SH_NOT_FOUND) {
+            return k;
+        }
+    }
+    return code_of(r);
 }
 
 // -- the virtual files ---------------------------------------------------------------------
@@ -612,12 +627,8 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
     h->free = b_free;
     h->out = out;
     h->poll = poll;
-#ifdef MOY_SH_ON_BOARD
-    h->root = "";
-#else
     // off a board (the suite's harness) the files tree is a folder it names
-    h->root = getenv("MOY_SH_ROOT") != NULL ? getenv("MOY_SH_ROOT") : "";
-#endif
+    h->root = files_root();
     h->vread = b_vread;
     h->vwrite = b_vwrite;
     h->vlist = b_vlist;

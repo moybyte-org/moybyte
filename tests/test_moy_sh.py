@@ -27,6 +27,7 @@ SH = os.path.join(ROOT, "native", "moy_sh")
 DASH = os.path.join(SH, "dash")
 STORE = os.path.join(ROOT, "native", "moy_store")
 KERNEL = os.path.join(ROOT, "native", "moy_kernel")
+SPINE = os.path.join(ROOT, "native", "moy_spine")
 SCRIPTS = os.path.join(ROOT, "tests", "moy_sh")
 
 CFLAGS = ["-std=gnu99", "-g", "-O1", "-fsanitize=address,undefined",
@@ -43,7 +44,7 @@ def shell_sources():
 
 # The board's side, compiled without dash's shim: its host table and the
 # serial face, the screen face and its grid.
-BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_term.c")
+BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c")
 
 
 def _objects(cc, out):
@@ -53,12 +54,15 @@ def _objects(cc, out):
     jobs.append((os.path.join(SH, "moy_sh_arena.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
-    board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE]
+    board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     for name in BOARD_SOURCES:
         jobs.append((os.path.join(SH, name), board))
     jobs.append((os.path.join(SH, "host", "board_main.c"), board))
     jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE]))
+    jobs.append((os.path.join(STORE, "moy_fs.c"), CFLAGS + ["-I", STORE]))
+    jobs.append((os.path.join(SPINE, "moy_settings.c"), CFLAGS + ["-I", SPINE]))
+    jobs.append((os.path.join(SPINE, "moy_json.c"), CFLAGS + ["-I", SPINE]))
     jobs.append((os.path.join(KERNEL, "moy_log.c"), CFLAGS + ["-I", KERNEL]))
 
     def one(job):
@@ -82,7 +86,7 @@ def harness(tmp_path_factory):
     if cc is None:
         pytest.skip("no C compiler")
     h = hashlib.sha256()
-    for d in (SH, STORE, KERNEL):
+    for d in (SH, STORE, KERNEL, SPINE):
         for path in sorted(glob.glob(os.path.join(d, "**", "*.[ch]"), recursive=True)):
             h.update(path.encode())
             with open(path, "rb") as f:
@@ -221,7 +225,7 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     flags = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
              "-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", DASH, "-I", STORE]
     plain = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
-             "-I", SH, "-I", KERNEL, "-I", STORE]
+             "-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     writable = []
     for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c")
                                   + BOARD_SOURCES]:
@@ -251,7 +255,7 @@ def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
     base = ["-std=gnu99", "-fsyntax-only", "-Wall", "-Werror"] + guard
     dash = base + ["-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", DASH,
                    "-I", STORE]
-    plain = base + ["-I", SH, "-I", KERNEL, "-I", STORE]
+    plain = base + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     jobs = [(src, dash) for src in shell_sources()]
     jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
                                                      "host/sh_main.c", "host/board_main.c")

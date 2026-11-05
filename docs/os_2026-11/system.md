@@ -89,6 +89,16 @@ face of its service's one implementation run as the shell (pid 1), giving back
 what it took before it ends, a media stream excepted;
 `runtime/shell/sh_roles.py` lists their forms.
 
+**The line between C and the console** (owner, 2026-11-05: the terminal is
+mostly C, one implementation moved down, Python calling it). With the VM
+stopped these answer, each over the C the console itself calls: the file
+commands, `ps`, `kill` (the run in front), `free`, `log`/`dmesg`, `reboot`,
+`date`, `sleep`, `clear`, `help`, and `settings` `list`, `get`, `set` and
+`unset` (§5; `native/moy_sh/moy_sh_store.c`). Everything else needs the
+console: `settings reload` (it applies the file), `pkg`, `perm`, `notify`,
+`service`, `lease`, `python`, the device faces, the installed commands, `df`
+and the console's /proc, /dev and /bin rows.
+
 **The screen face** is the Terminal, a system app (`runtime/apps/terminal_app.py` on its
 identity cart `system_carts/moybyte.terminal.moy`,
 the code icon, after the other built-in apps): a session of the C shell whose
@@ -198,13 +208,19 @@ them arrive; the shell reaches them, and `settings` works over them.
 row's JSON on one line (`theme = "blocks"`, `font_scale = 2`,
 `favorites = ["/sd/moybyte/carts/moybyte.paint.moy"]`). The reader is
 strict: a line that is not `key = <JSON>` (blank lines and `#` comments
-aside) is passed over and logged. It is written atomically and read through
-the store's crash-safe reader, like every store write. The shell's
-`settings` (`runtime/shell/sh_roles.py`) lists the file, `get`s a value,
+aside) is passed over and logged. The file's one reader and one writer are
+C, the settings rows' (`native/moy_spine/moy_settings.h`): `moy_docs`'s
+`parse_settings` and `settings_text` call them on every tier. It is written
+atomically and read through the store's crash-safe reader, like every store
+write. The shell's `settings` (`runtime/shell/sh_roles.py`) lists the file, `get`s a value,
 `set`s one (a JSON value, or the words as a string) and `unset`s one,
 re-applying the key live where the console applies it (Settings' own verbs),
 and `reload` reads a file edited by hand back into the console, which
-otherwise writes its rows over the edit at its next change. The web sync's
+otherwise writes its rows over the edit at its next change. With the VM
+stopped the shell serves `settings` itself, in C over the same reader and
+writer (`native/moy_sh/moy_sh_store.c`): `list`, `get`, `set` and `unset`
+change the file, which the console reads at its next start; `reload` needs
+the console. The web sync's
 system root carries the file as `system/settings` (`moy_sync.SYSTEM_FILES`,
 `.claude/rules/web.md`).
 

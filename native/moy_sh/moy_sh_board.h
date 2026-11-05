@@ -24,6 +24,12 @@
 // A spawned program and a role command write and read their streams through
 // the session that is running (moy_sh_running: the module's read and write).
 //
+// WITH NO VM the store's commands are served in C (moy_sh_store.c), over the
+// same C the console calls: `settings` (list, get, set, unset) reads and
+// writes system/settings through the settings rows' file reader and writer
+// (native/moy_spine/moy_settings.h) and the store's crash-safe write. Every
+// other role command, and `settings reload`, needs the console.
+//
 // THE SERIAL FACE is the dev channel's `sh` word (moy_devch.c): `sh LINE`
 // runs LINE in the boot's serial session, made the first time and parked
 // (moy_sh_park), and answers each line of output as `SH <line>`, then
@@ -42,11 +48,17 @@
 #define MOY_SH_DOOR 0x7368u             // the ROLE door's row the shell crosses
 #define MOY_SH_ARENA (128u * 1024u)     // a session's arena
 #define MOY_SH_SERIAL_LINE 240u         // an `SH` line's bytes, longer ones wrap
+#define MOY_SH_STORE "/sd/moybyte"      // the console's store: system/ and the carts
+#define MOY_SH_STORE_PATH 320u          // a store path's bytes, the root's included
 
 // The board's table into `h`, the face's terminal (`out`, `poll`, `ctx`) in it.
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),
                        int (*poll)(void *ctx));
+
+// The store's commands with no VM (above): an exit status, or
+// MOY_SH_NOT_FOUND when `argv` names none of them. `root` prefixes every path.
+int moy_sh_store_role(moy_sh_t *s, const char *root, int argc, char **argv);
 
 // A long run's yield: the task sleeps a tick, so a task below it runs.
 void moy_sh_board_yield(void);

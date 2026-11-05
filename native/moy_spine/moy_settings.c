@@ -332,3 +332,116 @@ size_t moy_settings_dump(const moy_settings_t *s, char *out, size_t cap) {
     put(&k, "}", 1);
     return k.n;
 }
+
+// -- the settings file ---------------------------------------------------------
+
+static int is_blank(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
+
+int moy_settings_key_ok(const char *key, size_t len) {
+    if (len == 0u || key[0] == '#') {
+        return 0;
+    }
+    for (size_t i = 0; i < len; i++) {
+        char c = key[i];
+        if (c == ' ' || c == '\t' || c == '=' || c == '\r' || c == '\n') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void trim(const char **p, const char **e) {
+    while (*p < *e && is_blank(**p)) {
+        (*p)++;
+    }
+    while (*e > *p && is_blank((*e)[-1])) {
+        (*e)--;
+    }
+}
+
+int moy_settings_load_file(moy_settings_t *s, const char *text, size_t len,
+                           uint32_t *rows, uint32_t *passed) {
+    moy_settings_t tmp = { s->mem, NULL, 0u, 0u, 0u, NULL, NULL, 0u };
+    uint32_t bad = 0u;
+    const char *at = text, *end = text + len;
+    while (at < end) {
+        const char *nl = memchr(at, '\n', (size_t)(end - at));
+        const char *le = nl != NULL ? nl : end;
+        const char *lp = at;
+        at = nl != NULL ? nl + 1 : end;
+        trim(&lp, &le);
+        if (lp == le || *lp == '#') {
+            continue;
+        }
+        const char *eq = memchr(lp, '=', (size_t)(le - lp));
+        if (eq == NULL) {
+            bad++;
+            continue;
+        }
+        const char *kp = lp, *ke = eq, *vp = eq + 1, *ve = le;
+        trim(&kp, &ke);
+        trim(&vp, &ve);
+        size_t kn = (size_t)(ke - kp), jn = (size_t)(ve - vp);
+        if (!moy_settings_key_ok(kp, kn)
+            || moy_settings_validate(vp, jn) != MOY_SETTINGS_OK) {
+            bad++;
+            continue;
+        }
+        char *buf = make_buf(&tmp, kn, jn);
+        if (buf == NULL || (memcpy(buf, kp, kn), memcpy(buf + kn, vp, jn),
+                            put_row(&tmp, buf, (uint32_t)kn, (uint32_t)jn))
+                               != MOY_SETTINGS_OK) {
+            clear_rows(&tmp);
+            return MOY_SETTINGS_NOMEM;
+        }
+    }
+    clear_rows(s);
+    s->rows = tmp.rows;
+    s->count = tmp.count;
+    s->cap = tmp.cap;
+    s->dirty = 0u;
+    s->gen++;
+    *rows = s->count;
+    if (passed != NULL) {
+        *passed = bad;
+    }
+    return MOY_SETTINGS_OK;
+}
+
+// a's key before b's, by bytes, a shorter key first where one is the other's start
+static int key_before(const row_t *a, const row_t *b) {
+    size_t n = a->key_len < b->key_len ? a->key_len : b->key_len;
+    int c = memcmp(a->buf, b->buf, n);
+    return c < 0 || (c == 0 && a->key_len < b->key_len);
+}
+
+size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
+    sink_t k = { out, cap, 0u };
+    // The rows in key order with no index to allocate: each pass writes the
+    // least key after the last one written (a settings file holds dozens).
+    const row_t *last = NULL;
+    for (;;) {
+        const row_t *next = NULL;
+        for (uint32_t i = 0; i < s->count; i++) {
+            const row_t *r = &s->rows[i];
+            if ((last == NULL || key_before(last, r)) && (next == NULL || key_before(r, next))) {
+                next = r;
+            }
+        }
+        if (next == NULL) {
+            return k.n;
+        }
+        last = next;
+        if (moy_settings_key_ok(next->buf, next->key_len)) {
+            put(&k, next->buf, next->key_len);
+            put(&k, " = ", 3);
+            const char *v = next->buf + next->key_len;
+            for (uint32_t i = 0; i < next->json_len; i++) {
+                put(&k, (v[i] == '\n' || v[i] == '\r') ? " " : v + i, 1);
+            }
+            put(&k, "\n", 1);
+        }
+    }
+}

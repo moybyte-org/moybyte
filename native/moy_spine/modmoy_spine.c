@@ -1075,6 +1075,31 @@ static mp_obj_t settings_dump(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
 
+// load_file(text) -> the lines passed over: the rows are the settings file's
+// (moy_settings_load_file, the file's one reader).
+static mp_obj_t settings_load_file(mp_obj_t self, mp_obj_t text) {
+    size_t n;
+    const char *s = str_arg(text, &n, MP_ERROR_TEXT("the settings text is a str"));
+    uint32_t rows, passed;
+    int rc = moy_settings_load_file(settings_of(self), s, n, &rows, &passed);
+    if (rc != MOY_SETTINGS_OK) {
+        raise_settings(rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(passed);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(settings_load_file_obj, settings_load_file);
+
+// file() -> the settings file's text for the rows (moy_settings_file, its one
+// writer).
+static mp_obj_t settings_file(mp_obj_t self) {
+    moy_settings_t *s = settings_of(self);
+    vstr_t vstr;
+    vstr_init_len(&vstr, moy_settings_file(s, NULL, 0));
+    moy_settings_file(s, vstr.buf, vstr.len);
+    return mp_obj_new_str_from_vstr(&vstr);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_file_obj, settings_file);
+
 // The write hook, when the store is dirty: True when it is clean afterwards.
 static mp_obj_t settings_flush(mp_obj_t self_in) {
     int clean = moy_settings_flush(settings_of(self_in));
@@ -1210,6 +1235,8 @@ static const mp_rom_map_elem_t settings_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&settings_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_keys), MP_ROM_PTR(&settings_keys_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&settings_dump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_load_file), MP_ROM_PTR(&settings_load_file_obj) },
+    { MP_ROM_QSTR(MP_QSTR_file), MP_ROM_PTR(&settings_file_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&settings_del_obj) },
 };
 static MP_DEFINE_CONST_DICT(settings_locals, settings_locals_table);

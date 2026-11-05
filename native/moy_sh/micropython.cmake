@@ -29,6 +29,7 @@ add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_fmt.c
     ${MOY_SH}/moy_sh_board.c
     ${MOY_SH}/moy_sh_screen.c
+    ${MOY_SH}/moy_sh_store.c
     ${MOY_SH}/moy_term.c)
 set_source_files_properties(${MOY_SH_DASH_SRCS} PROPERTIES
     COMPILE_OPTIONS "-include;${MOY_SH}/dash_config.h;-I${MOY_SH}/dash")
@@ -42,6 +43,7 @@ idf_build_get_property(_moy_sh_cfg CONFIG_DIR)
 target_include_directories(moy_sh_core PRIVATE
     ${MOY_SH}
     ${MOY_SH}/../moy_store
+    ${MOY_SH}/../moy_spine
     ${MOY_SH}/../moy_kernel
     ${_moy_sh_cfg}
     "${_moy_sh_inc}")

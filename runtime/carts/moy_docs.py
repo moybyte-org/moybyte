@@ -161,12 +161,16 @@ def forget_wifi(ssid, root=CARTS_DIR):
 #   favorites = ["/sd/moybyte/carts/moybyte.paint.moy"]
 #
 # One `key = value` a line, sorted by key; the value is the row's JSON on one
-# line. The reader is strict: a line that is not `key = <JSON>` (a blank line
-# and a `#` comment aside) is passed over and logged, the rest still read. The
-# legacy `system.json` beside the carts dir reads as ABSENT (CLAUDE.md, no store
-# migrations): a console with only that file starts on the defaults and writes
-# this one. Written atomically and read through `_read_recover`, so an
-# interrupted publish heals from its backup like every store write.
+# line. The format's one reader and one writer are C, the settings rows'
+# (native/moy_spine/moy_settings.h, `Settings.load_file` and `Settings.file`):
+# the functions here call them, on every tier, and the C shell reads and
+# writes the file through the same two while no VM runs. A line that is not
+# `key = <JSON>` (a blank line and a `#` comment aside) is passed over and
+# logged, the rest still read. The legacy `system.json` beside the carts dir
+# reads as ABSENT (CLAUDE.md, no store migrations): a console with only that
+# file starts on the defaults and writes this one. Written atomically and read
+# through `_read_recover`, so an interrupted publish heals from its backup like
+# every store write.
 
 SYSTEM_DIR = "system"
 SETTINGS_NAME = SYSTEM_DIR + "/settings"
@@ -177,46 +181,37 @@ def system_store_path(root=CARTS_DIR):
     return _sibling_path(root, SETTINGS_NAME)
 
 
-def _settings_key_ok(key):
-    if not key or key[0] == "#":
-        return False
-    for ch in key:
-        if ch in " \t=\r\n":
-            return False
-    return True
+def _rows():
+    try:
+        import moy_spine
+    except ImportError:  # pragma: no cover - the host: the runtime package's
+        from runtime import moy_spine
+    return moy_spine.Settings()
 
 
 def parse_settings(text):
     """The rows a settings file's `text` holds, {key: value}."""
-    out = {}
-    for n, line in enumerate(text.split("\n")):
-        line = line.strip()
-        if not line or line[0] == "#":
-            continue
-        key, eq, value = line.partition("=")
-        key = key.strip()
+    rows = _rows()
+    passed = rows.load_file(text)
+    if passed:
         try:
-            if not eq or not _settings_key_ok(key):
-                raise ValueError("not key = value")
-            out[key] = json.loads(value.strip())
-        except ValueError:
-            try:
-                print("Moybyte settings: line %d passed over" % (n + 1))
-            except Exception:  # noqa: BLE001 -- a log line never stops a read
-                pass
-    return out
+            print("Moybyte settings: %d line(s) passed over" % passed)
+        except Exception:  # noqa: BLE001 -- a log line never stops a read
+            pass
+    return {key: rows.get(key) for key in rows.keys()}
 
 
 def settings_text(settings):
     """A settings file's text for `settings`: a dict of plain JSON-able data,
     or the rows' JSON object text (what the settings store's rows dump)."""
+    rows = _rows()
     if isinstance(settings, str):
-        settings = json.loads(settings) if settings.strip() else {}
-    lines = []
-    for key in sorted(settings):
-        if _settings_key_ok(key):
-            lines.append("%s = %s\n" % (key, json.dumps(settings[key])))
-    return "".join(lines)
+        rows.load(settings if settings.strip() else "{}")
+    else:
+        for key in settings:
+            if key:
+                rows.set(key, settings[key], False)
+    return rows.file()
 
 
 def load_system(root=CARTS_DIR):

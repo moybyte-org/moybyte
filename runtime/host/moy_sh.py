@@ -32,6 +32,7 @@ SH = os.path.join(native_build.ROOT, "native", "moy_sh")
 _DASH = os.path.join(SH, "dash")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
+_SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 
 DOOR = 0x7368
@@ -43,12 +44,12 @@ _COLS_BYTES = 9                         # a cell's most bytes in a line: its SGR
 def _sources():
     """[(source, own flags)]: dash's under its shim, the board's side plain."""
     shim = ["-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", _DASH, "-I", _STORE]
-    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE]
+    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE, "-I", _SPINE]
     dash = sorted(glob.glob(os.path.join(_DASH, "*.c")))
     dash += [os.path.join(_DASH, "bltin", n) for n in ("printf.c", "test.c")]
     dash += [os.path.join(SH, n) for n in ("moy_sh.c", "moy_sh_sys.c", "moy_sh_cmds.c")]
     own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_board.c",
-                                         "moy_sh_screen.c", "moy_term.c")]
+                                         "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c")]
     return [(s, shim) for s in dash] + [(s, plain) for s in own]
 
 
@@ -60,7 +61,8 @@ def archive(cflags=(), verbose=False):
         return None
     flags = _FLAGS + list(cflags)
     h = hashlib.sha256(" ".join(flags).encode())
-    for d, pat in ((SH, "**/*.[ch]"), (_KERNEL, "*.h"), (_STORE, "*.h")):
+    for d, pat in ((SH, "**/*.[ch]"), (_KERNEL, "*.h"), (_STORE, "*.h"),
+                     (_SPINE, "*.h")):
         for path in sorted(glob.glob(os.path.join(d, pat), recursive=True)):
             h.update(path[len(native_build.ROOT):].encode())
             with open(path, "rb") as f:

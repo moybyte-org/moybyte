@@ -642,6 +642,74 @@ def test_a_legacy_system_json_reads_as_absent(tmp_path):
     assert json.loads(legacy.read_text()) == {"theme": "dusk", "font_scale": 3}
 
 
+def _file_rows(sp):
+    if not hasattr(sp.Settings, "load_file"):
+        pytest.skip("the settings file is C's alone: the oracle has no reader of it")
+    return sp.Settings()
+
+
+SETTINGS_FILE = ('app_guard = {"strikes": {"files": 1}, "open": "files"}\n'
+                 'crisp_pixels = true\ndesk_mru = []\n'
+                 'favorites = ["/carts/a.moy", "/carts/b.moy"]\nfont_scale = 2\n'
+                 'name = "Moy"\nota_channel = "stable"\nratio = 0.5\nskin = null\n'
+                 'theme = "outline"\ntheme_variant = "dark"\nvolume = 3\n')
+
+
+def test_the_settings_file_is_its_rows_sorted_one_a_line(sp):
+    """system/settings' bytes, pinned: the file's one writer is the C rows'."""
+    s = _file_rows(sp)
+    s.load(GOLDEN)
+    assert s.file() == SETTINGS_FILE
+    t = _file_rows(sp)
+    assert t.load_file(SETTINGS_FILE) == 0
+    assert t.file() == SETTINGS_FILE and json.loads(t.dump()) == json.loads(GOLDEN)
+
+
+def test_the_settings_files_reader_passes_over_what_it_cannot_read(sp):
+    s = _file_rows(sp)
+    text = ('# a comment\n\n  theme = "dusk"  \r\nvolume=3\nnot a row\nname = Zed\n'
+            'bad key = 1\n = 2\n#x = 1\nfavorites = ["/a.moy"]\nvolume = 4\n'
+            'deep = [1,\n2]\nlast = "no newline"')
+    assert s.load_file(text) == 6
+    assert s.keys() == ["theme", "volume", "favorites", "last"]
+    assert (s.get("theme"), s.get("volume"), s.get("last")) == ("dusk", 4, "no newline")
+    assert not s.dirty()
+    assert s.file() == ('favorites = ["/a.moy"]\nlast = "no newline"\n'
+                        'theme = "dusk"\nvolume = 4\n')
+
+
+def test_the_settings_file_keeps_only_keys_and_lines_it_can_read_back(sp):
+    s = _file_rows(sp)
+    s.set("b", [1, 2], False)
+    s.set("a.b", 1, False)
+    s.set("a", "x", False)
+    s.set("has space", 1, False)
+    s.set("#hash", 1, False)
+    s.set_text("pretty", '[1,\n 2]', False)
+    assert s.file() == 'a = "x"\na.b = 1\nb = [1, 2]\npretty = [1,  2]\n'
+    t = _file_rows(sp)
+    t.load_file(s.file())
+    assert t.get("pretty") == [1, 2] and len(t.keys()) == 4
+
+
+def test_the_settings_file_functions_are_the_c_rows(monkeypatch):
+    """moy_carts' parse_settings and settings_text hold no parser of their
+    own: with the C reader and writer taken away, neither works."""
+    from runtime import moy_carts, moy_spine
+    assert moy_carts.parse_settings(SETTINGS_FILE) == json.loads(GOLDEN)
+    assert moy_carts.settings_text(json.loads(GOLDEN)) == SETTINGS_FILE
+    assert moy_carts.settings_text(GOLDEN) == SETTINGS_FILE
+
+    def gone(*_a):
+        raise RuntimeError("the C settings file")
+    monkeypatch.setattr(moy_spine.Settings, "load_file", gone)
+    monkeypatch.setattr(moy_spine.Settings, "file", gone)
+    for call in (lambda: moy_carts.parse_settings(SETTINGS_FILE),
+                 lambda: moy_carts.settings_text({"a": 1})):
+        with pytest.raises(RuntimeError):
+            call()
+
+
 def test_a_line_the_settings_reader_cannot_read_is_passed_over(tmp_path):
     from runtime import moy_carts
     rows = moy_carts.parse_settings(
