@@ -448,6 +448,23 @@ int moy_sh_complete(moy_sh_t *s, const char *prefix, moy_sh_ent_fn fn, void *arg
     return r;
 }
 
+int moy_sh_list(moy_sh_t *s, const char *path, moy_sh_ent_fn fn, void *arg) {
+    struct moy_sh_globals *was = enter(s);
+    int r = 0;
+    moy_sh_DIR *d = moy_sh_opendir(path);
+    if (d == NULL) {
+        r = errno ? errno : ENOENT;
+    } else {
+        struct dirent *e;
+        while (!r && (e = moy_sh_readdir(d)) != NULL) {
+            r = fn(arg, e->d_name, e->d_type == DT_DIR, 0);
+        }
+        moy_sh_closedir(d);
+    }
+    leave(was);
+    return r;
+}
+
 // --- the fork -------------------------------------------------------------------
 
 int moy_sh_fork(void (*child)(void *), void *arg, int bg) {

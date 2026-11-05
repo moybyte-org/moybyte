@@ -13,7 +13,9 @@
 # shim: it is the kernel's side, over moy_kernel's and moy_store's headers.
 # A usermod runs inside the main component's CMakeLists, so the library takes
 # the IDF build's flags explicitly. The screen face (moy_sh_screen.c) and its
-# grid (moy_term.c) ride in it beside the serial face, without the shim too.
+# grid (moy_term.c) ride in it beside the serial face, without the shim too,
+# and on an image that carries the toolkit (native/moy_ui staged beside it)
+# the Terminal's face (moy_sh_face.c), which draws through its engine.
 
 set(MOY_SH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SH_DASH_SRCS ${MOY_SH}/dash/*.c)
@@ -31,6 +33,9 @@ add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_screen.c
     ${MOY_SH}/moy_sh_store.c
     ${MOY_SH}/moy_term.c)
+if(EXISTS ${MOY_SH}/../moy_ui/moy_ui_api.h)
+    target_sources(moy_sh_core PRIVATE ${MOY_SH}/moy_sh_face.c)
+endif()
 set_source_files_properties(${MOY_SH_DASH_SRCS} PROPERTIES
     COMPILE_OPTIONS "-include;${MOY_SH}/dash_config.h;-I${MOY_SH}/dash")
 
@@ -45,6 +50,9 @@ target_include_directories(moy_sh_core PRIVATE
     ${MOY_SH}/../moy_store
     ${MOY_SH}/../moy_spine
     ${MOY_SH}/../moy_kernel
+    ${MOY_SH}/../moy_ui
+    ${MOY_SH}/../moy_gfx
+    ${MOY_SH}/../moy_glass
     ${_moy_sh_cfg}
     "${_moy_sh_inc}")
 target_compile_definitions(moy_sh_core PRIVATE "${_moy_sh_defs}")

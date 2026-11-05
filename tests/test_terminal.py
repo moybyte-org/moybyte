@@ -25,15 +25,14 @@ def term(tmp_path):
 
 
 def run(app, text):
-    app.ed.set_text(text)
-    app.ed.move(0, len(text))
-    app.submit()
+    app.face.set_line(text)
+    app.face.submit()
 
 
 def plain(app):
     import re
-    app._take()
-    return [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.lines]
+    app.face.take()
+    return [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.face.lines()]
 
 
 def test_the_terminal_is_a_system_app_on_its_identity_cart(term):
@@ -47,55 +46,56 @@ def test_a_line_is_echoed_and_run_in_the_session(term):
     _ws, app = term
     run(app, "echo hello; mkdir /made; cd /made; pwd")
     assert plain(app) == ["$ echo hello; mkdir /made; cd /made; pwd", "hello", "/made"]
-    assert app.lines[0] == "\x1b[2m$ \x1b[36mecho hello; mkdir /made; cd /made; pwd\x1b[0m"
+    assert app.face.lines()[0] == "\x1b[2m$ \x1b[36mecho hello; mkdir /made; cd /made; pwd\x1b[0m"
 
 
 def test_a_command_that_goes_on_takes_the_continuation_prompt(term):
     _ws, app = term
     run(app, "for i in 1 2")
-    assert app.more and app.prompt() == "> "
+    assert app.face.more() and app.face.prompt() == "> "
     run(app, "do echo $i; done")
-    assert not app.more and plain(app)[-2:] == ["1", "2"]
+    assert not app.face.more() and plain(app)[-2:] == ["1", "2"]
     run(app, "if true")
-    app.key(3)                          # Ctrl-C drops what `more` held
-    assert not app.more and plain(app)[-1] == "> ^C"
+    app.face.key(3)                     # Ctrl-C drops what `more` held
+    assert not app.face.more() and plain(app)[-1] == "> ^C"
     run(app, "echo after")
     assert plain(app)[-1] == "after"
 
 
 def test_tab_completes_a_command_and_a_path(term, tmp_path):
     ws, app = term
-    app.ed.set_text("ech")
-    app.ed.move(0, 3)
-    app.key(9)
-    assert app.ed.text() == "echo "
-    app.ed.set_text("e")
-    app.ed.move(0, 1)
-    app.key(9)
-    assert app.ed.text() == "e" and [c[0] for c in app.cands] == [
-        "echo", "eval", "exec", "exit", "export"]
+    f = app.face
+    f.set_line("ech")
+    f.key(9)
+    assert f.line() == "echo "
+    f.set_line("e")
+    f.key(9)
+    assert f.line() == "e" and f.cands() == ["echo", "eval", "exec", "exit", "export"]
     assert plain(app)[-1] == "echo  eval  exec  exit  export"
-    app.pick(3)
-    assert app.ed.text() == "exit " and app.cands == []
-    run(app, "mkdir /tree; mkdir /tree/alpha; touch /tree/beta")
-    app.ed.set_text("ls /tree/a")
-    app.ed.move(0, 10)
-    app.key(9)
-    assert app.ed.text() == "ls /tree/alpha/"
+    f.pick(3)
+    assert f.line() == "exit " and f.cands() == []
+    run(app, "mkdir /tree; mkdir /tree/alpha; mkdir /tree/apex; touch /tree/beta")
+    f.set_line("ls /tree/al")
+    f.key(9)
+    assert f.line() == "ls /tree/alpha/"
+    f.set_line("ls /tree/a")
+    f.key(9)
+    assert f.line() == "ls /tree/a" and f.cands() == ["alpha/", "apex/"]
 
 
 def test_up_and_down_walk_the_lines_run_before(term):
     _ws, app = term
     run(app, "echo one")
     run(app, "echo two")
-    app.recall(-1)
-    assert app.ed.text() == "echo two"
-    app.recall(-1)
-    app.recall(-1)
-    assert app.ed.text() == "echo one"
-    app.recall(1)
-    app.recall(1)
-    assert app.ed.text() == ""
+    f = app.face
+    f.recall(-1)
+    assert f.line() == "echo two"
+    f.recall(-1)
+    f.recall(-1)
+    assert f.line() == "echo one"
+    f.recall(1)
+    f.recall(1)
+    assert f.line() == "" and f.history() == ["echo one", "echo two"]
 
 
 def test_exit_starts_a_new_session(term):
@@ -110,12 +110,12 @@ def test_ctrl_c_stops_a_running_built_in(term):
     """The screen face's poll answers its Ctrl-C inside the run, and the
     rest of the line goes; the latched key is not a second Ctrl-C after."""
     _ws, app = term
-    app.scr.interrupt()
+    app.face.interrupt()
     t0 = time.monotonic()
     run(app, "sleep 5; echo not-after")
     assert time.monotonic() - t0 < 2
-    assert "not-after" not in plain(app) and app.scr.status() == 130
-    app.key(3)
+    assert "not-after" not in plain(app) and app.face.status() == 130
+    app.face.key(3)
     assert plain(app)[-1] != "$ ^C"
 
 
@@ -143,27 +143,26 @@ def test_ctrl_c_ends_a_role_command_waiting_on_its_device(term, monkeypatch):
     def stopped(d):
         polls.append(1)
         if len(polls) == 3:
-            app.scr.interrupt()
+            app.face.interrupt()
         return real(d)
     monkeypatch.setattr(sh_roles, "stopped", stopped)
     t0 = time.monotonic()
     run(app, "ble scan 5000; echo not-after")
     assert time.monotonic() - t0 < 2
-    assert held == [] and app.scr.status() == 130
+    assert held == [] and app.face.status() == 130
     assert "not-after" not in plain(app)
 
 
 def test_an_idle_frame_makes_no_line(term):
-    """The grid's lines are taken when its generation moves, the prompt
-    row when what it shows does: an idle frame rebuilds neither."""
+    """The grid's lines are taken when its generation moves: an idle frame
+    takes none."""
     ws, app = term
     run(app, "echo a")
     app.draw(0)
     app.draw(0)
-    lines, row = list(app.lines), app._prompt_row[0]
-    assert not app._take()
+    assert not app.face.take()
     app.draw(0)
-    assert all(a is b for a, b in zip(lines, app.lines)) and app._prompt_row[0] is row
+    assert not app.face.take()
 
 
 def test_the_grid_follows_the_view(term):
@@ -172,7 +171,7 @@ def test_the_grid_follows_the_view(term):
     app.draw(0)
     app.draw(0)
     run(app, "printf '%0100d\\n' 0")
-    assert max(len(x) for x in plain(app)) == app.cols
+    assert max(len(x) for x in plain(app)) == app.face.size()[0]
 
 
 # -- the key row ------------------------------------------------------------------
@@ -199,11 +198,11 @@ def _tdeck_types():
 
 
 def test_the_tdeck_row_holds_the_shell_symbols_its_keyboard_lacks():
-    from runtime.apps.terminal_app import TDECK_SYMBOLS, _TDECK_ROW
+    from runtime import moy_sh
     typed = _tdeck_types()
     assert "$" in typed and "/" in typed and ";" in typed       # the parse reads the table
-    assert sorted(TDECK_SYMBOLS) == sorted(c for c in SHELL_SYMBOLS if c not in typed)
-    assert _TDECK_ROW == ("Tab",) + tuple(TDECK_SYMBOLS)
+    assert moy_sh.tdeck_row() == "".join(c for c in SHELL_SYMBOLS if c not in typed)
+    assert moy_sh.tdeck_row() == "|><&~\\{}[]="
 
 
 def test_a_desk_draws_no_key_row(tmp_path):
@@ -256,32 +255,32 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
             drv.type_char(ord(ch))
             drv.frame(1 / 30)
         roll(-1, 0)
-        assert app.ed.col == 1                    # the caret, left
+        assert app.face.col() == 1                    # the caret, left
         roll(0, -1)
-        assert app.ed.text() == "echo one"        # the history, up
+        assert app.face.line() == "echo one"        # the history, up
         roll(0, 1)
-        assert app.ed.text() == "" and not app.in_row
+        assert app.face.line() == "" and not app.face.in_row()
         roll(0, 1)
-        assert app.in_row                         # down past the newest line
+        assert app.face.in_row()                         # down past the newest line
         roll(1, 0)
         roll(1, 0)
         enter()                                   # the trackball's click
-        assert app.ed.text() == ">" and app.in_row
+        assert app.face.line() == ">" and app.face.in_row()
         roll(1, 0)
         drv.type_char(13)                         # the keyboard's Enter
         drv.frame(1 / 30)
         drv.frame(1 / 30)
-        assert app.ed.text() == "><" and app.in_row
+        assert app.face.line() == "><" and app.face.in_row()
         roll(0, -1)
-        assert not app.in_row
+        assert not app.face.in_row()
         drv.type_char(ord("x"))
         drv.frame(1 / 30)
-        assert app.ed.text() == "><x"
+        assert app.face.line() == "><x"
         roll(0, 1)
-        assert app.in_row
+        assert app.face.in_row()
         drv.type_char(ord("y"))                   # a typed key goes back to the prompt
         drv.frame(1 / 30)
-        assert app.ed.text() == "><xy" and not app.in_row
+        assert app.face.line() == "><xy" and not app.face.in_row()
     finally:
         ui_draw.input_kind(kinds[0])
         ui_draw.hint_kind(kinds[1])

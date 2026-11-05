@@ -2317,6 +2317,17 @@ static moy_ui_ctx_t *ctx_of(mp_obj_t o) {
     return c;
 }
 
+// For another module's C that draws on a Python frame through the engine
+// (moy_sh's Face): the context `ctx` holds, and the sink of canvas `cv` in
+// `look`.
+moy_ui_ctx_t *moy_ui_mp_ctx(mp_obj_t ctx) {
+    return ctx_of(ctx);
+}
+
+void moy_ui_mp_sink(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look) {
+    sink_of(s, cv, look);
+}
+
 // A colour key's value (`over_vals`): a role by its token name, an RGB
 // colour, or absent (an unknown name too).
 static int32_t over_colour(mp_obj_t v) {

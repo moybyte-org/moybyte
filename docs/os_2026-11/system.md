@@ -100,23 +100,29 @@ commands, `ps`, `kill` (the run in front), `free`, `log`/`dmesg`, `reboot`,
 `service`, `lease`, `python`, the device faces, the installed commands, `df`
 and the console's /proc, /dev and /bin rows.
 
-**The screen face** is the Terminal, a system app (`runtime/apps/terminal_app.py` on its
-identity cart `system_carts/moybyte.terminal.moy`,
-the code icon, after the other built-in apps): a session of the C shell whose
-output fills a VT100 cell grid in C (`native/moy_sh/moy_term.h`, kept in
-PSRAM and taken at the first open), which the app draws through `ui.text_view`
-as its log, with a one-row text view under it for the prompt, edited by the
-shared `CodeEditor` (`native/moy_sh/moy_sh_screen.h` is the face's C). There
-is no new drawing path, and the shell holds no pixels. A typed line is echoed
-into the grid and run; Tab completes a command's name (`moy_sh_complete`) or a
-path, left and right move the caret and up and down walk the history. A desk
-has a keyboard and draws no key row. On a handheld a key row under the prompt
-holds what the input cannot type, and a completion with several candidates
-offers them there to pick: the T-Deck's holds Tab and the shell's symbols its
-keyboard has no key for (`TDECK_SYMBOLS`), its trackball being the arrows,
-Enter the run and Mic the stop, and down past the newest line enters it;
-a gamepad's and touch's hold Tab, Ctrl-C, the arrows and Run, and under touch
-the shell's symbols sit under it. A run holds the VM's thread until its commands end, so **Ctrl-C
+**The screen face** is the Terminal's face, which is C
+(`native/moy_sh/moy_sh_face.h`, owner 2026-11-05: the terminal is mostly C,
+so it runs with no VM): a session of the C shell whose output fills a VT100
+cell grid in C (`native/moy_sh/moy_term.h`), drawn as a `ui.text_view` log
+through the toolkit's engine (`native/moy_ui/moy_ui_api.h`), with a one-row
+text view under it for the prompt line, the history, completion and the key
+rows, all of it in the face's record in PSRAM, taken at the first open. The
+Terminal system app (`runtime/apps/terminal_app.py` on its identity cart
+`system_carts/moybyte.terminal.moy`, the code icon, after the other built-in
+apps) launches it in the console, handing it the host's frame and the
+frame's keys; the recovery console (§2) opens the same face from the kernel.
+There is no new drawing path, and the shell holds no pixels. A typed line is
+echoed into the grid and run; Tab completes a command's name
+(`moy_sh_complete`) or a path (`moy_sh_list`, the shell's own view of the
+files), left and right move the caret and up and down walk the history. A
+desk has a keyboard and draws no key row. On a handheld a key row under the
+prompt holds what the input cannot type, and a completion with several
+candidates offers them there to pick: the T-Deck's holds Tab and the shell's
+symbols its keyboard has no key for (`moy_sh_face_tdeck_row`, read from the
+keyboard's matrix in `native/moy_input/moy_kbd.c`), its trackball being the
+arrows, Enter the run and Mic the stop, and down past the newest line enters
+it; a gamepad's and touch's hold Tab, Ctrl-C, the arrows and Run, and under
+touch the shell's symbols sit under it. A run holds its caller's thread (in the console the VM's) until its commands end, so **Ctrl-C
 reaches it in C**: the face's poll kicks the input drivers and reads the
 kernel input table's latches between merges for a key that types 0x03, the
 T-Deck's Mic (`start`) or a gamepad's B. A role command that waits (`http

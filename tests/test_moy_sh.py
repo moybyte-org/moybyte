@@ -45,6 +45,11 @@ def shell_sources():
 # The board's side, compiled without dash's shim: its host table and the
 # serial face, the screen face and its grid.
 BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c")
+# The Terminal's face draws through the toolkit's engine, so it compiles
+# against native/moy_ui and the harnesses, which have no toolkit, leave it out.
+FACE_SOURCES = ("moy_sh_face.c",)
+UI_INCLUDES = [a for n in ("moy_ui", "moy_gfx", "moy_glass")
+               for a in ("-I", os.path.join(ROOT, "native", n))]
 
 
 def _objects(cc, out):
@@ -219,7 +224,8 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     the arena: compiled as a board compiles it (no PIC), the shell's objects
     hold one writable word, moy_sh_g, and nothing in .data or .bss besides.
     The board's host table and the serial face (moy_sh_board.c) keep none:
-    the serial session is parked in that word (moy_sh_park)."""
+    the serial session is parked in that word (moy_sh_park), and the
+    Terminal's face (moy_sh_face.c) keeps everything in its record."""
     cc = shutil.which(os.environ.get("CC", "cc"))
     nm = shutil.which("nm")
     if cc is None or nm is None:
@@ -230,9 +236,9 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
              "-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     writable = []
     for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c")
-                                  + BOARD_SOURCES]:
+                                  + BOARD_SOURCES + FACE_SOURCES]:
         obj = str(tmp_path / (os.path.basename(src)[:-2] + ".o"))
-        own = flags if src in shell_sources() else plain
+        own = flags if src in shell_sources() else plain + UI_INCLUDES
         r = subprocess.run([cc] + own + ["-c", src, "-o", obj], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr[-2000:]
         for line in subprocess.check_output([nm, obj], text=True).splitlines():
@@ -262,6 +268,7 @@ def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
     jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
                                                      "host/sh_main.c", "host/board_main.c")
              + BOARD_SOURCES]
+    jobs += [(os.path.join(SH, n), plain + UI_INCLUDES) for n in FACE_SOURCES]
 
     def one(job):
         src, flags = job

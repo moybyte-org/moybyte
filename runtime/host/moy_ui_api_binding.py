@@ -736,8 +736,15 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
+    def api_native(ctx, cv, look):
+        """(context, sink, keep): the frame's context pointer and the sink of
+        canvas `cv` in `look`, for another C module that draws on this frame
+        through the engine (moy_sh's Face); `keep` holds what they point into."""
+        p, k = _ctx(ctx)
+        return p, sink(cv, look), k
+
     for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, api_text_reveal,
-              text_tones, text_words, text_runs):
+              text_tones, text_words, text_runs, api_native):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,

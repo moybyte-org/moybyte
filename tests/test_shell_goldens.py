@@ -847,12 +847,11 @@ def _terminal_plan(ws, cfg):
 
     def typed(text, tab=False):
         def enter():
-            app.ed.set_text(text)
-            app.ed.move(0, len(text))
+            app.face.set_line(text)
             if tab:
-                app.complete()
+                app.face.complete()
             else:
-                app.submit()
+                app.face.submit()
         return enter
 
     def open_it():
@@ -870,10 +869,9 @@ def _terminal_plan(ws, cfg):
             if kind is not None:
                 ui_draw.input_kind(kind)
                 ui_draw.hint_kind(kind)
-            app.cands = []
-            app.in_row = in_row
-            app.ed.set_text("ls /c")
-            app.ed.move(0, 5)
+            app.face.clear_cands()
+            app.face.set_in_row(in_row)
+            app.face.set_line("ls /c")
             app._damage.all()
         return enter
 

@@ -138,6 +138,10 @@ const char *moy_sh_cwd(moy_sh_t *s);
 // Names for completion: the built-ins (dash's, the C core's, the roles')
 // starting with `prefix`, until fn answers nonzero; the face completes paths.
 int moy_sh_complete(moy_sh_t *s, const char *prefix, moy_sh_ent_fn fn, void *arg);
+// The names in folder `path` of the session's files tree (its folder when
+// relative), a folder's with is_dir set, until fn answers nonzero: 0, fn's
+// answer, or an errno value.
+int moy_sh_list(moy_sh_t *s, const char *path, moy_sh_ent_fn fn, void *arg);
 
 // The arena's bytes below its top, for a face's diagnostics.
 size_t moy_sh_arena_in_use(const moy_sh_t *s);
