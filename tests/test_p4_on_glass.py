@@ -178,12 +178,18 @@ def wasm_carts(board):
 
 def test_a_compiled_app_reaches_its_roles_through_imports(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_reaches_its_roles(board, root)
+    try:
+        on_glass.wasm_app_reaches_its_roles(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_a_compiled_app_draws_the_toolkits_widgets(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_draws_the_toolkit(board, root)
+    try:
+        on_glass.wasm_app_draws_the_toolkit(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):

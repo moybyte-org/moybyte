@@ -3335,6 +3335,19 @@ def wasm_app_push(board, board_dir):
     return root
 
 
+def remove_carts(board, titles):
+    """Delete the carts titled `titles` from the board's store, as the home's
+    Delete does (`CartManager.delete`): what a test pushed, given back."""
+    board.pyval("[ws.carts.delete(c) for c in list(ws.carts.all) "
+                "if c['title'] in %r] and 0" % (list(titles),), timeout=60)
+    left = board.pyval("[c['title'] for c in ws.carts.all if c['title'] in %r]"
+                       % (list(titles),), timeout=20, strict=True)
+    assert not left, "still on the board after the delete: %r" % left
+
+
+WASM_APPS = (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1])
+
+
 def wasm_app_reaches_its_roles(board, root):
     """App Roles Wasm runs with its prefs and theme imports and no crossing of
     any class but the console's frame, each prefs row hopped to the VM's task (moy_app.wasm_hops: the
