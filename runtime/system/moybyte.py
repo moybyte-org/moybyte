@@ -149,6 +149,8 @@ class Wakes:
         self.ended = None           # fn(pid) told when a process's wakes end
         self.added = None           # fn() told when a wake is made (a board's
                                     # loop then makes the scheduler's upcall)
+        self.holds = None           # fn(pid) -> what else keeps a process running:
+                                    # its asyncio tasks (runtime/system/aio.py)
 
     def bind(self, table):
         """The input table whose rings the readers read. A new table starts
@@ -252,8 +254,9 @@ class Wakes:
             self.ended(pid)
 
     def count(self, pid):
-        """How many wakes process `pid` holds. Allocates nothing."""
-        n = 0
+        """How many wakes process `pid` holds, its asyncio tasks counted
+        (`holds`). Allocates nothing."""
+        n = self.holds(pid) if self.holds is not None else 0
         for w in self.list:
             if w[_OWNER] == pid:
                 n += 1

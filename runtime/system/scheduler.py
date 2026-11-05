@@ -31,6 +31,12 @@ The shell's own wakes (pid 1) are never struck. The rungs count over a run;
 a new start is a new process. An abort skips the callback's `finally` and
 `__exit__` (the guard's header says what it puts back).
 
+ASYNCIO. The shell's one asyncio loop (runtime/system/aio.py) is a wake of
+the shell's that the tick runs plainly (`plain_every`), each task step under
+`step`: the guard and the rungs as the task's process, its exception the
+loop's. A process's live tasks count as its wakes. The first start of a
+service whose source names asyncio installs the loop.
+
 MESSAGES (moybyte's `mail`) are served by `mail()`, which the console calls
 at the start of its frame while one is queued, so a message sent by the
 frame's input is served before the frame draws, and by a tick that runs
@@ -169,6 +175,8 @@ ERR = _lvl("ERR", 3)
 
 
 class Scheduler:
+    ABORTED = ABORTED
+
     def __init__(self, wakes=None, guard=_guard):
         self.wakes = wakes if wakes is not None else _moybyte.WAKES
         self.guard = guard
@@ -181,6 +189,9 @@ class Scheduler:
         self._i = 0
         self._wid = 0
         self._one = self._call_wid      # bound once: the guard's callable
+        self._plain = {}            # wid -> True: the shell's wakes run unguarded
+        self._t0 = 0                # this tick's start and budget (left_us)
+        self._budget = 0
         self.wakes.ended = self._ended
 
     # -- the tick ---------------------------------------------------------
@@ -201,6 +212,8 @@ class Scheduler:
             self.spent_us = 0
             return 0
         t0 = _ticks_us()
+        self._t0 = t0
+        self._budget = budget
         if self._i >= self._n:
             self._n = self.wakes.due(_ticks_ms(), self._due)
             self._i = 0
@@ -232,12 +245,35 @@ class Scheduler:
                 self._run(wake[0])
         return _ticks_diff(_ticks_us(), t0)
 
+    def left_us(self):
+        """What is left of this tick's budget, microseconds."""
+        return self._budget - _ticks_diff(_ticks_us(), self._t0)
+
+    def plain_every(self, ms, fn):
+        """A wake of the shell's, every `ms`, that the tick runs without the
+        guard: a driver whose own callbacks each take one (the asyncio loop,
+        runtime/system/aio.py). Answers its id."""
+        was = _L.current() if _L is not None else SHELL
+        if _L is not None:
+            _L.current(SHELL)
+        try:
+            wid = self.wakes.every(ms, fn)
+        finally:
+            if _L is not None:
+                _L.current(was)
+        self._plain[wid] = True
+        return wid
+
     def _call_wid(self):
         self.wakes.call(self._wid)
 
     def _run(self, wid):
         w = self.wakes.by_id.get(wid)
         if w is None:
+            self._plain.pop(wid, None)
+            return
+        if wid in self._plain:
+            self.wakes.call(wid)
             return
         pid = w[_OWNER]
         p = self.procs.get(pid)
@@ -251,10 +287,35 @@ class Scheduler:
                 and not self.wakes.count(pid):
             self._exit(p, EXIT_OK)
 
-    def _guarded(self, pid, fn, w=None, budget=None, ladder=True):
+    def step(self, pid, fn):
+        """An asyncio task's step (runtime/system/aio.py): `fn()` as process
+        `pid` under the guard and the rungs, counted as its callback. Answers
+        ABORTED or fn's result; fn's exception, its end or its error, is the
+        caller's once it is counted."""
+        return self._guarded(pid, fn, None, None, True, True)
+
+    def held(self, pid):
+        """Whether process `pid` is suspended: its callbacks wait."""
+        p = self.procs.get(pid)
+        return p is not None and p.state == SUSPENDED
+
+    def settle(self, pid):
+        """A live service holding no wake and no task has exited (0)."""
+        p = self.procs.get(pid)
+        if p is not None and p.kind == SERVICE and p.state != EXITED \
+                and p.state != STOPPING and not self.wakes.count(pid):
+            self._exit(p, EXIT_OK)
+
+    def crash(self, pid, exc):
+        """Process `pid` crashed with `exc` outside a wake (an asyncio task):
+        logged, and a service exits with its code."""
+        self._crash(pid, exc, None)
+
+    def _guarded(self, pid, fn, w=None, budget=None, ladder=True, raises=False):
         """`fn()` as process `pid` under a guard of `budget` microseconds,
         the rungs counted where `ladder`. Answers ABORTED, None for a crash,
-        else fn's result."""
+        else fn's result; where `raises`, fn's exception is re-raised once
+        counted instead."""
         if budget is None:
             budget = MOY_BG_ABORT_US
         wakes = self.wakes
@@ -265,6 +326,7 @@ class Scheduler:
         g = self.guard
         t0 = _ticks_us()
         r = None
+        err = None
         try:
             if g is not None:
                 r = g.call(fn, budget)
@@ -272,14 +334,14 @@ class Scheduler:
             else:
                 r = fn()
                 cost = _ticks_diff(_ticks_us(), t0)
-        except SystemExit as exc:
+        except BaseException as exc:  # noqa: BLE001 -- a callback never breaks a frame
             cost = _ticks_diff(_ticks_us(), t0)
-            self._crash(pid, exc, w)
-            r = None
-        except Exception as exc:  # noqa: BLE001 -- a callback never breaks a frame
-            cost = _ticks_diff(_ticks_us(), t0)
-            self._crash(pid, exc, w)
-            r = None
+            if raises:
+                err = exc
+            elif isinstance(exc, (SystemExit, Exception)):
+                self._crash(pid, exc, w)
+            else:
+                raise
         finally:
             if _L is not None:
                 _L.current(was_pid)
@@ -295,6 +357,8 @@ class Scheduler:
                 self._strike(pid, "aborted after %d ms" % (budget // 1000))
         elif ladder and cost > MOY_BG_CALLBACK_US:
             self._overrun(pid, cost)
+        if err is not None:
+            raise err
         return r
 
     # -- the rungs --------------------------------------------------------
@@ -383,6 +447,8 @@ class Scheduler:
             p.state, p.code = EXITED, EXIT_CRASHED
             return None
         _log(INFO, pid, "start", name)
+        if "asyncio" in src_of(cart):
+            _aio().install(self)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
         if env:
             ns.update(env)
@@ -508,6 +574,18 @@ class Scheduler:
         self.procs.clear()
         self._n = self._i = 0
         self.resumed = ()
+
+
+def src_of(cart):
+    return cart.get("src") or ""
+
+
+def _aio():
+    try:
+        import aio
+    except ImportError:  # host: the runtime package
+        from runtime import aio
+    return aio
 
 
 SCHED = Scheduler()

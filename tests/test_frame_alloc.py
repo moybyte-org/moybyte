@@ -29,6 +29,7 @@ board-model binary that is not under a GIL.
 WHAT IT PINS. The frames allocate nothing -- with nothing held, with a
 button held down, with a background service due every frame (the
 kernel's service upcall, runtime/system/scheduler.py's tick and the wake),
+beside an asyncio service asleep in the shell's loop (runtime/system/aio.py),
 and with a notification's banner over the game (runtime/system/notifications.py) --
 over windows long enough to take in two PERF periods and a
 T-Deck diag tick (net of a thread's straddling block, see SLACK). The console boots in kid mode (PERF DIAG off,
@@ -398,6 +399,7 @@ def measure(loop):
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
     background(loop, info)
+    asleep(loop, info)
     music(loop, info)
     banner(loop, info)
     notes(loop, info)
@@ -434,6 +436,36 @@ def background(loop, info):
     gc.enable()
     p = scheduler.SCHED.procs[pid]
     info["bg_ran"] = p.ns["n"][0] if p.ns else -1
+    scheduler.SCHED.stop(pid)
+
+
+AIO = """
+import asyncio
+n = [0]
+async def main():
+    while True:
+        n[0] += 1
+        await asyncio.sleep(60)
+asyncio.run(main())
+"""
+
+
+def asleep(loop, info):
+    """The play frame again beside an asyncio service asleep in the shell's
+    loop (runtime/system/aio.py): the loop's wake looks at it every POLL_MS.
+    A pass that steps a task is the task's work and allocates the loop's own
+    (MicroPython's run_until_complete makes two tuples a pass)."""
+    import scheduler
+    pid = scheduler.SCHED.start({"id": "t.aio", "title": "aio", "src": AIO,
+                                 "permissions": []})
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    info["aio"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    p = scheduler.SCHED.procs[pid]
+    info["aio_ran"] = p.state
     scheduler.SCHED.stop(pid)
 
 
@@ -1383,6 +1415,12 @@ def test_a_play_frame_with_a_background_service_allocates_nothing(result):
     info, text = result
     assert info["bg_ran"] > len(info["bg"]) // 2, text[-3000:]
     _assert_quiet(info["bg"], "a background service", text)
+
+
+def test_a_play_frame_beside_an_asleep_asyncio_service_allocates_nothing(result):
+    info, text = result
+    assert info["aio_ran"] == "background", text[-3000:]
+    _assert_quiet(info["aio"], "an asyncio service asleep", text)
 
 
 def test_a_play_frame_with_music_playing_allocates_nothing(result):

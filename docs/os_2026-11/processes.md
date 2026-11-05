@@ -274,10 +274,23 @@ a board with the VM stop, Python services are stopped before the stop and
 started again after it (§5; the mini-VM spike, P3.8, may keep them
 running). The hardening rung is the overview's §4.
 
-**`asyncio`** is one event loop the shell owns on this scheduler: a
-task's step is a callback under the same slice, `await asyncio.sleep(s)`
-or `asyncio.sleep_ms(ms)` a timer wake, an asyncio stream over a UART or
-a socket an event wake. **Standard names first**: `open()` on tree paths,
+**`asyncio`** is MicroPython's, on one event loop the shell owns on this
+scheduler (`runtime/system/aio.py`, whose header is the authority): no
+process runs a loop of its own, so `asyncio.run(coro)` and
+`create_task(coro)` put the task on the shell's loop and answer its Task at
+once, and a service's main ends with `asyncio.run(main())`. A task is the
+process's that made it, and each step (one resume up to its next await) is
+that process's callback under the guard and the same rungs, its cost in the
+process's CPU time; an aborted step ends its task. A process holds its live
+tasks as it holds its wakes, so a service runs while it has one, and its end
+cancels them. A task's exception that nothing awaits is its process's crash.
+`await asyncio.sleep(s)` or `asyncio.sleep_ms(ms)` is a timer, and a stream
+over a socket (`open_connection`, `start_server`) waits on the loop's poller,
+looked at every frame while one waits. The loop is one wake of the shell's,
+registered while a task lives, so a console with none pays nothing and an
+asleep task's frames allocate nothing. The host runs CPython's asyncio in
+its place, one iteration a pass, with `sleep_ms` added; the browser's VM has
+no asyncio. **Standard names first**: `open()` on tree paths,
 `os`, `time.ticks_us`/`time.time`, `socket`, `requests` and `logging`
 from micropython-lib (`logging` routed to the OS log, §9); `moybyte.*`
 only for what is genuinely ours (below, and `hardware.md` §4).
