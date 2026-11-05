@@ -2555,50 +2555,59 @@ PAUSE_PSRAM_MAX = 160 * 1024
 PAUSE_PSRAM_LEAK_MAX = 4096
 
 
-def _strip_light(px, w, h, margin, top=0):
-    """(brightest, mean) luma of the pixels in the `margin` columns at both
-    ends of a frame, from row `top` down -- the part a centred card never
-    covers, under the bar a handheld shows over a paused game."""
+def _band_light(px, w, h, margin, rows):
+    """(darkest, brightest) luma of the bottom `rows` rows of a frame in the
+    `margin` columns at both ends -- the part a centred card never covers."""
     seen = []
-    for y in range(top, h):
+    for y in range(h - rows, h):
         row = y * w
         for x in tuple(range(margin)) + tuple(range(w - margin, w)):
             v = px[row + x]
             seen.append(((v >> 11) & 31) * 240 + ((v >> 5) & 63) * 118
                         + (v & 31) * 88)
-    return max(seen) // 100, sum(seen) // len(seen) // 100
+    return min(seen) // 100, max(seen) // 100
 
 
-def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
+def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
     """A running game's pause menu opens, dims the game and closes back to
     it, on the heap the suite already guards: internal SRAM stays at or above
     moycore's floor and within WASM_RUN_SRAM_MAX of the run before the menu,
     and PSRAM gives back what the card took (its layers are kept from
-    before the run). Opened and closed
-    by the console's one key (`ws.system_key`, the T-Deck's Mic).
+    before the run, and the desk has warmed its covers before it: a walk
+    still owed runs on the first idle frames it meets, the pause's, and
+    keeps what it warmed, which is the shelf's and not the card's). Opened
+    and closed by the console's one key (`ws.system_key`, the T-Deck's Mic).
 
-    The dim is read off the glass, in the columns beside the card: the
-    brightest pixel there falls under the running game's while the menu is
-    open, and comes back when it closes. Returns the heap numbers,
+    The dim is read off the glass, in the columns beside the card, on the
+    game's bottom `rows` rows, which hold one colour on every frame (Star
+    Catcher's floor, drawn over its stars and its catch flash): every pixel
+    there is darker than the game's while the menu is open, and the game's
+    colour again once it closes; the FPS chip, which draws over that
+    corner, is off for the run. Returns the heap numbers,
     {"sram": (before, during, after), "psram": (before, during, after)}."""
     from tools import board as board_tool
-    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
-    assert line is not None and "no cart match" not in line, line
+    end = time.time() + 60
+    while board.pyval("ws.covers._seen", strict=True):
+        assert time.time() < end, "the desk never finished warming its covers"
+        board.drain(0.5)
+    fps_was = board.pyval("ws.show_fps", strict=True)
+    board.pyexec("ws.show_fps = False", strict=True)
     paused = False
     try:
+        line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+        assert line is not None and "no cart match" not in line, line
         board.drain(2.5)
         st = board.state()
         assert st.get("cart") and not st.get("cart_error"), st
         title = st["cart"]
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
-        top = board.pyval("ws.layout.cy", strict=True)
         # The first grab of a session grows the Python heap by what its frame
         # copies need, and keeps it grown: take that before the baseline.
         board_tool.grab(board, "screen")
         sram0, psram0 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit0 = _strip_light(px, w, h, margin, top)
-        assert lit0[0] > 120, "the game shows nothing bright to dim: %r" % (lit0,)
+        lit0 = _band_light(px, w, h, margin, rows)
+        assert lit0[0] == lit0[1] > 0, "the glass shows no floor of the game: %r" % (lit0,)
 
         board.pyexec("ws.system_key()", strict=True)
         paused = True
@@ -2607,7 +2616,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert board.pyval("ws.player.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit1 = _strip_light(px, w, h, margin, top)
+        lit1 = _band_light(px, w, h, margin, rows)
 
         board.pyexec("ws.system_key()", strict=True)
         paused = False
@@ -2621,19 +2630,20 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert board.state()["frames"] > f0, "the game is not ticking after resume"
         sram2, psram2 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit2 = _strip_light(px, w, h, margin, top)
+        lit2 = _band_light(px, w, h, margin, rows)
     finally:
         if paused:
             board.pyexec("ws.pause.close()")
         board.leave_cart()
         board.drain(1.0)
+        board.pyexec("ws.show_fps = %r" % bool(fps_was))
     print("\nPAUSE internal SRAM free %d -> %d (open) -> %d, floor %d; "
-          "PSRAM free %d -> %d (open) -> %d; beside the card brightest %d "
-          "-> %d (open) -> %d, mean %d -> %d -> %d"
+          "PSRAM free %d -> %d (open) -> %d; the floor beside the card "
+          "(darkest, brightest) %r -> %r (open) -> %r"
           % (sram0, sram1, sram2, floor, psram0, psram1, psram2,
-             lit0[0], lit1[0], lit2[0], lit0[1], lit1[1], lit2[1]))
-    assert lit1[0] < lit0[0] * 0.85 and lit1[1] < lit0[1], (lit0, lit1)
-    assert lit2[0] > lit0[0] * 0.85 and lit2[0] > lit1[0], (lit0, lit1, lit2)
+             lit0, lit1, lit2))
+    assert lit1[1] < lit0[0] * 0.85, (lit0, lit1)
+    assert lit2 == lit0, (lit0, lit1, lit2)
     assert min(sram0, sram1, sram2) >= floor, (sram0, sram1, sram2, floor)
     assert sram0 - sram1 <= WASM_RUN_SRAM_MAX, (sram0, sram1)
     assert psram0 - psram1 <= PAUSE_PSRAM_MAX, (psram0, psram1)
