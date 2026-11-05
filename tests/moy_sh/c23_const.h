@@ -17,13 +17,22 @@
 #define MOY_C23_MEM(f, s, ...) \
     _Generic(MOY_C23_Q(s), const void *: (const void *)f((s), __VA_ARGS__), default: f((s), __VA_ARGS__))
 
+/* A C23 glibc already defines these as const-keeping macros: replace them. */
+#undef strchr
 #define strchr(s, c) MOY_C23_STR(strchr, s, c)
+#undef strrchr
 #define strrchr(s, c) MOY_C23_STR(strrchr, s, c)
+#undef strstr
 #define strstr(s, n) MOY_C23_STR(strstr, s, n)
+#undef strpbrk
 #define strpbrk(s, a) MOY_C23_STR(strpbrk, s, a)
+#undef strchrnul
 #define strchrnul(s, c) MOY_C23_STR(strchrnul, s, c)
+#undef memchr
 #define memchr(s, c, n) MOY_C23_MEM(memchr, s, c, n)
+#undef memrchr
 #define memrchr(s, c, n) MOY_C23_MEM(memrchr, s, c, n)
+#undef bsearch
 #define bsearch(k, b, n, z, f) \
     _Generic(MOY_C23_Q(b), const void *: (const void *)bsearch((k), (b), (n), (z), (f)), \
              default: bsearch((k), (b), (n), (z), (f)))
