@@ -75,10 +75,10 @@ const profile = process.env.MOY_PROFILE
 // The page under test is served from 127.0.0.1 out of our own dist/, so the
 // sandbox is not what is keeping anything out.
 const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
-// A runner slow enough to print nothing for the whole wait ("exited: no, still
-// running", "stderr: (nothing at all)") gets one more launch with a longer wait:
-// it failed two Pages builds on 2026-11-05 and passed on rerun both times. A
-// Chrome that exits or prints an error is not retried.
+// A Chrome still running when the wait ends gets one more launch with a longer
+// wait: on the Pages runners it prints D-Bus warnings and then takes over 20 s
+// to report its port (every stable-site build from 2026-11-05 16:50). A Chrome
+// that exited, or would not start, is not retried.
 function launch(waitMs) {
     const chrome = spawn(CHROME, [
         "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
@@ -99,7 +99,7 @@ function launch(waitMs) {
             "  exited:  " + (chrome.exitCode === null
                 ? "no, still running" : "yes, code " + chrome.exitCode) + "\n" +
             "  stderr:  " + (buf ? buf.slice(-1200) : "(nothing at all)"));
-            e.silent = chrome.exitCode === null && !buf; err(e); }, waitMs);
+            e.running = chrome.exitCode === null; err(e); }, waitMs);
         chrome.on("error", (e) => { clearTimeout(t); err(
             new Error("chrome would not start (" + CHROME + "): " + e.message)); });
         chrome.stderr.on("data", (d) => {
@@ -111,17 +111,17 @@ function launch(waitMs) {
     return { chrome, url };
 }
 
-let { chrome, url: firstUrl } = launch(20000);
+let { chrome, url: firstUrl } = launch(45000);
 let wsUrl;
 try {
     wsUrl = await firstUrl;
 } catch (e) {
-    if (!e.silent) throw e;
-    console.error(e.message + "\n  -- launching once more, waiting 60s");
+    if (!e.running) throw e;
+    console.error(e.message + "\n  -- launching once more, waiting 90s");
     const gone = new Promise((r) => chrome.once("exit", r));
     chrome.kill();
     await gone;
-    const again = launch(60000);
+    const again = launch(90000);
     chrome = again.chrome;
     wsUrl = await again.url;
 }
