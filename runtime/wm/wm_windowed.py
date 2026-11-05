@@ -863,21 +863,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         fs = self._fs()
         w, h = self._open_size(key, fs)
         title_h = _layout_base.metric("title", fs)
-        dx, dy, dw, dh = self._desk_rect()
         if key == "desktop" and self._play_intent == "dev":
             x, y = self._dev_place(w, h, fs)
         else:
-            # Cascade: centred in the work area right of the icon column (a
-            # window wider than it as far right as the desk allows), each
-            # deeper window stepping down-right, clamped so the title strip
-            # always stays reachable on the desk.
-            wx, _wy, ww, _wh = self._work_rect(fs)
-            if w > ww:
-                wx, ww = max(dx, dx + dw - w), w
-            x = wx + (ww - w) // 2 + depth * 12 * fs
-            y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
-            x = max(wx, min(x, dx + dw - (w if w <= dw - (wx - dx) else w // 2)))
-            y = max(dy, min(y, dy + dh - 24 * fs))
+            x, y, w, h = self._cascade(kind, w, h, title_h, depth, fs)
         x, y = self._clear_of_subject(x, y, w, h, fs)
         win = _Win(kind, x, y, w, h, title_h)
         if self._opens_full(kind):
@@ -890,6 +879,31 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # buffer.
         self._prewarm(win)
         return win
+
+    def _cascade(self, kind, w, h, title_h, depth, fs):
+        """(x, y, w, h) a window of outer size (w, h) opens at, stack depth
+        `depth`: the WHOLE window on the desk. Centred in the work area right
+        of the icon column, or as far right as the desk allows where it is
+        wider than that area (over the icons); each deeper window steps
+        down-right, so the strip of the one under it stays in sight. A step
+        that would carry it past the desk's right or bottom edge shrinks it
+        to the room left, never under its minimum (`_min_size`); a minimum
+        that still does not fit moves it back onto the desk."""
+        dx, dy, dw, dh = self._desk_rect()
+        wx, _wy, ww, _wh = self._work_rect(fs)
+        if w > ww:
+            wx, ww = max(dx, dx + dw - w), w
+        x = wx + (ww - w) // 2 + depth * 12 * fs
+        y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
+        mw, mh = self._min_for(kind, title_h, dw, dh)
+        right, bottom = dx + dw, dy + dh
+        if x + w > right:
+            w = max(mw, right - x)
+            x = max(dx, min(x, right - w))
+        if y + h > bottom:
+            h = max(mh, bottom - y)
+            y = max(dy, min(y, bottom - h))
+        return x, y, w, h
 
     def _dev_place(self, w, h, fs):
         """Where a dev playtest of outer size (w, h) opens (D-03.4): at 2x,
@@ -1093,12 +1107,16 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         (fs-scaled) at register_app time -- the minimums live with the app,
         not in a WM if-ladder. The cap at (max_w, max_h) keeps the same apps
         usable on a 320x240 windowed host."""
+        return self._min_for(win.kind, win.title_h, max_w, max_h)
+
+    def _min_for(self, kind, title_h, max_w, max_h):
+        """`_min_size` for a window of `kind` not yet made."""
         fs = self._fs()
-        ms = self.ws.app_min_size(win.kind) \
+        ms = self.ws.app_min_size(kind) \
             if hasattr(self.ws, "app_min_size") else None
         if ms is not None:
             return (min(max_w, ms[0] * fs), min(max_h, ms[1] * fs))
-        return (160 * fs, 90 * fs + win.title_h)
+        return (160 * fs, 90 * fs + title_h)
 
     def _rubber(self, win, edges, wx, wy, ow, oh, ddx, ddy):
         """The rect (x, y, w, h) a resize by (ddx, ddy) of the window that

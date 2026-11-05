@@ -1045,6 +1045,7 @@ def _two_apps(tmp_path):
     ws.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
     files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    ws.wm._move_window(files, ws.wm._desk_rect()[0], files.y)
     ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
     _quiesce(ws)
     for _ in range(3):
@@ -1540,6 +1541,10 @@ def _engage_resize(ws, drv, dx=60, dy=-40):
     drv.frame(0.0)
     _quiesce(ws)
     win = ws.wm._wins["settings"]
+    if win.x + win.w + dx > ws.sys_canvas.w:     # a grip grows it: room to its right
+        ws.wm._move_window(win, ws.sys_canvas.w - win.w - dx - 8, win.y)
+        drv.frame(0.0)
+        _quiesce(ws)
     gx0, gy0, gw, gh = ws.wm._grip_rect(win)
     gx, gy = gx0 + gw // 2, gy0 + gh // 2
     drv.touch(gx, gy)
@@ -2469,9 +2474,60 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "023113715d65d02dbc049869a0a89b25e0fa293def93c6e8f3ab9f91da2e85e4",
-    "2377c20dc76e3a8aa9d30426c6c93799a63e590c8d15a27200d65dcf4a930759",
+    "2292bf0ee7815df1fbf45c83412fb75354cf2a3cdec313b0a25f88ce819efe8f",
+    "e25f15efca0ffb2a6439f7e1d1a6c4c34613828e2eee68930f23db64d722e9b3",
 )
+
+
+def _off_desk(ws):
+    """[(kind, rect)] of the windows not wholly on the desk (the glass less
+    the OS bar)."""
+    dx, dy, dw, dh = ws.wm._desk_rect()
+    out = []
+    for k in ws.wm._order:
+        w = ws.wm._wins[k]
+        if w.x < dx or w.y < dy or w.x + w.w > dx + dw or w.y + w.h > dy + dh:
+            out.append((k, (w.x, w.y, w.w, w.h)))
+    return out
+
+
+@pytest.mark.parametrize("config", ("p4_1024x600_cs2_fs1_windowed",
+                                    "p4_1024x600_fs2_windowed",
+                                    "guition_p4_1280x800_windowed"))
+def test_every_app_and_a_cascade_open_whole_on_the_glass(tmp_path, config):
+    """A window opens with all of it on the glass, beside the desk's whole
+    icon set: each system app opened alone, then every one of them and
+    Settings opened over each other (a cascade, each deeper window stepped
+    down-right and shrunk to the room left, never under its minimum)."""
+    from test_shell_goldens import CONFIGS, _build
+    ws = _build(CONFIGS[config], tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    apps = [a for a, _t in ws._apps]
+    icons = [k for k, _l, _c in ws.wm._backdrop_layer._icon_catalog()]
+    assert [a.id for a in apps if a.id not in ws.wm.HIDDEN_APPS
+            and getattr(a, "DESK_TILE", True) and a.id not in icons] == []   # the whole icon set
+    for app in apps:
+        ws.open_app(app)
+        drv.frame(1 / 30)
+        assert app.id in ws.wm._wins
+        assert _off_desk(ws) == [], app.id
+        ws.wm.close_window_kind(app.id)
+        drv.frame(1 / 30)
+        assert app.id not in ws.wm._wins
+    for app in apps:
+        ws.open_app(app)
+        drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    assert len(ws.wm._order) == len(apps) + 1
+    assert _off_desk(ws) == []
+    _dx, _dy, dw, dh = ws.wm._desk_rect()
+    for k in ws.wm._order:
+        w = ws.wm._wins[k]
+        mw, mh = ws.wm._min_size(w, dw, dh)
+        assert w.w >= mw and w.h >= mh, (k, w.w, w.h, mw, mh)
 
 
 def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):

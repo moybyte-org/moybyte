@@ -621,7 +621,8 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
     p.frame()
     cx, cy, cw, chh = c.content_rect()
     vis = next((x, y) for y in range(cy + chh - 4, cy, -8) for x in range(cx + 4, cx + cw, 8)
-               if not (s.x <= x < s.x + s.w and s.y <= y < s.y + s.h))
+               if not (s.x <= x < s.x + s.w and s.y <= y < s.y + s.h)
+               and w._resize_zone_at(x, y) is None)   # a tap on Calc, not a grab of an edge
     p.both("click", *vis)
     p.frame()
     assert w._focus == "calc"
