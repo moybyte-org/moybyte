@@ -695,7 +695,7 @@ SYSTEM_KEYS = {
 # change: a system app's by its PREFS_NS (tests/test_moy_sync.py holds every
 # app that takes the prefs role to this list), and any cart's, whose namespace
 # is its id and so carries a dot.
-SYSTEM_PREFS_NS = ("paint",)
+SYSTEM_PREFS_NS = ("paint", "music")
 
 # The keys whose values name carts by PATH (`<carts root>/<folder>`). They cross
 # as folder names and land under the receiver's own carts root: a cart's folder

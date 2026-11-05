@@ -1,0 +1,30 @@
+{
+  "format": "moy-1",
+  "version": 1,
+  "title": "Music",
+  "id": "moybyte.music",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 305,
+    "app": {
+      "id": "jukebox",
+      "entry": "music_app:MusicAppLayer",
+      "text_mode": false,
+      "order": 85
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "music",
+      "media",
+      "media:url",
+      "http"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

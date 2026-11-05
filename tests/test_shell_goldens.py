@@ -276,7 +276,7 @@ GOLDEN_EXCLUDE = {}
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts")
+APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts", "jukebox")
 
 # Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
 # so what these hash is the app bar over a cart's own 320x240 raster, composited
@@ -443,6 +443,15 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_status": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="status"),
+    "tdeck_320x240_fs1_music": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="music"),
+    "p4_1024x600_cs2_fs1_music": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="music"),
+    "guition_480x320_fs1_music": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="music_noaudio"),
     "p4_1024x600_cs2_fs1_procs": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="procs"),
@@ -602,6 +611,10 @@ def _cart_by_title(ws, title):
 def _build(cfg, carts_dir):
     from runtime import host_app
     from runtime.status_items import ITEMS
+    from runtime import music_app
+    music_app.STREAM._end()             # nor what Music played
+    music_app.STREAM.face = None
+    music_app.STREAM.stations = music_app.STATIONS
     for it in ITEMS.slots:              # no app's status item outlives its config
         if it.pid:
             ITEMS._free(it)
@@ -671,6 +684,8 @@ def _surface_plan(ws, cfg):
         return _procs_plan(ws)
     if cfg.get("plan") == "tasks":
         return _tasks_plan(ws, cfg)
+    if cfg.get("plan") in ("music", "music_noaudio"):
+        return _music_plan(ws, cfg)
     if cfg.get("plan") == "status":
         return _status_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
@@ -1092,6 +1107,179 @@ def _status_plan(ws, cfg):
             ("status_battery_charging", charging)]
 
 
+MUSIC_HANDHELD = ("music_radio", "music_radio_connecting", "music_files", "music_files_empty",
+                  "music_files_nosd", "music_nowifi", "music_now_radio", "music_now_list",
+                  "music_now_failed", "music_add", "music_add_https", "music_cc",
+                  "music_bar_paused")
+MUSIC_DESK = ("music_desk", "music_desk_files", "music_desk_menu", "music_desk_failed")
+
+
+class _MusicFace:
+    """The media face as Music reads it, faked: one moment's answers."""
+
+    def __init__(self, n):
+        self.n = dict(n) if n else None
+
+    def now(self):
+        return self.n
+
+    def play(self, src):
+        pass
+
+    def pause(self):
+        self.n["paused"] = True
+
+    def resume(self):
+        self.n["paused"] = False
+
+    def stop(self):
+        self.n = None
+
+    def next(self):
+        return True
+
+    prev = next
+
+    def volume(self, v=None):
+        return self.n["volume"]
+
+
+_MUSIC_RADIO = {"state": "playing", "paused": False, "src": "http://ice1.somafm.com/x",
+                "station": "", "title": "Boards of Canada - Dayvan Cowboy", "entry": 0,
+                "entries": 1, "volume": 60}
+_MUSIC_LIST = {"state": "playing", "paused": True, "src": "/m/a.mp3", "station": "",
+               "title": "Sunny day drive", "entry": 2, "entries": 12, "volume": 40,
+               "at": 72, "len": 221}
+_MUSIC_FILES = ((("Beach trip", "/m/Beach trip.mp3", "3:41"), ("Birthday song", "/m/b.mp3", "2:05"),
+                 ("Dragon theme", "/m/d.mp3", "4:12"), ("Grandma's piano", "/m/g.mp3", "1:58"),
+                 ("Space walk", "/m/s.mp3", "5:20")),
+                (("Road trip mix", "/m/r.m3u", "12 songs"), ("Sleepy time", "/m/s.m3u", "8 songs")))
+
+
+def _music(ws, now, what, page="list", tab=0, cur=None, files=None):
+    """Music open on `page` while the faked face answers `now` for `what`
+    (kind, name, src); the stream's wake cancelled, so the frame is still."""
+    from runtime import music_app as M
+    import moybyte
+    s = M.STREAM
+    s._end()
+    app = ws._apps_by_id["jukebox"]
+    s.face = _MusicFace(now)
+    if what is not None:
+        s.what = what
+        s.poll()
+        if s.wake is not None:
+            moybyte.cancel(s.wake)
+            s.wake = None
+    ws.open_app(app)
+    app.tab = tab
+    if files is not None:
+        app.files = files
+        app.idle_owed = False
+    if cur is not None:
+        app.cur[tab] = cur
+    if page != "list":
+        app._go(page)
+    return app
+
+
+def _music_plan(ws, cfg):
+    """Music (#110, docs/media/music_2026-11/README.md) over a faked media
+    face: on the T-Deck its Radio, My music (a list, empty, no SD card),
+    Radio without Wi-Fi, Now playing (a station, a paused list, a station
+    that failed), Add a station (and an https address it refuses), the
+    control center with Music's card and the bar with it paused; on the
+    desk its window on Radio and My music, Music's status menu and a
+    station that failed; on the Guition S3, which has no audio, its
+    no-audio page."""
+    from runtime import music_app as M
+    groove = ("radio", "Groove Salad", M.STATIONS[0][2])
+    road = ("list", "Road trip mix", "/m/r.m3u")
+    if cfg.get("plan") == "music_noaudio":
+        def noaudio():
+            M.STREAM.face = False           # the Guition S3's: no media service
+            ws.open_app(ws._apps_by_id["jukebox"])
+        return [("music_noaudio", noaudio)]
+    if cfg["windowed"]:
+        def desk():
+            ws.open_desk()
+            _music(ws, _MUSIC_RADIO, groove, cur=3)
+
+        def desk_files():
+            _music(ws, _MUSIC_LIST, road, tab=1, files=_MUSIC_FILES)
+
+        def desk_menu():
+            from runtime.status_items import ITEMS
+            ws.open_desk()
+            ws.open_app(ws._apps_by_id["files"])
+            _music_wake_off()
+            ws._golden_popover = True
+            ws.open_status_menu(ITEMS.at(0))
+            assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+
+        def desk_failed():
+            ws.close_popover()
+            _music(ws, dict(_MUSIC_RADIO, state="failed", title=""),
+                   ("radio", "Secret Agent", M.STATIONS[5][2]))
+            ws.open_status_menu(ws.status_open)
+        return [("music_desk", desk), ("music_desk_files", desk_files),
+                ("music_desk_menu", desk_menu), ("music_desk_failed", desk_failed)]
+
+    def connecting():
+        _music(ws, dict(_MUSIC_RADIO, state="opening", title=""),
+               ("radio", "Drone Zone", M.STATIONS[1][2]), cur=2)
+
+    def nowifi():
+        app = _music(ws, None, None)
+        app._has_wifi = lambda: False
+        app.wifi = False
+
+    def cc():
+        _music(ws, _MUSIC_RADIO, groove)
+        ws.go_home()
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
+    def paused():
+        ws.close_popover()
+        ws._golden_popover = False
+        _music(ws, dict(_MUSIC_RADIO, paused=True), groove)
+        ws.go_home()
+
+    def add_https():
+        app = _music(ws, None, None, page="add")
+        app.url = "https://stream.example.org/live.mp3"
+        app.err = M._check(app.url, False)
+
+    def add():
+        app = _music(ws, None, None, page="add")
+        app.url = "http://ice1.somafm.com/lush-128-mp3"
+    return [("music_radio", lambda: _music(ws, _MUSIC_RADIO, groove, cur=3)),
+            ("music_radio_connecting", connecting),
+            ("music_files", lambda: _music(ws, _MUSIC_LIST, road, tab=1, cur=2,
+                                           files=_MUSIC_FILES)),
+            ("music_files_empty", lambda: _music(ws, None, None, tab=1, files=((), ()))),
+            ("music_files_nosd", lambda: _music(ws, None, None, tab=1, files=False)),
+            ("music_nowifi", nowifi),
+            ("music_now_radio", lambda: _music(ws, _MUSIC_RADIO, groove, page="now")),
+            ("music_now_list", lambda: _music(ws, _MUSIC_LIST, road, page="now")),
+            ("music_now_failed", lambda: _music(ws, dict(_MUSIC_RADIO, state="failed", title=""),
+                                                ("radio", "Secret Agent", M.STATIONS[5][2]),
+                                                page="now")),
+            ("music_add", add), ("music_add_https", add_https), ("music_cc", cc),
+            ("music_bar_paused", paused)]
+
+
+def _music_wake_off():
+    from runtime import music_app as M
+    import moybyte
+    s = M.STREAM
+    if s.wake is not None:
+        moybyte.cancel(s.wake)
+        s.wake = None
+
+
 TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service",
                   "note_banner", "tasks_notes", "rec_indicator")
 
@@ -1336,6 +1524,10 @@ def surface_names(config_name):
         return list(PROCS_SURFACES)
     if cfg.get("plan") == "tasks":
         return list(TASKS_SURFACES)
+    if cfg.get("plan") == "music":
+        return list(MUSIC_DESK if cfg["windowed"] else MUSIC_HANDHELD)
+    if cfg.get("plan") == "music_noaudio":
+        return ["music_noaudio"]
     if cfg.get("plan") == "status":
         return list(STATUS_DESK if cfg["windowed"] else STATUS_HANDHELD)
     names = []

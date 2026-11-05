@@ -197,6 +197,7 @@
     {"perm": "getcarts", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "storybook", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "myart", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
-    {"perm": "artwork", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []}
+    {"perm": "artwork", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
+    {"perm": "music", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []}
   ]
 }

@@ -83,6 +83,7 @@ TABLE = (
     ("storybook", "marker", PY, None, None, ()),
     ("myart", "marker", PY, None, None, ()),
     ("artwork", "marker", PY, None, None, ()),
+    ("music", "marker", PY, None, None, ()),
 )
 
 PERM, GRANTS, TIERS, PROMPT, NEEDS, NAMES = range(6)

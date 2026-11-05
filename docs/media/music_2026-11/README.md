@@ -215,6 +215,26 @@ as they are. Three things change:
     `_menu_stop_media`), with its test in `tests/test_dev_media.py`. The
     sentence in `docs/os_2026-11/hardware.md` §3 goes with it.
 
+## Where the build differs
+
+Build step 2 (`runtime/apps/music_app.py`, cart
+`system_carts/moybyte.music.moy`) differs from the renders in these places:
+- Its process kind is `jukebox`: `music` is the Editor's Music tab.
+- It has no tile in the desk's column (`DESK_TILE`). A ninth tile wraps the
+  1024×600 desk's column into a third. The desk reaches Music from the
+  home's Apps and from its status item.
+- A list's current row draws no fill once the focus leaves the table.
+- The volume meter changes by a tap or by its − and + buttons. It takes no
+  ← → of its own.
+- On a pad, Y opens Now playing. L and R do not switch tabs: the input
+  table has no shoulder keys.
+- No theme names the `paused` role yet, so the paused ink is `ink_dim`
+  everywhere.
+- The Radio tab shows its no-Wi-Fi page when the console has a Wi-Fi radio
+  that is not up and knows no network.
+- Its prefs keep only the stations added (`music_stations`); there is no
+  settings page.
+
 ## The files
 
 | file | what it shows |

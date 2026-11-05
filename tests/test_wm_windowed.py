@@ -3493,14 +3493,18 @@ def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
 
 def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
     """The desk is the windowed tier's launch surface for apps, so its column
-    holds the Apps tab's carts: the registered apps' and the app carts no
-    app claims, Notes among them, whose tile is its icon set slot and whose
-    tap runs the cart in a window."""
+    holds the Apps tab's carts: the registered apps' (but an app that
+    declares no DESK_TILE, Music) and the app carts no app claims, Notes
+    among them, whose tile is its icon set slot and whose tap runs the cart
+    in a window."""
     ws = _moy_desk(tmp_path)
     desk = ws.wm._backdrop_layer
     rows = desk._icon_catalog()
     shown = {id(c) for _k, _l, c in rows if c is not None}
-    apps = ws._launcher_items(ws.carts.all, "apps")
+    off = [a for a, _t in ws._apps if not getattr(a, "DESK_TILE", True)]
+    assert [a.id for a in off] == ["jukebox"]
+    apps = [c for c in ws._launcher_items(ws.carts.all, "apps")
+            if not any(a.is_app(c) for a in off)]
     assert apps and all(id(c) in shown for c in apps), \
         [c.get("title") for c in apps if id(c) not in shown]
     notes = [r for r in rows if r[1] == "Notes"]
