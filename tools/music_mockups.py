@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   _lines              the media face's lines of text
+#   glyph               an icon the mock draws by hand
+#   Kit                 the frame a scene draws in
+#   MediaCard           the media card at its three densities
+#   MusicMock           the app's pages
+#   ControlCenter       the stand-in control center
+#   MusicMenu           the stand-in desk menu
+#   _bar_status         the stand-in status item in the bar
+#   _battery            the stand-in low and charging battery
+#   _vm_stop            the Stop & play question
+#   main                the scenes and the command
 """The Music app's mockups (#110), and the shell's status item and control
 center it plays through: each screen drawn with the public UI API's verbs on
 the goldens' workstation (`tests/test_shell_goldens.py`), at the real sizes,
