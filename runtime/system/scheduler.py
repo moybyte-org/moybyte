@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   Proc                     a process the scheduler has met: its state and counts
+#   Scheduler                the wakes' runner, the services and their policies
+#   -- the tick              Scheduler.tick, mail, the plain wakes, step
+#   -- the rungs             overrun, strike, suspend, resume, a crash
+#   -- services              start, hook, stop, kill, exit, pause, reset
+#   -- restart policies      policy, set_policy, forgive, the back-off
+#   start_cart               a shelf cart started under its consent
+#   boot                     the autostart services at the first frame
 """The cooperative scheduler (docs/os_2026-11/processes.md sections 1, 3, 4
 and 5): the wakes of `moybyte.WAKES` run once a frame after present, each
 callback under a slice and the abort guard, and the services the shell
@@ -61,6 +70,21 @@ service cart whose manifest asks for `autostart` and whose consent holds it
 (Settings turns it off per app), and every service the resume record says
 was running when the kernel stopped the VM.
 
+RESTART POLICIES. A service's policy says what follows an end nobody asked
+for (an exit, a crash, a kill at its start; a `stop`, the pause before a VM
+stop and `reset` are asked): `never` (the default) leaves it down,
+`on-crash` starts it again after an end with a code other than 0, `always`
+after any. The restart waits a back-off, MOY_RESTART_BACKOFF_MS doubled for
+each end in a row, and the RESTART_CAP'th end in a row (the strike ledger's
+cap, CrashGuard.STRIKES) leaves it down; a run of MOY_RESTART_HEAL_MS or more
+before its end starts the count afresh, and so does a start by hand
+(`forgive`). The restart is the cart's launch again, under its consent as it
+stands then, as a new process whose start forgets the old row (its log
+stays). The policies are `system/settings`' RESTART_KEY, {service id:
+policy}, read at the end: `service policy` sets and shows them
+(runtime/shell/sh_roles.py), and every start, end, restart and the cap are
+lines of the OS log.
+
 ACROSS A VM STOP (the S3s). The stop ends the VM's heap, so a Python service
 cannot be held through it: `pause()`, just before the stop, TERMs every
 running service (its `moy_stop` persists what it needs) and the resume
@@ -96,6 +120,8 @@ MOY_BG_CALLBACK_US = 20000      # a callback over this is an overrun
 MOY_BG_ABORT_US = 300000        # the guard's timer: past a collection's pause
 MOY_BG_STRIKES = 3              # strikes to suspension
 MOY_SERVICE_STOP_MS = 2000      # TERM to KILL: a start or stop hook's limit
+MOY_RESTART_BACKOFF_MS = 1000  # the first restart's wait, doubled for each end in a row
+MOY_RESTART_HEAL_MS = 10000     # a run this long before its end starts the count afresh
 DUE_MAX = 16                    # wakes taken from the registry at a time
 _WRAP = 0x3FFFFFFF              # a counter wraps as ticks do: a small int on a board
 
@@ -109,6 +135,16 @@ EXITED = "exited"
 
 SHELL = 1
 SERVICE, APP, COMMAND = "service", "app", "command"
+
+NEVER, ON_CRASH, ALWAYS = "never", "on-crash", "always"
+POLICIES = (NEVER, ON_CRASH, ALWAYS)
+RESTART_KEY = "service_restart"     # system/settings: {service id: policy}
+
+try:
+    from crash_guard import CrashGuard as _CG
+except ImportError:  # host: the runtime package
+    from runtime.crash_guard import CrashGuard as _CG
+RESTART_CAP = _CG.STRIKES           # ends in a row that leave a service down
 
 ALLOC_WRAP = _WRAP              # `allocated()` wraps here: a difference is masked by it
 
@@ -155,9 +191,19 @@ class Proc:
         self.code = None
         self.calls = 0
         self.cost_us = 0        # its callbacks' cost, summed (wrapping at 2**30)
+        self.started = 0        # ticks_ms at its start
+        self.ws = None          # the console a service was started on, its cart
+        self.origin = None      # as the shelf holds it, and its consent: what a
+        self.args = ()          # restart launches again
         self.mem = None         # what its start allocated (`allocated`), bytes
         self.cpu = None         # its last sample's busy us a second (Procs.account)
         self.seen_us = 0        # cost_us at that sample
+
+
+def _let_go(p):
+    """An exited row that will not restart holds no console."""
+    p.ws = p.origin = None
+    p.args = ()
 
 
 def _log(level, pid, *parts):
@@ -190,6 +236,9 @@ class Scheduler:
         self._wid = 0
         self._one = self._call_wid      # bound once: the guard's callable
         self._plain = {}            # wid -> True: the shell's wakes run unguarded
+        self.store = None           # the settings the restart policies are read from
+        self.down = {}              # service id -> its ends in a row
+        self.pending = {}           # service id -> the wake of its restart
         self._t0 = 0                # this tick's start and budget (left_us)
         self._budget = 0
         self.wakes.ended = self._ended
@@ -253,11 +302,14 @@ class Scheduler:
         """A wake of the shell's, every `ms`, that the tick runs without the
         guard: a driver whose own callbacks each take one (the asyncio loop,
         runtime/system/aio.py). Answers its id."""
+        return self._plain_wake(self.wakes.every, ms, fn)
+
+    def _plain_wake(self, make, ms, fn):
         was = _L.current() if _L is not None else SHELL
         if _L is not None:
             _L.current(SHELL)
         try:
-            wid = self.wakes.every(ms, fn)
+            wid = make(ms, fn)
         finally:
             if _L is not None:
                 _L.current(was)
@@ -274,6 +326,8 @@ class Scheduler:
             return
         if wid in self._plain:
             self.wakes.call(wid)
+            if wid not in self.wakes.by_id:
+                self._plain.pop(wid, None)
             return
         pid = w[_OWNER]
         p = self.procs.get(pid)
@@ -424,12 +478,14 @@ class Scheduler:
 
     # -- services -----------------------------------------------------------
 
-    def start(self, cart, rec=None, have=(), env=None):
+    def start(self, cart, rec=None, have=(), env=None, ws=None, origin=None):
         """Start service `cart` (a cart dict carrying `src`), under consent
         record `rec` on a console with the services `have`, its namespace
         holding the names of `env` (what the console hands a system
-        process). A cart already running answers its pid. Answers its pid,
-        or None when the launch was refused or it ended in its start."""
+        process); `ws` and `origin`, the console and the shelf's cart, are
+        what a restart launches again (`start_cart`). A cart already running
+        answers its pid. Answers its pid, or None when the launch was refused
+        or it ended in its start."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
@@ -442,6 +498,8 @@ class Scheduler:
         pid = _L.spawn(name) if _L is not None else self._next_pid()
         p = self.procs[pid] = Proc(pid, SERVICE, name, cart)
         p.granted = tuple(granted)
+        p.started = _ticks_ms()
+        p.ws, p.origin, p.args = ws, origin, (rec, have, env)
         if refusal is not None:
             _log(ERR, pid, refusal)
             p.state, p.code = EXITED, EXIT_CRASHED
@@ -537,11 +595,88 @@ class Scheduler:
     def _exit(self, p, code):
         if p.state == EXITED:
             return
+        asked = p.state == STOPPING
         p.state = EXITED
         p.code = code
         p.ns = None
         self.wakes.end(p.pid)
         _log(INFO, p.pid, "exit %d" % code)
+        if asked or p.kind != SERVICE or not self._unasked(p, code):
+            _let_go(p)
+
+    # -- restart policies ---------------------------------------------------
+
+    def policy(self, name):
+        """Service `name`'s restart policy: NEVER where none is set."""
+        rows = self.store.get(RESTART_KEY) if self.store is not None else None
+        got = rows.get(name) if isinstance(rows, dict) else None
+        return got if got in POLICIES else NEVER
+
+    def set_policy(self, name, policy):
+        """Service `name`'s restart policy set, persisted in the settings."""
+        if policy not in POLICIES:
+            raise ValueError("no restart policy %r" % (policy,))
+        if self.store is None:
+            raise OSError("no settings to keep it in")
+        rows = self.store.get(RESTART_KEY)
+        rows = dict(rows) if isinstance(rows, dict) else {}
+        if policy == NEVER:
+            rows.pop(name, None)
+        else:
+            rows[name] = policy
+        self.store.set(RESTART_KEY, rows)
+
+    def forgive(self, name):
+        """A start by hand: service `name`'s ends in a row forgotten and its
+        pending restart dropped. Answers whether one was pending."""
+        self.down.pop(name, None)
+        wid = self.pending.pop(name, None)
+        if wid is None:
+            return False
+        for p in self.procs.values():
+            if p.name == name and p.state == EXITED:
+                _let_go(p)
+        self.wakes.cancel(wid)
+        self._plain.pop(wid, None)
+        return True
+
+    def _unasked(self, p, code):
+        """What follows service `p`'s end nobody asked for; True where it
+        restarts."""
+        pol = self.policy(p.name)
+        if pol == NEVER or (pol == ON_CRASH and code == EXIT_OK):
+            return False
+        n = self.down.get(p.name, 0)
+        if _ticks_diff(_ticks_ms(), p.started) >= MOY_RESTART_HEAL_MS:
+            n = 0
+        n += 1
+        self.down[p.name] = n
+        if n >= RESTART_CAP:
+            _log(ERR, p.pid, "%s: %d ends in a row, it stays down" % (pol, n))
+            return False
+        ms = MOY_RESTART_BACKOFF_MS << (n - 1)
+        _log(WARNING, p.pid, "%s: restart in %d ms (end %d of %d)"
+             % (pol, ms, n, RESTART_CAP))
+        old = self.pending.pop(p.name, None)
+        if old is not None:
+            self.wakes.cancel(old)
+        self.pending[p.name] = self._plain_wake(self.wakes.after, ms,
+                                                lambda: self._again(p))
+        return True
+
+    def _again(self, p):
+        """Service `p` launched again after its back-off."""
+        self.pending.pop(p.name, None)
+        if self.find(p.name) is not None:
+            return
+        if self.procs.get(p.pid) is p:
+            del self.procs[p.pid]
+        cart = p.origin if p.origin is not None else p.cart
+        if p.ws is not None:
+            start_cart(p.ws, cart, self)
+        else:
+            rec, have, env = p.args
+            self.start(cart, rec, have, env)
 
     def _ended(self, pid):
         """`moybyte.end(pid)`: a process the Player ran ended; its row goes."""
@@ -568,10 +703,15 @@ class Scheduler:
 
     def reset(self):
         """Every service ended and every row forgotten (a test's teardown)."""
+        for name in list(self.pending):
+            self.forgive(name)
         for p in list(self.procs.values()):
             if p.kind == SERVICE and p.state != EXITED:
+                p.state = STOPPING
                 self._exit(p, EXIT_KILLED)
         self.procs.clear()
+        self.down.clear()
+        self.store = None
         self._n = self._i = 0
         self.resumed = ()
 
@@ -621,13 +761,22 @@ def prepared(ws, cart):
     return run, rec, have, env_of(run) if env_of is not None else None
 
 
-def start_cart(ws, cart):
-    """Start service `cart` of console `ws` under its consent (`prepared`)."""
+def attach(ws, sched=None):
+    """The console whose settings hold the restart policies."""
+    (sched or SCHED).store = getattr(ws, "system", None)
+
+
+def start_cart(ws, cart, sched=None):
+    """Start service `cart` of console `ws` under its consent (`prepared`)
+    on `sched` (SCHED)."""
+    sched = sched or SCHED
+    attach(ws, sched)
     got = prepared(ws, cart)
     if got is None:
         _log(ERR, None, "service %s: no source" % (cart.get("id") or cart.get("title")))
         return None
-    return SCHED.start(*got)
+    run, rec, have, env = got
+    return sched.start(run, rec, have, env, ws, cart)
 
 
 def wants_autostart(ws, cart):
@@ -650,6 +799,7 @@ def boot(ws):
     """The console's services at its first frame: the autostart ones and
     those the resume record names. Answers the pids started."""
     out = []
+    attach(ws)
     carts = getattr(ws, "carts", None)
     for cart in (carts.all if carts is not None else ()):
         if wants_autostart(ws, cart) or cart.get("path") in SCHED.resumed:

@@ -307,6 +307,26 @@ def test_service_starts_stops_and_says_its_state(console):
     assert call(d, "role", "service", "start", "local.nope") == 1
 
 
+def test_service_policy_sets_and_shows_and_lives_in_the_settings(console):
+    ws, door = console
+    io, d = door()
+    assert call(d, "role", "service", "policy", "local.svc") == 0
+    assert io.out.split() == ["never", "local.svc"]
+    assert call(d, "role", "service", "policy", "local.svc", "on-crash") == 0
+    assert ws.system.get(S.RESTART_KEY) == {"local.svc": "on-crash"}
+    io, d = door()
+    assert call(d, "role", "service", "policy") == 0
+    assert "on-crash  local.svc\n" in io.out
+    assert call(d, "role", "service", "policy", "local.svc", "sometimes") == 2
+    assert call(d, "role", "service", "policy", "local.nope") == 1
+    S.SCHED.pending["local.svc"] = S.SCHED.wakes.after(10000, lambda: None)
+    io, d = door()
+    assert call(d, "role", "service", "status", "local.svc") == 3
+    assert io.out.split() == ["-", "restarting", "local.svc"]
+    assert call(d, "role", "service", "stop", "local.svc") == 0   # the wait dropped
+    assert not S.SCHED.pending
+
+
 class _Req:
     def __init__(self, status, body):
         self.st, self.b, self.closed, self.polls = (status, len(body)), body, False, 0

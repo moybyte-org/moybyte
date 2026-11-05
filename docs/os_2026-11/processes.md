@@ -378,11 +378,22 @@ reader is the first holder outside that heap (the media service, P2.4).
 process table holds, per service, its **autostart** state (a permission,
 `autostart`, owner 2026-11-03: a service cart holding it starts at the
 console's first drawn frame, and the user can turn that off in Settings), its **restart
-policy** (`never`, `on-crash`, `always`, with a back-off and the strike
-ledger's cap; P3.6) and its log lines under its process id (§9): start,
-stop, kill, exit with its code, and each rung. `service
+policy** and its log lines under its process id (§9): start, stop, kill,
+exit with its code, each rung, each restart and the cap. The policy says
+what follows an end nobody asked for (an exit, a crash, a start killed at
+its limit; a stop, the pause before a VM stop are asked): `never`, the
+default, leaves the service down, `on-crash` starts it again after an end
+with a code other than 0, `always` after any. The restart waits a back-off,
+`MOY_RESTART_BACKOFF_MS` (1 s) doubled for each end in a row, and the
+strike ledger's cap (`CrashGuard.STRIKES`, 3) of ends in a row leaves it
+down; a run of `MOY_RESTART_HEAL_MS` (10 s) before its end, or a start by
+hand, starts the count afresh. The restart is the cart's launch again under
+its consent as it stands then, a new process. The policies are a
+`system/settings` row, `service_restart` ({service id: policy}, configuration
+in `runtime/system/scheduler.py`), and a manifest declares none. `service
 start/stop/status/restart` and the task manager are the two faces of one
-implementation. The `moy_stop` hook is the TERM; a service still running after
+implementation, and `service policy [NAME [never|on-crash|always]]` shows
+and sets the policy. The `moy_stop` hook is the TERM; a service still running after
 `MOY_SERVICE_STOP_MS` (configuration, 2000) gets the KILL: its task deleted, its
 OWNER swept, the ledger told. A Python service's row is the scheduler's
 (`runtime/system/scheduler.py`): its `moy_stop` runs under a guard of

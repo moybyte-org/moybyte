@@ -24,6 +24,8 @@ on the serial face and the screen face alike.
   notify clear [ID]          clear one, or every one
   service [status [NAME|PID]]  each service cart: pid, state, id
   service start|stop|restart NAME|PID
+  service policy [NAME [never|on-crash|always]]
+                             each service's restart policy, or set one
                              the task manager's Stop is the same stop
   lease                      what the board leases and who holds it
   http get URL [CAP]         a GET, its body to stdout; not 2xx exits 1
@@ -260,6 +262,8 @@ def _svc_rows(ws):
 
 def _svc_line(name, p):
     sch = _sched()
+    if name in sch.SCHED.pending:
+        return "-     restarting %s\n" % name
     if p is None:
         return "-     stopped    %s\n" % name
     st = p.state if p.state != sch.EXITED else "exited %d" % (p.code or 0)
@@ -277,6 +281,7 @@ def _svc_find(rows, key):
 def r_service(d, a):
     ws = d.ws
     sch = _sched()
+    sch.attach(ws)
     rows = _svc_rows(ws)
     if not a or a[0] == "status":
         if len(a) <= 1:
@@ -288,17 +293,21 @@ def r_service(d, a):
             return 1
         d.out(_svc_line(hit[0], hit[2]))
         return 0 if hit[2] is not None and hit[2].state != sch.EXITED else 3
+    if a[0] == "policy" and len(a) <= 3:
+        return _svc_policy(d, sch, rows, a[1:])
     if a[0] not in ("start", "stop", "restart") or len(a) != 2:
-        return _usage(d, "service", "[status [NAME|PID]] | start|stop|restart NAME|PID")
+        return _usage(d, "service", "[status [NAME|PID]] | start|stop|restart NAME|PID"
+                      " | policy [NAME [never|on-crash|always]]")
     hit = _svc_find(rows, a[1])
     if hit is None:
         d.err("service", "%s: no such service" % a[1])
         return 1
     name, cart, p = hit
     live = p is not None and p.state != sch.EXITED
+    waiting = sch.SCHED.forgive(name)
     if a[0] in ("stop", "restart") and live:
         ws.procs.stop_service(p.pid)
-    elif a[0] == "stop":
+    elif a[0] == "stop" and not waiting:
         d.err("service", "%s is not running" % name)
         return 1
     if a[0] in ("start", "restart"):
@@ -307,6 +316,25 @@ def r_service(d, a):
         if sch.start_cart(ws, cart) is None:
             d.err("service", "%s did not start: its log says why" % name)
             return 1
+    return 0
+
+
+def _svc_policy(d, sch, rows, a):
+    """`service policy`: each service's restart policy, one's, or one set."""
+    S = sch.SCHED
+    if not a:
+        d.out("".join("%-9s %s\n" % (S.policy(n), n) for n, _c, _p in rows))
+        return 0
+    hit = _svc_find(rows, a[0])
+    if hit is None:
+        d.err("service", "%s: no such service" % a[0])
+        return 1
+    if len(a) == 1:
+        d.out("%-9s %s\n" % (S.policy(hit[0]), hit[0]))
+        return 0
+    if a[1] not in sch.POLICIES:
+        return _usage(d, "service", "policy NAME never|on-crash|always")
+    S.set_policy(hit[0], a[1])
     return 0
 
 
