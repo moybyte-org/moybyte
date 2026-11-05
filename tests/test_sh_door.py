@@ -388,6 +388,67 @@ def test_device_faces_answer_through_the_door(console, monkeypatch):
     assert io.err == "lora: this console has none\n"
 
 
+class _Stoppable:
+    """A device face whose wait the session's Ctrl-C ends: `opened` until
+    the role gives it back."""
+
+    CAP_MAX = 65536
+
+    def __init__(self):
+        self.opened = 0
+
+    def get(self, url, cap):
+        self.opened += 1
+        face = self
+
+        class R:
+            def state(self):
+                return None
+
+            def close(self):
+                face.opened -= 1
+        return R()
+
+    def open(self):
+        self.opened += 1
+        return 16000
+
+    def read(self, buf):
+        return 0
+
+    def listen(self, on):
+        self.opened += 1
+
+    def recv(self, buf):
+        return None
+
+    def scan(self, ms):
+        self.opened += 1
+
+    def close(self):
+        self.opened -= 1
+
+
+@pytest.mark.parametrize("argv", [("http", "get", "http://x/"), ("mic", "read", "5000"),
+                                  ("lora", "recv", "5000"), ("ble", "scan", "5000")])
+def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkeypatch, argv):
+    """A role command waiting on a device asks the session's face for Ctrl-C
+    between polls (moy_sh.interrupted, the serial face's 0x03 or the screen
+    face's keys): it exits 130 having closed what it opened."""
+    face = _Stoppable()
+    _faces(monkeypatch, **{argv[0]: face})
+    _ws, door = console
+    io, d = door()
+    polls = []
+
+    def interrupted():
+        polls.append(1)
+        return len(polls) > 3
+    io.interrupted = interrupted
+    assert call(d, "role", *argv) == 130
+    assert face.opened == 0 and len(polls) == 4
+
+
 def test_lease_lists_the_boards_rows(console, monkeypatch):
     from runtime import leases
     monkeypatch.setattr(leases, "pins", lambda: "uart1  17,18     -")

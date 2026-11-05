@@ -9,6 +9,10 @@ Each is the face of one implementation, never a second copy, run as the shell
 (pid 1: full access, not gated); what the shell takes (the radio, the
 microphone, the USB host, a MIDI port, the audio ring) it gives back before
 the command ends, except a media stream, which plays until `media stop`.
+A command that waits (`http get`, `mic read`, `lora recv`, `ble scan`, `snd
+play`) asks the session's face for Ctrl-C between its polls (`stopped`) and
+on one gives back what it took and exits 130, the rest of the line dropped,
+on the serial face and the screen face alike.
 
   perm [list [APP]]          each app's asked permission, on or off: Settings'
                              App permissions (runtime/shell/app_perms.py)
@@ -51,6 +55,7 @@ except ImportError:  # host: the runtime package
     from runtime import sh_door as _door
 
 USAGE = 2
+INTERRUPTED = 130
 WAIT_MS = 20000                 # an http request's wait, at most
 MIC_MS = 10000                  # a mic read, at most
 LORA_MS = 5000                  # a recv's wait, by default
@@ -78,6 +83,21 @@ def _sleep(ms):
         time.sleep_ms(ms)
     except AttributeError:  # CPython
         time.sleep(ms / 1000)
+
+
+def stopped(d):
+    """Ctrl-C on the face of the session the command runs from."""
+    io = d.io
+    return io is not None and hasattr(io, "interrupted") and bool(io.interrupted())
+
+
+def _wait(d, ms):
+    """Sleep `ms` in POLL_MS steps: True when Ctrl-C came first."""
+    for _ in range(max(1, ms // POLL_MS)):
+        if stopped(d):
+            return True
+        _sleep(POLL_MS)
+    return stopped(d)
 
 
 def _int(s, default=None):
@@ -311,7 +331,8 @@ def r_http(d, a):
             if _ticks_diff(_ticks_ms(), t0) > WAIT_MS:
                 d.err("http", _WHY[110])
                 return 1
-            _sleep(POLL_MS)
+            if _wait(d, POLL_MS):
+                return INTERRUPTED
             st = req.state()
         body = req.body()
         if body and d.io is not None:
@@ -344,8 +365,8 @@ def r_mic(d, a):
             if n:
                 d.io.write(1, bytes(buf[:2 * n]))
                 want -= n
-            else:
-                _sleep(POLL_MS)
+            elif _wait(d, POLL_MS):
+                return INTERRUPTED
     finally:
         f.close()
     return 0
@@ -372,7 +393,8 @@ def r_lora(d, a):
                 n, rssi, snr = got
                 d.out("%d %s %s\n" % (rssi, snr, bytes(buf[:n]).decode("utf-8", "replace")))
                 return 0
-            _sleep(POLL_MS)
+            if _wait(d, POLL_MS):
+                return INTERRUPTED
         d.err("lora", "nothing heard")
         return 1
     finally:
@@ -388,7 +410,8 @@ def r_ble(d, a):
     ms = _int(a[1], SCAN_MS) if len(a) == 2 else SCAN_MS
     try:
         f.scan(ms)
-        _sleep(ms)
+        if _wait(d, ms):
+            return INTERRUPTED
         d.out("".join("%s %d %s\n" % (addr, rssi, name or "-")
                       for addr, rssi, name in f.devices()))
     finally:
@@ -499,12 +522,13 @@ def r_snd(d, a):
         while at + 1 < len(data):
             took = m.snd(bytearray(data[at:at + 4096]))
             at += 2 * took
-            if not took:
-                _sleep(POLL_MS)
+            if stopped(d) or (not took and _wait(d, POLL_MS)):
+                return INTERRUPTED
         c = m.snd_counts()
         t0 = _ticks_ms()
         while c is not None and c[3] < c[5] and _ticks_diff(_ticks_ms(), t0) < 2000:
-            _sleep(POLL_MS)
+            if _wait(d, POLL_MS):
+                return INTERRUPTED
             c = m.snd_counts()
     finally:
         m.snd_close()

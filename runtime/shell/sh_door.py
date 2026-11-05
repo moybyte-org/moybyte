@@ -80,7 +80,12 @@ def _io():
     try:
         import moy_sh
         return moy_sh
-    except ImportError:  # host: no C shell; a test hands the door its own
+    except ImportError:
+        pass
+    try:                # CPython: the ctypes binding (runtime/host/moy_sh.py)
+        from runtime import moy_sh
+        return moy_sh
+    except ImportError:  # the browser and the desktop MicroPython: no C shell
         return None
 
 
