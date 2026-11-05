@@ -255,7 +255,8 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
     return code_of(r);
 }
 
-// The commands the console serves (runtime/shell/sh_door.py's ROLES).
+// The commands the console serves: runtime/shell/sh_roles.py has an r_<name>
+// for each (tests/test_sh_door.py holds the two equal).
 static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
     "python", "service", "snd", "usb", NULL,

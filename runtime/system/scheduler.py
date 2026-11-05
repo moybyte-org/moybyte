@@ -102,7 +102,7 @@ STOPPING = "stopping"
 EXITED = "exited"
 
 SHELL = 1
-SERVICE, APP = "service", "app"
+SERVICE, APP, COMMAND = "service", "app", "command"
 
 ALLOC_WRAP = _WRAP              # `allocated()` wraps here: a difference is masked by it
 
@@ -517,18 +517,17 @@ def tick(slack_us=0):
     return SCHED.tick(slack_us)
 
 
-def start_cart(ws, cart):
-    """Start service `cart` of console `ws` under its consent: its source
-    read from the store when the shelf holds it slim, its namespace holding
-    what the console hands it (`ws.service_env(cart)`, a system process's)."""
+def prepared(ws, cart):
+    """What a launch of `cart` on console `ws` runs under: (the cart with
+    its source, read from the store when the shelf holds it slim, its
+    consent record, the console's services, its namespace's names: a
+    system process's, `ws.service_env`), or None where it has no source."""
     carts = getattr(ws, "carts", None)
     full = carts.rehydrate(cart) if carts is not None else cart
-    src = full.get("src")
     run = dict(full)
     if carts is not None:
         carts.reslim(cart)
-    if src is None:
-        _log(ERR, None, "service %s: no source" % (cart.get("id") or cart.get("title")))
+    if run.get("src") is None:
         return None
     consent = getattr(ws, "consent", None)
     if consent is not None:
@@ -541,7 +540,16 @@ def start_cart(ws, cart):
     else:
         rec, have = None, ()
     env_of = getattr(ws, "service_env", None)
-    return SCHED.start(run, rec, have, env_of(run) if env_of is not None else None)
+    return run, rec, have, env_of(run) if env_of is not None else None
+
+
+def start_cart(ws, cart):
+    """Start service `cart` of console `ws` under its consent (`prepared`)."""
+    got = prepared(ws, cart)
+    if got is None:
+        _log(ERR, None, "service %s: no source" % (cart.get("id") or cart.get("title")))
+        return None
+    return SCHED.start(*got)
 
 
 def wants_autostart(ws, cart):

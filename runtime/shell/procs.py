@@ -98,6 +98,8 @@ RUNNING, THROTTLED, MINIMISED = "running", "throttled", "minimised"
 PAUSED, CRASHED = "paused", "crashed"
 SVC = "svc:"                    # a service row's key prefix
 NOTIFY = "notifications"        # the permission a post needs
+# The scheduler's rows that carry the grant their start was bound with.
+_GRANTED = (_sched.SERVICE, _sched.COMMAND)
 
 # The Workstation's fields a world holds, and its InputState's.
 _WS = ("player", "project", "audio", "canvas", "cart_frame", "_run_canvas",
@@ -874,12 +876,12 @@ class Procs:
                 return _poster(p.world.project.cart if p.world.project else None,
                                pl.granted)
         sp = _sched.SCHED.procs.get(pid)
-        if sp is not None and sp.kind == _sched.SERVICE and sp.state != _sched.EXITED:
+        if sp is not None and sp.kind in _GRANTED and sp.state != _sched.EXITED:
             return _poster(sp.cart, sp.granted)
         return (None, None, False)
 
     def granted(self, pid):
-        """The permissions process `pid`'s run or service was granted, as a
+        """The permissions process `pid`'s run, service or command was granted, as a
         lease checks them (runtime/system/leases.py): None for the shell,
         which is not gated, () for a pid with no live run."""
         if pid == _sched.SHELL:
@@ -891,7 +893,7 @@ class Procs:
             if p.world.player.pid == pid:
                 return p.world.player.granted
         sp = _sched.SCHED.procs.get(pid)
-        if sp is not None and sp.kind == _sched.SERVICE and sp.state != _sched.EXITED:
+        if sp is not None and sp.kind in _GRANTED and sp.state != _sched.EXITED:
             return sp.granted
         return ()
 

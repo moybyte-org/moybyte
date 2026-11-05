@@ -17,7 +17,7 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh_posix.h`, `dash_config.h` | the shim dash compiles against (`-include dash_config.h`) |
 | `moy_sh_int.h` | what the three `.c` files share |
 | `dash/`, `patches/`, `dash_vendor.json`, `dash_pin.h` | the vendored dash (`UPSTREAM.md`) |
-| `moy_sh_board.c`, `moy_sh_board.h` | a board's host table (the kernel's figures in C, the console's across the ROLE door, `runtime/shell/sh_door.py`) and the serial face, the dev channel's `sh` word |
+| `moy_sh_board.c`, `moy_sh_board.h` | a board's host table (the kernel's figures in C, the console's across the ROLE door: `runtime/shell/sh_door.py` serves the processes, /proc, /dev, /bin and the installed commands, `runtime/shell/sh_roles.py` the role commands) and the serial face, the dev channel's `sh` word |
 | `modmoy_sh.c`, `micropython.cmake` | the MicroPython module (a door command's streams, `line`) and the board build: the shell is its own static library, so dash's shim reaches no other file |
 | `host/sh_main.c`, `host/board_main.c` | the host harnesses the suite runs: a session over a folder, and the serial face over the board's table |
 

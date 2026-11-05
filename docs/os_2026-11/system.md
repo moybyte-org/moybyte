@@ -47,6 +47,19 @@ cart's `main(argv)` in the shell's VM, a wasm command's WASI `_start`
 future SSH client and a laptop's `ssh` session all speak one standard. The
 `python` REPL into the shell's VM is one command among many.
 
+As built, a Python line program is a command cart's `main(argv)` in the
+shell's VM (`runtime/shell/sh_door.py` says how it runs): its name on the
+PATH is its id's name (`local.hello` is `hello`; until install refuses a
+collision, two carts sharing a name leave it to the first id) and
+`<id>/<name>` runs that one; it is a process of its own (kind `command`)
+holding the permissions its consent grants, its `print` and `input` the
+session's streams over the door, its exit code `main`'s answer, under the
+scheduler's guard for 30 s at most. A command run with `&` runs to its end
+before the prompt returns, its output into the log under its pid, and `wait`
+reads its code. `python` reads its stdin as a REPL (an expression's value
+printed) or runs `-c CODE`; the serial face's stdin is empty, so there it
+takes a pipe or a here-document.
+
 **Built-ins are views of OS services: one implementation, a GUI face and a
 command face, never a second copy.** The core commands are **C built-ins**
 over the kernel's own tables and the store's C (`native/moy_store/moy_fs.h`,
@@ -67,7 +80,12 @@ kernel's row and the run in front (which `kill` ends) are served in C, and
 everything the console knows (its processes, /proc and /dev through
 `runtime/system/devfs.py`, the installed and role commands, `df`) crosses the
 ROLE door on the shell's own row to `runtime/shell/sh_door.py`, so with the VM
-stopped `ps` shows the console stopped and the run in front.
+stopped `ps` shows the console stopped and the run in front. The role commands
+served today are `perm`, `notify`, `service`, `lease`, `python` and the device
+faces `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `media` and `snd`, each a
+face of its service's one implementation run as the shell (pid 1), giving back
+what it took before it ends, a media stream excepted;
+`runtime/shell/sh_roles.py` lists their forms.
 
 **The screen face.** On a board with glass the terminal is a system app
 whose Layer is the **renderer** of the C shell's output: today's
