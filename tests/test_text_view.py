@@ -783,3 +783,24 @@ def test_a_caret_revealed_moves_the_view_only_as_far_as_its_row(th, bufs):
     assert r.reveal(2, 0)               # a caret above: its row at the top
     r.frame()
     assert r.ends()[0][0] == 2 and r.ends()[0][1] < 40
+
+
+def test_an_sgr_escape_mid_line_moves_no_glyph(th):
+    """A run after an escape draws at its own column, the escape's bytes
+    taking none: the line's ink lies where the plain line's does."""
+    from runtime.host_canvas import make_system_canvas
+
+    def ink(line):
+        cv = make_system_canvas(320, 240)
+        host = ui_draw.AppHost()
+        host.begin(cv, th, (0, 0, 320, 240))
+        ui.page("Ink")
+        ui.at(0, 40, 320, 40)
+        ui.text_view("ink", [line], {"rows": 1})
+        ui.end()
+        b = bytes(cv._buf)
+        ground = b[2 * (60 * 320 + 300):2 * (60 * 320 + 300) + 2]
+        return [x for x in range(320) if any(
+            b[2 * (y * 320 + x):2 * (y * 320 + x) + 2] != ground for y in range(44, 76))]
+
+    assert ink("\x1b[2m$ \x1b[0;36mls -l\x1b[0m /") == ink("$ ls -l /")

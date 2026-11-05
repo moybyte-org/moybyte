@@ -951,6 +951,7 @@ typedef struct {
     const uint8_t *p;
     int left, cols, tx0, y;
     uint32_t a0, b0;            // the row's bytes
+    int c0;                     // ...and its first column
 } dr_t;
 
 static uint16_t c565(const dr_t *d, int ci) {
@@ -1043,8 +1044,8 @@ static void print_run(void *ctx, int tone, uint32_t a, uint32_t b, int col) {
         cb = cb - cols_in(p, d->b0, b);
         b = d->b0;
     }
-    // columns relative to the row's first
-    int rc0 = cols_in(p, d->a0, a), rc1 = rc0 + (cb - ca);
+    // columns relative to the row's first (an SGR escape before the run takes none)
+    int rc0 = ca - d->c0, rc1 = rc0 + (cb - ca);
     int left = d->left, right = d->left + d->cols;
     if (rc1 <= left) {
         return;
@@ -1183,6 +1184,7 @@ static void draw_row(dr_t *d, const int32_t in[4], const moy_ui_trow_t *r,
     d->p = r->p;
     d->a0 = r->a;
     d->b0 = r->b;
+    d->c0 = r->ca;
     d->left = left;
     d->cols = cols;
     d->tx0 = tx0;
