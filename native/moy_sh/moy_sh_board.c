@@ -599,6 +599,10 @@ static int b_log(void *ctx, moy_sh_t *s, int fd, const char *name, int follow) {
     return 0;
 }
 
+void moy_sh_board_yield(void) {
+    b_sleep(NULL, 1);
+}
+
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),
                        int (*poll)(void *ctx)) {

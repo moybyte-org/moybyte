@@ -41,6 +41,11 @@ def shell_sources():
     return srcs
 
 
+# The board's side, compiled without dash's shim: its host table and the
+# serial face, the screen face and its grid.
+BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_term.c")
+
+
 def _objects(cc, out):
     dash_flags = CFLAGS + ["-include", os.path.join(SH, "dash_config.h"),
                            "-I", SH, "-I", DASH, "-I", STORE]
@@ -49,7 +54,8 @@ def _objects(cc, out):
     jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
     board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE]
-    jobs.append((os.path.join(SH, "moy_sh_board.c"), board))
+    for name in BOARD_SOURCES:
+        jobs.append((os.path.join(SH, name), board))
     jobs.append((os.path.join(SH, "host", "board_main.c"), board))
     jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE]))
     jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE]))
@@ -89,11 +95,10 @@ def harness(tmp_path_factory):
         if not all(os.path.exists(e) for e in exes.values()):
             objs = _objects(cc, str(base))
             mains = {name: os.path.join(str(base), name + ".o") for name in exes}
-            shared = [o for o in objs if o not in mains.values()
-                      and not o.endswith("moy_sh_board.o")]
+            board = [os.path.join(str(base), n[:-2] + ".o") for n in BOARD_SOURCES]
+            shared = [o for o in objs if o not in mains.values() and o not in board]
             for name, exe in exes.items():
-                own = [mains[name]] + ([os.path.join(str(base), "moy_sh_board.o")]
-                                       if name == "board_main" else [])
+                own = [mains[name]] + (board if name == "board_main" else [])
                 r = subprocess.run([cc] + CFLAGS + shared + own + ["-o", exe + ".tmp"],
                                    capture_output=True, text=True)
                 assert r.returncode == 0, r.stderr[-4000:]
@@ -156,6 +161,41 @@ def test_the_serial_face_answers_as_its_transcript_says(harness, tmp_path, name)
         assert got == f.read()
 
 
+def _face(harness, path, root, screen):
+    name = os.path.basename(path)
+    args = ([harness["board_main"]] + (["-vm"] if name.startswith("vm_") else [])
+            + (["-screen"] if screen else []) + [path])
+    r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60,
+                       env=dict(os.environ, TZ="UTC", MOY_SH_ROOT=str(root)))
+    return r.stdout.decode("utf-8", "replace")
+
+
+# interrupt.sh's Ctrl-C is sh_main's stand-in (/.interrupt), which no face polls.
+REPLAYS = ([os.path.join(SERIAL, n + ".sh") for n in SERIAL_NAMES]
+           + [os.path.join(SCRIPTS, n + ".sh") for n in SCRIPT_NAMES if n != "interrupt"])
+
+
+@pytest.mark.parametrize("path", REPLAYS, ids=[os.path.relpath(p, SCRIPTS) for p in REPLAYS])
+def test_the_screen_face_replays_the_serial_transcript(harness, tmp_path, path):
+    """One transcript, both faces: each serial script's lines fed to the
+    screen face (moy_sh_screen.c) give, line for line, what its grid shows,
+    the serial face's output with its tabs set at the grid's stops and
+    its trailing blanks, which a grid does not hold, dropped. A
+    transcript that writes escapes (`clear`) says them raw on serial and
+    moves the grid, so it is the grid's own test's. Every script of the
+    suite replays so too, over the board's table in place of sh_main's."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    serial = _face(harness, path, tmp_path / "a", False)
+    if "\x1b" in serial:
+        pytest.skip("escapes: the grid's test reads them")
+    screen = _face(harness, path, tmp_path / "b", True)
+    assert "Sanitizer" not in screen and "runtime error" not in screen, screen
+    want = ["SH " + ln[3:].expandtabs(8).rstrip(" ") if ln.startswith("SH ") else ln
+            for ln in serial.split("\n")]
+    assert screen.split("\n") == want
+
+
 def test_every_core_builtin_has_its_script():
     """A C built-in is tested by tests/moy_sh/builtin_<name>.sh."""
     with open(os.path.join(SH, "moy_sh_cmds.c"), encoding="utf-8") as f:
@@ -183,8 +223,8 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     plain = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
              "-I", SH, "-I", KERNEL, "-I", STORE]
     writable = []
-    for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
-                                                                  "moy_sh_board.c")]:
+    for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c")
+                                  + BOARD_SOURCES]:
         obj = str(tmp_path / (os.path.basename(src)[:-2] + ".o"))
         own = flags if src in shell_sources() else plain
         r = subprocess.run([cc] + own + ["-c", src, "-o", obj], capture_output=True, text=True)
@@ -214,8 +254,8 @@ def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
     plain = base + ["-I", SH, "-I", KERNEL, "-I", STORE]
     jobs = [(src, dash) for src in shell_sources()]
     jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
-                                                     "moy_sh_board.c", "host/sh_main.c",
-                                                     "host/board_main.c")]
+                                                     "host/sh_main.c", "host/board_main.c")
+             + BOARD_SOURCES]
 
     def one(job):
         src, flags = job

@@ -400,6 +400,10 @@ uint32_t moy_input_rep_word(const moy_input_t *t);
 uint32_t moy_input_key_repeats(const moy_input_t *t, int32_t *ev);
 int32_t moy_input_last_key(const moy_input_t *t);    // the byte the frame's key event types
 int32_t moy_input_key_event(const moy_input_t *t);   // the frame's key event
+// Between merges, for a run that holds the frame (the shell's Ctrl-C,
+// native/moy_sh/moy_sh_screen.h): whether a source's latch holds now, or has
+// queued, a key that types `byte`, or holds one of `buttons`.
+bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons);
 void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write of an event; the next source write heals it
 uint8_t moy_input_mods(const moy_input_t *t);
 // The frame's wheel notches, every source's summed.

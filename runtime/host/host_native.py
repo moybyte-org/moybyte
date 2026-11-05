@@ -14,6 +14,11 @@ ctypes-loads that one path -- the dynamic loader hands each the same handle,
 so a state one sets is the state every other reads. There is no state to copy
 across and no forwarder between libraries.
 
+The C shell (native/moy_sh) is the one part that is not a Part: dash's
+sources compile under a shim of their own, so runtime/host/moy_sh.py builds
+them as a static archive, as a board builds its own static library, and the
+library links it whole.
+
 Two parts are taken only where their prerequisites are: the compiled-cart run
 (runtime/host/moyhost_wasm.c and native/moy_wasm) where WAMR builds for the host
 (runtime/wasm_binding.wamr), and the user-files layer and the C image decoder
@@ -88,6 +93,10 @@ def parts(verbose=False):
         out.append(_module("runtime.lua_binding").WASM_PART)
         cflags += ["-DMOY_WASM=1", "-isystem", inc, "-DMOYHOST_WAMR_PIN=%s" % wasm.pin()]
         link = [lib, "-lm", "-lpthread", "-ldl"]
+    sh = _module("runtime.moy_sh").archive(ASAN if os.environ.get("MOYHOST_ASAN") else (),
+                                           verbose)
+    if sh is not None:
+        link = link + ["-Wl,--whole-archive", sh, "-Wl,--no-whole-archive"]
     return out, cflags, link
 
 

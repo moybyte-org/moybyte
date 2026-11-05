@@ -48,6 +48,9 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),
                        int (*poll)(void *ctx));
 
+// A long run's yield: the task sleeps a tick, so a task below it runs.
+void moy_sh_board_yield(void);
+
 // The serial face: run `text` (one line, no newline) in the serial session.
 // False when no session could be made (said as `SH error`).
 bool moy_sh_board_line(const char *text);

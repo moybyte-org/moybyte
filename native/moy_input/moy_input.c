@@ -1367,6 +1367,21 @@ int32_t moy_input_key_event(const moy_input_t *t) {
     return t->front->last_key;
 }
 
+bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons) {
+    for (uint8_t s = 0; s < t->nsrc; s++) {
+        const moy_input_latch_t *l = &t->front->src[s];
+        if ((l->held & buttons) || (l->key && moy_input_typed(l->key) == byte)) {
+            return true;
+        }
+        for (uint8_t i = 0; i < l->qn && i < MOY_INPUT_KEYQ; i++) {
+            if (moy_input_typed(l->q[i]) == byte) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 uint8_t moy_input_mods(const moy_input_t *t) {
     return (uint8_t)(t->mods | MOY_INPUT_MODS(t->front->last_key));
 }

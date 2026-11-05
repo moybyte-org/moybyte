@@ -117,6 +117,11 @@ void moy_sh_cancel(moy_sh_t *s);
 // $? after the last command, or the exit status after MOY_SH_EXIT.
 int moy_sh_status(const moy_sh_t *s);
 
+// Ctrl-C while a host callback runs (a role command waiting): the host's
+// poll asked, and an interrupt it answers kept, so the rest of the line is
+// dropped when the callback returns, as after a built-in's.
+int moy_sh_interrupted(moy_sh_t *s);
+
 // The prompt to show now (PS1, or PS2 after MOY_SH_MORE), expanded, into out.
 size_t moy_sh_prompt(moy_sh_t *s, int more, char *out, size_t cap);
 

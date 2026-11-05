@@ -12,7 +12,8 @@
 # component's include path. moy_sh_board.c rides in the library without the
 # shim: it is the kernel's side, over moy_kernel's and moy_store's headers.
 # A usermod runs inside the main component's CMakeLists, so the library takes
-# the IDF build's flags explicitly.
+# the IDF build's flags explicitly. The screen face (moy_sh_screen.c) and its
+# grid (moy_term.c) ride in it beside the serial face, without the shim too.
 
 set(MOY_SH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SH_DASH_SRCS ${MOY_SH}/dash/*.c)
@@ -26,7 +27,9 @@ list(APPEND MOY_SH_DASH_SRCS
 add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_arena.c
     ${MOY_SH}/moy_sh_fmt.c
-    ${MOY_SH}/moy_sh_board.c)
+    ${MOY_SH}/moy_sh_board.c
+    ${MOY_SH}/moy_sh_screen.c
+    ${MOY_SH}/moy_term.c)
 set_source_files_properties(${MOY_SH_DASH_SRCS} PROPERTIES
     COMPILE_OPTIONS "-include;${MOY_SH}/dash_config.h;-I${MOY_SH}/dash")
 
@@ -52,7 +55,7 @@ target_compile_options(moy_sh_core PRIVATE
     -Os)
 target_link_libraries(moy_sh_core PRIVATE
     idf::freertos idf::heap idf::newlib idf::vfs idf::esp_common idf::esp_system
-    idf::esp_hw_support idf::soc idf::hal idf::log)
+    idf::esp_hw_support idf::esp_timer idf::soc idf::hal idf::log)
 
 add_library(usermod_moy_sh INTERFACE)
 target_sources(usermod_moy_sh INTERFACE ${MOY_SH}/modmoy_sh.c)

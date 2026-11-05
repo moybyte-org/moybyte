@@ -3,7 +3,12 @@
 // time as the dev channel's `sh` word feeds it; every line the face says is
 // printed, as the channel would carry it.
 //
-//   board_main [-vm] SCRIPT      MOY_SH_ROOT names the files tree
+//   board_main [-vm] [-screen] SCRIPT      MOY_SH_ROOT names the files tree
+//
+// With -screen the same lines go through the screen face (moy_sh_screen.c)
+// instead, a grid of SCREEN_COLS columns (the serial face's line, so the two
+// break a long line alike), and the lines each adds to its grid are printed
+// as the serial face says them: one transcript, both faces.
 //
 // With no -vm the VM is stopped: the door answers NEEDS_VM and a run is in
 // front (pid 9, "moybyte.doom", which `kill` ends). With -vm the door is a
@@ -20,6 +25,7 @@
 #include "moy_log.h"
 #include "moy_loop.h"
 #include "moy_sh_board.h"
+#include "moy_sh_screen.h"
 
 static int vm = 0;
 static int front = 1;
@@ -162,14 +168,70 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     return -8;
 }
 
+#define SCREEN_COLS ((int)MOY_SH_SERIAL_LINE)
+#define SCREEN_ROWS 24
+
+// The screen face's answer to one line: the grid's lines from `*next` to the
+// cursor's, after a partial last line is ended as the face ends one.
+static void screen_line(moy_sh_screen_t **fp, const char *text, uint32_t *next) {
+    if (*fp == NULL) {
+        *fp = moy_sh_screen_new(SCREEN_COLS, SCREEN_ROWS, getenv("MOY_SH_ROOT"));
+        if (*fp == NULL) {
+            printf("SH error no session\n");
+            return;
+        }
+        *next = 0;
+    }
+    moy_sh_screen_t *f = *fp;
+    moy_term_t *t = moy_sh_screen_term(f);
+    size_t n = strlen(text);
+    char *buf = malloc(n + 1);
+    memcpy(buf, text, n);
+    buf[n] = '\n';
+    int r = moy_sh_screen_run(f, buf, n + 1);
+    free(buf);
+    int cur[3];
+    moy_term_cursor(t, cur);
+    if (cur[1] != 0) {
+        moy_term_write(t, "\n", 1);
+    }
+    uint32_t v[3];
+    moy_term_take(t, v);
+    moy_term_cursor(t, cur);
+    uint32_t end = v[0] + (uint32_t)cur[0];
+    char row[4 * SCREEN_COLS + 64];
+    for (uint32_t i = *next < v[0] ? v[0] : *next; i < end; i++) {
+        moy_term_line(t, (int)(i - v[0]), row, sizeof row);
+        printf("SH %s\n", row);
+    }
+    *next = end;
+    moy_sh_t *s = moy_sh_screen_session(f);
+    if (r == MOY_SH_MORE) {
+        printf("SH more\n");
+    } else if (r == MOY_SH_EXIT) {
+        printf("SH exit %d\n", moy_sh_status(s));
+        moy_sh_screen_free(f);
+        *fp = NULL;
+    } else {
+        printf("SH end %d\n", moy_sh_status(s));
+    }
+}
+
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "-vm")) {
-        vm = 1;
+    int screen = 0;
+    for (;;) {
+        if (argc > 1 && !strcmp(argv[1], "-vm")) {
+            vm = 1;
+        } else if (argc > 1 && !strcmp(argv[1], "-screen")) {
+            screen = 1;
+        } else {
+            break;
+        }
         argc--;
         argv++;
     }
     if (argc != 2) {
-        fprintf(stderr, "usage: board_main [-vm] SCRIPT\n");
+        fprintf(stderr, "usage: board_main [-vm] [-screen] SCRIPT\n");
         return 2;
     }
     moy_log_init(8192);
@@ -187,12 +249,19 @@ int main(int argc, char **argv) {
         return 2;
     }
     char line[4096];
+    moy_sh_screen_t *face = NULL;
+    uint32_t next = 0;
     while (fgets(line, sizeof line, f) != NULL) {
         line[strcspn(line, "\n")] = 0;
         printf("> sh %s\n", line);
-        moy_sh_board_line(line);
+        if (screen) {
+            screen_line(&face, line, &next);
+        } else {
+            moy_sh_board_line(line);
+        }
     }
     fclose(f);
+    moy_sh_screen_free(face);
     moy_sh_t *s = moy_sh_running();
     if (s != NULL) {
         void *ctx = moy_sh_ctx(s);

@@ -855,7 +855,7 @@ static int sleepcmd(int argc, char **argv) {
 static int clearcmd(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    out1str("\033[2J\033[H");
+    out1str("\033[H\033[2J\033[3J");
     return 0;
 }
 

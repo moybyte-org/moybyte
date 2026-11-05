@@ -636,6 +636,17 @@ int moy_sh_wait(int *wstatus, int flags) {
     }
 }
 
+int moy_sh_interrupted(moy_sh_t *s) {
+    if (s->interrupt) {
+        return 1;
+    }
+    if (s->host.poll != NULL && s->host.poll(s->host.ctx)) {
+        s->interrupt = 1;
+        return 1;
+    }
+    return 0;
+}
+
 int moy_sh_poll(void) {
     moy_sh_t *s = moy_sh_cur;
     if (s->interrupt) {
