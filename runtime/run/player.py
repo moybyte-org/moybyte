@@ -1616,7 +1616,9 @@ class Player(PlayerDiag):
         media service's): the launch ends unrun and the shell asks first,
         "Stop the music to play <game>?", whose Stop & play stops the stream
         and opens the cart again (`Workstation.ask_stop_music`). The Player
-        stays where it was: `declined` tells the opener not to run it."""
+        stays where it was: `declined` tells the opener not to run it, and
+        the run's process ends, so the shell is current again for the
+        dialog's answer (the stream is the shell's to stop)."""
         info_of = getattr(_moy_play, "info", None)
         info = info_of(run) if info_of is not None else None
         if info is None or len(info) < 13 or info[11] != "lease":
@@ -1631,6 +1633,9 @@ class Player(PlayerDiag):
             pass
         self._run_handle = 0
         self.declined = True
+        _os_log.end(self.pid, "declined")
+        _moybyte.end(self.pid)
+        self.pid = None
         ws.ask_stop_music(cart)
         return True
 

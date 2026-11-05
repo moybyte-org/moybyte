@@ -169,7 +169,12 @@ def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
     asked = []
     monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
     cart = {"title": "Doom", "runtime": "wasm"}
+    ws.player._log_begin(cart)
+    assert moy_log.current() != moy_log.SHELL
     assert ws.player._music_keeps_the_vm(5, cart)
     assert asked == [cart] and ended == [5] and ws.player.declined
+    # the declined run's process is over: the dialog's answer, which stops
+    # the shell's stream, runs as the shell
+    assert moy_log.current() == moy_log.SHELL and ws.player.pid is None
     monkeypatch.setattr(ws, "leases", None, raising=False)
     assert not ws.player._music_keeps_the_vm(5, cart), "no music: the verdict stands"
