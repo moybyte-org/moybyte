@@ -375,8 +375,14 @@ one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
 Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
 leaves the LED lit — the other way round, reading a light turns it off), which
-means a written pin stays an output until reboot; and **an input is pulled up**,
-so an unwired pin reads 1 and a button to ground reads 0.
+means a written pin stays an output while the page holds it; and **an input is
+pulled up**, so an unwired pin reads 1 and a button to ground reads 0.
+
+**The page's pins are leases** (`moy_gpio.c`'s header, `native/moy_kernel/moy_lease.h`):
+a write takes the pin's lease for a process named `web`, which `pins` and `ps`
+show, and the webhost's stop drops them. A pin a cart on this board leased is
+refused `pin N: busy`, a read as a write, and never touched; a pin the page
+holds is busy to a cart.
 
 ## LoRa (`native/moy_net/moy_lora.h`)
 

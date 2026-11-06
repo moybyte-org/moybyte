@@ -133,6 +133,12 @@ int moy_gpio_drive(int pin, int level) {
     return 0;
 }
 
+void moy_gpio_reset(int pin) {
+    if (pin >= 0 && pin < 64) {
+        moy_net_host_mode[pin] = 0;
+    }
+}
+
 int moy_gpio_sense(int pin) {
     if (pin < 0 || pin >= 64) {
         return -1;

@@ -174,6 +174,45 @@ def test_an_input_is_pulled_up_so_an_unwired_pin_is_not_noise():
 # -- the endpoint ------------------------------------------------------------
 
 
+# -- the lease table (moy_lease.h): the page's pins are leases like a cart's ----
+
+
+@pytest.fixture
+def leases():
+    from runtime.host import moy_lease as L
+    L.reset()
+    L.offer("gpio:" + ",".join(str(p) for p in PINS))
+    yield L
+    nb.web_stop()                       # drops the page's leases
+    L.reset()
+
+
+def test_a_pin_a_cart_holds_is_busy_to_the_page_and_never_touched(leases):
+    cart = leases.take(42, leases.GPIO, 0, (2,), leases.PINS)
+    d = _doc(handle("POST", _batch([{"p": 2, "mode": "out", "v": 1},
+                                    {"p": 2, "mode": "read"},
+                                    {"p": 4, "mode": "out", "v": 1}])))
+    assert d["ok"] == 1
+    assert [why for _i, why in d["err"]] == ["pin 2: busy", "pin 2: busy"]
+    assert not _touched(2)
+    assert leases.of_pin(2) == cart
+
+
+def test_a_page_s_write_holds_the_pin_until_the_webhost_stops(leases):
+    handle("POST", _batch([{"p": 5, "mode": "out", "v": 1}]))
+    h = leases.of_pin(5)
+    assert h, "the write took the pin's lease"
+    owner, cls, _unit, flags, pins, _edges = leases.get(h)
+    assert (cls, pins) == (leases.GPIO, (5,)) and flags & leases.PINS and owner
+    with pytest.raises(OSError):
+        leases.take(42, leases.GPIO, 0, (5,), leases.PINS)
+    d = _doc(handle("POST", _batch([{"p": 5, "mode": "out", "v": 0},
+                                    {"p": 5, "mode": "read"}])))
+    assert d["ok"] == 2 and d["reads"] == {"5": 0}, "its own lease is no stranger"
+    nb.web_stop()
+    assert leases.of_pin(5) == 0
+
+
 def test_get_answers_the_allowlist_for_a_human():
     body = handle("GET", b"")
     assert b"200 OK" in body

@@ -262,6 +262,7 @@ int moy_web_bind(uint16_t port) {
 }
 
 static void stop_now(void) {
+    moy_gpio_release();
     close_conn(&W->lfd);
     close_conn(&W->pfd);
     W->closing = 0;

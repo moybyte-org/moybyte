@@ -354,7 +354,8 @@ int moy_net_dialing(void);
 // -- the Zero's pins (moy_gpio.c) and the setup portal (moy_dns.c) ------------------
 
 // /gpio: a response document into `out` and its HTTP status. The webhost
-// routes it where the board has a pin table.
+// routes it where the board has a pin table. A pin is driven under a lease
+// (moy_gpio.c's header): one another process holds is refused busy.
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, const char *pin, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
@@ -363,6 +364,11 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
 int moy_gpio_pins(const uint8_t **pins) __attribute__((weak));
 int moy_gpio_drive(int pin, int level) __attribute__((weak));
 int moy_gpio_sense(int pin) __attribute__((weak));
+// The pin's next touch configures it afresh (its lease is new: one dropped
+// since left it safe).
+void moy_gpio_reset(int pin) __attribute__((weak));
+// Every pin lease the page holds dropped (the webhost's stop).
+void moy_gpio_release(void);
 
 #define MOY_DNS_PORT 53
 #define MOY_DNS_QUERY_MAX 512          // RFC 1035's UDP size; a real query is ~40 bytes

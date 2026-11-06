@@ -330,6 +330,13 @@ int moy_gpio_drive(int pin, int level) {
     return gpio_set_level((gpio_num_t)pin, level ? 1 : 0) == ESP_OK ? 0 : -1;
 }
 
+void moy_gpio_reset(int pin) {
+    int i = gpio_slot(pin);
+    if (i >= 0) {
+        s_gpio_mode[i] = 0;
+    }
+}
+
 int moy_gpio_sense(int pin) {
     int i = gpio_slot(pin);
     if (i < 0) {
