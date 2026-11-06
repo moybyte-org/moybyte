@@ -87,15 +87,16 @@ reported through this console's window was at least a tick plus 8 ms
 (`MOY_MATCH_LOWER_HOLD`), so a match that escalated on a burst of loss returns
 to one tick once the air clears instead of keeping the higher delay for good.
 
-**A cart paced 60 or "free" ticks at 60 Hz in a match** (owner, 2026-11-06: "i
-dont want a higher delay"), so one tick of delay is 16.7 ms. The host names the
-tick in START from its cart's manifest pace (`players.match_rate`) and the
-guest takes it; a cart paced 30, or undeclared, keeps 30, because its logic
-counts frames. What is a time stays a time: the delay's ceiling
-(`MOY_MATCH_DELAY_MAX_MS`) and the escalation window are milliseconds and
-seconds, their tick counts scaled by the rate. A cart paced 60 also stops
-running at half speed in a match, which the fixed 30 Hz tick did to it. `link
-rate 30|60|auto` on the dev channel forces the tick a host asks, for an A/B.
+**A cart paced 60 or "free" is to tick at 60 Hz in a match** (owner,
+2026-11-06: "i dont want a higher delay"), so one tick of delay is 16.7 ms. On
+glass the first build ticked every such match at 60, and the Guition S3 could
+not hold it against the P4 (Brick Siege Lua at 93% speed even drawing every
+other tick, Python at 77%), so every match ticks at 30 until a 60 Hz match can
+step down to 30 at a frame both consoles agree on (2026-11-06). The host names
+the tick in START and the guest takes it; `link rate 30|60|auto` on the host's
+dev channel forces it. What is a time stays a time at either rate: the delay's
+ceiling (`MOY_MATCH_DELAY_MAX_MS`) and the escalation window are milliseconds
+and seconds, their tick counts scaled by the rate.
 
 **A 60 Hz match that cannot keep its rate draws every other tick** (2026-11-06).
 A board that cannot draw 60 a second holds the shared game to its own rate:

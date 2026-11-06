@@ -863,16 +863,15 @@ class EspNowLink:
         r = self._m.candidate(cart, self._ticks_ms())
         return None if r is None else Peer(r)
 
-    rate_force = None                   # a dev override of the tick (30 or 60), else the cart's
+    rate_force = None                   # a dev override of the tick (30 or 60), else 30
 
-    def offer(self, ws, cart, router=None, seed=None, fps=None):
+    def offer(self, ws, cart, router=None, seed=None):
         """At a multiplayer cart's start: a peer on the same cart makes this
         run a match (the lower MAC hosts). The host's tuning rides START, and
-        so does its tick: 60 for a cart paced 60 or "free" (dt-scaled), else
-        30."""
+        so does its tick: 30, unless `link rate 60` forced it."""
         if not self.active:
             return False
-        hz = self.rate_force or match_rate(fps)
+        hz = self.rate_force or TICK_HZ
         self._m.set_rate(hz)
         cfg = getattr(ws, "config", None) if ws is not None else None
         try:
@@ -926,17 +925,6 @@ class EspNowLink:
             },
             "world_check": bool(m.world_check) if m is not None else None,
         }
-
-
-def match_rate(fps):
-    """The tick a host asks for a cart paced `fps` (its manifest's): a cart
-    whose logic runs at 60, or is dt-scaled ("free"), ticks at 60."""
-    if fps == "free":
-        return TICK_FAST
-    try:
-        return TICK_FAST if int(fps) >= TICK_FAST else TICK_HZ
-    except (TypeError, ValueError):
-        return TICK_HZ
 
 
 def _cart_buttons():

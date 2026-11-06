@@ -271,16 +271,18 @@ def test_a_full_handshake_gives_each_console_the_other_half_of_one_game():
 
 
 def test_the_host_names_the_tick_and_the_guest_takes_it():
-    """START carries the host's tick: 60 for a cart paced 60 or "free", 30
-    for the rest. Both consoles simulate one game, so the guest's own reading
-    of its cart never decides it."""
-    for fps, hz in (("free", 60), (60, 60), (30, 30), (None, 30)):
+    """START carries the host's tick and the guest takes it. Every match ticks
+    at 30 (2026-11-06: the 60 Hz tick waits for a match that can step down);
+    `link rate 60` on the host forces 60 for both."""
+    for force, hz in ((None, 30), (60, 60), (30, 30)):
         air, clock, a, b = _pair(lambda ws, title: True)
         _see_each_other(a, b, clock)
+        a.rate_force = force
+        b.rate_force = 60                 # the guest's own ask never decides
         wsa, wsb = _Ws(), _Ws()
-        assert a.offer(wsa, "Brick Siege", fps=fps)
+        assert a.offer(wsa, "Brick Siege")
         b.poll(wsb)
-        assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, fps
+        assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, force
         assert abs(wsb.netplay.dt - 1.0 / hz) < 1e-9
         assert a.stats()["match"]["hz"] == hz
 
@@ -810,7 +812,7 @@ def test_a_run_never_adopts_a_dead_session(tmp_path):
         def announce(self, cart="", state=0):
             self.calls.append(("announce", cart, state))
 
-        def offer(self, ws, cart, router=None, seed=None, fps=None):
+        def offer(self, ws, cart, router=None, seed=None):
             self.calls.append(("offer", cart))
             return False
 
