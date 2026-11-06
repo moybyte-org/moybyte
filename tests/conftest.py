@@ -326,6 +326,14 @@ def _processes_reset():
     N = sys.modules.get("runtime.notifications")
     if N is not None and (N.NOTES.list or N.NOTES.banner is not None):
         N.NOTES.reset()
+    SI = sys.modules.get("runtime.status_items")
+    if SI is not None:
+        for it in SI.ITEMS.slots:
+            if it.pid:
+                SI.ITEMS._free(it)
+    SL = sys.modules.get("runtime.shell_layout")
+    if SL is not None:
+        SL.ITEMS[0] = 0
 
 
 @pytest.fixture(autouse=True)
@@ -334,16 +342,21 @@ def _processes_fresh():
     one per process, as they are one per board: the kernel's current process
     (`moy_log.current`), which a run makes itself until it ends; the lease
     and device gates (`leases.LEASES.grants`, `devices.grants`), which a
-    Workstation binds to its running set as it boots; and the notifications
-    (`notifications.NOTES`), whose banner stays up BANNER_MS of wall time. A
-    test that left a game running handed every later test on the worker that
-    game's pid, one that built a Workstation handed it that console's grants,
-    so the shell's own reads (a /dev file) and a bare process's lease were
-    refused as another's, and a badge an earlier test's achievements process
-    posted into the next test's console stayed up as a banner, which keeps
-    a console animating and draws over the bar. Each test starts, and
-    leaves, the shell current, the gates unbound and no notification, as a
-    fresh VM has them before its console boots."""
+    Workstation binds to its running set as it boots; the notifications
+    (`notifications.NOTES`), whose banner stays up BANNER_MS of wall time;
+    and the apps' status items (`status_items.ITEMS`) with the count the bar
+    packs for them (`shell_layout.ITEMS`), which a console brings level only
+    at its next frame. A test that left a game running handed every later
+    test on the worker that game's pid, one that built a Workstation handed
+    it that console's grants, so the shell's own reads (a /dev file) and a
+    bare process's lease were refused as another's; a badge an earlier
+    test's achievements process posted into the next test's console stayed
+    up as a banner, which keeps a console animating and draws over the bar;
+    and an item freed after its console's last frame left the count at 1, so
+    the next console's first layout placed the bar's cells around a status
+    item it did not have. Each test starts, and leaves, the shell current,
+    the gates unbound, no notification and no status item, as a fresh VM has
+    them before its console boots."""
     _processes_reset()
     yield
     _processes_reset()
