@@ -947,3 +947,93 @@ def test_a_lua_run_after_a_stopped_match_opens_once(tmp_path):
     open_cart(ws, "Brick Siege Lua")
     assert ws.cart_error is None, ws.cart_error
     assert starts == [1], "the run was started %d times" % len(starts)
+
+
+# -- two whole consoles, one cart -----------------------------------------------
+
+def _cart_world(ws):
+    """The cart's state as text: every plain global of its namespace, the
+    frame-aligned world checksum the cross-architecture hunt used
+    (docs/netplay_v1.md §5). A console's own high score (pmem) is local by
+    design and stays out."""
+    import types
+    out = []
+    ns = ws.ns
+    for k in sorted(ns):
+        v = ns[k]
+        if k.startswith("_") or k == "best" or callable(v) \
+                or isinstance(v, types.ModuleType):
+            continue
+        r = repr(v)
+        if " at 0x" not in r:
+            out.append("%s=%s" % (k, r))
+    return "\n".join(out)
+
+
+def _two_consoles(tmp_path, monkeypatch, title, loss, frames):
+    """Two real consoles in one process over a lossy air, each kid mashing
+    buttons on their own seed, the cart's world recorded per lockstep frame.
+    Each console keeps its own random stream (two boards share nothing)."""
+    import random
+    from ws_helpers import build_ws, open_cart
+    import runtime.player as player_mod
+
+    air, clock = _Air(), _Clock()
+    monkeypatch.setattr(player_mod, "_ticks_ms", clock)
+    drops = random.Random(99)
+    carry = air.carry
+    air.carry = lambda s, d, p: None if drops.random() < loss else carry(s, d, p)
+    wss, streams = [], []
+    for i, mac in enumerate((b"\x01" * 6, b"\x02" * 6)):
+        ws = build_ws(tmp_path / ("c%d" % i))
+        ws.link = moy_espnow.EspNowLink(
+            board="b%d" % i, name="n%d" % i, ticks_ms=clock,
+            radio=_FakeRadio(air, mac), wlan=_FakeWlan(mac),
+            launch=moy_espnow.launch_cart)
+        wss.append(ws)
+        streams.append(random.Random(100 + i).getstate())
+
+    def on(i, fn):
+        random.setstate(streams[i])
+        fn()
+        streams[i] = random.getstate()
+
+    for i in (0, 1):
+        on(i, lambda: open_cart(wss[i], title))
+    kids = random.Random(7)
+    names = ("left", "right", "up", "down", "a", "b")
+    held = [set(), set()]
+    worlds = ({}, {})
+    for _ in range(frames):
+        clock.advance(17)
+        for i in (0, 1):
+            ws = wss[i]
+            if kids.random() < 0.15:
+                held[i] = set(kids.sample(names, kids.randint(0, 2)))
+
+            def frame():
+                ws.input.begin_frame()
+                for n in names:
+                    ws.input.set_held(n, n in held[i])
+                ws.link._m.poll(clock())
+                ws.frame(0.017)
+            on(i, frame)
+            assert ws.cart_error is None, ws.cart_error
+            np = ws.player._netplay
+            if np is not None:
+                worlds[i].setdefault((np.session, np.frame), _cart_world(ws))
+    return worlds
+
+
+def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeypatch):
+    """The owner's report (2026-11-06): a Brick Siege match "quite quickly
+    diverges". Two whole consoles on the shared console path over an air that
+    loses a third of the packets, the kids changing buttons through every
+    stall: every frame both simulated must hold the same world. A stalled
+    tick's retry resampling the frame it had already emitted parted the two
+    tanks within three seconds here."""
+    worlds = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 700)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert len(both) > 200, "the premise: a long match formed and advanced"
+    bad = [f for f in both if worlds[0][f] != worlds[1][f]]
+    assert bad == [], "first divergent frame %r" % (bad[:1],)

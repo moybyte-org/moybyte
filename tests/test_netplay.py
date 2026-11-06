@@ -437,6 +437,59 @@ def test_even_one_tick_of_debt_is_dropped_not_burst_repaid():
     assert s.due(100 + s.tick_ms) is True, "the next tick is a full period out"
 
 
+def _played(s):
+    return tuple(s._m.held)
+
+
+def test_a_stalled_retry_never_resamples_a_frame_already_on_the_air():
+    """THE BRICK SIEGE DESYNC (2026-11-06). A stalled tick retries every loop
+    frame, and each retry used to write the kid's CURRENT buttons over the
+    frame it had already emitted. The peer keeps the first copy it hears, so a
+    button pressed or released during a stall played one way on this screen
+    and the other way on the peer's, for good: a tank two pixels apart by
+    frame 15 at 60% loss on the host's two-console harness."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 3)
+    played = {0: {}, 1: {}}
+    for k in range(40):
+        # A's kid toggles LEFT every loop frame; B's packets reach A only
+        # every third frame, so A stalls and retries with a new mask.
+        mask = 1 if k % 2 else 0
+        if k % 3 == 0:
+            wire.deliver(0, sa)
+        if sa.advance(mask):
+            played[0][sa.frame] = _played(sa)
+        wire.deliver(1, sb)
+        if sb.advance(0):
+            played[1][sb.frame] = _played(sb)
+    both = set(played[0]) & set(played[1])
+    assert len(both) > 5, "the premise: the match advanced through its stalls"
+    assert sa.stall_ticks > 3, "...and it did stall"
+    assert [f for f in sorted(both) if played[0][f] != played[1][f]] == [], \
+        "both consoles play the same buttons on every frame"
+
+
+def test_a_raise_writes_the_frame_it_skips_before_it_can_be_emitted():
+    """A raise moves the sampling lead from frame+1 to frame+2, so one frame
+    is never sampled. It is written with the raise's sample before any packet
+    carries it: a placeholder sent as 0 and later written as something else is
+    the resample bug by another door."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 3)
+    sa.delay = 2
+    wire.deliver(0, sa)
+    wire.deliver(1, sb)
+    f = sa.frame
+    assert sa.advance(0x08) in (True, False)
+    for g in (f + 1, f + 2):
+        assert sa._m._m.s.mine_f[g & 255] == g, "frame %d is on the tape" % g
+        assert sa._m._m.s.mine_m[g & 255] == 0x08
+
+
 def test_stall_ticks_counts_ticks_not_retries():
     """The Player retries a stalled tick every loop frame now, so `stalls`
     (every stalled advance) inflates with the loop rate; `stall_ticks` is the

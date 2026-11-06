@@ -39,6 +39,16 @@ frame parts the two worlds permanently and with no symptom: both screens keep
 painting something plausible, and the two games differ. Link-cable handhelds
 show this as "waiting for player"; do not soften it.
 
+**A frame's local input is sampled ONCE** (2026-11-06). A stalled tick
+retries every loop frame (below), and each retry used to write the buttons
+held by then over the frame it had already put on the air; the peer keeps the
+first copy it hears, so a press or a release during a stall played one way on
+one screen and the other way on the other, for good. That was the owner's
+Brick Siege desync, and the host's two-console harness
+(`tests/test_espnow_link.py`) parted the two worlds at frame 34 with a third of
+the packets lost. The tape is first-write-wins at both ends, and every frame up
+to the sampling lead is written before a packet carries it.
+
 **Redundancy instead of retransmit, and the window must chase the peer.** Every
 packet repeats the last few frames of input (a mask is one byte, so it is free,
 and a drop heals on the next packet rather than a round trip — the

@@ -56,6 +56,9 @@ belongs here is only what a coder must not undo:
 - **The handshake is BROADCAST, addressed in the payload.** Unicast here needs a
   peer registration that an `active()` cycle wipes and the first beacon races,
   which cost a night to find. Do not tidy it back.
+- **A frame's local input is sampled ONCE** (2026-11-06): a stalled tick's
+  retry that rewrote its already-emitted frame was the Brick Siege desync.
+  `tests/test_espnow_link.py`'s two-console lossy match is the net.
 - **Every input packet carries the frame its sender is WAITING FOR.** A fixed
   redundancy window deadlocks two stalled consoles permanently.
 - **Nothing waits forever.** An unanswered invite and a match that falls too far

@@ -211,8 +211,17 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     if (!s->live) {
         return -1;
     }
+    // A frame's local input is sampled ONCE: a stalled tick retries this call
+    // with whatever is held by then, and the first sample may already be on
+    // the air, where the peer keeps the first copy it hears. Every frame up
+    // to `due` is written before it is emitted, so a raise's skipped frame
+    // never goes out as a placeholder a later write contradicts.
     int32_t due = s->frame + s->delay;
-    tape_put(s->mine_f, s->mine_m, due, held);
+    for (int32_t f = s->frame + 1; f <= due; f++) {
+        if (tape_get(s->mine_f, s->mine_m, f) < 0) {
+            tape_put(s->mine_f, s->mine_m, f, held);
+        }
+    }
     emit(m, due);
     int theirs = tape_get(s->theirs_f, s->theirs_m, s->frame);
     if (theirs < 0) {

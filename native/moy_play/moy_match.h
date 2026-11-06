@@ -12,7 +12,9 @@
 //      The delay starts at one tick and raises itself to two under stall
 //      pressure (ESCALATE_*), never lower: a lower delay mid-match could
 //      overwrite a frame already emitted. Delay is each console's own
-//      sampling lead, so the two sides may run different values.
+//      sampling lead, so the two sides may run different values. A frame
+//      is sampled once: a stalled tick's retry never rewrites a frame the
+//      peer may already hold.
 //   2. REDUNDANCY, NOT RETRANSMIT: every packet carries the last REDUNDANCY
 //      frames of input (a byte each), and the frame its sender is waiting
 //      for, so a stalled peer is served the frame it is stuck on (the fixed
