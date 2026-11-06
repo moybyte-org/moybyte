@@ -116,6 +116,14 @@ enum {
 #define MOY_MATCH_LOWER_HOLD 2
 // The link's.
 #define MOY_MATCH_BEACON_MS 400
+// THE CHANNEL: ESP-NOW is heard only on the channel it is sent on, and a
+// station associated to an AP is pinned to the AP's. A console whose station
+// is free sits on HOME_CH; with no peer on its cart heard, every PROBE_EVERY-th
+// beacon tick it visits the next channel of the probe list for one tick, and a
+// pinned peer heard there is followed to its channel for as long as it is
+// heard. A pinned console never moves; a live match never tunes.
+#define MOY_MATCH_HOME_CH 1
+#define MOY_MATCH_PROBE_EVERY 3
 #define MOY_MATCH_PEER_TTL_MS 2000
 #define MOY_MATCH_DRAIN_MAX 24
 #define MOY_MATCH_START_TRIES 12
@@ -134,6 +142,10 @@ typedef struct {
     int (*recv)(void *ctx, uint8_t mac[6], uint8_t *data, uint32_t cap);
     int (*add_peer)(void *ctx, const uint8_t mac[6]);
     int (*recover)(void *ctx);          // NULL: none
+    // The radio's channel: `set` > 0 moves an unassociated station there.
+    // Answers the channel, negated while the station is associated (pinned
+    // to its AP's); 0 unknown. NULL: the link never tunes.
+    int (*channel)(void *ctx, int set);
     void (*say)(void *ctx, const char *line);   // NULL: printf
     void *ctx;
 } moy_match_io_t;
@@ -145,6 +157,8 @@ typedef struct {
     uint32_t seen;
     bool used;
     uint8_t hz;                         // the tick it says it can hold; 0 unsaid (30)
+    uint8_t ch;                         // the channel it beacons on; 0 unsaid
+    bool pinned;                        // ...an associated station's, which it cannot leave
 } moy_match_peer_t;
 
 typedef struct {
@@ -258,6 +272,10 @@ typedef struct {
     bool world_check;                   // the tiers note world digests (a diag)
     uint8_t rate;                       // the tick this console says it can hold
     bool hold;                          // ...and takes as is when it hosts (a dev force)
+    uint8_t ch;                         // the channel the radio is on (0 unknown)
+    bool pinned;                        // ...an associated station's
+    uint8_t probe;                      // beacon ticks since the last probe, and its place
+    uint8_t probe_at;
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];

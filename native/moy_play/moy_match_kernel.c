@@ -32,7 +32,12 @@ static int k_add_peer(void *ctx, const uint8_t mac[6]) {
     return moy_link_add_peer(mac);
 }
 
-static const moy_match_io_t K_IO = {k_send, k_recv, k_add_peer, NULL, NULL, NULL};
+static int k_channel(void *ctx, int set) {
+    (void)ctx;
+    return moy_link_channel(set);
+}
+
+static const moy_match_io_t K_IO = {k_send, k_recv, k_add_peer, NULL, k_channel, NULL, NULL};
 #define K_HAS_LINK 1
 #endif
 

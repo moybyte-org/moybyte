@@ -667,8 +667,9 @@ static void beacon(moy_match_t *m) {
     p[1] = MOY_MATCH_T_BEACON;
     p[2] = m->state;
     char body[sizeof(m->name) + sizeof(m->board) + sizeof(m->cart) + 8];
-    int n = snprintf(body, sizeof(body), "%s|%s|%s|%d", m->name, m->board, m->cart,
-                     m->rate ? m->rate : MOY_MATCH_TICK_HZ);
+    int n = snprintf(body, sizeof(body), "%s|%s|%s|%d|%d", m->name, m->board, m->cart,
+                     m->rate ? m->rate : MOY_MATCH_TICK_HZ,
+                     m->pinned ? -(int)m->ch : (int)m->ch);
     if (n < 0) {
         n = 0;
     }
@@ -908,8 +909,8 @@ static void on_beacon(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, 
         // from a registered peer.
         add_peer(m, mac);
     }
-    // "name|board|cart|hz": the first three fields, a missing one empty, and
-    // the tick it says it holds.
+    // "name|board|cart|hz|ch": the first three fields, a missing one empty,
+    // the tick it says it holds and its channel (negative: pinned).
     const char *b = (const char *)msg + 3;
     const char *e = (const char *)msg + n;
     char *dst[3] = {p->name, p->board, p->cart};
@@ -927,6 +928,15 @@ static void on_beacon(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, 
         hz = hz * 10 + (*b++ - '0');
     }
     p->hz = (uint8_t)(hz == MOY_MATCH_TICK_FAST ? MOY_MATCH_TICK_FAST : MOY_MATCH_TICK_HZ);
+    b = b < e && *b == '|' ? b + 1 : e;
+    bool neg = b < e && *b == '-';
+    b += neg ? 1 : 0;
+    int ch = 0;
+    while (b < e && *b >= '0' && *b <= '9' && ch < 100) {
+        ch = ch * 10 + (*b++ - '0');
+    }
+    p->ch = (uint8_t)(ch <= 14 ? ch : 0);
+    p->pinned = neg && p->ch != 0;
     p->state = msg[2];
     p->seen = now;
 }
@@ -1094,6 +1104,49 @@ static void expire(moy_match_t *m, uint32_t now) {
     }
 }
 
+static const uint8_t PROBE[] = {6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+
+// The beacon tick's channel (MOY_MATCH_HOME_CH): read where the radio is;
+// a free station goes where a pinned peer was heard, else home, else -- with
+// no peer on its cart, every PROBE_EVERY-th tick -- one tick on the next
+// probe channel.
+static void tune(moy_match_t *m, uint32_t now) {
+    if (m->io == NULL || m->io->channel == NULL || m->s.live) {
+        return;
+    }
+    int c = m->io->channel(m->io->ctx, 0);
+    m->pinned = c < 0;
+    m->ch = (uint8_t)(c < 0 ? -c : c);
+    if (m->pinned || c == 0) {
+        return;
+    }
+    int want = 0;
+    bool kin = false;
+    for (int i = 0; i < MOY_MATCH_PEERS; i++) {
+        const moy_match_peer_t *p = &m->peers[i];
+        if (!p->used || (int32_t)(now - p->seen) > MOY_MATCH_PEER_TTL_MS) {
+            continue;
+        }
+        if (p->pinned && want == 0) {
+            want = p->ch;
+        }
+        kin = kin || (m->cart[0] && strcmp(p->cart, m->cart) == 0);
+    }
+    if (want == 0) {
+        want = MOY_MATCH_HOME_CH;
+        if (!kin && ++m->probe >= MOY_MATCH_PROBE_EVERY) {
+            m->probe = 0;
+            want = PROBE[m->probe_at];
+            m->probe_at = (uint8_t)((m->probe_at + 1u) % sizeof(PROBE));
+        }
+    }
+    if (want != m->ch) {
+        int got = m->io->channel(m->io->ctx, want);
+        m->pinned = got < 0;
+        m->ch = (uint8_t)(got < 0 ? -got : got);
+    }
+}
+
 int moy_match_poll(moy_match_t *m, uint32_t now) {
     if (!m->active) {
         return 0;
@@ -1126,6 +1179,7 @@ int moy_match_poll(moy_match_t *m, uint32_t now) {
     int32_t since = (int32_t)(now - m->beacon_at);
     if (since >= MOY_MATCH_BEACON_MS || since < 0) {
         m->beacon_at = now;
+        tune(m, now);
         beacon(m);
         expire(m, now);
         maybe_match(m, now);

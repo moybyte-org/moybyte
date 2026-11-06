@@ -31,11 +31,19 @@ class _Air:
         self.sent += 1
         if self.deaf:
             return
+        ch = _ch(self.radios.get(src))
         for mac, r in self.radios.items():
-            if mac == src:
+            if mac == src or _ch(r) != ch:
                 continue
             if dst == BROADCAST or dst == mac:
                 r.inbox.append((src, payload))
+
+
+def _ch(radio):
+    """The channel a fake radio is on: its station's (one channel for all
+    when the test gave it none)."""
+    w = getattr(radio, "wlan", None)
+    return 1 if w is None else w.ch
 
 
 class _FakeRadio:
@@ -85,15 +93,26 @@ class _FakeWlan:
     def __init__(self, mac):
         self._mac = mac
         self._pm = self.PM_PERFORMANCE
+        self.ch = 1
+        self.assoc = False              # associated: pinned to the AP's channel
 
     def active(self, on=None):
         return True
+
+    def isconnected(self):
+        return self.assoc
 
     def config(self, *a, **kw):
         if kw:
             if "pm" in kw:
                 self._pm = kw["pm"]
+            if "channel" in kw:
+                if self.assoc:
+                    raise OSError("the station is associated")
+                self.ch = int(kw["channel"])
             return None
+        if a and a[0] == "channel":
+            return self.ch
         if a and a[0] == "mac":
             return self._mac
         if a and a[0] == "pm":
@@ -131,9 +150,10 @@ class _Ws:
 
 
 def _link(air, clock, mac, board="tdeck", name="A", launch=None):
+    radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+    radio.wlan = wlan
     lk = moy_espnow.EspNowLink(board=board, name=name, ticks_ms=clock,
-                               radio=_FakeRadio(air, mac), wlan=_FakeWlan(mac),
-                               launch=launch)
+                               radio=radio, wlan=wlan, launch=launch)
     lk.start()
     return lk
 
@@ -291,6 +311,48 @@ def test_the_host_names_the_tick_and_the_guest_takes_it():
         assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, (fps, force, theirs)
         assert abs(wsb.netplay.dt - 1.0 / hz) < 1e-9
         assert a.stats()["match"]["hz"] == hz
+
+
+def test_a_free_console_finds_a_peer_pinned_to_its_aps_channel():
+    """SSH holds a console's station on its AP, and ESP-NOW is heard only on
+    the channel it is sent on: the pinned console cannot move, so the free
+    one, hearing no peer on its cart at home, probes the channels a tick at a
+    time, hears the pinned peer's beacon on 6 and follows it there, and the
+    match forms on 6 with the station still associated."""
+    air, clock, a, b = _pair(lambda ws, title: True)
+    a.wlan.ch, a.wlan.assoc = 6, True        # a's station is on its AP
+    wsa, wsb = _Ws(), _Ws()
+    a.announce("Brick Siege", 1)
+    b.announce("Brick Siege", 1)
+    for _ in range(40):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+        if a.session is not None and b.session is not None:
+            break
+    assert a.session is not None and b.session is not None, "the match formed"
+    assert a.wlan.ch == 6 and a.wlan.assoc, "the pinned station never moved"
+    assert b.wlan.ch == 6, "the free one followed it"
+
+
+def test_two_free_consoles_meet_at_home_and_a_match_never_tunes():
+    air, clock, a, b = _pair(lambda ws, title: True)
+    b.wlan.ch = 9                            # a station's scan left it elsewhere
+    wsa, wsb = _Ws(), _Ws()
+    a.announce("Brick Siege", 1)
+    b.announce("Brick Siege", 1)
+    for _ in range(10):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+    assert a.wlan.ch == b.wlan.ch == 1, "both free stations sit at home"
+    assert a.session is not None and b.session is not None
+    a.wlan.ch = b.wlan.ch = 3                # a live match stays where it is
+    for _ in range(3):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+    assert a.session is not None and a.wlan.ch == b.wlan.ch == 3
 
 
 def test_the_guest_ends_the_match_when_it_does_not_have_the_cart():

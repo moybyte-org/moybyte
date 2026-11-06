@@ -106,6 +106,11 @@ typedef struct {
 int moy_link_start(uint32_t rxbuf);
 void moy_link_stop(void);
 int moy_link_rate(int rate);
+// The radio's channel (moy_match.h's io `channel`): `set` > 0 moves a station
+// that is not associated there. The channel it is on, negated while the
+// station is associated (an AP's channel, which ESP-NOW cannot leave); 0 when
+// the radio cannot say.
+int moy_link_channel(int set);
 int moy_link_add_peer(const uint8_t mac[6]);
 int moy_link_send(const uint8_t mac[6], const uint8_t *data, size_t len);
 int moy_link_recv(uint8_t mac[6], uint8_t *data, uint32_t cap);

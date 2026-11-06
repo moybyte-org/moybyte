@@ -658,7 +658,8 @@ def state_json():
 # consoles in one process, where a board has the kernel's one (its
 # `moy_play.Match()` takes no io: native/moy_net's ring is its transport).
 # `io` is the transport: send(mac, payload) -> bool, recv() -> (mac, msg) or
-# None (raising on a radio error), add_peer(mac), recover() -> bool, say(line).
+# None (raising on a radio error), add_peer(mac), recover() -> bool,
+# channel(set) -> the channel, negated when pinned (0: none), say(line).
 
 _M_TAPE = 256
 _M_CART = 121
@@ -670,7 +671,8 @@ _M_CHECKS = 4
 class _Peer(ctypes.Structure):
     _fields_ = [("mac", _U8 * 6), ("name", ctypes.c_char * 24),
                 ("board", ctypes.c_char * 16), ("cart", ctypes.c_char * _M_CART),
-                ("state", _U8), ("seen", _U32), ("used", _B), ("hz", _U8)]
+                ("state", _U8), ("seen", _U32), ("used", _B), ("hz", _U8),
+                ("ch", _U8), ("pinned", _B)]
 
 
 _I32, _F32 = ctypes.c_int32, ctypes.c_float
@@ -719,7 +721,7 @@ class _MatchS(ctypes.Structure):
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
                 ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
                 ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8),
-                ("hold", _B)]
+                ("hold", _B), ("ch", _U8), ("pinned", _B), ("probe", _U8), ("probe_at", _U8)]
 
 
 _SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
@@ -728,12 +730,14 @@ _RECV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
                          ctypes.POINTER(_U8), _U32)
 _ADD = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8))
 _RECOVER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+_CHANNEL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int)
 _SAY = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p)
 
 
 class _Io(ctypes.Structure):
     _fields_ = [("send", _SEND), ("recv", _RECV), ("add_peer", _ADD),
-                ("recover", _RECOVER), ("say", _SAY), ("ctx", ctypes.c_void_p)]
+                ("recover", _RECOVER), ("channel", _CHANNEL), ("say", _SAY),
+                ("ctx", ctypes.c_void_p)]
 
 
 _MSIGS = (
@@ -802,7 +806,7 @@ def seed_of(seed, frame):
 
 
 _LINK_FIELDS = ("active", "state", "rx", "tx", "drops", "recovers", "session_id",
-                "start_tries", "start_len", "inbox_drops", "world_check")
+                "start_tries", "start_len", "inbox_drops", "world_check", "ch", "pinned")
 
 
 class Match:
@@ -819,7 +823,8 @@ class Match:
         self._m = _MatchS()
         self._io_obj = io
         self._io = _Io(_SEND(self._send), _RECV(self._recv), _ADD(self._add),
-                       _RECOVER(self._recover), _SAY(self._say), None)
+                       _RECOVER(self._recover), _CHANNEL(self._channel), _SAY(self._say),
+                       None)
         self._p = ctypes.cast(ctypes.byref(self._m), ctypes.c_void_p)
         d.moy_match_init(self._p, ctypes.cast(ctypes.byref(self._io), ctypes.c_void_p),
                          str(name).encode(), str(board).encode(),
@@ -861,6 +866,13 @@ class Match:
             return 0 if rec is None or rec() is not False else -1
         except Exception:  # noqa: BLE001
             return -1
+
+    def _channel(self, _ctx, set_to):
+        ch = getattr(self._io_obj, "channel", None)
+        try:
+            return 0 if ch is None else int(ch(int(set_to)))
+        except Exception:  # noqa: BLE001 -- a radio that cannot say never tunes
+            return 0
 
     def _say(self, _ctx, line):
         say = getattr(self._io_obj, "say", None)

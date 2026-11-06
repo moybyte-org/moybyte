@@ -296,6 +296,8 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_tx: dest[0] = mp_obj_new_int_from_uint(m->tx); return;
         case MP_QSTR_drops: dest[0] = mp_obj_new_int_from_uint(m->drops); return;
         case MP_QSTR_recovers: dest[0] = mp_obj_new_int_from_uint(m->recovers); return;
+        case MP_QSTR_ch: dest[0] = MP_OBJ_NEW_SMALL_INT(m->ch); return;
+        case MP_QSTR_pinned: dest[0] = mp_obj_new_bool(m->pinned); return;
         case MP_QSTR_session_id: dest[0] = MP_OBJ_NEW_SMALL_INT(m->session_id); return;
         case MP_QSTR_start_len: dest[0] = MP_OBJ_NEW_SMALL_INT(m->start_len); return;
         case MP_QSTR_cart: dest[0] = str_of(m->cart); return;

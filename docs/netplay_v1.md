@@ -158,6 +158,18 @@ reads as a world desync there. The check rides the input packet, so
 `MOY_MATCH_PROTO` went to 2 with it (3 with the step down's notice), and
 consoles on different protocols do not see each other.
 
+**Two consoles meet on one channel** (2026-11-06). ESP-NOW is heard only on
+the channel it is sent on, and a station associated to an AP -- SSH's while it
+serves, the store's, a sync -- is pinned to the AP's channel: a Guition S3
+serving SSH sat on 6 while the P4 sat on 1, and no match formed. Each beacon
+says its sender's channel, negative when pinned. A console whose station is
+free sits on `MOY_MATCH_HOME_CH`; while it hears no peer on its cart it spends
+one beacon tick in `MOY_MATCH_PROBE_EVERY` on the next channel of a probe list
+(6 and 11 first), and a pinned peer heard there is followed to its channel for
+as long as it is heard, so the match forms there with the station still
+associated. A pinned console never moves, and a live match never tunes
+(`moy_link_channel`, the io's `channel`).
+
 **The handshake is BROADCAST, addressed in the payload** — START and JOIN carry
 the destination MAC as six bytes. Unicast was the protocol's only such frame and
 kept vanishing: 376 input frames and 20 beacons arrived against **zero**

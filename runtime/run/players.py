@@ -630,6 +630,16 @@ class _RadioIo:
     def recover(self):
         return self._link._cycle_radio()
 
+    def channel(self, set_to):
+        """The station's channel (moy_match.h's io `channel`), negated while
+        it is associated; `set_to` > 0 moves a free one there."""
+        w = self._link.wlan
+        pinned = bool(w.isconnected())
+        if set_to > 0 and not pinned:
+            w.config(channel=set_to)
+        ch = int(w.config("channel") or 0)
+        return -ch if pinned else ch
+
 
 class EspNowLink:
     """The console's half of the radio link: the radio's bring-up and
@@ -931,6 +941,7 @@ class EspNowLink:
             "peers": [(p.name, p.board, p.cart, p.state) for p in self.peers.values()],
             "rx": self.rx, "tx": self.tx, "drops": self.drops,
             "recovers": self.recovers,
+            "channel": None if m is None else (-m.ch if m.pinned else m.ch),
             "error": self.error or (m.error if m is not None and m.error else None),
             "match": None if s is None else {
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
