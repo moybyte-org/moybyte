@@ -97,6 +97,19 @@ seconds, their tick counts scaled by the rate. A cart paced 60 also stops
 running at half speed in a match, which the fixed 30 Hz tick did to it. `link
 rate 30|60|auto` on the dev channel forces the tick a host asks, for an A/B.
 
+**A 60 Hz match that cannot keep its rate draws every other tick** (2026-11-06).
+A board that cannot draw 60 a second holds the shared game to its own rate:
+the Guition S3 held a Brick Siege Lua match with the P4 to 47.7 ticks/s, the
+game at 80% speed, and the P4's waits on it read as stall pressure that raised
+the Guition's delay to its 66 ms ceiling. After a settled window ticking under
+93% of the rate (`MOY_MATCH_DIV_BAR`) the host takes a draw divisor of 2 from a
+frame 32 on (`MOY_MATCH_DIV_LEAD`) and every input packet names it; the guest
+cannot simulate that frame before it holds the host's input for it, which
+travels in a packet that carries the notice, so both consoles skip the same
+draws (`moy_lockstep_draws`) and a `_draw` that keeps state still runs on the
+same ticks on both. The sim keeps its 60 Hz tick and its 16.7 ms a tick of
+delay; the match draws 30 a second, what a 30 Hz match drew.
+
 **The 2026-08-22 "DELAY=1 measured and REJECTED at 14%" verdict was the PACING's
 fault, not the radio's**, and is reversed. Tick debt was repaid as a burst at
 the loop rate, which outruns a peer emitting at 30 Hz, so both consoles

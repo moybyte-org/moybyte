@@ -341,6 +341,8 @@ static void emit(moy_match_t *m, int32_t newest) {
     float e = s->m_ema < 0.0f ? 0.0f : s->m_ema > 254.0f ? 254.0f : s->m_ema;
     p[17] = s->has_ema ? (uint8_t)e : 255u;
     p[18] = s->last_win;                    // ...and how often I stalled on you
+    p[19] = s->draw_div > 1 ? s->draw_div : 1u; // ...and the draws we take
+    put16(p + 20, (uint32_t)s->div_from);
     for (int32_t i = 0; i < n; i++) {
         int v = tape_get(s->mine_f, s->mine_m, newest - i);
         p[MOY_MATCH_IN_HDR + i] = v < 0 ? 0 : (uint8_t)v;
@@ -413,9 +415,25 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
             say(m, "Moybyte link: input delay -> %d (%d ms, peer margin %d ms)", s->delay,
                 (int)(s->delay * 1000 / s->tick_hz), (int)s->rep_min);
         }
+        // The host's draw divisor: a 60 Hz match ticking under DIV_BAR% of
+        // its rate is bound by a board's frame, and drawing every other tick
+        // halves what that frame draws.
+        if (settled && timed && s->has_win_ms && s->index == 0 && s->draw_div <= 1
+                && s->tick_hz >= MOY_MATCH_TICK_FAST) {
+            int32_t ms = (int32_t)(now - s->win_ms);
+            int32_t ticks = s->frame - s->win_mark;
+            if (ms > 0 && ticks * 1000 * 100 < (int32_t)s->tick_hz * MOY_MATCH_DIV_BAR * ms) {
+                s->draw_div = MOY_MATCH_DIV_STEP;
+                s->div_from = s->frame + MOY_MATCH_DIV_LEAD;
+                say(m, "Moybyte link: drawing every %d ticks from frame %ld (%ld ticks/s)",
+                    MOY_MATCH_DIV_STEP, (long)s->div_from, (long)(ticks * 1000 / ms));
+            }
+        }
         s->win_mark = s->frame;
         s->win_stalls = 0;
         s->rep_min = 255;
+        s->has_win_ms = timed;
+        s->win_ms = now;
     }
     if (timed && s->has_next) {
         unsigned i = (unsigned)s->frame & 63u;
@@ -441,6 +459,14 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     s->frame++;
     s->frame_seed = moy_lockstep_seed_of(s->seed, s->frame);
     return 1;
+}
+
+bool moy_lockstep_draws(const moy_match_t *m, int32_t f) {
+    const moy_lockstep_t *s = &m->s;
+    if (!s->live || s->draw_div <= 1u || f < s->div_from) {
+        return true;
+    }
+    return (f - s->div_from) % s->draw_div == 0;
 }
 
 void moy_lockstep_resend(moy_match_t *m) {
@@ -476,6 +502,10 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
     s->peer_win = data[18];
+    if (data[19] > 1u && s->draw_div <= 1u && s->index != 0) {
+        s->draw_div = data[19];
+        s->div_from = moy_lockstep_expand(m, (uint32_t)data[20] | ((uint32_t)data[21] << 8));
+    }
     s->peer_margin = data[17];
     if (data[17] < s->rep_min) {
         s->rep_min = data[17];

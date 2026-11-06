@@ -92,7 +92,16 @@ enum {
 // it), and every input packet carries the sender's newest one.
 #define MOY_MATCH_CHECK_EVERY 32
 #define MOY_MATCH_CHECKS 4
-#define MOY_MATCH_IN_HDR 19             // an input packet's header
+#define MOY_MATCH_IN_HDR 22             // an input packet's header
+// A 60 Hz match that cannot keep its rate draws every DIV_STEP-th tick: the
+// host decides after a settled window ticked under DIV_BAR percent of the
+// rate and names the frame it starts at, DIV_LEAD frames on, in every packet.
+// The guest cannot simulate that frame before it holds the host's input for
+// it, which travels in a packet that carries the notice, so both consoles
+// skip the same draws and a _draw that keeps state cannot part them.
+#define MOY_MATCH_DIV_STEP 2
+#define MOY_MATCH_DIV_BAR 93
+#define MOY_MATCH_DIV_LEAD 32
 // A console's delay sets the PEER's stalls, so the peer's reports steer it:
 // up a tick when the peer's last window stalled ESCALATE_AT ticks, down a
 // tick when the peer's last window was clean (a quarter of that) and every
@@ -192,6 +201,12 @@ typedef struct {
     uint8_t last_win, peer_win;
     int32_t delay_mark;                 // the frame of the last delay change
     uint32_t raises, lowers;
+    // The draw divisor (DIV_*): 0 or 1 every tick draws; from `div_from` on,
+    // every div-th. The window's wall clock, for the host's rate reading.
+    uint8_t draw_div;
+    int32_t div_from;
+    bool has_win_ms;
+    uint32_t win_ms;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
@@ -290,6 +305,9 @@ const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *ca
 int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session,
                        const char *cfg);
 void moy_lockstep_close(moy_match_t *m);
+// Does frame `f`'s tick draw? Every tick does, unless the match took a draw
+// divisor (MOY_MATCH_DIV_*) at or before `f`. Pure.
+bool moy_lockstep_draws(const moy_match_t *m, int32_t f);
 // The match's tick rate in Hz (begin sets MOY_MATCH_TICK_HZ): the period, and
 // the delay's ceiling and the escalation window, which are times.
 void moy_lockstep_rate(moy_match_t *m, int hz);

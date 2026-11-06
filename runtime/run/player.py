@@ -1864,7 +1864,7 @@ class Player(PlayerDiag):
             # consoles, so a _draw that keeps state cannot part them.
             if self._n_ticks != 1:
                 self._n_ticks = 1
-            return bool(np.waiting or np.pending(_ticks_ms()))
+            return bool((np.waiting or np.pending(_ticks_ms())) and np.draws(np.frame))
         if not self.tick_ms:
             if self._n_ticks != 1:
                 self._n_ticks = 1
@@ -2117,7 +2117,7 @@ class Player(PlayerDiag):
                 stalled = False
                 if np is not None:
                     dt, stalled, np = self._lockstep_step(ws, dt)
-                    if stalled:
+                    if stalled or not np.draws(np.frame - 1):
                         render = False
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one

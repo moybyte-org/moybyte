@@ -660,8 +660,13 @@ class _FakeSession:
         self.advanced = 0
         self.resent = 0
 
+    frame = 0
+
     def pending(self, now):
         return self.on
+
+    def draws(self, f):
+        return True
 
     def due(self, now):
         return self.on

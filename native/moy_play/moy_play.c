@@ -883,7 +883,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         // A matched game draws the frames it simulates and no others: a draw
         // between ticks, or over a stalled one, is a present the stall's
         // retry waits behind (the console's path draws on the due tick).
-        render = ticks > 0;
+        render = ticks > 0 && moy_lockstep_draws(mm, mm->s.frame - 1);
     } else if ((r->flags & MOY_PLAY_PACED) && r->tick != NULL && r->tick->rate > 0) {
         render = moy_tick_plan(r->tick, (moy_tick_real_t)dt, &ticks);
         if (ticks == 0) {

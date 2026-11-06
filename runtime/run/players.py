@@ -465,7 +465,7 @@ class LockstepSession:
         if name in ("frame", "delay", "redundancy", "stalls", "stall_ticks",
                     "waiting", "dead", "packets_in", "packets_out",
                     "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
-                    "lowers", "peer_margin", "desync",
+                    "lowers", "peer_margin", "draw_div", "desync",
                     "desync_kind", "checks"):
             return getattr(self.__dict__["_m"], name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
@@ -491,6 +491,10 @@ class LockstepSession:
 
     def due(self, now_ms):
         return self._m.due(now_ms)
+
+    def draws(self, f):
+        """Does frame `f`'s tick draw (the match's draw divisor)?"""
+        return self._m.draws(f)
 
     def advance(self, held_mask, now_ms=None):
         """One lockstep frame: True simulate (both slots now hold this frame's
@@ -913,6 +917,7 @@ class EspNowLink:
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
                 "stall_ticks": s.stall_ticks, "delay": s.delay, "hz": s.tick_hz,
                 "raises": s.raises, "lowers": s.lowers, "peer_margin": s.peer_margin,
+                "draw_div": s.draw_div,
                 "m_ema": s._m_ema, "waiting": s.waiting, "in": s.packets_in,
                 "out": s.packets_out, "peer_frame": s.last_peer_frame,
                 "checks": s.checks, "desync": None if s.desync < 0 else s.desync,
