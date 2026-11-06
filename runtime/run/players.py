@@ -558,8 +558,8 @@ class LockstepSession:
         lock=: (late, stall, slew, delay, margin). The first three are ms of
         the tick schedule given up per second -- this console's own frames
         running a whole tick long (a collection, a heavy frame), its waits
-        on the peer's input, and the guest's phase moved later -- so their
-        sum over the tick's ms is the ticks a second the match lost. Then
+        on the peer's input, and the guest's phase moved later net of
+        earlier -- so their sum over the tick's ms is the ticks a second the match lost. Then
         the input delay in ms, and the ms before it needed them that the
         peer's inputs landed (None before any). ONE reader -- it consumes
         its window."""

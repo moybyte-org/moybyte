@@ -616,10 +616,11 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
         t += 33
     assert guest._m_ema is not None, "the guest measured arrival margin"
     assert host._m_ema is not None, "the host measures it too: it is the peer's report"
-    # inputs were banked a full tick before each need, so the margin is FAT --
-    # and a fat margin moves NOTHING (the slew is one-sided: only a thin
-    # margin pushes the phase later; pulling earlier shaves margin for zero
-    # latency benefit and was measured chasing the stall cliff):
+    # inputs were banked a full tick before each need, so the margin is FAT
+    # on both sides -- and a fat margin moves NOTHING while the host's is as
+    # fat (pulling earlier on the guest's own margin shaves it for zero
+    # latency benefit and was measured chasing the stall cliff; only a
+    # thinner host pulls the guest earlier, the test below):
     assert guest._next_ms == nx0, "a fat margin leaves the phase alone"
     # Starve the margin directly: seed a thin EMA and stamp the next frame's
     # input as having landed 2ms before the need (the wire above cannot thin
@@ -645,6 +646,56 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
     host.advance(0, t)
     guest.advance(0, t)
     assert guest._next_ms == g_nx, "at DELAY=2 the controller is off"
+
+
+def test_a_thinner_host_pulls_the_guest_earlier_down_to_its_target():
+    """The phase's other half (2026-11-07): the host is the anchor and never
+    slews, so a host whose margin is thin stalled every tick for good while
+    the guest sat on a fat one, and its stalls raised the guest's delay. The
+    host's margin rides every packet; a guest whose own margin is more than
+    SLEW_SPREAD_MS fatter, and above its target band, pulls its phase 1 ms
+    earlier a tick. It never pulls itself under the band, and a balanced pair
+    moves nothing."""
+    wire = _Wire()
+    a, b = _match(wire, delay=1)
+    (host, _rh, _ih), (guest, _rg, _ig) = a, b
+    t = 1000
+    host.due(t)
+    guest.due(t)
+    for _ in range(12):
+        host.advance(0, t)
+        guest.advance(0, t)
+        for p in wire.queues[0]:
+            host.on_packet(p, t)
+        wire.queues[0] = []
+        for p in wire.queues[1]:
+            guest.on_packet(p, t)
+        wire.queues[1] = []
+        t += 33
+    s = guest._m._m.s
+
+    def tick(ema, host_margin, landed):
+        for p in wire.queues[0]:
+            host.on_packet(p, t)
+        wire.queues[0] = []
+        host.advance(0, t)
+        for p in wire.queues[1]:
+            guest.on_packet(p, t)
+        wire.queues[1] = []
+        guest._m_ema = ema
+        s.peer_margin = host_margin
+        f = guest.frame
+        guest._arr_f[f & 63] = f
+        guest._arr_t[f & 63] = t - landed
+        nx = guest._next_ms
+        assert guest.advance(0, t) is True
+        return guest._next_ms - nx
+
+    assert tick(40.0, 5, 40) == -1, "a thin host pulls a fat guest earlier"
+    assert tick(30.0, 25, 30) == 0, "a balanced pair moves nothing"
+    assert tick(15.0, 0, 15) == 0, "never under the guest's own band"
+    assert tick(5.0, 0, 5) == 1, "a thin guest still pushes itself later"
+    assert guest.slew_ms == 0, "net: one earlier, one later"
 
 
 def test_the_lock_meter_says_where_the_tick_rate_went():
