@@ -377,6 +377,9 @@ void moy_match_stop(moy_match_t *m) {
     moy_match_end(m);
     memset(m->peers, 0, sizeof(m->peers));
     m->defer_n = 0;
+    // A request the console never synced belongs to the run that stopped
+    // the link: the next run's offer() syncs, and would re-run itself.
+    m->act = MOY_MATCH_ACT_NONE;
     m->active = false;
 }
 

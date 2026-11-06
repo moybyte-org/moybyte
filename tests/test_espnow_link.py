@@ -893,3 +893,57 @@ def test_an_invite_meant_for_somebody_else_is_ignored():
     c.poll(wsc)
     assert wsb.netplay is not None, "the addressee joined"
     assert wsc.netplay is None, "the bystander did not"
+
+
+def test_a_stopped_link_asks_nothing_of_the_next_run():
+    """On a board the kernel's tail polls the link in C (moy_match_poll) and
+    the console's half (sync) runs in the Python frame's tail, which a front
+    run never reaches. A START or a give-up landing in that gap leaves its
+    open-the-cart request pending, and a run ended there (`end`, a Ctrl-C,
+    the pause menu's Quit) stops the link with it still pending. It must go
+    with the stop: kept, the next multiplayer start's offer() synced it and
+    re-ran the cart from inside Player.start, whose own runtime then found
+    the nested run's open ("moycore: a run is already open", on glass on the
+    Guition S3, 2026-11-06)."""
+    launched = []
+    air, clock, a, b = _pair(lambda ws, title: launched.append(title) or True)
+    _see_each_other(a, b, clock)
+    wsa, wsb = _Ws(), _Ws()
+    assert a.offer(wsa, "Brick Siege") is True
+    b._m.poll(clock())                # the kernel tail's C poll: the START lands
+    assert launched == []
+    b.stop(wsb)                       # the run ends before the console's tail
+
+    b.start()
+    b.offer(wsb, "Brick Siege")       # the next run's start, solo here
+    assert launched == [], "a stopped link's request reached the next run"
+    assert b.session is None
+
+
+def test_a_lua_run_after_a_stopped_match_opens_once(tmp_path):
+    """The same gap, end to end on the console: a request left pending by
+    the last run's link must not re-run the next one from inside its own
+    start (a nested Player.start, whose outer half then failed on the
+    runtime the nested one had opened)."""
+    from ws_helpers import build_ws, open_cart
+
+    air, clock = _Air(), _Clock()
+    host = _link(air, clock, b"\x01" * 6, "tdeck", "Ada")
+    ws = build_ws(tmp_path)
+    ws.link = moy_espnow.EspNowLink(board="guition_s3", name="Bo", ticks_ms=clock,
+                                    radio=_FakeRadio(air, b"\x02" * 6),
+                                    wlan=_FakeWlan(b"\x02" * 6),
+                                    launch=moy_espnow.launch_cart)
+    ws.link.start()
+    _see_each_other(host, ws.link, clock, cart="Brick Siege Lua")
+    assert host.offer(_Ws(), "Brick Siege Lua") is True
+    ws.link._m.poll(clock())          # the START lands in the C poll alone
+    ws.link.stop(ws)
+    host.stop()
+
+    starts = []
+    real = ws.player.start
+    ws.player.start = lambda project: starts.append(1) or real(project)
+    open_cart(ws, "Brick Siege Lua")
+    assert ws.cart_error is None, ws.cart_error
+    assert starts == [1], "the run was started %d times" % len(starts)

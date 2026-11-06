@@ -101,6 +101,20 @@ a shelf tap) — which frees that run to form a NEW match. **T_BYE is receive-on
 today** — nothing sends one, so that half rests on `tests/test_espnow_link.py`,
 the protocol's host pin.
 
+**A stopped link asks nothing of the next run** (2026-11-06). The kernel's tail
+polls the link in C and the console syncs the cart it asks for in the Python
+frame's tail, which a front run never reaches: a START or a give-up landing in
+that gap leaves the request pending, and a run ended there stops the link with
+it. `moy_match_stop` drops it. Kept, the next multiplayer start's `offer()`
+synced it and re-ran the cart from inside `Player.start`, whose runtime then
+found the nested run's open ("moycore: a run is already open").
+
+**Two consoles on one bench pair the same way two kids do.** A board pass runs
+every suite at once, so the on-glass checks of a multiplayer seed take one
+machine-wide room (`tests/on_glass.py`'s `radio_room`): two boards in Brick
+Siege Lua together formed a match, whose guest re-run reads stop `place` and
+whose lockstep stalls on the peer.
+
 **The PERF line names a match eating frames** (`13c3d9e`, 2026-08-27):
 `net=<ticks/s>` on both emitters, right after `fps=`, because for a linked game
 the drawn rate IS the tick rate — the world moves only on the shared tick and

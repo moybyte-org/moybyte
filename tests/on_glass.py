@@ -2070,6 +2070,55 @@ VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
 
 
+def _multiplayer_titles():
+    """The seed carts whose manifest asks for `multiplayer`: a run of one
+    arms the radio link."""
+    import json
+    titles = set()
+    for m in (ROOT / "system_carts").glob("*.moy/manifest.json"):
+        man = json.loads(m.read_text(encoding="utf-8"))
+        if "multiplayer" in ((man.get("moybyte") or {}).get("permissions") or ()):
+            titles.add(man.get("title"))
+    return titles
+
+
+@contextlib.contextmanager
+def radio_room(title):
+    """Hold the bench's one radio room for a run of `title` when it is a
+    multiplayer cart. Two consoles on the same multiplayer cart within radio
+    range form a match by design (docs/netplay_v1.md: being in the same room
+    is the pairing ceremony): the guest's re-run is no HOME launch (stop
+    `place`), a lockstep run stalls on the peer's inputs, and neither is
+    the solo run a check reads. `tools/board.py pass` runs every board's
+    suite at once, and the suites reach their Brick Siege Lua runs within
+    seconds of each other, so a run of one takes a machine-wide flock under
+    ~/.cache/moybyte for its length; the link stops when the run ends, and
+    the next board's run finds the room quiet. A console driven by hand
+    outside a suite is not in the lock: one left on a multiplayer cart is a
+    peer every suite run of it meets."""
+    if title not in _multiplayer_titles():
+        yield
+        return
+    import fcntl
+    cache = Path.home() / ".cache" / "moybyte"
+    cache.mkdir(parents=True, exist_ok=True)
+    with open(cache / "radio-room.lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def _in_the_room(check):
+    """`check(board, spec, title, ...)` run inside `radio_room(title)`."""
+    import functools
+
+    @functools.wraps(check)
+    def run(board, spec, title, *args, **kw):
+        with radio_room(title):
+            return check(board, spec, title, *args, **kw)
+    return run
+
+
+@_in_the_room
 def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     """The cart path's second checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a VM-free seed game is the kernel loop's foreground -- its input, ticks,
@@ -2182,6 +2231,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
         board.drain(1.5)
 
 
+@_in_the_room
 def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
                                       runtime="lua"):
     """The cart path's first checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
