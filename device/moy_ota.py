@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   wait_online                      report the link, dialling saved credentials first
+#   poll_online                      the same, polled: never waits
 #   OtaUpdater                       the Settings screens' updater, over the kernel's
 #   C6Updater                        the companion radio's updater (the P4s)
 #   verify_sig                       does a signature sign the payload (the reference)
@@ -92,6 +93,26 @@ def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
         else:                              # host / CPython: no sleep_ms
             time.sleep(step_ms / 1000.0)
     return bool(online())
+
+
+def poll_online(online, autoconnect, since):
+    """wait_online for a caller that must not wait (a pump that asks again
+    next frame): `(True, None)` with the link up; `(None, since)` while the
+    dial runs -- `since` None dials now (`autoconnect`, best-effort) and
+    starts the budget; `(False, None)` once ONLINE_WAIT_MS of it passed."""
+    if online():
+        return True, None
+    import time
+    if since is None:
+        if autoconnect is not None:
+            try:
+                autoconnect()
+            except Exception:  # noqa: BLE001 -- the budget decides
+                pass
+        return None, time.ticks_ms()
+    if time.ticks_diff(time.ticks_ms(), since) < ONLINE_WAIT_MS:
+        return None, since
+    return False, None
 
 
 # Which board this image is for. An OTA payload is an APP PARTITION image, so it

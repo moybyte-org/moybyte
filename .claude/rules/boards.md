@@ -188,6 +188,13 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   it outlives a soft reset, and a new VM puts it down unless the kernel's
   ESP-NOW link rides it. The Zero is outside this: WiFi is its only I/O, and
   it keeps the port's station for its setup access point.
+- **The frame never waits on the radio (2026-11-06)**: on a P4 every
+  `esp_wifi_*` call is a round trip to the C6, and a blocking scan, a join's
+  poll or a link wait held the whole desk for seconds. The console asks and
+  polls: `DeviceWifi.scan_poll()`/`join()`/`joined()` (Settings'
+  wake), `CartNet.ready()` (Get Carts) and `dial()` (an http request, a
+  stream), whose worker task waits for the link (`moy_net_dialing`). A cart's
+  `wifi.scan()`/`connect()` and a shell command still wait: theirs to spend.
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
   HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
   Guition S3's cards have a host of their own, mounted by

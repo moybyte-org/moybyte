@@ -20,6 +20,7 @@
 #include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #if __has_include("mdns.h") && defined(MOY_NET_MDNS) && MOY_NET_MDNS
 #include "mdns.h"
@@ -38,7 +39,16 @@ static esp_netif_t *s_netif;
 static volatile int s_want;             // a connect is asked for: retry on loss
 static esp_timer_handle_t s_retry;      // the next attempt after a loss
 static volatile uint8_t s_backoff;      // retries since the last address
+static volatile uint8_t s_stall;        // the timer is an attempt's deadline, not a backoff
 static volatile uint8_t s_keep;         // an address came: keep the network
+static volatile uint8_t s_scan;         // SCAN_IDLE, _ASKING, _RUNNING or _DONE
+static uint32_t s_scan_ms;              // since when it is asked for, or runs
+static uint32_t s_ask_ms;               // the last ask of the driver
+
+// A scan the driver refused (a station still starting or associating) is
+// asked again every SCAN_ASK_MS until MOY_WIFI_SCAN_MS has passed.
+enum { SCAN_IDLE, SCAN_ASKING, SCAN_RUNNING, SCAN_DONE };
+#define SCAN_ASK_MS 250u
 
 // A lost or failed association is retried after a backoff (0.5 s doubling to
 // 8 s), never from the event itself: an immediate esp_wifi_connect() lands on
@@ -48,12 +58,16 @@ static volatile uint8_t s_keep;         // an address came: keep the network
 // the leave a connect's own disconnect causes can also end the attempt that
 // follows it, so a leave is retried like any loss; an attempt that has
 // already got its address is left alone.
-static void retry(void *arg) {
-    (void)arg;
-    if (s_want && !s_st.connected) {
-        esp_wifi_connect();
-    }
-}
+//
+// Each attempt also has a deadline, STALL_MS: an attempt that reached neither
+// an address nor a disconnect by then is the station associating with
+// nothing, which no event would ever end -- every later stream and request
+// failed until a reboot. It is ended with a disconnect, whose event retries
+// it after the backoff; the backoff is armed here too, in case that event
+// never comes either.
+#define STALL_MS 15000u
+
+static void connect_now(void);
 
 static void schedule_retry(void) {
     if (s_retry == NULL) {
@@ -61,8 +75,35 @@ static void schedule_retry(void) {
     }
     uint8_t k = s_backoff < 4 ? s_backoff : 4;
     s_backoff++;
+    s_stall = 0;
     esp_timer_stop(s_retry);
     esp_timer_start_once(s_retry, (uint64_t)500000u << k);
+}
+
+static void retry(void *arg) {
+    (void)arg;
+    if (!s_want || s_st.connected) {
+        return;
+    }
+    if (s_stall) {
+        esp_wifi_disconnect();
+        schedule_retry();
+        return;
+    }
+    connect_now();
+}
+
+// One attempt, its deadline armed; a refused ask is retried after the backoff.
+static void connect_now(void) {
+    if (esp_wifi_connect() != ESP_OK) {
+        schedule_retry();
+        return;
+    }
+    if (s_retry != NULL) {
+        s_stall = 1;
+        esp_timer_stop(s_retry);
+        esp_timer_start_once(s_retry, (uint64_t)STALL_MS * 1000u);
+    }
 }
 
 // The wall clock (moy_net.h): NTP asked from the first address a raise of
@@ -164,6 +205,11 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_STOP) {
         s_st.on = 0;
         s_st.connected = 0;
+        s_scan = SCAN_IDLE;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        if (s_scan == SCAN_RUNNING) {
+            s_scan = SCAN_DONE;
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *d = data;
         portENTER_CRITICAL(&s_latch);
@@ -183,6 +229,10 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         portEXIT_CRITICAL(&s_latch);
         s_backoff = 0;
         s_keep = 1;
+        if (s_stall && s_retry != NULL) {
+            s_stall = 0;
+            esp_timer_stop(s_retry);
+        }
         ntp_start();
     }
 }
@@ -238,6 +288,7 @@ void moy_wifi_off(void) {
         esp_timer_stop(s_retry);
     }
     ntp_stop();
+    s_scan = SCAN_IDLE;
     esp_wifi_disconnect();
     esp_wifi_stop();
     portENTER_CRITICAL(&s_latch);
@@ -248,8 +299,11 @@ void moy_wifi_off(void) {
     portEXIT_CRITICAL(&s_latch);
 }
 
+// Each driver call is a round trip to the C6 on a P4, so a connect asks only
+// for what the station's state needs: a start when it is down, a disconnect
+// when it is associating or associated.
 int moy_wifi_connect(const char *ssid, const char *password) {
-    int e = moy_wifi_on();
+    int e = s_st.on ? ESP_OK : moy_wifi_on();
     if (e != ESP_OK) {
         return e;
     }
@@ -261,12 +315,15 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     }
     memcpy(c.sta.ssid, ssid, n);
     memcpy(c.sta.password, password, p);
+    int busy = s_want || s_st.connected;
     s_want = 0;
     s_backoff = 0;
     if (s_retry != NULL) {
         esp_timer_stop(s_retry);
     }
-    esp_wifi_disconnect();
+    if (busy) {
+        esp_wifi_disconnect();
+    }
     e = esp_wifi_set_config(WIFI_IF_STA, &c);
     if (e != ESP_OK) {
         return e;
@@ -274,14 +331,13 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     portENTER_CRITICAL(&s_latch);
     memcpy(s_st.ssid, ssid, n);
     s_st.ssid[n] = '\0';
+    s_st.reason = 0;                    // a refusal from here on is this attempt's
     portEXIT_CRITICAL(&s_latch);
     s_want = 1;
     // A connect asked while the radio is still starting (through the C6 on a
     // P4, right after the lease brought it up) is refused; the backoff asks
     // again, as it does after a loss.
-    if (esp_wifi_connect() != ESP_OK) {
-        schedule_retry();
-    }
+    connect_now();
     return ESP_OK;
 }
 
@@ -406,6 +462,10 @@ int moy_wifi_mdns(const char *host) {
     #endif
 }
 
+int moy_net_dialing(void) {
+    return s_st.on && s_want && !s_st.connected;
+}
+
 int moy_net_link(uint32_t *ip) {
     portENTER_CRITICAL(&s_latch);
     int up = s_st.connected && s_st.ip != 0;
@@ -458,13 +518,43 @@ void moy_wifi_state(moy_wifi_state_t *out) {
     portEXIT_CRITICAL(&s_latch);
 }
 
-int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
+// A scan is started without blocking (through the C6 on a P4 a blocking one
+// holds its caller for seconds) and its records are read once the driver's
+// SCAN_DONE came.
+int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max) {
     if (!s_st.on) {
+        s_scan = SCAN_IDLE;
         return -1;
     }
-    if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
-        return -1;
+    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_scan == SCAN_IDLE) {
+        s_scan = SCAN_ASKING;
+        s_scan_ms = ms;
+        s_ask_ms = ms - SCAN_ASK_MS;
     }
+    if (s_scan == SCAN_ASKING) {
+        if (ms - s_scan_ms >= MOY_WIFI_SCAN_MS) {
+            s_scan = SCAN_IDLE;
+            return -1;
+        }
+        if (ms - s_ask_ms >= SCAN_ASK_MS) {
+            s_ask_ms = ms;
+            s_scan = SCAN_RUNNING;      // first: its SCAN_DONE may come before the return
+            if (esp_wifi_scan_start(NULL, false) == ESP_OK) {
+                s_scan_ms = ms;
+            } else {
+                s_scan = SCAN_ASKING;
+            }
+        }
+        return MOY_WIFI_SCANNING;
+    }
+    if (s_scan == SCAN_RUNNING) {
+        if (ms - s_scan_ms < MOY_WIFI_SCAN_MS) {
+            return MOY_WIFI_SCANNING;
+        }
+        esp_wifi_scan_stop();
+    }
+    s_scan = SCAN_IDLE;
     uint16_t n = (uint16_t)max;
     wifi_ap_record_t *recs = heap_caps_malloc(sizeof(*recs) * (size_t)max,
                                               MALLOC_CAP_SPIRAM);
@@ -483,6 +573,14 @@ int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
         out[i].auth = (uint8_t)recs[i].authmode;
     }
     heap_caps_free(recs);
+    return n;
+}
+
+int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
+    int n;
+    while ((n = moy_wifi_scan_poll(out, max)) == MOY_WIFI_SCANNING) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     return n;
 }
 

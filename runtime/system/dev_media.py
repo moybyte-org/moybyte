@@ -146,17 +146,9 @@ def _hold():
         return
     _s["radio"] = True
     ws.wifi_hold(TAG)
-    w = getattr(ws, "wifi", None)
-    net = getattr(ws, "cart_net", None)
-    try:
-        up = w is not None and w.status()[0]
-    except Exception:  # noqa: BLE001 -- a station that cannot say is down
-        up = False
-    if not up and net is not None and hasattr(net, "online"):
-        try:
-            net.online()
-        except Exception:  # noqa: BLE001 -- the stream reports what failed
-            pass
+    dial = getattr(getattr(ws, "cart_net", None), "dial", None)
+    if dial is not None:
+        dial()                     # never waited: the worker's task waits for the link
 
 
 def _let_go():

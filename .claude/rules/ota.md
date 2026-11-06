@@ -114,10 +114,11 @@ paths:
     trusted by the old key and signed by the new. The kernel's copy is
     `moy_ota.c`'s `KEYS_HEX`; `tests/test_ota_signing.py` holds the two equal.
   - **`ensure_online()` must WAIT for the link** after autoconnect
-    (`ONLINE_WAIT_MS`): `DeviceWifi.connect()` polls briefly and gives up, and a
-    saved network that comes up just after reads as "wifi offline". The wait
-    belongs there, not in `connect()`, which would freeze the desktop on every
-    wrong password.
+    (`ONLINE_WAIT_MS`): autoconnect only asks the station for the last-joined
+    network and returns, so a caller behind a CHECKING screen waits there. No
+    other path waits on the radio in the frame: Settings polls its scan and
+    join, Get Carts polls `CartNet.ready()`, and an http request or a stream
+    `dial()`s and lets its worker's task wait (`moy_net_dialing`).
   - **Bump `moy_ota.FIRMWARE_VERSION` only via `make release`** — a hand bump
     desynchronises the stamp CI reads back out of the artifact, and a manifest
     advertising a version the image does not carry offers the same install

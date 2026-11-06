@@ -80,7 +80,12 @@ class CartNet:
     the shape the host's urllib one has (runtime/host/host_app.py).
 
         online()   dial the saved network if the link is down and WAIT for it
-                   (moy_ota.wait_online)
+                   (moy_ota.wait_online): a caller behind a CHECKING screen
+        dial()     dial it and return at once: a request on a worker's task
+                   waits for the link there (moy_net_dialing)
+        ready()    the link polled (moy_ota.poll_online): True up, None
+                   while the dial runs (the first call dials), False once
+                   its budget passed
         open(url)  GET with redirects followed (a GitHub release asset is a
                    302 to its CDN)
 
@@ -93,6 +98,7 @@ class CartNet:
     def __init__(self, wifi, autoconnect=None):
         self.wifi = wifi
         self.autoconnect = autoconnect
+        self._dialled = None        # ticks_ms of the dial ready() waits on
 
     def _up(self):
         try:
@@ -109,6 +115,22 @@ class CartNet:
 
     def _dial(self):
         return self.autoconnect(self.wifi)
+
+    def dial(self):
+        if self.wifi is None or self.autoconnect is None or self._up():
+            return
+        try:
+            self._dial()
+        except Exception:  # noqa: BLE001 -- the request reports what failed
+            pass
+
+    def ready(self):
+        if self.wifi is None:
+            return False
+        import moy_ota
+        up, self._dialled = moy_ota.poll_online(
+            self._up, None if self.autoconnect is None else self._dial, self._dialled)
+        return up
 
     def open(self, url):
         import moy_net

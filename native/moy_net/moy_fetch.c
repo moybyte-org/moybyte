@@ -104,6 +104,20 @@ static void open_source(void) {
     #endif
 }
 
+#ifdef FETCH_TASK
+extern int moy_net_dialing(void) __attribute__((weak));
+
+// The station the console asked for, waited for here rather than on the VM:
+// a request made while it associates resolves its host once it has an address.
+static void await_link(slot_t *s) {
+    uint32_t t0 = moy_net_ms();
+    while (moy_net_dialing != NULL && moy_net_dialing() && !s->closing
+           && moy_net_ms() - t0 < MOY_NET_DIAL_MS) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+#endif
+
 // One queued request served: the worker's, off the VM's thread on a board.
 static void serve(int i) {
     slot_t *s = &s_slot[i];
@@ -114,6 +128,9 @@ static void serve(int i) {
     }
     s->state = MOY_FETCH_RUNNING;
     UNLOCK();
+    #ifdef FETCH_TASK
+    await_link(s);
+    #endif
     int status = 0;
     char *body = NULL;
     size_t n = 0;

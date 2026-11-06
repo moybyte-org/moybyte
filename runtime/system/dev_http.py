@@ -19,9 +19,10 @@ Needs the `http` permission.
 
 The radio is a lease (`Workstation.wifi_hold`): a request holds the console's
 "http" tag from its `get` until it finishes, is closed, or its process ends,
-and the last one out lets it go. A `get` with the station down dials the
-known networks first (the console's cart_net), which may take seconds; the
-request itself never holds a frame.
+and the last one out lets it go. A `get` with the station down asks for the
+last-joined network (the console's cart_net `dial`) and returns at once; the
+request waits for the link on the worker's task (moy_net_dialing), so
+neither holds a frame.
 
 The host serves a request as it is queued (the driver's `run`), over the
 real client, which speaks plain TCP there."""
@@ -124,17 +125,9 @@ def _hold():
         return
     _held[0] = True
     ws.wifi_hold(TAG)
-    w = getattr(ws, "wifi", None)
-    net = getattr(ws, "cart_net", None)
-    try:
-        up = w is not None and w.status()[0]
-    except Exception:  # noqa: BLE001 -- a station that cannot say is down
-        up = False
-    if not up and net is not None and hasattr(net, "online"):
-        try:
-            net.online()
-        except Exception:  # noqa: BLE001 -- the request reports what failed
-            pass
+    dial = getattr(getattr(ws, "cart_net", None), "dial", None)
+    if dial is not None:
+        dial()                     # never waited: the worker's task waits for the link
 
 
 def _wake_for(req, on_done):

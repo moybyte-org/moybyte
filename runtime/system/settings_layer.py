@@ -284,6 +284,8 @@ WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
 WIFI_SCAN = "Scan again"       # the Wi-Fi popover's last row
+WIFI_LOOKING = "Looking for networks..."  # the panel's line while a scan runs
+WIFI_POLL_MS = 100            # a running scan or join, asked this often
 
 
 def _capital(s):
@@ -376,6 +378,13 @@ class SettingsLayer:
         self.wifi_pw = TextEntry(WIFI_PW_MAX)  # the password being typed (its .text)
         self.wifi_msg = ""
         self.wifi_known = []
+        # The radio's slow halves, polled, never waited on (a scan or a join
+        # through the P4's C6 takes seconds): the scan running, the join
+        # running as (ssid, password, locked), and the wake that polls them
+        # while either runs.
+        self.wifi_scanning = False
+        self.wifi_joining = None
+        self._wifi_wake = None
         # Bluetooth keyboard panel, capability-gated through _bt_service():
         # a board with no BLE service never shows the row.
         self.bt_view = False
@@ -711,12 +720,16 @@ class SettingsLayer:
 
     def wifi_leave(self):
         """The panel's exit: the typing ends and the lease goes, unless the
-        other container still shows the panel."""
+        other container still shows the panel. A scan or join still running
+        is let go with it (a join the station finishes stays joined)."""
         ws = self.ws
         self.wifi_pick = None
         ws._set_text_mode(False)
         pop = ws.sysmenu
         if not self.wifi_view and not (pop.open and pop.widget == "wifi"):
+            self.wifi_scanning = False
+            self.wifi_joining = None
+            self._wifi_unwatch()
             ws.wifi_release("settings")
 
     def _wifi_back(self, popover=False):
@@ -738,21 +751,95 @@ class SettingsLayer:
             self.wifi_known = []
             self.wifi_msg = "No Wi-Fi service."
             return
+        self.wifi_scanning = True
+        self.wifi_msg = WIFI_LOOKING
+        self._wifi_scan_poll()
+        if self.wifi_scanning:
+            self._wifi_watch()
+
+    def _wifi_scan_poll(self):
+        """The scan asked once more: its networks once it ended, nothing
+        while it runs. A service with no polled scan answers at once."""
+        ws = self.ws
+        w = ws.wifi
         try:
-            self.wifi_nets = list(ws.wifi.scan())
-            self.wifi_known = list(ws.wifi.known())
-            self.wifi_msg = ""
+            poll = getattr(w, "scan_poll", None)
+            nets = poll() if poll is not None else w.scan()
+            if nets is None:
+                return
+            self.wifi_nets = list(nets)
+            self.wifi_known = list(w.known())
+            if self.wifi_msg == WIFI_LOOKING:
+                self.wifi_msg = ""
         except Exception as exc:  # noqa: BLE001 -- a radio hiccup must not crash Settings
             self.wifi_nets = []
             self.wifi_msg = ("Scan failed: " + str(exc))[:34]
+        self.wifi_scanning = False
         if self.wifi_sel >= len(self.wifi_nets):
             self.wifi_sel = max(0, len(self.wifi_nets) - 1)
+        ws._dirty = True
+
+    def _wifi_watch(self):
+        """Poll the running scan or join every WIFI_POLL_MS, as the shell's
+        wake, until neither runs."""
+        if self._wifi_wake is not None:
+            return
+        try:
+            import moybyte as _mb
+            import devices as _D
+        except ImportError:  # host: the runtime package
+            from runtime import moybyte as _mb
+            from runtime import devices as _D
+        try:
+            import moy_log as _L
+        except ImportError:
+            try:
+                from runtime import moy_log as _L
+            except ImportError:  # the browser: one process table, no log
+                _L = None
+        was = _L.current() if _L is not None else None
+        if _L is not None:
+            _L.current(_D.SHELL)
+        try:
+            self._wifi_wake = _mb.WAKES.every(WIFI_POLL_MS, self._wifi_tick)
+        finally:
+            if _L is not None:
+                _L.current(was)
+
+    def _wifi_unwatch(self):
+        wid = self._wifi_wake
+        self._wifi_wake = None
+        if wid is not None:
+            try:
+                import moybyte as _mb
+            except ImportError:
+                from runtime import moybyte as _mb
+            _mb.WAKES.cancel(wid)
+
+    def _wifi_tick(self):
+        if self.wifi_scanning:
+            self._wifi_scan_poll()
+        if self.wifi_joining is not None:
+            w = self.ws.wifi
+            ok = None
+            try:
+                ok = w.joined() if w is not None else False
+            except Exception:  # noqa: BLE001 -- a station that cannot say has not joined
+                ok = False
+            if ok is not None:
+                self._wifi_settle(ok)
+        if not self.wifi_scanning and self.wifi_joining is None:
+            self._wifi_unwatch()
+
+    def wifi_busy(self):
+        """A scan or a join runs: the panel shows it and polls it."""
+        return self.wifi_scanning or self.wifi_joining is not None
 
     def _wifi_activate(self):
         """CONNECT the selected network: open networks (or already-saved ones)
         connect straight away; a locked, unknown one opens the password prompt."""
         ws = self.ws
-        if not self.wifi_nets:
+        if not self.wifi_nets or self.wifi_joining is not None:
             return
         ssid, _sig, locked = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)]
         if locked and ssid not in self.wifi_known:
@@ -760,11 +847,9 @@ class SettingsLayer:
         else:
             # A saved/open network reconnects with "" -- the SERVICE resolves
             # the stored password. A LOCKED known net that still fails (a stale
-            # saved password) reopens the prompt, so the kid can retype it
-            # (on-glass P4).
-            ok = self._wifi_connect(ssid, "")
-            if not ok and locked:
-                self._wifi_ask(ssid)
+            # saved password) reopens the prompt as the join settles, so the
+            # kid can retype it (on-glass P4).
+            self._wifi_connect(ssid, "", locked)
         ws._dirty = True
 
     def _wifi_ask(self, ssid):
@@ -777,26 +862,46 @@ class SettingsLayer:
         ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
         ws._dirty = True
 
-    def _wifi_connect(self, ssid, pw):
+    def _wifi_connect(self, ssid, pw, locked=False):
+        """Ask the service to join `ssid` and return at once: the verdict is
+        the join's to give (`_wifi_settle`), now or when the poll sees it."""
         ws = self.ws
-        ok = False
-        try:
-            ok = bool(ws.wifi.connect(ssid, pw)) if ws.wifi is not None else False
-        except Exception as exc:  # noqa: BLE001
-            self.wifi_msg = ("Can't connect: " + str(exc))[:34]
-        else:
-            # Voice (docs/os_voice_v1.md): say the fix, not the fault -- a typed
-            # password gets the password message; an open/saved net stays generic.
-            self.wifi_msg = ("Connected to " + str(ssid))[:34] if ok \
-                else ("That password didn't work." if pw
-                      else "Couldn't connect.")
         self.wifi_pick = None
         ws._set_text_mode(False)
+        w = ws.wifi
+        try:
+            join = getattr(w, "join", None) if w is not None else None
+            ok = (join(ssid, pw) if join is not None else w.connect(ssid, pw)) \
+                if w is not None else False
+        except Exception as exc:  # noqa: BLE001
+            self.wifi_msg = ("Can't connect: " + str(exc))[:34]
+            ws._dirty = True
+            return False
+        self.wifi_joining = (ssid, pw, locked)
+        if ok is None:
+            self.wifi_msg = ("Connecting to " + str(ssid) + "...")[:34]
+            self._wifi_watch()
+            ws._dirty = True
+            return None
+        return self._wifi_settle(bool(ok))
+
+    def _wifi_settle(self, ok):
+        """The join ended. Voice (docs/os_voice_v1.md): say the fix, not the
+        fault -- a typed password gets the password message, an open or saved
+        net stays generic, and a saved locked one that failed asks again."""
+        ws = self.ws
+        ssid, pw, locked = self.wifi_joining
+        self.wifi_joining = None
+        self.wifi_msg = ("Connected to " + str(ssid))[:34] if ok \
+            else ("That password didn't work." if pw
+                  else "Couldn't connect.")
         if ws.wifi is not None:
             try:
                 self.wifi_known = list(ws.wifi.known())
             except Exception:  # noqa: BLE001
                 pass
+        if not ok and locked and not pw:
+            self._wifi_ask(ssid)
         ws._dirty = True
         return ok
 

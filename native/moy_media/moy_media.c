@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "minimp3.h"
+#include "moy_net.h"
 #include "moy_ota.h"
 #include "moy_play.h"
 
@@ -67,6 +68,7 @@ typedef struct {
     int err;
     int played;                     // the entry decoded a frame
     int retries;
+    uint32_t dial_ms;               // since when an opening URL waits for the link, 0 none
     int eof;                        // the entry's source has no more bytes
     int h;                          // the URL's client, 0 for none
     uint32_t clen;                  // its Content-Length: 0 for a stream with no end
@@ -847,6 +849,7 @@ static void begin(media_t *m) {
     UNLOCK(m);
     m->kind = kind;
     m->retries = again ? m->retries + 1 : 0;
+    m->dial_ms = 0;
     m->played = 0;
     m->eof = 0;
     m->skip = 0;
@@ -907,7 +910,31 @@ static void take_list(media_t *m) {
     }
 }
 
-static void open_url(media_t *m) {
+#ifdef MEDIA_BOARD
+extern int moy_net_dialing(void) __attribute__((weak));
+
+// The station the console asked for, waited for here, a step at a time so a
+// command still reaches the task: 1 while it associates (MOY_NET_DIAL_MS at
+// most), 0 once the URL may open.
+static int awaiting_link(media_t *m) {
+    if (moy_net_dialing == NULL || !moy_net_dialing()) {
+        return 0;
+    }
+    uint32_t ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) | 1u;
+    if (m->dial_ms == 0) {
+        m->dial_ms = ms;
+    }
+    return ms - m->dial_ms < MOY_NET_DIAL_MS;
+}
+#endif
+
+// 0 while the URL waits for the link (the task polls again), else 1.
+static int open_url(media_t *m) {
+    #ifdef MEDIA_BOARD
+    if (awaiting_link(m)) {
+        return 0;
+    }
+    #endif
     LOCK(m);
     copy_text(m->pool + m->e_src[m->cur], m->url, sizeof(m->url));
     UNLOCK(m);
@@ -917,13 +944,13 @@ static void open_url(media_t *m) {
                               &status, &clen);
     if (h < 0) {
         advance(m, -h);
-        return;
+        return 1;
     }
     m->h = h;
     m->clen = clen;
     if (status != 200) {
         advance(m, 5);                  // EIO: no stream behind it
-        return;
+        return 1;
     }
     char ctype[64] = "";
     moy_httpc_header(h, "content-type", ctype, sizeof(ctype));
@@ -931,7 +958,7 @@ static void open_url(media_t *m) {
     path = path != NULL ? strchr(path + 3, '/') : NULL;
     if (moy_media_list_kind(ctype, path, NULL, 0) != 0) {
         take_list(m);
-        return;
+        return 1;
     }
     char name[MOY_MEDIA_TEXT_MAX];
     int nn = moy_httpc_header(h, "icy-name", name, sizeof(name));
@@ -941,6 +968,7 @@ static void open_url(media_t *m) {
     m->icy_int = (uint32_t)header_int(h, "icy-metaint");
     m->icy_left = m->icy_int;
     m->state = MOY_MEDIA_PLAYING;
+    return 1;
 }
 
 // A connection's bytes, its ICY metadata taken out, into the stream buffer.
@@ -1187,8 +1215,7 @@ static int step(media_t *m) {
     }
     int st = m->state;
     if (st == MOY_MEDIA_OPENING) {
-        open_url(m);
-        return 1;
+        return open_url(m);
     }
     if (st != MOY_MEDIA_PLAYING) {
         return 0;

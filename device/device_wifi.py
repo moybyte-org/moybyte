@@ -28,6 +28,12 @@ import time
 
 from device_util import _diag_note
 
+# How long a join waits for an address before it reads as failed, and the
+# disconnect reasons that end it sooner: the network refused the password
+# (4-way handshake timeout, auth fail, handshake timeout).
+JOIN_MS = 15000
+REFUSED = (15, 202, 204)
+
 
 def _keep_alive():
     """moy_ota.keep_alive: the connect's poll holds the frame on purpose."""
@@ -83,7 +89,20 @@ class KernelWlan:
         return self._n.wifi_status()[1]
 
     def scan(self):
-        return [(s, b"", 0, rssi, auth, False) for s, rssi, auth in self._n.wifi_scan()]
+        return self._shape(self._n.wifi_scan())
+
+    def scan_poll(self):
+        """scan() without the wait: None until the scan this starts ends."""
+        nets = self._n.wifi_scan(False)
+        return None if nets is None else self._shape(nets)
+
+    @staticmethod
+    def _shape(nets):
+        return [(s, b"", 0, rssi, auth, False) for s, rssi, auth in nets]
+
+    def reason(self):
+        """The last disconnect's reason since the connect asked, 0 for none."""
+        return self._n.wifi_status()[5]
 
     def connect(self, ssid, password=""):
         self._n.wifi_connect(ssid, password or "")
@@ -144,6 +163,8 @@ class DeviceWifi:
         # stops the radio but the driver keeps its internal-RAM allocation, so a
         # measurement of the idle desk's internal SRAM has to know.
         self.driver_up = False
+        self._join = None        # (ssid, password, stored, started) while a join runs
+        self._joined = None      # the last join's verdict
         _rest_after_vm_start()
 
     def _ensure_wlan(self):
@@ -161,24 +182,43 @@ class DeviceWifi:
 
     # -- the injected `wifi` API surface (host == device) ----------------
     def scan(self):
-        """Nearby networks as (ssid, signal%, locked?).
+        """Nearby networks as (ssid, signal%, locked?), waited for (a cart's
+        `wifi.scan()`, a few seconds; the console polls scan_poll instead).
         WLAN.scan() returns (ssid, bssid, channel, RSSI, security, hidden) tuples;
         map RSSI (~-100..-30 dBm) to a 0..100 bar and security!=0 to locked."""
         if self._ensure_wlan() is None:
             return []
         try:
-            out = []
-            for net in self.wlan.scan():
-                ssid = net[0].decode() if isinstance(net[0], (bytes, bytearray)) else str(net[0])
-                rssi = net[3] if len(net) > 3 else -100
-                sig = max(0, min(100, 2 * (int(rssi) + 100)))   # -100->0%, -50->100%
-                locked = bool(net[4]) if len(net) > 4 else False
-                if ssid:
-                    out.append((ssid, sig, locked))
-            return out
+            return self._nets(self.wlan.scan())
         except Exception as exc:  # noqa: BLE001 -- a scan failure must not crash the cart
             print("Moybyte wifi scan failed:", exc)
             return []
+
+    def scan_poll(self):
+        """scan() without the wait: None while the radio scans (the first call
+        starts it), then its networks. A station with no polled scan (the
+        port's) answers at once."""
+        if self._ensure_wlan() is None:
+            return []
+        poll = getattr(self.wlan, "scan_poll", None)
+        try:
+            nets = poll() if poll is not None else self.wlan.scan()
+            return None if nets is None else self._nets(nets)
+        except Exception as exc:  # noqa: BLE001 -- a scan failure must not crash Settings
+            print("Moybyte wifi scan failed:", exc)
+            return []
+
+    @staticmethod
+    def _nets(raw):
+        out = []
+        for net in raw:
+            ssid = net[0].decode() if isinstance(net[0], (bytes, bytearray)) else str(net[0])
+            rssi = net[3] if len(net) > 3 else -100
+            sig = max(0, min(100, 2 * (int(rssi) + 100)))   # -100->0%, -50->100%
+            locked = bool(net[4]) if len(net) > 4 else False
+            if ssid:
+                out.append((ssid, sig, locked))
+        return out
 
     def _stored_password(self, ssid):
         """The password wifi.json holds for `ssid`, else None.
@@ -196,44 +236,61 @@ class DeviceWifi:
             pass
         return None
 
-    def connect(self, ssid, password=""):
-        """Associate with `ssid`, remember the creds, and report whether the link
-        came up. An EMPTY password resolves to the stored one first -- the panel's
-        known-network reconnect passes "" (it has no credential access), and the
-        old behavior associated with "" AND remembered it, destroying the saved
-        password (the on-glass P4 "says not connected after i exit", 2026-07-25).
-        The connect()/isconnected() poll below gives up after ~4s; a saved network
-        that comes up later is caught by moy_ota's ensure_online() ONLINE_WAIT_MS
-        (measured 1.5s late on glass, 2026-08-02 -- the wait deliberately lives
-        there, not here, so a wrong password never freezes the desktop).
+    def join(self, ssid, password=""):
+        """Ask the station for `ssid` and return at once: True when the link
+        is up, False when the radio refused the ask, None while it associates
+        (joined() answers then; the console polls it, never waits). An EMPTY
+        password resolves to the stored one first -- the panel's known-network
+        reconnect passes "" (it has no credential access), and associating
+        with "" AND remembering it destroyed the saved password (the on-glass
+        P4 "says not connected after i exit", 2026-07-25).
 
-        A credential is stored only when the radio ASSOCIATED, or when it is a
-        non-blank password that differs from what is on disk. Never a blank one
-        the radio did not verify: the resolve above yields "" both for an open
-        network and for one the store could not tell us about, so remembering it
-        unconditionally lets a single unreadable load rewrite wifi.json as one
-        empty-password entry and drop every other saved network. Storing a
-        non-blank password even on FAILURE is deliberate -- the ~4s poll giving
-        up is the late-association case ensure_online() waits for."""
+        A credential is stored when the join settles, and only when the radio
+        ASSOCIATED, or when it is a non-blank password that differs from what
+        is on disk. Never a blank one the radio did not verify: the resolve
+        above yields "" both for an open network and for one the store could
+        not tell us about, so remembering it unconditionally lets a single
+        unreadable load rewrite wifi.json as one empty-password entry and drop
+        every other saved network. Storing a non-blank password even on
+        FAILURE is deliberate: a join that read as failed can still associate
+        later (the kernel's driver retries a loss), and moy_ota.wait_online is
+        what waits for that."""
         ssid = str(ssid)
         stored = self._stored_password(ssid)
         password = wifi_password(password, stored)
-        ok = False
-        if self._ensure_wlan() is not None:
-            try:
-                self.wlan.connect(ssid, password)
-                # Brief poll for association. The single-threaded desktop loop calls
-                # this between frames, so keep the budget small; a real impl should
-                # spread this across frames rather than block.
-                for _ in range(40):
-                    if self.wlan.isconnected():
-                        ok = True
-                        break
-                    _keep_alive()
-                    time.sleep_ms(100)
-            except Exception as exc:  # noqa: BLE001
-                print("Moybyte wifi connect failed:", exc)
-                ok = False
+        self._join = None
+        if self._ensure_wlan() is None:
+            return self._settle(ssid, password, stored, False)
+        try:
+            self.wlan.connect(ssid, password)
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte wifi connect failed:", exc)
+            return self._settle(ssid, password, stored, False)
+        self._join = (ssid, password, stored, time.ticks_ms())
+        return self.joined()
+
+    def joined(self):
+        """The running join's verdict: None while it associates, True once
+        the link is up, False once the network refused the password or
+        JOIN_MS passed; the last verdict when none runs."""
+        j = self._join
+        if j is None:
+            return self._joined
+        w = self.wlan
+        up = False
+        refused = False
+        try:
+            up = w is not None and bool(w.isconnected())
+            reason = getattr(w, "reason", None)
+            refused = not up and reason is not None and reason() in REFUSED
+        except Exception:  # noqa: BLE001 -- a station that cannot say has not joined
+            pass
+        if not up and not refused and time.ticks_diff(time.ticks_ms(), j[3]) < JOIN_MS:
+            return None
+        self._join = None
+        return self._settle(j[0], j[1], j[2], up)
+
+    def _settle(self, ssid, password, stored, ok):
         if ok:
             self._ssid = ssid
         if wifi_remember(ok, password, stored) \
@@ -242,6 +299,24 @@ class DeviceWifi:
                 self._store.remember_wifi(ssid, password, self._root)
             except Exception as exc:  # noqa: BLE001 -- save failure must not crash the cart
                 print("Moybyte wifi remember failed:", exc)
+        self._joined = ok
+        return ok
+
+    def connect(self, ssid, password=""):
+        """join(), waited out for about 4 s (a cart's `wifi.connect`): whether
+        the link came up. A network that associates later is moy_ota's
+        wait_online's to catch, never this wait's."""
+        ok = self.join(ssid, password)
+        for _ in range(40):
+            if ok is not None:
+                return ok
+            _keep_alive()
+            time.sleep_ms(100)
+            ok = self.joined()
+        if ok is None:
+            j = self._join
+            self._join = None
+            ok = self._settle(j[0], j[1], j[2], False)
         return ok
 
     def disconnect(self):
@@ -345,10 +420,12 @@ def make_wifi(store=None, root=None):
 
 
 def autoconnect_wifi(wifi):
-    """Boot-time autoconnect (#38): try the most-recently-remembered known network
-    first (moy_carts stores it at the front), so the kid joins once and the console
-    is online thereafter. Best-effort + guarded: a no-WiFi build or no saved creds
-    just no-ops."""
+    """The link asked for from saved credentials (#38), never waited for: the
+    station is started toward the most-recently-joined network (moy_carts
+    keeps it at the front). True when the link is already up, None while the
+    station associates, False with nothing saved or no radio. A caller that
+    needs the link waits for it where it can afford to (moy_ota.wait_online,
+    behind a CHECKING screen) or lets a worker task wait (moy_net_dialing)."""
     if wifi is None:
         return False
     try:
@@ -360,10 +437,14 @@ def autoconnect_wifi(wifi):
         root = getattr(wifi, "_root", None)
         if store is not None and root is not None:
             nets = store.load_wifi(root)
-        for n in nets:                      # front-of-list = last joined
-            if wifi.connect(n["ssid"], n.get("password", "")):
-                _diag_note("wifi", "autoconnected: %s" % (n["ssid"],))
-                return True
+        if not nets:
+            return False
+        n = nets[0]
+        join = getattr(wifi, "join", None) or wifi.connect
+        ok = join(n["ssid"], n.get("password", ""))
+        if ok:
+            _diag_note("wifi", "autoconnected: %s" % (n["ssid"],))
+        return ok
     except Exception as exc:  # noqa: BLE001 -- autoconnect must never block/crash boot
         _diag_note("wifi", "autoconnect failed: %s" % (exc,))
     return False

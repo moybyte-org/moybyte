@@ -496,10 +496,18 @@ static mp_obj_t mod_wifi_status(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_status_obj, mod_wifi_status);
 
-// [(ssid bytes, rssi, auth)], [] while the radio is down.
-static mp_obj_t mod_wifi_scan(void) {
+// wifi_scan(wait=True): [(ssid bytes, rssi, auth)], [] while the radio is
+// down. wifi_scan(False) never waits: None while the scan it started (or the
+// one running) has not ended, then its list.
+static mp_obj_t mod_wifi_scan(size_t n_args, const mp_obj_t *args) {
+    bool wait = n_args == 0 || mp_obj_is_true(args[0]);
     moy_wifi_ap_t *aps = m_new(moy_wifi_ap_t, MOY_WIFI_SCAN_MAX);
-    int n = moy_wifi_scan(aps, MOY_WIFI_SCAN_MAX);
+    int n = wait ? moy_wifi_scan(aps, MOY_WIFI_SCAN_MAX)
+                 : moy_wifi_scan_poll(aps, MOY_WIFI_SCAN_MAX);
+    if (n == MOY_WIFI_SCANNING) {
+        m_del(moy_wifi_ap_t, aps, MOY_WIFI_SCAN_MAX);
+        return mp_const_none;
+    }
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (int i = 0; i < n; i++) {
         mp_obj_t t[3] = {mp_obj_new_bytes((const byte *)aps[i].ssid, strlen(aps[i].ssid)),
@@ -509,7 +517,7 @@ static mp_obj_t mod_wifi_scan(void) {
     m_del(moy_wifi_ap_t, aps, MOY_WIFI_SCAN_MAX);
     return out;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_scan_obj, mod_wifi_scan);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_scan_obj, 0, 1, mod_wifi_scan);
 
 static mp_obj_t mod_wifi_mac(void) {
     uint8_t mac[6];

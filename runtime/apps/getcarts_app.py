@@ -563,10 +563,17 @@ class GetCartsAppLayer(ListShellApp):
             self._damage.again()
 
     def _online(self):
-        """The lease taken and the link up; False (lease let go) when the
-        console could not get online."""
+        """The lease taken and the link up: True; None while the saved
+        network is still being joined (the pump asks again next frame, the
+        frame never waits on it); False (lease let go) when the console could
+        not get online."""
         self._hold()
-        if self._inst.net().online():
+        net = self._inst.net()
+        ready = getattr(net, "ready", None)
+        up = ready() if ready is not None else net.online()
+        if up is None:
+            return None
+        if up:
             return True
         self._release()
         return False
@@ -581,7 +588,10 @@ class GetCartsAppLayer(ListShellApp):
     def _pump_check(self):
         net = self._inst.net()
         if self._step == 0:
-            if not self._online():
+            up = self._online()
+            if up is None:
+                return
+            if not up:
                 self._go("nomemory" if self._starved() else "nowifi")
                 return
             root = self._inst.root()
@@ -828,7 +838,10 @@ class GetCartsAppLayer(ListShellApp):
             self._go("connecting")
 
     def _pump_licence(self):
-        if not self._online():
+        up = self._online()
+        if up is None:
+            return
+        if not up:
             self._fail(_ci.NET_MEMORY if self._starved() else "WiFi isn't connected.")
             return
         ext = self.lic[0]
@@ -866,7 +879,10 @@ class GetCartsAppLayer(ListShellApp):
         if e is None:
             self._go("connecting")
             return
-        if not self._online():
+        up = self._online()
+        if up is None:
+            return
+        if not up:
             self._fail("WiFi isn't connected.")
             return
         if self._fetching != ("reach", self._ext):
@@ -962,7 +978,10 @@ class GetCartsAppLayer(ListShellApp):
         return out
 
     def _pump_connect(self):
-        if not self._online():
+        up = self._online()
+        if up is None:
+            return
+        if not up:
             self._fail(_ci.NET_MEMORY if self._starved() else "WiFi isn't connected.")
             return
         row = self.cur

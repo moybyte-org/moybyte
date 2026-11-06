@@ -332,6 +332,12 @@ size_t moy_wc_url(char *out, size_t cap, int paired);
 
 // The kernel's link where the image has one: whether it holds an address.
 int moy_net_link(uint32_t *ip);
+// Whether the kernel's station is asked for a network and has no address yet:
+// a request on a worker's task (the http worker's, the media service's) waits
+// for it up to MOY_NET_DIAL_MS before it resolves its host, so the console
+// asks for the link and never waits on it.
+int moy_net_dialing(void);
+#define MOY_NET_DIAL_MS 16000u
 
 // -- the Zero's pins (moy_gpio.c) and the setup portal (moy_dns.c) ------------------
 
@@ -444,7 +450,14 @@ void moy_wifi_forget_kept(const char *ssid);
 int moy_wifi_ap(const char *ssid, uint32_t *ip);
 int moy_wifi_ap_mac(uint8_t mac[6]);
 int moy_wifi_mdns(const char *host);
-// A blocking scan into `out`: the count, or -1 when the radio is down.
+// The scan, polled: the first call asks for one and answers MOY_WIFI_SCANNING
+// until the driver's SCAN_DONE (or MOY_WIFI_SCAN_MS) ends it, then the count
+// found into `out`; -1 when the radio is down, or refused the scan (a station
+// still associating) for all of MOY_WIFI_SCAN_MS. moy_wifi_scan waits for
+// that answer on the caller's task.
+#define MOY_WIFI_SCANNING (-2)
+#define MOY_WIFI_SCAN_MS 15000u
+int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max);
 int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);
 // The power-save mode, set first when `set` is 0 or more; -1 before the driver.

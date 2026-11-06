@@ -107,6 +107,11 @@ int moy_net_link(uint32_t *ip) {
     return *ip != 0;
 }
 
+// No station dials on the host: a request never waits for one.
+int moy_net_dialing(void) {
+    return 0;
+}
+
 // The board's pins, standing in for the Zero's: a table a test sets, the
 // levels driven, and an input that reads its pull-up.
 uint8_t moy_net_host_pins[16];

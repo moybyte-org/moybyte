@@ -102,6 +102,17 @@ class FakeWifi:
         self.radio = True
         return [tuple(ap) for ap in self.FAKE_APS]
 
+    def scan_poll(self):
+        """DeviceWifi's polled scan: the fake radio's scan ends at once."""
+        return self.scan()
+
+    def join(self, ssid, password=""):
+        """DeviceWifi's join: the fake radio associates at once."""
+        return self.connect(ssid, password)
+
+    def joined(self):
+        return self._connected
+
     def _stored_password(self, ssid):
         """The password wifi.json holds for `ssid`, else None.
 
