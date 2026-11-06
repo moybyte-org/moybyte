@@ -356,16 +356,16 @@ starts after the stop starts them again (`moy_start`), so its timers start
 afresh and the records its sources took during the stop are not delivered
 (the owner's 2026-11-03 answer asked for them with their real timestamps,
 which a restart cannot give; #246 holds the question). The mini-VM
-spike (P3.8) tries more on the S3s: when a big cart stops the VM, a
-**small MicroPython VM** (a few hundred KB of heap) starts in its place, one
-VM at a time and in sequence through the stop/start machinery
-(`native/moy_kernel/moy_kernel.h`'s stop order), never concurrent, which
-avoids #246's variant-B failure. Background Python apps restart in it from
-the state their `moy_stop` persisted (`moy_start`), so they keep running
-through the big cart; Python-served commands stay refused, their servers
-being the whole shell. Its heap comes out of the big cart's share, so it
-runs only if the cart's declared need leaves room; otherwise Python pauses.
-If the spike finds it too complex, it is dropped and "Python pauses" stands. A service that is killed under
+spike (P3.8, branch `minivm`, f4496588f) built the alternative and it was
+DROPPED (owner, 2026-11-06): a small MicroPython started in the stopped
+VM's place, strictly after its teardown, ran the services through Doom on
+both S3s, but it cost the cart 1-2 fps and 256 KB of its PSRAM, reached no
+card and no glass, and helps only Python services while the ones that
+matter during a game (media, the radio link) are C. "Python pauses"
+stands. What it showed that outlives it: a VM with only the services
+subset frozen in boots in about 100-350 ms and runs one service in a
+12-20 KB heap, the starting point for a board with no PSRAM whose only
+Python is service-sized (#246 has the numbers). A service that is killed under
 memory pressure (the threshold from the shares) gets its `moy_stop` hook
 first, and what it persists there is its contract. The threshold is
 `moy_share_kill_below` (`native/moy_play/moy_play.h`): what every present row
