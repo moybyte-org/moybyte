@@ -3307,7 +3307,12 @@ def wasm_runaway_runs_to_its_end(board, paths, n=400000000):
     r = wasm_run(board, paths["hello"], "spin", (n,), during=_stop)
     assert not r["ok"] and "terminated by user" in r["error"], r
     assert r["terminated"] is True
-    assert r["run_us"] >= 0.9 * ref["run_us"], (r["run_us"], ref["run_us"])
+    # The stop lands a fifth of the way in, so a run cut there reads ~0.2 of
+    # the reference and one that ran to its end ~1.0. The reference is ONE
+    # run, and a busy desk slows one by a tenth and more (the Guition P4:
+    # 841 ms against its usual 745, the terminated run 753), so the bound sits
+    # between the two answers rather than at the reference's own noise.
+    assert r["run_us"] >= 0.6 * ref["run_us"], (r["run_us"], ref["run_us"])
     return ref["call_us"], r["run_us"]
 
 
