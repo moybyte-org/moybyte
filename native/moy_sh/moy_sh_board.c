@@ -819,6 +819,7 @@ bool moy_sh_board_line(const char *text) {
             return false;
         }
         moy_sh_board_go_home(s);
+        moy_sh_setvar(s, "TERM", "dumb");  // the channel carries lines, not a screen
         f->s = s;
         moy_sh_park(s);
     }

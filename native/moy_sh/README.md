@@ -10,7 +10,7 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh.h` | the public interface: a session, its host table, feeding it text |
 | `moy_sh.c` | the session: dash's state set up, a run, the fork, the wait, the exec, the role commands, `sh` |
 | `moy_sh_sys.c` | the OS dash sees: descriptors over pipe buffers and whole-file objects, paths, the store through `moy_vol`, `/dev` `/proc` `/bin`, signals |
-| `moy_sh_cmds.c` | the C core built-ins (file commands, `ps`, `free`, `df`, `log`/`dmesg`, `reboot`, `date`, `sleep`, `clear`, `help`), sorted |
+| `moy_sh_cmds.c` | the C core built-ins (file commands, `ps`, `free`, `df`, `log`/`dmesg`, `reboot`, `date`, `sleep`, `clear`, `help`, `neofetch`), sorted |
 | `moy_sh_arena.c` | the session's region: first-fit with boundary tags, saved and restored whole for a fork |
 | `moy_sh_fmt.c` | the shell's `vsnprintf`: every integer conversion at every length, which a board's nano formatter lacks |
 | `moy_sh_g.h` | every dash global as a field of one record, which lives in the arena |

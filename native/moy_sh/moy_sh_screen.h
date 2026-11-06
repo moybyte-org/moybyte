@@ -35,7 +35,7 @@
 
 typedef struct moy_sh_screen moy_sh_screen_t;
 
-// A face of `cols` by `rows` in its home folder "/"; `root` names the files
+// A face of `cols` by `rows` in its home (moy_sh_board_go_home); `root` names the files
 // tree off a board (NULL: the board table's). NULL when memory refuses.
 moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root);
 void moy_sh_screen_free(moy_sh_screen_t *f);

@@ -192,10 +192,13 @@ def _face(harness, path, root, screen):
 
 
 # interrupt.sh's Ctrl-C is sh_main's stand-in (/.interrupt), which no face polls;
+# neofetch's rows are sh_main's stand-in console's, and the screen face draws
+# them in colour where the serial face (TERM=dumb) writes them plain;
 # an `app_` script's text app shows on the screen face's own screen, which
 # tests/test_terminal.py holds.
 REPLAYS = ([os.path.join(SERIAL, n + ".sh") for n in SERIAL_NAMES if not n.startswith("app_")]
-           + [os.path.join(SCRIPTS, n + ".sh") for n in SCRIPT_NAMES if n != "interrupt"])
+           + [os.path.join(SCRIPTS, n + ".sh") for n in SCRIPT_NAMES
+              if n not in ("interrupt", "builtin_neofetch")])
 
 
 @pytest.mark.parametrize("path", REPLAYS, ids=[os.path.relpath(p, SCRIPTS) for p in REPLAYS])

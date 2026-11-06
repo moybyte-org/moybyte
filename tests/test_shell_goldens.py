@@ -902,6 +902,25 @@ def _terminal_plan(ws, cfg):
             app._damage.all()
         return enter
 
+    def neofetch():
+        # the store's figures are the host disk's: fixed here, so the page
+        # is the same on every machine
+        from runtime import sh_door
+        f = app.face
+        if f.app() is not None:
+            for k in (b"\x18n" if f.app() == "edit" else b"q"):
+                f.key(k)
+        f.clear_cands()
+        f.set_in_row(False)
+        was = sh_door.ShellDoor.v_df
+        sh_door.ShellDoor.v_df = lambda self, path: "%d %d" % (31 << 30, 19 << 30)
+        try:
+            f.set_line("clear; neofetch")
+            f.submit()
+        finally:
+            sh_door.ShellDoor.v_df = was
+        app._damage.all()
+
     plan = [("app_terminal", open_it)]
     if cfg.get("appearance"):
         plan.append(("app_terminal_listing", typed("help")))
@@ -912,6 +931,7 @@ def _terminal_plan(ws, cfg):
         plan.append(("app_terminal_edit", text_app("edit /sd/moybyte/system/settings",
                                                    b"font_scale = 2\r")))
         plan.append(("app_terminal_top", text_app("top", still=True)))
+        plan.append(("app_terminal_neofetch", neofetch))
     return plan
 
 
@@ -1638,7 +1658,7 @@ def surface_names(config_name):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
         if not cfg["windowed"]:
             names.append("app_terminal_touch")
-        names += ["app_terminal_edit", "app_terminal_top"]
+        names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch"]
     return names
 
 

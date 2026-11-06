@@ -7,6 +7,7 @@
 //
 // The OS around the session is a stand-in, enough to exercise every path:
 //   /proc/1/status, /dev/uart1        virtual files (uart1 takes writes)
+//   /proc/console                     the console's own rows, fixed (neofetch)
 //   /bin/hello, /bin/count, /bin/fail, /bin/daemon, /bin/py
 //                                     installed commands: hello prints its
 //                                     argv, count copies stdin to stdout with a
@@ -90,6 +91,9 @@ static int h_vread(void *ctx, const char *path, char **p, size_t *n) {
     const char *text = NULL;
     if (!strcmp(path, "/proc/1/status")) {
         text = "name: shell\npid: 1\nkind: shell\nstate: running\n";
+    } else if (!strcmp(path, "/proc/console")) {
+        text = "name: moybyte-1a2b\nboard: Test Board 7\xe2\x80\xb3\nfirmware: 0.16.0\n"
+               "display: 1024x600\ntheme: blocks\nwifi: home (192.168.1.20)\n";
     } else if (!strcmp(path, "/dev/uart1")) {
         *p = dup_bytes(uart, uart_n);
         *n = uart_n;

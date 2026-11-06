@@ -73,6 +73,8 @@ void moy_ssh_face_raw(moy_ssh_face_t *f, const char *p, size_t n);
 int moy_ssh_face_poll(moy_ssh_face_t *f);
 long moy_ssh_face_in(moy_ssh_face_t *f, void *buf, size_t n);
 void moy_ssh_face_size(const moy_ssh_face_t *f, int *cols, int *rows);
+// Whether the client asked for a terminal (pty-req).
+int moy_ssh_face_pty(const moy_ssh_face_t *f);
 // fn(arg) on the console's task (moy_ssh_hop), what it wrote sent after.
 void moy_ssh_face_hop(moy_ssh_face_t *f, void (*fn)(void *arg), void *arg);
 

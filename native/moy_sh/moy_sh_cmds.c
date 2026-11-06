@@ -1002,6 +1002,239 @@ static int clearcmd(int argc, char **argv) {
     return 0;
 }
 
+// -- neofetch -------------------------------------------------------------------------
+
+#if defined(ESP_PLATFORM) && __has_include("esp_chip_info.h")
+#include "esp_chip_info.h"
+#include "esp_timer.h"
+#define MOY_SH_FETCH_CHIP 1
+#endif
+
+#define FETCH_ROWS 16
+#define FETCH_VALUE 64
+#define FETCH_GAP 3                     // between the logo and the rows
+
+static const char *const fetch_logo[] = {
+    " .--------.",
+    " | .----. |",
+    " | | moy| |",
+    " | '----' |",
+    " |  +  oo |",
+    " '--------'",
+};
+#define FETCH_LOGO_ROWS ((int)(sizeof fetch_logo / sizeof fetch_logo[0]))
+#define FETCH_LOGO_W 11
+
+typedef struct {
+    const char *label[FETCH_ROWS];
+    char value[FETCH_ROWS][FETCH_VALUE];
+    int n;
+    char title[FETCH_VALUE];
+} fetch_t;
+
+static char *fetch_add(fetch_t *f, const char *label) {
+    if (f->n >= FETCH_ROWS) {
+        return NULL;
+    }
+    f->label[f->n] = label;
+    return f->value[f->n++];
+}
+
+// `key`'s value in /proc/console's `key: value` lines, into `out`; 0 none.
+static int console_row(const char *text, size_t n, const char *key, char *out, size_t cap) {
+    size_t kn = strlen(key);
+    for (const char *p = text, *end = text + n; p < end;) {
+        const char *nl = memchr(p, '\n', (size_t)(end - p));
+        const char *e = nl != NULL ? nl : end;
+        if ((size_t)(e - p) > kn + 2 && memcmp(p, key, kn) == 0 && p[kn] == ':' && p[kn + 1] == ' ') {
+            size_t vn = (size_t)(e - p) - kn - 2;
+            vn = vn < cap - 1 ? vn : cap - 1;
+            memcpy(out, p + kn + 2, vn);
+            out[vn] = 0;
+            return vn > 0;
+        }
+        p = e + 1;
+    }
+    return 0;
+}
+
+static void fetch_console(fetch_t *f, const char *text, size_t n, const char *key,
+                          const char *label) {
+    char v[FETCH_VALUE];
+    if (text != NULL && console_row(text, n, key, v, sizeof v)) {
+        char *out = fetch_add(f, label);
+        if (out != NULL) {
+            memcpy(out, v, strlen(v) + 1);
+        }
+    }
+}
+
+static void fetch_size(char *out, uint64_t b) {
+    if (b < 1024u * 1024u) {
+        snprintf(out, 16, "%lu KiB", (unsigned long)(b / 1024u));
+    } else if (b < 1024u * 1024u * 1024u) {
+        unsigned long t = (unsigned long)(b * 10u / (1024u * 1024u));
+        snprintf(out, 16, "%lu.%lu MiB", t / 10u, t % 10u);
+    } else {
+        unsigned long t = (unsigned long)(b * 10u / (1024u * 1024u * 1024u));
+        snprintf(out, 16, "%lu.%lu GiB", t / 10u, t % 10u);
+    }
+}
+
+static void fetch_used(fetch_t *f, const char *label, uint64_t total, uint64_t free) {
+    char *out = total > 0 ? fetch_add(f, label) : NULL;
+    if (out != NULL) {
+        char u[16], t[16];
+        fetch_size(u, total - free);
+        fetch_size(t, total);
+        snprintf(out, FETCH_VALUE, "%s / %s", u, t);
+    }
+}
+
+static void fetch_df(fetch_t *f, const char *label, const char *path) {
+    moy_sh_t *s = moy_sh_cur;
+    char sp[MOY_SH_PATH_MAX];
+    uint64_t total = 0, free = 0;
+    const char *p = moy_sh_store_path(path, sp, sizeof sp);
+    if (p != NULL && s->host.df != NULL && s->host.df(s->host.ctx, p, &total, &free) == 0) {
+        fetch_used(f, label, total, free);
+    }
+}
+
+// The columns `p` takes (a UTF-8 character one), and `*cut` the bytes that
+// fit in `room` columns.
+static int fetch_width(const char *p, int room, size_t *cut) {
+    int w = 0;
+    size_t i = 0;
+    *cut = 0;
+    for (; p[i]; i++) {
+        if (((unsigned char)p[i] & 0xC0u) != 0x80u) {
+            if (w == room) {
+                *cut = i;
+                return w;
+            }
+            w++;
+        }
+    }
+    *cut = i;
+    return w;
+}
+
+// One line: `pad` columns of logo (row `logo`, or blanks past it), then
+// `label` and `text` cut to what the terminal has left, `text` in bold where
+// `bold`.
+static void fetch_line(int colour, int cols, int logo, int pad, const char *label,
+                       const char *text, int bold) {
+    int used = 0;
+    if (pad > 0 && label == NULL && text == NULL) {
+        pad = 0;                        // the logo alone, as wide as it is
+        out1fmt("%s%s%s", colour ? "\033[36m" : "", fetch_logo[logo], colour ? "\033[0m" : "");
+    }
+    if (pad > 0) {
+        const char *l = logo >= 0 && logo < FETCH_LOGO_ROWS ? fetch_logo[logo] : "";
+        out1fmt("%s%-*s%s", colour && *l ? "\033[36m" : "", pad, l, colour && *l ? "\033[0m" : "");
+        used = pad;
+    }
+    int room = cols - used;
+    if (label != NULL) {
+        size_t cut;
+        int w = fetch_width(label, room, &cut);
+        out1fmt("%s%.*s%s", colour ? "\033[1;36m" : "", (int)cut, label, colour ? "\033[0m" : "");
+        room -= w;
+        if (room > 0) {
+            out1str(": ");
+            room -= 2;
+        }
+    }
+    if (text != NULL && room > 0) {
+        size_t cut;
+        fetch_width(text, room, &cut);
+        bold = bold && colour;
+        out1fmt("%s%.*s%s", bold ? "\033[1m" : "", (int)cut, text, bold ? "\033[0m" : "");
+    }
+    out1c('\n');
+}
+
+// The console at a glance: a logo beside its rows, the rows the console's VM
+// knows (/proc/console) left out while it is stopped; in colour on a
+// terminal that draws escapes, plain on the serial line and into a pipe.
+static int neofetchcmd(int argc, char **argv) {
+    moy_sh_t *s = moy_sh_cur;
+    (void)argc;
+    (void)argv;
+    fetch_t *f = moy_sh_halloc(sizeof *f);
+    if (f == NULL) {
+        return moy_sh_fail("neofetch: no memory");
+    }
+    memset(f, 0, sizeof *f);
+    char *text = NULL;
+    size_t tn = 0;
+    if (s->host.vread == NULL || s->host.vread(s->host.ctx, "/proc/console", &text, &tn) != 0) {
+        text = NULL;
+    }
+    if (text != NULL) {
+        console_row(text, tn, "name", f->title, sizeof f->title);
+    }
+    fetch_console(f, text, tn, "board", "Board");
+    fetch_console(f, text, tn, "firmware", "Firmware");
+    char *v = fetch_add(f, "Chip");
+#ifdef MOY_SH_FETCH_CHIP
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    snprintf(v, FETCH_VALUE, "%s, %d cores", CONFIG_IDF_TARGET, chip.cores);
+    v = fetch_add(f, "Uptime");
+    unsigned long up = (unsigned long)(esp_timer_get_time() / 60000000);
+    if (up >= 24u * 60u) {
+        snprintf(v, FETCH_VALUE, "%lud %luh %lum", up / 1440u, up / 60u % 24u, up % 60u);
+    } else if (up >= 60u) {
+        snprintf(v, FETCH_VALUE, "%luh %lum", up / 60u, up % 60u);
+    } else {
+        snprintf(v, FETCH_VALUE, "%lum", up);
+    }
+#else
+    snprintf(v, FETCH_VALUE, "%s", MOY_SH_MACHINE);
+#endif
+    uint32_t m[6] = { 0 };
+    if (s->host.mem != NULL && s->host.mem(s->host.ctx, m) == 0) {
+        fetch_used(f, "Memory", m[0], m[1]);
+        fetch_used(f, "PSRAM", m[2], m[3]);
+    }
+    fetch_df(f, "Card", "/sd");
+    fetch_df(f, "Internal", "/");
+    fetch_console(f, text, tn, "display", "Display");
+    fetch_console(f, text, tn, "theme", "Theme");
+    v = fetch_add(f, "Shell");
+    snprintf(v, FETCH_VALUE, "moy_sh (dash)");
+    fetch_console(f, text, tn, "wifi", "WiFi");
+    moy_sh_hfree(text);
+
+    const char *term = moy_sh_getvar(s, "TERM");
+    int colour = isatty(1) && (term == NULL || strcmp(term, "dumb") != 0);
+    int cols = s->host.cols != NULL ? s->host.cols(s->host.ctx) : 80;
+    // the rows beside the logo where a label and a short value fit; on a
+    // narrower terminal (the T-Deck's) the rows alone, so they fit its screen
+    int beside = cols >= FETCH_LOGO_W + FETCH_GAP + 28;
+    int pad = beside ? FETCH_LOGO_W + FETCH_GAP : 0;
+    int row = 0;
+    if (f->title[0]) {
+        char rule[FETCH_VALUE];
+        size_t cut;
+        int w = fetch_width(f->title, FETCH_VALUE - 1, &cut);
+        memset(rule, '-', (size_t)w);
+        rule[w] = 0;
+        fetch_line(colour, cols, beside ? row++ : -1, pad, NULL, f->title, 1);
+        fetch_line(colour, cols, beside ? row++ : -1, pad, NULL, rule, 0);
+    }
+    for (int i = 0; i < f->n; i++) {
+        fetch_line(colour, cols, beside ? row++ : -1, pad, f->label[i], f->value[i], 0);
+    }
+    for (; beside && row < FETCH_LOGO_ROWS; row++) {
+        fetch_line(colour, cols, row, pad, NULL, NULL, 0);
+    }
+    moy_sh_hfree(f);
+    return 0;
+}
+
 static int helpcmd(int argc, char **argv);
 
 // Sorted by name (moy_sh_core_builtin searches it).
@@ -1023,6 +1256,7 @@ static const struct builtincmd core[] = {
     { "ls", lscmd, BUILTIN_REGULAR },
     { "mkdir", mkdircmd, BUILTIN_REGULAR },
     { "mv", mvcmd, BUILTIN_REGULAR },
+    { "neofetch", neofetchcmd, BUILTIN_REGULAR },
     { "ps", pscmd, BUILTIN_REGULAR },
     { "reboot", rebootcmd, BUILTIN_REGULAR },
     { "rm", rmcmd, BUILTIN_REGULAR },

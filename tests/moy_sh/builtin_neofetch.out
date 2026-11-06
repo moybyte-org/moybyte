@@ -1,0 +1,43 @@
+$ neofetch
+[36m .--------.   [0m[1mmoybyte-1a2b[0m
+[36m | .----. |   [0m------------
+[36m | | moy| |   [0m[1;36mBoard[0m: Test Board 7″
+[36m | '----' |   [0m[1;36mFirmware[0m: 0.16.0
+[36m |  +  oo |   [0m[1;36mChip[0m: host
+[36m '--------'   [0m[1;36mMemory[0m: 402 KiB / 500 KiB
+              [1;36mPSRAM[0m: 4.1 MiB / 8.0 MiB
+              [1;36mCard[0m: 512 KiB / 1.0 MiB
+              [1;36mInternal[0m: 512 KiB / 1.0 MiB
+              [1;36mDisplay[0m: 1024x600
+              [1;36mTheme[0m: blocks
+              [1;36mShell[0m: moy_sh (dash)
+              [1;36mWiFi[0m: home (192.168.1.20)
+$ neofetch | cat
+ .--------.   moybyte-1a2b
+ | .----. |   ------------
+ | | moy| |   Board: Test Board 7″
+ | '----' |   Firmware: 0.16.0
+ |  +  oo |   Chip: host
+ '--------'   Memory: 402 KiB / 500 KiB
+              PSRAM: 4.1 MiB / 8.0 MiB
+              Card: 512 KiB / 1.0 MiB
+              Internal: 512 KiB / 1.0 MiB
+              Display: 1024x600
+              Theme: blocks
+              Shell: moy_sh (dash)
+              WiFi: home (192.168.1.20)
+$ TERM=dumb neofetch
+ .--------.   moybyte-1a2b
+ | .----. |   ------------
+ | | moy| |   Board: Test Board 7″
+ | '----' |   Firmware: 0.16.0
+ |  +  oo |   Chip: host
+ '--------'   Memory: 402 KiB / 500 KiB
+              PSRAM: 4.1 MiB / 8.0 MiB
+              Card: 512 KiB / 1.0 MiB
+              Internal: 512 KiB / 1.0 MiB
+              Display: 1024x600
+              Theme: blocks
+              Shell: moy_sh (dash)
+              WiFi: home (192.168.1.20)
+[exit 0]

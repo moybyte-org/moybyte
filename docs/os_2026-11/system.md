@@ -94,7 +94,9 @@ what it took before it ends, a media stream excepted;
 mostly C, one implementation moved down, Python calling it). With the VM
 stopped these answer, each over the C the console itself calls: the file
 commands, `ps`, `kill` (the run in front), `free`, `log`/`dmesg`, `reboot`,
-`date`, `sleep`, `clear`, `help`, `edit` and `top` (below), `settings`
+`date`, `sleep`, `clear`, `help`, `neofetch` (the rows only the console
+knows, its name, board, firmware, display, theme and WiFi, read from the
+door's `/proc/console`, left out), `edit` and `top` (below), `settings`
 `list`, `get`, `set` and `unset` (§5), and `pkg list` and `pkg remove` (§6),
 the last two in `native/moy_sh/moy_sh_store.c`. Everything else needs the
 console: `settings reload` (it applies the file), the other `pkg` verbs,

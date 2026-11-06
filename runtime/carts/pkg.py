@@ -69,7 +69,7 @@ SHELL_NAMES = (
     ".", ":", "[", "alias", "basename", "bg", "break", "cat", "cd", "chdir", "clear",
     "command", "continue", "cp", "date", "df", "dirname", "dmesg", "echo", "edit", "eval", "exec",
     "exit", "export", "false", "fg", "free", "getopts", "grep", "hash", "head",
-    "help", "jobs", "kill", "local", "log", "ls", "mkdir", "mv", "printf", "ps",
+    "help", "jobs", "kill", "local", "log", "ls", "mkdir", "mv", "neofetch", "printf", "ps",
     "pwd", "read", "readonly", "reboot", "return", "rm", "rmdir", "set", "sh",
     "shift", "sleep", "tail", "test", "top", "touch", "trap", "true", "type", "umask",
     "unalias", "uname", "unset", "wait", "wc",

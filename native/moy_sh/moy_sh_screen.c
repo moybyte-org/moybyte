@@ -122,10 +122,18 @@ static int screen_app(void *ctx, moy_sh_t *s, int argc, char **argv) {
     return status;
 }
 
+static int screen_cols(void *ctx) {
+    moy_sh_screen_t *f = ctx;
+    int cols, rows;
+    moy_term_size(f->t, &cols, &rows);
+    return cols;
+}
+
 moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
     moy_sh_host_t h;
     moy_sh_board_host(&h, NULL, screen_out, screen_poll);
     h.app = screen_app;
+    h.cols = screen_cols;
     moy_sh_screen_t *f = h.alloc(NULL, sizeof *f);
     if (f == NULL) {
         return NULL;

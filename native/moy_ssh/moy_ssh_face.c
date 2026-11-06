@@ -135,6 +135,10 @@ void moy_ssh_face_raw(moy_ssh_face_t *f, const char *p, size_t n) {
     out(f, p, n, 1);
 }
 
+int moy_ssh_face_pty(const moy_ssh_face_t *f) {
+    return f->pty;
+}
+
 void moy_ssh_face_size(const moy_ssh_face_t *f, int *cols, int *rows) {
     *cols = f->cols > 0 ? f->cols : 80;
     *rows = f->rows > 0 ? f->rows : 24;

@@ -66,7 +66,7 @@ def test_kill_ends_a_run_as_the_task_manager_does(monkeypatch):
 
 def test_proc_reads_and_lists_through_devfs(monkeypatch):
     _ws, door = _door(monkeypatch)
-    assert call(door, "list", "/proc") == "1/\n12/\n"
+    assert call(door, "list", "/proc") == "1/\n12/\nconsole\n"
     assert call(door, "list", "/proc/12") == "log\nstatus\n"
     assert call(door, "list", "/") == ABSENT
     assert call(door, "list", "/nowhere") == ABSENT

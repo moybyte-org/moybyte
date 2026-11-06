@@ -61,6 +61,42 @@ EXITS = 8                       # background commands' exit codes kept for `wait
 LINE = 256                      # what a stdin read takes at a time
 
 
+def _module(name):
+    try:
+        return __import__(name)
+    except ImportError:  # host: the runtime package
+        return getattr(__import__("runtime." + name), name)
+
+
+def console_text(ws):
+    """/proc/console: what only the console knows of itself, one `key: value`
+    a line, a row it cannot answer left out (neofetch's, native/moy_sh)."""
+    rows = []
+
+    def row(key, fn):
+        try:
+            v = fn()
+        except Exception:  # noqa: BLE001 -- a row the tier cannot answer
+            v = None
+        if v:
+            rows.append("%s: %s\n" % (key, str(v).replace("\n", " ")))
+
+    row("name", lambda: _module("ssh_service").hostname(ws))
+    row("board", lambda: _module("settings_layer").board_name())
+    row("firmware", lambda: ws.updater.version_label() if ws.updater is not None else None)
+    row("display", lambda: "%dx%d" % (ws.glass_canvas.w, ws.glass_canvas.h))
+    row("theme", lambda: ws.look.theme_name)
+
+    def wifi():
+        if ws.wifi is None:
+            return None
+        connected, ssid, ip = ws.wifi.status()
+        return "%s (%s)" % (ssid, ip) if connected and ip else ssid if connected else "off"
+
+    row("wifi", wifi)
+    return "".join(rows)
+
+
 def _rows(ws):
     """[(pid, ppid, kind, state, name)]: the console's processes."""
     out = []
@@ -331,6 +367,8 @@ class ShellDoor:
         return 0
 
     def v_read(self, path):
+        if path == "/proc/console":
+            return console_text(self.ws).encode()
         try:
             with _devfs.open(path, "rb") as f:
                 data = f.read()
@@ -356,7 +394,8 @@ class ShellDoor:
         except OSError:
             return ABSENT
         folder = path.rstrip("/") == "/proc"
-        return "".join(n + ("/\n" if folder else "\n") for n in names)
+        return ("".join(n + ("/\n" if folder else "\n") for n in names)
+                + ("console\n" if folder else ""))
 
     def v_df(self, path):
         try:

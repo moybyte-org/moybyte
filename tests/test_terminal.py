@@ -451,3 +451,20 @@ def test_a_session_starts_in_the_user_files_folder_beside_the_carts(term, tmp_pa
     run(app, "ls -1 /")
     listed = plain(app)
     assert {"bin", "carts", "files"} <= set(listed[listed.index("files$ ls -1 /") + 1:])
+
+
+def test_neofetch_reads_the_console_s_own_rows_from_its_proc_file(term):
+    """/proc/console is the door's: the rows only the console knows, which
+    neofetch (C) shows beside its own; on the screen face in colour."""
+    ws, app = term
+    run(app, "cat /proc/console")
+    rows = dict(ln.split(": ", 1) for ln in plain(app)[1:] if ": " in ln)
+    assert rows["name"].startswith("moybyte-")
+    assert rows["display"] == "%dx%d" % (ws.glass_canvas.w, ws.glass_canvas.h)
+    run(app, "ls /proc")
+    assert "console" in plain(app)[-1].split()
+    run(app, "neofetch")
+    shown = plain(app)
+    assert any(rows["name"] in ln for ln in shown)
+    assert any(ln.strip().startswith("Shell: moy_sh") for ln in shown)
+    assert any("36mDisplay\x1b[0m" in ln for ln in app.face.lines())
