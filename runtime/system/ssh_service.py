@@ -109,6 +109,23 @@ def _announce(ws):
         print("Moybyte ssh: mDNS: %s" % (exc,))
 
 
+def _dial(ws):
+    """The station started toward the last-joined saved network, without
+    waiting for it (the kernel's connect returns at once): the server
+    listens whenever the link comes up."""
+    w = getattr(ws, "wifi", None)
+    try:
+        if w is None or w.status()[0]:
+            return
+        store, root = getattr(w, "_store", None), getattr(w, "_root", None)
+        nets = store.load_wifi(root) if store is not None and root is not None else []
+        wlan = getattr(w, "wlan", None)
+        if nets and wlan is not None:
+            wlan.connect(nets[0]["ssid"], nets[0].get("password", "") or "")
+    except Exception as exc:  # noqa: BLE001 -- the link is the radio's to find
+        print("Moybyte ssh: wifi: %s" % (exc,))
+
+
 def rename(ws):
     if _state["serving"] and _state["name"] != hostname(ws):
         _announce(ws)
@@ -129,6 +146,7 @@ def start(ws):
         ws.wifi_release(TAG)
         return False
     _state["serving"] = True
+    _dial(ws)
     _announce(ws)
     return True
 

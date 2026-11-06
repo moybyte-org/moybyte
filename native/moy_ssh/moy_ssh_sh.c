@@ -4,9 +4,9 @@
 //
 // The session runs on the face's task. What crosses the door into Python or
 // touches the store hops to the console's task (moy_ssh_face_hop): the
-// table's entries that do are wrapped here, and the shell's own store calls
-// go through the table's `hop`. The kernel's log, memory figures and sleeps
-// run in place.
+// table's entries that do are wrapped here (every one moy_sh_board.c's door
+// serves, `mem`'s Python heap among them), and the shell's own store calls
+// go through the table's `hop`. The kernel's log and sleeps run in place.
 //
 // A text app (moy_sh_app.h) opens in front of the face at the client's size;
 // a full-screen one is shown on the alternate screen, its grid's changed rows
@@ -23,7 +23,7 @@
 #include "moy_ssh.h"
 #include "moy_ssh_face.h"
 
-#define ARENA (48u * 1024u)             // a session's arena (README.md, Memory)
+#define ARENA (32u * 1024u)             // a session's arena (README.md, Memory)
 #define ROW_BYTES 2048u
 
 typedef struct {
@@ -38,7 +38,8 @@ typedef struct {
 
 // -- the hops -----------------------------------------------------------------------
 
-enum { H_VREAD, H_VWRITE, H_VLIST, H_LOOKUP, H_SPAWN, H_STATUS, H_KILL, H_PROCS, H_ROLE, H_DF };
+enum { H_VREAD, H_VWRITE, H_VLIST, H_LOOKUP, H_SPAWN, H_STATUS, H_KILL, H_PROCS, H_ROLE, H_DF,
+       H_MEM };
 
 typedef struct {
     int op;
@@ -56,6 +57,7 @@ typedef struct {
     int i, j;
     int *pi;
     uint64_t *u1, *u2;
+    uint32_t *mem;
     int r;
 } call_t;
 
@@ -90,6 +92,9 @@ static void call_here(void *arg) {
             break;
         case H_ROLE:
             c->r = b->role(ctx, c->s, c->argc, c->argv);
+            break;
+        case H_MEM:
+            c->r = b->mem(ctx, c->mem);
             break;
         default:
             c->r = b->df(ctx, c->path, c->u1, c->u2);
@@ -150,6 +155,12 @@ static int w_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
 
 static int w_df(void *ctx, const char *path, uint64_t *total, uint64_t *free_) {
     call_t c = { .op = H_DF, .path = path, .u1 = total, .u2 = free_ };
+    return call(&c, ctx);
+}
+
+// The Python heap's figures cross the door with the rest.
+static int w_mem(void *ctx, uint32_t out[6]) {
+    call_t c = { .op = H_MEM, .mem = out };
     return call(&c, ctx);
 }
 
@@ -332,6 +343,7 @@ static void *sh_open(moy_ssh_face_t *f) {
     host.procs = w_procs;
     host.role = w_role;
     host.df = w_df;
+    host.mem = w_mem;
     host.hop = w_hop;
     host.in = sh_in;
     host.app = sh_app;

@@ -206,6 +206,14 @@ struct moy_sh_globals {
     struct moy_sh_proc proc;
 };
 
-extern __thread struct moy_sh_globals *moy_sh_g;
+// Thread-local (moy_sh.h, TASKS). A board links one image, so its access is
+// local-exec: the RISC-V toolchain's default for an extern reaches it
+// through a GOT the IDF's linker script discards.
+#ifdef ESP_PLATFORM
+#define MOY_SH_TLS __thread __attribute__((tls_model("local-exec")))
+#else
+#define MOY_SH_TLS __thread
+#endif
+extern MOY_SH_TLS struct moy_sh_globals *moy_sh_g;
 
 #endif // MOY_SH_G_H

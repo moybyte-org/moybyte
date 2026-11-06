@@ -71,3 +71,55 @@ def test_passwd_sets_and_removes_the_password(system):
     ("ЖЖ box 2", "box-2"), ("x" * 80, "x" * 63)])
 def test_the_mdns_name_is_settings_name_as_a_label(name, label):
     assert ssh_service.hostname(WS(name)) == label
+
+
+class Server:
+    def __init__(self):
+        self.calls = []
+
+    def start(self, path):
+        self.calls.append(("start", path))
+
+    def stop(self):
+        self.calls.append(("stop",))
+
+    def hash(self, password, salt):
+        return test_moy_ssh.hashed(password)
+
+
+class Wlan:
+    def __init__(self):
+        self.dialled = []
+
+    def connect(self, ssid, password):
+        self.dialled.append((ssid, password))
+
+
+class Store:
+    def load_wifi(self, root):
+        return [{"ssid": "last", "password": "pw"}, {"ssid": "older", "password": ""}]
+
+
+class Wifi:
+    def __init__(self, up=False):
+        self.up, self.wlan, self._store, self._root = up, Wlan(), Store(), "/r"
+
+    def status(self):
+        return (self.up, None, None)
+
+
+@pytest.mark.parametrize("up", [False, True])
+def test_serving_holds_the_ssh_lease_and_dials_the_last_network(system, monkeypatch, up):
+    server = Server()
+    monkeypatch.setattr(ssh_service, "_N", server)
+    monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None})
+    monkeypatch.setattr(ssh_service, "_announce", lambda ws: None)
+    ws = WS()
+    ws.wifi = Wifi(up)
+    assert not ssh_service.start(ws) and ws.held == []
+    assert ssh_service.set_password(ws, "s3cret")
+    assert ws.held == ["ssh"] and server.calls == [("start", str(system))]
+    # the station starts toward the last-joined network unless it is up
+    assert ws.wifi.wlan.dialled == ([] if up else [("last", "pw")])
+    assert ssh_service.set_password(ws, None)
+    assert ws.held == [] and server.calls[-1] == ("stop",)

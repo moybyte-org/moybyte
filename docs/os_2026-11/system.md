@@ -251,7 +251,9 @@ With no password set there is no SSH. The password's hash is
 `system/password`, set with the shell's `passwd`; the shell's `/etc` is
 `system/`, and `/etc/dropbear` names it too, where ssh-copy-id puts a key
 for a Dropbear server. The server holds the radio (the `ssh` lease) while a
-password is set (`runtime/system/ssh_service.py`).
+password is set (`runtime/system/ssh_service.py`). The T-Deck, the Guition
+S3 and the Waveshare P4 serve it; the Guition P4's image has no room for it
+(its board.toml).
 The web terminal asks for the same password, since anyone on the LAN would
 otherwise get a root shell; the serial terminal needs no sign-in, being the
 owner's cable. **A spike first**: image size against `headroom_floor_kib`,

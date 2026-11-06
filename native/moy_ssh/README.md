@@ -54,7 +54,7 @@ descriptor tables and the algorithm lists (which a session writes) are PSRAM
 too, taken at the first `start` (`moy_ssh_globals`): each global's name is
 the object a pointer points at (`port/moy_ssh_port.h`). The module keeps one
 pointer of internal SRAM, the server's state one more. A session's shell
-arena is 48 KB of PSRAM (`moy_ssh_sh.c`), not the Terminal's 128 KB: the most
+arena is 32 KB of PSRAM (`moy_ssh_sh.c`), not the Terminal's 128 KB: the most
 a session used is `stats()`'s `arena_peak`, measured in #246 over
 ssh-copy-id's install command, pipelines, `top` and `edit`.
 
@@ -69,6 +69,8 @@ too, which is where ssh-copy-id installs a key on a Dropbear server.
 
 ## Boards
 
-Every console board takes the module (each board.toml's `[native.shared]`):
-the image cost and the internal SRAM are in #246. The Zero denies it with
-`moy_sh` until its phase (`docs/os_2026-11.md` §7, phase 4).
+The T-Deck, the Guition S3 and the Waveshare P4 take the module (each
+board.toml's `[native.shared]`); the image cost and the internal SRAM are in
+#246. The Guition P4 denies it, and its mDNS responder with it, because its
+image does not fit them (its board.toml says by how much). The Zero denies it
+with `moy_sh` until its phase (`docs/os_2026-11.md` §7, phase 4).

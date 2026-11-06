@@ -348,6 +348,16 @@ bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
 
+[[native.shared.deny]]
+module = "moy_ssh"
+why = """
+The SSH server (native/moy_ssh/README.md) does not fit this board's image:
+with it the app image fell 28 KB under [image]'s headroom floor, 2026-11-06
+(the server about 67 KB of flash here). Its mDNS name goes with it
+(MOY_NET_MDNS, off in this board's mpconfigboard.h): it is announced only
+while the server serves. The other three consoles take it. Room for it is
+the slots' size, which is the owner's call [image] records."""
+
 [[native.shared.take]]
 module = "moy_sd"
 why = """

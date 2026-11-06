@@ -41,7 +41,7 @@ _Static_assert(NOPTS == MOY_SH_G_NOPTS, "moy_sh_g.h: optlist's size is dash's NO
 
 // The running session's state, the one writable word the shell keeps outside
 // its arena (its session is moy_sh_cur, a field of it).
-__thread struct moy_sh_globals *moy_sh_g;
+MOY_SH_TLS struct moy_sh_globals *moy_sh_g;
 
 // --- memory -----------------------------------------------------------------
 

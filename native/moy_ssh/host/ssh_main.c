@@ -22,7 +22,16 @@ extern const moy_ssh_shell_t moy_ssh_moy_sh;
 
 // -- the stand-in kernel: the VM stopped, nothing in front ---------------------
 
+// The door is the console task's alone (moy_ssh.h, TASKS): reached from any
+// other thread it ends the harness, which a test reads as a dead server.
+static pthread_t console_tid;
+static volatile int console_up;
+
 bool moy_loop_vm(void) {
+    if (console_up && !pthread_equal(pthread_self(), console_tid)) {
+        fprintf(stderr, "ssh_main: the door reached off the console's task\n");
+        abort();
+    }
     return false;
 }
 
@@ -96,6 +105,8 @@ static volatile int stop;
 
 static void *console(void *arg) {
     (void)arg;
+    console_tid = pthread_self();
+    console_up = 1;
     for (;;) {
         moy_ssh_tail();
         usleep(16000);
