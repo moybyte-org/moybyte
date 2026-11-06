@@ -144,7 +144,7 @@
     "native/moy_ssh/dropbear/src/svr-auth.c": "dfca147785145837a6ea142a4283d129ec99791592acdfa3a023de8b6052c653",
     "native/moy_ssh/dropbear/src/svr-authpasswd.c": "4c8e5a7add68b9424df41a9a3adef43bc1318e8a0abd270c6a156c7357b55257",
     "native/moy_ssh/dropbear/src/svr-authpubkey.c": "3bdde6605bbd4c44140a24905e1563753d4be4416a8d4c322f74e2e0339d82b7",
-    "native/moy_ssh/dropbear/src/svr-chansession.c": "7c31693a9e268c51e942e3818284a0efaf9ddca7b70eb82b085fedfe904aa453",
+    "native/moy_ssh/dropbear/src/svr-chansession.c": "3a87cb7d109ddad9f75f9845f1994ef5e07f02c04560d7a1c06563712613b649",
     "native/moy_ssh/dropbear/src/svr-forward.c": "d5f3da490e14a2d81fc503bc8ed2707e2532716b37b1642e367a0be2e3fa69f4",
     "native/moy_ssh/dropbear/src/svr-kex.c": "48473c48b6e2dc45ab46d6fbf0284d2cec81fd46c4504b17682efa234e3d7734",
     "native/moy_ssh/dropbear/src/svr-runopts.c": "2227ae8480ec5a76b3303db8c77ceaa4d04aab2282838ec8fcf0f18d0e23dfe2",
@@ -154,7 +154,7 @@
     "native/moy_ssh/dropbear/src/termcodes.h": "32bac9d625d76b54b3f281d210e8db832575e3f3ae708656153075739dac9688",
     "native/moy_ssh/dropbear/src/x11fwd.h": "795d480d4af21af02231f19ee37a21ebf5d7d5c1f0404c7802892e31115971d2"
   },
-  "patch": "dff363b36d69438fd4823c470da53fd8cb7a840aa1daf8c24084065cd2208826",
+  "patch": "585d057b2eb8221e3af1761ee17f0916767b1df03423241e36501e8c80bb5091",
   "sha256": "e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81",
   "url": "https://matt.ucc.asn.au/dropbear/releases/dropbear-2026.94.tar.bz2",
   "version": "2026.94"

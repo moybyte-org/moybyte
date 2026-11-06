@@ -11,6 +11,9 @@ the server runs inside the kernel's process, one session at a time.
 - svr-chansession.c: no fork, no pty, no SIGCHLD: a session's command is
   moy_ssh_command (the shell's face over a socket pair), its end
   moy_ssh_reap, its signal moy_ssh_signal; a pty request keeps the size.
+  A command's end does not flush its output: the output ends at the face's
+  close, which follows its status, so the bytes still crossing the board's
+  loopback when the status is reaped are read, not dropped.
 - chansession.h: the size a pty request asked for.
 - dbrandom.c: the seed is the SoC's hardware generator (moy_ssh_entropy).
 - gensignkey.c: the host key is renamed into place (FAT has no link()).
@@ -244,10 +247,27 @@ index ad62b90..746b950 100644
  		- we probably just lost a race with another connection to generate the key */
  		if (!(skip_exist && errno == EEXIST)) {
 diff --git a/src/svr-chansession.c b/src/svr-chansession.c
-index a2ea1fc..ab2c303 100644
+index a2ea1fc..df20df4 100644
 --- a/src/svr-chansession.c
 +++ b/src/svr-chansession.c
-@@ -100,7 +100,24 @@ void svr_chansess_checksignal(void) {
+@@ -78,9 +78,16 @@ static int sesscheckclose(struct Channel *channel) {
+ 	struct ChanSess *chansess = (struct ChanSess*)channel->typedata;
+ 	TRACE(("sesscheckclose, pid %d, exitpid %d", chansess->pid, chansess->exit.exitpid))
+ 
++#if DROPBEAR_MOY
++	/* no flushing: the face closes its end after its exit status, so its
++	   output ends at that EOF. A loopback's bytes reach this end after the
++	   send that wrote them, and a flush closes at the first moment none are
++	   readable, dropping what is still crossing. */
++#else
+ 	if (chansess->exit.exitpid != -1) {
+ 		channel->flushing = 1;
+ 	}
++#endif
+ 	return chansess->pid == 0 || chansess->exit.exitpid != -1;
+ }
+ 
+@@ -100,7 +107,24 @@ void svr_chansess_checksignal(void) {
  		return;
  	}
  
@@ -272,7 +292,7 @@ index a2ea1fc..ab2c303 100644
  		unsigned int i;
  		struct exitinfo *ex = NULL;
  		TRACE(("svr_chansess_checksignal : pid %d", pid))
-@@ -278,6 +295,7 @@ static int newchansess(struct Channel *channel) {
+@@ -278,6 +302,7 @@ static int newchansess(struct Channel *channel) {
  
  }
  
@@ -280,7 +300,7 @@ index a2ea1fc..ab2c303 100644
  static struct logininfo* 
  chansess_login_alloc(const struct ChanSess *chansess) {
  	struct logininfo * li;
-@@ -285,6 +303,7 @@ chansess_login_alloc(const struct ChanSess *chansess) {
+@@ -285,6 +310,7 @@ chansess_login_alloc(const struct ChanSess *chansess) {
  			svr_ses.remotehost, chansess->tty);
  	return li;
  }
@@ -288,7 +308,7 @@ index a2ea1fc..ab2c303 100644
  
  /* send exit status message before the channel is closed */
  static void closechansess(const struct Channel *channel) {
-@@ -323,6 +342,7 @@ static void cleanupchansess(const struct Channel *channel) {
+@@ -323,6 +349,7 @@ static void cleanupchansess(const struct Channel *channel) {
  	m_free(chansess->term);
  	m_free(chansess->original_command);
  
@@ -296,7 +316,7 @@ index a2ea1fc..ab2c303 100644
  	if (chansess->tty) {
  		/* write the utmp/wtmp login record */
  		li = chansess_login_alloc(chansess);
-@@ -336,6 +356,7 @@ static void cleanupchansess(const struct Channel *channel) {
+@@ -336,6 +363,7 @@ static void cleanupchansess(const struct Channel *channel) {
  		pty_release(chansess->tty);
  		m_free(chansess->tty);
  	}
@@ -304,7 +324,7 @@ index a2ea1fc..ab2c303 100644
  
  #if DROPBEAR_X11FWD
  	x11cleanup(chansess);
-@@ -465,7 +486,11 @@ static int sessionsignal(const struct ChanSess *chansess) {
+@@ -465,7 +493,11 @@ static int sessionsignal(const struct ChanSess *chansess) {
  		return DROPBEAR_FAILURE;
  	}
  			
@@ -316,7 +336,7 @@ index a2ea1fc..ab2c303 100644
  		TRACE(("sessionsignal: kill() errored"))
  		return DROPBEAR_FAILURE;
  	} 
-@@ -479,6 +504,20 @@ static int sessionwinchange(const struct ChanSess *chansess) {
+@@ -479,6 +511,20 @@ static int sessionwinchange(const struct ChanSess *chansess) {
  
  	int termc, termr, termw, termh;
  
@@ -337,7 +357,7 @@ index a2ea1fc..ab2c303 100644
  	if (chansess->master < 0) {
  		/* haven't got a pty yet */
  		return DROPBEAR_FAILURE;
-@@ -608,6 +647,22 @@ static int sessionpty(struct ChanSess * chansess) {
+@@ -608,6 +654,22 @@ static int sessionpty(struct ChanSess * chansess) {
  		return DROPBEAR_FAILURE;
  	}
  
@@ -360,7 +380,7 @@ index a2ea1fc..ab2c303 100644
  	/* allocate the pty */
  	if (chansess->master != -1) {
  		dropbear_exit("Multiple pty requests");
-@@ -741,6 +796,22 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+@@ -741,6 +803,22 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
  	make_connection_string(chansess);
  #endif
  
@@ -383,7 +403,7 @@ index a2ea1fc..ab2c303 100644
  	if (chansess->term == NULL) {
  		/* no pty */
  		ret = noptycommand(channel, chansess);
-@@ -752,6 +823,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+@@ -752,6 +830,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
  		/* want pty */
  		ret = ptycommand(channel, chansess);
  	}
@@ -391,7 +411,7 @@ index a2ea1fc..ab2c303 100644
  
  #if !DROPBEAR_VFORK
  	m_free(chansess->connection_string);
-@@ -765,6 +837,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+@@ -765,6 +844,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
  	return ret;
  }
  
@@ -399,7 +419,7 @@ index a2ea1fc..ab2c303 100644
  /* Execute a command and set up redirection of stdin/stdout/stderr without a
   * pty.
   * Returns DROPBEAR_SUCCESS or DROPBEAR_FAILURE */
-@@ -937,6 +1010,8 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
+@@ -937,6 +1017,8 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
  	return DROPBEAR_SUCCESS;
  }
  
@@ -408,7 +428,7 @@ index a2ea1fc..ab2c303 100644
  /* Add the pid of a child to the list for exit-handling */
  static void addchildpid(struct ChanSess *chansess, pid_t pid) {
  
-@@ -960,6 +1035,7 @@ static void addchildpid(struct ChanSess *chansess, pid_t pid) {
+@@ -960,6 +1042,7 @@ static void addchildpid(struct ChanSess *chansess, pid_t pid) {
  
  }
  
@@ -416,7 +436,7 @@ index a2ea1fc..ab2c303 100644
  /* Clean up, drop to user privileges, set up the environment and execute
   * the command/shell. This function does not return. */
  static void execchild(const void *user_data) {
-@@ -1067,6 +1143,7 @@ static void execchild(const void *user_data) {
+@@ -1067,6 +1150,7 @@ static void execchild(const void *user_data) {
  	/* only reached on error */
  	dropbear_exit("Child failed");
  }
@@ -424,7 +444,7 @@ index a2ea1fc..ab2c303 100644
  
  /* Set up the general chansession environment, in particular child-exit
   * handling */
-@@ -1080,12 +1157,16 @@ void svr_chansessinitialise() {
+@@ -1080,12 +1164,16 @@ void svr_chansessinitialise() {
  	svr_ses.childpids[0].chansess = NULL;
  	svr_ses.childpidsize = 1;
  	svr_ses.lastexit.exitpid = -1; /* Nothing has exited yet */

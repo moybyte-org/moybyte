@@ -68,7 +68,8 @@ def _build(out):
         objs.append(obj)
     assert all(p.wait() == 0 for p in procs)
     exe = str(out / "ssh_main")
-    subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-o", exe] + objs + shell
+    subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-Wl,--wrap=moy_ssh_pair",
+                                       "-o", exe] + objs + shell
                    + ["-lpthread"], check=True)
     return exe
 
@@ -205,6 +206,24 @@ def test_an_exec_reads_the_channel_as_its_stdin(harness):
     assert r.returncode == 0, r.stderr
     assert (harness["system"] / "note").read_bytes() == b"one\ntwo\n"
     assert b"2" in r.stdout
+
+
+def test_a_large_exec_s_output_arrives_whole_to_a_fast_and_a_slow_reader(harness):
+    """The status is reaped while the output's tail is still crossing the
+    pair (ssh_main.c's loopback): the channel reads it to the face's close."""
+    data = os.urandom(1 << 20)
+    (harness["system"] / "big").write_bytes(data)
+    for _ in range(3):
+        r = ssh(harness, PASSWORD, "moy@127.0.0.1", "cat /etc/big")
+        assert r.returncode == 0, r.stderr
+        assert len(r.stdout) == len(data) and r.stdout == data
+    cmd = ["ssh"] + options(harness) + ["-o", "PubkeyAuthentication=no",
+                                        "moy@127.0.0.1", "cat /etc/big"]
+    slow = " ".join("'%s'" % c for c in cmd) + " | (sleep 0.5; cat)"
+    r = subprocess.run(["sh", "-c", slow], env=env_of(harness, PASSWORD), capture_output=True,
+                       timeout=60, stdin=subprocess.DEVNULL)
+    assert r.stdout == data, len(r.stdout)
+    (harness["system"] / "big").unlink()
 
 
 def test_ssh_copy_id_installs_a_key_that_signs_in(harness):

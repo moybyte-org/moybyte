@@ -78,9 +78,16 @@ static int sesscheckclose(struct Channel *channel) {
 	struct ChanSess *chansess = (struct ChanSess*)channel->typedata;
 	TRACE(("sesscheckclose, pid %d, exitpid %d", chansess->pid, chansess->exit.exitpid))
 
+#if DROPBEAR_MOY
+	/* no flushing: the face closes its end after its exit status, so its
+	   output ends at that EOF. A loopback's bytes reach this end after the
+	   send that wrote them, and a flush closes at the first moment none are
+	   readable, dropping what is still crossing. */
+#else
 	if (chansess->exit.exitpid != -1) {
 		channel->flushing = 1;
 	}
+#endif
 	return chansess->pid == 0 || chansess->exit.exitpid != -1;
 }
 

@@ -6,7 +6,9 @@
 // one role, `passwd`, as runtime/system/ssh_service.py does: the hash
 // written or removed, the run started or stopped. Every other crossing is
 // the VM's NEEDS_VM. The main thread prints the server's STATS line when
-// a connection ends. Usage: ssh_main PORT SYSTEM_DIR
+// a connection ends. The face's socket pair is a board's: a byte one end
+// sends crosses another task before the other end can read it, as lwIP's
+// loopback hands it to its own. Usage: ssh_main PORT SYSTEM_DIR
 
 #include <pthread.h>
 #include <signal.h>
@@ -16,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "moy_lease.h"
@@ -134,6 +137,80 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
         return passwd((const char *)arg + k, n - k);
     }
     return MOY_LOOP_ROLE_NEEDS_VM;
+}
+
+// -- the pair: a board's loopback --------------------------------------------------
+
+// Linked with --wrap=moy_ssh_pair: the face's end and Dropbear's are each a
+// socketpair's, and a thread per direction carries the bytes between them,
+// a chunk at a time and a little late, then the end of the stream.
+#define LEG_CHUNK 4096
+#define LEG_LAG_US 1000
+
+int __real_moy_ssh_pair(int fds[2]);
+
+typedef struct {
+    int from, to;
+    int *legs;                  // the legs still running; the last closes both ends
+    int ends[2];
+} leg_t;
+
+static void *leg(void *arg) {
+    leg_t *l = arg;
+    char buf[LEG_CHUNK];
+    for (;;) {
+        ssize_t n = read(l->from, buf, sizeof buf);
+        if (n <= 0) {
+            break;
+        }
+        usleep(LEG_LAG_US);
+        const char *p = buf;
+        while (n > 0) {
+            ssize_t w = write(l->to, p, (size_t)n);
+            if (w <= 0) {
+                break;
+            }
+            p += w;
+            n -= w;
+        }
+        if (n > 0) {
+            break;
+        }
+    }
+    shutdown(l->to, SHUT_WR);
+    shutdown(l->from, SHUT_RD);
+    if (__atomic_sub_fetch(l->legs, 1, __ATOMIC_ACQ_REL) == 0) {
+        close(l->ends[0]);
+        close(l->ends[1]);
+        free(l->legs);
+    }
+    free(l);
+    return NULL;
+}
+
+int __wrap_moy_ssh_pair(int fds[2]) {
+    int db[2], face[2];
+    if (__real_moy_ssh_pair(db) != 0) {
+        return -1;
+    }
+    if (__real_moy_ssh_pair(face) != 0) {
+        close(db[0]);
+        close(db[1]);
+        return -1;
+    }
+    int *legs = malloc(sizeof *legs);
+    leg_t *up = calloc(1, sizeof *up), *down = calloc(1, sizeof *down);
+    *legs = 2;
+    *up = (leg_t){ face[1], db[1], legs, { db[1], face[1] } };
+    *down = (leg_t){ db[1], face[1], legs, { db[1], face[1] } };
+    pthread_t t;
+    pthread_create(&t, NULL, leg, up);
+    pthread_detach(t);
+    pthread_create(&t, NULL, leg, down);
+    pthread_detach(t);
+    fds[0] = db[0];
+    fds[1] = face[0];
+    return 0;
 }
 
 // -- the tasks ----------------------------------------------------------------------
