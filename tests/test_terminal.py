@@ -83,6 +83,34 @@ def test_tab_completes_a_command_and_a_path(term, tmp_path):
     assert f.line() == "ls /tree/a" and f.cands() == ["alpha/", "apex/"]
 
 
+def test_tab_completes_an_argument_with_no_folder_from_the_working_one(term):
+    """An argument with no `/` names the working folder: `cat <Tab>` lists it
+    and `cat asd<Tab>` completes from it (a word with no slash once read the
+    folder's end from strrchr's NULL and took the console down)."""
+    _ws, app = term
+    run(app, "mkdir /w; cd /w; touch asdf.txt; mkdir apex; touch beta")
+    for n in range(40):
+        run(app, f"touch long_name_of_a_file_that_runs_past_the_row_{n:02}")
+    f = app.face
+    f.set_line("cat asd")
+    f.key(9)
+    assert f.line() == "cat asdf.txt "
+    f.set_line("cat a")
+    f.key(9)
+    assert f.line() == "cat a" and f.cands() == ["apex/", "asdf.txt"]
+    f.set_line("cat ")
+    f.key(9)
+    assert f.line() == "cat " and len(f.cands()) == 24
+    assert "apex/  asdf.txt  beta  long_name" in "".join(plain(app))
+    f.set_line("cat zz")
+    f.key(9)
+    assert f.line() == "cat zz"
+    run(app, "cd /")
+    f.set_line("cat ")
+    f.key(9)
+    assert f.line() == "cat " and "w/" in f.cands()
+
+
 def test_up_and_down_walk_the_lines_run_before(term):
     _ws, app = term
     run(app, "echo one")

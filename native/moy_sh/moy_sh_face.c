@@ -477,11 +477,15 @@ void moy_sh_face_complete(moy_sh_face_t *f) {
         }
         a->n = k;
     } else {
-        size_t sl = (size_t)(strrchr(word, '/') - word) + 1;
+        // an argument with no slash names the working folder
+        const char *slash = strrchr(word, '/');
+        size_t sl = slash != NULL ? (size_t)(slash - word) + 1 : 0;
         memcpy(stem, word, sl);
         stem[sl] = '\0';
-        char folder[MOY_SH_FACE_LINE];
-        memcpy(folder, stem, sl + 1);
+        char folder[MOY_SH_FACE_LINE] = ".";
+        if (sl > 0) {
+            memcpy(folder, stem, sl + 1);
+        }
         while (sl > 1 && folder[sl - 1] == '/') {
             folder[--sl] = '\0';
         }
