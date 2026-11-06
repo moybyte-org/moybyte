@@ -58,7 +58,8 @@ last line its exit code (`SH end N`). It is the board's one serial session:
 `cd` and variables carry from one line, and one call, to the next. A line
 that waits (`sleep`, `http get`, `pkg update`) parks while the console's
 frames go on; Ctrl-C sends the channel's 0x03, which stops it. `--timeout`
-(60 s) bounds each line. It works with the VM stopped too (an S3 running a
+(60 s) bounds each line; `--also REGEX` prints the board's other lines that
+match as they come (`--also HITCH` with `diag 1`: a line's worst frames). It works with the VM stopped too (an S3 running a
 cart without one), where a console command answers "needs the console".
 Never set or remove a board's SSH password with it (`passwd`): the console's
 is the owner's.

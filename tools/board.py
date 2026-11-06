@@ -65,6 +65,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -358,6 +359,7 @@ def cmd_sh(b, a):
     carry from one line to the next. Ctrl-C here sends the channel's 0x03,
     which interrupts the command. Exit status: the last line's."""
     status = 0
+    also = re.compile(a.also) if a.also else None
     for line in a.lines:
         n0 = len(b.lines)
         b._write_line("sh " + line)
@@ -372,6 +374,8 @@ def cmd_sh(b, a):
                         end = got
                     elif got.startswith("SH "):
                         print(got[3:])
+                    elif also is not None and also.search(got):
+                        print(got)
         except KeyboardInterrupt:
             b.ser.write(b"\x03")
             b.ser.flush()
@@ -975,6 +979,8 @@ def parser(dirs):
     p.add_argument("lines", nargs="+", metavar="LINE")
     p.add_argument("--timeout", type=float, default=60.0,
                    help="seconds to wait for each line's end")
+    p.add_argument("--also", metavar="REGEX",
+                   help="print the board's other lines that match too (HITCH, PERF)")
     p = verb("run", help="start a cart by title; it stays running")
     p.add_argument("title")
     p.add_argument("--settle", type=float, default=2.5,
