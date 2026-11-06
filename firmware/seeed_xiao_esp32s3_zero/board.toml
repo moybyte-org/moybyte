@@ -530,6 +530,13 @@ serial is a bare REPL with no dev channel). Its face is the network one, SSH
 and the web terminal (docs/os_2026-11/system.md section 3), and this board
 takes the shell with that face."""
 
+[[native.shared.deny]]
+module = "moy_ssh"
+why = """
+The SSH server (native/moy_ssh/README.md): its session's shell is moy_sh,
+which this board denies until its network face; it takes the server with
+the shell (docs/os_2026-11.md section 7, phase 4)."""
+
 
 [[native.shared.deny]]
 module = "moy_png"
