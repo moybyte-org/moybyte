@@ -18,6 +18,9 @@ from runtime import moy_input as mi
 from runtime import moy_log as L
 
 
+BIG = bytes(range(251)) * 2000             # past the cap and many windows
+
+
 class _H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 -- the stdlib's name
         if self.path == "/hello":
@@ -26,6 +29,11 @@ class _H(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/big":
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(BIG)))
+            self.end_headers()
+            self.wfile.write(BIG)
         elif self.path == "/tls":
             self.send_response(302)
             self.send_header("Location", "https://example.com/")
@@ -82,6 +90,41 @@ def test_a_get_returns_the_body_and_holds_the_radio_while_it_runs(ws, server):
     assert ws.leases.holders() == [] and ws.wifi.radio is False
     r.close()
     assert N.count(0) == 0
+
+
+def test_a_stream_brings_a_body_of_any_length_through_its_window(ws, server):
+    """moy_fetch_stream: the body comes through a window the worker fills and
+    the reader takes, never more of it held than the window, however long it
+    is (here twice the cap of a whole get); the radio is held until it ends."""
+    assert len(BIG) > N.CAP_MAX
+    pid = L.spawn("t.http")
+    r = _as(pid, lambda: dev_http.stream(server + "/big", 4096))
+    got = bytearray()
+    buf = bytearray(1500)
+    while True:
+        st = r.state()
+        if st is None:
+            continue
+        assert st == (200, None)
+        assert r.available() <= 4096
+        n = r.readinto(buf)
+        got += buf[:n]
+        if not n and r.ended():
+            break
+    assert bytes(got) == BIG
+    assert "http" in ws.leases.holders()
+    r.close()
+    assert ws.leases.holders() == [] and N.count(0) == 0
+
+
+def test_a_stream_closed_part_way_gives_its_slot_and_the_radio_back(ws, server):
+    pid = L.spawn("t.http")
+    r = _as(pid, lambda: dev_http.stream(server + "/big", 4096))
+    while r.state() is None:
+        pass
+    assert r.readinto(bytearray(100)) == 100
+    r.close()
+    assert N.count(0) == 0 and ws.leases.holders() == []
 
 
 def test_a_404_is_a_response_and_a_refused_connection_an_errno(ws, server):

@@ -7,7 +7,8 @@
 #   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
 #   -- the record               load_record, save_record, record_entry
-#   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
+#   -- fetching                 Worker, Fetch, Reach, FileCheck, index_fetch, cover_fetch
+#   Worker                      a transport with the http worker: documents whole, downloads streamed
 #   Fetch                       one small document, whole
 #   Reach                       which of a cart's URLs this console can read
 #   FileCheck                   a file the player supplied, held to the index
@@ -853,6 +854,78 @@ class _Whole:
         self.req.close()
 
 
+class _Streamed:
+    """A download streamed through the http worker's window (a transport's
+    `stream(url)`: runtime/system/dev_http.py) as the response Install
+    reads: no status while its head is on its way, then its bytes as they
+    come, never waited for."""
+
+    def __init__(self, req, window):
+        self.req = req
+        self.window = window
+        self.status = None
+        self.length = None
+        self._failed = None
+
+    def poll(self):
+        st = self.req.state()
+        if st is not None:
+            self.status = st[0]
+
+    def ready(self, n):
+        if self._failed is not None:
+            return True
+        try:
+            self.req.state()
+        except OSError as exc:           # broke off: the read says so
+            self._failed = exc
+            return True
+        have = self.req.available()
+        return have >= n or have >= self.window or self.req.ended()
+
+    def readinto(self, mv):
+        if self._failed is not None:
+            raise self._failed
+        return self.req.readinto(mv)
+
+    def close(self):
+        self.req.close()
+
+
+class Worker:
+    """A transport whose requests the http worker serves off the VM's
+    thread (runtime/system/dev_http.py): Fetch's documents up to GET_MAX
+    fetched whole, and Install's downloads of any size streamed through a
+    window, so no TLS handshake or read holds a frame. The rest is the
+    transport's."""
+
+    def __init__(self, net, http):
+        self._net = net
+        self.get = http.get
+        self.stream = http.stream
+        self.GET_MAX = http.CAP_MAX
+
+    def __getattr__(self, name):
+        return getattr(self._net, name)
+
+
+# A stream's window: a reader's gate (GATE, a zip member's header whole) must
+# fit in it with room for the worker to read on, or the gate never opens.
+WINDOW = GATE + 65536
+
+
+def _request(net, url):
+    """The response a download reads: streamed by the http worker where the
+    transport has it, else the transport's own `open`."""
+    stream = getattr(net, "stream", None)
+    if stream is not None:
+        try:
+            return _Streamed(stream(url, WINDOW), WINDOW)
+        except OSError as exc:      # no slot, no grant: the transport's own way
+            _log("%s: %s; opened instead" % (url, exc))
+    return net.open(url)
+
+
 class Fetch:
     """One small document whole -- an index, a licence text, a cover -- at
     most `limit` bytes and, given `size`/`sha`, exactly those. `step()` is True
@@ -1422,7 +1495,7 @@ class Install:
                 o.url = resolve(self.cart["index"], o.urls.pop(0))
                 t = _ticks_ms()
                 try:
-                    o.resp = self.net.open(o.url)
+                    o.resp = _request(self.net, o.url)
                 except Exception as exc:  # noqa: BLE001 -- try the next mirror
                     o.why.append("%s: %s" % (o.url, exc))
                     o.text = net_text(self.net, o.text)
@@ -1430,6 +1503,14 @@ class Install:
                 finally:
                     self.t_net += _ticks_diff(_ticks_ms(), t)
             resp = o.resp
+            if resp.status is None and hasattr(resp, "poll"):
+                try:
+                    resp.poll()
+                except Exception as exc:  # noqa: BLE001 -- no answer: the next mirror
+                    o.why.append("%s: %s" % (o.url, exc))
+                    o.text = net_text(self.net, o.text)
+                    o.close()
+                    continue
             if resp.status is None:
                 return False
             if resp.status != 200 or (resp.length is not None and resp.length != o.size):

@@ -438,6 +438,7 @@ moybyte.brightness(level=None) -> level   needs "brightness"
 moybyte.mic.read(buf) -> n             PCM16 mono at the board's rate; needs "mic"
 moybyte.gps() -> (lat, lon, alt, t_us) | None
 moybyte.http.get(url, cap, on_done) -> Request: state() / body() / readinto(buf) / close()
+moybyte.http.stream(url, window) -> Stream: state() / available() / ended() / readinto(buf) / close()   a body of any length through a window
 moybyte.lora.config(...) / listen() / send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
 moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None
 moybyte.ble.scan() / connect(addr) / find(uuid) / read(h) / write(h, bytes) / subscribe(h) / advertise(name, data)

@@ -226,40 +226,25 @@ STEP_MS = 8                     # an install's work in one step
 KEEP_BYTES = 4096               # a cached index's bytes written in one step
 
 
-class _Worker:
-    """The installer's transport, its small documents fetched whole by the
-    http worker (`http.get`) off the VM's thread (cart_index.Fetch)."""
-
-    def __init__(self, net, http):
-        self._net = net
-        self.get = http.get
-        self.GET_MAX = http.CAP_MAX
-
-    def __getattr__(self, name):
-        return getattr(self._net, name)
-
-
 class Pkg:
     """The verbs over `inst` (the install role's server, bound, with `carts()`
     the scanned shelf), writing to `out(text)` and `err(line)`. `ask(question)`
     is a yes or no from the user (None: nobody to ask, a no); `stopped()`
-    is True once Ctrl-C came; `http` the http device API (None: the
-    transport's own `open` for every fetch)."""
+    is True once Ctrl-C came. The transport is the install role's
+    (`inst.net()`: the http worker's where it verifies, cart_index.Worker)."""
 
-    def __init__(self, inst, out, err, ask=None, stopped=None, http=None):
+    def __init__(self, inst, out, err, ask=None, stopped=None):
         self.inst = inst
         self.out = out
         self.err = err
         self.ask = ask
         self.stopped = stopped or (lambda: False)
-        self.http = http
         self.held = False
 
     # -- the network ---------------------------------------------------------------
 
     def _net(self):
-        net = self.inst.net()
-        return _Worker(net, self.http) if self.http is not None else net
+        return self.inst.net()
 
     def _online(self):
         """`yield from` it: the radio held and the link up, asked without

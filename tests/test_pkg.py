@@ -331,6 +331,113 @@ def test_update_caches_list_reads_the_cache_and_install_lands(tmp_path):
     assert not (tmp_path / "carts" / "dm.moy").exists()
 
 
+class _WorkerReq:
+    """The http worker's request (runtime/system/dev_http.py's Request and
+    Stream): no answer for its first polls, then its body, a stream's a few
+    bytes a poll."""
+
+    def __init__(self, body, cap=None, trickle=None):
+        self.body = body[:cap] if body is not None and cap else body
+        self.polls = 0
+        self.trickle = trickle
+        self.at = 0
+
+    def _in(self):
+        if self.trickle is None:
+            return len(self.body)
+        return min(len(self.body), max(0, self.polls - 2) * self.trickle)
+
+    def state(self):
+        self.polls += 1
+        if self.polls < 3:
+            return None
+        if self.body is None:
+            return (404, 0)
+        return (200, None if self.trickle else len(self.body))
+
+    def available(self):
+        return self._in() - self.at
+
+    def ended(self):
+        return self._in() == len(self.body)
+
+    def readinto(self, mv, off=None):
+        if off is None:
+            off = self.at
+        got = self.body[off:min(off + len(mv), self._in())]
+        mv[:len(got)] = got
+        self.at = off + len(got)
+        return len(got)
+
+    def close(self):
+        pass
+
+
+class _HttpWorker:
+    CAP_MAX = 256 * 1024
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.got = []
+        self.streamed = []
+
+    def get(self, url, cap):
+        self.got.append(url)
+        return _WorkerReq(self.routes.get(url), cap)
+
+    def stream(self, url, window):
+        # the window holds a reader's whole gate, or a large archive's
+        # member never opens (a board's install hung on exactly that)
+        assert ci.GATE < window <= self.CAP_MAX
+        self.streamed.append(url)
+        return _WorkerReq(self.routes.get(url), trickle=97)
+
+
+def test_an_install_s_downloads_are_the_http_worker_s_and_never_block(tmp_path):
+    """Where the transport has the http worker (cart_index.Worker: a board's
+    install role, Get Carts' and pkg's alike) the index is fetched whole and
+    a download of any size streams through the worker's window, a few bytes
+    a poll, off the VM's thread: the transport's blocking `open` (a TLS
+    handshake and reads on the frame) is never called."""
+    repo = Repo(BASE)
+    repo.add("dm", name="Dungeon")
+    root = str(tmp_path / "carts")
+    os.makedirs(root, exist_ok=True)
+    ci.save_sources(root, [repo.url("index.json")])
+    mem, http = MemNet(repo.routes()), _HttpWorker(repo.routes())
+    inst = Inst(root, ci.Worker(mem, http))
+    out, err = [], []
+    p = pkg.Pkg(inst, out.append, err.append, ask=lambda q: True)
+    assert done(p.update()) == 0, err
+    assert done(p.install(["dm"], yes=True)) == 0, err
+    assert (tmp_path / "carts" / "dm.moy" / "manifest.json").exists()
+    assert mem.opened == [], "nothing went through the blocking open"
+    assert http.streamed and http.got, (http.got, http.streamed)
+
+
+def test_the_install_role_s_transport_is_the_worker_s_where_https_verifies(tmp_path,
+                                                                          monkeypatch):
+    """One transport for Get Carts and `pkg`: the install role's `net()`
+    (runtime/shell/shell_servers.py) wraps the console's in the http worker
+    where its https verifies, and hands the console's own where it does not."""
+    from runtime import devices
+    from runtime.shell_servers import InstallServer
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    http = _HttpWorker({})
+    http.tls = lambda: True
+    monkeypatch.setattr(devices, "api", lambda name: http if name == "http" else None)
+    ws.cart_net = MemNet({})
+    net = InstallServer(ws).net(None)
+    assert isinstance(net, ci.Worker) and net.online() is True
+    net.get("u", 10)
+    net.stream("v", ci.WINDOW)
+    assert http.got == ["u"] and http.streamed == ["v"]
+    http.tls = lambda: False
+    ws.cart_net = MemNet({})
+    assert InstallServer(ws).net(None) is ws.cart_net
+
+
 def test_install_brings_its_depends_first_and_refuses_what_it_cannot(tmp_path):
     repo = Repo(BASE)
     repo.add("base")

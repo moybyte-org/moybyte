@@ -428,21 +428,6 @@ def _yes(d, question):
     return line in ("y", "yes")
 
 
-def _worker():
-    """The http device API where its https verifies (the boards: pkg's
-    documents fetched off the VM's thread), else None (the host's transport
-    fetches them)."""
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
-    f = devices.api("http")
-    try:
-        return f if f is not None and f.tls() else None
-    except Exception:  # noqa: BLE001 -- a console that cannot say has none
-        return None
-
-
 def _then_release(p, verb):
     """`verb`'s code, the radio's release (r_pkg's `finally`) left to a
     step of its own."""
@@ -462,7 +447,7 @@ def r_pkg(d, a):
     yes = "-y" in a
     a = [w for w in a if w != "-y"]
     p = pkg.Pkg(_Bound(InstallServer(d.ws), d.ws), d.out, lambda line: d.err("pkg", line),
-                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d), http=_worker())
+                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d))
     verb, rest = (a[0], a[1:]) if a else ("", [])
     try:
         if verb == "update" and not rest:

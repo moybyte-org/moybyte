@@ -388,6 +388,48 @@ class WallpaperServer(_Store):
 
 # -- the cart installer --------------------------------------------------------------
 
+class _AsShell:
+    """The http device API's requests made as the shell (pid 1, never
+    gated): the installer is the system's, whichever app drives it, and
+    closes what it opens itself."""
+
+    def __init__(self, face, log):
+        self._face = face
+        self._log = log
+        self.CAP_MAX = face.CAP_MAX
+
+    def _as_shell(self, fn, *a):
+        L = self._log
+        if L is None:
+            return fn(*a)
+        was = L.current()
+        L.current(1)
+        try:
+            return fn(*a)
+        finally:
+            L.current(was)
+
+    def get(self, url, cap):
+        return self._as_shell(self._face.get, url, cap)
+
+    def stream(self, url, window):
+        return self._as_shell(self._face.stream, url, window)
+
+
+def _http_worker():
+    """The http device API where its https verifies (the boards), else None
+    (the host's transport fetches over plain TCP)."""
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    try:
+        f = devices.api("http")
+        return _AsShell(f, devices._L) if f is not None and f.tls() else None
+    except Exception:  # noqa: BLE001 -- a console that cannot say has none
+        return None
+
+
 class InstallServer:
     """Carts from outside (#124): the network a store fetches with, the radio
     lease it fetches under, the store it installs into and the engine's
@@ -399,10 +441,26 @@ class InstallServer:
     def __init__(self, ws):
         self.__ws = ws
         self.__store = ws.store
+        self.__net = self.__wrapped = None
 
     def net(self, g):
-        """The transport (`online()`, `open(url)`), or None."""
-        return self.__ws.cart_net
+        """The transport (`online()`, `open(url)`), or None: where the http
+        device API verifies https (the boards), its documents and downloads
+        up to the worker's cap are the worker's, off the VM's thread
+        (cart_index.Worker), for Get Carts and `pkg` alike."""
+        net = self.__ws.cart_net
+        if net is not self.__net:
+            self.__net = net
+            http = _http_worker() if net is not None else None
+            if http is None:
+                self.__wrapped = net
+            else:
+                try:
+                    from cart_index import Worker
+                except ImportError:  # host: the runtime package
+                    from runtime.cart_index import Worker
+                self.__wrapped = Worker(net, http)
+        return self.__wrapped
 
     def home(self, g):
         """Where this console's carts are got instead, when not here: "board"

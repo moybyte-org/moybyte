@@ -4,10 +4,11 @@
 // (runtime/system/devices.py) raises.
 //
 //   open(owner, url, cap) -> h | -errno   tls() -> 1 where https verifies, else 0
+//   stream(owner, url, window) -> h | -errno   take(h, buf) -> n | -errno
 //   state(h) -> (state, status, n, err) | -errno
 //   read(h, off, buf) -> n | -errno     close(h)   sweep(owner) -> n
 //   count(owner) -> n   source() -> src   run()   present()   reset()
-//   QUEUED RUNNING DONE FAILED, CAP_MAX, ETLS, ECERT
+//   QUEUED RUNNING DONE FAILED STREAM, CAP_MAX, ETLS, ECERT
 
 #include "py/runtime.h"
 
@@ -21,6 +22,22 @@ static mp_obj_t http_open(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_int(rc < 0 ? rc : (mp_int_t)h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(http_open_obj, 3, 3, http_open);
+
+static mp_obj_t http_stream(size_t n_args, const mp_obj_t *args) {
+    uint32_t h = 0;
+    int rc = moy_fetch_stream((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
+                              (uint32_t)mp_obj_get_int(args[2]), &h);
+    return mp_obj_new_int(rc < 0 ? rc : (mp_int_t)h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(http_stream_obj, 3, 3, http_stream);
+
+static mp_obj_t http_take(mp_obj_t h, mp_obj_t buf) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(buf, &b, MP_BUFFER_WRITE);
+    return MP_OBJ_NEW_SMALL_INT(moy_fetch_take((uint32_t)mp_obj_get_int(h), b.buf,
+                                               (uint32_t)b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(http_take_obj, http_take);
 
 static mp_obj_t http_tls(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_fetch_tls());
@@ -91,6 +108,8 @@ static const mp_rom_map_elem_t http_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&http_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&http_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&http_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stream), MP_ROM_PTR(&http_stream_obj) },
+    { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&http_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&http_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_sweep), MP_ROM_PTR(&http_sweep_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&http_count_obj) },
@@ -103,6 +122,7 @@ static const mp_rom_map_elem_t http_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_RUNNING), MP_ROM_INT(MOY_FETCH_RUNNING) },
     { MP_ROM_QSTR(MP_QSTR_DONE), MP_ROM_INT(MOY_FETCH_DONE) },
     { MP_ROM_QSTR(MP_QSTR_FAILED), MP_ROM_INT(MOY_FETCH_FAILED) },
+    { MP_ROM_QSTR(MP_QSTR_STREAM), MP_ROM_INT(MOY_FETCH_STREAM) },
     { MP_ROM_QSTR(MP_QSTR_CAP_MAX), MP_ROM_INT(MOY_FETCH_CAP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_ETLS), MP_ROM_INT(MOY_HTTPC_ETLS) },
     { MP_ROM_QSTR(MP_QSTR_ECERT), MP_ROM_INT(MOY_HTTPC_ECERT) },

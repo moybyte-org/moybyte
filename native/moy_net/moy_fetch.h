@@ -31,6 +31,7 @@ enum {
     MOY_FETCH_RUNNING,
     MOY_FETCH_DONE,                     // a response: its status and body
     MOY_FETCH_FAILED,                   // no response: the errno
+    MOY_FETCH_STREAM,                   // a stream's head is in: its status, its body coming
 };
 
 // -errno codes, Linux's numbers on every tier.
@@ -44,10 +45,19 @@ enum {
 // MOY_FETCH_CAP_MAX, MOY_HTTPC_ETLS for https where moy_fetch_tls is 0,
 // ENOSPC with every slot taken).
 int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h);
+// A GET whose body streams through a window of `window` bytes (at most
+// MOY_FETCH_CAP_MAX) however long it is: STREAM once its head is in, DONE once
+// its body has all come, taken as it comes with moy_fetch_take. The worker
+// fills the window and waits while it is full. As moy_fetch_open's errors.
+int moy_fetch_stream(uint32_t owner, const char *url, uint32_t window, uint32_t *h);
+// Up to `n` of a stream's bytes, the window's oldest, taken: their count (0:
+// none in now, or, once DONE, none left), or -EBADF.
+int moy_fetch_take(uint32_t h, void *buf, uint32_t n);
 // 1 where an https request verifies, 0 where it is refused.
 int moy_fetch_tls(void);
-// The request's state, its HTTP status (0 until DONE) and body length, or
-// the errno of a FAILED one: the state, or -EBADF for a stale handle.
+// The request's state, its HTTP status (0 until DONE; a stream's from STREAM)
+// and body length (a stream's: the bytes in its window now), or the errno of
+// a FAILED one: the state, or -EBADF for a stale handle.
 int moy_fetch_state(uint32_t h, int *status, uint32_t *n, int *err);
 // Up to `n` body bytes from offset `off`: their count, or -EBADF.
 int moy_fetch_read(uint32_t h, uint32_t off, void *buf, uint32_t n);

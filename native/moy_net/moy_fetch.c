@@ -43,8 +43,11 @@ typedef struct {
     int status;
     int err;
     char *url;                      // MOY_FETCH_URL_MAX, kernel memory
-    char *body;
+    char *body;                     // a stream's: its window, a ring
     uint32_t n;
+    uint8_t stream;
+    int hc;                         // a stream's connection while its body comes, else 0
+    uint32_t wn, rn;                // a stream's bytes in, bytes taken
 } slot_t;
 
 static slot_t *s_slot;                  // MOY_FETCH_SLOTS, kernel memory at the first open
@@ -64,6 +67,12 @@ static slot_t *slot_at(uint32_t h) {
 }
 
 static void slot_free(slot_t *s) {
+    if (s->hc > 0) {
+        moy_httpc_close(s->hc);
+    }
+    s->hc = 0;
+    s->stream = 0;
+    s->wn = s->rn = 0;
     moy_net_free(s->url);
     moy_net_free(s->body);
     s->url = NULL;
@@ -118,6 +127,75 @@ static void await_link(slot_t *s) {
 }
 #endif
 
+// -- a stream (moy_fetch_stream) --------------------------------------------------
+//
+// Its head is read as a request's is; then its body comes into the window, a
+// ring the worker fills and moy_fetch_take empties, a read at a time: the
+// worker waits while the window is full, so a download of any size holds no
+// more than its window. One stream at a time keeps the worker (a request
+// queued behind it waits).
+
+static void stream_end(int i, int state, int err) {
+    slot_t *s = &s_slot[i];
+    moy_httpc_close(s->hc);
+    LOCK();
+    s->hc = 0;
+    s->err = err;
+    s->state = (uint8_t)state;
+    UNLOCK();
+    post(handle_of(i), (uint8_t)state, state == MOY_FETCH_DONE ? s->status : -err);
+}
+
+static void stream_head(int i) {
+    slot_t *s = &s_slot[i];
+    int status = 0;
+    uint32_t clen = 0;                  // the window takes the body whatever it says
+    int hc = moy_httpc_open_ex(s->url, MOY_FETCH_AGENT, MOY_HTTPC_WORKER, &status, &clen);
+    if (s->closing) {
+        s->hc = hc > 0 ? hc : 0;
+        slot_free(s);                   // closed while its head came
+        return;
+    }
+    LOCK();
+    if (hc > 0) {
+        s->hc = hc;
+        s->status = status;
+        s->state = MOY_FETCH_STREAM;
+        UNLOCK();
+        return;
+    }
+    s->err = -hc;
+    s->state = MOY_FETCH_FAILED;
+    UNLOCK();
+    post(handle_of(i), MOY_FETCH_FAILED, hc);
+}
+
+// What came of the stream's body into its window: 1 when bytes came.
+static int stream_pump(int i) {
+    slot_t *s = &s_slot[i];
+    LOCK();
+    uint32_t used = s->wn - s->rn;
+    UNLOCK();
+    uint32_t room = s->cap - used;
+    if (room == 0) {
+        return 0;
+    }
+    uint32_t at = s->wn % s->cap;
+    uint32_t k = s->cap - at < room ? s->cap - at : room;
+    int r = moy_httpc_read_wait(s->hc, s->body + at, k, 20);
+    if (r == -MOY_HTTPC_EAGAIN) {
+        return 0;
+    }
+    if (r <= 0) {
+        stream_end(i, r == 0 ? MOY_FETCH_DONE : MOY_FETCH_FAILED, r == 0 ? 0 : -r);
+        return 0;
+    }
+    LOCK();
+    s->wn += (uint32_t)r;
+    UNLOCK();
+    return 1;
+}
+
 // One queued request served: the worker's, off the VM's thread on a board.
 static void serve(int i) {
     slot_t *s = &s_slot[i];
@@ -131,6 +209,10 @@ static void serve(int i) {
     #ifdef FETCH_TASK
     await_link(s);
     #endif
+    if (s->stream) {
+        stream_head(i);
+        return;
+    }
     int status = 0;
     char *body = NULL;
     size_t n = 0;
@@ -153,10 +235,30 @@ static void serve(int i) {
     post(h, s->state, rc == 0 ? status : rc);
 }
 
-void moy_fetch_run(void) {
+// Every queued request served, and each stream's body read on until its
+// window is full or nothing more has come: 1 while a stream is open.
+static int run_once(void) {
+    int streams = 0;
     for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         serve(i);
+        slot_t *s = &s_slot[i];
+        if (s->state == MOY_FETCH_STREAM && s->hc > 0 && !s->closing) {
+            for (int k = 0; k < 64 && stream_pump(i); k++) {
+            }
+        }
+        if (s->stream && s->closing && (s->state == MOY_FETCH_STREAM
+                                        || s->state == MOY_FETCH_DONE
+                                        || s->state == MOY_FETCH_FAILED)) {
+            slot_free(s);               // closed while its body came
+            continue;
+        }
+        streams += s->state == MOY_FETCH_STREAM && s->hc > 0;
     }
+    return streams;
+}
+
+void moy_fetch_run(void) {
+    run_once();
 }
 
 #ifdef FETCH_TASK
@@ -164,7 +266,9 @@ static void worker(void *arg) {
     (void)arg;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        moy_fetch_run();
+        while (run_once()) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
     }
 }
 #endif
@@ -193,7 +297,17 @@ int moy_fetch_tls(void) {
     return moy_conn_verifies();
 }
 
+static int open_slot(uint32_t owner, const char *url, uint32_t cap, int stream, uint32_t *h);
+
 int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h) {
+    return open_slot(owner, url, cap, 0, h);
+}
+
+int moy_fetch_stream(uint32_t owner, const char *url, uint32_t window, uint32_t *h) {
+    return open_slot(owner, url, window, 1, h);
+}
+
+static int open_slot(uint32_t owner, const char *url, uint32_t cap, int stream, uint32_t *h) {
     int tls;
     char host[MOY_URL_HOST_MAX];
     uint16_t port;
@@ -233,14 +347,27 @@ int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h) {
         return -MOY_FETCH_ENOMEM;
     }
     memcpy(s->url, url, ul + 1);
+    if (stream) {
+        s->body = moy_net_alloc(cap);
+        if (s->body == NULL) {
+            moy_net_free(s->url);
+            s->url = NULL;
+            return -MOY_FETCH_ENOMEM;
+        }
+    }
     open_source();
     s->owner = owner;
     s->cap = cap;
     s->status = 0;
     s->err = 0;
-    s->body = NULL;
+    if (!stream) {
+        s->body = NULL;
+    }
     s->n = 0;
     s->closing = 0;
+    s->stream = (uint8_t)stream;
+    s->hc = 0;
+    s->wn = s->rn = 0;
     LOCK();
     s->state = MOY_FETCH_QUEUED;
     UNLOCK();
@@ -261,7 +388,7 @@ int moy_fetch_state(uint32_t h, int *status, uint32_t *n, int *err) {
     LOCK();
     int st = s->state;
     *status = s->status;
-    *n = st == MOY_FETCH_DONE ? s->n : 0;
+    *n = s->stream ? s->wn - s->rn : st == MOY_FETCH_DONE ? s->n : 0;
     *err = s->err;
     UNLOCK();
     return st;
@@ -280,13 +407,37 @@ int moy_fetch_read(uint32_t h, uint32_t off, void *buf, uint32_t n) {
     return (int)k;
 }
 
+int moy_fetch_take(uint32_t h, void *buf, uint32_t n) {
+    slot_t *s = slot_at(h);
+    if (s == NULL || s->closing || !s->stream) {
+        return -MOY_FETCH_EBADF;
+    }
+    LOCK();
+    uint32_t have = s->wn - s->rn;
+    UNLOCK();
+    uint32_t k = have < n ? have : n;
+    uint32_t at = s->rn % s->cap;
+    uint32_t first = s->cap - at < k ? s->cap - at : k;
+    memcpy(buf, s->body + at, first);
+    memcpy((char *)buf + first, s->body, k - first);
+    LOCK();
+    s->rn += k;
+    UNLOCK();
+    return (int)k;
+}
+
 int moy_fetch_close(uint32_t h) {
     slot_t *s = slot_at(h);
     if (s == NULL || s->closing) {
         return -MOY_FETCH_EBADF;
     }
     LOCK();
-    if (s->state == MOY_FETCH_RUNNING) {
+    #ifdef FETCH_TASK
+    int serving = s->state == MOY_FETCH_RUNNING || (s->state == MOY_FETCH_STREAM && s->hc > 0);
+    #else
+    int serving = s->state == MOY_FETCH_RUNNING;
+    #endif
+    if (serving) {
         s->closing = 1;
         UNLOCK();
         return 0;

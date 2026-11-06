@@ -10,6 +10,10 @@ Needs the `http` permission.
                      console that cannot verify one (`tls()` False: the
                      host) refuses it, a redirect to it too (OSError
                      EPROTONOSUPPORT)
+  stream(url, window=65536) -> Stream
+                     a GET whose body of any length comes through a window
+                     of `window` bytes (at most CAP_MAX), taken as it comes:
+                     the worker waits while the window is full
   tls() -> bool      whether this console's https verifies
   take() / dial() / settle()
                      the radio lease and the link asked for ahead of a
@@ -20,6 +24,12 @@ Needs the `http` permission.
   Request.body()     the body as bytes (None while it runs)
   Request.readinto(buf, off=0) -> n
   Request.close()
+  Stream.state()     None until its head is in, then (status, None); OSError
+                     with its errno when it got no response or broke off
+  Stream.available() the bytes in its window now
+  Stream.ended()     its body has all come
+  Stream.readinto(buf) -> n   the window's oldest bytes taken (0: none now)
+  Stream.close()
 
 The radio is a lease (`Workstation.wifi_hold`): a request holds the console's
 "http" tag from its `get` until it finishes, is closed, or its process ends,
@@ -96,6 +106,33 @@ class Request:
         _end(self)
 
 
+class Stream(Request):
+    def state(self):
+        if auto_run and _HOST:
+            _N.run()
+        st, status, n, err = self._st()
+        if st == _N.FAILED:
+            _settle()
+            raise _D.error(err)
+        if st in (_N.QUEUED, _N.RUNNING):
+            return None
+        return status, None
+
+    def available(self):
+        return self._st()[2]
+
+    def ended(self):
+        return self._st()[0] == _N.DONE
+
+    def readinto(self, buf, off=0):
+        if auto_run and _HOST:
+            _N.run()
+        return _D.check(_N.take(self.h, buf))
+
+    def body(self):
+        return None
+
+
 def _end(req):
     if _open.pop(req.h, None) is None:
         return
@@ -109,7 +146,7 @@ def _end(req):
 def _busy():
     for req in _open.values():
         st = _N.state(req.h)
-        if not isinstance(st, int) and st[0] in (_N.QUEUED, _N.RUNNING):
+        if not isinstance(st, int) and st[0] in (_N.QUEUED, _N.RUNNING, _N.STREAM):
             return True
     return False
 
@@ -190,6 +227,20 @@ def get(url, cap=16384, on_done=None):
     _open[h] = req
     if on_done is not None:
         _wake_for(req, on_done)
+    if auto_run:
+        _N.run()
+    return req
+
+
+def stream(url, window=65536):
+    p = _D.need("http")
+    _hold()
+    h = _N.stream(p, str(url), int(window))
+    if h < 0:
+        _settle()
+        raise _D.error(-h)
+    req = Stream(h, p)
+    _open[h] = req
     if auto_run:
         _N.run()
     return req
