@@ -259,3 +259,17 @@ def test_the_audio_rows_refuse_a_fifth_source():
     run = [("run:%d" % i, MIB // 2, True) for i in range(3)]
     assert fit.admit((MIB // 2, True), run, None, 4) is None
     assert fit.admit((MIB // 2, True), run, None, 3) == ["run:0"]
+
+
+def test_the_divisor_follows_the_loops_period(tmp_path):
+    """The throttled games draw every Nth frame, N rising to THROTTLE_MAX
+    while the loop misses the front's period and falling back to
+    THROTTLE_MIN once it runs ahead of it: the period is the loop's `dt`."""
+    from runtime import procs
+    ws, drv, wa, wb = _two(tmp_path)
+    for _ in range(40):
+        drv.frame(1 / 10)
+    assert ws.procs.n == procs.THROTTLE_MAX
+    for _ in range(120):
+        drv.frame(1 / 60)
+    assert ws.procs.n == procs.THROTTLE_MIN

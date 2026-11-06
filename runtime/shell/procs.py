@@ -204,7 +204,8 @@ class Proc:
         self.state = THROTTLED
         self.skip = 0               # its draw frames since the last it drew
         self.owed = 0               # painted frames its last draw is owed
-        self.draws = self.ups = 0   # since the meter's last sample
+        self.draws = self.ups = 0   # since it joined the set
+        self._draws0 = self._ups0 = 0   # ...at the meter's last sample
         self.fps = self.rate = 0.0  # the meter's last sample: draws, updates /s
         self.name = "Game"          # its cart's title (`named`)
         self.app = False            # an `"type": "app"` cart: updated while minimised
@@ -234,9 +235,8 @@ class Procs:
         self.spare = None           # an emptied world, kept for the next one
         self.n = THROTTLE_MIN       # the throttled games' draw divisor
         self._seq = 1
-        self._t = 0                 # the last frame's ms
         self._ema = 0               # the loop period, smoothed (ms)
-        self._paced = 0             # when the divisor last moved
+        self._paced = 0             # loop ms since the divisor last moved
         self._meter_t = 0
         self._acct_t = 0            # the last accounting sample
         self.gen = 0                # moves with every sample and every change
@@ -678,7 +678,7 @@ class Procs:
             if not self.list:
                 self._front_state(wm, dt)
                 return
-        self._pace(now)
+        self._pace(dt)
         self._front_state(wm, dt)
         horizon = wm._retained_n() if hasattr(wm, "_retained_n") else 1
         i = 0
@@ -771,18 +771,19 @@ class Procs:
         ticks to `frame`."""
         return self._front_min is not None and self._front_min is self.ws.player
 
-    def _pace(self, now):
+    def _pace(self, dt):
         """The divisor follows the loop: THROTTLE_MIN while a frame keeps
         the front's period (its tick, else 30 a second), up to THROTTLE_MAX
-        while it does not."""
-        per = _ticks_diff(now, self._t) if self._t else 0
-        self._t = now
-        if per <= 0 or per > 1000:
+        while it does not. The period is the loop's own `dt`, the clock
+        every other part of the frame steps by."""
+        per = int(dt * 1000)
+        if per <= 0:
             return
         self._ema = per if not self._ema else (self._ema * 7 + per) // 8
-        if _ticks_diff(now, self._paced) < PACE_MS:
+        self._paced += per
+        if self._paced < PACE_MS:
             return
-        self._paced = now
+        self._paced = 0
         budget = self.ws.player.tick_ms or 33
         if self._ema * 100 > budget * 115 and self.n < THROTTLE_MAX:
             self.n += 1
@@ -928,9 +929,9 @@ class Procs:
                or getattr(ws, "diag_live", False))
         parts = []
         for p in self.list:
-            p.fps = p.draws * 1000.0 / el
-            p.rate = p.ups * 1000.0 / el
-            p.draws = p.ups = 0
+            p.fps = (p.draws - p._draws0) * 1000.0 / el
+            p.rate = (p.ups - p._ups0) * 1000.0 / el
+            p._draws0, p._ups0 = p.draws, p.ups
             if say:
                 parts.append("%s=%s/%.1f/%.1f" % (p.title().replace(" ", "_"),
                                                   p.state, p.fps, p.rate))
