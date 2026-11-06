@@ -19,6 +19,7 @@
 #define SH_MORE 1
 #define SH_EXIT 2
 #define WAIT_MS 250                     // the face's wait for input: an app's clock, a signal
+#define DRAIN_MS 2000                   // the face's wait for Dropbear's half-close
 
 uint32_t moy_ssh_mark_shell(void);
 
@@ -221,8 +222,26 @@ static void prompt(moy_ssh_face_t *f) {
     moy_ssh_face_out(f, p, n);
 }
 
-// The status is published before the socket closes: Dropbear wakes on the
-// close and must find the exit there, or the channel never closes.
+// The client's bytes the command left unread, read and dropped until
+// Dropbear's half-close: it shuts its end's write side once it has reaped
+// the status, and an end read to that EOF closes with nothing unread.
+static void drain(moy_ssh_face_t *f) {
+    uint32_t t0 = moy_ssh_ms();
+    while (moy_ssh_ms() - t0 < DRAIN_MS) {
+        if (!readable(f, WAIT_MS)) {
+            continue;
+        }
+        ssize_t n = recv(f->fd, f->line, sizeof f->line, 0);
+        if (n == 0 || (n < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)) {
+            return;
+        }
+    }
+}
+
+// The status is published before the output's FIN: Dropbear wakes on that
+// EOF and must find the exit there, or the channel never closes. The socket
+// closes after the drain: lwIP answers a close with bytes unread with a
+// reset, and a reset drops the output the face has not yet sent.
 static void finish(moy_ssh_face_t *f, int status) {
     f->status = status;
     if (f->sh != NULL) {
@@ -230,7 +249,8 @@ static void finish(moy_ssh_face_t *f, int status) {
         f->sh = NULL;
     }
     __atomic_store_n(&f->exited, 1, __ATOMIC_RELEASE);
-    shutdown(f->fd, SHUT_RDWR);
+    shutdown(f->fd, SHUT_WR);
+    drain(f);
     close(f->fd);
     f->fd = -1;
     moy_ssh_free(f->held);

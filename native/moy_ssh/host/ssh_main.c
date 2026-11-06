@@ -8,8 +8,10 @@
 // the VM's NEEDS_VM. The main thread prints the server's STATS line when
 // a connection ends. The face's socket pair is a board's: a byte one end
 // sends crosses another task before the other end can read it, as lwIP's
-// loopback hands it to its own. Usage: ssh_main PORT SYSTEM_DIR
+// loopback hands it to its own, and an end closed with bytes it never read
+// is a reset, as lwIP's close is. Usage: ssh_main PORT SYSTEM_DIR
 
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -143,7 +145,10 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 
 // Linked with --wrap=moy_ssh_pair: the face's end and Dropbear's are each a
 // socketpair's, and a thread per direction carries the bytes between them,
-// a chunk at a time and a little late, then the end of the stream.
+// a chunk at a time and a little late, then the end of the stream. An end
+// closed with bytes in it unread is lwIP's reset: tcp_close answers it with
+// a RST and drops what that end had not yet sent, so the leg carrying them
+// drops what it holds and ends the stream.
 #define LEG_CHUNK 4096
 #define LEG_LAG_US 1000
 
@@ -155,6 +160,13 @@ typedef struct {
     int ends[2];
 } leg_t;
 
+// AF_UNIX marks a socket ECONNRESET when its peer closes with bytes unread.
+static int reset(int fd) {
+    int err = 0;
+    socklen_t n = sizeof err;
+    return getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &n) == 0 && err == ECONNRESET;
+}
+
 static void *leg(void *arg) {
     leg_t *l = arg;
     char buf[LEG_CHUNK];
@@ -164,6 +176,9 @@ static void *leg(void *arg) {
             break;
         }
         usleep(LEG_LAG_US);
+        if (reset(l->from)) {
+            break;
+        }
         const char *p = buf;
         while (n > 0) {
             ssize_t w = write(l->to, p, (size_t)n);

@@ -10,7 +10,8 @@ ssh-copy-id installed signs in; `password_auth = no` in system/ssh refuses
 the password and still takes the key. Past the sign-in: an `exec` runs on the
 shell with the channel as its stdin and ends with its status; a terminal
 session is the face's line discipline; `top` and `edit` run on the
-alternate screen; and a session's every allocation goes when it ends. The
+alternate screen; an exec that leaves its stdin unread still sends its
+output whole; and a session's every allocation goes when it ends. The
 run (moy_ssh_run.c): `passwd -d` over SSH stops the server once its session
 ends, and `passwd x` in the same session withdraws that stop.
 """
@@ -223,6 +224,22 @@ def test_a_large_exec_s_output_arrives_whole_to_a_fast_and_a_slow_reader(harness
     r = subprocess.run(["sh", "-c", slow], env=env_of(harness, PASSWORD), capture_output=True,
                        timeout=60, stdin=subprocess.DEVNULL)
     assert r.stdout == data, len(r.stdout)
+    (harness["system"] / "big").unlink()
+
+
+def test_an_exec_that_leaves_its_stdin_unread_still_sends_its_output_whole(harness):
+    """`ssh host 'cat /etc/big' < bigfile`: the client's bytes the command
+    never read are still in the face's end when it ends. lwIP answers a close
+    with bytes unread with a reset that drops the output not yet sent (the
+    harness's pair does too), so the face drains to Dropbear's half-close."""
+    junk = os.urandom(1 << 20)
+    for size in (1 << 20, 20000):
+        data = os.urandom(size)
+        (harness["system"] / "big").write_bytes(data)
+        for _ in range(3):
+            r = ssh(harness, PASSWORD, "moy@127.0.0.1", "cat /etc/big", stdin=junk, timeout=60)
+            assert r.returncode == 0, r.stderr
+            assert len(r.stdout) == len(data) and r.stdout == data, len(r.stdout)
     (harness["system"] / "big").unlink()
 
 

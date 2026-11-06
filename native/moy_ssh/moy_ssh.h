@@ -81,11 +81,12 @@ const char *moy_ssh_system(void);
 int moy_ssh_pair(int fds[2]);
 
 // The tasks: a task's id; a nap of up to `ms` (a poke ends it early); a
-// poke of task `t`'s nap.
+// poke of task `t`'s nap; a millisecond clock.
 uintptr_t moy_ssh_self(void);
 void moy_ssh_nap(int ms);
 #define MOY_SSH_FOREVER (-1)
 void moy_ssh_poke(uintptr_t t);
+uint32_t moy_ssh_ms(void);
 // The console's task's own wait, which leaves its task notifications alone.
 void moy_ssh_console_nap(int ms);
 // fn(arg) on a task of its own (a PSRAM stack on a board), its id or 0.

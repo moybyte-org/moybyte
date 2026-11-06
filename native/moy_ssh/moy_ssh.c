@@ -23,7 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
-static uint32_t now_ms(void) {
+uint32_t moy_ssh_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
@@ -59,7 +59,7 @@ uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack,
 #else
 #include <pthread.h>
 #include <sys/random.h>
-static uint32_t now_ms(void) {
+uint32_t moy_ssh_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
@@ -567,13 +567,13 @@ int moy_ssh_setup(const char *system_dir) {
         }
         buf_burn_free(b);
     } else {
-        uint32_t t0 = now_ms();
+        uint32_t t0 = moy_ssh_ms();
         svr_opts.hostkey->ed25519key = gen_ed25519_priv_key(256);
         b = buf_new(MAX_PRIVKEY_SIZE);
         buf_put_priv_key(b, svr_opts.hostkey, type);
         int r = sys_publish("ssh_host_key", b->data, b->len);
         buf_burn_free(b);
-        printf("SSH host key made in %u ms%s\n", (unsigned)(now_ms() - t0),
+        printf("SSH host key made in %u ms%s\n", (unsigned)(moy_ssh_ms() - t0),
                r != 0 ? ", not stored" : "");
     }
     g->set_up = 1;
@@ -641,7 +641,7 @@ int moy_ssh_pair(int fds[2]) {
 
 uint32_t moy_ssh_mark_shell(void) {
     s_stats.signed_in++;
-    s_stats.handshake_ms = now_ms() - s_accepted_at;
+    s_stats.handshake_ms = moy_ssh_ms() - s_accepted_at;
     return s_stats.handshake_ms;
 }
 
@@ -674,7 +674,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     g->keys = c.keys;
     g->keys_n = c.keys_n;
     s_stats.sessions++;
-    s_accepted_at = now_ms();
+    s_accepted_at = moy_ssh_ms();
     s_session_base = s_stats.heap_now;
     s_stats.session_peak = 0;
 
