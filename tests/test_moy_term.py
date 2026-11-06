@@ -100,6 +100,20 @@ def test_sgr_inks_become_the_escapes_a_text_view_maps(term):
     assert view(s) == ["\x1b[31mred \x1b[92mok \x1b[2mdim \x1b[0mn \x1b[34mb\x1b[0m"]
 
 
+def test_rgb_inks_and_grounds_are_the_base_colours_exactly(term):
+    """38;2 and 48;2 take the nearest of the console's sixteen base colours
+    and say it back as that colour's RGB; a ground on a blank is kept, and a
+    half-block's cell carries both."""
+    s = term(20, 3)
+    s.write("\x1b[38;2;131;118;156;48;2;29;43;83m\u2580\x1b[38;2;255;0;80m\u2584"
+            "\x1b[0m.\x1b[48;5;8m  \x1b[49mx\x1b[0m\n")
+    assert view(s)[0] == ("\x1b[38;2;131;118;156m\x1b[48;2;29;43;83m\u2580"
+                          "\x1b[38;2;255;0;77m\u2584\x1b[0m.\x1b[48;2;255;0;77m  "
+                          "\x1b[49mx")
+    s.write("\x1b[38;5;1mred\x1b[38;2;0;0;0m\x1b[0mplain\n")
+    assert view(s)[1] == "\x1b[31mred\x1b[0mplain"
+
+
 def test_utf8_tabs_and_unknown_escapes(term):
     s = term(20, 3)
     s.write("é→".encode("utf-8") + b"\xff|")

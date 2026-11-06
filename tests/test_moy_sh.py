@@ -28,6 +28,9 @@ DASH = os.path.join(SH, "dash")
 STORE = os.path.join(ROOT, "native", "moy_store")
 KERNEL = os.path.join(ROOT, "native", "moy_kernel")
 SPINE = os.path.join(ROOT, "native", "moy_spine")
+# the console's palette the grid and neofetch read: the toolkit's generated
+# tables, which need nothing else of it
+UI_TABLES = os.path.join(ROOT, "native", "moy_ui", "moy_ui_tables.c")
 SCRIPTS = os.path.join(ROOT, "tests", "moy_sh")
 
 CFLAGS = ["-std=gnu99", "-g", "-O1", "-fsanitize=address,undefined",
@@ -73,6 +76,7 @@ def _objects(cc, out):
     jobs.append((os.path.join(SPINE, "moy_settings.c"), CFLAGS + ["-I", SPINE]))
     jobs.append((os.path.join(SPINE, "moy_json.c"), CFLAGS + ["-I", SPINE]))
     jobs.append((os.path.join(KERNEL, "moy_log.c"), CFLAGS + ["-I", KERNEL]))
+    jobs.append((UI_TABLES, CFLAGS))
 
     def one(job):
         src, flags = job
@@ -100,6 +104,8 @@ def harness(tmp_path_factory):
             h.update(path.encode())
             with open(path, "rb") as f:
                 h.update(f.read())
+    with open(UI_TABLES, "rb") as f:
+        h.update(f.read())
     base = tmp_path_factory.getbasetemp().parent / "moy_sh_host" / h.hexdigest()[:16]
     base.mkdir(parents=True, exist_ok=True)
     exes = {name: str(base / name) for name in ("sh_main", "board_main")}

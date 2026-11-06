@@ -39,7 +39,7 @@ _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 DOOR = 0x7368
 HOST = True                             # a host face names its files tree (Screen's root)
 _FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w"]
-_COLS_BYTES = 9                         # a cell's most bytes in a line: its SGR and UTF-8
+_COLS_BYTES = 12                        # a line's bytes a column (moy_term.h, MOY_TERM_COL_BYTES)
 
 
 def _sources():

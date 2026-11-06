@@ -128,9 +128,10 @@ typedef struct {
     // a task of its own hops to the console's (the SSH face, native/moy_ssh);
     // a hop from that task runs in place.
     void (*hop)(void *ctx, void (*fn)(void *arg), void *arg);
-    // the terminal's columns, for a command that lays out a screen's width
-    // (neofetch) (may be NULL: 80)
-    int (*cols)(void *ctx);
+    // the terminal's size, for a command that lays out a screenful
+    // (neofetch): its columns and rows, 0 rows where it has no height (may
+    // be NULL: 80 columns, no height)
+    void (*size)(void *ctx, int *cols, int *rows);
 } moy_sh_host_t;
 
 // A session over `arena` bytes; NULL when the host's alloc refuses. `host` is

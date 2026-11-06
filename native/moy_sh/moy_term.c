@@ -1,11 +1,16 @@
 // moy_term: the terminal's cell grid. moy_term.h has the contract.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "moy_term.h"
 
+// The console's palette, its first sixteen the base colours (native/moy_ui's
+// generated tables, linked wherever the shell is).
+extern const uint32_t moy_theme_moy64[64];
+
 #define BLANK ((uint32_t)' ' | (MOY_TERM_INK << MOY_TERM_FG_AT))
-#define PARAMS 8
+#define PARAMS 16
 #define TAB 8
 #define NONE 0xFFFFFFFFu
 
@@ -195,14 +200,54 @@ static void drop_scrollback(moy_term_t *t) {
     }
 }
 
+int moy_term_nearest(uint32_t rgb) {
+    int best = 0;
+    uint32_t bd = UINT32_MAX;
+    for (int i = 0; i < 16; i++) {
+        uint32_t c = moy_theme_moy64[i];
+        int dr = (int)((rgb >> 16) & 0xFF) - (int)((c >> 16) & 0xFF);
+        int dg = (int)((rgb >> 8) & 0xFF) - (int)((c >> 8) & 0xFF);
+        int db = (int)(rgb & 0xFF) - (int)(c & 0xFF);
+        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+        if (d < bd) {
+            bd = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+// SGR 38/48's colour at par[i] (`2;R;G;B` or `5;N`): a base colour's index,
+// or -1 for one it names none of; *used the parameters it took.
+static int sgr_colour(const moy_term_t *t, int i, int np, int *used) {
+    int mode = i < np ? t->par[i] : -1;
+    if (mode == 5) {
+        *used = 2;
+        return i + 1 < np && t->par[i + 1] < 16 ? t->par[i + 1] : -1;
+    }
+    if (mode == 2) {
+        *used = 4;
+        if (i + 3 >= np) {
+            return -1;
+        }
+        uint32_t rgb = ((uint32_t)(t->par[i + 1] & 0xFF) << 16)
+                       | ((uint32_t)(t->par[i + 2] & 0xFF) << 8) | (uint32_t)(t->par[i + 3] & 0xFF);
+        return moy_term_nearest(rgb);
+    }
+    *used = 1;
+    return -1;
+}
+
 static void sgr(moy_term_t *t) {
     uint32_t fg = MOY_TERM_FG(t->attr);
+    uint32_t bg = MOY_TERM_BG(t->attr);
     uint32_t dim = t->attr & MOY_TERM_DIM;
     int np = t->np ? t->np : 1;
     for (int i = 0; i < np; i++) {
         int v = t->par[i];
         if (v == 0) {
             fg = MOY_TERM_INK;
+            bg = 0;
             dim = 0;
         } else if (v == 2) {
             dim = MOY_TERM_DIM;
@@ -214,21 +259,20 @@ static void sgr(moy_term_t *t) {
             fg = (uint32_t)(v - 90 + 8);
         } else if (v == 39) {
             fg = MOY_TERM_INK;
-        } else if ((v == 38 || v == 48) && i + 1 < np) {
-            int mode = t->par[i + 1];
-            if (mode == 5 && i + 2 < np) {
-                if (v == 38 && t->par[i + 2] < 16) {
-                    fg = (uint32_t)t->par[i + 2];
-                }
-                i += 2;
-            } else if (mode == 2) {
-                i += 4;
-            } else {
-                i += 1;
+        } else if (v == 49) {
+            bg = 0;
+        } else if (v == 38 || v == 48) {
+            int used, c = sgr_colour(t, i + 1, np, &used);
+            if (c >= 0 && v == 48) {
+                bg = (uint32_t)c + 1u;
+            } else if (c >= 0) {
+                // 38;5;N keeps N an ANSI ink (the theme's); an RGB is the colour
+                fg = t->par[i + 1] == 5 ? (uint32_t)c : MOY_TERM_PAL + (uint32_t)c;
             }
+            i += used;
         }
     }
-    t->attr = (fg << MOY_TERM_FG_AT) | dim;
+    t->attr = (fg << MOY_TERM_FG_AT) | dim | (bg << MOY_TERM_BG_AT);
 }
 
 static int arg(const moy_term_t *t, int i, int dflt) {
@@ -441,7 +485,7 @@ static void byte(moy_term_t *t, uint8_t c) {
         if ((c & 0xC0) == 0x80) {
             t->u8 = (t->u8 << 6) | (c & 0x3Fu);
             if (--t->u8n == 0) {
-                put(t, t->u8 <= 0x10FFFFu && t->u8 >= 0x80 ? t->u8 : 0xFFFDu);
+                put(t, t->u8 <= 0xFFFFFu && t->u8 >= 0x80 ? t->u8 : 0xFFFDu);
             }
             return;
         }
@@ -556,10 +600,19 @@ static size_t utf8(uint32_t cp, char *o) {
     return 4;
 }
 
+static size_t rgb_sgr(char *o, int ground, int i) {
+    uint32_t c = moy_theme_moy64[i];
+    return (size_t)snprintf(o, 24, "\x1b[%d;2;%u;%u;%um", ground ? 48 : 38,
+                            (unsigned)(c >> 16), (unsigned)((c >> 8) & 0xFF), (unsigned)(c & 0xFF));
+}
+
 // The SGR that sets a cell's ink: its colour wins over dim, as a text view
 // draws one tone a run.
 static size_t ink(uint32_t c, char *o) {
     uint32_t fg = MOY_TERM_FG(c);
+    if (fg >= MOY_TERM_PAL) {
+        return rgb_sgr(o, 0, (int)(fg - MOY_TERM_PAL));
+    }
     if (fg < 8) {
         memcpy(o, "\x1b[30m", 5);
         o[3] = (char)('0' + fg);
@@ -583,18 +636,27 @@ size_t moy_term_line(const moy_term_t *t, int i, char *out, size_t cap) {
     if (i >= 0 && i < count && i < t->n) {
         const uint32_t *p = held(t, i);
         int end = t->cols;
-        while (end > 0 && MOY_TERM_CP(p[end - 1]) == ' ') {
+        while (end > 0 && MOY_TERM_CP(p[end - 1]) == ' ' && MOY_TERM_BG(p[end - 1]) == 0) {
             end--;
         }
         uint32_t was = MOY_TERM_INK << MOY_TERM_FG_AT;
-        const uint32_t look = (0x1Fu << MOY_TERM_FG_AT) | MOY_TERM_DIM;
-        char b[16];
+        const uint32_t look = (0x3Fu << MOY_TERM_FG_AT) | MOY_TERM_DIM;
+        const uint32_t ground = 0x1Fu << MOY_TERM_BG_AT;
+        char b[64];
         for (int x = 0; x < end; x++) {
             size_t m = 0;
             uint32_t c = p[x];
             if (MOY_TERM_CP(c) != ' ' && (c & look) != (was & look)) {
                 m = ink(c, b);
-                was = c;
+                was = (was & ground) | (c & look);
+                if (memcmp(b, "\x1b[0m", 4) == 0) {
+                    was &= ~ground;             // a reset takes the ground with it
+                }
+            }
+            if ((c & ground) != (was & ground)) {
+                m += MOY_TERM_BG(c) ? rgb_sgr(b + m, 1, (int)MOY_TERM_BG(c) - 1)
+                                    : (size_t)snprintf(b + m, 8, "\x1b[49m");
+                was = (was & ~ground) | (c & ground);
             }
             m += utf8(MOY_TERM_CP(c), b + m);
             if (k + m + 5 > cap) {
@@ -603,7 +665,7 @@ size_t moy_term_line(const moy_term_t *t, int i, char *out, size_t cap) {
             memcpy(out + k, b, m);
             k += m;
         }
-        if ((was & look) != ((MOY_TERM_INK << MOY_TERM_FG_AT) & look) && k + 5 <= cap) {
+        if ((was & (look | ground)) != ((MOY_TERM_INK << MOY_TERM_FG_AT) & look) && k + 5 <= cap) {
             memcpy(out + k, "\x1b[0m", 4);
             k += 4;
         }

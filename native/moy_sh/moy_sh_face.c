@@ -901,7 +901,7 @@ int moy_sh_face_take(moy_sh_face_t *f) {
 
 // The getter's rows: `rows` of the grid's widest line.
 static void ring_fit(moy_sh_face_t *f, size_t rows) {
-    size_t slot = (size_t)f->cols * 9u + 8u;
+    size_t slot = (size_t)f->cols * MOY_TERM_COL_BYTES + 8u;
     if (f->ring != NULL && slot <= f->slot && rows <= f->nslots) {
         return;
     }

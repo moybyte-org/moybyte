@@ -7,8 +7,11 @@
 // THE GRID is a ring of `lines` lines of `cols` cells: the screen is its last
 // `rows`, the lines above it the scrollback, which a line scrolled off the
 // screen's top joins and the oldest leaves when the ring is full. A cell is
-// one word: the codepoint in its low 21 bits, the ink above (MOY_TERM_FG_AT:
-// 0-15 the ANSI colours, MOY_TERM_INK the default) and the dim bit. The
+// one word: the codepoint in its low 20 bits (one past U+FFFFF is U+FFFD),
+// the ink above (MOY_TERM_FG_AT: 0-15 the ANSI colours, which a text view
+// draws in the theme's tones, MOY_TERM_INK the default, MOY_TERM_PAL and up
+// the console's sixteen base colours exactly), the dim bit, and the ground
+// (MOY_TERM_BG_AT: 0 none, 1-16 a base colour). The
 // ring's memory comes from the caller's `alloc` at moy_term_new and resize
 // (PSRAM on a board), nothing else is kept.
 //
@@ -21,9 +24,11 @@
 //   J (0 1 2 3)           erase below, above, the screen, the scrollback
 //   K (0 1 2)             erase right, left, the line
 //   m                     SGR: 0 reset, 2 dim, 22 normal, 30-37 and 90-97 the
-//                         ink, 39 the default, 38;5;N its first sixteen; the
-//                         rest (bold, the background, inverse) are read and
-//                         drop, since a text view draws one ink a run
+//                         ink, 39 the default, 38;5;N its first sixteen,
+//                         38;2;R;G;B the nearest base colour; 48;2;R;G;B and
+//                         48;5;N (N < 16: that base colour) the ground, 49
+//                         none; the rest (bold, 40-47, inverse) are read and
+//                         drop
 //   s u, ESC 7 ESC 8      the cursor saved and restored
 //   ? 25 h / l            the cursor shown and hidden
 // and ESC D (index), ESC E (next line), ESC M (up a row), ESC c (reset).
@@ -42,11 +47,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MOY_TERM_FG_AT 21
+#define MOY_TERM_FG_AT 20
 #define MOY_TERM_INK 16u                // the default ink
+#define MOY_TERM_PAL 32u                // + i: base colour i, exactly
 #define MOY_TERM_DIM (1u << 26)
-#define MOY_TERM_CP(cell) ((cell) & 0x1FFFFFu)
-#define MOY_TERM_FG(cell) (((cell) >> MOY_TERM_FG_AT) & 0x1Fu)
+#define MOY_TERM_BG_AT 27
+#define MOY_TERM_CP(cell) ((cell) & 0xFFFFFu)
+#define MOY_TERM_FG(cell) (((cell) >> MOY_TERM_FG_AT) & 0x3Fu)
+#define MOY_TERM_BG(cell) ((cell) >> MOY_TERM_BG_AT)
+
+// The base colour nearest `rgb` (0xRRGGBB): its index, 0-15, among the
+// console's palette's first sixteen (native/moy_ui's moy_theme_moy64).
+int moy_term_nearest(uint32_t rgb);
 
 typedef struct moy_term moy_term_t;
 
@@ -77,9 +89,15 @@ uint32_t moy_term_gen(const moy_term_t *t);
 void moy_term_take(moy_term_t *t, uint32_t out[3]);
 
 // The view's line `i` (0 the oldest held) as UTF-8 with an SGR escape where
-// its ink changes, its trailing blanks dropped, into `out` (NUL-terminated,
-// cut at a character that does not fit): its bytes.
+// its ink or its ground changes, its trailing blanks dropped (a blank with a
+// ground is kept), into `out` (NUL-terminated, cut at a character that does
+// not fit): its bytes.
 size_t moy_term_line(const moy_term_t *t, int i, char *out, size_t cap);
+
+// The bytes a line's buffer holds a column, plus 8: a cell's ANSI ink and
+// a UTF-8 character at most, with room for the RGB escapes of a line such as
+// neofetch's logo; a line that changes colour more often is cut there.
+#define MOY_TERM_COL_BYTES 12u
 
 // The cursor: out[0] its view line, out[1] its column, out[2] 1 shown.
 void moy_term_cursor(const moy_term_t *t, int out[3]);

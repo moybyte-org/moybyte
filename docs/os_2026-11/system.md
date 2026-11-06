@@ -167,13 +167,17 @@ serial face's output.
 **The terminal emulation**, a full-screen text app's surface: the app
 writes an ANSI/VT100 subset to its stdout and reads keys from stdin, as on
 any Unix; the C shell's emulator keeps the cell grid (`moy_term.h` lists the
-subset it reads: cursor motion, erase, SGR inks, scrolling and wrap), and the
-screen face draws that grid through `ui.text_view`, whose SGR tones are the
-theme's. The keys below are what the text apps read (`moy_sh_app.h`); a
+subset it reads: cursor motion, erase, SGR inks and grounds, scrolling and
+wrap), and the screen face draws that grid through `ui.text_view`, whose
+ANSI inks are the theme's tones and whose RGB inks and grounds are the
+nearest of the sixteen base colours, exactly; the half and whole blocks
+(▀ ▄ █) are fills, so a program draws pixel art two pixels a cell, as
+`neofetch` draws Moy. The keys below are what the text apps read (`moy_sh_app.h`); a
 line program's stdin, the resize event and the size call are still a sketch:
 
 ```
 ESC[row;colH  ESC[K  ESC[2J  ESC[3xm/4xm  ESC[?25l/h   cursor, erase, 16 colours as theme tokens, cursor show/hide
+ESC[38;2;r;g;bm  ESC[48;2;r;g;bm  ESC[49m             an ink and a ground: the nearest base colour
 ESC[A..D, PgUp/PgDn, Home/End, F-keys as xterm sends them; a resize as the OS event "winch"
 stdio: Python print/input; Lua io.read/io.write; C read/write on 0, 1, 2 (tiers.md §1); wasm fd_read/fd_write (WASI, tiers.md §3)
 moybyte.term.size() -> (cols, rows)   the one thing the standards lack; args and the exit code are WASI's and POSIX's

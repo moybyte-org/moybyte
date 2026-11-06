@@ -222,7 +222,7 @@ static mp_obj_t screen_line(mp_obj_t self, mp_obj_t i) {
     int cols, rows;
     moy_term_size(t, &cols, &rows);
     vstr_t v;
-    vstr_init_len(&v, (size_t)cols * 9u + 8u);
+    vstr_init_len(&v, (size_t)cols * MOY_TERM_COL_BYTES + 8u);
     v.len = moy_term_line(t, mp_obj_get_int(i), v.buf, v.alloc);
     return mp_obj_new_str_from_vstr(&v);
 }
@@ -529,7 +529,7 @@ static mp_obj_t face_lines(mp_obj_t self) {
     int32_t n = moy_sh_face_lines(f);
     mp_obj_t out = mp_obj_new_list(0, NULL);
     vstr_t v;
-    vstr_init(&v, (size_t)cols * 9u + 8u);
+    vstr_init(&v, (size_t)cols * MOY_TERM_COL_BYTES + 8u);
     for (int32_t i = 0; i < n; i++) {
         size_t k = moy_sh_face_log_line(f, i, v.buf, v.alloc);
         mp_obj_list_append(out, mp_obj_new_str(v.buf, k));

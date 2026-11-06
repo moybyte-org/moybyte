@@ -325,10 +325,8 @@ static void sh_resize(void *sh, int cols, int rows) {
 
 // -- the session --------------------------------------------------------------------
 
-static int sh_cols(void *ctx) {
-    int cols, rows;
-    moy_ssh_face_size(((sh_t *)ctx)->f, &cols, &rows);
-    return cols;
+static void sh_size(void *ctx, int *cols, int *rows) {
+    moy_ssh_face_size(((sh_t *)ctx)->f, cols, rows);
 }
 
 static void *sh_open(moy_ssh_face_t *f) {
@@ -354,7 +352,7 @@ static void *sh_open(moy_ssh_face_t *f) {
     host.hop = w_hop;
     host.in = sh_in;
     host.app = sh_app;
-    host.cols = sh_cols;
+    host.size = sh_size;
     // /etc is the folder the server reads its sign-in from
     const char *sys = moy_ssh_system();
     size_t rn = strlen(host.root);

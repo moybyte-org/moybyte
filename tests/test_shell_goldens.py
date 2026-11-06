@@ -921,6 +921,21 @@ def _terminal_plan(ws, cfg):
             sh_door.ShellDoor.v_df = was
         app._damage.all()
 
+    def colours():
+        # the grounds and the half blocks neofetch's logo and palette draw
+        # with: the sixteen base colours in two rows (48;5), then Moy's
+        # colours as RGB inks and grounds over the upper, lower and whole
+        # blocks (38;2 and 48;2)
+        f = app.face
+        f.clear_cands()
+        f.set_in_row(False)
+        f.set_line("clear; for r in 0 8; do for i in 0 1 2 3 4 5 6 7; do "
+                   "printf '\\033[48;5;%dm   ' $((r + i)); done; printf '\\033[0m\\n'; done; "
+                   "printf '\\033[38;2;131;118;156;48;2;0;0;0m\\342\\226\\200\\342\\226\\204"
+                   "\\033[49m\\342\\226\\210 \\033[38;2;126;37;83mlegs\\033[0m\\n'")
+        f.submit()
+        app._damage.all()
+
     plan = [("app_terminal", open_it)]
     if cfg.get("appearance"):
         plan.append(("app_terminal_listing", typed("help")))
@@ -932,6 +947,7 @@ def _terminal_plan(ws, cfg):
                                                    b"font_scale = 2\r")))
         plan.append(("app_terminal_top", text_app("top", still=True)))
         plan.append(("app_terminal_neofetch", neofetch))
+        plan.append(("app_terminal_colours", colours))
     return plan
 
 
@@ -1658,7 +1674,8 @@ def surface_names(config_name):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
         if not cfg["windowed"]:
             names.append("app_terminal_touch")
-        names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch"]
+        names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
+                  "app_terminal_colours"]
     return names
 
 

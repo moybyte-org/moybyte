@@ -1010,34 +1010,60 @@ static int clearcmd(int argc, char **argv) {
 #define MOY_SH_FETCH_CHIP 1
 #endif
 
+// The console's palette, its first sixteen the base colours (native/moy_ui's
+// generated tables, linked wherever the shell is).
+extern const uint32_t moy_theme_moy64[64];
+
 #define FETCH_ROWS 16
 #define FETCH_VALUE 64
+#define FETCH_LOGO_W 16
+#define FETCH_LOGO_ROWS 8
 #define FETCH_GAP 3                     // between the logo and the rows
+#define FETCH_ACCENT 14                 // the title's and the labels' base colour
 
-static const char *const fetch_logo[] = {
-    " .--------.",
-    " | .----. |",
-    " | | moy| |",
-    " | '----' |",
-    " |  +  oo |",
-    " '--------'",
+// Moy, the mascot: chrome.py's "moy" sprite ('.' clear, a hex digit a base
+// colour), drawn two pixels a cell with half blocks.
+static const char *const fetch_moy[16] = {
+    "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
+    ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",
+    ".0dddddddddddd0.", ".0dd0ddd0ddddd0.", ".0ddd000dddddd0.", ".0dddddddddddd0.",
+    ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....",
 };
-#define FETCH_LOGO_ROWS ((int)(sizeof fetch_logo / sizeof fetch_logo[0]))
-#define FETCH_LOGO_W 11
+
+// ...and his silhouette where the terminal draws no colour.
+static const char *const fetch_plain[FETCH_LOGO_ROWS] = {
+    "   .-------.    ",
+    "  /        |    ",
+    " |         '--. ",
+    " |   o   o    | ",
+    " |    ---     | ",
+    " |            | ",
+    "  '--.----.--'  ",
+    "    '-'  '-'    ",
+};
+
+// A row's rank: the rows a short terminal leaves out go highest rank first.
+typedef struct {
+    const char *label;
+    char value[FETCH_VALUE];
+    int rank;
+} fetch_row_t;
 
 typedef struct {
-    const char *label[FETCH_ROWS];
-    char value[FETCH_ROWS][FETCH_VALUE];
+    fetch_row_t row[FETCH_ROWS];
     int n;
     char title[FETCH_VALUE];
 } fetch_t;
 
-static char *fetch_add(fetch_t *f, const char *label) {
+static char *fetch_add(fetch_t *f, const char *label, int rank) {
     if (f->n >= FETCH_ROWS) {
         return NULL;
     }
-    f->label[f->n] = label;
-    return f->value[f->n++];
+    fetch_row_t *r = &f->row[f->n++];
+    r->label = label;
+    r->rank = rank;
+    r->value[0] = 0;
+    return r->value;
 }
 
 // `key`'s value in /proc/console's `key: value` lines, into `out`; 0 none.
@@ -1059,10 +1085,10 @@ static int console_row(const char *text, size_t n, const char *key, char *out, s
 }
 
 static void fetch_console(fetch_t *f, const char *text, size_t n, const char *key,
-                          const char *label) {
+                          const char *label, int rank) {
     char v[FETCH_VALUE];
     if (text != NULL && console_row(text, n, key, v, sizeof v)) {
-        char *out = fetch_add(f, label);
+        char *out = fetch_add(f, label, rank);
         if (out != NULL) {
             memcpy(out, v, strlen(v) + 1);
         }
@@ -1081,8 +1107,8 @@ static void fetch_size(char *out, uint64_t b) {
     }
 }
 
-static void fetch_used(fetch_t *f, const char *label, uint64_t total, uint64_t free) {
-    char *out = total > 0 ? fetch_add(f, label) : NULL;
+static void fetch_used(fetch_t *f, const char *label, int rank, uint64_t total, uint64_t free) {
+    char *out = total > 0 ? fetch_add(f, label, rank) : NULL;
     if (out != NULL) {
         char u[16], t[16];
         fetch_size(u, total - free);
@@ -1091,13 +1117,13 @@ static void fetch_used(fetch_t *f, const char *label, uint64_t total, uint64_t f
     }
 }
 
-static void fetch_df(fetch_t *f, const char *label, const char *path) {
+static void fetch_df(fetch_t *f, const char *label, int rank, const char *path) {
     moy_sh_t *s = moy_sh_cur;
     char sp[MOY_SH_PATH_MAX];
     uint64_t total = 0, free = 0;
     const char *p = moy_sh_store_path(path, sp, sizeof sp);
     if (p != NULL && s->host.df != NULL && s->host.df(s->host.ctx, p, &total, &free) == 0) {
-        fetch_used(f, label, total, free);
+        fetch_used(f, label, rank, total, free);
     }
 }
 
@@ -1106,12 +1132,10 @@ static void fetch_df(fetch_t *f, const char *label, const char *path) {
 static int fetch_width(const char *p, int room, size_t *cut) {
     int w = 0;
     size_t i = 0;
-    *cut = 0;
     for (; p[i]; i++) {
         if (((unsigned char)p[i] & 0xC0u) != 0x80u) {
             if (w == room) {
-                *cut = i;
-                return w;
+                break;
             }
             w++;
         }
@@ -1120,44 +1144,126 @@ static int fetch_width(const char *p, int room, size_t *cut) {
     return w;
 }
 
-// One line: `pad` columns of logo (row `logo`, or blanks past it), then
-// `label` and `text` cut to what the terminal has left, `text` in bold where
-// `bold`.
-static void fetch_line(int colour, int cols, int logo, int pad, const char *label,
-                       const char *text, int bold) {
-    int used = 0;
-    if (pad > 0 && label == NULL && text == NULL) {
-        pad = 0;                        // the logo alone, as wide as it is
-        out1fmt("%s%s%s", colour ? "\033[36m" : "", fetch_logo[logo], colour ? "\033[0m" : "");
+static void fetch_sgr(int ground, int base) {
+    uint32_t c = moy_theme_moy64[base];
+    out1fmt("\033[%d;2;%u;%u;%um", ground ? 48 : 38, (unsigned)(c >> 16),
+            (unsigned)((c >> 8) & 0xFF), (unsigned)(c & 0xFF));
+}
+
+static int moy_pixel(int x, int y) {
+    char c = fetch_moy[y][x];
+    return c == '.' ? -1 : c <= '9' ? c - '0' : c - 'a' + 10;
+}
+
+// Logo row `i` (blanks past it), FETCH_LOGO_W columns, the ink reset after.
+static void fetch_logo(int colour, int i) {
+    if (i < 0 || i >= FETCH_LOGO_ROWS) {
+        out1fmt("%*s", FETCH_LOGO_W, "");
+        return;
     }
+    if (!colour) {
+        out1str(fetch_plain[i]);
+        return;
+    }
+    // two pixels a cell: the top one the ink of an upper half block, the
+    // bottom one its ground (a lower half block where the top is clear)
+    int ink = -1, ground = -1;          // the line before ended in a reset
+    for (int x = 0; x < FETCH_LOGO_W; x++) {
+        int t = moy_pixel(x, 2 * i), b = moy_pixel(x, 2 * i + 1);
+        const char *glyph = "\xe2\x96\x80";
+        int want_ink = t, want_ground = b;
+        if (t < 0 && b < 0) {
+            glyph = " ";
+            want_ink = ink;
+        } else if (t < 0) {
+            glyph = "\xe2\x96\x84";
+            want_ink = b;
+            want_ground = -1;
+        } else if (t == b) {
+            glyph = "\xe2\x96\x88";
+            want_ground = ground;       // a whole block hides its ground
+        }
+        if (want_ground != ground) {
+            if (want_ground < 0) {
+                out1str("\033[49m");
+            } else {
+                fetch_sgr(1, want_ground);
+            }
+            ground = want_ground;
+        }
+        if (want_ink != ink && want_ink >= 0) {
+            fetch_sgr(0, want_ink);
+            ink = want_ink;
+        }
+        out1str(glyph);
+    }
+    out1str("\033[0m");
+}
+
+// One line: the logo's row `logo` beside the text (`pad` 0: no logo), then
+// `label` and `text` cut to what the terminal has left.
+static void fetch_line(int colour, int cols, int pad, int logo, const char *label,
+                       const char *text, int title) {
+    int room = cols;
     if (pad > 0) {
-        const char *l = logo >= 0 && logo < FETCH_LOGO_ROWS ? fetch_logo[logo] : "";
-        out1fmt("%s%-*s%s", colour && *l ? "\033[36m" : "", pad, l, colour && *l ? "\033[0m" : "");
-        used = pad;
+        fetch_logo(colour, logo);
+        out1fmt("%*s", FETCH_GAP, "");
+        room -= pad;
     }
-    int room = cols - used;
-    if (label != NULL) {
+    char accent[32] = "";
+    if (colour) {
+        uint32_t c = moy_theme_moy64[FETCH_ACCENT];
+        snprintf(accent, sizeof accent, "\033[1;38;2;%u;%u;%um", (unsigned)(c >> 16),
+                 (unsigned)((c >> 8) & 0xFF), (unsigned)(c & 0xFF));
+    }
+    const char *plain = colour ? "\033[0m" : "";
+    if (label != NULL && room > 0) {
         size_t cut;
-        int w = fetch_width(label, room, &cut);
-        out1fmt("%s%.*s%s", colour ? "\033[1;36m" : "", (int)cut, label, colour ? "\033[0m" : "");
-        room -= w;
+        room -= fetch_width(label, room, &cut);
+        out1fmt("%s%.*s%s", accent, (int)cut, label, plain);
         if (room > 0) {
-            out1str(": ");
-            room -= 2;
+            out1c(':');
+            room--;
+        }
+        if (room > 0) {
+            out1c(' ');
+            room--;
         }
     }
     if (text != NULL && room > 0) {
         size_t cut;
         fetch_width(text, room, &cut);
-        bold = bold && colour;
-        out1fmt("%s%.*s%s", bold ? "\033[1m" : "", (int)cut, text, bold ? "\033[0m" : "");
+        const char *at = title ? memchr(text, '@', cut) : NULL;
+        if (at != NULL && colour) {
+            // name@moybyte: the two names in the accent, as neofetch's user@host
+            out1fmt("%s%.*s%s@%s%.*s%s", accent, (int)(at - text), text, plain, accent,
+                    (int)(cut - (size_t)(at - text) - 1), at + 1, plain);
+        } else {
+            out1fmt("%.*s", (int)cut, text);
+        }
     }
     out1c('\n');
 }
 
-// The console at a glance: a logo beside its rows, the rows the console's VM
-// knows (/proc/console) left out while it is stopped; in colour on a
-// terminal that draws escapes, plain on the serial line and into a pipe.
+// The base colours in two rows of eight, as neofetch's colour blocks.
+static void fetch_palette(int cols, int pad, int logo, int half) {
+    if (pad > 0) {
+        fetch_logo(1, logo);
+        out1fmt("%*s", FETCH_GAP, "");
+    }
+    int room = (cols - pad) / 3;
+    for (int i = 0; i < 8 && i < room; i++) {
+        fetch_sgr(1, half * 8 + i);
+        out1str("   ");
+    }
+    out1str("\033[0m\n");
+}
+
+// The console at a glance: Moy beside its rows, the rows the console's VM
+// knows (/proc/console) left out while it is stopped; in colour, the base
+// colours under the rows, on a terminal that draws escapes, plain on the
+// serial line and into a pipe. A terminal too narrow for the logo gets the
+// rows alone, one too short for them all its highest-ranked rows.
 static int neofetchcmd(int argc, char **argv) {
     moy_sh_t *s = moy_sh_cur;
     (void)argc;
@@ -1172,17 +1278,18 @@ static int neofetchcmd(int argc, char **argv) {
     if (s->host.vread == NULL || s->host.vread(s->host.ctx, "/proc/console", &text, &tn) != 0) {
         text = NULL;
     }
-    if (text != NULL) {
-        console_row(text, tn, "name", f->title, sizeof f->title);
+    char name[FETCH_VALUE];
+    if (text != NULL && console_row(text, tn, "name", name, sizeof name)) {
+        snprintf(f->title, sizeof f->title, "%s@moybyte", name);
     }
-    fetch_console(f, text, tn, "board", "Board");
-    fetch_console(f, text, tn, "firmware", "Firmware");
-    char *v = fetch_add(f, "Chip");
+    fetch_console(f, text, tn, "board", "Board", 1);
+    fetch_console(f, text, tn, "firmware", "Firmware", 2);
+    char *v = fetch_add(f, "Chip", 3);
 #ifdef MOY_SH_FETCH_CHIP
     esp_chip_info_t chip;
     esp_chip_info(&chip);
     snprintf(v, FETCH_VALUE, "%s, %d cores", CONFIG_IDF_TARGET, chip.cores);
-    v = fetch_add(f, "Uptime");
+    v = fetch_add(f, "Uptime", 7);
     unsigned long up = (unsigned long)(esp_timer_get_time() / 60000000);
     if (up >= 24u * 60u) {
         snprintf(v, FETCH_VALUE, "%lud %luh %lum", up / 1440u, up / 60u % 24u, up % 60u);
@@ -1196,40 +1303,64 @@ static int neofetchcmd(int argc, char **argv) {
 #endif
     uint32_t m[6] = { 0 };
     if (s->host.mem != NULL && s->host.mem(s->host.ctx, m) == 0) {
-        fetch_used(f, "Memory", m[0], m[1]);
-        fetch_used(f, "PSRAM", m[2], m[3]);
+        fetch_used(f, "Memory", 4, m[0], m[1]);
+        fetch_used(f, "PSRAM", 5, m[2], m[3]);
     }
-    fetch_df(f, "Card", "/sd");
-    fetch_df(f, "Internal", "/");
-    fetch_console(f, text, tn, "display", "Display");
-    fetch_console(f, text, tn, "theme", "Theme");
-    v = fetch_add(f, "Shell");
+    fetch_df(f, "Card", 6, "/sd");
+    fetch_df(f, "Internal", 9, "/");
+    fetch_console(f, text, tn, "display", "Display", 10);
+    fetch_console(f, text, tn, "theme", "Theme", 11);
+    v = fetch_add(f, "Shell", 12);
     snprintf(v, FETCH_VALUE, "moy_sh (dash)");
-    fetch_console(f, text, tn, "wifi", "WiFi");
+    fetch_console(f, text, tn, "wifi", "WiFi", 8);
     moy_sh_hfree(text);
 
     const char *term = moy_sh_getvar(s, "TERM");
     int colour = isatty(1) && (term == NULL || strcmp(term, "dumb") != 0);
-    int cols = s->host.cols != NULL ? s->host.cols(s->host.ctx) : 80;
-    // the rows beside the logo where a label and a short value fit; on a
-    // narrower terminal (the T-Deck's) the rows alone, so they fit its screen
-    int beside = cols >= FETCH_LOGO_W + FETCH_GAP + 28;
+    int cols = 80, rows = 0;
+    if (s->host.size != NULL) {
+        s->host.size(s->host.ctx, &cols, &rows);
+    }
+    int beside = cols >= FETCH_LOGO_W + FETCH_GAP + 26;
     int pad = beside ? FETCH_LOGO_W + FETCH_GAP : 0;
-    int row = 0;
+    int palette = colour;
+    // what a short terminal shows: the title always, the palette while it
+    // fits, the rows highest rank first (the prompt takes the last line)
+    if (rows > 0) {
+        int head = f->title[0] ? 2 : 0;
+        if (palette && head + f->n + 3 > rows - 1) {
+            palette = 0;
+        }
+        while (f->n > 0 && head + f->n > rows - 1) {
+            int worst = 0;
+            for (int i = 1; i < f->n; i++) {
+                worst = f->row[i].rank > f->row[worst].rank ? i : worst;
+            }
+            memmove(&f->row[worst], &f->row[worst + 1], (size_t)(f->n - worst - 1) * sizeof f->row[0]);
+            f->n--;
+        }
+    }
+    int line = 0;
     if (f->title[0]) {
         char rule[FETCH_VALUE];
         size_t cut;
         int w = fetch_width(f->title, FETCH_VALUE - 1, &cut);
         memset(rule, '-', (size_t)w);
         rule[w] = 0;
-        fetch_line(colour, cols, beside ? row++ : -1, pad, NULL, f->title, 1);
-        fetch_line(colour, cols, beside ? row++ : -1, pad, NULL, rule, 0);
+        fetch_line(colour, cols, pad, line++, NULL, f->title, 1);
+        fetch_line(colour, cols, pad, line++, NULL, rule, 0);
     }
     for (int i = 0; i < f->n; i++) {
-        fetch_line(colour, cols, beside ? row++ : -1, pad, f->label[i], f->value[i], 0);
+        fetch_line(colour, cols, pad, line++, f->row[i].label, f->row[i].value, 0);
     }
-    for (; beside && row < FETCH_LOGO_ROWS; row++) {
-        fetch_line(colour, cols, row, pad, NULL, NULL, 0);
+    if (palette) {
+        fetch_line(colour, cols, pad, line++, NULL, NULL, 0);
+        fetch_palette(cols, pad, line++, 0);
+        fetch_palette(cols, pad, line++, 1);
+    }
+    for (; pad > 0 && line < FETCH_LOGO_ROWS; line++) {
+        fetch_logo(colour, line);
+        out1c('\n');
     }
     moy_sh_hfree(f);
     return 0;
