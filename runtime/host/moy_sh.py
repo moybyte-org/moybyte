@@ -53,6 +53,7 @@ def _sources():
     dash += [os.path.join(SH, n) for n in ("moy_sh.c", "moy_sh_sys.c", "moy_sh_cmds.c")]
     own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_board.c",
                                          "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c",
+                                         "moy_sh_app.c", "moy_sh_top.c",
                                          "moy_sh_face.c", "moy_sh_floor.c")]
     return [(s, shim) for s in dash] + [(s, plain) for s in own]
 
@@ -148,6 +149,9 @@ _SIGS = (
     ("moy_sh_face_input", [_P, _I] + [ctypes.c_int32] * 7, _I),
     ("moy_sh_face_row", [_I], _I),
     ("moy_sh_face_elsewhere", [_P, _I], _I),
+    ("moy_sh_face_cancel", [_P, _I], _I),
+    ("moy_sh_face_app", [_P], _S),
+    ("moy_sh_face_full", [_P], _I),
     ("moy_sh_face_draw", [_P, _P, _P, _P], _I),
     ("moy_sh_face_line", [_P, ctypes.POINTER(ctypes.c_int32)], _S),
     ("moy_sh_face_set_line", [_P, _S, ctypes.c_int32], None),
@@ -436,6 +440,16 @@ class Face:
 
     def in_row(self):
         return bool(_lib().moy_sh_face_in_row(self._p()))
+
+    def cancel(self, desk):
+        return bool(_lib().moy_sh_face_cancel(self._p(), 1 if desk else 0))
+
+    def app(self):
+        n = _lib().moy_sh_face_app(self._p())
+        return n.decode() if n else None
+
+    def full(self):
+        return bool(_lib().moy_sh_face_full(self._p()))
 
     def set_in_row(self, on):
         _lib().moy_sh_face_set_in_row(self._p(), 1 if on else 0)

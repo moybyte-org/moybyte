@@ -12,7 +12,7 @@
 //
 // THE DOOR'S ROW carries `verb NUL arg NUL arg ...` and answers an int, or
 // text into the answer buffer (runtime/shell/sh_door.py is its other half):
-//   ps                      text: a row a line, `pid ppid kind state mem name`
+//   ps                      text: a row a line, `pid ppid kind state mem cpu name`
 //   kill PID SIG            0, or an errno
 //   status PID              text: `running` or `exited CODE`; ABSENT: none
 //   lookup NAME             1 when an installed command has the name
@@ -38,7 +38,14 @@
 // (moy_sh_park), and answers each line of output as `SH <line>`, then
 // `SH end <status>`, `SH more` (the command goes on: send its next line) or
 // `SH exit <status>` (the shell exited; the next `sh` starts a new one). A
-// Ctrl-C byte on the channel interrupts the running command.
+// Ctrl-C byte on the channel interrupts the running command. A text app a
+// command opened (moy_sh_app.h) answers `SH app
+// NAME` instead of `SH end`, a full-screen one after its screen, a row an
+// `SH` line on a grid of MOY_SH_SERIAL_COLS by MOY_SH_SERIAL_ROWS; while it
+// is in front each `sh LINE` is its: a full-screen app's keys in caret
+// notation (`^S`, `^X`, `^[[A` the up arrow, `^?` Delete, `^^` a caret), a
+// line app's line (`^D` alone ends it), answered the same way, and `SH end
+// 0` once the app has ended.
 
 #ifndef MOY_SH_BOARD_H
 #define MOY_SH_BOARD_H
@@ -51,6 +58,8 @@
 #define MOY_SH_DOOR 0x7368u             // the ROLE door's row the shell crosses
 #define MOY_SH_ARENA (128u * 1024u)     // a session's arena
 #define MOY_SH_SERIAL_LINE 240u         // an `SH` line's bytes, longer ones wrap
+#define MOY_SH_SERIAL_COLS 80           // a text app's screen on the serial face
+#define MOY_SH_SERIAL_ROWS 24
 #define MOY_SH_STORE "/sd/moybyte"      // the console's store: system/ and the carts
 #define MOY_SH_STORE_PATH 320u          // a store path's bytes, the root's included
 
@@ -69,5 +78,7 @@ void moy_sh_board_yield(void);
 // The serial face: run `text` (one line, no newline) in the serial session.
 // False when no session could be made (said as `SH error`).
 bool moy_sh_board_line(const char *text);
+// The serial session given back, with the text app in front of it.
+void moy_sh_board_end(void);
 
 #endif // MOY_SH_BOARD_H

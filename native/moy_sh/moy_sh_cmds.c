@@ -718,6 +718,17 @@ static int ps_row(void *arg, const moy_sh_ps_t *p) {
     return 0;
 }
 
+// `top`: a text app in front of the face (moy_sh_app.h).
+static int appcmd(int argc, char **argv) {
+    moy_sh_t *s = moy_sh_cur;
+    flushall();
+    int r = s->host.app != NULL ? s->host.app(s->host.ctx, s, argc, argv) : MOY_SH_NOT_FOUND;
+    if (r == MOY_SH_NOT_FOUND) {
+        return moy_sh_fail("%s: needs a screen", argv[0]);
+    }
+    return r;
+}
+
 static int pscmd(int argc, char **argv) {
     moy_sh_t *s = moy_sh_cur;
     (void)argc;
@@ -884,6 +895,7 @@ static const struct builtincmd core[] = {
     { "sh", moy_sh_shcmd, BUILTIN_REGULAR },
     { "sleep", sleepcmd, BUILTIN_REGULAR },
     { "tail", tailcmd, BUILTIN_REGULAR },
+    { "top", appcmd, BUILTIN_REGULAR },
     { "touch", touchcmd, BUILTIN_REGULAR },
     { "wc", wccmd, BUILTIN_REGULAR },
 };

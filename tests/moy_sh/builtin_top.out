@@ -1,0 +1,5 @@
+$ top -d 1
+top: needs a screen
+$ echo "status $?"
+status 1
+[exit 0]

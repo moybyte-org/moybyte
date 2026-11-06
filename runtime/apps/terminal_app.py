@@ -130,6 +130,16 @@ class TerminalAppLayer:
 
     # -- input --------------------------------------------------------------------
 
+    def cancel_field(self):
+        """The board's cancel key (the T-Deck's Mic) for the text app in
+        front (`edit`, `top`, `python`): True when it took it; with none in
+        front Mic stays the console's key."""
+        f = self.face
+        if f is not None and f.cancel(self.layout.desk):
+            self._damage.all()
+            return True
+        return False
+
     def handle_input(self, inp):
         f = self.face
         if f is None:

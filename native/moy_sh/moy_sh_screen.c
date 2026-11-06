@@ -17,6 +17,7 @@ static uint32_t now_ms(void) {
 #define NOW_MS() now_ms()
 #endif
 
+#include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #include "moy_sh_screen.h"
 
@@ -43,6 +44,8 @@ struct moy_sh_screen {
     int held;                           // the cancel keys held at the last read
     int by_keys;                        // the run's interrupt was a key press
     int stop;                           // the face's own Ctrl-C
+    moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
+    int ctrl;                           // the input types control keys
     char root[MOY_SH_SCREEN_ROOT];
 };
 
@@ -98,9 +101,31 @@ static void t_free(void *ctx, void *p) {
     f->free(NULL, p);
 }
 
+static int run_line(void *ctx, const char *text, size_t n) {
+    return moy_sh_screen_run(ctx, text, n);
+}
+
+static int screen_app(void *ctx, moy_sh_t *s, int argc, char **argv) {
+    moy_sh_screen_t *f = ctx;
+    if (f->app != NULL) {
+        static const char busy[] = ": an app is open\n";
+        moy_sh_fd_write(s, 2, argv[0], strlen(argv[0]));
+        moy_sh_fd_write(s, 2, busy, sizeof busy - 1);
+        return 1;
+    }
+    if (moy_sh_app_find(argv[0]) == NULL) {
+        return MOY_SH_NOT_FOUND;
+    }
+    int cols, rows, status;
+    moy_term_size(f->t, &cols, &rows);
+    f->app = moy_sh_app_open(s, cols, rows, f->ctrl, run_line, f, argc, argv, &status);
+    return status;
+}
+
 moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
     moy_sh_host_t h;
     moy_sh_board_host(&h, NULL, screen_out, screen_poll);
+    h.app = screen_app;
     moy_sh_screen_t *f = h.alloc(NULL, sizeof *f);
     if (f == NULL) {
         return NULL;
@@ -136,6 +161,7 @@ void moy_sh_screen_free(moy_sh_screen_t *f) {
     if (f == NULL) {
         return;
     }
+    moy_sh_screen_end_app(f);
     moy_sh_free(f->s);
     moy_term_free(f->t);
     f->free(NULL, f);
@@ -166,4 +192,21 @@ moy_sh_t *moy_sh_screen_session(moy_sh_screen_t *f) {
 
 moy_term_t *moy_sh_screen_term(moy_sh_screen_t *f) {
     return f->t;
+}
+
+moy_sh_app_t *moy_sh_screen_app(const moy_sh_screen_t *f) {
+    return f->app;
+}
+
+void moy_sh_screen_end_app(moy_sh_screen_t *f) {
+    moy_sh_app_t *a = f->app;
+    f->app = NULL;
+    moy_sh_app_close(a);
+}
+
+void moy_sh_screen_set_ctrl(moy_sh_screen_t *f, int ctrl) {
+    f->ctrl = ctrl != 0;
+    if (f->app != NULL) {
+        moy_sh_app_set_ctrl(f->app, f->ctrl);
+    }
 }

@@ -31,6 +31,7 @@ struct moy_sh_floor {
     int32_t key;                        // the byte typed last frame
     int32_t ptr;                        // the pointer's flags last frame
     int drawn, owed;
+    int full;                           // a full-screen app had the screen last frame
 };
 
 static const char *const WORDS[] = {"retry", "safe", "reboot", "repl"};
@@ -241,7 +242,7 @@ int moy_sh_floor_frame(moy_sh_floor_t *fl, const moy_sh_floor_in_t *in, int *cho
     int typed = key != 0 && key != fl->key;
     fl->key = key;
     if (typed && (key == '\r' || key == '\n') && !moy_sh_face_in_row(f)
-        && !moy_sh_face_more(f)) {
+        && !moy_sh_face_more(f) && moy_sh_face_app(f) == NULL) {
         int32_t col;
         int ch = moy_sh_floor_choice(moy_sh_face_line(f, &col));
         if (ch != MOY_SH_FLOOR_NONE) {
@@ -252,6 +253,14 @@ int moy_sh_floor_frame(moy_sh_floor_t *fl, const moy_sh_floor_in_t *in, int *cho
     }
     int r = moy_sh_face_input(f, g->desk, key, in->repeats, in->repeat_key, in->left,
                               in->right, in->up, in->down);
+    if (in->cancel && moy_sh_face_cancel(f, g->desk)) {
+        r |= MOY_SH_FACE_HIT;
+    }
+    int full = moy_sh_face_full(f);
+    if (full != fl->full) {
+        fl->full = full;
+        r |= MOY_SH_FACE_HIT;
+    }
     int dirty = !fl->drawn || fl->owed || (r & MOY_SH_FACE_HIT) || in->ptr || fl->ptr;
     fl->ptr = in->ptr;
     if (!dirty) {
@@ -280,10 +289,12 @@ int moy_sh_floor_frame(moy_sh_floor_t *fl, const moy_sh_floor_in_t *in, int *cho
     int flags = (g->desk ? MOY_UI_DESK : 0)
                 | (moy_sh_face_elsewhere(f, g->desk) ? MOY_UI_ELSEWHERE : 0);
     moy_ui_api_begin(c, a, surf, flags, g->fs);
-    int32_t top = head(fl, c, NULL, choice);
+    int32_t top = full ? 4 * g->fs : head(fl, c, NULL, choice);
     moy_sh_face_frame_t fr = {0, top, g->w, g->h - top, g->fs, g->desk, NULL, 0};
     int out = moy_sh_face_draw(f, c, &s, &fr);
-    head(fl, c, &s, choice);
+    if (!full) {
+        head(fl, c, &s, choice);
+    }
     moy_ui_api_end(c, &s);
     fl->drawn = 1;
     fl->owed = (out & (MOY_SH_FACE_AGAIN | MOY_SH_FACE_DAMAGE)) != 0 || moy_ui_api_owes(c)

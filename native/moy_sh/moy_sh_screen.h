@@ -15,8 +15,12 @@
 // run a key interrupted returns once the key is let go (a second and a half
 // at most), so the next frame's merge sees no press of it.
 //
+// A TEXT APP a command opens (moy_sh_app.h) is
+// the screen's while it is in front; the face draws it and feeds it keys.
+//
 // Its memory is the board table's `alloc` (PSRAM): the face, the session's
-// arena and the grid, all taken at moy_sh_screen_new, the first open.
+// arena and the grid, all taken at moy_sh_screen_new, the first open, and an
+// app's while it is open.
 
 #ifndef MOY_SH_SCREEN_H
 #define MOY_SH_SCREEN_H
@@ -43,5 +47,13 @@ void moy_sh_screen_interrupt(moy_sh_screen_t *f);
 
 moy_sh_t *moy_sh_screen_session(moy_sh_screen_t *f);
 moy_term_t *moy_sh_screen_term(moy_sh_screen_t *f);
+
+// The text app in front (moy_sh_app.h), which a command of the session
+// opened (NULL: the shell's prompt), and its end. The face says whether its
+// input types control keys, which an app's own help names.
+struct moy_sh_app;
+struct moy_sh_app *moy_sh_screen_app(const moy_sh_screen_t *f);
+void moy_sh_screen_end_app(moy_sh_screen_t *f);
+void moy_sh_screen_set_ctrl(moy_sh_screen_t *f, int ctrl);
 
 #endif // MOY_SH_SCREEN_H

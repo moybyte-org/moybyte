@@ -71,7 +71,7 @@ SHELL_NAMES = (
     "exit", "export", "false", "fg", "free", "getopts", "grep", "hash", "head",
     "help", "jobs", "kill", "local", "log", "ls", "mkdir", "mv", "printf", "ps",
     "pwd", "read", "readonly", "reboot", "return", "rm", "rmdir", "set", "sh",
-    "shift", "sleep", "tail", "test", "touch", "trap", "true", "type", "umask",
+    "shift", "sleep", "tail", "test", "top", "touch", "trap", "true", "type", "umask",
     "unalias", "unset", "wait", "wc",
     # the role commands (runtime/shell/sh_roles.py)
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",

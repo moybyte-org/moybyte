@@ -539,6 +539,7 @@ void nlr_jump_fail(void *val) {
 #define K_POLL_MS        20
 #define K_REPORT_MS      5000
 #define K_INJECT         160      // the bytes serial's `type` queues for the screen
+#define K_START_BIT      14       // `start` in MOY_INPUT_NAMES: the T-Deck's Mic, a text app's cancel
 
 // The floor's choices, as its screen numbers them (moy_sh_floor.h), and the
 // serial words that pick them.
@@ -1097,6 +1098,7 @@ static bool k_floor_input(k_floor_t *k, uint32_t now, moy_sh_floor_in_t *in) {
     in->repeat_key = in->repeats ? moy_input_typed(ev) : 0;
     uint32_t held, pressed;
     moy_input_masks(t, MOY_INPUT_UNION, &held, &pressed);
+    in->cancel = (int32_t)((pressed >> K_START_BIT) & 1u);
     int32_t *dir[4] = {&in->left, &in->right, &in->up, &in->down};
     for (int b = 0; b < 4; b++) {
         *dir[b] = (int32_t)(((pressed >> b) & 1u) + moy_input_repeats(t, (uint8_t)b));

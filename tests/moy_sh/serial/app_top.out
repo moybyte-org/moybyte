@@ -1,0 +1,143 @@
+> sh top
+SH top  3 processes
+SH 
+SH   PID KIND     STATE       CPU     MEM NAME
+SH >   0 kernel   running        -       - kernel
+SH     1 shell    stopped        -       - console
+SH     9 app      running        -       - moybyte.doom
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH up/down pick  k end it  q quit
+SH app top
+> sh ^[[B
+SH top  3 processes
+SH 
+SH   PID KIND     STATE       CPU     MEM NAME
+SH     0 kernel   running        -       - kernel
+SH >   1 shell    stopped        -       - console
+SH     9 app      running        -       - moybyte.doom
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH up/down pick  k end it  q quit
+SH app top
+> sh k
+SH top  3 processes
+SH 
+SH   PID KIND     STATE       CPU     MEM NAME
+SH     0 kernel   running        -       - kernel
+SH >   1 shell    stopped        -       - console
+SH     9 app      running        -       - moybyte.doom
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 1: not permitted
+SH app top
+> sh ^[[B
+SH top  3 processes
+SH 
+SH   PID KIND     STATE       CPU     MEM NAME
+SH     0 kernel   running        -       - kernel
+SH     1 shell    stopped        -       - console
+SH >   9 app      running        -       - moybyte.doom
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH up/down pick  k end it  q quit
+SH app top
+> sh k
+[the run in front ends]
+SH top  2 processes
+SH 
+SH   PID KIND     STATE       CPU     MEM NAME
+SH >   0 kernel   running        -       - kernel
+SH     1 shell    stopped        -       - console
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH ended 9
+SH app top
+> sh q
+SH end 0
+> sh echo "back $?"
+SH back 0
+SH end 0
+> sh ps
+SH   PID  PPID KIND     STATE      NAME
+SH   100     0 shell    running    sh
+SH     0     0 kernel   running    kernel
+SH     1     0 shell    stopped    console
+SH end 0
+[exit 0]

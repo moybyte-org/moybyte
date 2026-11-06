@@ -54,11 +54,13 @@
 typedef struct moy_sh moy_sh_t;
 
 // One process for `ps`: pid, its parent's (0 none), its kind and state
-// ("app", "service", "command", ...; "running", "exited", ...), its name.
+// ("app", "service", "command", ...; "running", "exited", ...), its name,
+// and what the task manager measures of it.
 typedef struct {
     int pid, ppid;
     const char *kind, *state, *name;
     uint32_t mem;                       // bytes, 0 unknown
+    int32_t cpu;                        // per mille of a core over the last second, -1 unknown
 } moy_sh_ps_t;
 
 typedef int (*moy_sh_ps_fn)(void *arg, const moy_sh_ps_t *p);
@@ -101,6 +103,11 @@ typedef struct {
     void (*sleep_ms)(void *ctx, int ms);
     // the log, for `log`/`dmesg`: write its lines (or one process's) to `fd`
     int (*log)(void *ctx, moy_sh_t *s, int fd, const char *name, int follow);
+    // a text app put in front of the face (moy_sh_app.h; argv[0] names it),
+    // from inside the run of its command: 0 it opened and shows when the
+    // line's run ends, an exit status where it would not, MOY_SH_NOT_FOUND
+    // where the face has no screen (may be NULL: none)
+    int (*app)(void *ctx, moy_sh_t *s, int argc, char **argv);
 } moy_sh_host_t;
 
 // A session over `arena` bytes; NULL when the host's alloc refuses. `host` is
@@ -149,8 +156,12 @@ size_t moy_sh_arena_in_use(const moy_sh_t *s);
 // The session a host callback was called from (spawn, role: a program's
 // streams are its), or between runs the parked one, or NULL.
 moy_sh_t *moy_sh_running(void);
-// The host table's ctx the session was made with.
+// The host table's ctx the session was made with, and the table.
 void *moy_sh_ctx(const moy_sh_t *s);
+const moy_sh_host_t *moy_sh_host(const moy_sh_t *s);
+// The store path of shell path `path` (against the session's folder) into
+// `out`, from inside a run: 0, or an errno value (ENOENT for a virtual file).
+int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap);
 // Park `s` (NULL: none): the session a face keeps between its runs, held in
 // the one writable word, so a face on a board keeps no root of its own. A
 // session's own runs leave the parked one parked; freeing it unparks it.

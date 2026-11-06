@@ -62,12 +62,15 @@ typedef struct {
 // A frame's input: the byte typed (0 none; a held one is typed once), a held
 // key's repeats of `repeat_key`, each direction's steps, the pointer (its
 // logical place and moy_ui_api.h's MOY_UI_IN_PTR flags: 1 live, 2 held, 4 the
-// press edge) and the ms since the last frame.
+// press edge), the ms since the last frame and the cancel key's press (a
+// text app's, moy_sh_face_cancel). While a full-screen app is in front
+// the head is not drawn: the app has the whole screen.
 typedef struct {
     int32_t key, repeats, repeat_key;
     int32_t left, right, up, down;
     int32_t x, y, ptr;
     int32_t dt;
+    int32_t cancel;                     // the board's cancel key went down (the T-Deck's Mic)
 } moy_sh_floor_in_t;
 
 typedef struct moy_sh_floor moy_sh_floor_t;

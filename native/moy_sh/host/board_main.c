@@ -125,7 +125,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
         i += strlen(buf + i) + 1;
     }
     if (!strcmp(f[0], "ps")) {
-        return text(ans, cap, "1 0 shell running 0 console\n7 1 service background 2048 achievements\n");
+        return text(ans, cap, "1 0 shell running 0 - console\n7 1 service background 2048 15 achievements\n");
     }
     if (!strcmp(f[0], "kill")) {
         return atoi(f[1]) == 1 ? 1 : 0;     // EPERM
@@ -262,11 +262,6 @@ int main(int argc, char **argv) {
     }
     fclose(f);
     moy_sh_screen_free(face);
-    moy_sh_t *s = moy_sh_running();
-    if (s != NULL) {
-        void *ctx = moy_sh_ctx(s);
-        moy_sh_free(s);
-        free(ctx);
-    }
+    moy_sh_board_end();
     return 0;
 }

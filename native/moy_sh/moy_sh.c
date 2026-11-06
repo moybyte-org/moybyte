@@ -233,6 +233,21 @@ void *moy_sh_ctx(const moy_sh_t *s) {
     return s->host.ctx;
 }
 
+const moy_sh_host_t *moy_sh_host(const moy_sh_t *s) {
+    return &s->host;
+}
+
+int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap) {
+    struct moy_sh_globals *was = enter(s);
+    char abs[MOY_SH_PATH_MAX];
+    int r = moy_sh_path(path, abs, sizeof abs);
+    if (r == 0 && moy_sh_store_path(abs, out, cap) == NULL) {
+        r = ENOENT;
+    }
+    leave(was);
+    return r;
+}
+
 void moy_sh_park(moy_sh_t *s) {
     moy_sh_g = s != NULL ? s->g : NULL;
 }

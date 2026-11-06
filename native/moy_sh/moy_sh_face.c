@@ -1,9 +1,24 @@
 // moy_sh_face: the Terminal's face. moy_sh_face.h has the contract.
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#if __has_include("esp_timer.h")
+#include "esp_timer.h"
+#define NOW_MS() ((uint32_t)(esp_timer_get_time() / 1000))
+#else
+#include <time.h>
+static uint32_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+#define NOW_MS() now_ms()
+#endif
+
+#include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #include "moy_sh_face.h"
 #include "moy_text.h"
@@ -52,6 +67,7 @@ struct moy_sh_face {
     // the log: the grid's lines as the last frame took them
     uint32_t gen;
     int stale;
+    const moy_term_t *showing;          // the grid the log took last: the shell's or an app's
     int32_t count;
     char *ring;                         // the getter's rows, `nslots` of `slot` bytes
     size_t slot, nslots, next;
@@ -64,6 +80,10 @@ static const char HINTS_KEYS[] = "confirm\0Run\0Tab\0Complete\0Ctrl C\0Stop";
 static const char HINTS_TDECK[] = "confirm\0Run\0cancel\0Stop";
 static const char HINTS_PAD[] = "confirm\0Press\0back\0Back";
 static const char HINTS_ROW[] = "confirm\0Press";
+static const char HINTS_APP_TDECK[] = "cancel\0Keys";
+static const char HINTS_APP_ROW[] = "confirm\0Press\0cancel\0Back";
+static const char HINTS_LINE_TDECK[] = "confirm\0Run\0cancel\0Close";
+static const char *const ARROWS[] = {"left", "right", "up", "down"};
 
 static moy_ui_span_t span_n(const char *p, size_t n) {
     moy_ui_span_t s = {(const uint8_t *)p, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n)};
@@ -149,6 +169,34 @@ static moy_sh_t *session(moy_sh_face_t *f) {
     return f->scr != NULL ? moy_sh_screen_session(f->scr) : NULL;
 }
 
+static moy_sh_app_t *app_of(const moy_sh_face_t *f) {
+    return f->scr != NULL ? moy_sh_screen_app(f->scr) : NULL;
+}
+
+// A full-screen app in front: its screen is the log, and there is no prompt.
+static moy_sh_app_t *full_app(const moy_sh_face_t *f) {
+    moy_sh_app_t *a = app_of(f);
+    return a != NULL && moy_sh_app_ops(a)->full ? a : NULL;
+}
+
+static moy_sh_app_t *line_app(const moy_sh_face_t *f) {
+    moy_sh_app_t *a = app_of(f);
+    return a != NULL && !moy_sh_app_ops(a)->full ? a : NULL;
+}
+
+// The grid the log shows: a full-screen app's, else the shell's.
+static moy_term_t *shown(const moy_sh_face_t *f) {
+    moy_sh_app_t *a = full_app(f);
+    return a != NULL ? moy_sh_app_term(a) : moy_sh_screen_term(f->scr);
+}
+
+static void end_app(moy_sh_face_t *f) {
+    moy_sh_screen_end_app(f->scr);
+    f->in_row = 0;
+    f->ncand = 0;
+    f->stale = 1;
+}
+
 static void write_s(moy_sh_face_t *f, const char *s) {
     moy_term_write(moy_sh_screen_term(f->scr), s, strlen(s));
 }
@@ -158,6 +206,11 @@ static size_t prompt_of(moy_sh_face_t *f, char *out, size_t cap) {
     if (s == NULL) {
         out[0] = '\0';
         return 0;
+    }
+    moy_sh_app_t *a = line_app(f);
+    if (a != NULL) {
+        int n = snprintf(out, cap, "%s", moy_sh_app_prompt(a));
+        return n < 0 ? 0 : (size_t)n < cap ? (size_t)n : cap - 1;
     }
     size_t n = moy_sh_prompt(s, f->more, out, cap);
     return n < cap ? n : cap - 1;
@@ -285,6 +338,16 @@ void moy_sh_face_submit(moy_sh_face_t *f) {
         f->nhist++;
     }
     f->hi = f->nhist;
+    moy_sh_app_t *a = line_app(f);
+    if (a != NULL) {
+        text[n] = '\0';
+        if (moy_sh_app_line(a, text) == MOY_SH_APP_END) {
+            end_app(f);
+        }
+        fresh_line(f);
+        f->stale = 1;
+        return;
+    }
     text[n++] = '\n';
     int r = moy_sh_screen_run(f->scr, text, (size_t)n);
     fresh_line(f);
@@ -311,6 +374,10 @@ static void interrupt(moy_sh_face_t *f) {
     echo(f, "^C\n");
     moy_sh_cancel(session(f));
     set_line(f, "", 0);
+    moy_sh_app_t *a = line_app(f);
+    if (a != NULL && moy_sh_app_keys(a, "\x03", 1) == MOY_SH_APP_END) {
+        end_app(f);
+    }
     f->more = 0;
     f->ncand = 0;
     f->hi = f->nhist;
@@ -487,7 +554,65 @@ void moy_sh_face_pick(moy_sh_face_t *f, int i) {
 
 // -- input ----------------------------------------------------------------------------
 
+// Bytes to the app in front, and the face's shell back where they end it.
+static int feed(moy_sh_face_t *f, const char *p, size_t n) {
+    moy_sh_app_t *a = app_of(f);
+    if (a == NULL) {
+        return 0;
+    }
+    if (moy_sh_app_keys(a, p, n) == MOY_SH_APP_END) {
+        end_app(f);
+    }
+    return 1;
+}
+
+// A typed key as a terminal sends it: Enter a CR, the face's forward Delete
+// xterm's, the rest its UTF-8.
+static int feed_code(moy_sh_face_t *f, int32_t code) {
+    char b[4];
+    size_t n = 0;
+    if (code == 0x7F) {
+        const char *d = moy_sh_app_key_bytes("del");
+        return feed(f, d, strlen(d));
+    }
+    if (code == 0x0A) {
+        code = 0x0D;
+    }
+    if (code <= 0) {
+        return 0;
+    } else if (code < 0x80) {
+        b[n++] = (char)code;
+    } else if (code < 0x800) {
+        b[n++] = (char)(0xC0 | (code >> 6));
+        b[n++] = (char)(0x80 | (code & 0x3F));
+    } else if (code < 0x10000) {
+        b[n++] = (char)(0xE0 | (code >> 12));
+        b[n++] = (char)(0x80 | ((code >> 6) & 0x3F));
+        b[n++] = (char)(0x80 | (code & 0x3F));
+    } else {
+        return 0;
+    }
+    return feed(f, b, n);
+}
+
 int moy_sh_face_key(moy_sh_face_t *f, int32_t code) {
+    if (full_app(f) != NULL) {
+        f->swallow = 0;
+        return feed_code(f, code);
+    }
+    if (line_app(f) != NULL) {
+        if (code == 4) {
+            if (f->len == 0) {
+                echo(f, "\n");
+                end_app(f);
+            }
+            return 1;
+        }
+        if (code == 0x09) {
+            insert_s(f, "    ", 4);
+            return 1;
+        }
+    }
     if (code == 3) {
         if (f->swallow) {
             f->swallow = 0;
@@ -513,6 +638,26 @@ int moy_sh_face_key(moy_sh_face_t *f, int32_t code) {
 }
 
 void moy_sh_face_press(moy_sh_face_t *f, const char *name) {
+    moy_sh_app_t *a = app_of(f);
+    if (a != NULL) {
+        for (const char *const *k = moy_sh_app_ops(a)->keys; k != NULL && k[0]; k += 2) {
+            if (!strcmp(k[0], name)) {
+                feed(f, k[1], strlen(k[1]));
+                return;
+            }
+        }
+        if (moy_sh_app_ops(a)->full) {
+            const char *b = moy_sh_app_key_bytes(name);
+            b = b != NULL ? b : !strcmp(name, "Tab") ? "\t" : !strcmp(name, "^C") ? "\x03"
+              : !strcmp(name, "Run") ? "\r" : name;
+            feed(f, b, strlen(b));
+            return;
+        }
+        if (!strcmp(name, "Tab")) {
+            insert_s(f, "    ", 4);
+            return;
+        }
+    }
     if (!strcmp(name, "Tab")) {
         moy_sh_face_complete(f);
     } else if (!strcmp(name, "^C")) {
@@ -539,6 +684,38 @@ int moy_sh_face_row(int desk) {
     return k >= MOY_SH_ROW_TDECK && k <= MOY_SH_ROW_TOUCH ? k : MOY_SH_ROW_NONE;
 }
 
+int moy_sh_face_cancel(moy_sh_face_t *f, int desk) {
+    moy_sh_app_t *a = app_of(f);
+    if (a == NULL) {
+        return 0;
+    }
+    if (moy_sh_app_ops(a)->full) {
+        if (moy_sh_face_row(desk) == MOY_SH_ROW_TDECK) {
+            f->in_row = !f->in_row;
+        } else {
+            feed(f, "\x1b", 1);
+        }
+        return 1;
+    }
+    if (f->in_row) {
+        f->in_row = 0;
+        return 1;
+    }
+    echo(f, "\n");
+    set_line(f, "", 0);
+    end_app(f);
+    return 1;
+}
+
+const char *moy_sh_face_app(const moy_sh_face_t *f) {
+    moy_sh_app_t *a = app_of(f);
+    return a != NULL ? moy_sh_app_ops(a)->name : NULL;
+}
+
+int moy_sh_face_full(const moy_sh_face_t *f) {
+    return full_app(f) != NULL;
+}
+
 int moy_sh_face_elsewhere(const moy_sh_face_t *f, int desk) {
     return moy_sh_face_row(desk) != MOY_SH_ROW_PAD && !f->in_row;
 }
@@ -551,6 +728,49 @@ int moy_sh_face_input(moy_sh_face_t *f, int desk, int32_t key, int32_t repeats,
         f->in_row = 0;
     }
     int hit = 0, enter = 0;
+    if (app_of(f) != NULL && moy_sh_app_tick(app_of(f), NOW_MS())) {
+        hit = 1;
+    }
+    if (full_app(f) != NULL) {
+        if (key && key != f->key) {
+            if (f->in_row && (key == 0x0D || key == 0x0A)) {
+                enter = f->enter = 1;
+            } else {
+                f->in_row = 0;
+                feed_code(f, key);
+            }
+            hit = 1;
+        }
+        f->key = key;
+        if (repeats > 0 && (repeat_key == 8 || repeat_key == 127
+                            || (repeat_key >= 32 && repeat_key < 127))) {
+            for (int32_t i = 0; i < repeats; i++) {
+                feed_code(f, repeat_key);
+            }
+            hit = 1;
+        }
+        if (row == MOY_SH_ROW_PAD) {
+            return (hit ? MOY_SH_FACE_HIT : 0) | MOY_SH_FACE_KEYS;
+        }
+        if (f->in_row) {
+            if (up) {
+                f->in_row = 0;
+                hit = 1;
+            } else if (!enter) {
+                return (hit ? MOY_SH_FACE_HIT : 0) | MOY_SH_FACE_KEYS;
+            }
+            return hit ? MOY_SH_FACE_HIT : 0;
+        }
+        int32_t steps[4] = {left, right, up, down};
+        for (int d = 0; d < 4; d++) {
+            const char *b = moy_sh_app_key_bytes(ARROWS[d]);
+            for (int32_t i = 0; i < steps[d] && full_app(f) != NULL; i++) {
+                feed(f, b, strlen(b));
+                hit = 1;
+            }
+        }
+        return hit ? MOY_SH_FACE_HIT : 0;
+    }
     if (key && key != f->key) {
         if (f->in_row && (key == 0x0D || key == 0x0A)) {
             enter = f->enter = 1;       // the draw presses the row's focused key
@@ -632,7 +852,7 @@ static const uint8_t *log_get(void *src, int32_t i, size_t *n) {
         return NULL;
     }
     char *at = f->ring + (f->next++ % f->nslots) * f->slot;
-    *n = moy_term_line(moy_sh_screen_term(f->scr), (int)i, at, f->slot);
+    *n = moy_term_line(shown(f), (int)i, at, f->slot);
     return (const uint8_t *)at;
 }
 
@@ -655,11 +875,12 @@ int moy_sh_face_take(moy_sh_face_t *f) {
         }
         return 0;
     }
-    moy_term_t *t = moy_sh_screen_term(f->scr);
+    moy_term_t *t = shown(f);
     uint32_t g = moy_term_gen(t) & 0x3FFFFFFFu;
-    if (!f->stale && g == f->gen) {
+    if (!f->stale && g == f->gen && t == f->showing) {
         return 0;
     }
+    f->showing = t;
     f->gen = g;
     f->stale = 0;
     uint32_t v[3];
@@ -667,7 +888,7 @@ int moy_sh_face_take(moy_sh_face_t *f) {
     int32_t count = (int32_t)(v[1] & 0x3FFFFFFFu);
     int c[3];
     moy_term_cursor(t, c);
-    if (count > 1 && c[0] == count - 1 && c[1] == 0) {
+    if (count > 1 && c[0] == count - 1 && c[1] == 0 && full_app(f) == NULL) {
         count--;                        // the cursor's empty line: the prompt row is it
     }
     f->count = count;
@@ -698,6 +919,22 @@ static void at(moy_ui_ctx_t *c, const int32_t r[4]) {
     moy_ui_api_at(c, (int)r[0], (int)r[1], (int)r[2], (int)r[3]);
 }
 
+static int is_arrow(const char *name) {
+    for (int i = 0; i < 4; i++) {
+        if (!strcmp(name, ARROWS[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// A key's width in units: a word (an app's Save, Exit) three, Tab and the
+// arrows two, a symbol one.
+static int32_t units_of(const char *label) {
+    int n = utf8_len(label, strlen(label));
+    return n > 3 && !is_arrow(label) ? 3 : n > 2 ? 2 : 1;
+}
+
 // A row of keys across `rect`: the key row, the candidates or the symbols.
 // Answers the label pressed, -1 none.
 static int key_row(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const int32_t rect[4],
@@ -720,14 +957,14 @@ static int key_row(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const int32_t rect[4
     } else {
         int32_t units = 0;
         for (int i = 0; i < n; i++) {
-            units += utf8_len(labels[i], strlen(labels[i])) > 2 ? 2 : 1;
+            units += units_of(labels[i]);
         }
         int32_t room = rect[2] - gap * (n - 1);
         int32_t unit = room >= 0 ? room / units : -((-room + units - 1) / units);
         int32_t rest[4];
         memcpy(rest, rect, sizeof rest);
         for (int i = 0; i < n; i++) {
-            int32_t w = unit * (utf8_len(labels[i], strlen(labels[i])) > 2 ? 2 : 1);
+            int32_t w = unit * units_of(labels[i]);
             if (i == n - 1) {
                 w = rest[2];
             }
@@ -761,27 +998,52 @@ static int key_row(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const int32_t rect[4
     return hit;
 }
 
+// The hints a frame's strip shows: the row's, an app's, the prompt's.
+static const char *hints_of(const moy_sh_face_t *f, size_t *n) {
+    const char *h = NULL;
+    int input = moy_ui_input();
+    if (full_app(f) != NULL) {
+        h = input == 1 ? (f->in_row ? HINTS_APP_ROW : HINTS_APP_TDECK)
+          : input == 2 ? HINTS_ROW : NULL;
+        *n = h == HINTS_APP_ROW ? sizeof HINTS_APP_ROW - 1 : h == HINTS_APP_TDECK
+             ? sizeof HINTS_APP_TDECK - 1 : h == HINTS_ROW ? sizeof HINTS_ROW - 1 : 0;
+        return h;
+    }
+    if (f->in_row) {
+        *n = sizeof HINTS_ROW - 1;
+        return HINTS_ROW;
+    }
+    switch (input) {
+        case 0: *n = sizeof HINTS_KEYS - 1; return HINTS_KEYS;
+        case 1:
+            if (line_app(f) != NULL) {
+                *n = sizeof HINTS_LINE_TDECK - 1;
+                return HINTS_LINE_TDECK;
+            }
+            *n = sizeof HINTS_TDECK - 1;
+            return HINTS_TDECK;
+        case 2: *n = sizeof HINTS_PAD - 1; return HINTS_PAD;
+        default: *n = 0; return NULL;
+    }
+}
+
 int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
                      const moy_sh_face_frame_t *fr) {
     int out = 0;
     int fs = fr->fs > 1 ? fr->fs : 1;
     int rk = moy_sh_face_row(fr->desk);
+    if (f->scr != NULL) {
+        moy_sh_screen_set_ctrl(f->scr, rk == MOY_SH_ROW_NONE);
+    }
+    moy_sh_app_t *app = app_of(f);
+    moy_sh_app_t *fa = full_app(f);
+    const moy_sh_app_ops_t *ops = app != NULL ? moy_sh_app_ops(app) : NULL;
+    int text = ops == NULL || !ops->full || ops->text;
     moy_ui_box_t pg;
     moy_ui_api_page(c, s, span(""), NULL, &pg);
     int32_t page[4] = {fr->cx, fr->cy, fr->cw, fr->ch};
-    const char *hints = NULL;
     size_t hn = 0;
-    if (f->in_row) {
-        hints = HINTS_ROW;
-        hn = sizeof HINTS_ROW - 1;
-    } else {
-        switch (moy_ui_input()) {
-            case 0: hints = HINTS_KEYS; hn = sizeof HINTS_KEYS - 1; break;
-            case 1: hints = HINTS_TDECK; hn = sizeof HINTS_TDECK - 1; break;
-            case 2: hints = HINTS_PAD; hn = sizeof HINTS_PAD - 1; break;
-            default: break;
-        }
-    }
+    const char *hints = hints_of(f, &hn);
     if (hints != NULL && !fr->desk) {
         const uint8_t *items = fr->bar != NULL ? fr->bar : (const uint8_t *)hints;
         size_t n = fr->bar != NULL ? fr->bar_n : hn;
@@ -797,7 +1059,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
     if (rk != MOY_SH_ROW_NONE) {
         int32_t key_h = (fr->desk ? 32 : 22) * fs;
         int32_t row[4];
-        if (rk == MOY_SH_ROW_TOUCH) {
+        if (rk == MOY_SH_ROW_TOUCH && text) {
             static const char sym[] = MOY_SH_FACE_TOUCH_SYMBOLS;
             const char *labels[sizeof sym];
             char one[sizeof sym][2];
@@ -818,23 +1080,32 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
         const char *labels[MOY_SH_FACE_CANDS + 16];
         char one[sizeof MOY_SH_FACE_SYMBOLS][2];
         int n = 0;
-        int cands = f->ncand > 0;
+        int cands = f->ncand > 0 && app == NULL;
+        for (const char *const *k = ops != NULL ? ops->keys : NULL; k != NULL && k[0]; k += 2) {
+            labels[n++] = k[0];
+        }
         if (cands) {
             for (; n < f->ncand; n++) {
                 labels[n] = f->cand[n] + f->cand_label[n];
             }
         } else if (rk == MOY_SH_ROW_TDECK) {
-            char syms[sizeof MOY_SH_FACE_SYMBOLS];
-            int k = moy_sh_face_tdeck_row(syms, sizeof syms);
-            labels[n++] = "Tab";
-            for (int j = 0; j < k; j++) {
-                one[j][0] = syms[j];
-                one[j][1] = '\0';
-                labels[n++] = one[j];
+            if (text) {
+                char syms[sizeof MOY_SH_FACE_SYMBOLS];
+                int k = moy_sh_face_tdeck_row(syms, sizeof syms);
+                labels[n++] = "Tab";
+                for (int j = 0; j < k; j++) {
+                    one[j][0] = syms[j];
+                    one[j][1] = '\0';
+                    labels[n++] = one[j];
+                }
+            }
+        } else if (fa != NULL) {
+            for (int j = 0; j < 4; j++) {
+                labels[n++] = ARROWS[j];
             }
         } else {
-            for (; n < NKEYS; n++) {
-                labels[n] = KEYS[n];
+            for (int j = 0; j < NKEYS; j++) {
+                labels[n++] = KEYS[j];
             }
         }
         int i = key_row(c, s, row, labels, n, cands, fs, symbols);
@@ -857,7 +1128,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
                 }
             }
             if (f->in_row && found >= 0) {
-                if (f->ncand > 0) {
+                if (cands) {
                     moy_sh_face_pick(f, found);
                 } else {
                     moy_sh_face_press(f, labels[found]);
@@ -865,6 +1136,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
                 out |= MOY_SH_FACE_AGAIN | MOY_SH_FACE_DAMAGE;
             }
         }
+        fa = full_app(f);               // a key of the row may have ended it
     }
     moy_font_info_t mono;
     moy_ui_font(MOY_UI_FONT_MONO, &mono);
@@ -874,21 +1146,46 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
     cols = cols > MIN_COLS ? cols : MIN_COLS;
     int32_t lh = (mono.line + 2) * fs;
     int32_t band[4];
-    cut(page, MOY_UI_CUT_BOTTOM, lh + 4 * fs, band);
+    if (fa == NULL) {
+        cut(page, MOY_UI_CUT_BOTTOM, lh + 4 * fs, band);
+    }
     if (moy_sh_face_take(f)) {
-        moy_ui_api_text_aim(c, span("log"), -1, f->count);
+        moy_ui_api_text_aim(c, span("log"), fa != NULL ? 0 : -1, f->count);
     }
     int32_t row_px = (mono.h < mono.line ? mono.h : mono.line) * fs;
     size_t need = (size_t)(page[3] / (row_px > 0 ? row_px : 1)) + 2u;
     ring_fit(f, need < LOG_ROWS_MAX + 2u ? need : LOG_ROWS_MAX + 2u);
     at(c, page);
     int32_t opt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;
-    opt[MOY_UI_TXO_FOLLOW] = 1;
+    opt[MOY_UI_TXO_FOLLOW] = fa == NULL;
+    if (fa != NULL) {
+        opt[MOY_UI_TXO_TOP] = 0;            // the app's screen from its first row
+        int cur[3];
+        moy_term_cursor(moy_sh_app_term(fa), cur);
+        if (cur[2]) {
+            opt[MOY_UI_TXO_CARET_LINE] = cur[0];
+            opt[MOY_UI_TXO_CARET_COL] = cur[1];
+        }
+    }
     moy_ui_span_t marks[2] = {span(""), span("")};
     moy_ui_lines_t L = {f, f->count, log_get};
     int32_t got[2] = {0, 0};
     moy_ui_api_text_view(c, s, span("log"), &L, opt, marks, NULL, got);
     int32_t rows = got[1] > 1 ? got[1] : 1;
+    if (fa != NULL) {
+        int ac, ar;
+        rows = got[1] > 2 ? got[1] - 1 : rows;  // the rows that fit whole: the view shows a part one
+        moy_sh_app_size(fa, &ac, &ar);
+        if (cols != ac || rows != ar) {
+            moy_sh_app_resize(fa, (int)cols, (int)rows);
+            moy_sh_app_size(fa, &ac, &ar);
+            if (ac == cols && ar == rows) {
+                f->stale = 1;
+                out |= MOY_SH_FACE_AGAIN;
+            }
+        }
+        return out;
+    }
     // the prompt row: the prompt dim, the line typed, the caret's column
     char p[MOY_SH_FACE_LINE];
     size_t pn = prompt_of(f, p, sizeof p);
@@ -966,6 +1263,6 @@ size_t moy_sh_face_log_line(moy_sh_face_t *f, int32_t i, char *out, size_t cap) 
         }
         return 0;
     }
-    size_t n = moy_term_line(moy_sh_screen_term(f->scr), (int)i, out, cap);
+    size_t n = moy_term_line(shown(f), (int)i, out, cap);
     return n < cap ? n : cap - 1;
 }

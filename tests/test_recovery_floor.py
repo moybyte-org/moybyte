@@ -159,7 +159,7 @@ def _main(job):
 
     class In(ctypes.Structure):
         _fields_ = [(n, i32) for n in ("key", "repeats", "repeat_key", "left", "right", "up",
-                                       "down", "x", "y", "ptr", "dt")]
+                                       "down", "x", "y", "ptr", "dt", "cancel")]
 
     vp = ctypes.c_void_p
     lib.moy_sh_floor_new.restype = vp

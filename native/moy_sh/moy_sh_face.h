@@ -26,6 +26,21 @@
 // finger's hold Tab, Ctrl-C, the arrows and Run, and under touch a row of
 // the shell's symbols sits under them.
 //
+// A TEXT APP in front (moy_sh_app.h) is drawn and
+// fed by the same face. A full-screen one takes the whole page, the prompt
+// row and its hints gone: the log shows the app's own screen with its cursor
+// as the caret, sized to the page (a resize is the app's), and every key
+// goes to it as a terminal sends it -- a typed key its byte, Enter a CR,
+// Delete and the arrows (the trackball's and a d-pad's steps) xterm's
+// escapes. The key row holds the app's own keys (top's Kill and Quit),
+// then on the T-Deck Tab and its missing
+// symbols where the app types text, on a gamepad and under touch the arrows;
+// the T-Deck enters its row with Mic (the board's cancel,
+// moy_sh_face_cancel) and leaves it with Mic or up, and a keyboard's Esc is
+// the app's. A line app keeps the prompt row, its prompt the app's: Enter
+// hands it the line, Tab types four spaces, Ctrl-D on an empty line or the
+// cancel key (Mic) ends it. A frame's input brings the app its tick.
+//
 // Its memory is the board table's `alloc` (PSRAM), taken at moy_sh_face_new
 // and at the session's first need, nothing per frame.
 
@@ -96,6 +111,15 @@ void moy_sh_face_press(moy_sh_face_t *f, const char *name);
 int moy_sh_face_input(moy_sh_face_t *f, int desk, int32_t key, int32_t repeats,
                       int32_t repeat_key, int32_t left, int32_t right, int32_t up,
                       int32_t down);
+
+// The board's cancel key (the T-Deck's Mic, a keyboard's Esc where the host
+// keeps it) for the text app in front: whether one took it. With none in
+// front it is the host's (the console's key).
+int moy_sh_face_cancel(moy_sh_face_t *f, int desk);
+// The text app in front: its name (NULL: the shell's prompt), and whether
+// it is a full-screen one.
+const char *moy_sh_face_app(const moy_sh_face_t *f);
+int moy_sh_face_full(const moy_sh_face_t *f);
 
 // The key row the input in use gets on a desk or not (MOY_SH_ROW_*).
 int moy_sh_face_row(int desk);

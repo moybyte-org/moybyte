@@ -285,3 +285,75 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
         ui_draw.input_kind(kinds[0])
         ui_draw.hint_kind(kinds[1])
         app.close_session()
+
+
+# -- the text apps (native/moy_sh/moy_sh_app.h) ----------------------------------------
+
+
+def _frame(ws):
+    from runtime.host_app import ConsoleDriver
+    drv = ConsoleDriver(ws)
+    if ws.wm.top_kind() != "terminal":
+        ws.open_app(ws.terminal_app)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return drv
+
+
+def _keys(app, data):
+    for b in data:
+        app.face.key(b)
+
+
+def _arrow(app, d, n=1):
+    steps = {"left": (n, 0, 0, 0), "right": (0, n, 0, 0), "up": (0, 0, n, 0), "down": (0, 0, 0, n)}
+    app.face.input(app.layout.desk, 0, 0, 0, *steps[d])
+
+
+def test_the_app_screen_is_sized_to_the_page(term):
+    """A full-screen app's screen is the page's rows and columns, the prompt
+    row gone: a resize is the app's own."""
+    ws, app = term
+    cols0, rows0 = app.face.size()
+    run(app, "top")
+    _frame(ws)
+    assert len(plain(app)) > rows0
+    _keys(app, b"q")
+    assert app.face.app() is None and app.face.size() == (cols0, rows0)
+
+
+def test_top_shows_the_process_table_and_quits(term):
+    """`top` reads what `ps` reads, the task manager's rows across the door,
+    a row picked with the arrows; q gives the shell back."""
+    ws, app = term
+    run(app, "top")
+    assert app.face.app() == "top"
+    _frame(ws)
+    shown = plain(app)
+    assert shown[0].startswith("top ") and any(ln.startswith(">") for ln in shown)
+    assert any(ln.rstrip().endswith("shell") for ln in shown)
+    _arrow(app, "down")
+    assert plain(app)[3].startswith(" ") and plain(app)[4].startswith(">")
+    _keys(app, b"q")
+    assert app.face.app() is None and plain(app)[-1] == "$ top"
+
+
+def test_mic_enters_the_app_key_row_on_the_tdeck(term):
+    """On the T-Deck the board's cancel (Mic) goes to a full-screen app's key
+    row, whose Quit ends it; with no app in front Mic stays the console's."""
+    from runtime import ui_draw
+    ws, app = term
+    kinds = ui_draw.input_kind(), ui_draw.hint_kind()
+    ui_draw.input_kind("tdeck")
+    ui_draw.hint_kind("tdeck")
+    try:
+        assert not app.cancel_field()
+        run(app, "top")
+        _frame(ws)
+        assert app.cancel_field() and app.face.in_row()
+        assert app.cancel_field() and not app.face.in_row()
+        app.face.press("Quit")
+        assert app.face.app() is None
+    finally:
+        ui_draw.input_kind(kinds[0])
+        ui_draw.hint_kind(kinds[1])

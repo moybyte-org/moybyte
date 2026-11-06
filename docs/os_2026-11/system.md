@@ -93,12 +93,35 @@ what it took before it ends, a media stream excepted;
 mostly C, one implementation moved down, Python calling it). With the VM
 stopped these answer, each over the C the console itself calls: the file
 commands, `ps`, `kill` (the run in front), `free`, `log`/`dmesg`, `reboot`,
-`date`, `sleep`, `clear`, `help`, `settings` `list`, `get`, `set` and
-`unset` (§5), and `pkg list` and `pkg remove` (§6), the last two in
-`native/moy_sh/moy_sh_store.c`. Everything else needs the console:
-`settings reload` (it applies the file), the other `pkg` verbs, `perm`, `notify`,
-`service`, `lease`, `python`, the device faces, the installed commands, `df`
-and the console's /proc, /dev and /bin rows.
+`date`, `sleep`, `clear`, `help`, `top` (below), `settings`
+`list`, `get`, `set` and `unset` (§5), and `pkg list` and `pkg remove` (§6),
+the last two in `native/moy_sh/moy_sh_store.c`. Everything else needs the
+console: `settings reload` (it applies the file), the other `pkg` verbs,
+`perm`, `notify`, `service`, `lease`, `python`, the device faces, the
+installed commands, `df` and the console's /proc, /dev and /bin rows.
+
+**The text apps** (`native/moy_sh/moy_sh_app.h`): `top`, one C
+implementation that every face
+hosts the same way: the Terminal's face, the recovery console's (the same
+face) and the serial face. The command asks its face to put the app in
+front, and the app takes the face when the line's run ends. A full-screen
+app (`top`) has a screen of its own of the face's size (the
+alternate screen: the shell's grid is untouched and back as it was when the
+app ends), which it writes as VT100, and reads keys as a terminal sends
+them; the face turns its input into those (a typed key its byte, the
+arrows, the trackball's and a d-pad's steps xterm's escapes, a key row's
+button its bytes), and a resize is the app's screen resized and drawn again.
+The key row holds the app's own keys (top's Kill and Quit), on the T-Deck
+then Tab and the symbols its keyboard lacks where the app types text, on a
+gamepad and under touch the arrows; the T-Deck's Mic enters the row and
+leaves it. On the serial face each `sh` line is the app's keys in caret
+notation and the answer is its screen (`moy_sh_board.h`). The split (owner,
+2026-11-05: the terminal is mostly C): `top` is C over the rows `ps`
+reads, the task manager's CPU and memory crossing the door with them
+(`runtime/shell/sh_door.py`), so with the VM stopped it shows what `ps`
+shows, the kernel, the console stopped and the run in front. A line app
+keeps the face's prompt row, its prompt the app's, and takes each line
+typed.
 
 **The screen face** is the Terminal's face, which is C
 (`native/moy_sh/moy_sh_face.h`, owner 2026-11-05: the terminal is mostly C,
@@ -139,7 +162,8 @@ writes an ANSI/VT100 subset to its stdout and reads keys from stdin, as on
 any Unix; the C shell's emulator keeps the cell grid (`moy_term.h` lists the
 subset it reads: cursor motion, erase, SGR inks, scrolling and wrap), and the
 screen face draws that grid through `ui.text_view`, whose SGR tones are the
-theme's. The input half below is still a sketch:
+theme's. The keys below are what the text apps read (`moy_sh_app.h`); a
+line program's stdin, the resize event and the size call are still a sketch:
 
 ```
 ESC[row;colH  ESC[K  ESC[2J  ESC[3xm/4xm  ESC[?25l/h   cursor, erase, 16 colours as theme tokens, cursor show/hide
@@ -166,7 +190,9 @@ Backspace held on the T-Deck, which has no Ctrl, Alt, Esc or Tab;
 Ctrl+Alt+F1 on a USB or BLE keyboard); a touch-only board enters it by the
 crash count or over the dev channel. From it the owner reads the `log`,
 `kill`s a process, `pkg remove`s an app, fixes a `system/` file, takes or
-rolls back an OTA update and `reboot`s, with no computer and no reflash.
+rolls back an OTA update and `reboot`s, with no computer and no reflash;
+`top` (§1) takes its whole screen while it is open, the head back when it
+ends.
 
 **The screen** is the Terminal's C face (`native/moy_sh/moy_sh_face.h`), no
 second copy, under a head that says why the floor is up ("The console kept

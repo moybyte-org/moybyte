@@ -875,6 +875,33 @@ def _terminal_plan(ws, cfg):
             app._damage.all()
         return enter
 
+    def text_app(cmd, keys=(), still=False):
+        # a text app over a known file, under the board's own keys; `still`
+        # empties the process-wide scheduler (what tests before this one in
+        # the process left), so top's rows are the console's own
+        def enter():
+            if still:
+                from runtime import scheduler
+                scheduler.SCHED.reset()
+            if tdeck:
+                ui_draw.input_kind("tdeck")
+                ui_draw.hint_kind("tdeck")
+            f = app.face
+            if f.app() is not None:
+                for k in (b"\x18n" if f.app() == "edit" else b"q"):
+                    f.key(k)
+            f.clear_cands()
+            f.set_in_row(False)
+            for ln in ("mkdir -p /sd/moybyte/system",
+                       "printf 'theme = \"dusk\"\\nvolume = 3\\n' > /sd/moybyte/system/settings",
+                       cmd):
+                f.set_line(ln)
+                f.submit()
+            for k in keys:
+                f.key(k)
+            app._damage.all()
+        return enter
+
     plan = [("app_terminal", open_it)]
     if cfg.get("appearance"):
         plan.append(("app_terminal_listing", typed("help")))
@@ -882,6 +909,7 @@ def _terminal_plan(ws, cfg):
         plan.append(("app_terminal_keys", line(None, True) if tdeck else line("touch")))
         if tdeck:
             plan.append(("app_terminal_touch", line("touch")))
+        plan.append(("app_terminal_top", text_app("top", still=True)))
     return plan
 
 
@@ -1608,6 +1636,7 @@ def surface_names(config_name):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
         if not cfg["windowed"]:
             names.append("app_terminal_touch")
+        names += ["app_terminal_top"]
     return names
 
 

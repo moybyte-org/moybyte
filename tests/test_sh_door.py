@@ -49,8 +49,8 @@ def call(door, *fields):
 
 def test_ps_names_the_console_and_its_runs(monkeypatch):
     _ws, door = _door(monkeypatch)
-    assert call(door, "ps") == ("1 0 shell running 0 shell\n"
-                                "12 1 game running 0 Coin_Quest\n")
+    assert call(door, "ps") == ("1 0 shell running 0 - shell\n"
+                                "12 1 game running 0 - Coin_Quest\n")
 
 
 def test_kill_ends_a_run_as_the_task_manager_does(monkeypatch):

@@ -21,6 +21,7 @@
 #include "moy_lease.h"
 #include "moy_log.h"
 #include "moy_loop.h"
+#include "moy_sh_app.h"
 #include "moy_sh_board.h"
 
 // The Player's run in front (native/moy_play: weak, so an image without it
@@ -126,7 +127,7 @@ static int front_pid(void) {
 
 static int b_procs(void *ctx, moy_sh_ps_fn fn, void *arg) {
     (void)ctx;
-    moy_sh_ps_t row = { 0, 0, "kernel", "running", "kernel", 0 };
+    moy_sh_ps_t row = { 0, 0, "kernel", "running", "kernel", 0, -1 };
     int r = fn(arg, &row);
     if (r) {
         return r;
@@ -134,35 +135,37 @@ static int b_procs(void *ctx, moy_sh_ps_fn fn, void *arg) {
     char *ans;
     size_t n;
     if (door("ps", 0, NULL, &ans, &n) < 0) {
-        moy_sh_ps_t console = { SHELL_PID, 0, "shell", "stopped", "console", 0 };
+        moy_sh_ps_t console = { SHELL_PID, 0, "shell", "stopped", "console", 0, -1 };
         if ((r = fn(arg, &console)) != 0) {
             return r;
         }
         int pid = front_pid();
         if (pid) {
-            moy_sh_ps_t run = { pid, SHELL_PID, "app", "running", moy_log_name((uint32_t)pid), 0 };
+            moy_sh_ps_t run = { pid, SHELL_PID, "app", "running", moy_log_name((uint32_t)pid), 0,
+                                -1 };
             return fn(arg, &run);
         }
         return 0;
     }
-    // `pid ppid kind state mem name` a line
+    // `pid ppid kind state mem cpu name` a line (cpu `-` unmeasured)
     for (char *line = ans; line != NULL && *line && r == 0;) {
         char *end = strchr(line, '\n');
         if (end != NULL) {
             *end = 0;
         }
-        char *f[6];
+        char *f[7];
         int k = 0;
-        for (char *p = line; k < 6 && p != NULL; k++) {
+        for (char *p = line; k < 7 && p != NULL; k++) {
             f[k] = p;
-            p = k < 5 ? strchr(p, ' ') : NULL;
+            p = k < 6 ? strchr(p, ' ') : NULL;
             if (p != NULL) {
                 *p++ = 0;
             }
         }
-        if (k == 6) {
-            moy_sh_ps_t p = { atoi(f[0]), atoi(f[1]), f[2], f[3], f[5],
-                              (uint32_t)strtoul(f[4], NULL, 10) };
+        if (k == 7) {
+            moy_sh_ps_t p = { atoi(f[0]), atoi(f[1]), f[2], f[3], f[6],
+                              (uint32_t)strtoul(f[4], NULL, 10),
+                              f[5][0] == '-' ? -1 : (int32_t)atoi(f[5]) };
             r = fn(arg, &p);
         }
         line = end != NULL ? end + 1 : NULL;
@@ -652,6 +655,8 @@ typedef struct {
     char line[MOY_SH_SERIAL_LINE + 4];  // "SH " and the output's line
     size_t n;
     uint32_t yielded;                   // ms, the last time the poll yielded
+    moy_sh_t *s;
+    moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
 } serial_t;
 
 static void serial_flush(serial_t *f) {
@@ -706,6 +711,88 @@ static int serial_poll(void *ctx) {
     return stop;
 }
 
+static int serial_run(void *ctx, const char *text, size_t n) {
+    serial_t *f = ctx;
+    return moy_sh_run(f->s, text, n);
+}
+
+static int serial_app(void *ctx, moy_sh_t *s, int argc, char **argv) {
+    serial_t *f = ctx;
+    if (f->app != NULL || moy_sh_app_find(argv[0]) == NULL) {
+        return f->app != NULL ? 1 : MOY_SH_NOT_FOUND;
+    }
+    int status;
+    f->app = moy_sh_app_open(s, MOY_SH_SERIAL_COLS, MOY_SH_SERIAL_ROWS, 1, serial_run, f,
+                             argc, argv, &status);
+    return status;
+}
+
+static uint32_t serial_ms(void) {
+    const moy_loop_ops_t *ops = moy_loop_ops();
+    return ops != NULL && ops->ticks_ms != NULL ? ops->ticks_ms() : 0;
+}
+
+// What the app shows: a full-screen one's screen a row a line, its inks
+// dropped, then `SH app NAME`.
+static void serial_show(serial_t *f) {
+    moy_sh_app_t *a = f->app;
+    moy_sh_app_tick(a, serial_ms());
+    moy_term_t *t = moy_sh_app_term(a);
+    if (t != NULL) {
+        uint32_t v[3];
+        moy_term_take(t, v);
+        char row[MOY_SH_SERIAL_LINE * 2];
+        for (int i = 0; i < (int)v[1]; i++) {
+            size_t n = moy_term_line(t, i, row, sizeof row), k = 0;
+            for (size_t j = 0; j < n; j++) {
+                if (row[j] == 0x1b) {
+                    while (j < n && row[j] != 'm') {
+                        j++;
+                    }
+                } else if (k < MOY_SH_SERIAL_LINE) {
+                    f->line[3 + k++] = row[j];
+                }
+            }
+            f->n = k;
+            serial_flush(f);
+        }
+    }
+    moy_loop_say("SH app %s", moy_sh_app_ops(a)->name);
+}
+
+// A serial line to the app in front: a full-screen app's keys in caret
+// notation (^X a control key, ^[ Esc, so ^[[A is up; ^? Delete; ^^ a caret),
+// a line app's line (^D ends it).
+static void serial_to_app(serial_t *f, const char *text) {
+    moy_sh_app_t *a = f->app;
+    char keys[MOY_SH_SERIAL_LINE];
+    size_t k = 0;
+    for (const char *p = text; *p && k < sizeof keys; p++) {
+        if (p[0] == '^' && p[1]) {
+            p++;
+            keys[k++] = *p == '?' ? 0x7F : *p == '^' ? '^' : (char)(*p & 0x1F);
+        } else {
+            keys[k++] = *p;
+        }
+    }
+    int r;
+    if (moy_sh_app_ops(a)->full || (k == 1 && keys[0] < 0x20)) {
+        r = moy_sh_app_keys(a, keys, k);
+    } else {
+        r = moy_sh_app_line(a, text);
+    }
+    if (f->n) {
+        serial_flush(f);
+    }
+    if (r == MOY_SH_APP_END) {
+        f->app = NULL;
+        moy_sh_app_close(a);
+        moy_loop_say("SH end %d", 0);
+    } else {
+        serial_show(f);
+    }
+}
+
 bool moy_sh_board_line(const char *text) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
@@ -718,15 +805,21 @@ bool moy_sh_board_line(const char *text) {
         memcpy(f->line, "SH ", 3);
         moy_sh_host_t h;
         moy_sh_board_host(&h, f, serial_out, serial_poll);
+        h.app = serial_app;
         s = moy_sh_new(&h, MOY_SH_ARENA, "/", "/");
         if (s == NULL) {
             b_free(NULL, f);
             moy_loop_say_line("SH error no session");
             return false;
         }
+        f->s = s;
         moy_sh_park(s);
     }
     serial_t *f = moy_sh_ctx(s);
+    if (f->app != NULL) {
+        serial_to_app(f, text);
+        return true;
+    }
     size_t n = strlen(text);
     char *buf = b_alloc(NULL, n + 1);
     if (buf == NULL) {
@@ -744,10 +837,23 @@ bool moy_sh_board_line(const char *text) {
         moy_loop_say_line("SH more");
     } else if (r == MOY_SH_EXIT) {
         moy_loop_say("SH exit %d", moy_sh_status(s));
+        moy_sh_app_close(f->app);
         moy_sh_free(s);
         b_free(NULL, f);
+    } else if (f->app != NULL) {
+        serial_show(f);
     } else {
         moy_loop_say("SH end %d", moy_sh_status(s));
     }
     return true;
+}
+
+void moy_sh_board_end(void) {
+    moy_sh_t *s = moy_sh_running();
+    if (s != NULL) {
+        serial_t *f = moy_sh_ctx(s);
+        moy_sh_app_close(f->app);
+        moy_sh_free(s);
+        b_free(NULL, f);
+    }
 }

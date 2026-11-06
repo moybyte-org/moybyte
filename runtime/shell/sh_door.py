@@ -69,6 +69,21 @@ def _rows(ws):
     return out
 
 
+def _figures(ws):
+    """{pid: (cpu, mem)}: what the task manager measures, per mille of a core
+    and bytes, None where unmeasured (runtime/shell/procs.py's rows)."""
+    out = {}
+    for p in _devfs._sched.SCHED.procs.values():
+        out[p.pid] = (p.cpu, getattr(p, "mem", None))
+    procs = getattr(ws, "procs", None)
+    rows = getattr(procs, "rows", None)
+    if rows is not None:
+        for r in rows():
+            if r[6] is not None:
+                out[r[6]] = (r[4], r[5])
+    return out
+
+
 def _row(ws, pid):
     for r in ws.procs.rows():
         if r[6] == pid:
@@ -280,8 +295,14 @@ class ShellDoor:
             self.io.write(2, ("%s: %s\n" % (name, text)).encode())
 
     def v_ps(self):
-        return "".join("%d %d %s %s 0 %s\n" % (pid, ppid, kind, state, name.replace(" ", "_"))
-                       for pid, ppid, kind, state, name in _rows(self.ws))
+        figs = _figures(self.ws)
+        out = []
+        for pid, ppid, kind, state, name in _rows(self.ws):
+            cpu, mem = figs.get(pid, (None, None))
+            out.append("%d %d %s %s %d %s %s\n" % (pid, ppid, kind, state, mem or 0,
+                                                 "-" if cpu is None else int(cpu),
+                                                 name.replace(" ", "_")))
+        return "".join(out)
 
     def v_status(self, pid):
         pid = int(pid)

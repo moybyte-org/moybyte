@@ -371,6 +371,24 @@ static mp_obj_t face_elsewhere(mp_obj_t self, mp_obj_t desk) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(face_elsewhere_obj, face_elsewhere);
 
+// cancel(desk) -> whether the text app in front took the board's cancel key
+static mp_obj_t face_cancel(mp_obj_t self, mp_obj_t desk) {
+    return mp_obj_new_bool(moy_sh_face_cancel(tface(self), mp_obj_is_true(desk)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(face_cancel_obj, face_cancel);
+
+// app() -> the text app in front's name, or None
+static mp_obj_t face_app(mp_obj_t self) {
+    const char *n = moy_sh_face_app(tface(self));
+    return n != NULL ? mp_obj_new_str(n, strlen(n)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_app_obj, face_app);
+
+static mp_obj_t face_full(mp_obj_t self) {
+    return mp_obj_new_bool(moy_sh_face_full(tface(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_full_obj, face_full);
+
 // draw(ctx, cv, look, cx, cy, cw, ch, fs, desk[, bar]) -> bits
 static mp_obj_t face_draw(size_t n_args, const mp_obj_t *a) {
     moy_sh_face_t *f = tface(a[0]);
@@ -543,6 +561,9 @@ static const mp_rom_map_elem_t face_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_press), MP_ROM_PTR(&face_press_obj) },
     { MP_ROM_QSTR(MP_QSTR_input), MP_ROM_PTR(&face_input_obj) },
     { MP_ROM_QSTR(MP_QSTR_elsewhere), MP_ROM_PTR(&face_elsewhere_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&face_cancel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_app), MP_ROM_PTR(&face_app_obj) },
+    { MP_ROM_QSTR(MP_QSTR_full), MP_ROM_PTR(&face_full_obj) },
     { MP_ROM_QSTR(MP_QSTR_draw), MP_ROM_PTR(&face_draw_obj) },
     { MP_ROM_QSTR(MP_QSTR_line), MP_ROM_PTR(&face_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_col), MP_ROM_PTR(&face_col_obj) },
