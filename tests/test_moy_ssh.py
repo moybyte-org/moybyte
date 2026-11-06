@@ -71,6 +71,7 @@ def _build(out):
     assert all(p.wait() == 0 for p in procs)
     exe = str(out / "ssh_main")
     subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-Wl,--wrap=moy_ssh_pair",
+                                       "-Wl,--wrap=send",
                                        "-o", exe] + objs + shell
                    + ["-lpthread"], check=True)
     return exe
@@ -359,6 +360,25 @@ def test_a_terminal_session_is_the_face_s_line_discipline(harness):
     assert b"echo hi\r\nhi\r\n" in out, out
     assert b"ech\b \bho abd\r\nabd\r\n" in out, out
     assert b"^C\r\n" in out, out
+
+
+def test_a_command_s_output_leaves_the_face_in_few_segments_run_after_run(harness):
+    """Each send on the face's end is a segment on a board's loopback (TCP_NODELAY),
+    which queues at most LWIP_LOOPBACK_MAX_PBUFS (8) and drops the rest: neofetch
+    written a few bytes at a time stopped after 379 bytes the second time it ran
+    in one session. The face gathers a command's output and sends it in pieces of
+    up to OUT_BYTES."""
+    n = int(stats(harness)["ended"])
+    sends = int(stats(harness).get("face_sends", 0))
+    lines = (b"neofetch\r", b"neofetch\r", b"exit\r")
+    out = terminal(harness, [(line, 1.0) for line in lines])
+    s = ended(harness, n + 1)
+    assert out.count(b"lab (192.168.1.2)") == 2, out
+    assert out.count(b"moy_sh (dash)") == 2, out
+    # the client sends a key a packet, and each key's echo is a send of its own
+    keys = sum(len(line) for line in lines)
+    used = int(s["face_sends"]) - sends - keys
+    assert used <= 8, "%d sends for two neofetches (about 2 KB each) and their prompts" % used
 
 
 def test_top_and_edit_run_on_the_alternate_screen(harness):

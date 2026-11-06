@@ -24,6 +24,8 @@
 #define SH_EXIT 2
 #define WAIT_MS 250                     // the face's wait for input: an app's clock, a signal
 #define DRAIN_MS 2000                   // the face's wait for Dropbear's half-close
+#define OUT_BYTES 1024                  // output gathered into one send
+#define OUT_MS 10                       // ...or for this long, at the shell's poll
 
 uint32_t moy_ssh_mark_shell(void);
 
@@ -45,6 +47,9 @@ struct moy_ssh_face {
     size_t n, cur, ahead_n;             // the line's length, the caret in it
     char *held;                 // written off the face's task (a hop), sent after
     size_t held_n, held_cap;
+    char obuf[OUT_BYTES];       // the output not yet sent (OUT_BYTES, the header)
+    size_t on;
+    uint32_t oat;               // ms, when its first byte came
     char line[LINE_MAX_BYTES];
     char ahead[AHEAD_BYTES];    // bytes a poll read that were not Ctrl-C
     char hist[HIST_LINES][HIST_LINE];   // the lines run, oldest first
@@ -80,6 +85,38 @@ static void send_all(moy_ssh_face_t *f, const char *p, size_t n) {
     }
 }
 
+// THE OUTPUT IS GATHERED: each send on the face's end is a segment on a
+// board's loopback (TCP_NODELAY), and lwIP queues at most
+// LWIP_LOOPBACK_MAX_PBUFS (8) there and drops the rest, so a command written
+// a few bytes at a time lost segments and stalled on the retransmit timer --
+// neofetch run twice in a session stopped after 379 bytes. The face's output
+// waits in obuf and goes out when it fills, before the face waits for input
+// or a hop, at the end, and at the shell's poll once it is OUT_MS old.
+static void flush(moy_ssh_face_t *f) {
+    if (f->on) {
+        size_t n = f->on;
+        f->on = 0;
+        send_all(f, f->obuf, n);
+    }
+}
+
+static void gather(moy_ssh_face_t *f, const char *p, size_t n) {
+    while (n > 0) {
+        if (f->on == 0) {
+            f->oat = moy_ssh_ms();
+        }
+        size_t k = sizeof f->obuf - f->on;
+        k = k < n ? k : n;
+        memcpy(f->obuf + f->on, p, k);
+        f->on += k;
+        p += k;
+        n -= k;
+        if (f->on == sizeof f->obuf) {
+            flush(f);
+        }
+    }
+}
+
 // Off the face's task the bytes wait: a slow client never holds the console.
 static void hold(moy_ssh_face_t *f, const char *p, size_t n) {
     if (f->held_n + n > f->held_cap) {
@@ -112,19 +149,19 @@ static void out(moy_ssh_face_t *f, const char *p, size_t n, int raw) {
         return;
     }
     if (raw || !f->pty) {
-        send_all(f, p, n);
+        gather(f, p, n);
         return;
     }
     // a terminal's newline is CR LF
     size_t start = 0;
     for (size_t i = 0; i < n; i++) {
         if (p[i] == '\n' && (i == 0 || p[i - 1] != '\r')) {
-            send_all(f, p + start, i - start);
-            send_all(f, "\r\n", 2);
+            gather(f, p + start, i - start);
+            gather(f, "\r\n", 2);
             start = i + 1;
         }
     }
-    send_all(f, p + start, n - start);
+    gather(f, p + start, n - start);
 }
 
 void moy_ssh_face_out(moy_ssh_face_t *f, const char *p, size_t n) {
@@ -145,6 +182,9 @@ void moy_ssh_face_size(const moy_ssh_face_t *f, int *cols, int *rows) {
 }
 
 void moy_ssh_face_hop(moy_ssh_face_t *f, void (*fn)(void *arg), void *arg) {
+    if (on_face_task()) {
+        flush(f);
+    }
     moy_ssh_hop(fn, arg);
     if (f->held_n && on_face_task()) {
         size_t n = f->held_n;
@@ -156,6 +196,9 @@ void moy_ssh_face_hop(moy_ssh_face_t *f, void (*fn)(void *arg), void *arg) {
 // Ctrl-C: a terminal's byte or the client's signal. Without a terminal the
 // channel's bytes are the command's input, never keys.
 int moy_ssh_face_poll(moy_ssh_face_t *f) {
+    if (f->on && on_face_task() && moy_ssh_ms() - f->oat >= OUT_MS) {
+        flush(f);
+    }
     if (f->interrupt) {
         f->interrupt = 0;
         return 1;
@@ -208,6 +251,9 @@ long moy_ssh_face_in(moy_ssh_face_t *f, void *buf, size_t n) {
     }
     while (!f->eof) {
         int face = on_face_task();
+        if (face) {
+            flush(f);
+        }
         if (face && !readable(f, WAIT_MS)) {
             if (f->interrupt) {
                 return -1;
@@ -261,6 +307,7 @@ static void finish(moy_ssh_face_t *f, int status) {
         shell()->close(f->sh);
         f->sh = NULL;
     }
+    flush(f);
     __atomic_store_n(&f->exited, 1, __ATOMIC_RELEASE);
     shutdown(f->fd, SHUT_WR);
     drain(f);
@@ -659,6 +706,7 @@ static void face_run(moy_ssh_face_t *f) {
                 shell()->show(f->sh, 0);
             }
         }
+        flush(f);
         if (!readable(f, WAIT_MS)) {
             if (f->pend_n > 0 && f->front == MOY_SSH_FRONT_FULL
                     && moy_ssh_ms() - f->pend_at >= PEND_MS) {

@@ -17,7 +17,7 @@ is `runtime/system/ssh_service.py`.
 | `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`, over the run |
 | `port/` | Dropbear's options (`localoptions.h`), its `config.h`, the names the port renames (`moy_ssh_port.h`, `moy_ssh_names.h`), and in `port/esp/` the headers ESP-IDF lacks |
 | `dropbear/`, `patches/`, `dropbear_vendor.json` | the vendored Dropbear (`UPSTREAM.md`) |
-| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face and the board's shell over a folder, the console's task a thread, the face's socket pair a board's loopback (its bytes cross a thread, a little late), and a VM that answers `passwd` |
+| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face and the board's shell over a folder, the console's task a thread, the face's socket pair a board's loopback (its bytes cross a thread, a little late, its sends counted), and a VM that answers `passwd` and the console's rows |
 
 ## Crypto
 
@@ -44,6 +44,12 @@ Three tasks, none of them the VM's:
   commands) — is handed there and waited for. What a hopped command writes
   is held and sent from the face's task after it, so the console never waits
   on a client. The connection's sign-in files are read the same way.
+- **the face's output is gathered** (`moy_ssh_face.c`, OUT_BYTES): each send
+  on the pair is a segment on the board's loopback, which queues at most
+  `LWIP_LOOPBACK_MAX_PBUFS` (8) and drops the rest, so the face sends a
+  command's output in pieces of up to 1 KB: when the piece fills, before it
+  waits for input or a hop, at the end, and at the shell's poll once 10 ms
+  old. The harness counts the sends (`face_sends` in its STATS line).
 
 The server's two tasks are made at the first start and park between a stop
 and the next start, never deleted: deleting a PSRAM-stacked task links

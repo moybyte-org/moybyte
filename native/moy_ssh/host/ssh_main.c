@@ -131,8 +131,20 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
                       uint8_t *ans, size_t cap) {
     (void)grant;
     (void)row;
-    (void)ans;
-    (void)cap;
+    // the door's own words the console answers: its rows, its heap, a volume
+    const char *p0 = (const char *)arg;
+    static const char console_text[] =
+        "name: moy\nboard: host harness\nfirmware: 0.0.0\ndisplay: 800x480\n"
+        "theme: moy\nwifi: lab (192.168.1.2)\n";
+    static const char console_read[] = "read\0/proc/console";
+    if (n == sizeof console_read - 1 && memcmp(p0, console_read, n) == 0
+            && cap >= sizeof console_text) {
+        memcpy(ans, console_text, sizeof console_text - 1);
+        return (int32_t)(sizeof console_text - 1);
+    }
+    if ((n == 3 && memcmp(p0, "mem", 3) == 0) || (n > 3 && memcmp(p0, "df\0", 3) == 0)) {
+        return (int32_t)snprintf((char *)ans, cap, "%u %u", 8000000u, 6000000u);
+    }
     // `role JOB passwd ARGS...`
     static const char verb[] = "role";
     static const char name[] = "passwd";
@@ -165,6 +177,20 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 #define LEG_LAG_US 1000
 
 int __real_moy_ssh_pair(int fds[2]);
+
+// Linked with --wrap=send too: the sends on a face's end are the segments a
+// board's loopback carries (TCP_NODELAY, at most LWIP_LOOPBACK_MAX_PBUFS of
+// them queued), counted for STATS.
+ssize_t __real_send(int fd, const void *p, size_t n, int flags);
+static volatile int s_face_end = -1;
+static volatile unsigned s_face_sends;
+
+ssize_t __wrap_send(int fd, const void *p, size_t n, int flags) {
+    if (fd == s_face_end) {
+        __atomic_add_fetch(&s_face_sends, 1, __ATOMIC_RELAXED);
+    }
+    return __real_send(fd, p, n, flags);
+}
 
 typedef struct {
     int from, to;
@@ -237,6 +263,7 @@ int __wrap_moy_ssh_pair(int fds[2]) {
     pthread_detach(t);
     fds[0] = db[0];
     fds[1] = face[0];
+    s_face_end = face[0];
     return 0;
 }
 
@@ -286,9 +313,10 @@ int main(int argc, char **argv) {
             listening = s.listening;
             parked = now_parked;
             printf("STATS ended=%u sessions=%u signed_in=%u refused=%u heap_now=%zu heap_peak=%zu "
-                   "session_peak=%zu to_shell_ms=%u arena_peak=%zu listening=%d parked=%d\n",
+                   "session_peak=%zu to_shell_ms=%u arena_peak=%zu listening=%d parked=%d face_sends=%u\n",
                    s.ended, s.sessions, s.signed_in, s.refused, s.heap_now, s.heap_peak,
-                   s.session_peak, s.handshake_ms, s.arena_peak, s.listening, parked);
+                   s.session_peak, s.handshake_ms, s.arena_peak, s.listening, parked,
+                   s_face_sends);
             fflush(stdout);
         }
         usleep(20000);
