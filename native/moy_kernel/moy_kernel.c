@@ -486,8 +486,13 @@ void moy_kernel_test_crash(bool abort_not_fault) {
 // One call per console frame. The first subscribes the VM task (it runs on it)
 // and the record's reason; every call resets the watchdog and keeps the longest
 // gap between two (the worst frame the console took), which the gate reads.
+// A call from another task once it is armed (a worker's network wait, which
+// feeds through the client's tick) is not the VM's frame and changes nothing.
 void moy_kernel_feed(void) {
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_wd_armed && esp_task_wdt_status(NULL) != ESP_OK) {
+        return;
+    }
     if (!s_wd_armed) {
         if (esp_task_wdt_add(NULL) != ESP_OK) {
             return;
