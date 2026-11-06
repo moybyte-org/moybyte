@@ -312,3 +312,31 @@ def _webhost_switched_off():
     nb.web_stop()
     nb.web_events()
     nb.wc_poll()                 # a switch in its goodbye sees the host stopped
+
+
+def _processes_reset():
+    L = sys.modules.get("runtime.moy_log")
+    if L is not None:
+        L.current(L.SHELL)
+    for name in ("runtime.leases", "runtime.devices"):
+        m = sys.modules.get(name)
+        if m is not None:
+            gate = getattr(m, "LEASES", m)
+            gate.grants = None
+
+
+@pytest.fixture(autouse=True)
+def _processes_fresh():
+    """Whose code runs and who grants what are one per process, as they are
+    one per board: the kernel's current process (`moy_log.current`), which a
+    run makes itself until it ends, and the lease and device gates
+    (`leases.LEASES.grants`, `devices.grants`), which a Workstation binds to
+    its running set as it boots. A test that left a game running handed
+    every later test on the worker that game's pid, and one that built a
+    Workstation handed it that console's grants, so the shell's own reads (a
+    /dev file) and a bare process's lease were refused as another's. Each
+    test starts, and leaves, the shell current and the gates unbound, as a
+    fresh VM has them before its console boots."""
+    _processes_reset()
+    yield
+    _processes_reset()
