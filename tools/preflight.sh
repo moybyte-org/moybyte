@@ -7,6 +7,16 @@
 #   tools/preflight.sh --full   # the host job even when only docs changed
 #   tools/preflight.sh --firmware     # ...plus every board's image, built here
 #   tools/preflight.sh --no-firmware  # ...without them even where the change reaches them
+#   tools/preflight.sh --native # the host suite on this machine's OS, not CI's
+#
+# The host suite -- the desktop MicroPython it drives, the main suite and the
+# redraw suite -- runs in CI's OS: an ubuntu 26.04 container with Python 3.11
+# (tools/ci_image/run.sh, which says how). This machine's older glibc and
+# OpenSSH passed what the runner's failed: C23's const-preserving bsearch and
+# strchr (9546bd7bd) and the current ssh-copy-id (2f6278bb7). With no Docker
+# the default FAILS rather than falling back; `--native` is the quick run on
+# this OS, chosen. Everything else -- the browser builds and suites, the docs
+# check, the toolchain fetches, the tour, the board images -- runs here.
 #
 # The browser suites run on their own when the change touches what CI's
 # web-e2e.yml path filter covers (`web_touched`, below, mirrors that list);
@@ -63,6 +73,7 @@ NOWEB=0
 FULL=0
 FIRMWARE=0
 NOFIRMWARE=0
+NATIVE=0
 for arg in "$@"; do
   case "${arg}" in
     --web) WEB=1 ;;
@@ -70,6 +81,7 @@ for arg in "$@"; do
     --full) FULL=1 ;;
     --firmware) FIRMWARE=1 ;;
     --no-firmware) NOFIRMWARE=1 ;;
+    --native) NATIVE=1 ;;
   esac
 done
 TOUR_DIR="$(mktemp -d)"
@@ -124,7 +136,14 @@ lane_times() {                # lane_times STATUS: the table, then the shared lo
   TOTAL_DUR="$(dur "${total}")"
 }
 
-PYTEST=(env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
+# The host suite's prefix: CI's OS, or this one under --native. The container
+# mounts its own venv at the same path, so "${PY}" names the right one in both.
+IN=()
+if [ "${NATIVE}" = "0" ]; then
+  tools/ci_image/run.sh --check || exit 2
+  IN=(tools/ci_image/run.sh)
+fi
+PYTEST=("${IN[@]}" env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
 
 changed() {                     # every path changed against origin/dev (or $PREFLIGHT_BASE)
   { git diff --name-only "${PREFLIGHT_BASE:-origin/dev}"...HEAD 2>/dev/null
@@ -191,6 +210,7 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && [ "${FIRMWARE}" = "0" ] && docs_
   done <<< "$(changed)"
   mapfile -t named < <(printf '%s\n' tests/test_look_shots.py tests/test_editor_look.py "${named[@]}" | sort -u)
   step "docs agree with the tree"  "${PY}" tools/check_docs.py
+  [ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
   step "tests that name a changed document" \
     "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
   if [ "${fails}" -ne 0 ]; then
@@ -215,7 +235,8 @@ fi
 # Not cached-and-skipped: a stale binary is the failure this is here to catch,
 # and a warm build is under a minute.
 step "browser console builds"                       firmware/web_runner/build.sh
-step "desktop MicroPython with the native usermods" make unix-micropython
+[ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
+step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
 # CI's cached step: the toolchain the showcase cart's goldens build with,
 # fetched by its pinned sha256 when absent (a no-op when it is here).
@@ -225,7 +246,7 @@ step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --
 step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
 step "suite (redraw excluded)" \
   "${PYTEST[@]}" -p xdist -n auto -q --ignore=tests/test_redraw_on_change.py
-step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py
+step "redraw suite, alone"     "${IN[@]}" "${PY}" -m pytest -q tests/test_redraw_on_change.py
 step "headless tour (fresh save dir)" \
   "${PY}" tools/simulate_desktop.py --demo --strict \
     --gif "${TOUR_DIR}/demo.gif" --save-dir "${TOUR_DIR}/projects"

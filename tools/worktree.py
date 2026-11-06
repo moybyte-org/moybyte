@@ -28,7 +28,8 @@
 commits whose patches are not on `--into` (default dev; `git cherry`, so a
 cherry-picked landing counts as merged), unless `--force`. It unlinks the
 links first, removes the tree with every build output in it, deletes the
-branch when nothing on it is unmerged, and prints the space freed.
+branch when nothing on it is unmerged, drops the CI container's volumes for
+it (tools/ci_image/run.sh), and prints the space freed.
 
 Run either from the main checkout or from any worktree: the main checkout is
 found through git.
@@ -237,6 +238,9 @@ def cmd_rm(a, main):
         raise WorktreeError("%s has %s -- commit and land them, or --force"
                             % (a.name, " and ".join(why)))
     before = du(wt)
+    ci = os.path.join(wt, "tools", "ci_image", "run.sh")
+    if os.path.isfile(ci) and shutil.which("docker"):
+        subprocess.run([ci, "--rm-volumes"], capture_output=True)
     for rel in links(main):
         p = os.path.join(wt, rel)
         if os.path.islink(p):
