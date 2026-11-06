@@ -155,7 +155,7 @@
     "native/moy_ssh/dropbear/src/x11fwd.h": "795d480d4af21af02231f19ee37a21ebf5d7d5c1f0404c7802892e31115971d2"
   },
   "patch": "585d057b2eb8221e3af1761ee17f0916767b1df03423241e36501e8c80bb5091",
-  "sha256": "e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81",
-  "url": "https://matt.ucc.asn.au/dropbear/releases/dropbear-2026.94.tar.bz2",
+  "sha256": "827d3f6e510e7554ee18d5c6a00dfee1a6a555559495e65e2e8f8d41c79eed84",
+  "url": "https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2026.94.tar.gz",
   "version": "2026.94"
 }

@@ -5,7 +5,10 @@
     python3 tools/vendor_dropbear.py --tarball PATH
     python3 tools/vendor_dropbear.py --check   # what would change
 
-The release tarball is checked against its pinned SHA-256, native/moy_ssh/
+The release is fetched as GitHub's mirror's tag archive (mkj/dropbear), the
+same tree as Dropbear's own release tarball under another top folder:
+Dropbear's release server answers this tool's fetch with HTTP 403. --tarball
+takes either, each checked against its own pinned SHA-256. native/moy_ssh/
 patches/moybyte.patch is applied, default_options_guard.h is generated as
 Dropbear's Makefile does (ifndef_wrapper.sh), and FILES is copied. The
 hash of every copied file goes to native/moy_ssh/dropbear_vendor.json.
@@ -30,8 +33,12 @@ PATCH = os.path.join(MOD, "patches", "moybyte.patch")
 RECORD = os.path.join(MOD, "dropbear_vendor.json")
 
 VERSION = "2026.94"
-URL = "https://matt.ucc.asn.au/dropbear/releases/dropbear-%s.tar.bz2" % VERSION
-SHA256 = "e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81"
+URL = "https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_%s.tar.gz" % VERSION
+SHA256 = "827d3f6e510e7554ee18d5c6a00dfee1a6a555559495e65e2e8f8d41c79eed84"
+RELEASE_URL = "https://matt.ucc.asn.au/dropbear/releases/dropbear-%s.tar.bz2" % VERSION
+RELEASE_SHA256 = "e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81"
+# Each archive's top folder, by its hash.
+TOPS = {SHA256: "dropbear-DROPBEAR_%s" % VERSION, RELEASE_SHA256: "dropbear-%s" % VERSION}
 
 # What the server build compiles and includes (native/moy_ssh/micropython.cmake):
 # the server, curve25519 and ed25519, chacha20-poly1305, SHA-2 and the few
@@ -213,12 +220,13 @@ def guard(text):
 
 
 def build_tree(tarball):
-    if sha(tarball) != SHA256:
+    folder = TOPS.get(sha(tarball))
+    if folder is None:
         raise SystemExit("vendor-dropbear: %s is not dropbear-%s (sha256)" % (tarball, VERSION))
     work = tempfile.mkdtemp(prefix="vendor_dropbear_")
     with tarfile.open(tarball) as t:
         t.extractall(work, filter="data")
-    top = os.path.join(work, "dropbear-%s" % VERSION)
+    top = os.path.join(work, folder)
     r = subprocess.run(["patch", "-p1", "--no-backup-if-mismatch", "-i", PATCH],
                        cwd=top, capture_output=True, text=True)
     if r.returncode != 0:
@@ -233,13 +241,16 @@ def build_tree(tarball):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tarball", default=os.path.join(ROOT, ".build", "dropbear-%s.tar.bz2" % VERSION))
+    ap.add_argument("--tarball", default=os.path.join(ROOT, ".build",
+                                                      "dropbear-DROPBEAR_%s.tar.gz" % VERSION))
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
     if not os.path.exists(args.tarball):
         os.makedirs(os.path.dirname(args.tarball), exist_ok=True)
         print("vendor-dropbear: fetching %s" % URL)
-        urllib.request.urlretrieve(URL, args.tarball)
+        part = args.tarball + ".part"
+        urllib.request.urlretrieve(URL, part)
+        os.replace(part, args.tarball)
     work, top = build_tree(args.tarball)
     try:
         files = {}
