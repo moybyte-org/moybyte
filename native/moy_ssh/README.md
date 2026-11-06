@@ -1,6 +1,7 @@
 # moy_ssh — the SSH server
 
-`ssh <name>.local` into a console (`docs/os_2026-11/system.md` §3):
+`ssh <name>.local` into a console (`moybyte-XXXX.local` until Settings'
+Name is set) (`docs/os_2026-11/system.md` §3):
 Dropbear's server inside the kernel's process, its session's shell the C
 `moy_sh` over a face of its own. How the server runs a session is
 `moy_ssh.h`'s header, how the shell is reached `moy_ssh_face.h`'s. The

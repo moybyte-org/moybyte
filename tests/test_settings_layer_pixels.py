@@ -479,9 +479,10 @@ def test_a_settled_settings_page_paints_nothing(tmp_path):
 
 
 @pytest.mark.parametrize("variant", ["dark", "light"])
-def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant):
+def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path, variant):
     """Where nothing types (touch alone) the Name row is read-only: with no
-    name saved its value reads "Not set", and the note that a keyboard
+    name saved its value is the console's default name (`moybyte-XXXX`, the
+    host's stand-in MAC), and the note that a keyboard
     changes it stands under the General group's card on the page's ground,
     in the captions' dim ink, with no divider -- not a row of the group
     (design review R5-11)."""
@@ -505,7 +506,7 @@ def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant)
             drv.frame(_DT)
     finally:
         ui.info = real
-    assert ("Name", settings_layer.NAME_UNSET) in infos, infos
+    assert ("Name", settings_layer._ssh.default_name()) in infos, infos
     cv = ws.sys_canvas
     buf = bytes(cv._buf)
 

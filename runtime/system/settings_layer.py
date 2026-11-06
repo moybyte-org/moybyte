@@ -276,11 +276,10 @@ _HINT_TOGGLE = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", 
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 7, 4)}
 _STEPPED = {"steps": True}    # a level row's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
-_NAME_HINT = {"hint": "Your name"}   # what the empty Name field shows
+_NAME_HINT = {"hint": None}   # the empty Name field shows the default name
 # The caption under the read-only Name where nothing can type (D-24's
 # interim words, `Workstation.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
-NAME_UNSET = "Not set"      # the read-only Name row's value with no name saved
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
@@ -1462,7 +1461,7 @@ class SettingsLayer:
         if kind == "level":
             return self.level(key)
         if kind == "name" and not ws.can_type():
-            return str(ws.system.get(key, "") or "") or NAME_UNSET
+            return _ssh.name(ws)
         return None
 
     def _poll(self):
@@ -1576,7 +1575,7 @@ class SettingsLayer:
                 self.set_level(key, got)
         elif kind == "name" and v is not None:
             # nothing can type (touch alone, a gamepad): the saved name shows,
-            # read-only ("Not set" where none is), and the group's footer says
+            # read-only (`moybyte-XXXX` where none is), and the group's footer says
             # how to change it (`_rows_page`), instead of a field no key
             # reaches (#239 is the on-screen keyboard)
             self._kinds.pop(s, None)
@@ -1587,6 +1586,8 @@ class SettingsLayer:
             cur = self._name
             if cur is None:
                 cur = str(ws.system.get(key, "") or "")
+            if _NAME_HINT["hint"] is None:
+                _NAME_HINT["hint"] = _ssh.default_name()
             got, done = _ui.field(s, cur, NAME_MAX, _NAME_HINT)
             if got != cur:
                 self._name = got

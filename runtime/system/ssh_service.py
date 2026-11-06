@@ -1,7 +1,10 @@
 """The SSH server's console side (native/moy_ssh, docs/os_2026-11/system.md
 section 3): it serves while a password is set, holding the radio for the
 "ssh" tag, and the console answers on the network as `<name>.local`, its name
-Settings' Name.
+Settings' Name, or with none set `moybyte-XXXX`: the last four hex digits of
+the chip's MAC, which on an S3 is its WiFi station's. A P4's radio is its C6,
+whose MAC is out of reach until the radio is up, so a P4 takes its own chip's.
+The host's is a fixed stand-in, HOST_MAC, so its pixels stay the same.
 
 The server reads its sign-in from the store's system folder at every
 connection's start (native/moy_ssh/moy_ssh.h): `password` (the hash this
@@ -13,6 +16,8 @@ password: no SSH, and the radio is not held for it.
   set_password(ws, pw)     store the password's hash (None: remove it), and
                            serve or stop to match; False where it cannot
   is_set()                 whether a password is set
+  name(ws)                 the console's name: Settings' Name, or default_name()
+  default_name()           `moybyte-XXXX`, the name of a console with none set
   hostname(ws)             the mDNS name the console answers to
   rename(ws)               the name re-announced after Settings' Name changed
   status()                 (serving, sessions, signed in, refused) or None
@@ -36,9 +41,10 @@ TAG = "ssh"
 PASSWORD = "password"
 ROUNDS = 4096
 NAME_MAX = 63
-DEFAULT_NAME = "moybyte"
+PREFIX = "moybyte"
+HOST_MAC = b"\x02\x00\x00\x00\xbe\xef"
 
-_state = {"serving": False, "name": None}
+_state = {"serving": False, "name": None, "default": None}
 
 
 def system_dir():
@@ -83,17 +89,37 @@ def _write(name, text):
         f.write(text)
 
 
+def default_name():
+    """Read once: the chip's MAC is fixed. Never stored, so a sync carries
+    only a name the user set."""
+    got = _state["default"]
+    if got is None:
+        try:
+            import machine
+            mac = machine.unique_id()
+        except (ImportError, AttributeError):  # the host
+            mac = HOST_MAC
+        got = _state["default"] = "%s-%02x%02x" % (PREFIX, mac[-2], mac[-1])
+    return got
+
+
+def name(ws):
+    system = getattr(ws, "system", None)
+    return (str(system.get("name", "") or "") if system is not None else "") or default_name()
+
+
 def hostname(ws):
-    """Settings' Name as a DNS label: lowercase letters, digits and hyphens."""
-    raw = str(ws.system.get("name", "") or "") if getattr(ws, "system", None) else ""
+    """The console's name as a DNS label: lowercase letters, digits and
+    hyphens."""
+    raw = name(ws)
     out = []
     for ch in raw.lower():
         if ("a" <= ch <= "z") or ("0" <= ch <= "9"):
             out.append(ch)
         elif out and out[-1] != "-":
             out.append("-")
-    name = "".join(out).strip("-")[:NAME_MAX].strip("-")
-    return name or DEFAULT_NAME
+    label = "".join(out).strip("-")[:NAME_MAX].strip("-")
+    return label or default_name()
 
 
 def _announce(ws):

@@ -67,10 +67,19 @@ def test_passwd_sets_and_removes_the_password(system):
 
 
 @pytest.mark.parametrize("name, label", [
-    ("", "moybyte"), ("Nikola's T-Deck", "nikola-s-t-deck"), ("  --  ", "moybyte"),
+    ("", "moybyte-beef"), ("Nikola's T-Deck", "nikola-s-t-deck"), ("  --  ", "moybyte-beef"),
     ("ЖЖ box 2", "box-2"), ("x" * 80, "x" * 63)])
 def test_the_mdns_name_is_settings_name_as_a_label(name, label):
     assert ssh_service.hostname(WS(name)) == label
+
+
+def test_a_console_with_no_name_is_moybyte_and_its_mac_s_last_four_hex_digits():
+    assert ssh_service.name(WS("")) == "moybyte-beef"
+    assert ssh_service.name(WS("Den")) == "Den"
+    # never stored: a sync carries only a name the user set
+    ws = WS("")
+    ssh_service.name(ws)
+    assert ws.system.get("name", "") == ""
 
 
 class Server:

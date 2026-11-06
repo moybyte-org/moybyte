@@ -145,8 +145,8 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     # nobody to talk to).
     try:
         from players import make_link
-        ws.link = make_link(board=link_id,
-                            name=ws.system.get("name", link_id))
+        from ssh_service import name as console_name
+        ws.link = make_link(board=link_id, name=console_name(ws))
         ws.net = ws.link.net
     except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
         log("boot", "link unavailable: %s" % exc)

@@ -234,9 +234,11 @@ The same shell runs over the USB serial dev
 channel (the kernel word `sh LINE`, `native/moy_kernel/moy_devch.c`, over one
 session the kernel keeps: `SH` a line of output, then `SH end <status>`), over a web
 terminal through the webhost (`device/moy_webhost.py`, a route beside
-`/run` and `/update`), and over **SSH**: `ssh moybyte.local` from any
+`/run` and `/update`), and over **SSH**: `ssh moybyte-XXXX.local` from any
 laptop, `scp`/`sftp` into the files tree, mDNS for the hostname (the IDF's
-`mdns` component, the name Settings' Name), the server Dropbear (MIT-style,
+`mdns` component, the name Settings' Name; a console with none set is
+`moybyte-` and the last four hex digits of its MAC, owner, 2026-11-06,
+`runtime/system/ssh_service.py`), the server Dropbear (MIT-style,
 small, built for embedded; owner, 2026-11-03; libssh is LGPL and awkward in a
 statically linked FSL image, wolfSSH is GPL) with its own crypto: the image's
 mbedTLS has no curve25519, chacha20 or ed25519 (the spike, e5b4dcd9e), so
