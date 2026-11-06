@@ -13,6 +13,7 @@ file(GLOB_RECURSE MOY_SSH_LTC_SRCS ${MOY_SSH}/dropbear/libtomcrypt/*.c)
 add_library(moy_ssh_core STATIC ${MOY_SSH_DB_SRCS} ${MOY_SSH_LTC_SRCS}
     ${MOY_SSH}/moy_ssh.c
     ${MOY_SSH}/moy_ssh_face.c
+    ${MOY_SSH}/moy_ssh_run.c
     ${MOY_SSH}/moy_ssh_sh.c)
 set_source_files_properties(${MOY_SSH_LTC_SRCS} PROPERTIES COMPILE_DEFINITIONS LTC_SOURCE)
 

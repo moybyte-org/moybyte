@@ -10,12 +10,13 @@ is `runtime/system/ssh_service.py`.
 | file | what it is |
 |---|---|
 | `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the hop to the console's task, the counted PSRAM allocator, the POSIX names Dropbear asks for |
+| `moy_ssh_run.c` | the run: the server's task and the face's, made at the first start and parked between a stop and the next, the console's start and stop (`moy_ssh.h`'s THE RUN) |
 | `moy_ssh_face.h`, `moy_ssh_face.c` | the shell's face over the channel: the socket pair, its own task, the terminal's line discipline, `exec` with the channel as its stdin, a text app's keys, the exit status Dropbear reaps |
 | `moy_ssh_sh.c` | the face's shell: a `moy_sh` session over the board's host table (`native/moy_sh/moy_sh_board.h`), the entries that cross the door hopped, `/etc` the server's system folder, a full-screen text app drawn as VT100 |
-| `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`; the server's two tasks, their stacks and records PSRAM |
+| `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`, over the run |
 | `port/` | Dropbear's options (`localoptions.h`), its `config.h`, the names the port renames (`moy_ssh_port.h`, `moy_ssh_names.h`), and in `port/esp/` the headers ESP-IDF lacks |
 | `dropbear/`, `patches/`, `dropbear_vendor.json` | the vendored Dropbear (`UPSTREAM.md`) |
-| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the server, the face and the board's shell over a folder, the console's task a thread |
+| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face and the board's shell over a folder, the console's task a thread, and a VM that answers `passwd` |
 
 ## Crypto
 
@@ -46,6 +47,9 @@ Three tasks, none of them the VM's:
 The server's two tasks are made at the first start and park between a stop
 and the next start, never deleted: deleting a PSRAM-stacked task links
 FreeRTOS's task-state query into IRAM, internal SRAM the idle desk would pay.
+A stop asked from a session's own command (`passwd -d` over SSH) stands
+until that session ends, and a start in the same session (`passwd x`)
+withdraws it (`moy_ssh.h`, THE RUN).
 
 `moy_sh`'s running session is per task (`native/moy_sh/moy_sh.h`, TASKS), so
 an SSH session and the Terminal's run side by side.
@@ -56,7 +60,7 @@ Every Dropbear allocation is PSRAM and counted (`moy_ssh_stats`). Dropbear's
 large globals (`ses`, `svr_ses`, `opts`, `svr_opts`), libtomcrypt's
 descriptor tables and the algorithm lists (which a session writes) are PSRAM
 too, taken at the first `start` (`moy_ssh_globals`): each global's name is
-the object a pointer points at (`port/moy_ssh_port.h`). The module keeps one
+the object a pointer points at (`port/moy_ssh_port.h`). The run keeps one
 pointer of internal SRAM, the server's state one more. A session's shell
 arena is 32 KB of PSRAM (`moy_ssh_sh.c`), not the Terminal's 128 KB: the most
 a session used is `stats()`'s `arena_peak`, measured in #246 over

@@ -10,7 +10,9 @@ ssh-copy-id installed signs in; `password_auth = no` in system/ssh refuses
 the password and still takes the key. Past the sign-in: an `exec` runs on the
 shell with the channel as its stdin and ends with its status; a terminal
 session is the face's line discipline; `top` and `edit` run on the
-alternate screen; and a session's every allocation goes when it ends.
+alternate screen; and a session's every allocation goes when it ends. The
+run (moy_ssh_run.c): `passwd -d` over SSH stops the server once its session
+ends, and `passwd x` in the same session withdraws that stop.
 """
 
 import os
@@ -43,8 +45,8 @@ def _build(out):
     srcs = [os.path.join(d, f) for top in ("src", "libtommath", "libtomcrypt")
             for d, _dirs, files in os.walk(os.path.join(DB, top))
             for f in files if f.endswith(".c")]
-    srcs += [os.path.join(MOD, f) for f in ("moy_ssh.c", "moy_ssh_face.c", "moy_ssh_sh.c",
-                                             "host/ssh_main.c")]
+    srcs += [os.path.join(MOD, f) for f in ("moy_ssh.c", "moy_ssh_face.c", "moy_ssh_run.c",
+                                             "moy_ssh_sh.c", "host/ssh_main.c")]
     native = os.path.join(ROOT, "native")
     flags = ["-Os", "-ffunction-sections", "-fdata-sections", "-w", "-g",
              "-include", os.path.join(MOD, "port", "moy_ssh_names.h"),
@@ -72,15 +74,20 @@ def _build(out):
 
 
 @pytest.fixture(scope="module")
-def harness(tmp_path_factory):
+def built(tmp_path_factory):
     out = tmp_path_factory.mktemp("moy_ssh")
-    exe = _build(out)
+    return out, _build(out)
+
+
+def serve(exe, out):
+    """A server of its own over a fresh tree, its password PASSWORD."""
     tree = out / "tree"
     system = tree / SYSTEM
     system.mkdir(parents=True)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
+    out.mkdir(parents=True, exist_ok=True)
     log = open(out / "server.log", "w+")
     env = dict(os.environ, MOY_SH_ROOT=str(tree), ASAN_OPTIONS="detect_leaks=0")
     server = subprocess.Popen([exe, str(port), str(system)], stdout=log,
@@ -98,12 +105,23 @@ def harness(tmp_path_factory):
     key = home / ".ssh" / "id_ed25519"
     subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
     h = {"port": port, "askpass": askpass, "log": log, "system": system, "home": home,
-         "key": key, "out": out}
+         "key": key, "out": out, "server": server}
     set_password(h, PASSWORD)
+    return h
+
+
+def end(h):
+    h["server"].kill()
+    h["server"].wait()
+    h["log"].close()
+
+
+@pytest.fixture(scope="module")
+def harness(built):
+    out, exe = built
+    h = serve(exe, out / "main")
     yield h
-    server.kill()
-    server.wait()
-    log.close()
+    end(h)
 
 
 def hashed(password):
@@ -265,3 +283,39 @@ def test_every_session_gives_back_what_it_took(harness):
     s = stats(harness)
     assert int(s["heap_now"]) == held
     assert int(s["session_peak"]) > 0
+
+
+def refused(h, wait=3.0):
+    """Whether the port refuses a connection within `wait` seconds."""
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", h["port"]), timeout=1).close()
+        except ConnectionRefusedError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_passwd_in_a_session_stops_the_server_after_it_and_a_new_one_withdraws_the_stop(
+        built, tmp_path):
+    """`passwd -d` asked over SSH (inside a hop) cannot wait for the session
+    it runs in, so the server stops when that session ends; `passwd x` in the
+    same session withdraws the stop, and the server serves on (moy_ssh.h, THE
+    RUN). The harness's VM answers `passwd` as ssh_service does."""
+    _out, exe = built
+    h = serve(exe, tmp_path)
+    try:
+        r = ssh(h, PASSWORD, "moy@127.0.0.1", "passwd -d; passwd other; echo done")
+        assert r.returncode == 0, r.stderr
+        assert b"done" in r.stdout
+        assert not refused(h, wait=1.5)
+        r = ssh(h, "other", "moy@127.0.0.1", "echo in")
+        assert r.returncode == 0 and r.stdout == b"in\n", r.stderr
+        assert stats(h)["listening"] == "1"
+        r = ssh(h, "other", "moy@127.0.0.1", "passwd -d")
+        assert r.returncode == 0, r.stderr
+        assert refused(h)
+        assert stats(h)["listening"] == "0"
+    finally:
+        end(h)

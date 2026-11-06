@@ -22,6 +22,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
@@ -31,13 +32,29 @@ uintptr_t moy_ssh_self(void) {
 }
 
 void moy_ssh_nap(int ms) {
-    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
+    ulTaskNotifyTake(pdTRUE, ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
 }
 
 void moy_ssh_poke(uintptr_t t) {
     if (t != 0) {
         xTaskNotifyGive((TaskHandle_t)t);
     }
+}
+
+// The console's task waits with vTaskDelay: its notifications are
+// MicroPython's (mp_hal_wake_main_task), never the server's.
+void moy_ssh_console_nap(int ms) {
+    vTaskDelay(pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
+}
+
+// Priority 1 on core 0, the stack and the record PSRAM.
+uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg) {
+    TaskHandle_t h = NULL;
+    if (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, 1, &h, 0,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        return 0;
+    }
+    return (uintptr_t)h;
 }
 #else
 #include <pthread.h>
@@ -58,6 +75,21 @@ void moy_ssh_nap(int ms) {
 
 void moy_ssh_poke(uintptr_t t) {
     (void)t;
+}
+
+void moy_ssh_console_nap(int ms) {
+    usleep(ms * 1000);
+}
+
+uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg) {
+    (void)name;
+    (void)stack;
+    pthread_t t;
+    if (pthread_create(&t, NULL, (void *(*)(void *))fn, arg) != 0) {
+        return 0;
+    }
+    pthread_detach(t);
+    return (uintptr_t)t;
 }
 #endif
 
@@ -635,6 +667,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
         // no password set: no SSH
         moy_ssh_free(c.keys);
         close(fd);
+        s_stats.ended++;
         return 0;
     }
     strcpy(s_hash, c.hash);
@@ -661,6 +694,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     g->keys = NULL;
     g->keys_n = 0;
     s_hash[0] = 0;
+    s_stats.ended++;
     return 0;
 }
 

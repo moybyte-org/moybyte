@@ -24,6 +24,14 @@
 // TASKS. The server's task and the face's (moy_ssh_face.h) never touch the
 // store or Python: what must runs on the console's task, HOPPED there
 // (moy_ssh_hop) and served at the frame's tail (moy_ssh_tail).
+//
+// THE RUN (moy_ssh_run.c): the console starts and stops the two tasks. They
+// are made at the first start and park between a stop and the next start,
+// never deleted (README.md, What runs where). A stop ends them after the
+// session they serve. Asked from a session's own command (`passwd -d` over
+// SSH, inside a hop) a stop cannot wait for that session, so it stands until
+// the session ends; a start asked in the same session (`passwd x` next)
+// withdraws it, and the tasks serve on.
 
 #ifndef MOY_SSH_H
 #define MOY_SSH_H
@@ -36,6 +44,7 @@
 
 typedef struct {
     uint32_t sessions;          // connections served
+    uint32_t ended;             // connections ended, signed in or not
     uint32_t signed_in;         // commands run after a sign-in
     uint32_t refused;           // password attempts refused
     size_t heap_now;            // Dropbear's allocations now, bytes
@@ -75,13 +84,29 @@ int moy_ssh_pair(int fds[2]);
 // poke of task `t`'s nap.
 uintptr_t moy_ssh_self(void);
 void moy_ssh_nap(int ms);
+#define MOY_SSH_FOREVER (-1)
 void moy_ssh_poke(uintptr_t t);
+// The console's task's own wait, which leaves its task notifications alone.
+void moy_ssh_console_nap(int ms);
+// fn(arg) on a task of its own (a PSRAM stack on a board), its id or 0.
+uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg);
 // fn(arg) on the console's task, waiting for it; in place when called there.
 void moy_ssh_hop(void (*fn)(void *arg), void *arg);
 // The console's task, at every frame's tail: the hop that waits, run.
 void moy_ssh_tail(void);
 // Whether the console's task is inside a hop now (a session's command).
 int moy_ssh_serving(void);
+
+// The run, on the console's task: serving on `port` (the face's shell set
+// first, moy_ssh_face_set_shell), 0, MOY_SSH_EADDRINUSE or MOY_SSH_ENOMEM;
+// serving already, 0. The stop, and whether it serves. The tasks' ids, 0
+// before the first start made them.
+#define MOY_SSH_EADDRINUSE (-1)
+#define MOY_SSH_ENOMEM (-2)
+int moy_ssh_run_start(int port);
+void moy_ssh_run_stop(void);
+int moy_ssh_run_listening(void);
+void moy_ssh_run_tasks(uintptr_t *server, uintptr_t *face);
 
 void *moy_ssh_calloc(size_t n, size_t size);
 void moy_ssh_free(void *p);
