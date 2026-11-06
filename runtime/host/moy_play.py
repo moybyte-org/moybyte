@@ -263,7 +263,11 @@ def kill_below(procs_held):
 def share_use(board=None):
     """Host only: stand in for `board`'s line (None: the image's own, which
     on the host is no line), its rows' holdings cleared. False for a board
-    no line has."""
+    no line has. Garbage is collected first: a taker freed after the switch
+    gives back bytes the cleared rows never held (an input table an earlier
+    test dropped, freed by the collector in the middle of a measurement)."""
+    import gc
+    gc.collect()
     return _lib().moy_share_use(board.encode() if board is not None else None) == 0
 
 

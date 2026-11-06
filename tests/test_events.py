@@ -280,6 +280,32 @@ def test_a_task_ring_source_takes_from_the_rings_row_and_an_isr_ring_is_internal
         mp.share_use(None)
 
 
+def test_a_table_dropped_before_the_line_switch_gives_nothing_back_after_it():
+    """share_use clears the rows: a ring opened before it and freed after it
+    gave back bytes the row never held, and a later measurement read its own
+    take as gone (CI, 2026-11-06: `(0 - 544) == 1056` above)."""
+    import gc
+    from runtime import moy_play as mp
+    old = mi.InputTable()
+    old.ring_source("uart0", mi.PROV_FIFO, 64)
+    old.cycle = old                     # garbage only the collector frees
+    del old
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        assert mp.share_use("tdeck")
+        t = mi.InputTable()
+        f = t.ring_source("uart1", mi.PROV_FIFO, 64)
+        held = mp.share_held(mp.SHARE_RINGS)
+        gc.collect()
+        assert mp.share_held(mp.SHARE_RINGS) == held
+        f.close()
+    finally:
+        mp.share_use(None)
+        if was:
+            gc.enable()
+
+
 def test_an_isr_ring_counts_its_drops_once_where_its_readers_find_them():
     t = mi.InputTable()
     g = t.ring_source("gpio5", mi.PROV_ISR, 4)
