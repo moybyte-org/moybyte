@@ -14,7 +14,7 @@ sys.path.insert(0, ROOT)
 from runtime import editor_panes as P      # noqa: E402
 from runtime import host_app                # noqa: E402
 from runtime import ui                      # noqa: E402
-from ws_helpers import settle_badges  # noqa: E402
+from ws_helpers import quiesce, settle_badges  # noqa: E402
 
 FULL_1024 = (6, 46, 1012, 548)              # full screen: the row is the top 40 px
 STRIP_1024 = (6, 90, 1012, 504)             # the pictures' title-strip frame
@@ -348,7 +348,7 @@ def test_a_sheet_pick_sets_the_sprite_and_the_brush_and_a_slide_previews(desk):
 
 def _card_bodies_hidden(ws, drv, keys, monkeypatch, label):
     from runtime import editor_desk
-    ws.pointer.visible = False
+    quiesce(ws)
     d = ws.editor_desk
 
     def shot(key):
