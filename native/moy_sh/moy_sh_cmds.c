@@ -828,6 +828,9 @@ static int datecmd(int argc, char **argv) {
         fmt = argptr[0] + 1;
     }
     time_t now = time(NULL);
+#ifdef ESP_PLATFORM
+    now += 946684800;           // a board's clock counts from 2000 (moy_wifi.c)
+#endif
     struct tm tm;
     char buf[128];
     gmtime_r(&now, &tm);
