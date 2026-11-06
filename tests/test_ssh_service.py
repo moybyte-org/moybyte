@@ -109,17 +109,22 @@ class Wifi:
 
 
 @pytest.mark.parametrize("up", [False, True])
-def test_serving_holds_the_ssh_lease_and_dials_the_last_network(system, monkeypatch, up):
+def test_serving_holds_the_ssh_lease_dials_the_last_network_and_answers_by_name(system, monkeypatch, up):
     server = Server()
     monkeypatch.setattr(ssh_service, "_N", server)
     monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None})
-    monkeypatch.setattr(ssh_service, "_announce", lambda ws: None)
-    ws = WS()
+    names = []
+    monkeypatch.setitem(__import__("sys").modules, "moy_net",
+                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
+    ws = WS("Desk 2")
     ws.wifi = Wifi(up)
     assert not ssh_service.start(ws) and ws.held == []
     assert ssh_service.set_password(ws, "s3cret")
     assert ws.held == ["ssh"] and server.calls == [("start", str(system))]
     # the station starts toward the last-joined network unless it is up
     assert ws.wifi.wlan.dialled == ([] if up else [("last", "pw")])
+    assert names == ["desk-2"]
     assert ssh_service.set_password(ws, None)
     assert ws.held == [] and server.calls[-1] == ("stop",)
+    # the responder ends with the server: its task is internal SRAM
+    assert names == ["desk-2", ""]

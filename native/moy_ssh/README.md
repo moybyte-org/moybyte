@@ -43,6 +43,10 @@ Three tasks, none of them the VM's:
   is held and sent from the face's task after it, so the console never waits
   on a client. The connection's sign-in files are read the same way.
 
+The server's two tasks are made at the first start and park between a stop
+and the next start, never deleted: deleting a PSRAM-stacked task links
+FreeRTOS's task-state query into IRAM, internal SRAM the idle desk would pay.
+
 `moy_sh`'s running session is per task (`native/moy_sh/moy_sh.h`, TASKS), so
 an SSH session and the Terminal's run side by side.
 

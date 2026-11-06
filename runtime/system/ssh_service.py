@@ -151,6 +151,17 @@ def start(ws):
     return True
 
 
+def _unannounce():
+    if _state["name"] is None:
+        return
+    _state["name"] = None
+    try:
+        import moy_net
+        moy_net.wifi_mdns("")
+    except Exception as exc:  # noqa: BLE001 -- a responder that will not end ends with the radio
+        print("Moybyte ssh: mDNS: %s" % (exc,))
+
+
 def stop(ws):
     if not _state["serving"]:
         return
@@ -158,6 +169,7 @@ def stop(ws):
     try:
         _N.stop()
     finally:
+        _unannounce()
         ws.wifi_release(TAG)
 
 

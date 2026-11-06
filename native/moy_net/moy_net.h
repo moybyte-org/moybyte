@@ -439,7 +439,8 @@ void moy_wifi_state(moy_wifi_state_t *out);
 int moy_wifi_connect_kept(void);
 void moy_wifi_forget_kept(const char *ssid);
 // The provisioning access point beside the station (open; its address in
-// `*ip`), its MAC, and the mDNS name the board answers to: 0 or an ESP error.
+// `*ip`), its MAC, and the mDNS name the board answers to (an empty name
+// ends the responder and gives back its task): 0 or an ESP error.
 int moy_wifi_ap(const char *ssid, uint32_t *ip);
 int moy_wifi_ap_mac(uint8_t mac[6]);
 int moy_wifi_mdns(const char *host);

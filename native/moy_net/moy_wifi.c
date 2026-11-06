@@ -378,11 +378,19 @@ int moy_wifi_ap_mac(uint8_t mac[6]) {
 // The name the board answers to on the network (`<host>.local`), with its
 // web console as an http service, where the board takes the responder
 // (MOY_NET_MDNS: the headless Zero, found by name, and every console while
-// its SSH server serves). 0, an ESP error, or
+// its SSH server serves). An empty name ends the responder: its task's
+// stack and records are internal SRAM. 0, an ESP error, or
 // ESP_ERR_NOT_SUPPORTED in an image without it.
 int moy_wifi_mdns(const char *host) {
     #if HAVE_MDNS
     static uint8_t up;
+    if (host[0] == '\0') {
+        if (up) {
+            mdns_free();
+            up = 0;
+        }
+        return 0;
+    }
     if (!up) {
         esp_err_t e = mdns_init();
         if (e != ESP_OK) {
