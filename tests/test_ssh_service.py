@@ -41,7 +41,7 @@ class Door:
 @pytest.fixture
 def system(tmp_path, monkeypatch):
     monkeypatch.setattr(ssh_service._docs, "system_store_path",
-                        lambda: str(tmp_path / "settings"))
+                        lambda root=None: str(tmp_path / "settings"))
     return tmp_path
 
 
@@ -53,12 +53,12 @@ def test_the_hash_is_the_server_s_form():
 def test_passwd_sets_and_removes_the_password(system):
     ws = WS()
     d = Door(ws)
-    assert not ssh_service.is_set()
+    assert not ssh_service.is_set(ws)
     assert sh_roles.r_passwd(d, ["s3cret"]) == 0
     text = (system / "password").read_text()
     salt = text.split("$")[2]
     assert text == ssh_service.hashed("s3cret", salt) + "\n"
-    assert ssh_service.is_set()
+    assert ssh_service.is_set(ws)
     assert sh_roles.r_passwd(d, []) == 0 and d.text == "password set\n"
     assert sh_roles.r_passwd(d, ["-d"]) == 0
     assert not (system / "password").exists()
@@ -194,3 +194,13 @@ def test_a_stop_from_a_session_lets_the_radio_and_the_name_go_once_the_server_pa
     assert wakes.live == {} and ws.held == ["ssh"]
     wakes.tick()
     assert ws.held == ["ssh"] and names[-1] == "desk"
+
+
+def test_the_sign_in_folder_is_beside_the_carts_the_console_booted_on():
+    """No card: the console's carts are the internal store's, and so are its
+    settings and the server's sign-in files (/moy/system), never the card's."""
+    ws = WS()
+    ws.carts_root = "/moy/carts"
+    assert ssh_service.system_dir(ws) == "/moy/system"
+    ws.carts_root = "/sd/moybyte/carts"
+    assert ssh_service.system_dir(ws) == "/sd/moybyte/system"

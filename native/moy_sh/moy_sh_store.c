@@ -65,10 +65,9 @@ static void sayf(moy_sh_t *s, int fd, const char *fmt, const char *a, const char
 
 // -- settings -------------------------------------------------------------------------
 
-// The file's path under `root` (the files tree's), into `out`.
+// The file's path in the store folder `root`, into `out`.
 static int settings_path(const char *root, char *out, size_t cap, int dir) {
-    int n = snprintf(out, cap, "%s%s/%s", root, MOY_SH_STORE,
-                     dir ? "system" : "system/settings");
+    int n = snprintf(out, cap, "%s/%s", root, dir ? "system" : "system/settings");
     return n > 0 && (size_t)n < cap;
 }
 
@@ -246,9 +245,9 @@ static int settings_cmd(moy_sh_t *s, const char *root, int argc, char **argv) {
 
 // -- pkg ------------------------------------------------------------------------------
 
-// The carts folder under `root`: the store's, where the console keeps them.
+// The carts folder in the store folder `root`, where the console keeps them.
 static int carts_root(const char *root, char *out, size_t cap) {
-    int n = snprintf(out, cap, "%s%s/carts", root, MOY_SH_STORE);
+    int n = snprintf(out, cap, "%s/carts", root);
     return n > 0 && (size_t)n < cap;
 }
 

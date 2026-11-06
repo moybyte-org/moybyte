@@ -287,7 +287,10 @@ the serial `sh`, the recovery console), starts in the **user's files
 folder** beside the store's carts, `/sd/moybyte/files` on a card and
 `/moy/files` without one, which is its `$HOME` and where `cd` returns; a
 console with no files folder yet starts in `/`
-(`moy_sh_board_go_home`). It is the folder the Files app shows, so the
+(`moy_sh_board_go_home`). The store is the one the console booted on, found
+the way its boot finds it (the card's where its carts are there, else the
+internal flash's), and `/etc` is that store's `system/`, the folder the SSH
+server signs in from (`ssh_service.system_dir`, beside `ws.carts_root`). It is the folder the Files app shows, so the
 shell, SFTP and the app see one home; the home's `.ssh` is `/etc`, as
 `/.ssh` is, so ssh-copy-id's key lands where the server reads it.
 

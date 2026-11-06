@@ -364,7 +364,7 @@ static void *sh_open(moy_ssh_face_t *f) {
         moy_ssh_free(h);
         return NULL;
     }
-    moy_sh_board_go_home(h->s);
+    moy_sh_board_go_home(h->s, 1);
     if (!moy_ssh_face_pty(f)) {
         moy_sh_setvar(h->s, "TERM", "dumb");   // a command's bytes, not a screen
     }

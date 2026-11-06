@@ -20,7 +20,8 @@ PARK_MS. A start before then cancels the wake and keeps both.
   boot(ws)                 at the console's first frame: serve if a password is set
   set_password(ws, pw)     store the password's hash (None: remove it), and
                            serve or stop to match; False where it cannot
-  is_set()                 whether a password is set
+  system_dir(ws)           the store's system folder the server signs in from
+  is_set(ws)               whether a password is set
   name(ws)                 the console's name: Settings' Name, or default_name()
   default_name()           `moybyte-XXXX`, the name of a console with none set
   hostname(ws)             the mDNS name the console answers to
@@ -71,19 +72,21 @@ PARK_MS = 100
 _state = {"serving": False, "name": None, "default": None, "park": None}
 
 
-def system_dir():
-    """The store's system folder, where the server reads its sign-in."""
-    path = _docs.system_store_path()
+def system_dir(ws):
+    """The store's system folder, where the server reads its sign-in: the one
+    beside the carts the console booted on (the card's, or the internal
+    store's without one), where its settings are."""
+    path = _docs.system_store_path(getattr(ws, "carts_root", None) or _docs.CARTS_DIR)
     return path.rsplit("/", 1)[0]
 
 
-def _path(name):
-    return system_dir() + "/" + name
+def _path(ws, name):
+    return system_dir(ws) + "/" + name
 
 
-def is_set():
+def is_set(ws):
     try:
-        with open(_path(PASSWORD)) as f:
+        with open(_path(ws, PASSWORD)) as f:
             return f.read().startswith("$moy1$")
     except OSError:
         return False
@@ -104,12 +107,12 @@ def _salt():
     return "".join("%02x" % b for b in os.urandom(16))
 
 
-def _write(name, text):
+def _write(ws, name, text):
     try:
-        _docs._mkdir(system_dir())
+        _docs._mkdir(system_dir(ws))
     except Exception:  # noqa: BLE001 -- the folder may already be there
         pass
-    with open(_path(name), "w") as f:
+    with open(_path(ws, name), "w") as f:
         f.write(text)
 
 
@@ -184,14 +187,14 @@ def rename(ws):
 def start(ws):
     """Serve: the radio held for "ssh", the server listening, the name on
     the network. False with no server in the image or no password set."""
-    if _N is None or not is_set():
+    if _N is None or not is_set(ws):
         return False
     if _state["serving"]:
         return True
     _unpark()
     ws.wifi_hold(TAG)
     try:
-        _N.start(system_dir())
+        _N.start(system_dir(ws))
     except Exception as exc:  # noqa: BLE001 -- a server that will not start serves nothing
         print("Moybyte ssh: %s" % (exc,))
         ws.wifi_release(TAG)
@@ -270,14 +273,14 @@ def set_password(ws, password):
     if password is None:
         try:
             import os
-            os.remove(_path(PASSWORD))
+            os.remove(_path(ws, PASSWORD))
         except OSError:
             pass
         stop(ws)
         return True
     if not password:
         return False
-    _write(PASSWORD, hashed(password, _salt()) + "\n")
+    _write(ws, PASSWORD, hashed(password, _salt()) + "\n")
     start(ws)
     return True
 

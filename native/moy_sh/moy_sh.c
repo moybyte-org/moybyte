@@ -223,6 +223,18 @@ int moy_sh_go_home(moy_sh_t *s, const char *const *dirs) {
     return at;
 }
 
+int moy_sh_is_dir(moy_sh_t *s, const char *path) {
+    struct moy_sh_globals *was = enter(s);
+    struct stat st;
+    int r = stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    leave(was);
+    return r;
+}
+
+void moy_sh_set_etc(moy_sh_t *s, const char *etc) {
+    s->host.etc = etc;
+}
+
 void moy_sh_free(moy_sh_t *s) {
     if (s == NULL) {
         return;

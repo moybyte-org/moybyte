@@ -32,7 +32,6 @@ MOD = os.path.join(ROOT, "native", "moy_ssh")
 DB = os.path.join(MOD, "dropbear")
 PASSWORD = "moybyte-test"
 SALT = "00112233445566778899aabbccddeeff"
-SYSTEM = "sd/moybyte/system"
 FILES = "sd/moybyte/files"
 
 pytestmark = pytest.mark.skipif(
@@ -83,12 +82,15 @@ def built(tmp_path_factory):
     return out, _build(out)
 
 
-def serve(exe, out):
-    """A server of its own over a fresh tree, its password PASSWORD."""
+def serve(exe, out, store="sd/moybyte"):
+    """A server of its own over a fresh tree whose console keeps its store in
+    `store` (the card's, or "moy": the internal flash's), its password
+    PASSWORD."""
     tree = out / "tree"
-    system = tree / SYSTEM
+    system = tree / store / "system"
     system.mkdir(parents=True)
-    (tree / FILES).mkdir(parents=True)
+    for sub in ("carts", "files"):
+        (tree / store / sub).mkdir(parents=True)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -297,6 +299,27 @@ def test_a_session_starts_in_the_files_folder_and_the_root_lists_what_is_there(h
     assert r.returncode == 0, r.stderr
     assert r.stdout.decode().split("\n")[:3] == ["/" + FILES, "/" + FILES,
                                                   "asdf.txt  bin/  dev/  etc/  proc/  sd/"]
+
+
+def test_with_no_card_the_session_and_ssh_copy_id_use_the_internal_store(built, tmp_path):
+    """No card: the console's store is the internal flash's (/moy), so a
+    session starts in /moy/files, /etc is /moy/system, and ssh-copy-id's key
+    lands in the folder the server signs in from."""
+    _out, exe = built
+    h = serve(exe, tmp_path, store="moy")
+    try:
+        assert h["system"] == tmp_path / "tree" / "moy" / "system"
+        r = ssh(h, PASSWORD, "moy@127.0.0.1", "pwd; grep -c moy1 /etc/password")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.decode().split("\n")[:2] == ["/moy/files", "1"]
+        pub = (h["key"].parent / "id_ed25519.pub").read_text().strip()
+        r = ssh(h, PASSWORD, "moy@127.0.0.1", CURRENT_INSTALL, stdin=(pub + "\n").encode())
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert (h["system"] / "authorized_keys").read_text() == pub + "\n"
+        r = ssh(h, "", "moy@127.0.0.1", "echo in", key=True)
+        assert r.returncode == 0 and r.stdout == b"in\n", r.stderr
+    finally:
+        end(h)
 
 
 def test_password_auth_no_refuses_the_password_and_keeps_the_key(harness):

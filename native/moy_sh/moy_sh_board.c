@@ -278,7 +278,9 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
     int32_t r = door_int("role", argc, argv);
     if (r == DOOR_NEEDS_VM) {
-        int k = moy_sh_store_role(s, files_root(), argc, argv);
+        char store[MOY_SH_STORE_PATH];
+        snprintf(store, sizeof store, "%s%s", files_root(), moy_sh_board_store(s));
+        int k = moy_sh_store_role(s, store, argc, argv);
         if (k != MOY_SH_NOT_FOUND) {
             return k;
         }
@@ -621,8 +623,49 @@ void moy_sh_board_yield(void) {
     b_sleep(NULL, 1);
 }
 
-void moy_sh_board_go_home(moy_sh_t *s) {
-    const char *dirs[] = { MOY_SH_STORE "/files", "/moy/files", "/files", NULL };
+// The stores a console boots on, in the order the console's boot tries them
+// (device/card_store.py's carts_loader: the card, else the internal flash).
+#define STORES(X) X("/sd/moybyte") X("/moy") X("")
+
+static int store_at(moy_sh_t *s) {
+    const char *const carts[] = {
+#define CARTS(p) p "/carts",
+        STORES(CARTS)
+#undef CARTS
+    };
+    for (int i = 0; i < (int)(sizeof carts / sizeof carts[0]); i++) {
+        if (moy_sh_is_dir(s, carts[i])) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+const char *moy_sh_board_store(moy_sh_t *s) {
+    const char *const stores[] = {
+#define STORE(p) p,
+        STORES(STORE)
+#undef STORE
+    };
+    return stores[store_at(s)];
+}
+
+void moy_sh_board_go_home(moy_sh_t *s, int keep_etc) {
+    const char *const systems[] = {
+#define SYSTEM(p) p "/system",
+        STORES(SYSTEM)
+#undef SYSTEM
+    };
+    const char *const homes[] = {
+#define HOME(p) p "/files",
+        STORES(HOME)
+#undef HOME
+    };
+    int i = store_at(s);
+    if (!keep_etc) {
+        moy_sh_set_etc(s, systems[i]);
+    }
+    const char *dirs[] = { homes[i], NULL };
     moy_sh_go_home(s, dirs);
 }
 
@@ -637,7 +680,7 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
     h->poll = poll;
     // off a board (the suite's harness) the files tree is a folder it names
     h->root = files_root();
-    h->etc = MOY_SH_STORE "/system";
+    h->etc = "/sd/moybyte/system";      // until the session settles (moy_sh_board_go_home)
     h->vread = b_vread;
     h->vwrite = b_vwrite;
     h->vlist = b_vlist;
@@ -818,7 +861,7 @@ bool moy_sh_board_line(const char *text) {
             moy_loop_say_line("SH error no session");
             return false;
         }
-        moy_sh_board_go_home(s);
+        moy_sh_board_go_home(s, 0);
         moy_sh_setvar(s, "TERM", "dumb");  // the channel carries lines, not a screen
         f->s = s;
         moy_sh_park(s);

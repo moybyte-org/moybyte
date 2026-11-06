@@ -143,6 +143,12 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
 // session stays where it was). A home's `.ssh` is the host's `etc`, as `/.ssh` is.
 #define MOY_SH_HOME_MAX 96
 int moy_sh_go_home(moy_sh_t *s, const char *const *dirs);
+
+// Whether `path` (a shell path) is a folder of the session's tree.
+int moy_sh_is_dir(moy_sh_t *s, const char *path);
+
+// The folder /etc names from now on (`etc` outlives the session).
+void moy_sh_set_etc(moy_sh_t *s, const char *etc);
 void moy_sh_free(moy_sh_t *s);
 
 // Feed `n` bytes the face read (a line, its newline included). Answers

@@ -482,7 +482,7 @@ def r_passwd(d, a):
     ws = d.ws
     if not a:
         st = ssh_service.status()
-        d.out("password %s\n" % ("set" if ssh_service.is_set() else "not set"))
+        d.out("password %s\n" % ("set" if ssh_service.is_set(ws) else "not set"))
         if st is not None:
             d.out("ssh %s as %s.local, %d session(s), %d refused\n"
                   % ("serving" if st[0] else "off", ssh_service.hostname(ws), st[1], st[3]))

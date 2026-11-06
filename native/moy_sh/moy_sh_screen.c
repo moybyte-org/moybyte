@@ -162,7 +162,7 @@ moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
         h.free(NULL, f);
         return NULL;
     }
-    moy_sh_board_go_home(f->s);
+    moy_sh_board_go_home(f->s, 0);
     return f;
 }
 

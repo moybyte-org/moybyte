@@ -60,13 +60,18 @@
 #define MOY_SH_SERIAL_LINE 240u         // an `SH` line's bytes, longer ones wrap
 #define MOY_SH_SERIAL_COLS 80           // a text app's screen on the serial face
 #define MOY_SH_SERIAL_ROWS 24
-#define MOY_SH_STORE "/sd/moybyte"      // the console's store: system/ and the carts
 #define MOY_SH_STORE_PATH 320u          // a store path's bytes, the root's included
 
-// A new session's home and working folder: the user's files folder beside the
-// store's carts (a card's, the internal store's, or a host tree whose root is
-// the store's own folder), else `/` as it began.
-void moy_sh_board_go_home(moy_sh_t *s);
+// The console's store folder, as it boots on one: the card's (/sd/moybyte)
+// where its carts are there, else the internal store's (/moy), else a host
+// tree's root (""), which is a store's own folder; the card's where none has
+// its carts yet. Its system/ is /etc, its carts/ the shelf, its files/ home.
+const char *moy_sh_board_store(moy_sh_t *s);
+
+// A new session settled in the store: /etc its system folder (unless
+// `keep_etc`: the SSH face's is the server's own), its home and working
+// folder the user's files folder, else `/` as it began.
+void moy_sh_board_go_home(moy_sh_t *s, int keep_etc);
 
 // The board's table into `h`, the face's terminal (`out`, `poll`, `ctx`) in it.
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
@@ -74,7 +79,8 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        int (*poll)(void *ctx));
 
 // The store's commands with no VM (above): an exit status, or
-// MOY_SH_NOT_FOUND when `argv` names none of them. `root` prefixes every path.
+// MOY_SH_NOT_FOUND when `argv` names none of them. `root` is the store folder
+// as the C library names it (the files tree's root, then moy_sh_board_store).
 int moy_sh_store_role(moy_sh_t *s, const char *root, int argc, char **argv);
 
 // A long run's yield: the task sleeps a tick, so a task below it runs.

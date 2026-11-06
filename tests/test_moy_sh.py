@@ -176,10 +176,13 @@ def test_the_serial_face_answers_as_its_transcript_says(harness, tmp_path, name)
 
 
 def _seed_home(root, name):
-    """A `home_` script's tree holds a console's files folder, where its
-    session starts (moy_sh_board_go_home)."""
-    if name.startswith("home_"):
-        (root / "sd" / "moybyte" / "files").mkdir(parents=True)
+    """A `home_` script's tree holds a console's store on its card, a
+    `nocard_` script's on the internal flash (/moy): its carts and its files
+    folder, where the session starts (moy_sh_board_go_home)."""
+    store = ("sd/moybyte" if name.startswith("home_")
+             else "moy" if name.startswith("nocard_") else None)
+    for sub in ("carts", "files") if store else ():
+        (root / store / sub).mkdir(parents=True)
 
 
 def _face(harness, path, root, screen):
