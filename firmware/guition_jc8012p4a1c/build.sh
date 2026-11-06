@@ -98,6 +98,9 @@ moybyte_patch_thread_state_tls
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
 # so a call here reserves 0. Whether a P4 wants a reserve is unmeasured (#58).
 
+# DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
+# SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
+
 # DECLINED moybyte_patch_psram_retune -- not applicable: an ESP32-S3 MSPI
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist
 # in its build.

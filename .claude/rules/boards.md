@@ -137,6 +137,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   made the tick SLOWER (the drivers starve). The VM's win in internal memory is
   instruction placement (`MOY_HOT`); its allocator is a small-object pool
   (`native/moycore/README.md`).
+- **Do NOT turn on `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` on the S3s**
+  (A/B'd on both and declined, 2026-11-06, #246). ESP-IDF's own fragments then
+  move the .bss of lwIP, wpa_supplicant, the WiFi driver's net80211 and pp and
+  the BT host to PSRAM, which frees internal RAM at an idle desk, but the WiFi
+  driver's start then takes more internal RAM than the move freed, and the
+  driver keeps it until a reboot. A component's static scratch moves to PSRAM
+  by a patch that allocates it while the component runs instead
+  (`moybyte_patch_mdns_psram`, `tools/patch_mdns_psram.py`).
 
 ## Hard constraints — each one hung or bricked a board
 

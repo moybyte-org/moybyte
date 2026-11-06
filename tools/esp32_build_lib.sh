@@ -406,6 +406,19 @@ moybyte_patch_usj_rx_init() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_usj_rx_init.py" "${MPY_DIR}" || exit 1
 }
 
+# The mDNS responder's four function-static scratch buffers (about 1.8 KB of
+# internal .bss in every image that links espressif/mdns) become one PSRAM
+# block mdns_init allocates and mdns_free frees, so a console whose responder
+# runs only while its SSH server serves holds none of it otherwise.
+# tools/patch_mdns_psram.py is the patch and why ESP-IDF's external-.bss
+# option was declined; all-or-nothing, idempotent. The patch goes to the
+# component manager's copy, which exists only once the build has fetched it,
+# so this records the opt-in and moybyte_submodules applies it after the fetch.
+moybyte_patch_mdns_psram() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  MOYBYTE_MDNS_PSRAM=1
+}
+
 # LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
 # flash store programs 1 KB of a file at a time instead of 128 bytes and walks
 # the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is
@@ -878,12 +891,18 @@ moybyte_submodules_key() {
 
 moybyte_submodules() {
   local bout="$1"
-  if [ "$(cat "${bout}/.moybyte-submodules" 2>/dev/null)" = "$(moybyte_submodules_key)" ]; then
-    return 0
+  local mdns="managed_components/espressif__mdns/mdns.c"
+  if [ "$(cat "${bout}/.moybyte-submodules" 2>/dev/null)" != "$(moybyte_submodules_key)" ] \
+     || { [ -n "${MOYBYTE_MDNS_PSRAM:-}" ] && [ ! -f "${mdns}" ]; }; then
+    make submodules BOARD_DIR="${BOARD_DIR}"
+    mkdir -p "${bout}"
+    moybyte_submodules_key > "${bout}/.moybyte-submodules"
   fi
-  make submodules BOARD_DIR="${BOARD_DIR}"
-  mkdir -p "${bout}"
-  moybyte_submodules_key > "${bout}/.moybyte-submodules"
+  # The submodules step's configure is the component manager's fetch, so the
+  # managed components are there to patch before the build compiles them.
+  if [ -n "${MOYBYTE_MDNS_PSRAM:-}" ]; then
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_mdns_psram.py" "${MPY_DIR}" || exit 1
+  fi
 }
 
 moybyte_build_and_collect() {

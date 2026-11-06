@@ -50,7 +50,10 @@ def board():
 # reads the battery gauge (its low glyph), so the baseline holds what the
 # ADC driver keeps in internal SRAM once read. A change that adds internal
 # statics, or internal RAM the idle desk holds, re-measures it the same way.
-WASM_IDLE_BASELINE = (125863, 86016)
+# Plus mDNS's scratch (the espressif/mdns component's four function-static
+# buffers, a PSRAM block while the responder runs, moybyte_patch_mdns_psram):
+# 1849 bytes of .bss by the link map against dev 145567a4f, 2026-11-06.
+WASM_IDLE_BASELINE = (125863 + 1849, 86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 

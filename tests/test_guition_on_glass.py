@@ -101,7 +101,11 @@ EXFAT_SRAM = 640
 # Less the floor's state (native/moy_kernel: the recovery view and its
 # geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
 # by the link map.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270 + 4 - 640
+# Less mDNS's scratch (the espressif/mdns component's four function-static
+# buffers, a PSRAM block while the responder runs, moybyte_patch_mdns_psram):
+# 1849 bytes of .bss by the link map against dev 145567a4f, 2026-11-06.
+KERNEL_SRAM = (1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270
+               + 4 - 640 - 1849)
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

@@ -116,6 +116,13 @@ make firmware-flash-guition-s3 PORT=/dev/ttyACM1
 make firmware-monitor-guition-s3 PORT=/dev/ttyACM1
 ```
 
+The patch ladder is `build.sh`'s, each shared patch called or declined in
+writing. Internal SRAM is this board's squeeze, so the network stack's static
+data stays where ESP-IDF puts it except mDNS's scratch, which
+`moybyte_patch_mdns_psram` turns into a PSRAM block held only while the
+responder runs (`.claude/rules/boards.md` has why the IDF-wide external-.bss
+option was declined).
+
 Bring-up smokes: `modules/moybyte_shell.py`'s `MODE` ("panel" / "touch" /
 "desktop"), all self-terminating, all re-runnable from the live REPL:
 

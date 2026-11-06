@@ -703,7 +703,10 @@ poller it served (2026-10-07): the keyboard and the GT911 are the kernel's,
 passed on its input task, and nothing opens a `machine.I2C`. A third rides
 along, the same one the P4 build reuses: **native-code-free**
 (#66), which lets a cart-compile miss reclaim the `@micropython.native` exec
-arena instead of growing it until soft reset.
+arena instead of growing it until soft reset. And one this tree adds to the
+component manager's copy of espressif/mdns, `moybyte_patch_mdns_psram`: the
+responder's scratch is a PSRAM block while it serves `<name>.local` for SSH,
+not internal .bss for the whole power-on.
 
 ---
 

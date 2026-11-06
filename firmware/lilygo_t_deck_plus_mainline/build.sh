@@ -118,6 +118,11 @@ moybyte_patch_usj_rx_init
 #     MSPI setting in sdkconfig.board, not optional alongside it.
 moybyte_patch_psram_retune
 
+# The mDNS responder's scratch is PSRAM while it runs (the SSH server's
+# `<name>.local`), not internal .bss for the whole power-on
+# (tools/patch_mdns_psram.py).
+moybyte_patch_mdns_psram
+
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
 

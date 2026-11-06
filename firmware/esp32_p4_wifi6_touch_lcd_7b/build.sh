@@ -146,6 +146,9 @@ moybyte_patch_lfs_sizes
 # Whether a P4 with 32MB of PSRAM wants a reserve at all is unmeasured (#58);
 # the day it is, the board sets the define and takes the call back.
 
+# DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
+# SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
+
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
 # the file does not exist in its build. Its PSRAM constraint is a different one
