@@ -323,19 +323,26 @@ def _processes_reset():
         if m is not None:
             gate = getattr(m, "LEASES", m)
             gate.grants = None
+    N = sys.modules.get("runtime.notifications")
+    if N is not None and (N.NOTES.list or N.NOTES.banner is not None):
+        N.NOTES.reset()
 
 
 @pytest.fixture(autouse=True)
 def _processes_fresh():
-    """Whose code runs and who grants what are one per process, as they are
-    one per board: the kernel's current process (`moy_log.current`), which a
-    run makes itself until it ends, and the lease and device gates
-    (`leases.LEASES.grants`, `devices.grants`), which a Workstation binds to
-    its running set as it boots. A test that left a game running handed
-    every later test on the worker that game's pid, and one that built a
-    Workstation handed it that console's grants, so the shell's own reads (a
-    /dev file) and a bare process's lease were refused as another's. Each
-    test starts, and leaves, the shell current and the gates unbound, as a
+    """Whose code runs, who grants what and what the processes posted are
+    one per process, as they are one per board: the kernel's current process
+    (`moy_log.current`), which a run makes itself until it ends; the lease
+    and device gates (`leases.LEASES.grants`, `devices.grants`), which a
+    Workstation binds to its running set as it boots; and the notifications
+    (`notifications.NOTES`), whose banner stays up BANNER_MS of wall time. A
+    test that left a game running handed every later test on the worker that
+    game's pid, one that built a Workstation handed it that console's grants,
+    so the shell's own reads (a /dev file) and a bare process's lease were
+    refused as another's, and a badge an earlier test's achievements process
+    posted into the next test's console stayed up as a banner, which keeps
+    a console animating and draws over the bar. Each test starts, and
+    leaves, the shell current, the gates unbound and no notification, as a
     fresh VM has them before its console boots."""
     _processes_reset()
     yield
