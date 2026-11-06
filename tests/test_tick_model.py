@@ -665,8 +665,8 @@ class _FakeSession:
     def pending(self, now):
         return self.on
 
-    def draws(self, f):
-        return True
+    def dt_at(self, f):
+        return 1 / 30
 
     def due(self, now):
         return self.on

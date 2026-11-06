@@ -481,7 +481,7 @@ static void refresh(run_t *r, int32_t *s) {
         s[SNAP_KEY] = 0;
         s[SNAP_TOUCH_X] = s[SNAP_TOUCH_Y] = s[SNAP_TOUCH_DOWN] = s[SNAP_TOUCH_MS] = 0;
         // time() is the match's clock: two consoles' wall clocks are two worlds.
-        s[SNAP_TIME_MS] = (int32_t)(m->s.frame * 1000 / (m->s.tick_hz ? m->s.tick_hz : 30));
+        s[SNAP_TIME_MS] = moy_lockstep_ms(m, m->s.frame);
         return;
     }
     uint32_t held = 0, pressed = 0;
@@ -587,7 +587,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
         // A match's dt is the C float of its tick on every path: a dt that
         // crossed a VM (REPR_C's 30-bit float, the console path) is not
         // the bits the kernel's front frame hands the other console.
-        dt = 1.0f / (float)(lm->s.tick_hz ? lm->s.tick_hz : MOY_MATCH_TICK_HZ);
+        dt = 1.0f / (float)moy_lockstep_hz_at(lm, lm->s.frame - 1);
     }
     for (uint8_t i = 0; i < ticks; i++) {
         if ((r->flags & MOY_PLAY_PACED) && r->in != NULL) {
@@ -879,11 +879,11 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     bool render = true;
     if (moy_play_lockstep(F.run, now, &ticks)) {
         moy_match_t *mm = moy_match_kernel();
-        dt = 1.0f / (float)(mm != NULL && mm->s.tick_hz ? mm->s.tick_hz : MOY_MATCH_TICK_HZ);
+        dt = 1.0f / (float)moy_lockstep_hz_at(mm, mm->s.frame - 1);
         // A matched game draws the frames it simulates and no others: a draw
         // between ticks, or over a stalled one, is a present the stall's
         // retry waits behind (the console's path draws on the due tick).
-        render = ticks > 0 && moy_lockstep_draws(mm, mm->s.frame - 1);
+        render = ticks > 0;
     } else if ((r->flags & MOY_PLAY_PACED) && r->tick != NULL && r->tick->rate > 0) {
         render = moy_tick_plan(r->tick, (moy_tick_real_t)dt, &ticks);
         if (ticks == 0) {

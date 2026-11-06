@@ -31,9 +31,10 @@ belongs here is only what a coder must not undo:
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
 - **Input delay is ADAPTIVE** (raise 2026-08-25, way down 2026-11-06): matches
-  start at DELAY=1 (one tick: 33 ms at 30 Hz, 16.7 ms at the 60 Hz the owner
-  wants a cart paced 60 or "free" to tick at, 2026-11-06; matches tick at 30
-  until a 60 Hz match can step down), a console whose PEER reports real
+  start at DELAY=1 (one tick: 33 ms at 30 Hz, 16.7 ms at the 60 Hz a cart
+  paced 60 or "free" ticks at when both consoles hold it, owner 2026-11-06; a
+  60 Hz match that cannot keep it steps down to 30 at a frame the host names,
+  once and for good), a console whose PEER reports real
   stall pressure raises itself a tick at a time to 66 ms, and it comes back
   down a tick when the peer reports a clean window and a tick plus 8 ms to
   spare. A console's delay sets the peer's stalls, never its own: steering it

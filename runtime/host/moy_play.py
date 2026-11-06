@@ -670,7 +670,7 @@ _M_CHECKS = 4
 class _Peer(ctypes.Structure):
     _fields_ = [("mac", _U8 * 6), ("name", ctypes.c_char * 24),
                 ("board", ctypes.c_char * 16), ("cart", ctypes.c_char * _M_CART),
-                ("state", _U8), ("seen", _U32), ("used", _B)]
+                ("state", _U8), ("seen", _U32), ("used", _B), ("hz", _U8)]
 
 
 _I32, _F32 = ctypes.c_int32, ctypes.c_float
@@ -700,7 +700,8 @@ class _Lockstep(ctypes.Structure):
                 ("escalate_ticks", _I32), ("escalate_at", _U32),
                 ("peer_margin", _U8), ("rep_min", _U8), ("last_win", _U8),
                 ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32),
-                ("draw_div", _U8), ("div_from", _I32), ("has_win_ms", _B), ("win_ms", _U32)]
+                ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
+                ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32)]
 
 
 class _MatchS(ctypes.Structure):
@@ -716,7 +717,8 @@ class _MatchS(ctypes.Structure):
                 ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
                 ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
-                ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8)]
+                ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8),
+                ("hold", _B)]
 
 
 _SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
@@ -765,8 +767,9 @@ _MSIGS = (
     ("moy_lockstep_world_due", [ctypes.c_void_p], _B),
     ("moy_lockstep_world", [ctypes.c_void_p, _I32, _U32], None),
     ("moy_match_world_check", [ctypes.c_void_p, _B], None),
-    ("moy_match_set_rate", [ctypes.c_void_p, ctypes.c_int], None),
-    ("moy_lockstep_draws", [ctypes.c_void_p, _I32], _B),
+    ("moy_match_set_rate", [ctypes.c_void_p, ctypes.c_int, _B], None),
+    ("moy_lockstep_hz_at", [ctypes.c_void_p, _I32], ctypes.c_int),
+    ("moy_lockstep_ms", [ctypes.c_void_p, _I32], _I32),
     ("moy_lockstep_rate", [ctypes.c_void_p, ctypes.c_int], None),
     ("moy_lockstep_hash", [_U32, ctypes.c_char_p, ctypes.c_size_t], _U32),
     ("moy_lockstep_tps", [ctypes.c_void_p, _U32], _U32),
@@ -884,8 +887,8 @@ class Match:
             return s.m_ema if s.has_ema else None
         if name == "peer_margin":
             return None if s.peer_margin == 255 else s.peer_margin
-        if name == "draw_div":
-            return s.draw_div if s.draw_div > 1 else 1
+        if name == "step_from":
+            return s.step_from if s.step_hz else None
         if name == "next_ms":
             return s.next_ms if s.has_next else None
         if name == "last_sent":
@@ -934,8 +937,8 @@ class Match:
     def announce(self, cart, state):
         self._d.moy_match_announce(self._p, (cart or "").encode(), int(state))
 
-    def set_rate(self, hz):
-        self._d.moy_match_set_rate(self._p, int(hz))
+    def set_rate(self, hz, hold=False):
+        self._d.moy_match_set_rate(self._p, int(hz), bool(hold))
 
     def rate(self, hz):
         self._d.moy_lockstep_rate(self._p, int(hz))
@@ -1032,8 +1035,11 @@ class Match:
     def arm_worlds(self, on):
         self._d.moy_match_world_check(self._p, bool(on))
 
-    def draws(self, f):
-        return bool(self._d.moy_lockstep_draws(self._p, int(f)))
+    def hz_at(self, f):
+        return self._d.moy_lockstep_hz_at(self._p, int(f))
+
+    def ms(self, f):
+        return self._d.moy_lockstep_ms(self._p, int(f))
 
     def world_due(self):
         return bool(self._d.moy_lockstep_world_due(self._p))

@@ -831,7 +831,7 @@ class Player(PlayerDiag):
             try:
                 ws.wifi_hold("link")   # the STA up, owned by the wifi service, BEFORE the radio
                 link.start()
-                link.announce(cart.get("title") or "", 1)
+                link.announce(cart.get("title") or "", 1, fps=cart.get("fps"))
                 # A DEAD match never survives into the next run (#65). The
                 # link's own give-up paths clear it as they re-run the cart,
                 # but a re-run arriving from anywhere else -- Editor PLAY, the
@@ -1864,7 +1864,7 @@ class Player(PlayerDiag):
             # consoles, so a _draw that keeps state cannot part them.
             if self._n_ticks != 1:
                 self._n_ticks = 1
-            return bool((np.waiting or np.pending(_ticks_ms())) and np.draws(np.frame))
+            return bool(np.waiting or np.pending(_ticks_ms()))
         if not self.tick_ms:
             if self._n_ticks != 1:
                 self._n_ticks = 1
@@ -2117,7 +2117,7 @@ class Player(PlayerDiag):
                 stalled = False
                 if np is not None:
                     dt, stalled, np = self._lockstep_step(ws, dt)
-                    if stalled or not np.draws(np.frame - 1):
+                    if stalled:
                         render = False
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
@@ -2263,10 +2263,10 @@ class Player(PlayerDiag):
             if not run:
                 # The run ended in the kernel's front (`end`):
                 # nothing simulates, and this frame's Player takes the route.
-                return np.dt, True, np
+                return np.dt_at(np.frame), True, np
             n = _moy_play.lockstep(run)
             if n is not None:
-                return np.dt, n == 0, np
+                return np.dt_at(np.frame - 1), n == 0, np
         if np is not None:
             # Drain the radio BEFORE deciding whether this tick can
             # advance: the boards drain in the frame TAIL, so without
@@ -2281,7 +2281,7 @@ class Player(PlayerDiag):
                     _di()
                 except Exception:  # noqa: BLE001 -- radio must not kill a frame
                     pass
-            dt = np.dt
+            dt = np.dt_at(np.frame)
             # The session owns the CLOCK as well as the order: it ticks
             # at its fixed rate, not at whatever the board's frame loop
             # manages, or a fixed dt would silently run the game fast.

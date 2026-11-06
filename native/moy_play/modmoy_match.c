@@ -85,11 +85,11 @@ static mp_obj_t mt_set_config(mp_obj_t self, mp_obj_t cfg) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mt_set_config_obj, mt_set_config);
 
-static mp_obj_t mt_set_rate(mp_obj_t self, mp_obj_t hz) {
-    moy_match_set_rate(M(self), mp_obj_get_int(hz));
+static mp_obj_t mt_set_rate(size_t n, const mp_obj_t *a) {
+    moy_match_set_rate(M(a[0]), mp_obj_get_int(a[1]), n > 2 && mp_obj_is_true(a[2]));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mt_set_rate_obj, mt_set_rate);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_set_rate_obj, 2, 3, mt_set_rate);
 
 static mp_obj_t mt_rate(mp_obj_t self, mp_obj_t hz) {
     moy_lockstep_rate(M(self), mp_obj_get_int(hz));
@@ -236,10 +236,15 @@ static mp_obj_t mt_packet(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_packet_obj, 2, 3, mt_packet);
 
-static mp_obj_t mt_draws(mp_obj_t self, mp_obj_t f) {
-    return mp_obj_new_bool(moy_lockstep_draws(M(self), (int32_t)mp_obj_get_int(f)));
+static mp_obj_t mt_hz_at(mp_obj_t self, mp_obj_t f) {
+    return MP_OBJ_NEW_SMALL_INT(moy_lockstep_hz_at(M(self), (int32_t)mp_obj_get_int(f)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mt_draws_obj, mt_draws);
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_hz_at_obj, mt_hz_at);
+
+static mp_obj_t mt_ms(mp_obj_t self, mp_obj_t f) {
+    return mp_obj_new_int(moy_lockstep_ms(M(self), (int32_t)mp_obj_get_int(f)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_ms_obj, mt_ms);
 
 static mp_obj_t mt_world_check(mp_obj_t self, mp_obj_t on) {
     moy_match_world_check(M(self), mp_obj_is_true(on));
@@ -301,7 +306,9 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_peer_margin:
             dest[0] = s->peer_margin == 255 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(s->peer_margin);
             return;
-        case MP_QSTR_draw_div: dest[0] = MP_OBJ_NEW_SMALL_INT(s->draw_div > 1 ? s->draw_div : 1); return;
+        case MP_QSTR_step_from:
+            dest[0] = s->step_hz == 0 ? mp_const_none : mp_obj_new_int(s->step_from);
+            return;
         case MP_QSTR_raises: dest[0] = mp_obj_new_int_from_uint(s->raises); return;
         case MP_QSTR_lowers: dest[0] = mp_obj_new_int_from_uint(s->lowers); return;
         case MP_QSTR_frame: dest[0] = mp_obj_new_int(s->frame); return;
@@ -365,7 +372,8 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tps), MP_ROM_PTR(&mt_tps_obj) },
     { MP_ROM_QSTR(MP_QSTR_world_due), MP_ROM_PTR(&mt_world_due_obj) },
     { MP_ROM_QSTR(MP_QSTR_arm_worlds), MP_ROM_PTR(&mt_world_check_obj) },
-    { MP_ROM_QSTR(MP_QSTR_draws), MP_ROM_PTR(&mt_draws_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hz_at), MP_ROM_PTR(&mt_hz_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ms), MP_ROM_PTR(&mt_ms_obj) },
     { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },
 };

@@ -28,8 +28,9 @@
 // the inputs it applied (and its tier's world digest while the world check is
 // armed), every input packet carries the newest stamp, and the first that
 // disagrees is printed and noticed on the screen.
-// Determinism: the tick is fixed for the match (TICK_HZ, or TICK_FAST for a
-// cart paced 60 or "free", the host's choice), and each logic frame starts from
+// Determinism: every frame's tick is the match's (TICK_FAST when both consoles
+// say they hold it, else TICK_HZ, the host's choice in START; from a step
+// down's agreed frame on, TICK_HZ), and each logic frame starts from
 // a seed derived from (seed, frame), so drawing, which consumes the random
 // stream at each board's own rate, cannot move it. The session
 // paces itself and drops any debt of a full tick by re-basing (burst
@@ -64,7 +65,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MOY_MATCH_PROTO 2
+#define MOY_MATCH_PROTO 3
 enum {
     MOY_MATCH_T_BEACON = 1, MOY_MATCH_T_JOIN = 2, MOY_MATCH_T_START = 3,
     MOY_MATCH_T_INPUT = 4, MOY_MATCH_T_MSG = 5, MOY_MATCH_T_BYE = 6,
@@ -93,15 +94,14 @@ enum {
 #define MOY_MATCH_CHECK_EVERY 32
 #define MOY_MATCH_CHECKS 4
 #define MOY_MATCH_IN_HDR 22             // an input packet's header
-// A 60 Hz match that cannot keep its rate draws every DIV_STEP-th tick: the
-// host decides after a settled window ticked under DIV_BAR percent of the
-// rate and names the frame it starts at, DIV_LEAD frames on, in every packet.
-// The guest cannot simulate that frame before it holds the host's input for
-// it, which travels in a packet that carries the notice, so both consoles
-// skip the same draws and a _draw that keeps state cannot part them.
-#define MOY_MATCH_DIV_STEP 2
-#define MOY_MATCH_DIV_BAR 93
-#define MOY_MATCH_DIV_LEAD 32
+// A 60 Hz match that cannot keep its rate steps down to 30 for the rest of
+// the match: the host decides after a settled window ticked under STEP_BAR
+// percent of the rate and names the frame the step takes, STEP_LEAD frames
+// on, in every packet. The guest cannot simulate that frame before it holds
+// the host's input for it, which travels in a packet that carries the notice,
+// so both consoles tick the same frames at the same dt.
+#define MOY_MATCH_STEP_BAR 93
+#define MOY_MATCH_STEP_LEAD 32
 // A console's delay sets the PEER's stalls, so the peer's reports steer it:
 // up a tick when the peer's last window stalled ESCALATE_AT ticks, down a
 // tick when the peer's last window was clean (a quarter of that) and every
@@ -139,6 +139,7 @@ typedef struct {
     uint8_t state;                      // 0 idle (launcher), 1 in a cart, 2 matched
     uint32_t seen;
     bool used;
+    uint8_t hz;                         // the tick it says it can hold; 0 unsaid (30)
 } moy_match_peer_t;
 
 typedef struct {
@@ -201,10 +202,14 @@ typedef struct {
     uint8_t last_win, peer_win;
     int32_t delay_mark;                 // the frame of the last delay change
     uint32_t raises, lowers;
-    // The draw divisor (DIV_*): 0 or 1 every tick draws; from `div_from` on,
-    // every div-th. The window's wall clock, for the host's rate reading.
-    uint8_t draw_div;
-    int32_t div_from;
+    // The step down (STEP_*): the rate the match began at, and from frame
+    // `step_from` on `step_hz` (0: none named). The window's wall clock, for
+    // the host's rate reading; `hold` keeps the host's rate (a dev force).
+    uint16_t hz0;
+    uint8_t step_hz;
+    int32_t step_from;
+    bool stepped;                       // this console ticks at step_hz now
+    bool hold;
     bool has_win_ms;
     uint32_t win_ms;
 } moy_lockstep_t;
@@ -244,7 +249,8 @@ typedef struct {
     char act_cart[MOY_MATCH_CART + 1];
     char error[48];
     bool world_check;                   // the tiers note world digests (a diag)
-    uint8_t rate;                       // the tick this console asks when it hosts
+    uint8_t rate;                       // the tick this console says it can hold
+    bool hold;                          // ...and takes as is when it hosts (a dev force)
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -264,9 +270,11 @@ void moy_match_announce(moy_match_t *m, const char *cart, int state);
 // The tuning this console offers when it hosts: a JSON object of at most
 // MOY_MATCH_CFG bytes, else "{}".
 void moy_match_set_config(moy_match_t *m, const char *cfg);
-// The tick rate this console asks when it hosts (MOY_MATCH_TICK_HZ or
-// MOY_MATCH_TICK_FAST); the guest takes the host's from START.
-void moy_match_set_rate(moy_match_t *m, int hz);
+// The tick this console says it can hold (MOY_MATCH_TICK_HZ or
+// MOY_MATCH_TICK_FAST), in its beacon. A host starts the match at the lower
+// of its own and the peer's and may step it down; `hold` starts it at this
+// console's own and never steps (a dev force). The guest takes START's.
+void moy_match_set_rate(moy_match_t *m, int hz, bool hold);
 // The host's half at a cart's start: a peer stands by on `cart` -> 1, this
 // run is a match (lower MAC) or it asked the peer to host (higher MAC) -> 0.
 int moy_match_offer(moy_match_t *m, const char *cart, uint32_t now);
@@ -305,9 +313,10 @@ const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *ca
 int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session,
                        const char *cfg);
 void moy_lockstep_close(moy_match_t *m);
-// Does frame `f`'s tick draw? Every tick does, unless the match took a draw
-// divisor (MOY_MATCH_DIV_*) at or before `f`. Pure.
-bool moy_lockstep_draws(const moy_match_t *m, int32_t f);
+// The rate frame `f` ticks at (its dt is 1/that), and the match's clock after
+// `f` ticks, in ms: the same on both consoles across a step down. Pure.
+int moy_lockstep_hz_at(const moy_match_t *m, int32_t f);
+int32_t moy_lockstep_ms(const moy_match_t *m, int32_t f);
 // The match's tick rate in Hz (begin sets MOY_MATCH_TICK_HZ): the period, and
 // the delay's ceiling and the escalation window, which are times.
 void moy_lockstep_rate(moy_match_t *m, int hz);

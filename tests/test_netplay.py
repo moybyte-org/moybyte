@@ -88,7 +88,7 @@ def _step(a, b, wire, frames=1):
 
 def _input_packet(session, newest, waiting, masks):
     return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
-                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255, 255, 1, 0, 0] + list(masks))
+                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255, 255, 0, 0, 0] + list(masks))
 
 
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
@@ -301,7 +301,7 @@ def test_a_packet_from_a_previous_match_is_ignored():
     wire = _Wire()
     a, b = _match(wire, session=7)
     (sa, _ra, _ia), _ = a, b
-    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255, 255, 1, 0, 0] + [0, 0])
+    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255, 255, 0, 0, 0] + [0, 0])
     assert sa.on_packet(bytes(stale)) is False
     stale[2] = 7
     assert sa.on_packet(bytes(stale)) is True
@@ -700,45 +700,91 @@ def test_the_delay_stays_up_while_the_margin_is_under_a_tick():
     assert sa.delay == 2 and sb.delay == 2 and sa.lowers == 0
 
 
-def test_a_sixty_hertz_match_that_cannot_keep_its_rate_draws_every_other_tick():
-    """A 60 Hz match bound by a board's drawing (the Guition S3 held a Brick
-    Siege Lua match to 47.7 ticks/s, 2026-11-06) draws every other tick: the
-    host decides after a settled window under DIV_BAR% of the rate and names
-    a frame DIV_LEAD on, the guest hears it in the packet that carries the
-    host's input for that frame, and from there both skip the same draws. The
-    sim keeps its 60 Hz tick and its 16.7 ms of delay a tick."""
+def test_a_sixty_hertz_match_that_cannot_keep_its_rate_steps_down_to_thirty():
+    """A 60 Hz match bound by a console's frame (the Guition S3 held a Brick
+    Siege Lua match to 47.7 ticks/s, 2026-11-06) steps down to 30 Hz for the
+    rest of the match: the host decides after a settled window under
+    STEP_BAR% of the rate and names a frame STEP_LEAD on, the guest hears it
+    in the packet that carries the host's input for that frame, and from
+    there both tick at 30 with a dt of 1/30. The match's clock runs on across
+    the step without a jump, and the delay keeps its ms."""
     wire = _Wire()
     a, b = _match(wire, tick_hz=60)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 4                 # 66.7 ms at 60 Hz
     t = 1000
-    for _ in range(3 * 180 + 40):          # 45 ticks a second
+    for _ in range(3 * 180 + 80):          # 45 ticks a second
         for s in (sa, sb):
             s.due(t)
             s.advance(0, t)
         wire.deliver(1, sb)
         wire.deliver(0, sa)
         t += 22
-    assert sa.draw_div == 2 and sb.draw_div == 2
-    f0 = sa._m._m.s.div_from
-    assert f0 == sb._m._m.s.div_from and f0 > 2 * 180
-    assert [sa.draws(f) for f in range(f0 - 3, f0 + 5)] == \
-        [True, True, True, True, False, True, False, True]
-    assert all(sa.draws(f) == sb.draws(f) for f in range(0, sa.frame + 10))
+    f0 = sa.step_from
+    assert f0 is not None and f0 == sb.step_from and f0 > 2 * 180
+    assert sa.frame > f0 and sb.frame > f0
+    assert sa.tick_hz == 30 and sb.tick_hz == 30
+    assert sa.tick_ms == 33 and sa.delay_max == 2
+    assert sa.delay == 2 and sb.delay == 2, "4 ticks of 16.7 ms are 2 of 33.3"
+    assert [sa.dt_at(f) for f in (f0 - 1, f0)] == [1 / 60, 1 / 30]
+    assert all(sa.dt_at(f) == sb.dt_at(f) for f in range(0, sa.frame + 10))
+    assert [sa.ms(f) for f in (f0 - 1, f0, f0 + 1, f0 + 2)] == \
+        [(f0 - 1) * 1000 // 60, f0 * 1000 // 60, f0 * 1000 // 60 + 33,
+         f0 * 1000 // 60 + 66]
+    assert sa.desync < 0 and sb.desync < 0
 
 
-def test_a_match_that_keeps_its_rate_draws_every_tick():
+def test_a_match_that_keeps_its_rate_stays_at_sixty():
     wire = _Wire()
     a, b = _match(wire, tick_hz=60)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
     t = 1000
-    for k in range(3 * 180 + 40):          # 60 a second: 16, 17, 17 ms
+    for k in range(4 * 180):               # 60 a second: 16, 17, 17 ms
         for s in (sa, sb):
             s.due(t)
             s.advance(0, t)
         wire.deliver(1, sb)
         wire.deliver(0, sa)
         t += 16 if k % 3 == 0 else 17
-    assert sa.draw_div == 1 and sb.draw_div == 1
+    assert sa.step_from is None and sb.step_from is None
+    assert sa.tick_hz == 60 and sb.tick_hz == 60
+
+
+def test_a_forced_rate_never_steps_down():
+    """`link rate 60` holds the host's rate however slowly the match ticks:
+    the diag that measures what a pair does at 60."""
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa._m._m.s.hold = True
+    t = 1000
+    for _ in range(4 * 180):
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 22
+    assert sa.step_from is None and sa.tick_hz == 60 and sb.tick_hz == 60
+
+
+def test_a_stepped_match_never_steps_back_up():
+    """The step is one way: a match at 30 after a step ticking at full pace
+    stays at 30, and a later notice of another step is not taken."""
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    t = 1000
+    for k in range(3 * 180 + 80 + 6 * 90):
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 22 if k < 3 * 180 + 80 else 33
+    f0 = sa.step_from
+    assert f0 is not None and sa.tick_hz == 30 and sb.tick_hz == 30
+    assert sa.step_from == f0 and sb.step_from == f0
 
 
 # -- the shared random stream ------------------------------------------------

@@ -407,7 +407,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # the match's clock: two consoles' wall clocks are two worlds.
         mc = getattr(input, "match_clock", None)
         if mc is not None:
-            return mc.frame * 1000 // mc.tick_hz
+            return mc.ms(mc.frame)
         return _since_ms(getattr(input, "cart_start_ms", 0))
 
     def key(code=None):

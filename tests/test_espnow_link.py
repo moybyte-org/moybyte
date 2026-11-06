@@ -271,18 +271,24 @@ def test_a_full_handshake_gives_each_console_the_other_half_of_one_game():
 
 
 def test_the_host_names_the_tick_and_the_guest_takes_it():
-    """START carries the host's tick and the guest takes it. Every match ticks
-    at 30 (2026-11-06: the 60 Hz tick waits for a match that can step down);
-    `link rate 60` on the host forces 60 for both."""
-    for force, hz in ((None, 30), (60, 60), (30, 30)):
+    """START carries the host's tick and the guest takes it: 60 when both
+    consoles say they hold it (a cart paced 60 or "free"; the guest says it in
+    its beacon), else 30. `link rate` on the host forces its own."""
+    for fps, force, theirs, hz in ((None, None, "free", 30), ("free", None, "free", 60),
+                                   (60, None, 60, 60), ("free", None, 30, 30),
+                                   (None, 60, 30, 60), ("free", 30, "free", 30)):
         air, clock, a, b = _pair(lambda ws, title: True)
-        _see_each_other(a, b, clock)
         a.rate_force = force
-        b.rate_force = 60                 # the guest's own ask never decides
+        a.announce("Brick Siege", 0, fps=fps)
+        b.announce("Brick Siege", 0, fps=theirs)
+        clock.advance(10)
+        a.poll()
+        b.poll()
+        a.state = b.state = 1
         wsa, wsb = _Ws(), _Ws()
         assert a.offer(wsa, "Brick Siege")
         b.poll(wsb)
-        assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, force
+        assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, (fps, force, theirs)
         assert abs(wsb.netplay.dt - 1.0 / hz) < 1e-9
         assert a.stats()["match"]["hz"] == hz
 
@@ -466,7 +472,7 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
 
     a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
     peer_mac = b"\xaa" * 6
-    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [255, 255, 1, 0, 0] + [5])
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [255, 255, 0, 0, 0] + [5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
     a.radio.inbox.append((peer_mac, inp))
     a.radio.inbox.append((peer_mac, beacon))
@@ -495,7 +501,7 @@ def test_a_stale_input_frame_from_a_previous_match_cannot_reach_a_new_one():
     a.offer(wsa, "Brick Siege")
     assert a.session.session != old, "a new match gets a new session id"
     stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF, 0]
-                            + [0] * 10 + [255, 255, 1, 0, 0] + [0, 0]))
+                            + [0] * 10 + [255, 255, 0, 0, 0] + [0, 0]))
     a._dispatch(wsa, b"\x02" * 6, stale)
     assert a.session.packets_in == 0
 
@@ -618,7 +624,7 @@ def test_the_link_rides_the_radio_lease(tmp_path):
             self.calls.append("start")
             return True
 
-        def announce(self, cart="", state=0):
+        def announce(self, cart="", state=0, fps=None):
             pass
 
         def offer(self, ws, cart, router=None, seed=None):
@@ -809,7 +815,7 @@ def test_a_run_never_adopts_a_dead_session(tmp_path):
             self.calls.append("start")
             return True
 
-        def announce(self, cart="", state=0):
+        def announce(self, cart="", state=0, fps=None):
             self.calls.append(("announce", cart, state))
 
         def offer(self, ws, cart, router=None, seed=None):
@@ -987,7 +993,7 @@ def _cart_world(ws):
     return "\n".join(out)
 
 
-def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None):
+def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=17):
     """Two real consoles in one process over a lossy air, each kid mashing
     buttons on their own seed, the cart's world recorded per lockstep frame.
     Each console keeps its own random stream (two boards share nothing)."""
@@ -1025,7 +1031,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None):
     for k in range(frames):
         if tamper is not None:
             tamper(k, wss)
-        clock.advance(17)
+        clock.advance(step)
         for i in (0, 1):
             ws = wss[i]
             if kids.random() < 0.15:
@@ -1036,7 +1042,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None):
                 for n in names:
                     ws.input.set_held(n, n in held[i])
                 ws.link._m.poll(clock())
-                ws.frame(0.017)
+                ws.frame(step / 1000)
             on(i, frame)
             assert ws.cart_error is None, ws.cart_error
             np = ws.player._netplay
@@ -1061,7 +1067,7 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
         np = ws.player._netplay
         assert np.checks >= 4 and np.desync < 0, \
             "the desync check compared checkpoints and found them agreeing"
-        assert ws.ns["time"]() == np.frame * 1000 // np.tick_hz, \
+        assert ws.ns["time"]() == np.ms(np.frame), \
             "time() is the match's clock, never a board's wall clock"
         ws.input.last_key = ord("x")
         ws.player._tick_keys(ws)
@@ -1086,14 +1092,33 @@ def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkey
     assert wss[0].link.stats()["match"]["desync_kind"] == "worlds"
 
 
+def test_a_match_too_slow_for_sixty_steps_down_and_stays_in_sync(tmp_path, monkeypatch):
+    """Brick Siege paces "free", so both consoles say they hold 60 and the
+    match starts there. Two consoles whose loops run at 45 frames a second
+    (the Guition S3's matched Lua frame, 2026-11-06) tick the match under
+    STEP_BAR% of 60: the host names a frame, both step to 30 there, and the
+    match keeps ticking at the new rate with the inputs and the worlds
+    agreeing across the step, frame by frame. time() runs on across it."""
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 1300, step=22)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert [f for f in both if worlds[0][f] != worlds[1][f]] == []
+    nps = [ws.player._netplay for ws in wss]
+    f0 = nps[0].step_from
+    assert f0 is not None and nps[1].step_from == f0, "the host stepped and named the frame"
+    for ws, np in zip(wss, nps):
+        assert np.tick_hz == 30 and np.frame > f0 + 150, (np.tick_hz, np.frame, f0)
+        assert np.desync < 0 and np.checks >= 20, (np.desync, np.checks)
+        assert np.dt_at(f0 - 1) == 1 / 60 and np.dt_at(f0) == 1 / 30
+        assert ws.ns["time"]() == np.ms(np.frame) > np.frame * 1000 // 60
+
+
 def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
     """A kid's _draw keeps state as often as not (`t += 1` for a blink), and
     two consoles agree only if each runs it once a tick. Brick Siege paces
     "free", whose loop frames all drew in a match -- a count of loop frames,
     which two boards never share -- and a stalled tick drew with no update
     while its retry updated with no draw. Over a lossy air, every console
-    draws exactly the simulated ticks the match draws (all of them, or the
-    draw divisor's share once the host took one)."""
+    draws exactly the simulated ticks."""
     seen = {}
 
     def count(k, wss):
@@ -1114,5 +1139,4 @@ def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
         np = ws.player._netplay
         f0, draws = seen[i]
         assert np.stall_ticks > 5, "the premise: the match stalled"
-        want = sum(1 for f in range(f0, np.frame) if np.draws(f))
-        assert draws == want, (i, draws, want, np.draw_div)
+        assert draws == np.frame - f0, (i, draws, np.frame - f0)

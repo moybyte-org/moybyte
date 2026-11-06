@@ -87,29 +87,32 @@ reported through this console's window was at least a tick plus 8 ms
 (`MOY_MATCH_LOWER_HOLD`), so a match that escalated on a burst of loss returns
 to one tick once the air clears instead of keeping the higher delay for good.
 
-**A cart paced 60 or "free" is to tick at 60 Hz in a match** (owner,
-2026-11-06: "i dont want a higher delay"), so one tick of delay is 16.7 ms. On
-glass the first build ticked every such match at 60, and the Guition S3 could
-not hold it against the P4 (Brick Siege Lua at 93% speed even drawing every
-other tick, Python at 77%), so every match ticks at 30 until a 60 Hz match can
-step down to 30 at a frame both consoles agree on (2026-11-06). The host names
-the tick in START and the guest takes it; `link rate 30|60|auto` on the host's
-dev channel forces it. What is a time stays a time at either rate: the delay's
-ceiling (`MOY_MATCH_DELAY_MAX_MS`) and the escalation window are milliseconds
-and seconds, their tick counts scaled by the rate.
+**A cart paced 60 or "free" ticks at 60 Hz in a match when both consoles hold
+it** (owner, 2026-11-06: "i dont want a higher delay"), so one tick of delay is
+16.7 ms. Each console says the tick it holds for the cart in its beacon and its
+JOIN (`players.match_rate` of the cart's pace: 60 for a cart paced 60 or
+"free", else 30), and the host starts the match at the lower of the two, in
+START; the guest takes it. `link rate 30|60|auto` on a console's dev channel
+forces its own word, and a forced host never steps down. What is a time stays a
+time at either rate: the delay's ceiling (`MOY_MATCH_DELAY_MAX_MS`) and the
+escalation window are milliseconds and seconds, their tick counts scaled by the
+rate.
 
-**A 60 Hz match that cannot keep its rate draws every other tick** (2026-11-06).
-A board that cannot draw 60 a second holds the shared game to its own rate:
-the Guition S3 held a Brick Siege Lua match with the P4 to 47.7 ticks/s, the
-game at 80% speed, and the P4's waits on it read as stall pressure that raised
-the Guition's delay to its 66 ms ceiling. After a settled window ticking under
-93% of the rate (`MOY_MATCH_DIV_BAR`) the host takes a draw divisor of 2 from a
-frame 32 on (`MOY_MATCH_DIV_LEAD`) and every input packet names it; the guest
-cannot simulate that frame before it holds the host's input for it, which
-travels in a packet that carries the notice, so both consoles skip the same
-draws (`moy_lockstep_draws`) and a `_draw` that keeps state still runs on the
-same ticks on both. The sim keeps its 60 Hz tick and its 16.7 ms a tick of
-delay; the match draws 30 a second, what a 30 Hz match drew.
+**A 60 Hz match that cannot keep its rate steps down to 30 for the rest of the
+match** (owner, 2026-11-06). Lockstep ticks both consoles at the slower one's
+pace: the first 60 Hz build held a Guition S3 <-> P4 Brick Siege Lua match to
+47.7 ticks/s, and the P4's waits on the S3 read as stall pressure that raised
+the S3's delay to its 66 ms ceiling. After a settled window ticking under 93%
+of the rate (`MOY_MATCH_STEP_BAR`) the host names a frame 32 on
+(`MOY_MATCH_STEP_LEAD`) and every input packet carries it; the guest cannot
+simulate that frame before it holds the host's input for it, which travels in
+a packet that carries the notice, so both consoles tick every frame from there
+at 30 with a dt of 1/30 (`moy_lockstep_hz_at`). The match's clock runs on
+without a jump (`moy_lockstep_ms`: time() is the ms of the ticks at each rate),
+each console's delay keeps its milliseconds rounded up to the new tick, and the
+first window at the new rate is grace, like formation's. The step is one way:
+a match never steps back up. It replaced a draw divisor (2026-11-06), which
+kept the 60 Hz tick and drew every other one, and still ticked at 93%.
 
 **The 2026-08-22 "DELAY=1 measured and REJECTED at 14%" verdict was the PACING's
 fault, not the radio's**, and is reversed. Tick debt was repaid as a burst at
@@ -152,8 +155,8 @@ Python cart's data globals as text, `players.world_text`; a Lua cart's by
 `moycore_lua_digest`; a compiled cart gives none). A cart that reads local
 state on purpose -- Harpoon Pop's high score is each console's own `pmem` --
 reads as a world desync there. The check rides the input packet, so
-`MOY_MATCH_PROTO` went to 2 with it, and consoles on different protocols do not
-see each other.
+`MOY_MATCH_PROTO` went to 2 with it (3 with the step down's notice), and
+consoles on different protocols do not see each other.
 
 **The handshake is BROADCAST, addressed in the payload** — START and JOIN carry
 the destination MAC as six bytes. Unicast was the protocol's only such frame and

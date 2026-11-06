@@ -143,13 +143,9 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     return 0;
 }
 
-void moy_lockstep_rate(moy_match_t *m, int hz) {
-    moy_lockstep_t *s = &m->s;
-    if (hz < 10) {
-        hz = 10;
-    } else if (hz > MOY_MATCH_TICK_FAST) {
-        hz = MOY_MATCH_TICK_FAST;
-    }
+// The pace and what is a time at `hz`: the period, the delay's ceiling and
+// the escalation window.
+static void pace(moy_lockstep_t *s, int hz) {
     s->tick_hz = (uint16_t)hz;
     s->tick_ms = 1000u / (uint32_t)hz;
     s->tick_rem = 0;
@@ -160,6 +156,55 @@ void moy_lockstep_rate(moy_match_t *m, int hz) {
     s->escalate_ticks = MOY_MATCH_ESCALATE_S * hz;
     s->escalate_at = (uint32_t)((MOY_MATCH_ESCALATE_AT * hz + MOY_MATCH_TICK_HZ / 2)
                                 / MOY_MATCH_TICK_HZ);
+}
+
+void moy_lockstep_rate(moy_match_t *m, int hz) {
+    moy_lockstep_t *s = &m->s;
+    if (hz < 10) {
+        hz = 10;
+    } else if (hz > MOY_MATCH_TICK_FAST) {
+        hz = MOY_MATCH_TICK_FAST;
+    }
+    pace(s, hz);
+    s->hz0 = (uint16_t)hz;
+    s->step_hz = 0;
+    s->stepped = false;
+}
+
+int moy_lockstep_hz_at(const moy_match_t *m, int32_t f) {
+    const moy_lockstep_t *s = &m->s;
+    if (s->step_hz != 0 && f >= s->step_from) {
+        return s->step_hz;
+    }
+    return s->hz0 ? s->hz0 : MOY_MATCH_TICK_HZ;
+}
+
+int32_t moy_lockstep_ms(const moy_match_t *m, int32_t f) {
+    const moy_lockstep_t *s = &m->s;
+    int64_t hz0 = s->hz0 ? s->hz0 : MOY_MATCH_TICK_HZ;
+    if (s->step_hz == 0 || f <= s->step_from) {
+        return (int32_t)((int64_t)f * 1000 / hz0);
+    }
+    int64_t base = (int64_t)s->step_from * 1000 / hz0;
+    return (int32_t)(base + (int64_t)(f - s->step_from) * 1000 / s->step_hz);
+}
+
+// This console reached the step's frame: its pace and its delay move to the
+// new rate, the delay keeping its ms (rounded up), and the window opens anew.
+static void take_step(moy_match_t *m) {
+    moy_lockstep_t *s = &m->s;
+    int was = s->tick_hz;
+    pace(s, s->step_hz);
+    int d = (s->delay * s->step_hz + was - 1) / was;
+    s->delay = d < MOY_MATCH_DELAY ? MOY_MATCH_DELAY : d > s->delay_max ? s->delay_max : d;
+    s->stepped = true;
+    s->delay_mark = s->frame;
+    s->win_mark = s->frame;
+    s->win_stalls = 0;
+    s->last_win = 255;
+    s->has_win_ms = false;
+    say(m, "Moybyte link: %d Hz from frame %ld, input delay %d (%d ms)", s->step_hz,
+        (long)s->step_from, s->delay, (int)(s->delay * 1000 / s->tick_hz));
 }
 
 // One period: tick_ms, plus the ms the fraction has gathered (60 Hz is
@@ -341,8 +386,8 @@ static void emit(moy_match_t *m, int32_t newest) {
     float e = s->m_ema < 0.0f ? 0.0f : s->m_ema > 254.0f ? 254.0f : s->m_ema;
     p[17] = s->has_ema ? (uint8_t)e : 255u;
     p[18] = s->last_win;                    // ...and how often I stalled on you
-    p[19] = s->draw_div > 1 ? s->draw_div : 1u; // ...and the draws we take
-    put16(p + 20, (uint32_t)s->div_from);
+    p[19] = s->step_hz;                     // ...and the rate we step down to
+    put16(p + 20, (uint32_t)s->step_from);
     for (int32_t i = 0; i < n; i++) {
         int v = tape_get(s->mine_f, s->mine_m, newest - i);
         p[MOY_MATCH_IN_HDR + i] = v < 0 ? 0 : (uint8_t)v;
@@ -367,6 +412,9 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     // the air, where the peer keeps the first copy it hears. Every frame up
     // to `due` is written before it is emitted, so a raise's skipped frame
     // never goes out as a placeholder a later write contradicts.
+    if (s->step_hz != 0 && !s->stepped && s->frame >= s->step_from) {
+        take_step(m);
+    }
     checkpoint(m);
     int32_t due = s->frame + s->delay;
     for (int32_t f = s->frame + 1; f <= due; f++) {
@@ -392,10 +440,11 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     }
     s->stall_mark = s->stalls;
     if (s->frame - s->win_mark >= s->escalate_ticks) {
-        // The first window is match formation and changes nothing. The
-        // peer's stalls are what this console's delay buys down, so the
-        // peer's report steers it.
-        bool settled = s->win_mark >= s->escalate_ticks;
+        // The first window is match formation and changes nothing, nor
+        // does the first at a stepped rate. The peer's stalls are what this
+        // console's delay buys down, so the peer's report steers it.
+        bool settled = s->win_mark >= s->escalate_ticks
+                       && !(s->stepped && s->win_mark == s->delay_mark && s->last_win == 255u);
         s->last_win = settled ? (uint8_t)(s->win_stalls > 254u ? 254u : s->win_stalls) : 255u;
         uint32_t pw = s->peer_win;
         if (settled && pw != 255u && pw >= s->escalate_at && s->delay < s->delay_max) {
@@ -415,18 +464,19 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
             say(m, "Moybyte link: input delay -> %d (%d ms, peer margin %d ms)", s->delay,
                 (int)(s->delay * 1000 / s->tick_hz), (int)s->rep_min);
         }
-        // The host's draw divisor: a 60 Hz match ticking under DIV_BAR% of
-        // its rate is bound by a board's frame, and drawing every other tick
-        // halves what that frame draws.
-        if (settled && timed && s->has_win_ms && s->index == 0 && s->draw_div <= 1
-                && s->tick_hz >= MOY_MATCH_TICK_FAST) {
+        // The host's step down: a 60 Hz match ticking under STEP_BAR% of
+        // its rate is bound by a console's frame (lockstep ticks both at the
+        // slower one's pace), and 30 Hz halves what that frame must do.
+        if (settled && timed && s->has_win_ms && s->index == 0 && s->step_hz == 0
+                && !s->hold && s->tick_hz > MOY_MATCH_TICK_HZ) {
             int32_t ms = (int32_t)(now - s->win_ms);
             int32_t ticks = s->frame - s->win_mark;
-            if (ms > 0 && ticks * 1000 * 100 < (int32_t)s->tick_hz * MOY_MATCH_DIV_BAR * ms) {
-                s->draw_div = MOY_MATCH_DIV_STEP;
-                s->div_from = s->frame + MOY_MATCH_DIV_LEAD;
-                say(m, "Moybyte link: drawing every %d ticks from frame %ld (%ld ticks/s)",
-                    MOY_MATCH_DIV_STEP, (long)s->div_from, (long)(ticks * 1000 / ms));
+            if (ms > 0 && ticks * 1000 * 100 < (int32_t)s->tick_hz * MOY_MATCH_STEP_BAR * ms) {
+                s->step_hz = MOY_MATCH_TICK_HZ;
+                s->step_from = s->frame + MOY_MATCH_STEP_LEAD;
+                say(m, "Moybyte link: %ld ticks/s of %d, stepping to %d Hz at frame %ld",
+                    (long)(ticks * 1000 / ms), (int)s->tick_hz, MOY_MATCH_TICK_HZ,
+                    (long)s->step_from);
             }
         }
         s->win_mark = s->frame;
@@ -459,14 +509,6 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     s->frame++;
     s->frame_seed = moy_lockstep_seed_of(s->seed, s->frame);
     return 1;
-}
-
-bool moy_lockstep_draws(const moy_match_t *m, int32_t f) {
-    const moy_lockstep_t *s = &m->s;
-    if (!s->live || s->draw_div <= 1u || f < s->div_from) {
-        return true;
-    }
-    return (f - s->div_from) % s->draw_div == 0;
 }
 
 void moy_lockstep_resend(moy_match_t *m) {
@@ -502,9 +544,9 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
     s->peer_win = data[18];
-    if (data[19] > 1u && s->draw_div <= 1u && s->index != 0) {
-        s->draw_div = data[19];
-        s->div_from = moy_lockstep_expand(m, (uint32_t)data[20] | ((uint32_t)data[21] << 8));
+    if (data[19] != 0u && s->step_hz == 0 && s->index != 0 && data[19] < s->tick_hz) {
+        s->step_hz = data[19];
+        s->step_from = moy_lockstep_expand(m, (uint32_t)data[20] | ((uint32_t)data[21] << 8));
     }
     s->peer_margin = data[17];
     if (data[17] < s->rep_min) {
@@ -613,8 +655,9 @@ static void beacon(moy_match_t *m) {
     p[0] = MOY_MATCH_PROTO;
     p[1] = MOY_MATCH_T_BEACON;
     p[2] = m->state;
-    char body[sizeof(m->name) + sizeof(m->board) + sizeof(m->cart) + 4];
-    int n = snprintf(body, sizeof(body), "%s|%s|%s", m->name, m->board, m->cart);
+    char body[sizeof(m->name) + sizeof(m->board) + sizeof(m->cart) + 8];
+    int n = snprintf(body, sizeof(body), "%s|%s|%s|%d", m->name, m->board, m->cart,
+                     m->rate ? m->rate : MOY_MATCH_TICK_HZ);
     if (n < 0) {
         n = 0;
     }
@@ -625,8 +668,9 @@ static void beacon(moy_match_t *m) {
     broadcast(m, p, (size_t)(3 + n));
 }
 
-void moy_match_set_rate(moy_match_t *m, int hz) {
+void moy_match_set_rate(moy_match_t *m, int hz, bool hold) {
     m->rate = (uint8_t)(hz == MOY_MATCH_TICK_FAST ? MOY_MATCH_TICK_FAST : MOY_MATCH_TICK_HZ);
+    m->hold = hold;
 }
 
 void moy_match_set_config(moy_match_t *m, const char *cfg) {
@@ -718,7 +762,10 @@ static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32
     f[6] = (uint8_t)((seed >> 16) & 0xFF);
     f[7] = (uint8_t)((seed >> 24) & 0xFF);
     memcpy(f + 8, p->mac, 6);
-    f[14] = m->rate ? m->rate : (uint8_t)MOY_MATCH_TICK_HZ;
+    // The lower of the two consoles' word, unless this one's is forced.
+    uint8_t hz = m->rate ? m->rate : (uint8_t)MOY_MATCH_TICK_HZ;
+    uint8_t theirs = p->hz ? p->hz : (uint8_t)MOY_MATCH_TICK_HZ;
+    f[14] = m->hold || hz <= theirs ? hz : theirs;
     size_t at = 15;
     size_t cn = strlen(cart);
     if (cn > MOY_MATCH_CART) {
@@ -736,11 +783,21 @@ static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32
     broadcast(m, m->start_frame, at);
     moy_lockstep_begin(m, 0, seed, m->session_id, cfg_or_null(m->cfg));
     moy_lockstep_rate(m, f[14]);
+    m->s.hold = m->hold;
     m->state = 2;
     if (relaunch) {
         ask(m, cart);
     }
     return 1;
+}
+
+// Ask the peer to host, saying the tick this console holds (a JOIN can land
+// before the beacon that says it).
+static void join(moy_match_t *m, const moy_match_peer_t *p) {
+    uint8_t j[9] = {MOY_MATCH_PROTO, MOY_MATCH_T_JOIN};
+    memcpy(j + 2, p->mac, 6);
+    j[8] = m->rate ? m->rate : (uint8_t)MOY_MATCH_TICK_HZ;
+    broadcast(m, j, sizeof(j));
 }
 
 int moy_match_offer(moy_match_t *m, const char *cart, uint32_t now) {
@@ -759,9 +816,7 @@ int moy_match_offer_seeded(moy_match_t *m, const char *cart, uint32_t now, bool 
     if (memcmp(m->mac, p->mac, 6) > 0) {
         // They host. Ask rather than sit still: they may already be playing,
         // and nothing on their side would ever offer again.
-        uint8_t j[8] = {MOY_MATCH_PROTO, MOY_MATCH_T_JOIN};
-        memcpy(j + 2, p->mac, 6);
-        broadcast(m, j, sizeof(j));
+        join(m, p);
         return 0;
     }
     return host(m, p, has_seed, seed, cart, false);
@@ -810,9 +865,7 @@ static void maybe_match(moy_match_t *m, uint32_t now) {
         return;
     }
     if (memcmp(m->mac, p->mac, 6) > 0) {
-        uint8_t j[8] = {MOY_MATCH_PROTO, MOY_MATCH_T_JOIN};
-        memcpy(j + 2, p->mac, 6);
-        broadcast(m, j, sizeof(j));
+        join(m, p);
     } else {
         host(m, p, false, 0, m->cart, true);
     }
@@ -844,7 +897,8 @@ static void on_beacon(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, 
         // from a registered peer.
         add_peer(m, mac);
     }
-    // "name|board|cart": the first three fields, a missing one empty.
+    // "name|board|cart|hz": the first three fields, a missing one empty, and
+    // the tick it says it holds.
     const char *b = (const char *)msg + 3;
     const char *e = (const char *)msg + n;
     char *dst[3] = {p->name, p->board, p->cart};
@@ -857,6 +911,11 @@ static void on_beacon(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, 
         copy_str(dst[k], cap[k], b, (size_t)(bar - b));
         b = bar < e ? bar + 1 : e;
     }
+    int hz = 0;
+    while (b < e && *b >= '0' && *b <= '9' && hz < 1000) {
+        hz = hz * 10 + (*b++ - '0');
+    }
+    p->hz = (uint8_t)(hz == MOY_MATCH_TICK_FAST ? MOY_MATCH_TICK_FAST : MOY_MATCH_TICK_HZ);
     p->state = msg[2];
     p->seen = now;
 }
@@ -896,8 +955,7 @@ static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, s
     ask(m, cart);
 }
 
-static void on_join(moy_match_t *m, const uint8_t mac[6], uint32_t now) {
-    (void)now;
+static void on_join(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, size_t n) {
     if (!m->cart[0]) {
         return;
     }
@@ -909,9 +967,12 @@ static void on_join(moy_match_t *m, const uint8_t mac[6], uint32_t now) {
         }
         return;
     }
-    const moy_match_peer_t *p = peer_of(m, mac);
+    moy_match_peer_t *p = peer_of(m, mac);
     if (p == NULL || strcmp(p->cart, m->cart) != 0 || p->state == 2) {
         return;
+    }
+    if (n > 8) {
+        p->hz = msg[8] == MOY_MATCH_TICK_FAST ? MOY_MATCH_TICK_FAST : MOY_MATCH_TICK_HZ;
     }
     // We are already running the cart: a lockstep sim cannot join a game in
     // progress, so this half goes back to frame zero too.
@@ -965,7 +1026,7 @@ void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg
         }
         case MOY_MATCH_T_JOIN:
             if (for_us(m, msg, n, 2)) {
-                on_join(m, mac, now);
+                on_join(m, mac, msg, n);
             }
             return;
         default:

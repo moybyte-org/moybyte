@@ -315,7 +315,7 @@ try:
 except ImportError:                     # CPython: the host's ctypes module
     from runtime import moy_play as _mp
 
-PROTO = 2
+PROTO = 3
 T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE = 1, 2, 3, 4, 5, 6
 TICK_HZ = 30
 TICK_FAST = 60
@@ -441,8 +441,6 @@ class LockstepSession:
             _m.redundancy = redundancy
         self._m = _m
         self._buttons = buttons
-        self.tick_hz = int(_m.tick_hz)
-        self.dt = 1.0 / self.tick_hz
         self.index = int(_m.index)
         self.peer = 1 - self.index
         self.seed = int(_m.seed)
@@ -465,7 +463,7 @@ class LockstepSession:
         if name in ("frame", "delay", "redundancy", "stalls", "stall_ticks",
                     "waiting", "dead", "packets_in", "packets_out",
                     "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
-                    "lowers", "peer_margin", "draw_div", "desync",
+                    "lowers", "peer_margin", "step_from", "tick_hz", "desync",
                     "desync_kind", "checks"):
             return getattr(self.__dict__["_m"], name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
@@ -492,9 +490,19 @@ class LockstepSession:
     def due(self, now_ms):
         return self._m.due(now_ms)
 
-    def draws(self, f):
-        """Does frame `f`'s tick draw (the match's draw divisor)?"""
-        return self._m.draws(f)
+    @property
+    def dt(self):
+        """The next tick's dt (frame `frame`'s)."""
+        return 1.0 / self._m.hz_at(self._m.frame)
+
+    def dt_at(self, f):
+        """Frame `f`'s dt: 1/its tick, which a step down moves at a frame
+        both consoles agree on."""
+        return 1.0 / self._m.hz_at(f)
+
+    def ms(self, f):
+        """The match's clock after `f` ticks, in ms (time() in a match)."""
+        return self._m.ms(f)
 
     def advance(self, held_mask, now_ms=None):
         """One lockstep frame: True simulate (both slots now hold this frame's
@@ -853,8 +861,17 @@ class EspNowLink:
             self.sync(ws)
 
     # -- pairing --
-    def announce(self, cart="", state=0):
+    rate_force = None                   # a dev force of the tick (30 or 60), else the cart's
+
+    def announce(self, cart="", state=0, fps=None):
+        """What this console sits on, in its beacon: the cart, and the tick it
+        holds for it (`match_rate` of the cart's pace; `link rate` forces
+        it). A host starts the match at the lower of the two."""
         if self._m is not None:
+            if self.rate_force:
+                self._m.set_rate(self.rate_force, True)
+            else:
+                self._m.set_rate(match_rate(fps), False)
             self._m.announce(cart or "", state)
 
     def candidate(self, cart):
@@ -863,16 +880,12 @@ class EspNowLink:
         r = self._m.candidate(cart, self._ticks_ms())
         return None if r is None else Peer(r)
 
-    rate_force = None                   # a dev override of the tick (30 or 60), else 30
-
     def offer(self, ws, cart, router=None, seed=None):
         """At a multiplayer cart's start: a peer on the same cart makes this
         run a match (the lower MAC hosts). The host's tuning rides START, and
-        so does its tick: 30, unless `link rate 60` forced it."""
+        so does its tick: the lower of the two consoles' (`announce`)."""
         if not self.active:
             return False
-        hz = self.rate_force or TICK_HZ
-        self._m.set_rate(hz)
         cfg = getattr(ws, "config", None) if ws is not None else None
         try:
             self._m.set_config(json.dumps(cfg) if cfg else None)
@@ -916,7 +929,7 @@ class EspNowLink:
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
                 "stall_ticks": s.stall_ticks, "delay": s.delay, "hz": s.tick_hz,
                 "raises": s.raises, "lowers": s.lowers, "peer_margin": s.peer_margin,
-                "draw_div": s.draw_div,
+                "step_from": s.step_from,
                 "m_ema": s._m_ema, "waiting": s.waiting, "in": s.packets_in,
                 "out": s.packets_out, "peer_frame": s.last_peer_frame,
                 "checks": s.checks, "desync": None if s.desync < 0 else s.desync,
@@ -925,6 +938,18 @@ class EspNowLink:
             },
             "world_check": bool(m.world_check) if m is not None else None,
         }
+
+
+def match_rate(fps):
+    """The tick a console says it holds for a cart paced `fps` (its
+    manifest's): 60 for a cart whose logic runs at 60 or is dt-scaled
+    ("free"), else 30. A match that cannot keep 60 steps down."""
+    if fps == "free":
+        return TICK_FAST
+    try:
+        return TICK_FAST if int(fps) >= TICK_FAST else TICK_HZ
+    except (TypeError, ValueError):
+        return TICK_HZ
 
 
 def _cart_buttons():
