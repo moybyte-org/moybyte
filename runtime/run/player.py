@@ -841,7 +841,7 @@ class Player(PlayerDiag):
                 if _np is not None and getattr(_np, "dead", False):
                     link.end_match(ws)
                 if ws.netplay is None:
-                    link.offer(ws, cart.get("title") or "")
+                    link.offer(ws, cart.get("title") or "", fps=cart.get("fps"))
             except Exception as exc:  # noqa: BLE001 -- a radio must never block a cart
                 print("Moybyte link failed:", exc)
         # Gated on the same permission: an unlinked console leaves this None and

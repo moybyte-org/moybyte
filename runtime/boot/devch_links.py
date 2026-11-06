@@ -19,6 +19,8 @@ def link(chan, ws, parts, line):
         lk.start()
     elif action == "off":
         lk.stop()
+    elif action == "rate" and len(parts) > 2:
+        lk.rate_force = int(parts[2]) if parts[2] in ("30", "60") else None
     elif action == "check" and len(parts) > 2:
         lk.check_worlds(parts[2] == "on")
     elif action == "cart" and len(parts) > 2:

@@ -111,7 +111,6 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     s->peer = 1 - index;
     s->seed = seed;
     s->session = session;
-    s->tick_ms = 1000u / MOY_MATCH_TICK_HZ;
     s->delay = MOY_MATCH_DELAY;
     s->redundancy = MOY_MATCH_REDUNDANCY;
     s->last_peer_frame = -1;
@@ -136,7 +135,39 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     if (cfg != NULL) {
         copy_str(s->config, sizeof(s->config), cfg, strlen(cfg));
     }
+    moy_lockstep_rate(m, MOY_MATCH_TICK_HZ);
     return 0;
+}
+
+void moy_lockstep_rate(moy_match_t *m, int hz) {
+    moy_lockstep_t *s = &m->s;
+    if (hz < 10) {
+        hz = 10;
+    } else if (hz > MOY_MATCH_TICK_FAST) {
+        hz = MOY_MATCH_TICK_FAST;
+    }
+    s->tick_hz = (uint16_t)hz;
+    s->tick_ms = 1000u / (uint32_t)hz;
+    s->tick_rem = 0;
+    s->delay_max = (MOY_MATCH_DELAY_MAX_MS * hz + 999) / 1000;
+    if (s->delay_max < 1) {
+        s->delay_max = 1;
+    }
+    s->escalate_ticks = MOY_MATCH_ESCALATE_S * hz;
+    s->escalate_at = (uint32_t)((MOY_MATCH_ESCALATE_AT * hz + MOY_MATCH_TICK_HZ / 2)
+                                / MOY_MATCH_TICK_HZ);
+}
+
+// One period: tick_ms, plus the ms the fraction has gathered (60 Hz is
+// 16 ms twice and 17 once).
+static uint32_t period(moy_lockstep_t *s) {
+    uint32_t hz = s->tick_hz ? s->tick_hz : MOY_MATCH_TICK_HZ;
+    s->tick_rem = (uint16_t)(s->tick_rem + 1000u % hz);
+    if (s->tick_rem >= hz) {
+        s->tick_rem = (uint16_t)(s->tick_rem - hz);
+        return s->tick_ms + 1u;
+    }
+    return s->tick_ms;
 }
 
 void moy_lockstep_close(moy_match_t *m) {
@@ -157,7 +188,7 @@ bool moy_lockstep_due(moy_match_t *m, uint32_t now) {
     moy_lockstep_t *s = &m->s;
     if (!s->has_next) {
         s->has_next = true;
-        s->next_ms = now + s->tick_ms;
+        s->next_ms = now + period(s);
         if (!s->has_tps) {
             // The rate's window opens at the first tick, so a match formed
             // mid-window never reports a frozen first rate.
@@ -169,9 +200,10 @@ bool moy_lockstep_due(moy_match_t *m, uint32_t now) {
     if ((int32_t)(now - s->next_ms) < 0) {
         return false;
     }
-    uint32_t nx = s->next_ms + s->tick_ms;
+    uint32_t step = period(s);
+    uint32_t nx = s->next_ms + step;
     if ((int32_t)(now - nx) >= 0) {
-        nx = now + s->tick_ms;          // any debt of a full tick is dropped
+        nx = now + step;                // any debt of a full tick is dropped
     }
     s->next_ms = nx;
     return true;
@@ -349,13 +381,14 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
         return 0;
     }
     s->stall_mark = s->stalls;
-    if (s->frame - s->win_mark >= MOY_MATCH_ESCALATE_TICKS) {
+    if (s->frame - s->win_mark >= s->escalate_ticks) {
         // The first window is match formation and never escalates.
-        if (s->win_mark >= MOY_MATCH_ESCALATE_TICKS
-                && s->win_stalls >= MOY_MATCH_ESCALATE_AT
-                && s->delay < MOY_MATCH_DELAY_MAX) {
+        if (s->win_mark >= s->escalate_ticks
+                && s->win_stalls >= s->escalate_at
+                && s->delay < s->delay_max) {
             s->delay++;
-            say(m, "Moybyte link: input delay -> %d (stall pressure)", s->delay);
+            say(m, "Moybyte link: input delay -> %d (%d ms, stall pressure)", s->delay,
+                (int)(s->delay * 1000 / s->tick_hz));
         }
         s->win_mark = s->frame;
         s->win_stalls = 0;
@@ -531,6 +564,10 @@ static void beacon(moy_match_t *m) {
     broadcast(m, p, (size_t)(3 + n));
 }
 
+void moy_match_set_rate(moy_match_t *m, int hz) {
+    m->rate = (uint8_t)(hz == MOY_MATCH_TICK_FAST ? MOY_MATCH_TICK_FAST : MOY_MATCH_TICK_HZ);
+}
+
 void moy_match_set_config(moy_match_t *m, const char *cfg) {
     size_t n = cfg != NULL ? strlen(cfg) : 0;
     // The seed matters more than the tuning: an oversized config is dropped
@@ -620,7 +657,8 @@ static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32
     f[6] = (uint8_t)((seed >> 16) & 0xFF);
     f[7] = (uint8_t)((seed >> 24) & 0xFF);
     memcpy(f + 8, p->mac, 6);
-    size_t at = 14;
+    f[14] = m->rate ? m->rate : (uint8_t)MOY_MATCH_TICK_HZ;
+    size_t at = 15;
     size_t cn = strlen(cart);
     if (cn > MOY_MATCH_CART) {
         cn = MOY_MATCH_CART;
@@ -636,6 +674,7 @@ static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32
     m->start_tries = 0;
     broadcast(m, m->start_frame, at);
     moy_lockstep_begin(m, 0, seed, m->session_id, cfg_or_null(m->cfg));
+    moy_lockstep_rate(m, f[14]);
     m->state = 2;
     if (relaunch) {
         ask(m, cart);
@@ -766,15 +805,16 @@ static bool for_us(const moy_match_t *m, const uint8_t *msg, size_t n, size_t at
 }
 
 static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, size_t n) {
-    if (n < 14 || m->s.live) {
+    if (n < 15 || m->s.live) {
         return;
     }
     uint8_t session = msg[2];
     int index = msg[3];
     uint32_t seed = (uint32_t)msg[4] | ((uint32_t)msg[5] << 8) | ((uint32_t)msg[6] << 16)
                     | ((uint32_t)msg[7] << 24);
-    const char *body = (const char *)msg + 14;
-    size_t bn = n - 14u;
+    int hz = msg[14];
+    const char *body = (const char *)msg + 15;
+    size_t bn = n - 15u;
     size_t cut = 0;
     while (cut < bn && body[cut] != 0) {
         cut++;
@@ -790,6 +830,7 @@ static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, s
     if (moy_lockstep_begin(m, index, seed, session, cfg_or_null(cfg)) != 0) {
         return;
     }
+    moy_lockstep_rate(m, hz);
     m->state = 2;
     ask(m, cart);
 }

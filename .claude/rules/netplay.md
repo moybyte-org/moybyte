@@ -31,7 +31,9 @@ belongs here is only what a coder must not undo:
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
 - **Input delay is ADAPTIVE and raise-only since 2026-08-25**: matches start at
-  DELAY=1 (33ms) and a session under real stall pressure raises itself to 2 --
+  DELAY=1 (one tick: 33 ms at 30 Hz, 16.7 ms at the 60 Hz a cart paced 60 or
+  "free" ticks at, owner 2026-11-06) and a session under real stall pressure
+  raises itself a tick at a time to 66 ms --
   never down, because a lower delay mid-match can overwrite an input frame the
   peer already played. The 2026-08-22 "DELAY=1 measured and REJECTED (14%)"
   verdict was the PACING's fault, not the radio's -- burst catch-up

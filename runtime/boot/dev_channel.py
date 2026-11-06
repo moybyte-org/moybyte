@@ -1047,10 +1047,12 @@ class DevChannel:
                       now, `power on` wakes now. The board keeps RENDERING while
                       dark, so an unattended bench run still produces frames.
       web [start]     serve the wasm console from this board (ws.webhost)
-      link [on|off|cart <title>|check on|off]   the #7 ESP-NOW radio: peers,
-                      pairing and the live lockstep match, as JSON. `on`/`off`
-                      arm it by hand (the Player only arms it for a multiplayer
-                      cart); `check` arms the desync check's world digest
+      link [on|off|cart <title>|check on|off|rate 30|60|auto]   the #7
+                      ESP-NOW radio: peers, pairing and the live lockstep match,
+                      as JSON. `on`/`off` arm it by hand (the Player only arms
+                      it for a multiplayer cart); `check` arms the desync
+                      check's world digest; `rate` forces the tick this console
+                      asks when it hosts (auto: the cart's pace)
       py <code>       eval/exec one line against the LIVE console
       recv <n> <window> [rate=<baud>] <path>   take n RAW bytes off stdin
                       into <path>.new, acking every <window> of them, the

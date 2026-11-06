@@ -870,7 +870,8 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     uint8_t ticks = 1;
     bool render = true;
     if (moy_play_lockstep(F.run, now, &ticks)) {
-        dt = 1.0f / (float)MOY_MATCH_TICK_HZ;
+        moy_match_t *mm = moy_match_kernel();
+        dt = 1.0f / (float)(mm != NULL && mm->s.tick_hz ? mm->s.tick_hz : MOY_MATCH_TICK_HZ);
         // A matched game draws the frames it simulates and no others: a draw
         // between ticks, or over a stalled one, is a present the stall's
         // retry waits behind (the console's path draws on the due tick).

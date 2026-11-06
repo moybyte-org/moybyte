@@ -2,7 +2,7 @@
 
 **Status: SHIPPED and BINDING (last amended 2026-08-27).** Two kids open the
 same cart on their own consoles; the boards hear each other over ESP-NOW inside
-a second and simulate one game on two screens from a shared 30 Hz tape of button
+a second and simulate one game on two screens from a shared 30 or 60 Hz tape of button
 masks. Being in the same room is the pairing ceremony.
 
 **The campaigns are archived.** `docs/history/espnow_multiplayer_2026-08.md` is
@@ -58,15 +58,26 @@ side waits on a frame the other has scrolled past. Two boards ran to frame ~150
 and froze solid with packets flowing both ways (2026-08-22) before that field
 existed.
 
-**Input delay is ADAPTIVE, opens at one tick (33 ms), and only ever RISES**
+**Input delay is ADAPTIVE, opens at one tick (33 ms at 30 Hz), and only ever RISES**
 (2026-08-25). Delay is each console's private sampling lead over its own tape,
 so a raise cannot rewrite an input the peer may already have played, needs no
 agreement on the wire, and may differ between the sides — a verification match
 held the T-Deck at 1 against the P4 at 2 throughout, 29.5 ticks/s and 2.0%
 stalls. A DROP is the unsafe direction: it can overwrite a frame already
-emitted. A session seeing ≥12 distinct stalled ticks in a 3 s window (the first
-is formation grace) goes to 2 and says so on serial; an earlier bar of 5 with no
-grace escalated every match always, because ambient-RF loss arrives in bursts.
+emitted. A session seeing ≥12 distinct stalled ticks in a 3 s window at 30 Hz
+(24 at 60; the first window is formation grace) raises one tick and says so on
+serial, up to 66 ms (two ticks at 30 Hz, four at 60); an earlier bar of 5 with
+no grace escalated every match always, because ambient-RF loss arrives in bursts.
+
+**A cart paced 60 or "free" ticks at 60 Hz in a match** (owner, 2026-11-06: "i
+dont want a higher delay"), so one tick of delay is 16.7 ms. The host names the
+tick in START from its cart's manifest pace (`players.match_rate`) and the
+guest takes it; a cart paced 30, or undeclared, keeps 30, because its logic
+counts frames. What is a time stays a time: the delay's ceiling
+(`MOY_MATCH_DELAY_MAX_MS`) and the escalation window are milliseconds and
+seconds, their tick counts scaled by the rate. A cart paced 60 also stops
+running at half speed in a match, which the fixed 30 Hz tick did to it. `link
+rate 30|60|auto` on the dev channel forces the tick a host asks, for an A/B.
 
 **The 2026-08-22 "DELAY=1 measured and REJECTED at 14%" verdict was the PACING's
 fault, not the radio's**, and is reversed. Tick debt was repaid as a burst at

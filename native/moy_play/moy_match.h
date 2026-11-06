@@ -26,7 +26,8 @@
 // the inputs it applied (and its tier's world digest while the world check is
 // armed), every input packet carries the newest stamp, and the first that
 // disagrees is printed and noticed on the screen.
-// Determinism: the tick is fixed (TICK_HZ), and each logic frame starts from
+// Determinism: the tick is fixed for the match (TICK_HZ, or TICK_FAST for a
+// cart paced 60 or "free", the host's choice), and each logic frame starts from
 // a seed derived from (seed, frame), so drawing, which consumes the random
 // stream at each board's own rate, cannot move it. The session
 // paces itself and drops any debt of a full tick by re-basing (burst
@@ -69,11 +70,15 @@ enum {
 
 // The lockstep clock and its levers (configuration; docs/netplay_v1.md has
 // the measurements behind each).
-#define MOY_MATCH_TICK_HZ 30
+#define MOY_MATCH_TICK_HZ 30            // a match's tick unless its host asks 60
+#define MOY_MATCH_TICK_FAST 60          // a cart paced 60 or "free"
 #define MOY_MATCH_DELAY 1
+#define MOY_MATCH_DELAY_MAX_MS 66       // the delay's ceiling: 2 ticks at 30 Hz, 4 at 60
+#define MOY_MATCH_ESCALATE_S 3          // the escalation window
+#define MOY_MATCH_ESCALATE_AT 12        // distinct stalled ticks in a window, per 30 Hz
+// At 30 Hz (the default rate) the window in ticks and the delay's ceiling.
+#define MOY_MATCH_ESCALATE_TICKS (MOY_MATCH_ESCALATE_S * MOY_MATCH_TICK_HZ)
 #define MOY_MATCH_DELAY_MAX 2
-#define MOY_MATCH_ESCALATE_TICKS 90     // the escalation window, 3 s at 30 Hz
-#define MOY_MATCH_ESCALATE_AT 12        // distinct stalled ticks in a window
 #define MOY_MATCH_REDUNDANCY 4
 #define MOY_MATCH_MAX_SPAN 24
 #define MOY_MATCH_GIVE_UP 300           // stalled advances in a row: dead
@@ -164,6 +169,12 @@ typedef struct {
     int32_t desync;                     // the first checkpoint that disagreed, -1 none
     uint8_t desync_kind;                // 1 the inputs, 2 the world
     uint32_t checks;                    // checkpoints compared and agreeing
+    // The match's rate (the host's, carried by START) and what it scales.
+    uint16_t tick_hz;
+    uint16_t tick_rem;                  // the period's fraction of a ms, in 1/hz
+    int delay_max;
+    int32_t escalate_ticks;
+    uint32_t escalate_at;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
@@ -201,6 +212,7 @@ typedef struct {
     char act_cart[MOY_MATCH_CART + 1];
     char error[48];
     bool world_check;                   // the tiers note world digests (a diag)
+    uint8_t rate;                       // the tick this console asks when it hosts
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -220,6 +232,9 @@ void moy_match_announce(moy_match_t *m, const char *cart, int state);
 // The tuning this console offers when it hosts: a JSON object of at most
 // MOY_MATCH_CFG bytes, else "{}".
 void moy_match_set_config(moy_match_t *m, const char *cfg);
+// The tick rate this console asks when it hosts (MOY_MATCH_TICK_HZ or
+// MOY_MATCH_TICK_FAST); the guest takes the host's from START.
+void moy_match_set_rate(moy_match_t *m, int hz);
 // The host's half at a cart's start: a peer stands by on `cart` -> 1, this
 // run is a match (lower MAC) or it asked the peer to host (higher MAC) -> 0.
 int moy_match_offer(moy_match_t *m, const char *cart, uint32_t now);
@@ -258,6 +273,9 @@ const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *ca
 int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session,
                        const char *cfg);
 void moy_lockstep_close(moy_match_t *m);
+// The match's tick rate in Hz (begin sets MOY_MATCH_TICK_HZ): the period, and
+// the delay's ceiling and the escalation window, which are times.
+void moy_lockstep_rate(moy_match_t *m, int hz);
 // Is a tick due? Pure: no schedule side effect.
 bool moy_lockstep_pending(const moy_match_t *m, uint32_t now);
 // Is the next fixed tick due? Consumes the schedule.

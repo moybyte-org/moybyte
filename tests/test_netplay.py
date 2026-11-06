@@ -269,6 +269,28 @@ def test_the_tick_is_fixed_and_thirty_hertz():
     assert netplay.DELAY == 1, "matches START at one frame of delay (33ms)"
     assert netplay.DELAY_MAX == 2, "...and stall pressure can only raise it to two"
     assert netplay.REDUNDANCY == 4
+    assert a[0].delay_max == 2
+
+
+def test_a_sixty_hertz_match_keeps_its_times_and_halves_its_ticks():
+    """A cart paced 60 or "free" ticks at 60 in a match (owner, 2026-11-06:
+    "i dont want a higher delay"): one tick of delay is 16.7 ms. What is a TIME
+    stays one -- the delay's ceiling (66 ms: four ticks), the escalation window
+    (3 s) -- and 60 periods of 16 or 17 ms make exactly a second."""
+    wire = _Wire()
+    a, _b = _match(wire, tick_hz=60)
+    s = a[0]
+    assert abs(s.dt - 1.0 / 60.0) < 1e-9 and s.tick_hz == 60
+    assert s.delay_max == 4
+    assert s._m._m.s.escalate_ticks == 180 and s._m._m.s.escalate_at == 24
+    now, ticks = 1000, 0
+    while ticks < 61:
+        if s.due(now):
+            ticks += 1
+            if ticks == 1:
+                start = now
+        now += 1
+    assert now - 1 - start == 1000, "the 61st tick lands one second after the first"
 
 
 # -- hygiene ----------------------------------------------------------------

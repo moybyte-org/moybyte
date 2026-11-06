@@ -695,7 +695,9 @@ class _Lockstep(ctypes.Structure):
                 ("ck_f", _I32 * _M_CHECKS), ("ck_in", _U32 * _M_CHECKS),
                 ("ck_w", _U32 * _M_CHECKS), ("ck_last", _I32), ("peer_ck_f", _I32),
                 ("peer_ck_in", _U32), ("peer_ck_w", _U32), ("peer_ck_cmp", _I32),
-                ("desync", _I32), ("desync_kind", _U8), ("checks", _U32)]
+                ("desync", _I32), ("desync_kind", _U8), ("checks", _U32),
+                ("tick_hz", _U16), ("tick_rem", _U16), ("delay_max", ctypes.c_int),
+                ("escalate_ticks", _I32), ("escalate_at", _U32)]
 
 
 class _MatchS(ctypes.Structure):
@@ -711,7 +713,7 @@ class _MatchS(ctypes.Structure):
                 ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
                 ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
-                ("error", ctypes.c_char * 48), ("world_check", _B)]
+                ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8)]
 
 
 _SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
@@ -760,6 +762,8 @@ _MSIGS = (
     ("moy_lockstep_world_due", [ctypes.c_void_p], _B),
     ("moy_lockstep_world", [ctypes.c_void_p, _I32, _U32], None),
     ("moy_match_world_check", [ctypes.c_void_p, _B], None),
+    ("moy_match_set_rate", [ctypes.c_void_p, ctypes.c_int], None),
+    ("moy_lockstep_rate", [ctypes.c_void_p, ctypes.c_int], None),
     ("moy_lockstep_hash", [_U32, ctypes.c_char_p, ctypes.c_size_t], _U32),
     ("moy_lockstep_tps", [ctypes.c_void_p, _U32], _U32),
     ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
@@ -921,6 +925,12 @@ class Match:
 
     def announce(self, cart, state):
         self._d.moy_match_announce(self._p, (cart or "").encode(), int(state))
+
+    def set_rate(self, hz):
+        self._d.moy_match_set_rate(self._p, int(hz))
+
+    def rate(self, hz):
+        self._d.moy_lockstep_rate(self._p, int(hz))
 
     def set_config(self, cfg):
         self._d.moy_match_set_config(self._p, None if cfg is None else cfg.encode())

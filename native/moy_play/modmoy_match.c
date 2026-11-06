@@ -85,6 +85,18 @@ static mp_obj_t mt_set_config(mp_obj_t self, mp_obj_t cfg) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mt_set_config_obj, mt_set_config);
 
+static mp_obj_t mt_set_rate(mp_obj_t self, mp_obj_t hz) {
+    moy_match_set_rate(M(self), mp_obj_get_int(hz));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_set_rate_obj, mt_set_rate);
+
+static mp_obj_t mt_rate(mp_obj_t self, mp_obj_t hz) {
+    moy_lockstep_rate(M(self), mp_obj_get_int(hz));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_rate_obj, mt_rate);
+
 static mp_obj_t mt_offer(size_t n, const mp_obj_t *a) {
     bool has = n > 3 && a[3] != mp_const_none;
     return mp_obj_new_bool(moy_match_offer_seeded(
@@ -279,6 +291,8 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_seed: dest[0] = mp_obj_new_int_from_uint(s->seed); return;
         case MP_QSTR_session: dest[0] = MP_OBJ_NEW_SMALL_INT(s->session); return;
         case MP_QSTR_tick_ms: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_ms); return;
+        case MP_QSTR_tick_hz: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_hz); return;
+        case MP_QSTR_delay_max: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay_max); return;
         case MP_QSTR_frame: dest[0] = mp_obj_new_int(s->frame); return;
         case MP_QSTR_delay: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay); return;
         case MP_QSTR_redundancy: dest[0] = MP_OBJ_NEW_SMALL_INT(s->redundancy); return;
@@ -317,6 +331,8 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mt_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_announce), MP_ROM_PTR(&mt_announce_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_config), MP_ROM_PTR(&mt_set_config_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_rate), MP_ROM_PTR(&mt_set_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rate), MP_ROM_PTR(&mt_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_offer), MP_ROM_PTR(&mt_offer_obj) },
     { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&mt_poll_obj) },
     { MP_ROM_QSTR(MP_QSTR_drain), MP_ROM_PTR(&mt_drain_obj) },
