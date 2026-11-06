@@ -708,7 +708,8 @@ class _Lockstep(ctypes.Structure):
                 ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32),
                 ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
                 ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
-                ("lock_at", _U32)]
+                ("lock_at", _U32), ("late_ms", _U32), ("stall_ms", _U32),
+                ("slew_ms", _I32)]
 
 
 class _MatchS(ctypes.Structure):

@@ -323,6 +323,9 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_redundancy: dest[0] = MP_OBJ_NEW_SMALL_INT(s->redundancy); return;
         case MP_QSTR_stalls: dest[0] = mp_obj_new_int_from_uint(s->stalls); return;
         case MP_QSTR_stall_ticks: dest[0] = mp_obj_new_int_from_uint(s->stall_ticks); return;
+        case MP_QSTR_late_ms: dest[0] = mp_obj_new_int_from_uint(s->late_ms); return;
+        case MP_QSTR_stall_ms: dest[0] = mp_obj_new_int_from_uint(s->stall_ms); return;
+        case MP_QSTR_slew_ms: dest[0] = mp_obj_new_int(s->slew_ms); return;
         case MP_QSTR_packets_in: dest[0] = mp_obj_new_int_from_uint(s->packets_in); return;
         case MP_QSTR_packets_out: dest[0] = mp_obj_new_int_from_uint(s->packets_out); return;
         case MP_QSTR_waiting: dest[0] = mp_obj_new_bool(s->waiting); return;

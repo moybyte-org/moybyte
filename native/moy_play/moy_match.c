@@ -262,8 +262,17 @@ bool moy_lockstep_due(moy_match_t *m, uint32_t now) {
     }
     uint32_t step = period(s);
     uint32_t nx = s->next_ms + step;
+    // A slot a stalled frame takes ticks nothing, and a dropped debt moves
+    // every later slot: both are ticks the match never gets back.
+    uint32_t lost = s->waiting ? step : 0u;
     if ((int32_t)(now - nx) >= 0) {
+        lost += now - s->next_ms;
         nx = now + step;                // any debt of a full tick is dropped
+    }
+    if (s->waiting) {
+        s->stall_ms += lost;
+    } else {
+        s->late_ms += lost;
     }
     s->next_ms = nx;
     return true;
@@ -509,6 +518,7 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
             if (s->delay == 1 && s->index != 0
                     && e < (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS)) {
                 s->next_ms += 1u;
+                s->slew_ms++;
             }
         }
     }

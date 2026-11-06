@@ -261,6 +261,7 @@ class PerfMeters:
             for name in _CONSOLE_METERS:
                 loop.perf(name, None)
             loop.perf("net", self.perf_net())
+            loop.perf("lock", self.perf_lock())
             return
         loop.perf("draw", self._draw_ms)
         loop.perf("flush", self._flush_ms)
@@ -281,6 +282,7 @@ class PerfMeters:
         loop.perf("wms", v)
         loop.perf("home", getattr(ws, "_pf_home", None))
         loop.perf("net", self.perf_net())
+        loop.perf("lock", self.perf_lock())
         pl = self.player
         if pl is None or not pl.tick_ms:
             self._perf_sched = None
@@ -313,6 +315,13 @@ class PerfMeters:
         must not carry a number that a second caller would spend."""
         np = self.netplay
         return None if np is None else np.tps(_ticks_ms())
+
+    def perf_lock(self):
+        """The PERF line's `lock=`: where a match's tick rate went
+        (LockstepSession.lock), None with no session. Its one reader, beside
+        perf_net."""
+        np = self.netplay
+        return None if np is None else np.lock(_ticks_ms())
 
     def perf_breakdown(self):
         """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --

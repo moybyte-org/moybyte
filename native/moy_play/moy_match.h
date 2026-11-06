@@ -233,6 +233,14 @@ typedef struct {
     uint32_t win_ms;
     bool has_lock;                      // the last pass that sent (LOCK_MS)
     uint32_t lock_at;
+    // Where the tick rate goes, in ms of the tick schedule given up (the
+    // PERF line's `lock=`, LockstepSession.lock): a tick that comes due a
+    // whole period late drops its debt, `late` when nothing was stalled
+    // (this console's own frame ran long: a collection, a heavy frame); a
+    // slot that passes while a tick waits on the peer's input is `stall`;
+    // `slew` is the guest's phase moved later.
+    uint32_t late_ms, stall_ms;
+    int32_t slew_ms;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };

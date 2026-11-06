@@ -449,6 +449,7 @@ class LockstepSession:
         self.config = _decode_config(_m.config)
         self._router = router
         self.world = None               # the cart's world as text, for the check
+        self._lock_was = None           # lock()'s window: (ms, its counters)
         self.local = self.remote = None
         if router is not None:
             # Both slots are the session's and NOT auto-advanced: their edges
@@ -465,7 +466,7 @@ class LockstepSession:
                     "waiting", "dead", "packets_in", "packets_out",
                     "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
                     "lowers", "peer_margin", "step_from", "tick_hz", "desync",
-                    "desync_kind", "checks"):
+                    "desync_kind", "checks", "late_ms", "stall_ms", "slew_ms"):
             return getattr(self.__dict__["_m"], name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
             return getattr(self.__dict__["_m"], name[1:])
@@ -551,6 +552,30 @@ class LockstepSession:
         """Ticks per second since the last call: the PERF line's net=. ONE
         reader -- it consumes its window."""
         return self._m.tps(now_ms)
+
+    def lock(self, now_ms):
+        """Where the tick rate went since the last call, the PERF line's
+        lock=: (late, stall, slew, delay, margin). The first three are ms of
+        the tick schedule given up per second -- this console's own frames
+        running a whole tick long (a collection, a heavy frame), its waits
+        on the peer's input, and the guest's phase moved later -- so their
+        sum over the tick's ms is the ticks a second the match lost. Then
+        the input delay in ms, and the ms before it needed them that the
+        peer's inputs landed (None before any). ONE reader -- it consumes
+        its window."""
+        m = self._m
+        now = (m.late_ms, m.stall_ms, m.slew_ms)
+        was = self._lock_was
+        self._lock_was = (now_ms, now)
+        hz = m.tick_hz or TICK_HZ
+        e = m.m_ema
+        tail = (m.delay * 1000 // hz, None if e is None else int(e + 0.5))
+        if was is None:
+            return (None, None, None) + tail
+        ms = (now_ms - was[0]) & 0x3FFFFFFF
+        if ms <= 0:
+            return (None, None, None) + tail
+        return tuple((now[i] - was[1][i]) * 1000 // ms for i in range(3)) + tail
 
     def close(self):
         for i in (self.index, self.peer):

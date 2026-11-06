@@ -78,6 +78,8 @@ FIELDS = (
     ("home", "%d/%d/%d", ""),           # launcher split: wallpaper/grid/bar ms
     ("gc", "%d/%d/%d", ""),             # collections / their pause us / longest
                                         # pause us, this sample (gc.pauses())
+    ("lock", "%d/%d/%d/%d/%d", ""),     # #65 match: ms/s of ticks lost late/
+                                        # stalled/slewed, delay ms, margin ms
 )
 
 _NAMES = tuple(n for n, _s, _u in FIELDS)

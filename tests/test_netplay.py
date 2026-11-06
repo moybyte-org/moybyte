@@ -647,6 +647,36 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
     assert guest._next_ms == g_nx, "at DELAY=2 the controller is off"
 
 
+def test_the_lock_meter_says_where_the_tick_rate_went():
+    """PERF's lock= (2026-11-07): the ms of the tick schedule a console gave
+    up, per second, split by why -- a tick that came due a whole period late
+    with nothing stalled is this console's own frame (`late`), a slot that
+    passes while a tick waits on the peer is the peer's (`stall`) -- then
+    the delay and the margin. Their sum over the tick's ms is what the
+    match's ticks/s fell short by."""
+    wire = _Wire()
+    (host, _rh, _ih), (guest, _rg, _ig) = _match(wire, delay=1)
+    t = 1000
+    assert host.lock(t) == (None, None, None, 33, None), "the window opens"
+    for s in (host, guest):
+        s.due(t)
+        assert s.advance(0, t) is False         # frame 0 waits on the other
+    wire.deliver(0, host)
+    wire.deliver(1, guest)
+    assert host.advance(0, t + 5) is True       # a stall inside its slot costs nothing
+    assert host.due(t + 99)                     # a frame ran two ticks long
+    assert host.late_ms == 66 and host.stall_ms == 0
+    assert host.advance(0, t + 99) is True      # frame 1's input was banked
+    assert host.due(t + 132)
+    assert host.advance(0, t + 132) is False    # frame 2's is not
+    assert host.due(t + 166)                    # its slot passes, stalled
+    assert host.late_ms == 66 and host.stall_ms in (33, 34)
+    late, stall, slew, delay, margin = host.lock(t + 500)
+    assert (late, stall, slew, delay) == (132, host.stall_ms * 2, 0, 33)
+    assert margin is None, "the wire timed no arrival, so no margin is known"
+    assert host.lock(t + 1500)[:3] == (0, 0, 0), "one reader: the window was spent"
+
+
 def _timed_match(wire, t, frames, a, b, masks=None, lag=0):
     """Both consoles tick at 30 Hz on a clock; each packet lands `lag` ms
     after its sender's tick. Returns the buttons each console played, by
@@ -973,6 +1003,7 @@ def test_the_console_reports_no_session_as_None_never_as_a_rate(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.netplay is None
     assert ws.perf_net() is None
+    assert ws.perf_lock() is None
 
 
 def test_the_console_asks_the_live_session_for_the_rate(tmp_path):

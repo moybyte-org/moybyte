@@ -34,6 +34,7 @@ static const field_t FIELDS[MOY_PF_FIELDS] = {
     {"gfence_ms", 1, 1, ""},
     {"home", 3, 0, ""},
     {"gc", 3, 0, ""},
+    {"lock", 5, 0, ""},
 };
 
 // `v` with `decimals` places into tmp (at least 24 bytes).
@@ -242,5 +243,6 @@ size_t moy_perf_sample(moy_perf_t *p, uint32_t drawn, const moy_perf_overlap_t *
     // The miss count is a window's; the console pushes it anew.
     p->console.has[MOY_PF_MISS] = 0;
     p->console.has[MOY_PF_NET] = 0;
+    p->console.has[MOY_PF_LOCK] = 0;
     return moy_perf_format(&v, out, cap);
 }

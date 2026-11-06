@@ -224,6 +224,16 @@ session prints `-`, never 0**: 0 is a real reading, matched but not advancing,
 and a frozen 0 is what a broken meter looks like — the lesson `fold=` taught by
 lying for a month.
 
+**`lock=late/stall/slew/delay/margin` says where the rate went** (2026-11-07,
+the line's last field, `-` with no session). The first three are ms of the
+tick schedule given up per second, so their sum over the tick's ms is what
+`net=` fell short by: `late` is a tick that came due a whole period late with
+nothing stalled (this console's own frame: a collection, a heavy frame; read
+it beside `gc=`), `stall` a slot that passed while a tick waited on the peer's
+input, `slew` the guest's phase moved later. Then the input
+delay in ms and the margin the peer's inputs land with (`-` before one is
+timed). One console's `late` shows up as the other's `stall`.
+
 ## 4. Radio facts, one session each
 
 - **A restart must not stop the link.** `Player.release_world` stops it only
