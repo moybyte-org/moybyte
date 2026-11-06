@@ -86,6 +86,11 @@ enum {
 #define MOY_MATCH_MAX_SPAN 24
 #define MOY_MATCH_GIVE_UP 300           // stalled advances in a row: dead
 #define MOY_MATCH_TAPE 256
+// A stalled tick's retry (until its input arrives) and the resend between
+// ticks go out at most every LOCK_MS, whatever the loop's rate: a loop whose
+// frames between ticks are cheap sent every pass and flooded the air
+// (moy_lockstep_gate).
+#define MOY_MATCH_LOCK_MS 16
 #define MOY_MATCH_SLEW_TARGET_MS 12
 #define MOY_MATCH_SLEW_BAND_MS 4
 // The desync check: every CHECK_EVERY frames each console stamps a checkpoint
@@ -212,6 +217,8 @@ typedef struct {
     bool hold;
     bool has_win_ms;
     uint32_t win_ms;
+    bool has_lock;                      // the last pass that sent (LOCK_MS)
+    uint32_t lock_at;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
@@ -324,6 +331,11 @@ void moy_lockstep_rate(moy_match_t *m, int hz);
 bool moy_lockstep_pending(const moy_match_t *m, uint32_t now);
 // Is the next fixed tick due? Consumes the schedule.
 bool moy_lockstep_due(moy_match_t *m, uint32_t now);
+// May this pass of the console's loop send: a due tick always, a stalled
+// tick whose missing input has arrived always, and any other retry or the
+// resend between ticks once MOY_MATCH_LOCK_MS has passed since the last pass
+// that sent. A true answer is that pass.
+bool moy_lockstep_gate(moy_match_t *m, uint32_t now, bool due);
 // One lockstep frame with the local console's held mask: 1 simulate (the
 // players' buttons and the frame's seed are set), 0 STALL, -1 no session.
 // `timed` false: no clock (the phase controller and arrival stamps idle).

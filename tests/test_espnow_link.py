@@ -1112,6 +1112,16 @@ def test_a_match_too_slow_for_sixty_steps_down_and_stays_in_sync(tmp_path, monke
         assert ws.ns["time"]() == np.ms(np.frame) > np.frame * 1000 // 60
 
 
+def test_a_fast_loop_does_not_flood_the_air(tmp_path, monkeypatch):
+    """Two consoles looping every 4 ms (frames between ticks are cheap)
+    send at most once per LOCK_MS between ticks, plus each tick's own."""
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, step=4)
+    np = wss[0].player._netplay
+    secs = 1500 * 4 / 1000
+    assert np.frame > 25 * (secs - 2), "the match ticked"
+    assert np.packets_out <= secs * (1000 / netplay.LOCK_MS + 30) + 40, np.packets_out
+
+
 def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
     """A kid's _draw keeps state as often as not (`t += 1` for a blink), and
     two consoles agree only if each runs it once a tick. Brick Siege paces

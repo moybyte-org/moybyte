@@ -287,8 +287,6 @@ typedef struct {
     uint32_t budget;                // the runaway watch's, for each tick (ms)
     bool armed;                     // the crash record names this run
     bool reseed;                    // a lockstep frame starts: seed libmoy first
-    bool lock_any;                  // the match's last send: lock_at is set
-    uint32_t lock_at;
     char path[192];                 // the cart's folder
 } run_t;
 
@@ -397,7 +395,6 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.ptr[0] = R.ptr[1] = R.ptr[2] = 0;
     R.view = 0;
     R.reseed = false;
-    R.lock_any = false;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
     R.budget = watch_budget(NULL);
     moy_chrome_stuck_text(W.what, sizeof(W.what), R.budget);
@@ -697,18 +694,12 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
     // tail's drain left it up to a frame stale (8.0% -> 6.4% stalled ticks
     // at DELAY=2 from this alone, on glass).
     moy_match_drain_input(m, now, MOY_MATCH_DRAIN_MAX);
-    // Every advance and every resend is a broadcast. A due tick always runs;
-    // a stalled tick's retry and the resend between ticks wait out
-    // MOY_PLAY_LOCK_MS since the last send, the cadence of a console's loop
-    // frame. The kernel's front loops far faster: a send each pass flooded
-    // the air (T-Deck and P4: 17 ticks/s, 47% of ticks stalled),
-    // and a 4 ms retry did the same.
+    // Every advance and every resend is a broadcast: a stalled tick's retry
+    // and the resend between ticks wait out MOY_MATCH_LOCK_MS (the gate).
     bool due = moy_lockstep_due(m, now);
-    if (!due && r->lock_any && now - r->lock_at < MOY_PLAY_LOCK_MS) {
+    if (!moy_lockstep_gate(m, now, due)) {
         return true;
     }
-    r->lock_any = true;
-    r->lock_at = now;
     if (due || m->s.waiting) {
         // A stalled tick retries every loop frame: the missing input usually
         // lands a few ms after it was first needed.

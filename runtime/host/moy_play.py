@@ -701,7 +701,8 @@ class _Lockstep(ctypes.Structure):
                 ("peer_margin", _U8), ("rep_min", _U8), ("last_win", _U8),
                 ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32),
                 ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
-                ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32)]
+                ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
+                ("lock_at", _U32)]
 
 
 class _MatchS(ctypes.Structure):
@@ -769,6 +770,7 @@ _MSIGS = (
     ("moy_match_world_check", [ctypes.c_void_p, _B], None),
     ("moy_match_set_rate", [ctypes.c_void_p, ctypes.c_int, _B], None),
     ("moy_lockstep_hz_at", [ctypes.c_void_p, _I32], ctypes.c_int),
+    ("moy_lockstep_gate", [ctypes.c_void_p, _U32, _B], _B),
     ("moy_lockstep_ms", [ctypes.c_void_p, _I32], _I32),
     ("moy_lockstep_rate", [ctypes.c_void_p, ctypes.c_int], None),
     ("moy_lockstep_hash", [_U32, ctypes.c_char_p, ctypes.c_size_t], _U32),
@@ -1034,6 +1036,9 @@ class Match:
 
     def arm_worlds(self, on):
         self._d.moy_match_world_check(self._p, bool(on))
+
+    def gate(self, now, due):
+        return bool(self._d.moy_lockstep_gate(self._p, int(now) & 0xFFFFFFFF, bool(due)))
 
     def hz_at(self, f):
         return self._d.moy_lockstep_hz_at(self._p, int(f))

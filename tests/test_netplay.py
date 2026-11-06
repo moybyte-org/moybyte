@@ -997,3 +997,24 @@ def test_perf_sample_does_not_spend_the_meters_window(tmp_path):
     for _ in range(4):
         ws.perf_sample()
     assert ws.netplay.asked == []
+
+
+def test_a_retry_or_a_resend_waits_out_the_lock():
+    """A loop whose frames between ticks are cheap sent on every pass and
+    flooded the air: Python matches ran at 80% of their tick with half
+    their ticks stalled (2026-11-06). A due tick always sends; a stalled
+    retry or a resend goes out at most every LOCK_MS, until the stalled
+    tick's input arrives: that retry ticks at once."""
+    wire = _Wire()
+    a, b = _match(wire)
+    sa = a[0]
+    lock = netplay.LOCK_MS
+    assert sa.gate(1000, False) is True
+    assert sa.gate(1000 + lock - 1, False) is False
+    assert sa.gate(1000 + lock - 1, True) is True, "a due tick never waits"
+    assert sa.gate(1000 + 2 * lock - 1, False) is True
+    assert _step(a, b, wire) == [(False, False)] and sa.waiting
+    t = 1000 + 2 * lock
+    assert sa.gate(t, False) is False, "nothing new arrived"
+    wire.deliver(0, sa)
+    assert sa.gate(t, False) is True, "the missing input arrived"

@@ -219,6 +219,17 @@ static uint32_t period(moy_lockstep_t *s) {
     return s->tick_ms;
 }
 
+bool moy_lockstep_gate(moy_match_t *m, uint32_t now, bool due) {
+    moy_lockstep_t *s = &m->s;
+    bool ready = s->waiting && tape_get(s->theirs_f, s->theirs_m, s->frame) >= 0;
+    if (!due && !ready && s->has_lock && now - s->lock_at < MOY_MATCH_LOCK_MS) {
+        return false;
+    }
+    s->has_lock = true;
+    s->lock_at = now;
+    return true;
+}
+
 void moy_lockstep_close(moy_match_t *m) {
     moy_lockstep_t *s = &m->s;
     tape_clear(s->mine_f);

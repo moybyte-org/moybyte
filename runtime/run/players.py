@@ -319,6 +319,7 @@ PROTO = 3
 T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE = 1, 2, 3, 4, 5, 6
 TICK_HZ = 30
 TICK_FAST = 60
+LOCK_MS = 16                            # moy_match.h's MOY_MATCH_LOCK_MS
 DELAY = 1
 DELAY_MAX = 2
 ESCALATE_TICKS = 90
@@ -489,6 +490,12 @@ class LockstepSession:
 
     def due(self, now_ms):
         return self._m.due(now_ms)
+
+    def gate(self, now_ms, due):
+        """May this pass send (moy_lockstep_gate): a due tick and a stalled
+        one whose input arrived always, another retry or a resend at most
+        every LOCK_MS."""
+        return self._m.gate(now_ms, due)
 
     @property
     def dt(self):

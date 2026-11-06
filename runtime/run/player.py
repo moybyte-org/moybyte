@@ -2286,7 +2286,10 @@ class Player(PlayerDiag):
             # at its fixed rate, not at whatever the board's frame loop
             # manages, or a fixed dt would silently run the game fast.
             _nowp = _ticks_ms()
-            if np.due(_nowp) or np.waiting:
+            _due = np.due(_nowp)
+            if not np.gate(_nowp, _due):
+                stalled = True          # within LOCK_MS of the last send
+            elif _due or np.waiting:
                 # A STALLED tick retries every loop frame instead of
                 # waiting out a whole tick: the missing input usually
                 # lands a few ms after it was first needed, and the

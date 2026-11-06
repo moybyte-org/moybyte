@@ -221,6 +221,11 @@ static mp_obj_t mt_advance(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_advance_obj, 2, 3, mt_advance);
 
+static mp_obj_t mt_gate(mp_obj_t self, mp_obj_t now, mp_obj_t due) {
+    return mp_obj_new_bool(moy_lockstep_gate(M(self), now_of(now), mp_obj_is_true(due)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_gate_obj, mt_gate);
+
 static mp_obj_t mt_resend(mp_obj_t self) {
     moy_lockstep_resend(M(self));
     return mp_const_none;
@@ -373,6 +378,7 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_world_due), MP_ROM_PTR(&mt_world_due_obj) },
     { MP_ROM_QSTR(MP_QSTR_arm_worlds), MP_ROM_PTR(&mt_world_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_hz_at), MP_ROM_PTR(&mt_hz_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gate), MP_ROM_PTR(&mt_gate_obj) },
     { MP_ROM_QSTR(MP_QSTR_ms), MP_ROM_PTR(&mt_ms_obj) },
     { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },

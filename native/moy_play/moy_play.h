@@ -349,7 +349,6 @@ void moy_play_watch_budget(uint32_t ms);
 // snapshot then reads the session's two global players, and libmoy's random
 // stream starts from the frame's seed. False: no match, the run is solo.
 bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks);
-#define MOY_PLAY_LOCK_MS 16u            // a stall's retry and a resend: at most this often
 // The seed a matched run's console starts from (its _init draws from it):
 // true while the kernel's link has a live session.
 bool moy_play_lock_seed(uint32_t *seed);

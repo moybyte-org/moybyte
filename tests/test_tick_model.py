@@ -668,6 +668,9 @@ class _FakeSession:
     def dt_at(self, f):
         return 1 / 30
 
+    def gate(self, now, due):
+        return True
+
     def due(self, now):
         return self.on
 
