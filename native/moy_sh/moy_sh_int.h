@@ -53,6 +53,8 @@ struct moy_sh {
 
     struct builtincmd *roles;           // the host's service commands
     int nroles;
+
+    char home[MOY_SH_HOME_MAX];         // the session's home, whose .ssh is /etc's
 };
 
 // The session running now (set for the length of a call into the shell).

@@ -276,6 +276,19 @@ sends the secret in the clear and `native/moy_net` has only a TLS client;
 if the SSH spike says the S3s cannot carry a second TLS server, they mount
 over SFTP only (owner, 2026-11-03).
 
+**What the files tree shows (2026-11-06).** Its root `/` is the console's
+real root: `/bin`, `/dev`, `/etc` and `/proc`, the names of the volume
+mounted at `/` (the internal flash, its `moy/` store among them) and the
+folders mounted beside it (`/sd` with a card), each once
+(`native/moy_sh/moy_sh_sys.c`). A session, on every face (the Terminal, SSH,
+the serial `sh`, the recovery console), starts in the **user's files
+folder** beside the store's carts, `/sd/moybyte/files` on a card and
+`/moy/files` without one, which is its `$HOME` and where `cd` returns; a
+console with no files folder yet starts in `/`
+(`moy_sh_board_go_home`). It is the folder the Files app shows, so the
+shell, SFTP and the app see one home; the home's `.ssh` is `/etc`, as
+`/.ssh` is, so ssh-copy-id's key lands where the server reads it.
+
 ## 5. Settings as files
 
 **`system/`** holds the console's documents **as plain-text files like

@@ -75,9 +75,10 @@ At every connection's start the server reads the store's system folder
 (`moy_ssh.h`'s SIGN-IN): `password`, the hash (`$moy1$SALT$HEX`, SHA-256
 iterated, `moy_ssh_hash`; no password, no SSH), `ssh`'s `password_auth`, and
 `authorized_keys` (ed25519 keys). Any user name is the console's one
-account. In the shell `/etc` is that folder, and `/etc/dropbear` and
-`/.ssh` (a session's home is `/`) name it too: an older ssh-copy-id installs
-a key on a Dropbear server in the first, a current one in the second.
+account. In the shell `/etc` is that folder, and `/etc/dropbear`, `/.ssh`
+and the home's `.ssh` (a session's home is the user's files folder,
+`docs/os_2026-11/system.md` §4) name it too: an older ssh-copy-id installs
+a key on a Dropbear server in the first, a current one in the home's.
 
 ## Boards
 

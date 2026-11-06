@@ -171,6 +171,11 @@ void moy_vol_leave(moy_vol_here_t *h);
 // moy_store_keep what outlives the call (the marker cache); both are freed by
 // moy_store_free with the size they were made with.
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
+// The folders mounted under the root beside the root's own volume ("sd" for
+// /sd), each once to `fn` until it answers non-zero (its answer returned).
+// Optional: a host with one volume over the whole tree defines none, and a
+// caller takes it weak.
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg);
 //
 // moy_store_tick is called at every open and every listing: on a board it
 // feeds the kernel's task watchdog when the frame loop has armed it, so a

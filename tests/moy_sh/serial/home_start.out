@@ -1,0 +1,24 @@
+> sh pwd
+SH /sd/moybyte/files
+SH end 0
+> sh echo $HOME
+SH /sd/moybyte/files
+SH end 0
+> sh echo hi > /asdf.txt
+SH end 0
+> sh ls /
+SH asdf.txt  bin/  dev/  etc  proc/  sd/
+SH end 0
+> sh ls ~
+SH end 0
+> sh cd /; cd; pwd
+SH /sd/moybyte/files
+SH end 0
+> sh mkdir -p .ssh; echo key > .ssh/authorized_keys; cat /etc/authorized_keys
+SH key
+SH end 0
+> sh cat ~/.ssh/authorized_keys /.ssh/authorized_keys
+SH key
+SH key
+SH end 0
+[exit 0]

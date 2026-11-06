@@ -33,6 +33,7 @@ DB = os.path.join(MOD, "dropbear")
 PASSWORD = "moybyte-test"
 SALT = "00112233445566778899aabbccddeeff"
 SYSTEM = "sd/moybyte/system"
+FILES = "sd/moybyte/files"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("cc") is None or shutil.which("ssh") is None
@@ -87,6 +88,7 @@ def serve(exe, out):
     tree = out / "tree"
     system = tree / SYSTEM
     system.mkdir(parents=True)
+    (tree / FILES).mkdir(parents=True)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -287,6 +289,14 @@ def test_a_current_ssh_copy_id_installs_its_key_where_the_server_reads(harness):
     r = ssh(harness, "", "moy@127.0.0.1", "echo in", key=True)
     assert r.returncode == 0, r.stderr
     keys.unlink()
+
+
+def test_a_session_starts_in_the_files_folder_and_the_root_lists_what_is_there(harness):
+    (harness["out"] / "tree" / "asdf.txt").write_text("hi\n")
+    r = ssh(harness, PASSWORD, "moy@127.0.0.1", "pwd; echo $HOME; ls /")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.decode().split("\n")[:3] == ["/" + FILES, "/" + FILES,
+                                                  "asdf.txt  bin/  dev/  etc/  proc/  sd/"]
 
 
 def test_password_auth_no_refuses_the_password_and_keeps_the_key(harness):

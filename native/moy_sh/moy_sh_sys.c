@@ -20,7 +20,8 @@
 // `.`/`..` folded. /dev and /proc are virtual (the host's vread/vlist, with
 // /dev/null and /dev/tty here); /bin lists the installed commands (the
 // host's lookup); everything else is the store's, under the host's root,
-// through moy_vol.
+// through moy_vol. `/` lists the virtual folders, the root volume's names and
+// the folders mounted beside it (moy_vol_mounts), each once.
 
 #include <errno.h>
 #include <stdarg.h>
@@ -278,10 +279,15 @@ const char *moy_sh_store_path(const char *abs, char *out, size_t cap) {
         return NULL;
     }
     const char *etc = moy_sh_cur->host.etc;
-    if (etc != NULL && (under(abs, "/etc") || under(abs, "/.ssh"))) {
+    const char *home = moy_sh_cur->home;
+    size_t hn = strcmp(home, "/") == 0 ? 0 : strlen(home);
+    if (etc != NULL && (under(abs, "/etc") || under(abs, "/.ssh")
+                        || (hn > 0 && strncmp(abs, home, hn) == 0 && under(abs + hn, "/.ssh")))) {
         const char *rest = abs + 4;
-        if (abs[1] == '.') {
+        if (under(abs, "/.ssh")) {
             rest = abs + 5;
+        } else if (!under(abs, "/etc")) {
+            rest = abs + hn + 5;            // the home's .ssh
         } else if (under(rest, "/dropbear")) {
             rest += 9;
         }
@@ -983,15 +989,40 @@ static int dir_add(void *arg, const char *name, int is_dir, uint32_t size) {
     return 0;
 }
 
+// The root's names come from several places (the virtual folders, the
+// host's, the root volume's, the mount points): each is listed once.
+static int root_add(void *arg, const char *name, int is_dir, uint32_t size) {
+    struct moy_sh_dir *d = arg;
+    for (size_t i = 0; i < d->len; i += strlen(d->names + i + 1) + 2) {
+        if (strcmp(d->names + i + 1, name) == 0) {
+            return 0;
+        }
+    }
+    return dir_add(d, name, is_dir, size);
+}
+
 static int vol_ent(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
     (void)len;
     return dir_add(ctx, name, is_dir, size);
 }
 
+static int vol_root_ent(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
+    (void)len;
+    return root_add(ctx, name, is_dir, size);
+}
+
+static int mount_ent(void *arg, const char *name) {
+    return root_add(arg, name, 1, 0);
+}
+
+// Taken weak: a host whose one volume holds the whole tree has no mounts.
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) __attribute__((weak));
+
 typedef struct {
     const char *path;
     struct moy_sh_dir *d;
     int r;
+    int root;                           // the tree's root: its volume's names and the mounts
 } list_call_t;
 
 // A folder of the store listed, where the store may be touched (store_call).
@@ -1002,9 +1033,12 @@ static void list_here(void *arg) {
     int entered = moy_vol_gate_enter(c->path);
     c->r = c->path != NULL ? moy_vol_at(c->path, &v, &rest) : ENAMETOOLONG;
     if (c->r == 0) {
-        c->r = moy_vol_list(&v, rest, vol_ent, c->d);
+        c->r = moy_vol_list(&v, rest, c->root ? vol_root_ent : vol_ent, c->d);
     }
     moy_vol_gate_leave(entered);
+    if (c->root && moy_vol_mounts != NULL) {
+        moy_vol_mounts(mount_ent, c->d);
+    }
 }
 
 moy_sh_DIR *moy_sh_opendir(const char *path) {
@@ -1036,7 +1070,8 @@ moy_sh_DIR *moy_sh_opendir(const char *path) {
         r = vlist(abs, dir_add, d);
         r = r == ENOENT && !strcmp(abs, "/proc") ? 0 : r;
     } else {
-        if (!strcmp(abs, "/")) {
+        int root = !strcmp(abs, "/");
+        if (root) {
             dir_add(d, "bin", 1, 0);
             dir_add(d, "dev", 1, 0);
             if (s->host.etc != NULL) {
@@ -1044,10 +1079,10 @@ moy_sh_DIR *moy_sh_opendir(const char *path) {
             }
             dir_add(d, "proc", 1, 0);
             if (s->host.vlist != NULL) {
-                s->host.vlist(s->host.ctx, "/", dir_add, d);
+                s->host.vlist(s->host.ctx, "/", root_add, d);
             }
         }
-        list_call_t c = { moy_sh_store_path(abs, sp, sizeof sp), d, 0 };
+        list_call_t c = { moy_sh_store_path(abs, sp, sizeof sp), d, 0, root };
         moy_sh_hop(s, list_here, &c);
         r = !strcmp(abs, "/") ? 0 : c.r;
     }

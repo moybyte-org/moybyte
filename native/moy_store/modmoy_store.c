@@ -264,6 +264,16 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
     }
     const char *r = path;
     mp_vfs_mount_t *m = mp_vfs_lookup_path(path, &r);
+    if (m == MP_VFS_ROOT) {
+        // the root itself: the volume mounted at "/", where one is
+        for (mp_vfs_mount_t *x = MP_STATE_VM(vfs_mount_table); x != NULL; x = x->next) {
+            if (x->len == 1) {
+                m = x;
+                r = "/";
+                break;
+            }
+        }
+    }
     if (m == MP_VFS_NONE || m == MP_VFS_ROOT) {
         return MP_ENODEV;
     }
@@ -310,6 +320,30 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
     #endif
     (void)t;
     return MP_ENODEV;
+}
+
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) {
+    if (MP_STATE_VM(vfs_mount_table) == NULL) {
+        #if MICROPY_VFS_FAT
+        return moy_store_card_fatfs() != NULL ? fn(arg, "sd") : 0;
+        #else
+        return 0;
+        #endif
+    }
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        char name[32];
+        size_t n = 0;
+        while (n + 1 < m->len && n < sizeof name - 1 && m->str[n + 1] != '/') {
+            name[n] = m->str[n + 1];
+            n++;
+        }
+        name[n] = 0;
+        int r = n > 0 ? fn(arg, name) : 0;
+        if (r != 0) {
+            return r;
+        }
+    }
+    return 0;
 }
 
 // -- arguments and results ----------------------------------------------------------

@@ -15,6 +15,9 @@
 // stand-in console: `ps` answers two rows, `role` echoes its argv through the
 // running session's stdout, `lookup`/`spawn` know `hello`, `kill` refuses
 // pid 1, `read /proc/7/status` and `list /proc` answer, the rest is ABSENT.
+//
+// The store's mount table is a stand-in too: one volume mounted at /sd, as a
+// board's card (moy_vol_mounts), over whatever the tree holds there.
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -28,6 +31,10 @@
 #include "moy_sh_screen.h"
 
 static int vm = 0;
+
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) {
+    return fn(arg, "sd");
+}
 static int front = 1;
 
 bool moy_loop_vm(void) {

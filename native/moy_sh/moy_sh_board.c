@@ -621,6 +621,11 @@ void moy_sh_board_yield(void) {
     b_sleep(NULL, 1);
 }
 
+void moy_sh_board_go_home(moy_sh_t *s) {
+    const char *dirs[] = { MOY_SH_STORE "/files", "/moy/files", "/files", NULL };
+    moy_sh_go_home(s, dirs);
+}
+
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),
                        int (*poll)(void *ctx)) {
@@ -813,6 +818,7 @@ bool moy_sh_board_line(const char *text) {
             moy_loop_say_line("SH error no session");
             return false;
         }
+        moy_sh_board_go_home(s);
         f->s = s;
         moy_sh_park(s);
     }

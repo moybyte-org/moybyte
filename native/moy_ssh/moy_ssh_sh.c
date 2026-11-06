@@ -357,6 +357,7 @@ static void *sh_open(moy_ssh_face_t *f) {
         moy_ssh_free(h);
         return NULL;
     }
+    moy_sh_board_go_home(h->s);
     return h;
 }
 

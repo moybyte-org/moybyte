@@ -161,6 +161,7 @@ def test_the_serial_face_answers_as_its_transcript_says(harness, tmp_path, name)
     golden = os.path.join(SERIAL, name + ".out")
     root = tmp_path / "root"
     root.mkdir()
+    _seed_home(root, name)
     args = [harness["board_main"]] + (["-vm"] if name.startswith("vm_") else []) + [script]
     r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60,
                        env=dict(os.environ, TZ="UTC", MOY_SH_ROOT=str(root)))
@@ -172,6 +173,13 @@ def test_the_serial_face_answers_as_its_transcript_says(harness, tmp_path, name)
     assert os.path.isfile(golden), "no transcript for %s: run with MOYBYTE_UPDATE_GOLDENS=1" % name
     with open(golden, encoding="utf-8") as f:
         assert got == f.read()
+
+
+def _seed_home(root, name):
+    """A `home_` script's tree holds a console's files folder, where its
+    session starts (moy_sh_board_go_home)."""
+    if name.startswith("home_"):
+        (root / "sd" / "moybyte" / "files").mkdir(parents=True)
 
 
 def _face(harness, path, root, screen):
@@ -199,8 +207,9 @@ def test_the_screen_face_replays_the_serial_transcript(harness, tmp_path, path):
     transcript that writes escapes (`clear`) says them raw on serial and
     moves the grid, so it is the grid's own test's. Every script of the
     suite replays so too, over the board's table in place of sh_main's."""
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
+    for side in ("a", "b"):
+        (tmp_path / side).mkdir()
+        _seed_home(tmp_path / side, os.path.basename(path)[:-3])
     serial = _face(harness, path, tmp_path / "a", False)
     if "\x1b" in serial:
         pytest.skip("escapes: the grid's test reads them")

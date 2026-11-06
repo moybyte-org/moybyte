@@ -192,7 +192,9 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
     argv[0] = savestr("sh");
     argv[1] = savestr("-im");
     procargs(argv);
-    setvar("HOME", home != NULL ? home : "/", 0);
+    home = home != NULL && strlen(home) < sizeof s->home ? home : "/";
+    strcpy(s->home, home);
+    setvar("HOME", home, 0);
     setvar("PS1", "${PWD##*/}$ ", 0);
     setvar("TERM", "vt100", VEXPORT);
     if (cwd != NULL && chdir(cwd) == 0) {
@@ -201,6 +203,24 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
     flushall();
     leave(was);
     return s;
+}
+
+int moy_sh_go_home(moy_sh_t *s, const char *const *dirs) {
+    struct moy_sh_globals *was = enter(s);
+    int at = -1;
+    struct stat st;
+    for (int i = 0; dirs[i] != NULL && at < 0; i++) {
+        if (strlen(dirs[i]) < sizeof s->home && stat(dirs[i], &st) == 0 && S_ISDIR(st.st_mode)
+                && chdir(dirs[i]) == 0) {
+            setpwd(dirs[i], 0);
+            setvar("HOME", dirs[i], 0);
+            strcpy(s->home, dirs[i]);
+            at = i;
+        }
+    }
+    flushall();
+    leave(was);
+    return at;
 }
 
 void moy_sh_free(moy_sh_t *s) {

@@ -63,6 +63,11 @@
 #define MOY_SH_STORE "/sd/moybyte"      // the console's store: system/ and the carts
 #define MOY_SH_STORE_PATH 320u          // a store path's bytes, the root's included
 
+// A new session's home and working folder: the user's files folder beside the
+// store's carts (a card's, the internal store's, or a host tree whose root is
+// the store's own folder), else `/` as it began.
+void moy_sh_board_go_home(moy_sh_t *s);
+
 // The board's table into `h`, the face's terminal (`out`, `poll`, `ctx`) in it.
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),

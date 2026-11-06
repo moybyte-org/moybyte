@@ -437,3 +437,17 @@ def test_mic_enters_the_app_key_row_on_the_tdeck(term):
     finally:
         ui_draw.input_kind(kinds[0])
         ui_draw.hint_kind(kinds[1])
+
+
+def test_a_session_starts_in_the_user_files_folder_beside_the_carts(term, tmp_path):
+    """The host's files tree is the carts folder's parent, so the user's
+    files folder is its `/files`; a session starts there and `cd` returns
+    there, and `/` still lists the tree's root."""
+    _ws, app = term
+    (tmp_path / "files").mkdir(exist_ok=True)
+    run(app, "exit")
+    run(app, "pwd; echo $HOME; cd /; cd; pwd")
+    assert plain(app)[-3:] == ["/files", "/files", "/files"]
+    run(app, "ls -1 /")
+    listed = plain(app)
+    assert {"bin", "carts", "files"} <= set(listed[listed.index("files$ ls -1 /") + 1:])

@@ -84,9 +84,10 @@ typedef struct {
     // the files tree: absolute shell paths resolve under `root` ("" on a board)
     const char *root;
     // the folder (a path of the tree) /etc names: the console's system/, its
-    // documents as /etc holds a Unix system's; /etc/dropbear and the home's
-    // /.ssh name it too, where ssh-copy-id puts a key (an older one for a
-    // Dropbear server, a current one for any) (may be NULL: none)
+    // documents as /etc holds a Unix system's; /etc/dropbear, /.ssh and the
+    // session's home's .ssh (moy_sh_go_home) name it too, where ssh-copy-id
+    // puts a key (an older one for a Dropbear server, a current one for any)
+    // (may be NULL: none)
     const char *etc;
     // virtual files: /dev/<name>, /proc/... and the root's own names. read
     // answers 0 with the bytes (from `alloc`), an errno otherwise (ENOENT: not
@@ -133,6 +134,12 @@ typedef struct {
 // copied. The shell starts in `cwd` with $HOME `home`, interactive.
 moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
                      const char *cwd);
+
+// The first of `dirs` (NULL-terminated) that is a folder becomes the
+// session's home and its working folder: its index, or -1 when none is (the
+// session stays where it was). A home's `.ssh` is the host's `etc`, as `/.ssh` is.
+#define MOY_SH_HOME_MAX 96
+int moy_sh_go_home(moy_sh_t *s, const char *const *dirs);
 void moy_sh_free(moy_sh_t *s);
 
 // Feed `n` bytes the face read (a line, its newline included). Answers
