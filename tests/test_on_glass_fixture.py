@@ -13,6 +13,9 @@ answers on the far side; that is each board's own on-glass suite, and those
 stay the gate.
 """
 
+import ast
+import re
+
 import pytest
 
 import on_glass
@@ -35,7 +38,9 @@ class _FakeBoard:
 
     def __init__(self, port, board_dir=None, attach_only=True,
                  expect_board="tdeck", state_reply="STATE {}",
-                 reset_is_damage=False):
+                 reset_is_damage=False, shelf=("celeste", "doom")):
+        self.shelf = list(shelf)
+        self.deleted = []
         self.port = port
         self.board_dir = board_dir
         self.attach_only = attach_only
@@ -63,8 +68,25 @@ class _FakeBoard:
     def verify_board(self):
         self.calls.append(("verify_board",))
 
+    def pyval(self, expr, timeout=30.0, strict=False):
+        """The three shelf expressions `session()` sends, answered from a list
+        of ids; a `ws.carts.delete` removes the ids it names."""
+        self.calls.append(("pyval", timeout))
+        if expr.startswith("sorted") and "not in" not in expr:
+            return sorted(self.shelf)
+        names = ast.literal_eval(re.search(r"in (\[.*?\])", expr).group(1))
+        if "ws.carts.delete" in expr:
+            self.deleted += [n for n in names if n in self.shelf]
+            self.shelf = [n for n in self.shelf if n not in names]
+            return 0
+        return sorted(n for n in self.shelf if n not in names)
+
     def close(self):
         self.calls.append(("close",))
+
+
+def _no_shelf(calls):
+    return [c for c in calls if c[0] != "pyval"]
 
 
 def _install(monkeypatch, **kw):
@@ -88,8 +110,8 @@ def test_an_attach_only_board_is_probed_in_order_and_never_reset(monkeypatch):
     with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
         pass
     assert b is made[0]
-    assert b.calls == [("drain", 0.8), ("cmd", "state"),
-                       ("verify_board",), ("close",)]
+    assert _no_shelf(b.calls) == [("drain", 0.8), ("cmd", "state"),
+                                  ("verify_board",), ("close",)]
     assert b.board_dir == TDECK, "the suite's own board.toml is what was read"
 
 
@@ -124,8 +146,8 @@ def test_the_reset_capable_board_is_reset_and_never_probed_for_state(monkeypatch
     with on_glass.session("/dev/ttyACM3", board_dir=P4) as b:
         b.cmd("diag 1")                     # what the P4 suite does with it
     assert b is made[0]
-    assert b.calls == [("reset",), ("verify_board",),
-                       ("cmd", "diag 1"), ("close",)]
+    assert _no_shelf(b.calls) == [("reset",), ("verify_board",),
+                                  ("cmd", "diag 1"), ("close",)]
 
 
 def test_a_silent_attach_only_board_raises_and_still_closes(monkeypatch):
@@ -168,3 +190,57 @@ def test_all_three_suites_go_through_the_shared_session():
         assert "P4Board(" not in src, (
             "%s builds the driver itself again -- the attach/reset decision "
             "has left the one place that is guarded" % suite)
+
+
+def test_the_shelf_is_given_back_with_only_the_new_ids_deleted(monkeypatch):
+    """What a suite pushed goes; what was there stays -- the owner's games
+    included, and a fixture written over an id that was already there."""
+    made = _install(monkeypatch, attach_only=True)
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        b.shelf += ["wasm_tampered", "conformance: a", "custom"]
+        b.shelf += ["local.ring_py%d" % i for i in range(9)]
+    assert sorted(b.shelf) == ["celeste", "doom"]
+    assert sorted(b.deleted) == sorted(
+        ["wasm_tampered", "conformance: a", "custom"]
+        + ["local.ring_py%d" % i for i in range(9)])
+    assert "celeste" not in b.deleted and "doom" not in b.deleted
+    assert made[0].calls[-1] == ("close",)
+
+
+def test_the_delete_goes_in_batches_with_a_long_timeout(monkeypatch):
+    made = _install(monkeypatch, attach_only=True)
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        b.shelf += ["x%d" % i for i in range(50)]
+    deletes = [c for c in b.calls if c[0] == "pyval" and c[1] >= 120]
+    assert len(deletes) >= 50 // on_glass.SHELF_DELETE_BATCH
+    assert b.shelf == ["celeste", "doom"]
+
+
+def test_a_failing_suite_still_gives_the_shelf_back(monkeypatch):
+    made = _install(monkeypatch, attach_only=True)
+    with pytest.raises(ValueError):
+        with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+            b.shelf.append("stuck_lua")
+            raise ValueError("a test blew up")
+    assert made[0].shelf == ["celeste", "doom"]
+    assert made[0].calls[-1] == ("close",)
+
+
+def test_a_board_that_never_listed_its_shelf_is_left_alone(monkeypatch):
+    made = _install(monkeypatch, attach_only=True)
+    monkeypatch.setattr(_FakeBoard, "pyval",
+                        lambda self, expr, **kw: self.calls.append(
+                            ("pyval", 0)))
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        pass
+    assert b.calls.count(("pyval", 0)) == 1, "nothing recorded, nothing deleted"
+
+
+def test_a_shelf_that_cannot_be_deleted_warns_and_does_not_raise(monkeypatch):
+    made = _install(monkeypatch, attach_only=True)
+    monkeypatch.setattr(_FakeBoard, "pyval", lambda self, expr, **kw: (
+        sorted(self.shelf) if expr.startswith("sorted") and "not in" not in expr
+        else ["stuck"] if "not in" in expr else 0))
+    with pytest.warns(UserWarning, match="left carts on the shelf"):
+        with on_glass.session("/dev/ttyACM2", board_dir=TDECK):
+            pass

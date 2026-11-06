@@ -33,6 +33,7 @@ import hashlib
 import os
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -80,9 +81,65 @@ def session(port, board_dir):
             b.verify_board()
         else:
             b.reset()                  # verifies identity once the desk is up
-        yield b
+        shelf = shelf_ids(b)
+        try:
+            yield b
+        finally:
+            restore_shelf(b, shelf)
     finally:
         b.close()
+
+
+# A suite pushes fixtures (the compiled wasm carts, the stuck pair, the jet,
+# the conformance carts ...) and most of them never take their own cart back
+# off: a pass left 25-75 of them on a board's shelf. The shelf is therefore
+# recorded when the session opens and every id that was not there is deleted
+# when it closes -- through `ws.carts.delete`, as the home's Delete does. A
+# cart that was already there is never touched, a fixture pushed over a
+# pre-existing id included, so the owner's own carts survive a pass.
+
+SHELF_DELETE_BATCH = 4          # a delete is SD work: ~1 s a cart on the T-Deck
+
+
+def shelf_ids(board):
+    """The ids on the board's shelf now (a sorted list), or None when the
+    board did not answer -- then the session has nothing to give back."""
+    return board.pyval("sorted(str(c.get('id')) for c in ws.carts.all)",
+                       timeout=30)
+
+
+def restore_shelf(board, before):
+    """Delete every cart whose id is not in `before`. Never raises (it runs
+    while a failing suite unwinds): what it could not delete is a warning."""
+    if before is None:
+        return
+    try:
+        left = _new_on_shelf(board, before, rescan=True)
+        for _ in range(8):
+            if not left:
+                return
+            for i in range(0, len(left), SHELF_DELETE_BATCH):
+                board.pyval(
+                    "[ws.carts.delete(c) for c in list(ws.carts.all) "
+                    "if str(c.get('id')) in %r] and 0"
+                    % (left[i:i + SHELF_DELETE_BATCH],), timeout=120)
+            left = _new_on_shelf(board, before)
+        warnings.warn("the suite left carts on the shelf: %r" % (left,))
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn("could not give the shelf back: %r" % (exc,))
+
+
+def _new_on_shelf(board, before, rescan=False):
+    """Ids on the shelf that `before` does not hold; `rescan` first picks up
+    folders a suite wrote with no rescan of their own."""
+    expr = ("sorted(str(c.get('id')) for c in ws.carts.all "
+            "if str(c.get('id')) not in %r)" % (list(before),))
+    if rescan:
+        expr = "(ws.rescan_carts(), %s)[1]" % expr
+    got = board.pyval(expr, timeout=120)
+    if got is None:
+        raise RuntimeError("the board did not list its shelf")
+    return got
 
 
 # -- the checks every fullscreen-tier board shares ---------------------------
