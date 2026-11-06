@@ -4632,6 +4632,70 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
     return ff1 - ff0
 
 
+# A VM-free Lua run in the kernel's front on a banded panel larger than its
+# game canvas (the Guition S3, moy_glass.front): every present arms the fold
+# over the game canvas and the scratch the binder hands it. The proof, between
+# two front frames: the fold over those same arguments synthesizes the bands
+# of the composite the console's blit_game makes of the same snapshot -- 0
+# differing bytes -- and the composite one pixel off does not.
+_FRONT_FOLD_PROOF = """
+def _front_proof(shift):
+    comp = ws.comp
+    gc = ws.canvas
+    gw, gh = gc.w, gc.h
+    ox, oy, scale = ws.wm.play_viewport()
+    assert scale == 1, scale
+    fbw, fbh = comp.size()
+    scr = ws.sys_canvas.front_scratch(gw, gh)
+    comp.fold_fence()
+    comp.snap_fence()
+    back = comp._back
+    fb = comp._fbs[back]
+    try:
+        comp.snap_scale_fold(gc._buf, 0, scr, gw, gh, 0, gw, ox, oy, scale)
+        comp.snap_fence()
+        z = bytes(2 * fbw)
+        for y in range(fbh):
+            fb[2 * fbw * y:2 * fbw * (y + 1)] = z
+        src = memoryview(scr)
+        for y in range(gh):
+            a = 2 * ((oy + y) * fbw + ox + shift)
+            fb[a:a + 2 * gw] = src[2 * gw * y:2 * gw * (y + 1)]
+        return comp._lcd.fold_test(back)
+    finally:
+        comp.disarm_scale_fold()
+"""
+
+
+def a_lua_run_folds_to_the_glass_in_front(board, title="Brick Siege Lua", seconds=4.0):
+    """`title` runs in the kernel's front, its frames folded through the
+    flush (the fold's count climbs), and the proof above reads 0 -- and not 0
+    for the composite one pixel off. Returns the folds counted."""
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        assert board.pyval("__import__('moy_play').front_live()", strict=True), \
+            "the run did not take the front"
+        f0 = board.pyval("ws.comp.fold_count", strict=True)
+        board.drain(seconds)
+        f1 = board.pyval("ws.comp.fold_count", strict=True)
+        assert board.pyexec(_FRONT_FOLD_PROOF, strict=True)
+        bad = board.pyval("ws._g['_front_proof'](0)", timeout=120, strict=True)
+        off = board.pyval("ws._g['_front_proof'](1)", timeout=120, strict=True)
+        live = board.pyval("__import__('moy_play').front_live()", strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nFRONT FOLD %s: %d folds in %.0fs, proof %r, one pixel off %r"
+          % (title, f1 - f0, seconds, bad, off))
+    assert f1 - f0 > 20 * seconds, "the front's frames were not folded"
+    assert bad == 0, "the front's fold differs from its composite: %d bytes" % bad
+    assert off > 0, "the proof cannot see a one-pixel shift"
+    assert live, "the proof took the run out of the front"
+    return f1 - f0
+
+
 # A compiled cart's direct-colour frame on a P4: the PPA scales it from the
 # cart's memory and the GDMA snapshots it into the run's scratch
 # (device/p4_canvas.py, present_frame). The proof, between two frames: no blit

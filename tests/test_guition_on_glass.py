@@ -672,16 +672,16 @@ def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
 
 
-# A VM-free seed game's 320x240 canvas is not the 480x320 panel the kernel's
-# present shows, so the console's frame drives the same C Player: its CONSOLE
-# crossing is the only one, and a Ctrl-C reaches the REPL.
+# A VM-free seed game runs in the kernel's front: its 320x240 canvas reaches
+# the 480x320 panel through the fold, and a Ctrl-C ends the run in front and
+# reaches the REPL.
 @pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
 def test_a_front_run_makes_no_crossing(board, spec, title):
-    on_glass.a_front_run_makes_no_crossing(board, spec, title, front=False)
+    on_glass.a_front_run_makes_no_crossing(board, spec, title)
 
 
 def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
-    on_glass.a_ctrl_c_ends_a_front_run(board, front=False)
+    on_glass.a_ctrl_c_ends_a_front_run(board)
 
 
 # The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): the kernel stops the
@@ -712,3 +712,10 @@ def test_bluetooth_stops_and_starts_again(board):
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)
+
+
+# A Lua run on this panel takes the kernel's front (moy_glass.front's banded
+# fold): its frames reach the glass through the fold, byte for byte the
+# composite the console's own blit_game makes.
+def test_a_lua_run_in_front_folds_to_the_glass(board):
+    on_glass.a_lua_run_folds_to_the_glass_in_front(board)
