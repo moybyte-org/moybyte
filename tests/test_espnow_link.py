@@ -1199,6 +1199,18 @@ def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
     which two boards never share -- and a stalled tick drew with no update
     while its retry updated with no draw. Over a lossy air, every console
     draws exactly the simulated ticks."""
+    seen, count = _draw_counter()
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 600, count)
+    for i, ws in enumerate(wss):
+        np = ws.player._netplay
+        f0, draws = seen[i]
+        assert np.stall_ticks > 5, "the premise: the match stalled"
+        assert draws == np.frame - f0, (i, draws, np.frame - f0)
+
+
+def _draw_counter():
+    """A tamper for _two_consoles counting each console's _draw calls from
+    the frame its match began: ({console: [frame0, draws]}, tamper)."""
     seen = {}
 
     def count(k, wss):
@@ -1213,10 +1225,31 @@ def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
                 box[1] += 1
                 draw()
             ws.player._draw = counted
+    return seen, count
 
-    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 600, count)
+
+def test_a_tick_the_clock_reaches_after_the_plan_waits_for_a_drawn_frame(
+        tmp_path, monkeypatch):
+    """A board's clock moves between a frame's plan (frame_plan, which says
+    whether it draws) and its lockstep step. A frame planned between ticks
+    that started the tick the clock reached meanwhile simulated it and never
+    drew it: with a millisecond between the two on a 4 ms loop, a fifth of
+    the ticks went undrawn, and a _draw that keeps state parts the worlds.
+    The plan decides: such a frame only sends, and the tick waits for the
+    next frame's plan."""
+    import runtime.player as player_mod
+    plan = player_mod.Player.frame_plan
+
+    def planned(self, dt):
+        out = plan(self, dt)
+        player_mod._ticks_ms.advance(1)
+        return out
+    monkeypatch.setattr(player_mod.Player, "frame_plan", planned)
+    seen, count = _draw_counter()
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, count,
+                                 step=4)
     for i, ws in enumerate(wss):
         np = ws.player._netplay
         f0, draws = seen[i]
-        assert np.stall_ticks > 5, "the premise: the match stalled"
+        assert np.frame - f0 > 400, "the premise: the match ticked"
         assert draws == np.frame - f0, (i, draws, np.frame - f0)

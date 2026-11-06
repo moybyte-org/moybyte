@@ -129,7 +129,12 @@ fixed `dt`, a re-seed each logic frame from (seed, frame) since drawing consumes
 the stream too, the HOST's cart config winning for the match, and a cart's
 `_draw` running exactly once for each tick it simulates (2026-11-06): a kid's
 `_draw` keeps state as often as not, and a "free"-paced cart such as Brick
-Siege drew every loop frame of a match, a count no two boards share. A cart's
+Siege drew every loop frame of a match, a count no two boards share. The
+frame's plan (`Player.frame_plan`) decides whether a tick may start, and a
+frame planned between ticks starts none even when the board's clock reaches
+one before its lockstep step (2026-11-07): with a millisecond between the
+two on a 4 ms loop, the host's harness simulated a fifth of the ticks in
+frames that drew nothing. A cart's
 `time()` reads the match's clock (frame × tick) and `key()` reads nothing,
 because a board's wall clock and keyboard bytes are its own. A Lua tick's `dt`
 is the C float of the match's tick whichever path runs it (2026-11-06): the

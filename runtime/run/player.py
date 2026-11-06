@@ -363,6 +363,7 @@ class Player(PlayerDiag):
         self._tick_dt = 1.0 / 30
         self.tick_ms = 0
         self._n_ticks = 1             # frame_plan's answer, run by tick()
+        self._np_plan = True          # ...and in a match, whether a tick may start
         self._keyp_latch = 0          # a keyp edge waiting for a logic tick
         self._tick_edges = None       # ws.input.tick_edges, bound while paced
         self._keep_edges = None       # ws.input.keep_edges, bound while paced
@@ -1864,7 +1865,10 @@ class Player(PlayerDiag):
             # consoles, so a _draw that keeps state cannot part them.
             if self._n_ticks != 1:
                 self._n_ticks = 1
-            return bool(np.waiting or np.pending(_ticks_ms()))
+            plan = bool(np.waiting or np.pending(_ticks_ms()))
+            if plan is not self._np_plan:
+                self._np_plan = plan
+            return plan
         if not self.tick_ms:
             if self._n_ticks != 1:
                 self._n_ticks = 1
@@ -2255,6 +2259,15 @@ class Player(PlayerDiag):
         # that cannot extrapolate safely.
         stalled = False
         np = self._netplay
+        if np is not None and not self._np_plan:
+            # The plan saw no tick due and none stalled, so this frame draws
+            # nothing, and it starts no tick even if the clock has reached
+            # one since: a tick it simulated would never be drawn. It keeps
+            # sending between ticks.
+            self._np_plan = True
+            if np.gate(_ticks_ms(), False):
+                np.resend()
+            return np.dt_at(np.frame), True, np
         if np is not None and self._play is not None:
             # A run in the kernel's Player: its lockstep is C -- the drain, the
             # due tick or the stall's retry, the advance, the resend between
