@@ -831,13 +831,17 @@ def state_json():
     audio pull mixed, frames it found none, the room, whether it is open, its
     depth) and
     the running cart's first eight pmem slots, the earned badges' ids, the
-    Settings rows as the console holds them and whether the FPS chip shows,
-    for a harness driving the page (`window.__moyState()`)."""
+    Settings rows as the console holds them, whether the FPS chip shows and
+    the store's sync (`sync`: the batches its far end has taken, and whether
+    one is on its way), for a harness driving the page
+    (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
     st["ach"] = sorted(_S["ws"].ach.unlocked)
     st["system"] = json.loads(_S["ws"].system.dump() or "{}")
     st["show_fps"] = bool(_S["ws"].show_fps)
+    st["sync"] = {"acked": _S.get("sync_acked", 0),
+                  "busy": any(w.busy() for w in _watchers())}
     st["edit"] = _edit_state(_S["ws"])
     try:
         import moy_audio
@@ -933,6 +937,8 @@ def sync_ack(ok):
     w = watchers.get(_S.get("sync_took") or moy_sync.CARTS_ROOT_ID)
     if w is not None:
         w.ack(bool(ok))
+    if ok:
+        _S["sync_acked"] = _S.get("sync_acked", 0) + 1
     return ""
 
 

@@ -17,8 +17,10 @@
   {"note": "a phone's keyboard: the typed text arrives as #kbin's input event, ENTER as its keydown"},
   {"js": "(function(){var k=document.getElementById('kbin');k.focus();k.value=' nikola';k.dispatchEvent(new Event('input'));return k.value;})()"},
   {"waitFor": "(async () => { const a = await window.__moyState(); await new Promise(r => setTimeout(r, 300)); const s = await window.__moyState(); return a.frames === s.frames && (true); })()", "timeout": 15000},
+  {"note": "the batches the store's far end has taken so far (the page's OPFS, or the board): the name's documents reach it after this", "js": "window.__moyState().then(s => { window.__n0 = s.sync.acked; return window.__n0; })"},
   {"js": "(function(){var k=document.getElementById('kbin');k.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return 'enter';})()"},
   {"waitFor": "(async () => { const a = await window.__moyState(); await new Promise(r => setTimeout(r, 300)); const s = await window.__moyState(); return a.frames === s.frames && (s.theme.name !== 'custom'); })()", "timeout": 15000},
+  {"note": "the store holds what the name wrote before the browser closes: a batch taken since ENTER, none on its way, and none for 1.5 s, longer than the sweep's 1 s pump", "waitFor": "(async () => { const a = await window.__moyState(); await new Promise(r => setTimeout(r, 1500)); const s = await window.__moyState(); return a.sync.acked > window.__n0 && !s.sync.busy && s.sync.acked === a.sync.acked; })()", "timeout": 20000},
   {"shot": "named"},
   {"js": "document.getElementById('s').textContent"},
   {"js": "window.__moyState().then(s => 'THEME ' + JSON.stringify(s.theme))"}
