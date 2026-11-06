@@ -571,11 +571,122 @@ static int tail_one(int fd, const char *name, void *arg) {
     return 0;
 }
 
+static int tail_bytes(int fd, const char *name, void *arg) {
+    size_t want = (size_t)*(int *)arg;
+    char *text;
+    size_t len = slurp(fd, &text);
+    (void)name;
+    size_t at = len > want ? len - want : 0;
+    outmem(text + at, len - at, out1);
+    return 0;
+}
+
+// -c N counts bytes; -Nc is the old spelling, which ssh-copy-id still uses
+// to see whether authorized_keys ends in a newline.
 static int tailcmd(int argc, char **argv) {
     (void)argc;
+    const char *a = argv[1];
+    if (a && a[0] == '-' && a[1] >= '0' && a[1] <= '9') {
+        const char *e = a + 1;
+        while (*e >= '0' && *e <= '9') {
+            e++;
+        }
+        if (e[0] == 'c' && e[1] == '\0') {
+            int n = atoi(a + 1);
+            return each_input(argv + 2, tail_bytes, &n);
+        }
+    }
+    int n = 10, c, bytes = 0;
+    while ((c = nextopt("n:c:")) != '\0') {
+        n = number(optionarg);
+        bytes = c == 'c';
+    }
+    return each_input(argptr, bytes ? tail_bytes : tail_one, &n);
+}
+
+// The directory part of a path, as POSIX dirname prints it.
+static int dirnamecmd(int argc, char **argv) {
+    if (argc != 2) {
+        return moy_sh_fail("usage: dirname PATH");
+    }
+    const char *p = argv[1];
+    size_t n = strlen(p);
+    while (n > 1 && p[n - 1] == '/') {
+        n--;
+    }
+    while (n > 0 && p[n - 1] != '/') {
+        n--;
+    }
+    if (n == 0) {
+        out1str(".\n");
+        return 0;
+    }
+    while (n > 1 && p[n - 1] == '/') {
+        n--;
+    }
+    outmem(p, n, out1);
+    out1c('\n');
+    return 0;
+}
+
+// The last part of a path, without SUFFIX when it ends in one.
+static int basenamecmd(int argc, char **argv) {
+    if (argc != 2 && argc != 3) {
+        return moy_sh_fail("usage: basename PATH [SUFFIX]");
+    }
+    const char *p = argv[1];
+    size_t n = strlen(p);
+    while (n > 1 && p[n - 1] == '/') {
+        n--;
+    }
+    size_t at = n;
+    while (at > 0 && p[at - 1] != '/') {
+        at--;
+    }
+    if (n == 1 && p[0] == '/') {
+        at = 0;
+    }
+    size_t len = n - at;
+    if (argc == 3) {
+        size_t sl = strlen(argv[2]);
+        if (sl < len && memcmp(p + n - sl, argv[2], sl) == 0) {
+            len -= sl;
+        }
+    }
+    outmem(p + at, len, out1);
+    out1c('\n');
+    return 0;
+}
+
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#ifdef CONFIG_IDF_TARGET
+#define MOY_SH_MACHINE CONFIG_IDF_TARGET
+#else
+#define MOY_SH_MACHINE "host"
+#endif
+
+// The system's name (-s, the default), the chip (-m), or both (-a).
+static int unamecmd(int argc, char **argv) {
+    int sys = 0, mach = 0, c;
+    (void)argc;
     (void)argv;
-    int n = lines_opt();
-    return each_input(argptr, tail_one, &n);
+    while ((c = nextopt("asm")) != '\0') {
+        sys |= c == 's' || c == 'a';
+        mach |= c == 'm' || c == 'a';
+    }
+    if (!sys && !mach) {
+        sys = 1;
+    }
+    if (sys) {
+        out1str("Moybyte");
+    }
+    if (mach) {
+        out1str(sys ? " " MOY_SH_MACHINE : MOY_SH_MACHINE);
+    }
+    out1c('\n');
+    return 0;
 }
 
 typedef struct {
@@ -895,11 +1006,13 @@ static int helpcmd(int argc, char **argv);
 
 // Sorted by name (moy_sh_core_builtin searches it).
 static const struct builtincmd core[] = {
+    { "basename", basenamecmd, BUILTIN_REGULAR },
     { "cat", catcmd, BUILTIN_REGULAR },
     { "clear", clearcmd, BUILTIN_REGULAR },
     { "cp", cpcmd, BUILTIN_REGULAR },
     { "date", datecmd, BUILTIN_REGULAR },
     { "df", dfcmd, BUILTIN_REGULAR },
+    { "dirname", dirnamecmd, BUILTIN_REGULAR },
     { "dmesg", logcmd, BUILTIN_REGULAR },
     { "edit", appcmd, BUILTIN_REGULAR },
     { "free", freecmd, BUILTIN_REGULAR },
@@ -919,6 +1032,7 @@ static const struct builtincmd core[] = {
     { "tail", tailcmd, BUILTIN_REGULAR },
     { "top", appcmd, BUILTIN_REGULAR },
     { "touch", touchcmd, BUILTIN_REGULAR },
+    { "uname", unamecmd, BUILTIN_REGULAR },
     { "wc", wccmd, BUILTIN_REGULAR },
 };
 

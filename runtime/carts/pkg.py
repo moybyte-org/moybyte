@@ -66,13 +66,13 @@ ARCHIVE_RAM_SHARE = 4         # an external archive kept in RAM below this share
 # built-ins, the C core's and the role commands'. tests/test_pkg.py holds
 # them to the C tables and to sh_roles.
 SHELL_NAMES = (
-    ".", ":", "[", "alias", "bg", "break", "cat", "cd", "chdir", "clear",
-    "command", "continue", "cp", "date", "df", "dmesg", "echo", "edit", "eval", "exec",
+    ".", ":", "[", "alias", "basename", "bg", "break", "cat", "cd", "chdir", "clear",
+    "command", "continue", "cp", "date", "df", "dirname", "dmesg", "echo", "edit", "eval", "exec",
     "exit", "export", "false", "fg", "free", "getopts", "grep", "hash", "head",
     "help", "jobs", "kill", "local", "log", "ls", "mkdir", "mv", "printf", "ps",
     "pwd", "read", "readonly", "reboot", "return", "rm", "rmdir", "set", "sh",
     "shift", "sleep", "tail", "test", "top", "touch", "trap", "true", "type", "umask",
-    "unalias", "unset", "wait", "wc",
+    "unalias", "uname", "unset", "wait", "wc",
     # the role commands (runtime/shell/sh_roles.py)
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "passwd",
     "perm", "pkg", "python", "service", "settings", "snd", "usb",

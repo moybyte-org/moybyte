@@ -6,4 +6,12 @@ $ tail -n 2 n
 12
 $ printf 'no newline' | tail -n 1; echo
 no newline
+$ printf 'key\n' > k
+$ [ -z "`tail -1c k 2>/dev/null`" ] && echo ends-in-newline
+ends-in-newline
+$ printf 'key' > j
+$ tail -1c j; echo
+y
+$ tail -c 3 n
+12
 [exit 0]

@@ -1,0 +1,13 @@
+$ dirname .ssh/authorized_keys
+.ssh
+$ dirname /etc/dropbear/authorized_keys
+/etc/dropbear
+$ dirname file
+.
+$ dirname /
+/
+$ dirname /etc/
+/
+$ dirname a//b//
+a
+[exit 0]
