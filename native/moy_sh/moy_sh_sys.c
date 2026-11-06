@@ -5,7 +5,8 @@
 // count of the descriptors naming it across every process, so a fork's child
 // adds a reference to each and its exit drops them (moy_sh_sys_fork/_exit):
 //
-//   TERM   the terminal: writes go to the host's `out`, reads see end of file
+//   TERM   the terminal: writes go to the host's `out`, reads the host's `in`
+//          (end of file without one)
 //   NUL    /dev/null
 //   MEM    bytes read whole at open: a file of the tree, a /dev or /proc read
 //   FILE   bytes written, put into the tree (or the virtual file) whole when
@@ -276,6 +277,15 @@ const char *moy_sh_store_path(const char *abs, char *out, size_t cap) {
     if (is_virtual(abs)) {
         return NULL;
     }
+    const char *etc = moy_sh_cur->host.etc;
+    if (etc != NULL && under(abs, "/etc")) {
+        const char *rest = abs + 4;
+        if (under(rest, "/dropbear")) {
+            rest += 9;
+        }
+        size_t n = (size_t)snprintf(out, cap, "%s%s%s", root, etc, rest);
+        return n < cap ? out : NULL;
+    }
     size_t n = (size_t)snprintf(out, cap, "%s%s", root, strcmp(abs, "/") == 0 && *root ? "" : abs);
     if (n >= cap) {
         return NULL;
@@ -289,7 +299,7 @@ const char *moy_sh_store_path(const char *abs, char *out, size_t cap) {
 
 // --- the store --------------------------------------------------------------
 
-static int store_read(const char *path, char **buf, size_t *len) {
+static int store_read_here(const char *path, char **buf, size_t *len) {
     moy_vol_t v;
     const char *rest;
     moy_vol_file_t *f;
@@ -333,7 +343,7 @@ static int store_read(const char *path, char **buf, size_t *len) {
     return r;
 }
 
-static int store_write(const char *path, const char *p, size_t n, int append) {
+static int store_write_here(const char *path, const char *p, size_t n, int append) {
     moy_vol_t v;
     const char *rest;
     moy_vol_file_t *f;
@@ -355,7 +365,7 @@ static int store_write(const char *path, const char *p, size_t n, int append) {
     return r;
 }
 
-static int store_stat(const char *path, moy_vol_stat_t *st) {
+static int store_stat_here(const char *path, moy_vol_stat_t *st) {
     moy_vol_t v;
     const char *rest;
     int entered = moy_vol_gate_enter(path);
@@ -365,6 +375,57 @@ static int store_stat(const char *path, moy_vol_stat_t *st) {
     }
     moy_vol_gate_leave(entered);
     return r;
+}
+
+// Each store call runs where the store may be touched: through the host's
+// hop (moy_sh_hop), the session current there.
+typedef struct {
+    int op;
+    const char *path;
+    char **buf;
+    size_t *len;
+    const char *p;
+    size_t n;
+    int append;
+    moy_vol_stat_t *st;
+    int r;
+} store_call_t;
+
+enum { S_READ, S_WRITE, S_STAT };
+
+static void store_here(void *arg) {
+    store_call_t *c = arg;
+    switch (c->op) {
+        case S_READ:
+            c->r = store_read_here(c->path, c->buf, c->len);
+            break;
+        case S_WRITE:
+            c->r = store_write_here(c->path, c->p, c->n, c->append);
+            break;
+        default:
+            c->r = store_stat_here(c->path, c->st);
+            break;
+    }
+}
+
+static int store_call(store_call_t *c) {
+    moy_sh_hop(moy_sh_cur, store_here, c);
+    return c->r;
+}
+
+static int store_read(const char *path, char **buf, size_t *len) {
+    store_call_t c = { .op = S_READ, .path = path, .buf = buf, .len = len };
+    return store_call(&c);
+}
+
+static int store_write(const char *path, const char *p, size_t n, int append) {
+    store_call_t c = { .op = S_WRITE, .path = path, .p = p, .n = n, .append = append };
+    return store_call(&c);
+}
+
+static int store_stat(const char *path, moy_vol_stat_t *st) {
+    store_call_t c = { .op = S_STAT, .path = path, .st = st };
+    return store_call(&c);
 }
 
 // --- virtual files ----------------------------------------------------------
@@ -572,7 +633,9 @@ ssize_t moy_sh_read(int fd, void *buf, size_t n) {
             if (n > left) {
                 n = left;
             }
-            memcpy(buf, o->buf + o->pos, n);
+            if (n) {
+                memcpy(buf, o->buf + o->pos, n);
+            }
             o->pos += n;
             return (ssize_t)n;
         }
@@ -582,13 +645,24 @@ ssize_t moy_sh_read(int fd, void *buf, size_t n) {
             if (n > left) {
                 n = left;
             }
-            memcpy(buf, p->buf + p->pos, n);
+            if (n) {
+                memcpy(buf, p->buf + p->pos, n);
+            }
             p->pos += n;
             return (ssize_t)n;
         }
         case O_PIPE_W:
             errno = EBADF;
             return -1;
+        case O_TERM: {
+            moy_sh_t *s = moy_sh_cur;
+            long r = s->host.in != NULL ? s->host.in(s->host.ctx, buf, n) : 0;
+            if (r < 0) {
+                errno = EIO;
+                return -1;
+            }
+            return (ssize_t)r;
+        }
         default:
             return 0;
     }
@@ -912,6 +986,25 @@ static int vol_ent(void *ctx, const char *name, size_t len, int is_dir, uint32_t
     return dir_add(ctx, name, is_dir, size);
 }
 
+typedef struct {
+    const char *path;
+    struct moy_sh_dir *d;
+    int r;
+} list_call_t;
+
+// A folder of the store listed, where the store may be touched (store_call).
+static void list_here(void *arg) {
+    list_call_t *c = arg;
+    moy_vol_t v;
+    const char *rest;
+    int entered = moy_vol_gate_enter(c->path);
+    c->r = c->path != NULL ? moy_vol_at(c->path, &v, &rest) : ENAMETOOLONG;
+    if (c->r == 0) {
+        c->r = moy_vol_list(&v, rest, vol_ent, c->d);
+    }
+    moy_vol_gate_leave(entered);
+}
+
 moy_sh_DIR *moy_sh_opendir(const char *path) {
     char abs[MOY_SH_PATH_MAX], sp[MOY_SH_PATH_MAX];
     struct stat st;
@@ -944,21 +1037,17 @@ moy_sh_DIR *moy_sh_opendir(const char *path) {
         if (!strcmp(abs, "/")) {
             dir_add(d, "bin", 1, 0);
             dir_add(d, "dev", 1, 0);
+            if (s->host.etc != NULL) {
+                dir_add(d, "etc", 1, 0);
+            }
             dir_add(d, "proc", 1, 0);
             if (s->host.vlist != NULL) {
                 s->host.vlist(s->host.ctx, "/", dir_add, d);
             }
         }
-        const char *p = moy_sh_store_path(abs, sp, sizeof sp);
-        moy_vol_t v;
-        const char *rest;
-        int entered = moy_vol_gate_enter(p);
-        int e = p != NULL ? moy_vol_at(p, &v, &rest) : ENAMETOOLONG;
-        if (e == 0) {
-            e = moy_vol_list(&v, rest, vol_ent, d);
-        }
-        moy_vol_gate_leave(entered);
-        r = !strcmp(abs, "/") ? 0 : e;
+        list_call_t c = { moy_sh_store_path(abs, sp, sizeof sp), d, 0 };
+        moy_sh_hop(s, list_here, &c);
+        r = !strcmp(abs, "/") ? 0 : c.r;
     }
     if (r != 0) {
         moy_sh_hfree(d->names);

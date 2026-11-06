@@ -41,7 +41,7 @@ _Static_assert(NOPTS == MOY_SH_G_NOPTS, "moy_sh_g.h: optlist's size is dash's NO
 
 // The running session's state, the one writable word the shell keeps outside
 // its arena (its session is moy_sh_cur, a field of it).
-struct moy_sh_globals *moy_sh_g;
+__thread struct moy_sh_globals *moy_sh_g;
 
 // --- memory -----------------------------------------------------------------
 
@@ -246,6 +246,28 @@ int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap) {
     }
     leave(was);
     return r;
+}
+
+typedef struct {
+    moy_sh_t *s;
+    void (*fn)(void *);
+    void *arg;
+} sh_hop_t;
+
+static void hop_in(void *p) {
+    sh_hop_t *h = p;
+    struct moy_sh_globals *was = enter(h->s);
+    h->fn(h->arg);
+    leave(was);
+}
+
+void moy_sh_hop(moy_sh_t *s, void (*fn)(void *arg), void *arg) {
+    if (s == NULL || s->host.hop == NULL) {
+        fn(arg);
+        return;
+    }
+    sh_hop_t h = { s, fn, arg };
+    s->host.hop(s->host.ctx, hop_in, &h);
 }
 
 void moy_sh_park(moy_sh_t *s) {
@@ -786,6 +808,14 @@ int moy_sh_exec(char **argv, const char *path, int idx) {
     moy_sh_t *s = moy_sh_cur;
     char abs[MOY_SH_PATH_MAX];
     struct stat st;
+    // `exec sh ...` (ssh-copy-id's, a script's) is this shell: /bin/sh
+    if (!strcmp(argv[0], "sh") || !strcmp(argv[0], "/bin/sh")) {
+        int argc = 0;
+        while (argv[argc] != NULL) {
+            argc++;
+        }
+        return moy_sh_shcmd(argc, argv);
+    }
     if (strchr(argv[0], '/') != NULL) {
         if (moy_sh_path(argv[0], abs, sizeof abs) == 0 && stat(abs, &st) == 0 &&
             S_ISREG(st.st_mode)) {

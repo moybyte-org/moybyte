@@ -632,6 +632,7 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
     h->poll = poll;
     // off a board (the suite's harness) the files tree is a folder it names
     h->root = files_root();
+    h->etc = MOY_SH_STORE "/system";
     h->vread = b_vread;
     h->vwrite = b_vwrite;
     h->vlist = b_vlist;

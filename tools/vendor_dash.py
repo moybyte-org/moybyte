@@ -397,7 +397,8 @@ def _gooddefine(line):
 
 
 def mkinit(sources):
-    headers = ['"shell.h"', '"mystring.h"', '"init.h"']
+    # system.h first: its moy_sh_posix.h names every file call the shell's own
+    headers = ['"system.h"', '"shell.h"', '"mystring.h"', '"init.h"']
     defines, decls = [], []
     code = {name: [] for name, _r, _a, _c in EVENTS}
     for fname, text in sources:

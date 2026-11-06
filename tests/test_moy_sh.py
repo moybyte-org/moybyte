@@ -252,6 +252,30 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     assert writable == ["moy_sh.c: moy_sh_g"], writable
 
 
+def test_no_shell_object_calls_the_c_library_s_descriptors(tmp_path):
+    """dash's file calls are the shell's own (moy_sh_posix.h's names over
+    moy_sh_sys.c's descriptors): a source that missed the shim called the
+    C library's close() on the process's real descriptors -- mkinit's init.c
+    did, closing an SSH session's sockets at a command substitution's end."""
+    cc = shutil.which(os.environ.get("CC", "cc"))
+    nm = shutil.which("nm")
+    if cc is None or nm is None:
+        pytest.skip("no C compiler or nm")
+    flags = ["-std=gnu99", "-Os", "-include", os.path.join(SH, "dash_config.h"),
+             "-I", SH, "-I", DASH, "-I", STORE]
+    raw = {"open", "read", "write", "close", "dup", "dup2", "fcntl", "pipe", "lseek",
+           "open64", "stat", "fstat", "lstat"}
+    calls = []
+    for src in shell_sources():
+        obj = str(tmp_path / (os.path.basename(src)[:-2] + ".o"))
+        r = subprocess.run([cc] + flags + ["-c", src, "-o", obj], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[-2000:]
+        for line in subprocess.check_output([nm, "-u", obj], text=True).splitlines():
+            if line.split()[-1] in raw:
+                calls.append("%s: %s" % (os.path.basename(src), line.split()[-1]))
+    assert calls == [], calls
+
+
 def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
     """A newer C library's C23 bsearch, strchr, strchrnul ... answer a const
     pointer for a const argument, and CI's compiler refused dash's implicit

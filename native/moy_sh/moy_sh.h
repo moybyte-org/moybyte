@@ -30,6 +30,12 @@
 // and the commands of the console's services (`roles`), which the host serves
 // (`role`) and refuses with "needs the console" while the VM is stopped.
 //
+// TASKS. A session runs on one task at a time; the running session is that
+// task's (`moy_sh_g` is thread-local), so the screen's and the serial face's
+// sessions on the console's task and an SSH session on its own run side by
+// side. What touches the files tree or crosses the door goes through the
+// host's `hop` (moy_sh_hop).
+//
 // MEMORY. The session's record and its arena come from the host's `alloc`
 // (PSRAM on a board) at moy_sh_new; a pipe's buffer, a file read whole and a
 // fork's snapshot come from it while a run needs them and go back after.
@@ -77,6 +83,10 @@ typedef struct {
     int (*poll)(void *ctx);
     // the files tree: absolute shell paths resolve under `root` ("" on a board)
     const char *root;
+    // the folder (a path of the tree) /etc names: the console's system/, its
+    // documents as /etc holds a Unix system's; /etc/dropbear names it too,
+    // where ssh-copy-id puts a key for a Dropbear server (may be NULL: none)
+    const char *etc;
     // virtual files: /dev/<name>, /proc/... and the root's own names. read
     // answers 0 with the bytes (from `alloc`), an errno otherwise (ENOENT: not
     // virtual); list answers ENOENT for a folder it does not serve.
@@ -108,6 +118,14 @@ typedef struct {
     // line's run ends, an exit status where it would not, MOY_SH_NOT_FOUND
     // where the face has no screen (may be NULL: none)
     int (*app)(void *ctx, moy_sh_t *s, int argc, char **argv);
+    // the terminal's input for a command reading it: up to n bytes, 0 at its
+    // end (may be NULL: a terminal reads end of file)
+    long (*in)(void *ctx, void *buf, size_t n);
+    // run fn(arg) where the files tree and the door may be touched, and wait
+    // for it (may be NULL: on the calling task). A face whose session runs on
+    // a task of its own hops to the console's (the SSH face, native/moy_ssh);
+    // a hop from that task runs in place.
+    void (*hop)(void *ctx, void (*fn)(void *arg), void *arg);
 } moy_sh_host_t;
 
 // A session over `arena` bytes; NULL when the host's alloc refuses. `host` is
@@ -162,6 +180,9 @@ const moy_sh_host_t *moy_sh_host(const moy_sh_t *s);
 // The store path of shell path `path` (against the session's folder) into
 // `out`, from inside a run: 0, or an errno value (ENOENT for a virtual file).
 int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap);
+// Run fn(arg) through the host's hop (moy_sh_host_t's), the session `s`
+// current for its length on whichever task runs it; in place without one.
+void moy_sh_hop(moy_sh_t *s, void (*fn)(void *arg), void *arg);
 // Park `s` (NULL: none): the session a face keeps between its runs, held in
 // the one writable word, so a face on a board keeps no root of its own. A
 // session's own runs leave the parked one parked; freeing it unparks it.

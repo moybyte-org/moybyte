@@ -204,6 +204,31 @@ static void vertical(ed_t *e, int d) {
 
 // -- the file -----------------------------------------------------------------------
 
+// The file's reads and its save run where the store may be touched (the
+// session's hop, moy_sh_hop).
+typedef struct {
+    const char *path;
+    const char *text;
+    size_t n;
+    moy_buf_t *b;
+    int is_dir, exists, rc;
+} ed_io_t;
+
+static void ed_save_here(void *arg) {
+    ed_io_t *io = arg;
+    io->rc = moy_fs_publish(io->path, io->text, io->n);
+}
+
+static void ed_load_here(void *arg) {
+    ed_io_t *io = arg;
+    moy_vol_stat_t vs;
+    io->is_dir = moy_fs_stat(io->path, &vs) == 0 && vs.is_dir;
+    if (!io->is_dir) {
+        io->rc = moy_fs_read(io->path, NULL, io->b);
+        io->exists = io->rc == 0 || moy_fs_exists(io->path);
+    }
+}
+
 static void save(moy_sh_app_t *a, ed_t *e) {
     size_t n = len(e), tail = e->cap - e->g1;
     char *text = moy_sh_app_alloc(a, n + 1);
@@ -213,7 +238,9 @@ static void save(moy_sh_app_t *a, ed_t *e) {
     }
     memcpy(text, e->buf, e->g0);
     memcpy(text + e->g0, e->buf + e->g1, tail);
-    int rc = moy_fs_publish(e->path, text, n);
+    ed_io_t io = { .path = e->path, .text = text, .n = n };
+    moy_sh_hop(moy_sh_app_session(a), ed_save_here, &io);
+    int rc = io.rc;
     moy_sh_app_free(a, text);
     if (rc != 0) {
         snprintf(e->msg, sizeof e->msg, "not saved: %s", strerror(rc > 0 ? rc : EIO));
@@ -244,16 +271,17 @@ static int ed_open(moy_sh_app_t *a, void *st, int argc, char **argv) {
     const char *base = strrchr(argv[1], '/');
     base = base != NULL && base[1] ? base + 1 : argv[1];
     snprintf(e->name, sizeof e->name, "%s", base);
-    moy_vol_stat_t vs;
-    if (moy_fs_stat(e->path, &vs) == 0 && vs.is_dir) {
+    moy_buf_t b = {0};
+    ed_io_t io = { .path = e->path, .b = &b };
+    moy_sh_hop(s, ed_load_here, &io);
+    if (io.is_dir) {
         return say_err(s, argv[1], "is a folder");
     }
-    moy_buf_t b = {0};
     size_t n = 0;
-    int rc = moy_fs_read(e->path, NULL, &b);
+    int rc = io.rc;
     if (rc == 0) {
         n = b.n;
-    } else if (moy_fs_exists(e->path)) {
+    } else if (io.exists) {
         return say_err(s, argv[1], rc > 0 ? strerror(rc) : "cannot be read");
     }
     if (n > EDIT_MAX) {

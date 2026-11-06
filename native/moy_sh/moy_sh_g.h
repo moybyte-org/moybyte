@@ -206,6 +206,6 @@ struct moy_sh_globals {
     struct moy_sh_proc proc;
 };
 
-extern struct moy_sh_globals *moy_sh_g;
+extern __thread struct moy_sh_globals *moy_sh_g;
 
 #endif // MOY_SH_G_H

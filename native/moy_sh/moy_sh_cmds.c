@@ -40,6 +40,14 @@ static int resolve(const char *path, char *abs, size_t cap) {
 // The store op `op` on `path` (and `to`): 0 or an errno.
 enum { V_MKDIR, V_RMDIR, V_REMOVE, V_RENAME };
 
+typedef struct {
+    int op;
+    const char *p, *q;
+    int r;
+} vol_call_t;
+
+static void vol_here(void *arg);
+
 static int vol_op(int op, const char *path, const char *to) {
     char abs[MOY_SH_PATH_MAX], sp[MOY_SH_PATH_MAX], abs2[MOY_SH_PATH_MAX], sp2[MOY_SH_PATH_MAX];
     if (moy_sh_path(path, abs, sizeof abs) != 0) {
@@ -49,6 +57,20 @@ static int vol_op(int op, const char *path, const char *to) {
     if (p == NULL) {
         return EROFS;
     }
+    const char *q = NULL;
+    if (op == V_RENAME && moy_sh_path(to, abs2, sizeof abs2) == 0) {
+        q = moy_sh_store_path(abs2, sp2, sizeof sp2);
+    }
+    vol_call_t c = { op, p, q, 0 };
+    moy_sh_hop(moy_sh_cur, vol_here, &c);
+    return c.r;
+}
+
+// The store's change, where the store may be touched (moy_sh_hop).
+static void vol_here(void *arg) {
+    vol_call_t *c = arg;
+    int op = c->op;
+    const char *p = c->p, *q = c->q;
     moy_vol_t v, v2;
     const char *rest, *rest2;
     int entered = moy_vol_gate_enter(p);
@@ -63,10 +85,6 @@ static int vol_op(int op, const char *path, const char *to) {
                 r = moy_vol_remove(&v, rest);
                 break;
             case V_RENAME: {
-                const char *q = NULL;
-                if (moy_sh_path(to, abs2, sizeof abs2) == 0) {
-                    q = moy_sh_store_path(abs2, sp2, sizeof sp2);
-                }
                 if (q == NULL) {
                     r = EROFS;
                     break;
@@ -83,7 +101,7 @@ static int vol_op(int op, const char *path, const char *to) {
         }
     }
     moy_vol_gate_leave(entered);
-    return r;
+    c->r = r;
 }
 
 static int is_dir(const char *path) {

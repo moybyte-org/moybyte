@@ -245,7 +245,7 @@ SH app edit
 > sh n
 SH end 0
 > sh ls /
-SH bin/  dev/  proc/  sd/
+SH bin/  dev/  etc/  proc/  sd/
 SH end 0
 > sh edit /sd
 SH edit: /sd: is a folder
