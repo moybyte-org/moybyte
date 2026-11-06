@@ -167,10 +167,15 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
     """`ws.front_bind`: give the kernel's Player this compositor as the ends
     of a run in the loop's foreground (moy_glass.front), answering whether it
     took. A banded board whose game canvas IS the panel presents it as is; a
-    DSI board scales the game canvas into console mode's rect, which the
-    desk world (a window's run) and a cart-declared view leave to the
-    console. A bind that took pushes the console's half of the PERF line
-    once for the run: the console's frame does not run while it is in front."""
+    banded panel larger than the game canvas folds it into console mode's
+    rect through the flush (the scratch is the system canvas's fold
+    snapshot, blit_game's); a DSI board scales the game canvas into that
+    rect. The desk world (a window's run) and a cart-declared view leave the
+    run to the console. A bind that took pushes the console's half of the
+    PERF line once for the run: the console's frame does not run while it is
+    in front."""
+    fold = getattr(comp, "snap_scale_fold", None) is not None
+
     def bind():
         if game is sys_canvas:
             took = glass.front(comp)
@@ -182,7 +187,12 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
             r = getattr(ws, "render_scale", 1)
             ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
             smooth = bool(getattr(type(sys_canvas), "_smooth", True))
-            took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+            if fold:
+                scr = sys_canvas.front_scratch(game.w, game.h)
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
+                                          scr))
+            else:
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
         if took:
             ws.perf_push(loop, front=True)
         return took

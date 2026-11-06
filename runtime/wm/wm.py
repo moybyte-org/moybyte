@@ -512,6 +512,14 @@ class FullscreenStackWM:
         self._vp_val = (ox, oy, scale)
         return self._vp_val
 
+    def play_viewport(self):
+        """Console mode's fullscreen game rect, (ox, oy, scale): what a run
+        the kernel drives in front composes (native/moy_play's front). None
+        for a cart-declared view, which the console composes."""
+        if self._view_src() is not None:
+            return None
+        return FullscreenStackWM.viewport(self)
+
     def game_xy(self, px, py):
         """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
         coords, so a running cart / the editors (drawn in the 320x240 viewport) hit-

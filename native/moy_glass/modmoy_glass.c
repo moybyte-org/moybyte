@@ -903,7 +903,12 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
 // it. A DSI compositor's run draws into the game canvas `game` -- (buf, w, h,
 // ox, oy, scale, smooth) -- which each present scales into the back buffer:
 // the PPA's bilinear scale where the board has it and `smooth` holds, the
-// CPU kernel's nearest one otherwise, then the switch. front(None) withdraws.
+// CPU kernel's nearest one otherwise, then the switch. A banded panel larger
+// than its game canvas (the Guition S3's) takes `game` and the fold's
+// `scratch` -- (buf, w, h, ox, oy, scale, smooth, scratch) -- and each present
+// snapshots the canvas into the scratch, which the flush resolves band by band
+// with the bezel around it (moy_fold.h), as the console's blit_game does.
+// front(None) withdraws.
 
 typedef struct {
     uint16_t *(*canvas)(void *ctx, int *w, int *h);
@@ -926,7 +931,10 @@ static struct {
     uint16_t *game;
     int gw, gh, ox, oy, scale;
     bool smooth;
+    uint8_t *scr;                       // the fold's scratch (a banded game canvas)
+    size_t scr_len;
 } G;
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_scr);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_comp);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_game);
 
@@ -957,6 +965,37 @@ static bool front_identity(void *ctx, int32_t *x, int32_t *y) {
     glass_banded_obj_t *c = ctx;
     return *x >= 0 && *y >= 0 && *x < c->w && *y < c->h;
 }
+
+#if MOY_GLASS_BANDED
+// The run draws once the last snapshot has read the canvas.
+static uint16_t *front_fold_canvas(void *ctx, int *w, int *h) {
+    (void)ctx;
+    moy_fold_snap_fence();
+    *w = G.gw;
+    *h = G.gh;
+    return G.game;
+}
+
+static void front_fold_present(void *ctx, bool drew) {
+    glass_banded_obj_t *c = ctx;
+    if (!drew) {
+        return;
+    }
+    moy_fold_fence();                   // the last flush has read the scratch
+    bool async_copy = false;
+    if (!moy_fold_arm_snap((const uint8_t *)G.game, (size_t)G.gw * (size_t)G.gh * 2u, 0,
+                           G.scr, G.scr_len, G.gw, G.gh, 0, G.gw, G.ox, G.oy, G.scale,
+                           (int)c->w, (int)c->h, &async_copy)) {
+        // Geometry the fold cannot express: the bezel and the scale on the CPU.
+        size_t n;
+        uint16_t *dst = view_px(c->fbs[c->b.back], &n);
+        memset(dst, 0, n * 2u);
+        mg_blit565_scale(dst, n, (int)c->w, (int)c->h, G.ox, G.oy, G.game,
+                         (size_t)G.gw * (size_t)G.gh, G.gw, G.gh, G.scale);
+    }
+    moy_banded_present(&c->b);
+}
+#endif
 #endif
 
 static uint16_t *front_dsi_canvas(void *ctx, int *w, int *h) {
@@ -983,7 +1022,7 @@ static void front_dsi_present(void *ctx, bool drew) {
     moy_dsi_present(&c->d, false);
 }
 
-static bool front_dsi_map(void *ctx, int32_t *x, int32_t *y) {
+static bool front_game_map(void *ctx, int32_t *x, int32_t *y) {
     (void)ctx;
     int32_t gx = (*x - G.ox) / G.scale, gy = (*y - G.oy) / G.scale;
     bool in = *x >= G.ox && *y >= G.oy && gx < G.gw && gy < G.gh;
@@ -1000,10 +1039,37 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         moy_play_front_ops(NULL);
         MP_STATE_VM(moy_glass_front_comp) = MP_OBJ_NULL;
         MP_STATE_VM(moy_glass_front_game) = MP_OBJ_NULL;
+        MP_STATE_VM(moy_glass_front_scr) = MP_OBJ_NULL;
         return mp_const_true;
     }
     memset(&G, 0, sizeof(G));
     if (false) {
+#if MOY_GLASS_BANDED
+    } else if (mp_obj_is_type(a[0], &glass_banded_type) && n_args > 1) {
+        mp_obj_t *g;
+        mp_obj_get_array_fixed_n(a[1], 8, &g);
+        size_t n;
+        G.game = view_px(g[0], &n);
+        G.gw = (int)mp_obj_get_int(g[1]);
+        G.gh = (int)mp_obj_get_int(g[2]);
+        G.ox = (int)mp_obj_get_int(g[3]);
+        G.oy = (int)mp_obj_get_int(g[4]);
+        G.scale = (int)mp_obj_get_int(g[5]);
+        mp_buffer_info_t sb;
+        mp_get_buffer_raise(g[7], &sb, MP_BUFFER_WRITE);
+        G.scr = sb.buf;
+        G.scr_len = sb.len;
+        glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+        if (G.scale < 1 || n < (size_t)G.gw * (size_t)G.gh || G.ox < 0 || G.oy < 0
+                || G.ox + G.gw * G.scale > c->w || G.oy + G.gh * G.scale > c->h) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
+        G.ops.canvas = front_fold_canvas;
+        G.ops.present = front_fold_present;
+        G.ops.map = front_game_map;
+        MP_STATE_VM(moy_glass_front_game) = g[0];
+        MP_STATE_VM(moy_glass_front_scr) = g[7];
+#endif
 #ifdef MOY_GLASS_BANDED_TYPE
     } else if (mp_obj_is_type(a[0], &glass_banded_type)) {
         G.ops.canvas = front_banded_canvas;
@@ -1038,7 +1104,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         }
         G.ops.canvas = front_dsi_canvas;
         G.ops.present = front_dsi_present;
-        G.ops.map = front_dsi_map;
+        G.ops.map = front_game_map;
         MP_STATE_VM(moy_glass_front_game) = g[0];
     } else {
         return mp_const_false;          // a compositor with no front (rotated)

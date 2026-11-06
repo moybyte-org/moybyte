@@ -1405,6 +1405,20 @@ class DeviceCanvas:
     # the windowed WM anyway.)
     letterbox_composite = True
 
+    def front_scratch(self, gw, gh):
+        """The fold's snapshot scratch for a run in the kernel's front on this
+        panel (moy_glass.front): blit_game's own, sized for the whole `gw` x
+        `gh` game canvas, after the fence that frees it. The console's next
+        sync_back fences the front's last snapshot."""
+        self._comp.fold_fence()
+        scr = self._snap_scratch
+        if scr is None or scr._w != gw or scr._h != gh:
+            if scr is not None:
+                scr.release()
+            scr = self._snap_scratch = _LayerComp(gw, gh, self._gfx, 0, _ROLE_SCRATCH)
+        self._snap_live = True
+        return scr.framebuffer()
+
     def release_fold(self):
         """A run's end (Player.release_world): give back the fold's snapshot
         and the view crop's scratch, which only a game frame uses -- a
