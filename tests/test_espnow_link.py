@@ -1062,3 +1062,33 @@ def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkey
         assert np.desync > 0 and np.desync_kind == 2, (np.desync, np.desync_kind)
         assert ws._notice is not None and ws._notice[0] == "Out of sync"
     assert wss[0].link.stats()["match"]["desync_kind"] == "worlds"
+
+
+def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
+    """A kid's _draw keeps state as often as not (`t += 1` for a blink), and
+    two consoles agree only if each runs it once a tick. Brick Siege paces
+    "free", whose loop frames all drew in a match -- a count of loop frames,
+    which two boards never share -- and a stalled tick drew with no update
+    while its retry updated with no draw. Over a lossy air, every console's
+    draws equal its simulated ticks."""
+    seen = {}
+
+    def count(k, wss):
+        for i, ws in enumerate(wss):
+            np = ws.player._netplay
+            if np is None or i in seen:
+                continue
+            draw = ws.player._draw
+            box = seen[i] = [np.frame, 0]
+
+            def counted(draw=draw, box=box):
+                box[1] += 1
+                draw()
+            ws.player._draw = counted
+
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 600, count)
+    for i, ws in enumerate(wss):
+        np = ws.player._netplay
+        f0, draws = seen[i]
+        assert np.stall_ticks > 5, "the premise: the match stalled"
+        assert draws == np.frame - f0, (i, draws, np.frame - f0)

@@ -720,7 +720,7 @@ class Procs:
                 return
         if shown:
             draw = pl.frame_plan(dt)
-            if draw:
+            if draw and pl._netplay is None:   # a match draws every tick it simulates
                 p.skip += 1
                 if p.skip >= self.n:
                     p.skip = 0

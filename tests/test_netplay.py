@@ -513,12 +513,12 @@ def test_the_world_check_compares_only_where_both_consoles_armed_it():
     wire = _Wire()
     a, b = _match(wire)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
-    sa._m.world_check(True)
+    sa._m.arm_worlds(True)
     sa.world = lambda: "only A looks"
     sb.world = lambda: "B is not asked"
     _step(a, b, wire, 100)
     assert sa.checks >= 2 and sa.desync < 0
-    sb._m.world_check(True)
+    sb._m.arm_worlds(True)
     _step(a, b, wire, 40)
     assert sa.desync > 0 and sa.desync_kind == 2
 

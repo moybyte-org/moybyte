@@ -1011,7 +1011,7 @@ class Match:
     def tps(self, now):
         return self._d.moy_lockstep_tps(self._p, int(now) & 0xFFFFFFFF)
 
-    def world_check(self, on):
+    def arm_worlds(self, on):
         self._d.moy_match_world_check(self._p, bool(on))
 
     def world_due(self):

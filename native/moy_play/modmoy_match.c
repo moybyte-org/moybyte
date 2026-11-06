@@ -337,7 +337,7 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_packet), MP_ROM_PTR(&mt_packet_obj) },
     { MP_ROM_QSTR(MP_QSTR_tps), MP_ROM_PTR(&mt_tps_obj) },
     { MP_ROM_QSTR(MP_QSTR_world_due), MP_ROM_PTR(&mt_world_due_obj) },
-    { MP_ROM_QSTR(MP_QSTR_world_check), MP_ROM_PTR(&mt_world_check_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_worlds), MP_ROM_PTR(&mt_world_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },
 };

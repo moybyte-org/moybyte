@@ -1854,15 +1854,19 @@ class Player(PlayerDiag):
         draw divisor stays 1 there -- composing the two is its own step."""
         # Each store is skipped when it changes nothing: a store on the Player
         # looks through its classes for a property setter.
+        np = self._netplay
+        if np is not None:
+            # A match, whatever the cart's pace: a frame may draw when a tick
+            # is due or a stalled one retries, and tick() draws it only if it
+            # simulated -- a cart's _draw runs exactly once a tick on both
+            # consoles, so a _draw that keeps state cannot part them.
+            if self._n_ticks != 1:
+                self._n_ticks = 1
+            return bool(np.waiting or np.pending(_ticks_ms()))
         if not self.tick_ms:
             if self._n_ticks != 1:
                 self._n_ticks = 1
             return True
-        np = self._netplay
-        if np is not None:
-            if self._n_ticks != 1:
-                self._n_ticks = 1
-            return bool(np.pending(_ticks_ms()))
         s = self.sched
         s.plan(dt)
         n = s.n
@@ -2105,6 +2109,14 @@ class Player(PlayerDiag):
                 # compares -- there is no clock and no probe here.
                 if self._app_layout is not None and self._layout_moved():
                     self._app_layout(*self._app_wh)
+                # A match's tick is decided before anything draws: a frame
+                # that did not simulate draws nothing (frame_plan).
+                np = self._netplay
+                stalled = False
+                if np is not None:
+                    dt, stalled, np = self._lockstep_step(ws, dt)
+                    if stalled:
+                        render = False
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
                 # early-out) when the cart never called background(). Skipped on a
@@ -2132,10 +2144,6 @@ class Player(PlayerDiag):
                 # own table (E-02: the cart's fset stays the run's).
                 if self._flag_put is not None:
                     ws.project.flag_edits(self._flag_put)
-                np = self._netplay
-                stalled = False
-                if np is not None:            # a match: its clock, its stall
-                    dt, stalled, np = self._lockstep_step(ws, dt)
                 # MICROSECONDS, not ms. These three brackets and the backdrop one
                 # above feed DRAWBRK's split, and `chrome` is what is left after
                 # subtracting them from the frame -- on a ms clock every one of
@@ -2238,9 +2246,9 @@ class Player(PlayerDiag):
         # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
         # the fixed tick -- a variable dt diverges the two sims on frame
         # one -- and a frame whose peer input has not arrived does NOT
-        # simulate. It still DRAWS: the screen holds the last agreed
-        # frame instead of freezing, which is what "waiting for player"
-        # looks like on hardware that cannot extrapolate safely.
+        # simulate, and draws nothing: the screen holds the last agreed
+        # frame, which is what "waiting for player" looks like on hardware
+        # that cannot extrapolate safely.
         stalled = False
         np = self._netplay
         if np is not None and self._play is not None:

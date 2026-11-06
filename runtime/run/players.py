@@ -838,7 +838,7 @@ class EspNowLink:
         if self._m is None:
             self.start()
         if self._m is not None:
-            self._m.world_check(bool(on))
+            self._m.arm_worlds(bool(on))
 
     def _dispatch(self, ws, mac, msg):
         if self._m is not None:
