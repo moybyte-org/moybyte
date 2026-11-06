@@ -406,6 +406,10 @@ def test_passwd_in_a_session_stops_the_server_after_it_and_a_new_one_withdraws_t
         r = ssh(h, "other", "moy@127.0.0.1", "passwd -d")
         assert r.returncode == 0, r.stderr
         assert refused(h)
+        # the harness prints its figures every 20 ms: the refusal can come first
+        deadline = time.time() + 5
+        while stats(h)["listening"] != "0" and time.time() < deadline:
+            time.sleep(0.05)
         assert stats(h)["listening"] == "0"
     finally:
         end(h)
