@@ -256,6 +256,31 @@ def test_ctrl_c_stops_a_parked_role_command(term, monkeypatch):
     assert plain(app)[-1] == "next"
 
 
+def test_b_while_a_run_is_parked_stops_the_run_and_keeps_the_terminal(term, monkeypatch):
+    """The gamepad's B is the console's back: while a run is parked it is the
+    run's cancel, as Ctrl-C is, and the Terminal stays open; at the prompt it
+    leaves the Terminal as before."""
+    ended = _slow_role(monkeypatch, steps=50)
+    ws, app = term
+    drv = _frame(ws)
+    app.face.set_line("lease; echo not-after")
+    app.face.submit()
+    assert app.face.busy()
+    drv.press("b")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    settle(app, limit=2)
+    assert ws.wm.top_kind() == "terminal"
+    assert not app.face.busy() and ended == [1] and app.face.status() == 130
+    assert "not-after" not in plain(app)
+    run(app, "echo next")
+    assert plain(app)[-1] == "next", "the B stopped that run and no other"
+    drv.press("b")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.wm.top_kind() != "terminal"
+
+
 def test_the_console_s_frames_go_on_while_a_command_waits(term, monkeypatch):
     """The kernel's frame (moy_loop_step, the host's driver tier) runs the
     parked run's turn at its tail: frames keep their pace while `sleep` and

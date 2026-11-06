@@ -168,8 +168,9 @@ computes it holds the console's task, so **Ctrl-C reaches it in C**: the
 face's poll kicks the input drivers and reads the kernel input table's
 latches between merges for a key that types 0x03, the T-Deck's Mic
 (`start`) or a gamepad's B; a parked run takes the Terminal's Ctrl-C and
-the board's cancel key from the face, and the serial face's from the
-channel's 0x03. A role command asks the same poll between its polls through
+the board's cancel key from the face, the console's back (B, Esc, the bar's
+chevron) from the Terminal's `back()`, which keeps the Terminal open while a
+run is parked, and the serial face's from the channel's 0x03. A role command asks the same poll between its polls through
 `moy_sh.interrupted()`, or is stopped by its session, gives back what it
 took and exits 130. The simulator and
 the host tests run the same session through the host's ctypes binding

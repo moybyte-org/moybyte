@@ -140,6 +140,17 @@ class TerminalAppLayer:
             return True
         return False
 
+    def back(self):
+        """B, Esc and the bar's back while a run is parked are the run's
+        cancel, as Ctrl-C is (True: the Terminal stays); with none it is the
+        console's back out of the Terminal."""
+        f = self.face
+        if f is not None and f.busy():
+            f.interrupt()
+            self._damage.all()
+            return True
+        return False
+
     def handle_input(self, inp):
         f = self.face
         if f is None:
