@@ -85,6 +85,48 @@ void *moy_net_alloc(size_t n) {
 void moy_net_free(void *p) {
     free(p);
 }
+
+// The machine's own clock, which its system keeps.
+int moy_clock_state(int64_t *at) {
+    if (at != NULL) {
+        *at = (int64_t)time(NULL);
+    }
+    return MOY_CLOCK_SYNCED;
+}
+
+int moy_clock_server(const char *name) {
+    return name != NULL && strlen(name) > MOY_CLOCK_SERVER_MAX ? -1 : 0;
+}
+#endif
+
+// -- the clock a certificate's dates are read against ---------------------------
+
+#if defined(ESP_PLATFORM) || MOY_NET_POSIX
+#include <stdlib.h>
+
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int synced) {
+    return synced || now >= floor ? now : floor;
+}
+
+int moy_clock_future_counts(int64_t now, int64_t floor, int synced) {
+    return synced || now >= floor;
+}
+
+int64_t moy_clock_build_day(void) {
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *d = __DATE__;                   // "Mmm dd yyyy"
+    int m = 0;
+    while (m < 12 && strncmp(mon + 3 * m, d, 3) != 0) {
+        m++;
+    }
+    int day = (d[4] == ' ' ? 0 : d[4] - '0') * 10 + (d[5] - '0');
+    int y = atoi(d + 7);
+    // Days from 1970-01-01 to y-(m+1)-day (the civil-from-days inverse).
+    int yy = y - (m < 2), era = yy / 400, yoe = yy - era * 400;
+    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
+    long days = (long)era * 146097 + (long)yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    return (int64_t)days * 86400;
+}
 #endif
 
 // -- the listener -----------------------------------------------------------------
@@ -364,37 +406,40 @@ int moy_conn_verifies(void) {
 }
 
 #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
-// A certificate's dates read the clock, and a board's clock is the uptime
-// unless something set it. So the clock mbedtls reads is never earlier than
-// the day this image was built: a certificate that expired before the build is
-// refused on every board, one that expired after it is refused once the clock
-// is set past that, and while the clock is behind the build a not-yet-valid
-// date is not held against a certificate (one issued after the build is the
-// usual case for 90-day certificates).
+// A certificate's dates read the clock (moy_clock_cert_time): the real time
+// once NTP has answered (moy_clock_state); before that a board's clock is the
+// uptime, so it is read raised to the day this image was built. A certificate
+// that expired before the build is refused on every board, one that expired
+// after it once the clock is set past that, and while the clock is behind the
+// build a not-yet-valid date is not held against a certificate (one issued
+// after the build is the usual case for 90-day certificates).
+extern int moy_clock_state(int64_t *at) __attribute__((weak));
+
+#define CLOCK_WAIT_MS 3000          // a first answer a handshake waits for
+
 static mbedtls_time_t (*s_clock)(mbedtls_time_t *);
 static mbedtls_time_t s_floor;
 
-static mbedtls_time_t build_day(void) {
-    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    const char *d = __DATE__;                   // "Mmm dd yyyy"
-    int m = 0;
-    while (m < 12 && strncmp(mon + 3 * m, d, 3) != 0) {
-        m++;
+static int synced(void) {
+    return moy_clock_state != NULL && moy_clock_state(NULL) == MOY_CLOCK_SYNCED;
+}
+
+// The station is up for this handshake, so a request NTP has out is waited
+// for, briefly: its answer is what makes the dates exact.
+static void await_clock(void) {
+    if (moy_clock_state == NULL) {
+        return;
     }
-    int day = (d[4] == ' ' ? 0 : d[4] - '0') * 10 + (d[5] - '0');
-    int y = atoi(d + 7);
-    // Days from 1970-01-01 to y-(m+1)-day (the civil-from-days inverse).
-    int yy = y - (m < 2), era = yy / 400, yoe = yy - era * 400;
-    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
-    long days = (long)era * 146097 + (long)yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
-    return (mbedtls_time_t)days * 86400;
+    uint32_t t0 = moy_net_ms();
+    while (moy_clock_state(NULL) == MOY_CLOCK_ASKING && moy_net_ms() - t0 < CLOCK_WAIT_MS) {
+        moy_net_sleep_ms(50);
+        tick();
+    }
 }
 
 static mbedtls_time_t tls_now(mbedtls_time_t *t) {
     mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
-    if (n < s_floor) {
-        n = s_floor;
-    }
+    n = (mbedtls_time_t)moy_clock_cert_time(n, s_floor, synced());
     if (t != NULL) {
         *t = n;
     }
@@ -402,15 +447,17 @@ static mbedtls_time_t tls_now(mbedtls_time_t *t) {
 }
 
 static int verify(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
-    if (s_clock == NULL || s_clock(NULL) < s_floor) {
+    mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
+    if (!moy_clock_future_counts(n, s_floor, synced())) {
         *flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_FUTURE;
     }
     return esp_crt_verify_callback(ctx, crt, depth, flags);
 }
 
 static int verify_setup(mbedtls_ssl_config *conf) {
+    await_clock();
     if (mbedtls_time != tls_now) {
-        s_floor = build_day();
+        s_floor = (mbedtls_time_t)moy_clock_build_day();
         s_clock = mbedtls_time;
         mbedtls_platform_set_time(tls_now);
     }

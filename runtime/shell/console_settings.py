@@ -1,7 +1,8 @@
 """The Workstation's SETTINGS verbs: the `SETTINGS_TOGGLES` setters
 (`set_diag_live`/`set_diag_sd`/`set_steady`/`set_two_player`/`set_crisp_pixels`/
 `set_show_fps`/`set_unknown_sources`) over the one `_set_toggle` tail, the
-second-keyboard probe local 2P rides on, and the OTA channel choice. A mixin
+second-keyboard probe local 2P rides on, the time zone and the OTA channel
+choice. A mixin
 of `Workstation`: each verb writes the flat mirror, marks the repaint and
 persists through `prefs`. What the settings MEAN at boot (`load_system`'s
 apply cascade) stays on the kernel.
@@ -11,6 +12,11 @@ try:                        # a VM: the kernel's frame loop (native/moy_kernel)
     import moy_loop as _loop
 except ImportError:         # host CPython: the host drives its own frames
     _loop = None
+
+try:
+    import wallclock as _wc
+except ImportError:  # pragma: no cover - host package lane
+    from runtime import wallclock as _wc
 
 
 class SettingsToggles:
@@ -132,6 +138,20 @@ class SettingsToggles:
         Settings screen's (settings_layer.TOGGLE_CONFIRMS), not this verb's:
         the boot apply and the dev channel come through here too."""
         self._set_toggle("unknown_sources", bool(on), persist)
+
+    def set_time_zone(self, tz, persist=True):
+        """The console's time zone, a POSIX TZ string (Settings -> Time zone,
+        `wallclock.ZONES`), applied to the bar's clock from its next read
+        and persisted as `tz`; one that does not parse is UTC. The NTP
+        server, `ntp_server`, has no row: it is applied with the zone."""
+        tz = tz if isinstance(tz, str) and tz else _wc.UTC
+        if not _wc.set_zone(tz):
+            tz = _wc.UTC
+        _wc.set_server(self.system.get("ntp_server"))
+        self.bar_layer._clock_at = -1
+        self._dirty = True
+        if persist and self.system.get("tz") != tz:
+            self.system.set("tz", tz)
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which

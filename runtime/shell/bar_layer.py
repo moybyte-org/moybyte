@@ -34,16 +34,21 @@ other extracted UIs use, since console.py builds the one BarLayer instance a
 Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
 `_ticks_diff` are duplicated here (time-only) for the clock.
 """
-import time
-
 try:
+    import wallclock as _wc
     from layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                              content_of)
     from shell_layout import pack as _pack, cell_of as _cell_of, without as _without
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import wallclock as _wc
     from runtime.layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                                      content_of)
     from runtime.shell_layout import pack as _pack, cell_of as _cell_of, without as _without
+
+
+# The clock's text while the wall clock does not hold real time, and its date.
+UNSYNCED = "--:--"
+_NO_DATE = (0, 0, 0)
 
 
 # -- bar geometry (single source; console.py imports these back) --------------
@@ -1867,31 +1872,33 @@ class BarLayer:
             self._strip_moved(cv, x, y, w, h)
 
     def _clock_text(self):
-        """A wall-clock HH:MM from time.localtime when available, else a mm:ss
-        uptime so the strip always shows a live clock (host == device). The
-        cart bar's cache KEY calls this every frame it paints (#66), so the
-        clock is read when its text can next change -- the next minute, or
-        the next second of the uptime -- and its strings are made only when
-        it did."""
+        """The local HH:MM (`wallclock`: the console's time zone), or
+        UNSYNCED while the clock does not hold real time -- a board before
+        its first NTP answer, whose clock counts from power-on and would read
+        as a time of day. The cart bar's cache KEY calls this every frame it
+        paints (#66), so the clock is read when its text can next change --
+        the next minute, or each second while unsynced -- and its strings are
+        made only when it did."""
         now = _ticks_ms()
         if self._clock_at >= 0 and _ticks_diff(now, self._clock_at) < self._clock_hold:
             return self._clock_cache
-        try:
-            lt = time.localtime()
-            a, b = lt[3], lt[4]
-            hold = (60 - lt[5]) * 1000
-            if lt[0] != self._date_cache[0] or lt[1] != self._date_cache[1] \
-                    or lt[2] != self._date_cache[2]:
-                self._date_cache = (lt[0], lt[1], lt[2])
-        except Exception:  # noqa: BLE001
-            secs = _ticks_diff(now, 0) // 1000
-            a, b = (secs // 60) % 100, secs % 60
-            hold = 1000 - _ticks_diff(now, 0) % 1000
+        lt = _wc.localtime()
+        if lt is None:
+            self._date_cache = _NO_DATE
+            self._clock_hm = (-1, -1)
+            self._clock_cache = UNSYNCED
+            self._clock_at = now
+            self._clock_hold = 1000
+            return UNSYNCED
+        a, b = lt[3], lt[4]
+        if lt[0] != self._date_cache[0] or lt[1] != self._date_cache[1] \
+                or lt[2] != self._date_cache[2]:
+            self._date_cache = (lt[0], lt[1], lt[2])
         if a != self._clock_hm[0] or b != self._clock_hm[1]:
             self._clock_hm = (a, b)
             self._clock_cache = "%02d:%02d" % (a, b)
         self._clock_at = now
-        self._clock_hold = hold
+        self._clock_hold = (60 - lt[5]) * 1000
         return self._clock_cache
 
     def _today(self):

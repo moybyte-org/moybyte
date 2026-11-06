@@ -288,6 +288,10 @@ def test_pkg_installs_a_cart_from_the_carts_repo(board):
     on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
 
 
+def test_the_clock_syncs_when_the_network_comes_up(board):
+    on_glass.the_clock_syncs_when_the_network_comes_up(board)
+
+
 def test_the_shell_answers_with_the_vm_down(board):
     on_glass.the_shell_answers_with_the_vm_down(board)
 

@@ -60,6 +60,9 @@ one, `time.ticks_us()`.
                      changed() and remove(), None where the bar is full
                      (runtime/system/status_items.py). The process's end
                      takes it out
+  clock_synced()     whether the wall clock holds real time: NTP has answered
+                     on a board since power-on (runtime/system/wallclock.py);
+                     until then `time.time()` counts from power-on
 
 on/every/after answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
@@ -490,6 +493,14 @@ def _status_end(pid):
 
 
 ENDS.append(_status_end)
+
+
+def clock_synced():
+    try:
+        import wallclock
+    except ImportError:  # host: the runtime package
+        from runtime import wallclock
+    return wallclock.synced()
 
 
 def __getattr__(name):

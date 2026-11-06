@@ -17,6 +17,7 @@ same C built for the host.
                    download into the slot or the C6, the copied image's
                    install, the keys and the signature
   http_*           the streaming client Get Carts and the updater fetch through
+  clock_*          the wall clock's state and the NTP server it asks
 
 `install()` puts this module where `import moy_net` finds it. What it adds to
 the C is what ctypes cannot do by itself: JSON text for a batch's ops (the
@@ -182,6 +183,11 @@ _SIGS = (
     ("moy_wc_park", [_I], None),
     ("moy_wc_url", [ctypes.c_void_p, _Z, _I], _Z),
     ("moy_c6_version", [], _I),
+    ("moy_clock_state", [ctypes.POINTER(ctypes.c_int64)], _I),
+    ("moy_clock_server", [_P], _I),
+    ("moy_clock_cert_time", [ctypes.c_int64, ctypes.c_int64, _I], ctypes.c_int64),
+    ("moy_clock_future_counts", [ctypes.c_int64, ctypes.c_int64, _I], _I),
+    ("moy_clock_build_day", [], ctypes.c_int64),
 )
 
 
@@ -220,6 +226,19 @@ def _text(raw):
 
 
 # -- WiFi ---------------------------------------------------------------------
+
+def clock_state():
+    """The wall clock's state (moy_net.h's MOY_CLOCK_*): the host's own clock,
+    synced."""
+    return _lib().moy_clock_state(None)
+
+
+def clock_server(name):
+    """The NTP server the next sync asks (None: the default); ValueError for
+    a name past the C's bound."""
+    if _lib().moy_clock_server(None if name is None else _bytes(name)) != 0:
+        raise ValueError("server name")
+
 
 def wifi_password(password, stored):
     """The password a connect to a network uses: the stored one when the one

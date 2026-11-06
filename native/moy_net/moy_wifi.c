@@ -8,10 +8,16 @@
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
+#include <sys/time.h>
+#include <time.h>
+
+#include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
@@ -59,6 +65,99 @@ static void schedule_retry(void) {
     esp_timer_start_once(s_retry, (uint64_t)500000u << k);
 }
 
+// The wall clock (moy_net.h): NTP asked from the first address a raise of
+// the station gets to the radio going down, for whichever holder raised it.
+// The answer's mark lives in RTC memory beside the time the chip's RTC keeps,
+// so it holds across the VM's soft reset and the chip's software reset, and a
+// power-on finds the time behind the mark (or the mark gone) and reads
+// unsynced.
+//
+// The board's system clock counts from 2000, MicroPython's epoch on the esp32
+// port: its `time` module reads it so, and the TLS clock the VM installs
+// (mbedtls_time) adds CLOCK_EPOCH back. NTP answers in Unix time, so the
+// answer is set CLOCK_EPOCH seconds back (sntp_sync_time below).
+#define CLOCK_MARK 0x4d4f5943u              // "MOYC"
+#define CLOCK_EPOCH 946684800               // 1970-01-01 to 2000-01-01
+#define CLOCK_ASK_MS 15000u                 // a first answer is still awaited
+
+typedef struct {
+    uint32_t mark;
+    int64_t at;                             // Unix time of the last answer
+} clock_rtc_t;
+
+RTC_NOINIT_ATTR static clock_rtc_t s_clk;
+static volatile uint8_t s_ntp;              // the SNTP client is running
+static uint32_t s_ntp_ms;                   // since when, esp_timer's ms
+static char *s_server;                      // a set server's name, or NULL
+
+static int clock_synced(void) {
+    return s_clk.mark == CLOCK_MARK && (int64_t)time(NULL) + CLOCK_EPOCH >= s_clk.at;
+}
+
+int moy_clock_state(int64_t *at) {
+    int ok = clock_synced();
+    if (at != NULL) {
+        *at = ok ? s_clk.at : 0;
+    }
+    if (ok) {
+        return MOY_CLOCK_SYNCED;
+    }
+    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return s_ntp && s_st.connected && ms - s_ntp_ms < CLOCK_ASK_MS ? MOY_CLOCK_ASKING
+                                                                  : MOY_CLOCK_UNSYNCED;
+}
+
+int moy_clock_server(const char *name) {
+    size_t n = name != NULL ? strlen(name) : 0;
+    if (n > MOY_CLOCK_SERVER_MAX) {
+        return -1;
+    }
+    if (n == 0) {
+        if (s_server != NULL) {
+            s_server[0] = '\0';
+        }
+        return 0;
+    }
+    if (s_server == NULL) {
+        s_server = heap_caps_malloc(MOY_CLOCK_SERVER_MAX + 1, MALLOC_CAP_SPIRAM);
+        if (s_server == NULL) {
+            return -1;
+        }
+    }
+    memcpy(s_server, name, n + 1u);
+    return 0;
+}
+
+// lwIP's SNTP client sets the clock through this (ESP-IDF's is weak): the
+// answer, Unix time, on the board's epoch, and the mark.
+void sntp_sync_time(struct timeval *tv) {
+    struct timeval t = {tv->tv_sec - CLOCK_EPOCH, tv->tv_usec};
+    settimeofday(&t, NULL);
+    sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
+    s_clk.at = (int64_t)tv->tv_sec;
+    s_clk.mark = CLOCK_MARK;
+}
+
+static void ntp_start(void) {
+    if (s_ntp) {
+        return;
+    }
+    esp_sntp_config_t c = ESP_NETIF_SNTP_DEFAULT_CONFIG(
+        s_server != NULL && s_server[0] ? s_server : MOY_CLOCK_SERVER);
+    c.wait_for_sync = false;
+    if (esp_netif_sntp_init(&c) == ESP_OK) {
+        s_ntp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        s_ntp = 1;
+    }
+}
+
+static void ntp_stop(void) {
+    if (s_ntp) {
+        s_ntp = 0;
+        esp_netif_sntp_deinit();
+    }
+}
+
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         s_st.on = 1;
@@ -84,6 +183,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         portEXIT_CRITICAL(&s_latch);
         s_backoff = 0;
         s_keep = 1;
+        ntp_start();
     }
 }
 
@@ -137,6 +237,7 @@ void moy_wifi_off(void) {
     if (s_retry != NULL) {
         esp_timer_stop(s_retry);
     }
+    ntp_stop();
     esp_wifi_disconnect();
     esp_wifi_stop();
     portENTER_CRITICAL(&s_latch);

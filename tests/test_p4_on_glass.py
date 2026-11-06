@@ -456,6 +456,10 @@ def test_pkg_installs_a_cart_from_the_carts_repo(board):
     on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
 
 
+def test_the_clock_syncs_when_the_network_comes_up(board):
+    on_glass.the_clock_syncs_when_the_network_comes_up(board)
+
+
 def test_the_event_rings_keep_their_records(board):
     on_glass.the_event_rings_keep_their_records(board)
 

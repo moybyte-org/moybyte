@@ -159,6 +159,8 @@ class SpineVerbs:
         # registry entry, not a line here.
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
+        # The bar's clock reads the stored time zone (UTC with none).
+        self.set_time_zone(self.system.get("tz"), persist=False)
         # A key a retired setting left behind (#217 took FRAMESKIP) would ride
         # every write forever; drop it once.
         self.system.delete("frameskip")

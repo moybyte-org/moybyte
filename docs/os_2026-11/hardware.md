@@ -53,13 +53,32 @@ security model").
    (`esp_crt_bundle`, in each `sdkconfig.board`), the S3s' included: every
    https request but the updater's (`MOY_HTTPC_SIGNED`, `moy_ota.h`) checks
    the chain to a root of it, the host's name and the dates, `http`, media
-   streams, Get Carts and `pkg` alike. A board's clock is its uptime unless
-   something set it, so the dates are read against a clock never earlier
-   than the image's build day: a certificate that expired before the build
-   is refused everywhere, and a not-yet-valid one is let pass while the
-   clock is behind that day. A build without the bundle (the host, the Zero)
-   refuses those requests with `EPROTONOSUPPORT`, and a certificate that
-   does not verify fails with `EKEYREJECTED`. The bundle's flash cost and
+   streams, Get Carts and `pkg` alike. The dates are read against real time
+   once the clock is synced (below); until then a board's clock counts from
+   power-on, so it is read raised to the image's build day: a certificate
+   that expired before the build is refused everywhere, and a not-yet-valid
+   one is let pass while the clock is behind that day. A handshake in the
+   first 15 s of an unsynced client's asking waits up to 3 s for its answer
+   first (`moy_net_port.c`). **Network time (owner, 2026-11-06):**
+   whenever the station holds an address, for whichever lease holder raised
+   it, the WiFi driver runs ESP-IDF's SNTP client (`esp_netif_sntp`,
+   `native/moy_net/moy_wifi.c`) against `pool.ntp.org`, or the
+   `ntp_server` key of `system/settings`, and stops it with the radio; it
+   never raises the radio itself. The clock's state is `moy_clock_state`
+   (`moy_net.h`: unsynced, synced, or asking), `moy_net.clock_state()` in
+   Python and `moybyte.clock_synced()` for an app. The last answer's mark
+   lives in RTC memory beside the time the chip's RTC keeps, so the clock
+   stays synced across a soft reset and a software reset, and reads
+   unsynced after a power-off until the next answer. The time zone is a
+   POSIX TZ string in `system/settings`' `tz` (UTC when absent), picked in
+   Settings -> Time zone from a list of places (`runtime/system/wallclock.py`'s
+   `ZONES`, each with its summer rules) and converted in Python on every
+   tier; the bar's clock shows local time once synced and `--:--` before,
+   where a board's clock would read as a time of day. The host, the unix
+   port and the browser read their machine's clock, synced. A build
+   without the bundle (the host, the Zero) refuses those requests with
+   `EPROTONOSUPPORT`, and a certificate that does not verify fails with
+   `EKEYREJECTED`. The bundle's flash cost and
    the handshake's memory are #246's.
 2. **Bus leases**: a named UART, I²C, SPI or GPIO set from the board's
    `lease` rows, with PWM, ADC and edge timestamps on GPIO. Exclusive, for

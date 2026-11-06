@@ -67,9 +67,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from editors_base import TextEntry
     from audio_session import console_volume
+    import wallclock as _wc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import TextEntry
     from runtime.audio_session import console_volume
+    from runtime import wallclock as _wc
 
 # -- settings-screen geometry: the row height console's Layout scales ---------
 _SET_ROW_H = 26
@@ -246,7 +248,7 @@ _PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "Sy
 # Power's.
 _GROUPS = (
     ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
-                 "volume", "brightness", "name")),
+                 "volume", "brightness", "tz", "name")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "ota_channel", "update_online", "update", "update_c6")),
@@ -337,6 +339,9 @@ class SettingsLayer:
         # top; NAME is stored in system/settings and applied by nothing yet.
         ("volume", "VOLUME", "level"),
         ("brightness", "BRIGHTNESS", "level"),
+        # TIME ZONE: the bar's clock's zone, picked from wallclock.ZONES on
+        # its own page (a list: the zones are too many to step through).
+        ("tz", "TIME ZONE", "tz"),
         ("name", "NAME", "name"),
         # The ON/OFF gate rows are NOT here: they are declared once in
         # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
@@ -398,6 +403,10 @@ class SettingsLayer:
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
+        # The Time zone picker: a page of wallclock.ZONES over the rows.
+        self.tz_view = False
+        self._tz_words = None         # its rows' words, made at its first open
+        self._tz_fresh = False        # opened this frame: focus goes to the list
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
         self.page = None              # "achievements", "licences", "log" or None
@@ -437,6 +446,7 @@ class SettingsLayer:
             self.close_bluetooth()
         self.confirm_key = None
         self.crash_view = False
+        self.tz_view = False
         self.page = None
         self._name_bar("Settings")
         self._typing = False
@@ -1008,6 +1018,47 @@ class SettingsLayer:
             self.close_crash()
         _ui.group()
 
+    # -- the Time zone picker ---------------------------------------------------
+
+    def open_tz(self):
+        self.tz_view = True
+        self._tz_fresh = True
+        self.ws._dirty = True
+
+    def close_tz(self):
+        self.tz_view = False
+        self._want = say("TIME ZONE")
+        self.ws._dirty = True
+
+    def _tz_page(self):
+        """The zones, west to east, each beside its standard offset: the one
+        in force wears the current mark, and choosing one sets it and goes
+        back."""
+        rows = self._tz_words
+        if rows is None:
+            rows = self._tz_words = [
+                (place, _wc.utc_label(_wc.parse(tz)[1]), {"id": "tz%d" % k, "current": False})
+                for k, (place, tz) in enumerate(_wc.ZONES)]
+        now = _wc.zone()
+        _ui.page("")
+        _ui.hints(("confirm", "Use", "back", "Back"))
+        _ui.group("Time zone")
+        if self._tz_fresh:
+            self._tz_fresh = False
+            for k in range(len(rows)):
+                if _wc.ZONES[k][1] == now:
+                    _ui.focus(rows[k][2]["id"])     # the page opens on it
+        got = None
+        for k in range(len(rows)):
+            place, off, o = rows[k]
+            o["current"] = _wc.ZONES[k][1] == now
+            if _ui.link(place, off, o):
+                got = k
+        _ui.group()
+        if got is not None:
+            self.ws.set_time_zone(_wc.ZONES[got][1])
+            self.close_tz()
+
     # -- the lent left zone (#46 zoned bar) -------------------------------------
 
     def draw_zone(self, cv, rect):
@@ -1215,6 +1266,9 @@ class SettingsLayer:
         if kind == "crash":                     # LAST CRASH: any step/tap opens the record
             self.open_crash()
             return
+        if kind == "tz":                        # TIME ZONE: any step/tap opens the picker
+            self.open_tz()
+            return
         if kind == "idle":                      # the idle ladder's rungs: OFF, 30S .. 30M
             ws.idle_ladder.step(key, d)
             return
@@ -1372,6 +1426,8 @@ class SettingsLayer:
                 if enabled else "Off"
         if kind == "action":
             return self._theme_title() if key == "appearance" else ""
+        if kind == "tz":
+            return _wc.place(_wc.zone())
         if kind == "crash":
             rec = last_crash()
             v = str(rec.get("kind") or "?")[:8] if rec else "None"
@@ -1457,6 +1513,10 @@ class SettingsLayer:
             self._kinds[s] = "link"
             if _ui.link(s, v):
                 self.open_crash()
+        elif kind == "tz":
+            self._kinds[s] = "link"
+            if _ui.link(s, v):
+                self.open_tz()
         elif kind == "webhost":
             self._kinds[s] = "link"
             if _ui.link(s, v):
@@ -1606,6 +1666,8 @@ class SettingsLayer:
             return "confirm"
         if self.crash_view:
             return "crash"
+        if self.tz_view:
+            return "tz"
         return self.page
 
     def _input_host(self):
@@ -1648,6 +1710,8 @@ class SettingsLayer:
             self.close_confirm()
         elif view == "crash":
             self.close_crash()
+        elif view == "tz":
+            self.close_tz()
         elif view == "achievements":
             if not self.achievements.back():
                 self.close_page()
@@ -1757,6 +1821,8 @@ class SettingsLayer:
                 self.syslog.draw(self._content())
             elif view == "permissions":
                 self.permits.draw(self._content())
+            elif view == "tz":
+                self._tz_page()
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()

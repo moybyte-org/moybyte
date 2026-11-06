@@ -259,6 +259,12 @@ def capture(cfg, carts_dir):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
     sl.close_bluetooth()
 
+    ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    sl.open_tz()
+    out["tz_picker"] = page(sl._sub)
+    sl.close_tz()
+    ws.set_time_zone(None, persist=False)
+
     from runtime.settings_layer import KEEP_OFF, TOGGLE_CONFIRMS
     for key in sorted(TOGGLE_CONFIRMS):
         sl.open_confirm(key)
@@ -486,7 +492,9 @@ def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     ws.use_inputs([("local", "touch")])
-    ws.settings_layer.show_row("name")
+    # the next group's first row in view puts the note and the Name row
+    # above it on the screen too
+    ws.settings_layer.show_row("steady")
     infos = []
     ui = settings_layer._ui
     real = ui.info

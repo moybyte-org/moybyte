@@ -82,6 +82,32 @@ void moy_net_sleep_ms(uint32_t ms);
 void *moy_net_alloc(size_t n);
 void moy_net_free(void *p);
 
+// The wall clock (docs/os_2026-11/hardware.md section 1). A board's clock
+// counts from power-on until NTP sets it: the WiFi driver asks whenever the
+// station holds an address, for whichever holder raised it, and keeps the
+// answer's mark in RTC memory, so a soft reset (the VM's, or the chip's own
+// software reset, across which its RTC keeps the time) stays synced and a
+// power-off reads unsynced until the next answer. The host, the unix port
+// and the browser read their machine's clock, synced.
+#define MOY_CLOCK_UNSYNCED 0
+#define MOY_CLOCK_SYNCED 1
+#define MOY_CLOCK_ASKING 2          // unsynced, a first answer still awaited
+#define MOY_CLOCK_SERVER "pool.ntp.org"
+#define MOY_CLOCK_SERVER_MAX 63
+// The clock's state, and the Unix time of the last answer in `*at` (NULL
+// when not wanted; 0 while unsynced).
+int moy_clock_state(int64_t *at);
+// The server the next sync asks: NULL or "" for MOY_CLOCK_SERVER. 0, or -1
+// for a name longer than MOY_CLOCK_SERVER_MAX.
+int moy_clock_server(const char *name);
+// What a certificate's dates are read against: the clock once it is synced;
+// before that the clock raised to `floor` (the image's build day), and a
+// not-yet-valid date counts only while the clock is at or past `floor`.
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int synced);
+int moy_clock_future_counts(int64_t now, int64_t floor, int synced);
+// The Unix time of 00:00 UTC on the day this file was compiled.
+int64_t moy_clock_build_day(void);
+
 // The reason phrase a response's status line carries ("OK" for a status the
 // table does not name).
 const char *moy_http_reason(int status);

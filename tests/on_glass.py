@@ -1270,6 +1270,35 @@ def pkg_installs_a_cart_from_the_carts_repo(board, ident="teapot"):
     assert _sh(board, "pkg remove %s" % ident, timeout=60) == (0, [ident + " removed"])
 
 
+def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
+    """docs/os_2026-11/hardware.md section 1's network time: `pkg update`
+    raises the WiFi for its fetch, NTP answers while it is up (or answered
+    earlier this power-on), and the bar shows local time in a non-UTC zone;
+    the radio goes down after. The zone the board had is put back. A board
+    with no network skips."""
+    import calendar
+    was = board.pyval("ws.system.get('tz')", strict=True)
+    try:
+        board.pyval("ws.set_time_zone(%r) or 1" % tz, strict=True)
+        st, out = _sh(board, "pkg update", timeout=120)
+        if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
+            pytest.skip("no network: %r" % out)
+        assert st == 0, out
+        assert board.pyval("__import__('moy_net').clock_state()", strict=True) == 1
+        assert board.pyval("__import__('moybyte').clock_synced()", strict=True) is True
+        lt = board.pyval("tuple(__import__('wallclock').localtime()[:6])", strict=True)
+        bar = board.pyval("ws.bar_layer._clock_text()", strict=True)
+        board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
+        assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
+        assert bar == "%02d:%02d" % tuple(lt[3:5]), (bar, lt)
+        assert board.pyval("sorted(ws.leases.holders())", strict=True) == [], \
+            "the radio stayed held"
+    finally:
+        board.pyval("ws.set_time_zone(%r) or 1" % (was,), strict=True)
+        if was is None:
+            board.pyval("ws.system.delete('tz') or 1", strict=True)
+
+
 def the_shell_answers_with_the_vm_down(board, title="Doom"):
     """docs/os_2026-11.md P3.1's check: with the VM stopped for a compiled
     run, `ps`, `log` and `kill` answer over the serial face from the kernel

@@ -662,8 +662,9 @@ BOARD = "board"         # never sent to a browser, never taken from one
 # Every key a console writes, by what crossing does to it; a key not named here
 # (a retired setting, one added without an entry) is LOCAL. A PORTABLE key
 # carries the shape its value must have to be taken (None: any JSON value).
-# BOARD keys guard the board: its pairing pin, its update channel, and whether
-# it loads unsigned code -- a page must never be able to turn that on.
+# BOARD keys guard the board: its pairing pin, its update channel, the NTP
+# server its certificate dates rest on, and whether it loads unsigned code --
+# a page must never be able to turn that on.
 SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),
@@ -690,9 +691,11 @@ SYSTEM_KEYS = {
     "wallpaper_guard": (LOCAL, None),
     "service_restart": (LOCAL, None),
     "win_full": (LOCAL, None),
+    "tz": (LOCAL, None),
     "web_pin": (BOARD, None),
     "ota_channel": (BOARD, None),
     "unknown_sources": (BOARD, None),
+    "ntp_server": (BOARD, None),
 }
 
 # The app prefs namespaces (native/moy_app's `<ns>_<key>` rows) a page may

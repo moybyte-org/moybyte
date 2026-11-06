@@ -1150,7 +1150,7 @@ class _HeldClock:
     def __init__(self):
         self.lt = time.localtime()
 
-    def localtime(self):
+    def localtime(self, t=None):
         return self.lt
 
 
@@ -1169,7 +1169,7 @@ class _Loop:
         def _frame(dt):
             frame(FRAME_S)
         ws.frame = _frame
-        bar_layer.time = _HeldClock()
+        bar_layer._wc = _HeldClock()
         ws.bar_layer._clock_at = -1      # read the held clock from the next frame
 
 

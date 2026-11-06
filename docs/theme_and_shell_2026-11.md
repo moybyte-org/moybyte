@@ -1574,7 +1574,7 @@ thing in both modes; what differs is only the container a component opens in
 | `close` | the X, for a layout that wants it; the shipped themes place none | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status), headed by the back chevron where the bar has a way back and no `close` | the surface's zone generation | the chevron: the way back; the rest the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
-| `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
+| `clock` | `HH:MM` in the console's time zone, `--:--` until the clock is synced (`docs/os_2026-11/hardware.md` §1) | the minute | the calendar component | 40×8 / 16×16 (two lines) |
 | `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8.6): the Settings panel as a popover hung from the widget, in both modes | 16×16 / 16×16 |
 | `battery` | the battery glyph | the level bucket | the power component: Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings (owner, 2026-10-13) | 16×16 / 16×16 |
 | `chips` | the taskbar's window chips (desktop mode) | `_chip_sig` | focus, minimise, restore as today | one chip 24×16, flexes / icon chips 16×16 each |

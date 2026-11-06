@@ -526,6 +526,35 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_ps_obj, 0, 1, mod_wifi_ps);
 
 #endif
 
+// -- the wall clock (moy_net.h) ---------------------------------------------------
+
+// clock_state() -> MOY_CLOCK_UNSYNCED, _SYNCED or _ASKING; allocates nothing.
+// The browser's build (no platform half) reads the page's clock: synced.
+static mp_obj_t mod_clock_state(void) {
+    #if MOY_NET_SERVE
+    return MP_OBJ_NEW_SMALL_INT(moy_clock_state(NULL));
+    #else
+    return MP_OBJ_NEW_SMALL_INT(MOY_CLOCK_SYNCED);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_clock_state_obj, mod_clock_state);
+
+// clock_server(name or None): the server the next sync asks; ValueError past
+// MOY_CLOCK_SERVER_MAX bytes.
+static mp_obj_t mod_clock_server(mp_obj_t name) {
+    const char *n = name == mp_const_none ? NULL : mp_obj_str_get_str(name);
+    #if MOY_NET_SERVE
+    int bad = moy_clock_server(n) != 0;
+    #else
+    int bad = n != NULL && strlen(n) > MOY_CLOCK_SERVER_MAX;
+    #endif
+    if (bad) {
+        mp_raise_ValueError(MP_ERROR_TEXT("server name"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_clock_server_obj, mod_clock_server);
+
 // -- the sync apply and the webhost -------------------------------------------------
 
 #include "py/mphal.h"
@@ -1185,6 +1214,8 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&mod_http_close_obj)},
     #endif
+    {MP_ROM_QSTR(MP_QSTR_clock_state), MP_ROM_PTR(&mod_clock_state_obj)},
+    {MP_ROM_QSTR(MP_QSTR_clock_server), MP_ROM_PTR(&mod_clock_server_obj)},
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},

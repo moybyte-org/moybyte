@@ -149,3 +149,7 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=
 # an image that pays for every byte twice, once per OTA slot.
 CONFIG_COMPILER_OPTIMIZATION_PERF=
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# NTP (native/moy_net/moy_wifi.c) asks the moment the station has an address:
+# a handshake waits for that answer, so lwIP's random first delay is off.
+CONFIG_LWIP_SNTP_STARTUP_DELAY=n
