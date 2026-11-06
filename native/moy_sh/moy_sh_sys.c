@@ -278,9 +278,11 @@ const char *moy_sh_store_path(const char *abs, char *out, size_t cap) {
         return NULL;
     }
     const char *etc = moy_sh_cur->host.etc;
-    if (etc != NULL && under(abs, "/etc")) {
+    if (etc != NULL && (under(abs, "/etc") || under(abs, "/.ssh"))) {
         const char *rest = abs + 4;
-        if (under(rest, "/dropbear")) {
+        if (abs[1] == '.') {
+            rest = abs + 5;
+        } else if (under(rest, "/dropbear")) {
             rest += 9;
         }
         size_t n = (size_t)snprintf(out, cap, "%s%s%s", root, etc, rest);

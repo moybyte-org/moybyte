@@ -223,6 +223,35 @@ def test_ssh_copy_id_installs_a_key_that_signs_in(harness):
     assert r.stdout == b"in\n"
 
 
+# What a current ssh-copy-id (OpenSSH 9.x and later) runs on the server: no
+# Dropbear case, the home's .ssh/authorized_keys, found through uname, dirname
+# and tail's byte count. Kept as text so the test needs no particular client.
+CURRENT_INSTALL = (
+    "exec sh -c 'cd; umask 077; AUTH_KEY_FILE=\".ssh/authorized_keys\"; "
+    "[ -f /etc/openwrt_release ] && [ \"$LOGNAME\" = \"root\" ] && "
+    "AUTH_KEY_FILE=/etc/dropbear/authorized_keys; "
+    "[ \"`uname -s`\" = \"Haiku\" ] && AUTH_KEY_FILE=config/settings/ssh/authorized_keys; "
+    "AUTH_KEY_DIR=`dirname \"${AUTH_KEY_FILE}\"`; "
+    "mkdir -p \"${AUTH_KEY_DIR}\" && "
+    "{ [ -z \"`tail -1c \"${AUTH_KEY_FILE}\" 2>/dev/null`\" ] || "
+    "echo >> \"${AUTH_KEY_FILE}\" || exit 1; } && "
+    "cat >> \"${AUTH_KEY_FILE}\" || exit 1; "
+    "if type restorecon >/dev/null 2>&1; then restorecon -F \"${AUTH_KEY_DIR}\" \"${AUTH_KEY_FILE}\"; fi'"
+)
+
+
+def test_a_current_ssh_copy_id_installs_its_key_where_the_server_reads(harness):
+    keys = harness["system"] / "authorized_keys"
+    keys.write_text("ssh-ed25519 AAAAold old@laptop")     # no trailing newline
+    pub = (harness["key"].parent / "id_ed25519.pub").read_text().strip()
+    r = ssh(harness, PASSWORD, "moy@127.0.0.1", CURRENT_INSTALL, stdin=(pub + "\n").encode())
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert keys.read_text() == "ssh-ed25519 AAAAold old@laptop\n" + pub + "\n"
+    r = ssh(harness, "", "moy@127.0.0.1", "echo in", key=True)
+    assert r.returncode == 0, r.stderr
+    keys.unlink()
+
+
 def test_password_auth_no_refuses_the_password_and_keeps_the_key(harness):
     keys = harness["system"] / "authorized_keys"
     keys.write_text((harness["key"].parent / "id_ed25519.pub").read_text())

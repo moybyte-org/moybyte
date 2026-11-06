@@ -84,8 +84,9 @@ typedef struct {
     // the files tree: absolute shell paths resolve under `root` ("" on a board)
     const char *root;
     // the folder (a path of the tree) /etc names: the console's system/, its
-    // documents as /etc holds a Unix system's; /etc/dropbear names it too,
-    // where ssh-copy-id puts a key for a Dropbear server (may be NULL: none)
+    // documents as /etc holds a Unix system's; /etc/dropbear and the home's
+    // /.ssh name it too, where ssh-copy-id puts a key (an older one for a
+    // Dropbear server, a current one for any) (may be NULL: none)
     const char *etc;
     // virtual files: /dev/<name>, /proc/... and the root's own names. read
     // answers 0 with the bytes (from `alloc`), an errno otherwise (ENOENT: not
