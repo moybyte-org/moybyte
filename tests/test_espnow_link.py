@@ -1055,10 +1055,12 @@ def _cart_world(ws):
     return "\n".join(out)
 
 
-def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=17):
+def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=17,
+                  ready=None):
     """Two real consoles in one process over a lossy air, each kid mashing
     buttons on their own seed, the cart's world recorded per lockstep frame.
-    Each console keeps its own random stream (two boards share nothing)."""
+    Each console keeps its own random stream (two boards share nothing).
+    `ready(wss)` runs once both are built, before either opens the cart."""
     import random
     from ws_helpers import build_ws, open_cart
     import runtime.player as player_mod
@@ -1076,14 +1078,17 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=
     random.seed(1058)
     for i, mac in enumerate((b"\x01" * 6, b"\x02" * 6)):
         ws = build_ws(tmp_path / ("c%d" % i))
+        radio = _FakeRadio(air, mac)
+        radio.wlan = _FakeWlan(mac)         # the air hears by its channel
         ws.link = moy_espnow.EspNowLink(
             board="b%d" % i, name="n%d" % i, ticks_ms=clock,
-            radio=_FakeRadio(air, mac), wlan=_FakeWlan(mac),
-            launch=moy_espnow.launch_cart)
+            radio=radio, wlan=radio.wlan, launch=moy_espnow.launch_cart)
         ws.link.check_worlds(True)
         wss.append(ws)
         streams.append(random.Random(100 + i).getstate())
     random.setstate(outer)
+    if ready is not None:
+        ready(wss)
 
     def on(i, fn):
         random.setstate(streams[i])
@@ -1140,6 +1145,39 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
         ws.input.last_key = ord("x")
         ws.player._tick_keys(ws)
         assert ws.ns["key"]() == 0, "a key does not cross the air, so a match has none"
+
+
+def test_a_match_plays_while_one_console_serves_ssh(tmp_path, monkeypatch):
+    """SSH during a match (2026-11-07), as far as a host can take it: one
+    console serves SSH, so its radio is held for "ssh" and its station is
+    associated to its AP on channel 6, while the other's station is free at
+    home. The free one follows the pinned one, the match forms there and
+    plays in sync over a lossy air with the station associated throughout,
+    and when the cart ends the link lets go of the radio while SSH keeps it.
+    The airtime the session's own traffic takes, and the frame time the
+    server's hops take at the frame's tail, are glass's to measure."""
+    def serving(wss):
+        ws = wss[0]
+        ws.wifi_hold("ssh")
+        ws.link.wlan.ch, ws.link.wlan.assoc = 6, True
+
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 900,
+                                ready=serving)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert len(both) > 200, "the premise: the match formed on the AP's channel"
+    assert [f for f in both if worlds[0][f] != worlds[1][f]] == []
+    ssh, free = wss
+    assert ssh.link.wlan.ch == 6 and ssh.link.wlan.assoc, "the station never moved"
+    assert free.link.wlan.ch == 6, "the free console followed it"
+    for ws in wss:
+        np = ws.player._netplay
+        assert np.desync < 0 and np.checks >= 4, (np.desync, np.checks)
+        assert np.frame * 1000 / (900 * 17) > 20, "the match ticked at its rate"
+    ssh.netplay = None
+    ssh.player.release_world()
+    assert ssh.leases.holders() == ["ssh"] and ssh.wifi.radio is True, \
+        "the link let go and SSH still holds the radio"
+    assert ssh.link.wlan.assoc, "and the session's station is still on its AP"
 
 
 def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkeypatch):
