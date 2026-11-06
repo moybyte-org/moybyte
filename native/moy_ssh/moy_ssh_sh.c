@@ -35,6 +35,7 @@ typedef struct {
     moy_sh_app_t *app;                  // the text app in front, or NULL
     uint32_t *rows;                     // a full-screen app's rows as last sent (hashes)
     int nrows;
+    int cursor[3];                      // its cursor as last sent: row, column, shown
     int polls;
 } sh_t;
 
@@ -260,7 +261,8 @@ static uint32_t hash(const char *p, size_t n) {
 }
 
 // A full-screen app's grid to the terminal: the rows that changed since the
-// last show (every row when `whole`), then its cursor.
+// last show (every row when `whole`), then its cursor where a row was sent or
+// the cursor changed. A still app sends nothing.
 static void sh_show(void *sh, int whole) {
     sh_t *h = sh;
     moy_term_t *t = h->app != NULL ? moy_sh_app_term(h->app) : NULL;
@@ -279,6 +281,7 @@ static void sh_show(void *sh, int whole) {
     if (row == NULL) {
         return;
     }
+    int sent = whole;
     if (whole) {
         static const char clear[] = "\x1b[?1049h\x1b[0m\x1b[H\x1b[2J";
         moy_ssh_face_raw(h->f, clear, sizeof clear - 1);
@@ -291,11 +294,17 @@ static void sh_show(void *sh, int whole) {
             continue;
         }
         h->rows[i] = x;
+        sent = 1;
         memcpy(row + k + n, "\x1b[0m\x1b[K", 7);
         moy_ssh_face_raw(h->f, row, (size_t)k + n + 7);
     }
     int c[3];
     moy_term_cursor(t, c);
+    if (!sent && memcmp(c, h->cursor, sizeof c) == 0) {
+        moy_ssh_free(row);
+        return;
+    }
+    memcpy(h->cursor, c, sizeof c);
     // the cursor's view line, then its column
     int k = snprintf(row, 32, "\x1b[%d;%dH\x1b[?25%c", c[0] + 1, c[1] + 1, c[2] ? 'h' : 'l');
     moy_ssh_face_raw(h->f, row, (size_t)k);

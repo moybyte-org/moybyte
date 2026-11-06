@@ -381,6 +381,25 @@ def test_a_command_s_output_leaves_the_face_in_few_segments_run_after_run(harnes
     assert used <= 8, "%d sends for two neofetches (about 2 KB each) and their prompts" % used
 
 
+def _sends_for(h, chunks):
+    n = int(stats(h)["ended"])
+    before = int(stats(h).get("face_sends", 0))
+    out = terminal(h, chunks)
+    return out, int(ended(h, n + 1)["face_sends"]) - before
+
+
+def test_a_still_full_screen_app_sends_nothing_while_it_waits(harness):
+    """The face shows a full-screen app each 250 ms tick: its changed rows,
+    then its cursor only where the cursor moved."""
+    (harness["system"] / "still").write_text("hello\n")
+    short, n_short = _sends_for(harness, ((b"edit /etc/still\r", 1.0), (b"\x18", 0.5),
+                                          (b"exit\r", 0.3)))
+    long_, n_long = _sends_for(harness, ((b"edit /etc/still\r", 3.0), (b"\x18", 0.5),
+                                         (b"exit\r", 0.3)))
+    assert b"hello" in short and b"hello" in long_
+    assert n_long - n_short <= 1, "%d sends over two idle seconds" % (n_long - n_short)
+
+
 def test_top_and_edit_run_on_the_alternate_screen(harness):
     (harness["system"] / "memo").write_text("hello\n")
     out = terminal(harness, ((b"top\r", 1.5), (b"q", 0.8), (b"edit /etc/memo\r", 1.0),
