@@ -12,7 +12,7 @@ is `runtime/system/ssh_service.py`.
 |---|---|
 | `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the hop to the console's task, the counted PSRAM allocator, the POSIX names Dropbear asks for |
 | `moy_ssh_run.c` | the run: the server's task and the face's, made at the first start and parked between a stop and the next, the console's start and stop (`moy_ssh.h`'s THE RUN) |
-| `moy_ssh_face.h`, `moy_ssh_face.c` | the shell's face over the channel: the socket pair, its own task, the terminal's line discipline, `exec` with the channel as its stdin, a text app's keys, the exit status Dropbear reaps |
+| `moy_ssh_face.h`, `moy_ssh_face.c` | the shell's face over the channel: the socket pair, its own task, the terminal's line discipline (its caret keys and history), `exec` with the channel as its stdin, a text app's keys, the exit status Dropbear reaps |
 | `moy_ssh_sh.c` | the face's shell: a `moy_sh` session over the board's host table (`native/moy_sh/moy_sh_board.h`), the entries that cross the door hopped, `/etc` the server's system folder, a full-screen text app drawn as VT100 |
 | `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`, over the run |
 | `port/` | Dropbear's options (`localoptions.h`), its `config.h`, the names the port renames (`moy_ssh_port.h`, `moy_ssh_names.h`), and in `port/esp/` the headers ESP-IDF lacks |

@@ -296,7 +296,8 @@ static void sh_show(void *sh, int whole) {
     }
     int c[3];
     moy_term_cursor(t, c);
-    int k = snprintf(row, 32, "\x1b[%d;%dH\x1b[?25%c", c[1] + 1, c[0] + 1, c[2] ? 'h' : 'l');
+    // the cursor's view line, then its column
+    int k = snprintf(row, 32, "\x1b[%d;%dH\x1b[?25%c", c[0] + 1, c[1] + 1, c[2] ? 'h' : 'l');
     moy_ssh_face_raw(h->f, row, (size_t)k);
     moy_ssh_free(row);
 }

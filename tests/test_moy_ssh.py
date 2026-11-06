@@ -433,3 +433,31 @@ def test_a_stop_from_a_session_parks_only_once_that_session_has_ended(built, tmp
         assert refused(h)
     finally:
         end(h)
+
+
+ARROWS = {"up": (b"\x1b[A", b"\x1bOA"), "right": (b"\x1b[C", b"\x1bOC")}
+
+
+def test_the_arrows_move_the_editor_s_caret_in_both_spellings_and_split(harness):
+    """Right in `edit` moves the caret one character along the line, as
+    `ESC [ C`, as the application-cursor `ESC O C`, and split across writes;
+    the terminal's cursor is put at the caret's row, then its column (the
+    title on row 1, the text from row 2)."""
+    (harness["system"] / "memo").write_text("hello\nworld\n")
+    csi, ss3 = ARROWS["right"]
+    out = terminal(harness, ((b"edit /etc/memo\r", 1.0), (csi, 0.3), (b"X", 0.3), (ss3, 0.3),
+                       (b"Y", 0.3), (b"\x1b", 0.1), (b"[", 0.1), (b"C", 0.3), (b"Z", 0.3),
+                       (b"\x13", 0.8), (b"\x18", 0.5), (b"exit\r", 0.5)))
+    assert (harness["system"] / "memo").read_text() == "hXeYlZlo\nworld\n"
+    opened = out.index(b"\x1b[?1049h")
+    assert out.index(b"\x1b[2;1H\x1b[?25h", opened) < out.index(b"\x1b[2;3H\x1b[?25h", opened), out
+
+
+def test_up_at_the_prompt_walks_the_lines_run_before(harness):
+    csi, ss3 = ARROWS["up"]
+    out = terminal(harness, ((b"echo one\r", 0.4), (b"echo two\r", 0.4), (csi, 0.3),
+                             (b"\r", 0.4), (ss3 + ss3, 0.3), (b"\r", 0.4), (b"\x1b", 0.1),
+                             (b"[A", 0.3), (b"\x1b[D\x1b[D", 0.3), (b"_\r", 0.4),
+                             (b"exit\r", 0.3)))
+    lines = [ln for ln in out.replace(b"\r", b"").split(b"\n") if ln in (b"one", b"two", b"o_ne")]
+    assert lines == [b"one", b"two", b"two", b"one", b"o_ne"], out

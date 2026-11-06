@@ -11,8 +11,11 @@
 // writes while there is held and sent from the face's task after the hop.
 //
 // With a terminal (pty-req) the face is the terminal's line discipline: it
-// echoes, erases, turns a newline into CR LF and reads Ctrl-C and Ctrl-D, and
-// a text app in front (edit, top, python) gets the keys or the lines. Without
+// echoes, erases, turns a newline into CR LF and reads Ctrl-C and Ctrl-D, its
+// Left, Right, Home, End and Delete edit the line and Up and Down walk the
+// lines run before (an arrow as ESC [ or ESC O, however the reads split it),
+// and a text app in front (edit, top, python) gets the keys or the lines, a
+// full-screen app an escape's bytes together (a lone ESC after PEND_MS). Without
 // one (`ssh host CMD`) it runs CMD, its standard input the channel's, and
 // ends with its status.
 //

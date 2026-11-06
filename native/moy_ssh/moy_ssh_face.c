@@ -15,6 +15,10 @@
 
 #define LINE_MAX_BYTES 1024
 #define AHEAD_BYTES 256
+#define HIST_LINES 16                   // the lines Up walks back through
+#define HIST_LINE 256                   // a longer line is not kept
+#define PEND_MAX 16                     // an escape a full-screen app waits for the rest of
+#define PEND_MS 500                     // how long it waits (readline's keyseq-timeout)
 #define HELD_MAX (256u * 1024u)         // what a hop may write before the rest is dropped
 #define SH_MORE 1
 #define SH_EXIT 2
@@ -31,18 +35,23 @@ struct moy_ssh_face {
     char *cmd;                  // `exec`'s command; NULL: the interactive shell
     void *sh;
     int started;                // 1 the face task took it, 2 the reaper did
-    int more, esc, last_cr, eof, front;
+    int more, esc, esc_num, last_cr, eof, front;
     volatile int interrupt;     // a `signal` request (INT)
     volatile int resized;       // a window-change request
     volatile int exited;        // the status is final: Dropbear may reap it
     volatile int done;          // set last by the face task: the rest is the reaper's
     int reaped;
     int status;
-    size_t n, ahead_n;
+    size_t n, cur, ahead_n;             // the line's length, the caret in it
     char *held;                 // written off the face's task (a hop), sent after
     size_t held_n, held_cap;
     char line[LINE_MAX_BYTES];
     char ahead[AHEAD_BYTES];    // bytes a poll read that were not Ctrl-C
+    char hist[HIST_LINES][HIST_LINE];   // the lines run, oldest first
+    int nhist, hi;                      // how many; the one Up/Down shows (nhist: none)
+    char pend[PEND_MAX];                // a full-screen app's escape, its rest to come
+    size_t pend_n;
+    uint32_t pend_at;
 };
 
 void moy_ssh_face_set_shell(const moy_ssh_shell_t *shell) {
@@ -276,8 +285,116 @@ static void settle(moy_ssh_face_t *f) {
     }
 }
 
+// The line typed, kept for Up unless it is blank or the last one kept.
+static void remember(moy_ssh_face_t *f) {
+    f->hi = f->nhist;
+    size_t n = f->n;
+    while (n > 0 && f->line[n - 1] == ' ') {
+        n--;
+    }
+    if (n == 0 || f->n >= HIST_LINE) {
+        return;
+    }
+    if (f->nhist > 0 && strlen(f->hist[f->nhist - 1]) == f->n
+            && memcmp(f->hist[f->nhist - 1], f->line, f->n) == 0) {
+        return;
+    }
+    if (f->nhist == HIST_LINES) {
+        memmove(f->hist[0], f->hist[1], sizeof f->hist[0] * (HIST_LINES - 1));
+        f->nhist--;
+    }
+    memcpy(f->hist[f->nhist], f->line, f->n);
+    f->hist[f->nhist][f->n] = 0;
+    f->hi = ++f->nhist;
+}
+
+// The terminal's caret `n` columns left.
+static void back(moy_ssh_face_t *f, size_t n) {
+    char b[16];
+    if (n > 0) {
+        int k = snprintf(b, sizeof b, "\x1b[%uD", (unsigned)n);
+        send_all(f, b, (size_t)k);
+    }
+}
+
+// The line from the caret on drawn again, `gone` columns past its end
+// cleared, the caret put back.
+static void redraw_tail(moy_ssh_face_t *f, size_t gone) {
+    send_all(f, f->line + f->cur, f->n - f->cur);
+    if (gone) {
+        send_all(f, "\x1b[K", 3);
+    }
+    back(f, f->n - f->cur);
+}
+
+// The typed line replaced by `text` (a history line), the caret at its end.
+static void replace_line(moy_ssh_face_t *f, const char *text) {
+    back(f, f->cur);
+    size_t was = f->n, n = strlen(text);
+    memcpy(f->line, text, n);
+    f->n = f->cur = n;
+    send_all(f, f->line, n);
+    if (was > n) {
+        send_all(f, "\x1b[K", 3);
+    }
+}
+
+// An escape sequence's final byte, with its first number: the arrows walk
+// the history and move the caret, Home, End and Delete edit the line; any
+// other is dropped.
+static void edit_key(moy_ssh_face_t *f, char c, int num) {
+    if (c == '~') {
+        c = num == 1 || num == 7 ? 'H' : num == 4 || num == 8 ? 'F' : num == 3 ? 'P' : 0;
+    }
+    switch (c) {
+    case 'A':
+        if (f->hi > 0) {
+            replace_line(f, f->hist[--f->hi]);
+        }
+        break;
+    case 'B':
+        if (f->hi < f->nhist) {
+            f->hi++;
+            replace_line(f, f->hi < f->nhist ? f->hist[f->hi] : "");
+        }
+        break;
+    case 'C':
+        if (f->cur < f->n) {
+            send_all(f, f->line + f->cur++, 1);
+        }
+        break;
+    case 'D':
+        if (f->cur > 0) {
+            f->cur--;
+            back(f, 1);
+        }
+        break;
+    case 'H':
+        back(f, f->cur);
+        f->cur = 0;
+        break;
+    case 'F':
+        send_all(f, f->line + f->cur, f->n - f->cur);
+        f->cur = f->n;
+        break;
+    case 'P':
+        if (f->cur < f->n) {
+            memmove(f->line + f->cur, f->line + f->cur + 1, f->n - f->cur - 1);
+            f->n--;
+            redraw_tail(f, 1);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 // A complete line to the shell or to the line app in front; 1 when the shell exited.
 static int run_line(moy_ssh_face_t *f) {
+    if (f->pty) {
+        remember(f);
+    }
+    f->cur = 0;
     if (f->front == MOY_SSH_FRONT_LINE) {
         f->line[f->n] = 0;
         f->n = 0;
@@ -300,11 +417,22 @@ static int run_line(moy_ssh_face_t *f) {
 // The terminal's keys; 1 when the face ended.
 static int key(moy_ssh_face_t *f, char c) {
     if (f->esc) {
-        // an escape sequence (an arrow, a function key) is dropped whole
-        if (f->esc == 1 && (c == '[' || c == 'O')) {
-            f->esc = 2;
-        } else if (f->esc == 1 || (c >= 0x40 && c <= 0x7e)) {
+        // an escape sequence, whole however the reads split it: ESC [ or
+        // ESC O, its numbers (the first kept), its final byte
+        if (f->esc == 1) {
+            f->esc = c == '[' || c == 'O' ? 2 : 0;
+            f->esc_num = 0;
+        } else if (c >= '0' && c <= '9') {
+            if (f->esc == 2 && f->esc_num < 1000) {
+                f->esc_num = f->esc_num * 10 + (c - '0');
+            }
+        } else if (c == ';') {
+            f->esc = 3;
+        } else {
             f->esc = 0;
+            if (c >= 0x40 && c <= 0x7e) {
+                edit_key(f, c, f->esc_num);
+            }
         }
         return 0;
     }
@@ -319,7 +447,8 @@ static int key(moy_ssh_face_t *f, char c) {
         return 0;
     case 3:
         moy_ssh_face_out(f, "^C\n", 3);
-        f->n = 0;
+        f->n = f->cur = 0;
+        f->hi = f->nhist;
         f->more = 0;
         if (f->front == MOY_SSH_FRONT_SHELL) {
             shell()->cancel(f->sh);
@@ -340,9 +469,16 @@ static int key(moy_ssh_face_t *f, char c) {
         return 0;
     case 0x7f:
     case 8:
-        if (f->n > 0) {
+        if (f->cur > 0) {
+            memmove(f->line + f->cur - 1, f->line + f->cur, f->n - f->cur);
             f->n--;
-            send_all(f, "\b \b", 3);
+            f->cur--;
+            if (f->cur == f->n) {
+                send_all(f, "\b \b", 3);
+            } else {
+                back(f, 1);
+                redraw_tail(f, 1);
+            }
         }
         return 0;
     case '\r':
@@ -351,8 +487,14 @@ static int key(moy_ssh_face_t *f, char c) {
         return run_line(f);
     default:
         if ((unsigned char)c >= 0x20 && f->n < sizeof f->line - 1) {
-            f->line[f->n++] = c;
+            memmove(f->line + f->cur + 1, f->line + f->cur, f->n - f->cur);
+            f->line[f->cur] = c;
+            f->n++;
             send_all(f, &c, 1);
+            f->cur++;
+            if (f->cur < f->n) {
+                redraw_tail(f, 0);
+            }
         }
         return 0;
     }
@@ -369,14 +511,83 @@ static int plain(moy_ssh_face_t *f, char c) {
     return 0;
 }
 
-static int feed(moy_ssh_face_t *f, const char *p, size_t n) {
-    if (f->front == MOY_SSH_FRONT_FULL) {
-        if (shell()->keys(f->sh, p, n)) {
+// How many bytes at the end of `p` begin an escape sequence whose rest has
+// not come: ESC, ESC [ or ESC O, ESC [ and its numbers.
+static size_t partial_escape(const char *p, size_t n) {
+    size_t i = n;
+    while (i > 0 && n - i < PEND_MAX - 1 && p[i - 1] != 0x1b) {
+        i--;
+    }
+    if (i == 0 || p[i - 1] != 0x1b) {
+        return 0;
+    }
+    const char *e = p + i - 1;
+    size_t k = n - (i - 1);
+    if (k == 1 || (k == 2 && (e[1] == '[' || e[1] == 'O'))) {
+        return k;
+    }
+    if (e[1] != '[') {
+        return 0;
+    }
+    for (size_t j = 2; j < k; j++) {
+        if (!((e[j] >= '0' && e[j] <= '9') || e[j] == ';')) {
+            return 0;
+        }
+    }
+    return k;
+}
+
+// A full-screen app's keys: an escape split across reads waits for its rest
+// (a lone ESC goes alone when nothing follows it, face_run's wait).
+static void feed_full(moy_ssh_face_t *f, const char *p, size_t n) {
+    char b[PEND_MAX + AHEAD_BYTES];
+    while (n > 0 || f->pend_n > 0) {
+        size_t take = n < AHEAD_BYTES ? n : AHEAD_BYTES;
+        size_t k = f->pend_n;
+        memcpy(b, f->pend, k);
+        memcpy(b + k, p, take);
+        k += take;
+        p += take;
+        n -= take;
+        f->pend_n = 0;
+        size_t keep = n == 0 ? partial_escape(b, k) : 0;
+        memcpy(f->pend, b + k - keep, keep);
+        f->pend_n = keep;
+        f->pend_at = moy_ssh_ms();
+        k -= keep;
+        if (k == 0) {
+            return;
+        }
+        if (shell()->keys(f->sh, b, k)) {
+            f->pend_n = 0;
             f->front = MOY_SSH_FRONT_SHELL;
             settle(f);
-        } else {
-            shell()->show(f->sh, 0);
+            return;
         }
+        shell()->show(f->sh, 0);
+        if (n == 0) {
+            return;
+        }
+    }
+}
+
+// The escape a full-screen app waited for, sent as it is: its rest never came.
+static void flush_pending(moy_ssh_face_t *f) {
+    char b[PEND_MAX];
+    size_t k = f->pend_n;
+    memcpy(b, f->pend, k);
+    f->pend_n = 0;
+    if (shell()->keys(f->sh, b, k)) {
+        f->front = MOY_SSH_FRONT_SHELL;
+        settle(f);
+    } else {
+        shell()->show(f->sh, 0);
+    }
+}
+
+static int feed(moy_ssh_face_t *f, const char *p, size_t n) {
+    if (f->front == MOY_SSH_FRONT_FULL) {
+        feed_full(f, p, n);
         return 0;
     }
     for (size_t i = 0; i < n; i++) {
@@ -445,6 +656,10 @@ static void face_run(moy_ssh_face_t *f) {
             }
         }
         if (!readable(f, WAIT_MS)) {
+            if (f->pend_n > 0 && f->front == MOY_SSH_FRONT_FULL
+                    && moy_ssh_ms() - f->pend_at >= PEND_MS) {
+                flush_pending(f);
+            }
             continue;
         }
         char b[256];
