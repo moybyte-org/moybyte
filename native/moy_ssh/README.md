@@ -73,8 +73,6 @@ too, which is where ssh-copy-id installs a key on a Dropbear server.
 
 ## Boards
 
-The T-Deck, the Guition S3 and the Waveshare P4 take the module (each
-board.toml's `[native.shared]`); the image cost and the internal SRAM are in
-#246. The Guition P4 denies it, and its mDNS responder with it, because its
-image does not fit them (its board.toml says by how much). The Zero denies it
-with `moy_sh` until its phase (`docs/os_2026-11.md` §7, phase 4).
+Every console takes the module (each board.toml's `[native.shared]`); the
+image cost and the internal SRAM are in #246. The Zero denies it with
+`moy_sh` until its phase (`docs/os_2026-11.md` §7, phase 4).

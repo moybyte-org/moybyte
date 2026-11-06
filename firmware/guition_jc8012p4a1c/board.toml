@@ -186,7 +186,10 @@ isr_iram = 1
 # image, and the store (the card, the internal vfs its fallback) gives the room.
 # They grew to 7.75 MiB (owner, 2026-11-05) for the terminal's C shell
 # (native/moy_sh, +85 KB at -Os), which at 7.5 MiB left the image 28 KB under
-# the floor; the internal vfs went from 960 KiB to 448 KiB for it.
+# the floor; the internal vfs went from 960 KiB to 448 KiB for it. They grew
+# to 7.875 MiB (owner, 2026-11-06) for the SSH server and its mDNS responder
+# (native/moy_ssh, about 67 KB, and the IDF's mdns, about 27 KB), which at
+# 7.75 MiB left the image under the floor; the internal vfs went to 192 KiB.
 headroom_floor_kib = 1024
 
 [serial]
@@ -348,15 +351,13 @@ bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
 
-[[native.shared.deny]]
+[[native.shared.take]]
 module = "moy_ssh"
 why = """
-The SSH server (native/moy_ssh/README.md) does not fit this board's image:
-with it the app image fell 28 KB under [image]'s headroom floor, 2026-11-06
-(the server about 67 KB of flash here). Its mDNS name goes with it
-(MOY_NET_MDNS, off in this board's mpconfigboard.h): it is announced only
-while the server serves. The other three consoles take it. Room for it is
-the slots' size, which is the owner's call [image] records."""
+The SSH server (native/moy_ssh/README.md, docs/os_2026-11/system.md section
+3), which every console takes: `ssh <name>.local` while a password is set,
+the name announced by the mDNS responder (MOY_NET_MDNS in this board's
+mpconfigboard.h) while it serves. The slots grew for it ([image])."""
 
 [[native.shared.take]]
 module = "moy_sd"

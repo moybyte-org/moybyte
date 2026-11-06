@@ -99,9 +99,8 @@ NATIVE = {
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
     # browser. moy_sh, the terminal's C shell, is taken by every console; the
     # Zero denies it until its network face (its board.toml says why).
-    # moy_ssh, the SSH server, is taken by every console but the Guition P4,
-    # whose image it does not fit (native/moy_ssh/README.md); the Zero denies
-    # it with moy_sh until its phase.
+    # moy_ssh, the SSH server, is taken by every console (native/moy_ssh/
+    # README.md); the Zero denies it with moy_sh until its phase.
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -125,7 +124,7 @@ NATIVE = {
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
            "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
            "moy_sh", "moy_ssh"},
-    # The Guition P4 (2026-09-06): the Waveshare's set less moy_ssh, because the
+    # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
     # authors no native module of its own, and moy_dsi drives its JD9365
@@ -134,7 +133,7 @@ NATIVE = {
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_usb", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
-                   "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh"},
+                   "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml), and with it moy_media; moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
