@@ -152,13 +152,26 @@ symbols its keyboard has no key for (`moy_sh_face_tdeck_row`, read from the
 keyboard's matrix in `native/moy_input/moy_kbd.c`), its trackball being the
 arrows, Enter the run and Mic the stop, and down past the newest line enters
 it; a gamepad's and touch's hold Tab, Ctrl-C, the arrows and Run, and under
-touch the shell's symbols sit under it. A run holds its caller's thread (in the console the VM's) until its commands end, so **Ctrl-C
-reaches it in C**: the face's poll kicks the input drivers and reads the
-kernel input table's latches between merges for a key that types 0x03, the
-T-Deck's Mic (`start`) or a gamepad's B. A role command that waits (`http
-get`, `mic read`, `lora recv`, `ble scan`, `snd play`) asks the same poll
-between its polls through `moy_sh.interrupted()`, which on the serial face is
-the channel's 0x03, gives back what it took and exits 130. The simulator and
+touch the shell's symbols sit under it. **A shell command never holds the
+console's frame while it waits** (2026-11-06): the Terminal's and the
+serial face's line runs on a task of its session's own, in strict turn with
+the console's (`native/moy_sh/moy_sh_board.h`, THE RUNNER), and where it
+waits -- `sleep`, a role command between its steps -- it parks: the frame
+goes on, the face shows no prompt, and the loop's tail hands the run its
+turn again a frame later. A role command that waits (`http get`, `pkg`'s
+fetches and installs, `mic read`, `lora recv`, `ble scan`, `snd play`) is a
+generator the door steps a few milliseconds a crossing
+(`runtime/shell/sh_door.py`), its output reaching the face as it comes, and
+one on the network asks for the link without waiting for it. An SSH
+session's own task waits between the steps the same way. While a run
+computes it holds the console's task, so **Ctrl-C reaches it in C**: the
+face's poll kicks the input drivers and reads the kernel input table's
+latches between merges for a key that types 0x03, the T-Deck's Mic
+(`start`) or a gamepad's B; a parked run takes the Terminal's Ctrl-C and
+the board's cancel key from the face, and the serial face's from the
+channel's 0x03. A role command asks the same poll between its polls through
+`moy_sh.interrupted()`, or is stopped by its session, gives back what it
+took and exits 130. The simulator and
 the host tests run the same session through the host's ctypes binding
 (`runtime/host/moy_sh.py`); `tests/test_moy_sh.py` replays every serial and
 suite transcript through the screen face and holds its grid's lines to the

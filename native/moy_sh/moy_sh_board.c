@@ -11,9 +11,13 @@
 #define MOY_SH_ON_BOARD 1
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #else
+#include <pthread.h>
 #include <time.h>
 #endif
 
@@ -28,14 +32,23 @@
 // links).
 bool moy_play_front_live(void) __attribute__((weak));
 bool moy_play_front_end(int why) __attribute__((weak));
+// The loop's jobs (native/moy_kernel/moy_loop.h): weak, so a harness
+// without the loop links, and its faces' runs are then the caller's.
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 
 #define DOOR_ABSENT (-8)
 #define DOOR_NEEDS_VM (-9)
+#define DOOR_RUNNING (-100)             // a role command goes on: `step` it again
 #define DOOR_FULL (-2)
 #define ANSWER_CAP 8192u
 #define SHELL_PID 1
 #define POLL_BYTES 64
 #define YIELD_MS 200u
+#define ROLE_POLL_MS 10                 // a waiting role command's step, at most this often
+#define INTERRUPTED 130
+#define RUN_STACK (24u * 1024u)         // a runner's stack (the SSH face's task's)
+#define ABORT_TURNS 256                 // a parked run's turns to end at its session's end
 
 // -- memory ---------------------------------------------------------------------
 
@@ -66,8 +79,9 @@ static void b_free(void *ctx, void *p) {
 // -- the door ---------------------------------------------------------------------
 
 // One crossing: `verb` and `argv` packed NUL-separated, the answer into a
-// buffer from b_alloc (*ans, freed by the caller) of *n bytes.
-static int32_t door(const char *verb, int argc, char *const *argv, char **ans, size_t *n) {
+// buffer from b_alloc (*ans, freed by the caller) of *n bytes. On the
+// console's task: door() hops there (the running session's moy_sh_hop).
+static int32_t cross(const char *verb, int argc, char *const *argv, char **ans, size_t *n) {
     *ans = NULL;
     *n = 0;
     if (!moy_loop_vm()) {
@@ -101,6 +115,26 @@ static int32_t door(const char *verb, int argc, char *const *argv, char **ans, s
         b_free(NULL, arg);
     }
     return r;
+}
+
+typedef struct {
+    const char *verb;
+    int argc;
+    char *const *argv;
+    char **ans;
+    size_t *n;
+    int32_t r;
+} door_t;
+
+static void door_here(void *arg) {
+    door_t *d = arg;
+    d->r = cross(d->verb, d->argc, d->argv, d->ans, d->n);
+}
+
+static int32_t door(const char *verb, int argc, char *const *argv, char **ans, size_t *n) {
+    door_t d = { verb, argc, argv, ans, n, 0 };
+    moy_sh_hop(moy_sh_running(), door_here, &d);
+    return d.r;
 }
 
 static int32_t door_int(const char *verb, int argc, char *const *argv) {
@@ -274,16 +308,51 @@ static const char *files_root(void) {
 #endif
 }
 
+static void b_sleep(void *ctx, int ms);
+
+typedef struct {
+    moy_sh_t *s;
+    int argc;
+    char **argv;
+    int r;
+} store_role_t;
+
+static void store_role_here(void *arg) {
+    store_role_t *c = arg;
+    char store[MOY_SH_STORE_PATH];
+    snprintf(store, sizeof store, "%s%s", files_root(), moy_sh_board_store(c->s));
+    c->r = moy_sh_store_role(c->s, store, c->argc, c->argv);
+}
+
+// A role command is a job the console steps: `role JOB ARGV...` starts it
+// and runs its first step, `step JOB` each one after, while it answers
+// RUNNING; between them the session waits (b_sleep: a runner's run parks,
+// so the console's frame goes on). Ctrl-C `stop`s it. JOB names the session.
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
-    int32_t r = door_int("role", argc, argv);
+    char job[2 * sizeof(uintptr_t) + 1];
+    snprintf(job, sizeof job, "%lx", (unsigned long)(uintptr_t)s);
+    char **all = b_alloc(NULL, ((size_t)argc + 1) * sizeof *all);
+    if (all == NULL) {
+        return 1;
+    }
+    all[0] = job;
+    memcpy(all + 1, argv, (size_t)argc * sizeof *argv);
+    int32_t r = door_int("role", argc + 1, all);
+    b_free(NULL, all);
     if (r == DOOR_NEEDS_VM) {
-        char store[MOY_SH_STORE_PATH];
-        snprintf(store, sizeof store, "%s%s", files_root(), moy_sh_board_store(s));
-        int k = moy_sh_store_role(s, store, argc, argv);
-        if (k != MOY_SH_NOT_FOUND) {
-            return k;
+        store_role_t c = { s, argc, argv, MOY_SH_NOT_FOUND };
+        moy_sh_hop(s, store_role_here, &c);
+        return c.r != MOY_SH_NOT_FOUND ? c.r : code_of(r);
+    }
+    char *one[1] = { job };
+    while (r == DOOR_RUNNING) {
+        if (moy_sh_interrupted(s)) {
+            door_int("stop", 1, one);
+            return INTERRUPTED;
         }
+        b_sleep(NULL, ROLE_POLL_MS);
+        r = door_int("step", 1, one);
     }
     return code_of(r);
 }
@@ -597,14 +666,28 @@ static void b_reboot(void *ctx) {
 #endif
 }
 
-static void b_sleep(void *ctx, int ms) {
-    (void)ctx;
+static void nap(int ms) {
 #ifdef MOY_SH_ON_BOARD
     vTaskDelay(pdMS_TO_TICKS(ms > 0 ? ms : 0));
 #else
     struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
     nanosleep(&ts, NULL);
 #endif
+}
+
+static moy_sh_runner_t *runner_here(void);
+static void park(moy_sh_runner_t *r, int ms);
+
+// On a runner's stack the run parks for `ms` (the frame goes on), else the
+// task sleeps.
+static void b_sleep(void *ctx, int ms) {
+    (void)ctx;
+    moy_sh_runner_t *r = runner_here();
+    if (r != NULL) {
+        park(r, ms);
+    } else {
+        nap(ms);
+    }
 }
 
 static int b_log(void *ctx, moy_sh_t *s, int fd, const char *name, int follow) {
@@ -620,7 +703,323 @@ static int b_log(void *ctx, moy_sh_t *s, int fd, const char *name, int follow) {
 }
 
 void moy_sh_board_yield(void) {
-    b_sleep(NULL, 1);
+    nap(1);
+}
+
+// -- the runner ----------------------------------------------------------------------------
+//
+// A task of the runner's own runs the session's line, strictly in turn with
+// the caller: the caller's task waits while the run's goes, so the session
+// and the face's grid have one writer at a time. The run hands the turn back
+// to hop (runner_hop: the caller's task runs it and hands the turn back) and
+// to park (b_sleep: the caller's task returns MOY_SH_BUSY, and the loop's
+// job, `resume`, hands the run its turn again a frame later, once the park's
+// time is up).
+
+enum { R_RUN, R_PARKED, R_HOP, R_DONE };
+
+struct moy_sh_runner {
+    moy_sh_t *s;
+    const char *text;
+    size_t n;
+    int state;
+    int result;
+    int abort;                          // the session goes: every park ends at once
+    int quit;                           // the task ends
+    uint32_t until;                     // ms, a park's end
+    void (*fn)(void *arg);              // a hop
+    void *arg;
+    void (*done)(void *ctx, int r);     // a parked run ended (the face's)
+    void *ctx;
+    int (*poll)(void *ctx);             // the face's poll
+    int live;                           // the task runs
+    int inline_runs;                    // every run the caller's
+#ifdef MOY_SH_ON_BOARD
+    TaskHandle_t task;
+    SemaphoreHandle_t go, back;
+#else
+    pthread_t task;
+    pthread_mutex_t m;
+    pthread_cond_t c;
+    int turn;                           // 1: the run's, 0: the caller's
+#endif
+};
+
+static uint32_t run_ms(void) {
+#ifdef MOY_SH_ON_BOARD
+    return (uint32_t)(esp_timer_get_time() / 1000);
+#else
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+#endif
+}
+
+#ifdef MOY_SH_ON_BOARD
+static int on_run_task(const moy_sh_runner_t *r) {
+    return r->live && xTaskGetCurrentTaskHandle() == r->task;
+}
+
+static void to_run(moy_sh_runner_t *r) {
+    xSemaphoreGive(r->go);
+    xSemaphoreTake(r->back, portMAX_DELAY);
+}
+
+static void to_caller(moy_sh_runner_t *r) {
+    xSemaphoreGive(r->back);
+    xSemaphoreTake(r->go, portMAX_DELAY);
+}
+#else
+static int on_run_task(const moy_sh_runner_t *r) {
+    return r->live && pthread_equal(pthread_self(), r->task);
+}
+
+static void pass(moy_sh_runner_t *r, int turn) {
+    pthread_mutex_lock(&r->m);
+    r->turn = turn;
+    pthread_cond_broadcast(&r->c);
+    while (r->turn == turn) {
+        pthread_cond_wait(&r->c, &r->m);
+    }
+    pthread_mutex_unlock(&r->m);
+}
+
+static void to_run(moy_sh_runner_t *r) {
+    pass(r, 1);
+}
+
+static void to_caller(moy_sh_runner_t *r) {
+    pass(r, 0);
+}
+#endif
+
+static void run_main(moy_sh_runner_t *r) {
+    while (!r->quit) {
+        r->result = moy_sh_run(r->s, r->text, r->n);
+        r->state = R_DONE;
+        to_caller(r);
+    }
+}
+
+#ifdef MOY_SH_ON_BOARD
+static void run_task(void *arg) {
+    moy_sh_runner_t *r = arg;
+    xSemaphoreTake(r->go, portMAX_DELAY);
+    run_main(r);
+    xSemaphoreGive(r->back);
+    for (;;) {
+        vTaskDelay(portMAX_DELAY);      // the caller deletes it
+    }
+}
+#else
+static void *run_task(void *arg) {
+    moy_sh_runner_t *r = arg;
+    pthread_mutex_lock(&r->m);
+    while (!r->turn) {
+        pthread_cond_wait(&r->c, &r->m);
+    }
+    pthread_mutex_unlock(&r->m);
+    run_main(r);
+    pthread_mutex_lock(&r->m);
+    r->turn = 0;
+    pthread_cond_broadcast(&r->c);
+    pthread_mutex_unlock(&r->m);
+    return NULL;
+}
+#endif
+
+// The task, at the first run: 0, or -1 where none can be made (the run is
+// then the caller's).
+static int run_start(moy_sh_runner_t *r) {
+    if (r->live) {
+        return 0;
+    }
+#ifdef MOY_SH_ON_BOARD
+    r->go = xSemaphoreCreateBinary();
+    r->back = xSemaphoreCreateBinary();
+    if (r->go == NULL || r->back == NULL
+            || xTaskCreatePinnedToCoreWithCaps(run_task, "moy_sh", RUN_STACK, r,
+                                               uxTaskPriorityGet(NULL), &r->task,
+                                               xPortGetCoreID(),
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        if (r->go != NULL) {
+            vSemaphoreDelete(r->go);
+        }
+        if (r->back != NULL) {
+            vSemaphoreDelete(r->back);
+        }
+        r->go = r->back = NULL;
+        return -1;
+    }
+#else
+    pthread_mutex_init(&r->m, NULL);
+    pthread_cond_init(&r->c, NULL);
+    r->turn = 0;
+    if (pthread_create(&r->task, NULL, run_task, r) != 0) {
+        pthread_cond_destroy(&r->c);
+        pthread_mutex_destroy(&r->m);
+        return -1;
+    }
+#endif
+    r->live = 1;
+    return 0;
+}
+
+// The runner whose task this is, while its session runs.
+static moy_sh_runner_t *runner_here(void) {
+    moy_sh_t *s = moy_sh_running();
+    moy_sh_runner_t *r = s != NULL ? moy_sh_host(s)->runner : NULL;
+    return r != NULL && on_run_task(r) ? r : NULL;
+}
+
+static void park(moy_sh_runner_t *r, int ms) {
+    if (r->abort) {
+        return;
+    }
+    r->until = run_ms() + (uint32_t)(ms > 0 ? ms : 0);
+    r->state = R_PARKED;
+    to_caller(r);
+}
+
+static void runner_hop(void *ctx, void (*fn)(void *arg), void *arg) {
+    (void)ctx;
+    moy_sh_runner_t *r = runner_here();
+    if (r == NULL) {
+        fn(arg);
+        return;
+    }
+    r->fn = fn;
+    r->arg = arg;
+    r->state = R_HOP;
+    to_caller(r);
+}
+
+static int runner_poll(void *ctx) {
+    moy_sh_t *s = moy_sh_running();
+    moy_sh_runner_t *r = s != NULL ? moy_sh_host(s)->runner : NULL;
+    if (r != NULL && r->abort) {
+        return 1;
+    }
+    return r != NULL && r->poll != NULL ? r->poll(ctx) : 0;
+}
+
+// The run's turns until it parks or ends, the hops it asks run here.
+static int turn(moy_sh_runner_t *r) {
+    for (;;) {
+        r->state = R_RUN;
+        to_run(r);
+        if (r->state == R_HOP) {
+            r->fn(r->arg);
+            continue;
+        }
+        return r->state == R_PARKED ? MOY_SH_BUSY : r->result;
+    }
+}
+
+// The loop's job while a run is parked: its turn once the park is up.
+static bool resume(void *arg) {
+    moy_sh_runner_t *r = arg;
+    if (r->state != R_PARKED) {
+        return false;
+    }
+    if (!r->abort && (int32_t)(run_ms() - r->until) < 0) {
+        return true;
+    }
+    int k = turn(r);
+    if (k == MOY_SH_BUSY) {
+        return true;
+    }
+    if (r->done != NULL) {
+        r->done(r->ctx, k);
+    }
+    return false;
+}
+
+moy_sh_runner_t *moy_sh_board_runner(moy_sh_host_t *h, void (*done)(void *ctx, int r)) {
+    if (moy_loop_job == NULL) {
+        return NULL;
+    }
+    moy_sh_runner_t *r = b_alloc(NULL, sizeof *r);
+    if (r == NULL) {
+        return NULL;
+    }
+    memset(r, 0, sizeof *r);
+    r->state = R_DONE;
+    r->done = done;
+    r->ctx = h->ctx;
+    r->poll = h->poll;
+    h->poll = runner_poll;
+    h->hop = runner_hop;
+    h->runner = r;
+    return r;
+}
+
+int moy_sh_board_run(moy_sh_t *s, const char *text, size_t n) {
+    moy_sh_runner_t *r = moy_sh_host(s)->runner;
+    if (r == NULL || r->inline_runs || !moy_loop_vm() || r->abort || run_start(r) != 0) {
+        return moy_sh_run(s, text, n);
+    }
+    if (r->state != R_DONE) {
+        return MOY_SH_BUSY;
+    }
+    r->s = s;
+    r->text = text;
+    r->n = n;
+    int k = turn(r);
+    if (k == MOY_SH_BUSY && !moy_loop_job(resume, r)) {
+        while ((k = turn(r)) == MOY_SH_BUSY) {
+            int32_t left = (int32_t)(r->until - run_ms());
+            nap(left > 0 ? (int)left : 0);
+        }
+    }
+    return k;
+}
+
+void moy_sh_board_runner_inline(moy_sh_runner_t *r) {
+    if (r != NULL) {
+        r->inline_runs = 1;
+    }
+}
+
+int moy_sh_board_busy(const moy_sh_t *s) {
+    const moy_sh_runner_t *r = moy_sh_host(s)->runner;
+    return r != NULL && r->state == R_PARKED;
+}
+
+void moy_sh_board_runner_end(moy_sh_runner_t *r) {
+    if (r == NULL) {
+        return;
+    }
+    if (r->state == R_PARKED) {
+        r->abort = 1;
+        for (int i = 0; i < ABORT_TURNS && r->state == R_PARKED; i++) {
+            turn(r);
+        }
+    }
+    if (moy_loop_job_drop != NULL) {
+        moy_loop_job_drop(resume, r);
+    }
+    if (r->live && r->state != R_PARKED) {
+        r->quit = 1;
+#ifdef MOY_SH_ON_BOARD
+        to_run(r);
+        vTaskDeleteWithCaps(r->task);
+        vSemaphoreDelete(r->go);
+        vSemaphoreDelete(r->back);
+#else
+        pthread_mutex_lock(&r->m);
+        r->turn = 1;
+        pthread_cond_broadcast(&r->c);
+        pthread_mutex_unlock(&r->m);
+        pthread_join(r->task, NULL);
+        pthread_cond_destroy(&r->c);
+        pthread_mutex_destroy(&r->m);
+#endif
+    }
+    // a run that would not end keeps its task and its record
+    if (r->state != R_PARKED) {
+        b_free(NULL, r);
+    }
 }
 
 // The stores a console boots on, in the order the console's boot tries them
@@ -704,8 +1103,10 @@ typedef struct {
     char line[MOY_SH_SERIAL_LINE + 4];  // "SH " and the output's line
     size_t n;
     uint32_t yielded;                   // ms, the last time the poll yielded
+    int stop;                           // a Ctrl-C byte the dev channel read
     moy_sh_t *s;
     moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
+    moy_sh_runner_t *runner;
 } serial_t;
 
 static void serial_flush(serial_t *f) {
@@ -735,7 +1136,8 @@ static void serial_out(void *ctx, int stream, const char *p, size_t n) {
 static int serial_poll(void *ctx) {
     serial_t *f = ctx;
     const moy_loop_ops_t *ops = moy_loop_ops();
-    int stop = 0;
+    int stop = f->stop;
+    f->stop = 0;
     if (ops != NULL && ops->getc != NULL) {
         for (int i = 0; i < POLL_BYTES; i++) {
             int c = ops->getc();
@@ -842,6 +1244,37 @@ static void serial_to_app(serial_t *f, const char *text) {
     }
 }
 
+// A run's end, said: at once, or a parked one's when it ends.
+static void serial_end(void *ctx, int r) {
+    serial_t *f = ctx;
+    moy_sh_t *s = f->s;
+    if (f->n) {
+        serial_flush(f);
+    }
+    if (r == MOY_SH_MORE) {
+        moy_loop_say_line("SH more");
+    } else if (r == MOY_SH_EXIT) {
+        moy_loop_say("SH exit %d", moy_sh_status(s));
+        moy_sh_app_close(f->app);
+        moy_sh_board_runner_end(f->runner);
+        moy_sh_free(s);
+        b_free(NULL, f);
+    } else if (f->app != NULL) {
+        serial_show(f);
+    } else {
+        moy_loop_say("SH end %d", moy_sh_status(s));
+    }
+}
+
+bool moy_sh_board_break(void) {
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL || !moy_sh_board_busy(s)) {
+        return false;
+    }
+    ((serial_t *)moy_sh_ctx(s))->stop = 1;
+    return true;
+}
+
 bool moy_sh_board_line(const char *text) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
@@ -855,8 +1288,10 @@ bool moy_sh_board_line(const char *text) {
         moy_sh_host_t h;
         moy_sh_board_host(&h, f, serial_out, serial_poll);
         h.app = serial_app;
+        f->runner = moy_sh_board_runner(&h, serial_end);
         s = moy_sh_new(&h, MOY_SH_ARENA, "/", "/");
         if (s == NULL) {
+            moy_sh_board_runner_end(f->runner);
             b_free(NULL, f);
             moy_loop_say_line("SH error no session");
             return false;
@@ -867,6 +1302,14 @@ bool moy_sh_board_line(const char *text) {
         moy_sh_park(s);
     }
     serial_t *f = moy_sh_ctx(s);
+    if (moy_sh_board_busy(s)) {
+        if (strcmp(text, "^C") == 0) {
+            f->stop = 1;
+        } else {
+            moy_loop_say_line("SH busy");
+        }
+        return true;
+    }
     if (f->app != NULL) {
         serial_to_app(f, text);
         return true;
@@ -879,22 +1322,10 @@ bool moy_sh_board_line(const char *text) {
     }
     memcpy(buf, text, n);
     buf[n] = '\n';
-    int r = moy_sh_run(s, buf, n + 1);
+    int r = moy_sh_board_run(s, buf, n + 1);
     b_free(NULL, buf);
-    if (f->n) {
-        serial_flush(f);
-    }
-    if (r == MOY_SH_MORE) {
-        moy_loop_say_line("SH more");
-    } else if (r == MOY_SH_EXIT) {
-        moy_loop_say("SH exit %d", moy_sh_status(s));
-        moy_sh_app_close(f->app);
-        moy_sh_free(s);
-        b_free(NULL, f);
-    } else if (f->app != NULL) {
-        serial_show(f);
-    } else {
-        moy_loop_say("SH end %d", moy_sh_status(s));
+    if (r != MOY_SH_BUSY) {
+        serial_end(f, r);
     }
     return true;
 }
@@ -904,6 +1335,7 @@ void moy_sh_board_end(void) {
     if (s != NULL) {
         serial_t *f = moy_sh_ctx(s);
         moy_sh_app_close(f->app);
+        moy_sh_board_runner_end(f->runner);
         moy_sh_free(s);
         b_free(NULL, f);
     }

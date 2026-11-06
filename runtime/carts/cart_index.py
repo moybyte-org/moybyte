@@ -825,12 +825,41 @@ def remove(root, folder, keep=None):
 
 # -- fetching -------------------------------------------------------------------
 
+class _Whole:
+    """A document fetched whole off the VM's thread (a transport's
+    `get(url, cap)`: the http worker's request, runtime/system/dev_http.py)
+    as the response Fetch reads: no status while it runs."""
+
+    def __init__(self, req):
+        self.req = req
+        self.at = 0
+        self.status = None
+        self.length = None
+
+    def poll(self):
+        st = self.req.state()
+        if st is not None:
+            self.status, self.length = st
+
+    def ready(self, n):
+        return True
+
+    def readinto(self, mv):
+        n = self.req.readinto(mv, self.at)
+        self.at += n
+        return n
+
+    def close(self):
+        self.req.close()
+
+
 class Fetch:
     """One small document whole -- an index, a licence text, a cover -- at
     most `limit` bytes and, given `size`/`sha`, exactly those. `step()` is True
     while the answer is still on its way (only a non-blocking transport ever
-    says so) and raises an InstallError when it cannot be had; then `data`
-    holds the bytes."""
+    says so: one with `get(url, cap)` up to its GET_MAX, whose request
+    answers off the VM's thread) and raises an InstallError when it cannot be
+    had; then `data` holds the bytes."""
 
     def __init__(self, net, url, limit, size=None, sha=None):
         self.net = net
@@ -841,8 +870,12 @@ class Fetch:
         self.data = None
         self._out = bytearray()
         self._buf = bytearray(4096)
+        get = getattr(net, "get", None)
         try:
-            self._resp = net.open(url)
+            if get is not None and self.limit <= getattr(net, "GET_MAX", 0):
+                self._resp = _Whole(get(url, self.limit))
+            else:
+                self._resp = net.open(url)
         except Exception as exc:  # noqa: BLE001 -- every transport error is "unreachable"
             raise InstallError(net_text(net, UNREACHABLE), "%s: %s" % (url, exc))
 
@@ -851,6 +884,12 @@ class Fetch:
         if resp is None:
             return False
         try:
+            if resp.status is None and hasattr(resp, "poll"):
+                try:
+                    resp.poll()
+                except Exception as exc:  # noqa: BLE001 -- no response is "unreachable"
+                    raise InstallError(net_text(self.net, UNREACHABLE), "%s: %s"
+                                       % (self.url, exc))
             if resp.status is None:
                 return True
             if resp.status != 200:

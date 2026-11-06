@@ -8,6 +8,11 @@ SH end 0
 > sh perm grant moybyte.paint camera
 SH console perm: grant moybyte.paint camera
 SH end 0
+> sh lease
+SH console lease:
+SH console lease: step 1
+SH console lease: step 2
+SH end 0
 > sh notify hi | wc -l
 SH notify: not served here
 SH 1

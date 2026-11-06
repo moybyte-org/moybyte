@@ -46,6 +46,8 @@ struct moy_sh_screen {
     int stop;                           // the face's own Ctrl-C
     moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
     int ctrl;                           // the input types control keys
+    moy_sh_runner_t *runner;
+    int ended, result;                  // a parked run's end, not yet taken
     char root[MOY_SH_SCREEN_ROOT];
 };
 
@@ -101,8 +103,16 @@ static void t_free(void *ctx, void *p) {
     f->free(NULL, p);
 }
 
+static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks);
+
 static int run_line(void *ctx, const char *text, size_t n) {
-    return moy_sh_screen_run(ctx, text, n);
+    return run_here(ctx, text, n, 0);
+}
+
+static void screen_done(void *ctx, int r) {
+    moy_sh_screen_t *f = ctx;
+    f->ended = 1;
+    f->result = r;
 }
 
 static int screen_app(void *ctx, moy_sh_t *s, int argc, char **argv) {
@@ -140,6 +150,7 @@ moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
     f->alloc = h.alloc;
     f->free = h.free;
     h.ctx = f;
+    f->runner = moy_sh_board_runner(&h, screen_done);
     if (root != NULL) {
         size_t n = strlen(root);
         if (n >= sizeof f->root) {
@@ -151,11 +162,13 @@ moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
     }
     f->t = moy_term_new(cols, rows, rows + MOY_SH_SCREEN_LINES, t_alloc, t_free, f);
     if (f->t == NULL) {
+        moy_sh_board_runner_end(f->runner);
         h.free(NULL, f);
         return NULL;
     }
     f->s = moy_sh_new(&h, MOY_SH_ARENA, "/", "/");
     if (f->s == NULL) {
+        moy_sh_board_runner_end(f->runner);
         moy_term_free(f->t);
         h.free(NULL, f);
         return NULL;
@@ -169,17 +182,45 @@ void moy_sh_screen_free(moy_sh_screen_t *f) {
         return;
     }
     moy_sh_screen_end_app(f);
+    moy_sh_board_runner_end(f->runner);
     moy_sh_free(f->s);
     moy_term_free(f->t);
     f->free(NULL, f);
 }
 
 int moy_sh_screen_run(moy_sh_screen_t *f, const char *text, size_t n) {
+    return run_here(f, text, n, 1);
+}
+
+void moy_sh_screen_inline(moy_sh_screen_t *f) {
+    moy_sh_board_runner_inline(f->runner);
+}
+
+int moy_sh_screen_busy(const moy_sh_screen_t *f) {
+    return moy_sh_board_busy(f->s);
+}
+
+int moy_sh_screen_ended(moy_sh_screen_t *f, int *r) {
+    if (!f->ended) {
+        return 0;
+    }
+    f->ended = 0;
+    *r = f->result;
+    return 1;
+}
+
+static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks) {
+    if (moy_sh_board_busy(f->s)) {
+        return MOY_SH_BUSY;
+    }
     f->held = keys_held();
     f->by_keys = 0;
     f->polled = NOW_MS();
     f->yielded = f->polled;
-    int r = moy_sh_run(f->s, text, n);
+    int r = parks ? moy_sh_board_run(f->s, text, n) : moy_sh_run(f->s, text, n);
+    if (r == MOY_SH_BUSY) {
+        return r;
+    }
     // a key that interrupted is let go before the frame merges again, so its
     // press is no edge there (Mic is the console's key, B its back)
     uint32_t t0 = NOW_MS();

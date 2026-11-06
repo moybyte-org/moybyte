@@ -12,7 +12,7 @@ from runtime import devfs
 from runtime import moy_log as L
 from runtime import scheduler as S
 from runtime.shell_servers import SH_DOOR, RoleDoor
-from runtime.sh_door import ABSENT, EPERM, ESRCH, ShellDoor
+from runtime.sh_door import ABSENT, EPERM, ESRCH, RUNNING, ShellDoor
 
 
 class _Procs:
@@ -44,7 +44,14 @@ def _door(monkeypatch):
 
 
 def call(door, *fields):
-    return door(b"\0".join(f.encode() for f in fields))
+    """A door crossing; a role command started (`role JOB ...`) and stepped
+    to its end, as the session does between frames."""
+    if fields[:1] == ("role",):
+        fields = ("role", "t") + fields[1:]
+    r = door(b"\0".join(f.encode() for f in fields))
+    while fields[0] == "role" and r == RUNNING:
+        r = door(b"step\0t")
+    return r
 
 
 def test_ps_names_the_console_and_its_runs(monkeypatch):
@@ -377,9 +384,8 @@ class _Media:
 
 
 def _faces(monkeypatch, **faces):
-    from runtime import devices, sh_roles
+    from runtime import devices
     monkeypatch.setattr(devices, "api", lambda name: faces.get(name))
-    monkeypatch.setattr(sh_roles, "_sleep", lambda ms: None)
 
 
 def test_device_faces_answer_through_the_door(console, monkeypatch):
@@ -549,7 +555,7 @@ sh_door.COMMAND_MS = 50
 io, d = door()
 print("SPIN", d(b"spawn\x000\0spin"), repr(io.fds[2]))
 io, d = door(b"x = 6\nx * 7\nfor i in range(2):\n    print(i)\n\n1 / 0\nraise SystemExit(4)\n")
-print("REPL", d(b"role\0python"), repr(io.fds[1]), b"ZeroDivisionError" in io.fds[2])
+print("REPL", d(b"role\0t\0python"), repr(io.fds[1]), b"ZeroDivisionError" in io.fds[2])
 '''
 
 

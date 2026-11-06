@@ -27,6 +27,17 @@ def term(tmp_path):
 def run(app, text):
     app.face.set_line(text)
     app.face.submit()
+    settle(app)
+
+
+def settle(app, limit=10.0):
+    """The frames' tails until the line's run ends: a run that waits parks
+    (native/moy_sh/moy_sh_board.h) and the loop's job resumes it."""
+    from runtime import moy_sh
+    t0 = time.monotonic()
+    while app.face.busy() and time.monotonic() - t0 < limit:
+        moy_sh.jobs()
+        time.sleep(0.002)
 
 
 def plain(app):
@@ -179,6 +190,90 @@ def test_ctrl_c_ends_a_role_command_waiting_on_its_device(term, monkeypatch):
     assert time.monotonic() - t0 < 2
     assert held == [] and app.face.status() == 130
     assert "not-after" not in plain(app)
+
+
+def _slow_role(monkeypatch, steps=3, ms=30):
+    """`lease` as a role command that waits: a line, then `ms`, `steps`
+    times (runtime/shell/sh_roles.py's generators); `ended` once its
+    `finally` ran."""
+    from runtime import sh_roles
+    ended = []
+
+    def slow(d, a):
+        try:
+            for i in range(steps):
+                d.out("step %d\n" % i)
+                if (yield from sh_roles._wait(d, ms)):
+                    return sh_roles.INTERRUPTED
+            return 0
+        finally:
+            ended.append(1)
+    monkeypatch.setattr(sh_roles, "r_lease", slow)
+    return ended
+
+
+def test_a_waiting_role_command_parks_and_its_output_streams(term, monkeypatch):
+    """A role command that waits is stepped across the door a frame at a
+    time: Enter returns while it waits (the run parks on the session's
+    runner, native/moy_sh/moy_sh_board.h), its lines reach the grid as they
+    come, the prompt stays down until it ends, and the line goes on after."""
+    from runtime import moy_sh
+    ended = _slow_role(monkeypatch)
+    _ws, app = term
+    app.face.set_line("lease; echo after")
+    t0 = time.monotonic()
+    app.face.submit()
+    assert time.monotonic() - t0 < 0.025
+    assert app.face.busy() and app.face.prompt() == ""
+    assert plain(app)[-1] == "step 0"
+    app.face.set_line("echo typed ahead")
+    app.face.submit()                   # Enter while it runs does nothing
+    t0 = time.monotonic()
+    while "step 1" not in plain(app) and time.monotonic() - t0 < 2:
+        moy_sh.jobs()
+        time.sleep(0.005)
+    assert "step 1" in plain(app) and app.face.busy() and "after" not in plain(app)
+    settle(app)
+    assert not app.face.busy() and ended == [1] and app.face.status() == 0
+    assert plain(app)[-4:] == ["step 0", "step 1", "step 2", "after"]
+    assert app.face.prompt() == "$ " and app.face.line() == "echo typed ahead"
+
+
+def test_ctrl_c_stops_a_parked_role_command(term, monkeypatch):
+    """Ctrl-C while the run is parked is the run's: the role command is
+    stopped at its next turn (its `finally` gives back what it took), the
+    rest of the line goes, and the prompt is back."""
+    ended = _slow_role(monkeypatch, steps=50)
+    _ws, app = term
+    app.face.set_line("lease; echo not-after")
+    app.face.submit()
+    assert app.face.busy()
+    app.face.key(3)
+    settle(app, limit=2)
+    assert not app.face.busy() and ended == [1] and app.face.status() == 130
+    assert "not-after" not in plain(app) and "step 49" not in plain(app)
+    run(app, "echo next")
+    assert plain(app)[-1] == "next"
+
+
+def test_the_console_s_frames_go_on_while_a_command_waits(term, monkeypatch):
+    """The kernel's frame (moy_loop_step, the host's driver tier) runs the
+    parked run's turn at its tail: frames keep their pace while `sleep` and
+    a waiting role command go on, and the run ends on the frames alone."""
+    from runtime import moy_loop as _loop
+    _slow_role(monkeypatch, steps=2, ms=40)
+    _ws, app = term
+    app.face.set_line("sleep 0.1; lease; echo done")
+    app.face.submit()
+    assert app.face.busy()
+    worst, t_end = 0.0, time.monotonic() + 3
+    while app.face.busy() and time.monotonic() < t_end:
+        t0 = time.monotonic()
+        _loop.drive(lambda: 0, lambda: 0, lambda dt: 1, 1 / 30)
+        worst = max(worst, time.monotonic() - t0)
+        time.sleep(1 / 60)
+    assert not app.face.busy() and plain(app)[-1] == "done"
+    assert worst < 0.025, worst
 
 
 def test_an_idle_frame_makes_no_line(term):

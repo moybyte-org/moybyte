@@ -194,7 +194,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   polls: `DeviceWifi.scan_poll()`/`join()`/`joined()` (Settings'
   wake), `CartNet.ready()` (Get Carts) and `dial()` (an http request, a
   stream), whose worker task waits for the link (`moy_net_dialing`). A cart's
-  `wifi.scan()`/`connect()` and a shell command still wait: theirs to spend.
+  `wifi.scan()`/`connect()` still waits: its own to spend. A shell command
+  does not hold the frame either (2026-11-06): its run parks on the session's
+  runner while a role command waits, stepped across the door a frame at a
+  time (`native/moy_sh/moy_sh_board.h`, THE RUNNER).
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
   HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
   Guition S3's cards have a host of their own, mounted by

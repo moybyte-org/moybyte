@@ -96,6 +96,9 @@ moy_sh_floor_t *moy_sh_floor_new(const moy_sh_floor_geom_t *g, const char *root)
     fl->shape = h.alloc(NULL, sizeof *fl->shape);
     fl->px = h.alloc(NULL, (size_t)g->w * (size_t)g->h * 2u);
     fl->face = moy_sh_face_new(root);
+    if (fl->face != NULL) {
+        moy_sh_face_inline(fl->face);   // no frames resume a parked run here
+    }
     if (fl->ctx == NULL || fl->shape == NULL || fl->px == NULL || fl->face == NULL) {
         if (cm == NULL) {
             fl->ctx = NULL;

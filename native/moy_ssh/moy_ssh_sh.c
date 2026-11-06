@@ -5,8 +5,10 @@
 // The session runs on the face's task. What crosses the door into Python or
 // touches the store hops to the console's task (moy_ssh_face_hop): the
 // table's entries that do are wrapped here (every one moy_sh_board.c's door
-// serves, `mem`'s Python heap among them), and the shell's own store calls
-// go through the table's `hop`. The kernel's log and sleeps run in place.
+// serves, `mem`'s Python heap among them, but `role`), and the shell's own
+// store calls go through the table's `hop`. A role command runs on this
+// task, each of its door's crossings a hop (moy_sh_board.c's `door`) and its
+// waits between its steps here. The kernel's log and sleeps run in place.
 //
 // A text app (moy_sh_app.h) opens in front of the face at the client's size;
 // a full-screen one is shown on the alternate screen, its grid's changed rows
@@ -38,7 +40,7 @@ typedef struct {
 
 // -- the hops -----------------------------------------------------------------------
 
-enum { H_VREAD, H_VWRITE, H_VLIST, H_LOOKUP, H_SPAWN, H_STATUS, H_KILL, H_PROCS, H_ROLE, H_DF,
+enum { H_VREAD, H_VWRITE, H_VLIST, H_LOOKUP, H_SPAWN, H_STATUS, H_KILL, H_PROCS, H_DF,
        H_MEM };
 
 typedef struct {
@@ -89,9 +91,6 @@ static void call_here(void *arg) {
             break;
         case H_PROCS:
             c->r = b->procs(ctx, (moy_sh_ps_fn)c->fn, c->arg);
-            break;
-        case H_ROLE:
-            c->r = b->role(ctx, c->s, c->argc, c->argv);
             break;
         case H_MEM:
             c->r = b->mem(ctx, c->mem);
@@ -148,9 +147,10 @@ static int w_procs(void *ctx, moy_sh_ps_fn fn, void *arg) {
     return call(&c, ctx);
 }
 
+// On the face's task: a role command's crossings hop one at a time, and it
+// waits between its steps here, so the console's frame goes on.
 static int w_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
-    call_t c = { .op = H_ROLE, .s = s, .argc = argc, .argv = argv };
-    return call(&c, ctx);
+    return ((sh_t *)ctx)->board.role(ctx, s, argc, argv);
 }
 
 static int w_df(void *ctx, const char *path, uint64_t *total, uint64_t *free_) {

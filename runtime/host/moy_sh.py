@@ -156,6 +156,9 @@ _SIGS = (
     ("moy_sh_face_line", [_P, ctypes.POINTER(ctypes.c_int32)], _S),
     ("moy_sh_face_set_line", [_P, _S, ctypes.c_int32], None),
     ("moy_sh_face_submit", [_P], None),
+    ("moy_sh_face_busy", [_P], _I),
+    ("moy_sh_screen_busy", [_P], _I),
+    ("moy_loop_jobs", [], _I),
     ("moy_sh_face_complete", [_P], None),
     ("moy_sh_face_recall", [_P, _I], None),
     ("moy_sh_face_pick", [_P, _I], None),
@@ -220,6 +223,12 @@ def arena():
 
 def line(text):
     return bool(_lib().moy_sh_board_line(str(text).encode()))
+
+
+def jobs():
+    """The loop's jobs run once, as a frame's tail runs them (a parked
+    run's turn, native/moy_sh/moy_sh_board.h): how many remain."""
+    return _lib().moy_loop_jobs()
 
 
 def interrupted():
@@ -420,6 +429,9 @@ class Face:
 
     def complete(self):
         _lib().moy_sh_face_complete(self._p())
+
+    def busy(self):
+        return bool(_lib().moy_sh_face_busy(self._p()))
 
     def recall(self, d):
         _lib().moy_sh_face_recall(self._p(), int(d))

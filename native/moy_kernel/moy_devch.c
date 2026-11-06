@@ -347,6 +347,7 @@ static bool w_log(int argc, char **argv, const char *line) {
 // console), answered `SH <line>` a line and `SH end <status>`, `SH more` or
 // `SH exit <status>`. The kernel's, so it answers with no VM running.
 bool moy_sh_board_line(const char *text) __attribute__((weak));
+bool moy_sh_board_break(void) __attribute__((weak));
 
 static bool w_sh(int argc, char **argv, const char *line) {
     (void)argc;
@@ -491,6 +492,10 @@ bool moy_devch_poll(bool *quit) {
                 break;
             }
             D.rx++;
+            // Ctrl-C while the shell's serial run waits: that run's
+            if (c == 3 && moy_sh_board_break != NULL && moy_sh_board_break()) {
+                continue;
+            }
             if (c == '\n' || c == '\r') {
                 bool over = D.over;
                 D.over = false;

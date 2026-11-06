@@ -244,6 +244,17 @@ void moy_loop_say(const char *fmt, ...);
 void moy_loop_say_line(const char *line);
 void *moy_loop_alloc(size_t n);
 
+// Jobs in C the frame runs at its tail, each once a frame while it answers
+// true (the shell's runs that wait on the console: native/moy_sh/
+// moy_sh_board.h). False when the MOY_LOOP_JOBS slots are taken.
+#define MOY_LOOP_JOBS 4
+typedef bool (*moy_loop_job_fn)(void *arg);
+bool moy_loop_job(moy_loop_job_fn fn, void *arg);
+void moy_loop_job_drop(moy_loop_job_fn fn, void *arg);
+// Each job run once now, as the frame's tail runs them: a harness that steps
+// no frames (the host's tests) pumps them so. Answers how many remain.
+int moy_loop_jobs(void);
+
 // -- what the console tells the loop ------------------------------------------
 
 // The loop's own cadence: frames a second while nothing is paced.

@@ -17,9 +17,9 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh_posix.h`, `dash_config.h` | the shim dash compiles against (`-include dash_config.h`) |
 | `moy_sh_int.h` | what the three `.c` files share |
 | `dash/`, `patches/`, `dash_vendor.json`, `dash_pin.h` | the vendored dash (`UPSTREAM.md`) |
-| `moy_sh_board.c`, `moy_sh_board.h` | a board's host table (the kernel's figures in C, the console's across the ROLE door: `runtime/shell/sh_door.py` serves the processes, /proc, /dev, /bin and the installed commands, `runtime/shell/sh_roles.py` the role commands) and the serial face, the dev channel's `sh` word |
+| `moy_sh_board.c`, `moy_sh_board.h` | a board's host table (the kernel's figures in C, the console's across the ROLE door: `runtime/shell/sh_door.py` serves the processes, /proc, /dev, /bin and the installed commands, `runtime/shell/sh_roles.py` the role commands, stepped while they wait), the runner (a face's runs on a task of the session's own, parked while they wait so the console's frame goes on) and the serial face, the dev channel's `sh` word |
 | `moy_sh_store.c` | the console's commands the shell serves from the store while no VM runs (`settings`; `pkg list` and `pkg remove` over `native/moy_store/moy_shelf.h`), over the C the console calls (`moy_sh_board.h`) |
-| `moy_sh_screen.c`, `moy_sh_screen.h` | the screen face: a session over the board's table whose terminal is a grid, its Ctrl-C read from the kernel input table's latches while a run holds the frame; the Terminal's face draws and feeds it |
+| `moy_sh_screen.c`, `moy_sh_screen.h` | the screen face: a session over the board's table whose terminal is a grid, its runs on the session's runner, its Ctrl-C read from the kernel input table's latches while a run holds the task; the Terminal's face draws and feeds it |
 | `moy_sh_face.c`, `moy_sh_face.h` | the Terminal's face: a screen session with its prompt line, history, completion and key rows, and their input, drawn through the toolkit's engine (`native/moy_ui/moy_ui_api.h`) on a frame the caller begins; the Terminal app (`runtime/apps/terminal_app.py`) hands it the console's frames and the kernel's recovery console its own. Built where the image carries the toolkit |
 | `moy_sh_floor.c`, `moy_sh_floor.h` | the recovery console's screen: the Terminal's face under the reason, the crash record's lines and the choices (Try again, Safe start, Reboot) as buttons, its words at the prompt the floor's; the default seed theme's dark look in the kernel's look, petme128 through a RUN sink, drawn whole into a logical buffer the kernel turns onto its panel (`native/moy_kernel/moy_kernel.c`'s `moy_kernel_recovery`); `tests/test_recovery_floor.py` renders the same C on the host. Built with the face |
 | `moy_sh_app.c`, `moy_sh_app.h` | the text apps every face hosts (`edit`, `top`, the interactive `python`): a full-screen app's own screen and keys, a line app over the prompt, the serial face's caret notation; `python`'s lines run as `python --repl LINE` in the console's VM |
@@ -38,9 +38,13 @@ run a session over the console's own door, log and store.
 
 A session runs on the task that feeds it; the running session is that task's
 (`moy_sh_g` is thread-local), so the SSH face's session on its own task
-(`native/moy_ssh`) runs beside the Terminal's on the console's. Whatever
-touches the files tree or crosses the door goes through the host table's
-`hop` (`moy_sh_hop`), which on that face runs it on the console's task.
+(`native/moy_ssh`) runs beside the Terminal's. Whatever touches the files
+tree or crosses the door goes through the host table's `hop`
+(`moy_sh_hop`), which on that face runs it on the console's task. The
+Terminal's and the serial face's lines run on their session's runner
+(`moy_sh_board.h`): a task of its own, in strict turn with the console's,
+whose `hop` hands the turn back for the crossing and whose waits park the
+run while the console's frames go on.
 
 ## Memory
 
@@ -51,7 +55,7 @@ its session and its grid the same way at its first open (`moy_sh_screen_new`)
 and gives them back at `close`. The objects hold one writable word, thread-local,
 `moy_sh_g` (the running session's state, and between runs the serial face's,
 parked there so the board keeps no root of its own): `tests/test_moy_sh.py`
-compiles them as a board does and fails on any other `.data` or `.bss`. The Terminal's face takes its record (the line, the history, the candidates and the log's row buffers) the same way at `moy_sh_face_new` and gives it back at `moy_sh_face_free`; a frame allocates nothing but the log's row buffers when the grid grows. The recovery floor's screen takes its record, its UI context, its shape and its pixels the same way at `moy_sh_floor_new`. A text app takes its front, its record and its screen (`moy_sh_app_open`), and the editor its text, from the same `alloc` while it is open.
+compiles them as a board does and fails on any other `.data` or `.bss`. The Terminal's face takes its record (the line, the history, the candidates and the log's row buffers) the same way at `moy_sh_face_new` and gives it back at `moy_sh_face_free`; a frame allocates nothing but the log's row buffers when the grid grows. The recovery floor's screen takes its record, its UI context, its shape and its pixels the same way at `moy_sh_floor_new`. A text app takes its front, its record and its screen (`moy_sh_app_open`), and the editor its text, from the same `alloc` while it is open. A face's runner takes its record from `alloc`, and at its session's first run a task whose 24 KB stack is PSRAM (`RUN_STACK`, the SSH face's task's) and two semaphores; all go at `moy_sh_board_runner_end`, before the session is freed. The kernel's loop keeps the parked runs' jobs in four slots of its own (`moy_loop_job`).
 
 ## The suite
 

@@ -455,6 +455,11 @@ static mp_obj_t face_pick(mp_obj_t self, mp_obj_t i) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(face_pick_obj, face_pick);
 
+static mp_obj_t face_busy(mp_obj_t self) {
+    return mp_obj_new_bool(moy_sh_face_busy(tface(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_busy_obj, face_busy);
+
 static mp_obj_t face_more(mp_obj_t self) {
     return mp_obj_new_bool(moy_sh_face_more(tface(self)));
 }
@@ -572,6 +577,7 @@ static const mp_rom_map_elem_t face_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_complete), MP_ROM_PTR(&face_complete_obj) },
     { MP_ROM_QSTR(MP_QSTR_recall), MP_ROM_PTR(&face_recall_obj) },
     { MP_ROM_QSTR(MP_QSTR_pick), MP_ROM_PTR(&face_pick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_busy), MP_ROM_PTR(&face_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_more), MP_ROM_PTR(&face_more_obj) },
     { MP_ROM_QSTR(MP_QSTR_prompt), MP_ROM_PTR(&face_prompt_obj) },
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&face_take_obj) },

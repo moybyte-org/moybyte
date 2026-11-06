@@ -17,7 +17,10 @@
 //   status PID              text: `running` or `exited CODE`; ABSENT: none
 //   lookup NAME             1 when an installed command has the name
 //   spawn BG ARGV...        the exit status (a pid when BG is 1); ABSENT: none
-//   role ARGV...            the exit status; ABSENT: not a command it serves
+//   role JOB ARGV...        start the role command and step it: the exit
+//                           status, RUNNING (-100) while it goes on;
+//                           ABSENT: not a command it serves
+//   step JOB / stop JOB     its next step, the same answers / end it (130)
 //   read PATH / list DIR    the bytes / a name a line (a folder's ends in /)
 //   write PATH BYTES        0, or an errno
 //   df PATH / mem           text: `total free`
@@ -38,7 +41,9 @@
 // (moy_sh_park), and answers each line of output as `SH <line>`, then
 // `SH end <status>`, `SH more` (the command goes on: send its next line) or
 // `SH exit <status>` (the shell exited; the next `sh` starts a new one). A
-// Ctrl-C byte on the channel interrupts the running command. A text app a
+// Ctrl-C byte on the channel, or `sh ^C` while a run is parked, interrupts
+// the running command; any other `sh` line while one is parked answers
+// `SH busy`. A text app a
 // command opened (moy_sh_app.h) answers `SH app
 // NAME` instead of `SH end`, a full-screen one after its screen, a row an
 // `SH` line on a grid of MOY_SH_SERIAL_COLS by MOY_SH_SERIAL_ROWS; while it
@@ -85,6 +90,38 @@ int moy_sh_store_role(moy_sh_t *s, const char *root, int argc, char **argv);
 
 // A long run's yield: the task sleeps a tick, so a task below it runs.
 void moy_sh_board_yield(void);
+
+// THE RUNNER. A face whose session runs on the console's task (the screen
+// face, the serial face) gives it a runner: each line runs on a task of the
+// session's own, in strict turn with the caller, so it shares nothing with
+// the console but what the caller's waiting leaves alone. What crosses the
+// door or touches the store hops back to the caller's task (the table's
+// `hop`). A wait parks the run (`sleep`, a role command between its steps:
+// the board's `sleep_ms`) and the caller's call answers MOY_SH_BUSY; the
+// loop's job (moy_loop_job) hands the run its turn again each frame once the
+// wait is up, steps the role command once more across the door, and calls
+// the face's `done` with the run's answer when it ends. So a command that
+// waits on the console blocks its face alone, and the frame goes on. With no
+// VM (the recovery floor, an S3 running a cart without one) or no task to
+// be had, a line runs on the caller's task as before.
+typedef struct moy_sh_runner moy_sh_runner_t;
+// A runner for the table `h` (its ctx and poll set: the runner wraps the
+// poll, and sets `hop` and `runner`), or NULL where the loop has no jobs.
+moy_sh_runner_t *moy_sh_board_runner(moy_sh_host_t *h, void (*done)(void *ctx, int r));
+// moy_sh_run on the session's runner: its answer, or MOY_SH_BUSY while the
+// run is parked (`done` gets the answer). MOY_SH_BUSY too while one is.
+int moy_sh_board_run(moy_sh_t *s, const char *text, size_t n);
+// Whether a run of the session is parked: the session is the run's until it
+// ends, so nothing else may enter it (a prompt, a completion).
+int moy_sh_board_busy(const moy_sh_t *s);
+// Every run of the runner's on the caller's task, never parked.
+void moy_sh_board_runner_inline(moy_sh_runner_t *r);
+// Before the session is freed: a parked run is made to end (its waits end,
+// its poll answers Ctrl-C), then the task and the record go.
+void moy_sh_board_runner_end(moy_sh_runner_t *r);
+// A Ctrl-C byte on the dev channel while the serial session's run is parked:
+// true when one was (it is interrupted).
+bool moy_sh_board_break(void);
 
 // The serial face: run `text` (one line, no newline) in the serial session.
 // False when no session could be made (said as `SH error`).

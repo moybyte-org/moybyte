@@ -34,7 +34,9 @@
 // task's (`moy_sh_g` is thread-local), so the screen's and the serial face's
 // sessions on the console's task and an SSH session on its own run side by
 // side. What touches the files tree or crosses the door goes through the
-// host's `hop` (moy_sh_hop).
+// host's `hop` (moy_sh_hop). A board's faces run a line on a stack of the
+// session's own (the host's `runner`, moy_sh_board.h), so a command that
+// waits on the console parks its run and the console's frame goes on.
 //
 // MEMORY. The session's record and its arena come from the host's `alloc`
 // (PSRAM on a board) at moy_sh_new; a pipe's buffer, a file read whole and a
@@ -50,6 +52,7 @@
 #define MOY_SH_DONE 0                   // every command ran; show the prompt
 #define MOY_SH_MORE 1                   // a command goes on: show PS2, send more
 #define MOY_SH_EXIT 2                   // the shell exited (moy_sh_status)
+#define MOY_SH_BUSY 3                   // a face's run parked: it ends later (moy_sh_board.h)
 
 #define MOY_SH_NOT_FOUND (-1)           // spawn/role: no such command
 #define MOY_SH_NEEDS_VM (-2)            // role: the VM is stopped
@@ -132,6 +135,9 @@ typedef struct {
     // (neofetch): its columns and rows, 0 rows where it has no height (may
     // be NULL: 80 columns, no height)
     void (*size)(void *ctx, int *cols, int *rows);
+    // the board's runner (moy_sh_board.h): the record of the session's own
+    // stack, its runs' (may be NULL: a run is the calling task's)
+    struct moy_sh_runner *runner;
 } moy_sh_host_t;
 
 // A session over `arena` bytes; NULL when the host's alloc refuses. `host` is

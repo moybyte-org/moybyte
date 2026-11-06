@@ -306,26 +306,26 @@ def test_update_caches_list_reads_the_cache_and_install_lands(tmp_path):
     repo.add("dm", name="Dungeon")
     repo.add("hop")
     inst, p, out, err = _pkg(tmp_path, repo)
-    assert p.update() == 0 and out == [repo.url("index.json") + ": 2 carts\n"]
+    assert done(p.update()) == 0 and out == [repo.url("index.json") + ": 2 carts\n"]
     assert len(os.listdir(tmp_path / "pkg")) == 1
     inst._net = None                                   # list reads the cache alone
     del out[:]
-    assert p.list() == 0
+    assert done(p.list()) == 0
     assert out == ["dm 1 - Dungeon\n", "hop 1 - Hop\n"]
     inst._net = MemNet(repo.routes())
     del out[:]
-    assert p.install(["dm"], yes=True) == 0, err
+    assert done(p.install(["dm"], yes=True)) == 0, err
     assert (tmp_path / "carts" / "dm.moy" / "manifest.json").exists()
     assert out[0].startswith("Getting dm 1 (") and "dm 1 installed" in out[-1]
     assert inst.held == 0, "the radio is let go"
     del out[:]
-    assert p.list(["dun"]) == 0
+    assert done(p.list(["dun"])) == 0
     assert out == ["dm 1 installed Dungeon\n"]
     repo.add("dm", version=2, name="Dungeon")
     inst._net = MemNet(repo.routes())
-    assert p.update() == 0
+    assert done(p.update()) == 0
     del out[:]
-    assert p.upgrade(yes=True) == 0 and "dm 2 installed" in out[-1]
+    assert done(p.upgrade(yes=True)) == 0 and "dm 2 installed" in out[-1]
     del out[:]
     assert p.remove(["dm"]) == 0 and out == ["dm removed\n"]
     assert not (tmp_path / "carts" / "dm.moy").exists()
@@ -338,14 +338,14 @@ def test_install_brings_its_depends_first_and_refuses_what_it_cannot(tmp_path):
     e["depends"] = ["base"]
     repo.files["index.json"] = repo.index()
     inst, p, out, err = _pkg(tmp_path, repo)
-    assert p.install(["game"], yes=True) == 0, err
+    assert done(p.install(["game"], yes=True)) == 0, err
     assert [ln.split()[1] for ln in out if ln.startswith("Getting")] == ["base", "game"]
     e["depends"] = ["nowhere"]
     repo.files["index.json"] = repo.index()
     inst2, p2, _out, err2 = _pkg(tmp_path / "b", repo)
-    assert p2.install(["game"], yes=True) == 1
+    assert done(p2.install(["game"], yes=True)) == 1
     assert err2 == ["game: It needs nowhere, which no cart shelf has."]
-    assert p2.install(["nothing"]) == 1 and err2[-1] == "nothing: no cart shelf lists it"
+    assert done(p2.install(["nothing"])) == 1 and err2[-1] == "nothing: no cart shelf lists it"
 
 
 def test_a_no_at_the_prompt_installs_nothing(tmp_path):
@@ -353,7 +353,7 @@ def test_a_no_at_the_prompt_installs_nothing(tmp_path):
     repo.add("cam", moybyte={"permissions": ["camera"]})
     inst, p, out, err = _pkg(tmp_path, repo)
     inst._consent.check = lambda cart, install=False: ([], [], None)
-    assert p.install(["cam"]) == 1
+    assert done(p.install(["cam"])) == 1
     assert not (tmp_path / "carts" / "cam.moy").exists()
     assert inst.prefs == {}, "no consent recorded"
 
@@ -363,11 +363,11 @@ def test_a_bad_signature_is_refused_by_update(tmp_path, keys):
     repo.add("dm")
     repo.files["index.json"] = _sign(repo.index()).replace(b'"dm"', b'"dx"')
     inst, p, out, err = _pkg(tmp_path, repo)
-    assert p.update() == 1 and err == [repo.url("index.json") + ": " + ci.BAD_SIGNATURE]
+    assert done(p.update()) == 1 and err == [repo.url("index.json") + ": " + ci.BAD_SIGNATURE]
     assert not (tmp_path / "pkg").exists(), "nothing cached"
     repo.files["index.json"] = _sign(repo.index())
     inst._net = MemNet(repo.routes())
-    assert p.update() == 0 and out[-1].endswith(": 1 carts, signed\n")
+    assert done(p.update()) == 0 and out[-1].endswith(": 1 carts, signed\n")
 
 
 # -- the commands on a host console -------------------------------------------------------
@@ -387,10 +387,22 @@ class IO:
         return got
 
 
+def done(verb):
+    """A verb (a generator: runtime/carts/pkg.py) stepped to its end."""
+    try:
+        while True:
+            next(verb)
+    except StopIteration as e:
+        return e.value
+
+
 def _role(ws, *argv, stdin=b""):
-    from runtime.sh_door import ShellDoor
+    from runtime.sh_door import RUNNING, ShellDoor
     io = IO(stdin)
-    code = ShellDoor(ws, io).v_role(*argv)
+    d = ShellDoor(ws, io)
+    code = d.v_role("t", *argv)
+    while code == RUNNING:
+        code = d.v_step("t")
     return code, io.fds[1].decode(), io.fds[2].decode()
 
 

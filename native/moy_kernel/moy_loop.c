@@ -97,6 +97,11 @@ static struct {
     uint32_t up_frame[MOY_UPC_CLASSES], up_last[MOY_UPC_CLASSES], up_total[MOY_UPC_CLASSES];
     moy_idle_t idle;
     heavy_t *heavy;
+    struct {
+        moy_loop_job_fn fn;
+        void *arg;
+    } jobs[MOY_LOOP_JOBS];
+    int njobs;
 } L = {.vm = true, .frame_ms = 16, .slot = 16, .light_top = MOY_IDLE_LIGHT_FULL};
 
 // -- the tier's helpers ---------------------------------------------------------
@@ -127,6 +132,55 @@ void moy_loop_say_line(const char *line) {
     } else {
         printf("%s\n", line);
     }
+}
+
+// -- the jobs ----------------------------------------------------------------------
+
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) {
+    for (int i = 0; i < L.njobs; i++) {
+        if (L.jobs[i].fn == fn && L.jobs[i].arg == arg) {
+            return true;
+        }
+    }
+    if (L.njobs == MOY_LOOP_JOBS) {
+        return false;
+    }
+    L.jobs[L.njobs].fn = fn;
+    L.jobs[L.njobs].arg = arg;
+    L.njobs++;
+    return true;
+}
+
+void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) {
+    for (int i = 0; i < L.njobs; i++) {
+        if (L.jobs[i].fn == fn && L.jobs[i].arg == arg) {
+            memmove(&L.jobs[i], &L.jobs[i + 1], (size_t)(L.njobs - i - 1) * sizeof L.jobs[0]);
+            L.njobs--;
+            return;
+        }
+    }
+}
+
+// A job may drop itself or another, or add one, while they run: each is run
+// at most once a call, by its identity.
+int moy_loop_jobs(void) {
+    int n = L.njobs;
+    moy_loop_job_fn fns[MOY_LOOP_JOBS];
+    void *args[MOY_LOOP_JOBS];
+    for (int i = 0; i < n; i++) {
+        fns[i] = L.jobs[i].fn;
+        args[i] = L.jobs[i].arg;
+    }
+    for (int i = 0; i < n; i++) {
+        bool still = false;
+        for (int j = 0; j < L.njobs; j++) {
+            still |= L.jobs[j].fn == fns[i] && L.jobs[j].arg == args[i];
+        }
+        if (still && !fns[i](args[i])) {
+            moy_loop_job_drop(fns[i], args[i]);
+        }
+    }
+    return L.njobs;
 }
 
 static uint32_t now_ms(void) {
@@ -818,9 +872,15 @@ int moy_loop_step(void) {
     }
     uint32_t svc = !L.vm ? 0u
                    : L.services | L.once | (ops->services != NULL ? ops->services() : 0u);
-    if (ops->tail != NULL || svc) {
+    if (ops->tail != NULL || svc || L.njobs) {
         if (ops->tail != NULL) {
             ops->tail(now, drew);
+        }
+        if (L.njobs) {
+            moy_loop_jobs();
+            if (L.end) {
+                return take_end();
+            }
         }
         if (svc) {
             L.once = 0;

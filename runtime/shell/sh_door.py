@@ -32,6 +32,11 @@ except ImportError:  # host: the runtime package
     from runtime import devfs as _devfs
 
 try:
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:  # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
+
+try:
     import scheduler as _sched
 except ImportError:  # host: the runtime package
     from runtime import scheduler as _sched
@@ -52,9 +57,11 @@ except ImportError:  # CPython and the browser: no VM abort
     _guard = None
 
 ABSENT = -8
+RUNNING = -100                  # a role command goes on: the session steps it again
 EPERM, ESRCH, EIO = 1, 3, 5
 SHELL = 1
 COMMAND_MS = 30000              # a command's or a REPL's run, at most
+STEP_MS = 8                     # a role command's steps in one crossing, at most this long
 NOT_RUN = 126                   # the exit code of a command refused its start
 KILLED = 137
 EXITS = 8                       # background commands' exit codes kept for `wait`
@@ -312,6 +319,7 @@ class ShellDoor:
         self.ws = ws
         self.io = io if io is not None else _io()
         self.exits = []                 # [(pid, code)] of background commands
+        self.jobs = {}                  # JOB -> (name, generator): role commands going on
 
     def __call__(self, args):
         fields = bytes(args).split(b"\0")
@@ -470,7 +478,16 @@ class ShellDoor:
         self.exits = ([(pid, code)] + self.exits)[:EXITS]
         return pid
 
-    def v_role(self, *argv):
+    # A ROLE COMMAND (runtime/shell/sh_roles.py's r_<name>) answers its exit
+    # code, or is a generator: one that waits yields between its polls, and
+    # its `return` is the code. `role JOB NAME ARGS...` starts it and steps
+    # it; while it goes on the door answers RUNNING and the session (JOB
+    # names it) crosses `step JOB` again a frame later, each crossing
+    # stepping it for STEP_MS at most (a bare `yield` ends the crossing: it
+    # waits on something), so no frame waits on it; `stop JOB` (Ctrl-C)
+    # closes it, its `finally` giving back what it took.
+
+    def v_role(self, job, *argv):
         if not argv:
             return ABSENT
         try:
@@ -480,16 +497,55 @@ class ShellDoor:
         fn = getattr(sh_roles, "r_" + argv[0], None)
         if fn is None:
             return ABSENT
+        self.v_stop(job)
+        r = self._as_shell(argv[0], lambda: fn(self, list(argv[1:])))
+        if not hasattr(r, "send"):
+            return r
+        self.jobs[job] = (argv[0], r)
+        return self.v_step(job)
+
+    def v_step(self, job):
+        got = self.jobs.get(job)
+        if got is None:
+            return ABSENT
+        name, gen = got
+        t0 = _ticks_ms()
+
+        def step():
+            while True:
+                if not next(gen) or _ticks_diff(_ticks_ms(), t0) >= STEP_MS:
+                    return RUNNING
+        r = self._as_shell(name, step)
+        if r != RUNNING:
+            self.jobs.pop(job, None)
+        return r
+
+    def v_stop(self, job):
+        got = self.jobs.pop(job, None)
+        if got is None:
+            return ABSENT
+        self._as_shell(got[0], got[1].close)
+        return 130
+
+    def _as_shell(self, name, fn):
+        """fn() as the shell (pid 1): its answer, a generator's return value
+        at its end, 1 for its failure (said on fd 2)."""
+        try:
+            import sh_roles
+        except ImportError:  # host: the runtime package
+            from runtime import sh_roles
         was = _L.current() if _L is not None else None
         if _L is not None:
             _L.current(SHELL)
         try:
-            return fn(self, list(argv[1:]))
+            return fn()
+        except StopIteration as e:
+            return e.args[0] if e.args and e.args[0] is not None else 0
         except OSError as e:
-            self.err(argv[0], sh_roles.why(e))
+            self.err(name, sh_roles.why(e))
             return 1
         except Exception as e:  # noqa: BLE001 -- a role's failure is its exit
-            self.err(argv[0], traceback_text(e).rstrip("\n"))
+            self.err(name, traceback_text(e).rstrip("\n"))
             return 1
         finally:
             if _L is not None:

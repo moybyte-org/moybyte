@@ -28,6 +28,13 @@ package.
 
 A verb that reads the indexes fetches a source the cache does not hold yet.
 
+Every verb but `sources` is a generator its caller steps (the shell's door,
+runtime/shell/sh_door.py): it yields while it waits on the network, never
+waiting in one step -- the link asked for (`ready()`, the transport's
+non-blocking poll, never `online()`), an index or a licence fetched whole by
+the http worker (`http`: its `get`, runtime/system/dev_http.py) where the
+console has one, an install a budget at a time -- and returns the exit code.
+
 The checks every install makes, here and in Get Carts (`blocker`): a store to
 keep it in, a runtime this console carries, a compiled module for this chip
 (or a main.wasm the interpreter plays), the engine's own fit and THE SHARES'
@@ -41,15 +48,16 @@ answers to or another installed command holds.
 
 import hashlib
 import json
+import os
 
 try:
     import cart_index as _ci
     from moy_store_base import _sibling_path
-    from moy_fs import _exists, _mkdir, _read
+    from moy_fs import _exists, _mkdir, _read, _remove
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import cart_index as _ci
     from runtime.moy_store_base import _sibling_path
-    from runtime.moy_fs import _exists, _mkdir, _read
+    from runtime.moy_fs import _exists, _mkdir, _read, _remove
 
 try:
     import app_perms as _perms
@@ -214,30 +222,64 @@ class Stopped(Exception):
     """Ctrl-C on the face the command runs from."""
 
 
+STEP_MS = 8                     # an install's work in one step
+KEEP_BYTES = 4096               # a cached index's bytes written in one step
+
+
+class _Worker:
+    """The installer's transport, its small documents fetched whole by the
+    http worker (`http.get`) off the VM's thread (cart_index.Fetch)."""
+
+    def __init__(self, net, http):
+        self._net = net
+        self.get = http.get
+        self.GET_MAX = http.CAP_MAX
+
+    def __getattr__(self, name):
+        return getattr(self._net, name)
+
+
 class Pkg:
     """The verbs over `inst` (the install role's server, bound, with `carts()`
     the scanned shelf), writing to `out(text)` and `err(line)`. `ask(question)`
     is a yes or no from the user (None: nobody to ask, a no); `stopped()`
-    is True once Ctrl-C came."""
+    is True once Ctrl-C came; `http` the http device API (None: the
+    transport's own `open` for every fetch)."""
 
-    def __init__(self, inst, out, err, ask=None, stopped=None):
+    def __init__(self, inst, out, err, ask=None, stopped=None, http=None):
         self.inst = inst
         self.out = out
         self.err = err
         self.ask = ask
         self.stopped = stopped or (lambda: False)
+        self.http = http
         self.held = False
 
     # -- the network ---------------------------------------------------------------
 
+    def _net(self):
+        net = self.inst.net()
+        return _Worker(net, self.http) if self.http is not None else net
+
     def _online(self):
+        """`yield from` it: the radio held and the link up, asked without
+        waiting (the transport's `ready()`; `online()` where it has none)."""
+        net = self.inst.net()
         if not self.held:
-            if self.inst.net() is None:
+            if net is None:
                 raise _ci.InstallError("This console has no network.")
             self.inst.hold()
             self.held = True
-        if not self.inst.net().online():
-            raise _ci.InstallError(_ci.net_text(self.inst.net(), "WiFi isn't connected."))
+            yield                       # the radio's lease and its dial a frame each
+        ready = getattr(net, "ready", None)
+        up = ready() if ready is not None else net.online()
+        while up is None:
+            if self.stopped():
+                raise Stopped()
+            yield
+            up = ready()
+        if not up:
+            raise _ci.InstallError(_ci.net_text(net, "WiFi isn't connected."))
 
     def release(self):
         if self.held:
@@ -245,10 +287,12 @@ class Pkg:
             self.inst.release()
 
     def _wait(self, job):
+        """`yield from` it: `job` stepped to its end, a step a frame."""
         try:
             while job.step():
                 if self.stopped():
                     raise Stopped()
+                yield
         except BaseException:
             job.close()
             raise
@@ -272,28 +316,48 @@ class Pkg:
         return self.inst.op(read)
 
     def _keep(self, url, data):
+        """`yield from` it: `data` cached for `url`, KEEP_BYTES a step (a
+        card's write runs near 140 KB/s), beside it until whole, then put
+        in its place."""
         path = self._cache_path(url)
+        part = path + ".part"
+        f = []
 
-        def write():
+        def start():
             _mkdir(_sibling_path(self.inst.root(), CACHE_DIR))
-            with open(path, "wb") as f:
-                f.write(data)
-        self.inst.op(write)
+            f.append(open(part, "wb"))
+        self.inst.op(start)
+        done = False
+        try:
+            for at in range(0, len(data), KEEP_BYTES):
+                yield
+                self.inst.op(lambda: f[0].write(data[at:at + KEEP_BYTES]))
+            done = True
+        finally:
+            def end():
+                f[0].close()
+                if done:
+                    os.rename(part, path)
+                else:
+                    _remove(part)
+            self.inst.op(end)
 
     def sources(self):
         return self.inst.op(lambda: _ci.load_indexes(self.inst.root()))
 
     def _fetch(self, url):
-        """`url`'s index, fetched, checked and cached: its carts."""
-        self._online()
-        data = self._wait(_ci.index_fetch(self.inst.net(), url))
+        """`yield from` it: `url`'s index, fetched, checked and cached: its
+        carts."""
+        yield from self._online()
+        data = yield from self._wait(_ci.index_fetch(self._net(), url))
+        yield
         carts = _ci.parse_index(data, url)
-        self._keep(url, data)
+        yield from self._keep(url, data)
         return carts
 
     def carts(self, fetch=True):
-        """Every cart the sources' indexes list, from the cache (a source it
-        does not hold yet fetched when `fetch`)."""
+        """`yield from` it: every cart the sources' indexes list, from the
+        cache (a source it does not hold yet fetched when `fetch`)."""
         out = []
         for url in self.sources():
             data = self._cached(url)
@@ -301,7 +365,7 @@ class Pkg:
                 if data is not None:
                     out.extend(_ci.parse_index(data, url))
                 elif fetch:
-                    out.extend(self._fetch(url))
+                    out.extend((yield from self._fetch(url)))
             except _ci.InstallError as exc:
                 self.err("%s: %s" % (url, exc.text))
         return out
@@ -345,7 +409,7 @@ class Pkg:
         bad = 0
         for url in self.sources():
             try:
-                carts = self._fetch(url)
+                carts = yield from self._fetch(url)
                 self.out("%s: %d carts%s\n" % (url, len(carts),
                                                ", signed" if carts and carts[0]["signed"]
                                                else ""))
@@ -355,7 +419,7 @@ class Pkg:
         return 1 if bad else 0
 
     def list(self, words=()):
-        carts = self.carts()
+        carts = yield from self.carts()
         words = [w.lower() for w in words]
         n = 0
         for c, _p, state in self._rows(carts):
@@ -370,7 +434,8 @@ class Pkg:
         return 0 if n or not words else 1
 
     def install(self, idents, yes=False, carts=None):
-        carts = self.carts() if carts is None else carts
+        if carts is None:
+            carts = yield from self.carts()
         have = installed_ids(self.inst.carts())
         todo = []
         for ident in idents:
@@ -401,7 +466,7 @@ class Pkg:
             if why is not None:
                 self.err("%s: %s" % (c["id"], why))
                 return 1
-            code = self._one(c, p, yes)
+            code = yield from self._one(c, p, yes)
             if code:
                 return code
             free = self.inst.free()
@@ -413,8 +478,8 @@ class Pkg:
         accepted = []
         for e in p["external"]:
             ref = e["licence"]
-            self._online()
-            text = _ci.as_text(self._wait(_ci.licence_fetch(self.inst.net(), c, ref)))
+            yield from self._online()
+            text = _ci.as_text((yield from self._wait(_ci.licence_fetch(self._net(), c, ref))))
             self.out("%s needs %s, under this licence:\n\n%s\n" % (
                 c["name"], e["path"], text.rstrip("\n")))
             if not (yes or (self.ask is not None and self.ask("Agree?"))):
@@ -423,11 +488,11 @@ class Pkg:
         return accepted
 
     def _one(self, c, p, yes):
-        accepted = self._licences(c, p, yes)
+        accepted = yield from self._licences(c, p, yes)
         if accepted is None:
             self.err("%s: %s" % (c["id"], _ci.NO_LICENCE))
             return 1
-        self._online()
+        yield from self._online()
         arc = 0
         for e in p["external"]:
             arc += e["archive"]["size"]
@@ -446,7 +511,8 @@ class Pkg:
         self.out("Getting %s %d (%s)\n" % (c["id"], c["version"],
                                             size_text(p["download_bytes"])))
         try:
-            while job.step():
+            while job.step(STEP_MS):
+                yield
                 if job.asking is not None:
                     self.release()
                     self.out("".join(ln + "\n" for ln in job.asking))
@@ -482,9 +548,9 @@ class Pkg:
         return code
 
     def upgrade(self, yes=False):
-        carts = self.carts()
+        carts = yield from self.carts()
         ids = [c["id"] for c, _p, state in self._rows(carts) if state == "update"]
         if not ids:
             self.out("Nothing to upgrade.\n")
             return 0
-        return self.install(ids, yes, carts)
+        return (yield from self.install(ids, yes, carts))

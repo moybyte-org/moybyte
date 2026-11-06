@@ -11,6 +11,10 @@ Needs the `http` permission.
                      host) refuses it, a redirect to it too (OSError
                      EPROTONOSUPPORT)
   tls() -> bool      whether this console's https verifies
+  take() / dial() / settle()
+                     the radio lease and the link asked for ahead of a
+                     `get`, a round trip a frame, and the lease let go
+                     where none followed
   Request.state()    None while it runs, else (status, length); OSError
                      with its errno when it got no response
   Request.body()     the body as bytes (None while it runs)
@@ -119,15 +123,36 @@ def _settle():
             ws.wifi_release(TAG)
 
 
-def _hold():
+def take():
+    """The radio lease taken ahead of a `get`, its link not yet asked for:
+    True when this call took it. A caller that spreads the radio's round
+    trips over frames (the shell's `http get`; on a P4 each is the C6's)
+    takes, then `dial()`s, then gets, and `settle()`s where no request
+    followed."""
     ws = _D.console
     if ws is None or _held[0]:
-        return
+        return False
     _held[0] = True
     ws.wifi_hold(TAG)
-    dial = getattr(getattr(ws, "cart_net", None), "dial", None)
+    return True
+
+
+def dial():
+    """The console's network asked for (cart_net `dial`), never waited:
+    the worker's task waits for the link."""
+    dial = getattr(getattr(_D.console, "cart_net", None), "dial", None)
     if dial is not None:
-        dial()                     # never waited: the worker's task waits for the link
+        dial()
+
+
+def settle():
+    """The radio lease let go once no request is in flight."""
+    _settle()
+
+
+def _hold():
+    if take():
+        dial()
 
 
 def _wake_for(req, on_done):

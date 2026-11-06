@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   _wait                             a wait a step at a time (`yield from`), Ctrl-C ends it
+#   r_settings                        system/settings
+#   r_pkg                             runtime/carts/pkg.py's verbs, stepped
+#   r_passwd                          SSH's password
+#   r_http                            a GET by the http worker, stepped
+#   r_snd                             stdin through the audio ring
+#   r_python                          a REPL or code in the shell's VM
 """The C shell's role commands (docs/os_2026-11/system.md section 1): the
 command faces of the console's Python services, which the shell reaches
 through its door (runtime/shell/sh_door.py's `role`) and refuses with "needs
@@ -10,9 +18,15 @@ Each is the face of one implementation, never a second copy, run as the shell
 microphone, the USB host, a MIDI port, the audio ring) it gives back before
 the command ends, except a media stream, which plays until `media stop`.
 A command that waits (`http get`, `mic read`, `lora recv`, `ble scan`, `snd
-play`) asks the session's face for Ctrl-C between its polls (`stopped`) and
-on one gives back what it took and exits 130, the rest of the line dropped,
-on the serial face and the screen face alike.
+play`, `pkg`'s fetches and installs) is a generator the door steps
+(runtime/shell/sh_door.py, `role`): it yields where it waits (`_wait`, a bare
+`yield`; `yield True` where more work is ready at once), so the console's
+frame goes on and the session's face alone waits; its output reaches the
+session as it comes. It asks the face for Ctrl-C between its polls
+(`stopped`), and on one, or on the session's `stop`, gives back what it took
+and exits 130, the rest of the line dropped, on every face alike. A command
+on the network asks for the link without waiting for it (cart_net `ready`,
+the http worker's own wait), never `online()`.
 
   perm [list [APP]]          each app's asked permission, on or off: Settings'
                              App permissions (runtime/shell/app_perms.py)
@@ -96,14 +110,6 @@ def why(e):
     return _WHY.get(n, "error %d" % n)
 
 
-def _sleep(ms):
-    try:
-        import time
-        time.sleep_ms(ms)
-    except AttributeError:  # CPython
-        time.sleep(ms / 1000)
-
-
 def stopped(d):
     """Ctrl-C on the face of the session the command runs from."""
     io = d.io
@@ -111,12 +117,14 @@ def stopped(d):
 
 
 def _wait(d, ms):
-    """Sleep `ms` in POLL_MS steps: True when Ctrl-C came first."""
-    for _ in range(max(1, ms // POLL_MS)):
-        if stopped(d):
-            return True
-        _sleep(POLL_MS)
-    return stopped(d)
+    """`yield from` it: `ms` waited out a step at a time (the door steps
+    the command again a frame later), True when Ctrl-C came first."""
+    t0 = _ticks_ms()
+    while not stopped(d):
+        if _ticks_diff(_ticks_ms(), t0) >= ms:
+            return False
+        yield
+    return True
 
 
 def _int(s, default=None):
@@ -420,6 +428,30 @@ def _yes(d, question):
     return line in ("y", "yes")
 
 
+def _worker():
+    """The http device API where its https verifies (the boards: pkg's
+    documents fetched off the VM's thread), else None (the host's transport
+    fetches them)."""
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    f = devices.api("http")
+    try:
+        return f if f is not None and f.tls() else None
+    except Exception:  # noqa: BLE001 -- a console that cannot say has none
+        return None
+
+
+def _then_release(p, verb):
+    """`verb`'s code, the radio's release (r_pkg's `finally`) left to a
+    step of its own."""
+    code = yield from verb
+    if p.held:
+        yield
+    return code
+
+
 def r_pkg(d, a):
     try:
         import pkg
@@ -430,24 +462,24 @@ def r_pkg(d, a):
     yes = "-y" in a
     a = [w for w in a if w != "-y"]
     p = pkg.Pkg(_Bound(InstallServer(d.ws), d.ws), d.out, lambda line: d.err("pkg", line),
-                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d))
+                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d), http=_worker())
     verb, rest = (a[0], a[1:]) if a else ("", [])
     try:
         if verb == "update" and not rest:
-            return p.update()
+            return (yield from _then_release(p, p.update()))
         if verb == "list" and not rest:
-            return p.list()
+            return (yield from _then_release(p, p.list()))
         if verb == "search" and rest:
-            return p.list(rest)
+            return (yield from _then_release(p, p.list(rest)))
         if verb == "sources" and not rest:
             d.out("".join(u + "\n" for u in p.sources()))
             return 0
         if verb == "install" and rest:
-            return p.install(rest, yes)
+            return (yield from _then_release(p, p.install(rest, yes)))
         if verb == "remove" and rest:
             return p.remove(rest)
         if verb == "upgrade" and not rest:
-            return p.upgrade(yes)
+            return (yield from _then_release(p, p.upgrade(yes)))
     except pkg.Stopped:
         return INTERRUPTED
     except pkg.InstallError as exc:
@@ -507,22 +539,31 @@ def r_http(d, a):
     f = _api(d, "http")
     if f is None:
         return 1
-    req = f.get(a[1], _int(a[2], f.CAP_MAX) if len(a) == 3 else f.CAP_MAX)
+    req = None
     try:
+        # the radio's round trips a frame each: the lease, the dial, the get
+        if getattr(f, "take", None) is not None and f.take():
+            yield
+            f.dial()
+            yield
+        req = f.get(a[1], _int(a[2], f.CAP_MAX) if len(a) == 3 else f.CAP_MAX)
         t0 = _ticks_ms()
         st = req.state()
         while st is None:
             if _ticks_diff(_ticks_ms(), t0) > WAIT_MS:
                 d.err("http", _WHY[110])
                 return 1
-            if _wait(d, POLL_MS):
+            if (yield from _wait(d, POLL_MS)):
                 return INTERRUPTED
             st = req.state()
         body = req.body()
         if body and d.io is not None:
             d.io.write(1, body)
     finally:
-        req.close()
+        if req is not None:
+            req.close()
+        elif getattr(f, "settle", None) is not None:
+            f.settle()
     if not 200 <= st[0] < 300:
         d.err("http", "status %d" % st[0])
         return 1
@@ -549,7 +590,8 @@ def r_mic(d, a):
             if n:
                 d.io.write(1, bytes(buf[:2 * n]))
                 want -= n
-            elif _wait(d, POLL_MS):
+                yield True
+            elif (yield from _wait(d, POLL_MS)):
                 return INTERRUPTED
     finally:
         f.close()
@@ -577,7 +619,7 @@ def r_lora(d, a):
                 n, rssi, snr = got
                 d.out("%d %s %s\n" % (rssi, snr, bytes(buf[:n]).decode("utf-8", "replace")))
                 return 0
-            if _wait(d, POLL_MS):
+            if (yield from _wait(d, POLL_MS)):
                 return INTERRUPTED
         d.err("lora", "nothing heard")
         return 1
@@ -594,7 +636,7 @@ def r_ble(d, a):
     ms = _int(a[1], SCAN_MS) if len(a) == 2 else SCAN_MS
     try:
         f.scan(ms)
-        if _wait(d, ms):
+        if (yield from _wait(d, ms)):
             return INTERRUPTED
         d.out("".join("%s %d %s\n" % (addr, rssi, name or "-")
                       for addr, rssi, name in f.devices()))
@@ -706,12 +748,14 @@ def r_snd(d, a):
         while at + 1 < len(data):
             took = m.snd(bytearray(data[at:at + 4096]))
             at += 2 * took
-            if stopped(d) or (not took and _wait(d, POLL_MS)):
+            if took:
+                yield True
+            if stopped(d) or (not took and (yield from _wait(d, POLL_MS))):
                 return INTERRUPTED
         c = m.snd_counts()
         t0 = _ticks_ms()
         while c is not None and c[3] < c[5] and _ticks_diff(_ticks_ms(), t0) < 2000:
-            if _wait(d, POLL_MS):
+            if (yield from _wait(d, POLL_MS)):
                 return INTERRUPTED
             c = m.snd_counts()
     finally:

@@ -113,6 +113,8 @@ static int32_t text(uint8_t *ans, size_t cap, const char *t) {
     return (int32_t)n;
 }
 
+static int steps;                       // a stepped role command's steps left
+
 int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
                       uint8_t *ans, size_t cap) {
     (void)grant;
@@ -147,15 +149,27 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
         moy_sh_fd_write(moy_sh_running(), 1, "hello from the console\n", 23);
         return 0;
     }
+    // `role JOB NAME ARGS...`: the command said back; `lease` goes on for
+    // two steps (`step JOB`), each saying itself
     if (!strcmp(f[0], "role")) {
         char line[256];
-        int m = snprintf(line, sizeof line, "console %s:", f[1]);
-        for (int i = 2; i < k; i++) {
+        int m = snprintf(line, sizeof line, "console %s:", f[2]);
+        for (int i = 3; i < k; i++) {
             m += snprintf(line + m, sizeof line - m, " %s", f[i]);
         }
         line[m++] = '\n';
         moy_sh_fd_write(moy_sh_running(), 1, line, (size_t)m);
-        return !strcmp(f[1], "perm") ? 0 : -8;
+        if (!strcmp(f[2], "lease")) {
+            steps = 2;
+            return -100;
+        }
+        return !strcmp(f[2], "perm") ? 0 : -8;
+    }
+    if (!strcmp(f[0], "step") && steps > 0) {
+        char line[32];
+        int m = snprintf(line, sizeof line, "console lease: step %d\n", 3 - steps);
+        moy_sh_fd_write(moy_sh_running(), 1, line, (size_t)m);
+        return --steps ? -100 : 0;
     }
     if (!strcmp(f[0], "read") && !strcmp(f[1], "/proc/7/status")) {
         return text(ans, cap, "Name:\tachievements\nPid:\t7\n");

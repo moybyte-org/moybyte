@@ -63,6 +63,7 @@ struct moy_sh_face {
     int in_row;                         // the T-Deck's keys on its row, not the prompt
     int enter;                          // a typed Enter owed to the row's focused key
     int swallow;                        // the Ctrl-C that stopped a run, still latched
+    int inline_runs;                    // runs never park (moy_sh_face_inline)
     int32_t key;                        // the key typed last frame
     // the log: the grid's lines as the last frame took them
     uint32_t gen;
@@ -154,6 +155,9 @@ void moy_sh_face_free(moy_sh_face_t *f) {
 moy_sh_screen_t *moy_sh_face_screen(moy_sh_face_t *f) {
     if (f->scr == NULL) {
         f->scr = moy_sh_screen_new(f->cols, f->rows, f->has_root ? f->root : NULL);
+        if (f->scr != NULL && f->inline_runs) {
+            moy_sh_screen_inline(f->scr);
+        }
         f->stale = 1;
     }
     return f->scr;
@@ -201,9 +205,14 @@ static void write_s(moy_sh_face_t *f, const char *s) {
     moy_term_write(moy_sh_screen_term(f->scr), s, strlen(s));
 }
 
+// A run of the session is parked: the session is the run's until it ends.
+static int busy(const moy_sh_face_t *f) {
+    return f->scr != NULL && moy_sh_screen_busy(f->scr);
+}
+
 static size_t prompt_of(moy_sh_face_t *f, char *out, size_t cap) {
     moy_sh_t *s = session(f);
-    if (s == NULL) {
+    if (s == NULL || busy(f)) {
         out[0] = '\0';
         return 0;
     }
@@ -316,8 +325,36 @@ static int blank(const char *s, int32_t n) {
     return 1;
 }
 
+// After a run: the prompt's line, PS2 or a new session, and the Ctrl-C that
+// stopped it kept from a second one.
+static void ran(moy_sh_face_t *f, int r) {
+    fresh_line(f);
+    f->more = r == RUN_MORE;
+    if (r == RUN_EXIT) {
+        int code = moy_sh_status(session(f));
+        moy_sh_face_close_session(f);
+        if (moy_sh_face_screen(f) != NULL) {
+            char msg[48];
+            snprintf(msg, sizeof msg, "%s[the shell exited %d]%s\n", ECHO, code, PLAIN);
+            write_s(f, msg);
+        }
+    } else if (moy_sh_status(session(f)) == INTERRUPTED) {
+        f->swallow = 1;
+    }
+    f->stale = 1;
+}
+
+// A parked run that ended since: what follows its end.
+static void settle(moy_sh_face_t *f) {
+    int r;
+    if (f->scr != NULL && moy_sh_screen_ended(f->scr, &r)) {
+        ran(f, r);
+    }
+}
+
 void moy_sh_face_submit(moy_sh_face_t *f) {
-    if (moy_sh_face_screen(f) == NULL) {
+    settle(f);
+    if (moy_sh_face_screen(f) == NULL || busy(f)) {
         return;
     }
     char text[MOY_SH_FACE_LINE + 1];
@@ -350,25 +387,21 @@ void moy_sh_face_submit(moy_sh_face_t *f) {
     }
     text[n++] = '\n';
     int r = moy_sh_screen_run(f->scr, text, (size_t)n);
-    fresh_line(f);
-    f->more = r == RUN_MORE;
-    if (r == RUN_EXIT) {
-        int code = moy_sh_status(session(f));
-        moy_sh_face_close_session(f);
-        if (moy_sh_face_screen(f) != NULL) {
-            char msg[48];
-            snprintf(msg, sizeof msg, "%s[the shell exited %d]%s\n", ECHO, code, PLAIN);
-            write_s(f, msg);
-        }
-    } else if (moy_sh_status(session(f)) == INTERRUPTED) {
-        f->swallow = 1;
+    if (r == MOY_SH_BUSY) {
+        f->stale = 1;
+        return;
     }
-    f->stale = 1;
+    ran(f, r);
 }
 
-// Ctrl-C at the prompt: the line dropped, and what `more` held.
+// Ctrl-C at the prompt: the line dropped, and what `more` held; while a run
+// is parked, the run's.
 static void interrupt(moy_sh_face_t *f) {
     if (moy_sh_face_screen(f) == NULL) {
+        return;
+    }
+    if (busy(f)) {
+        moy_sh_screen_interrupt(f->scr);
         return;
     }
     echo(f, "^C\n");
@@ -440,7 +473,7 @@ static int is_sep(char c) {
 }
 
 void moy_sh_face_complete(moy_sh_face_t *f) {
-    if (moy_sh_face_screen(f) == NULL) {
+    if (moy_sh_face_screen(f) == NULL || busy(f)) {
         return;
     }
     int32_t col = f->col, start = col;
@@ -599,7 +632,17 @@ static int feed_code(moy_sh_face_t *f, int32_t code) {
     return feed(f, b, n);
 }
 
+void moy_sh_face_inline(moy_sh_face_t *f) {
+    f->inline_runs = 1;
+}
+
+int moy_sh_face_busy(moy_sh_face_t *f) {
+    settle(f);
+    return busy(f);
+}
+
 int moy_sh_face_key(moy_sh_face_t *f, int32_t code) {
+    settle(f);
     if (full_app(f) != NULL) {
         f->swallow = 0;
         return feed_code(f, code);
@@ -689,6 +732,10 @@ int moy_sh_face_row(int desk) {
 }
 
 int moy_sh_face_cancel(moy_sh_face_t *f, int desk) {
+    if (busy(f)) {
+        moy_sh_screen_interrupt(f->scr);
+        return 1;
+    }
     moy_sh_app_t *a = app_of(f);
     if (a == NULL) {
         return 0;
@@ -727,6 +774,7 @@ int moy_sh_face_elsewhere(const moy_sh_face_t *f, int desk) {
 int moy_sh_face_input(moy_sh_face_t *f, int desk, int32_t key, int32_t repeats,
                       int32_t repeat_key, int32_t left, int32_t right, int32_t up,
                       int32_t down) {
+    settle(f);
     int row = moy_sh_face_row(desk);
     if (row != MOY_SH_ROW_TDECK) {
         f->in_row = 0;
@@ -1033,7 +1081,9 @@ static const char *hints_of(const moy_sh_face_t *f, size_t *n) {
 
 int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
                      const moy_sh_face_frame_t *fr) {
-    int out = 0;
+    settle(f);
+    // a parked run's output comes between frames, and its caret blinks
+    int out = busy(f) ? MOY_SH_FACE_AGAIN : 0;
     int fs = fr->fs > 1 ? fr->fs : 1;
     int rk = moy_sh_face_row(fr->desk);
     if (f->scr != NULL) {

@@ -3,17 +3,23 @@
 // is a cell grid (moy_term.h), which the console's terminal app draws and
 // feeds (runtime/apps/terminal_app.py).
 //
-// A RUN holds the VM's thread until its commands end, so no frame is drawn
-// and no input merged while one goes. Ctrl-C reaches it in C: the face's
-// poll kicks the input drivers (as a frame's tail does) and reads the kernel
-// input table's latches between merges (moy_input_holds): a key that types
-// 0x03 (Ctrl+C on any keyboard) or a press of `start` (the T-Deck's Mic) or
-// `b` (a gamepad's B), the cancel key each input names, interrupts the
-// running command. A role command waiting in Python asks the same poll
-// through moy_sh_interrupted, which is how the serial face's 0x03 reaches it
-// too. The poll yields the task now and then, as the serial face's does. A
-// run a key interrupted returns once the key is let go (a second and a half
-// at most), so the next frame's merge sees no press of it.
+// A RUN is the session's runner's (moy_sh_board.h): it holds the console's
+// task while it computes, and parks where it waits (`sleep`, a role command
+// between its steps), when moy_sh_screen_run answers MOY_SH_BUSY and the
+// frames go on, the run's output reaching the grid as it comes; the face
+// keeps the session's prompt down and lets nothing else enter the session
+// until moy_sh_screen_ended gives the run's answer. Ctrl-C reaches a run in
+// C: the face's own (moy_sh_screen_interrupt, what the Terminal's keys send
+// while a run is parked), and, while one holds the task, the face's poll
+// kicks the input drivers (as a frame's tail does) and reads the kernel input
+// table's latches between merges (moy_input_holds): a key that types 0x03
+// (Ctrl+C on any keyboard) or a press of `start` (the T-Deck's Mic) or `b`
+// (a gamepad's B), the cancel key each input names, interrupts the running
+// command. A role command waiting in Python asks the same poll through
+// moy_sh_interrupted, which is how the serial face's 0x03 reaches it too.
+// The poll yields the task now and then, as the serial face's does. A run a
+// key interrupted while it held the task returns once the key is let go (a
+// second and a half at most), so the next frame's merge sees no press of it.
 //
 // A TEXT APP a command opens (moy_sh_app.h) is
 // the screen's while it is in front; the face draws it and feeds it keys.
@@ -40,8 +46,15 @@ typedef struct moy_sh_screen moy_sh_screen_t;
 moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root);
 void moy_sh_screen_free(moy_sh_screen_t *f);
 
-// What was typed (a line, its newline included), as moy_sh_run.
+// What was typed (a line, its newline included), as moy_sh_run, or
+// MOY_SH_BUSY while its run is parked. An app's line runs to its end.
 int moy_sh_screen_run(moy_sh_screen_t *f, const char *text, size_t n);
+// Whether a run is parked; and 1 once, when a parked run has ended, with its
+// answer in *r.
+int moy_sh_screen_busy(const moy_sh_screen_t *f);
+// Every run on the caller's task to its end, never parked.
+void moy_sh_screen_inline(moy_sh_screen_t *f);
+int moy_sh_screen_ended(moy_sh_screen_t *f, int *r);
 // The face's own Ctrl-C: the next poll answers it.
 void moy_sh_screen_interrupt(moy_sh_screen_t *f);
 

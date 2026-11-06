@@ -8,9 +8,13 @@
 //
 // THE PROMPT is one row under the grid's log, a text view of the prompt and
 // what is typed, its caret the view's. Enter echoes the line into the grid
-// (the prompt dim, the text in cyan) and runs it; a run holds the caller's
-// thread until its commands end (moy_sh_screen.h has how Ctrl-C reaches
-// it). Tab completes the word left of the caret: a command's name from the
+// (the prompt dim, the text in cyan) and runs it on the session's runner
+// (moy_sh_screen.h): a run holds the caller's thread while it computes, and
+// where it waits it parks, the frames going on and its output streaming
+// into the grid. While a run is parked the prompt row shows no prompt, Enter
+// and Tab do nothing, Ctrl-C and the board's cancel stop the run, and each
+// frame is owed (its caret blinks); the next call after the run ended
+// brings the prompt back. Tab completes the word left of the caret: a command's name from the
 // shell's built-ins (moy_sh_complete), a path's from its folder; with several
 // candidates and no longer common stem it lists them in the grid and offers
 // the first MOY_SH_FACE_CANDS on the key row. Left and right move the caret,
@@ -138,6 +142,11 @@ const char *moy_sh_face_line(const moy_sh_face_t *f, int32_t *col);
 void moy_sh_face_set_line(moy_sh_face_t *f, const char *text, int32_t col);
 // Enter and Tab on the line as it stands.
 void moy_sh_face_submit(moy_sh_face_t *f);
+// Whether a run of the session is parked (one that ended is settled first).
+int moy_sh_face_busy(moy_sh_face_t *f);
+// Every run on the caller's task to its end (the recovery floor, whose loop
+// runs no frames' jobs): set before the first open.
+void moy_sh_face_inline(moy_sh_face_t *f);
 void moy_sh_face_complete(moy_sh_face_t *f);
 // Up (-1) or down (+1) through the lines run before; candidate `i` of the
 // key row picked (the rest of its word typed).

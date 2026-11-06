@@ -133,13 +133,24 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     (void)row;
     (void)ans;
     (void)cap;
-    static const char verb[] = "role\0passwd";
-    if (n >= sizeof verb - 1 && memcmp(arg, verb, sizeof verb - 1) == 0
-            && (n == sizeof verb - 1 || arg[sizeof verb - 1] == 0)) {
-        size_t k = n == sizeof verb - 1 ? n : sizeof verb;
-        return passwd((const char *)arg + k, n - k);
+    // `role JOB passwd ARGS...`
+    static const char verb[] = "role";
+    static const char name[] = "passwd";
+    const char *p = (const char *)arg, *end = p + n;
+    if (n < sizeof verb || memcmp(p, verb, sizeof verb) != 0) {
+        return MOY_LOOP_ROLE_NEEDS_VM;
     }
-    return MOY_LOOP_ROLE_NEEDS_VM;
+    p += sizeof verb;
+    p += strnlen(p, (size_t)(end - p)) + 1;     // the job
+    if (p > end || (size_t)(end - p) < sizeof name - 1 || memcmp(p, name, sizeof name - 1) != 0
+            || (p + sizeof name - 1 < end && p[sizeof name - 1] != 0)) {
+        return MOY_LOOP_ROLE_NEEDS_VM;
+    }
+    p += sizeof name - 1;
+    if (p < end) {
+        p++;
+    }
+    return passwd(p, (size_t)(end - p));
 }
 
 // -- the pair: a board's loopback --------------------------------------------------
