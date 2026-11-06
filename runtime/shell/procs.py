@@ -805,7 +805,8 @@ class Procs:
             _sample(p.world.player, el)
         rows = _sched.SCHED.procs
         if rows:
-            for sp in rows.values():
+            for pid in rows:            # a dict's own iteration: values() is an object
+                sp = rows[pid]
                 d = (sp.cost_us - sp.seen_us) & _sched.ALLOC_WRAP
                 sp.seen_us = sp.cost_us
                 sp.cpu = d // el

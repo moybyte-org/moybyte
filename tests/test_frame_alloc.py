@@ -36,7 +36,10 @@ T-Deck diag tick (net of a thread's straddling block, see SLACK). The console bo
 the default), where nothing periodic is formatted, printed or ringed (owner
 call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
 skill lists the idioms that allocate on a board while reading as free; a dozen
-of them were on this path at once.
+of them were on this path at once. The work the console runs on the wall
+clock (the battery's read, the task manager's accounting) is made due and
+measured on its own as well: how many of its periods a window spans depends
+on how fast the machine runs the window's frames.
 
 It then runs Notes, the app cart on the public UI API, with a note open: idle
 it paints nothing and allocates nothing, and typed into, one key every fourth
@@ -211,6 +214,18 @@ class Pin:
 
     def value(self, v=None):
         return self._v
+
+
+class ADC:
+    """The battery's gauge (device/battery.py): a cell resting at 3.8 V
+    behind the T-Deck's 100k/100k divider."""
+    ATTN_11DB = 3
+
+    def __init__(self, pin, atten=None):
+        pass
+
+    def read_uv(self):
+        return 1900000
 
 
 class I2C:
@@ -402,6 +417,7 @@ def measure(loop):
     asleep(loop, info)
     music(loop, info)
     banner(loop, info)
+    periodic(loop, info)
     notes(loop, info)
     code(loop, info)
     apps(loop, info)
@@ -548,6 +564,41 @@ def banner(loop, info):
     info["banner_top"] = loop.ws.wm.top_kind()
     scheduler.SCHED.stop(pid)
     notifications.NOTES.reset()
+
+
+def periodic(loop, info):
+    """The console's work that runs on the wall clock, each made due and run
+    alone: the battery's read (device/battery.py, every REFRESH_MS) and the
+    task manager's accounting (Procs.account, every METER_MS) over a table
+    that holds the services stopped above. A window holds one of them or
+    none depending on how fast the machine runs its frames."""
+    from gc import mem_alloc
+    import scheduler
+    ws = loop.ws
+    b = ws.battery
+    pr = ws.procs
+    b._at = None
+    b.level()
+    gc.collect()
+    gc.disable()
+    out = []
+    for _ in range(3):
+        b._at = None
+        a = mem_alloc()
+        b.level()
+        out.append(mem_alloc() - a)
+    info["battery"] = out
+    out = []
+    for _ in range(3):
+        now = time.ticks_ms()
+        pr._acct_t = time.ticks_add(now, -60000)
+        a = mem_alloc()
+        pr.account(now)
+        out.append(mem_alloc() - a)
+    info["account"] = out
+    gc.enable()
+    info["battery_level"] = b.level()
+    info["account_rows"] = len(scheduler.SCHED.procs)
 
 
 def _typing(loop, ms, least=0):
@@ -1458,6 +1509,18 @@ def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
     keys = (len(info["notes_typing"]) + 3) // 4
     assert keys - 1 <= info["notes_typing_drawn"] <= keys + 1, (
         info["notes_typing_drawn"], keys)
+
+
+def test_the_console_s_clocked_work_allocates_nothing(result):
+    """The battery's read and the task manager's accounting run on the wall
+    clock, so whether a window takes one in depends on the machine's speed:
+    under xdist's load a window of MIN_FRAMES spans several. Each is pinned
+    here on its own, made due."""
+    info, text = result
+    assert info["battery_level"] == 55, info["battery_level"]   # 3.8 V resting
+    assert info["account_rows"] > 0, "no service row to account"
+    assert info["battery"] == [0, 0, 0], info["battery"]
+    assert info["account"] == [0, 0, 0], info["account"]
 
 
 def test_notes_idle_allocates_nothing(result):
