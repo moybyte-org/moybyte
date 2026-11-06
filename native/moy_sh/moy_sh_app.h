@@ -1,10 +1,11 @@
 // moy_sh_app: the shell's text apps (docs/os_2026-11/system.md section 1,
-// "full-screen text apps"): `edit` (moy_sh_edit.c) and `top` (moy_sh_top.c),
-// each one C implementation that every face
+// "full-screen text apps"): `edit` (moy_sh_edit.c), `top` (moy_sh_top.c) and
+// the interactive `python` (below), each one C implementation that every face
 // hosts the same way -- the Terminal's (moy_sh_screen.c under moy_sh_face.c),
 // the recovery floor's (the same face) and the serial face (moy_sh_board.c).
 //
-// A COMMAND OPENS ONE. `edit` and `top` ask the session's host to put the app in front (the host table's
+// A COMMAND OPENS ONE. `edit`, `top` and a `python` whose stdin is the
+// terminal ask the session's host to put the app in front (the host table's
 // `app`); the app opens inside that run (reading its file, saying on stderr
 // why it would not) and takes the face when the run's line ends. A face
 // with no screen answers MOY_SH_NOT_FOUND and the command says "needs a
@@ -24,7 +25,10 @@
 //
 // A LINE APP keeps the face's prompt line, its editing and its history: the
 // prompt is the app's, and Enter hands the line to the app instead of the
-// shell.
+// shell. `python` is one: a line runs in the session as `python --repl LINE`,
+// the console's REPL (runtime/shell/sh_roles.py) answering whether the
+// statement goes on, so with the VM stopped it says "needs the console" and
+// never opens.
 //
 // ITS MEMORY is the host table's `alloc` (PSRAM on a board): the front, the
 // app's record and its screen at the open, given back at the end; a key or a

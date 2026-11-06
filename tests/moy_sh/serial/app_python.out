@@ -1,0 +1,7 @@
+> sh python
+SH python: needs the console
+SH end 1
+> sh echo "status $?"
+SH status 1
+SH end 0
+[exit 0]

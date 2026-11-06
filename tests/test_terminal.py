@@ -365,6 +365,31 @@ def test_edit_opens_full_screen_saves_and_gives_the_grid_back(term, tmp_path):
     assert plain(app)[-1] == "$ edit /sd/moybyte/system/settings"
 
 
+def test_python_is_a_line_app_over_the_prompt(term):
+    """`python` with the terminal for its stdin keeps the prompt line, its
+    prompt the REPL's: a line at a time into the console's VM, a block held
+    until it ends, Ctrl-D on an empty line back to the shell."""
+    _ws, app = term
+    run(app, "python")
+    assert app.face.app() == "python" and not app.face.full()
+    assert app.face.prompt() == ">>> "
+    run(app, "6 * 7")
+    assert plain(app)[-2:] == [">>> 6 * 7", "42"]
+    run(app, "def f(x):")
+    assert app.face.prompt() == "... "
+    app.face.set_line("")
+    app.face.key(9)                                     # Tab: four spaces
+    app.face.set_line(app.face.line() + "return x + 1")
+    app.face.submit()
+    run(app, "")
+    run(app, "print(f(1))")
+    assert plain(app)[-1] == "2" and app.face.prompt() == ">>> "
+    app.face.key(4)
+    assert app.face.app() is None and app.face.prompt() == "$ "
+    run(app, "echo $?")
+    assert plain(app)[-1] == "0"
+
+
 def test_mic_enters_the_app_key_row_on_the_tdeck(term):
     """On the T-Deck the board's cancel (Mic) goes to a full-screen app's key
     row, whose Quit ends it; with no app in front Mic stays the console's."""

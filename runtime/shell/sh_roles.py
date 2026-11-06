@@ -53,7 +53,9 @@ on the serial face and the screen face alike.
   settings reload            read the file again (an edit by hand) and apply it
   python [-c CODE]           a REPL over stdin into the shell's VM (an
                              expression's value printed, a block ended by a
-                             blank or unindented line), or CODE run
+                             blank or unindented line), or CODE run; with
+                             the terminal for its stdin the face's REPL in
+                             front (`--repl LINE`, a line at a time)
 """
 
 try:
@@ -702,16 +704,93 @@ def _open_brackets(text):
     return n > 0
 
 
-def r_python(d, a):
-    stdin = _door.In(d.io)
-    stdout = _door.Out(d.io, 1)
-    stderr = _door.Out(d.io, 2)
+REPL_MORE = 100                 # `python --repl LINE`: the statement goes on
+REPL_END = 101                  # the REPL ended (SystemExit)
+_REPL = [None]                  # the interactive REPL's namespace and held lines
+
+
+def _python_ns(stdin, stdout, stderr):
     try:
         import moybyte
     except ImportError:  # host: the runtime package
         from runtime import moybyte
     ns = {"__name__": "__main__", "moybyte": moybyte}
     ns.update(_door.stdio_names(stdin, stdout, stderr))
+    return ns
+
+
+def _python_one(src, ns, stdout, stderr, status):
+    """One statement: an expression's value printed; SystemExit's code kept
+    in status[1]."""
+    try:
+        try:
+            code = compile(src, "<stdin>", "eval")
+        except SyntaxError:
+            exec(compile(src, "<stdin>", "exec"), ns)
+            return
+        v = eval(code, ns)
+    except SystemExit as e:
+        status[1] = _door.exit_code(e.args[0] if e.args else None, stderr)
+        return
+    if v is not None:
+        ns["_"] = v
+        stdout.write(repr(v) + "\n")
+
+
+def _python_run(src, ns, stdout, stderr, status):
+    """Run `src` under the guard: True once it raised SystemExit."""
+    code = _door.run_program(_door.SHELL, lambda: _python_one(src, ns, stdout, stderr, status),
+                             stderr)
+    if code:
+        status[0] = code
+    return status[1] is not None
+
+
+def _python_repl(d, a, stdin, stdout, stderr):
+    """`python --repl`: the interactive REPL the Terminal's face holds in
+    front (native/moy_sh/moy_sh_app.c), a line a call. With no line a fresh
+    namespace; `--drop` lets go of the block typed so far; a LINE answers
+    0 (run, or blank), REPL_MORE (its block goes on) or REPL_END (exit())."""
+    st = _REPL[0]
+    if not a or st is None:
+        st = _REPL[0] = {"ns": _python_ns(stdin, stdout, stderr), "held": []}
+        if not a:
+            return 0
+    if a[0] == "--drop":
+        st["held"] = []
+        return 0
+    ns, held = st["ns"], st["held"]
+    ns.update(_door.stdio_names(stdin, stdout, stderr))
+    status = [0, None]
+    line = a[0].rstrip("\r\n")
+    if held:
+        text = "\n".join(held)
+        if _open_brackets(text) or (line.strip() and line[:1] in " \t"):
+            held.append(line)
+            return REPL_MORE
+        st["held"] = []
+        if _python_run(text + "\n", ns, stdout, stderr, status):
+            _REPL[0] = None
+            return REPL_END
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return 0
+    if s.endswith(":") or s.endswith("\\") or _open_brackets(s):
+        st["held"] = [line]
+        return REPL_MORE
+    if _python_run(line + "\n", ns, stdout, stderr, status):
+        _REPL[0] = None
+        return REPL_END
+    return 0
+
+
+def r_python(d, a):
+    stdin = _door.In(d.io)
+    stdout = _door.Out(d.io, 1)
+    stderr = _door.Out(d.io, 2)
+    if a and a[0] == "--repl":
+        return _python_repl(d, a[1:], stdin, stdout, stderr)
+    ns = _python_ns(stdin, stdout, stderr)
     if a:
         if a[0] != "-c" or len(a) < 2:
             return _usage(d, "python", "[-c CODE]")
@@ -719,26 +798,8 @@ def r_python(d, a):
         return _door.run_program(_door.SHELL, lambda: exec(src, ns), stderr)
     status = [0, None]              # the last failure's code, SystemExit's
 
-    def one(src):
-        try:
-            try:
-                code = compile(src, "<stdin>", "eval")
-            except SyntaxError:
-                exec(compile(src, "<stdin>", "exec"), ns)
-                return
-            v = eval(code, ns)
-        except SystemExit as e:
-            status[1] = _door.exit_code(e.args[0] if e.args else None, stderr)
-            return
-        if v is not None:
-            ns["_"] = v
-            stdout.write(repr(v) + "\n")
-
     def run(src):
-        code = _door.run_program(_door.SHELL, lambda: one(src), stderr)
-        if code:
-            status[0] = code
-        return status[1] is not None
+        return _python_run(src, ns, stdout, stderr, status)
 
     held = []
     while True:

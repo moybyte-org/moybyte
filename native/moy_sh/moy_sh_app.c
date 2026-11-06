@@ -1,13 +1,15 @@
 // moy_sh_app: the shell's text apps. moy_sh_app.h has the contract.
 
+#include <stdio.h>
 #include <string.h>
 
 #include "moy_sh_app.h"
 
 extern const moy_sh_app_ops_t moy_sh_edit_app;
 extern const moy_sh_app_ops_t moy_sh_top_app;
+static const moy_sh_app_ops_t python_app;
 
-static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_edit_app, &moy_sh_top_app};
+static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_edit_app, &python_app, &moy_sh_top_app};
 #define NAPPS ((int)(sizeof APPS / sizeof APPS[0]))
 
 struct moy_sh_app {
@@ -272,3 +274,94 @@ int moy_sh_app_key(const char **pp, const char *end) {
         default: return 0;
     }
 }
+
+// -- python: the console's REPL as a line app ---------------------------------------
+
+#define REPL_MORE 100                   // `python --repl LINE`: the statement goes on
+#define REPL_END 101                    // the REPL ended (SystemExit)
+
+typedef struct {
+    int more;
+} py_t;
+
+static int py_open(moy_sh_app_t *a, void *st, int argc, char **argv) {
+    (void)st;
+    (void)argc;
+    (void)argv;
+    moy_sh_t *s = a->s;
+    const moy_sh_host_t *h = moy_sh_host(s);
+    char *args[] = {"python", "--repl", NULL};
+    int r = h->role != NULL ? h->role(h->ctx, s, 2, args) : MOY_SH_NOT_FOUND;
+    if (r == 0) {
+        return 0;
+    }
+    const char *why = r == MOY_SH_NEEDS_VM ? "python: needs the console\n"
+                    : r == MOY_SH_NOT_FOUND ? "python: not served here\n" : NULL;
+    if (why != NULL) {
+        moy_sh_fd_write(s, 2, why, strlen(why));
+        return 1;
+    }
+    return r;
+}
+
+// `python --repl ARG...` run in the session, ARG single-quoted.
+static int py_send(moy_sh_app_t *a, const char *flag, const char *text) {
+    size_t n = strlen(text), cap = 32 + n * 4;
+    char *cmd = moy_sh_app_alloc(a, cap);
+    if (cmd == NULL) {
+        return 1;
+    }
+    size_t k = (size_t)snprintf(cmd, cap, "python --repl %s'", flag);
+    for (size_t i = 0; i < n; i++) {
+        if (text[i] == '\'') {
+            memcpy(cmd + k, "'\\''", 4);
+            k += 4;
+        } else if (text[i] != '\n' && text[i] != '\r') {
+            cmd[k++] = text[i];
+        }
+    }
+    cmd[k++] = '\'';
+    cmd[k++] = '\n';
+    int r = moy_sh_app_run(a, cmd, k);
+    moy_sh_app_free(a, cmd);
+    return r == MOY_SH_DONE ? moy_sh_status(a->s) : REPL_END;
+}
+
+static int py_line(moy_sh_app_t *a, void *st, const char *text) {
+    py_t *p = st;
+    int r = py_send(a, "", text);
+    p->more = r == REPL_MORE;
+    return r == REPL_END ? MOY_SH_APP_END : MOY_SH_APP_GO;
+}
+
+static int py_keys(moy_sh_app_t *a, void *st, const char *k, size_t n) {
+    py_t *p = st;
+    for (size_t i = 0; i < n; i++) {
+        if (k[i] == 3 && p->more) {
+            py_send(a, "--drop ", "");
+            p->more = 0;
+        } else if (k[i] == 4 || k[i] == 0x1b) {
+            return MOY_SH_APP_END;
+        }
+    }
+    return MOY_SH_APP_GO;
+}
+
+static const char *py_prompt(moy_sh_app_t *a, void *st) {
+    (void)a;
+    return ((py_t *)st)->more ? "... " : ">>> ";
+}
+
+static const char *const PY_KEYS[] = {"Exit", "\x04", NULL};
+
+static const moy_sh_app_ops_t python_app = {
+    .name = "python",
+    .state = sizeof(py_t),
+    .full = 0,
+    .text = 1,
+    .keys = PY_KEYS,
+    .open = py_open,
+    .keys_in = py_keys,
+    .line = py_line,
+    .prompt = py_prompt,
+};

@@ -58,9 +58,10 @@ holding the permissions its consent grants, its `print` and `input` the
 session's streams over the door, its exit code `main`'s answer, under the
 scheduler's guard for 30 s at most. A command run with `&` runs to its end
 before the prompt returns, its output into the log under its pid, and `wait`
-reads its code. `python` reads its stdin as a REPL (an expression's value
-printed) or runs `-c CODE`; the serial face's stdin is empty, so there it
-takes a pipe or a here-document.
+reads its code. `python` with the terminal for its stdin is the
+interactive REPL in front of the face (below); with a pipe or a
+here-document it reads that as a REPL (an expression's value printed), and
+it runs `-c CODE`.
 
 **Built-ins are views of OS services: one implementation, a GUI face and a
 command face, never a second copy.** The core commands are **C built-ins**
@@ -100,8 +101,8 @@ console: `settings reload` (it applies the file), the other `pkg` verbs,
 `perm`, `notify`, `service`, `lease`, `python`, the device faces, the
 installed commands, `df` and the console's /proc, /dev and /bin rows.
 
-**The text apps** (`native/moy_sh/moy_sh_app.h`): `edit FILE` (#117) and
-`top`, each one C implementation that every face
+**The text apps** (`native/moy_sh/moy_sh_app.h`): `edit FILE` (#117), `top`
+and the interactive `python`, each one C implementation that every face
 hosts the same way: the Terminal's face, the recovery console's (the same
 face) and the serial face. The command asks its face to put the app in
 front, and the app takes the face when the line's run ends. A full-screen
@@ -121,9 +122,11 @@ notation and the answer is its screen (`moy_sh_board.h`). The split (owner,
 console edits `system/settings` with no VM; `top` is C over the rows `ps`
 reads, the task manager's CPU and memory crossing the door with them
 (`runtime/shell/sh_door.py`), so with the VM stopped it shows what `ps`
-shows, the kernel, the console stopped and the run in front. A line app
-keeps the face's prompt row, its prompt the app's, and takes each line
-typed.
+shows, the kernel, the console stopped and the run in front; `python` is a
+line app over the prompt row, its prompt `>>> `, each line run as `python
+--repl LINE` in the console's VM (`runtime/shell/sh_roles.py`), so with the
+VM stopped it says "needs the console". An `input()` typed at it meets the
+end of the face's stdin.
 
 **The screen face** is the Terminal's face, which is C
 (`native/moy_sh/moy_sh_face.h`, owner 2026-11-05: the terminal is mostly C,

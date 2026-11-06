@@ -849,6 +849,12 @@ const struct builtincmd *moy_sh_find_builtin(const char *name) {
 int moy_sh_rolecmd(int argc, char **argv) {
     moy_sh_t *s = moy_sh_cur;
     flushall();
+    if (argc == 1 && strcmp(argv[0], "python") == 0 && isatty(0) && s->host.app != NULL) {
+        int a = s->host.app(s->host.ctx, s, argc, argv);   // the REPL in front of the face
+        if (a != MOY_SH_NOT_FOUND) {
+            return a;
+        }
+    }
     int r = s->host.role != NULL ? s->host.role(s->host.ctx, s, argc, argv) : MOY_SH_NOT_FOUND;
     if (r == MOY_SH_NEEDS_VM) {
         return moy_sh_fail("%s: needs the console", argv[0]);
