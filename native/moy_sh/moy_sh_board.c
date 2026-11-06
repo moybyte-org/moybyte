@@ -1049,7 +1049,7 @@ const char *moy_sh_board_store(moy_sh_t *s) {
     return stores[store_at(s)];
 }
 
-void moy_sh_board_go_home(moy_sh_t *s, int keep_etc) {
+int moy_sh_board_go_home(moy_sh_t *s, int keep_etc) {
     const char *const systems[] = {
 #define SYSTEM(p) p "/system",
         STORES(SYSTEM)
@@ -1065,7 +1065,13 @@ void moy_sh_board_go_home(moy_sh_t *s, int keep_etc) {
         moy_sh_set_etc(s, systems[i]);
     }
     const char *dirs[] = { homes[i], NULL };
-    moy_sh_go_home(s, dirs);
+    return moy_sh_go_home(s, dirs);
+}
+
+void moy_sh_board_home_late(moy_sh_t *s, int *homed) {
+    if (!*homed && !moy_sh_board_busy(s) && strcmp(moy_sh_cwd(s), "/") == 0) {
+        *homed = moy_sh_board_go_home(s, 0) >= 0;
+    }
 }
 
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
@@ -1107,6 +1113,7 @@ typedef struct {
     moy_sh_t *s;
     moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
     moy_sh_runner_t *runner;
+    int homed;                          // the session has reached its home
 } serial_t;
 
 static void serial_flush(serial_t *f) {
@@ -1296,12 +1303,13 @@ bool moy_sh_board_line(const char *text) {
             moy_loop_say_line("SH error no session");
             return false;
         }
-        moy_sh_board_go_home(s, 0);
+        f->homed = moy_sh_board_go_home(s, 0) >= 0;
         moy_sh_setvar(s, "TERM", "dumb");  // the channel carries lines, not a screen
         f->s = s;
         moy_sh_park(s);
     }
     serial_t *f = moy_sh_ctx(s);
+    moy_sh_board_home_late(s, &f->homed);
     if (moy_sh_board_busy(s)) {
         if (strcmp(text, "^C") == 0) {
             f->stop = 1;

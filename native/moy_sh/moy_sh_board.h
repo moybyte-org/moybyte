@@ -75,8 +75,13 @@ const char *moy_sh_board_store(moy_sh_t *s);
 
 // A new session settled in the store: /etc its system folder (unless
 // `keep_etc`: the SSH face's is the server's own), its home and working
-// folder the user's files folder, else `/` as it began.
-void moy_sh_board_go_home(moy_sh_t *s, int keep_etc);
+// folder the user's files folder, else `/` as it began: the store's index, or
+// -1 when its files folder is not there.
+int moy_sh_board_go_home(moy_sh_t *s, int keep_etc);
+// A face's session made before the store was there (a card that mounts after
+// the session began) goes home at the first line that finds it, while it is
+// still at `/`. `*homed`: the face's word, set once it has.
+void moy_sh_board_home_late(moy_sh_t *s, int *homed);
 
 // The board's table into `h`, the face's terminal (`out`, `poll`, `ctx`) in it.
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,

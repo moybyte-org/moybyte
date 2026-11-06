@@ -1,0 +1,20 @@
+> sh pwd
+SH /
+SH end 0
+> sh echo $HOME
+SH /
+SH end 0
+> sh mkdir -p /sd/moybyte/carts /sd/moybyte/files
+SH end 0
+> sh pwd
+SH /sd/moybyte/files
+SH end 0
+> sh echo $HOME
+SH /sd/moybyte/files
+SH end 0
+> sh cd /proc
+SH end 0
+> sh pwd
+SH /proc
+SH end 0
+[exit 0]

@@ -47,6 +47,7 @@ struct moy_sh_screen {
     moy_sh_app_t *app;                  // the text app in front (moy_sh_app.h)
     int ctrl;                           // the input types control keys
     moy_sh_runner_t *runner;
+    int homed;                          // the session has reached its home
     int ended, result;                  // a parked run's end, not yet taken
     char root[MOY_SH_SCREEN_ROOT];
 };
@@ -173,7 +174,7 @@ moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
         h.free(NULL, f);
         return NULL;
     }
-    moy_sh_board_go_home(f->s, 0);
+    f->homed = moy_sh_board_go_home(f->s, 0) >= 0;
     return f;
 }
 
@@ -213,6 +214,7 @@ static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks) {
     if (moy_sh_board_busy(f->s)) {
         return MOY_SH_BUSY;
     }
+    moy_sh_board_home_late(f->s, &f->homed);
     f->held = keys_held();
     f->by_keys = 0;
     f->polled = NOW_MS();
