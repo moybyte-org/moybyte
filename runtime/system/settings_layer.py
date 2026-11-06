@@ -44,6 +44,11 @@ pointer this layer is routed.
 """
 
 try:
+    import ssh_service as _ssh
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ssh_service as _ssh
+
+try:
     import ui as _ui
     import layout_base as _lb
     from crash_guard import crash_available, crash_lines, last_crash
@@ -1294,6 +1299,7 @@ class SettingsLayer:
         self._name = None
         if got != str(self.ws.system.get("name", "") or ""):
             self.ws.system.set("name", got)
+            _ssh.rename(self.ws)
 
     def leave(self):
         """Settings stopped holding the keyboard (the console's frame saw input

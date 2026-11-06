@@ -262,7 +262,7 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
 // for each (tests/test_sh_door.py holds the two equal).
 static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
-    "pkg", "python", "service", "settings", "snd", "usb", NULL,
+    "passwd", "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
 
 // The files tree's root, as moy_sh_board_host gives it.

@@ -169,8 +169,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   the "network" permission), `link` (a match; taken before `link.start()`),
   `carts` (the Get Carts app while it fetches an index or a cart), `http`
   (an app's `moybyte.http` request while it runs, `runtime/system/dev_http.py`)
-  and `media` (a stream while a URL of its list may play,
-  `runtime/system/dev_media.py`).
+  `media` (a stream while a URL of its list may play,
+  `runtime/system/dev_media.py`) and `ssh` (the SSH server while a password
+  is set, `runtime/system/ssh_service.py`).
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
   guard and `state`'s `wifi_held` names the holders. On the consoles the

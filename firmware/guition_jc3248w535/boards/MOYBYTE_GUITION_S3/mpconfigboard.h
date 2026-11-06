@@ -165,6 +165,9 @@
 // starts and stops as the spine's lease asks, and Python never constructs the
 // port's network.WLAN on this board.
 #define MOY_NET_WIFI                        (1)
+// The mDNS name (`<name>.local`, Settings' Name) the console answers to while
+// its SSH server serves (runtime/system/ssh_service.py).
+#define MOY_NET_MDNS                        (1)
 
 // The VM abort: the scheduler stops a background Python callback that never
 // returns while the shell goes on (native/moy_kernel/modmoy_guard.c).

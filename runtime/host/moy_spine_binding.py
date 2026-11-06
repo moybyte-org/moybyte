@@ -122,7 +122,7 @@ _SIGS = (
 # moy_settings_save_fn: (ctx, text, len) -> nonzero when it landed.
 SAVE_FN = c.CFUNCTYPE(c.c_int, _P, _P, _SIZE)
 
-LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media")
+LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh")
 
 
 def binding(sanitize=False):

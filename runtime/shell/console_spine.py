@@ -485,7 +485,8 @@ class SpineVerbs:
         (the WIFI panel), "cart" (a run with the "network" permission), "link"
         (a match), "carts" (the Get Carts app while it fetches), "http" (a
         process's `moybyte.http` request while it runs, dev_http.py), "media" (a
-        stream while a URL of its list may play, dev_media.py). A new consumer
+        stream while a URL of its list may play, dev_media.py), "ssh" (the SSH
+        server while it serves, ssh_service.py). A new consumer
         of the network takes a tag here and releases it on its way out, or the
         radio never goes off again. The tags are `moy_spine.LEASE_TAGS`, and
         any other is refused (ValueError)."""

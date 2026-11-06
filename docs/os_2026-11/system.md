@@ -236,15 +236,22 @@ session the kernel keeps: `SH` a line of output, then `SH end <status>`), over a
 terminal through the webhost (`device/moy_webhost.py`, a route beside
 `/run` and `/update`), and over **SSH**: `ssh moybyte.local` from any
 laptop, `scp`/`sftp` into the files tree, mDNS for the hostname (the IDF's
-`mdns` component), crypto from the mbedTLS already in the image
-(`native/moy_net/moy_net_port.c`), the server Dropbear (MIT-style, small,
-built for embedded; owner, 2026-11-03; libssh is LGPL and awkward in a
-statically linked FSL image, wolfSSH is GPL). **Sign-in (owner,
+`mdns` component, the name Settings' Name), the server Dropbear (MIT-style,
+small, built for embedded; owner, 2026-11-03; libssh is LGPL and awkward in a
+statically linked FSL image, wolfSSH is GPL) with its own crypto: the image's
+mbedTLS has no curve25519, chacha20 or ed25519 (the spike, e5b4dcd9e), so
+Dropbear's bundled libtomcrypt carries them (`native/moy_ssh/README.md`).
+**Sign-in (owner,
 2026-11-03)**: password login by default, the password set by the user at
 setup (on the Zero, on its webhost page), never a shared default; keys in
 `system/authorized_keys`, so `ssh-copy-id` works; passwords and keys are
 both valid, and an advanced user turns passwords off
 with one line in the sshd_config-like `system/ssh` (`password_auth = no`).
+With no password set there is no SSH. The password's hash is
+`system/password`, set with the shell's `passwd`; the shell's `/etc` is
+`system/`, and `/etc/dropbear` names it too, where ssh-copy-id puts a key
+for a Dropbear server. The server holds the radio (the `ssh` lease) while a
+password is set (`runtime/system/ssh_service.py`).
 The web terminal asks for the same password, since anyone on the LAN would
 otherwise get a root shell; the serial terminal needs no sign-in, being the
 owner's cable. **A spike first**: image size against `headroom_floor_kib`,
@@ -270,9 +277,10 @@ over SFTP only (owner, 2026-11-03).
 
 **`system/`** holds the console's documents **as plain-text files like
 `/etc`** (owner, 2026-11-03), beside the carts folder (`/sd/moybyte/system/`
-on a card): `settings` and `sources` (§6) today, and `wifi`,
-`authorized_keys`, `ssh`, `crontab` and `hostname` as the phases that need
-them arrive; the shell reaches them, and `settings` works over them.
+on a card): `settings` and `sources` (§6), `password`, `ssh`,
+`authorized_keys` and the SSH host key (§3), and `wifi`, `crontab` and
+`hostname` as the phases that need them arrive; the shell reaches them as
+`/etc`, and `settings` works over them.
 
 **`system/settings`** (P3.2, `runtime/carts/moy_docs.py`) is every row
 `ws.system` holds, one `key = value` a line, sorted by key, each value the

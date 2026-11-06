@@ -51,6 +51,10 @@ on the serial face and the screen face alike.
   settings set KEY VALUE...  a JSON value, or the words as a string; applied
   settings unset KEY         at once where the console applies the key live
   settings reload            read the file again (an edit by hand) and apply it
+  passwd PASSWORD            the console's password, for SSH's sign-in
+                             (runtime/system/ssh_service.py): set, and the
+                             server serves; `passwd -d` removes it and stops it
+  passwd                     whether one is set, and what SSH serves
   python [-c CODE]           a REPL over stdin into the shell's VM (an
                              expression's value printed, a block ended by a
                              blank or unindented line), or CODE run; with
@@ -467,6 +471,30 @@ def r_lease(d, a):
         from runtime.leases import pins
     text = pins()
     d.out(text + "\n" if text else "")
+    return 0
+
+
+def r_passwd(d, a):
+    try:
+        import ssh_service
+    except ImportError:  # host: the runtime package
+        from runtime import ssh_service
+    ws = d.ws
+    if not a:
+        st = ssh_service.status()
+        d.out("password %s\n" % ("set" if ssh_service.is_set() else "not set"))
+        if st is not None:
+            d.out("ssh %s as %s.local, %d session(s), %d refused\n"
+                  % ("serving" if st[0] else "off", ssh_service.hostname(ws), st[1], st[3]))
+        return 0
+    if a == ["-d"]:
+        ssh_service.set_password(ws, None)
+        return 0
+    if len(a) != 1 or a[0].startswith("-"):
+        return _usage(d, "passwd", "PASSWORD | -d")
+    if not ssh_service.set_password(ws, a[0]):
+        d.err("passwd", "not set")
+        return 1
     return 0
 
 

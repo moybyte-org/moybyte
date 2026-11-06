@@ -178,6 +178,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import scheduler as _scheduler
 
+# The SSH server, served at the first frame where a password is set.
+try:
+    import ssh_service as _ssh
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ssh_service as _ssh
+
 # The hardware leases (leases.py): the `pins` verbs' local service, and the
 # grants a lease and a device API (devices.py) check; devfs.py's process rows.
 try:
@@ -3339,11 +3345,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def boot_services(self):
         """The services that start with the console: every service cart
-        holding `autostart`, and those a VM stop paused (scheduler.boot)."""
+        holding `autostart`, those a VM stop paused (scheduler.boot), and the
+        SSH server where a password is set (ssh_service.boot)."""
         try:
             _scheduler.boot(self)
         except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
             print("Moybyte services: %s" % (exc,))
+        _ssh.boot(self)
 
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
