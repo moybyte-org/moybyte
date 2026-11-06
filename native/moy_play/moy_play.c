@@ -480,7 +480,8 @@ static void refresh(run_t *r, int32_t *s) {
         s[SNAP_PLAYERS] = 2;
         s[SNAP_KEY] = 0;
         s[SNAP_TOUCH_X] = s[SNAP_TOUCH_Y] = s[SNAP_TOUCH_DOWN] = s[SNAP_TOUCH_MS] = 0;
-        s[SNAP_TIME_MS] = (int32_t)(moycore_run_now_ms() - r->start_ms);
+        // time() is the match's clock: two consoles' wall clocks are two worlds.
+        s[SNAP_TIME_MS] = (int32_t)(m->s.frame * 1000 / (m->s.tick_hz ? m->s.tick_hz : 30));
         return;
     }
     uint32_t held = 0, pressed = 0;

@@ -1059,6 +1059,11 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
         np = ws.player._netplay
         assert np.checks >= 4 and np.desync < 0, \
             "the desync check compared checkpoints and found them agreeing"
+        assert ws.ns["time"]() == np.frame * 1000 // np.tick_hz, \
+            "time() is the match's clock, never a board's wall clock"
+        ws.input.last_key = ord("x")
+        ws.player._tick_keys(ws)
+        assert ws.ns["key"]() == 0, "a key does not cross the air, so a match has none"
 
 
 def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkeypatch):

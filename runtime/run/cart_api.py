@@ -403,7 +403,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
 
     def time():
         # Milliseconds since the Player stamped the run: the clock a Lua or a
-        # compiled cart's time() reads too (lua_ext.snap_shared).
+        # compiled cart's time() reads too (lua_ext.snap_shared). In a match,
+        # the match's clock: two consoles' wall clocks are two worlds.
+        mc = getattr(input, "match_clock", None)
+        if mc is not None:
+            return mc.frame * 1000 // mc.tick_hz
         return _since_ms(getattr(input, "cart_start_ms", 0))
 
     def key(code=None):

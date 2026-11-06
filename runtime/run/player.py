@@ -725,6 +725,7 @@ class Player(PlayerDiag):
             self.ws.netplay = None
         try:
             self.ws.input.netplay_live = False
+            self.ws.input.match_clock = None
         except Exception:  # noqa: BLE001
             pass
         # ...and the radio goes down with it.
@@ -859,6 +860,7 @@ class Player(PlayerDiag):
         # make_api is handed.
         try:
             ws.input.netplay_live = self._netplay is not None
+            ws.input.match_clock = self._netplay  # time() reads the match's clock
         except Exception:  # noqa: BLE001 -- a bare test stub need not carry it
             pass
         if self._netplay is not None and self._netplay.config:
@@ -2217,6 +2219,8 @@ class Player(PlayerDiag):
         # independent of whether the backend sets last_key before or after
         # begin_frame().
         k = ws.input.last_key
+        if self._netplay is not None:
+            k = 0                       # only buttons cross the air: no key() in a match
         fed = self._focus_editor
         if fed is None:
             ws.input.cart_key = k

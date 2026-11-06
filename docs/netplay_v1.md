@@ -108,7 +108,9 @@ fixed `dt`, a re-seed each logic frame from (seed, frame) since drawing consumes
 the stream too, the HOST's cart config winning for the match, and a cart's
 `_draw` running exactly once for each tick it simulates (2026-11-06): a kid's
 `_draw` keeps state as often as not, and a "free"-paced cart such as Brick
-Siege drew every loop frame of a match, a count no two boards share. CPython and
+Siege drew every loop frame of a match, a count no two boards share. A cart's
+`time()` reads the match's clock (frame × tick) and `key()` reads nothing,
+because a board's wall clock and keyboard bytes are its own. CPython and
 MicroPython ship different PRNGs, so only device↔device agrees. And the Player
 drains the radio BEFORE deciding a tick (`drain_input`): tail-draining left the
 peer's input a loop frame stale, worth 8.0% → 6.4% stalls on the P4 pair.
