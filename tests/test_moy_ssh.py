@@ -338,15 +338,27 @@ def test_top_and_edit_run_on_the_alternate_screen(harness):
     assert (harness["system"] / "memo").read_text() == "Xhello\n"
 
 
+def ended(h, n, wait=10.0):
+    """The STATS line once the server has ended `n` connections: a client
+    returns at the channel's close, before the server has let its session
+    go."""
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        s = stats(h)
+        if int(s.get("ended", -1)) >= n:
+            return s
+        time.sleep(0.05)
+    raise AssertionError("the server ended %s connections, not %d" % (stats(h).get("ended"), n))
+
+
 def test_every_session_gives_back_what_it_took(harness):
+    n = int(stats(harness)["ended"])
     for i in range(3):
         assert ssh(harness, PASSWORD, "moy@127.0.0.1", "echo %d" % i).returncode == 0
-    time.sleep(0.3)
-    held = int(stats(harness)["heap_now"])
+    held = int(ended(harness, n + 3)["heap_now"])
     for i in range(3):
         assert ssh(harness, PASSWORD, "moy@127.0.0.1", "ls / | wc -l").returncode == 0
-    time.sleep(0.3)
-    s = stats(harness)
+    s = ended(harness, n + 6)
     assert int(s["heap_now"]) == held
     assert int(s["session_peak"]) > 0
 
@@ -359,6 +371,8 @@ def refused(h, wait=3.0):
             socket.create_connection(("127.0.0.1", h["port"]), timeout=1).close()
         except ConnectionRefusedError:
             return True
+        except ConnectionResetError:
+            pass                    # the listener closed under this connect: ask again
         time.sleep(0.1)
     return False
 

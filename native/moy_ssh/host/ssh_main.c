@@ -274,9 +274,9 @@ int main(int argc, char **argv) {
             ended = s.ended;
             listening = s.listening;
             parked = now_parked;
-            printf("STATS sessions=%u signed_in=%u refused=%u heap_now=%zu heap_peak=%zu "
+            printf("STATS ended=%u sessions=%u signed_in=%u refused=%u heap_now=%zu heap_peak=%zu "
                    "session_peak=%zu to_shell_ms=%u arena_peak=%zu listening=%d parked=%d\n",
-                   s.sessions, s.signed_in, s.refused, s.heap_now, s.heap_peak,
+                   s.ended, s.sessions, s.signed_in, s.refused, s.heap_now, s.heap_peak,
                    s.session_peak, s.handshake_ms, s.arena_peak, s.listening, parked);
             fflush(stdout);
         }
