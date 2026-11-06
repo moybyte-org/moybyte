@@ -449,7 +449,7 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
 
     a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
     peer_mac = b"\xaa" * 6
-    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0, 5])
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
     a.radio.inbox.append((peer_mac, inp))
     a.radio.inbox.append((peer_mac, beacon))
@@ -477,8 +477,8 @@ def test_a_stale_input_frame_from_a_previous_match_cannot_reach_a_new_one():
     _see_each_other(a, b, clock)
     a.offer(wsa, "Brick Siege")
     assert a.session.session != old, "a new match gets a new session id"
-    stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF,
-                             0, 0, 0]))
+    stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF, 0]
+                            + [0] * 10 + [0, 0]))
     a._dispatch(wsa, b"\x02" * 6, stale)
     assert a.session.packets_in == 0
 
@@ -970,7 +970,7 @@ def _cart_world(ws):
     return "\n".join(out)
 
 
-def _two_consoles(tmp_path, monkeypatch, title, loss, frames):
+def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None):
     """Two real consoles in one process over a lossy air, each kid mashing
     buttons on their own seed, the cart's world recorded per lockstep frame.
     Each console keeps its own random stream (two boards share nothing)."""
@@ -990,6 +990,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames):
             board="b%d" % i, name="n%d" % i, ticks_ms=clock,
             radio=_FakeRadio(air, mac), wlan=_FakeWlan(mac),
             launch=moy_espnow.launch_cart)
+        ws.link.check_worlds(True)
         wss.append(ws)
         streams.append(random.Random(100 + i).getstate())
 
@@ -1004,7 +1005,9 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames):
     names = ("left", "right", "up", "down", "a", "b")
     held = [set(), set()]
     worlds = ({}, {})
-    for _ in range(frames):
+    for k in range(frames):
+        if tamper is not None:
+            tamper(k, wss)
         clock.advance(17)
         for i in (0, 1):
             ws = wss[i]
@@ -1022,7 +1025,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames):
             np = ws.player._netplay
             if np is not None:
                 worlds[i].setdefault((np.session, np.frame), _cart_world(ws))
-    return worlds
+    return worlds, wss
 
 
 def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeypatch):
@@ -1032,8 +1035,30 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
     stall: every frame both simulated must hold the same world. A stalled
     tick's retry resampling the frame it had already emitted parted the two
     tanks within three seconds here."""
-    worlds = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 700)
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 700)
     both = sorted(set(worlds[0]) & set(worlds[1]))
     assert len(both) > 200, "the premise: a long match formed and advanced"
     bad = [f for f in both if worlds[0][f] != worlds[1][f]]
     assert bad == [], "first divergent frame %r" % (bad[:1],)
+    for ws in wss:
+        np = ws.player._netplay
+        assert np.checks >= 4 and np.desync < 0, \
+            "the desync check compared checkpoints and found them agreeing"
+
+
+def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkeypatch):
+    """The desync check (2026-11-06): two worlds that disagree are SAID, on
+    serial and on the screen, never left to paint two plausible games. One
+    console's tank is nudged a pixel mid-match -- the shape of every
+    nondeterminism the lockstep contract forbids -- and the next checkpoint
+    both consoles compare names it, as a world (not an input) disagreement."""
+    def nudge(k, wss):
+        if k == 300:
+            wss[1].ns["tanks"][0][0] += 1.0
+
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 420, nudge)
+    for ws in wss:
+        np = ws.player._netplay
+        assert np.desync > 0 and np.desync_kind == 2, (np.desync, np.desync_kind)
+        assert ws._notice is not None and ws._notice[0] == "Out of sync"
+    assert wss[0].link.stats()["match"]["desync_kind"] == "worlds"

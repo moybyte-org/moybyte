@@ -708,6 +708,9 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
         if (r->in != NULL) {
             moy_input_masks(r->in, MOY_INPUT_UNION, &held, &pressed);
         }
+        if (moy_lockstep_world_due(m)) {
+            moy_lockstep_world(m, m->s.frame, moycore_lua_digest());
+        }
         if (moy_lockstep_advance(m, (uint8_t)(held & MOY_PLAY_BUTTON_MASK), now, true) == 1) {
             *ticks = 1;
             r->reseed = true;

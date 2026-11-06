@@ -58,9 +58,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
 # from cart_api (its one author) and is handed to the session.
 try:
-    from players import mask_of as _netplay_mask
+    from players import mask_of as _netplay_mask, world_text as _world_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.players import mask_of as _netplay_mask
+    from runtime.players import mask_of as _netplay_mask, world_text as _world_text
 try:
     from cart_api import CART_BUTTONS as _NET_BUTTONS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -889,6 +889,10 @@ class Player(PlayerDiag):
                 _moy_play.end(run, _moy_play.END_CRASH)
             return ok
         code, t_compile_native, _ckey, _csig = self._compile_python(project, src, ns)
+        if self._netplay is not None:
+            # The desync check's world digest, when the link has it armed:
+            # the cart's globals entering a checkpoint frame.
+            self._netplay.world = lambda: _world_text(ns)
         try:
             t4 = _ticks_ms()
             if code is None:

@@ -70,6 +70,11 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n);
 // The frame's halves are the console's: moycore_run_split.
 // The VM closed and the pool given back. Safe with no VM.
 void moycore_lua_close(void);
+// A digest of the cart's world: every global that is data (numbers by their
+// bits, strings, booleans, tables three deep), order-independent so table
+// layout cannot move it; functions and userdata are not the world. 0 with
+// no VM. The lockstep desync check's Lua half (native/moy_play/moy_match.h).
+uint32_t moycore_lua_digest(void);
 
 // The runaway watch (native/moy_play/moy_play.h): from the watcher's task,
 // make the open Lua run raise at its next instruction, `what` after its

@@ -315,7 +315,7 @@ try:
 except ImportError:                     # CPython: the host's ctypes module
     from runtime import moy_play as _mp
 
-PROTO = 1
+PROTO = 2
 T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE = 1, 2, 3, 4, 5, 6
 TICK_HZ = 30
 DELAY = 1
@@ -385,6 +385,33 @@ class _SendIo:
         pass
 
 
+def _plain(v, depth):
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return repr(v)
+    if depth > 0 and isinstance(v, (list, tuple)):
+        return "[" + ",".join(_plain(x, depth - 1) or "?" for x in v) + "]"
+    if depth > 0 and isinstance(v, dict):
+        ks = [k for k in v if isinstance(k, (int, str))]
+        ks.sort(key=repr)
+        return "{" + ",".join("%r:%s" % (k, _plain(v[k], depth - 1) or "?") for k in ks) + "}"
+    return None
+
+
+def world_text(ns):
+    """A Python cart's world as text, for the desync check's world digest:
+    every global that is data (names with a leading underscore are the
+    console's), three containers deep. Objects and functions are not the
+    world."""
+    out = []
+    for k in sorted(ns):
+        if k[:1] == "_":
+            continue
+        t = _plain(ns[k], 3)
+        if t is not None:
+            out.append(k + "=" + t)
+    return "\n".join(out)
+
+
 class LockstepSession:
     """One two-console match as the console sees it: the C session
     (moy_lockstep_*) and its two global players' slots in `router`, both
@@ -420,6 +447,7 @@ class LockstepSession:
         self.session = int(_m.session)
         self.config = _decode_config(_m.config)
         self._router = router
+        self.world = None               # the cart's world as text, for the check
         self.local = self.remote = None
         if router is not None:
             # Both slots are the session's and NOT auto-advanced: their edges
@@ -434,7 +462,8 @@ class LockstepSession:
     def __getattr__(self, name):
         if name in ("frame", "delay", "redundancy", "stalls", "stall_ticks",
                     "waiting", "dead", "packets_in", "packets_out",
-                    "last_peer_frame", "peer_need", "tick_ms"):
+                    "last_peer_frame", "peer_need", "tick_ms", "desync",
+                    "desync_kind", "checks"):
             return getattr(self.__dict__["_m"], name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
             return getattr(self.__dict__["_m"], name[1:])
@@ -464,7 +493,11 @@ class LockstepSession:
         """One lockstep frame: True simulate (both slots now hold this frame's
         buttons and the random stream starts from the frame's seed), False
         STALL. Never blocks, never guesses."""
-        if self._m.advance(held_mask, now_ms) != 1:
+        m = self._m
+        w = self.world
+        if w is not None and m.world_due():
+            m.world(w())
+        if m.advance(held_mask, now_ms) != 1:
             return False
         held = self._m.held
         self._apply(self.local, held[self.index])
@@ -763,6 +796,9 @@ class EspNowLink:
         if s is not None:
             if ws.netplay is not s:
                 ws.netplay = s
+            if s.desync >= 0 and self._said != (s.session, s.desync):
+                self._said = (s.session, s.desync)
+                self._say_desync(ws)
         elif ws.netplay is not None and isinstance(ws.netplay, LockstepSession) \
                 and ws.netplay._m is m:
             ws.netplay = None
@@ -778,6 +814,31 @@ class EspNowLink:
         if not ok and m.live:
             print("Moybyte link: no cart named %r here" % title)
             self.end_match(ws)
+
+    _said = None
+
+    def _say_desync(self, ws):
+        """The match's desync on the screen: two worlds that disagree are
+        said, never left to paint two plausible games."""
+        notice = getattr(ws, "notice", None)
+        if notice is None:
+            return
+        try:
+            try:
+                import ui_draw as _ud
+            except ImportError:
+                from runtime import ui_draw as _ud
+            notice(_ud.s("notice.out_of_sync"), _ud.s("notice.out_of_sync_why"), "warn")
+        except Exception as exc:  # noqa: BLE001 -- a notice must never kill a frame
+            print("Moybyte link: notice failed:", exc)
+
+    def check_worlds(self, on=True):
+        """Arm the desync check's world half (a diag: a digest of the cart's
+        world at every checkpoint, compared only where both consoles armed it)."""
+        if self._m is None:
+            self.start()
+        if self._m is not None:
+            self._m.world_check(bool(on))
 
     def _dispatch(self, ws, mac, msg):
         if self._m is not None:
@@ -844,7 +905,11 @@ class EspNowLink:
                 "stall_ticks": s.stall_ticks, "delay": s.delay,
                 "m_ema": s._m_ema, "waiting": s.waiting, "in": s.packets_in,
                 "out": s.packets_out, "peer_frame": s.last_peer_frame,
+                "checks": s.checks, "desync": None if s.desync < 0 else s.desync,
+                "desync_kind": ("inputs", "worlds")[s.desync_kind - 1]
+                if s.desync >= 0 else None,
             },
+            "world_check": bool(m.world_check) if m is not None else None,
         }
 
 

@@ -88,7 +88,7 @@ def _step(a, b, wire, frames=1):
 
 def _input_packet(session, newest, waiting, masks):
     return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
-                  waiting & 0xFF, waiting >> 8] + list(masks))
+                  waiting & 0xFF, waiting >> 8] + [0] * 10 + list(masks))
 
 
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
@@ -279,7 +279,7 @@ def test_a_packet_from_a_previous_match_is_ignored():
     wire = _Wire()
     a, b = _match(wire, session=7)
     (sa, _ra, _ia), _ = a, b
-    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0, 0, 0])
+    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [0, 0])
     assert sa.on_packet(bytes(stale)) is False
     stale[2] = 7
     assert sa.on_packet(bytes(stale)) is True
@@ -488,6 +488,39 @@ def test_a_raise_writes_the_frame_it_skips_before_it_can_be_emitted():
     for g in (f + 1, f + 2):
         assert sa._m._m.s.mine_f[g & 255] == g, "frame %d is on the tape" % g
         assert sa._m._m.s.mine_m[g & 255] == 0x08
+
+
+def test_the_input_check_compares_every_checkpoint_and_names_a_parting():
+    """Every MOY_MATCH_CHECK_EVERY frames each console stamps the hash of
+    every input it applied, and every packet carries its newest stamp: a
+    delivery, ordering or delay bug -- the class the resample bug was -- is
+    named at the next checkpoint instead of painting two games. Always on: it
+    is the inputs alone, a byte a frame, in C."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 100)
+    assert sa.checks >= 2 and sb.checks >= 2 and sa.desync < 0 and sb.desync < 0
+    sb._m._m.s.hist ^= 1                  # B's record of an applied frame parts
+    _step(a, b, wire, 40)
+    assert sa.desync > 0 and sa.desync_kind == 1, "the inputs, not the worlds"
+    assert sb.desync == sa.desync
+
+
+def test_the_world_check_compares_only_where_both_consoles_armed_it():
+    """The world half is a diag: a console that did not arm it stamps no
+    digest, and a digest is never compared against nothing."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa._m.world_check(True)
+    sa.world = lambda: "only A looks"
+    sb.world = lambda: "B is not asked"
+    _step(a, b, wire, 100)
+    assert sa.checks >= 2 and sa.desync < 0
+    sb._m.world_check(True)
+    _step(a, b, wire, 40)
+    assert sa.desync > 0 and sa.desync_kind == 2
 
 
 def test_stall_ticks_counts_ticks_not_retries():

@@ -124,6 +124,15 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     // The match's seed is the frame-zero state both consoles agree on: the
     // cart's _init draws from it.
     s->frame_seed = seed;
+    s->hist = MOY_LOCKSTEP_HASH0;
+    s->world_f = -1;
+    s->ck_last = -1;
+    s->peer_ck_f = -1;
+    s->peer_ck_cmp = -1;
+    s->desync = -1;
+    for (int i = 0; i < MOY_MATCH_CHECKS; i++) {
+        s->ck_f[i] = -1;
+    }
     if (cfg != NULL) {
         copy_str(s->config, sizeof(s->config), cfg, strlen(cfg));
     }
@@ -168,6 +177,98 @@ bool moy_lockstep_due(moy_match_t *m, uint32_t now) {
     return true;
 }
 
+uint32_t moy_lockstep_hash(uint32_t h, const uint8_t *p, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        h = (h ^ p[i]) * 16777619u;
+    }
+    return h;
+}
+
+bool moy_lockstep_world_due(const moy_match_t *m) {
+    const moy_lockstep_t *s = &m->s;
+    return m->world_check && s->live && s->frame > 0 && s->frame % MOY_MATCH_CHECK_EVERY == 0
+           && s->world_f != s->frame && s->ck_last != s->frame;
+}
+
+void moy_match_world_check(moy_match_t *m, bool on) {
+    m->world_check = on;
+}
+
+void moy_lockstep_world(moy_match_t *m, int32_t frame, uint32_t digest) {
+    moy_lockstep_t *s = &m->s;
+    if (s->live && frame == s->frame && s->ck_last != frame) {
+        s->world_f = frame;
+        s->world_d = digest;
+    }
+}
+
+// One checkpoint against another: the first disagreement is the match's
+// desync, said once.
+static void compare(moy_match_t *m, int32_t f, uint32_t in_a, uint32_t w_a, uint32_t in_b,
+                    uint32_t w_b) {
+    moy_lockstep_t *s = &m->s;
+    uint8_t kind = in_a != in_b ? 1 : (w_a != 0 && w_b != 0 && w_a != w_b) ? 2 : 0;
+    if (kind == 0) {
+        s->checks++;
+        return;
+    }
+    if (s->desync < 0) {
+        s->desync = f;
+        s->desync_kind = kind;
+        say(m, "Moybyte link: OUT OF SYNC at frame %ld (%s differ)", (long)f,
+            kind == 1 ? "inputs" : "worlds");
+    }
+}
+
+static void check_peer(moy_match_t *m) {
+    moy_lockstep_t *s = &m->s;
+    if (s->peer_ck_f <= s->peer_ck_cmp) {
+        return;
+    }
+    for (int i = 0; i < MOY_MATCH_CHECKS; i++) {
+        if (s->ck_f[i] == s->peer_ck_f) {
+            compare(m, s->peer_ck_f, s->ck_in[i], s->ck_w[i], s->peer_ck_in, s->peer_ck_w);
+            s->peer_ck_cmp = s->peer_ck_f;
+            return;
+        }
+    }
+}
+
+static void checkpoint(moy_match_t *m) {
+    moy_lockstep_t *s = &m->s;
+    int32_t f = s->frame;
+    if (f <= 0 || f % MOY_MATCH_CHECK_EVERY != 0 || s->ck_last == f) {
+        return;
+    }
+    unsigned i = (unsigned)(f / MOY_MATCH_CHECK_EVERY) % MOY_MATCH_CHECKS;
+    s->ck_f[i] = f;
+    s->ck_in[i] = s->hist;
+    s->ck_w[i] = s->world_f == f ? s->world_d : 0u;
+    s->ck_last = f;
+    check_peer(m);
+}
+
+static void fold(moy_lockstep_t *s) {
+    uint8_t b[7] = {(uint8_t)s->frame, (uint8_t)(s->frame >> 8), (uint8_t)(s->frame >> 16),
+                    (uint8_t)(s->frame >> 24), s->held[0], s->held[1], 0};
+    s->hist = moy_lockstep_hash(s->hist, b, 6);
+}
+
+static void put16(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+static void put32(uint8_t *p, uint32_t v) {
+    put16(p, v);
+    put16(p + 2, v >> 16);
+}
+
+static uint32_t get32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16)
+           | ((uint32_t)p[3] << 24);
+}
+
 static void emit(moy_match_t *m, int32_t newest) {
     moy_lockstep_t *s = &m->s;
     s->has_sent = true;
@@ -184,20 +285,28 @@ static void emit(moy_match_t *m, int32_t newest) {
     if (n < 1) {
         n = 1;
     }
-    uint8_t p[7 + MOY_MATCH_MAX_SPAN];
+    uint8_t p[MOY_MATCH_IN_HDR + MOY_MATCH_MAX_SPAN];
     p[0] = MOY_MATCH_PROTO;
     p[1] = MOY_MATCH_T_INPUT;
     p[2] = s->session;
-    p[3] = (uint8_t)(newest & 0xFF);
-    p[4] = (uint8_t)((newest >> 8) & 0xFF);
-    p[5] = (uint8_t)(s->frame & 0xFF);      // ...and what I am waiting for
-    p[6] = (uint8_t)((s->frame >> 8) & 0xFF);
+    put16(p + 3, (uint32_t)newest);
+    put16(p + 5, (uint32_t)s->frame);       // ...and what I am waiting for
+    // ...and my newest checkpoint (frame 0 is never one: none yet)
+    int ck = -1;
+    for (int i = 0; i < MOY_MATCH_CHECKS; i++) {
+        if (s->ck_last >= 0 && s->ck_f[i] == s->ck_last) {
+            ck = i;
+        }
+    }
+    put16(p + 7, ck < 0 ? 0u : (uint32_t)s->ck_last);
+    put32(p + 9, ck < 0 ? 0u : s->ck_in[ck]);
+    put32(p + 13, ck < 0 ? 0u : s->ck_w[ck]);
     for (int32_t i = 0; i < n; i++) {
         int v = tape_get(s->mine_f, s->mine_m, newest - i);
-        p[7 + i] = v < 0 ? 0 : (uint8_t)v;
+        p[MOY_MATCH_IN_HDR + i] = v < 0 ? 0 : (uint8_t)v;
     }
     s->packets_out++;
-    broadcast(m, p, (size_t)(7 + n));
+    broadcast(m, p, (size_t)(MOY_MATCH_IN_HDR + n));
 }
 
 static void apply(moy_lockstep_t *s, int player, uint8_t mask) {
@@ -216,6 +325,7 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     // the air, where the peer keeps the first copy it hears. Every frame up
     // to `due` is written before it is emitted, so a raise's skipped frame
     // never goes out as a placeholder a later write contradicts.
+    checkpoint(m);
     int32_t due = s->frame + s->delay;
     for (int32_t f = s->frame + 1; f <= due; f++) {
         if (tape_get(s->mine_f, s->mine_m, f) < 0) {
@@ -267,6 +377,7 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     int mine = tape_get(s->mine_f, s->mine_m, s->frame);
     apply(s, s->index, mine < 0 ? 0 : (uint8_t)mine);   // frames before the delay: nobody moved
     apply(s, s->peer, (uint8_t)theirs);
+    fold(s);
     s->waiting = false;
     s->frame++;
     s->frame_seed = moy_lockstep_seed_of(s->seed, s->frame);
@@ -295,7 +406,8 @@ int32_t moy_lockstep_expand(const moy_match_t *m, uint32_t f16) {
 int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t now,
                         bool timed) {
     moy_lockstep_t *s = &m->s;
-    if (!s->live || n < 7 || data[0] != MOY_MATCH_PROTO || data[1] != MOY_MATCH_T_INPUT) {
+    if (!s->live || n < MOY_MATCH_IN_HDR || data[0] != MOY_MATCH_PROTO
+            || data[1] != MOY_MATCH_T_INPUT) {
         return 0;
     }
     // A stale packet from the previous match carries its session id.
@@ -304,14 +416,24 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     }
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
-    size_t k = n - 7u;
+    uint32_t ck16 = (uint32_t)data[7] | ((uint32_t)data[8] << 8);
+    if (ck16 != 0u) {
+        int32_t ck = moy_lockstep_expand(m, ck16);
+        if (ck > s->peer_ck_f) {
+            s->peer_ck_f = ck;
+            s->peer_ck_in = get32(data + 9);
+            s->peer_ck_w = get32(data + 13);
+            check_peer(m);
+        }
+    }
+    size_t k = n - (size_t)MOY_MATCH_IN_HDR;
     if (k > MOY_MATCH_MAX_SPAN) {
         k = MOY_MATCH_MAX_SPAN;
     }
     for (size_t i = 0; i < k; i++) {
         int32_t f = newest - (int32_t)i;
         if (f >= 0 && tape_get(s->theirs_f, s->theirs_m, f) < 0) {
-            tape_put(s->theirs_f, s->theirs_m, f, data[7 + i]);
+            tape_put(s->theirs_f, s->theirs_m, f, data[MOY_MATCH_IN_HDR + i]);
             if (timed) {
                 unsigned j = (unsigned)f & 63u;
                 s->arr_f[j] = f;

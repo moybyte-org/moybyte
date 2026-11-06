@@ -21,6 +21,8 @@
     "notice.crashed_last": "It crashed last time",
     "notice.store_full": "The store is full",
     "notice.theme_refused": "Theme %s won't load",
+    "notice.out_of_sync": "Out of sync",
+    "notice.out_of_sync_why": "The two games differ from here",
     "theme.why_big": "its theme.json is too big",
     "theme.why_syntax": "its theme.json isn't one",
     "theme.why_newer": "it needs a newer Moybyte",

@@ -36,7 +36,9 @@ static const moy_match_io_t K_IO = {k_send, k_recv, k_add_peer, NULL, NULL, NULL
 #define K_HAS_LINK 1
 #endif
 
+#include "moy_chrome.h"
 #include "moy_loop.h"
+#include "moy_str.h"
 
 static moy_match_t *g_kernel;
 
@@ -63,8 +65,22 @@ moy_match_t *moy_match_kernel_make(const char *name, const char *board, uint32_t
 #endif
 }
 
+// The match's desync, said over whatever screen is up -- a run the kernel
+// drives included, whose frames the console's own notice never reaches.
+static int32_t g_said = -1;
+static uint8_t g_said_session;
+
 void moy_match_kernel_poll(uint32_t now) {
-    if (g_kernel != NULL && g_kernel->active) {
-        moy_match_poll(g_kernel, now);
+    moy_match_t *m = g_kernel;
+    if (m == NULL || !m->active) {
+        return;
+    }
+    moy_match_poll(m, now);
+    if (m->s.live && m->s.desync >= 0
+            && (g_said != m->s.desync || g_said_session != m->s.session)) {
+        g_said = m->s.desync;
+        g_said_session = m->s.session;
+        moy_chrome_notice(moy_str(MOY_S_NOTICE_OUT_OF_SYNC),
+                          moy_str(MOY_S_NOTICE_OUT_OF_SYNC_WHY), false, now + 8000u);
     }
 }

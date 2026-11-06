@@ -85,6 +85,23 @@ MicroPython ship different PRNGs, so only device↔device agrees. And the Player
 drains the radio BEFORE deciding a tick (`drain_input`): tail-draining left the
 peer's input a loop frame stale, worth 8.0% → 6.4% stalls on the P4 pair.
 
+**A desync is SAID, never painted** (2026-11-06). Every 32 frames
+(`MOY_MATCH_CHECK_EVERY`) each console stamps a checkpoint, the state entering
+that frame: a hash of every input it applied, and a digest of the cart's world
+when its tier gave one. Every input packet carries the sender's newest stamp,
+and the first that disagrees prints `Moybyte link: OUT OF SYNC at frame N
+(inputs|worlds differ)` and puts "Out of sync" over whatever screen is up (the
+kernel's notice for a run it drives, the console's otherwise); the match plays
+on. The input half is always on and is C alone. The world half is the
+frame-aligned probe of §5 built in, and a diag: `link check on` on the dev
+channel of BOTH consoles, a digest only being compared against another (a
+Python cart's data globals as text, `players.world_text`; a Lua cart's by
+`moycore_lua_digest`; a compiled cart gives none). A cart that reads local
+state on purpose -- Harpoon Pop's high score is each console's own `pmem` --
+reads as a world desync there. The check rides the input packet, so
+`MOY_MATCH_PROTO` went to 2 with it, and consoles on different protocols do not
+see each other.
+
 **The handshake is BROADCAST, addressed in the payload** — START and JOIN carry
 the destination MAC as six bytes. Unicast was the protocol's only such frame and
 kept vanishing: 376 input frames and 20 beacons arrived against **zero**

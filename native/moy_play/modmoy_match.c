@@ -224,6 +224,28 @@ static mp_obj_t mt_packet(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_packet_obj, 2, 3, mt_packet);
 
+static mp_obj_t mt_world_check(mp_obj_t self, mp_obj_t on) {
+    moy_match_world_check(M(self), mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_world_check_obj, mt_world_check);
+
+static mp_obj_t mt_world_due(mp_obj_t self) {
+    return mp_obj_new_bool(moy_lockstep_world_due(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_world_due_obj, mt_world_due);
+
+// The tier's world digest for the checkpoint about to be stamped: the bytes
+// (a str or a buffer) hashed here, so a Python tier never hashes by hand.
+static mp_obj_t mt_world(mp_obj_t self, mp_obj_t data) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    uint32_t d = moy_lockstep_hash(MOY_LOCKSTEP_HASH0, b.buf, b.len);
+    moy_lockstep_world(M(self), M(self)->s.frame, d ? d : 1u);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_world_obj, mt_world);
+
 static mp_obj_t mt_tps(mp_obj_t self, mp_obj_t now) {
     return mp_obj_new_int_from_uint(moy_lockstep_tps(M(self), now_of(now)));
 }
@@ -269,6 +291,10 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_last_peer_frame: dest[0] = mp_obj_new_int(s->last_peer_frame); return;
         case MP_QSTR_peer_need: dest[0] = mp_obj_new_int(s->peer_need); return;
         case MP_QSTR_frame_seed: dest[0] = mp_obj_new_int_from_uint(s->frame_seed); return;
+        case MP_QSTR_world_check: dest[0] = mp_obj_new_bool(m->world_check); return;
+        case MP_QSTR_desync: dest[0] = mp_obj_new_int(s->desync); return;
+        case MP_QSTR_desync_kind: dest[0] = MP_OBJ_NEW_SMALL_INT(s->desync_kind); return;
+        case MP_QSTR_checks: dest[0] = mp_obj_new_int_from_uint(s->checks); return;
         case MP_QSTR_config:
             dest[0] = s->config[0] ? str_of(s->config) : mp_const_none;
             return;
@@ -310,6 +336,9 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_resend), MP_ROM_PTR(&mt_resend_obj) },
     { MP_ROM_QSTR(MP_QSTR_packet), MP_ROM_PTR(&mt_packet_obj) },
     { MP_ROM_QSTR(MP_QSTR_tps), MP_ROM_PTR(&mt_tps_obj) },
+    { MP_ROM_QSTR(MP_QSTR_world_due), MP_ROM_PTR(&mt_world_due_obj) },
+    { MP_ROM_QSTR(MP_QSTR_world_check), MP_ROM_PTR(&mt_world_check_obj) },
+    { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },
 };
 static MP_DEFINE_CONST_DICT(match_locals, match_locals_table);

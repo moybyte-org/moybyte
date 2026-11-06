@@ -19,6 +19,8 @@ def link(chan, ws, parts, line):
         lk.start()
     elif action == "off":
         lk.stop()
+    elif action == "check" and len(parts) > 2:
+        lk.check_worlds(parts[2] == "on")
     elif action == "cart" and len(parts) > 2:
         lk.announce(" ".join(parts[2:]), 1)
     import json

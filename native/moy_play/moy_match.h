@@ -22,6 +22,10 @@
 //      lies (64 of 200 messages arrived while every send said True).
 //   3. A MISSING INPUT STALLS THE SIM. Advancing on a guess desyncs the two
 //      consoles permanently and invisibly.
+// A DESYNC IS SAID: every CHECK_EVERY frames each console stamps the hash of
+// the inputs it applied (and its tier's world digest while the world check is
+// armed), every input packet carries the newest stamp, and the first that
+// disagrees is printed and noticed on the screen.
 // Determinism: the tick is fixed (TICK_HZ), and each logic frame starts from
 // a seed derived from (seed, frame), so drawing, which consumes the random
 // stream at each board's own rate, cannot move it. The session
@@ -57,7 +61,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MOY_MATCH_PROTO 1
+#define MOY_MATCH_PROTO 2
 enum {
     MOY_MATCH_T_BEACON = 1, MOY_MATCH_T_JOIN = 2, MOY_MATCH_T_START = 3,
     MOY_MATCH_T_INPUT = 4, MOY_MATCH_T_MSG = 5, MOY_MATCH_T_BYE = 6,
@@ -76,6 +80,12 @@ enum {
 #define MOY_MATCH_TAPE 256
 #define MOY_MATCH_SLEW_TARGET_MS 12
 #define MOY_MATCH_SLEW_BAND_MS 4
+// The desync check: every CHECK_EVERY frames each console stamps a checkpoint
+// (the hash of every input it applied, and the world digest its tier gave
+// it), and every input packet carries the sender's newest one.
+#define MOY_MATCH_CHECK_EVERY 32
+#define MOY_MATCH_CHECKS 4
+#define MOY_MATCH_IN_HDR 17             // an input packet's header
 // The link's.
 #define MOY_MATCH_BEACON_MS 400
 #define MOY_MATCH_PEER_TTL_MS 2000
@@ -139,6 +149,21 @@ typedef struct {
     uint8_t held[2], prev[2], pressed[2];
     uint32_t frame_seed;                // the seed the last advance's frame starts from
     char config[MOY_MATCH_CFG + 1];     // the host's tuning, "" for none
+    // The desync check. `hist` folds every applied frame's inputs; a
+    // checkpoint at frame F is the state ENTERING F: hist over 0..F-1 and the
+    // world digest the tier noted for F (0: none, never compared).
+    uint32_t hist;
+    int32_t world_f;
+    uint32_t world_d;
+    int32_t ck_f[MOY_MATCH_CHECKS];
+    uint32_t ck_in[MOY_MATCH_CHECKS], ck_w[MOY_MATCH_CHECKS];
+    int32_t ck_last;                    // the newest checkpoint's frame, -1 none
+    int32_t peer_ck_f;                  // the peer's newest heard
+    uint32_t peer_ck_in, peer_ck_w;
+    int32_t peer_ck_cmp;                // the peer's newest compared
+    int32_t desync;                     // the first checkpoint that disagreed, -1 none
+    uint8_t desync_kind;                // 1 the inputs, 2 the world
+    uint32_t checks;                    // checkpoints compared and agreeing
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
@@ -175,6 +200,7 @@ typedef struct {
     uint8_t act;
     char act_cart[MOY_MATCH_CART + 1];
     char error[48];
+    bool world_check;                   // the tiers note world digests (a diag)
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -245,6 +271,17 @@ void moy_lockstep_resend(moy_match_t *m);
 int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t now,
                         bool timed);
 uint32_t moy_lockstep_seed_of(uint32_t seed, int32_t f);
+// The desync check's world half: true when the frame about to be simulated
+// is a checkpoint whose world digest is not noted yet; the tier then notes
+// its digest of the world ENTERING that frame (any 32-bit value but 0).
+// Only while the console's world check is armed (moy_match_world_check):
+// the input half of the check is always on.
+bool moy_lockstep_world_due(const moy_match_t *m);
+void moy_match_world_check(moy_match_t *m, bool on);
+void moy_lockstep_world(moy_match_t *m, int32_t frame, uint32_t digest);
+// FNV-1a over `n` bytes, folded into `h` (start from MOY_LOCKSTEP_HASH0).
+#define MOY_LOCKSTEP_HASH0 2166136261u
+uint32_t moy_lockstep_hash(uint32_t h, const uint8_t *p, size_t n);
 // Ticks per second since the last call (the PERF line's net=); one reader.
 uint32_t moy_lockstep_tps(moy_match_t *m, uint32_t now);
 int32_t moy_lockstep_expand(const moy_match_t *m, uint32_t f16);

@@ -1223,6 +1223,78 @@ int moycore_lua_load_finish(char *err, size_t n)
     return 0;
 }
 
+static uint32_t dig_mix(uint32_t h)
+{
+    h ^= h >> 16; h *= 0x7feb352du;
+    h ^= h >> 15; h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return h;
+}
+
+static uint32_t dig_bytes(uint32_t h, const void *p, size_t n)
+{
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+    return h;
+}
+
+// The value at `idx`: 0 for what is not data (the entry is skipped).
+static uint32_t dig_value(lua_State *L, int idx, int depth)
+{
+    switch (lua_type(L, idx)) {
+        case LUA_TNUMBER:
+            if (lua_isinteger(L, idx)) {
+                lua_Integer v = lua_tointeger(L, idx);
+                return dig_mix(dig_bytes(0x1000193u, &v, sizeof(v)));
+            } else {
+                lua_Number v = lua_tonumber(L, idx);
+                return dig_mix(dig_bytes(0x2000193u, &v, sizeof(v)));
+            }
+        case LUA_TSTRING: {
+            size_t n;
+            const char *t = lua_tolstring(L, idx, &n);
+            return dig_mix(dig_bytes(0x3000193u, t, n));
+        }
+        case LUA_TBOOLEAN:
+            return dig_mix(0x4000193u + (uint32_t)lua_toboolean(L, idx));
+        case LUA_TTABLE: {
+            uint32_t sum = 0x5000193u;
+            if (depth <= 0 || !lua_checkstack(L, 3)) return dig_mix(sum);
+            int t = lua_absindex(L, idx);
+            lua_pushnil(L);
+            while (lua_next(L, t) != 0) {
+                uint32_t v = dig_value(L, -1, depth - 1);
+                uint32_t k = v ? dig_value(L, -2, 0) : 0u;
+                if (v != 0u && k != 0u) sum += dig_mix(k * 31u + v);
+                lua_pop(L, 1);
+            }
+            return dig_mix(sum);
+        }
+        default:
+            return 0u;
+    }
+}
+
+uint32_t moycore_lua_digest(void)
+{
+    lua_State *L = moycore_RUN.L;
+    if (L == NULL || !lua_checkstack(L, 4)) return 0u;
+    int top = lua_gettop(L);
+    uint32_t sum = 0x6000193u;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
+    int g = lua_gettop(L);
+    lua_pushnil(L);
+    while (lua_next(L, g) != 0) {
+        if (lua_type(L, -2) == LUA_TSTRING && !lua_rawequal(L, -1, g)) {
+            uint32_t v = dig_value(L, -1, 3);
+            if (v != 0u) sum += dig_mix(dig_value(L, -2, 0) * 31u + v);
+        }
+        lua_pop(L, 1);
+    }
+    lua_settop(L, top);
+    return sum ? sum : 1u;
+}
+
 int moycore_lua_tick(float dt, int draw, char *err, size_t n)
 {
     // The hooks bracket the cart's OWN halves and nothing else: a frame that

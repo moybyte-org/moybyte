@@ -664,6 +664,7 @@ _M_TAPE = 256
 _M_CART = 121
 _M_CFG = 101
 _M_FRAME = 250
+_M_CHECKS = 4
 
 
 class _Peer(ctypes.Structure):
@@ -689,7 +690,12 @@ class _Lockstep(ctypes.Structure):
                 ("has_ema", _B), ("m_ema", _F32), ("win_mark", _I32),
                 ("win_stalls", _U32), ("tps_f", _I32), ("has_tps", _B), ("tps_ms", _U32),
                 ("held", _U8 * 2), ("prev", _U8 * 2), ("pressed", _U8 * 2),
-                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG)]
+                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG),
+                ("hist", _U32), ("world_f", _I32), ("world_d", _U32),
+                ("ck_f", _I32 * _M_CHECKS), ("ck_in", _U32 * _M_CHECKS),
+                ("ck_w", _U32 * _M_CHECKS), ("ck_last", _I32), ("peer_ck_f", _I32),
+                ("peer_ck_in", _U32), ("peer_ck_w", _U32), ("peer_ck_cmp", _I32),
+                ("desync", _I32), ("desync_kind", _U8), ("checks", _U32)]
 
 
 class _MatchS(ctypes.Structure):
@@ -705,7 +711,7 @@ class _MatchS(ctypes.Structure):
                 ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
                 ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
-                ("error", ctypes.c_char * 48)]
+                ("error", ctypes.c_char * 48), ("world_check", _B)]
 
 
 _SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
@@ -751,6 +757,10 @@ _MSIGS = (
     ("moy_lockstep_packet", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t, _U32, _B],
      ctypes.c_int),
     ("moy_lockstep_seed_of", [_U32, _I32], _U32),
+    ("moy_lockstep_world_due", [ctypes.c_void_p], _B),
+    ("moy_lockstep_world", [ctypes.c_void_p, _I32, _U32], None),
+    ("moy_match_world_check", [ctypes.c_void_p, _B], None),
+    ("moy_lockstep_hash", [_U32, ctypes.c_char_p, ctypes.c_size_t], _U32),
     ("moy_lockstep_tps", [ctypes.c_void_p, _U32], _U32),
     ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
     ("moy_match_size", [], ctypes.c_size_t),
@@ -779,7 +789,7 @@ def seed_of(seed, frame):
 
 
 _LINK_FIELDS = ("active", "state", "rx", "tx", "drops", "recovers", "session_id",
-                "start_tries", "start_len", "inbox_drops")
+                "start_tries", "start_len", "inbox_drops", "world_check")
 
 
 class Match:
@@ -1000,6 +1010,17 @@ class Match:
 
     def tps(self, now):
         return self._d.moy_lockstep_tps(self._p, int(now) & 0xFFFFFFFF)
+
+    def world_check(self, on):
+        self._d.moy_match_world_check(self._p, bool(on))
+
+    def world_due(self):
+        return bool(self._d.moy_lockstep_world_due(self._p))
+
+    def world(self, data):
+        data = data.encode() if isinstance(data, str) else bytes(data)
+        d = self._d.moy_lockstep_hash(2166136261, data, len(data))
+        self._d.moy_lockstep_world(self._p, self._m.s.frame, d or 1)
 
     def expand(self, f16):
         return self._d.moy_lockstep_expand(self._p, int(f16) & 0xFFFF)
