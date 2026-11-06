@@ -45,11 +45,23 @@ tools/board.py tdeck py "ws.screen" "len(ws.carts.all)"   # eval on the live con
 tools/board.py tdeck py --exec "ws._x = 1"    # statements, in the shared ws._g namespace
 tools/board.py tdeck pmem [--text]            # the running cart's 256 cells (--text: a string)
 tools/board.py tdeck mem                      # python heap, internal SRAM, PSRAM
+tools/board.py p4 sh "cd /proc" "ls" "pkg update"   # lines in the C shell's serial session
 tools/board.py tdeck tail 3 --send heapcaps --grep HEAPCAPS  # every heap's total/free/largest/low-water, one line
 tools/board.py tdeck tap 160 120              # swipe X0 Y0 X1 Y1 [FRAMES] / open settings
 tools/board.py tdeck tail 10 --send "diag 1" --grep PERF
 tools/board.py tdeck perf "Brick Siege"       # see the perf skill
 ```
+
+**`sh`** sends each line as the kernel's `sh` word (`native/moy_sh/moy_sh_board.h`,
+THE SERIAL FACE) and prints its `SH` lines as they come, the status of the
+last line its exit code (`SH end N`). It is the board's one serial session:
+`cd` and variables carry from one line, and one call, to the next. A line
+that waits (`sleep`, `http get`, `pkg update`) parks while the console's
+frames go on; Ctrl-C sends the channel's 0x03, which stops it. `--timeout`
+(60 s) bounds each line. It works with the VM stopped too (an S3 running a
+cart without one), where a console command answers "needs the console".
+Never set or remove a board's SSH password with it (`passwd`): the console's
+is the owner's.
 
 `perf` ends its cart and puts diag and uncap back, `push` changes only the
 store, `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board

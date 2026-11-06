@@ -4,7 +4,7 @@
 #   -- the boards and their declarations  boards, board_file, is_console
 #   -- which port: facts that need no open  learn, holders, port_table, claim, resolve
 #   -- opening a board                refuse_if_held, attach, stable
-#   -- verbs                          cmd_state, cmd_py, cmd_run, cmd_desk, cmd_perf, cmd_pmem, cmd_tail
+#   -- verbs                          cmd_state, cmd_py, cmd_sh, cmd_run, cmd_desk, cmd_perf, cmd_pmem, cmd_tail
 #   -- the picture on the glass       grab, cmd_shot
 #   -- the ports                      cmd_ports
 #   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
@@ -22,6 +22,8 @@
     tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
                                                 a compiled cart gets its chip's module
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
+    tools/board.py p4 sh "ls /proc" "pkg update"  lines in the C shell's serial
+                                                session: its output, its status
     tools/board.py tdeck pmem [--text]          the running cart's 256 pmem cells
     tools/board.py tdeck mem                    python heap, internal SRAM, PSRAM
     tools/board.py tdeck tap X Y | swipe X0 Y0 X1 Y1 [FRAMES] | open settings
@@ -343,6 +345,45 @@ def cmd_py(b, a):
             status = 1
         else:
             print("%s -> %r" % (expr[:80], val))
+    return status
+
+
+SH_ENDS = ("SH end ", "SH exit ", "SH more", "SH app ", "SH busy", "SH error")
+
+
+def cmd_sh(b, a):
+    """Each line in the C shell's serial session (the kernel's `sh` word,
+    native/moy_sh/moy_sh_board.h): its output as it comes, then its end.
+    The session is the board's one serial session, so `cd` and variables
+    carry from one line to the next. Ctrl-C here sends the channel's 0x03,
+    which interrupts the command. Exit status: the last line's."""
+    status = 0
+    for line in a.lines:
+        n0 = len(b.lines)
+        b._write_line("sh " + line)
+        end, t_end = None, time.time() + a.timeout
+        try:
+            while end is None and time.time() < t_end:
+                b._pump()
+                while n0 < len(b.lines) and end is None:
+                    got = b.lines[n0]
+                    n0 += 1
+                    if got.startswith(SH_ENDS):
+                        end = got
+                    elif got.startswith("SH "):
+                        print(got[3:])
+        except KeyboardInterrupt:
+            b.ser.write(b"\x03")
+            b.ser.flush()
+            end = b.wait_line("SH end ", 10.0) or end
+        if end is None:
+            print("no end of %r in %.0f s" % (line, a.timeout), file=sys.stderr)
+            return 2
+        if a.verbose or not end.startswith("SH end "):
+            print(end, file=sys.stderr)
+        word, _, rest = end[3:].partition(" ")
+        status = int(rest) if word in ("end", "exit") and rest.strip().isdigit() else \
+            0 if word in ("more", "app") else 2 if word == "error" else 1
     return status
 
 
@@ -883,7 +924,7 @@ ON_THE_CONSOLE = {"state": cmd_state, "py": cmd_py, "run": cmd_run,
                   "leave": cmd_leave, "desk": cmd_desk, "perf": cmd_perf,
                   "pmem": cmd_pmem, "mem": cmd_mem, "tap": cmd_tap,
                   "swipe": cmd_swipe, "open": cmd_open, "tail": cmd_tail,
-                  "shot": cmd_shot}
+                  "shot": cmd_shot, "sh": cmd_sh}
 
 
 def _common(ap, default):
@@ -930,6 +971,10 @@ def parser(dirs):
                    help="run each as statements (the shared ws._g namespace)")
     p.add_argument("--file", help="a snippet to run first, as statements")
     p.add_argument("--timeout", type=float, default=30.0)
+    p = verb("sh", help="run lines in the C shell's serial session (`sh` word)")
+    p.add_argument("lines", nargs="+", metavar="LINE")
+    p.add_argument("--timeout", type=float, default=60.0,
+                   help="seconds to wait for each line's end")
     p = verb("run", help="start a cart by title; it stays running")
     p.add_argument("title")
     p.add_argument("--settle", type=float, default=2.5,
