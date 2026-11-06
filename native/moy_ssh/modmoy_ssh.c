@@ -3,6 +3,7 @@
 //
 //   moy_ssh.start(system_dir, port=22)
 //   moy_ssh.stop()
+//   moy_ssh.parked() -> whether both tasks have parked after a stop
 //   moy_ssh.stats() -> (sessions, signed_in, refused, heap_now, heap_peak,
 //                       session_peak, to_shell_ms, listening, stack_free,
 //                       face_stack_free, arena_peak)
@@ -51,6 +52,11 @@ static mp_obj_t ssh_stop(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ssh_stop_obj, ssh_stop);
 
+static mp_obj_t ssh_parked(void) {
+    return mp_obj_new_bool(moy_ssh_run_parked());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ssh_parked_obj, ssh_parked);
+
 static mp_obj_t stack_free(uintptr_t h) {
     return h != 0 ? mp_obj_new_int_from_uint(uxTaskGetStackHighWaterMark((TaskHandle_t)h)
                                                 * sizeof(StackType_t))
@@ -87,6 +93,7 @@ static const mp_rom_map_elem_t moy_ssh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ssh) },
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&ssh_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&ssh_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_parked), MP_ROM_PTR(&ssh_parked_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&ssh_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_hash), MP_ROM_PTR(&ssh_hash_obj) },
 };

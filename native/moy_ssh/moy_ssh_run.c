@@ -166,6 +166,10 @@ int moy_ssh_run_listening(void) {
     return s_r != NULL && get(&s_r->stop) == RUN;
 }
 
+int moy_ssh_run_parked(void) {
+    return s_r == NULL || (get(&s_r->stop) == ENDING && parked());
+}
+
 void moy_ssh_run_tasks(uintptr_t *server, uintptr_t *face) {
     *server = s_r != NULL ? s_r->server : 0;
     *face = s_r != NULL ? s_r->face : 0;

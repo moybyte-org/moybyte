@@ -12,6 +12,11 @@ module writes), `ssh` (`password_auth = no` turns passwords off),
 `authorized_keys` (ssh-copy-id's) and the host key it makes itself. No
 password: no SSH, and the radio is not held for it.
 
+A stop asked from a session's own command (`passwd -d` over SSH) ends the
+server only after that session (moy_ssh.h, THE RUN), so the radio and the
+name stay until the run reports its tasks parked: a shell wake looks every
+PARK_MS. A start before then cancels the wake and keeps both.
+
   boot(ws)                 at the console's first frame: serve if a password is set
   set_password(ws, pw)     store the password's hash (None: remove it), and
                            serve or stop to match; False where it cannot
@@ -37,14 +42,33 @@ try:
 except ImportError:  # host: the runtime package
     from runtime import moy_docs as _docs
 
+try:
+    import moybyte as _moybyte
+except ImportError:  # host: the runtime package
+    from runtime import moybyte as _moybyte
+
+try:
+    import moy_log as _L
+except ImportError:  # pragma: no cover - an image without the kernel
+    try:
+        from runtime import moy_log as _L
+    except ImportError:
+        _L = None
+
+try:
+    import devices as _D
+except ImportError:  # host: the runtime package
+    from runtime import devices as _D
+
 TAG = "ssh"
 PASSWORD = "password"
 ROUNDS = 4096
 NAME_MAX = 63
 PREFIX = "moybyte"
 HOST_MAC = b"\x02\x00\x00\x00\xbe\xef"
+PARK_MS = 100
 
-_state = {"serving": False, "name": None, "default": None}
+_state = {"serving": False, "name": None, "default": None, "park": None}
 
 
 def system_dir():
@@ -164,6 +188,7 @@ def start(ws):
         return False
     if _state["serving"]:
         return True
+    _unpark()
     ws.wifi_hold(TAG)
     try:
         _N.start(system_dir())
@@ -188,6 +213,37 @@ def _unannounce():
         print("Moybyte ssh: mDNS: %s" % (exc,))
 
 
+def _let_go(ws):
+    _unannounce()
+    ws.wifi_release(TAG)
+
+
+def _unpark():
+    w = _state["park"]
+    _state["park"] = None
+    if w is not None:
+        _moybyte.WAKES.cancel(w)
+
+
+def _as_shell(fn):
+    if _L is None:
+        return fn()
+    was = _L.current()
+    _L.current(_D.SHELL)
+    try:
+        return fn()
+    finally:
+        _L.current(was)
+
+
+def _await_park(ws):
+    def look():
+        if _N.parked():
+            _unpark()
+            _let_go(ws)
+    _state["park"] = _as_shell(lambda: _moybyte.WAKES.every(PARK_MS, look))
+
+
 def stop(ws):
     if not _state["serving"]:
         return
@@ -195,8 +251,10 @@ def stop(ws):
     try:
         _N.stop()
     finally:
-        _unannounce()
-        ws.wifi_release(TAG)
+        if _N.parked():
+            _let_go(ws)
+        else:
+            _await_park(ws)
 
 
 def boot(ws):

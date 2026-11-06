@@ -13,7 +13,8 @@ session is the face's line discipline; `top` and `edit` run on the
 alternate screen; an exec that leaves its stdin unread still sends its
 output whole; and a session's every allocation goes when it ends. The
 run (moy_ssh_run.c): `passwd -d` over SSH stops the server once its session
-ends, and `passwd x` in the same session withdraws that stop.
+ends, its tasks report parked only after it, and `passwd x` in the same
+session withdraws that stop.
 """
 
 import os
@@ -382,5 +383,39 @@ def test_passwd_in_a_session_stops_the_server_after_it_and_a_new_one_withdraws_t
         assert r.returncode == 0, r.stderr
         assert refused(h)
         assert stats(h)["listening"] == "0"
+    finally:
+        end(h)
+
+
+def test_a_stop_from_a_session_parks_only_once_that_session_has_ended(built, tmp_path):
+    """The run reports the tasks parked (what ssh_service waits on to let the
+    radio and the mDNS name go) only after the session that ran `passwd -d`
+    has written its last byte and closed."""
+    _out, exe = built
+    h = serve(exe, tmp_path)
+    try:
+        assert stats(h)["parked"] == "0"
+        cmd = ["ssh"] + options(h) + ["-o", "PubkeyAuthentication=no",
+                                      "-o", "PreferredAuthentications=password",
+                                      "moy@127.0.0.1", "passwd -d; cat; echo done"]
+        p = subprocess.Popen(cmd, env=env_of(h, PASSWORD), stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.time() + 20
+            while stats(h).get("listening") != "0" and time.time() < deadline:
+                time.sleep(0.05)
+            assert stats(h)["listening"] == "0"
+            time.sleep(0.5)
+            assert stats(h)["parked"] == "0"
+            out, err = p.communicate(b"last\n", timeout=30)
+        finally:
+            p.kill()
+        assert p.returncode == 0, err
+        assert out == b"last\ndone\n"
+        deadline = time.time() + 5
+        while stats(h)["parked"] != "1" and time.time() < deadline:
+            time.sleep(0.05)
+        assert stats(h)["parked"] == "1"
+        assert refused(h)
     finally:
         end(h)

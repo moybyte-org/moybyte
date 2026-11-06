@@ -50,7 +50,9 @@ and the next start, never deleted: deleting a PSRAM-stacked task links
 FreeRTOS's task-state query into IRAM, internal SRAM the idle desk would pay.
 A stop asked from a session's own command (`passwd -d` over SSH) stands
 until that session ends, and a start in the same session (`passwd x`)
-withdraws it (`moy_ssh.h`, THE RUN).
+withdraws it (`moy_ssh.h`, THE RUN). The console keeps the radio and the
+mDNS name until `moy_ssh.parked()` says both tasks have parked, so that
+session ends cleanly even where `ssh` is the radio's only holder.
 
 `moy_sh`'s running session is per task (`native/moy_sh/moy_sh.h`, TASKS), so
 an SSH session and the Terminal's run side by side.

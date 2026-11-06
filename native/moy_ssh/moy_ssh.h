@@ -31,7 +31,9 @@
 // session they serve. Asked from a session's own command (`passwd -d` over
 // SSH, inside a hop) a stop cannot wait for that session, so it stands until
 // the session ends; a start asked in the same session (`passwd x` next)
-// withdraws it, and the tasks serve on.
+// withdraws it, and the tasks serve on. What the session needs to finish
+// (the radio, the mDNS name) stays up until the run reports both tasks
+// parked.
 
 #ifndef MOY_SSH_H
 #define MOY_SSH_H
@@ -100,13 +102,15 @@ int moy_ssh_serving(void);
 
 // The run, on the console's task: serving on `port` (the face's shell set
 // first, moy_ssh_face_set_shell), 0, MOY_SSH_EADDRINUSE or MOY_SSH_ENOMEM;
-// serving already, 0. The stop, and whether it serves. The tasks' ids, 0
-// before the first start made them.
+// serving already, 0. The stop, whether it serves, and whether both tasks
+// have parked (true before the first start). The tasks' ids, 0 before the
+// first start made them.
 #define MOY_SSH_EADDRINUSE (-1)
 #define MOY_SSH_ENOMEM (-2)
 int moy_ssh_run_start(int port);
 void moy_ssh_run_stop(void);
 int moy_ssh_run_listening(void);
+int moy_ssh_run_parked(void);
 void moy_ssh_run_tasks(uintptr_t *server, uintptr_t *face);
 
 void *moy_ssh_calloc(size_t n, size_t size);

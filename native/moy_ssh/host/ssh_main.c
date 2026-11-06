@@ -6,10 +6,11 @@
 // one role, `passwd`, as runtime/system/ssh_service.py does: the hash
 // written or removed, the run started or stopped. Every other crossing is
 // the VM's NEEDS_VM. The main thread prints the server's STATS line when
-// a connection ends. The face's socket pair is a board's: a byte one end
-// sends crosses another task before the other end can read it, as lwIP's
-// loopback hands it to its own, and an end closed with bytes it never read
-// is a reset, as lwIP's close is. Usage: ssh_main PORT SYSTEM_DIR
+// a connection ends, the server starts or stops listening, or its tasks
+// park. The face's socket pair is a board's: a byte one end sends crosses
+// another task before the other end can read it, as lwIP's loopback hands it
+// to its own, and an end closed with bytes it never read is a reset, as
+// lwIP's close is. Usage: ssh_main PORT SYSTEM_DIR
 
 #include <errno.h>
 #include <pthread.h>
@@ -263,18 +264,20 @@ int main(int argc, char **argv) {
     pthread_t t;
     pthread_create(&t, NULL, console, NULL);
     uint32_t ended = UINT32_MAX;
-    int listening = -1;
+    int listening = -1, parked = -1;
     for (;;) {
         moy_ssh_stats_t s;
         moy_ssh_stats(&s);
         s.listening = moy_ssh_run_listening();
-        if (s.ended != ended || s.listening != listening) {
+        int now_parked = moy_ssh_run_parked();
+        if (s.ended != ended || s.listening != listening || now_parked != parked) {
             ended = s.ended;
             listening = s.listening;
+            parked = now_parked;
             printf("STATS sessions=%u signed_in=%u refused=%u heap_now=%zu heap_peak=%zu "
-                   "session_peak=%zu to_shell_ms=%u arena_peak=%zu listening=%d\n",
+                   "session_peak=%zu to_shell_ms=%u arena_peak=%zu listening=%d parked=%d\n",
                    s.sessions, s.signed_in, s.refused, s.heap_now, s.heap_peak,
-                   s.session_peak, s.handshake_ms, s.arena_peak, s.listening);
+                   s.session_peak, s.handshake_ms, s.arena_peak, s.listening, parked);
             fflush(stdout);
         }
         usleep(20000);

@@ -19,7 +19,8 @@ class WS:
         self.held = []
 
     def wifi_hold(self, tag):
-        self.held.append(tag)
+        if tag not in self.held:  # idempotent per tag, as the console's
+            self.held.append(tag)
 
     def wifi_release(self, tag):
         self.held.remove(tag)
@@ -85,6 +86,10 @@ def test_a_console_with_no_name_is_moybyte_and_its_mac_s_last_four_hex_digits():
 class Server:
     def __init__(self):
         self.calls = []
+        self.is_parked = True
+
+    def parked(self):
+        return self.is_parked
 
     def start(self, path):
         self.calls.append(("start", path))
@@ -121,7 +126,7 @@ class Wifi:
 def test_serving_holds_the_ssh_lease_dials_the_last_network_and_answers_by_name(system, monkeypatch, up):
     server = Server()
     monkeypatch.setattr(ssh_service, "_N", server)
-    monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None})
+    monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None, "park": None})
     names = []
     monkeypatch.setitem(__import__("sys").modules, "moy_net",
                         type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
@@ -137,3 +142,55 @@ def test_serving_holds_the_ssh_lease_dials_the_last_network_and_answers_by_name(
     assert ws.held == [] and server.calls[-1] == ("stop",)
     # the responder ends with the server: its task is internal SRAM
     assert names == ["desk-2", ""]
+
+
+class Wakes:
+    def __init__(self):
+        self.live, self.next = {}, 1
+
+    def every(self, ms, fn):
+        wid, self.next = self.next, self.next + 1
+        self.live[wid] = fn
+        return wid
+
+    def cancel(self, wid):
+        return self.live.pop(wid, None) is not None
+
+    def tick(self):
+        for fn in list(self.live.values()):
+            fn()
+
+
+def test_a_stop_from_a_session_lets_the_radio_and_the_name_go_once_the_server_parks(
+        system, monkeypatch):
+    """`passwd -d` over SSH: the server ends after the session that asked, so
+    the radio (perhaps its only holder) and the mDNS name stay until the run
+    reports its tasks parked; a `passwd x` before then keeps both."""
+    server = Server()
+    wakes = Wakes()
+    monkeypatch.setattr(ssh_service, "_N", server)
+    monkeypatch.setattr(ssh_service._moybyte, "WAKES", wakes)
+    monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None, "park": None})
+    names = []
+    monkeypatch.setitem(__import__("sys").modules, "moy_net",
+                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
+    ws = WS("Desk")
+    ws.wifi = Wifi(True)
+    assert ssh_service.set_password(ws, "s3cret")
+    server.is_parked = False
+    assert ssh_service.set_password(ws, None)
+    assert server.calls[-1] == ("stop",)
+    assert ws.held == ["ssh"] and names == ["desk"] and len(wakes.live) == 1
+    wakes.tick()
+    assert ws.held == ["ssh"] and names == ["desk"]
+    server.is_parked = True
+    wakes.tick()
+    assert ws.held == [] and names == ["desk", ""] and wakes.live == {}
+    # a start in the same session withdraws the stop: the radio stays held
+    assert ssh_service.set_password(ws, "s3cret")
+    server.is_parked = False
+    assert ssh_service.set_password(ws, None)
+    assert ssh_service.set_password(ws, "again")
+    assert wakes.live == {} and ws.held == ["ssh"]
+    wakes.tick()
+    assert ws.held == ["ssh"] and names[-1] == "desk"
