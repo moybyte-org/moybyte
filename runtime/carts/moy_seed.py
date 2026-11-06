@@ -395,11 +395,12 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # own titles' bare folders (`sweep_store`'s `seed`). Generation 6 takes
 # RETIRED_FOLDERS: the names a host store gave the built-ins whose source
 # folder was not their title's slug, before system_carts/ shipped each one
-# under its id.
+# under its id. Generation 7 takes the Wi-Fi tool, deleted 2026-10-13 when
+# Settings' panel became the one Wi-Fi implementation.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
-    "wallpaper_space"))
-RETIRED_GEN = 6
+    "wallpaper_space", "wifi"))
+RETIRED_GEN = 7
 RETIRED_VER_NAME = "retired.ver"
 
 
