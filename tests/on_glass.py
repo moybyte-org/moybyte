@@ -151,16 +151,30 @@ def the_internal_volume_is_the_kernels(board):
                        strict=True) == "k"
 
 
+def rest_holders(board):
+    """The radio's holders on a console at rest: none, but `ssh` while its
+    SSH server serves (a password set on the board,
+    runtime/system/ssh_service.py), which holds the radio for as long as it
+    does. Read from the board, never assumed: a board with no password must
+    still hold nothing."""
+    serving = board.pyval("__import__('ssh_service')._state['serving']")
+    return ["ssh"] if serving is True else []
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match
-    holds nothing and reports no link. `wifi_held` is the lease's holders;
-    a firmware from before the lease has no such key, and says so here."""
+    holds nothing and reports no link -- but for the SSH server's `ssh` while
+    a password is set (`rest_holders`), whose station is up. `wifi_held` is
+    the lease's holders; a firmware from before the lease has no such key,
+    and says so here."""
     st = board.state()
+    rest = rest_holders(board)
     assert "wifi_held" in st, "no wifi_held in state: firmware predates the lease"
-    assert st["wifi_held"] == [], "something holds the radio at rest: %r" % (
+    assert st["wifi_held"] == rest, "something holds the radio at rest: %r" % (
         st["wifi_held"],)
-    assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
+    if not rest:
+        assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
 
 
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
@@ -170,6 +184,7 @@ def the_bar_wifi_widget_opens_the_wifi_panel(board):
     and desktop mode alike (docs/theme_and_shell_2026-11.md §8.6, look step 33),
     holding the radio; closing the popover lets the radio go."""
     _home_desk(board)
+    rest = rest_holders(board)
     cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
                         strict=True)
     xy = None
@@ -196,7 +211,7 @@ def the_bar_wifi_widget_opens_the_wifi_panel(board):
     finally:
         board.pyexec("ws.sysmenu.close()\nws.popover_touch()", strict=True)
         board.drain(1.0)
-    assert board.state().get("wifi_held") == [], "the radio outlived the panel"
+    assert board.state().get("wifi_held") == rest, "the radio outlived the panel"
     _home_desk(board)
 
 
@@ -1291,8 +1306,8 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
         assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
         assert bar == "%02d:%02d" % tuple(lt[3:5]), (bar, lt)
-        assert board.pyval("sorted(ws.leases.holders())", strict=True) == [], \
-            "the radio stayed held"
+        assert board.pyval("sorted(ws.leases.holders())", strict=True) == \
+            rest_holders(board), "the radio stayed held"
     finally:
         board.pyval("ws.set_time_zone(%r) or 1" % (was,), strict=True)
         if was is None:
@@ -2622,7 +2637,10 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
             assert all(start[k] is not None and start[k] >= 0 for k in
                        ("total", "vm", "imports", "workstation", "wiring",
                         "first_frame")), start
-            assert back.get("wifi_held") == [], back.get("wifi_held")
+            # a new VM starts with nothing held; the SSH server, where one
+            # serves, takes its lease back once the console's services boot
+            assert set(back.get("wifi_held") or ()) <= set(rest_holders(board)), \
+                back.get("wifi_held")
     finally:
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
     return psram
@@ -3681,7 +3699,8 @@ def wasm_cart_fps(board, title, seconds=10.0, check=None):
 
 def _wasm_cart_fps(board, title, seconds, check):
     from runtime.perf_line import parse_perf
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     try:
@@ -4483,7 +4502,8 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
     need, have = wasm_fit(board, "Doom")
     print("\nDOOM fit: footprint %r, free %r" % (need, have))
     host = doom_host_crcs(tics)
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
           "(__import__('array').array('i', bytearray(1024)))")
     with perf_diag(board):             # its fps is read off PERF
@@ -4597,7 +4617,8 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
     fold's count climbs with the fold's own), the snapshot DMA takes them all
     and never times out, frames are in layout `fmt` (1 blit565, 2 blit), and
     the proof above reads 0. Returns the frames folded in `seconds`."""
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     st = board.state()
     fps_was = board.pyval("ws.show_fps", strict=True)
     board.pyexec("ws.show_fps = True", strict=True)
@@ -4755,7 +4776,8 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
     canvas above the chip is never written while the frames change, and the
     proof above reads 0 and a settle that reproduces the snapshot. Returns
     the snapshots taken in `seconds`."""
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     fps_was = board.pyval("ws.show_fps", strict=True)
     board.pyexec("ws.show_fps = True", strict=True)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
