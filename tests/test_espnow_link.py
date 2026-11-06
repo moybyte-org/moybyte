@@ -1069,6 +1069,11 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=
     carry = air.carry
     air.carry = lambda s, d, p: None if drops.random() < loss else carry(s, d, p)
     wss, streams = [], []
+    # Building a console draws from the global random stream, and the match
+    # follows from what it drew: seeded here, it is the same whatever ran
+    # before it.
+    outer = random.getstate()
+    random.seed(1058)
     for i, mac in enumerate((b"\x01" * 6, b"\x02" * 6)):
         ws = build_ws(tmp_path / ("c%d" % i))
         ws.link = moy_espnow.EspNowLink(
@@ -1078,6 +1083,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=
         ws.link.check_worlds(True)
         wss.append(ws)
         streams.append(random.Random(100 + i).getstate())
+    random.setstate(outer)
 
     def on(i, fn):
         random.setstate(streams[i])
@@ -1139,12 +1145,14 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
 def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkeypatch):
     """The desync check (2026-11-06): two worlds that disagree are SAID, on
     serial and on the screen, never left to paint two plausible games. One
-    console's tank is nudged a pixel mid-match -- the shape of every
-    nondeterminism the lockstep contract forbids -- and the next checkpoint
-    both consoles compare names it, as a world (not an input) disagreement."""
+    console's score is nudged mid-match -- the shape of every nondeterminism
+    the lockstep contract forbids -- and the next checkpoint both consoles
+    compare names it, as a world (not an input) disagreement. The score,
+    not a tank: a tank nudged against a wall is pushed back and the worlds
+    agree again before a checkpoint looks."""
     def nudge(k, wss):
         if k == 300:
-            wss[1].ns["tanks"][0][0] += 1.0
+            wss[1].ns["score"] += 1
 
     worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 420, nudge)
     for ws in wss:
