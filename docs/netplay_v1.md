@@ -58,16 +58,30 @@ side waits on a frame the other has scrolled past. Two boards ran to frame ~150
 and froze solid with packets flowing both ways (2026-08-22) before that field
 existed.
 
-**Input delay is ADAPTIVE, opens at one tick (33 ms at 30 Hz), and only ever RISES**
-(2026-08-25). Delay is each console's private sampling lead over its own tape,
-so a raise cannot rewrite an input the peer may already have played, needs no
-agreement on the wire, and may differ between the sides — a verification match
-held the T-Deck at 1 against the P4 at 2 throughout, 29.5 ticks/s and 2.0%
-stalls. A DROP is the unsafe direction: it can overwrite a frame already
-emitted. A session seeing ≥12 distinct stalled ticks in a 3 s window at 30 Hz
-(24 at 60; the first window is formation grace) raises one tick and says so on
-serial, up to 66 ms (two ticks at 30 Hz, four at 60); an earlier bar of 5 with
-no grace escalated every match always, because ambient-RF loss arrives in bursts.
+**Input delay is ADAPTIVE: it opens at one tick (33 ms at 30 Hz), rises under
+stall pressure (2026-08-25) and comes back down when the peer has a tick to
+spare (2026-11-06).** Delay is each console's private sampling lead over its
+own tape, needs no agreement on the wire, and may differ between the sides — a
+verification match held the T-Deck at 1 against the P4 at 2 throughout, 29.5
+ticks/s and 2.0% stalls. Neither direction can rewrite an input the peer may
+already hold, because a frame is sampled once and the tape is first-write-wins:
+a raise writes the frame it skips with the same sample, and a drop finds the
+next frame already sampled and plays it. A session
+seeing ≥12 distinct stalled ticks in a 3 s window at 30 Hz (24 at 60; the first
+window is formation grace) raises one tick and says so on serial, up to 66 ms
+(two ticks at 30 Hz, four at 60); an earlier bar of 5 with no grace escalated
+every match always, because ambient-RF loss arrives in bursts.
+
+**The way down is the peer's report, a design choice beside the 60 Hz tick**
+(2026-11-06). Every input packet carries the sender's arrival-margin EMA of
+the other side's inputs: how many ms before it needed them they landed. A
+console lowers its delay a tick when a whole window was clean (at most a
+quarter of the raise's bar), the lowest margin the peer reported through it
+was at least a tick plus 8 ms (`MOY_MATCH_LOWER_GUARD_MS`), and two windows
+have passed since its last change (`MOY_MATCH_LOWER_HOLD`), so a match that
+escalated on a burst of loss returns to one tick once the air clears instead
+of keeping the higher delay for good. The margin it reads is its own inputs'
+at the peer, because a console's delay sets the PEER's stalls, not its own.
 
 **A cart paced 60 or "free" ticks at 60 Hz in a match** (owner, 2026-11-06: "i
 dont want a higher delay"), so one tick of delay is 16.7 ms. The host names the

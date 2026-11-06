@@ -464,7 +464,8 @@ class LockstepSession:
     def __getattr__(self, name):
         if name in ("frame", "delay", "redundancy", "stalls", "stall_ticks",
                     "waiting", "dead", "packets_in", "packets_out",
-                    "last_peer_frame", "peer_need", "tick_ms", "delay_max", "desync",
+                    "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
+                    "lowers", "peer_margin", "desync",
                     "desync_kind", "checks"):
             return getattr(self.__dict__["_m"], name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
@@ -911,6 +912,7 @@ class EspNowLink:
             "match": None if s is None else {
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
                 "stall_ticks": s.stall_ticks, "delay": s.delay, "hz": s.tick_hz,
+                "raises": s.raises, "lowers": s.lowers, "peer_margin": s.peer_margin,
                 "m_ema": s._m_ema, "waiting": s.waiting, "in": s.packets_in,
                 "out": s.packets_out, "peer_frame": s.last_peer_frame,
                 "checks": s.checks, "desync": None if s.desync < 0 else s.desync,

@@ -9,12 +9,13 @@
 // p99, a 250-byte state blob in 15.0 / 17.1 ms, so the payload is the inputs
 // and both consoles run the same simulation from them.
 //   1. INPUT DELAY: frame N's input is sent during N-delay and played on N.
-//      The delay starts at one tick and raises itself to two under stall
-//      pressure (ESCALATE_*), never lower: a lower delay mid-match could
-//      overwrite a frame already emitted. Delay is each console's own
-//      sampling lead, so the two sides may run different values. A frame
-//      is sampled once: a stalled tick's retry never rewrites a frame the
-//      peer may already hold.
+//      The delay starts at one tick, rises a tick under stall pressure
+//      (ESCALATE_*) and comes back down a tick when the peer reports a
+//      tick's slack to spare (LOWER_*). A frame is sampled once and the tape
+//      is first-write-wins, so neither direction can rewrite a frame the peer
+//      may already hold: a drop only skips one sample. Delay is each
+//      console's own sampling lead, so the two sides may run different
+//      values.
 //   2. REDUNDANCY, NOT RETRANSMIT: every packet carries the last REDUNDANCY
 //      frames of input (a byte each), and the frame its sender is waiting
 //      for, so a stalled peer is served the frame it is stuck on (the fixed
@@ -90,7 +91,13 @@ enum {
 // it), and every input packet carries the sender's newest one.
 #define MOY_MATCH_CHECK_EVERY 32
 #define MOY_MATCH_CHECKS 4
-#define MOY_MATCH_IN_HDR 17             // an input packet's header
+#define MOY_MATCH_IN_HDR 18             // an input packet's header
+// The delay comes back down a tick when the peer has reported, for a whole
+// clean window, that this console's inputs reach it at least a tick plus
+// LOWER_GUARD_MS before it needs them; never within LOWER_HOLD windows of a
+// change.
+#define MOY_MATCH_LOWER_GUARD_MS 8
+#define MOY_MATCH_LOWER_HOLD 2
 // The link's.
 #define MOY_MATCH_BEACON_MS 400
 #define MOY_MATCH_PEER_TTL_MS 2000
@@ -175,6 +182,11 @@ typedef struct {
     int delay_max;
     int32_t escalate_ticks;
     uint32_t escalate_at;
+    // The delay's way down: the peer's report of how early this console's
+    // inputs reach it (ms, its margin EMA; 255 none), the window's lowest.
+    uint8_t peer_margin, rep_min;
+    int32_t delay_mark;                 // the frame of the last delay change
+    uint32_t raises, lowers;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };

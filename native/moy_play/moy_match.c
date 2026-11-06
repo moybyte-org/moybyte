@@ -129,6 +129,8 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     s->peer_ck_f = -1;
     s->peer_ck_cmp = -1;
     s->desync = -1;
+    s->peer_margin = 255;
+    s->rep_min = 255;
     for (int i = 0; i < MOY_MATCH_CHECKS; i++) {
         s->ck_f[i] = -1;
     }
@@ -333,6 +335,9 @@ static void emit(moy_match_t *m, int32_t newest) {
     put16(p + 7, ck < 0 ? 0u : (uint32_t)s->ck_last);
     put32(p + 9, ck < 0 ? 0u : s->ck_in[ck]);
     put32(p + 13, ck < 0 ? 0u : s->ck_w[ck]);
+    // ...and how early the peer's inputs reach me, for its delay's way down
+    float e = s->m_ema < 0.0f ? 0.0f : s->m_ema > 254.0f ? 254.0f : s->m_ema;
+    p[17] = s->has_ema ? (uint8_t)e : 255u;
     for (int32_t i = 0; i < n; i++) {
         int v = tape_get(s->mine_f, s->mine_m, newest - i);
         p[MOY_MATCH_IN_HDR + i] = v < 0 ? 0 : (uint8_t)v;
@@ -382,27 +387,41 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     }
     s->stall_mark = s->stalls;
     if (s->frame - s->win_mark >= s->escalate_ticks) {
-        // The first window is match formation and never escalates.
-        if (s->win_mark >= s->escalate_ticks
-                && s->win_stalls >= s->escalate_at
-                && s->delay < s->delay_max) {
+        // The first window is match formation and changes nothing.
+        bool settled = s->win_mark >= s->escalate_ticks;
+        if (settled && s->win_stalls >= s->escalate_at && s->delay < s->delay_max) {
             s->delay++;
+            s->delay_mark = s->frame;
+            s->raises++;
             say(m, "Moybyte link: input delay -> %d (%d ms, stall pressure)", s->delay,
                 (int)(s->delay * 1000 / s->tick_hz));
+        } else if (settled && s->delay > MOY_MATCH_DELAY
+                   && s->win_stalls * 4u <= s->escalate_at
+                   && s->frame - s->delay_mark >= MOY_MATCH_LOWER_HOLD * s->escalate_ticks
+                   && s->rep_min != 255u
+                   && s->rep_min >= s->tick_ms + MOY_MATCH_LOWER_GUARD_MS) {
+            s->delay--;
+            s->delay_mark = s->frame;
+            s->lowers++;
+            say(m, "Moybyte link: input delay -> %d (%d ms, peer margin %d ms)", s->delay,
+                (int)(s->delay * 1000 / s->tick_hz), (int)s->rep_min);
         }
         s->win_mark = s->frame;
         s->win_stalls = 0;
+        s->rep_min = 255;
     }
-    if (timed && s->delay == 1 && s->index != 0 && s->has_next) {
+    if (timed && s->has_next) {
         unsigned i = (unsigned)s->frame & 63u;
         if (s->arr_f[i] == s->frame) {
             float margin = (float)(int32_t)(now - s->arr_t[i]);
             float e = s->has_ema ? s->m_ema * 0.9f + margin * 0.1f : margin;
             s->m_ema = e;
             s->has_ema = true;
-            // One-sided: a thin margin pushes the phase later; a fat one is
-            // left alone (pulling it earlier chased the stall cliff).
-            if (e < (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS)) {
+            // The guest's phase at delay one, one-sided: a thin margin pushes
+            // it later; a fat one is left alone (pulling it earlier chased the
+            // stall cliff). The host is the anchor.
+            if (s->delay == 1 && s->index != 0
+                    && e < (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS)) {
                 s->next_ms += 1u;
             }
         }
@@ -449,6 +468,10 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     }
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
+    s->peer_margin = data[17];
+    if (data[17] < s->rep_min) {
+        s->rep_min = data[17];
+    }
     uint32_t ck16 = (uint32_t)data[7] | ((uint32_t)data[8] << 8);
     if (ck16 != 0u) {
         int32_t ck = moy_lockstep_expand(m, ck16);

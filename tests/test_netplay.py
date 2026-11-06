@@ -88,7 +88,7 @@ def _step(a, b, wire, frames=1):
 
 def _input_packet(session, newest, waiting, masks):
     return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
-                  waiting & 0xFF, waiting >> 8] + [0] * 10 + list(masks))
+                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255] + list(masks))
 
 
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
@@ -301,7 +301,7 @@ def test_a_packet_from_a_previous_match_is_ignored():
     wire = _Wire()
     a, b = _match(wire, session=7)
     (sa, _ra, _ia), _ = a, b
-    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [0, 0])
+    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255] + [0, 0])
     assert sa.on_packet(bytes(stale)) is False
     stale[2] = 7
     assert sa.on_packet(bytes(stale)) is True
@@ -560,9 +560,8 @@ def test_stall_ticks_counts_ticks_not_retries():
 
 def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
     """The adaptive delay: matches start at DELAY=1 (33ms); a window with
-    ESCALATE_AT distinct stalled ticks buys the second tick. Raise-only,
-    because a LOWER delay mid-match can overwrite an input frame the peer has
-    already played (the newer sample lands on an already-emitted frame)."""
+    ESCALATE_AT distinct stalled ticks buys the second tick. With no clock the
+    peer reports no margin, so nothing ever brings it back down."""
     wire = _Wire()
     a, b = _match(wire)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
@@ -611,7 +610,7 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
         wire.queues[1] = []
         t += 33
     assert guest._m_ema is not None, "the guest measured arrival margin"
-    assert host._m_ema is None, "the host never runs the controller"
+    assert host._m_ema is not None, "the host measures it too: it is the peer's report"
     # inputs were banked a full tick before each need, so the margin is FAT --
     # and a fat margin moves NOTHING (the slew is one-sided: only a thin
     # margin pushes the phase later; pulling earlier shaves margin for zero
@@ -628,12 +627,72 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
     nx1 = guest._next_ms
     assert guest.advance(0, t) is True
     assert guest._next_ms == nx1 + 1, "a thin margin pushes the guest's phase later"
+    host._m_ema = 5.0
+    h = host.frame
+    host._arr_f[h & 63] = h
+    host._arr_t[h & 63] = t - 2
+    h_nx = host._next_ms
+    host.advance(0, t)
+    assert host._next_ms == h_nx, "the host's clock is the anchor: it never slews"
     g_nx = guest._next_ms
     host.delay = 2
     guest.delay = 2
     host.advance(0, t)
     guest.advance(0, t)
     assert guest._next_ms == g_nx, "at DELAY=2 the controller is off"
+
+
+def _timed_match(wire, t, frames, a, b, masks=None, lag=0):
+    """Both consoles tick at 30 Hz on a clock; each packet lands `lag` ms
+    after its sender's tick. Returns the buttons each console played, by
+    frame."""
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    played = ({}, {})
+    for k in range(frames):
+        m = masks(k) if masks else 0
+        for i, s in enumerate((sa, sb)):
+            s.due(t)
+            if s.advance(m if i == 0 else 0, t):
+                played[i][s.frame] = _played(s)
+        for i, s in ((1, sb), (0, sa)):
+            for p in wire.queues[i]:
+                s.on_packet(p, t + lag)
+            wire.queues[i] = []
+        t += 33
+    return t, played
+
+
+def test_the_delay_comes_back_down_when_the_peer_has_a_tick_to_spare():
+    """The delay's way down (2026-11-06, a design choice beside the 60 Hz
+    tick). The peer reports how early this console's inputs reach it; a
+    whole clean window of at least a tick plus LOWER_GUARD_MS to spare, two
+    windows after the last change, lowers the delay a tick. Sample-once makes
+    the drop safe without agreement: the frames already sampled keep their
+    buttons, and the drop only skips one sample -- both consoles play the
+    same buttons on every frame through it, and the input check agrees."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 2
+    _t, played = _timed_match(wire, 1000, 3 * netplay.ESCALATE_TICKS + 20, a, b,
+                              masks=lambda k: (k // 7) % 3)
+    assert sa.delay == 1 and sb.delay == 1, "a tick to spare buys the tick back"
+    assert sa.lowers == 1 and sa.raises == 0
+    both = set(played[0]) & set(played[1])
+    assert [f for f in sorted(both) if played[0][f] != played[1][f]] == []
+    assert sa.desync < 0 and sb.desync < 0 and sa.checks > 3
+
+
+def test_the_delay_stays_up_while_the_margin_is_under_a_tick():
+    """An input that lands less than a tick plus the guard before it is
+    needed would stall at one tick less: the delay holds."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 2
+    _timed_match(wire, 1000, 4 * netplay.ESCALATE_TICKS, a, b, lag=33)
+    assert sa.peer_margin is not None and sa.peer_margin < 33 + 8
+    assert sa.delay == 2 and sb.delay == 2 and sa.lowers == 0
 
 
 # -- the shared random stream ------------------------------------------------

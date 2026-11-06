@@ -697,7 +697,9 @@ class _Lockstep(ctypes.Structure):
                 ("peer_ck_in", _U32), ("peer_ck_w", _U32), ("peer_ck_cmp", _I32),
                 ("desync", _I32), ("desync_kind", _U8), ("checks", _U32),
                 ("tick_hz", _U16), ("tick_rem", _U16), ("delay_max", ctypes.c_int),
-                ("escalate_ticks", _I32), ("escalate_at", _U32)]
+                ("escalate_ticks", _I32), ("escalate_at", _U32),
+                ("peer_margin", _U8), ("rep_min", _U8), ("delay_mark", _I32),
+                ("raises", _U32), ("lowers", _U32)]
 
 
 class _MatchS(ctypes.Structure):
@@ -878,6 +880,8 @@ class Match:
             return c or None
         if name == "m_ema":
             return s.m_ema if s.has_ema else None
+        if name == "peer_margin":
+            return None if s.peer_margin == 255 else s.peer_margin
         if name == "next_ms":
             return s.next_ms if s.has_next else None
         if name == "last_sent":

@@ -293,6 +293,11 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_tick_ms: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_ms); return;
         case MP_QSTR_tick_hz: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_hz); return;
         case MP_QSTR_delay_max: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay_max); return;
+        case MP_QSTR_peer_margin:
+            dest[0] = s->peer_margin == 255 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(s->peer_margin);
+            return;
+        case MP_QSTR_raises: dest[0] = mp_obj_new_int_from_uint(s->raises); return;
+        case MP_QSTR_lowers: dest[0] = mp_obj_new_int_from_uint(s->lowers); return;
         case MP_QSTR_frame: dest[0] = mp_obj_new_int(s->frame); return;
         case MP_QSTR_delay: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay); return;
         case MP_QSTR_redundancy: dest[0] = MP_OBJ_NEW_SMALL_INT(s->redundancy); return;
