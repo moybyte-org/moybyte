@@ -1,15 +1,17 @@
-// The module `moy_ssh`: the server's task, started and stopped from the
+// The module `moy_ssh`: the server's two tasks, started and stopped from the
 // console (moy_ssh.h).
 //
-//   moy_ssh.start(hash, key=None, port=22) -> the bytes of a new host key, or None
+//   moy_ssh.start(system_dir, port=22)
 //   moy_ssh.stop()
 //   moy_ssh.stats() -> (sessions, signed_in, refused, heap_now, heap_peak,
-//                       session_peak, to_shell_ms, listening, stack_free)
+//                       session_peak, to_shell_ms, listening, stack_free,
+//                       face_stack_free, arena_peak)
 //   moy_ssh.hash(password, salt) -> the stored form
 //
-// The key and the hash are the store's, read and written by the caller: a
-// file in the store is the VM's to touch. The server task's stack is PSRAM;
-// the setup (the key made or read) runs on the caller's task.
+// `system_dir` is the store's system folder: the password, `ssh`, the
+// authorized keys and the host key are read there (moy_ssh.h's SIGN-IN). The
+// setup runs on the caller's task, the console's; the server task and the
+// face task (moy_ssh_face.h) have PSRAM stacks and records.
 
 #include <string.h>
 #include <unistd.h>
@@ -28,94 +30,138 @@
 #include "moy_ssh_face.h"
 
 #define SSH_STACK (16 * 1024)
+#define FACE_STACK (24 * 1024)
 #define SSH_PRIORITY 1
 #define SSH_CORE 0
 
 extern const moy_ssh_shell_t moy_ssh_moy_sh;
 
-static TaskHandle_t s_task;
-static volatile int s_stop, s_done, s_lfd = -1;
+typedef struct {
+    TaskHandle_t task, face;
+    volatile int stop, done, face_done;
+    int lfd;
+} ssh_tasks_t;
+
+static ssh_tasks_t *s_t;
 
 static void ssh_task(void *arg) {
-    (void)arg;
-    while (!s_stop) {
-        if (moy_ssh_serve_one(s_lfd, 500) < 0) {
+    ssh_tasks_t *t = arg;
+    while (!t->stop) {
+        if (moy_ssh_serve_one(t->lfd, 500) < 0) {
             break;
         }
     }
-    close(s_lfd);
-    s_lfd = -1;
-    s_done = 1;
+    close(t->lfd);
+    t->lfd = -1;
+    t->done = 1;
     vTaskSuspend(NULL);
 }
 
-static mp_obj_t ssh_start(size_t n_args, const mp_obj_t *args) {
-    const char *hash = mp_obj_str_get_str(args[0]);
-    mp_buffer_info_t key = {0};
-    bool have_key = n_args > 1 && args[1] != mp_const_none;
-    if (have_key) {
-        mp_get_buffer_raise(args[1], &key, MP_BUFFER_READ);
+static void face_task(void *arg) {
+    ssh_tasks_t *t = arg;
+    moy_ssh_face_task(&t->stop);
+    t->face_done = 1;
+    vTaskSuspend(NULL);
+}
+
+static TaskHandle_t spawn(TaskFunction_t fn, const char *name, uint32_t stack) {
+    TaskHandle_t h = NULL;
+    if (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, s_t, SSH_PRIORITY, &h, SSH_CORE,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        return NULL;
     }
-    int port = n_args > 2 ? mp_obj_get_int(args[2]) : 22;
-    uint8_t *made = NULL;
-    size_t made_n = 0;
-    if (moy_ssh_setup(have_key ? key.buf : NULL, key.len, hash, &made, &made_n) != 0) {
+    return h;
+}
+
+static void reap(void);
+
+static mp_obj_t ssh_start(size_t n_args, const mp_obj_t *args) {
+    const char *sys = mp_obj_str_get_str(args[0]);
+    int port = n_args > 1 ? mp_obj_get_int(args[1]) : 22;
+    if (moy_ssh_setup(sys) != 0) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ssh setup failed"));
     }
-    mp_obj_t out = mp_const_none;
-    if (made != NULL) {
-        out = mp_obj_new_bytes(made, made_n);
-        moy_ssh_free(made);
+    if (s_t != NULL && s_t->stop && !moy_ssh_serving()) {
+        reap();
     }
-    if (s_task != NULL) {
-        return out;
-    }
-    moy_ssh_face_set_shell(&moy_ssh_moy_sh);
-    s_lfd = moy_ssh_listen(port);
-    if (s_lfd < 0) {
-        mp_raise_OSError(MP_EADDRINUSE);
-    }
-    s_stop = s_done = 0;
-    if (xTaskCreatePinnedToCoreWithCaps(ssh_task, "moy_ssh", SSH_STACK, NULL, SSH_PRIORITY,
-                                        &s_task, SSH_CORE,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        close(s_lfd);
-        s_lfd = -1;
-        s_task = NULL;
-        mp_raise_OSError(MP_ENOMEM);
-    }
-    return out;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ssh_start_obj, 1, 3, ssh_start);
-
-// The task ends after the session it serves (the listener's next wait).
-static mp_obj_t ssh_stop(void) {
-    if (s_task == NULL) {
+    if (s_t != NULL) {
         return mp_const_none;
     }
-    s_stop = 1;
-    while (!s_done) {
+    s_t = heap_caps_calloc(1, sizeof *s_t, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_t == NULL) {
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    moy_ssh_face_set_shell(&moy_ssh_moy_sh);
+    s_t->lfd = moy_ssh_listen(port);
+    if (s_t->lfd < 0) {
+        heap_caps_free(s_t);
+        s_t = NULL;
+        mp_raise_OSError(MP_EADDRINUSE);
+    }
+    s_t->face = spawn(face_task, "moy_ssh_face", FACE_STACK);
+    s_t->task = s_t->face != NULL ? spawn(ssh_task, "moy_ssh", SSH_STACK) : NULL;
+    if (s_t->task == NULL) {
+        if (s_t->face != NULL) {
+            s_t->stop = 1;
+            while (!s_t->face_done) {
+                mp_hal_delay_ms(20);
+            }
+            vTaskDeleteWithCaps(s_t->face);
+        }
+        close(s_t->lfd);
+        heap_caps_free(s_t);
+        s_t = NULL;
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ssh_start_obj, 1, 2, ssh_start);
+
+// The tasks end after the session they serve (the listener's next wait),
+// the hops they make served here meanwhile. Asked from a session's own
+// command (`passwd -d` over SSH: inside a hop) they are told to end and
+// reaped by the next start or stop.
+static void reap(void) {
+    while (!s_t->done || !s_t->face_done) {
+        moy_ssh_tail();
         mp_hal_delay_ms(20);
     }
-    vTaskDeleteWithCaps(s_task);
-    s_task = NULL;
+    vTaskDeleteWithCaps(s_t->task);
+    vTaskDeleteWithCaps(s_t->face);
+    heap_caps_free(s_t);
+    s_t = NULL;
+}
+
+static mp_obj_t ssh_stop(void) {
+    if (s_t == NULL) {
+        return mp_const_none;
+    }
+    s_t->stop = 1;
+    if (!moy_ssh_serving()) {
+        reap();
+    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ssh_stop_obj, ssh_stop);
 
+static mp_obj_t stack_free(TaskHandle_t h) {
+    return h != NULL ? mp_obj_new_int_from_uint(uxTaskGetStackHighWaterMark(h)
+                                                * sizeof(StackType_t))
+                     : mp_const_none;
+}
+
 static mp_obj_t ssh_stats(void) {
     moy_ssh_stats_t s;
     moy_ssh_stats(&s);
-    mp_obj_t t[9] = {
+    mp_obj_t t[11] = {
         mp_obj_new_int_from_uint(s.sessions), mp_obj_new_int_from_uint(s.signed_in),
         mp_obj_new_int_from_uint(s.refused), mp_obj_new_int_from_uint(s.heap_now),
         mp_obj_new_int_from_uint(s.heap_peak), mp_obj_new_int_from_uint(s.session_peak),
-        mp_obj_new_int_from_uint(s.handshake_ms), mp_obj_new_bool(s_task != NULL),
-        s_task != NULL ? mp_obj_new_int_from_uint(uxTaskGetStackHighWaterMark(s_task)
-                                                  * sizeof(StackType_t))
-                       : mp_const_none,
+        mp_obj_new_int_from_uint(s.handshake_ms), mp_obj_new_bool(s_t != NULL),
+        stack_free(s_t != NULL ? s_t->task : NULL), stack_free(s_t != NULL ? s_t->face : NULL),
+        mp_obj_new_int_from_uint(s.arena_peak),
     };
-    return mp_obj_new_tuple(9, t);
+    return mp_obj_new_tuple(11, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ssh_stats_obj, ssh_stats);
 

@@ -3,12 +3,8 @@
 # headers and its POSIX renames, port/moy_ssh_port.h, reach no other file),
 # and the module `moy_ssh`.
 #
-# Built only where the build asks for it (MOYBYTE_SSH=1 in the environment):
-# the spike's measurement images. Every other image compiles nothing here.
-
-if(NOT "$ENV{MOYBYTE_SSH}" STREQUAL "1")
-    return()
-endif()
+# Built into every image that stages it: a board takes or denies native/moy_ssh
+# in its board.toml (README.md, Boards).
 
 set(MOY_SSH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SSH_DB_SRCS ${MOY_SSH}/dropbear/src/*.c ${MOY_SSH}/dropbear/libtommath/*.c)
@@ -34,6 +30,7 @@ target_include_directories(moy_ssh_core PRIVATE
     ${MOY_SSH}/dropbear/libtomcrypt/src/headers
     ${MOY_SSH}/dropbear/libtommath
     ${MOY_SSH}/../moy_sh
+    ${MOY_SSH}/../moy_store
     ${_moy_ssh_cfg}
     "${_moy_ssh_inc}")
 target_compile_definitions(moy_ssh_core PRIVATE "${_moy_ssh_defs}"

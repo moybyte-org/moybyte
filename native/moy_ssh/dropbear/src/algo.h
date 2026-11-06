@@ -46,6 +46,20 @@ struct Algo_Type {
 typedef struct Algo_Type algo_type;
 
 /* lists mapping ssh types of algorithms to internal values */
+#if DROPBEAR_MOY
+/* PSRAM copies of the lists (common-algo.c's moy_ssh_algos) */
+extern algo_type *moy_ssh_g_sshkex, *moy_ssh_g_sigalgs, *moy_ssh_g_sshciphers,
+	*moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress, *moy_ssh_g_ssh_delaycompress,
+	*moy_ssh_g_ssh_nocompress;
+#define sshkex moy_ssh_g_sshkex
+#define sigalgs moy_ssh_g_sigalgs
+#define sshciphers moy_ssh_g_sshciphers
+#define sshhashes moy_ssh_g_sshhashes
+#define ssh_compress moy_ssh_g_ssh_compress
+#define ssh_delaycompress moy_ssh_g_ssh_delaycompress
+#define ssh_nocompress moy_ssh_g_ssh_nocompress
+int moy_ssh_algos(void);
+#else
 extern algo_type sshkex[];
 extern algo_type sigalgs[];
 extern algo_type sshciphers[];
@@ -53,6 +67,7 @@ extern algo_type sshhashes[];
 extern algo_type ssh_compress[];
 extern algo_type ssh_delaycompress[];
 extern algo_type ssh_nocompress[];
+#endif
 
 extern const struct dropbear_cipher dropbear_nocipher;
 extern const struct dropbear_cipher_mode dropbear_mode_none;

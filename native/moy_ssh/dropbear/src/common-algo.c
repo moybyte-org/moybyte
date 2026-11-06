@@ -125,7 +125,11 @@ const struct dropbear_hash dropbear_nohash =
  * The ordering here is important for the client - the first mode
  * that is also supported by the server will get used. */
 
+#if DROPBEAR_MOY
+static const algo_type moy_sshciphers[] = {
+#else
 algo_type sshciphers[] = {
+#endif
 #if DROPBEAR_CHACHA20POLY1305
 	{"chacha20-poly1305@openssh.com", 0, &dropbear_chachapoly, 1, &dropbear_mode_chachapoly},
 #endif
@@ -171,7 +175,11 @@ algo_type sshciphers[] = {
 	{NULL, 0, NULL, 0, NULL}
 };
 
+#if DROPBEAR_MOY
+static const algo_type moy_sshhashes[] = {
+#else
 algo_type sshhashes[] = {
+#endif
 #if DROPBEAR_SHA1_96_HMAC
 	{"hmac-sha1-96", 0, &dropbear_sha1_96, 1, NULL},
 #endif
@@ -188,26 +196,42 @@ algo_type sshhashes[] = {
 };
 
 #ifndef DISABLE_ZLIB
+#if DROPBEAR_MOY
+static const algo_type moy_ssh_compress[] = {
+#else
 algo_type ssh_compress[] = {
+#endif
 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
 	{"zlib", DROPBEAR_COMP_ZLIB, NULL, 1, NULL},
 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
 	{NULL, 0, NULL, 0, NULL}
 };
 
+#if DROPBEAR_MOY
+static const algo_type moy_ssh_delaycompress[] = {
+#else
 algo_type ssh_delaycompress[] = {
+#endif
 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
 	{NULL, 0, NULL, 0, NULL}
 };
 #endif
 
+#if DROPBEAR_MOY
+static const algo_type moy_ssh_nocompress[] = {
+#else
 algo_type ssh_nocompress[] = {
+#endif
 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
 	{NULL, 0, NULL, 0, NULL}
 };
 
+#if DROPBEAR_MOY
+static const algo_type moy_sigalgs[] = {
+#else
 algo_type sigalgs[] = {
+#endif
 #if DROPBEAR_ED25519
 	{"ssh-ed25519", DROPBEAR_SIGNATURE_ED25519, NULL, 1, NULL},
 #if DROPBEAR_SK_ED25519
@@ -304,7 +328,11 @@ volatile int64_t crypto_int64_optblocker = 0;
 
 
 /* data == NULL for non-kex algorithm identifiers */
+#if DROPBEAR_MOY
+static const algo_type moy_sshkex[] = {
+#else
 algo_type sshkex[] = {
+#endif
 #if DROPBEAR_SNTRUP761
 	{"sntrup761x25519-sha512", 0, &kex_sntrup761, 1, NULL},
 	{"sntrup761x25519-sha512@openssh.com", 0, &kex_sntrup761, 1, NULL},
@@ -623,3 +651,36 @@ check_user_algos(const char* user_algo_list, algo_type * algos,
 	return n;
 }
 #endif /* DROPBEAR_USER_ALGO_LIST */
+
+#if DROPBEAR_MOY
+/* The lists are written while a session runs (`usable`), so each is a copy
+ * taken at the server's setup: PSRAM on a board (moy_ssh_calloc), the
+ * initial tables const. */
+algo_type *moy_ssh_g_sshciphers, *moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress,
+	*moy_ssh_g_ssh_delaycompress, *moy_ssh_g_ssh_nocompress, *moy_ssh_g_sigalgs,
+	*moy_ssh_g_sshkex;
+
+static int moy_algos_copy(algo_type **to, const algo_type *from, size_t size) {
+	if (*to == NULL) {
+		*to = moy_ssh_calloc(1, size);
+		if (*to == NULL) {
+			return -1;
+		}
+		memcpy(*to, from, size);
+	}
+	return 0;
+}
+
+int moy_ssh_algos(void) {
+	return moy_algos_copy(&moy_ssh_g_sshciphers, moy_sshciphers, sizeof moy_sshciphers)
+		| moy_algos_copy(&moy_ssh_g_sshhashes, moy_sshhashes, sizeof moy_sshhashes)
+#ifndef DISABLE_ZLIB
+		| moy_algos_copy(&moy_ssh_g_ssh_compress, moy_ssh_compress, sizeof moy_ssh_compress)
+		| moy_algos_copy(&moy_ssh_g_ssh_delaycompress, moy_ssh_delaycompress,
+			sizeof moy_ssh_delaycompress)
+#endif
+		| moy_algos_copy(&moy_ssh_g_ssh_nocompress, moy_ssh_nocompress, sizeof moy_ssh_nocompress)
+		| moy_algos_copy(&moy_ssh_g_sigalgs, moy_sigalgs, sizeof moy_sigalgs)
+		| moy_algos_copy(&moy_ssh_g_sshkex, moy_sshkex, sizeof moy_sshkex);
+}
+#endif

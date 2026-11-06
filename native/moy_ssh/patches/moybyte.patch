@@ -18,6 +18,11 @@ the server runs inside the kernel's process, one session at a time.
   (DROPBEAR_SIGNKEY_VERIFY): a server without public-key sign-in does not.
 - libtomcrypt's crypt_cipher_descriptor.c and crypt_hash_descriptor.c: the
   tables are PSRAM, taken at setup (port/moy_ssh_port.h), not .bss.
+- common-algo.c and algo.h: the algorithm lists, which a session writes
+  (`usable`), are const tables copied at setup into PSRAM (moy_ssh_algos),
+  each list's name a pointer to its copy, not .data.
+- svr-authpubkey.c: the authorized keys are the store's, read by the server
+  at the connection's start (moy_ssh_keys), not a file under a home folder.
 
 diff --git a/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c b/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c
 index ccc9890..1458331 100644
@@ -509,3 +514,192 @@ index 6e50f8f..7a25990 100644
  
  /* Used to work around Memory Sanitizer false positives */
  #if defined(__has_feature)
+diff --git a/src/algo.h b/src/algo.h
+--- a/src/algo.h
++++ b/src/algo.h
+@@ -46,6 +46,20 @@
+ typedef struct Algo_Type algo_type;
+ 
+ /* lists mapping ssh types of algorithms to internal values */
++#if DROPBEAR_MOY
++/* PSRAM copies of the lists (common-algo.c's moy_ssh_algos) */
++extern algo_type *moy_ssh_g_sshkex, *moy_ssh_g_sigalgs, *moy_ssh_g_sshciphers,
++	*moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress, *moy_ssh_g_ssh_delaycompress,
++	*moy_ssh_g_ssh_nocompress;
++#define sshkex moy_ssh_g_sshkex
++#define sigalgs moy_ssh_g_sigalgs
++#define sshciphers moy_ssh_g_sshciphers
++#define sshhashes moy_ssh_g_sshhashes
++#define ssh_compress moy_ssh_g_ssh_compress
++#define ssh_delaycompress moy_ssh_g_ssh_delaycompress
++#define ssh_nocompress moy_ssh_g_ssh_nocompress
++int moy_ssh_algos(void);
++#else
+ extern algo_type sshkex[];
+ extern algo_type sigalgs[];
+ extern algo_type sshciphers[];
+@@ -53,6 +67,7 @@
+ extern algo_type ssh_compress[];
+ extern algo_type ssh_delaycompress[];
+ extern algo_type ssh_nocompress[];
++#endif
+ 
+ extern const struct dropbear_cipher dropbear_nocipher;
+ extern const struct dropbear_cipher_mode dropbear_mode_none;
+diff --git a/src/common-algo.c b/src/common-algo.c
+--- a/src/common-algo.c
++++ b/src/common-algo.c
+@@ -125,7 +125,11 @@
+  * The ordering here is important for the client - the first mode
+  * that is also supported by the server will get used. */
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sshciphers[] = {
++#else
+ algo_type sshciphers[] = {
++#endif
+ #if DROPBEAR_CHACHA20POLY1305
+ 	{"chacha20-poly1305@openssh.com", 0, &dropbear_chachapoly, 1, &dropbear_mode_chachapoly},
+ #endif
+@@ -171,7 +175,11 @@
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sshhashes[] = {
++#else
+ algo_type sshhashes[] = {
++#endif
+ #if DROPBEAR_SHA1_96_HMAC
+ 	{"hmac-sha1-96", 0, &dropbear_sha1_96, 1, NULL},
+ #endif
+@@ -188,26 +196,42 @@
+ };
+ 
+ #ifndef DISABLE_ZLIB
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_compress[] = {
++#else
+ algo_type ssh_compress[] = {
++#endif
+ 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
+ 	{"zlib", DROPBEAR_COMP_ZLIB, NULL, 1, NULL},
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_delaycompress[] = {
++#else
+ algo_type ssh_delaycompress[] = {
++#endif
+ 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ #endif
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_nocompress[] = {
++#else
+ algo_type ssh_nocompress[] = {
++#endif
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sigalgs[] = {
++#else
+ algo_type sigalgs[] = {
++#endif
+ #if DROPBEAR_ED25519
+ 	{"ssh-ed25519", DROPBEAR_SIGNATURE_ED25519, NULL, 1, NULL},
+ #if DROPBEAR_SK_ED25519
+@@ -304,7 +328,11 @@
+ 
+ 
+ /* data == NULL for non-kex algorithm identifiers */
++#if DROPBEAR_MOY
++static const algo_type moy_sshkex[] = {
++#else
+ algo_type sshkex[] = {
++#endif
+ #if DROPBEAR_SNTRUP761
+ 	{"sntrup761x25519-sha512", 0, &kex_sntrup761, 1, NULL},
+ 	{"sntrup761x25519-sha512@openssh.com", 0, &kex_sntrup761, 1, NULL},
+@@ -623,3 +651,36 @@
+ 	return n;
+ }
+ #endif /* DROPBEAR_USER_ALGO_LIST */
++
++#if DROPBEAR_MOY
++/* The lists are written while a session runs (`usable`), so each is a copy
++ * taken at the server's setup: PSRAM on a board (moy_ssh_calloc), the
++ * initial tables const. */
++algo_type *moy_ssh_g_sshciphers, *moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress,
++	*moy_ssh_g_ssh_delaycompress, *moy_ssh_g_ssh_nocompress, *moy_ssh_g_sigalgs,
++	*moy_ssh_g_sshkex;
++
++static int moy_algos_copy(algo_type **to, const algo_type *from, size_t size) {
++	if (*to == NULL) {
++		*to = moy_ssh_calloc(1, size);
++		if (*to == NULL) {
++			return -1;
++		}
++		memcpy(*to, from, size);
++	}
++	return 0;
++}
++
++int moy_ssh_algos(void) {
++	return moy_algos_copy(&moy_ssh_g_sshciphers, moy_sshciphers, sizeof moy_sshciphers)
++		| moy_algos_copy(&moy_ssh_g_sshhashes, moy_sshhashes, sizeof moy_sshhashes)
++#ifndef DISABLE_ZLIB
++		| moy_algos_copy(&moy_ssh_g_ssh_compress, moy_ssh_compress, sizeof moy_ssh_compress)
++		| moy_algos_copy(&moy_ssh_g_ssh_delaycompress, moy_ssh_delaycompress,
++			sizeof moy_ssh_delaycompress)
++#endif
++		| moy_algos_copy(&moy_ssh_g_ssh_nocompress, moy_ssh_nocompress, sizeof moy_ssh_nocompress)
++		| moy_algos_copy(&moy_ssh_g_sigalgs, moy_sigalgs, sizeof moy_sigalgs)
++		| moy_algos_copy(&moy_ssh_g_sshkex, moy_sshkex, sizeof moy_sshkex);
++}
++#endif
+diff --git a/src/svr-authpubkey.c b/src/svr-authpubkey.c
+--- a/src/svr-authpubkey.c
++++ b/src/svr-authpubkey.c
+@@ -503,6 +503,34 @@
+ 		dropbear_exit("Failed to set euid");
+ 	}
+ #endif
++#if DROPBEAR_MOY
++	/* the keys are the store's system/authorized_keys, read by the server
++	 * at the connection's start (moy_ssh_keys) */
++	{
++		size_t keys_n = 0;
++		const char *keys = moy_ssh_keys(&keys_n), *end = keys + keys_n;
++		line = buf_new(MAX_AUTHKEYS_LINE);
++		for (line_num = 1; keys != NULL && keys < end
++				&& line_num <= MAX_AUTHKEYS_LINE_COUNT; line_num++) {
++			const char *nl = memchr(keys, '\n', end - keys);
++			size_t n = (nl != NULL ? nl : end) - keys;
++			buf_setpos(line, 0);
++			buf_setlen(line, 0);
++			if (n > 0 && n <= MAX_AUTHKEYS_LINE) {
++				buf_putbytes(line, (const unsigned char *)keys, n);
++				buf_setpos(line, 0);
++				ret = checkpubkey_line(line, line_num, "authorized_keys", keyalgo,
++					keyalgolen, keyblob, keybloblen, ret_options);
++				if (ret == DROPBEAR_SUCCESS) {
++					break;
++				}
++			}
++			keys += n + (nl != NULL);
++		}
++		buf_free(line);
++		return ret;
++	}
++#endif
+ 	/* check file permissions, also whether file exists */
+ 	if (checkpubkeyperms() == DROPBEAR_FAILURE) {
+ 		TRACE(("bad authorized_keys permissions, or file doesn't exist"))

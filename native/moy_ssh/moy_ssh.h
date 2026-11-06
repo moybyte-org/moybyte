@@ -9,10 +9,21 @@
 //
 // THE SHELL is moy_sh's: a session's `shell` or `exec` request opens a pair
 // of connected sockets, Dropbear's channel on one end and the shell's face on
-// the other (moy_ssh_face.c on a board, the harness's on the host).
+// the other (moy_ssh_face.h), which runs on a task of its own.
 //
-// SIGN-IN is a password against a stored hash (moy_ssh_hash): any user name
-// is the console's one account.
+// SIGN-IN (docs/os_2026-11/system.md section 3): a password against the
+// stored hash (moy_ssh_hash) or a key in authorized_keys, any user name the
+// console's one account. The store's system folder holds what the server
+// reads at every connection's start, so a change is in force at the next:
+//   password          the hash, one line; none (or an empty file): no SSH
+//   ssh               `key = value` lines, sshd_config-like: `password_auth =
+//                     no` turns passwords off (keys still sign in)
+//   authorized_keys   OpenSSH's format, a key a line (ssh-copy-id writes it)
+//   ssh_host_key      the host key, made at the first setup
+//
+// TASKS. The server's task and the face's (moy_ssh_face.h) never touch the
+// store or Python: what must runs on the console's task, HOPPED there
+// (moy_ssh_hop) and served at the frame's tail (moy_ssh_tail).
 
 #ifndef MOY_SSH_H
 #define MOY_SSH_H
@@ -25,22 +36,21 @@
 
 typedef struct {
     uint32_t sessions;          // connections served
-    uint32_t signed_in;         // sessions that signed in
+    uint32_t signed_in;         // commands run after a sign-in
     uint32_t refused;           // password attempts refused
     size_t heap_now;            // Dropbear's allocations now, bytes
     size_t heap_peak;           // their high-water since start
     size_t session_peak;        // the high-water of the last session alone
     uint32_t handshake_ms;      // accept to the shell's start, last session
+    size_t arena_peak;          // the most of a shell's arena a session used
     int listening;
 } moy_ssh_stats_t;
 
-// Once: the host key (Dropbear's private-key bytes) and the stored password
-// hash; 0, or -1 with the reason logged. With no key one is made and its
-// bytes put in *made (moy_ssh_calloc's: the caller stores them and frees
-// them with moy_ssh_free): the store's files are the VM's, so the caller
-// keeps them. Again later: the hash alone is replaced.
-int moy_ssh_setup(const uint8_t *key, size_t n, const char *hash, uint8_t **made,
-                  size_t *made_n);
+// The server's state (PSRAM), its algorithm lists, and the host key read
+// from `system_dir`/ssh_host_key or made and written there, on the calling
+// task, which must be the console's: 0, or -1 with the reason logged. Again
+// later: nothing more.
+int moy_ssh_setup(const char *system_dir);
 // A listening socket on `port`, or -1.
 int moy_ssh_listen(int port);
 // Serve one connection from `lfd` to its end; 0 when one was served, 1 when
@@ -52,9 +62,26 @@ int moy_ssh_serve_one(int lfd, int wait_ms);
 int moy_ssh_hash(const char *password, const char *salt, char *out, size_t cap);
 
 void moy_ssh_stats(moy_ssh_stats_t *out);
+// A shell's arena at its end, for arena_peak.
+void moy_ssh_note_arena(size_t used);
+
+// The store's system folder setup was given.
+const char *moy_ssh_system(void);
 
 // Two connected stream sockets (the channel's end, the face's end).
 int moy_ssh_pair(int fds[2]);
+
+// The tasks: a task's id; a nap of up to `ms` (a poke ends it early); a
+// poke of task `t`'s nap.
+uintptr_t moy_ssh_self(void);
+void moy_ssh_nap(int ms);
+void moy_ssh_poke(uintptr_t t);
+// fn(arg) on the console's task, waiting for it; in place when called there.
+void moy_ssh_hop(void (*fn)(void *arg), void *arg);
+// The console's task, at every frame's tail: the hop that waits, run.
+void moy_ssh_tail(void);
+// Whether the console's task is inside a hop now (a session's command).
+int moy_ssh_serving(void);
 
 void *moy_ssh_calloc(size_t n, size_t size);
 void moy_ssh_free(void *p);

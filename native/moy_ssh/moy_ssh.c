@@ -14,22 +14,63 @@
 
 #include "moy_ssh.h"
 #include "moy_ssh_face.h"
+#include "moy_fs.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
+
+uintptr_t moy_ssh_self(void) {
+    return (uintptr_t)xTaskGetCurrentTaskHandle();
+}
+
+void moy_ssh_nap(int ms) {
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
+}
+
+void moy_ssh_poke(uintptr_t t) {
+    if (t != 0) {
+        xTaskNotifyGive((TaskHandle_t)t);
+    }
+}
 #else
+#include <pthread.h>
 #include <sys/random.h>
 static uint32_t now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
 }
+
+uintptr_t moy_ssh_self(void) {
+    return (uintptr_t)pthread_self();
+}
+
+void moy_ssh_nap(int ms) {
+    usleep((ms < 2 ? ms : 2) * 1000);
+}
+
+void moy_ssh_poke(uintptr_t t) {
+    (void)t;
+}
 #endif
+
+#define SYS_PATH 192u
+#define KEYS_MAX (16u * 1024u)
+
+// A hop waiting for the console's task.
+typedef struct {
+    void (*fn)(void *);
+    void *arg;
+    volatile int done;
+    uintptr_t waiter;
+} hop_t;
 
 // The server's own state, PSRAM (moy_ssh_globals): the jump an exit takes,
 // the stored hash and what getpwnam and crypt answer with.
@@ -42,6 +83,14 @@ typedef struct {
     moy_ssh_stats_t stats;
     size_t session_base;
     uint32_t accepted_at;
+    char sys[SYS_PATH];         // the store's system folder
+    char *keys;                 // the connection's authorized keys, or NULL
+    size_t keys_n;
+    int set_up;
+    hop_t *volatile hop;        // the hop waiting, or NULL
+    volatile uintptr_t tail;    // the console's task, as its tail last ran
+    int serving;                // a hop runs on it now
+    moy_ssh_faces_t faces;
 } moy_state_t;
 
 static moy_state_t *g;
@@ -144,8 +193,161 @@ int moy_ssh_globals(void) {
     moy_ssh_g_svr_opts = moy_ssh_calloc(1, sizeof(svr_runopts));
     moy_ssh_g_ciphers = moy_ssh_calloc(TAB_SIZE, sizeof(struct ltc_cipher_descriptor));
     moy_ssh_g_hashes = moy_ssh_calloc(TAB_SIZE, sizeof(struct ltc_hash_descriptor));
-    return g && moy_ssh_g_ses && moy_ssh_g_svr_ses && moy_ssh_g_opts && moy_ssh_g_svr_opts
+    return moy_ssh_algos() == 0 && g && moy_ssh_g_ses && moy_ssh_g_svr_ses && moy_ssh_g_opts && moy_ssh_g_svr_opts
            && moy_ssh_g_ciphers && moy_ssh_g_hashes ? 0 : -1;
+}
+
+moy_ssh_faces_t *moy_ssh_faces(void) {
+    return &g->faces;
+}
+
+// -- the console's task ---------------------------------------------------------
+
+void moy_ssh_hop(void (*fn)(void *arg), void *arg) {
+    if (g == NULL || moy_ssh_self() == g->tail) {
+        fn(arg);
+        return;
+    }
+    hop_t h = { fn, arg, 0, moy_ssh_self() };
+    hop_t *none = NULL;
+    // one hop at a time: the server's and the face's take turns
+    while (!__atomic_compare_exchange_n(&g->hop, &none, &h, 0, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_ACQUIRE)) {
+        none = NULL;
+        moy_ssh_nap(5);
+    }
+    while (!__atomic_load_n(&h.done, __ATOMIC_ACQUIRE)) {
+        moy_ssh_nap(100);
+    }
+}
+
+int moy_ssh_serving(void) {
+    return g != NULL && g->serving;
+}
+
+void moy_ssh_tail(void) {
+    if (g == NULL) {
+        return;
+    }
+    g->tail = moy_ssh_self();
+    hop_t *h = __atomic_load_n(&g->hop, __ATOMIC_ACQUIRE);
+    if (h != NULL && !g->serving) {
+        g->serving = 1;
+        h->fn(h->arg);
+        g->serving = 0;
+        uintptr_t w = h->waiter;
+        __atomic_store_n(&g->hop, NULL, __ATOMIC_RELEASE);
+        __atomic_store_n(&h->done, 1, __ATOMIC_RELEASE);
+        moy_ssh_poke(w);
+    }
+}
+
+// -- the store's files ------------------------------------------------------------
+
+// `name` in the system folder read whole, on the console's task: 0 and its
+// bytes in *out (moy_buf_free's), or an errno.
+static int sys_read(const char *name, moy_buf_t *out) {
+    char path[SYS_PATH + 32];
+    snprintf(path, sizeof path, "%s/%s", g->sys, name);
+    int entered = moy_vol_gate_enter(path);
+    int r = moy_fs_read(path, NULL, out);
+    moy_vol_gate_leave(entered);
+    return r;
+}
+
+static int sys_publish(const char *name, const void *p, size_t n) {
+    char path[SYS_PATH + 32];
+    snprintf(path, sizeof path, "%s/%s", g->sys, name);
+    int entered = moy_vol_gate_enter(path);
+    int r = moy_fs_publish(path, p, n);
+    moy_vol_gate_leave(entered);
+    return r;
+}
+
+// `key` in a `key = value` file's text: its value's first word into out.
+static int conf_get(const char *t, size_t n, const char *key, char *out, size_t cap) {
+    size_t kn = strlen(key);
+    const char *end = t + n;
+    while (t < end) {
+        const char *nl = memchr(t, '\n', end - t);
+        const char *e = nl != NULL ? nl : end;
+        while (t < e && (*t == ' ' || *t == '\t')) {
+            t++;
+        }
+        if ((size_t)(e - t) > kn && !memcmp(t, key, kn)
+                && (t[kn] == ' ' || t[kn] == '\t' || t[kn] == '=')) {
+            const char *v = t + kn;
+            while (v < e && (*v == ' ' || *v == '\t' || *v == '=')) {
+                v++;
+            }
+            size_t k = 0;
+            while (v < e && *v != ' ' && *v != '\t' && *v != '\r' && *v != '#' && k + 1 < cap) {
+                out[k++] = *v++;
+            }
+            out[k] = 0;
+            return 1;
+        }
+        t = e + 1;
+    }
+    return 0;
+}
+
+// What a connection reads at its start (moy_ssh.h's SIGN-IN), on the
+// console's task.
+typedef struct {
+    char hash[MOY_SSH_HASH_MAX];
+    int password_auth;
+    char *keys;
+    size_t keys_n;
+} conf_t;
+
+static void conf_here(void *arg) {
+    conf_t *c = arg;
+    moy_buf_t b = {0};
+    c->hash[0] = 0;
+    if (sys_read("password", &b) == 0) {
+        size_t n = strcspn(b.p, "\r\n");
+        if (n < sizeof c->hash && n == strspn(b.p, "$moy1abcdef0123456789")) {
+            memcpy(c->hash, b.p, n);
+            c->hash[n] = 0;
+        }
+        moy_buf_free(&b);
+    }
+    c->password_auth = 1;
+    if (sys_read("ssh", &b) == 0) {
+        char v[8];
+        if (conf_get(b.p, b.n, "password_auth", v, sizeof v)) {
+            c->password_auth = strcmp(v, "no") != 0;
+        }
+        moy_buf_free(&b);
+    }
+    c->keys = NULL;
+    c->keys_n = 0;
+    if (sys_read("authorized_keys", &b) == 0) {
+        if (b.n <= KEYS_MAX) {
+            c->keys = moy_ssh_calloc(1, b.n + 1);
+            if (c->keys != NULL) {
+                memcpy(c->keys, b.p, b.n);
+                c->keys_n = b.n;
+            }
+        }
+        moy_buf_free(&b);
+    }
+}
+
+void moy_ssh_note_arena(size_t used) {
+    if (g != NULL && used > s_stats.arena_peak) {
+        s_stats.arena_peak = used;
+    }
+}
+
+const char *moy_ssh_system(void) {
+    return g != NULL ? g->sys : "";
+}
+
+const char *moy_ssh_keys(size_t *n) {
+    *n = g->keys_n;
+    return g->keys;
 }
 
 // -- the POSIX names ----------------------------------------------------------
@@ -282,34 +484,26 @@ char *moy_ssh_crypt(const char *key, const char *stored) {
     }
     if (strcmp(out, stored) != 0) {
         s_stats.refused++;
-    } else {
-        s_stats.signed_in++;
     }
     return out;
 }
 
 // -- the server -------------------------------------------------------------------
 
-int moy_ssh_setup(const uint8_t *key, size_t n, const char *hash, uint8_t **made,
-                  size_t *made_n) {
-    if (strlen(hash) >= MOY_SSH_HASH_MAX || strncmp(hash, "$moy1$", 6) != 0) {
-        printf("SSH no password set\n");
+int moy_ssh_setup(const char *system_dir) {
+    if (strlen(system_dir) >= SYS_PATH) {
+        printf("SSH the system folder's path is too long\n");
         return -1;
     }
     if (moy_ssh_globals() != 0) {
         printf("SSH no memory\n");
         return -1;
     }
-    strcpy(s_hash, hash);
+    strcpy(g->sys, system_dir);
+    g->tail = moy_ssh_self();
     _dropbear_exit = svr_dropbear_exit;
     _dropbear_log = svr_dropbear_log;
-    if (made != NULL) {
-        *made = NULL;
-        *made_n = 0;
-    }
-
-    static int once;
-    if (once) {
+    if (g->set_up) {
         return 0;
     }
     // Setup's own allocations (the options, the host key) live in epoch 0,
@@ -320,16 +514,19 @@ int moy_ssh_setup(const uint8_t *key, size_t n, const char *hash, uint8_t **made
         return -1;
     }
     seedrandom();
-    // -R: no key file is read or written here; the key is the caller's
+    // -R: no key file is read or written here; the key is the store's
     char *argv[] = {"dropbear", "-F", "-R", NULL};
     svr_getopts(3, argv);
     load_all_hostkeys();
     enum signkey_type type = DROPBEAR_SIGNKEY_ED25519;
+    moy_buf_t key = {0};
     buffer *b;
-    if (key != NULL) {
-        b = buf_new(n);
-        buf_putbytes(b, key, n);
+    if (sys_read("ssh_host_key", &key) == 0) {
+        b = buf_new(key.n);
+        buf_putbytes(b, (const unsigned char *)key.p, key.n);
         buf_setpos(b, 0);
+        m_burn(key.p, key.n);
+        moy_buf_free(&key);
         if (buf_get_priv_key(b, svr_opts.hostkey, &type) != DROPBEAR_SUCCESS
                 || type != DROPBEAR_SIGNKEY_ED25519) {
             buf_burn_free(b);
@@ -342,17 +539,12 @@ int moy_ssh_setup(const uint8_t *key, size_t n, const char *hash, uint8_t **made
         svr_opts.hostkey->ed25519key = gen_ed25519_priv_key(256);
         b = buf_new(MAX_PRIVKEY_SIZE);
         buf_put_priv_key(b, svr_opts.hostkey, type);
-        if (made != NULL) {
-            *made = moy_ssh_calloc(1, b->len);
-            if (*made != NULL) {
-                memcpy(*made, b->data, b->len);
-                *made_n = b->len;
-            }
-        }
+        int r = sys_publish("ssh_host_key", b->data, b->len);
         buf_burn_free(b);
-        printf("SSH host key made in %u ms\n", (unsigned)(now_ms() - t0));
+        printf("SSH host key made in %u ms%s\n", (unsigned)(now_ms() - t0),
+               r != 0 ? ", not stored" : "");
     }
-    once = 1;
+    g->set_up = 1;
     return 0;
 }
 
@@ -416,6 +608,7 @@ int moy_ssh_pair(int fds[2]) {
 }
 
 uint32_t moy_ssh_mark_shell(void) {
+    s_stats.signed_in++;
     s_stats.handshake_ms = now_ms() - s_accepted_at;
     return s_stats.handshake_ms;
 }
@@ -436,6 +629,17 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     if (fd < 0) {
         return 1;
     }
+    conf_t c;
+    moy_ssh_hop(conf_here, &c);
+    if (c.hash[0] == 0) {
+        // no password set: no SSH
+        moy_ssh_free(c.keys);
+        close(fd);
+        return 0;
+    }
+    strcpy(s_hash, c.hash);
+    g->keys = c.keys;
+    g->keys_n = c.keys_n;
     s_stats.sessions++;
     s_accepted_at = now_ms();
     s_session_base = s_stats.heap_now;
@@ -446,12 +650,17 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     m_malloc_set_epoch(1);
     if (setjmp(s_jmp) == 0) {
         seedrandom();
+        svr_opts.noauthpass = !c.password_auth;
         svr_session(fd, -1);
     }
     m_malloc_free_epoch(1, 1);
     m_malloc_set_epoch(0);
     close(fd);
     moy_ssh_face_reap_all(5000);
+    moy_ssh_free(g->keys);
+    g->keys = NULL;
+    g->keys_n = 0;
+    s_hash[0] = 0;
     return 0;
 }
 

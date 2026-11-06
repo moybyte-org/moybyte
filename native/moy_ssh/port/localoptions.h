@@ -2,7 +2,7 @@
 // one): a server only, one user, one connection at a time, inside the
 // kernel's process. The algorithm set is the smallest an OpenSSH client
 // accepts without being told anything: curve25519 key exchange, an ed25519
-// host key, chacha20-poly1305.
+// host key, chacha20-poly1305; sign-in by password or an ed25519 key.
 
 #ifndef MOY_SSH_LOCALOPTIONS_H
 #define MOY_SSH_LOCALOPTIONS_H
@@ -57,7 +57,7 @@
 #define DO_MOTD 0
 #define DROPBEAR_SVR_PASSWORD_AUTH 1
 #define DROPBEAR_SVR_PAM_AUTH 0
-#define DROPBEAR_SVR_PUBKEY_AUTH 0
+#define DROPBEAR_SVR_PUBKEY_AUTH 1
 #define DROPBEAR_SVR_PUBKEY_OPTIONS 0
 #define DROPBEAR_SVR_MULTIUSER 0
 #define DROPBEAR_SVR_DROP_PRIVS 0

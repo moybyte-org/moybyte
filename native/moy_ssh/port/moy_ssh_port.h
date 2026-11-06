@@ -35,6 +35,9 @@ int moy_ssh_reap(pid_t *pid, int *status);
 int moy_ssh_signal(pid_t pid, int sig);
 void moy_ssh_winch(pid_t pid, int cols, int rows);
 
+// The authorized keys' text the connection read (system/authorized_keys),
+// NULL with none.
+const char *moy_ssh_keys(size_t *n);
 // Memory for every Dropbear allocation (PSRAM on a board), counted.
 void *moy_ssh_calloc(size_t n, size_t size);
 void *moy_ssh_realloc(void *p, size_t n);
@@ -57,7 +60,8 @@ void moy_ssh_free(void *p);
 // Dropbear's and libtomcrypt's big globals are PSRAM, taken at the server's
 // setup (moy_ssh_globals): each name is the object a pointer points at, so
 // the definition `struct sshsession ses;` defines the pointer and every use
-// reads through it. What stays internal is the algorithm lists and a few words.
+// reads through it. The algorithm lists are PSRAM copies too (common-algo.c's
+// moy_ssh_algos).
 #define ses (*moy_ssh_g_ses)
 #define svr_ses (*moy_ssh_g_svr_ses)
 #define opts (*moy_ssh_g_opts)

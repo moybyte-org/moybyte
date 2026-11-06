@@ -99,8 +99,8 @@ NATIVE = {
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
     # browser. moy_sh, the terminal's C shell, is taken by every console; the
     # Zero denies it until its network face (its board.toml says why).
-    # moy_ssh, the SSH server, is staged on every console and compiles only
-    # into an image built with MOYBYTE_SSH=1 (native/moy_ssh/micropython.cmake).
+    # moy_ssh, the SSH server, is taken by every console (native/moy_ssh/
+    # README.md); the Zero denies it with moy_sh until its phase.
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
