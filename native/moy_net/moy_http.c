@@ -163,8 +163,11 @@ const char *moy_http_reason(int status) {
         case 403: return "Forbidden";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
+        case 409: return "Conflict";
+        case 429: return "Too Many Requests";
         case 500: return "Server Error";
         case 501: return "Not Implemented";
+        case 503: return "Service Unavailable";
         default: return "OK";
     }
 }

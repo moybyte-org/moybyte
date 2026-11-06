@@ -302,7 +302,8 @@ def _webhost_switched_off():
     serving or in its goodbye window handed a later test on the worker another
     host's pin and routes (a 403 for a pinless /gpio batch, a 404 for
     /console.json), or a 503 `closing`. After each test the switch is off and
-    the host stopped now, as a fresh process has them; a process that never
+    the host stopped now with no pin (so no wrong pins counted), as a fresh
+    process has them; a process that never
     loaded the library has neither."""
     yield
     nb = sys.modules.get("runtime.net_binding")
@@ -310,6 +311,7 @@ def _webhost_switched_off():
         return
     nb.wc_off()
     nb.web_stop()
+    nb.web_set_pin(None)         # a new pin starts the pin's backoff afresh
     nb.web_events()
     nb.wc_poll()                 # a switch in its goodbye sees the host stopped
 

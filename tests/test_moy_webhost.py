@@ -662,6 +662,129 @@ def test_a_post_wants_its_pin_in_the_body_and_ignores_the_query(tmp_path):
     assert b"200" in r.split(b"\r\n")[0], "the body pin is the one that works"
 
 
+# THE PIN'S BACKOFF (moy_webhost.c's header): four digits with unlimited tries
+# fell to a loop in under three minutes.
+
+FREE, FREE_ALL, FIRST_MS = 10, 30, 1000
+
+
+def _guess(h, pin):
+    return h.handle_http("GET", "/carts.json?pin=" + pin, b"")
+
+
+def _wait_ms(resp):
+    assert b"429" in h_status(resp), h_status(resp)
+    doc = json.loads(_body(resp))
+    assert doc["error"] == "wait"
+    return doc["ms"]
+
+
+def test_wrong_pins_past_the_free_ones_shut_the_source_out_for_a_doubling_window(tmp_path):
+    h = _pinned(tmp_path)
+    for _ in range(FREE):
+        assert b"403" in h_status(_guess(h, "0000"))
+    assert b"403" in h_status(_guess(h, "0001")), "the first one past is still answered"
+    ms = _wait_ms(_guess(h, "4321"))
+    assert 0 < ms <= FIRST_MS, "the right pin is not even looked at in the window"
+    assert _wait_ms(_guess(h, "0002")) <= FIRST_MS, "nor a wrong one: no extra count"
+    nb._skew_clock(FIRST_MS)
+    assert b"403" in h_status(_guess(h, "0003"))
+    assert FIRST_MS < _wait_ms(_guess(h, "0004")) <= 2 * FIRST_MS
+    nb._skew_clock(2 * FIRST_MS)
+    assert b"200" in h_status(_guess(h, "4321")), "the right pin works once it passes"
+    for _ in range(FREE):
+        assert b"403" in h_status(_guess(h, "0000")), "and clears the count"
+
+
+def test_the_window_covers_every_gated_route_and_spares_the_open_ones(tmp_path):
+    h = _pinned(tmp_path)
+    for _ in range(FREE + 1):
+        _guess(h, "0000")
+    op = {"p": "hop.moy/main.py", "t": "x = 2\n"}
+    _wait_ms(h.handle_http("POST", "/sync", _batch(op, pin="4321")))
+    _wait_ms(h.handle_http("GET", "/files.json?pin=4321", b""))
+    assert b"200" in h_status(h.handle_http("GET", "/sync", b""))
+    assert b"429" not in h_status(h.handle_http("GET", "/", b""))
+
+
+def test_a_wrong_pin_in_a_sync_body_counts_like_one_on_a_query(tmp_path):
+    h = _pinned(tmp_path)
+    op = {"p": "hop.moy/main.py", "t": "x = 3\n"}
+    for _ in range(FREE + 1):
+        assert b"403" in h_status(h.handle_http("POST", "/sync", _batch(op, pin="1")))
+    _wait_ms(_guess(h, "4321"))
+
+
+def test_a_new_pin_starts_the_count_afresh(tmp_path):
+    h = _pinned(tmp_path)
+    for _ in range(FREE + 1):
+        _guess(h, "0000")
+    _wait_ms(_guess(h, "4321"))
+    h.pin = "9876"
+    assert b"200" in h_status(_guess(h, "9876"))
+
+
+def _from(host, src, raw):
+    """`raw` sent to the serving host from the address `src`, pumping its poll
+    the way the frame loop does; everything it answered."""
+    c = socket.socket()
+    c.settimeout(5)
+    c.bind((src, 0))
+    c.connect(("127.0.0.1", host.port))
+    c.sendall(raw)
+    got = b""
+    for _ in range(400):
+        host.poll()
+        try:
+            c.settimeout(0.005)
+            k = c.recv(65536)
+        except socket.timeout:
+            continue
+        if not k:
+            break
+        got += k
+    c.close()
+    return got
+
+
+def _get(path):
+    return ("GET %s HTTP/1.1\r\n\r\n" % path).encode()
+
+
+def test_each_address_has_its_own_count(serving):
+    h = serving(pin="4321")
+    for _ in range(FREE + 1):
+        assert b"403" in h_status(_from(h, "127.0.0.2", _get("/carts.json?pin=0")))
+    _wait_ms(_from(h, "127.0.0.2", _get("/carts.json?pin=4321")))
+    assert b"200" in h_status(_from(h, "127.0.0.3", _get("/carts.json?pin=4321")))
+
+
+def test_more_addresses_buy_no_more_guesses_and_a_paired_page_keeps_working(serving):
+    h = serving(pin="4321")
+    assert b"200" in h_status(_from(h, "127.0.0.9", _get("/carts.json?pin=4321")))
+    srcs = ["127.0.0.%d" % i for i in range(2, 6)]
+    wrong = 0
+    while wrong <= FREE_ALL:
+        for src in srcs:
+            if wrong <= FREE_ALL:
+                assert b"403" in h_status(_from(h, src, _get("/carts.json?pin=1")))
+                wrong += 1
+    _wait_ms(_from(h, "127.0.0.7", _get("/carts.json?pin=4321")))
+    assert b"200" in h_status(_from(h, "127.0.0.9", _get("/carts.json?pin=4321")))
+    nb._skew_clock(3600 * 1000)
+    assert b"200" in h_status(_from(h, "127.0.0.7", _get("/carts.json?pin=4321"))), \
+        "an hour with no wrong pin clears the count from anywhere"
+
+
+def test_a_wrong_pin_the_vm_refuses_counts_and_its_route_waits_too(serving):
+    h = serving(pin="4321")
+    for _ in range(FREE + 1):
+        r = _from(h, "127.0.0.2", _get("/update?pin=0"))
+        assert b"403" in h_status(r), r[:80]
+    _wait_ms(_from(h, "127.0.0.2", _get("/update?pin=4321")))
+    _wait_ms(_from(h, "127.0.0.2", _get("/carts.json?pin=4321")))
+
+
 def test_a_whole_cart_delete_takes_the_cart_and_its_journal(tmp_path):
     """`{"p": "<cart>.moy", "dc": 1}` is the documented way to remove a
     built-in that shipped broken from a board whose seed reads PRESENCE and will

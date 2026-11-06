@@ -65,7 +65,8 @@ int moy_http_query(const char *target, size_t n, const char *name,
 // A non-blocking listener on every interface: its descriptor, or -errno.
 int moy_http_listen(uint16_t port);
 // One pending connection, blocking with the two timeouts above, or -1.
-int moy_http_accept(int lfd);
+// `*peer` is its IPv4 address (network order), 0 where there is none.
+int moy_http_accept(int lfd, uint32_t *peer);
 // Read one request off `fd` into `buf`: its head and as much of its body as
 // Content-Length names, up to `cap` bytes. MOY_HTTP_OK and `*got`, or
 // MOY_HTTP_BAD when no head arrived.
@@ -225,6 +226,17 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 #define MOY_WEB_DEFER_MS 3000
 #define MOY_WEB_POLL_MAX 4          // new connections one poll accepts
 #define MOY_WEB_PATH_MAX 96
+
+// The pin's backoff (moy_webhost.c's header): wrong pins a source has free,
+// wrong pins from anywhere before every source without a right pin waits, the
+// first window, its cap (each wrong pin past the free ones doubles it), the
+// sources remembered, and the quiet that clears the count from anywhere.
+#define MOY_WEB_PIN_FREE 10
+#define MOY_WEB_PIN_FREE_ALL 30
+#define MOY_WEB_PIN_WAIT_MS 1000u
+#define MOY_WEB_PIN_WAIT_MAX_MS 300000u
+#define MOY_WEB_PIN_SOURCES 8
+#define MOY_WEB_PIN_FORGET_MS 3600000u
 
 enum {
     MOY_WEB_EV_SHELF = 1,           // a batch changed the shelf: rescan

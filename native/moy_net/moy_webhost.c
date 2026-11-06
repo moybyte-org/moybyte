@@ -16,6 +16,22 @@
 // answers with a prompt. A host with no pin is open end to end (a test, the dev
 // server).
 //
+// THE PIN'S BACKOFF: four digits fall to a loop in minutes, so wrong pins cost
+// time. A source (the peer's IPv4 address; 0 off a socket) has
+// MOY_WEB_PIN_FREE wrong pins; each past them shuts it out for a window that
+// starts at MOY_WEB_PIN_WAIT_MS and doubles up to MOY_WEB_PIN_WAIT_MAX_MS.
+// Past MOY_WEB_PIN_FREE_ALL wrong pins from anywhere, every source that has
+// not given the right pin since the pin was set waits the same way, so more
+// addresses buy no more guesses, and the page already paired keeps working.
+// While a source waits, every gated request answers 429 {"error":"wait",
+// "ms":N} at once, its pin never compared, so the window is no oracle; the
+// poll never sleeps. A right pin clears its source's count. The count from
+// anywhere clears after MOY_WEB_PIN_FORGET_MS with no wrong pin, and all of it
+// when the pin changes. The VM's routes count too: a parked request it
+// answers 403 {"error":"pin"} is a wrong pin, and one whose source waits is
+// answered 429 before it is parked. At the cap a source gets one guess in five
+// minutes: the 10,000 pins take weeks.
+//
 // THE BUNDLE is the image's own (native/moy_web, pre-gzipped), sent from flash
 // with nothing resident in between; there is no copy on storage to shadow it.
 // THE PULLS stream the store as one JSON object, {"<top>/<rel>": text} and
@@ -79,6 +95,12 @@ static const struct {
 static const char PIN_REFUSED[] = "{\"error\":\"pin\"}";
 
 typedef struct {
+    uint32_t peer, seen, until;     // the address, its last request, its window's end
+    uint16_t fails;                 // wrong pins since its last right one
+    uint8_t used, paired;           // paired: gave the right pin since it was set
+} pin_src_t;
+
+typedef struct {
     int lfd;                        // the listener, -1 when none
     int cur;                        // the connection being served, -1 when none
     int pfd;                        // the parked connection, -1 when none
@@ -100,6 +122,9 @@ typedef struct {
     char *chunk;                    // CHUNK_HEAD + CHUNK_MIN + 2
     char *io;                       // READ_CHUNK + 4 (a UTF-8 carry)
     char *b64;                      // BIN_CHUNK / 3 * 4
+    uint32_t peer, ppeer;           // the request's source, the parked one's
+    uint32_t all_fails, all_last, all_until;
+    pin_src_t src[MOY_WEB_PIN_SOURCES];
 } web_t;
 
 static web_t *W;
@@ -161,6 +186,14 @@ static void copy_list(char *dst, size_t cap, const char *src) {
     dst[n] = '\0';
 }
 
+static void set_pin(const char *pin) {
+    if (strcmp(W->pin, pin ? pin : "") != 0) {
+        memset(W->src, 0, sizeof(W->src));
+        W->all_fails = W->all_until = 0;
+    }
+    copy_str(W->pin, sizeof(W->pin), pin);
+}
+
 static void config(const moy_web_cfg_t *cfg) {
     W->port = cfg->port;
     copy_str(W->carts, sizeof(W->carts), cfg->carts);
@@ -168,7 +201,7 @@ static void config(const moy_web_cfg_t *cfg) {
     copy_str(W->files, sizeof(W->files), cfg->files);
     copy_list(W->kinds, sizeof(W->kinds), cfg->kinds);
     copy_list(W->defer, sizeof(W->defer), cfg->defer);
-    copy_str(W->pin, sizeof(W->pin), cfg->pin);
+    set_pin(cfg->pin);
     W->epoch = cfg->epoch;
 }
 
@@ -251,7 +284,7 @@ void moy_web_stop(const char *why) {
 
 void moy_web_set_pin(const char *pin) {
     if (ensure()) {
-        copy_str(W->pin, sizeof(W->pin), pin);
+        set_pin(pin);
     }
 }
 
@@ -829,6 +862,110 @@ static void store_gate(void) {
     }
 }
 
+// -- the pin's backoff (the header) -------------------------------------------------
+
+static int32_t left(uint32_t until, uint32_t now) {
+    int32_t d = (int32_t)(until - now);
+    return d > 0 ? d : 0;
+}
+
+static uint32_t window(uint32_t past) {
+    uint32_t ms = MOY_WEB_PIN_WAIT_MS << (past < 16u ? past : 16u);
+    return ms < MOY_WEB_PIN_WAIT_MAX_MS ? ms : MOY_WEB_PIN_WAIT_MAX_MS;
+}
+
+// The request's source: its record, or a new one in place of the least
+// recently seen, a paired source's last.
+static pin_src_t *source(uint32_t now) {
+    pin_src_t *best = NULL;
+    for (int i = 0; i < MOY_WEB_PIN_SOURCES; i++) {
+        pin_src_t *s = &W->src[i];
+        if (s->used && s->peer == W->peer) {
+            s->seen = now;
+            return s;
+        }
+        if (best == NULL || !s->used
+            || (best->used && (s->paired < best->paired
+                               || (s->paired == best->paired
+                                   && (int32_t)(s->seen - best->seen) < 0)))) {
+            best = s;
+        }
+    }
+    memset(best, 0, sizeof(*best));
+    best->used = 1;
+    best->peer = W->peer;
+    best->seen = now;
+    return best;
+}
+
+// The milliseconds the request's source waits before its pin is looked at.
+static uint32_t pin_wait(void) {
+    uint32_t now = moy_net_ms();
+    if (W->all_fails && (uint32_t)(now - W->all_last) >= MOY_WEB_PIN_FORGET_MS) {
+        W->all_fails = W->all_until = 0;
+    }
+    pin_src_t *s = source(now);
+    int32_t w = left(s->until, now);
+    if (!s->paired && W->all_until) {
+        int32_t a = left(W->all_until, now);
+        w = a > w ? a : w;
+    }
+    return (uint32_t)w;
+}
+
+static void pin_note(int ok) {
+    uint32_t now = moy_net_ms();
+    pin_src_t *s = source(now);
+    if (ok) {
+        s->fails = 0;
+        s->until = 0;
+        s->paired = 1;
+        return;
+    }
+    if (s->fails < UINT16_MAX) {
+        s->fails++;
+    }
+    if (s->fails > MOY_WEB_PIN_FREE) {
+        s->until = now + window(s->fails - MOY_WEB_PIN_FREE - 1u);
+    }
+    W->all_fails++;
+    W->all_last = now;
+    if (W->all_fails > MOY_WEB_PIN_FREE_ALL) {
+        W->all_until = now + window(W->all_fails - MOY_WEB_PIN_FREE_ALL - 1u);
+    }
+}
+
+// 0 and nothing answered when the request's source may try a pin; else 1 and
+// the 429 answered.
+static int pin_waits(out_t *o) {
+    if (W->pin[0] == '\0') {
+        return 0;
+    }
+    uint32_t ms = pin_wait();
+    if (ms == 0) {
+        return 0;
+    }
+    char doc[48];
+    snprintf(doc, sizeof(doc), "{\"error\":\"wait\",\"ms\":%u}", (unsigned)ms);
+    json(o, 429, doc);
+    return 1;
+}
+
+// 1 when the request may go on; else its 429 or 403 is answered.
+static int pin_pass(out_t *o, int ok) {
+    if (W->pin[0] == '\0') {
+        return 1;
+    }
+    if (pin_waits(o)) {
+        return 0;
+    }
+    pin_note(ok);
+    if (!ok) {
+        json(o, 403, PIN_REFUSED);
+    }
+    return ok;
+}
+
 static int pin_ok_query(const char *target, size_t n) {
     if (W->pin[0] == '\0') {
         return 1;
@@ -906,8 +1043,7 @@ static int sync_post(out_t *o, const char *b, size_t n) {
         json(o, 400, "{\"error\":\"bad batch\"}");
         return 1;
     }
-    if (!moy_sync_pin_ok(&batch, W->pin)) {
-        json(o, 403, PIN_REFUSED);
+    if (!pin_pass(o, moy_sync_pin_ok(&batch, W->pin))) {
         return 1;
     }
     if (batch.root == MOY_SYNC_SYSTEM
@@ -971,7 +1107,7 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     size_t pn = q ? (size_t)(q - t) : tn;
     int post = path_is(m, mn, "POST");
     if ((post || path_is(m, mn, "GET")) && in_list(W->defer, t, pn)) {
-        return 0;
+        return !pin_waits(o) ? 0 : 1;
     }
     if (post && path_is(t, pn, "/sync")) {
         return sync_post(o, b, bn);
@@ -979,8 +1115,14 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     const uint8_t *gpins;
     if (moy_gpio_pins != NULL && moy_gpio_pins(&gpins) > 0 && path_is(t, pn, "/gpio")
         && (post || path_is(m, mn, "GET"))) {
+        if (pin_waits(o)) {
+            return 1;
+        }
         char doc[512];
         int status = moy_gpio_request(post, t, tn, b, bn, W->pin, doc, sizeof(doc));
+        if (W->pin[0] != '\0' && (status == 200 || status == 403)) {
+            pin_note(strcmp(doc, PIN_REFUSED) != 0);
+        }
         json(o, status, doc);
         return 1;
     }
@@ -1004,12 +1146,8 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     }
     int carts = path_is(t, pn, "/carts.json");
     if (carts || (path_is(t, pn, "/files.json") && W->has_files)) {
-        if (!pin_ok_query(t, tn)) {
-            json(o, 403, PIN_REFUSED);
-        } else if (carts) {
-            pull(o, W->carts, NULL);
-        } else {
-            pull(o, W->files, W->kinds);
+        if (pin_pass(o, pin_ok_query(t, tn))) {
+            pull(o, carts ? W->carts : W->files, carts ? NULL : W->kinds);
         }
         return 1;
     }
@@ -1041,6 +1179,7 @@ static void serve(int fd) {
     }
     W->cur = -1;
     W->pfd = fd;
+    W->ppeer = W->peer;
     W->preq = r;
     W->pgot = got;
     W->taken = 0;
@@ -1070,7 +1209,7 @@ int moy_web_poll(void) {
     }
     int did = 0;
     for (int i = 0; i < MOY_WEB_POLL_MAX && W->pfd < 0; i++) {
-        int fd = moy_http_accept(W->lfd);
+        int fd = moy_http_accept(W->lfd, &W->peer);
         if (fd < 0) {
             break;
         }
@@ -1107,6 +1246,13 @@ void moy_web_answer(const void *resp, size_t n) {
     if (W == NULL || W->pfd < 0) {
         return;
     }
+    if (W->pin[0] != '\0' && n > 12u && memcmp((const char *)resp + 9, "403", 3) == 0
+        && n >= sizeof(PIN_REFUSED) - 1u
+        && memcmp((const char *)resp + n - (sizeof(PIN_REFUSED) - 1u), PIN_REFUSED,
+                  sizeof(PIN_REFUSED) - 1u) == 0) {
+        W->peer = W->ppeer;
+        pin_note(0);
+    }
     out_t o = {.fd = W->pfd};
     raw(&o, resp, n);
     close_conn(&W->pfd);
@@ -1122,6 +1268,7 @@ int moy_web_handle(const char *method, size_t method_n, const char *target,
         return 0;
     }
     out_t o = {.fd = -1};
+    W->peer = 0;
     int done = route(&o, method, method_n, target, target_n, b, body_n);
     *out = o.buf;
     *out_n = o.n;

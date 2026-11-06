@@ -175,11 +175,15 @@ int moy_http_listen(uint16_t port) {
     return fd;
 }
 
-int moy_http_accept(int lfd) {
-    int fd = accept(lfd, NULL, NULL);
+int moy_http_accept(int lfd, uint32_t *peer) {
+    struct sockaddr_in a;
+    socklen_t an = sizeof(a);
+    memset(&a, 0, sizeof(a));
+    int fd = accept(lfd, (struct sockaddr *)&a, &an);
     if (fd < 0) {
         return -1;
     }
+    *peer = a.sin_family == AF_INET ? a.sin_addr.s_addr : 0u;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) & ~O_NONBLOCK);
     timeout(fd, SO_RCVTIMEO, MOY_HTTP_RECV_MS);
     timeout(fd, SO_SNDTIMEO, MOY_HTTP_SEND_MS);
