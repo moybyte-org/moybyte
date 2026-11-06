@@ -112,9 +112,10 @@ def test_a_services_callbacks_are_its_cpu_and_its_start_its_memory(tmp_path):
     try:
         sp = sched.procs[pid]
         assert 50000 <= sp.mem < 70000
-        sp.cost_us += 4000
         ws.procs._acct_t = 1
-        ws.procs.account(1 + 2000)
+        ws.procs.account(1 + 2000)              # the sample its start's cost falls in
+        sp.cost_us += 4000
+        ws.procs.account(1 + 4000)
         assert sp.cpu == 2
         rows = [r for r in _rows(ws) if r[2] == "service"]
         assert rows == [("svc:%d" % pid, "Svc", "service", "background", 2, sp.mem, pid)]
