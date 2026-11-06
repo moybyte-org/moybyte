@@ -9,9 +9,10 @@
 // p99, a 250-byte state blob in 15.0 / 17.1 ms, so the payload is the inputs
 // and both consoles run the same simulation from them.
 //   1. INPUT DELAY: frame N's input is sent during N-delay and played on N.
-//      The delay starts at one tick, rises a tick under stall pressure
-//      (ESCALATE_*) and comes back down a tick when the peer reports a
-//      tick's slack to spare (LOWER_*). A frame is sampled once and the tape
+//      The delay starts at one tick, rises a tick under the PEER's stall
+//      pressure (ESCALATE_*: this console's lead is what the peer waits on)
+//      and comes back down a tick when the peer reports a tick's slack to
+//      spare (LOWER_*). A frame is sampled once and the tape
 //      is first-write-wins, so neither direction can rewrite a frame the peer
 //      may already hold: a drop only skips one sample. Delay is each
 //      console's own sampling lead, so the two sides may run different
@@ -91,11 +92,12 @@ enum {
 // it), and every input packet carries the sender's newest one.
 #define MOY_MATCH_CHECK_EVERY 32
 #define MOY_MATCH_CHECKS 4
-#define MOY_MATCH_IN_HDR 18             // an input packet's header
-// The delay comes back down a tick when the peer has reported, for a whole
-// clean window, that this console's inputs reach it at least a tick plus
-// LOWER_GUARD_MS before it needs them; never within LOWER_HOLD windows of a
-// change.
+#define MOY_MATCH_IN_HDR 19             // an input packet's header
+// A console's delay sets the PEER's stalls, so the peer's reports steer it:
+// up a tick when the peer's last window stalled ESCALATE_AT ticks, down a
+// tick when the peer's last window was clean (a quarter of that) and every
+// margin it reported through this console's window was at least a tick plus
+// LOWER_GUARD_MS; down never within LOWER_HOLD windows of a change.
 #define MOY_MATCH_LOWER_GUARD_MS 8
 #define MOY_MATCH_LOWER_HOLD 2
 // The link's.
@@ -185,6 +187,9 @@ typedef struct {
     // The delay's way down: the peer's report of how early this console's
     // inputs reach it (ms, its margin EMA; 255 none), the window's lowest.
     uint8_t peer_margin, rep_min;
+    // Stalled ticks in the last settled window: mine (reported; 255 none
+    // yet) and the peer's report of its own.
+    uint8_t last_win, peer_win;
     int32_t delay_mark;                 // the frame of the last delay change
     uint32_t raises, lowers;
 } moy_lockstep_t;

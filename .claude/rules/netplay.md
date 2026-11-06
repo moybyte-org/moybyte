@@ -32,9 +32,11 @@ belongs here is only what a coder must not undo:
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
 - **Input delay is ADAPTIVE** (raise 2026-08-25, way down 2026-11-06): matches
   start at DELAY=1 (one tick: 33 ms at 30 Hz, 16.7 ms at the 60 Hz a cart paced
-  60 or "free" ticks at, owner 2026-11-06), a session under real stall
-  pressure raises itself a tick at a time to 66 ms, and it comes back down a
-  tick when the peer reports a tick plus 8 ms to spare over a clean window.
+  60 or "free" ticks at, owner 2026-11-06), a console whose PEER reports real
+  stall pressure raises itself a tick at a time to 66 ms, and it comes back
+  down a tick when the peer reports a clean window and a tick plus 8 ms to
+  spare. A console's delay sets the peer's stalls, never its own: steering it
+  by its own stalls oscillated on glass (2026-11-06).
   Both directions are safe only because a frame is sampled ONCE: never let a
   retry or a delay change rewrite a sampled frame. The 2026-08-22 "DELAY=1
   measured and REJECTED (14%)" verdict was the PACING's fault, not the

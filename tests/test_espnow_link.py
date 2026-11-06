@@ -464,7 +464,7 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
 
     a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
     peer_mac = b"\xaa" * 6
-    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [255] + [5])
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [255, 255] + [5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
     a.radio.inbox.append((peer_mac, inp))
     a.radio.inbox.append((peer_mac, beacon))
@@ -493,7 +493,7 @@ def test_a_stale_input_frame_from_a_previous_match_cannot_reach_a_new_one():
     a.offer(wsa, "Brick Siege")
     assert a.session.session != old, "a new match gets a new session id"
     stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF, 0]
-                            + [0] * 10 + [255] + [0, 0]))
+                            + [0] * 10 + [255, 255] + [0, 0]))
     a._dispatch(wsa, b"\x02" * 6, stale)
     assert a.session.packets_in == 0
 

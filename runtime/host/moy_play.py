@@ -698,8 +698,8 @@ class _Lockstep(ctypes.Structure):
                 ("desync", _I32), ("desync_kind", _U8), ("checks", _U32),
                 ("tick_hz", _U16), ("tick_rem", _U16), ("delay_max", ctypes.c_int),
                 ("escalate_ticks", _I32), ("escalate_at", _U32),
-                ("peer_margin", _U8), ("rep_min", _U8), ("delay_mark", _I32),
-                ("raises", _U32), ("lowers", _U32)]
+                ("peer_margin", _U8), ("rep_min", _U8), ("last_win", _U8),
+                ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32)]
 
 
 class _MatchS(ctypes.Structure):

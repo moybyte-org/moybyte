@@ -88,7 +88,7 @@ def _step(a, b, wire, frames=1):
 
 def _input_packet(session, newest, waiting, masks):
     return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
-                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255] + list(masks))
+                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255, 255] + list(masks))
 
 
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
@@ -301,7 +301,7 @@ def test_a_packet_from_a_previous_match_is_ignored():
     wire = _Wire()
     a, b = _match(wire, session=7)
     (sa, _ra, _ia), _ = a, b
-    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255] + [0, 0])
+    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255, 255] + [0, 0])
     assert sa.on_packet(bytes(stale)) is False
     stale[2] = 7
     assert sa.on_packet(bytes(stale)) is True
@@ -558,10 +558,14 @@ def test_stall_ticks_counts_ticks_not_retries():
     assert s.stalls == 5
 
 
-def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
-    """The adaptive delay: matches start at DELAY=1 (33ms); a window with
-    ESCALATE_AT distinct stalled ticks buys the second tick. With no clock the
-    peer reports no margin, so nothing ever brings it back down."""
+def test_the_peers_stall_pressure_raises_this_consoles_delay():
+    """The adaptive delay: matches start at DELAY=1 (33ms); a window in which
+    the PEER stalled ESCALATE_AT distinct ticks buys this console a tick,
+    because this console's lead is what the peer waits on (the 2026-11-06
+    P4 <-> Guition S3 match: the host stalled 4.6% of its ticks on the guest's
+    one-tick lead while raising its OWN delay, which served the guest, and
+    then lowered it again, four times in 90 s). With no clock the peer
+    reports no margin, so nothing brings it back down."""
     wire = _Wire()
     a, b = _match(wire)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
@@ -569,7 +573,7 @@ def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
     # distinct one-tick stalls: every other iteration sa's inbox is withheld
     # until its advance has already failed once, so each is a stalled TICK
     # healed by a loop-frame retry -- the P4-pair pattern, not one long outage
-    for k in range(3 * netplay.ESCALATE_TICKS):
+    for k in range(4 * netplay.ESCALATE_TICKS):
         if sa.advance(0) is False:
             wire.deliver(0, sa)          # the input lands; the retry heals it
             sa.advance(0)
@@ -578,14 +582,15 @@ def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
         if k % 2 == 0:
             wire.deliver(0, sa)
         if k == netplay.ESCALATE_TICKS - 10:
-            assert sa.delay == 1, "the FIRST window is formation grace, never a raise"
-    assert sa.delay == 2, "sustained stall pressure bought the second tick"
+            assert sb.delay == 1, "the FIRST window is formation grace, never a raise"
+    assert sb.delay == 2, "A's sustained stalls bought B's second tick"
+    assert sa.delay == 1, "...and B never stalled, so A's lead stays one"
     for _ in range(netplay.ESCALATE_TICKS + 10):
         sa.advance(0)
         sb.advance(0)
         wire.deliver(0, sa)
         wire.deliver(1, sb)
-    assert sa.delay == 2, "clean windows never lower it back"
+    assert sb.delay == 2, "with no margin reported, nothing lowers it"
 
 
 def test_the_delay_one_phase_controller_is_guest_only_and_gated():

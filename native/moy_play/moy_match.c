@@ -131,6 +131,8 @@ int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session
     s->desync = -1;
     s->peer_margin = 255;
     s->rep_min = 255;
+    s->last_win = 255;
+    s->peer_win = 255;
     for (int i = 0; i < MOY_MATCH_CHECKS; i++) {
         s->ck_f[i] = -1;
     }
@@ -338,6 +340,7 @@ static void emit(moy_match_t *m, int32_t newest) {
     // ...and how early the peer's inputs reach me, for its delay's way down
     float e = s->m_ema < 0.0f ? 0.0f : s->m_ema > 254.0f ? 254.0f : s->m_ema;
     p[17] = s->has_ema ? (uint8_t)e : 255u;
+    p[18] = s->last_win;                    // ...and how often I stalled on you
     for (int32_t i = 0; i < n; i++) {
         int v = tape_get(s->mine_f, s->mine_m, newest - i);
         p[MOY_MATCH_IN_HDR + i] = v < 0 ? 0 : (uint8_t)v;
@@ -387,16 +390,20 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
     }
     s->stall_mark = s->stalls;
     if (s->frame - s->win_mark >= s->escalate_ticks) {
-        // The first window is match formation and changes nothing.
+        // The first window is match formation and changes nothing. The
+        // peer's stalls are what this console's delay buys down, so the
+        // peer's report steers it.
         bool settled = s->win_mark >= s->escalate_ticks;
-        if (settled && s->win_stalls >= s->escalate_at && s->delay < s->delay_max) {
+        s->last_win = settled ? (uint8_t)(s->win_stalls > 254u ? 254u : s->win_stalls) : 255u;
+        uint32_t pw = s->peer_win;
+        if (settled && pw != 255u && pw >= s->escalate_at && s->delay < s->delay_max) {
             s->delay++;
             s->delay_mark = s->frame;
             s->raises++;
-            say(m, "Moybyte link: input delay -> %d (%d ms, stall pressure)", s->delay,
-                (int)(s->delay * 1000 / s->tick_hz));
-        } else if (settled && s->delay > MOY_MATCH_DELAY
-                   && s->win_stalls * 4u <= s->escalate_at
+            say(m, "Moybyte link: input delay -> %d (%d ms, the peer stalled %d ticks)",
+                s->delay, (int)(s->delay * 1000 / s->tick_hz), (int)pw);
+        } else if (settled && s->delay > MOY_MATCH_DELAY && pw != 255u
+                   && pw * 4u <= s->escalate_at
                    && s->frame - s->delay_mark >= MOY_MATCH_LOWER_HOLD * s->escalate_ticks
                    && s->rep_min != 255u
                    && s->rep_min >= s->tick_ms + MOY_MATCH_LOWER_GUARD_MS) {
@@ -468,6 +475,7 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     }
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
+    s->peer_win = data[18];
     s->peer_margin = data[17];
     if (data[17] < s->rep_min) {
         s->rep_min = data[17];
