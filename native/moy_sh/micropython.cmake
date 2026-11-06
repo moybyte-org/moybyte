@@ -35,6 +35,7 @@ add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_store.c
     ${MOY_SH}/moy_term.c
     ${MOY_SH}/moy_sh_app.c
+    ${MOY_SH}/moy_sh_edit.c
     ${MOY_SH}/moy_sh_top.c)
 if(EXISTS ${MOY_SH}/../moy_ui/moy_ui_api.h)
     target_sources(moy_sh_core PRIVATE ${MOY_SH}/moy_sh_face.c ${MOY_SH}/moy_sh_floor.c)

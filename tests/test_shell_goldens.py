@@ -909,6 +909,8 @@ def _terminal_plan(ws, cfg):
         plan.append(("app_terminal_keys", line(None, True) if tdeck else line("touch")))
         if tdeck:
             plan.append(("app_terminal_touch", line("touch")))
+        plan.append(("app_terminal_edit", text_app("edit /sd/moybyte/system/settings",
+                                                   b"font_scale = 2\r")))
         plan.append(("app_terminal_top", text_app("top", still=True)))
     return plan
 
@@ -1636,7 +1638,7 @@ def surface_names(config_name):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
         if not cfg["windowed"]:
             names.append("app_terminal_touch")
-        names += ["app_terminal_top"]
+        names += ["app_terminal_edit", "app_terminal_top"]
     return names
 
 

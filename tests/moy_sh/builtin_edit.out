@@ -1,0 +1,13 @@
+$ edit
+edit: needs a screen
+$ echo "status $?"
+status 1
+$ edit /proc
+edit: needs a screen
+$ echo "status $?"
+status 1
+$ edit a b
+edit: needs a screen
+$ echo "status $?"
+status 1
+[exit 0]

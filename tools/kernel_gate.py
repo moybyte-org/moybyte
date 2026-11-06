@@ -2,7 +2,8 @@
 """The kernel's sprint-2 gate on glass (docs/history/kernel_spine_2026-10.md §10), on
 one console board.
 
-    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update] [card] [crashes]   # default: all
+    tools/kernel_gate.py BOARD [crash] [hang] [floor] [safe] [update] [card] [crashes] [edit]
+                                                    # default: all
 
 Each step reboots the board, which a suite's held-open session cannot survive
 on an attach-only board, so the gate is a tool that opens the port per step:
@@ -39,6 +40,12 @@ on an attach-only board, so the gate is a tool that opens the port per step:
          `key 13`, through the kernel's input table) shows its output on it
          (`screen`), and a tap on Try again (`tap` at the button's centre)
          brings the console back with the count at 0.
+  edit   the terminal's editor (native/moy_sh/moy_sh_edit.c) edits
+         system/settings twice, a line added at its top and saved: first
+         in the desk's Terminal (its face driven over `py`, the keys it
+         would merge from a frame), then on the floor with no VM, typed
+         through the kernel's input table (`type`, `key`), each time read
+         back with `sh head` and the line taken out again the same way.
 
 One line a step, exit 1 on the first failure. The board is left at its
 launcher, on an ordinary start, whatever happened.
@@ -57,7 +64,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import board as bd  # noqa: E402
 
-STEPS = ("crash", "hang", "floor", "safe", "update", "card", "crashes")
+STEPS = ("crash", "hang", "floor", "safe", "update", "card", "crashes", "edit")
 OFFER = re.compile(r"KERNEL update (offers version=\d+ channel=\w* size=\d+|none published)")
 REPORT = re.compile(r"KERNEL recovery reason=(\w+) sel=(\w+) crc=([0-9a-f]{8})")
 
@@ -313,6 +320,65 @@ def step_crashes(name, dirs):
                 limit, lines[0] if lines else "?", crc, inp))
 
 
+SETTINGS = "/sd/moybyte/system/settings"
+_FACE = "ws.terminal_app.face"
+
+
+def _first_line(name, dirs):
+    code, out, _ = _sh(name, dirs, "head -n 1 " + SETTINGS)
+    if code != 0:
+        raise GateError("%s: head said %r %r" % (name, code, out))
+    return out[0] if out else ""
+
+
+def _desk_keys(name, dirs, data):
+    """Keys into the desk Terminal's face, as a frame merges them: the app in front after."""
+    return _vals(name, dirs, "([%s.key(c) for c in %r], %s.app())[1]" % (_FACE, data, _FACE))[0]
+
+
+def _floor_keys(name, dirs, text=None, keys=()):
+    if text:
+        _send(name, dirs, "type " + text, secs=0.4)
+    for k in keys:
+        _send(name, dirs, "key %d" % k, secs=0.3)
+
+
+def step_edit(name, dirs):
+    mark_desk, mark_floor = "# edited-on-the-desk", "# edited-on-the-floor"
+    cmd = "edit " + SETTINGS
+    before = _first_line(name, dirs)
+    opened, = _vals(name, dirs, "(ws.open_app(ws.terminal_app), %s.set_line(%r), %s.submit(), "
+                                "%s.app())[3]" % (_FACE, cmd, _FACE, _FACE))
+    if opened != "edit":
+        raise GateError("%s: the desk's `%s` opened %r" % (name, cmd, opened))
+    left = _desk_keys(name, dirs, (mark_desk + "\r").encode() + b"\x13\x18")
+    desk = _first_line(name, dirs)
+    _vals(name, dirs, "(%s.set_line(%r), %s.submit())[0]" % (_FACE, cmd, _FACE))
+    _desk_keys(name, dirs, b"\x7f" * (len(mark_desk) + 1) + b"\x13\x18")
+    if left is not None or desk != mark_desk or _first_line(name, dirs) != before:
+        raise GateError("%s: the desk's editor left %r, saved %r, restored %r"
+                        % (name, left, desk, _first_line(name, dirs)))
+    _to_floor(name, dirs)
+    try:
+        _floor_keys(name, dirs, cmd, (13,))
+        _screen(name, dirs, lambda s: any("edit settings" in ln for ln in s), "the editor")
+        _floor_keys(name, dirs, mark_floor, (13, 19, 24))
+        _screen(name, dirs, lambda s: any(ln.startswith("KERNEL screen line") for ln in s)
+                and not any("edit settings" in ln for ln in s), "the prompt after ^X")
+        floor = _first_line(name, dirs)
+        _floor_keys(name, dirs, cmd, (13,) + (127,) * (len(mark_floor) + 1) + (19, 24))
+        _screen(name, dirs, lambda s: not any("edit settings" in ln for ln in s),
+                "the prompt after the second ^X")
+        after = _first_line(name, dirs)
+    finally:
+        _send(name, dirs, "retry")
+        bd.wait_for_desk(name, dirs, quiet=True)
+    if floor != mark_floor or after != before:
+        raise GateError("%s: the floor's editor saved %r, restored %r" % (name, floor, after))
+    return "desk Terminal and floor each saved %s's first line and took it back (%r)" % (
+        SETTINGS, before)
+
+
 def _screen(name, dirs, ok, what, timeout=20.0):
     """What the floor's screen shows (`screen`), asked until `ok` of its lines."""
     end = time.time() + timeout
@@ -335,7 +401,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("board", choices=sorted(dirs), help="a console board's id")
     ap.add_argument("steps", nargs="*", metavar="step",
-                    help="crash, hang, floor, safe, update, card, crashes (default: all)")
+                    help="crash, hang, floor, safe, update, card, crashes, edit (default: all)")
     a = ap.parse_args(argv)
     name, steps = a.board, a.steps or list(STEPS)
     if not bd.is_console(dirs[name]):
@@ -345,7 +411,7 @@ def main(argv=None):
         ap.error("unknown step %s (%s)" % (", ".join(bad), ", ".join(STEPS)))
     run = {"crash": step_crash, "hang": step_hang, "floor": step_floor,
            "safe": step_safe, "update": step_update, "card": step_card,
-           "crashes": step_crashes}
+           "crashes": step_crashes, "edit": step_edit}
     for s in steps:
         try:
             print("%-6s %-10s ok  %s" % (s, name, run[s](name, dirs)))

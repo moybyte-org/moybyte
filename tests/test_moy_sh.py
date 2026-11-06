@@ -45,7 +45,7 @@ def shell_sources():
 # The board's side, compiled without dash's shim: its host table and the
 # serial face, the screen face and its grid.
 BOARD_SOURCES = ("moy_sh_board.c", "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c",
-                 "moy_sh_app.c", "moy_sh_top.c")
+                 "moy_sh_app.c", "moy_sh_edit.c", "moy_sh_top.c")
 # The Terminal's face and the recovery floor's screen over it draw through the
 # toolkit's engine, so they compile against native/moy_ui and the harnesses,
 # which have no toolkit, leave them out.

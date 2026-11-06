@@ -70,9 +70,9 @@ def test_tab_completes_a_command_and_a_path(term, tmp_path):
     assert f.line() == "echo "
     f.set_line("e")
     f.key(9)
-    assert f.line() == "e" and f.cands() == ["echo", "eval", "exec", "exit", "export"]
-    assert plain(app)[-1] == "echo  eval  exec  exit  export"
-    f.pick(3)
+    assert f.line() == "e" and f.cands() == ["echo", "edit", "eval", "exec", "exit", "export"]
+    assert plain(app)[-1] == "echo  edit  eval  exec  exit  export"
+    f.pick(4)
     assert f.line() == "exit " and f.cands() == []
     run(app, "mkdir /tree; mkdir /tree/alpha; mkdir /tree/apex; touch /tree/beta")
     f.set_line("ls /tree/al")
@@ -336,6 +336,33 @@ def test_top_shows_the_process_table_and_quits(term):
     assert plain(app)[3].startswith(" ") and plain(app)[4].startswith(">")
     _keys(app, b"q")
     assert app.face.app() is None and plain(app)[-1] == "$ top"
+
+
+def test_edit_opens_full_screen_saves_and_gives_the_grid_back(term, tmp_path):
+    """`edit FILE` takes the face's whole page with a screen of its own; the
+    keys edit, ^S saves through the store's crash-safe write, ^X with a
+    change asks first, and the shell's grid is back as it was."""
+    ws, app = term
+    run(app, "mkdir -p /sd/moybyte/system")
+    run(app, "printf 'theme = \"dusk\"\\n' > /sd/moybyte/system/settings")
+    before = plain(app)
+    run(app, "edit /sd/moybyte/system/settings")
+    assert app.face.app() == "edit" and app.face.full()
+    _frame(ws)
+    shown = plain(app)
+    assert shown[0] == "edit settings" and shown[1] == 'theme = "dusk"'
+    _arrow(app, "down")
+    _keys(app, b"volume = 3")
+    _keys(app, b"\x13")                                 # ^S
+    path = tmp_path / "sd" / "moybyte" / "system" / "settings"
+    assert path.read_text() == 'theme = "dusk"\nvolume = 3'
+    _keys(app, b"!\x18")                                # a change, then ^X
+    assert app.face.app() == "edit" and "Save the changes?" in plain(app)[-1]
+    _keys(app, b"n")
+    assert app.face.app() is None
+    assert path.read_text() == 'theme = "dusk"\nvolume = 3'
+    assert plain(app)[:len(before)] == before
+    assert plain(app)[-1] == "$ edit /sd/moybyte/system/settings"
 
 
 def test_mic_enters_the_app_key_row_on_the_tdeck(term):

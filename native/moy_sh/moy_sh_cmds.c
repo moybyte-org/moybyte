@@ -718,7 +718,7 @@ static int ps_row(void *arg, const moy_sh_ps_t *p) {
     return 0;
 }
 
-// `top`: a text app in front of the face (moy_sh_app.h).
+// `edit FILE` and `top`: a text app in front of the face (moy_sh_app.h).
 static int appcmd(int argc, char **argv) {
     moy_sh_t *s = moy_sh_cur;
     flushall();
@@ -880,6 +880,7 @@ static const struct builtincmd core[] = {
     { "date", datecmd, BUILTIN_REGULAR },
     { "df", dfcmd, BUILTIN_REGULAR },
     { "dmesg", logcmd, BUILTIN_REGULAR },
+    { "edit", appcmd, BUILTIN_REGULAR },
     { "free", freecmd, BUILTIN_REGULAR },
     { "grep", grepcmd, BUILTIN_REGULAR },
     { "head", headcmd, BUILTIN_REGULAR },

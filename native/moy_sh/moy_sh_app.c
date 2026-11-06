@@ -4,9 +4,10 @@
 
 #include "moy_sh_app.h"
 
+extern const moy_sh_app_ops_t moy_sh_edit_app;
 extern const moy_sh_app_ops_t moy_sh_top_app;
 
-static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_top_app};
+static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_edit_app, &moy_sh_top_app};
 #define NAPPS ((int)(sizeof APPS / sizeof APPS[0]))
 
 struct moy_sh_app {

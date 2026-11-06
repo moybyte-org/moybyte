@@ -109,6 +109,40 @@ def test_a_command_runs_on_screen_and_a_word_at_the_prompt_is_a_choice(built, bo
     assert got["line"] == ""
 
 
+# The crc32 of the T-Deck's and the Waveshare P4's floor with the editor open
+# on EDITED's settings file, the cursor on its second line.
+EDIT_GOLDEN = {
+    "tdeck": 0x7E83225E,
+    "p4": 0xEEE70F82,
+}
+EDITED = 'theme = "dusk"\n'
+
+
+@pytest.mark.parametrize("board", ["tdeck", "p4"])
+def test_the_editor_edits_system_settings_on_the_floor(built, board, tmp_path):
+    """`edit` on the floor (native/moy_sh/moy_sh_edit.c): the Terminal's
+    editor with no VM, the whole screen its own while it is open, ^S
+    saving through the store's crash-safe write and ^X giving the floor's
+    head and prompt back; Enter inside it is the text's, never a choice."""
+    d = tmp_path / "sd" / "moybyte" / "system"
+    d.mkdir(parents=True)
+    path = d / "settings"
+    path.write_text(EDITED)
+    opened = _type("edit /sd/moybyte/system/settings\n") + [{"down": 1}, {}]
+    png = os.environ.get("MOY_RECOVERY_PNG")
+    got = render(board, steps=opened, root=str(tmp_path),
+                 png=os.path.join(png, "floor_edit_%s.png" % board) if png else None)
+    assert got["screen"].splitlines()[0] == "\x1b[36medit settings\x1b[0m"
+    assert got["crc"] == EDIT_GOLDEN[board], "%s: %08x" % (board, got["crc"])
+    path.write_text(EDITED)
+    got = render(board, steps=opened + _type("volume = 3\nretry")
+                 + [{"key": 19}, {}, {"key": 24}, {}], root=str(tmp_path))
+    assert path.read_text() == 'theme = "dusk"\nvolume = 3\nretry'
+    assert got["choices"] == [] and "edit settings" not in got["screen"]
+    assert got["screen"].splitlines()[-1].endswith("edit /sd/moybyte/system/settings\x1b[0m")
+    assert [r[0] for r in got["rows"]] == ["retry", "safe", "reboot"]
+
+
 @pytest.mark.parametrize("board", sorted(CONSOLES))
 def test_a_tap_on_a_button_is_its_choice(built, board):
     first = render(board)

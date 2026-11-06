@@ -67,7 +67,7 @@ ARCHIVE_RAM_SHARE = 4         # an external archive kept in RAM below this share
 # them to the C tables and to sh_roles.
 SHELL_NAMES = (
     ".", ":", "[", "alias", "bg", "break", "cat", "cd", "chdir", "clear",
-    "command", "continue", "cp", "date", "df", "dmesg", "echo", "eval", "exec",
+    "command", "continue", "cp", "date", "df", "dmesg", "echo", "edit", "eval", "exec",
     "exit", "export", "false", "fg", "free", "getopts", "grep", "hash", "head",
     "help", "jobs", "kill", "local", "log", "ls", "mkdir", "mv", "printf", "ps",
     "pwd", "read", "readonly", "reboot", "return", "rm", "rmdir", "set", "sh",
