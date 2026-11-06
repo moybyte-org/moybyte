@@ -582,6 +582,13 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     }
     int32_t *snap = moycore_RUN.c.snap;
     int32_t *aq = moycore_RUN.c.aq;
+    moy_match_t *lm = moy_match_kernel();
+    if (lm != NULL && lm->s.live) {
+        // A match's dt is the C float of its tick on every path: a dt that
+        // crossed a VM (REPR_C's 30-bit float, the console path) is not
+        // the bits the kernel's front frame hands the other console.
+        dt = 1.0f / (float)(lm->s.tick_hz ? lm->s.tick_hz : MOY_MATCH_TICK_HZ);
+    }
     for (uint8_t i = 0; i < ticks; i++) {
         if ((r->flags & MOY_PLAY_PACED) && r->in != NULL) {
             moy_input_tick_edges(r->in);

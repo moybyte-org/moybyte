@@ -110,7 +110,12 @@ the stream too, the HOST's cart config winning for the match, and a cart's
 `_draw` keeps state as often as not, and a "free"-paced cart such as Brick
 Siege drew every loop frame of a match, a count no two boards share. A cart's
 `time()` reads the match's clock (frame × tick) and `key()` reads nothing,
-because a board's wall clock and keyboard bytes are its own. CPython and
+because a board's wall clock and keyboard bytes are its own. A Lua tick's `dt`
+is the C float of the match's tick whichever path runs it (2026-11-06): the
+Guition S3 ran Brick Siege Lua on the console's path, handing the kernel a
+`dt` that had crossed the VM as REPR_C's 30-bit float, while the P4 ran it in
+the kernel's front frame at the full float, and the world check parted them
+at its first checkpoint. CPython and
 MicroPython ship different PRNGs, so only device↔device agrees. And the Player
 drains the radio BEFORE deciding a tick (`drain_input`): tail-draining left the
 peer's input a loop frame stale, worth 8.0% → 6.4% stalls on the P4 pair.
