@@ -372,6 +372,7 @@ class GetCartsAppLayer(ListShellApp):
         self.question = None          # the install prompt's lines, while it is up
         self._consented = None        # (app id, permissions) the install records
         self._tail = None             # (steps, then, failed): a landing's or a removal's, a frame a step
+        self._sweep = None            # what install/ holds going, a store op a frame, no key held
         self.why = ""                 # the NOT INSTALLED page's reason
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
@@ -434,6 +435,7 @@ class GetCartsAppLayer(ListShellApp):
         if job is not None and job.landing and not job.finished:
             consented, self._consented = self._consented, None
             _pkg.land_now(self._inst, job, consented)
+        self._sweep = None            # what is left in install/ is the next open's recover
         self._end_tail()
         if self.job is not None and not self.job.finished and self.job.cancel():
             self._go("cart" if self.cur is not None else "list")
@@ -524,18 +526,47 @@ class GetCartsAppLayer(ListShellApp):
         return data
 
     def _recover(self):
+        """What a cut or a closed app left in install/ finished, a sweep
+        (`_step_sweep`) from the next frame; nothing when it holds nothing."""
         root = self._inst.root()
         if root is None or not self._inst.writable():
             return
         try:
-            self._inst.op(lambda: _ci.recover(root))
+            if not self._inst.op(lambda: _ci.staged(root)):
+                return
         except Exception as exc:  # noqa: BLE001 -- recover runs again next open
             _ci._log("recover failed: %s" % exc)
+            return
+        self._sweep = _ci.stepped(self._inst.op, _ci.recover_steps(root))
+        self._damage.again()
+
+    def _drop(self):
+        """A stopped install's build deleted over the next frames, a sweep
+        (`_step_sweep`)."""
+        if self.job is not None and self.job.dropping and not self.job.finished:
+            self._sweep = _ci.drain(self.job)
+            self._damage.again()
+
+    def _step_sweep(self):
+        """One store op of the sweep. It holds no key or tap: the pump's other
+        work waits on it instead, so a new install never meets a build half
+        deleted and a tap meanwhile still lands."""
+        try:
+            if next(self._sweep, _ci._DONE) is not _ci._DONE:
+                self._damage.again()
+                return
+        except Exception as exc:  # noqa: BLE001 -- recover runs again next open
+            _ci._log("install/ left for recover: %r" % (exc,))
+        self._sweep = None
+        self._damage.again()
 
     def _pump(self):
         """The BUSY phases' slice of work, one per drawn frame; between them
-        the shelf's covers. A landing's or a removal's steps go first, one a
-        frame, and hold every key until they end."""
+        the shelf's covers. A sweep of install/ goes first, then a landing's
+        or a removal's steps, one a frame, holding every key until they end."""
+        if self._sweep is not None:
+            self._step_sweep()
+            return
         if self._tail is not None:
             self._step_tail()
             return
@@ -588,9 +619,11 @@ class GetCartsAppLayer(ListShellApp):
             self._tail = None
             _ci._log("%r" % (exc,))
             failed(exc)
+            self._damage.again()
             return
         self._tail = None
         then()
+        self._damage.again()          # the work a tail held goes on next frame
 
     def _end_tail(self):
         """The steps in hand done at once: the app is closing."""
@@ -1075,6 +1108,7 @@ class GetCartsAppLayer(ListShellApp):
         checking = self.phase == "checking"
         if self.job is not None and not self.job.finished and not self.job.cancel():
             return
+        self._drop()
         self._drop_fetch()
         self._unpick()
         self._release()
@@ -1120,6 +1154,7 @@ class GetCartsAppLayer(ListShellApp):
             return
         self._consented = None
         job.cancel()
+        self._drop()
         self._unpick()
         self._say("Not installed. Nothing changed.")
         self._go("cart")

@@ -371,9 +371,14 @@ def test_a_denied_install_leaves_nothing(tmp_path):
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     assert app.phase == "consent"
+    job = app.job
     app.handle_input(_In("b"))                      # No
-    _frames(ws, 2)
-    assert app.phase == "cart" and app.toast[0] == "Not installed. Nothing changed."
+    for _ in range(40):                             # the build goes a store op a frame
+        assert app.phase == "cart" and app.toast[0] == "Not installed. Nothing changed."
+        if job.finished and app._sweep is None:
+            break
+        _frames(ws, 1)
+    assert job.finished and app._sweep is None, "the stopped build is still going"
     assert not (tmp_path / "carts" / "radio.moy").exists()
     assert not os.listdir(ci.stage_root(str(tmp_path / "carts")))
     assert "radio.moy" not in ci.load_record(str(tmp_path / "carts"))

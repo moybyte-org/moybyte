@@ -6,7 +6,7 @@
 #   -- the index                check_cart, cover_ref, parse_index (_read_listing)
 #   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
-#   -- the record               load_record, save_record, record_entry, remove_steps, stepped
+#   -- the record               load_record, save_record, record_entry, staged, recover_steps, remove_steps, drain, stepped
 #   -- fetching                 Worker, Fetch, Reach, FileCheck, index_fetch, cover_fetch
 #   Worker                      a transport with the http worker: documents whole, downloads streamed
 #   Fetch                       one small document, whole
@@ -84,8 +84,8 @@ An entry's `depends` (a list of cart ids, optional) names the carts it needs
 on the console first; `needs` resolves them over the indexes.
 
 A crash at any point leaves the old cart or the new one, never half of either:
-`recover`, which the app runs when it opens, removes an unfinished build and
-puts back an old copy whose replacement never moved in.
+`recover_steps`, which the app steps when it opens, removes an unfinished build
+and puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
@@ -149,7 +149,7 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
+    from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
                                 cart_path)
     from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
     import moy_carts as _store
@@ -157,7 +157,7 @@ try:
     import cart_listing as _cl
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
+    from runtime.moy_store_base import (_sibling_path, _is_dir,
                                         COVER_MAX_BYTES, cart_path)
     from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
                                 _write_atomic_steps)
@@ -800,26 +800,65 @@ def stage_root(root):
     return _sibling_path(root, STAGE_DIR)
 
 
-def recover(root):
-    """Finish what an interrupted install or removal left in `install/`: an
-    unfinished build goes, an old copy goes once its replacement is in place
-    and comes back when it is not, a removed cart goes. Call inside one store
-    session. Returns how many entries it handled."""
+def staged(root):
+    """Whether `install/` holds anything for `recover_steps` to finish."""
+    try:
+        return bool(os.listdir(stage_root(root)))
+    except OSError:
+        return False
+
+
+def recover_steps(root):
+    """Finish what an interrupted install or removal left in `install/`, a
+    store op a resume (`stepped` runs one a frame): an unfinished build goes,
+    an old copy goes once its replacement is in place (as a `.gone` first,
+    `discard_steps`) and comes back when it is not, a removed cart goes. A cut
+    anywhere leaves entries the next pass finishes."""
     base = stage_root(root)
     try:
         names = os.listdir(base)
     except OSError:
-        return 0
+        return
     for n in names:
+        yield
         p = base + "/" + n
-        if n.endswith(".old") and not _exists(cart_path(root, n[:-4])):
-            os.rename(p, cart_path(root, n[:-4]))
-            _log("put back %s" % n[:-4])
+        if n.endswith(".old"):
+            if not _exists(cart_path(root, n[:-4])):
+                os.rename(p, cart_path(root, n[:-4]))
+                _log("put back %s" % n[:-4])
+            else:
+                yield from discard_steps(p, base + "/" + n[:-4] + ".gone")
         elif _is_dir(p):
-            _rmtree(p)
+            yield from rmtree_steps(p)
         else:
-            os.remove(p)
-    return len(names)
+            try:
+                os.remove(p)
+            except OSError:
+                pass                      # a `.gone` an `.old` above already took
+
+
+def recover(root):
+    """`recover_steps` in one go. Call inside one store session. Returns how
+    many entries `install/` held."""
+    try:
+        n = len(os.listdir(stage_root(root)))
+    except OSError:
+        return 0
+    for _ in recover_steps(root):
+        pass
+    return n
+
+
+def discard_steps(path, gone):
+    """An old copy at `path` (an `.old`) deleted for good, a store op a
+    resume: renamed to `gone` (a `.gone` a cut left deleted first) and that
+    deleted an entry at a time. Half an `.old` left by a cut could come back
+    as a cart once its replacement is removed; half a `.gone` only goes."""
+    if _exists(gone):
+        yield from rmtree_steps(gone)
+        yield
+    os.rename(path, gone)
+    yield from rmtree_steps(gone)
 
 
 def remove_steps(root, folder, keep=None):
@@ -882,6 +921,12 @@ def rmtree_steps(path):
 
 
 _DONE = object()
+
+
+def drain(job):
+    """`yield from` it: an Install stepped until it ends, one step a resume."""
+    while job.step():
+        yield
 
 
 def stepped(op, steps):
@@ -1330,6 +1375,8 @@ class Install:
     it fetches anything. `supplied` maps an external file's path to a file the
     player gave instead of its archive. On any failure the staging folder goes
     and the shelf is exactly as it was; `cancel()` does the same on purpose.
+    The folder goes a store op a step (`dropping`), so a stopped job is
+    stepped until `step()` ends like any other, or left to `recover`.
 
     With an `ask`, `ask(stage)` is called once every file is checked and
     before anything moves into place, inside a store session: None goes on,
@@ -1395,6 +1442,7 @@ class Install:
         self._steps = None                # store ops a step at a time: the staging made, the landing
         self._then = None                 # what follows when they end
         self.landing = False
+        self.dropping = False             # a stopped build being deleted, a store op a step
         self._reported = False
 
     # -- the store, timed ------------------------------------------------------
@@ -1459,7 +1507,7 @@ class Install:
         finally:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
-        return False
+        return not self.finished
 
     def _report_once(self):
         if self.finished and self.done and not self._reported:
@@ -1485,11 +1533,12 @@ class Install:
         self.asking = None
 
     def cancel(self):
-        """Stop, keeping nothing. False once the build is landing, or the
-        keeper has it: past that point the cart lands."""
+        """Stop, keeping nothing: the build is deleted over the next steps
+        (`dropping`). False once the build is landing, or the keeper has it:
+        past that point the cart lands."""
         if self.keeping or self.landing:
             return False
-        if not self.finished:
+        if not self.finished and not self.dropping:
             self._fail(None, "cancelled")
         return True
 
@@ -1706,7 +1755,7 @@ class Install:
         yield from _record_steps(self.root, made(), made)
         if old:
             yield
-            yield from rmtree_steps(aside)
+            yield from discard_steps(aside, self.stage + ".gone")
 
     def _swap(self, entry):
         """The keeper's build into the carts folder by one rename (the old
@@ -1764,12 +1813,18 @@ class Install:
                 drop()
             except Exception as exc:  # noqa: BLE001 -- recover() finishes it next open
                 _log("%s: archive left for recover: %s" % (self.folder, exc))
-        if ok:
+        if ok or self.dropping:
             return
-        try:
-            self.in_store(lambda: _rmtree(self.stage) if _exists(self.stage) else None)
-        except Exception as exc:  # noqa: BLE001 -- recover() finishes it next open
-            _log("%s: staging left for recover: %s" % (self.folder, exc))
+        # The build deleted a store op a step, the job unfinished until then: a
+        # staging folder is `recover`'s to finish wherever a cut leaves it.
+        self.finished = False
+        self.dropping = True
+        self.asking = None
+        self._steps = rmtree_steps(self.stage)
+        self._then = self._dropped
+
+    def _dropped(self):
+        self.finished = True
 
 
 def _copy_bytes(src, dst):
