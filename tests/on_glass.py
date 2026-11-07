@@ -2071,7 +2071,9 @@ def web_console_is_baked_into_the_image(board):
     2026-09-08 before anyone noticed. Self-consistent on purpose (the names
     the webhost's table serves, not this checkout's `dist/`): a board may
     legitimately run an older build, and the question is whether ITS console
-    is whole -- and whether the kernel's webhost hands it out.
+    is whole -- and whether the webhost names it as what it serves. A board
+    serves only through its socket (its moy_net has no web_handle), so the
+    response's headers are the C router's, held by tests/test_moy_webhost.py.
     """
     import sys
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -2094,12 +2096,8 @@ def web_console_is_baked_into_the_image(board):
     for name, size, magic in got:
         assert magic == b"\x1f\x8b\x08", (name, magic)
         assert size > 0, name
-    head = board.pyval(
-        "bytes(ws.webhost.handle_http('GET', '/', b'')[:160]) "
-        "if not ws.webhost.serving else b'serving'")
-    if head != b"serving":
-        assert head.startswith(b"HTTP/1.1 200 OK"), head
-        assert b"Content-Encoding: gzip" in head, head
+    note = board.pyval("__import__('moy_webhost').WebHost('/moy/carts').source_note()")
+    assert "baked into this firmware" in note and stamp.split()[2] in note, (note, stamp)
 
 
 def _clear_to_console(board, clear):

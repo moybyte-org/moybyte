@@ -814,22 +814,6 @@ def test_the_web_console_is_baked_into_this_image(board):
     on_glass.web_console_is_baked_into_the_image(board)
 
 
-def test_the_console_is_served_out_of_the_firmware_image(board):
-    """The console this board hands a browser comes out of its own image --
-    the megabyte the page cannot boot without, read straight from flash."""
-    assert board.pyexec(
-        "import moy_webhost\n"
-        "H = moy_webhost.WebHost('/moy/carts')\n"
-        "R = H.handle_http('GET', '/worker.js', b'')\n"
-        "HEAD, BODY = R.split(bytes((13, 10, 13, 10)), 1)\n")
-    head = board.pyval("eval('HEAD', ws._g)")
-    assert b"Content-Encoding: gzip" in head, head
-    assert b"200 OK" in head and b"no-store" in head
-    assert board.pyval("eval('bytes(BODY[:3])', ws._g)") == b"\x1f\x8b\x08"
-    note = board.pyval("eval('H.source_note()', ws._g)")
-    assert "baked into this firmware" in note, note
-
-
 def test_a_lua_cart_runs_and_exits(board):
     """The Lua tier reaches every board by default; pin it with a real run."""
     on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua",
