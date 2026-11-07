@@ -255,7 +255,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
 | Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows; the image carries no camera driver, so `moybyte.camera` is None |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`). The high-speed OTG port is the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`), TinyUSB's device off (`MICROPY_HW_ENABLE_USBDEV` 0); which connector, if any, reaches it on this unit is not known to the port |
-| Factory firmware | `JC8012P4A1C_I_W_Y_xiaozhi2.0.4.bin` (P4) + `JC-C6-slave_v2.3.2.bin` (C6) in the vendor's demo repo |
+| Factory firmware | `JC8012P4A1C_I_W_Y_xiaozhi2.0.4.bin` (P4) + `JC-C6-slave_v2.3.2.bin` / `JC8012P4A1_C6.bin` (C6) in the vendor's demo repo; the C6 section says which ran here |
 
 Sources: Guition's demo zip (mirrored at
 <https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y> —
@@ -312,34 +312,66 @@ Free pins).
   free is read; it must not drift across rounds.
 - The console: 36 carts seeded on first boot, PPA registered, Lua runtime on,
   the desktop under `WindowedWM` at 1280×800 landscape; the first frame lands ~300ms
-  after the desktop is built, and the desktop is built ~27s after reset on a
-  seeded store — ~10s of which is the C6 (below). **On-glass suite 18/18**
+  after the desktop is built. **On-glass suite 18/18**
   (`tests/test_guition_p4_on_glass.py`: state, landscape canvas on portrait glass,
   the rect-rotate fast path under a running game, GSL3680 up,
   PPA live, settings window, picker, a Python cart and a Lua cart run and
   exit, idle blank + wake, PERF lines, 0 underruns after the tour).
-- **WiFi/BLE against Guition's factory C6 slave**: BLE comes up (the keyboard
-  scanner runs from the first frame), and ESP-Hosted 2.12.12's
-  `Req_FeatureControl` RPC times out TWICE at boot (`rpc_core: Timeout waiting
-  for Resp for [0x183]`, 5s each) — the factory slave
-  (`JC-C6-slave_v2.3.2.bin`) predates that RPC, so a boot costs those 10s.
-  WiFi itself works: the radio is a lease (`.claude/rules/boards.md`), and
-  when a holder brings it up it joins a saved network and downloads. A
-  sustained download needs ESP-Hosted's SDIO clock at 20 MHz on this board;
-  `boards/MOYBYTE_GUITION_P4/sdkconfig.board` says why. Flashing the
-  Waveshare's `c6_slave/` image (hosted 2.12.12 + the shim) to this C6 would
-  answer the RPC and bring ESP-NOW.
+- **WiFi/BLE run on Guition's ESP-Hosted 2.3.2 slave** (`JC-C6-slave_v2.3.2.bin`,
+  the C6 section below): BLE comes up (the keyboard scanner runs from the
+  first frame), the slave answers ESP-Hosted 2.12.12's `Req_FeatureControl`,
+  and WiFi joins a saved network when a holder brings the radio up (it is a
+  lease, `.claude/rules/boards.md`). A sustained download needs ESP-Hosted's
+  SDIO clock at 20 MHz on this board; `boards/MOYBYTE_GUITION_P4/sdkconfig.board`
+  says why, and the host drives that clock, so a slave image needs no
+  per-board build for it.
+
+## The C6's firmware
+
+The C6 is flashed from the P4 over ESP-Hosted's slave OTA:
+`tools/board.py guition_p4 c6 URL` streams the APP image at URL (served where
+the board's WiFi reaches it) through the kernel updater's C6 sink
+(`native/moy_net/moy_ota.c`), checks its size and sha256, hands it to the
+radio and reboots the console onto it. The C6's partition table is Guition's:
+two 1536 KB OTA slots (`ota_0` at 0x10000, `ota_1` at 0x190000), which the
+Waveshare's `c6_slave/` image (1.2 MB) fits.
+
+What the unit has run, in order (2026-11-07):
+
+- **As shipped**: an older Guition slave that answered neither
+  `Req_FeatureControl` (two 5 s `rpc_core: Timeout waiting for Resp for
+  [0x183]` per boot) nor the firmware-version RPC. Its OTA took the
+  Waveshare's shimmed slave once, and that image ran everything on glass:
+  WiFi, an https download, BLE and ESP-NOW, with Brick Siege matches against
+  the Waveshare P4 in Python and Lua (the numbers are #66's).
+- **Then**: `JC-C6-slave_v2.3.2.bin`'s app, flashed through the shimmed
+  slave's own OTA as the proof of a way back. It runs WiFi and BLE and boots
+  without the 0x183 timeouts, has no ESP-NOW shim, and **its OTA refuses every
+  image**: `ota_end` fails `ESP_ERR_OTA_VALIDATE_FAILED` (`resp code [5379]`)
+  for the shimmed slave and for its own image alike, with 1500- or 1024-byte
+  writes, paced or not. So the shimmed slave cannot reach this C6 over SDIO
+  while 2.3.2 runs on it.
+
+The way onto any C6 image that does not take an OTA is the C6's own UART:
+header **CN5** (`5-Schematic/5_ESP32-C6.png` in the vendor repo): 1 3V3,
+2 GND, 3 U0TXD, 4 U0RXD, 5 IO9 (the boot strap, low at reset for the ROM
+loader), 6 CHIP_PU. A merged image written at 0x0 there
+(`esptool --chip esp32c6 write_flash 0x0 <merged.bin>`) also rewrites
+`otadata` blank, so the C6 boots `ota_0`. The vendor's two merged C6 images
+(`JC-C6-slave_v2.3.2.bin` and `JC8012P4A1_C6.bin`, ESP-Hosted's
+`network_adapter` built Aug 2025 and Dec 2024) are vendor binaries and stay
+out of this repo: they are in the vendor repo above under
+`8-Burn operation/Burn files/`.
 
 ## Open items (what a human with a finger and a desk decides)
 
 1. ~~Touch calibration~~ — done on glass, 2026-09-06 (above).
 2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
-3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): the radio link
-   (`runtime/run/players.py`'s `EspNowLink`) fails into an inactive link by design. The Waveshare's `c6_slave/` image is
-   the same chip and the same SDIO; flashing it here is Phase D of
-   `docs/history/espnow_p4_2026-08.md` on this board, and the publisher does
-   not stage a `c6` block in this board's manifest yet.
-4. The factory slave's two 5s RPC timeouts per boot (the section above); the
-   shimmed slave image is the fix for 3 and 4 at once.
+3. **The C6 has no ESP-NOW shim** (the section above): the radio link
+   (`runtime/run/players.py`'s `EspNowLink`) fails into an inactive link by
+   design, and the publisher does not stage a `c6` block in this board's
+   manifest.
+4. Flashing the shimmed slave over CN5 needs a 3.3 V USB-UART adapter and a
+   hand on the header.
 5. BLE keyboard (unverified: nothing paired), audio by ear (no speaker on
    our unit), backlight PWM dimming on glass.

@@ -328,8 +328,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   driver uploads `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c` after every reset);
   its serial is the P4's own USB-Serial/JTAG (the S3 rules, and esptool needs
   no BOOT button); its backlight GPIO23 is active-HIGH where the Waveshare's is
-  active-low; its C6 runs Guition's factory slave, so BLE works and ESP-NOW
-  fails inert until the Waveshare's `c6_slave/` image is flashed to it.
+  active-low; its C6 runs Guition's ESP-Hosted 2.3.2 slave, whose OTA refuses
+  every image, so BLE works and ESP-NOW fails inert until the Waveshare's
+  `c6_slave/` image goes on over the C6's UART header (its README's C6
+  section; `tools/board.py guition_p4 c6 URL` is the SDIO route for a slave
+  that takes an OTA).
 
 ## The Zero (headless, #41)
 
