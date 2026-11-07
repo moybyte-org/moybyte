@@ -872,8 +872,10 @@ void moy_conn_close(void *conn) {
 }
 
 // The host's slot: memory the tests read back, `moy_slot_host_cap` bytes,
-// checked at close as a board's is in its first byte alone.
+// checked at close as a board's is in its first byte alone. A write past
+// `moy_slot_host_room` bytes fails ENOSPC as a flash that will not take them.
 uint32_t moy_slot_host_cap = 4u << 20;
+uint32_t moy_slot_host_room = 0xffffffffu;
 uint8_t *moy_slot_host_data;
 uint32_t moy_slot_host_n;
 char moy_slot_host_booted[16];
@@ -893,7 +895,8 @@ int moy_slot_write(const void *p, size_t n) {
     if (!s_open || s_closed) {
         return -EBADF;
     }
-    if (n > moy_slot_host_cap - moy_slot_host_n) {
+    if (n > moy_slot_host_cap - moy_slot_host_n
+        || moy_slot_host_n + n > moy_slot_host_room) {
         return -ENOSPC;
     }
     memcpy(moy_slot_host_data + moy_slot_host_n, p, n);

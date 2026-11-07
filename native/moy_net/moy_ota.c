@@ -1248,6 +1248,19 @@ int moy_ota_dl_step(uint32_t max) {
     if (max == 0 || max > DL_BUF) {
         max = DL_BUF;
     }
+    // A body of known size ends at its size, never at a read past it: on the
+    // boards' lwIP a plain-HTTP socket reports its close as end of stream once,
+    // and every read after that fails ENOTCONN.
+    if (s_u.st.dl_total) {
+        uint32_t left = s_u.st.dl_done < s_u.st.dl_total
+                        ? s_u.st.dl_total - s_u.st.dl_done : 0;
+        if (left == 0) {
+            return 0;
+        }
+        if (max > left) {
+            max = left;
+        }
+    }
     size_t got = 0;
     while (got < max) {
         int k = moy_httpc_read(s_u.h, s_u.buf + got, max - got);

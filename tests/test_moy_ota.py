@@ -865,6 +865,21 @@ def test_a_short_download_is_refused(board):
     assert board.u.finish() is False
 
 
+def test_a_download_reads_no_further_than_its_size(board):
+    """The stream stops at the manifest's size and no step reads past it: on a
+    board's lwIP the read after a plain-HTTP close fails ENOTCONN, and the step
+    the console takes after the last byte was that read (a LAN C6 flash on the
+    Guition P4, 2026-11-07). Bytes the server sends beyond the size are never
+    read, so they are never hashed or written."""
+    blob = app_image(40000)
+    path, steps = _download(board, blob, manifest=_manifest(board.mod, blob, ""),
+                            serve=blob + b"\xff" * 5000)
+    assert path == board.mod.SLOT_STAGED
+    assert nb._slot()[0] == blob
+    assert steps == (len(blob) + board.mod.DL_CHUNK - 1) // board.mod.DL_CHUNK
+    assert board.u.download_step() is False
+
+
 def test_a_corrupted_download_is_refused_by_the_signed_hash(board):
     blob = app_image(5000)
     bad = bytearray(blob)
@@ -947,11 +962,9 @@ def test_a_vm_stop_mid_download_drops_it(board):
 
 
 def test_a_slot_that_will_not_take_the_bytes_says_so_in_words(board):
-    nb._slot_reset(cap=4096)
+    nb._slot_reset(room=4096)                     # past the cap check, then short of room
     blob = app_image(10000)
-    man = _manifest(board.mod, blob, "")
-    man["size"] = 1                               # past the cap check, then short of room
-    path, _ = _download(board, blob, manifest=man)
+    path, _ = _download(board, blob)
     assert path is None
     assert board.u.error == board.mod.NO_ROOM
 

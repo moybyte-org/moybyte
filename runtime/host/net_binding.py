@@ -781,9 +781,10 @@ def _slot():
     return (ctypes.string_at(p, n) if p and n else b""), booted.decode("utf-8")
 
 
-def _slot_reset(cap=4 << 20):
+def _slot_reset(cap=4 << 20, room=0xFFFFFFFF):
     d = _lib()
     ctypes.c_uint32.in_dll(d, "moy_slot_host_cap").value = cap
+    ctypes.c_uint32.in_dll(d, "moy_slot_host_room").value = room
     ctypes.memset(ctypes.addressof((ctypes.c_char * 16).in_dll(
         d, "moy_slot_host_booted")), 0, 16)
 
