@@ -3,21 +3,20 @@
 `ssh <name>.local` into a console (`moybyte-XXXX.local` until Settings'
 Name is set) (`docs/os_2026-11/system.md` §3):
 Dropbear's server inside the kernel's process, its session's shell the C
-`moy_sh` over a face of its own. How the server runs a session is
-`moy_ssh.h`'s header, how the shell is reached `moy_ssh_face.h`'s. The
+`moy_sh` over the stream face the web terminal opens too
+(`native/moy_tty/README.md`). How the server runs a session is `moy_ssh.h`'s
+header, how the shell is reached `native/moy_tty/moy_tty.h`'s. The
 console's side — when it serves, the password, the radio and the mDNS name —
 is `runtime/system/ssh_service.py`.
 
 | file | what it is |
 |---|---|
-| `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the hop to the console's task, the counted PSRAM allocator, the POSIX names Dropbear asks for |
-| `moy_ssh_run.c` | the run: the server's task and the face's, made at the first start and parked between a stop and the next, the console's start and stop (`moy_ssh.h`'s THE RUN) |
-| `moy_ssh_face.h`, `moy_ssh_face.c` | the shell's face over the channel: the socket pair, its own task, the terminal's line discipline (its caret keys and history), `exec` with the channel as its stdin, a text app's keys, the exit status Dropbear reaps |
-| `moy_ssh_sh.c` | the face's shell: a `moy_sh` session over the board's host table (`native/moy_sh/moy_sh_board.h`), the entries that cross the door hopped, `/etc` the server's system folder, a full-screen text app drawn as VT100 |
+| `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the counted PSRAM allocator, the POSIX names Dropbear asks for, its channel's command opened as a face (`moy_ssh_command` over `moy_tty_open`), `/etc` the server's system folder |
+| `moy_ssh_run.c` | the run: the server's task, made at the first start and parked between a stop and the next, and its hold on the face task; the console's start and stop (`moy_ssh.h`'s THE RUN) |
 | `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`, over the run |
 | `port/` | Dropbear's options (`localoptions.h`), its `config.h`, the names the port renames (`moy_ssh_port.h`, `moy_ssh_names.h`), and in `port/esp/` the headers ESP-IDF lacks |
 | `dropbear/`, `patches/`, `dropbear_vendor.json` | the vendored Dropbear (`UPSTREAM.md`) |
-| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face and the board's shell over a folder, the console's task a thread, the face's socket pair a board's loopback (its bytes cross a thread, a little late, its sends counted), and a VM that answers `passwd` and the console's rows |
+| `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face (`native/moy_tty`) and the board's shell over a folder, the console's task a thread, the face's socket pair a board's loopback (its bytes cross a thread, a little late, its sends counted), and a VM that answers `passwd` and the console's rows |
 
 ## Crypto
 
@@ -28,40 +27,22 @@ uses none of it.
 
 ## What runs where
 
-Three tasks, none of them the VM's:
-
 - **the server** (`moy_ssh`, priority 1, core 0, a 16 KB PSRAM stack) owns
-  the network and the crypto, one connection at a time;
-- **the face** (`moy_ssh_face`, the same, a 24 KB PSRAM stack) runs the
-  session's shell: every C built-in, the parse and the line discipline, so
-  a long command holds no frame and a slow client blocks only this task;
-- **the console's task** serves a HOP at its frame's tail (`moy_ssh_tail`, a
-  weak hook in `native/moy_kernel/moy_loop_board.c`): what must run there —
-  the store's files (the volume's borrow resolves through the VM's mount
-  table, an internal-flash write disables the cache a PSRAM stack runs on,
-  and the T-Deck's card shares the panel's bus) and the door's crossings into
-  Python (role commands, the console's processes, `/proc`, `/dev`, installed
-  commands) — is handed there and waited for. What a hopped command writes
-  is held and sent from the face's task after it, so the console never waits
-  on a client. The connection's sign-in files are read the same way.
-- **the face's output is gathered** (`moy_ssh_face.c`, OUT_BYTES): each send
-  on the pair is a segment on the board's loopback, which queues at most
-  `LWIP_LOOPBACK_MAX_PBUFS` (8) and drops the rest, so the face sends a
-  command's output in pieces of up to 1 KB: when the piece fills, before it
-  waits for input or a hop, at the end, and at the shell's poll once 10 ms
-  old. The harness counts the sends (`face_sends` in its STATS line).
+  the network and the crypto, one connection at a time; it reads a
+  connection's sign-in files through the hop to the console's task;
+- **the face** is `native/moy_tty`'s task, which the server holds while it
+  serves: the session's shell, the hops and the gathered output are that
+  module's (its README, What runs where).
 
-The server's two tasks are made at the first start and park between a stop
-and the next start, never deleted: deleting a PSRAM-stacked task links
+The server's task is made at the first start and parks between a stop and
+the next start, never deleted: deleting a PSRAM-stacked task links
 FreeRTOS's task-state query into IRAM, internal SRAM the idle desk would pay.
-A stop asked from a session's own command (`passwd -d` over SSH) stands
-until that session ends, and a start in the same session (`passwd x`)
-withdraws it (`moy_ssh.h`, THE RUN). The console keeps the radio and the
-mDNS name until `moy_ssh.parked()` says both tasks have parked, so that
-session ends cleanly even where `ssh` is the radio's only holder.
-
-`moy_sh`'s running session is per task (`native/moy_sh/moy_sh.h`, TASKS), so
-an SSH session and the Terminal's run side by side.
+A stop asked from a face's own command (`passwd -d` over SSH or the web
+terminal) stands until that session ends, and a start in the same session
+(`passwd x`) withdraws it (`moy_ssh.h`, THE RUN). The console keeps the
+radio and the mDNS name until `moy_ssh.parked()` says the server has parked
+and its face has ended, so that session ends cleanly even where `ssh` is the
+radio's only holder.
 
 ## Memory
 
@@ -70,10 +51,9 @@ large globals (`ses`, `svr_ses`, `opts`, `svr_opts`), libtomcrypt's
 descriptor tables and the algorithm lists (which a session writes) are PSRAM
 too, taken at the first `start` (`moy_ssh_globals`): each global's name is
 the object a pointer points at (`port/moy_ssh_port.h`). The run keeps one
-pointer of internal SRAM, the server's state one more. A session's shell
-arena is 32 KB of PSRAM (`moy_ssh_sh.c`), not the Terminal's 128 KB: the most
-a session used is `stats()`'s `arena_peak`, measured in #246 over
-ssh-copy-id's install command, pipelines, `top` and `edit`.
+pointer of internal SRAM, the server's state one more. A session's shell and
+its arena are the face's (`native/moy_tty/README.md`, Memory); `stats()`'s
+`arena_peak` reports it.
 
 ## Sign-in
 
@@ -88,6 +68,7 @@ a key on a Dropbear server in the first, a current one in the home's.
 
 ## Boards
 
-Every console takes the module (each board.toml's `[native.shared]`); the
-image cost and the internal SRAM are in #246. The Zero denies it with
-`moy_sh` until its phase (`docs/os_2026-11.md` §7, phase 4).
+Every console takes the module (each board.toml's `[native.shared]`) with
+`native/moy_tty`; the image cost and the internal SRAM are in #246. The Zero
+denies it with `moy_sh` and `moy_tty` until its phase (`docs/os_2026-11.md`
+§7, phase 4).

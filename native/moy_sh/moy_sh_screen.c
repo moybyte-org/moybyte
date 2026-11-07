@@ -260,3 +260,26 @@ void moy_sh_screen_set_ctrl(moy_sh_screen_t *f, int ctrl) {
         moy_sh_app_set_ctrl(f->app, f->ctrl);
     }
 }
+
+size_t moy_sh_screen_prompt(moy_sh_screen_t *f, int more, char *out, size_t cap) {
+    return moy_sh_prompt(f->s, more, out, cap);
+}
+
+int moy_sh_screen_status(moy_sh_screen_t *f) {
+    return moy_sh_status(f->s);
+}
+
+void moy_sh_screen_cancel(moy_sh_screen_t *f) {
+    moy_sh_cancel(f->s);
+}
+
+int moy_sh_screen_cands(moy_sh_screen_t *f, const char *line, size_t col, moy_sh_cands_t *a) {
+    return moy_sh_cands(f->s, line, col, a);
+}
+
+void moy_sh_screen_heap(void *(**alloc)(void *ctx, size_t n), void (**free_)(void *ctx, void *p)) {
+    moy_sh_host_t h;
+    moy_sh_board_host(&h, NULL, NULL, NULL);
+    *alloc = h.alloc;
+    *free_ = h.free;
+}

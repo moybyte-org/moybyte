@@ -24,9 +24,9 @@
 #include "freertos/task.h"
 
 #include "moy_ssh.h"
-#include "moy_ssh_face.h"
+#include "moy_tty.h"
 
-extern const moy_ssh_shell_t moy_ssh_moy_sh;
+extern const moy_tty_shell_t moy_tty_moy_sh;
 
 static mp_obj_t ssh_start(size_t n_args, const mp_obj_t *args) {
     const char *sys = mp_obj_str_get_str(args[0]);
@@ -34,7 +34,7 @@ static mp_obj_t ssh_start(size_t n_args, const mp_obj_t *args) {
     if (moy_ssh_setup(sys) != 0) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ssh setup failed"));
     }
-    moy_ssh_face_set_shell(&moy_ssh_moy_sh);
+    moy_tty_set_shell(&moy_tty_moy_sh);
     int r = moy_ssh_run_start(port);
     if (r == MOY_SSH_EADDRINUSE) {
         mp_raise_OSError(MP_EADDRINUSE);

@@ -4,7 +4,8 @@
 # and the module `moy_ssh`.
 #
 # Built into every image that stages it: a board takes or denies native/moy_ssh
-# in its board.toml (README.md, Boards).
+# in its board.toml (README.md, Boards), and one that takes it takes the face
+# it opens, native/moy_tty.
 
 set(MOY_SSH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SSH_DB_SRCS ${MOY_SSH}/dropbear/src/*.c ${MOY_SSH}/dropbear/libtommath/*.c)
@@ -12,9 +13,7 @@ file(GLOB_RECURSE MOY_SSH_LTC_SRCS ${MOY_SSH}/dropbear/libtomcrypt/*.c)
 
 add_library(moy_ssh_core STATIC ${MOY_SSH_DB_SRCS} ${MOY_SSH_LTC_SRCS}
     ${MOY_SSH}/moy_ssh.c
-    ${MOY_SSH}/moy_ssh_face.c
-    ${MOY_SSH}/moy_ssh_run.c
-    ${MOY_SSH}/moy_ssh_sh.c)
+    ${MOY_SSH}/moy_ssh_run.c)
 set_source_files_properties(${MOY_SSH_LTC_SRCS} PROPERTIES COMPILE_DEFINITIONS LTC_SOURCE)
 
 idf_build_get_property(_moy_ssh_inc INCLUDE_DIRECTORIES GENERATOR_EXPRESSION)
@@ -30,7 +29,7 @@ target_include_directories(moy_ssh_core PRIVATE
     ${MOY_SSH}/dropbear/src
     ${MOY_SSH}/dropbear/libtomcrypt/src/headers
     ${MOY_SSH}/dropbear/libtommath
-    ${MOY_SSH}/../moy_sh
+    ${MOY_SSH}/../moy_tty
     ${MOY_SSH}/../moy_store
     ${_moy_ssh_cfg}
     "${_moy_ssh_inc}")
@@ -49,6 +48,6 @@ target_link_libraries(moy_ssh_core PRIVATE
 
 add_library(usermod_moy_ssh INTERFACE)
 target_sources(usermod_moy_ssh INTERFACE ${MOY_SSH}/modmoy_ssh.c)
-target_include_directories(usermod_moy_ssh INTERFACE ${MOY_SSH})
-target_link_libraries(usermod_moy_ssh INTERFACE moy_ssh_core)
+target_include_directories(usermod_moy_ssh INTERFACE ${MOY_SSH} ${MOY_SSH}/../moy_tty)
+target_link_libraries(usermod_moy_ssh INTERFACE moy_ssh_core moy_tty_core)
 target_link_libraries(usermod INTERFACE usermod_moy_ssh)

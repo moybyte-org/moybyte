@@ -1,9 +1,9 @@
-// moy_ssh_sh: the shell an SSH face runs -- a moy_sh session over the
-// board's host table (native/moy_sh/moy_sh_board.h), its terminal the face's
-// socket, its Ctrl-C the face's poll, its input the channel's.
+// moy_tty_sh: the shell a stream face runs (moy_tty.h) -- a moy_sh session
+// over the board's host table (native/moy_sh/moy_sh_board.h), its terminal
+// the face's socket, its Ctrl-C the face's poll, its input the stream's.
 //
 // The session runs on the face's task. What crosses the door into Python or
-// touches the store hops to the console's task (moy_ssh_face_hop): the
+// touches the store hops to the console's task (moy_tty_face_hop): the
 // table's entries that do are wrapped here (every one moy_sh_board.c's door
 // serves, `mem`'s Python heap among them, but `role`), and the shell's own
 // store calls go through the table's `hop`. A role command runs on this
@@ -22,14 +22,14 @@
 #include "moy_sh.h"
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
-#include "moy_ssh.h"
-#include "moy_ssh_face.h"
+#include "moy_tty.h"
 
 #define ARENA (32u * 1024u)             // a session's arena (README.md, Memory)
+#define NAMES_BYTES 4096u               // a Tab's names
 #define ROW_BYTES 2048u
 
 typedef struct {
-    moy_ssh_face_t *f;
+    moy_tty_t *f;
     moy_sh_t *s;
     moy_sh_host_t board;                // the board's table, the wrapped entries' own
     moy_sh_app_t *app;                  // the text app in front, or NULL
@@ -166,14 +166,14 @@ static int w_mem(void *ctx, uint32_t out[6]) {
 }
 
 static void w_hop(void *ctx, void (*fn)(void *arg), void *arg) {
-    moy_ssh_face_hop(((sh_t *)ctx)->f, fn, arg);
+    moy_tty_face_hop(((sh_t *)ctx)->f, fn, arg);
 }
 
 // -- the terminal ---------------------------------------------------------------------
 
 static void sh_out(void *ctx, int stream, const char *p, size_t n) {
     (void)stream;
-    moy_ssh_face_out(((sh_t *)ctx)->f, p, n);
+    moy_tty_out(((sh_t *)ctx)->f, p, n);
 }
 
 // The face's Ctrl-C, and now and then a tick for the tasks below the face's.
@@ -182,11 +182,11 @@ static int sh_poll(void *ctx) {
     if ((++h->polls & 63) == 0) {
         moy_sh_board_yield();
     }
-    return moy_ssh_face_poll(h->f);
+    return moy_tty_poll(h->f);
 }
 
 static long sh_in(void *ctx, void *buf, size_t n) {
-    return moy_ssh_face_in(((sh_t *)ctx)->f, buf, n);
+    return moy_tty_in(((sh_t *)ctx)->f, buf, n);
 }
 
 // -- the text apps ------------------------------------------------------------------
@@ -201,7 +201,7 @@ static int sh_app(void *ctx, moy_sh_t *s, int argc, char **argv) {
         return h->app != NULL ? 1 : MOY_SH_NOT_FOUND;
     }
     int cols, rows, status;
-    moy_ssh_face_size(h->f, &cols, &rows);
+    moy_tty_size(h->f, &cols, &rows);
     h->app = moy_sh_app_open(s, cols, rows, 1, app_run, h, argc, argv, &status);
     return status;
 }
@@ -211,21 +211,21 @@ static void app_end(sh_t *h) {
     int full = moy_sh_app_ops(a)->full;
     h->app = NULL;
     moy_sh_app_close(a);
-    moy_ssh_free(h->rows);
+    moy_tty_free(h->rows);
     h->rows = NULL;
     h->nrows = 0;
     if (full) {
         static const char back[] = "\x1b[0m\x1b[?25h\x1b[?1049l";
-        moy_ssh_face_raw(h->f, back, sizeof back - 1);
+        moy_tty_raw(h->f, back, sizeof back - 1);
     }
 }
 
 static int sh_front(void *sh) {
     sh_t *h = sh;
     if (h->app == NULL) {
-        return MOY_SSH_FRONT_SHELL;
+        return MOY_TTY_FRONT_SHELL;
     }
-    return moy_sh_app_ops(h->app)->full ? MOY_SSH_FRONT_FULL : MOY_SSH_FRONT_LINE;
+    return moy_sh_app_ops(h->app)->full ? MOY_TTY_FRONT_FULL : MOY_TTY_FRONT_LINE;
 }
 
 static int sh_keys(void *sh, const char *p, size_t n) {
@@ -272,19 +272,19 @@ static void sh_show(void *sh, int whole) {
     int cols, rows;
     moy_term_size(t, &cols, &rows);
     if (h->rows == NULL || h->nrows != rows) {
-        moy_ssh_free(h->rows);
-        h->rows = moy_ssh_calloc((size_t)rows, sizeof *h->rows);
+        moy_tty_free(h->rows);
+        h->rows = moy_tty_calloc((size_t)rows, sizeof *h->rows);
         h->nrows = h->rows != NULL ? rows : 0;
         whole = 1;
     }
-    char *row = moy_ssh_calloc(1, ROW_BYTES + 32);
+    char *row = moy_tty_calloc(1, ROW_BYTES + 32);
     if (row == NULL) {
         return;
     }
     int sent = whole;
     if (whole) {
         static const char clear[] = "\x1b[?1049h\x1b[0m\x1b[H\x1b[2J";
-        moy_ssh_face_raw(h->f, clear, sizeof clear - 1);
+        moy_tty_raw(h->f, clear, sizeof clear - 1);
     }
     for (int i = 0; i < h->nrows; i++) {
         int k = snprintf(row, 32, "\x1b[%d;1H", i + 1);
@@ -296,19 +296,19 @@ static void sh_show(void *sh, int whole) {
         h->rows[i] = x;
         sent = 1;
         memcpy(row + k + n, "\x1b[0m\x1b[K", 7);
-        moy_ssh_face_raw(h->f, row, (size_t)k + n + 7);
+        moy_tty_raw(h->f, row, (size_t)k + n + 7);
     }
     int c[3];
     moy_term_cursor(t, c);
     if (!sent && memcmp(c, h->cursor, sizeof c) == 0) {
-        moy_ssh_free(row);
+        moy_tty_free(row);
         return;
     }
     memcpy(h->cursor, c, sizeof c);
     // the cursor's view line, then its column
     int k = snprintf(row, 32, "\x1b[%d;%dH\x1b[?25%c", c[0] + 1, c[1] + 1, c[2] ? 'h' : 'l');
-    moy_ssh_face_raw(h->f, row, (size_t)k);
-    moy_ssh_free(row);
+    moy_tty_raw(h->f, row, (size_t)k);
+    moy_tty_free(row);
 }
 
 static uint32_t now_ms(void) {
@@ -335,11 +335,11 @@ static void sh_resize(void *sh, int cols, int rows) {
 // -- the session --------------------------------------------------------------------
 
 static void sh_size(void *ctx, int *cols, int *rows) {
-    moy_ssh_face_size(((sh_t *)ctx)->f, cols, rows);
+    moy_tty_size(((sh_t *)ctx)->f, cols, rows);
 }
 
-static void *sh_open(moy_ssh_face_t *f) {
-    sh_t *h = moy_ssh_calloc(1, sizeof *h);
+static void *sh_open(moy_tty_t *f) {
+    sh_t *h = moy_tty_calloc(1, sizeof *h);
     if (h == NULL) {
         return NULL;
     }
@@ -362,17 +362,19 @@ static void *sh_open(moy_ssh_face_t *f) {
     host.in = sh_in;
     host.app = sh_app;
     host.size = sh_size;
-    // /etc is the folder the server reads its sign-in from
-    const char *sys = moy_ssh_system();
-    size_t rn = strlen(host.root);
-    host.etc = strncmp(sys, host.root, rn) == 0 ? sys + rn : sys;
+    // /etc is the folder SSH reads its sign-in from, where it set one
+    const char *sys = moy_tty_etc();
+    if (sys != NULL) {
+        size_t rn = strlen(host.root);
+        host.etc = strncmp(sys, host.root, rn) == 0 ? sys + rn : sys;
+    }
     h->s = moy_sh_new(&host, ARENA, "/", "/");
     if (h->s == NULL) {
-        moy_ssh_free(h);
+        moy_tty_free(h);
         return NULL;
     }
-    moy_sh_board_go_home(h->s, 1);
-    if (!moy_ssh_face_pty(f)) {
+    moy_sh_board_go_home(h->s, sys != NULL);
+    if (!moy_tty_pty(f)) {
         moy_sh_setvar(h->s, "TERM", "dumb");   // a command's bytes, not a screen
     }
     return h;
@@ -407,12 +409,59 @@ static void sh_close(void *sh) {
     if (h->app != NULL) {
         app_end(h);
     }
-    moy_ssh_note_arena(moy_sh_arena_in_use(h->s));
+    moy_tty_note_arena(moy_sh_arena_in_use(h->s));
     moy_sh_free(h->s);
-    moy_ssh_free(h);
+    moy_tty_free(h);
 }
 
-const moy_ssh_shell_t moy_ssh_moy_sh = {
+// Tab: one name, the rest of it (a space after a file's); several, what they
+// share past the word, else the list.
+static size_t sh_complete(void *sh, const char *line, size_t col, char *ins, size_t cap,
+                          char *list, size_t list_cap, int *nlist) {
+    sh_t *h = sh;
+    *nlist = 0;
+    moy_sh_cands_t *a = moy_tty_calloc(1, sizeof *a);
+    char *buf = moy_tty_calloc(1, NAMES_BYTES);
+    size_t k = 0;
+    if (a != NULL && buf != NULL) {
+        a->buf = buf;
+        a->cap = NAMES_BYTES;
+        moy_sh_cands(h->s, line, col, a);
+        size_t wn = a->word_n;
+        if (a->n == 1) {
+            const char *nm = a->names[0];
+            size_t nn = strlen(nm);
+            k = nn - wn < cap - 1 ? nn - wn : 0;
+            memcpy(ins, nm + wn, k);
+            if (k == nn - wn && nm[nn - 1] != '/') {
+                ins[k++] = ' ';
+            }
+        } else if (a->n > 1) {
+            size_t common = moy_sh_cands_common(a);
+            if (common > wn && common - wn < cap) {
+                k = common - wn;
+                memcpy(ins, a->names[0] + wn, k);
+            } else {
+                size_t used = 0;
+                for (int i = 0; i < a->n; i++) {
+                    const char *nm = a->names[i] + a->stem_n;
+                    size_t nn = strlen(nm) + 1;
+                    if (used + nn > list_cap) {
+                        break;
+                    }
+                    memcpy(list + used, nm, nn);
+                    used += nn;
+                    (*nlist)++;
+                }
+            }
+        }
+    }
+    moy_tty_free(buf);
+    moy_tty_free(a);
+    return k;
+}
+
+const moy_tty_shell_t moy_tty_moy_sh = {
     sh_open, sh_run, sh_prompt, sh_status, sh_cancel, sh_close,
-    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize,
+    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize, sh_complete,
 };

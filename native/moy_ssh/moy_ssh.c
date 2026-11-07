@@ -13,96 +13,18 @@
 #include "dbmalloc.h"
 
 #include "moy_ssh.h"
-#include "moy_ssh_face.h"
+#include "moy_tty.h"
 #include "moy_fs.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_random.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/idf_additions.h"
-uint32_t moy_ssh_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
-}
-
-uintptr_t moy_ssh_self(void) {
-    return (uintptr_t)xTaskGetCurrentTaskHandle();
-}
-
-void moy_ssh_nap(int ms) {
-    ulTaskNotifyTake(pdTRUE, ms < 0 ? portMAX_DELAY : pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
-}
-
-void moy_ssh_poke(uintptr_t t) {
-    if (t != 0) {
-        xTaskNotifyGive((TaskHandle_t)t);
-    }
-}
-
-// The console's task waits with vTaskDelay: its notifications are
-// MicroPython's (mp_hal_wake_main_task), never the server's.
-void moy_ssh_console_nap(int ms) {
-    vTaskDelay(pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1);
-}
-
-// Priority 1 on core 0, the stack and the record PSRAM.
-uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg) {
-    TaskHandle_t h = NULL;
-    if (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, 1, &h, 0,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        return 0;
-    }
-    return (uintptr_t)h;
-}
 #else
-#include <pthread.h>
 #include <sys/random.h>
-uint32_t moy_ssh_ms(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
-}
-
-uintptr_t moy_ssh_self(void) {
-    return (uintptr_t)pthread_self();
-}
-
-void moy_ssh_nap(int ms) {
-    usleep((ms < 2 ? ms : 2) * 1000);
-}
-
-void moy_ssh_poke(uintptr_t t) {
-    (void)t;
-}
-
-void moy_ssh_console_nap(int ms) {
-    usleep(ms * 1000);
-}
-
-uintptr_t moy_ssh_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg) {
-    (void)name;
-    (void)stack;
-    pthread_t t;
-    if (pthread_create(&t, NULL, (void *(*)(void *))fn, arg) != 0) {
-        return 0;
-    }
-    pthread_detach(t);
-    return (uintptr_t)t;
-}
 #endif
 
 #define SYS_PATH 192u
 #define KEYS_MAX (16u * 1024u)
-
-// A hop waiting for the console's task.
-typedef struct {
-    void (*fn)(void *);
-    void *arg;
-    volatile int done;
-    uintptr_t waiter;
-} hop_t;
 
 // The server's own state, PSRAM (moy_ssh_globals): the jump an exit takes,
 // the stored hash and what getpwnam and crypt answer with.
@@ -119,10 +41,6 @@ typedef struct {
     char *keys;                 // the connection's authorized keys, or NULL
     size_t keys_n;
     int set_up;
-    hop_t *volatile hop;        // the hop waiting, or NULL
-    volatile uintptr_t tail;    // the console's task, as its tail last ran
-    int serving;                // a hop runs on it now
-    moy_ssh_faces_t faces;
 } moy_state_t;
 
 static moy_state_t *g;
@@ -229,51 +147,6 @@ int moy_ssh_globals(void) {
            && moy_ssh_g_ciphers && moy_ssh_g_hashes ? 0 : -1;
 }
 
-moy_ssh_faces_t *moy_ssh_faces(void) {
-    return &g->faces;
-}
-
-// -- the console's task ---------------------------------------------------------
-
-void moy_ssh_hop(void (*fn)(void *arg), void *arg) {
-    if (g == NULL || moy_ssh_self() == g->tail) {
-        fn(arg);
-        return;
-    }
-    hop_t h = { fn, arg, 0, moy_ssh_self() };
-    hop_t *none = NULL;
-    // one hop at a time: the server's and the face's take turns
-    while (!__atomic_compare_exchange_n(&g->hop, &none, &h, 0, __ATOMIC_ACQ_REL,
-                                        __ATOMIC_ACQUIRE)) {
-        none = NULL;
-        moy_ssh_nap(5);
-    }
-    while (!__atomic_load_n(&h.done, __ATOMIC_ACQUIRE)) {
-        moy_ssh_nap(100);
-    }
-}
-
-int moy_ssh_serving(void) {
-    return g != NULL && g->serving;
-}
-
-void moy_ssh_tail(void) {
-    if (g == NULL) {
-        return;
-    }
-    g->tail = moy_ssh_self();
-    hop_t *h = __atomic_load_n(&g->hop, __ATOMIC_ACQUIRE);
-    if (h != NULL && !g->serving) {
-        g->serving = 1;
-        h->fn(h->arg);
-        g->serving = 0;
-        uintptr_t w = h->waiter;
-        __atomic_store_n(&g->hop, NULL, __ATOMIC_RELEASE);
-        __atomic_store_n(&h->done, 1, __ATOMIC_RELEASE);
-        moy_ssh_poke(w);
-    }
-}
-
 // -- the store's files ------------------------------------------------------------
 
 // `name` in the system folder read whole, on the console's task: 0 and its
@@ -364,12 +237,6 @@ static void conf_here(void *arg) {
             }
         }
         moy_buf_free(&b);
-    }
-}
-
-void moy_ssh_note_arena(size_t used) {
-    if (g != NULL && used > s_stats.arena_peak) {
-        s_stats.arena_peak = used;
     }
 }
 
@@ -532,7 +399,11 @@ int moy_ssh_setup(const char *system_dir) {
         return -1;
     }
     strcpy(g->sys, system_dir);
-    g->tail = moy_ssh_self();
+    if (moy_tty_setup() != 0) {
+        printf("SSH no memory\n");
+        return -1;
+    }
+    moy_tty_set_etc(g->sys);
     _dropbear_exit = svr_dropbear_exit;
     _dropbear_log = svr_dropbear_log;
     if (g->set_up) {
@@ -567,13 +438,13 @@ int moy_ssh_setup(const char *system_dir) {
         }
         buf_burn_free(b);
     } else {
-        uint32_t t0 = moy_ssh_ms();
+        uint32_t t0 = moy_tty_ms();
         svr_opts.hostkey->ed25519key = gen_ed25519_priv_key(256);
         b = buf_new(MAX_PRIVKEY_SIZE);
         buf_put_priv_key(b, svr_opts.hostkey, type);
         int r = sys_publish("ssh_host_key", b->data, b->len);
         buf_burn_free(b);
-        printf("SSH host key made in %u ms%s\n", (unsigned)(moy_ssh_ms() - t0),
+        printf("SSH host key made in %u ms%s\n", (unsigned)(moy_tty_ms() - t0),
                r != 0 ? ", not stored" : "");
     }
     g->set_up = 1;
@@ -600,49 +471,28 @@ int moy_ssh_listen(int port) {
     return fd;
 }
 
-int moy_ssh_pair(int fds[2]) {
-#ifdef ESP_PLATFORM
-    // lwIP has no socketpair: a listener on the loopback, connected once.
-    int l = socket(AF_INET, SOCK_STREAM, 0);
-    if (l < 0) {
-        return -1;
-    }
-    struct sockaddr_in a;
-    socklen_t al = sizeof a;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    a.sin_port = 0;
-    int c = -1, s = -1;
-    if (bind(l, (struct sockaddr *)&a, sizeof a) == 0 && listen(l, 1) == 0
-            && getsockname(l, (struct sockaddr *)&a, &al) == 0) {
-        c = socket(AF_INET, SOCK_STREAM, 0);
-        if (c >= 0 && connect(c, (struct sockaddr *)&a, sizeof a) == 0) {
-            s = accept(l, NULL, NULL);
-        }
-    }
-    close(l);
-    if (s < 0) {
-        if (c >= 0) {
-            close(c);
-        }
-        return -1;
-    }
-    int one = 1;
-    setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    fds[0] = c;
-    fds[1] = s;
-    return 0;
-#else
-    return socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
-#endif
+// The session's shell opened, on the face's task.
+static void mark_shell(void) {
+    s_stats.signed_in++;
+    s_stats.handshake_ms = moy_tty_ms() - s_accepted_at;
 }
 
-uint32_t moy_ssh_mark_shell(void) {
-    s_stats.signed_in++;
-    s_stats.handshake_ms = moy_ssh_ms() - s_accepted_at;
-    return s_stats.handshake_ms;
+// -- Dropbear's side of the face (port/moy_ssh_port.h) -------------------------------
+
+int moy_ssh_command(const char *cmd, int pty, int cols, int rows, int *fd, pid_t *pid) {
+    return moy_tty_open(MOY_TTY_SSH, cmd, pty, cols, rows, mark_shell, fd, pid) == 0 ? 0 : -1;
+}
+
+int moy_ssh_reap(pid_t *pid, int *status) {
+    return moy_tty_reap(MOY_TTY_SSH, pid, status);
+}
+
+int moy_ssh_signal(pid_t pid, int sig) {
+    return moy_tty_signal(pid, sig);
+}
+
+void moy_ssh_winch(pid_t pid, int cols, int rows) {
+    moy_tty_winch(pid, cols, rows);
 }
 
 int moy_ssh_serve_one(int lfd, int wait_ms) {
@@ -662,7 +512,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
         return 1;
     }
     conf_t c;
-    moy_ssh_hop(conf_here, &c);
+    moy_tty_hop(conf_here, &c);
     if (c.hash[0] == 0) {
         // no password set: no SSH
         moy_ssh_free(c.keys);
@@ -674,7 +524,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     g->keys = c.keys;
     g->keys_n = c.keys_n;
     s_stats.sessions++;
-    s_accepted_at = moy_ssh_ms();
+    s_accepted_at = moy_tty_ms();
     s_session_base = s_stats.heap_now;
     s_stats.session_peak = 0;
 
@@ -689,7 +539,7 @@ int moy_ssh_serve_one(int lfd, int wait_ms) {
     m_malloc_free_epoch(1, 1);
     m_malloc_set_epoch(0);
     close(fd);
-    moy_ssh_face_reap_all(5000);
+    moy_tty_reap_all(MOY_TTY_SSH, 5000);
     moy_ssh_free(g->keys);
     g->keys = NULL;
     g->keys_n = 0;
@@ -704,4 +554,7 @@ void moy_ssh_stats(moy_ssh_stats_t *out) {
     } else {
         *out = s_stats;
     }
+    moy_tty_stats_t t;
+    moy_tty_stats(&t);
+    out->arena_peak = t.arena_peak;
 }

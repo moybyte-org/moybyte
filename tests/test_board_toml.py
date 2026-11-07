@@ -351,6 +351,17 @@ def test_every_native_take_names_a_module_and_says_why(board):
         assert name not in board_config.native_denials(BOARDS[board]), name
 
 
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_the_ssh_server_comes_with_its_face_and_the_face_with_its_shell(board):
+    """SSH opens the stream face (native/moy_tty) and the face runs moy_sh's
+    session: a board that takes one takes what it stands on."""
+    staged = set(board_config.native_modules(BOARDS[board], ROOT))
+    if "moy_ssh" in staged:
+        assert "moy_tty" in staged, board
+    if "moy_tty" in staged:
+        assert "moy_sh" in staged, board
+
+
 # The WebAssembly tier ships on every console board or on none
 # (native/moy_wasm/README.md), so its engine is the one shared module
 # whose default "yes" is not enough: every board file decides it in writing.

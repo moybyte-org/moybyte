@@ -1,27 +1,26 @@
-// moy_ssh_run: the server's task and the face's, started and stopped by the
-// console (moy_ssh.h, THE RUN). Shared by the board's module and the host
-// harness.
+// moy_ssh_run: the server's task and its hold on the face task
+// (native/moy_tty), started and stopped by the console (moy_ssh.h, THE RUN).
+// Shared by the board's module and the host harness.
 //
-// One word says what the tasks do: RUN, serve; STOP, end after the session
-// served now; ENDING, the server has left its loop for good and parks (the
-// face parks on anything but RUN). Only the server moves STOP to ENDING, so a
-// start that finds STOP may set RUN back: the server has not let go of its
-// socket. A parked task resumes when its done flag is cleared, or when it
-// finds the word RUN.
+// One word says what the server does: RUN, serve; STOP, end after the
+// session served now; ENDING, it has left its loop for good, lets go of the
+// face task and parks. Only the server moves STOP to ENDING, so a start that
+// finds STOP may set RUN back: the server has not let go of its socket. A
+// parked server resumes when its done flag is cleared, or when it finds the
+// word RUN.
 
 #include <unistd.h>
 
 #include "moy_ssh.h"
-#include "moy_ssh_face.h"
+#include "moy_tty.h"
 
 #define SERVER_STACK (16 * 1024)
-#define FACE_STACK (24 * 1024)
 
 enum { RUN, STOP, ENDING };
 
 typedef struct {
-    uintptr_t server, face;
-    volatile int stop, done, face_done;
+    uintptr_t server;
+    volatile int stop, done;
     int lfd;
 } run_t;
 
@@ -45,7 +44,7 @@ static void park(run_t *r, volatile int *done) {
         if (get(&r->stop) == RUN && swap(done, 1, 0)) {
             break;
         }
-        moy_ssh_nap(MOY_SSH_FOREVER);
+        moy_tty_nap(MOY_TTY_FOREVER);
     }
 }
 
@@ -65,39 +64,33 @@ static void server_task(void *arg) {
         }
         close(r->lfd);
         r->lfd = -1;
+        moy_tty_hold(MOY_TTY_SSH, 0);
         park(r, &r->done);
     }
 }
 
-static void face_task(void *arg) {
-    run_t *r = arg;
-    for (;;) {
-        moy_ssh_face_task(&r->stop);
-        park(r, &r->face_done);
-    }
-}
-
 static int parked(void) {
-    return get(&s_r->done) && get(&s_r->face_done);
+    return get(&s_r->done) && !moy_tty_busy(MOY_TTY_SSH);
 }
 
-// Until both tasks park, serving the hops they make meanwhile.
+// Until the server parks and its face ends, serving the hops they make
+// meanwhile.
 static void wait_parked(void) {
     while (!parked()) {
-        moy_ssh_tail();
-        moy_ssh_console_nap(20);
+        moy_tty_tail();
+        moy_tty_console_nap(20);
     }
 }
 
-// A task made, or a parked one woken; 0 when it could not be made.
+// The server made, or woken when parked; 0 when it could not be made.
 static int wake(uintptr_t *task, volatile int *done, void (*fn)(void *arg), const char *name,
                 uint32_t stack) {
     put(done, 0);
     if (*task != 0) {
-        moy_ssh_poke(*task);
+        moy_tty_poke(*task);
         return 1;
     }
-    *task = moy_ssh_spawn(fn, name, stack, s_r);
+    *task = moy_tty_spawn(fn, name, stack, s_r);
     if (*task == 0) {
         put(done, 1);
         return 0;
@@ -112,22 +105,19 @@ int moy_ssh_run_start(int port) {
             return MOY_SSH_ENOMEM;
         }
         s_r->stop = ENDING;
-        s_r->done = s_r->face_done = 1;
+        s_r->done = 1;
         s_r->lfd = -1;
     }
     run_t *r = s_r;
-    if (moy_ssh_serving()) {
-        // a session's own command: the session it runs in cannot end now
+    if (moy_tty_serving()) {
+        // a face's own command: the session it runs in cannot end now
         if (swap(&r->stop, STOP, RUN) || get(&r->stop) == RUN) {
-            if (get(&r->face_done)) {
-                wake(&r->face, &r->face_done, face_task, "moy_ssh_face", FACE_STACK);
-            }
-            return 0;
+            return moy_tty_hold(MOY_TTY_SSH, 1) == 0 ? 0 : MOY_SSH_ENOMEM;
         }
         // its client went while the command ran and the server left its
         // loop: it parks without waiting on anything, and serves again
         while (!get(&r->done)) {
-            moy_ssh_console_nap(5);
+            moy_tty_console_nap(5);
         }
     } else {
         if (get(&r->stop) == RUN) {
@@ -140,10 +130,11 @@ int moy_ssh_run_start(int port) {
         return MOY_SSH_EADDRINUSE;
     }
     put(&r->stop, RUN);
-    if (!wake(&r->face, &r->face_done, face_task, "moy_ssh_face", FACE_STACK)
+    if (moy_tty_hold(MOY_TTY_SSH, 1) != 0
             || !wake(&r->server, &r->done, server_task, "moy_ssh", SERVER_STACK)) {
         // what was woken parks again
         put(&r->stop, ENDING);
+        moy_tty_hold(MOY_TTY_SSH, 0);
         close(r->lfd);
         r->lfd = -1;
         return MOY_SSH_ENOMEM;
@@ -156,8 +147,8 @@ void moy_ssh_run_stop(void) {
         return;
     }
     swap(&s_r->stop, RUN, STOP);
-    // asked from a session's own command, the stop stands until it ends
-    if (!moy_ssh_serving()) {
+    // asked from a face's own command, the stop stands until it ends
+    if (!moy_tty_serving()) {
         wait_parked();
     }
 }
@@ -171,6 +162,8 @@ int moy_ssh_run_parked(void) {
 }
 
 void moy_ssh_run_tasks(uintptr_t *server, uintptr_t *face) {
+    moy_tty_stats_t t;
+    moy_tty_stats(&t);
     *server = s_r != NULL ? s_r->server : 0;
-    *face = s_r != NULL ? s_r->face : 0;
+    *face = t.task;
 }

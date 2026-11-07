@@ -128,7 +128,7 @@ typedef struct {
     long (*in)(void *ctx, void *buf, size_t n);
     // run fn(arg) where the files tree and the door may be touched, and wait
     // for it (may be NULL: on the calling task). A face whose session runs on
-    // a task of its own hops to the console's (the SSH face, native/moy_ssh);
+    // a task of its own hops to the console's (the stream face, native/moy_tty);
     // a hop from that task runs in place.
     void (*hop)(void *ctx, void (*fn)(void *arg), void *arg);
     // the terminal's size, for a command that lays out a screenful
@@ -187,6 +187,29 @@ const char *moy_sh_cwd(moy_sh_t *s);
 // Names for completion: the built-ins (dash's, the C core's, the roles')
 // starting with `prefix`, until fn answers nonzero; the face completes paths.
 int moy_sh_complete(moy_sh_t *s, const char *prefix, moy_sh_ent_fn fn, void *arg);
+// TAB (moy_sh_cands.c, every face's): the word left of the caret at `col` of
+// `line`, and the names it completes to, sorted and each once: a command's
+// name (moy_sh_complete) where the word is one, else a path's from its folder
+// (the working folder for a bare word), each carrying the folder as typed, a
+// folder's with its slash. `buf`/`cap` are the caller's, for the names'
+// bytes; answers how many.
+#define MOY_SH_CANDS_MAX 512
+typedef struct {
+    char *buf;
+    size_t cap, used;
+    const char *names[MOY_SH_CANDS_MAX];
+    int n;
+    size_t start;               // where the word begins in the line
+    size_t word_n;              // its bytes
+    size_t stem_n;              // its folder's bytes, which every name carries
+    char word[256];
+    char stem[256];
+    const char *prefix;
+    int listing;
+} moy_sh_cands_t;
+int moy_sh_cands(moy_sh_t *s, const char *line, size_t col, moy_sh_cands_t *a);
+// The bytes every name shares from its start.
+size_t moy_sh_cands_common(const moy_sh_cands_t *a);
 // The names in folder `path` of the session's files tree (its folder when
 // relative), a folder's with is_dir set, until fn answers nonzero: 0, fn's
 // answer, or an errno value.

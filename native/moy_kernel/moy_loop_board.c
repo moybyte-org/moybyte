@@ -50,7 +50,7 @@ void moy_input_loop_pointer(uint32_t now, bool click, bool swallow) __attribute_
 void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge) __attribute__((weak));
 void moy_input_loop_tail(void) __attribute__((weak));
 void moy_match_kernel_poll(uint32_t now) __attribute__((weak));
-void moy_ssh_tail(void) __attribute__((weak));
+void moy_tty_tail(void) __attribute__((weak));
 void moy_glass_loop_present(void) __attribute__((weak));
 void moy_glass_loop_fence(void) __attribute__((weak));
 void moy_glass_loop_idle(void) __attribute__((weak));
@@ -186,10 +186,11 @@ static void b_tail(uint32_t now, bool drew) {
     if (moy_match_kernel_poll != NULL) {
         moy_match_kernel_poll(now);
     }
-    // An SSH session's hop (native/moy_ssh): what its shell does in the
-    // store or across the door into Python runs on this task.
-    if (moy_ssh_tail != NULL) {
-        moy_ssh_tail();
+    // A stream face's hop (native/moy_tty: SSH's and the web terminal's):
+    // what its shell does in the store or across the door into Python runs
+    // on this task.
+    if (moy_tty_tail != NULL) {
+        moy_tty_tail();
     }
     // The idle-band drain: the overlapped flush returns with bands queued,
     // and a frame the console's gate skipped never reaches the flush that

@@ -51,7 +51,7 @@ def _sources():
     dash = sorted(glob.glob(os.path.join(_DASH, "*.c")))
     dash += [os.path.join(_DASH, "bltin", n) for n in ("printf.c", "test.c")]
     dash += [os.path.join(SH, n) for n in ("moy_sh.c", "moy_sh_sys.c", "moy_sh_cmds.c")]
-    own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_board.c",
+    own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_cands.c", "moy_sh_board.c",
                                          "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c",
                                          "moy_sh_app.c", "moy_sh_edit.c", "moy_sh_top.c",
                                          "moy_sh_face.c", "moy_sh_floor.c")]

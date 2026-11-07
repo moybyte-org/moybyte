@@ -30,6 +30,7 @@ list(APPEND MOY_SH_DASH_SRCS
 add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_arena.c
     ${MOY_SH}/moy_sh_fmt.c
+    ${MOY_SH}/moy_sh_cands.c
     ${MOY_SH}/moy_sh_board.c
     ${MOY_SH}/moy_sh_screen.c
     ${MOY_SH}/moy_sh_store.c

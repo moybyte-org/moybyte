@@ -537,6 +537,14 @@ The SSH server (native/moy_ssh/README.md): its session's shell is moy_sh,
 which this board denies until its network face; it takes the server with
 the shell (docs/os_2026-11.md section 7, phase 4)."""
 
+[[native.shared.deny]]
+module = "moy_tty"
+why = """
+The shell's face over a stream (native/moy_tty/README.md), SSH's and the web
+terminal's: it runs moy_sh, which this board denies until its network face
+(the owner's call on its flash and its gate, docs/os_2026-11/system.md
+section 3)."""
+
 
 [[native.shared.deny]]
 module = "moy_png"

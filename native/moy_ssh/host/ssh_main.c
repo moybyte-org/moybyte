@@ -1,6 +1,6 @@
 // The host harness: the server over a TCP port with the board's shell
-// (moy_ssh_sh.c over native/moy_sh's board table), its two tasks the run's
-// (moy_ssh_run.c) on threads, and the console's task a thread that starts
+// (native/moy_tty's face and moy_tty_sh.c over native/moy_sh's board table),
+// the server's task the run's (moy_ssh_run.c) and the face task on threads, and the console's task a thread that starts
 // the run and whose loop serves the hops, as a board's frame tail does. The
 // files tree is the folder MOY_SH_ROOT names. Behind the door the VM answers
 // one role, `passwd`, as runtime/system/ssh_service.py does: the hash
@@ -27,9 +27,9 @@
 #include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_ssh.h"
-#include "moy_ssh_face.h"
+#include "moy_tty.h"
 
-extern const moy_ssh_shell_t moy_ssh_moy_sh;
+extern const moy_tty_shell_t moy_tty_moy_sh;
 
 // -- the stand-in kernel: nothing in front, the VM's one role ---------------------
 
@@ -167,7 +167,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 
 // -- the pair: a board's loopback --------------------------------------------------
 
-// Linked with --wrap=moy_ssh_pair: the face's end and Dropbear's are each a
+// Linked with --wrap=moy_tty_pair: the face's end and Dropbear's are each a
 // socketpair's, and a thread per direction carries the bytes between them,
 // a chunk at a time and a little late, then the end of the stream. An end
 // closed with bytes in it unread is lwIP's reset: tcp_close answers it with
@@ -176,7 +176,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 #define LEG_CHUNK 4096
 #define LEG_LAG_US 1000
 
-int __real_moy_ssh_pair(int fds[2]);
+int __real_moy_tty_pair(int fds[2]);
 
 // Linked with --wrap=send too: the sends on a face's end are the segments a
 // board's loopback carries (TCP_NODELAY, at most LWIP_LOOPBACK_MAX_PBUFS of
@@ -241,12 +241,12 @@ static void *leg(void *arg) {
     return NULL;
 }
 
-int __wrap_moy_ssh_pair(int fds[2]) {
+int __wrap_moy_tty_pair(int fds[2]) {
     int db[2], face[2];
-    if (__real_moy_ssh_pair(db) != 0) {
+    if (__real_moy_tty_pair(db) != 0) {
         return -1;
     }
-    if (__real_moy_ssh_pair(face) != 0) {
+    if (__real_moy_tty_pair(face) != 0) {
         close(db[0]);
         close(db[1]);
         return -1;
@@ -280,7 +280,7 @@ static void *console(void *arg) {
     printf("listening on %d\n", s_port);
     fflush(stdout);
     for (;;) {
-        moy_ssh_tail();
+        moy_tty_tail();
         usleep(16000);
     }
     return NULL;
@@ -298,7 +298,7 @@ int main(int argc, char **argv) {
     if (moy_ssh_setup(s_system) != 0) {
         return 1;
     }
-    moy_ssh_face_set_shell(&moy_ssh_moy_sh);
+    moy_tty_set_shell(&moy_tty_moy_sh);
     pthread_t t;
     pthread_create(&t, NULL, console, NULL);
     uint32_t ended = UINT32_MAX;

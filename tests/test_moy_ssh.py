@@ -1,5 +1,5 @@
-"""The SSH server (native/moy_ssh) on the host: the board's server, face and
-shell (moy_ssh_sh.c over native/moy_sh's board table, the VM stopped) built
+"""The SSH server (native/moy_ssh) on the host: the board's server, its face
+and shell (native/moy_tty over native/moy_sh's board table, the VM stopped) built
 with the host's compiler (host/ssh_main.c), and a real OpenSSH client and
 ssh-copy-id against it.
 
@@ -30,6 +30,8 @@ import test_moy_sh as SH
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOD = os.path.join(ROOT, "native", "moy_ssh")
 DB = os.path.join(MOD, "dropbear")
+TTY = os.path.join(ROOT, "native", "moy_tty")
+TTY_SOURCES = ("moy_tty.c", "moy_tty_sys.c", "moy_tty_sh.c", "moy_tty_ws.c")
 PASSWORD = "moybyte-test"
 SALT = "00112233445566778899aabbccddeeff"
 FILES = "sd/moybyte/files"
@@ -47,8 +49,8 @@ def _build(out):
     srcs = [os.path.join(d, f) for top in ("src", "libtommath", "libtomcrypt")
             for d, _dirs, files in os.walk(os.path.join(DB, top))
             for f in files if f.endswith(".c")]
-    srcs += [os.path.join(MOD, f) for f in ("moy_ssh.c", "moy_ssh_face.c", "moy_ssh_run.c",
-                                             "moy_ssh_sh.c", "host/ssh_main.c")]
+    srcs += [os.path.join(MOD, f) for f in ("moy_ssh.c", "moy_ssh_run.c", "host/ssh_main.c")]
+    srcs += [os.path.join(TTY, f) for f in TTY_SOURCES]
     native = os.path.join(ROOT, "native")
     flags = ["-Os", "-ffunction-sections", "-fdata-sections", "-w", "-g",
              "-include", os.path.join(MOD, "port", "moy_ssh_names.h"),
@@ -56,6 +58,7 @@ def _build(out):
              "-I" + os.path.join(DB, "src"),
              "-I" + os.path.join(DB, "libtomcrypt", "src", "headers"),
              "-I" + os.path.join(DB, "libtommath"),
+             "-I" + TTY,
              "-I" + os.path.join(native, "moy_sh"), "-I" + os.path.join(native, "moy_store"),
              "-I" + os.path.join(native, "moy_kernel"),
              "-DDROPBEAR_SERVER", "-DLOCALOPTIONS_H_EXISTS", "-DLTC_SOURCE",
@@ -70,7 +73,7 @@ def _build(out):
         objs.append(obj)
     assert all(p.wait() == 0 for p in procs)
     exe = str(out / "ssh_main")
-    subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-Wl,--wrap=moy_ssh_pair",
+    subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-Wl,--wrap=moy_tty_pair",
                                        "-Wl,--wrap=send",
                                        "-o", exe] + objs + shell
                    + ["-lpthread"], check=True)
@@ -360,6 +363,28 @@ def test_a_terminal_session_is_the_face_s_line_discipline(harness):
     assert b"echo hi\r\nhi\r\n" in out, out
     assert b"ech\b \bho abd\r\nabd\r\n" in out, out
     assert b"^C\r\n" in out, out
+
+
+def test_tab_completes_a_command_and_a_path_and_lists_what_it_cannot_choose(harness):
+    """Tab is the Terminal's completion (moy_sh_cands): a command's name, a
+    path's from its folder, and with nothing more to share the names listed
+    under the line, the prompt and the line drawn again."""
+    tree = harness["out"] / "tree" / FILES
+    (tree / "tabby.txt").write_text("purr\n")
+    (tree / "tabs").mkdir(exist_ok=True)
+    (tree / "tabs" / "one.txt").write_text("1\n")
+    (tree / "tabs" / "two.txt").write_text("2\n")
+    try:
+        out = terminal(harness, ((b"neofe\t\r", 0.6), (b"cat tabb\t\r", 0.4),
+                                 (b"ls tabs/\t", 0.4), (b"\x03", 0.3), (b"exit\r", 0.3)))
+        assert b"neofetch \r\n" in out, out
+        assert b"cat tabby.txt \r\npurr\r\n" in out, out
+        assert b"one.txt  two.txt\r\n" in out, out
+    finally:
+        (tree / "tabby.txt").unlink()
+        for n in ("one.txt", "two.txt"):
+            (tree / "tabs" / n).unlink()
+        (tree / "tabs").rmdir()
 
 
 def test_a_command_s_output_leaves_the_face_in_few_segments_run_after_run(harness):

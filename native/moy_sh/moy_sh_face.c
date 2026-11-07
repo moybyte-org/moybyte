@@ -26,13 +26,11 @@ static uint32_t now_ms(void) {
 #define ECHO "\x1b[2m"
 #define TYPED "\x1b[0;36m"
 #define PLAIN "\x1b[0m"
-#define SEPS " ;|&()<>"
 #define MIN_COLS 8
 #define RUN_MORE 1
 #define RUN_EXIT 2
 #define INTERRUPTED 130
 #define NAMES_BYTES 8192u               // a completion's names, all of them
-#define NAMES_MAX 512
 #define LOG_ROWS_MAX 96                 // a text view's rows at most (MOY_UI_TEXT_ROWS)
 #define PROMPT_ROW (MOY_SH_FACE_LINE * 2 + 32)
 
@@ -106,19 +104,20 @@ static int utf8_len(const char *p, size_t n) {
 // -- the session -------------------------------------------------------------------
 
 moy_sh_face_t *moy_sh_face_new(const char *root) {
-    moy_sh_host_t h;
-    moy_sh_board_host(&h, NULL, NULL, NULL);
-    moy_sh_face_t *f = h.alloc(NULL, sizeof *f);
+    void *(*alloc)(void *ctx, size_t n);
+    void (*free_)(void *ctx, void *p);
+    moy_sh_screen_heap(&alloc, &free_);
+    moy_sh_face_t *f = alloc(NULL, sizeof *f);
     if (f == NULL) {
         return NULL;
     }
     memset(f, 0, sizeof *f);
-    f->alloc = h.alloc;
-    f->free = h.free;
+    f->alloc = alloc;
+    f->free = free_;
     if (root != NULL) {
         size_t n = strlen(root);
         if (n >= sizeof f->root) {
-            h.free(NULL, f);
+            free_(NULL, f);
             return NULL;
         }
         memcpy(f->root, root, n + 1);
@@ -169,10 +168,6 @@ void moy_sh_face_open(moy_sh_face_t *f) {
     moy_sh_face_screen(f);
 }
 
-static moy_sh_t *session(moy_sh_face_t *f) {
-    return f->scr != NULL ? moy_sh_screen_session(f->scr) : NULL;
-}
-
 static moy_sh_app_t *app_of(const moy_sh_face_t *f) {
     return f->scr != NULL ? moy_sh_screen_app(f->scr) : NULL;
 }
@@ -211,8 +206,7 @@ static int busy(const moy_sh_face_t *f) {
 }
 
 static size_t prompt_of(moy_sh_face_t *f, char *out, size_t cap) {
-    moy_sh_t *s = session(f);
-    if (s == NULL || busy(f)) {
+    if (f->scr == NULL || busy(f)) {
         out[0] = '\0';
         return 0;
     }
@@ -221,7 +215,7 @@ static size_t prompt_of(moy_sh_face_t *f, char *out, size_t cap) {
         int n = snprintf(out, cap, "%s", moy_sh_app_prompt(a));
         return n < 0 ? 0 : (size_t)n < cap ? (size_t)n : cap - 1;
     }
-    size_t n = moy_sh_prompt(s, f->more, out, cap);
+    size_t n = moy_sh_screen_prompt(f->scr, f->more, out, cap);
     return n < cap ? n : cap - 1;
 }
 
@@ -331,14 +325,14 @@ static void ran(moy_sh_face_t *f, int r) {
     fresh_line(f);
     f->more = r == RUN_MORE;
     if (r == RUN_EXIT) {
-        int code = moy_sh_status(session(f));
+        int code = moy_sh_screen_status(f->scr);
         moy_sh_face_close_session(f);
         if (moy_sh_face_screen(f) != NULL) {
             char msg[48];
             snprintf(msg, sizeof msg, "%s[the shell exited %d]%s\n", ECHO, code, PLAIN);
             write_s(f, msg);
         }
-    } else if (moy_sh_status(session(f)) == INTERRUPTED) {
+    } else if (moy_sh_screen_status(f->scr) == INTERRUPTED) {
         f->swallow = 1;
     }
     f->stale = 1;
@@ -405,7 +399,7 @@ static void interrupt(moy_sh_face_t *f) {
         return;
     }
     echo(f, "^C\n");
-    moy_sh_cancel(session(f));
+    moy_sh_screen_cancel(f->scr);
     set_line(f, "", 0);
     moy_sh_app_t *a = line_app(f);
     if (a != NULL && moy_sh_app_keys(a, "\x03", 1) == MOY_SH_APP_END) {
@@ -431,103 +425,23 @@ void moy_sh_face_recall(moy_sh_face_t *f, int d) {
 
 // -- completion ---------------------------------------------------------------------
 
-typedef struct {
-    char *buf;
-    size_t used;
-    const char *names[NAMES_MAX];
-    int n;
-    const char *prefix;                 // a folder's names must start with it
-    const char *stem;                   // prepended to a folder's names
-} names_t;
-
-static int add_name(void *arg, const char *name, int is_dir, uint32_t size) {
-    (void)size;
-    names_t *a = arg;
-    size_t pn = a->prefix ? strlen(a->prefix) : 0;
-    if (a->prefix && strncmp(name, a->prefix, pn) != 0) {
-        return 0;
-    }
-    size_t sn = a->stem ? strlen(a->stem) : 0, nn = strlen(name);
-    size_t need = sn + nn + (is_dir ? 1 : 0) + 1;
-    if (a->n >= NAMES_MAX || a->used + need > NAMES_BYTES) {
-        return 0;
-    }
-    char *p = a->buf + a->used;
-    memcpy(p, a->stem ? a->stem : "", sn);
-    memcpy(p + sn, name, nn);
-    if (is_dir) {
-        p[sn + nn] = '/';
-    }
-    p[need - 1] = '\0';
-    a->names[a->n++] = p;
-    a->used += need;
-    return 0;
-}
-
-static int by_name(const void *x, const void *y) {
-    return strcmp(*(const char *const *)x, *(const char *const *)y);
-}
-
-static int is_sep(char c) {
-    return c != '\0' && strchr(SEPS, c) != NULL;
-}
-
 void moy_sh_face_complete(moy_sh_face_t *f) {
     if (moy_sh_face_screen(f) == NULL || busy(f)) {
         return;
     }
-    int32_t col = f->col, start = col;
-    while (start > 0 && !is_sep(f->line[start - 1])) {
-        start--;
-    }
-    char word[MOY_SH_FACE_LINE];
-    size_t wn = (size_t)(col - start);
-    memcpy(word, f->line + start, wn);
-    word[wn] = '\0';
-    int32_t b = start;
-    while (b > 0 && f->line[b - 1] == ' ') {
-        b--;
-    }
-    names_t *a = f->alloc(NULL, sizeof *a);
+    moy_sh_cands_t *a = f->alloc(NULL, sizeof *a);
     if (a == NULL) {
         return;
     }
     memset(a, 0, sizeof *a);
     a->buf = f->alloc(NULL, NAMES_BYTES);
+    a->cap = NAMES_BYTES;
     if (a->buf == NULL) {
         f->free(NULL, a);
         return;
     }
-    char stem[MOY_SH_FACE_LINE] = "";
-    if (strchr(word, '/') == NULL && (b == 0 || is_sep(f->line[b - 1]))) {
-        moy_sh_complete(session(f), word, add_name, a);
-        qsort(a->names, (size_t)a->n, sizeof a->names[0], by_name);
-        int k = 0;
-        for (int i = 0; i < a->n; i++) {
-            if (k == 0 || strcmp(a->names[k - 1], a->names[i]) != 0) {
-                a->names[k++] = a->names[i];
-            }
-        }
-        a->n = k;
-    } else {
-        // an argument with no slash names the working folder
-        const char *slash = strrchr(word, '/');
-        size_t sl = slash != NULL ? (size_t)(slash - word) + 1 : 0;
-        memcpy(stem, word, sl);
-        stem[sl] = '\0';
-        char folder[MOY_SH_FACE_LINE] = ".";
-        if (sl > 0) {
-            memcpy(folder, stem, sl + 1);
-        }
-        while (sl > 1 && folder[sl - 1] == '/') {
-            folder[--sl] = '\0';
-        }
-        a->prefix = word + strlen(stem);
-        a->stem = stem;
-        moy_sh_list(session(f), folder, add_name, a);
-        qsort(a->names, (size_t)a->n, sizeof a->names[0], by_name);
-    }
-    size_t stem_n = strlen(stem);
+    moy_sh_screen_cands(f->scr, f->line, (size_t)f->col, a);
+    size_t wn = a->word_n, stem_n = a->stem_n;
     if (a->n == 1) {
         const char *nm = a->names[0];
         size_t nn = strlen(nm);
@@ -536,14 +450,7 @@ void moy_sh_face_complete(moy_sh_face_t *f) {
             insert_s(f, " ", 1);
         }
     } else if (a->n > 1) {
-        size_t common = strlen(a->names[0]);
-        for (int i = 1; i < a->n; i++) {
-            size_t k = 0;
-            while (k < common && a->names[i][k] == a->names[0][k]) {
-                k++;
-            }
-            common = k;
-        }
+        size_t common = moy_sh_cands_common(a);
         if (common > wn) {
             insert_s(f, a->names[0] + wn, common - wn);
         } else {

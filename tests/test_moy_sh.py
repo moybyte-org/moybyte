@@ -63,6 +63,7 @@ def _objects(cc, out):
     jobs = [(src, dash_flags) for src in shell_sources()]
     jobs.append((os.path.join(SH, "moy_sh_arena.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
+    jobs.append((os.path.join(SH, "moy_sh_cands.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
     board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     for name in BOARD_SOURCES:
@@ -263,7 +264,7 @@ def test_the_shell_keeps_no_writable_data_but_its_state_pointer(tmp_path):
     plain = ["-std=gnu99", "-Os", "-fno-pic", "-fno-pie", "-fno-common",
              "-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     writable = []
-    for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c")
+    for src in shell_sources() + [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_cands.c")
                                   + BOARD_SOURCES + FACE_SOURCES]:
         obj = str(tmp_path / (os.path.basename(src)[:-2] + ".o"))
         own = flags if src in shell_sources() else plain + UI_INCLUDES
@@ -317,7 +318,7 @@ def test_every_source_keeps_the_const_a_c23_library_preserves(tmp_path):
                    "-I", STORE]
     plain = base + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     jobs = [(src, dash) for src in shell_sources()]
-    jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c",
+    jobs += [(os.path.join(SH, n), plain) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_cands.c",
                                                      "host/sh_main.c", "host/board_main.c")
              + BOARD_SOURCES]
     jobs += [(os.path.join(SH, n), plain + UI_INCLUDES) for n in FACE_SOURCES]

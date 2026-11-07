@@ -7,6 +7,11 @@
 //   POST /sync of the system root              pin (the body's): parked for the VM when it
 //                                              answers /console.json, else 400
 //   GET, POST /gpio                            pin: the board's pins, where it has a table (moy_gpio.c)
+//   GET  /term (Upgrade: websocket)            pin (?pin=): the board's shell, the socket handed
+//                                              to the web terminal's bridge (native/moy_tty);
+//                                              without the upgrade, {"term":1}: the pin is good
+//                                              and a shell is here (the page asks it why a
+//                                              socket failed, which a WebSocket never says)
 //   anything in the configured `defer`         parked for the VM (/run, /update, /console.json;
 //                                              "*": every path)
 //
@@ -54,6 +59,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "moy_fs.h"
@@ -73,6 +79,9 @@ extern const char moy_web_stamp[] __attribute__((weak));
 #define HAVE_BUNDLE 0
 #endif
 extern bool moy_flush_drain(void) __attribute__((weak));
+// The web terminal's bridge (native/moy_tty/moy_tty_ws.c), where the image
+// takes it: 0 when it took the upgraded socket, else nonzero (busy, memory).
+extern int moy_web_term(int fd, int cols, int rows) __attribute__((weak));
 
 #define CHUNK_MIN 8192
 #define CHUNK_HEAD 8
@@ -1156,6 +1165,152 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     return 1;
 }
 
+// -- the web terminal's WebSocket (native/moy_tty/moy_tty_ws.c) ------------------------
+
+typedef struct {
+    uint32_t h[5];
+    uint8_t b[64];
+} sha1_t;
+
+static uint32_t rol(uint32_t v, int k) {
+    return (v << k) | (v >> (32 - k));
+}
+
+static void sha1_block(sha1_t *c) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++) {
+        w[i] = (uint32_t)c->b[4 * i] << 24 | (uint32_t)c->b[4 * i + 1] << 16
+               | (uint32_t)c->b[4 * i + 2] << 8 | c->b[4 * i + 3];
+    }
+    for (int i = 16; i < 80; i++) {
+        w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    }
+    uint32_t a = c->h[0], b = c->h[1], cc = c->h[2], d = c->h[3], e = c->h[4];
+    for (int i = 0; i < 80; i++) {
+        uint32_t f, k;
+        if (i < 20) {
+            f = (b & cc) | (~b & d), k = 0x5A827999u;
+        } else if (i < 40) {
+            f = b ^ cc ^ d, k = 0x6ED9EBA1u;
+        } else if (i < 60) {
+            f = (b & cc) | (b & d) | (cc & d), k = 0x8F1BBCDCu;
+        } else {
+            f = b ^ cc ^ d, k = 0xCA62C1D6u;
+        }
+        uint32_t t = rol(a, 5) + f + e + k + w[i];
+        e = d, d = cc, cc = rol(b, 30), b = a, a = t;
+    }
+    c->h[0] += a, c->h[1] += b, c->h[2] += cc, c->h[3] += d, c->h[4] += e;
+}
+
+static void sha1(const char *p, size_t n, uint8_t out[20]) {
+    sha1_t c = {{0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u}, {0}};
+    size_t k = 0;
+    for (size_t i = 0; i < n; i++) {
+        c.b[k++] = (uint8_t)p[i];
+        if (k == 64) {
+            sha1_block(&c);
+            k = 0;
+        }
+    }
+    uint64_t bits = (uint64_t)n * 8u;
+    c.b[k++] = 0x80;
+    if (k > 56) {
+        memset(c.b + k, 0, 64 - k);
+        sha1_block(&c);
+        k = 0;
+    }
+    memset(c.b + k, 0, 56 - k);
+    for (int i = 0; i < 8; i++) {
+        c.b[56 + i] = (uint8_t)(bits >> (56 - 8 * i));
+    }
+    sha1_block(&c);
+    for (int i = 0; i < 20; i++) {
+        out[i] = (uint8_t)(c.h[i / 4] >> (24 - 8 * (i % 4)));
+    }
+}
+
+// A header's value in the head [p, p+n), its name matched without case.
+static const char *header(const char *p, size_t n, const char *name, size_t *vn) {
+    size_t ln = strlen(name);
+    for (size_t i = 0; i + ln + 1 < n; i++) {
+        if ((i == 0 || p[i - 1] == '\n') && strncasecmp(p + i, name, ln) == 0
+            && p[i + ln] == ':') {
+            const char *v = p + i + ln + 1;
+            while (v < p + n && *v == ' ') {
+                v++;
+            }
+            const char *e = v;
+            while (e < p + n && *e != '\r' && *e != '\n') {
+                e++;
+            }
+            *vn = (size_t)(e - v);
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static int query_int(const char *t, size_t tn, const char *name, int dflt) {
+    const char *v;
+    size_t vn;
+    moy_http_query(t, tn, name, strlen(name), &v, &vn);
+    int x = 0;
+    for (size_t i = 0; i < vn && v[i] >= '0' && v[i] <= '9' && x < 1000; i++) {
+        x = x * 10 + (v[i] - '0');
+    }
+    return vn && x > 0 && x < 1000 ? x : dflt;
+}
+
+// GET /term. 1 when the socket was handed to the bridge (the caller neither
+// answers nor closes it), 0 when the request was answered here.
+static int term(out_t *o, const moy_http_req_t *r) {
+    if (moy_web_term == NULL) {
+        simple(o, 404, "text/plain; charset=utf-8", "not found");
+        return 0;
+    }
+    if (!pin_pass(o, pin_ok_query(r->target, r->target_n))) {
+        return 0;
+    }
+    size_t kn, pn = 0;
+    const char *key = header(W->req, r->head_end, "Sec-WebSocket-Key", &kn);
+    if (key == NULL) {
+        json(o, 200, "{\"term\":1}");
+        return 0;
+    }
+    if (kn == 0 || kn > 64) {
+        json(o, 400, "{\"error\":\"key\"}");
+        return 0;
+    }
+    char cat[64 + 36];
+    memcpy(cat, key, kn);
+    memcpy(cat + kn, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
+    uint8_t dg[20];
+    sha1(cat, kn + 36, dg);
+    char acc[32];
+    size_t an = b64(dg, 20, acc);
+    const char *proto = header(W->req, r->head_end, "Sec-WebSocket-Protocol", &pn);
+    int sh = proto != NULL && pn >= 6 && strstr(proto, "moy.sh") != NULL
+             && (size_t)(strstr(proto, "moy.sh") - proto) + 6 <= pn;
+    char head[200];
+    int hn = snprintf(head, sizeof(head),
+                      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Accept: %.*s\r\n%s\r\n",
+                      (int)an, acc, sh ? "Sec-WebSocket-Protocol: moy.sh\r\n" : "");
+    if (moy_http_send(o->fd, head, (size_t)hn) < 0) {
+        return 0;
+    }
+    int cols = query_int(r->target, r->target_n, "cols", 80);
+    int rows = query_int(r->target, r->target_n, "rows", 24);
+    if (moy_web_term(o->fd, cols, rows) == 0) {
+        return 1;
+    }
+    // the bridge serves another page: a close it can read
+    static const char busy[] = "\x88\x06\x03\xf5" "busy";
+    moy_http_send(o->fd, busy, sizeof(busy) - 1);
+    return 0;
+}
+
 // -- the poll -------------------------------------------------------------------------
 
 static void serve(int fd) {
@@ -1171,6 +1326,17 @@ static void serve(int fd) {
         bn = r.clen;
     }
     out_t o = {.fd = fd};
+    const char *q = memchr(r.target, '?', r.target_n);
+    size_t pn = q ? (size_t)(q - r.target) : r.target_n;
+    if (!W->closing && path_is(r.method, r.method_n, "GET") && path_is(r.target, pn, "/term")) {
+        W->cur = fd;
+        int kept = term(&o, &r);
+        W->cur = -1;
+        if (!kept) {
+            moy_http_close(fd);
+        }
+        return;
+    }
     W->cur = fd;
     if (route(&o, r.method, r.method_n, r.target, r.target_n,
               W->req + r.head_end, bn)) {
