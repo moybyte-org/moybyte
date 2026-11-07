@@ -44,7 +44,7 @@ the same shape on flash without one):
 | `system/` | the console's documents as plain-text files (`system.md` §5) | the shell |
 
 **The shared folders carry their real names on disk (owner, 2026-11-03)**,
-so USB, SFTP and WebDAV show what the OS shows. The rename ships as a
+so USB and SFTP show what the OS shows. The rename ships as a
 strict reader plus a seed bump: no migration, a legacy `files/<kind>/`
 folder reading as absent until wiped by hand (dev boards hold nothing of
 value). **Types are MIME types** (owner, 2026-11-03) wherever an
@@ -61,7 +61,7 @@ tree's browser and the first test of the picker and of "open with".
 **Sync, the web and USB see the same tree**: the sync RPC's three roots are
 three of the top folders and `apps/` becomes a fourth, with the same strict
 reader rule; a board-served page edits the board's tree, a site page its
-OPFS copy; SFTP and WebDAV mount it from a computer (`system.md` §4).
+OPFS copy; SFTP mounts it from a computer (`system.md` §4).
 **USB mass storage** (owner,
 2026-11-03) exposes the card's `moybyte/` folder while the store is held
 closed, never both at once: on the P4s, and on the T-Deck as a mode in

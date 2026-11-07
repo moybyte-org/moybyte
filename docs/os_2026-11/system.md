@@ -304,17 +304,17 @@ apps are **the app model for the headless Zero**
 run a command. The Zero runs the C built-ins until WASI commands arrive
 (the WASI spike, or P5.5); installable commands reach it with WASI.
 
-## 4. SFTP and WebDAV
+## 4. SFTP
 
-**SFTP** over SSH (§3) and **WebDAV** beside the sync RPC
-(owner, 2026-11-03) let a computer mount the files tree
-(`between_apps.md` §2) natively, the RPC staying
-for the browser. WebDAV runs over HTTPS with the device's own certificate
-(mbedTLS server mode, made at setup, its fingerprint shown on screen) and
-SSH's sign-in (§3) as the credential, since HTTP basic over plain HTTP
-sends the secret in the clear and `native/moy_net` has only a TLS client;
-if the SSH spike says the S3s cannot carry a second TLS server, they mount
-over SFTP only (owner, 2026-11-03).
+**SFTP** over SSH (§3) lets a computer mount the files tree
+(`between_apps.md` §2), the sync RPC staying for the browser. **WebDAV is
+dropped (owner, 2026-11-07)**: over plain HTTP its sign-in crosses the network
+readable, an HTTPS server needs a certificate no authority issues for a
+`.local` name, Finder and Explorer cannot use the browser console's device
+keys, and the Guition P4's image has no room for it; Linux file managers open
+`sftp://` natively, and Cyberduck and WinSCP do on macOS and Windows. A
+WebDAV server stays possible as a user's C (ELF) service (`tiers.md` §1),
+which has every table row.
 
 **SFTP (P4.4, 2026-11-07)** is the SSH server's `sftp` subsystem, so
 `sftp moybyte-XXXX.local` and `scp file moybyte-XXXX.local:` (scp's protocol
