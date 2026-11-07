@@ -99,6 +99,15 @@ def _typed(text):
     return [{"key": c} for c in text]
 
 
+def _sides(host, tmp_path, out):
+    """Each side's own account, for a failure to say which one stuck: the
+    shell's host (its STATS: sessions, live, bytes each way), the twin's log
+    and the page's run."""
+    return "\n".join(["", "-- the shell's host:", host.log()[-1500:],
+                      "-- the twin:", (tmp_path / "twin.log").read_text()[-1500:],
+                      "-- the page:", out[-2500:]])
+
+
 def _play(tmp_path, name, base, steps, pin=PIN):
     q = "?dev=1&desktop=1&cart=Terminal" + ("&pin=" + pin if pin else "")
     return web_e2e.run(tmp_path, name, q, steps, base, tmp_path / ("chrome_" + name),
@@ -117,14 +126,14 @@ def test_board_served_terminal_is_the_board_s_shell(tty_exe, tmp_path):
                  + [{"shot": "term_board"}]
                  + _typed("exit 4") + [{"key": "Enter"}, _says("[the shell exited 4]"),
                                        _lines("EXIT")])
-        _out, js = _play(tmp_path, "term_board", base, steps)
+        out, js = _play(tmp_path, "term_board", base, steps)
         opened = _tagged(js, "OPEN")
         assert any(ln.rstrip().endswith("$") for ln in opened), opened
         echo = "\n".join(_tagged(js, "ECHO"))
-        assert "web-42" in echo, echo
+        assert "web-42" in echo, echo + _sides(host, tmp_path, out)
         ended = "\n".join(_tagged(js, "EXIT"))
-        assert "[the shell exited 4]" in ended, ended
-        assert host.stats()["sessions"] == "1"
+        assert "[the shell exited 4]" in ended, ended + _sides(host, tmp_path, out)
+        assert host.stats()["sessions"] == "1", _sides(host, tmp_path, out)
     finally:
         server.terminate()
         host.end()
