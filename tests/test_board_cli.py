@@ -635,6 +635,82 @@ def test_pmem_with_no_cart_says_so(clock):
     assert code == 1 and out.startswith("no pmem")
 
 
+# -- the C6 radio's firmware ----------------------------------------------------
+
+
+class C6Radio:
+    """`ws.c6_updater` over a stream that fails a read past its end, as the
+    boards' lwIP does after a plain-HTTP close."""
+
+    def __init__(self, activates=True, verifies=True):
+        self.updater = types.SimpleNamespace(error=None, begin_download=self._begin)
+        self.error = None
+        self.dl_done = 0
+        self.size = None
+        self.sink = None
+        self.activates, self.verifies = activates, verifies
+
+    def _begin(self, m, sink):
+        self.size, self.sink = m["size"], sink
+
+    def download_step(self):
+        if self.dl_done >= self.size:
+            self.updater.error = "read failed (errno 128)"
+            return False
+        self.dl_done = min(self.size, self.dl_done + 16384)
+        return self.dl_done < self.size
+
+    def download_finish(self):
+        if not self.verifies:
+            self.error = "sha256 mismatch"
+            return None
+        return "<c6>"
+
+    def activate(self):
+        if self.activates:
+            return True
+        self.error = board.C6_NO_ACTIVATE
+        return False
+
+
+def c6_console(clock, monkeypatch, radio):
+    ws, wire, b = console(clock, board_dir=P4)
+    ws.c6_updater = radio
+    held = []
+    ws.wifi = types.SimpleNamespace(status=lambda: (True, "net", "10.0.0.2"))
+    ws.wifi_hold = held.append
+    ws.wifi_release = held.remove
+    monkeypatch.setitem(sys.modules, "device_wifi", types.SimpleNamespace(
+        autoconnect_wifi=lambda w: True))
+    monkeypatch.setitem(sys.modules, "moy_ota", types.SimpleNamespace(SINK_C6=2))
+    return b, held
+
+
+def test_a_c6_image_streams_to_its_size_and_no_further(clock, monkeypatch):
+    radio = C6Radio()
+    b, held = c6_console(clock, monkeypatch, radio)
+    code, out = run(board.c6_stream, b, "http://h/c6.bin", 100000, "ab" * 32)
+    assert code == "activated"
+    assert (radio.dl_done, radio.sink, radio.updater.error) == (100000, 2, None)
+    assert held == [], "the radio lease outlived the stream"
+
+
+def test_a_slave_without_activate_has_swapped_by_itself(clock, monkeypatch):
+    b, held = c6_console(clock, monkeypatch, C6Radio(activates=False))
+    code, _ = run(board.c6_stream, b, "http://h/c6.bin", 5000, "ab" * 32)
+    assert code == "swapped"
+
+
+def test_an_image_that_does_not_verify_is_never_handed_over(clock, monkeypatch):
+    radio = C6Radio(verifies=False)
+    radio.activate = lambda: pytest.fail("activated an unverified image")
+    b, held = c6_console(clock, monkeypatch, radio)
+    with pytest.raises(board.BoardError) as exc:
+        board.c6_stream(b, "http://h/c6.bin", 5000, "ab" * 32)
+    assert "sha256 mismatch" in str(exc.value)
+    assert held == []
+
+
 # -- the shot -----------------------------------------------------------------
 
 

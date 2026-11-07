@@ -8,6 +8,7 @@
 #   -- the picture on the glass       grab, cmd_shot
 #   -- the ports                      cmd_ports
 #   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
+#   -- the C6 radio's firmware        c6_image, c6_stream, cmd_c6
 #   -- the command line               parser, main (`pass` goes to tools/board_pass.py)
 """Drive an attached board by name: the on-glass loop, one command per step.
 
@@ -31,6 +32,8 @@
     tools/board.py tdeck flash [--build]        cable-flash its image, wait for the desk
     tools/board.py tdeck reboot [--soft]        reset it the way it allows, wait for the desk
     tools/board.py tdeck wait                   until the desk answers
+    tools/board.py guition_p4 c6 URL            flash the C6 radio's slave image
+                                                over ESP-Hosted, reboot onto it
     tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, one table
                                                 (tools/board_pass.py; --all,
                                                 --skip-build, --no-flash, --shot)
@@ -924,6 +927,97 @@ def cmd_flash(name, dirs, a):
 # -- the command line ---------------------------------------------------------
 
 
+# -- the C6 radio's firmware --------------------------------------------------
+
+C6_LINK_S = 60.0
+# What `ws.c6_updater.activate()` reports from a slave older than ESP-Hosted
+# 2.6: it has no activate RPC, and its own ota_end already pointed its
+# bootloader at the image and restarts it (Guition's factory 2.3.2 does this).
+C6_NO_ACTIVATE = "c6 activate refused"
+
+
+def c6_image(url):
+    """(size, sha256) of the image at `url`, read on this machine: the board
+    checks the bytes it streams against both before the radio may boot them."""
+    import hashlib
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=60) as r:
+        data = r.read()
+    return len(data), hashlib.sha256(data).hexdigest()
+
+
+def c6_stream(b, url, size, sha):
+    """Stream the image into the C6's inactive slot over ESP-Hosted (the path
+    Settings' UPGRADE C6 RADIO takes, with no manifest) and hand it over.
+    "activated", or "swapped" from a slave with no activate RPC; BoardError
+    with the reason otherwise. The radio lease is held for the stream only."""
+    if not b.pyval("getattr(ws, 'c6_updater', None) is not None", timeout=10):
+        raise BoardError("this board has no C6 updater")
+    cu = "ws.c6_updater"
+    b.pyexec("ws.wifi_hold('update')\n"
+             "__import__('device_wifi').autoconnect_wifi(ws.wifi)", timeout=30)
+    try:
+        end = time.time() + C6_LINK_S
+        while not b.pyval("ws.wifi.status()[0]", timeout=10):
+            if time.time() > end:
+                raise BoardError("the WiFi did not join a saved network "
+                                 "in %.0f s" % C6_LINK_S)
+            time.sleep(1.0)
+        if not b.pyexec("%s.updater.begin_download({'url': %r, 'size': %d, "
+                        "'sha256': %r}, sink=__import__('moy_ota').SINK_C6)"
+                        % (cu, url, size, sha), timeout=60):
+            raise BoardError("the download did not start: %s"
+                             % b.pyval("%s.updater.error" % cu, timeout=10))
+        # Never a step past the size: an image without the dl_step bound
+        # fails the read after a plain-HTTP close.
+        step = ("(lambda c: [c.download_step() for _ in range(4) "
+                "if c.dl_done < %d])(%s)" % (size, cu))
+        while True:
+            b.pyval(step, timeout=60)
+            done = b.pyval("%s.dl_done" % cu, timeout=10)
+            err = b.pyval("%s.updater.error" % cu, timeout=10)
+            if err:
+                raise BoardError("the download failed: %s" % err)
+            print("  %d / %d" % (done, size), end="\r", flush=True)
+            if done >= size:
+                break
+        print()
+        if b.pyval("%s.download_finish()" % cu, timeout=30) is None:
+            raise BoardError("the image did not verify: %s"
+                             % b.pyval("%s.error" % cu, timeout=10))
+        if b.pyval("%s.activate()" % cu, timeout=60):
+            return "activated"
+        err = b.pyval("%s.error" % cu, timeout=10)
+        if err == C6_NO_ACTIVATE:
+            return "swapped"
+        raise BoardError("the radio did not take it: %s" % err)
+    finally:
+        b.pyexec("ws.wifi_release('update')", timeout=30)
+
+
+def cmd_c6(name, dirs, a):
+    size, sha = c6_image(a.url)
+    print("%s: %d bytes, sha256 %s" % (a.url, size, sha))
+    b = attach(name, dirs, a.port, a.force,
+               log=(lambda s: print("  | " + s)) if a.verbose else None)
+    try:
+        need_console(b, name)
+        how = c6_stream(b, a.url, size, sha)
+    finally:
+        b.close()
+    print("handed over (%s); rebooting the console onto the new radio" % how)
+    a.soft = False
+    cmd_reboot(name, dirs, a)
+    b = attach(name, dirs, a.port, a.force)
+    try:
+        ver = b.pyval("__import__('moy_c6').fwversion()", timeout=10)
+        shim = b.pyval("__import__('moy_c6').shim_version()", timeout=10)
+    finally:
+        b.close()
+    print("the C6 runs ESP-Hosted %s, ESP-NOW shim %s" % (ver, shim))
+    return 0
+
+
 ON_THE_CONSOLE = {"state": cmd_state, "py": cmd_py, "run": cmd_run,
                   "leave": cmd_leave, "desk": cmd_desk, "perf": cmd_perf,
                   "pmem": cmd_pmem, "mem": cmd_mem, "tap": cmd_tap,
@@ -1045,6 +1139,11 @@ def parser(dirs):
     p.add_argument("--timeout", type=float, default=WAIT_S)
     p = verb("wait", help="until the desk answers")
     p.add_argument("--timeout", type=float, default=WAIT_S)
+    p = verb("c6", help="flash the C6 radio's slave image from a URL over "
+                        "ESP-Hosted, then reboot (a P4)")
+    p.add_argument("url", help="the slave's APP image, served where the "
+                               "board's WiFi reaches it")
+    p.add_argument("--timeout", type=float, default=WAIT_S)
     return ap
 
 
@@ -1100,6 +1199,8 @@ def main(argv=None):
         if not is_console(dirs[a.board]):
             raise BoardError("%s has no dev channel: `ports`, `flash` and "
                              "`reboot` are what apply" % a.board)
+        if a.verb == "c6":
+            return cmd_c6(a.board, dirs, a)
         b = attach(a.board, dirs, a.port, a.force,
                    log=(lambda s: print("  | " + s)) if a.verbose else None)
         try:
