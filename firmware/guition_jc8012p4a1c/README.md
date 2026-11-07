@@ -328,13 +328,16 @@ Free pins).
 
 ## The C6's firmware
 
-The C6 is flashed from the P4 over ESP-Hosted's slave OTA:
-`tools/board.py guition_p4 c6 URL` streams the APP image at URL (served where
-the board's WiFi reaches it) through the kernel updater's C6 sink
-(`native/moy_net/moy_ota.c`), checks its size and sha256, hands it to the
-radio and reboots the console onto it. The C6's partition table is Guition's:
-two 1536 KB OTA slots (`ota_0` at 0x10000, `ota_1` at 0x190000), which the
-Waveshare's `c6_slave/` image (1.2 MB) fits.
+**The C6 runs Guition's ESP-Hosted 2.3.2 slave, and its slave OTA cannot
+take an image**, so it is reflashed only over its own UART (CN5, below). It
+runs WiFi and BLE; it has no ESP-NOW shim, so ESP-NOW fails inert.
+
+The OTA path is ESP-Hosted's slave OTA: `tools/board.py guition_p4 c6 URL`
+streams the APP image at URL (served where the board's WiFi reaches it)
+through the kernel updater's C6 sink (`native/moy_net/moy_ota.c`), checks its
+size and sha256, hands it to the radio and reboots the console onto it. The
+C6's partition table is Guition's: two 1536 KB OTA slots (`ota_0` at 0x10000,
+`ota_1` at 0x190000), which the Waveshare's `c6_slave/` image (1.2 MB) fits.
 
 What the unit has run, in order (2026-11-07):
 
@@ -349,13 +352,52 @@ What the unit has run, in order (2026-11-07):
   without the 0x183 timeouts, has no ESP-NOW shim, and **its OTA refuses every
   image**: `ota_end` fails `ESP_ERR_OTA_VALIDATE_FAILED` (`resp code [5379]`)
   for the shimmed slave and for its own image alike, with 1500- or 1024-byte
-  writes, paced or not. So the shimmed slave cannot reach this C6 over SDIO
+  writes, paced or not, and again for the shimmed slave from a dev image
+  carrying `ffa9a89c8` (the image is exactly its own length, no padding, its
+  appended sha256 checks). So the shimmed slave cannot reach this C6 over SDIO
   while 2.3.2 runs on it.
 
+**Why (ESP-Hosted's own diagnosis,
+<https://github.com/espressif/esp-hosted-mcu/issues/143> and #113 there):**
+the slave's OTA handlers are a bare `esp_ota_begin`/`esp_ota_write`/
+`esp_ota_end`, and `esp_ota_end`'s image check fails on what landed in flash,
+not on anything the host sends. ESP-Hosted slaves 2.1–2.8 build in **QIO**
+flash mode (`CONFIG_ESPTOOLPY_FLASHMODE_QIO` in their
+`slave/sdkconfig.defaults.esp32c6`, removed in 2.9); older and newer ones
+are DIO. An OTA replaces the app, never the bootloader, so this C6 keeps the
+bootloader it shipped with under 2.3.2's QIO app. Of Espressif's
+bootloader-by-app matrix only one pairing refuses every image: a DIO
+bootloader under a 2.1–2.8 app, which corrupts its own OTA writes and which
+they list as permanently OTA-broken, with no software way out. That is this
+C6: its as-shipped slave answered no firmware-version RPC, and the vendor's
+older merged image (`JC8012P4A1_C6.bin`, Dec 2024) carries a DIO bootloader. The vendor's merged
+`JC-C6-slave_v2.3.2.bin` carries a QIO bootloader ("Enabling QIO for flash
+chip" in its strings), which is why 2.3.2 takes OTAs when it is flashed
+whole over the UART and not here. The Waveshare's `c6_slave/` image is
+ESP-Hosted 2.12 (DIO), so once it is on this C6 with its own bootloader,
+OTAs work again.
+
+No C6 boot line reaches the P4: the P4 drives `C6_CHIP_PU` (GPIO54) and
+reads `C6_IO2` (GPIO6), but `C6_IO9` (the boot strap, pulled up by R88) and
+the C6's UART0 go only to **CN5**, so neither the C6's ROM UART loader nor
+its SDIO download mode can be entered from the P4.
+
 The way onto any C6 image that does not take an OTA is the C6's own UART:
-header **CN5** (`5-Schematic/5_ESP32-C6.png` in the vendor repo): 1 3V3,
-2 GND, 3 U0TXD, 4 U0RXD, 5 IO9 (the boot strap, low at reset for the ROM
-loader), 6 CHIP_PU. A merged image written at 0x0 there
+header **CN5**, a 6-pin header beside the C6 module U7 (ESP32-C6-MINI-1U)
+(`5-Schematic/5_ESP32-C6.png` in the vendor repo): 1 3V3, 2 GND, 3 U0TXD,
+4 U0RXD, 5 IO9 (the boot strap, low at reset for the ROM loader), 6
+CHIP_PU. A 3.3 V USB-UART adapter takes GND to pin 2, its RX to pin 3 and
+its TX to pin 4, with 3V3 left off (the board's USB powers it). First park
+the P4 in its own loader so it lets go of GPIO54 (`esptool --chip esp32p4 -p
+<P4 port> --after no_reset chip_id`; R59 then holds CHIP_PU high), then pin 5
+to GND and pin 6 briefly to GND start the C6's ROM loader. Back the C6 up first
+(`esptool --chip esp32c6 -p <adapter> read_flash 0 0x400000 c6_backup.bin`),
+then write the Waveshare's `c6_slave/` build whole, from its build
+directory: `esptool --chip esp32c6 -p <adapter> -b 460800 write_flash
+--flash_mode dio --flash_size 4MB 0x0 bootloader/bootloader.bin 0x8000
+partition_table/partition-table.bin 0xd000 ota_data_initial.bin 0x10000
+network_adapter.bin`. Free pin 5, reboot the console, and
+`moy_c6.shim_version()` answers. A merged image written at 0x0 there
 (`esptool --chip esp32c6 write_flash 0x0 <merged.bin>`) also rewrites
 `otadata` blank, so the C6 boots `ota_0`. The vendor's two merged C6 images
 (`JC-C6-slave_v2.3.2.bin` and `JC8012P4A1_C6.bin`, ESP-Hosted's
@@ -371,7 +413,8 @@ out of this repo: they are in the vendor repo above under
    (`runtime/run/players.py`'s `EspNowLink`) fails into an inactive link by
    design, and the publisher does not stage a `c6` block in this board's
    manifest.
-4. Flashing the shimmed slave over CN5 needs a 3.3 V USB-UART adapter and a
-   hand on the header.
+4. Flashing the shimmed slave over CN5 (the C6 section's command) needs a
+   3.3 V USB-UART adapter and a hand on the header: the C6's OTA cannot take
+   it while 2.3.2 runs.
 5. BLE keyboard (unverified: nothing paired), audio by ear (no speaker on
    our unit), backlight PWM dimming on glass.
