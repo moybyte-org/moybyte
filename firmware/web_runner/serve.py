@@ -395,6 +395,11 @@ else:
                 out["message"] = msg
                 self._send(200 if ok else 409, json.dumps(out).encode())
                 return
+            if path == "/auth":
+                # An open host says so, as a board with no system folder
+                # does: a page that holds no key believes it, and only then.
+                self._send(200, b'{"v":1,"open":true}')
+                return
             if path != "/sync":
                 self._send(404, b'{"error":"not found"}')
                 return
@@ -451,6 +456,10 @@ if board_to is not None:
         def _asset(self):
             path = self.path.split("?", 1)[0].split("#", 1)[0]
             local = self.translate_path(path)
+            # The store is the board's, sealed: the bundle's seed carts.json
+            # never stands in for it.
+            if path in ("/carts.json", "/files.json"):
+                return False
             return path == "/" or os.path.isfile(local)
 
         def do_GET(self):
