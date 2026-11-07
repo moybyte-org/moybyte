@@ -13,7 +13,7 @@
 // tests/test_store_on_vfs.py drives it.
 //
 // The cache is the T-Deck's (dev 638661e), in C under every board's card:
-// moy_cache.h.
+// moy_cache.h, with its zero runs over the mounted volume's clusters.
 
 #include <string.h>
 
@@ -133,9 +133,12 @@ int moy_store_card_mount(uint32_t sectors) {
     if (card.vfs == NULL) {
         card.vfs = moy_store_raw_alloc(sizeof(fs_user_mount_t));
         card.cache.slots = moy_store_raw_alloc((size_t)SLOTS * SECTOR);
-        if (card.vfs == NULL || card.cache.slots == NULL) {
+        uint8_t *zeros = moy_store_raw_alloc((size_t)MOY_CACHE_RUN * SECTOR);
+        if (card.vfs == NULL || card.cache.slots == NULL || zeros == NULL) {
             return MP_ENOMEM;
         }
+        memset(zeros, 0, (size_t)MOY_CACHE_RUN * SECTOR);
+        card.cache.zeros = zeros;
     }
     fs_user_mount_t *v = card.vfs;
     memset(v, 0, sizeof *v);
@@ -151,8 +154,14 @@ int moy_store_card_mount(uint32_t sectors) {
     v->fatfs.drv = v;
     card.sectors = sectors;
     moy_cache_drop_all(&card.cache);
+    card.cache.every = 0;
     FRESULT res = f_mount(&v->fatfs);
-    return res == FR_OK ? 0 : fresult_to_errno_table[res];
+    if (res != FR_OK) {
+        return fresult_to_errno_table[res];
+    }
+    card.cache.base = (uint32_t)v->fatfs.database;
+    card.cache.every = v->fatfs.csize;
+    return 0;
 }
 
 // The board's card brought up and mounted with no VM, for the kernel (the

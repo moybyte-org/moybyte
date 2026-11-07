@@ -124,7 +124,9 @@ static int ram_io(void *ctx, uint32_t start, uint8_t *buf, uint32_t n, int write
 }
 
 static uint8_t cache_slots[MOY_CACHE_SLOTS * MOY_CACHE_SECTOR];
-static moy_cache_t cache = { .io = ram_io, .slots = cache_slots, .check = 1 };
+static const uint8_t cache_zeros[MOY_CACHE_RUN * MOY_CACHE_SECTOR];
+static moy_cache_t cache = { .io = ram_io, .slots = cache_slots, .check = 1,
+                             .zeros = cache_zeros };
 
 DRESULT disk_read(void *drv, BYTE *buff, DWORD sector, UINT count) {
     (void)drv;
@@ -221,6 +223,7 @@ static void format(void) {
     cut_at = -1;
     if (medium == 0) {
         moy_cache_drop_all(&cache);
+        cache.every = 0;
         static uint8_t work[SECTOR];
         memset(disk, 0, sizeof disk);
         memset(&fatfs, 0, sizeof fatfs);
@@ -235,8 +238,11 @@ static void format(void) {
 static void mount(void) {
     if (medium == 0) {
         moy_cache_drop_all(&cache);
+        cache.every = 0;
         memset(&fatfs, 0, sizeof fatfs);
         CHECK(f_mount(&fatfs) == FR_OK);
+        cache.base = (uint32_t)fatfs.database;
+        cache.every = fatfs.csize;
     } else {
         memset(&lfs, 0, sizeof lfs);
         CHECK(lfs2_mount(&lfs, &lcfg) == 0);
@@ -868,8 +874,8 @@ static void run(const uint8_t *data, size_t size) {
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--matrix") == 0) {
         long cuts = matrix();
-        printf("fuzz_fs: matrix of %ld cuts, ok; card cache %lu hits checked\n", cuts,
-               (unsigned long)cache.hits);
+        printf("fuzz_fs: matrix of %ld cuts, ok; card cache %lu hits checked, "
+               "%lu zero runs\n", cuts, (unsigned long)cache.hits, (unsigned long)cache.runs);
         return 0;
     }
     uint32_t seed = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 1u;
