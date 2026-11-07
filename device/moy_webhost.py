@@ -541,9 +541,9 @@ class WebHost:
         return got or self.url()
 
     def browsers(self):
-        """The paired browsers, [(kid, created, seen, name)] (seconds on the
-        VM's clock), whether the switch is on or not: the sign-in reads its
-        folder's keys first. [] with no folder."""
+        """The paired browsers, [(kid, created, seen, name)] (Unix seconds,
+        moy_net.h's moy_net_time), whether the switch is on or not: the
+        sign-in reads its folder's keys first. [] with no folder."""
         self._read_auth()
         if not self.auth:
             return []

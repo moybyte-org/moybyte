@@ -118,7 +118,7 @@ static void connect_now(void) {
 // (mbedtls_time) adds CLOCK_EPOCH back. NTP answers in Unix time, so the
 // answer is set CLOCK_EPOCH seconds back (sntp_sync_time below).
 #define CLOCK_MARK 0x4d4f5943u              // "MOYC"
-#define CLOCK_EPOCH 946684800               // 1970-01-01 to 2000-01-01
+#define CLOCK_EPOCH MOY_NET_CLOCK_EPOCH     // 1970-01-01 to 2000-01-01 (moy_net.h)
 #define CLOCK_ASK_MS 15000u                 // a first answer is still awaited
 
 typedef struct {

@@ -2033,7 +2033,7 @@ class SettingsLayer:
 
 
 def _day(t):
-    """`t` (seconds on the VM's clock) as the day it fell on."""
+    """`t` (Unix seconds, as wallclock takes them) as the day it fell on."""
     y, m, d = _wc.localtime(t)[:3]
     return "%d-%02d-%02d" % (y, m, d)
 

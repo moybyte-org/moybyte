@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 // -- HTTP ----------------------------------------------------------------------
 
@@ -91,6 +92,23 @@ void moy_net_free(void *p);
 // software reset, across which its RTC keeps the time) stays synced and a
 // power-off reads unsynced until the next answer. The host, the unix port
 // and the browser read their machine's clock, synced.
+//
+// moy_net_time: the wall clock in Unix seconds on every tier, the one clock
+// the stamps the kernel takes are on (a paired browser's times, a synced
+// file's journal entry), so a board, the host and the browser stamp an
+// instant alike and the console's wallclock reads them as it reads every
+// time. A board's system clock counts from 2000, MicroPython's epoch on the
+// esp32 port (machine.RTC sets it so, and the WiFi driver sets NTP's answer
+// MOY_NET_CLOCK_EPOCH back, moy_wifi.c), so its time() takes the epoch back;
+// the unix port, the browser and the host count from 1970.
+#ifdef ESP_PLATFORM
+#define MOY_NET_CLOCK_EPOCH 946684800       // 1970-01-01 to 2000-01-01
+#else
+#define MOY_NET_CLOCK_EPOCH 0
+#endif
+static inline int64_t moy_net_time(void) {
+    return (int64_t)time(NULL) + MOY_NET_CLOCK_EPOCH;
+}
 #define MOY_CLOCK_UNSYNCED 0
 #define MOY_CLOCK_SYNCED 1
 #define MOY_CLOCK_ASKING 2          // unsynced, a first answer still awaited
@@ -257,7 +275,6 @@ typedef struct {
     const char *system;             // the system folder (webkeys, password); NULL: open,
                                     // which only a host may be (a board refuses then)
     const char *defer;              // the paths the VM answers, NUL-separated, "" last
-    int64_t epoch;                  // seconds the VM's clock starts after 1970's
 } moy_web_cfg_t;
 
 typedef struct {
@@ -294,7 +311,7 @@ size_t moy_web_shelf(char *out, size_t cap);
 // over that folder (it need not serve), the board's id and a fresh QR token
 // (32 hex digits, "" while the sign-in is off), the paired browsers ("KID
 // CREATED SEEN NAME" a line) and dropping one ("all": every one).
-int moy_web_auth(const char *system, int64_t epoch);
+int moy_web_auth(const char *system);
 void moy_web_board_id(char out[33]);
 void moy_web_token(char out[33]);
 size_t moy_web_keys(char *out, size_t cap);

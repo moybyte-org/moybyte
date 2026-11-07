@@ -819,3 +819,25 @@ def test_passwd_lists_and_forgets_paired_browsers_and_shows_the_fingerprint(
     assert sh_roles.r_passwd(d, ["-r", "00" * 8]) == 1 and d.errs
     assert sh_roles.r_passwd(d, ["-r", kid]) == 0
     assert nb.web_keys() == []
+
+
+def test_every_stamp_is_unix_seconds(tmp_path):
+    """A paired browser's times and a synced file's journal entry are Unix
+    seconds on every tier, the console's wallclock's own (moy_net.h,
+    moy_net_time: a board's system clock counts from 2000 and takes its
+    epoch back there, once); nothing else in moy_net reads the clock or
+    shifts it."""
+    import time
+    h = _host(tmp_path)
+    _paired(h)
+    (_kid, created, seen, _name), = nb.web_keys()
+    assert abs(created - time.time()) < 5 and seen == created
+    from runtime import moy_journal, wallclock
+    assert moy_journal._EPOCH == wallclock._EPOCH
+    hdr = (ROOT / "native" / "moy_net" / "moy_net.h").read_text()
+    assert "#ifdef ESP_PLATFORM\n#define MOY_NET_CLOCK_EPOCH 946684800" in hdr
+    assert "return (int64_t)time(NULL) + MOY_NET_CLOCK_EPOCH;" in hdr
+    for name in ("moy_webauth.c", "moy_webhost.c", "modmoy_net.c"):
+        src = (ROOT / "native" / "moy_net" / name).read_text()
+        for word in ("time(NULL)", "mp_hal_time_ns", "VM_EPOCH", "epoch"):
+            assert word not in src, (name, word)

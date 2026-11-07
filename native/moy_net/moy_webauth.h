@@ -37,7 +37,7 @@ enum {
 // leaves the sign-in off, which only a host may (an open host: a test, the
 // dev server). 0, MOY_ENOMEM, or MOY_EINVAL for a folder past
 // MOY_WEB_PATH_MAX, which is never cut short.
-int moy_wa_config(const char *system_dir, int64_t epoch);
+int moy_wa_config(const char *system_dir);
 int moy_wa_open(void);                  // 1: no sign-in (an open host)
 
 // The backoff (moy_webhost.c's header): the ms `peer` waits before a
@@ -61,8 +61,8 @@ int moy_wa_check(const char *method, size_t mn, const char *target, size_t tn, c
 // digits, valid MOY_WA_TOKEN_MS and once; "" while the sign-in is off.
 void moy_wa_token(char out[2 * MOY_SEAL_RAND + 1]);
 void moy_wa_board_id(char out[2 * MOY_SEAL_RAND + 1]);
-// The paired browsers, a line each: "KID CREATED SEEN NAME\n" (seconds on the
-// VM's clock). Its length (cut at cap).
+// The paired browsers, a line each: "KID CREATED SEEN NAME\n" (Unix
+// seconds). Its length (cut at cap).
 size_t moy_wa_keys(char *out, size_t cap);
 // A line's CREATED and SEEN, read from `p` (a board's scanf has no %lld), and
 // where NAME starts: 1, or 0 when either is missing.

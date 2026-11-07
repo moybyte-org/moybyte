@@ -131,11 +131,17 @@ def _journal_paths(cart_dir):
     return jdir, jdir + "/" + JOURNAL_LOG, jdir + "/" + JOURNAL_CURSOR, jdir + "/" + JOURNAL_SNAP_DIR
 
 
+# Seconds from 1970 to `time.time()`'s epoch (2000 on a board's MicroPython),
+# so an entry's "ts" is Unix seconds on every tier, as a synced file's entry
+# is (native/moy_net/moy_net.h, moy_net_time).
+_EPOCH = 946684800 if _time is not None and _time.gmtime(0)[0] == 2000 else 0
+
+
 def _journal_ts():
     if _time is None:
         return 0
     try:
-        return int(_time.time())
+        return int(_time.time()) + _EPOCH
     except Exception:  # noqa: BLE001 -- ts is informational; never let it break a commit
         return 0
 

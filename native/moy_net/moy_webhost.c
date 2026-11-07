@@ -134,7 +134,6 @@ typedef struct {
     uint16_t port;
     uint32_t closing_at, parked_at, requests, events;
     int err;
-    int64_t epoch;
     char why[32];
     char carts[MOY_WEB_PATH_MAX];
     char files[MOY_WEB_PATH_MAX];
@@ -225,8 +224,7 @@ static void config(const moy_web_cfg_t *cfg) {
     copy_str(W->files, sizeof(W->files), cfg->files);
     copy_list(W->kinds, sizeof(W->kinds), cfg->kinds);
     copy_list(W->defer, sizeof(W->defer), cfg->defer);
-    W->epoch = cfg->epoch;
-    moy_wa_config(cfg->system, cfg->epoch);
+    moy_wa_config(cfg->system);
 }
 
 static void close_conn(int *fd) {
@@ -313,8 +311,8 @@ void moy_web_stop(const char *why) {
     W->closing_at = moy_net_ms();
 }
 
-int moy_web_auth(const char *system, int64_t epoch) {
-    return moy_wa_config(system, epoch);
+int moy_web_auth(const char *system) {
+    return moy_wa_config(system);
 }
 
 void moy_web_board_id(char out[33]) {
@@ -1070,7 +1068,7 @@ static int sync_post(out_t *o, const char *b, size_t n) {
         .files = W->has_files ? W->files : NULL,
         .kinds = W->kinds[0] ? W->kinds : NULL,
         .journal = 1,
-        .ts = (int64_t)time(NULL) - W->epoch,
+        .ts = moy_net_time(),
         .shelf = W->shelf,
         .shelf_cap = sizeof(W->shelf),
     };

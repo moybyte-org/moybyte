@@ -94,8 +94,7 @@ class _Result(ctypes.Structure):
 
 class _WebCfg(ctypes.Structure):
     _fields_ = [("port", ctypes.c_uint16), ("carts", _P), ("files", _P),
-                ("kinds", _P), ("system", _P), ("defer", _P),
-                ("epoch", ctypes.c_int64)]
+                ("kinds", _P), ("system", _P), ("defer", _P)]
 
 
 class _WebState(ctypes.Structure):
@@ -137,7 +136,7 @@ _SIGS = (
                         ctypes.c_void_p, ctypes.POINTER(_Result)], None),
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
     ("moy_web_stop", [_P], None),
-    ("moy_web_auth", [_P, ctypes.c_int64], _I),
+    ("moy_web_auth", [_P], _I),
     ("moy_web_board_id", [ctypes.c_void_p], None),
     ("moy_web_token", [ctypes.c_void_p], None),
     ("moy_web_keys", [ctypes.c_void_p, _Z], _Z),
@@ -403,7 +402,7 @@ def web_start(port, carts, files, kinds, system, defer):
     """Bind and serve; OSError on a bind failure. `system` None: the open host."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
                   _names(kinds), None if not system else _bytes(system),
-                  _names(defer), 0)
+                  _names(defer))
     rc = _lib().moy_web_start(ctypes.byref(cfg))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -424,7 +423,7 @@ def wc_on(port, carts, files, kinds, system, defer, ip):
     configuration."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
                   _names(kinds), None if not system else _bytes(system),
-                  _names(defer), 0)
+                  _names(defer))
     rc = _lib().moy_wc_on(ctypes.byref(cfg), _ip_of(ip))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -497,7 +496,7 @@ def web_stop(why=None):
 def web_auth(system):
     """The sign-in over the system folder (serving or not): the board's id,
     "" with no folder."""
-    rc = _lib().moy_web_auth(None if not system else _bytes(system), 0)
+    rc = _lib().moy_web_auth(None if not system else _bytes(system))
     if rc != 0:
         raise OSError(rc, os.strerror(rc))
     out = ctypes.create_string_buffer(33)

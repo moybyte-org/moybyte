@@ -4,7 +4,7 @@
 //
 // THE KEYS FILE, `<system>/webkeys`, the shell's /etc/webkeys: the board's id
 // on its first line ("moy-webkeys 1 ID") and a paired browser a line, "KID
-// KEY CREATED SEEN NAME" (hex, hex, seconds on the VM's clock, the browser's
+// KEY CREATED SEEN NAME" (hex, hex, Unix seconds, moy_net_time; the browser's
 // own name for itself). Read at config, written whole (through a .tmp and a
 // replace) when a browser pairs, is dropped, or was last seen an hour or more
 // before a sign-in. Its keys are secrets: the file is the owner's, as
@@ -102,7 +102,6 @@ typedef struct {
 typedef struct {
     uint8_t on;
     char dir[MOY_WEB_PATH_MAX];
-    int64_t epoch;
     uint8_t id[MOY_SEAL_RAND];
     wkey_t keys[MOY_WA_KEYS];
     chal_t ch[MOY_WA_CHALLENGES];
@@ -121,7 +120,7 @@ typedef struct {
 static wa_t *A;
 
 static int64_t now_s(void) {
-    return (int64_t)time(NULL) - A->epoch;
+    return moy_net_time();
 }
 
 // A board's printf and scanf (newlib nano) have no %lld: a time's decimal is
@@ -400,7 +399,7 @@ void moy_wa_note(uint32_t peer, int ok) {
 
 // -- configuration ----------------------------------------------------------------------
 
-int moy_wa_config(const char *system_dir, int64_t epoch) {
+int moy_wa_config(const char *system_dir) {
     if (A == NULL) {
         A = moy_net_alloc(sizeof *A);
         if (A == NULL) {
@@ -414,9 +413,7 @@ int moy_wa_config(const char *system_dir, int64_t epoch) {
     if (strlen(system_dir) >= sizeof A->dir) {
         return MOY_EINVAL;              // never a sign-in over a path cut short
     }
-    int same = A->on && strcmp(A->dir, system_dir) == 0;
-    A->epoch = epoch;
-    if (same) {
+    if (A->on && strcmp(A->dir, system_dir) == 0) {
         return 0;
     }
     snprintf(A->dir, sizeof A->dir, "%s", system_dir);

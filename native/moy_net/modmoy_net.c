@@ -599,12 +599,6 @@ static const char *str_or_null(mp_obj_t o) {
     return o == mp_const_none ? NULL : mp_obj_str_get_str(o);
 }
 
-#if MICROPY_EPOCH_IS_2000
-#define VM_EPOCH 946684800
-#else
-#define VM_EPOCH 0
-#endif
-
 // sync_batch(body) -> (root id, ops JSON text), or None.
 static mp_obj_t mod_sync_batch(mp_obj_t body) {
     mp_buffer_info_t b;
@@ -631,7 +625,7 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
         .files = str_or_null(args[1]),
         .kinds = names_of(args[2], kinds, sizeof(kinds)),
         .journal = mp_obj_is_true(args[5]),
-        .ts = (int64_t)(mp_hal_time_ns() / 1000000000ull) - VM_EPOCH,
+        .ts = moy_net_time(),
     };
     const char *rid = mp_obj_str_get_str(args[3]);
     int root = strcmp(rid, "files") == 0 ? MOY_SYNC_FILES
@@ -670,7 +664,6 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
         .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
-        .epoch = VM_EPOCH,
     };
     int rc = moy_web_start(&cfg);
     if (rc != 0) {
@@ -693,7 +686,6 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
         .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
-        .epoch = VM_EPOCH,
     };
     int rc = moy_wc_on(&cfg, ip_of(args[6]));
     if (rc != 0) {
@@ -789,7 +781,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_stop_obj, 0, 1, mod_web_stop)
 // web_auth(system) -> the board's id ("" with no folder): the sign-in set up
 // over the system folder, serving or not.
 static mp_obj_t mod_web_auth(mp_obj_t system) {
-    if (moy_web_auth(str_or_null(system), VM_EPOCH) != 0) {
+    if (moy_web_auth(str_or_null(system)) != 0) {
         mp_raise_OSError(MP_ENOMEM);
     }
     char id[33];
