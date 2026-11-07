@@ -43,6 +43,7 @@ static const moy_match_io_t K_IO = {k_send, k_recv, k_add_peer, NULL, k_channel,
 
 #include "moy_chrome.h"
 #include "moy_loop.h"
+#include "moy_perf.h"
 #include "moy_str.h"
 
 static moy_match_t *g_kernel;
@@ -88,4 +89,37 @@ void moy_match_kernel_poll(uint32_t now) {
         moy_chrome_notice(moy_str(MOY_S_NOTICE_OUT_OF_SYNC),
                           moy_str(MOY_S_NOTICE_OUT_OF_SYNC_WHY), false, now + 8000u);
     }
+}
+
+static uint32_t g_pf_at, g_pf_late, g_pf_stall;
+static int32_t g_pf_slew;
+static uint8_t g_pf_session;
+static bool g_pf_has;
+
+void moy_match_kernel_perf(void *values, uint32_t now) {
+    moy_match_t *m = g_kernel;
+    if (m == NULL || !m->s.live) {
+        g_pf_has = false;
+        return;
+    }
+    moy_perf_values_t *v = values;
+    const moy_lockstep_t *s = &m->s;
+    moy_perf_set(v, MOY_PF_NET, 0, (double)moy_lockstep_tps(m, now));
+    if (g_pf_has && g_pf_session == s->session && now != g_pf_at) {
+        double ms = (double)(uint32_t)(now - g_pf_at);
+        moy_perf_set(v, MOY_PF_LOCK, 0, (double)(uint32_t)(s->late_ms - g_pf_late) * 1000.0 / ms);
+        moy_perf_set(v, MOY_PF_LOCK, 1, (double)(uint32_t)(s->stall_ms - g_pf_stall) * 1000.0 / ms);
+        moy_perf_set(v, MOY_PF_LOCK, 2, (double)(s->slew_ms - g_pf_slew) * 1000.0 / ms);
+    }
+    uint32_t hz = s->tick_hz ? s->tick_hz : MOY_MATCH_TICK_HZ;
+    moy_perf_set(v, MOY_PF_LOCK, 3, (double)((uint32_t)s->delay * 1000u / hz));
+    if (s->has_ema) {
+        moy_perf_set(v, MOY_PF_LOCK, 4, (double)s->m_ema);
+    }
+    g_pf_has = true;
+    g_pf_session = s->session;
+    g_pf_at = now;
+    g_pf_late = s->late_ms;
+    g_pf_stall = s->stall_ms;
+    g_pf_slew = s->slew_ms;
 }

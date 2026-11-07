@@ -246,7 +246,10 @@ nothing stalled (this console's own frame: a collection, a heavy frame; read
 it beside `gc=`), `stall` a slot that passed while a tick waited on the peer's
 input, `slew` the guest's phase moved later, net of earlier. Then the input
 delay in ms and the margin the peer's inputs land with (`-` before one is
-timed). One console's `late` shows up as the other's `stall`.
+timed). One console's `late` shows up as the other's `stall`. While a kernel
+run plays the match in front (a Lua cart), no console frame runs to push
+either field, and the kernel's loop writes both from its own match
+(`moy_match_kernel_perf`).
 
 ## 4. Radio facts, one session each
 

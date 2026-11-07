@@ -706,6 +706,11 @@ bool moy_loop_perf_due(void) {
     return L.capture && L.heavy != NULL && (int32_t)(now_ms() - L.heavy->perf.at) >= 0;
 }
 
+// A kernel run in front plays the kernel's match with no console frame to
+// push its PERF fields: weak, so an image without the link has none.
+bool moy_play_front_live(void) __attribute__((weak));
+void moy_match_kernel_perf(void *v, uint32_t now) __attribute__((weak));
+
 static void account(uint32_t elapsed) {
     if (L.heavy == NULL) {
         return;
@@ -725,6 +730,10 @@ static void account(uint32_t elapsed) {
         }
         if (L.ops->gc_pauses != NULL && L.ops->gc_pauses(gc)) {
             gcp = gc;
+        }
+        if (moy_match_kernel_perf != NULL && moy_play_front_live != NULL
+                && moy_play_front_live()) {
+            moy_match_kernel_perf(&p->console, now);
         }
         moy_perf_sample(p, L.drawn, ovp, gcp, L.heavy->line, sizeof(L.heavy->line));
         if (L.ops->perf_line != NULL) {

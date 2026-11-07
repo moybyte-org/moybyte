@@ -406,5 +406,9 @@ moy_match_t *moy_match_kernel(void);
 moy_match_t *moy_match_kernel_make(const char *name, const char *board, uint32_t entropy);
 // The frame tail's poll of the kernel's link, when it is live.
 void moy_match_kernel_poll(uint32_t now);
+// The PERF line's net= and lock= for the kernel's match into `v` (a
+// moy_perf_values_t), while a kernel run plays it in front: no console frame
+// runs then to push them. Each consumes its window, as the console's do.
+void moy_match_kernel_perf(void *v, uint32_t now);
 
 #endif // MOY_MATCH_H
