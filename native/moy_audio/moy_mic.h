@@ -40,7 +40,9 @@ int moy_mic_open(uint32_t owner);
 int moy_mic_close(uint32_t owner);
 // Whatever `owner` holds let go: 1 when it held the microphone, else 0.
 uint32_t moy_mic_sweep(uint32_t owner);
-uint32_t moy_mic_owner(void);           // 0: no one
+uint32_t moy_mic_owner(void);           // the MOY_LEASE_MIC lease's holder, 0: no one
+// Its lease dropped from outside (moy_lease.h's DEVICES): `owner` lets it go.
+void moy_mic_lease_end(uint32_t owner);
 // Up to `n` samples, oldest first: their count, or -EBADF for a reader that
 // does not hold it.
 int moy_mic_read(uint32_t owner, int16_t *out, uint32_t n);

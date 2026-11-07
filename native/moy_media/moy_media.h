@@ -125,7 +125,10 @@ int moy_media_open(uint32_t owner, int rate, int channels);
 // The service freed and the row given back: 0, -EAGAIN while the task still
 // holds what it opened (stop() first), -EBADF for an owner that holds none.
 int moy_media_close(uint32_t owner);
-uint32_t moy_media_owner(void);
+uint32_t moy_media_owner(void);         // the MOY_LEASE_MEDIA lease's holder, 0: no one
+// Its lease dropped from outside (moy_lease.h's DEVICES): `owner`'s stream
+// stops and the service closes, or is the ORPHAN's until its task lets go.
+void moy_media_lease_end(uint32_t owner);
 // The VM ended (the kernel's moy_kernel_vm_down, a soft reset or a stop): its
 // processes' stream stopped and, once the task has let go (a bounded wait),
 // closed. One the task still holds is left as the ORPHAN's, closed by the

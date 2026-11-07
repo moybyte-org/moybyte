@@ -20,9 +20,10 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 _MEDIA = os.path.join(native_build.ROOT, "native", "moy_media")
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
+_KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
 PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "minimp3.h"),
-                         (_MEDIA, _NET, _PLAY))
+                         (_MEDIA, _NET, _PLAY, _KERNEL))
 
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
 TASK = 0                                # no task: the face calls run()

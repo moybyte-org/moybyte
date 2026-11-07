@@ -102,7 +102,9 @@ int moy_gatt_present(void);
 int moy_gatt_open(uint32_t owner);      // 0, -EBUSY, -ENODEV
 int moy_gatt_close(uint32_t owner);     // a connection dropped, advertising stopped
 uint32_t moy_gatt_sweep(uint32_t owner);
-uint32_t moy_gatt_owner(void);
+uint32_t moy_gatt_owner(void);          // the MOY_LEASE_BLE lease's holder, 0: no one
+// Its lease dropped from outside (moy_lease.h's DEVICES): `owner` lets it go.
+void moy_gatt_lease_end(uint32_t owner);
 int moy_gatt_scan(uint32_t owner, uint32_t ms);
 int moy_gatt_seen(uint32_t i, moy_gatt_seen_t *out);   // 0, or -ENOENT past the table
 uint32_t moy_gatt_seen_count(void);

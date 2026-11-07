@@ -159,3 +159,67 @@ def test_the_recording_indicator_stands_while_a_process_holds_the_microphone():
     assert devices.MIC[0] == 0 and N.owner() == 0
     raw = (ctypes.c_uint16 * (w * h))()
     assert not moy_play.chrome_overlay_draw(raw, w, h, pal, now)
+
+
+def _mic_lib():
+    import ctypes
+    from runtime.host import host_native
+    lib = ctypes.CDLL(host_native.build())
+    lib.moy_mic_open.argtypes = [ctypes.c_uint32]
+    lib.moy_mic_close.argtypes = [ctypes.c_uint32]
+    return lib
+
+
+def _shell(tmp_path):
+    from runtime.host_app import build_workstation
+    from test_terminal import plain, run
+    ws = build_workstation(str(tmp_path / "carts"))
+    app = ws.terminal_app
+    app.open()
+    return app, lambda line: (run(app, line), plain(app))[1]
+
+
+def test_the_shell_and_a_compiled_process_are_refused_while_a_python_app_records(tmp_path):
+    """The microphone's one holder is its lease (native/moy_kernel/moy_lease.h,
+    MOY_LEASE_MIC), whoever asks: while a Python app holds it, the shell's
+    `mic read` (served in C, pid 1) and a process of another tier (the
+    driver's open under its pid, as a wasm or ELF process's import is) are
+    refused busy; its end lets the lease go, and the shell reads."""
+    lib = _mic_lib()
+    app_pid, wasm_pid = L.spawn("t.mic"), L.spawn("t.wasm")
+    _as(app_pid, moybyte.mic.open)
+    assert N.owner() == app_pid
+    assert lib.moy_mic_open(wasm_pid) == -errno.EBUSY
+    term, line = _shell(tmp_path)
+    try:
+        out = line("mic read 50")
+        assert out[-1] == "mic: busy" and term.face.status() == 1, out
+        assert line("mic")[-1] == "rate 22050 holder %d drops 0" % app_pid
+        moybyte.end(app_pid)
+        assert N.owner() == 0
+        mic_sim.tone(440, 22050 // 10)
+        line("mic read 50")
+        assert term.face.status() == 0 and N.owner() == 0
+    finally:
+        term.close_session()
+
+
+def test_a_python_app_and_a_compiled_process_are_refused_while_the_shell_records():
+    """The reverse: the shell holding the microphone (pid 1, as its `mic
+    read` does while it reads) refuses a Python app's face and another
+    tier's process, and lets them in once it lets go."""
+    lib = _mic_lib()
+    app_pid, wasm_pid = L.spawn("t.mic"), L.spawn("t.wasm")
+    assert lib.moy_mic_open(1) == 0 and N.owner() == 1
+    try:
+        assert _errno(lambda: _as(app_pid, moybyte.mic.open)) == errno.EBUSY
+        assert lib.moy_mic_open(wasm_pid) == -errno.EBUSY
+    finally:
+        assert lib.moy_mic_close(1) == 0
+    assert lib.moy_mic_open(wasm_pid) == 0 and N.owner() == wasm_pid
+    from runtime import leases
+    assert [r[:3] for r in leases.LEASES.rows() if r[4] == "device"] == [("mic", (), wasm_pid)]
+    moybyte.end(wasm_pid)                       # its end sweeps the lease, in C
+    assert N.owner() == 0
+    _as(app_pid, moybyte.mic.open)
+    assert N.owner() == app_pid

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_lorawan.h"
+#include "moy_lease.h"
 
 #if defined(__has_include)
 #if __has_include("moy_input.h")
@@ -872,11 +873,14 @@ static int open_(uint32_t owner) {
     if (owner == 0 || !moy_lora_present()) {
         return -MOY_LORA_ENODEV;
     }
+    // The holder is the lease table's (moy_lease.h, MOY_LEASE_LORA); R->owner
+    // is its copy for the radio's task.
+    int lr = moy_lease_hold(owner, MOY_LEASE_LORA);
+    if (lr != MOY_LEASE_OK) {
+        return lr == MOY_LEASE_BUSY ? -MOY_LORA_EBUSY : -MOY_LORA_ENOMEM;
+    }
     if (R->owner == owner) {
         return 0;
-    }
-    if (R->owner != 0) {
-        return -MOY_LORA_EBUSY;
     }
     if (R->q == NULL) {
         #ifdef LORA_BOARD
@@ -885,6 +889,7 @@ static int open_(uint32_t owner) {
         R->q = malloc(sizeof(pkt_t) * MOY_LORA_QUEUE);
         #endif
         if (R->q == NULL) {
+            moy_lease_let(owner, MOY_LEASE_LORA);
             return -MOY_LORA_ENOMEM;
         }
     }
@@ -898,6 +903,7 @@ static int open_(uint32_t owner) {
     int rc = radio_up();
     if (rc != 0) {
         radio_down();
+        moy_lease_let(owner, MOY_LEASE_LORA);
         return rc;
     }
     R->owner = owner;
@@ -916,6 +922,7 @@ static int close_(uint32_t owner) {
     R->listen = 0;
     R->qn = 0;
     memset(&R->lw, 0, sizeof(R->lw));
+    moy_lease_let(owner, MOY_LEASE_LORA);
     return 0;
 }
 
@@ -923,8 +930,12 @@ uint32_t moy_lora_sweep(uint32_t owner) {
     return moy_lora_close(owner) == 0 ? 1u : 0u;
 }
 
+void moy_lora_lease_end(uint32_t owner) {
+    moy_lora_close(owner);
+}
+
 uint32_t moy_lora_owner(void) {
-    return R != NULL ? R->owner : 0;
+    return moy_lease_holder(MOY_LEASE_LORA);
 }
 
 static int held(uint32_t owner) {

@@ -302,11 +302,13 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
 }
 
 // The commands the console serves: runtime/shell/sh_roles.py has an r_<name>
-// for each (tests/test_sh_door.py holds the two equal).
+// for each but those C serves here (C_ROLES, each over the driver and its
+// lease, moy_lease.h's DEVICES; tests/test_sh_door.py holds the lists equal).
 static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
     "passwd", "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
+static const char *const C_ROLES[] = { "mic", NULL };
 
 // The files tree's root, as moy_sh_board_host gives it.
 static const char *files_root(void) {
@@ -333,12 +335,110 @@ static void store_role_here(void *arg) {
     c->r = moy_sh_store_role(c->s, store, c->argc, c->argv);
 }
 
+// -- the role commands served in C ------------------------------------------------
+
+static uint32_t run_ms(void);
+
+// The microphone's driver (native/moy_audio/moy_mic.h): weak, so an image
+// without it has none.
+int moy_mic_open(uint32_t owner) __attribute__((weak));
+int moy_mic_close(uint32_t owner) __attribute__((weak));
+int moy_mic_read(uint32_t owner, int16_t *out, uint32_t n) __attribute__((weak));
+uint32_t moy_mic_rate(void) __attribute__((weak));
+uint32_t moy_mic_owner(void) __attribute__((weak));
+uint32_t moy_mic_drops(void) __attribute__((weak));
+int moy_mic_present(void) __attribute__((weak));
+
+#define MIC_MS 10000                    // a mic read, at most
+#define MIC_POLL_MS 10
+
+static void say(moy_sh_t *s, int fd, const char *text) {
+    moy_sh_fd_write(s, fd, text, strlen(text));
+}
+
+// errno's words, as runtime/shell/sh_roles.py's `_WHY` says them.
+static const char *why_of(int e) {
+    switch (e) {
+    case 16: return "busy";
+    case 19: return "this console has none";
+    case 12: return "out of memory";
+    case 5: return "i/o error";
+    default: return "error";
+    }
+}
+
+// The lease ops run on the console's task, where the table is (hop).
+static void mic_open_here(void *arg) {
+    *(int *)arg = moy_mic_open(SHELL_PID);
+}
+
+static void mic_close_here(void *arg) {
+    (void)arg;
+    moy_mic_close(SHELL_PID);
+}
+
+// mic: its rate, holder and drops. mic read MS: MS of PCM16 mono at its rate
+// to stdout, the microphone held as the shell (pid 1) over its lease while
+// it reads, so it is refused (busy) while another process holds it, and
+// another is refused while the shell does. Ctrl-C gives it back and exits 130.
+static int b_mic(moy_sh_t *s, int argc, char **argv) {
+    char line[96];
+    if (moy_mic_present == NULL || !moy_mic_present()) {
+        say(s, 2, "mic: this console has none\n");
+        return 1;
+    }
+    if (argc == 1) {
+        snprintf(line, sizeof line, "rate %u holder %u drops %u\n", (unsigned)moy_mic_rate(),
+                 (unsigned)moy_mic_owner(), (unsigned)moy_mic_drops());
+        say(s, 1, line);
+        return 0;
+    }
+    char *end = NULL;
+    long ms = argc == 3 && strcmp(argv[1], "read") == 0 ? strtol(argv[2], &end, 10) : 0;
+    if (end == NULL || *end != 0 || ms <= 0 || ms > MIC_MS) {
+        snprintf(line, sizeof line, "usage: mic [read MS], MS up to %d\n", MIC_MS);
+        say(s, 2, line);
+        return 2;
+    }
+    int rc = 0;
+    moy_sh_hop(s, mic_open_here, &rc);
+    if (rc < 0) {
+        snprintf(line, sizeof line, "mic: %s\n", why_of(-rc));
+        say(s, 2, line);
+        return 1;
+    }
+    uint32_t want = (uint32_t)((uint64_t)moy_mic_rate() * (uint64_t)ms / 1000u);
+    int16_t buf[256];
+    uint32_t t0 = run_ms();
+    int code = 0;
+    while (want > 0 && run_ms() - t0 < (uint32_t)ms + 1000u) {
+        if (moy_sh_interrupted(s)) {
+            code = INTERRUPTED;
+            break;
+        }
+        int n = moy_mic_read(SHELL_PID, buf, want < 256u ? want : 256u);
+        if (n > 0) {
+            moy_sh_fd_write(s, 1, buf, (size_t)n * sizeof buf[0]);
+            want -= (uint32_t)n;
+        } else if (n < 0) {
+            break;
+        } else {
+            b_sleep(NULL, MIC_POLL_MS);
+        }
+    }
+    moy_sh_hop(s, mic_close_here, NULL);
+    return code;
+}
+
 // A role command is a job the console steps: `role JOB ARGV...` starts it
 // and runs its first step, `step JOB` each one after, while it answers
 // RUNNING; between them the session waits (b_sleep: a runner's run parks,
 // so the console's frame goes on). Ctrl-C `stop`s it. JOB names the session.
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
+    if (argc > 0 && strcmp(argv[0], C_ROLES[0]) == 0) {
+        return b_mic(s, argc, argv);
+    }
     char job[2 * sizeof(uintptr_t) + 1];
     snprintf(job, sizeof job, "%lx", (unsigned long)(uintptr_t)s);
     char **all = b_alloc(NULL, ((size_t)argc + 1) * sizeof *all);

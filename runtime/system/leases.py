@@ -358,10 +358,16 @@ class Leases:
     def rows(self):
         """[(name, pins, pid, process name, how)]: each row the board offers,
         a gpio pin a row, with who holds it (pid 0 and None: no one) and how
-        ("lease", "pins")."""
+        ("lease", "pins"); then each device a process holds (moy_lease.h's
+        DEVICES: "mic", "lora", "ble", "media"), how "device"."""
         held = {}
+        devices = []
         for h in _N.leases():
             owner, cls, unit, flags, pins, _edges = _N.get(h)
+            dev = _N.device_name(cls)
+            if dev is not None:
+                devices.append((dev, (), owner, _name(owner), "device"))
+                continue
             how = "pins" if flags & _N.PINS else "lease"
             for p in pins:
                 held[("p", p)] = (owner, how)
@@ -376,7 +382,7 @@ class Leases:
             else:
                 owner, how = held.get(("u", cls, unit), (0, None))
                 out.append((name, named, owner, _name(owner) if owner else None, how))
-        return out
+        return out + sorted(devices)
 
     def pins(self):
         """The `pins` command's lines: a row each, `name pins holder`."""

@@ -28,6 +28,17 @@
 // moy_lease_pin_state reads a pin back: on a board from the GPIO matrix, on
 // the host from the stand-in's record.
 //
+// DEVICES. A driver with one holder -- the microphone, the LoRa radio, the
+// BLE central (its scan and its connection), the media service -- holds it
+// as a lease of its DEVICE class: a row with no pins and no offer, taken by
+// the driver's own open for the process opening it (moy_lease_hold) and let
+// go by its close (moy_lease_let), so whoever asks -- a Python app's face, a
+// Lua, wasm or ELF process, the shell (pid 1) -- is refused while another
+// holds it, and the table names the holder (moy_lease_holder: the driver's
+// owner word). Dropped any other way -- its owner's sweep, a process's end
+// in any tier -- the row ends the driver's hold too (the driver's
+// moy_<driver>_lease_end, weak: an image without the driver has none).
+//
 // EDGES. moy_lease_edge opens a held pin's edges as a ring source of the
 // kernel's input table: on a board moy_edge.h's ISR source (BAD on one that
 // stages no moy_input, the Zero), on the host a stand-in whose edges
@@ -57,7 +68,14 @@ enum {
     MOY_LEASE_GPIO = 1,
     MOY_LEASE_UART = 2,
     MOY_LEASE_SPI = 3,
+    // the device classes (DEVICES above)
+    MOY_LEASE_MIC = 4,
+    MOY_LEASE_LORA = 5,
+    MOY_LEASE_BLE = 6,
+    MOY_LEASE_MEDIA = 7,
 };
+#define MOY_LEASE_DEVICE_FIRST MOY_LEASE_MIC
+#define MOY_LEASE_DEVICE_LAST MOY_LEASE_MEDIA
 
 // A lease's flags.
 #define MOY_LEASE_VM 0x01u          // taken by a VM process
@@ -123,6 +141,15 @@ uint32_t moy_lease_at(uint32_t slot);
 uint32_t moy_lease_held(uint8_t flags);
 // The lease holding `pin`, or 0.
 uint32_t moy_lease_of_pin(int pin);
+
+// A device class's one holder: `owner` holds `cls` (OK, again for its holder
+// too), BUSY while another does, BAD for a class that is no device, FULL,
+// NOMEM. Let: OK, STALE when `owner` holds none. The holder's pid, or 0.
+int moy_lease_hold(uint32_t owner, uint8_t cls);
+int moy_lease_let(uint32_t owner, uint8_t cls);
+uint32_t moy_lease_holder(uint8_t cls);
+// A device class's name ("mic", "lora", "ble", "media"), or NULL.
+const char *moy_lease_device_name(uint8_t cls);
 
 // Pin `pin` of lease `h` as an edge source of `depth` records; a `loop` pin is
 // an output too (moy_edge.h). *src is the ring source's handle.

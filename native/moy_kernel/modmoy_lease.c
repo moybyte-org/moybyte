@@ -167,6 +167,13 @@ static mp_obj_t lease_pin_state(mp_obj_t pin) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(lease_pin_state_obj, lease_pin_state);
 
+// device_name(cls) -> "mic", "lora", "ble", "media" for a device class, else None.
+static mp_obj_t lease_device_name(mp_obj_t cls) {
+    const char *n = moy_lease_device_name((uint8_t)mp_obj_get_int(cls));
+    return n != NULL ? mp_obj_new_str(n, strlen(n)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(lease_device_name_obj, lease_device_name);
+
 static mp_obj_t lease_sim_pin(mp_obj_t pin, mp_obj_t state, mp_obj_t level) {
     moy_lease_sim_pin(mp_obj_get_int(pin), (uint8_t)mp_obj_get_int(state), mp_obj_get_int(level));
     return mp_const_none;
@@ -205,6 +212,7 @@ static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_edge), MP_ROM_PTR(&lease_edge_obj) },
     { MP_ROM_QSTR(MP_QSTR_edge_close), MP_ROM_PTR(&lease_edge_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_pin_state), MP_ROM_PTR(&lease_pin_state_obj) },
+    { MP_ROM_QSTR(MP_QSTR_device_name), MP_ROM_PTR(&lease_device_name_obj) },
     { MP_ROM_QSTR(MP_QSTR_sim_pin), MP_ROM_PTR(&lease_sim_pin_obj) },
     { MP_ROM_QSTR(MP_QSTR_sim_level), MP_ROM_PTR(&lease_sim_level_obj) },
     { MP_ROM_QSTR(MP_QSTR_sim_get), MP_ROM_PTR(&lease_sim_get_obj) },

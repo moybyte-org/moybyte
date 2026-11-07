@@ -132,7 +132,13 @@ process's lease will live outside the VM, untouched by a stop.
 (`None` where the console lacks the class), each over a C driver, each checking its
 permission row against the caller's grants and swept at the caller's end. The
 mic, the radio, BLE, USB and MIDI have one holder at a time (`EBUSY` for
-another); `http` requests are many. Their events are NET, LORA, BLE, USB and
+another); `http` requests are many. The microphone's, the LoRa radio's, the
+BLE central's and the media service's holder is a lease of the device's class
+(`moy_lease.h`'s DEVICES), taken by the driver's own open for whoever opens it
+(a Python app's face, a process of another tier, the shell as pid 1) and
+swept with its holder's other leases, so the lease listing (`lease`) names
+it; the shell's `mic` is served in C over the driver and that lease
+(`native/moy_sh/moy_sh_board.c`). Their events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
 on.
 

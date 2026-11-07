@@ -58,6 +58,7 @@ _SIGS = (
     ("moy_lease_edge", [_U32, _I, _U32, ctypes.c_bool, ctypes.POINTER(_U32)], _I),
     ("moy_lease_edge_close", [_U32, _I], _I),
     ("moy_lease_pin_state", [_I], _U8),
+    ("moy_lease_device_name", [_U8], ctypes.c_char_p),
     ("moy_lease_sim_pin", [_I, _U8, _I], None),
     ("moy_lease_sim_level", [_I, _I], None),
     ("moy_lease_sim_get", [_I], _I),
@@ -163,6 +164,11 @@ def edge_close(h, pin):
 
 def pin_state(pin):
     return _lib().moy_lease_pin_state(pin)
+
+
+def device_name(cls):
+    n = _lib().moy_lease_device_name(cls)
+    return n.decode() if n is not None else None
 
 
 def sim_pin(pin, state, level):

@@ -18,9 +18,10 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
+_KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
 PART = native_build.Part("lora", ("moy_aes.h", "moy_aes.c", "moy_lorawan.h", "moy_lorawan.c",
-                                  "moy_lora.h", "moy_lora.c"), (_NET, _INPUT))
+                                  "moy_lora.h", "moy_lora.c"), (_NET, _INPUT, _KERNEL))
 
 EV_RX, EV_TX_DONE, EV_JOINED, EV_JOIN_FAILED, EV_DOWN, EV_UP_DONE = range(1, 7)
 IDLE, LISTEN = 0, 1

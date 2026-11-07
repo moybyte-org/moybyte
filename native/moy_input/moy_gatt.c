@@ -7,6 +7,7 @@
 
 #include "moy_input.h"
 #include "moy_drivers.h"
+#include "moy_lease.h"
 
 #if defined(MOY_INPUT_BOARD)
 #include "esp_heap_caps.h"
@@ -16,7 +17,6 @@ static moy_drv_lock_t s_lock = portMUX_INITIALIZER_UNLOCKED;
 static moy_drv_lock_t s_lock;
 #endif
 
-static volatile uint32_t s_owner;
 
 // What the API keeps, taken at the first open (a board's PSRAM): a console
 // whose apps never open BLE pays a pointer for it.
@@ -35,6 +35,7 @@ typedef struct {
     uint32_t nhead, nn;
     uint32_t src;
     int advertising;
+    volatile uint32_t owner;    // the lease's holder, the BLE task's copy
 } gatt_t;
 static gatt_t *G;
 
@@ -62,18 +63,21 @@ int moy_gatt_present(void) {
     return o != NULL && o->up();
 }
 
+// The holder is the lease table's (moy_lease.h, MOY_LEASE_BLE); G->owner is
+// its copy, which a lease dropped from outside still names as the driver lets
+// it go.
 static int held(uint32_t owner) {
-    return owner != 0 && owner == s_owner;
+    return owner != 0 && G != NULL && owner == G->owner;
 }
 
 int moy_gatt_open(uint32_t owner) {
     if (owner == 0 || !moy_gatt_present()) {
         return -MOY_GATT_ENODEV;
     }
-    if (s_owner == owner) {
+    if (held(owner)) {
         return 0;
     }
-    if (s_owner != 0) {
+    if (moy_lease_holder(MOY_LEASE_BLE) != 0) {
         return -MOY_GATT_EBUSY;
     }
     if (G == NULL) {
@@ -104,7 +108,11 @@ int moy_gatt_open(uint32_t owner) {
     G->value_n = 0;
     G->state = MOY_GATT_IDLE;
     MOY_DRV_UNLOCK(&s_lock);
-    s_owner = owner;
+    int lr = moy_lease_hold(owner, MOY_LEASE_BLE);
+    if (lr != MOY_LEASE_OK) {
+        return lr == MOY_LEASE_BUSY ? -MOY_GATT_EBUSY : -MOY_GATT_ENODEV;
+    }
+    G->owner = owner;
     return 0;
 }
 
@@ -120,9 +128,14 @@ int moy_gatt_close(uint32_t owner) {
         ops()->stop_advertising();
         G->advertising = 0;
     }
-    s_owner = 0;
+    G->owner = 0;
     G->state = MOY_GATT_IDLE;
+    moy_lease_let(owner, MOY_LEASE_BLE);
     return 0;
+}
+
+void moy_gatt_lease_end(uint32_t owner) {
+    moy_gatt_close(owner);
 }
 
 uint32_t moy_gatt_sweep(uint32_t owner) {
@@ -130,7 +143,7 @@ uint32_t moy_gatt_sweep(uint32_t owner) {
 }
 
 uint32_t moy_gatt_owner(void) {
-    return s_owner;
+    return moy_lease_holder(MOY_LEASE_BLE);
 }
 
 uint32_t moy_gatt_source(void) {
@@ -340,7 +353,7 @@ void moy_gatt_on_adv(const uint8_t addr[6], uint8_t type, int8_t rssi, const uin
     if (G == NULL) {
         return;
     }
-    if (s_owner == 0) {
+    if (G->owner == 0) {
         return;
     }
     MOY_DRV_LOCK(&s_lock);
@@ -376,7 +389,7 @@ void moy_gatt_on_scan_done(int err) {
     if (G == NULL) {
         return;
     }
-    if (s_owner != 0) {
+    if (G->owner != 0) {
         post(MOY_GATT_EV_SCAN_DONE, (uint16_t)G->nseen, err);
     }
 }
@@ -385,7 +398,7 @@ void moy_gatt_on_connect(int err, uint16_t conn) {
     if (G == NULL) {
         return;
     }
-    if (err == 0 && s_owner == 0) {
+    if (err == 0 && G->owner == 0) {
         ops()->disconnect(conn);        // its holder ended while it connected
         return;
     }
@@ -443,7 +456,7 @@ void moy_gatt_on_notify(uint16_t conn, uint16_t handle, const uint8_t *d, size_t
     if (G == NULL) {
         return;
     }
-    if (s_owner == 0 || conn != G->conn) {
+    if (G->owner == 0 || conn != G->conn) {
         return;
     }
     MOY_DRV_LOCK(&s_lock);
@@ -722,8 +735,8 @@ int moy_gatt_sim_adv(uint8_t *out, size_t cap) {
 #endif
 
 void moy_gatt_reset(void) {
-    if (s_owner != 0) {
-        moy_gatt_close(s_owner);
+    if (G != NULL && G->owner != 0) {
+        moy_gatt_close(G->owner);
     }
     moy_gatt_sim(0);
     if (G != NULL && G->src != 0) {

@@ -14,10 +14,11 @@ exit code; its output goes through the door to the session's fd 1, its
 complaints to fd 2. Imported at the first role command.
 
 Each is the face of one implementation, never a second copy, run as the shell
-(pid 1: full access, not gated); what the shell takes (the radio, the
-microphone, the USB host, a MIDI port, the audio ring) it gives back before
-the command ends, except a media stream, which plays until `media stop`.
-A command that waits (`http get`, `mic read`, `lora recv`, `ble scan`, `snd
+(pid 1: full access, not gated); what the shell takes (the radio, the USB
+host, a MIDI port, the audio ring) it gives back before the command ends,
+except a media stream, which plays until `media stop`. `mic` is served in C
+over the driver and its lease (native/moy_sh/moy_sh_board.c's C_ROLES).
+A command that waits (`http get`, `lora recv`, `ble scan`, `snd
 play`, `pkg`'s fetches and installs) is a generator the door steps
 (runtime/shell/sh_door.py, `role`): it yields where it waits (`_wait`, a bare
 `yield`; `yield True` where more work is ready at once), so the console's
@@ -43,8 +44,6 @@ the http worker's own wait), never `online()`.
                              the task manager's Stop is the same stop
   lease                      what the board leases and who holds it
   http get URL [CAP]         a GET, its body to stdout; not 2xx exits 1
-  mic                        its rate, holder and drops
-  mic read MS                MS of PCM16 mono at its rate to stdout
   lora send TEXT...          a raw packet
   lora recv [MS]             the next packet within MS: "RSSI SNR TEXT"
   ble scan [MS]              what a scan hears: "ADDR RSSI NAME"
@@ -95,7 +94,6 @@ except ImportError:  # host: the runtime package
 USAGE = 2
 INTERRUPTED = 130
 WAIT_MS = 20000                 # an http request's wait, at most
-MIC_MS = 10000                  # a mic read, at most
 LORA_MS = 5000                  # a recv's wait, by default
 SCAN_MS = 3000                  # a BLE scan, by default
 POLL_MS = 10
@@ -542,34 +540,6 @@ def r_http(d, a):
     if not 200 <= st[0] < 300:
         d.err("http", "status %d" % st[0])
         return 1
-    return 0
-
-
-def r_mic(d, a):
-    f = _api(d, "mic")
-    if f is None:
-        return 1
-    if not a:
-        d.out("rate %d holder %d drops %d\n" % (f.rate(), f.holder(), f.drops()))
-        return 0
-    ms = _int(a[1]) if len(a) == 2 and a[0] == "read" else None
-    if ms is None or not 0 < ms <= MIC_MS:
-        return _usage(d, "mic", "[read MS], MS up to %d" % MIC_MS)
-    rate = f.open()
-    try:
-        want = rate * ms // 1000
-        buf = bytearray(1024)
-        t0 = _ticks_ms()
-        while want > 0 and _ticks_diff(_ticks_ms(), t0) < ms + 1000:
-            n = min(f.read(buf), want)
-            if n:
-                d.io.write(1, bytes(buf[:2 * n]))
-                want -= n
-                yield True
-            elif (yield from _wait(d, POLL_MS)):
-                return INTERRUPTED
-    finally:
-        f.close()
     return 0
 
 

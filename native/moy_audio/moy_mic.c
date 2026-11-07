@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_aud.h"
+#include "moy_lease.h"
 
 #if MOY_AUD_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_* (mpconfigboard.h)
@@ -274,11 +275,14 @@ int moy_mic_open(uint32_t owner) {
         M->dev = 0xff;
         #endif
     }
+    // The holder is the lease table's (moy_lease.h, MOY_LEASE_MIC); M->owner
+    // is its copy for the producer, which reads it per buffer.
+    int lr = moy_lease_hold(owner, MOY_LEASE_MIC);
+    if (lr != MOY_LEASE_OK) {
+        return lr == MOY_LEASE_BUSY ? -MOY_MIC_EBUSY : -MOY_MIC_ENOMEM;
+    }
     if (M->owner == owner) {
         return 0;
-    }
-    if (M->owner != 0) {
-        return -MOY_MIC_EBUSY;
     }
     M->head = M->count = M->drops = 0;
     M->owner = owner;
@@ -287,6 +291,7 @@ int moy_mic_open(uint32_t owner) {
     if (rc != 0) {
         M->owner = 0;
         stop();
+        moy_lease_let(owner, MOY_LEASE_MIC);
         return rc;
     }
     #endif
@@ -302,7 +307,12 @@ int moy_mic_close(uint32_t owner) {
     stop();
     #endif
     M->head = M->count = 0;
+    moy_lease_let(owner, MOY_LEASE_MIC);
     return 0;
+}
+
+void moy_mic_lease_end(uint32_t owner) {
+    moy_mic_close(owner);
 }
 
 uint32_t moy_mic_sweep(uint32_t owner) {
@@ -310,7 +320,7 @@ uint32_t moy_mic_sweep(uint32_t owner) {
 }
 
 uint32_t moy_mic_owner(void) {
-    return M != NULL ? M->owner : 0;
+    return moy_lease_holder(MOY_LEASE_MIC);
 }
 
 uint32_t moy_mic_drops(void) {

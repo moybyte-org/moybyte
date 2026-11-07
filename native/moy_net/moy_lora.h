@@ -90,7 +90,9 @@ typedef struct {
 int moy_lora_open(uint32_t owner);
 int moy_lora_close(uint32_t owner);
 uint32_t moy_lora_sweep(uint32_t owner);
-uint32_t moy_lora_owner(void);
+uint32_t moy_lora_owner(void);         // the MOY_LEASE_LORA lease's holder, 0: no one
+// Its lease dropped from outside (moy_lease.h's DEVICES): `owner` lets it go.
+void moy_lora_lease_end(uint32_t owner);
 // The raw settings: 0, or -EINVAL for a value outside the radio's range.
 int moy_lora_config(uint32_t owner, const moy_lora_cfg_t *cfg);
 // Raw receive on (continuous, between transmissions) or off.

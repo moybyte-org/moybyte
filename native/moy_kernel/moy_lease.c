@@ -366,6 +366,8 @@ static moy_lease_row_t *row_of(uint32_t h) {
     return row;
 }
 
+static int table(void);
+
 int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
                    uint8_t flags, uint32_t *h) {
     const moy_lease_offer_t *gpio = offer_of(MOY_LEASE_GPIO, 0);
@@ -377,13 +379,9 @@ int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
     if (pins & ~may) {
         return MOY_LEASE_BAD;
     }
-    if (s_tab == NULL) {
-        s_tab = moy_htab_new(&s_mem, MOY_KIND_LEASE, MOY_LEASE_ROWS_MAX, sizeof(moy_lease_row_t));
-        if (s_tab == NULL || moy_htab_reserve(s_tab) != MOY_HTAB_OK) {
-            moy_htab_free(s_tab);
-            s_tab = NULL;
-            return MOY_LEASE_NOMEM;
-        }
+    int trc = table();
+    if (trc != MOY_LEASE_OK) {
+        return trc;
     }
     for (uint32_t s = 0; s < moy_htab_slots(s_tab); s++) {
         uint32_t at = moy_htab_at(s_tab, s);
@@ -409,10 +407,105 @@ int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
     return MOY_LEASE_OK;
 }
 
+static bool is_device(uint8_t cls) {
+    return cls >= MOY_LEASE_DEVICE_FIRST && cls <= MOY_LEASE_DEVICE_LAST;
+}
+
+// The drivers' ends of a device lease dropped from outside them.
+void moy_mic_lease_end(uint32_t owner) __attribute__((weak));
+void moy_lora_lease_end(uint32_t owner) __attribute__((weak));
+void moy_gatt_lease_end(uint32_t owner) __attribute__((weak));
+void moy_media_lease_end(uint32_t owner) __attribute__((weak));
+
+static void device_end(uint8_t cls, uint32_t owner) {
+    void (*end)(uint32_t) = cls == MOY_LEASE_MIC ? moy_mic_lease_end
+                          : cls == MOY_LEASE_LORA ? moy_lora_lease_end
+                          : cls == MOY_LEASE_BLE ? moy_gatt_lease_end
+                          : cls == MOY_LEASE_MEDIA ? moy_media_lease_end : NULL;
+    if (end != NULL) {
+        end(owner);
+    }
+}
+
+static int table(void) {
+    if (s_tab == NULL) {
+        s_tab = moy_htab_new(&s_mem, MOY_KIND_LEASE, MOY_LEASE_ROWS_MAX, sizeof(moy_lease_row_t));
+        if (s_tab == NULL || moy_htab_reserve(s_tab) != MOY_HTAB_OK) {
+            moy_htab_free(s_tab);
+            s_tab = NULL;
+            return MOY_LEASE_NOMEM;
+        }
+    }
+    return MOY_LEASE_OK;
+}
+
+// The live row of device class `cls`, or 0.
+static uint32_t device_row(uint8_t cls) {
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        uint32_t at = moy_htab_at(s_tab, s);
+        if (at != 0 && ((moy_lease_row_t *)moy_htab_row(s_tab, s))->cls == cls) {
+            return at;
+        }
+    }
+    return 0;
+}
+
+int moy_lease_hold(uint32_t owner, uint8_t cls) {
+    if (!is_device(cls) || owner == 0) {
+        return MOY_LEASE_BAD;
+    }
+    uint32_t at = device_row(cls);
+    if (at != 0) {
+        return row_of(at)->owner == owner ? MOY_LEASE_OK : MOY_LEASE_BUSY;
+    }
+    int rc = table();
+    if (rc != MOY_LEASE_OK) {
+        return rc;
+    }
+    void *row;
+    uint32_t h;
+    rc = moy_htab_add(s_tab, &h, &row);
+    if (rc != MOY_HTAB_OK) {
+        return rc == MOY_HTAB_FULL ? MOY_LEASE_FULL : MOY_LEASE_NOMEM;
+    }
+    moy_lease_row_t *r = row;
+    memset(r, 0, sizeof(*r));
+    r->owner = owner;
+    r->cls = cls;
+    return MOY_LEASE_OK;
+}
+
+int moy_lease_let(uint32_t owner, uint8_t cls) {
+    uint32_t at = is_device(cls) ? device_row(cls) : 0u;
+    if (at == 0 || row_of(at)->owner != owner) {
+        return MOY_LEASE_STALE;
+    }
+    moy_htab_release(s_tab, at);
+    return MOY_LEASE_OK;
+}
+
+uint32_t moy_lease_holder(uint8_t cls) {
+    uint32_t at = is_device(cls) ? device_row(cls) : 0u;
+    return at != 0 ? row_of(at)->owner : 0u;
+}
+
+const char *moy_lease_device_name(uint8_t cls) {
+    static const char *const names[] = { "mic", "lora", "ble", "media" };
+    return is_device(cls) ? names[cls - MOY_LEASE_DEVICE_FIRST] : NULL;
+}
+
 int moy_lease_drop(uint32_t h) {
     moy_lease_row_t *r = row_of(h);
     if (r == NULL) {
         return MOY_LEASE_STALE;
+    }
+    if (is_device(r->cls)) {
+        // The row goes first: the driver's end lets a lease it no longer has.
+        uint8_t cls = r->cls;
+        uint32_t owner = r->owner;
+        moy_htab_release(s_tab, h);
+        device_end(cls, owner);
+        return MOY_LEASE_OK;
     }
     for (uint32_t i = 0; i < MOY_LEASE_EDGES; i++) {
         if (r->edge[i] != 0) {

@@ -466,7 +466,7 @@ class _Stoppable:
         self.opened -= 1
 
 
-@pytest.mark.parametrize("argv", [("http", "get", "http://x/"), ("mic", "read", "5000"),
+@pytest.mark.parametrize("argv", [("http", "get", "http://x/"),
                                   ("lora", "recv", "5000"), ("ble", "scan", "5000")])
 def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkeypatch, argv):
     """A role command waiting on a device asks the session's face for Ctrl-C
@@ -593,5 +593,7 @@ def test_every_role_the_board_names_is_served():
                             "moy_sh_board.c")).read()
     table = src[src.index("ROLES[] = {"):]
     names = re.findall(r'"([a-z]+)"', table[:table.index("NULL")])
+    in_c = src[src.index("C_ROLES[] = {"):]
+    in_c = re.findall(r'"([a-z]+)"', in_c[:in_c.index("NULL")])
     served = sorted(n[2:] for n in dir(sh_roles) if n.startswith("r_"))
-    assert sorted(names) == served
+    assert sorted(names) == sorted(served + in_c) and not set(in_c) & set(served)

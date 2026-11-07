@@ -1,6 +1,7 @@
 // moy_media: the media service (moy_media.h has the contract).
 
 #include "moy_media.h"
+#include "moy_lease.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -194,8 +195,10 @@ int moy_media_present(void) {
 #endif
 }
 
+// The holder is the lease table's (moy_lease.h, MOY_LEASE_MEDIA); m->owner
+// is the service's copy, MOY_MEDIA_ORPHAN once the VM that held it is gone.
 uint32_t moy_media_owner(void) {
-    return s_m != NULL ? s_m->owner : 0u;
+    return moy_lease_holder(MOY_LEASE_MEDIA);
 }
 
 static media_t *mine(uint32_t owner) {
@@ -1323,6 +1326,8 @@ static void task(void *arg) {
 
 // -- open and close ---------------------------------------------------------------------
 
+static int media_open(uint32_t owner, int rate, int channels);
+
 int moy_media_open(uint32_t owner, int rate, int channels) {
     if (owner == 0u) {
         return -MOY_MEDIA_EINVAL;
@@ -1333,6 +1338,18 @@ int moy_media_open(uint32_t owner, int rate, int channels) {
     if (s_m != NULL) {
         return s_m->owner == owner ? 0 : -MOY_MEDIA_EBUSY;
     }
+    int lr = moy_lease_hold(owner, MOY_LEASE_MEDIA);
+    if (lr != MOY_LEASE_OK) {
+        return lr == MOY_LEASE_BUSY ? -MOY_MEDIA_EBUSY : -MOY_MEDIA_ENOMEM;
+    }
+    int rc = media_open(owner, rate, channels);
+    if (rc != 0) {
+        moy_lease_let(owner, MOY_LEASE_MEDIA);
+    }
+    return rc;
+}
+
+static int media_open(uint32_t owner, int rate, int channels) {
 #if MOY_MEDIA_MIX
     moy_aud_out_start();
     rate = moy_aud_out_rate();
@@ -1441,7 +1458,26 @@ int moy_media_close(uint32_t owner) {
         return -MOY_MEDIA_EAGAIN;
     }
     reap(m);
+    moy_lease_let(owner, MOY_LEASE_MEDIA);
     return 0;
+}
+
+// Its holder gone, the stream stops and the service is the ORPHAN's, closed
+// by the next open or the VM's end.
+static void orphan(media_t *m) {
+    if (m->owner != MOY_MEDIA_ORPHAN) {
+        uint32_t was = m->owner;
+        moy_media_stop(was);
+        m->owner = MOY_MEDIA_ORPHAN;
+        moy_lease_let(was, MOY_LEASE_MEDIA);
+    }
+}
+
+void moy_media_lease_end(uint32_t owner) {
+    media_t *m = mine(owner);
+    if (m != NULL && moy_media_close(owner) != 0) {
+        orphan(m);
+    }
 }
 
 int moy_media_close_vm(void) {
@@ -1449,10 +1485,7 @@ int moy_media_close_vm(void) {
     if (m == NULL) {
         return 0;
     }
-    if (m->owner != MOY_MEDIA_ORPHAN) {
-        moy_media_stop(m->owner);
-        m->owner = MOY_MEDIA_ORPHAN;
-    }
+    orphan(m);
 #ifdef MEDIA_BOARD
     for (int i = 0; i < 200 && !m->idle; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
