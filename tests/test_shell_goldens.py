@@ -1137,11 +1137,15 @@ class _StatusSection:
 
 
 def _status_item(ws, state=0):
+    """Music's item, on a pid the kernel handed out: a made-up one is a real
+    process's by the count of spawns before it, and that process's end sweeps
+    the item."""
+    from runtime import moy_log
     from runtime.status_items import ITEMS
     for it in ITEMS.slots:
         if it.pid:
             ITEMS._free(it)
-    it = ITEMS.add(5, "music", _StatusSection(), 0)
+    it = ITEMS.add(moy_log.spawn("Music"), "music", _StatusSection(), 0)
     it.app = "Music"
     it.show(state)
     return it
@@ -1191,8 +1195,9 @@ def _status_plan(ws, cfg):
         assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
 
     def scrolled():
+        from runtime import moy_log
         from runtime.status_items import ITEMS
-        it = ITEMS.add(6, "pulse", _StatusSection("radio"), 1)
+        it = ITEMS.add(moy_log.spawn("Radio"), "pulse", _StatusSection("radio"), 1)
         it.app = "Radio"
         it.show()
         press("down", 10)
