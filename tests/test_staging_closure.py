@@ -99,7 +99,7 @@ NATIVE = {
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
     # browser. moy_sh, the terminal's C shell, moy_tty, its face over a stream,
     # and moy_ssh, the SSH server (native/moy_ssh/README.md), are taken by
-    # every board, the Zero's face SSH alone (its board.toml says why).
+    # every board, the Zero's too (its board.toml says why).
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.

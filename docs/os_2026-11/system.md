@@ -274,9 +274,9 @@ With no password set there is no SSH. The password's hash is
 for a Dropbear server. The server holds the radio (the `ssh` lease) while a
 password is set (`runtime/system/ssh_service.py`). Every console serves
 it; the Guition P4's slots grew for it (its board.toml's `[image]`), and so
-did the Zero's (2026-11-07), whose one face it is: its station and name are
-up while it serves its webhost, so it holds no lease, and its password is
-the one its setup form sets.
+did the Zero's (2026-11-07), whose faces are this and the web terminal: its
+station and name are up while it serves its webhost, so it holds no lease,
+and its password is the one its setup form sets.
 The serial terminal needs no sign-in, being the owner's cable.
 
 **The web terminal** is the Terminal of the browser console, in both web

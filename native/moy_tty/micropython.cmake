@@ -12,13 +12,8 @@ add_library(moy_tty_core STATIC
     ${MOY_TTY}/moy_tty.c
     ${MOY_TTY}/moy_tty_sys.c
     ${MOY_TTY}/moy_tty_sh.c
+    ${MOY_TTY}/moy_tty_ws.c
     ${MOY_TTY}/moy_tty_sftp.c)
-# The web terminal's bridge, unless the board's micropython.cmake sets
-# MOY_TTY_WEB_TERM OFF (the Zero: SSH is its one face); the webhost's GET /term
-# answers 404 in an image without it.
-if(NOT DEFINED MOY_TTY_WEB_TERM OR MOY_TTY_WEB_TERM)
-    target_sources(moy_tty_core PRIVATE ${MOY_TTY}/moy_tty_ws.c)
-endif()
 
 idf_build_get_property(_moy_tty_inc INCLUDE_DIRECTORIES GENERATOR_EXPRESSION)
 idf_build_get_property(_moy_tty_opts COMPILE_OPTIONS GENERATOR_EXPRESSION)
