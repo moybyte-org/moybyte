@@ -24,9 +24,10 @@ ROWS): its VM, console, layers, paint images and scenes, p8 machine and
 OWNER. `run_begin` answers the run's handle and makes its row current;
 `use(h)` makes it current again, and every other verb acts on the current
 row, so the glue (`device/moycore_glue.py`) calls `use` before each call into
-its run. A row comes from PSRAM on a board (the first at the first ask and
-kept, a later one while its run holds it), so the S3s' internal SRAM holds
-the pointers alone. What a row keeps against the gc -- its registered
+its run. A row is held only while its run is, internal SRAM first on a
+board (the verbs read its console every call), and the current row while no
+run is open is an idle one in PSRAM, so the S3s' idle desk holds the
+pointers alone. What a row keeps against the gc -- its registered
 callables, its layer restore state, its last `view()`, its p8 buffers -- is
 one rooted list, a stretch per row. `runs()` counts the open runs and
 `heap(h)` reads a run's Lua heap, Lua's own count. The pool's chunks are

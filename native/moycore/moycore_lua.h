@@ -18,8 +18,10 @@
 // every call below acts on. A caller makes its row current
 // (moycore_run_use) before it calls in; a row is current on the VM's task
 // alone, so nothing switches it under a call. The rows are MOYCORE_RUNS at
-// most, from PSRAM on a board: the first at the first ask, kept for good; a
-// second and later one while a run holds it (moycore_run_new, moycore_run_end).
+// most, each held only while its run is (moycore_run_new, moycore_run_end),
+// internal SRAM first on a board, where the verbs read the console; while no
+// run is, the current row is an idle one in PSRAM, made at the first ask and
+// kept, so a call with no run reads zeros and the idle desk holds no row.
 #ifndef MOYCORE_LUA_H
 #define MOYCORE_LUA_H
 

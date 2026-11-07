@@ -897,16 +897,29 @@ static const moy_htab_mem_t g_tab_mem = { media_alloc, tab_release };
 
 moycore_run *moycore_run_row;
 static moycore_run *g_rows[MOYCORE_RUNS];
+static moycore_run *g_idle;            // current while no run is: PSRAM, kept
 static uint16_t g_row_gen;
 // The next run's OWNER: the Player's launch comes before the runtime makes
 // the run's row, which takes it.
 static uint32_t g_owner_next;
 
+// A run's row: internal SRAM first, where every verb's console reads are
+// (a compiled cart's draw state measured a frame's worth slower from PSRAM
+// on the S3s), held only while its run is, so the idle desk pays nothing.
+static void *row_alloc(void)
+{
+#ifdef MOYCORE_PSRAM
+    void *p = heap_caps_calloc(1, sizeof(moycore_run), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (p) return p;
+#endif
+    return media_alloc(sizeof(moycore_run));
+}
+
 static moycore_run *row_make(int slot)
 {
     moycore_run *r = g_rows[slot];
     if (r == NULL) {
-        r = (moycore_run *)media_alloc(sizeof(*r));
+        r = (moycore_run *)row_alloc();
         if (r == NULL) return NULL;
         g_rows[slot] = r;
     }
@@ -914,6 +927,8 @@ static moycore_run *row_make(int slot)
     r->slot = (uint8_t)slot;
     g_row_gen = (uint16_t)(g_row_gen >= 0x7fffu ? 1u : g_row_gen + 1u);
     r->gen = g_row_gen;
+    r->owner = g_owner_next;
+    g_owner_next = 0;
     return r;
 }
 
@@ -924,34 +939,27 @@ static int row_held(const moycore_run *r)
 
 moycore_run *moycore_run_first(void)
 {
-    if (g_rows[0] == NULL && row_make(0) == NULL) {
-        // No memory for even the first row: nothing can run, and every
-        // caller reads a zero row in flash rather than a NULL one (a write
-        // to it faults; only a made row is written).
-        static const moycore_run none;
-        return (moycore_run *)&none;
+    if (g_idle == NULL) {
+        g_idle = (moycore_run *)media_alloc(sizeof(moycore_run));
+        if (g_idle == NULL) {
+            // No memory for even the idle row: nothing can run, and every
+            // caller reads a zero row in flash rather than a NULL one (a
+            // write to it faults; only a made row is written).
+            static const moycore_run none;
+            return (moycore_run *)&none;
+        }
     }
-    moycore_run_row = g_rows[0];
+    moycore_run_row = g_idle;
     return moycore_run_row;
 }
 
 moycore_run *moycore_run_new(void)
 {
-    moycore_run *cur = moycore_row();
-    if (!row_held(cur) && g_rows[cur->slot] == cur) {
-        int slot = cur->slot;
-        moycore_run_use(row_make(slot));
-        moycore_run_row->owner = g_owner_next;
-        g_owner_next = 0;
-        return moycore_run_row;
-    }
     for (int i = 0; i < MOYCORE_RUNS; i++) {
         if (row_held(g_rows[i])) continue;
         moycore_run *r = row_make(i);
         if (r == NULL) return NULL;
         moycore_run_use(r);
-        r->owner = g_owner_next;
-        g_owner_next = 0;
         return r;
     }
     return NULL;
@@ -989,18 +997,13 @@ int moycore_run_count(void)
 
 void moycore_run_end(moycore_run *r)
 {
-    if (r == NULL || g_rows[r->slot] != r) return;
-    int slot = r->slot;
-    if (slot == 0) {
-        memset(r, 0, sizeof(*r));
-    } else {
-        g_rows[slot] = NULL;
-        media_free(r);
-    }
+    if (r == NULL || r->slot >= MOYCORE_RUNS || g_rows[r->slot] != r) return;
+    g_rows[r->slot] = NULL;
     if (moycore_run_row == r) {
-        moycore_run_row = g_rows[0];
+        moycore_run_row = NULL;         // the idle row, at the next ask
         moycore_run_cur = NULL;
     }
+    media_free(r);
 }
 
 size_t moycore_run_heap(const moycore_run *r)
