@@ -1,4 +1,5 @@
 == open: it asks to connect
+drew=1
 |\e[2mConnecting to the board...\e[0m
 |
 |
@@ -9,6 +10,7 @@
 |
 want=1 size=48x8 sized=0 out=0
 == open: the board's prompt, the keys sent
+drew=0
 |files$
 |
 |
@@ -19,6 +21,7 @@ want=1 size=48x8 sized=0 out=0
 |
 want=0 size=48x8 sized=0 out=2
 == the board's output
+drew=0
 |files$ ls
 |notes.md  pics/
 |files$
@@ -29,6 +32,7 @@ want=0 size=48x8 sized=0 out=2
 |
 want=0 size=48x8 sized=0 out=0
 == a full-screen app on the alternate screen
+drew=0
 |top  3 processes
 |
 |
@@ -39,6 +43,7 @@ want=0 size=48x8 sized=0 out=0
 |q quit
 want=0 size=48x8 sized=0 out=0
 == the app ended: the shell's screen back
+drew=0
 |files$ ls
 |notes.md  pics/
 |files$ top
@@ -49,6 +54,7 @@ want=0 size=48x8 sized=0 out=0
 |
 want=0 size=48x8 sized=0 out=0
 == lost under an app: the shell's screen back
+drew=1
 |files$ ls
 |notes.md  pics/
 |files$ top
@@ -59,6 +65,7 @@ want=0 size=48x8 sized=0 out=0
 |
 want=0 size=48x8 sized=0 out=0
 == a resize goes to the board
+drew=0
 |files$ ls
 |notes.md  pics/
 |files$ top
@@ -69,6 +76,7 @@ want=0 size=48x8 sized=0 out=0
 |
 want=1 size=40x8 sized=1 out=0
 == the shell exited
+drew=1
 |files$ top
 |files$ vi
 |\e[2mThe connection to the board was lost. Pr\e[0m
@@ -79,6 +87,7 @@ want=1 size=40x8 sized=1 out=0
 |
 want=0 size=40x8 sized=0 out=0
 == a key while closed sends nothing
+drew=0
 |files$ top
 |files$ vi
 |\e[2mThe connection to the board was lost. Pr\e[0m
@@ -89,6 +98,7 @@ want=0 size=40x8 sized=0 out=0
 |
 want=0 size=40x8 sized=0 out=0
 == Enter asks again
+drew=1
 |files$ vi
 |\e[2mThe connection to the board was lost. Pr\e[0m
 |\e[2mr to connect again.\e[0m
@@ -99,6 +109,7 @@ want=0 size=40x8 sized=0 out=0
 |
 want=1 size=40x8 sized=0 out=0
 == lost, then no answer
+drew=1
 |\e[2mew session.\e[0m
 |\e[2mConnecting to the board...\e[0m
 |
@@ -109,6 +120,7 @@ want=1 size=40x8 sized=0 out=0
 |
 want=0 size=40x8 sized=0 out=0
 == the pin refused, then a wait
+drew=1
 |\e[2mess Enter to connect again.\e[0m
 |\e[2mThe board does not answer. Press Enter t\e[0m
 |\e[2mo try again.\e[0m
@@ -119,6 +131,7 @@ want=0 size=40x8 sized=0 out=0
 |
 want=0 size=40x8 sized=0 out=0
 == the board's face is SSH's
+drew=1
 |\e[2mo try again.\e[0m
 |\e[2mThe board refused the pin. Enter it on t\e[0m
 |\e[2mhe page, then press Enter.\e[0m
@@ -130,12 +143,14 @@ want=0 size=40x8 sized=0 out=0
 want=0 size=40x8 sized=0 out=0
 == the Terminal closed: want=2
 == opened again: it asks again
+drew=1
 |\e[2mConnecting to the board...\e[0m
 |
 |
 |
 want=1 size=48x4 sized=0 out=0
 == a page no board serves: no shell, nothing asked
+drew=1
 |\e[2mThis console has no shell.\e[0m
 |
 |

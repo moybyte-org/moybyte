@@ -34,6 +34,7 @@ typedef struct {
     moy_sh_app_t *app;                  // the remote app open now, or NULL
     char *kept;                         // the shell's screen under an app's, or NULL
     int kept_rows, kept_cur[3];
+    int said;                           // a state written to the grid, not yet drawn
 } link_t;
 
 static link_t *L;
@@ -128,9 +129,12 @@ static void restore(link_t *l) {
     l->kept = NULL;
 }
 
+// A state's words arrive between frames, with or without the far shell's
+// bytes: the next tick draws them either way.
 static void say(link_t *l, const char *text) {
     if (l->app != NULL) {
         moy_sh_app_write(l->app, text);
+        l->said = 1;
     }
 }
 
@@ -247,8 +251,10 @@ static int r_tick(moy_sh_app_t *a, void *st, uint32_t ms) {
     (void)st;
     (void)ms;
     link_t *l = link_of();
+    int said = l->said;
+    l->said = 0;
     if (l->in_n == 0) {
-        return 0;
+        return said;
     }
     // the bytes up to each switch of screens, the switch done here
     const char *p = l->in, *end = l->in + l->in_n;
@@ -289,6 +295,7 @@ static void r_close(moy_sh_app_t *a, void *st) {
     l->kept = NULL;
     l->app = NULL;
     l->in_n = l->out_n = 0;
+    l->said = 0;
     if (l->state != MOY_SH_LINK_NONE) {
         l->want = MOY_SH_LINK_WANT_CLOSE;
         l->state = MOY_SH_LINK_IDLE;

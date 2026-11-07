@@ -1,8 +1,8 @@
 // The host harness of a link's face (moy_sh_link.h): the screen with no
 // session, its `remote` app at 48 by 8, driven as the page's transport drives
-// it, and the app's grid printed after each step (tests/test_moy_sh_link.py
-// holds it to tests/moy_sh_link/). Lines with no inks print bare; a line's
-// SGR escapes print as \e.
+// it, and after each step whether a tick drew and the app's grid
+// (tests/test_moy_sh_link.py holds it to tests/moy_sh_link/). Lines with no
+// inks print bare; a line's SGR escapes print as \e.
 
 #include <stdio.h>
 #include <string.h>
@@ -13,8 +13,11 @@
 
 static moy_sh_screen_t *S;
 
+static int tick(void);
+
 static void show(const char *step) {
     printf("== %s\n", step);
+    printf("drew=%d\n", tick());
     moy_term_t *t = moy_sh_app_term(moy_sh_screen_app(S));
     int cols, rows;
     moy_term_size(t, &cols, &rows);
@@ -39,8 +42,8 @@ static void show(const char *step) {
     printf("want=%d size=%dx%d sized=%d out=%zu\n", want, cols2, rows2, sized, on);
 }
 
-static void tick(void) {
-    moy_sh_app_tick(moy_sh_screen_app(S), 0);
+static int tick(void) {
+    return moy_sh_app_tick(moy_sh_screen_app(S), 0);
 }
 
 static void keys(const char *k) {

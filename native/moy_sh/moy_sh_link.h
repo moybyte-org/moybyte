@@ -7,10 +7,10 @@
 // face, its grid, its look and its key rows are the Terminal's. The far
 // shell's bytes write the app's grid as any VT100 app's output does, and the
 // keys the face turns its input into go back unread. The transport is the
-// page's (firmware/web_runner/term_link.py over the board's GET /term):
-// between frames it reads what the app wants and the keys typed, and hands
-// in the bytes that came and what became of the connection, which the app
-// says under the far shell's last screen.
+// page's (the worker's WebSocket to the board's GET /term, through web_boot's
+// term_*): between frames it reads what the app wants and the keys typed, and
+// hands in the bytes that came and what became of the connection, which the
+// app says under the far shell's last screen, drawn on the next frame.
 
 #ifndef MOY_SH_LINK_H
 #define MOY_SH_LINK_H
