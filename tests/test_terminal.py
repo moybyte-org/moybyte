@@ -159,22 +159,26 @@ def test_ctrl_c_stops_a_running_built_in(term):
 
 
 def test_ctrl_c_ends_a_role_command_waiting_on_its_device(term, monkeypatch):
-    """`ble scan` waits in Python across the door; the screen face's
-    Ctrl-C reaches it through moy_sh.interrupted and it gives the radio
+    """`http get` waits in Python across the door; the screen face's
+    Ctrl-C reaches it through moy_sh.interrupted and it gives the request
     back (runtime/shell/sh_roles.py)."""
     from runtime import devices, sh_roles
     held = []
 
-    class Ble:
-        def scan(self, ms):
+    class Http:
+        CAP_MAX = 65536
+
+        def get(self, url, cap):
             held.append(1)
 
-        def close(self):
-            held.pop()
+            class R:
+                def state(self):
+                    return None
 
-        def devices(self):
-            return []
-    monkeypatch.setattr(devices, "api", lambda name: Ble() if name == "ble" else None)
+                def close(self):
+                    held.pop()
+            return R()
+    monkeypatch.setattr(devices, "api", lambda name: Http() if name == "http" else None)
     _ws, app = term
     polls = []
     real = sh_roles.stopped
@@ -186,7 +190,7 @@ def test_ctrl_c_ends_a_role_command_waiting_on_its_device(term, monkeypatch):
         return real(d)
     monkeypatch.setattr(sh_roles, "stopped", stopped)
     t0 = time.monotonic()
-    run(app, "ble scan 5000; echo not-after")
+    run(app, "http get http://x/; echo not-after")
     assert time.monotonic() - t0 < 2
     assert held == [] and app.face.status() == 130
     assert "not-after" not in plain(app)

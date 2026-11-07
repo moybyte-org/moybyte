@@ -27,6 +27,10 @@
 #include "moy_loop.h"
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
+#if __has_include("../moy_input/moy_gatt.h")
+#include "../moy_input/moy_gatt.h"
+#define MOY_SH_BLE 1
+#endif
 
 // The Player's run in front (native/moy_play: weak, so an image without it
 // links).
@@ -308,7 +312,7 @@ static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
     "passwd", "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
-static const char *const C_ROLES[] = { "mic", "lora", NULL };
+static const char *const C_ROLES[] = { "mic", "lora", "ble", NULL };
 
 // The files tree's root, as moy_sh_board_host gives it.
 static const char *files_root(void) {
@@ -350,7 +354,7 @@ uint32_t moy_mic_drops(void) __attribute__((weak));
 int moy_mic_present(void) __attribute__((weak));
 
 #define MIC_MS 10000                    // a mic read, at most
-#define MIC_POLL_MS 10
+#define POLL_MS 10                      // a served command's wait between looks
 
 static void say(moy_sh_t *s, int fd, const char *text) {
     moy_sh_fd_write(s, fd, text, strlen(text));
@@ -423,7 +427,7 @@ static int b_mic(moy_sh_t *s, int argc, char **argv) {
         } else if (n < 0) {
             break;
         } else {
-            b_sleep(NULL, MIC_POLL_MS);
+            b_sleep(NULL, POLL_MS);
         }
     }
     moy_sh_hop(s, mic_close_here, NULL);
@@ -528,7 +532,7 @@ static int b_lora(moy_sh_t *s, int argc, char **argv) {
                 code = INTERRUPTED;
                 break;
             }
-            b_sleep(NULL, MIC_POLL_MS);
+            b_sleep(NULL, POLL_MS);
         }
         if (code == 1) {
             say(s, 2, "lora: nothing heard\n");
@@ -538,13 +542,97 @@ static int b_lora(moy_sh_t *s, int argc, char **argv) {
     return code;
 }
 
+#ifdef MOY_SH_BLE
+// The BLE central's driver (native/moy_input/moy_gatt.h): weak, as the mic's.
+int moy_gatt_present(void) __attribute__((weak));
+int moy_gatt_open(uint32_t owner) __attribute__((weak));
+int moy_gatt_close(uint32_t owner) __attribute__((weak));
+int moy_gatt_scan(uint32_t owner, uint32_t ms) __attribute__((weak));
+int moy_gatt_seen(uint32_t i, moy_gatt_seen_t *out) __attribute__((weak));
+
+#define SCAN_MS 3000                    // a scan, by default
+#define SCAN_MAX_MS 60000
+
+typedef struct {
+    uint32_t ms;
+    int rc;
+} ble_scan_t;
+
+static void ble_scan_here(void *arg) {
+    ble_scan_t *c = arg;
+    c->rc = moy_gatt_open(SHELL_PID);
+    if (c->rc == 0) {
+        c->rc = moy_gatt_scan(SHELL_PID, c->ms);
+        if (c->rc < 0) {
+            moy_gatt_close(SHELL_PID);
+        }
+    }
+}
+
+static void ble_close_here(void *arg) {
+    (void)arg;
+    moy_gatt_close(SHELL_PID);
+}
+
+// ble scan [MS]: the devices heard within MS, "ADDR RSSI NAME" each. The
+// radio held as the shell (pid 1) over its lease while it scans, refused
+// (busy) while another process holds it. Ctrl-C gives it back and exits 130.
+static int b_ble(moy_sh_t *s, int argc, char **argv) {
+    char line[64 + MOY_GATT_NAME];
+    if (argc < 2 || argc > 3 || strcmp(argv[1], "scan") != 0) {
+        say(s, 2, "usage: ble scan [MS]\n");
+        return 2;
+    }
+    if (moy_gatt_present == NULL || !moy_gatt_present()) {
+        say(s, 2, "ble: this console has none\n");
+        return 1;
+    }
+    char *end = NULL;
+    long ms = argc == 3 ? strtol(argv[2], &end, 10) : SCAN_MS;
+    if (argc == 3 && (end == NULL || *end != 0)) {
+        ms = SCAN_MS;
+    }
+    ble_scan_t c = { ms > 0 && ms <= SCAN_MAX_MS ? (uint32_t)ms : 0u, 0 };
+    moy_sh_hop(s, ble_scan_here, &c);
+    if (c.rc < 0) {
+        snprintf(line, sizeof line, "ble: %s\n", why_of(-c.rc));
+        say(s, 2, line);
+        return 1;
+    }
+    uint32_t t0 = run_ms();
+    while (run_ms() - t0 < c.ms) {
+        if (moy_sh_interrupted(s)) {
+            moy_sh_hop(s, ble_close_here, NULL);
+            return INTERRUPTED;
+        }
+        b_sleep(NULL, POLL_MS);
+    }
+    moy_gatt_seen_t d;
+    for (uint32_t i = 0; moy_gatt_seen(i, &d) == 0; i++) {
+        snprintf(line, sizeof line, "%02x:%02x:%02x:%02x:%02x:%02x %d %s\n", d.addr[5], d.addr[4],
+                 d.addr[3], d.addr[2], d.addr[1], d.addr[0], d.rssi, d.name[0] ? d.name : "-");
+        say(s, 1, line);
+    }
+    moy_sh_hop(s, ble_close_here, NULL);
+    return 0;
+}
+#else
+// An image without the input drivers (the Zero) has no BLE central.
+static int b_ble(moy_sh_t *s, int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    say(s, 2, "ble: this console has none\n");
+    return 1;
+}
+#endif
+
 // A role command is a job the console steps: `role JOB ARGV...` starts it
 // and runs its first step, `step JOB` each one after, while it answers
 // RUNNING; between them the session waits (b_sleep: a runner's run parks,
 // so the console's frame goes on). Ctrl-C `stop`s it. JOB names the session.
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
-    static int (*const served[])(moy_sh_t *, int, char **) = { b_mic, b_lora };
+    static int (*const served[])(moy_sh_t *, int, char **) = { b_mic, b_lora, b_ble };
     for (size_t i = 0; argc > 0 && C_ROLES[i] != NULL; i++) {
         if (strcmp(argv[0], C_ROLES[i]) == 0) {
             return served[i](s, argc, argv);

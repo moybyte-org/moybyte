@@ -14,12 +14,12 @@ exit code; its output goes through the door to the session's fd 1, its
 complaints to fd 2. Imported at the first role command.
 
 Each is the face of one implementation, never a second copy, run as the shell
-(pid 1: full access, not gated); what the shell takes (the BLE central, the USB
+(pid 1: full access, not gated); what the shell takes (the USB
 host, a MIDI port, the audio ring) it gives back before the command ends,
-except a media stream, which plays until `media stop`. `mic` and `lora` are
-served in C over their drivers and leases (native/moy_sh/moy_sh_board.c's
-C_ROLES).
-A command that waits (`http get`, `ble scan`, `snd
+except a media stream, which plays until `media stop`. `mic`, `lora` and
+`ble` are served in C over their drivers and leases
+(native/moy_sh/moy_sh_board.c's C_ROLES).
+A command that waits (`http get`, `snd
 play`, `pkg`'s fetches and installs) is a generator the door steps
 (runtime/shell/sh_door.py, `role`): it yields where it waits (`_wait`, a bare
 `yield`; `yield True` where more work is ready at once), so the console's
@@ -45,7 +45,6 @@ the http worker's own wait), never `online()`.
                              the task manager's Stop is the same stop
   lease                      what the board leases and who holds it
   http get URL [CAP]         a GET, its body to stdout; not 2xx exits 1
-  ble scan [MS]              what a scan hears: "ADDR RSSI NAME"
   usb [devices]              what is plugged in: "ADDR CLASS VID:PID NAME"
   midi                       the transports this console has
   midi send PORT BYTE...     MIDI bytes (hex) to uart<n>, usb:ADDR or ble:ADDR
@@ -93,7 +92,6 @@ except ImportError:  # host: the runtime package
 USAGE = 2
 INTERRUPTED = 130
 WAIT_MS = 20000                 # an http request's wait, at most
-SCAN_MS = 3000                  # a BLE scan, by default
 POLL_MS = 10
 
 _WHY = {1: "not permitted", 2: "not found", 5: "i/o error", 9: "not open",
@@ -538,24 +536,6 @@ def r_http(d, a):
     if not 200 <= st[0] < 300:
         d.err("http", "status %d" % st[0])
         return 1
-    return 0
-
-
-def r_ble(d, a):
-    if not a or a[0] != "scan" or len(a) > 2:
-        return _usage(d, "ble", "scan [MS]")
-    f = _api(d, "ble")
-    if f is None:
-        return 1
-    ms = _int(a[1], SCAN_MS) if len(a) == 2 else SCAN_MS
-    try:
-        f.scan(ms)
-        if (yield from _wait(d, ms)):
-            return INTERRUPTED
-        d.out("".join("%s %d %s\n" % (addr, rssi, name or "-")
-                      for addr, rssi, name in f.devices()))
-    finally:
-        f.close()
     return 0
 
 

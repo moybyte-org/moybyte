@@ -161,3 +161,25 @@ def test_ble_needs_the_permission_and_is_absent_with_the_host_down():
     moybyte.end(pid)
     gatt_sim.remove()
     assert moybyte.ble is None and "ble" not in P.services(Ws())
+
+
+def test_the_shells_ble_scan_is_served_in_c_over_the_centrals_lease(tmp_path):
+    """`ble scan` in the shell (native/moy_sh/moy_sh_board.c, pid 1) holds
+    the central's lease (moy_lease.h, MOY_LEASE_BLE) while it scans: refused
+    busy while a Python app holds it, and once the app ends it lists what it
+    heard and lets the lease go."""
+    from test_dev_mic import _shell
+    pid = L.spawn("t.ble")
+    _as(pid, lambda: moybyte.ble.connect(HRM))
+    term, line = _shell(tmp_path)
+    try:
+        assert line("ble scan 50")[-1] == "ble: busy"
+        assert term.face.status() == 1
+        moybyte.end(pid)
+        out = line("ble scan 50")
+        assert term.face.status() == 0, out
+        assert out[-2:] == ["%s -48 Pulse" % HRM, "%s -71 Lamp" % LAMP]
+        assert N.owner() == 0
+        assert line("ble")[-1] == "usage: ble scan [MS]"
+    finally:
+        term.close_session()

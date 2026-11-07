@@ -423,8 +423,8 @@ def test_device_faces_answer_through_the_door(console, monkeypatch):
 
 
 class _Stoppable:
-    """A device face whose wait the session's Ctrl-C ends: `opened` until
-    the role gives it back."""
+    """An http face whose wait the session's Ctrl-C ends: `opened` until
+    the role gives its request back."""
 
     CAP_MAX = 65536
 
@@ -443,33 +443,13 @@ class _Stoppable:
                 face.opened -= 1
         return R()
 
-    def open(self):
-        self.opened += 1
-        return 16000
 
-    def read(self, buf):
-        return 0
-
-    def listen(self, on):
-        self.opened += 1
-
-    def recv(self, buf):
-        return None
-
-    def scan(self, ms):
-        self.opened += 1
-
-    def close(self):
-        self.opened -= 1
-
-
-@pytest.mark.parametrize("argv", [("http", "get", "http://x/"), ("ble", "scan", "5000")])
-def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkeypatch, argv):
+def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkeypatch):
     """A role command waiting on a device asks the session's face for Ctrl-C
     between polls (moy_sh.interrupted, the serial face's 0x03 or the screen
     face's keys): it exits 130 having closed what it opened."""
     face = _Stoppable()
-    _faces(monkeypatch, **{argv[0]: face})
+    _faces(monkeypatch, http=face)
     _ws, door = console
     io, d = door()
     polls = []
@@ -478,7 +458,7 @@ def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkey
         polls.append(1)
         return len(polls) > 3
     io.interrupted = interrupted
-    assert call(d, "role", *argv) == 130
+    assert call(d, "role", "http", "get", "http://x/") == 130
     assert face.opened == 0 and len(polls) == 4
 
 

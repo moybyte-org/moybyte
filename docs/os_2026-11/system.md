@@ -85,10 +85,11 @@ everything the console knows (its processes, /proc and /dev through
 ROLE door on the shell's own row to `runtime/shell/sh_door.py`, so with the VM
 stopped `ps` shows the console stopped and the run in front. The role commands
 served today are `perm`, `notify`, `service`, `lease`, `python` and the device
-faces `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `media` and `snd`, each a
-face of its service's one implementation run as the shell (pid 1), giving back
-what it took before it ends, a media stream excepted;
-`runtime/shell/sh_roles.py` lists their forms.
+faces `http`, `usb`, `midi`, `media` and `snd`, each a face of its service's
+one implementation run as the shell (pid 1), giving back what it took before
+it ends, a media stream excepted; `runtime/shell/sh_roles.py` lists their
+forms. `mic`, `lora` and `ble` are served in C over their drivers and leases
+(`native/moy_sh/moy_sh_board.c`'s C_ROLES), as the shell (pid 1) too.
 
 **The line between C and the console** (owner, 2026-11-05: the terminal is
 mostly C, one implementation moved down, Python calling it). With the VM
@@ -159,10 +160,11 @@ the console's (`native/moy_sh/moy_sh_board.h`, THE RUNNER), and where it
 waits -- `sleep`, a role command between its steps -- it parks: the frame
 goes on, the face shows no prompt, and the loop's tail hands the run its
 turn again a frame later. A role command that waits (`http get`, `pkg`'s
-fetches and installs, `mic read`, `lora recv`, `ble scan`, `snd play`) is a
-generator the door steps a few milliseconds a crossing
-(`runtime/shell/sh_door.py`), its output reaching the face as it comes, and
-one on the network asks for the link without waiting for it. An SSH
+fetches and installs, `snd play`) is a generator the door steps a few
+milliseconds a crossing (`runtime/shell/sh_door.py`), its output reaching
+the face as it comes, and one on the network asks for the link without
+waiting for it; `mic read`, `lora recv` and `ble scan`, served in C, park
+the same way between their looks. An SSH
 session's own task waits between the steps the same way. While a run
 computes it holds the console's task, so **Ctrl-C reaches it in C**: the
 face's poll kicks the input drivers and reads the kernel input table's
