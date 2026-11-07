@@ -10,9 +10,10 @@
 //
 //   page -> board   binary: keys, as a terminal sends them
 //                   text:   {"size":[COLS,ROWS]}, the terminal's new size
-//   board -> page   binary: the face's bytes, gathered for up to GATHER_MS
-//                           (the face's output is many small sends: an echo
-//                           and its cursor, a full-screen app's rows)
+//   board -> page   binary: the face's bytes, what the pair holds when the
+//                           first arrives (the face gathers its own output,
+//                           moy_tty.c's OUT_BYTES; waiting here for more costs
+//                           a scheduler tick, 10 ms on a board)
 //                   close:  1000 "exit N" when the shell ends; 1013 "busy"
 //                           when another transport's face runs (one face at
 //                           a time), or this bridge serves another page
@@ -44,7 +45,6 @@
 #define BRIDGE_STACK (6 * 1024)
 #define IN_CAP 2048                     // a page's frames waiting to be whole
 #define OUT_CAP 2048                    // the face's bytes gathered into one frame
-#define GATHER_MS 2
 #define SEND_MS 5000                    // a page that takes nothing for this long is gone
 
 extern const moy_tty_shell_t moy_tty_moy_sh;
@@ -175,16 +175,8 @@ static int frames_in(int ws, int sfd, pid_t pid, uint8_t *in, size_t *n, char *s
     return 0;
 }
 
-static int readable(int fd, int ms) {
-    fd_set r;
-    FD_ZERO(&r);
-    FD_SET(fd, &r);
-    struct timeval tv = {ms / 1000, (ms % 1000) * 1000};
-    return select(fd + 1, &r, NULL, NULL, &tv) > 0;
-}
-
-// The face's bytes into one frame: what has come, and what comes within
-// GATHER_MS of it, up to OUT_CAP. 0 at the face's end.
+// The face's bytes into one frame: the first piece and what else the pair
+// holds now, up to OUT_CAP. 0 at the face's end.
 static ssize_t gather(int sfd, char *out) {
     size_t n = 0;
     ssize_t m = recv(sfd, out, OUT_CAP, 0);
@@ -192,12 +184,7 @@ static ssize_t gather(int sfd, char *out) {
         return 0;
     }
     n = (size_t)m;
-    uint32_t t0 = moy_tty_ms();
     while (n < OUT_CAP) {
-        int left = GATHER_MS - (int)(moy_tty_ms() - t0);
-        if (left < 0 || !readable(sfd, left)) {
-            break;
-        }
         m = recv(sfd, out + n, OUT_CAP - n, MSG_DONTWAIT);
         if (m <= 0) {
             break;

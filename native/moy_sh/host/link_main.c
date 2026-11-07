@@ -60,6 +60,17 @@ int main(void) {
     keys("ls");
     show("open: the board's prompt, the keys sent");
     in("ls\r\nnotes.md  pics/\r\nfiles$ ");
+    show("the board's output");
+    in("top\r\n\x1b[?1049h\x1b[0m\x1b[H\x1b[2Jtop  3 processes\x1b[8;1Hq quit");
+    show("a full-screen app on the alternate screen");
+    in("\x1b[0m\x1b[?25h\x1b[?1049lfiles$ ");
+    show("the app ended: the shell's screen back");
+    in("vi\x1b[?1049h\x1b[2Jvi's");
+    moy_sh_link_state(MOY_SH_LINK_LOST, 0);
+    show("lost under an app: the shell's screen back");
+    keys("\r");
+    moy_sh_link_state(MOY_SH_LINK_OPEN, 0);
+    in("files$ ");
     moy_sh_app_resize(moy_sh_screen_app(S), 40, 8);
     show("a resize goes to the board");
     moy_sh_link_state(MOY_SH_LINK_ENDED, 3);

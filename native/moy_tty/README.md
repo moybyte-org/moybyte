@@ -41,9 +41,9 @@ server could still serve the web terminal. How a face is reached is
   the pair is a segment on the board's loopback, which queues at most
   `LWIP_LOOPBACK_MAX_PBUFS` (8) and drops the rest, so the face sends in
   pieces of up to 1 KB: when the piece fills, before it waits for input or a
-  hop, at the end, and at the shell's poll once 10 ms old. The bridge gathers
-  again for 2 ms before it frames, so a key's echo and its redraw go out as
-  one WebSocket message.
+  hop, at the end, and at the shell's poll once 10 ms old. The bridge frames
+  what the pair holds when a piece arrives and never waits for more: a wait
+  of any length is a scheduler tick, 10 ms on a board, on every key.
 
 **One face at a time** across the transports (owner choice open: two faces
 would take two arenas): a page that finds an SSH session's face is closed

@@ -1,6 +1,10 @@
 // moy_sh_link: the Terminal's face where the shell is another console's
 // (moy_sh_link.h): the screen with no session behind it, and its one app,
 // `remote`, whose grid the far shell's bytes write and whose keys go back.
+//
+// The far face draws a full-screen app on the alternate screen (`ESC [?1049h`
+// ... `ESC [?1049l`, moy_tty_sh.c) and the grid has none, so the link keeps
+// the shell's screen when the app's begins and draws it back when it ends.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +18,10 @@
 #define OUT_CAP 4096u                   // keys not yet sent
 #define DIM "\x1b[2m"
 #define PLAIN "\x1b[0m"
+#define ALT_ON "\x1b[?1049h"
+#define ALT_OFF "\x1b[?1049l"
+#define ALT_N 8u                        // either's length
+#define ROW_CAP 2048u                   // a kept row, its inks and all
 
 typedef struct {
     char in[IN_CAP];
@@ -24,6 +32,8 @@ typedef struct {
     int cols, rows, sized;              // the grid; sized: it changed since read
     int state;                          // MOY_SH_LINK_*
     moy_sh_app_t *app;                  // the remote app open now, or NULL
+    char *kept;                         // the shell's screen under an app's, or NULL
+    int kept_rows, kept_cur[3];
 } link_t;
 
 static link_t *L;
@@ -77,6 +87,47 @@ size_t moy_sh_link_in(const char *p, size_t n) {
     return k;
 }
 
+// The shell's screen, kept while an app has the alternate one.
+static void keep(link_t *l) {
+    moy_term_t *t = l->app != NULL ? moy_sh_app_term(l->app) : NULL;
+    if (t == NULL || l->kept != NULL) {
+        return;
+    }
+    int cols, rows;
+    moy_term_size(t, &cols, &rows);
+    l->kept = malloc((size_t)rows * ROW_CAP);
+    if (l->kept == NULL) {
+        return;
+    }
+    l->kept_rows = rows;
+    for (int i = 0; i < rows; i++) {
+        char *row = l->kept + (size_t)i * ROW_CAP;
+        row[moy_term_line(t, i, row, ROW_CAP - 1)] = '\0';
+    }
+    moy_term_cursor(t, l->kept_cur);
+}
+
+// ...and drawn back when the app ends (or the session does).
+static void restore(link_t *l) {
+    if (l->kept == NULL) {
+        return;
+    }
+    if (l->app != NULL) {
+        char b[32];
+        moy_sh_app_write(l->app, PLAIN "\x1b[H\x1b[2J");
+        for (int i = 0; i < l->kept_rows; i++) {
+            snprintf(b, sizeof b, "\x1b[%d;1H", i + 1);
+            moy_sh_app_write(l->app, b);
+            moy_sh_app_write(l->app, l->kept + (size_t)i * ROW_CAP);
+            moy_sh_app_write(l->app, PLAIN);
+        }
+        snprintf(b, sizeof b, "\x1b[%d;%dH", l->kept_cur[0] + 1, l->kept_cur[1] + 1);
+        moy_sh_app_write(l->app, b);
+    }
+    free(l->kept);
+    l->kept = NULL;
+}
+
 static void say(link_t *l, const char *text) {
     if (l->app != NULL) {
         moy_sh_app_write(l->app, text);
@@ -99,14 +150,17 @@ void moy_sh_link_state(int state, int n) {
     case MOY_SH_LINK_OPEN:
         l->in_n = 0;
         l->out_n = 0;
+        snprintf(msg, sizeof msg, "\x1b[A\x1b[2K");    // the "Connecting" line
         break;
     case MOY_SH_LINK_ENDED:
-        snprintf(msg, sizeof msg, "%s\x1b[?1049l\r\n%s[the shell exited %d] Press Enter for a "
-                 "new session.%s\r\n", PLAIN, DIM, n, PLAIN);
+        restore(l);
+        snprintf(msg, sizeof msg, "%s\r\n%s[the shell exited %d] Press Enter for a new session.%s"
+                 "\r\n", PLAIN, DIM, n, PLAIN);
         break;
     case MOY_SH_LINK_LOST:
-        snprintf(msg, sizeof msg, "%s\x1b[?1049l\r\n%sThe connection to the board was lost. "
-                 "Press Enter to connect again.%s\r\n", PLAIN, DIM, PLAIN);
+        restore(l);
+        snprintf(msg, sizeof msg, "%s\r\n%sThe connection to the board was lost. Press Enter to "
+                 "connect again.%s\r\n", PLAIN, DIM, PLAIN);
         break;
     case MOY_SH_LINK_UNREACHABLE:
         snprintf(msg, sizeof msg, "%sThe board does not answer. Press Enter to try again.%s\r\n",
@@ -196,7 +250,33 @@ static int r_tick(moy_sh_app_t *a, void *st, uint32_t ms) {
     if (l->in_n == 0) {
         return 0;
     }
-    moy_sh_app_writen(a, l->in, l->in_n);
+    // the bytes up to each switch of screens, the switch done here
+    const char *p = l->in, *end = l->in + l->in_n;
+    while (p < end) {
+        const char *q = p;
+        int on = -1;
+        while (q + ALT_N <= end) {
+            if (q[0] == '\x1b' && memcmp(q, ALT_ON, ALT_N) == 0) {
+                on = 1;
+                break;
+            }
+            if (q[0] == '\x1b' && memcmp(q, ALT_OFF, ALT_N) == 0) {
+                on = 0;
+                break;
+            }
+            q++;
+        }
+        if (on < 0) {
+            q = end;
+        }
+        moy_sh_app_writen(a, p, (size_t)(q - p));
+        if (on == 1) {
+            keep(l);
+        } else if (on == 0) {
+            restore(l);
+        }
+        p = on < 0 ? end : q + ALT_N;
+    }
     l->in_n = 0;
     return 1;
 }
@@ -205,6 +285,8 @@ static void r_close(moy_sh_app_t *a, void *st) {
     (void)a;
     (void)st;
     link_t *l = link_of();
+    free(l->kept);
+    l->kept = NULL;
     l->app = NULL;
     l->in_n = l->out_n = 0;
     if (l->state != MOY_SH_LINK_NONE) {

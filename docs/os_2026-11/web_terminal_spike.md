@@ -16,8 +16,9 @@ lives in `system.md` §3, `native/moy_tty/README.md` and
 - the bridge is `native/moy_tty/moy_tty_ws.c`; a resize is a text message
   `{"size":[C,R]}`, not xterm's report; the board closes 1000 `exit N` and
   1013 `busy`; the subprotocol is `moy.sh`; the route answers `{"term":1}`
-  without the upgrade, which the page asks why a socket failed; the bridge
-  gathers the face's output for 2 ms a frame;
+  without the upgrade, which the page asks why a socket failed; the face
+  gathers its own output (a bridge that waited 2 ms for more cost a 10 ms
+  tick a key on a board) and the bridge frames what the pair holds;
 - the second `neofetch` stop of §2 was the face's loopback dropping
   segments, fixed by the face's output gathering before this build
   (`tests/test_moy_tty.py` runs it twice);
