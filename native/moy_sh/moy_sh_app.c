@@ -5,11 +5,17 @@
 
 #include "moy_sh_app.h"
 
+#if MOY_SH_LINK
+// The face of a console with no shell of its own (moy_sh_link.c): its one app.
+extern const moy_sh_app_ops_t moy_sh_remote_app;
+static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_remote_app};
+#else
 extern const moy_sh_app_ops_t moy_sh_edit_app;
 extern const moy_sh_app_ops_t moy_sh_top_app;
 static const moy_sh_app_ops_t python_app;
 
 static const moy_sh_app_ops_t *const APPS[] = {&moy_sh_edit_app, &python_app, &moy_sh_top_app};
+#endif
 #define NAPPS ((int)(sizeof APPS / sizeof APPS[0]))
 
 struct moy_sh_app {
@@ -44,11 +50,10 @@ static void t_free(void *ctx, void *p) {
     a->free(a->actx, p);
 }
 
-moy_sh_app_t *moy_sh_app_open(moy_sh_t *s, int cols, int rows, int ctrl,
-                              moy_sh_app_run_fn run, void *ctx, int argc, char **argv,
-                              int *status) {
+moy_sh_app_t *moy_sh_app_new(moy_sh_t *s, const moy_sh_app_heap_t *h, int cols, int rows,
+                             int ctrl, moy_sh_app_run_fn run, void *ctx, int argc, char **argv,
+                             int *status) {
     const moy_sh_app_ops_t *ops = moy_sh_app_find(argc > 0 ? argv[0] : NULL);
-    const moy_sh_host_t *h = moy_sh_host(s);
     *status = 1;
     if (ops == NULL) {
         return NULL;
@@ -98,6 +103,16 @@ moy_sh_app_t *moy_sh_app_open(moy_sh_t *s, int cols, int rows, int ctrl,
     }
     return a;
 }
+
+#if !MOY_SH_LINK
+moy_sh_app_t *moy_sh_app_open(moy_sh_t *s, int cols, int rows, int ctrl,
+                              moy_sh_app_run_fn run, void *ctx, int argc, char **argv,
+                              int *status) {
+    const moy_sh_host_t *h = moy_sh_host(s);
+    moy_sh_app_heap_t heap = {h->alloc, h->free, h->ctx};
+    return moy_sh_app_new(s, &heap, cols, rows, ctrl, run, ctx, argc, argv, status);
+}
+#endif
 
 void moy_sh_app_close(moy_sh_app_t *a) {
     if (a == NULL) {
@@ -275,6 +290,7 @@ int moy_sh_app_key(const char **pp, const char *end) {
     }
 }
 
+#if !MOY_SH_LINK
 // -- python: the console's REPL as a line app ---------------------------------------
 
 #define REPL_MORE 100                   // `python --repl LINE`: the statement goes on
@@ -365,3 +381,4 @@ static const moy_sh_app_ops_t python_app = {
     .line = py_line,
     .prompt = py_prompt,
 };
+#endif

@@ -56,6 +56,12 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # the page's pin prompt can be
                                             # driven in a real browser with no
                                             # board on the desk.
+    python serve.py ... --carts D --term HOST:PORT  # ...and GET /term passed
+                                            # through, bytes both ways, to a
+                                            # webhost that serves the board's
+                                            # shell (native/moy_tty's host
+                                            # harness, tests/test_moy_tty.py):
+                                            # the web terminal with no board.
 
 Bind the directory by PATH, never by chdir. Every build here REPLACES its output
 folder (build.sh and site/build.py both remove and recreate it), and a server
@@ -113,6 +119,14 @@ if one_link:
     args.remove("--one-link")
     if "--carts" not in sys.argv:
         raise SystemExit("--one-link needs --carts (it is part of the board twin)")
+term_to = None
+if "--term" in args:
+    i = args.index("--term")
+    h, _, p = args[i + 1].rpartition(":")
+    term_to = (h or "127.0.0.1", int(p))
+    del args[i:i + 2]
+    if "--carts" not in sys.argv:
+        raise SystemExit("--term needs --carts (it is part of the board twin)")
 if "--pin" in args:
     i = args.index("--pin")
     pin = args[i + 1]
@@ -342,6 +356,9 @@ else:
             if self._closing():
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/term" and term_to is not None:
+                self._term()
+                return
             if path == "/sync":
                 # The MODE MARKER (#193): a host that answers this owns the
                 # carts, so the page keeps nothing locally. Static hosting
@@ -388,6 +405,38 @@ else:
                 self._send(200, json.dumps(update.status()).encode())
                 return
             super().do_GET()          # the boot assets: never gated
+
+        def _term(self):
+            """The request as it came, to the shell's webhost, and then the
+            two sockets joined until either side closes."""
+            import socket
+            import threading
+            up = socket.create_connection(term_to)
+            head = self.requestline + "\r\n" + "".join(
+                "%s: %s\r\n" % kv for kv in self.headers.items()) + "\r\n"
+            up.sendall(head.encode())
+            down = self.connection
+
+            def pipe(a, b):
+                try:
+                    while True:
+                        d = a.recv(65536)
+                        if not d:
+                            break
+                        b.sendall(d)
+                except OSError:
+                    pass
+                try:
+                    b.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+            t = threading.Thread(target=pipe, args=(down, up), daemon=True)
+            t.start()
+            pipe(up, down)
+            t.join(2)
+            up.close()
+            self.close_connection = True
 
         def do_POST(self):
             if self._closing():
@@ -464,6 +513,8 @@ with server_class(("0.0.0.0", port), handler) as srv:
         note += " + a faked /update (%s)" % update_mode
     if one_link:
         note += " over one link at a time"
+    if term_to:
+        note += " + /term to %s:%d" % term_to
     print("serving %s at http://127.0.0.1:%d/%s%s"
           % (root, port, "?pin=%s" % pin if pin else "", note))
     srv.serve_forever()

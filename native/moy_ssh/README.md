@@ -35,8 +35,8 @@ uses none of it.
   module's (its README, What runs where).
 
 The server's task is made at the first start and parks between a stop and
-the next start, never deleted: deleting a PSRAM-stacked task links
-FreeRTOS's task-state query into IRAM, internal SRAM the idle desk would pay.
+the next start, never deleted, for the face task's reason
+(`native/moy_tty/README.md`, What runs where).
 A stop asked from a face's own command (`passwd -d` over SSH or the web
 terminal) stands until that session ends, and a start in the same session
 (`passwd x`) withdraws it (`moy_ssh.h`, THE RUN). The console keeps the

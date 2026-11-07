@@ -50,7 +50,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
+# The site's console runs the Terminal's shell in the page (build.sh --site);
+# a tree built without it serves the boards' bundle, whose Terminal says it
+# has no shell.
+PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist_site")
+if not os.path.exists(os.path.join(PLAYER_SRC, "index.html")):
+    PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
 VENDOR_SRC = os.path.join(HERE, "vendor")
 FIRMWARE_SRC = os.path.join(ROOT, "dist", "ci-firmware")
 sys.path.insert(0, ROOT)

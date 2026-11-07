@@ -95,18 +95,3 @@ int moy_sh_cands(moy_sh_t *s, const char *line, size_t col, moy_sh_cands_t *a) {
     qsort(a->names, (size_t)a->n, sizeof a->names[0], by_name);
     return a->n;
 }
-
-size_t moy_sh_cands_common(const moy_sh_cands_t *a) {
-    if (a->n == 0) {
-        return 0;
-    }
-    size_t common = strlen(a->names[0]);
-    for (int i = 1; i < a->n; i++) {
-        size_t k = 0;
-        while (k < common && a->names[i][k] == a->names[0][k]) {
-            k++;
-        }
-        common = k;
-    }
-    return common;
-}

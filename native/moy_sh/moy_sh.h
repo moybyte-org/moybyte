@@ -209,7 +209,20 @@ typedef struct {
 } moy_sh_cands_t;
 int moy_sh_cands(moy_sh_t *s, const char *line, size_t col, moy_sh_cands_t *a);
 // The bytes every name shares from its start.
-size_t moy_sh_cands_common(const moy_sh_cands_t *a);
+static inline size_t moy_sh_cands_common(const moy_sh_cands_t *a) {
+    size_t common = 0;
+    while (a->n > 0 && a->names[0][common] != '\0') {
+        common++;
+    }
+    for (int i = 1; i < a->n; i++) {
+        size_t k = 0;
+        while (k < common && a->names[i][k] == a->names[0][k]) {
+            k++;
+        }
+        common = k;
+    }
+    return common;
+}
 // The names in folder `path` of the session's files tree (its folder when
 // relative), a folder's with is_dir set, until fn answers nonzero: 0, fn's
 // answer, or an errno value.

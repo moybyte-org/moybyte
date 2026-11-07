@@ -90,6 +90,16 @@ const moy_sh_app_ops_t *moy_sh_app_find(const char *name);
 moy_sh_app_t *moy_sh_app_open(moy_sh_t *s, int cols, int rows, int ctrl,
                               moy_sh_app_run_fn run, void *ctx, int argc, char **argv,
                               int *status);
+// The same with no session behind it (`s` NULL: a link's face,
+// moy_sh_link.c), its memory `heap`'s.
+typedef struct {
+    void *(*alloc)(void *ctx, size_t n);
+    void (*free)(void *ctx, void *p);
+    void *ctx;
+} moy_sh_app_heap_t;
+moy_sh_app_t *moy_sh_app_new(moy_sh_t *s, const moy_sh_app_heap_t *heap, int cols, int rows,
+                             int ctrl, moy_sh_app_run_fn run, void *ctx, int argc, char **argv,
+                             int *status);
 void moy_sh_app_close(moy_sh_app_t *a);
 
 int moy_sh_app_keys(moy_sh_app_t *a, const char *p, size_t n);

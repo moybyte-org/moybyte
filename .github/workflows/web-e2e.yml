@@ -74,6 +74,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"  # the store suite builds its carts with it
       - "tests/fixtures/**"         # the p8 cart the drop suite imports, the wasm carts
+      - "tests/test_moy_tty.py"     # the terminal suite's board: its harness
       - "tests/tier_frame.py"       # the tier cart's golden, shared with the host
       - "native/**"                 # the C the browser build compiles, its engine included
       - "ports/jet/**"              # the Jet carts the wasm suite builds
@@ -95,6 +96,7 @@ on:
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"
       - "tests/fixtures/**"
+      - "tests/test_moy_tty.py"
       - "tests/tier_frame.py"
       - "native/**"
       - "ports/jet/**"
@@ -187,6 +189,10 @@ jobs:
       - name: Build the browser console
         run: firmware/web_runner/build.sh
 
+      # The site's, with the Terminal's shell: its own tree and dist_site/.
+      - name: Build the site's browser console
+        run: firmware/web_runner/build.sh --site
+
       # The wasm suite builds Jet Teapot and ESP 88 the way the carts' recipe
       # does, with wasi-sdk 24 -- ci.yml's cache, under the sha256 the build
       # pins, so a runner fetches it once.
@@ -214,7 +220,7 @@ jobs:
         run: |
           .venv/bin/python -m pytest -p xdist -n 4 -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-            tests/test_web_board_system_e2e.py \
+            tests/test_web_board_system_e2e.py tests/test_web_term_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \

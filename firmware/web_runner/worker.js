@@ -991,7 +991,8 @@ async function init(search, coarse, channel, scheme) {
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
-        + "import_p8_json, edit_cart, open_cart, state_json");
+        + "import_p8_json, edit_cart, open_cart, state_json, "
+        + "term_enable, term_poll_json, term_feed, term_state");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -1010,6 +1011,12 @@ async function init(search, coarse, channel, scheme) {
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
     stateJson = mp.globals.get("state_json");
+    mp.globals.get("term_enable")(mode === "board");
+    if (mode === "board") {
+        termPoll = mp.globals.get("term_poll_json");
+        termFeed = mp.globals.get("term_feed");
+        termState = mp.globals.get("term_state");
+    }
     if (gpioPins) {
         gpioPoll = mp.globals.get("gpio_poll_json");
         gpioAck = mp.globals.get("gpio_ack_json");
@@ -1210,6 +1217,90 @@ function gpioPump() {
         })
         .catch(() => { try { gpioAck(0, ""); } catch (e) { } })
         .finally(() => { gpioBusy = false; });
+}
+
+// THE TERMINAL on a board-served page is a face of the board's shell
+// (web_boot's term_*, native/moy_sh/moy_sh_link.h): one WebSocket to the
+// board's GET /term (native/moy_tty), opened when the Terminal asks and
+// closed when it lets go. Its bytes and its fate queue here in arrival order
+// and are handed to the VM between steps, never inside one. A socket that
+// fails before it opens says nothing of why, so the same route without the
+// upgrade is asked: 403 the pin, 429 a wait, 404 no shell here.
+const TERM = { OPEN: 2, ENDED: 3, LOST: 4, UNREACHABLE: 5, PIN: 6, WAIT: 7, BUSY: 8, NONE: 9 };
+let termPoll = null, termFeed = null, termState = null;
+let termWs = null;
+const termQ = [];
+function termQuery(extra) {
+    return "term?" + (pin ? "pin=" + encodeURIComponent(pin) + "&" : "") + extra;
+}
+function termB64(u8) {
+    let s = "";
+    for (let i = 0; i < u8.length; i += 0x8000) {
+        s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    }
+    return btoa(s);
+}
+function termClose() {
+    const ws = termWs;
+    termWs = null;
+    if (ws) { try { ws.close(1000); } catch (e) { } }
+}
+async function termWhy() {
+    try {
+        const r = await fetch(termQuery("probe=1"));
+        if (r.status === 403) return [TERM.PIN, 0];
+        if (r.status === 429) {
+            let ms = 0;
+            try { ms = (await r.json()).ms | 0; } catch (e) { }
+            return [TERM.WAIT, ms];
+        }
+        if (r.status === 404) return [TERM.NONE, 0];
+    } catch (e) { }
+    return [TERM.UNREACHABLE, 0];
+}
+function termOpen(cols, rows) {
+    termClose();
+    const u = new URL(termQuery("cols=" + cols + "&rows=" + rows), self.location.href);
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+    let ws;
+    try { ws = new WebSocket(u.href, "moy.sh"); } catch (e) {
+        termQ.push({ s: TERM.UNREACHABLE, n: 0 });
+        return;
+    }
+    ws.binaryType = "arraybuffer";
+    let opened = false;
+    termWs = ws;
+    ws.onopen = () => { if (termWs === ws) { opened = true; termQ.push({ s: TERM.OPEN, n: 0 }); } };
+    ws.onmessage = (m) => {
+        if (termWs === ws && typeof m.data !== "string") termQ.push({ d: termB64(new Uint8Array(m.data)) });
+    };
+    ws.onclose = (c) => {
+        if (termWs !== ws) return;
+        termWs = null;
+        const exit = /^exit (-?\d+)$/.exec(c.reason || "");
+        if (c.code === 1000 && exit) termQ.push({ s: TERM.ENDED, n: +exit[1] });
+        else if (c.code === 1013) termQ.push({ s: TERM.BUSY, n: 0 });
+        else if (opened) termQ.push({ s: TERM.LOST, n: 0 });
+        else termWhy().then(([st, n]) => termQ.push({ s: st, n: n }));
+    };
+}
+function termPump() {
+    if (!termPoll) return;
+    let j = "";
+    try { j = termPoll(); } catch (e) { return; }
+    if (j) {
+        const d = JSON.parse(j);
+        if (d.want === 2) termClose();
+        if (d.want === 1) termOpen(d.cols, d.rows);
+        if (termWs && termWs.readyState === 1) {
+            if (d.size) termWs.send(JSON.stringify({ size: d.size }));
+            if (d.out) termWs.send(new Uint8Array(d.out));
+        }
+    }
+    while (termQ.length) {
+        const q = termQ.shift();
+        try { if (q.d !== undefined) termFeed(q.d); else termState(q.s, q.n); } catch (e) { }
+    }
 }
 
 // MODE 1 delivery: the batch the sweep just built, applied into OPFS.
@@ -1591,6 +1682,7 @@ function loop() {
         }
         syncPump();
         gpioPump();
+        termPump();
         updatePump();
         cartsPump();
     } catch (e) {

@@ -833,7 +833,8 @@ def state_json():
     the running cart's first eight pmem slots, the earned badges' ids, the
     Settings rows as the console holds them, whether the FPS chip shows and
     the store's sync (`sync`: the batches its far end has taken, and whether
-    one is on its way), for a harness driving the page
+    one is on its way) and the Terminal's grid as lines (`term`, None before
+    it first opens), for a harness driving the page
     (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
@@ -843,6 +844,8 @@ def state_json():
     st["sync"] = {"acked": _S.get("sync_acked", 0),
                   "busy": any(w.busy() for w in _watchers())}
     st["edit"] = _edit_state(_S["ws"])
+    term = getattr(getattr(_S["ws"], "terminal_app", None), "face", None)
+    st["term"] = term.lines() if term is not None else None
     try:
         import moy_audio
         sc = moy_audio.snd_counts()
@@ -1103,6 +1106,83 @@ def gpio_off():
     if g is not None:
         g.stop()
     _S["gpio"] = None
+    return ""
+
+
+# -- the Terminal's link to the serving board's shell --------------------------------
+#
+# The Terminal's face on the bundle a board bakes is a face of that board's
+# shell (native/moy_sh/moy_sh_link.h): its `remote` app's grid is the board's
+# bytes and its keys go back. The worker owns the socket (GET /term on the
+# board, native/moy_tty's bridge) and moves what these hand it, between
+# frames; nothing here waits on the network.
+
+_TERM_NONE = 9                          # MOY_SH_LINK_NONE
+
+
+def _link():
+    """The C face's link ends, or None (the site's console runs its own shell)."""
+    try:
+        import moy_sh
+    except ImportError:
+        return None
+    return moy_sh if hasattr(moy_sh, "link_want") else None
+
+
+def term_enable(on):
+    """Whether this page has a board's shell to reach: a board-served page
+    does; any other says so in the Terminal and never asks."""
+    sh = _link()
+    _S["term"] = bool(on) and sh is not None
+    _S["term_rest"] = b""
+    if sh is not None and not on:
+        sh.link_state(_TERM_NONE, 0)
+    return ""
+
+
+def term_poll_json():
+    """What the Terminal asks of the socket since the last poll, or "":
+    {"want": 1 (open) | 2 (close), "cols", "rows", "size": [c, r], "out": [byte, ...]}.
+    The bytes the board sent that the grid had no room for go in first."""
+    sh = _link() if _S.get("term") else None
+    if sh is None:
+        return ""
+    rest = _S.get("term_rest")
+    if rest:
+        _S["term_rest"] = rest[sh.link_in(rest):]
+    want, cols, rows, sized = sh.link_want()
+    out = sh.link_out()
+    if not (want or sized or out):
+        return ""
+    d = {}
+    if want:
+        d["want"] = want
+        d["cols"] = cols
+        d["rows"] = rows
+    if sized:
+        d["size"] = [cols, rows]
+    if out:
+        d["out"] = list(out)
+    return json.dumps(d)
+
+
+def term_feed(b64):
+    """The board's bytes (base64, as the worker carries them) into the grid."""
+    sh = _link() if _S.get("term") else None
+    if sh is None:
+        return ""
+    import binascii
+    data = _S.get("term_rest", b"") + binascii.a2b_base64(b64)
+    _S["term_rest"] = data[sh.link_in(data):]
+    return ""
+
+
+def term_state(state, n=0):
+    """What became of the socket (MOY_SH_LINK_*), said in the Terminal."""
+    sh = _link() if _S.get("term") else None
+    if sh is not None:
+        _S["term_rest"] = b""
+        sh.link_state(int(state), int(n))
     return ""
 
 

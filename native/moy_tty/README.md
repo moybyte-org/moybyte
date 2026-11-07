@@ -15,7 +15,7 @@ server could still serve the web terminal. How a face is reached is
 | `moy_tty_sys.c` | the face task, the hop to the console's task and its tail (`moy_tty_tail`, a weak hook in `native/moy_kernel/moy_loop_board.c`), the socket pair, PSRAM |
 | `moy_tty_ws.c` | the web terminal's bridge: the socket the webhost upgraded (`GET /term`), its WebSocket messages to and from a face |
 | `modmoy_tty.c` | the module `moy_tty`: `stats()` |
-| `host/tty_main.c` | the host harness `tests/test_moy_tty.py` builds: the kernel's webhost with a pin, the bridge, the face and the board's shell over a folder, the console's task a thread |
+| `host/tty_main.c` | the host harness `tests/test_moy_tty.py` builds: the kernel's webhost with a pin and the bridge in front of the face and shell SSH's harness runs (`native/moy_ssh/host/ssh_main.c`) |
 
 ## What runs where
 

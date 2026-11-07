@@ -1,0 +1,103 @@
+== open: it asks to connect
+|\e[2mConnecting to the board...\e[0m
+|
+|
+|
+|
+|
+|
+|
+want=1 size=48x8 sized=0 out=0
+== open: the board's prompt, the keys sent
+|\e[2mConnecting to the board...\e[0m
+|files$
+|
+|
+|
+|
+|
+|
+want=0 size=48x8 sized=0 out=2
+== a resize goes to the board
+|\e[2mConnecting to the board...\e[0m
+|files$ ls
+|notes.md  pics/
+|files$
+|
+|
+|
+|
+want=0 size=40x8 sized=1 out=0
+== the shell exited
+|\e[2mConnecting to the board...\e[0m
+|files$ ls
+|notes.md  pics/
+|files$
+|\e[2m[the shell exited 3] Press Enter for a n\e[0m
+|\e[2mew session.\e[0m
+|
+|
+want=0 size=40x8 sized=0 out=0
+== a key while closed sends nothing
+|\e[2mConnecting to the board...\e[0m
+|files$ ls
+|notes.md  pics/
+|files$
+|\e[2m[the shell exited 3] Press Enter for a n\e[0m
+|\e[2mew session.\e[0m
+|
+|
+want=0 size=40x8 sized=0 out=0
+== Enter asks again
+|\e[2mConnecting to the board...\e[0m
+|files$ ls
+|notes.md  pics/
+|files$
+|\e[2m[the shell exited 3] Press Enter for a n\e[0m
+|\e[2mew session.\e[0m
+|\e[2mConnecting to the board...\e[0m
+|
+want=1 size=40x8 sized=0 out=0
+== lost, then no answer
+|\e[2mew session.\e[0m
+|\e[2mConnecting to the board...\e[0m
+|
+|\e[2mThe connection to the board was lost. Pr\e[0m
+|\e[2mess Enter to connect again.\e[0m
+|\e[2mThe board does not answer. Press Enter t\e[0m
+|\e[2mo try again.\e[0m
+|
+want=0 size=40x8 sized=0 out=0
+== the pin refused, then a wait
+|\e[2mess Enter to connect again.\e[0m
+|\e[2mThe board does not answer. Press Enter t\e[0m
+|\e[2mo try again.\e[0m
+|\e[2mThe board refused the pin. Enter it on t\e[0m
+|\e[2mhe page, then press Enter.\e[0m
+|\e[2mToo many wrong pins: wait 3 s, then pres\e[0m
+|\e[2ms Enter.\e[0m
+|
+want=0 size=40x8 sized=0 out=0
+== the board's face is SSH's
+|\e[2mo try again.\e[0m
+|\e[2mThe board refused the pin. Enter it on t\e[0m
+|\e[2mhe page, then press Enter.\e[0m
+|\e[2mToo many wrong pins: wait 3 s, then pres\e[0m
+|\e[2ms Enter.\e[0m
+|\e[2mThe board's shell is in an SSH session.\e[0m
+|\e[2mPress Enter to try again.\e[0m
+|
+want=0 size=40x8 sized=0 out=0
+== the Terminal closed: want=2
+== opened again: it asks again
+|\e[2mConnecting to the board...\e[0m
+|
+|
+|
+want=1 size=48x4 sized=0 out=0
+== a page no board serves: no shell, nothing asked
+|\e[2mThis console has no shell.\e[0m
+|
+|
+|
+want=0 size=48x4 sized=0 out=0

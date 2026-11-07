@@ -9,7 +9,8 @@
 # under _dev/. A run that built only its own branch would delete the other's.
 #
 # The centrepiece is a REAL build, not a recording -- site/build.py embeds
-# firmware/web_runner/dist, so this workflow compiles MicroPython to
+# firmware/web_runner/dist_site (`build.sh --site`: the console with the
+# Terminal's shell in it), so this workflow compiles MicroPython to
 # WebAssembly twice before assembling the pages. That is the slow part:
 # build.sh clones and installs emsdk (~1.7 GB) the first time. master's tree
 # caches its whole .build under a key only this workflow's master tree saves,
@@ -163,7 +164,7 @@ jobs:
       - name: Build the browser console (master)
         id: player
         continue-on-error: true
-        run: firmware/web_runner/build.sh
+        run: firmware/web_runner/build.sh --site
 
       - name: Build the browser console (dev)
         id: player_dev
@@ -172,7 +173,7 @@ jobs:
           mkdir -p _dev/firmware/web_runner/.build
           [ -e _dev/firmware/web_runner/.build/emsdk ] || [ -L _dev/firmware/web_runner/.build/emsdk ] || \
             ln -s "$GITHUB_WORKSPACE/firmware/web_runner/.build/emsdk" _dev/firmware/web_runner/.build/emsdk
-          _dev/firmware/web_runner/build.sh
+          _dev/firmware/web_runner/build.sh --site
 
       # The images the page's flasher writes: the `firmware-latest` release,
       # falling back per board to a live run artifact. A board with nothing

@@ -43,6 +43,16 @@
 //                     the key row the input in use gets; the T-Deck's symbols
 //
 // write and read raise OSError(EBADF) outside a door crossing.
+//
+// A console with no shell of its own (MOY_SH_LINK, moy_sh_link.h: the
+// browser console a board serves) has Face, face_row and tdeck_row, the
+// Face's screen the far shell's, and in place of the rest the link's ends
+// the page's transport moves:
+//   link_want()       (want, cols, rows, sized): MOY_SH_LINK_WANT_* once,
+//                     the grid's size and whether it changed
+//   link_out()        the keys typed since, bytes
+//   link_in(data)     the far shell's bytes: how many it took
+//   link_state(s, n)  what became of the connection (MOY_SH_LINK_*)
 
 #include <errno.h>
 #include <string.h>
@@ -51,8 +61,12 @@
 #include "py/runtime.h"
 
 #include "moy_sh.h"
-#include "moy_sh_board.h"
 #include "moy_sh_screen.h"
+#if MOY_SH_LINK
+#include "moy_sh_link.h"
+#else
+#include "moy_sh_board.h"
+#endif
 
 #if __has_include("moy_ui_api.h")
 #define MOY_SH_FACE 1
@@ -62,6 +76,7 @@ moy_ui_ctx_t *moy_ui_mp_ctx(mp_obj_t ctx);
 void moy_ui_mp_sink(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look);
 #endif
 
+#if !MOY_SH_LINK
 static moy_sh_t *running(void) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
@@ -296,6 +311,8 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     make_new, screen_make_new,
     locals_dict, &screen_locals
     );
+
+#endif
 
 #if MOY_SH_FACE
 // -- the Terminal's face -------------------------------------------------------------
@@ -546,7 +563,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_lines_obj, face_lines);
 
 static mp_obj_t face_status(mp_obj_t self) {
     moy_sh_screen_t *scr = moy_sh_face_screen(tface(self));
-    return MP_OBJ_NEW_SMALL_INT(scr ? moy_sh_status(moy_sh_screen_session(scr)) : 0);
+    return MP_OBJ_NEW_SMALL_INT(scr ? moy_sh_screen_status(scr) : 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_status_obj, face_status);
 
@@ -614,8 +631,45 @@ static mp_obj_t sh_tdeck_row(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(sh_tdeck_row_obj, sh_tdeck_row);
 #endif
 
+#if MOY_SH_LINK
+static mp_obj_t sh_link_want(void) {
+    int cols, rows, sized;
+    int w = moy_sh_link_want(&cols, &rows, &sized);
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(w), MP_OBJ_NEW_SMALL_INT(cols),
+                     MP_OBJ_NEW_SMALL_INT(rows), mp_obj_new_bool(sized)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(sh_link_want_obj, sh_link_want);
+
+static mp_obj_t sh_link_out(void) {
+    char buf[1024];
+    size_t n = moy_sh_link_out(buf, sizeof buf);
+    return mp_obj_new_bytes((const byte *)buf, n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(sh_link_out_obj, sh_link_out);
+
+static mp_obj_t sh_link_in(mp_obj_t data) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_sh_link_in(b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sh_link_in_obj, sh_link_in);
+
+static mp_obj_t sh_link_state(mp_obj_t state, mp_obj_t n) {
+    moy_sh_link_state(mp_obj_get_int(state), mp_obj_get_int(n));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(sh_link_state_obj, sh_link_state);
+#endif
+
 static const mp_rom_map_elem_t moy_sh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_sh) },
+    #if MOY_SH_LINK
+    { MP_ROM_QSTR(MP_QSTR_link_want), MP_ROM_PTR(&sh_link_want_obj) },
+    { MP_ROM_QSTR(MP_QSTR_link_out), MP_ROM_PTR(&sh_link_out_obj) },
+    { MP_ROM_QSTR(MP_QSTR_link_in), MP_ROM_PTR(&sh_link_in_obj) },
+    { MP_ROM_QSTR(MP_QSTR_link_state), MP_ROM_PTR(&sh_link_state_obj) },
+    #else
     { MP_ROM_QSTR(MP_QSTR_DOOR), MP_ROM_INT(MOY_SH_DOOR) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&sh_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&sh_read_obj) },
@@ -623,6 +677,7 @@ static const mp_rom_map_elem_t moy_sh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_line), MP_ROM_PTR(&sh_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_interrupted), MP_ROM_PTR(&sh_interrupted_obj) },
     { MP_ROM_QSTR(MP_QSTR_Screen), MP_ROM_PTR(&screen_type) },
+    #endif
     #if MOY_SH_FACE
     { MP_ROM_QSTR(MP_QSTR_Face), MP_ROM_PTR(&face_type) },
     { MP_ROM_QSTR(MP_QSTR_face_row), MP_ROM_PTR(&sh_face_row_obj) },

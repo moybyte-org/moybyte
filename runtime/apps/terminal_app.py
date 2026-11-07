@@ -9,6 +9,7 @@ it the frame: the host's context and canvas, the content rect under the
 bar, and the frame's keys; the face answers what the host owes after it.
 """
 
+import sys as _sys
 from array import array as _array
 
 try:
@@ -29,8 +30,12 @@ try:
 except (ImportError, AttributeError):   # a folder of that name on CPython's path
     try:                    # CPython: the ctypes binding (runtime/host/moy_sh.py)
         from runtime import moy_sh as _sh
-    except ImportError:     # the browser and the desktop MicroPython: no C shell
+    except ImportError:     # the desktop MicroPython: no C shell
         _sh = None
+
+# The site's browser console: the shell itself runs in the page.
+_BROWSER_SHELL = (_sh is not None and _sys.platform == "webassembly"
+                  and not hasattr(_sh, "link_want"))
 
 _HIT, _KEYS = 1, 2                      # the face's input answer
 _AGAIN, _DAMAGE = 1, 2                  # its draw answer
@@ -112,10 +117,14 @@ class TerminalAppLayer:
 
     def ensure(self):
         """The face, made the first time it is needed: None where this
-        console has no C shell (the browser)."""
+        console has no C shell. A host's session and the site's browser
+        console (its shell runs in the page) name their files tree: the
+        store's folder, /moy in the browser, whose `files` is home. On a
+        board-served page the face is the board's shell's
+        (native/moy_sh/moy_sh_link.h) and takes no tree."""
         if self.face is None and _sh is not None:
             try:
-                if getattr(_sh, "HOST", False):
+                if getattr(_sh, "HOST", False) or _BROWSER_SHELL:
                     self.face = _sh.Face(_host_root(self._install.root()))
                 else:
                     self.face = _sh.Face()

@@ -34,6 +34,17 @@ void moy_input_board_kick(void) __attribute__((weak));
 #define POLL_MS 20u
 #define YIELD_MS 200u
 #define RELEASE_MS 1500u                // the wait for an interrupting key's release
+// A run's budget where nothing can park it: the browser's console runs the
+// session on the page's worker, which delivers no key and draws no frame
+// until the run returns (no SharedArrayBuffer on a static host), so a run
+// past its budget is stopped as Ctrl-C stops it, in seconds. 0: none (a
+// board's runs park on its runner and the frames go on).
+#ifndef MOY_SH_RUN_BUDGET_S
+#define MOY_SH_RUN_BUDGET_S 0
+#endif
+#define BUDGET_MS ((uint32_t)MOY_SH_RUN_BUDGET_S * 1000u)
+#define TEXT_OF(x) #x
+#define TEXT(x) TEXT_OF(x)
 
 struct moy_sh_screen {
     moy_sh_t *s;
@@ -49,6 +60,8 @@ struct moy_sh_screen {
     moy_sh_runner_t *runner;
     int homed;                          // the session has reached its home
     int ended, result;                  // a parked run's end, not yet taken
+    uint32_t started;                   // the run's start, for its budget
+    int over;                           // the run outlived its budget
     char root[MOY_SH_SCREEN_ROOT];
 };
 
@@ -79,6 +92,10 @@ static int screen_poll(void *ctx) {
         return 1;
     }
     uint32_t now = NOW_MS();
+    if (BUDGET_MS && (f->over || now - f->started >= BUDGET_MS)) {
+        f->over = 1;
+        return 1;
+    }
     if (now - f->polled < POLL_MS) {
         return 0;
     }
@@ -219,9 +236,16 @@ static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks) {
     f->by_keys = 0;
     f->polled = NOW_MS();
     f->yielded = f->polled;
+    f->started = f->polled;
+    f->over = 0;
     int r = parks ? moy_sh_board_run(f->s, text, n) : moy_sh_run(f->s, text, n);
     if (r == MOY_SH_BUSY) {
         return r;
+    }
+    if (f->over) {
+        static const char said[] = "\x1b[2m[stopped: a command in the browser runs "
+                                   "for " TEXT(MOY_SH_RUN_BUDGET_S) " s at most]\x1b[0m\n";
+        moy_term_write(f->t, said, sizeof said - 1);
     }
     // a key that interrupted is let go before the frame merges again, so its
     // press is no edge there (Mic is the console's key, B its back)

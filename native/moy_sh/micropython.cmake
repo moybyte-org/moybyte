@@ -1,8 +1,9 @@
 # moy_sh: the terminal's C shell (README.md) -- dash's sources, the session,
 # the C built-ins, the board's host table and the serial face -- and the
 # MicroPython module the console's door handler writes a program's streams
-# through (modmoy_sh.c). Device-only: there is no .mk twin; the unix and web
-# ports have no kernel to host a session.
+# through (modmoy_sh.c). Its .mk twin is the browser console's
+# (firmware/web_runner/build.sh): the shell for the site's, the Terminal's
+# face over the serving board's shell for the bundle the boards bake.
 #
 # The shell builds as its OWN static library, as moy_wasm's runtime does,
 # because dash's sources take `-include dash_config.h` and the shell's POSIX

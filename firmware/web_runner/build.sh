@@ -13,6 +13,13 @@
 #                           # shape: the console is frozen bytecode inside the
 #                           # wasm -- no modules.json fetch, no in-browser
 #                           # compile of the 2MB source tree)
+#   ./build.sh --site       # the same, for the project site: the Terminal's C
+#                           # shell runs in the browser on its own store (its
+#                           # own tree and dist_site/). The plain build is the
+#                           # one every board bakes: its Terminal is a face of
+#                           # the serving board's shell (native/moy_sh/
+#                           # moy_sh_link.h), and the shell stays out of it,
+#                           # because the bundle rides every board image twice
 #   ./build.sh --stage-only # re-stage modules/carts/page only (fast dev loop):
 #                           # dist/ gains modules.json and the page loads the
 #                           # staged sources into the VFS, which SHADOWS the
@@ -57,9 +64,18 @@ PY="${REPO_ROOT}/.venv/bin/python"
 [ -x "${PY}" ] || PY=python3
 
 STAGE_ONLY=0
+SITE=0
 case "${1:-}" in
   --stage-only) STAGE_ONLY=1 ;;
+  --site) SITE=1 ;;
 esac
+# Each variant compiles in a tree of its own, so switching between them
+# rebuilds nothing: build-moybyte (the boards') and build-moybyte-site.
+WASM_BUILD="build-moybyte"
+if [ "${SITE}" = "1" ]; then
+  WASM_BUILD="build-moybyte-site"
+  DIST_DIR="${SCRIPT_DIR}/dist_site"
+fi
 
 # ---------------------------------------------------------------------------
 # 1. Toolchain (skipped with --stage-only): emsdk + micropython clone + patches.
@@ -135,7 +151,7 @@ PYEOF
   # the bundle would depend on which objects a machine happened to have.
   if ! cmp -s "${SCRIPT_DIR}/variant/mpconfigvariant.mk" \
               "${PORT_DIR}/variants/moybyte/mpconfigvariant.mk"; then
-    rm -rf "${PORT_DIR}/build-moybyte"
+    rm -rf "${PORT_DIR}/build-moybyte" "${PORT_DIR}/build-moybyte-site"
   fi
   # Every copy into a tree make compiles goes through board_config's mirror,
   # which writes a file only when its bytes changed: an unchanged file keeps
@@ -223,7 +239,10 @@ PYEOF
   # half: the module `moy_loop`, whose driver tier the worker's frame steps),
   # sprint 4's Player (the module `moy_play`), sprint 5's app ABI
   # (`moy_app`) and sprint 6's toolkit (`moy_ui`).
-  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui; do
+  # moy_sh: the Terminal's face on every build; its micropython.mk takes the
+  # shell itself only for the site's (MOY_WEB_SHELL=1, --site), and a face
+  # of the serving board's shell otherwise (moy_sh_link.h).
+  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui moy_sh; do
     cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
   done
 
@@ -426,16 +445,16 @@ EOF
   # source is preprocessed again, so a build that drops a usermod source
   # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
   # longer has. A changed hook starts the generated headers afresh.
-  INDEX_STAMP="${PORT_DIR}/build-moybyte/moy_index_impl"
+  INDEX_STAMP="${PORT_DIR}/${WASM_BUILD}/moy_index_impl"
   INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
   if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
-    rm -rf "${PORT_DIR}/build-moybyte/genhdr"
+    rm -rf "${PORT_DIR}/${WASM_BUILD}/genhdr"
   fi
   # makemanifest rebuilds what is NEWER, so it misses a module deleted from
   # the console, a new freeze option and a new mpy-cross: the manifest, the
   # frozen set (names and bytes) and the compiler are the keys, the same
   # guard as the boards' (moybyte_frozen_guard in the ESP32 build library).
-  FROZEN_OUT="${PORT_DIR}/build-moybyte"
+  FROZEN_OUT="${PORT_DIR}/${WASM_BUILD}"
   FROZEN_TOOL="$( { cat "${BUILD_DIR}/frozen_manifest.py"
                     md5sum < "${MPY_DIR}/mpy-cross/build/mpy-cross"; } | md5sum | cut -d' ' -f1)"
   FROZEN_SET="$(cd "${FROZEN_DIR}" && find . -type f -name '*.py' -exec md5sum {} + | sort | md5sum | cut -d' ' -f1)"
@@ -447,7 +466,20 @@ EOF
   fi
   echo "${FROZEN_TOOL}" > "${FROZEN_OUT}/.moybyte-frozen-tool"
   echo "${FROZEN_SET}" > "${FROZEN_OUT}/.moybyte-frozen-set"
-  make -C "${PORT_DIR}" VARIANT=moybyte USER_C_MODULES="${USERMODS_DIR}" \
+  # A module set that shrank leaves make's link output newer than every
+  # object it still names, so the link would keep what the set dropped: a
+  # changed set (the usermods' make fragments, which name every source)
+  # starts the tree afresh.
+  MODSET="$(cat "${USERMODS_DIR}"/*/micropython.mk | md5sum | cut -d' ' -f1)"
+  if [ "$(cat "${FROZEN_OUT}/.moybyte-modset" 2>/dev/null)" != "${MODSET}" ]; then
+    rm -rf "${FROZEN_OUT}"
+    mkdir -p "${FROZEN_OUT}"
+    echo "${FROZEN_TOOL}" > "${FROZEN_OUT}/.moybyte-frozen-tool"
+    echo "${FROZEN_SET}" > "${FROZEN_OUT}/.moybyte-frozen-set"
+  fi
+  echo "${MODSET}" > "${FROZEN_OUT}/.moybyte-modset"
+  make -C "${PORT_DIR}" VARIANT=moybyte BUILD="${WASM_BUILD}" MOY_WEB_SHELL="${SITE}" \
+    USER_C_MODULES="${USERMODS_DIR}" \
     FROZEN_MANIFEST="${BUILD_DIR}/frozen_manifest.py" -j"$(nproc)" >/dev/null
   echo "${INDEX_HOOK}" > "${INDEX_STAMP}"
 fi
@@ -511,9 +543,9 @@ else
   # licence headers and prose included (MicroPython's licence is the console's
   # About screen's, runtime/system/licences.py). The same re-print, unindented like
   # the glue it follows; nothing is compressed or renamed.
-  "${JS_NODE}" "${TERSER}" "${PORT_DIR}/build-moybyte/micropython.mjs" --module \
+  "${JS_NODE}" "${TERSER}" "${PORT_DIR}/${WASM_BUILD}/micropython.mjs" --module \
     --format comments=false -o "${DIST_DIR}/micropython.mjs"
-  cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
+  cp "${PORT_DIR}/${WASM_BUILD}/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi
 # A PRE-GZIPPED copy beside each asset, for the BOARDS. They serve `<name>.gz`

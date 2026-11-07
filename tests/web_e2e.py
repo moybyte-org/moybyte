@@ -45,6 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RUNNER = ROOT / "firmware" / "web_runner"
 DIST = RUNNER / "dist"
+DIST_SITE = RUNNER / "dist_site"            # build.sh --site: the site's, with the shell
 CHROME = os.environ.get("MOY_CHROME", "google-chrome")
 
 BUILD = "firmware/web_runner/build.sh"
@@ -83,6 +84,15 @@ FEATURES = {
     "firstrun": (lambda: ("moyScheme" in (DIST / "index.html").read_text()
                           and b"start_edit" in (DIST / "micropython.wasm").read_bytes()),
                  "dist/ predates the first-run theme and the start option"),
+    # The web terminal: the page's socket pump, and a face of the board's
+    # shell frozen into the wasm the boards bake.
+    "term": (lambda: ("termPump" in (DIST / "worker.js").read_text()
+                      and b"link_want" in (DIST / "micropython.wasm").read_bytes()),
+             "dist/ predates the board-served Terminal (no term pump, or no link face)"),
+    # The site's console runs the shell itself (build.sh --site, dist_site/).
+    "site_shell": (lambda: ((DIST_SITE / "micropython.wasm").exists()
+                            and b"neofetch" in (DIST_SITE / "micropython.wasm").read_bytes()),
+                   "no dist_site/ with the shell in it -- build it with %s --site" % BUILD),
 }
 
 

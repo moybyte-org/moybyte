@@ -252,9 +252,8 @@ screen and in the serial's `sh LINE` alike.
 
 The same shell runs over the USB serial dev
 channel (the kernel word `sh LINE`, `native/moy_kernel/moy_devch.c`, over one
-session the kernel keeps: `SH` a line of output, then `SH end <status>`), over a web
-terminal through the webhost (`device/moy_webhost.py`, a route beside
-`/run` and `/update`), and over **SSH**: `ssh moybyte-XXXX.local` from any
+session the kernel keeps: `SH` a line of output, then `SH end <status>`), over
+the **web terminal**, and over **SSH**: `ssh moybyte-XXXX.local` from any
 laptop, `scp`/`sftp` into the files tree, mDNS for the hostname (the IDF's
 `mdns` component, the name Settings' Name; a console with none set is
 `moybyte-` and the last four hex digits of its MAC, owner, 2026-11-06,
@@ -275,9 +274,30 @@ With no password set there is no SSH. The password's hash is
 for a Dropbear server. The server holds the radio (the `ssh` lease) while a
 password is set (`runtime/system/ssh_service.py`). Every console serves
 it; the Guition P4's slots grew for it (its board.toml's `[image]`).
-The web terminal asks for the same password, since anyone on the LAN would
-otherwise get a root shell; the serial terminal needs no sign-in, being the
-owner's cable. **A spike first**: image size against `headroom_floor_kib`,
+The serial terminal needs no sign-in, being the owner's cable.
+
+**The web terminal** is the Terminal of the browser console, in both web
+modes, one face and one look (`docs/os_2026-11/web_terminal_spike.md`, the
+spike the owner approved on 2026-11-06):
+- **On a page a board serves** the Terminal opens straight into `remote`, a
+  face of that board's shell (`native/moy_sh/moy_sh_link.h`): the board's
+  bytes draw the page's grid and its keys go back as they are typed. The
+  shell is the board's, on the same stream face SSH opens
+  (`native/moy_tty/README.md`): one face at a time across the two, so a page
+  that finds an SSH session's is told so. The transport is a WebSocket the
+  webhost upgrades, `GET /term?pin=&cols=&rows=` (subprotocol `moy.sh`),
+  handed off the console's task at once, so the frame never carries it.
+- **Its sign-in is the page's pin**, behind the pin's backoff like every
+  gated route (`native/moy_net/moy_webhost.c`): on a console a pin holder can
+  already write and run any cart, so a shell adds no exposure. The page says
+  in the Terminal when the board does not answer, refused the pin, or makes
+  it wait ("wait N s", the 429's `ms`).
+- **On the project site** the console runs the shell itself in the page
+  (`firmware/web_runner/build.sh --site`), its root the browser's store
+  (`/moy` in the page) and its home that store's `files`. A run holds the
+  page's worker, so one past its budget is stopped as Ctrl-C stops it
+  (`native/moy_sh/moy_sh_screen.c`). The bundle every board bakes carries the
+  face and no shell. **A spike first**: image size against `headroom_floor_kib`,
 RAM per session, and internal SRAM on the S3 with WiFi up. Terminal-only
 apps are **the app model for the headless Zero**
 (`firmware/seeed_xiao_esp32s3_zero/README.md`): `ssh` in from a laptop and

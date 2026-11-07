@@ -170,7 +170,7 @@ web_touched() {
     case "${f}" in
       firmware/web_runner/*|runtime/*|device/*|system_carts/*|native/*|ports/jet/*) return 0 ;;
       tests/test_web_*|tests/web_e2e.py|tests/cart_store_fixtures.py) return 0 ;;
-      tests/fixtures/*|tests/tier_frame.py) return 0 ;;
+      tests/fixtures/*|tests/test_moy_tty.py|tests/tier_frame.py) return 0 ;;
       tools/jet_cart.py|tools/zopfli_gz.py|tools/wasm_cart.py) return 0 ;;
       tools/p8_import.py|tools/p8_lua_port.py|tools/p8_writer.py) return 0 ;;
       .github/workflows/web-e2e.yml) return 0 ;;
