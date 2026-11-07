@@ -126,6 +126,9 @@ SERVICES = {
     "cart_pick": "the #124 question for the player's own copy of an external "
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
+    "media_net": "the page's bytes Music plays in the browser: a song from the "
+                 "page's store or a board's sealed /media, a station through "
+                 "the page's fetch (firmware/web_runner/media_link.py)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "battery": "the battery's gauge (#130) behind the bar's battery widget, "
                "its popover and About",
@@ -169,6 +172,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": INJECTED,
         "net": INJECTED,
@@ -211,6 +215,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
                    "system battery (the README's power notes)",
@@ -252,6 +257,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the board's README names no cell and no gauge pin",
         "net": INJECTED,
@@ -291,6 +297,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
                    "ESPHome example nobody has checked against a fitted cell; "
@@ -338,6 +345,7 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "media_net": "the host's media service reads its own files and URLs; media_net exists because a browser's VM cannot reach the network or its store itself",
         "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
@@ -393,6 +401,7 @@ WIRING = {
         "cart_keep": INJECTED,
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
+        "media_net": INJECTED,
         "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
