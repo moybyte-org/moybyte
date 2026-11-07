@@ -561,10 +561,25 @@ def watch(ms):
 
 
 def current():
-    """The live run's handle, or 0."""
+    """The run launched last while it is live, or 0."""
     d, _ = _play()
     d.moy_play_current.restype = _U32
     return int(d.moy_play_current())
+
+
+def mute(run, on):
+    """A run held aside reads no input while `on` (moy_play.h)."""
+    d, _ = _play()
+    d.moy_play_mute.argtypes = [_U32, ctypes.c_bool]
+    d.moy_play_mute.restype = ctypes.c_int
+    _rc(d.moy_play_mute(int(run), bool(on)))
+
+
+def runs():
+    """How many runs are live (moy_play.h: MOY_PLAY_RUNS at once)."""
+    d, _ = _play()
+    d.moy_play_runs.restype = _U32
+    return int(d.moy_play_runs())
 
 
 def front(run):

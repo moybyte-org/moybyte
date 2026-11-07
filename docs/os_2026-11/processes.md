@@ -417,7 +417,9 @@ rows too, beside the bar's indicator and its stop control (owner,
 2026-11-03).
 
 As built (runtime/system/tasks_ui.py, the kernel kind `tasks`), phase 1
-lists Python runs and services; Lua and wasm rows arrive with phase 5. The
+lists Python runs and services, and phase 5 Lua runs, whose memory is their
+own state's heap, Lua's exact count (`moycore.heap`); compiled rows arrive
+with the wasm sessions. The
 Player times its run's `update`, `draw` and window events in microseconds,
 and the scheduler a process's callbacks (`Proc.cost_us`); every
 `METER_MS` (2 s) `Procs.account` turns each into busy microseconds a second,
@@ -457,13 +459,14 @@ beside it, Cancel and Close, whose Close closes what it names and opens the
 game. The Player's own fit check still runs at the load, against what is
 free.
 
-**Sessions.** The Lua engine holds several runs at once, each a row
-(`native/moycore/moycore_lua.h`), while the kernel's Player plays one
-(`native/moy_play`) and wasm runs one session (`native/moy_wasm`), so
-several Lua or wasm apps at once arrive with the process tables (phase 5);
-Python, stepped by the shell in
-its one VM, gets several first: admission lets a Lua or compiled game run
-alone and names everything running to close. Each run takes one of four
+**Sessions.** Python, stepped by the shell in its one VM, and Lua run
+several at once: a Lua run is a row of the engine's (its own state,
+console and media, `native/moycore/moycore_lua.h`) and of the kernel's
+Player (`MOY_PLAY_RUNS`, `native/moy_play/moy_play.h`), so a Lua game joins
+the running set as a Python one does, held aside reading no input
+(`moy_play_mute`) (P5.3, 2026-11-07). wasm runs one session
+(`native/moy_wasm`), so admission lets a compiled game run alone and names
+everything running to close (`player_fit.shares_runtime`). Each run takes one of four
 owner tags (`cart`, `cart2`..`cart4`) for its layer loans and its audio
 session. Audio has `MOY_AUD_SESSIONS` (4) rows, less the Music editor's while
 it holds one: a fifth source is refused with the same dialog, naming the

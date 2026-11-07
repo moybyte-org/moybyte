@@ -30,9 +30,11 @@ the pointers alone. What a row keeps against the gc -- its registered
 callables, its layer restore state, its last `view()`, its p8 buffers -- is
 one rooted list, a stretch per row. `runs()` counts the open runs and
 `heap(h)` reads a run's Lua heap, Lua's own count. The pool's chunks are
-every state's, given back at the last VM's close. The Player still plays one
-run (`native/moy_play/moy_play.h`), and admission keeps a Lua or compiled
-game alone (`docs/os_2026-11/processes.md` §6).
+every state's, given back at the last VM's close. The kernel's Player holds a
+row per run too (`native/moy_play/moy_play.h`) and makes its run's row
+current before each frame, so Lua games run side by side in the shell's
+running set (`docs/os_2026-11/processes.md` §6); a compiled cart's engine
+runs one session.
 
 | piece | how |
 |---|---|

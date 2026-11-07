@@ -24,7 +24,7 @@
 //   bind(run, input, audio, tick) its input table, audio session, Tick
 //   open(run)                    the row's check that its runtime is open
 //   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
-//   end(run[, why]), info([run]), current(), stack()
+//   end(run[, why]), info([run]), current(), runs(), mute(run, on), stack()
 //   watch(ms)                    the runaway watch's budget for the next
 //                                launch, 0 its slots' rule (a test's lever)
 //   QUIT, VIEW (a frame's bits); END_QUIT, END_CRASH (an end's why)
@@ -81,12 +81,15 @@ void moy_play_vm_stop(void) {
     if (moycore_vm_stop != NULL) {
         moycore_vm_stop();
     }
-    uint32_t run = moy_play_current();
-    if (run != 0u && moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2) {
-        return;                         // MOY_STOP_RUN
-    }
-    if (run != 0u) {
-        moy_play_end(run, MOY_PLAY_END_SERIAL);
+    // Every run ends with the VM, but the one a stop is for (MOY_STOP_RUN):
+    // the kernel's from here.
+    uint32_t keep = moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2
+                    ? moy_play_current() : 0u;
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        uint32_t run = moy_play_run_at(i);
+        if (run != 0u && run != keep) {
+            moy_play_end(run, MOY_PLAY_END_SERIAL);
+        }
     }
 }
 
@@ -479,6 +482,21 @@ static mp_obj_t mod_current(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_current_obj, mod_current);
 
+// mute(run, on) -- a run held aside reads no input.
+static mp_obj_t mod_mute(mp_obj_t run_obj, mp_obj_t on) {
+    int rc = moy_play_mute(run_arg(run_obj), mp_obj_is_true(on));
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_mute_obj, mod_mute);
+
+static mp_obj_t mod_runs(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_play_runs());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_runs_obj, mod_runs);
+
 // THE SHARES' ROWS (moy_play.h).
 static mp_obj_t share_obj(uint32_t v) {
     return v >= MOY_SHARE_NONE ? mp_const_none : mp_obj_new_int_from_uint(v);
@@ -530,6 +548,8 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hold), MP_ROM_PTR(&mod_hold_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
+    { MP_ROM_QSTR(MP_QSTR_runs), MP_ROM_PTR(&mod_runs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mute), MP_ROM_PTR(&mod_mute_obj) },
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&mod_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_live), MP_ROM_PTR(&mod_front_live_obj) },

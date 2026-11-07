@@ -201,17 +201,119 @@ def test_the_fifth_run_is_refused_naming_the_oldest(tmp_path):
         "Brick Siege", "Coin Quest", "Hop Quest"]
 
 
-def test_a_lua_game_runs_alone(tmp_path, monkeypatch):
+LUA_GAME = """
+N = 0
+function _update()
+  N = N + 1
+  if CRASH_AT and N >= CRASH_AT then error("boom at " .. N) end
+end
+function _draw() cls(%d) end
+"""
+
+
+def _lua_game(carts, title, colour, crash_at=None):
+    import json
+    d = carts / (title.lower().replace(" ", "_") + ".moy")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.json").write_text(json.dumps(
+        {"title": title, "canvas": "160x120", "runtime": "lua", "main": "main.lua",
+         "moybyte": {"type": "game", "permissions": ["graphics"]}}))
+    src = LUA_GAME % colour
+    if crash_at is not None:
+        src = "CRASH_AT = %d\n" % crash_at + src
+    (d / "main.lua").write_text(src)
+    (d / "config.json").write_text("{}")
+
+
+def _lua_desk(tmp_path, *games):
+    carts = tmp_path / "carts"
+    for g in games:
+        _lua_game(carts, *g)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
     ws.open_desk()
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _n(pl):
+    return pl._lua.get_global("N")
+
+
+def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
+    """A Lua game joins the running set like a Python one: held while its
+    window is hidden, its world (its own Lua state) as it was, and it goes
+    on from there when it comes back."""
+    ws, drv = _lua_desk(tmp_path, ("Lua Count", 8))
+    open_cart(ws, "Lua Count")
+    wl = _windowed(ws, drv)
+    for _ in range(5):
+        drv.frame(1 / 30)
     open_cart(ws, "Star Catcher")
     _windowed(ws, drv)
-    lua = next(c for c in ws.carts.all if c.get("runtime") == "lua"
-               and c.get("type", "game") == "game")
-    ws.open(lua)
-    assert ws.confirm.open and ws.cart["title"] == "Star Catcher"
-    assert ws.procs.list == []
+    assert [p.title() for p in ws.procs.list] == ["Lua Count"]
+    p = ws.procs.list[0]
+    assert p.player._lua is not None and p.player.detached
+    ws.wm._minimize(wl, True)
+    drv.frame(1 / 30)
+    held = _n(p.player)
+    for _ in range(20):
+        drv.frame(1 / 30)
+    assert p.state == "minimised" and p.player.paused
+    assert _n(p.player) == held, "a held Lua game ran"
+    assert ws.player._lua is None and ws.cart["title"] == "Star Catcher"
+    ws.wm._minimize(wl, False)
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert p.state == "throttled" and not p.player.paused
+    assert _n(p.player) > held
+    # brought to the front, it is the one that plays and reads the keys
+    ws.wm._move_focus("run:1")
+    assert ws.cart["title"] == "Lua Count" and not ws.player.detached
+    n = _n(ws.player)
+    drv.frame(1 / 30)
+    assert _n(ws.player) > n
+
+
+def test_two_lua_games_are_two_task_manager_rows_with_their_own_heaps(tmp_path):
+    ws, drv = _lua_desk(tmp_path, ("Lua One", 3), ("Lua Two", 9))
+    open_cart(ws, "Lua One")
+    _windowed(ws, drv)
+    open_cart(ws, "Lua Two")
+    _windowed(ws, drv)
+    for _ in range(6):
+        drv.frame(1 / 30)
+    one = ws.procs.list[0].player
+    one._lua.exec("BIG = {} for i = 1, 4000 do BIG[i] = i end")
+    rows = {r[1]: r for r in ws.procs.rows() if r[2] != "service"}
+    assert set(rows) == {"Lua One", "Lua Two"}
+    a, b = rows["Lua One"], rows["Lua Two"]
+    assert a[6] != b[6] and a[6] is not None, "two runs, two pids"
+    assert a[5] and b[5] and a[5] > b[5] + 16000, (a[5], b[5])
+    assert a[5] == one._lua.heap()
+
+
+def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_path):
+    from runtime.system import os_log
+    ws, drv = _lua_desk(tmp_path, ("Lua Steady", 3), ("Lua Boom", 9, 6))
+    open_cart(ws, "Lua Boom")
+    _windowed(ws, drv)
+    boom = ws.player
+    pid = boom.pid
+    open_cart(ws, "Lua Steady")
+    _windowed(ws, drv)
+    steady = ws.player
+    assert [p.title() for p in ws.procs.list] == ["Lua Boom"]
+    for _ in range(30):
+        drv.frame(1 / 30)
+    assert ws.procs.list == [], "the crashed game kept its row"
+    rec = os_log.crash_of(pid)
+    assert rec is not None and "boom at" in rec[1], rec
+    assert steady.cart_error is None and ws.player is steady
+    n = _n(steady)
+    drv.frame(1 / 30)
+    assert _n(steady) > n
+    assert os_log.crash_of(steady.pid) is None
 
 
 # -- admission on each board's share (player_fit.admit) ------------------------

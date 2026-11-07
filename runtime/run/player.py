@@ -1748,7 +1748,7 @@ class Player(PlayerDiag):
         if bind is None or take is None:
             return False
         try:
-            return bool(bind()) and bool(take(_moy_play.current()))
+            return bool(bind()) and bool(take(self._run_handle))
         except Exception as exc:  # noqa: BLE001 -- the console's frame still runs it
             print("PLAY front:", exc)
             return False
@@ -1805,7 +1805,7 @@ class Player(PlayerDiag):
             self._cart_start_ms = _ticks_add(self._cart_start_ms, span)
             inp = self.ws.input
             inp.cart_start_ms = _ticks_add(getattr(inp, "cart_start_ms", 0), span)
-            run = _moy_play.current() if self._play is not None else 0
+            run = self._run_handle if self._play is not None else 0
             if run:
                 _moy_play.hold(run, span)
         held, self._audio_held = self._audio_held, 0

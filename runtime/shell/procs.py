@@ -262,9 +262,9 @@ class Procs:
         return wins is not None and FRONT in wins
 
     def _detachable(self):
-        """The front run can join the running set: a Python game in a desk
-        window of its own -- not a playtest the Editor holds, not a tool, not
-        a linked match."""
+        """The front run can join the running set: a Python or Lua game in
+        a desk window of its own -- not a playtest the Editor holds, not a
+        tool, not a linked match, not a run the kernel's front drives."""
         ws = self.ws
         wm = ws.wm
         hand = self.handheld()
@@ -276,7 +276,8 @@ class Procs:
             if win.docked is not None or getattr(win, "own", False) \
                     or getattr(wm, "_play_intent", None) == "dev":
                 return False
-        if (pl._is_tool and not (hand and _is_app(ws.cart))) or pl._script or pl._lua is not None or pl._play is not None \
+        if (pl._is_tool and not (hand and _is_app(ws.cart))) or pl._script \
+                or not _fit.shares_runtime(ws.cart) or pl._front \
                 or pl._netplay is not None or ws.cart_frame is not None:
             return False
         ed = getattr(ws, "editor_app", None)
@@ -284,23 +285,24 @@ class Procs:
 
     def running(self):
         """The running set as admission counts it, oldest first:
-        (key, need, python) a run, the front's last. A handheld's front run
+        (key, need, shares) a run, the front's last. A handheld's front run
         is the one a launch replaces, so it does not count there."""
         ws = self.ws
         rts = getattr(ws, "runtimes", None) or {}
         out = []
         for p in self.list:
             c = p.world.project.cart
-            out.append((p.key, _fit.app_need(c), True))
+            out.append((p.key, _fit.app_need(c), _fit.shares_runtime(c)))
         if self.handheld():
             return out
         if self._detachable():
             c = ws.cart or {}
             rt = c.get("runtime", "python")
-            out.append((FRONT, _fit.app_need(c, rts.get(rt)), rt == "python"))
+            out.append((FRONT, _fit.app_need(c, rts.get(rt)), _fit.shares_runtime(c)))
         elif self.list and self._front_live():
-            # a front run that cannot join (a Lua game, a playtest): it is
-            # replaced by the launch unless admission counts it
+            # a front run that cannot join (a compiled game, a playtest the
+            # kernel runs): it is replaced by the launch unless admission
+            # counts it
             c = ws.cart or {}
             rt = c.get("runtime", "python")
             if rt != "python":
@@ -359,7 +361,7 @@ class Procs:
             return True
         rt = cart.get("runtime", "python")
         rts = getattr(ws, "runtimes", None) or {}
-        close = _fit.admit((_fit.app_need(cart, rts.get(rt)), rt == "python"),
+        close = _fit.admit((_fit.app_need(cart, rts.get(rt)), _fit.shares_runtime(cart)),
                            running, _fit.board_share(), self._rows())
         if close:
             self.refuse(cart, close)
@@ -462,6 +464,9 @@ class Procs:
 
     def _mute(self, pl):
         pl.detached = True
+        m = getattr(pl._lua, "mute", None)
+        if m is not None:
+            m(True)                 # a Lua run's snapshot: no input table
         ns = pl.ns
         held = {}
         if ns:
@@ -476,6 +481,9 @@ class Procs:
 
     def _unmute(self, pl):
         pl.detached = False
+        m = getattr(pl._lua, "mute", None)
+        if m is not None:
+            m(False)
         pl.quit_asked = False
         ns = pl.ns
         held = getattr(pl, "_held_verbs", None)
@@ -820,21 +828,25 @@ class Procs:
         sp = _sched.SCHED.procs.get(pl.pid) if pl.pid is not None else None
         if sp is not None and sp.cpu is not None:
             cpu = (cpu or 0) + sp.cpu
+        mem = pl.mem
+        heap = getattr(pl._lua, "heap", None)
+        if heap is not None:
+            mem = heap()            # a Lua run's own heap, exact
         out.append((key, str((cart or {}).get("title") or "Game"),
-                    "app" if _is_app(cart) else "game", state, cpu, pl.mem, pl.pid))
+                    "app" if _is_app(cart) else "game", state, cpu, mem, pl.pid))
 
     def rows(self):
         """The task manager's rows, front run first, then the running set
         oldest first, then the services: (key, name, kind, state, cpu, mem,
         pid), `kind` "game", "app" or "service", `cpu` per mille of a core and
-        `mem` bytes, each None where unmeasured. A Lua or compiled run has no
-        row (phase 5 of docs/os_2026-11.md)."""
+        `mem` bytes, each None where unmeasured: a Lua run's the heap of its
+        own state, exact; a Python run's what its start allocated. A
+        compiled run has no row yet (phase 5 of docs/os_2026-11.md)."""
         ws = self.ws
         out = []
         pl = ws.player
         cart = ws.cart
-        if cart is not None and cart.get("runtime", "python") == "python" \
-                and pl._lua is None and pl._play is None and not pl._script \
+        if cart is not None and _fit.shares_runtime(cart) and not pl._script \
                 and (pl._update is not None or pl._draw is not None
                      or pl.cart_error is not None) \
                 and (ws.wm.stack.has(FRONT) or FRONT in getattr(ws.wm, "_wins", {})):

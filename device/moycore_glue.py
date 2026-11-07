@@ -555,6 +555,15 @@ class MoycoreRun:
             if bits & _moy_play.VIEW:
                 self._sync_view()
 
+    def mute(self, on):
+        """A run held aside (runtime/shell/procs.py) reads no input while
+        `on`: its frames' snapshot has no buttons, key or pointer."""
+        if self._run and _moy_play is not None:
+            try:
+                _moy_play.mute(self._run, on)
+            except (RuntimeError, AttributeError):
+                pass
+
     # -- exit ---------------------------------------------------------------
 
     def flush_pmem(self):

@@ -354,14 +354,25 @@ def app_need(cart, make=None):
     return need + PY_WORLD
 
 
+SHARED_RUNTIMES = ("python", "lua")
+
+
+def shares_runtime(cart):
+    """Whether `cart`'s runtime runs beside others: Python in the shell's
+    VM, Lua in a row of its own (native/moycore/moycore_lua.h). A compiled
+    cart's engine runs one session (native/moy_wasm/README.md)."""
+    return (cart or {}).get("runtime", "python") in SHARED_RUNTIMES
+
+
 def admit(new, running, share, rows):
-    """Whether a run of `new` -- (need, python) -- fits beside `running`,
-    the running set oldest first as (key, need, python): None when it does,
+    """Whether a run of `new` -- (need, shares) -- fits beside `running`,
+    the running set oldest first as (key, need, shares): None when it does,
     else the keys whose closing makes room, fewest first. The rules, in
     order: the share (`share` None: none to count), the audio table's
     `rows` free for a run's session (a fifth source is refused), and the
-    tiers -- a Lua or compiled run holds its runtime's one session, so it
-    runs alone (phase 5 brings several)."""
+    tiers -- a run `shares` when its runtime holds several runs at once
+    (Python, Lua: `shares_runtime`), and a compiled run holds its engine's
+    one session, so it runs alone."""
     need, py = new
     if share is not None and need <= share:
         total = need

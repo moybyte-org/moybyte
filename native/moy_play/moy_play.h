@@ -51,8 +51,11 @@
 // and a game earns no strikes (no ledger counts the role). The board's kernel
 // is what arms it (moy_kernel_arm); an image without one arms nothing.
 //
-// THE PLAYER (moy_play.c). One run at a time, named by a handle that is
-// refused (STALE) once it ended. `launch`, before the runtime loads, reads
+// THE PLAYER (moy_play.c). MOY_PLAY_RUNS runs at once, each a row named by a
+// handle that is refused (STALE) once it ended; a launch with every row live
+// ends the oldest run for its own. Each run's frame makes its runtime's row
+// current (moycore_lua.h) and the crash record names the run that ticked
+// last. `launch`, before the runtime loads, reads
 // the cart's catalogue entry for its runtime and verdict, takes that
 // runtime's row from the map and mints the run's OWNER row in the glass
 // (moy_buf.h), which a Lua run's layer and image pixels are loans to;
@@ -253,8 +256,9 @@ enum {                                          // why a run ended
 // libmoy's seven buttons are the input table's first seven bits.
 #define MOY_PLAY_BUTTON_MASK 0x7Fu
 #define MOY_PLAY_START_BIT 14           // moy_input's `start`: Super, the pause menu
-// A run handle's low byte: generation << 8 | this.
+// A run handle: its launch's number << 10 | its row << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
+#define MOY_PLAY_RUNS 4u        // the runs at once: a power of two, the owner tags' count
 #define MOY_PLAY_UPC 6          // MOY_UPC_CLASSES, the loop's crossing classes
 
 typedef struct {
@@ -304,12 +308,17 @@ int  moy_play_input(uint32_t run, const moy_play_in_t *in);
 // NEEDS_VM or STALE.
 int  moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t *out);
 int  moy_play_end(uint32_t run, int why);
+// A run held aside reads no input (`on`): its snapshot's buttons, key and
+// pointer read nothing until it is given back. STALE with no such run.
+int  moy_play_mute(uint32_t run, bool on);
 // A pause of `ms` the run did not live through (the pause menu): its time()
 // resumes where it stopped. STALE with no such run.
 int  moy_play_hold(uint32_t run, uint32_t ms);
-// The live run's info, or the last one's once it ended.
+// A run's info, live or ended, while its row has hosted no later run.
 int  moy_play_info(uint32_t run, moy_play_info_t *out);
-uint32_t moy_play_current(void);       // the live run, or 0
+uint32_t moy_play_current(void);       // the run launched last while live, or 0
+uint32_t moy_play_runs(void);          // how many runs are live
+uint32_t moy_play_run_at(uint32_t slot);   // row `slot`'s live run, or 0
 // The calling task's stack high-water mark in bytes, MOY_PLAY_NO_STACK off a
 // board. FreeRTOS keeps the task's lifetime minimum, so a reading falls only
 // when the cart's path goes deeper than anything the task ran before it.

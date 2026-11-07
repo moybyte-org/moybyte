@@ -47,7 +47,7 @@ static struct {
     volatile uint32_t budget;       // its budget, ms
     volatile bool fired;            // the watcher ended it
     uint32_t override;              // moy_play_watch_budget's, 0: the slots' rule
-    char what[96];                  // the stuck words this run's ticks end with
+    const char *what;               // the stuck words the live tick's run ends with
     bool on;                        // the watcher polls
 } W;
 
@@ -147,7 +147,7 @@ bool moy_play_watch(uint32_t now_ms) {
     watch_lock();
     if (W.since != 0u && !W.fired && now_ms - W.since >= W.budget) {
         W.fired = fire = true;
-        moycore_stuck(W.what);
+        moycore_stuck(W.what != NULL ? W.what : "stuck");
     }
     watch_unlock();
     return fire;
@@ -169,10 +169,11 @@ static uint32_t watch_budget(const moy_tick_t *t) {
          : ms > MOY_PLAY_STUCK_MAX_MS ? MOY_PLAY_STUCK_MAX_MS : ms;
 }
 
-static void watch_begin(uint32_t budget) {
+static void watch_begin(uint32_t budget, const char *what) {
     uint32_t now = moycore_run_now_ms();
     watch_lock();
     W.budget = budget;
+    W.what = what;
     W.fired = false;
     W.since = now != 0u ? now : 1u;
     watch_unlock();
@@ -269,8 +270,7 @@ void moy_play_rows(bool lua, bool wasm, bool python) {
 
 typedef struct {
     uint32_t h;                     // the live run's handle, 0 with none
-    uint32_t last;                  // the last run's, live or ended
-    uint32_t gen;
+    uint32_t last;                  // the row's last run's, live or ended
     const moy_rt_ops_t *rt;
     moy_play_info_t info;
     moy_input_t *in;
@@ -286,18 +286,69 @@ typedef struct {
     int view;                       // what the cart had declared last frame
     int view_w, view_h;
     uint32_t budget;                // the runaway watch's, for each tick (ms)
+    char what[96];                  // the stuck words its ticks end with
+    bool muted;                     // held aside: its snapshot reads no input
+    uint32_t gen;                   // its launch's number: the oldest is ended for a new one
     bool armed;                     // the crash record names this run
     bool reseed;                    // a lockstep frame starts: seed libmoy first
     char path[192];                 // the cart's folder
 } run_t;
 
-// The run's state, allocated at the first launch from the kernel's allocator
-// (PSRAM on a board): what the S3s count as internal SRAM is the pointer.
-static run_t *g_run;
-#define R (*g_run)
+// THE RUNS ARE ROWS: MOY_PLAY_RUNS of them, each a run's state, allocated
+// at the first launch from the kernel's allocator (PSRAM on a board): what the
+// S3s count as internal SRAM is the pointer. A handle is the launch's number,
+// the row and the tag (gen << 10 | slot << 8 | MOY_PLAY_TAG). `cur` is the
+// row launched last, which the stop's path and flags, `current` and the
+// front's state read; the crash record names the row that ticked last
+// (`armed`).
+typedef struct {
+    run_t row[MOY_PLAY_RUNS];
+    uint32_t gen;                   // the last launch's number
+    uint32_t last;                  // the last run launched, live or ended
+    uint8_t cur;
+    int8_t armed;                   // the row the crash record names, -1: none
+} runs_t;
+
+static runs_t *g_runs;
+#define R (g_runs->row[g_runs->cur])
 
 static run_t *live(uint32_t run) {
-    return g_run != NULL && run != 0u && run == R.h ? g_run : NULL;
+    if (g_runs == NULL || run == 0u) {
+        return NULL;
+    }
+    run_t *r = &g_runs->row[(run >> 8) & (MOY_PLAY_RUNS - 1u)];
+    return run == r->h ? r : NULL;
+}
+
+static bool runs_make(void *(*alloc)(size_t n)) {
+    if (g_runs == NULL) {
+        g_runs = alloc(sizeof(runs_t));
+        if (g_runs == NULL) {
+            return false;
+        }
+        memset(g_runs, 0, sizeof(runs_t));
+        g_runs->armed = -1;
+    }
+    return true;
+}
+
+static bool any_live(void) {
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        if (g_runs->row[i].h != 0u) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The crash record names `r` (its id, the GAME role): armed when it ticks
+// and it was not the one named.
+static void arm_row(run_t *r) {
+    int8_t slot = (int8_t)(r - g_runs->row);
+    if (r->armed && g_runs->armed != slot) {
+        arm(r->info.id);
+        g_runs->armed = slot;
+    }
 }
 
 typedef struct {
@@ -365,16 +416,28 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
 
 int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32_t *run) {
     (void)caller;
-    if (g_run == NULL) {
-        g_run = moy_loop_alloc(sizeof(run_t));
-        if (g_run == NULL) {
-            return MOY_PLAY_NOMEM;
+    if (!runs_make(moy_loop_alloc)) {
+        return MOY_PLAY_NOMEM;
+    }
+    // A free row, else the oldest run's: it ends for this one.
+    uint32_t slot = 0, oldest = 0;
+    bool found = false;
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        run_t *ri = &g_runs->row[i];
+        if (ri->h == 0u) {
+            slot = i;
+            found = true;
+            break;
         }
-        memset(g_run, 0, sizeof(run_t));
+        if (ri->gen < g_runs->row[oldest].gen) {
+            oldest = i;
+        }
     }
-    if (R.h != 0u) {
-        moy_play_end(R.h, MOY_PLAY_END_QUIT);
+    if (!found) {
+        slot = oldest;
+        moy_play_end(g_runs->row[slot].h, MOY_PLAY_END_QUIT);
     }
+    g_runs->cur = (uint8_t)slot;
     memset(&R.info, 0, sizeof(R.info));
     R.mc = NULL;
     launch_ctx_t c = { &R.info, false, cart, flags };
@@ -385,8 +448,9 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     if (rt == NULL) {
         return MOY_PLAY_NORT;
     }
-    R.gen = R.gen >= 0xFFFFFFu ? 1u : R.gen + 1u;
-    R.h = R.last = R.gen << 8 | MOY_PLAY_TAG;
+    g_runs->gen = g_runs->gen >= 0xFFFFFu ? 1u : g_runs->gen + 1u;
+    R.gen = g_runs->gen;
+    R.h = R.last = g_runs->last = R.gen << 10 | slot << 8 | MOY_PLAY_TAG;
     R.rt = rt;
     R.in = NULL;
     R.audio = 0;
@@ -397,15 +461,14 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.ptr[0] = R.ptr[1] = R.ptr[2] = 0;
     R.view = 0;
     R.reseed = false;
+    R.muted = false;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
     R.budget = watch_budget(NULL);
-    moy_chrome_stuck_text(W.what, sizeof(W.what), R.budget);
+    moy_chrome_stuck_text(R.what, sizeof(R.what), R.budget);
     watch_run(true);
     // Armed before the runtime loads: a fault in the load names the cart.
     R.armed = R.info.game;
-    if (R.armed) {
-        arm(R.info.id);
-    }
+    arm_row(&R);
     // The run's lifetime in the glass: what its runtime loads -- a Lua run's
     // layer and image pixels -- is on loan to it and goes with it.
     R.owner = 0;
@@ -428,7 +491,7 @@ int moy_play_bind(uint32_t run, moy_input_t *in, uint32_t audio, moy_tick_t *tic
     r->audio = audio;
     r->tick = tick;
     r->budget = watch_budget(tick);
-    moy_chrome_stuck_text(W.what, sizeof(W.what), r->budget);
+    moy_chrome_stuck_text(r->what, sizeof(r->what), r->budget);
     return MOY_PLAY_OK;
 }
 
@@ -487,7 +550,8 @@ static void refresh(run_t *r, int32_t *s) {
     uint32_t held = 0, pressed = 0;
     uint8_t slots[MOY_INPUT_SOURCES];
     uint8_t n = 1;
-    if (r->in != NULL) {
+    s[SNAP_KEY] = 0;
+    if (r->in != NULL && !r->muted) {
         moy_input_masks(r->in, MOY_INPUT_UNION, &held, &pressed);
         n = moy_input_players(r->in, slots);
         if (n > 1) {
@@ -501,9 +565,9 @@ static void refresh(run_t *r, int32_t *s) {
     s[SNAP_BTN] = (int32_t)(held & MOY_PLAY_BUTTON_MASK);
     s[SNAP_BTNP] = (int32_t)(pressed & MOY_PLAY_BUTTON_MASK);
     s[SNAP_PLAYERS] = n < 1 ? 1 : n;
-    s[SNAP_TOUCH_X] = r->ptr[0];
-    s[SNAP_TOUCH_Y] = r->ptr[1];
-    s[SNAP_TOUCH_DOWN] = r->ptr[2];
+    s[SNAP_TOUCH_X] = r->muted ? 0 : r->ptr[0];
+    s[SNAP_TOUCH_Y] = r->muted ? 0 : r->ptr[1];
+    s[SNAP_TOUCH_DOWN] = r->muted ? 0 : r->ptr[2];
     s[SNAP_TOUCH_MS] = 0;
     s[SNAP_TIME_MS] = (int32_t)(moycore_run_now_ms() - r->start_ms);
 }
@@ -553,8 +617,13 @@ void moy_kernel_say(const char *line) __attribute__((weak));
 
 static void stuck(run_t *r, bool raised) {
     moycore_lua_unstuck();
-    if (!raised || strstr(r->info.error, W.what) == NULL) {
-        snprintf(r->info.error, sizeof(r->info.error), "%s", W.what);
+    if (!raised || strstr(r->info.error, r->what) == NULL) {
+        size_t n = strnlen(r->what, sizeof(r->what));
+        if (n >= sizeof(r->info.error)) {
+            n = sizeof(r->info.error) - 1u;
+        }
+        memcpy(r->info.error, r->what, n);     // two fields of one row: no snprintf
+        r->info.error[n] = 0;
     }
     r->info.raised = true;
     r->info.stuck = true;
@@ -581,6 +650,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
         return MOY_PLAY_RAISED;         // its runtime is broken: report, never rerun
     }
     moycore_run_use(r->mc);             // its own row, whichever was current
+    arm_row(r);
     int32_t *snap = moycore_RUN.c.snap;
     int32_t *aq = moycore_RUN.c.aq;
     moy_match_t *lm = moy_match_kernel();
@@ -605,7 +675,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
             r->reseed = false;
         }
         bool draw = render && i + 1u == ticks;
-        watch_begin(r->budget);
+        watch_begin(r->budget, r->what);
         int rc = r->rt->frame(dt, draw, r->info.error, sizeof(r->info.error));
         if (watch_end()) {
             stuck(r, rc != 0);
@@ -643,6 +713,15 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     return MOY_PLAY_OK;
 }
 
+int moy_play_mute(uint32_t run, bool on) {
+    run_t *r = live(run);
+    if (r == NULL) {
+        return MOY_PLAY_STALE;
+    }
+    r->muted = on;
+    return MOY_PLAY_OK;
+}
+
 int moy_play_hold(uint32_t run, uint32_t ms) {
     run_t *r = live(run);
     if (r == NULL) {
@@ -665,10 +744,22 @@ int moy_play_end(uint32_t run, int why) {
         r->info.upcalls[i] = total[i] - r->upc0[i];
     }
     r->h = 0;
-    watch_run(false);
-    if (r->armed) {
+    watch_run(any_live());
+    if (g_runs->armed == (int8_t)(r - g_runs->row)) {
         arm("");                        // the board survived the run
-        r->armed = false;
+        g_runs->armed = -1;
+    }
+    r->armed = false;
+    if (r == &R) {
+        // `cur` moves to the newest run still live, if any.
+        uint32_t best = g_runs->cur;
+        for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+            run_t *ri = &g_runs->row[i];
+            if (ri->h != 0u && (g_runs->row[best].h == 0u || ri->gen > g_runs->row[best].gen)) {
+                best = i;
+            }
+        }
+        g_runs->cur = (uint8_t)best;
     }
     if (r->owner != 0u) {
         moy_owner_end(r->owner);        // any loan the runtime's close left
@@ -727,11 +818,11 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
 }
 
 const char *moy_play_path(void) {
-    return g_run != NULL && R.h != 0u ? R.path : NULL;
+    return g_runs != NULL && R.h != 0u ? R.path : NULL;
 }
 
 uint32_t moy_play_flags(void) {
-    return g_run != NULL ? R.flags : 0u;
+    return g_runs != NULL ? R.flags : 0u;
 }
 
 void moy_play_set_down(uint32_t run) {
@@ -742,23 +833,39 @@ void moy_play_set_down(uint32_t run) {
 }
 
 uint32_t moy_play_current(void) {
-    return g_run != NULL ? R.h : 0u;
+    return g_runs != NULL ? R.h : 0u;
 }
 
 uint32_t moy_play_last(void) {
-    return g_run != NULL ? R.last : 0u;
+    return g_runs != NULL ? g_runs->last : 0u;
+}
+
+uint32_t moy_play_run_at(uint32_t slot) {
+    return g_runs != NULL && slot < MOY_PLAY_RUNS ? g_runs->row[slot].h : 0u;
+}
+
+uint32_t moy_play_runs(void) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; g_runs != NULL && i < MOY_PLAY_RUNS; i++) {
+        n += g_runs->row[i].h != 0u;
+    }
+    return n;
 }
 
 int moy_play_info(uint32_t run, moy_play_info_t *out) {
-    if (g_run == NULL || run == 0u || run != R.last) {
+    if (g_runs == NULL || run == 0u) {
         return MOY_PLAY_STALE;
     }
-    *out = R.info;
-    if (!R.info.ended) {
+    run_t *r = &g_runs->row[(run >> 8) & (MOY_PLAY_RUNS - 1u)];
+    if (run != r->last) {
+        return MOY_PLAY_STALE;
+    }
+    *out = r->info;
+    if (!r->info.ended) {
         uint32_t frame[MOY_UPC_CLASSES], total[MOY_UPC_CLASSES];
         moy_loop_upcalls(frame, total);
         for (int i = 0; i < MOY_UPC_CLASSES; i++) {
-            out->upcalls[i] = total[i] - R.upc0[i];
+            out->upcalls[i] = total[i] - r->upc0[i];
         }
     }
     return MOY_PLAY_OK;
@@ -777,12 +884,7 @@ static struct {
 } F;
 
 void moy_play_reserve(void *(*alloc)(size_t n)) {
-    if (g_run == NULL) {
-        g_run = alloc(sizeof(run_t));
-        if (g_run != NULL) {
-            memset(g_run, 0, sizeof(run_t));
-        }
-    }
+    runs_make(alloc);
     watch_make();
 }
 
@@ -799,6 +901,7 @@ int moy_play_front(uint32_t run) {
     if (r == NULL) {
         return MOY_PLAY_STALE;
     }
+    moycore_run_use(r->mc);
     // A Lua run: its frame is the console's canvas. A compiled cart's frame
     // is its own memory, which the console's present composes (CartFrame).
     // A run with the VM down is the exception: the kernel's present shows
@@ -842,6 +945,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         F.live = false;
         return -1;
     }
+    moycore_run_use(r->mc);             // the canvas below is its row's
     // A Ctrl-C ends the run; the console's next upcall raises it.
     if (moy_play_interrupt_pending != NULL && moy_play_interrupt_pending()) {
         return front_ended(MOY_PLAY_END_SERIAL);
@@ -950,11 +1054,12 @@ size_t moy_play_state_json(char *o, size_t n) {
         PUT("null");
         return at;
     }
-    const moy_play_info_t *i = &R.info;
+    run_t *fr = live(F.run);
+    const moy_play_info_t *i = &fr->info;
     uint32_t frame[MOY_UPC_CLASSES], total[MOY_UPC_CLASSES], since[MOY_UPC_CLASSES];
     moy_loop_upcalls(frame, total);
     for (int k = 0; k < MOY_UPC_CLASSES; k++) {
-        since[k] = total[k] - R.upc0[k];
+        since[k] = total[k] - fr->upc0[k];
     }
     PUT("{\"screen\": \"desktop\", \"front\": true, \"vm\": %s, \"cart\": ",
         moy_loop_vm == NULL || moy_loop_vm() ? "true" : "false");
@@ -980,9 +1085,9 @@ size_t moy_play_state_json(char *o, size_t n) {
     ups(o, n, &at, frame);
     PUT(", \"upcall_totals\": ");
     ups(o, n, &at, total);
-    if ((R.flags & MOY_PLAY_PACED) && R.tick != NULL && R.tick->rate > 0) {
-        PUT(", \"tick\": [%d, %u, %u, %s]", R.tick->rate, (unsigned)R.tick->div,
-            (unsigned)R.tick->misses, R.tick->steady ? "true" : "false");
+    if ((fr->flags & MOY_PLAY_PACED) && fr->tick != NULL && fr->tick->rate > 0) {
+        PUT(", \"tick\": [%d, %u, %u, %s]", fr->tick->rate, (unsigned)fr->tick->div,
+            (unsigned)fr->tick->misses, fr->tick->steady ? "true" : "false");
     } else {
         PUT(", \"tick\": null");
     }
