@@ -211,6 +211,7 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && [ "${FIRMWARE}" = "0" ] && docs_
   mapfile -t named < <(printf '%s\n' tests/test_look_shots.py tests/test_editor_look.py "${named[@]}" | sort -u)
   step "docs agree with the tree"  "${PY}" tools/check_docs.py
   [ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
+  step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropython
   step "tests that name a changed document" \
     "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
   if [ "${fails}" -ne 0 ]; then
