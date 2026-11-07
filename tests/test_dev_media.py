@@ -358,3 +358,84 @@ def test_the_vms_end_closes_its_processes_stream(media):
     assert N.close_vm() == 0                             # nothing left: nothing to do
     dev_media._end()
 
+
+
+class _Reader:
+    """A page's reader (firmware/web_runner/media_link.py's shape): None
+    until its bytes come, then them, then 0; OSError for a refusal."""
+
+    def __init__(self, data, err=None, size=None):
+        self.data, self.err, self.size, self.at, self.waits = data, err, size, 0, 2
+        self.closed = False
+
+    def readinto(self, buf):
+        if self.waits:
+            self.waits -= 1
+            return None
+        if self.err:
+            raise OSError(self.err, "refused")
+        n = min(len(buf), len(self.data) - self.at)
+        buf[:n] = self.data[self.at:self.at + n]
+        self.at += n
+        return n
+
+    def close(self):
+        self.closed = True
+
+
+class _Net:
+    def __init__(self, songs, err=None):
+        self.songs, self.err, self.opened = songs, err, []
+
+    def holds(self, src):
+        return src in self.songs
+
+    def held(self, folder):
+        return tuple((k.rsplit("/", 1)[1], len(v)) for k, v in sorted(self.songs.items())
+                     if k.rsplit("/", 1)[0] == folder)
+
+    def open(self, src):
+        r = _Reader(self.songs.get(src, b""), self.err, len(self.songs.get(src, b"")))
+        self.opened.append((src, r))
+        return r
+
+
+@pytest.fixture
+def page(monkeypatch):
+    class _Ws:
+        media_net = None
+    ws = _Ws()
+    monkeypatch.setattr(devices, "console", ws)
+    return ws
+
+
+def test_a_song_the_page_reads_plays_where_the_console_does_not_keep_it(media, page):
+    """A board-served page: the board's song is not in the page's store, so
+    play() takes it on the page's word and the pump feeds the page's reader,
+    waiting while it has nothing, to its end."""
+    path = "/moy/files/music/Tone.mp3"
+    pid = L.spawn("t.page")
+    with pytest.raises(OSError) as e:
+        _as(pid, lambda: moybyte.media.play(path))
+    assert e.value.args[0] == errno.ENOENT
+    page.media_net = _Net({path: MP3})
+    assert dev_media.held("/moy/files/music") == (("Tone.mp3", len(MP3)),)
+    assert dev_media.held("/moy/files/other") == ()
+    _as(pid, lambda: moybyte.media.play(path))
+    pcm = array("h")
+    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    rate = AUDIO.rate()
+    start = next(i for i, v in enumerate(pcm) if v)  # past the page's two empty reads
+    assert abs(_freq(pcm[start + rate // 5:start + rate + rate // 2], rate) - 1000) < 10
+    assert page.media_net.opened[0][1].closed
+    assert moybyte.media.now()["len"] == 2           # its size, from the reader
+
+
+def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):
+    path = "/moy/files/music/Tone.mp3"
+    page.media_net = _Net({path: MP3}, err=errno.EACCES)
+    pid = L.spawn("t.refused")
+    _as(pid, lambda: moybyte.media.play(path))
+    assert _drive(lambda: moybyte.media.now()["state"] == "failed")
+    assert moybyte.media.now()["err"] == errno.EACCES
+    assert dev_media.tls()                           # the page's fetch verifies https

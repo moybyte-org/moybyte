@@ -92,6 +92,12 @@ FEATURES = {
     "term": (lambda: ("termPump" in (DIST / "worker.js").read_text()
                       and b"link_want" in (DIST / "micropython.wasm").read_bytes()),
              "dist/ predates the board-served Terminal (no term pump, or no link face)"),
+    # Music (#251): the worker's media reads, and the media service with its
+    # browser face frozen into the wasm.
+    "media": (lambda: ("mediaGet" in (DIST / "worker.js").read_text()
+                       and b"media_link" in (DIST / "micropython.wasm").read_bytes()),
+              "dist/ predates Music in the browser (no media reads, or no media_link "
+              "frozen in the wasm)"),
     # The site's console runs the shell itself (build.sh --site, dist_site/).
     "site_shell": (lambda: ((DIST_SITE / "micropython.wasm").exists()
                             and b"neofetch" in (DIST_SITE / "micropython.wasm").read_bytes()),

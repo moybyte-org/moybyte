@@ -482,7 +482,7 @@ export async function readAll(store) {
         }
         return out;
     }
-    await walk(store.carts, "", out, 0);
+    await walk(store.carts, "", out, 0, store.root.id === "files" ? isSong : null);
     return out;
 }
 
@@ -492,7 +492,7 @@ function asValue(rel, bytes) {
     try { return strict.decode(bytes); } catch (e) { return bytes; }
 }
 
-async function walk(dir, prefix, out, depth) {
+async function walk(dir, prefix, out, depth, leave) {
     if (depth > 6) return;
     const entries = [];
     for await (const [name, handle] of dir.entries()) entries.push([name, handle]);
@@ -501,14 +501,57 @@ async function walk(dir, prefix, out, depth) {
         if (skipLocal(name)) continue;      // the journal comes BACK too
         const rel = prefix ? prefix + "/" + name : name;
         if (handle.kind === "directory") {
-            await walk(handle, rel, out, depth + 1);
+            await walk(handle, rel, out, depth + 1, leave);
             continue;
         }
+        if (leave && leave(rel)) continue;
         // Top-level files are not cart files; the sweep never ships them and
         // the VFS must not be seeded with them either.
         if (rel.indexOf("/") < 0) continue;
         out[rel] = asValue(rel, new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     }
+}
+
+// THE SONGS: a files store's music folder keeps MP3s the VFS never holds
+// (readAll leaves them out); Music reads one a range at a time
+// (media_link.py), so a library never sits in the page's memory.
+export const MUSIC_DIR = "music";
+
+export function isSong(rel) {
+    const parts = String(rel).split("/");
+    const name = parts[parts.length - 1];
+    return parts.length === 2 && parts[0] === MUSIC_DIR && name[0] !== "."
+        && /\.mp3$/i.test(name);
+}
+
+// {name: size} of the store's songs.
+export async function songs(store) {
+    const out = {};
+    let dir;
+    try { dir = await store.carts.getDirectoryHandle(MUSIC_DIR); } catch (e) { return out; }
+    for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== "file" || !isSong(MUSIC_DIR + "/" + name)) continue;
+        out[name] = (await handle.getFile()).size;
+    }
+    return out;
+}
+
+// A song's File (a Blob to slice), or null.
+export async function songFile(store, name) {
+    if (!isSong(MUSIC_DIR + "/" + name)) return null;
+    try {
+        const dir = await store.carts.getDirectoryHandle(MUSIC_DIR);
+        return await (await dir.getFileHandle(name)).getFile();
+    } catch (e) { return null; }
+}
+
+// A dropped song kept: its name, or null for one that is not a song.
+export async function keepSong(store, name, bytes) {
+    const base = String(name).slice(String(name).lastIndexOf("/") + 1);
+    if (!isSong(MUSIC_DIR + "/" + base) || !safeSegments(MUSIC_DIR + "/" + base, skipLocal))
+        return null;
+    await writeText(store, [MUSIC_DIR, base], bytes);
+    return base;
 }
 
 export async function isEmpty(store) {

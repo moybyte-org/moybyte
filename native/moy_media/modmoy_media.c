@@ -7,9 +7,12 @@
 //   present() share() open(owner, rate) close(owner) owner()
 //   clear(owner) add(owner, src, title) playlist(owner, text, base)
 //   go(owner, i) stop(owner) pause(owner, on) volume(owner, v)
-//   feed(owner, gen, buf) -> n  feed_end(owner, gen)  feed_size(owner, gen, size)
+//   feed(owner, gen, buf) -> n  feed_end(owner, gen)  feed_fail(owner, gen, err)
+//   feed_size(owner, gen, size)
 //   status() -> tuple (FIELDS' order) | None   text(which) -> str
 //   entry(i) -> (src, title) | None   run() -> bool
+//   TASK: 1 where a task runs the service's loop (a board), else 0 (the
+//   browser: the face calls run())
 //   icy_title(meta) -> str | None   list_kind(ctype, path, text) -> int
 
 #include <string.h>
@@ -17,6 +20,15 @@
 #include "py/runtime.h"
 
 #include "moy_media.h"
+
+#if defined(__has_include)
+#if __has_include("esp_heap_caps.h")
+#define MEDIA_TASK 1
+#endif
+#endif
+#ifndef MEDIA_TASK
+#define MEDIA_TASK 0
+#endif
 
 static uint32_t u32(mp_obj_t o) {
     return (uint32_t)mp_obj_get_int_truncated(o);
@@ -111,6 +123,11 @@ static mp_obj_t media_feed_end(mp_obj_t owner, mp_obj_t gen) {
     return rc(moy_media_feed_end(u32(owner), u32(gen)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_end_obj, media_feed_end);
+
+static mp_obj_t media_feed_fail(mp_obj_t owner, mp_obj_t gen, mp_obj_t err) {
+    return rc(moy_media_feed_fail(u32(owner), u32(gen), mp_obj_get_int(err)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_fail_obj, media_feed_fail);
 
 static mp_obj_t media_feed_size(mp_obj_t owner, mp_obj_t gen, mp_obj_t size) {
     return rc(moy_media_feed_size(u32(owner), u32(gen), u32(size)));
@@ -221,6 +238,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_volume), MP_ROM_PTR(&media_volume_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed), MP_ROM_PTR(&media_feed_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_end), MP_ROM_PTR(&media_feed_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feed_fail), MP_ROM_PTR(&media_feed_fail_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_size), MP_ROM_PTR(&media_feed_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&media_stamp_obj) },
@@ -240,6 +258,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_T_TITLE), MP_ROM_INT(MOY_MEDIA_T_TITLE) },
     { MP_ROM_QSTR(MP_QSTR_T_STATION), MP_ROM_INT(MOY_MEDIA_T_STATION) },
     { MP_ROM_QSTR(MP_QSTR_T_ENTRY), MP_ROM_INT(MOY_MEDIA_T_ENTRY) },
+    { MP_ROM_QSTR(MP_QSTR_TASK), MP_ROM_INT(MEDIA_TASK) },
 };
 static MP_DEFINE_CONST_DICT(media_globals, media_globals_table);
 

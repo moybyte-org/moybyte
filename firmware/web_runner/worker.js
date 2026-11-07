@@ -30,7 +30,7 @@
 //   {t:"kept", state}    the page's answer to {t:"keep"}: "granted" | "denied"
 //   {t:"carts"}          list the cart folders (the export picker)
 //   {t:"export", cart}   zip one cart out of the VFS
-//   {t:"import", name, buf}  a dropped file into the store: a .moy zip, or a
+//   {t:"import", name, buf}  a dropped file into the store: an MP3 (Music), a .moy zip, or a
 //                        PICO-8 .p8 / .p8.png, which is CONVERTED first (#194)
 //   {t:"edit", cart, tab}  open a cart in the Editor (the import report's
 //                        action); `tab` optionally lands on paint/map/music
@@ -817,6 +817,18 @@ const P8_TMP = "/moy/tmp";
 // other thing this page imports is a `.moy` export, which is a zip and starts
 // "PK" -- so a dropped PNG is a PICO-8 cart attempt, and `png_problem` is what
 // says so kindly when it turns out to be a holiday photo.
+// A dropped song into this browser's music folder, where Music finds it; a
+// board-served page's songs are the board's own.
+async function importSong(name, buf) {
+    if (mode === "board") throw new Error("songs play from the console's own music folder");
+    const s = opfsStores.files;
+    if (!s) throw new Error("this browser keeps no songs");
+    const kept = await opfsSerial(() => store.keepSong(s, name, new Uint8Array(buf)));
+    if (!kept) throw new Error("not a song: " + name);
+    await mediaList(siteSongs);
+    return "added " + kept + " to your music";
+}
+
 function isP8Drop(name, buf) {
     const n = String(name || "").toLowerCase();
     if (n.endsWith(".p8") || n.endsWith(".p8.png")) return true;
@@ -1095,7 +1107,7 @@ function askToPair() {
 // plaintext, opened; `wait` the ms of a backoff, else -1. A refusal in the
 // clear (no session, a goodbye) is {status, text} as it came, never opened,
 // so nothing the network says without the session's key reads as the board's.
-async function sealed(method, path, body) {
+async function sealed(method, path, body, bin) {
     for (let tries = 0; tries < 2; tries++) {
         if (!(await signIn())) {
             const ms = authNeed ? authNeed.ms : -1;
@@ -1104,6 +1116,7 @@ async function sealed(method, path, body) {
         if (authOpen) {
             const r = await fetch(path.slice(1), body === undefined ? { method }
                 : { method, body, headers: { "Content-Type": "application/json" } });
+            if (bin) return { status: r.status, bytes: new Uint8Array(await r.arrayBuffer()), wait: -1 };
             return { status: r.status, text: await r.text(), wait: -1 };
         }
         const C = sw();
@@ -1121,6 +1134,7 @@ async function sealed(method, path, body) {
         const got = new Uint8Array(await r.arrayBuffer());
         const m = C.open(seq, r.status, got.length ? swPut(got) : 0);
         if (m < 0) return { status: 0, text: "", wait: -1 };
+        if (bin) return { status: r.status, bytes: swGet(m), wait: -1 };
         return { status: r.status, text: utf8d.decode(swGet(m)), wait: -1 };
     }
     return { status: 401, text: "", wait: -1 };
@@ -1207,6 +1221,8 @@ async function init(search, coarse, channel, scheme, signin) {
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
     await initStore({ carts: carts, files: files, system: system });
+    // Music's songs: the serving board's music folder, or this browser's.
+    await mediaList(mode === "board" ? () => gated("/media").then((r) => r.json) : siteSongs);
     if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
         const sys = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/system";
         mkdirs(sys);
@@ -1670,6 +1686,7 @@ function cartsPump() {
     if (!jobs) return;
     for (const j of JSON.parse(jobs)) {
         if (j.op === "get") cartsGet(j);
+        else if (j.op === "mget") mediaGet(j);
         else if (j.op === "drop") cartsDrop(j.id);
         else if (j.op === "keep") cartsKeep(j);
         else if (j.op === "record") cartsRecord(j);
@@ -1737,7 +1754,160 @@ function cartsDrop(id) {
     if (!live) return;
     if (live.ac) { try { live.ac.abort(); } catch (e) { } }
     if (live.stream) { try { mp.FS.close(live.stream); } catch (e) { } }
+    if (live.segs !== undefined) {
+        for (let k = 0; k <= live.segs; k++) {
+            try { mp.FS.unlink(segPath(id, k)); } catch (e) { }
+        }
+        return;
+    }
     try { mp.FS.unlink(live.path || (NET_DIR + "/pick-" + id)); } catch (e) { }
+}
+
+// -- Music's bytes (media_link.py): a song or a URL, into spool segments ----
+// A song is the browser's OPFS's (site) or the serving board's, read by its
+// sealed GET /media a range at a time (board); a URL is the page's fetch.
+// The bytes land in SEG-byte segments the console reads and removes, and
+// the read waits while AHEAD of them are unread, so a live stream holds a
+// few segments of the page's memory however long it plays.
+const SEG = 32768, AHEAD = 4, MEDIA_LIST = NET_DIR + "/media.json";
+const EACCES = 13, EIO = 5, EHOSTUNREACH = 113, ENOENT = 2;
+function segPath(id, k) { return NET_DIR + "/m" + id + "." + k; }
+
+// The songs this page plays and does not keep, listed for media_link.
+async function mediaList(fetchSongs) {
+    let doc = null;
+    try { doc = await fetchSongs(); } catch (e) { doc = null; }
+    mkdirs(NET_DIR);
+    mp.FS.writeFile(MEDIA_LIST, JSON.stringify(doc && typeof doc === "object" ? doc : {}));
+}
+function siteSongs() {
+    const s = opfsStores.files;
+    return s ? store.songs(s) : Promise.resolve({});
+}
+
+async function mediaGet(j) {
+    mkdirs(NET_DIR);
+    const live = { ac: new AbortController(), segs: 0, stream: null, low: 0, n: 0 };
+    cartsLive.set(j.id, live);
+    const mine = () => cartsLive.get(j.id) === live;
+    const fail = (errno, why) => {
+        live.failed = true;
+        if (mine()) cartsSay({ id: j.id, error: why, errno: errno });
+    };
+    // Appends across segment boundaries, saying each whole one.
+    const put = (u8) => {
+        let at = 0;
+        while (at < u8.length) {
+            if (!live.stream) live.stream = mp.FS.open(segPath(j.id, live.segs), "w");
+            const k = Math.min(SEG - live.n, u8.length - at);
+            mp.FS.write(live.stream, u8, at, k);
+            at += k;
+            live.n += k;
+            if (live.n === SEG) {
+                mp.FS.close(live.stream);
+                live.stream = null;
+                live.n = 0;
+                live.segs++;
+                cartsSay({ id: j.id, seg: live.segs });
+            }
+        }
+    };
+    const room = async () => {
+        for (;;) {
+            while (live.low < live.segs && !vfsExists(segPath(j.id, live.low))) live.low++;
+            if (live.segs - live.low < AHEAD || !mine()) return;
+            await new Promise((ok) => setTimeout(ok, 50));
+        }
+    };
+    const end = () => {
+        if (live.stream) { mp.FS.close(live.stream); live.stream = null; }
+        if (live.n) { live.segs++; live.n = 0; }
+        cartsSay({ id: j.id, end: 1, segs: live.segs });
+    };
+    try {
+        if (j.url) await mediaUrl(j, live, mine, put, room, fail);
+        else if (mode === "board") await mediaBoard(j, mine, put, room, fail);
+        else await mediaSite(j, mine, put, room, fail);
+        if (mine() && !live.failed) end();
+    } catch (e) {
+        if (!live.failed) fail(EIO, String((e && e.message) || e));
+    }
+}
+
+async function mediaUrl(j, live, mine, put, room, fail) {
+    // A page served over https may not fetch http (mixed content): it asks
+    // for the same station over https, which a station without it refuses.
+    let url = j.url;
+    if (self.location.protocol === "https:" && /^http:/i.test(url)) url = "https:" + url.slice(5);
+    let r;
+    try {
+        r = await fetch(url, { signal: live.ac.signal, cache: "no-store" });
+    } catch (e) {
+        if (!mine()) return;
+        // CORS and no network look the same from here; a no-cors fetch that
+        // answers says the station is there and will not let a page read it.
+        let there = false;
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 8000);
+        try { await fetch(url, { mode: "no-cors", signal: ac.signal, cache: "no-store" }); there = true; }
+        catch (e2) { /* not there */ }
+        clearTimeout(t);
+        ac.abort();
+        fail(there ? EACCES : EHOSTUNREACH, there ? "the station does not let a page read it"
+                                                  : String((e && e.message) || e));
+        return;
+    }
+    if (!mine()) return;
+    const len = r.headers.get("Content-Length");
+    cartsSay({ id: j.id, status: r.status, size: len !== null && /^\d+$/.test(len) ? +len : null });
+    if (r.status !== 200 || !r.body) {
+        try { live.ac.abort(); } catch (e) { }
+        fail(EIO, "HTTP " + r.status);
+        return;
+    }
+    const reader = r.body.getReader();
+    for (;;) {
+        await room();
+        if (!mine()) { try { live.ac.abort(); } catch (e) { } return; }
+        const { done, value } = await reader.read();
+        if (!mine()) return;
+        if (done) break;
+        put(value);
+    }
+}
+
+async function mediaSite(j, mine, put, room, fail) {
+    const f = opfsStores.files ? await store.songFile(opfsStores.files, j.song) : null;
+    if (!f) { fail(ENOENT, "no such song"); return; }
+    cartsSay({ id: j.id, status: 200, size: f.size });
+    for (let at = 0; at < f.size; at += SEG) {
+        await room();
+        if (!mine()) return;
+        put(new Uint8Array(await f.slice(at, at + SEG).arrayBuffer()));
+    }
+}
+
+function hexUtf8(s) {
+    return Array.from(utf8.encode(s), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function mediaBoard(j, mine, put, room, fail) {
+    const f = hexUtf8(j.song);
+    cartsSay({ id: j.id, status: 200, size: typeof j.size === "number" ? j.size : null });
+    for (let at = 0; ; ) {
+        await room();
+        if (!mine()) return;
+        const r = await sealed("GET", "/media?f=" + f + "&at=" + at + "&len=" + SEG, undefined, true);
+        if (!mine()) return;
+        if (r.status !== 200 || !r.bytes) {
+            fail(r.status === 404 ? ENOENT : EIO, "the console answered " + r.status);
+            return;
+        }
+        if (!r.bytes.length) return;
+        put(r.bytes);
+        at += r.bytes.length;
+        if (r.bytes.length < SEG) return;
+    }
 }
 
 // The staged folder the console checked, made durable with its record
@@ -2121,7 +2291,10 @@ self.onmessage = async (ev) => {
             }
         } else if (m.t === "import") {
             try {
-                if (isP8Drop(m.name, m.buf)) {
+                if (/\.mp3$/i.test(m.name)) {
+                    const s = await importSong(m.name, m.buf);
+                    self.postMessage({ t: "imported", ok: true, s: s });
+                } else if (isP8Drop(m.name, m.buf)) {
                     const r = await importP8(m.name, m.buf);
                     if (!r.ok) {
                         self.postMessage({ t: "imported", ok: false,

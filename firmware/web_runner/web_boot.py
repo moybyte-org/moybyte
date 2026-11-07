@@ -98,12 +98,33 @@ class _RunnerPump(PcmPump):
         if n > cap:
             n = cap
         na = self._na
-        if n <= 0 or na is None or not na.active():
+        if n <= 0 or na is None or not (na.active() or _media_open()):
             return
         buf = memoryview(self._buf)[:n * 2]
         na.render(buf, n)
         self.last_pcm = bytes(buf)
         self.rendered += n
+
+
+_MEDIA = []
+
+
+def _media():
+    """The media service's module, None where the image has none."""
+    if not _MEDIA:
+        try:
+            import moy_media
+            _MEDIA.append(moy_media)
+        except ImportError:
+            _MEDIA.append(None)
+    return _MEDIA[0]
+
+
+def _media_open():
+    """Whether the media service holds a stream: the mix then sounds with no
+    session focused."""
+    m = _media()
+    return m is not None and m.owner() != 0
 
 
 class _PointerSink:
@@ -308,6 +329,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     ws.cart_keep = seams[1]
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
+    ws.media_net = _media_net(ws, _S.get("store_mode"), carts_root)
     # The Moybyte shell's achievements are gamification for the kid console,
     # which the console page is, as on a board; they are no part of the
     # one-cart player (`cart`: an export, the gallery, a kiosk bundle), whose
@@ -417,20 +439,50 @@ def _cart_seams(ws, mode):
     already says out loud."""
     if mode == "board":
         return None, None, None, "board"
-    if mode not in ("site", "none"):
+    link = _worker_link(ws, mode)
+    if link is None:
         return None, None, None, None
+    import carts_link
+    keep = carts_link.WebCartKeep(link) if mode == "site" else None
+    return carts_link.WebCartNet(link), keep, link.pick, None
+
+
+def _worker_link(ws, mode):
+    """The queue to the worker's pump (`carts_link.CartsLink`), one a page:
+    Get Carts' fetches and keeps in a page that keeps its carts, Music's
+    reads in every page. None before a mode is known."""
+    if _S.get("carts") is not None:
+        return _S["carts"]
+    if mode not in ("site", "none", "board"):
+        return None
     try:
         import carts_link
     except ImportError as exc:       # never block a boot
         print("carts link unavailable:", exc)
-        return None, None, None, None
+        return None
 
     def _wake():
         ws._dirty = True
     link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
     _S["carts"] = link
-    keep = carts_link.WebCartKeep(link) if mode == "site" else None
-    return carts_link.WebCartNet(link), keep, link.pick, None
+    return link
+
+
+def _media_net(ws, mode, carts_root):
+    """`ws.media_net` (media_link.py): the songs and URLs Music plays from
+    the page's bytes -- the browser's OPFS songs or the serving board's, and
+    the page's fetch -- where the media service is in the image."""
+    link = _worker_link(ws, mode)
+    if link is None:
+        return None
+    if _media() is None:
+        return None
+    try:
+        import media_link
+        from moy_store_base import files_root
+    except ImportError:
+        return None
+    return media_link.WebMediaNet(link, files_root(carts_root) + "/" + media_link.MUSIC)
 
 
 def _cart_landed(folder):
@@ -778,8 +830,13 @@ def step_frame_json(dt, audio_ahead=-1.0):
     if au is not None and hasattr(au, "ahead"):
         au.ahead = float(audio_ahead)
     painted_before = ws.frame_state.frames_drawn
+    pulled = au.rendered if au is not None and hasattr(au, "rendered") else None
     _S["driver"].frame(dt)
     painted = ws.frame_state.frames_drawn != painted_before
+    if pulled is not None and au.rendered == pulled and _media_open():
+        # The media stream sounds with no Player pulling the mix (the shell,
+        # an app): a board's feeder task pulls it, the page's frame here.
+        au.tick(dt)
     # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
     # frame) -- the page plays it through its AudioWorklet ring.
     pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
@@ -833,8 +890,9 @@ def state_json():
     the running cart's first eight pmem slots, the earned badges' ids, the
     Settings rows as the console holds them, whether the FPS chip shows and
     the store's sync (`sync`: the batches its far end has taken, and whether
-    one is on its way) and the Terminal's grid as lines (`term`, None before
-    it first opens), for a harness driving the page
+    one is on its way), the Terminal's grid as lines (`term`, None before
+    it first opens) and the media stream's `now()` (`media`), for a harness
+    driving the page
     (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
@@ -852,6 +910,11 @@ def state_json():
     except (ImportError, AttributeError):
         sc = None
     st["snd"] = list(sc) if sc is not None else None
+    try:
+        import dev_media
+        st["media"] = dev_media.now()
+    except ImportError:
+        st["media"] = None
     # The running cart's first pmem slots, where a fixture reports its checks:
     # the run's flush, which hands a moved image to the console's pmem to be
     # kept at the next boundary as the periodic flush does, then its image.

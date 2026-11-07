@@ -242,7 +242,9 @@ PYEOF
   # moy_sh: the Terminal's face on every build; its micropython.mk takes the
   # shell itself only for the site's (MOY_WEB_SHELL=1, --site), and a face
   # of the serving board's shell otherwise (moy_sh_link.h).
-  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui moy_sh; do
+  # moy_media: the media service, the boards' decoder, pulled by the page's
+  # mix; a URL's bytes are the page's fetch, fed by the face.
+  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui moy_sh moy_media; do
     cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
   done
 
@@ -294,7 +296,7 @@ mkdir -p "${STAGE_DIR}/modules"
 # answering rather than off the console actually binding one. A headless Zero
 # therefore had no update row at all. tests/test_staging_closure.py now derives
 # this list rather than trusting it.
-for _mod in web_boot web_canvas gpio_link update_link carts_link web_p8; do
+for _mod in web_boot web_canvas gpio_link update_link carts_link media_link web_p8; do
   cp "${SCRIPT_DIR}/${_mod}.py" "${STAGE_DIR}/modules/${_mod}.py"
 done
 

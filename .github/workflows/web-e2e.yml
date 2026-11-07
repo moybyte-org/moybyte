@@ -37,6 +37,12 @@ name: Web console E2E
 #                                  error panel; Jet Teapot and ESP 88 play; Get
 #                                  Carts installs one by range, no module
 #                                  fetched, and it plays.
+#   tests/test_web_music_e2e.py    #251: Music on the boards' MP3 decoder in the
+#                                  wasm -- a dropped song kept in OPFS plays
+#                                  from it, a board's song streams through
+#                                  its sealed GET /media, a station plays
+#                                  through the page's fetch or says it blocks
+#                                  browsers -- and the tone reaches the page.
 #   tests/test_web_look_parity.py  the console's frames in both arrangements
 #                                  are the host's in the board's, pixel for
 #                                  pixel, under every seed theme.
@@ -223,6 +229,7 @@ jobs:
             tests/test_web_board_system_e2e.py tests/test_web_term_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
+            tests/test_web_music_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \
             tests/test_editor_ladder_icons.py
 

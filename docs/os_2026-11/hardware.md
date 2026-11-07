@@ -394,7 +394,9 @@ running thing tier for media; it has no speaker, and its image denies the
 module).
 
 **The output format (owner, 2026-11-03; two rates, 2026-11-04)**: 44.1 kHz
-stereo on the P4s, 22.05 kHz mono on the S3s, the host and the browser. Every
+stereo on the P4s, 22.05 kHz mono on the S3s and the host; the browser's page
+mixes at 11,025 Hz mono (`web_boot._AUDIO_RATE_HZ`), and its stream is
+resampled to that. Every
 board's sessions (the synth and the sample voices) mix at 22,050 Hz mono, so
 a cart sounds the same everywhere; on a P4 the feeder upsamples that mix
 once, 2× (`moy_aud_render_st` and `moy_aud_up2`, `native/moy_audio/moy_aud.h`:
@@ -426,6 +428,19 @@ closing the app ends it (its end sweeps it), minimising keeps it
 recording indicator does, is not built. A Python app making
 its own sound renders ahead from a thread or its loop (`processes.md` §3), at
 a depth greater than a GC pause.
+
+**In the browser (#251)** the same C decodes, compiled into the wasm
+(`native/moy_media/micropython.mk`) and pulled by the page's mix: no task
+(the face's pump runs the loop, as on the host) and no HTTP client
+(`MOY_MEDIA_CLIENT` 0), so a URL's bytes are fed as a file's are, from the
+page's fetch (`ws.media_net`, `firmware/web_runner/media_link.py`), with no
+ICY metadata (a page may not ask for it). A page keeps no song in its VFS: a
+static host's are the browser's OPFS (`files/music`, where a dropped MP3
+lands), a board-served page's are the board's music folder, read through
+its sealed `GET /media` a range a request (`native/moy_net/moy_webhost.c`,
+THE MEDIA ROUTE), since the sync wire carries no binaries. A station plays
+only if it sends CORS headers; one that does not fails with EACCES, which
+Music shows as "Blocks browsers".
 
 ## 4. Verbs (sketch)
 

@@ -13,6 +13,9 @@ One stream at a time, one process's.
                      SHARES give no MEDIA row or it is full, ENOENT for a
                      file that is not there
   tls() -> bool      whether an https:// URL plays here
+  held(folder) -> ((name, size), ...)  the songs in `folder` that this
+                     console plays but does not keep (a board-served page:
+                     the board's music folder); () elsewhere
   pause() resume() stop()
   next() prev()      the list's next or previous entry: False at its end
   volume(v=None)     the stream's level, 0..100 (the console's caps it)
@@ -33,8 +36,15 @@ URL may play the stream holds the radio lease under "media"
 
 The face's pump is a shell wake every PUMP_MS while a stream is open: it
 feeds a file's bytes to the C, closes the service once the C has let go after
-a stop, and on the host, which has no task, runs the C's loop. A file is read
-in the VM, so a store write never runs on the service's PSRAM stack."""
+a stop, and where there is no task (the host, the browser) runs the C's loop.
+A file is read in the VM, so a store write never runs on the service's PSRAM
+stack.
+
+IN THE BROWSER the C has no HTTP client, so the bytes of a URL, and of a
+song a board-served page plays from the board, are the page's
+(`ws.media_net`, firmware/web_runner/media_link.py): a reader the worker fills
+between frames, which answers None until bytes come and raises OSError with
+EACCES for a station that does not let a page read it."""
 
 try:
     import moy_media as _N
@@ -64,20 +74,21 @@ except ImportError:  # pragma: no cover - an image without the kernel
     except ImportError:
         _L = None
 
-EPERM, ENOENT, EBADF, EBUSY, EINVAL, ENOSPC = 1, 2, 9, 16, 22, 28
+EPERM, ENOENT, EIO, EBADF, EBUSY, EINVAL, ENOSPC = 1, 2, 5, 9, 16, 22, 28
 EPROTONOSUPPORT = 93
 TAG = "media"
 PUMP_MS = 50
 FEED_MAX = 8192
 STATES = ("idle", "opening", "playing", "ended", "failed")
 _HOST = _N is not None and hasattr(_N, "PART")
+_STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the pump runs the loop
 (_STATE, _PAUSED, _OWNER, _GEN, _ENTRY, _ENTRIES, _KIND, _ARMED, _RATE, _CH, _KBPS,
  _VOL, _INB, _INR, _PCM, _DEC, _PLAYED, _STARVED, _ERR, _TGEN, _IDLE, _AT_MS,
  _LEN_MS) = range(23)
 
 # The stream's process and what the pump holds for it.
 _s = {"pid": 0, "wake": None, "radio": False, "file": None, "gen": 0, "eof": False,
-      "stopping": False}
+      "stopping": False, "sized": False}
 _buf = [None]
 
 
@@ -112,8 +123,22 @@ def _need(perms):
     return p
 
 
+def _net():
+    """The page's bytes (`ws.media_net`), where the console is a browser's."""
+    return getattr(_D.console, "media_net", None)
+
+
+def held(folder):
+    net = _net()
+    fn = getattr(net, "held", None)
+    return fn(folder) if fn is not None else ()
+
+
 def tls():
-    """Whether an https stream plays here: its certificate verifies."""
+    """Whether an https stream plays here: its certificate verifies (the
+    page's fetch verifies its own)."""
+    if _net() is not None:
+        return True
     try:
         import moy_http
     except ImportError:  # host: the runtime package
@@ -204,7 +229,7 @@ def _end():
 
 
 def _try_close():
-    if _HOST:
+    if _STEP:
         _N.run()
     rc = _N.close(_s["pid"])
     if rc == 0 or rc == -EBADF:
@@ -213,43 +238,76 @@ def _try_close():
     return False
 
 
-def _feed(gen):
+def _source(src, p, gen):
+    """The entry's bytes: a file this console keeps, sized, else the page's
+    reader (a URL, or a song the serving board keeps); None for neither."""
+    net = _net()
+    if not _is_url(src):
+        try:
+            f = open(src, "rb")
+            size = f.seek(0, 2)
+            f.seek(0)
+            _N.feed_size(p, gen, size)
+            _s["sized"] = True
+            return f
+        except OSError:
+            if net is None or not net.holds(src):
+                return None
+    return net.open(src) if net is not None else None
+
+
+def _ended(p, gen, err=0):
+    _s["eof"] = True
+    f = _s["file"]
+    _s["file"] = None
+    if err:
+        _N.feed_fail(p, gen, err)
+    else:
+        _N.feed_end(p, gen)
+    if f is not None:
+        f.close()
+
+
+def _feed(gen, room):
     p = _s["pid"]
     if _s["gen"] != gen:
         _close_file()
         _s["gen"] = gen
         _s["eof"] = False
-        src = _N.text(_N.T_SRC)
-        try:
-            f = open(src, "rb")
-            _s["file"] = f
-            size = f.seek(0, 2)
-            f.seek(0)
-            _N.feed_size(p, gen, size)
-        except OSError:
-            _close_file()
-            _s["gen"] = gen
+        _s["sized"] = False
+        f = _source(_N.text(_N.T_SRC), p, gen)
+        if f is None:
             _s["eof"] = True
-            _N.feed_end(p, gen)
+            _N.feed_fail(p, gen, ENOENT)
             return
+        _s["file"] = f
     if _s["eof"] or _s["file"] is None:
         return
     if _buf[0] is None:
         _buf[0] = bytearray(FEED_MAX)
-    buf = _buf[0]
-    mv = memoryview(buf)
+    mv = memoryview(_buf[0])
     f = _s["file"]
     for _ in range(4):
-        n = f.readinto(buf)
+        want = min(FEED_MAX, room)
+        if want <= 0:
+            return
+        try:
+            n = f.readinto(mv[:want])
+        except OSError as e:
+            _ended(p, gen, (e.args[0] if e.args and isinstance(e.args[0], int) else 0) or EIO)
+            return
+        if not _s["sized"] and getattr(f, "size", None) is not None:
+            _s["sized"] = True
+            _N.feed_size(p, gen, f.size)
+        if n is None:                  # the page's reader: nothing yet
+            return
         if not n:
-            _s["eof"] = True
-            _N.feed_end(p, gen)
-            _s["file"] = None
-            f.close()
+            _ended(p, gen)
             return
         k = _N.feed(p, gen, mv[:n])
+        room -= max(k, 0)
         if k < n:
-            if k >= 0:
+            if k >= 0 and hasattr(f, "seek"):
                 f.seek(k - n, 1)
             return
 
@@ -261,15 +319,15 @@ def _pump():
     if _s["stopping"]:
         _try_close()
         return
-    if _HOST:
+    if _STEP:
         _N.run()
     st = _N.status()
     if st is None:
         _end()
         return
-    if st[_KIND] == _N.FEED and st[_ARMED]:
-        _feed(st[_GEN])
-        if _HOST:
+    if st[_ARMED]:
+        _feed(st[_GEN], st[_INR])
+        if _STEP:
             _N.run()
     if st[_STATE] in (_N.ENDED, _N.FAILED):
         _let_go()
@@ -324,13 +382,15 @@ def play(src):
         try:
             open(src, "rb").close()
         except OSError:
-            stop()
-            raise OSError(ENOENT, src)
+            net = _net()
+            if net is None or not net.holds(src):
+                stop()
+                raise OSError(ENOENT, src)
         _D.check(_N.add(p, src, None))
     if any(_is_url(_N.entry(i)[0]) for i in range(_N.status()[_ENTRIES])):
         _hold()
     _D.check(_N.go(p, 0))
-    if _HOST:
+    if _STEP:
         _N.run()
 
 

@@ -108,6 +108,7 @@ HELP_ADDRESS = "An MP3 stream or playlist"
 FOLDER_MAX = 200
 
 PLAYING, PAUSED_, OPENING, FAILED = "playing", "paused", "opening", "failed"
+EACCES = 13                 # a station that does not let a browser's page read it
 
 
 # -- what plays ----------------------------------------------------------------
@@ -366,7 +367,8 @@ def card_of(n, what, state=None):
             "station": station, "entry": (n or {}).get("entry", 0) or 0,
             "entries": (n or {}).get("entries", 1) or 1,
             "volume": (n or {}).get("volume", 0) or 0, "kind": kind,
-            "at": (n or {}).get("at", 0) or 0, "len": (n or {}).get("len", 0) or 0}
+            "at": (n or {}).get("at", 0) or 0, "len": (n or {}).get("len", 0) or 0,
+            "err": (n or {}).get("err", 0) or 0}
 
 
 def _artist_title(text):
@@ -383,7 +385,7 @@ def lines(c):
     if c["state"] == OPENING:
         return c["station"], "Connecting..."
     if c["state"] == FAILED:
-        return c["station"], "Not answering"
+        return c["station"], "Blocks browsers" if c.get("err") == EACCES else "Not answering"
     title, artist = _artist_title(c["title"])
     if c["kind"] == "list":
         return title, "%s · %d of %d" % (c["station"], c["entry"] + 1, c["entries"])
@@ -842,12 +844,20 @@ def _list_count(path):
 def _scan(folder):
     """The music folder's songs and playlists, sorted by name: (songs,
     lists), each a tuple of (name, path, detail); None where the folder is
-    not there."""
+    not there. A song this console plays but does not keep (a board-served
+    page's, which the board keeps: the media face's `held`) is listed too."""
     import os
+    m = _media()
+    held = getattr(m, "held", None)
+    held = held(folder) if held is not None else ()
     try:
         names = os.listdir(folder)
     except OSError:
-        return None
+        if not held:
+            return None
+        names = []
+    names = set(names)
+    names.update(nm for nm, _size in held)
     songs, lists = [], []
     for nm in sorted(names)[:FOLDER_MAX]:
         low = nm.lower()

@@ -201,6 +201,25 @@ nor those docs will warn you about:
   - **The site-mode sweep must pass a file it cannot carry by stat**
     (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
     every sweep, an installed Doom drew a frame a second.
+- **Music plays in the browser on the boards' decoder (#251)**: `moy_media`
+  is in the wasm with no task and no HTTP client (`moy_media.h`, THE
+  BROWSER), its face fed by `ws.media_net` (`media_link.py`) in both modes.
+  What bites:
+  - **A song never enters the VFS.** A site-mode page's songs stay in OPFS
+    (`moy_store.readAll` leaves `files/music/*.mp3` out; a dropped MP3 is
+    written there), a board-served page's on the board, read through its
+    sealed `GET /media` 32 KiB a request; the worker lists either into
+    `/moy/net/media.json` at boot, which is what Music's folder shows.
+  - **A stream's bytes go through spool SEGMENTS** the console removes as it
+    reads them, and the worker stops reading while four wait, so a radio
+    station costs the page a few segments however long it plays.
+  - **The page's frame pulls the mix while a stream plays** (`web_boot`'s
+    step ticks `_RunnerPump` when no Player did): a board's feeder task
+    pulls it whatever runs, and on the web nothing else would.
+  - **A station without CORS headers cannot be read**, and from the page
+    that looks like no network; a `no-cors` fetch that answers tells them
+    apart, and the face fails the entry with EACCES. A page on https asks
+    for an `http://` station over https (mixed content).
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board

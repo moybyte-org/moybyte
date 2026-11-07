@@ -7,8 +7,6 @@
 #include <string.h>
 
 #include "minimp3.h"
-#include "moy_net.h"
-#include "moy_ota.h"
 #include "moy_play.h"
 
 #if defined(__has_include)
@@ -19,13 +17,34 @@
 #endif
 #endif
 
+// MOY_MEDIA_CLIENT 0: the image has no HTTP client (the browser's), so a
+// URL's bytes are fed as a file's are, by the face from the page's fetch.
+// MOY_MEDIA_MIX 1: moy_audio's mix is in the image (a board's, the
+// browser's), and open() hands it the pull; the host's face attaches it.
+#ifndef MOY_MEDIA_CLIENT
+#define MOY_MEDIA_CLIENT 1
+#endif
+#ifdef MEDIA_BOARD
+#undef MOY_MEDIA_MIX
+#define MOY_MEDIA_MIX 1
+#endif
+#ifndef MOY_MEDIA_MIX
+#define MOY_MEDIA_MIX 0
+#endif
+
+#if MOY_MEDIA_CLIENT
+#include "moy_net.h"
+#include "moy_ota.h"
+#endif
+#if MOY_MEDIA_MIX
+#include "moy_aud.h"
+#endif
 #ifdef MEDIA_BOARD
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "moy_aud.h"
 #endif
 
 #define ONE 65536u
@@ -56,6 +75,7 @@ typedef struct {
     volatile int idle;              // stopped and let go
     uint32_t armed;                 // the generation a feed is taken for, 0 for none
     int fed_end;
+    int fed_err;                    // why the feed ended early (positive errno), 0
     char title[MOY_MEDIA_TEXT_MAX], station[MOY_MEDIA_TEXT_MAX];
     uint32_t text_gen;
     int list_played;                // an entry of this list decoded a frame
@@ -652,18 +672,23 @@ int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n) {
     return (int)k;
 }
 
-int moy_media_feed_end(uint32_t owner, uint32_t gen) {
+int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err) {
     media_t *m = mine(owner);
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
     LOCK(m);
-    if (gen != 0 && m->armed == gen) {
+    if (gen != 0 && m->armed == gen && !m->fed_end) {
         m->fed_end = 1;
+        m->fed_err = err > 0 ? err : 0;
     }
     UNLOCK(m);
     WAKE(m);
     return 0;
+}
+
+int moy_media_feed_end(uint32_t owner, uint32_t gen) {
+    return moy_media_feed_fail(owner, gen, 0);
 }
 
 int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size) {
@@ -779,12 +804,25 @@ int moy_media_entry(int i, char *src, size_t src_cap, char *title, size_t title_
 // -- the task ------------------------------------------------------------------------
 
 static void conn_close(media_t *m) {
+#if MOY_MEDIA_CLIENT
     if (m->h > 0) {
         moy_httpc_close(m->h);
     }
+#endif
     m->h = 0;
 }
 
+// A URL's length in bytes: its Content-Length, or the size its feeder gave
+// (feed_size); 0 for a live stream.
+static uint32_t url_len(const media_t *m) {
+#if MOY_MEDIA_CLIENT
+    return m->clen;
+#else
+    return m->e_size;
+#endif
+}
+
+#if MOY_MEDIA_CLIENT
 static void set_text(media_t *m, char *dst, const char *s, size_t n) {
     char t[MOY_MEDIA_TEXT_MAX];
     to_utf8(s, n, t, sizeof(t));
@@ -795,6 +833,7 @@ static void set_text(media_t *m, char *dst, const char *s, size_t n) {
     }
     UNLOCK(m);
 }
+#endif
 
 // The entry moves on by itself: again for a URL that played and has retries
 // left, else the next. A command since wins.
@@ -803,7 +842,7 @@ static void advance(media_t *m, int err) {
     conn_close(m);
     LOCK(m);
     if (m->gen == m->seen && !m->stop) {
-        int again = m->kind == MOY_MEDIA_URL && m->clen == 0 && m->played
+        int again = m->kind == MOY_MEDIA_URL && url_len(m) == 0 && m->played
                     && m->retries < MOY_MEDIA_RETRIES;
         m->entry = again ? m->cur : m->cur + 1;
         m->gen++;
@@ -822,6 +861,7 @@ static void begin(media_t *m) {
     m->seen = m->gen;
     m->armed = 0;
     m->fed_end = 0;
+    m->fed_err = 0;
     STORE(&m->in_r, LOAD(&m->in_w));
     m->cur = e;
     int kind = e >= 0 && e < m->n ? (is_url(m->pool + m->e_src[e]) ? MOY_MEDIA_URL : MOY_MEDIA_FEED) : 0;
@@ -831,7 +871,7 @@ static void begin(media_t *m) {
         m->e_dec = 0;
         m->e_used = 0;
     }
-    if (kind == MOY_MEDIA_FEED) {
+    if (kind == MOY_MEDIA_FEED || (kind == MOY_MEDIA_URL && !MOY_MEDIA_CLIENT)) {
         m->armed = m->seen;
     }
     if (e < 0) {
@@ -866,6 +906,7 @@ static void begin(media_t *m) {
     }
 }
 
+#if MOY_MEDIA_CLIENT
 static int header_int(int h, const char *name) {
     char v[16];
     if (moy_httpc_header(h, name, v, sizeof(v)) <= 0) {
@@ -1037,6 +1078,23 @@ static int read_url(media_t *m) {
     return 1;
 }
 
+#else
+
+// A fed URL is OPENING until its first bytes, or its feed's end, come.
+static int open_url(media_t *m) {
+    if (LOAD(&m->in_w) == m->in_r && !m->eof) {
+        return 0;
+    }
+    m->state = MOY_MEDIA_PLAYING;
+    return 1;
+}
+
+static int read_url(media_t *m) {
+    (void)m;
+    return 0;
+}
+#endif
+
 static void win_fill(media_t *m) {
     if (m->win_off >= MOY_MEDIA_WIN_MIN || (m->win_n == 0 && m->win_off > 0)) {
         memmove(m->win, m->win + m->win_off, m->win_n);
@@ -1194,8 +1252,11 @@ static int decode_one(media_t *m) {
 static int step(media_t *m) {
     LOCK(m);
     int stop = m->stop, moved = m->gen != m->seen;
-    if (!stop && m->kind == MOY_MEDIA_FEED) {
+    if (!stop && (m->kind == MOY_MEDIA_FEED || !MOY_MEDIA_CLIENT)) {
         m->eof = m->fed_end;
+        if (m->fed_end) {
+            m->err = m->fed_err;
+        }
     }
     UNLOCK(m);
     if (stop) {
@@ -1272,7 +1333,7 @@ int moy_media_open(uint32_t owner, int rate, int channels) {
     if (s_m != NULL) {
         return s_m->owner == owner ? 0 : -MOY_MEDIA_EBUSY;
     }
-#ifdef MEDIA_BOARD
+#if MOY_MEDIA_MIX
     moy_aud_out_start();
     rate = moy_aud_out_rate();
     channels = moy_aud_out_channels();
@@ -1319,6 +1380,8 @@ int moy_media_open(uint32_t owner, int rate, int channels) {
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
+#endif
+#if MOY_MEDIA_MIX
     moy_aud_lock();
     s_m = m;
     moy_aud_unlock();
@@ -1348,13 +1411,17 @@ static void task_end(media_t *m) {
 static void reap(media_t *m) {
 #ifdef MEDIA_BOARD
     task_end(m);                        // idle: it waits on its notification and holds nothing
+#endif
+#if MOY_MEDIA_MIX
     moy_aud_bg(NULL);
     moy_aud_lock();
     s_m = NULL;
     moy_aud_unlock();
-    vSemaphoreDelete(m->mtx);
 #else
     s_m = NULL;
+#endif
+#ifdef MEDIA_BOARD
+    vSemaphoreDelete(m->mtx);
 #endif
     uint32_t share = m->share;
     conn_close(m);

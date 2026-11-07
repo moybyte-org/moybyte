@@ -25,6 +25,7 @@ PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "m
                          (_MEDIA, _NET, _PLAY))
 
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
+TASK = 0                                # no task: the face calls run()
 URL, FEED = 1, 2
 T_SRC, T_TITLE, T_STATION, T_ENTRY = range(4)
 FIELDS = ("state", "paused", "owner", "gen", "entry", "entries", "kind", "armed", "rate",
@@ -59,6 +60,7 @@ _SIGS = (
     ("moy_media_volume", [_U32, _I], _I),
     ("moy_media_feed", [_U32, _U32, _P, _SZ], _I),
     ("moy_media_feed_end", [_U32, _U32], _I),
+    ("moy_media_feed_fail", [_U32, _U32, _I], _I),
     ("moy_media_feed_size", [_U32, _U32, _U32], _I),
     ("moy_media_status", [ctypes.POINTER(_St)], _I),
     ("moy_media_text", [_I, ctypes.c_char_p, _SZ], _I),
@@ -152,6 +154,10 @@ def feed(owner, gen, buf):
 
 def feed_end(owner, gen):
     return _lib().moy_media_feed_end(owner, gen)
+
+
+def feed_fail(owner, gen, err):
+    return _lib().moy_media_feed_fail(owner, gen, err)
 
 
 def feed_size(owner, gen, size):

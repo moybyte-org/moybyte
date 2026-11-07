@@ -5,8 +5,16 @@
 // playlist fills. MP3 is decoded (minimp3.h, vendored) and resampled to the
 // output's rate and channels (moy_aud_out_rate and _channels: 44.1 kHz stereo
 // on a P4, its stream's channels kept; 22.05 kHz mono elsewhere, a stereo
-// stream mixed down), and the mix (native/moy_audio/moy_aud.h's background
-// stream) pulls it, ducked under the focused session.
+// stream mixed down; in the browser the page's mix, 11,025 Hz mono), and the
+// mix (native/moy_audio/moy_aud.h's background stream) pulls it, ducked under
+// the focused session.
+//
+// THE BROWSER (MOY_MEDIA_CLIENT 0: its image has no HTTP client) feeds a
+// URL's bytes as it feeds a file's: the face fetches it with the page's fetch
+// and feeds the current generation, a URL entry OPENING until its first bytes
+// or its feed's end. feed_size gives a URL its length (the response's
+// Content-Length), and one with none is a live stream, opened again as a
+// board's is. It reads no ICY metadata: a page's fetch may not ask for it.
 //
 // THE MEMORY is the MEDIA row of THE SHARES (native/moy_play/moy_play.h):
 // open() takes MOY_MEDIA_SHARE from it and refuses with -ENOSPC where the row
@@ -18,8 +26,8 @@
 // WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds. On a board
 // a task on core 0 below the flush priority (MOY_MEDIA_PRIO) reads the
 // connection and decodes; it never runs a flash operation, so its stack is
-// PSRAM. The host has no task: moy_media_run() is one pass of its loop, the
-// face's to call. The mix's pull runs on the audio feeder's task under the
+// PSRAM. The host and the browser have no task: moy_media_run() is one pass
+// of its loop, the face's to call. The mix's pull runs on the audio feeder's task under the
 // mix's lock. The decoded ring has one writer (the task) and one reader (the
 // pull); the stream buffer one writer (the task for a URL, the VM's feed for a
 // file) and one reader (the task). Commands and texts change under the
@@ -142,6 +150,9 @@ int moy_media_volume(uint32_t owner, int v);
 // says the file has no more.
 int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n);
 int moy_media_feed_end(uint32_t owner, uint32_t gen);
+// The same, the source having failed with positive errno `err`: the entry's
+// `err` once it moves on.
+int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err);
 // The file's size in bytes for entry generation `gen`, which its length is
 // read from: the bytes its decoded frames took against the frames they made.
 int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size);

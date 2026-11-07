@@ -279,3 +279,31 @@ def test_a_files_place_reaches_the_card():
                   ("list", "Road trip mix", "/m/r.m3u"))
     assert (c["at"], c["len"]) == (72, 221)
     assert M.lines(c) == ("Sunny day drive", "Road trip mix · 3 of 12")
+
+
+def test_a_station_that_blocks_browsers_says_so(tmp_path, face):
+    """In the browser a station's bytes are the page's fetch, which a server
+    without CORS headers refuses: the face fails it with EACCES."""
+    ws = build_ws(tmp_path)
+    ws.open_app(_app(ws))
+    M.STREAM.play("radio", "Secret Agent", "http://x/y")
+    face.n["state"] = "failed"
+    face.n["err"] = 13
+    M.STREAM.poll()
+    assert M.lines(M.STREAM.card) == ("Secret Agent", "Blocks browsers")
+
+
+def test_the_folder_lists_the_songs_a_board_keeps_for_its_page(tmp_path, monkeypatch):
+    """A board-served page keeps no song: the face's `held` names the board's,
+    beside what the page's store has (a playlist rides the sync)."""
+    folder = tmp_path / "music"
+
+    class _Face:
+        def held(self, f):
+            return (("Board song.mp3", 4096),) if f == str(folder) else ()
+    monkeypatch.setattr(M, "_media", lambda: _Face())
+    assert M._scan(str(folder)) == ((("Board song", str(folder / "Board song.mp3"), ""),), ())
+    folder.mkdir()
+    (folder / "Mix.m3u").write_text("Board song.mp3\n")
+    songs, lists = M._scan(str(folder))
+    assert [s[0] for s in songs] == ["Board song"] and [x[0] for x in lists] == ["Mix"]
