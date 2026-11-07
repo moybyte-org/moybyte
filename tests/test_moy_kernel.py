@@ -50,16 +50,16 @@ class Rec(ctypes.Structure):
     _fields_ = [("magic", u32), ("version", u16), ("size", u16), ("crc", u32),
                 ("boot", u32), ("uptime_ms", u32), ("build", u32), ("pc", u32),
                 ("cause", u32), ("addr", u32), ("bt", u32 * 4), ("kind", u8),
-                ("core", u8), ("role", u8), ("reset", u8),
+                ("core", u8), ("role", u8), ("reset", u8), ("pid", u32),
                 ("task", ctypes.c_char * 16), ("id", ctypes.c_char * 24),
-                ("what", ctypes.c_char * 32)]
+                ("what", ctypes.c_char * 28)]
 
 
 class KState(ctypes.Structure):
     _fields_ = [("magic", u32), ("boot", u32), ("unproven", u8), ("next", u8),
                 ("reason", u8), ("test", u8), ("open_app", ctypes.c_char * 24),
                 ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24),
-                ("crashes", u8), ("crash_limit", u8)]
+                ("open_game_pid", u32), ("crashes", u8), ("crash_limit", u8)]
 
 
 class Decision(ctypes.Structure):
@@ -143,10 +143,10 @@ def _record(**kw):
 # ---- the record -----------------------------------------------------------------
 
 def test_the_record_is_128_bytes_and_its_crc_is_zlibs(lib):
-    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 88
+    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 92
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
-    assert (r.magic, r.version, r.size) == (0x4D4F5943, 1, 128)
+    assert (r.magic, r.version, r.size) == (0x4D4F5943, 2, 128)
     assert r.crc == zlib.crc32(bytes(r)[12:])
     assert lib.moy_crash_valid(ctypes.byref(r))
     assert lib.moy_crash_crc32(0, b"123456789", 9) == 0xCBF43926
@@ -158,7 +158,7 @@ def test_a_torn_or_foreign_record_reads_as_none(lib):
     assert not lib.moy_crash_valid(ctypes.byref(Rec()))
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
-    for field, value in (("pc", 1), ("kind", 0), ("version", 2), ("magic", 0)):
+    for field, value in (("pc", 1), ("kind", 0), ("version", 1), ("magic", 0)):
         t = Rec.from_buffer_copy(bytes(r))
         setattr(t, field, value)
         assert not lib.moy_crash_valid(ctypes.byref(t)), field
@@ -342,6 +342,24 @@ def test_a_crash_names_a_game_between_the_app_and_the_wallpaper(lib):
     lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"sky_run")
     lib.moy_kstate_open(ctypes.byref(st))
     assert st.open_game == b""
+
+
+def test_a_games_record_names_its_process(lib):
+    """The kernel's Player arms the pid of the run that ticked last beside
+    its id; a record of the GAME role carries it, any other role none, and
+    the game's end clears it."""
+    st = _state(lib)
+    lib.moy_kstate_open_pid.restype = ctypes.c_uint32
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"moybyte.brick_siege_lua")
+    lib.moy_kstate_arm_pid(ctypes.byref(st), 41)
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_GAME) == 41
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_APP) == 0
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"")
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_GAME) == 0
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"sky_run")
+    lib.moy_kstate_arm_pid(ctypes.byref(st), 7)
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert st.open_game_pid == 0
 
 
 # ---- the recovery screen ----------------------------------------------------------

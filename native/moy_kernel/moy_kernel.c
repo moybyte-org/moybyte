@@ -260,6 +260,7 @@ IRAM_ATTR void __wrap_esp_panic_handler(panic_info_t *info) {
         const char *id;
         r->boot = s_kst.boot;
         r->role = (uint8_t)moy_kstate_open_id(&s_kst, &id);
+        r->pid = moy_kstate_open_pid(&s_kst, r->role);
         moy_crash_strcpy(r->id, MOY_CRASH_ID_LEN, id);
     }
     r->build = s_build;
@@ -299,6 +300,7 @@ static void moy_kernel_record_vm(const char *what) {
     r->uptime_ms = (uint32_t)(esp_timer_get_time() / 1000);
     r->build = s_build;
     r->role = (uint8_t)moy_kstate_open_id(&s_kst, &id);
+    r->pid = moy_kstate_open_pid(&s_kst, r->role);
     moy_crash_strcpy(r->id, MOY_CRASH_ID_LEN, id);
     moy_crash_strcpy(r->task, MOY_CRASH_TASK_LEN, pcTaskGetName(NULL));
     moy_crash_strcpy(r->what, MOY_CRASH_WHAT_LEN, what);
@@ -450,6 +452,10 @@ void moy_kernel_boot_failed(const char *what) {
 
 void moy_kernel_arm(int role, const char *id) {
     moy_kstate_arm(&s_kst, role, id);
+}
+
+void moy_kernel_arm_pid(uint32_t pid) {
+    moy_kstate_arm_pid(&s_kst, pid);
 }
 
 int moy_kernel_crash_limit(int n, int *count) {

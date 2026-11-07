@@ -200,6 +200,10 @@ uint32_t moy_play_stack_free(void) {
 // The crash record's OPEN id (moy_crash.h's GAME role): the board's kernel
 // keeps it; weak, so an image or a host without one arms nothing.
 void moy_kernel_arm(int role, const char *id) __attribute__((weak));
+void moy_kernel_arm_pid(uint32_t pid) __attribute__((weak));
+// The OS log's current process (moy_log.h): the run's, set by the console
+// as it starts the run, before the launch. Weak: an image without the log.
+uint32_t moy_log_current(void) __attribute__((weak));
 
 static void arm(const char *id) {
     if (moy_kernel_arm != NULL) {
@@ -287,6 +291,7 @@ typedef struct {
     int view_w, view_h;
     uint32_t budget;                // the runaway watch's, for each tick (ms)
     char what[96];                  // the stuck words its ticks end with
+    uint32_t pid;                   // its process (moy_log.h's), 0 unknown
     bool muted;                     // held aside: its snapshot reads no input
     uint32_t gen;                   // its launch's number: the oldest is ended for a new one
     bool armed;                     // the crash record names this run
@@ -300,7 +305,7 @@ typedef struct {
 // the row and the tag (gen << 10 | slot << 8 | MOY_PLAY_TAG). `cur` is the
 // row launched last, which the stop's path and flags, `current` and the
 // front's state read; the crash record names the row that ticked last
-// (`armed`).
+// (`armed`): its id and its process.
 typedef struct {
     run_t row[MOY_PLAY_RUNS];
     uint32_t gen;                   // the last launch's number
@@ -347,6 +352,9 @@ static void arm_row(run_t *r) {
     int8_t slot = (int8_t)(r - g_runs->row);
     if (r->armed && g_runs->armed != slot) {
         arm(r->info.id);
+        if (moy_kernel_arm_pid != NULL) {
+            moy_kernel_arm_pid(r->pid);
+        }
         g_runs->armed = slot;
     }
 }
@@ -462,6 +470,7 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.view = 0;
     R.reseed = false;
     R.muted = false;
+    R.pid = moy_log_current != NULL ? moy_log_current() : 0u;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
     R.budget = watch_budget(NULL);
     moy_chrome_stuck_text(R.what, sizeof(R.what), R.budget);

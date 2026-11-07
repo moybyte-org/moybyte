@@ -47,7 +47,7 @@ extern "C" {
 #endif
 
 #define MOY_CRASH_MAGIC     0x4D4F5943u      // "MOYC"
-#define MOY_CRASH_VERSION   1
+#define MOY_CRASH_VERSION   2
 #define MOY_KSTATE_MAGIC    0x4D4F594Bu      // "MOYK"
 
 // What stopped the console. FAULT..DEBUG come from the panic handler; RESET is
@@ -74,7 +74,7 @@ enum { MOY_ROLE_NONE = 0, MOY_ROLE_APP, MOY_ROLE_WALLPAPER, MOY_ROLE_GAME };
 
 #define MOY_CRASH_ID_LEN    24
 #define MOY_CRASH_TASK_LEN  16
-#define MOY_CRASH_WHAT_LEN  32
+#define MOY_CRASH_WHAT_LEN  28
 
 typedef struct {
     uint32_t magic;
@@ -92,6 +92,7 @@ typedef struct {
     uint8_t core;
     uint8_t role;                    // MOY_ROLE_* of `id`
     uint8_t reset;                   // esp_reset_reason(), set at intake
+    uint32_t pid;                    // the process `id` ran as (moy_log.h's), 0 unknown
     char task[MOY_CRASH_TASK_LEN];
     char id[MOY_CRASH_ID_LEN];       // what the ledger held OPEN
     char what[MOY_CRASH_WHAT_LEN];   // the abort message, exception name or VM error
@@ -143,6 +144,7 @@ typedef struct {
     char open_app[MOY_CRASH_ID_LEN];
     char open_wallpaper[MOY_CRASH_ID_LEN];
     char open_game[MOY_CRASH_ID_LEN];
+    uint32_t open_game_pid;          // the open game's process, 0 unknown
     uint8_t crashes;                 // the console's crashes in a row (THE CRASH COUNT)
     uint8_t crash_limit;             // the count that opens the recovery console, 0 never
 } moy_kstate_t;
@@ -180,6 +182,11 @@ void moy_boot_proven(moy_kstate_t *st);
 // the app's when one is open, else the game's, else the wallpaper's.
 void moy_kstate_arm(moy_kstate_t *st, int role, const char *id);
 int moy_kstate_open_id(const moy_kstate_t *st, const char **id);
+// The process the GAME role's id runs as (the kernel's Player arms it with
+// the run that ticks), and the pid a record of `role` names: the game's for
+// GAME, else 0.
+void moy_kstate_arm_pid(moy_kstate_t *st, uint32_t pid);
+uint32_t moy_kstate_open_pid(const moy_kstate_t *st, int role);
 
 #ifdef __cplusplus
 }

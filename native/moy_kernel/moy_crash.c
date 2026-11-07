@@ -103,6 +103,7 @@ void moy_kstate_open(moy_kstate_t *st) {
         memset(st->open_app, 0, sizeof(st->open_app));
         memset(st->open_wallpaper, 0, sizeof(st->open_wallpaper));
         memset(st->open_game, 0, sizeof(st->open_game));
+        st->open_game_pid = 0;
         return;
     }
     memset(st, 0, sizeof(*st));
@@ -162,7 +163,18 @@ void moy_kstate_arm(moy_kstate_t *st, int role, const char *id) {
         moy_crash_strcpy(st->open_wallpaper, MOY_CRASH_ID_LEN, id);
     } else if (role == MOY_ROLE_GAME) {
         moy_crash_strcpy(st->open_game, MOY_CRASH_ID_LEN, id);
+        if (id == NULL || id[0] == '\0') {
+            st->open_game_pid = 0;
+        }
     }
+}
+
+void moy_kstate_arm_pid(moy_kstate_t *st, uint32_t pid) {
+    st->open_game_pid = pid;
+}
+
+MOY_CRASH_IRAM uint32_t moy_kstate_open_pid(const moy_kstate_t *st, int role) {
+    return role == MOY_ROLE_GAME ? st->open_game_pid : 0u;
 }
 
 MOY_CRASH_IRAM int moy_kstate_open_id(const moy_kstate_t *st, const char **id) {

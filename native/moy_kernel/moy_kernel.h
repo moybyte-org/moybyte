@@ -73,6 +73,8 @@ void moy_kernel_boot_failed(const char *what);
 
 // The ledger's OPEN id for a role, mirrored into RTC memory.
 void moy_kernel_arm(int role, const char *id);
+// The process the armed GAME runs as: a record of the game names it.
+void moy_kernel_arm_pid(uint32_t pid);
 // The crash count's limit (moy_crash.h's THE CRASH COUNT): `n` 0..32 sets it
 // (0: never), -1 reads it; the limit, and the count so far at *count.
 int moy_kernel_crash_limit(int n, int *count);

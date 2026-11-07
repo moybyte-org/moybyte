@@ -299,12 +299,13 @@ static mp_obj_t rec_dict(const moy_crash_rec_t *r) {
     if (r == NULL) {
         return mp_const_none;
     }
-    mp_obj_t d = mp_obj_new_dict(14);
+    mp_obj_t d = mp_obj_new_dict(15);
     put(d, MP_QSTR_kind, str_of(moy_crash_kind_name(r->kind)));
     put(d, MP_QSTR_task, str_of(r->task));
     put(d, MP_QSTR_id, r->id[0] ? str_of(r->id) : mp_const_none);
     put(d, MP_QSTR_role, str_of(moy_crash_role_name(r->role)));
     put(d, MP_QSTR_what, str_of(r->what));
+    put(d, MP_QSTR_pid, r->pid ? mp_obj_new_int_from_uint(r->pid) : mp_const_none);
     put(d, MP_QSTR_reset, str_of(moy_kernel_reset_name(r->reset)));
     put(d, MP_QSTR_pc, mp_obj_new_int_from_uint(r->pc));
     put(d, MP_QSTR_cause, mp_obj_new_int_from_uint(r->cause));
