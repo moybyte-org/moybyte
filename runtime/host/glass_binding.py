@@ -241,11 +241,17 @@ def _sweep_bufs():
     out = (ctypes.c_uint32 * 6)()
     lib = _lib()
     held = None
-    for h, ref in list(_HELD.items()):
+    while True:
+        try:
+            rows = list(_HELD.items())
+            break
+        except RuntimeError:        # a collection during the copy freed a Buf
+            continue
+    for h, ref in rows:
         if lib.moy_glass_host_row(h, out) != OK:
             b = ref()
             if b is None:
-                del _HELD[h]
+                _HELD.pop(h, None)
                 continue
             try:
                 b._gone()
