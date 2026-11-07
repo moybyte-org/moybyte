@@ -18,6 +18,7 @@ gives the tab back.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -76,6 +77,17 @@ def _lines(tag):
     return {"js": "window.__moyState().then(s => '%s ' + JSON.stringify(s.term))" % tag}
 
 
+def _until(test, timeout=30000):
+    """A step that holds until a grid line passes `test` (a JS predicate over
+    one line), so each check waits on what it checks, never on a guess."""
+    return {"waitFor": "window.__moyState().then(s => s.term.some(%s))" % test,
+            "timeout": timeout}
+
+
+def _says(text):
+    return _until("ln => ln.includes(%s)" % json.dumps(text))
+
+
 def _tagged(js, tag):
     for j in js:
         if isinstance(j, str) and j.startswith(tag + " "):
@@ -98,11 +110,13 @@ def test_board_served_terminal_is_the_board_s_shell(tty_exe, tmp_path):
     host = test_moy_tty.Host(tty_exe, tmp_path)
     server, base = _twin(tmp_path, host.port)
     try:
-        steps = ([{"note": "the Terminal connects", "wait": 2500}, _lines("OPEN")]
-                 + _typed("echo web-$((6*7))") + [{"key": "Enter"}, {"wait": 800},
+        steps = ([{"note": "the Terminal connects"}, _until("ln => /\\$\\s*$/.test(ln)"),
+                  _lines("OPEN")]
+                 + _typed("echo web-$((6*7))") + [{"key": "Enter"}, _says("web-42"),
                                                    _lines("ECHO")]
                  + [{"shot": "term_board"}]
-                 + _typed("exit 4") + [{"key": "Enter"}, {"wait": 800}, _lines("EXIT")])
+                 + _typed("exit 4") + [{"key": "Enter"}, _says("[the shell exited 4]"),
+                                       _lines("EXIT")])
         _out, js = _play(tmp_path, "term_board", base, steps)
         opened = _tagged(js, "OPEN")
         assert any(ln.rstrip().endswith("$") for ln in opened), opened
@@ -122,8 +136,8 @@ def test_a_board_served_terminal_says_why_it_has_no_shell(tty_exe, tmp_path):
     host = test_moy_tty.Host(tty_exe, tmp_path)
     server, base = _twin(tmp_path, host.port, pin="0000")
     try:
-        steps = [{"note": "the twin takes 0000, the shell's webhost 4321", "wait": 3000},
-                 _lines("PIN")]
+        steps = [{"note": "the twin takes 0000, the shell's webhost 4321"},
+                 _says("refused the pin"), _lines("PIN")]
         _out, js = _play(tmp_path, "term_pin", base, steps, pin="0000")
         assert any("refused the pin" in ln for ln in _tagged(js, "PIN")), js
     finally:
@@ -131,7 +145,7 @@ def test_a_board_served_terminal_says_why_it_has_no_shell(tty_exe, tmp_path):
         host.end()
     server, base = _twin(tmp_path / "gone", web_e2e.free_port())
     try:
-        steps = [{"wait": 3000}, _lines("GONE")]
+        steps = [_says("does not answer"), _lines("GONE")]
         _out, js = _play(tmp_path, "term_gone", base, steps)
         assert any("does not answer" in ln for ln in _tagged(js, "GONE")), js
     finally:
@@ -143,12 +157,16 @@ def test_a_board_served_terminal_waiting_on_wrong_pins_says_how_long(tty_exe, tm
     host = test_moy_tty.Host(tty_exe, tmp_path)
     for _ in range(11):
         test_moy_tty.get(host, "/term?pin=0000")
+    # The eleventh wrong pin's wait is a second; the clock stepped back a
+    # minute holds it open past the page's boot, however long that takes.
+    host.skew(-60000)
     server, base = _twin(tmp_path, host.port)
     try:
-        steps = [{"wait": 3000}, _lines("WAIT"), {"shot": "term_wait"}]
+        steps = [_says("Too many wrong pins"), _lines("WAIT"), {"shot": "term_wait"}]
         _out, js = _play(tmp_path, "term_wait", base, steps)
         said = "\n".join(_tagged(js, "WAIT"))
-        assert "Too many wrong pins: wait 1 s, then press Enter." in said, said
+        m = re.search(r"Too many wrong pins: wait (\d+) s, then press Enter\.", said)
+        assert m and 1 <= int(m.group(1)) <= 61, said
     finally:
         server.terminate()
         host.end()

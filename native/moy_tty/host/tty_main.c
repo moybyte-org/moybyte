@@ -7,7 +7,9 @@
 // the VM's NEEDS_VM but the console's rows. The face's pair is a socketpair.
 //
 // Standard input takes a line at a time: `ssh` opens a face as SSH does
-// (a `sleep 30`), so the page finds the face another's; `nossh` ends it.
+// (a `sleep 30`), so the page finds the face another's; `nossh` ends it;
+// `skew MS` moves the webhost's clock by MS (negative: back, so a pin's wait
+// already running lasts that much longer). Each answers a line.
 // The main thread prints a STATS line when a figure moves.
 // Usage: tty_main PORT PIN CARTS_DIR
 
@@ -28,6 +30,7 @@
 #include "moy_tty.h"
 
 extern const moy_tty_shell_t moy_tty_moy_sh;
+extern uint32_t moy_net_ms_skew;
 
 static pthread_t console_tid;
 static volatile int console_up;
@@ -180,6 +183,10 @@ int main(int argc, char **argv) {
                 moy_tty_reap_all(MOY_TTY_SSH, 5000);
                 moy_tty_hold(MOY_TTY_SSH, 0);
                 printf("NOSSH\n");
+                fflush(stdout);
+            } else if (strncmp(line, "skew ", 5) == 0) {
+                moy_net_ms_skew += (uint32_t)strtol(line + 5, NULL, 10);
+                printf("SKEW %s\n", line + 5);
                 fflush(stdout);
             }
         }

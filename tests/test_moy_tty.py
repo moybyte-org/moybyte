@@ -104,6 +104,15 @@ class Host:
         self.proc.stdin.write(line.encode() + b"\n")
         self.proc.stdin.flush()
 
+    def skew(self, ms):
+        """The webhost's clock moved by `ms`, once the host says so."""
+        self.say("skew %d" % ms)
+        for _ in range(200):
+            if "SKEW %d" % ms in self.log():
+                return
+            time.sleep(0.01)
+        raise AssertionError(self.log())
+
     def stats(self):
         lines = [ln for ln in self.log().splitlines() if ln.startswith("STATS ")]
         return dict(kv.split("=") for kv in lines[-1].split()[1:])
