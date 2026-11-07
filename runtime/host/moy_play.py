@@ -709,8 +709,7 @@ class _Lockstep(ctypes.Structure):
                 ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
                 ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
                 ("lock_at", _U32), ("late_ms", _U32), ("stall_ms", _U32),
-                ("slew_ms", _I32), ("peer_delay", ctypes.c_int),
-                ("peer_low", ctypes.c_int), ("peer_low_max", ctypes.c_int)]
+                ("slew_ms", _I32)]
 
 
 class _MatchS(ctypes.Structure):

@@ -36,9 +36,8 @@
 // paces itself and drops any debt of a full tick by re-basing (burst
 // catch-up coupled two consoles into a 30% stall); a stalled tick
 // retries every loop frame, and between ticks the newest packet is resent.
-// The guest (index 1) slews its phase 1 ms a tick: later toward SLEW_TARGET_MS
-// of measured arrival margin while the delay is one, earlier while the host's
-// reported margin is thinner by SLEW_SPREAD_MS; the host is the anchor.
+// The guest (index 1) slews its phase 1 ms a tick toward SLEW_TARGET_MS of
+// measured arrival margin while the delay is one; the host is the anchor.
 //
 // THE LINK. One instance owns the radio's one receive path. Pairing is
 // same-cart: two consoles sitting on the same title find each other through
@@ -94,8 +93,6 @@ enum {
 #define MOY_MATCH_LOCK_MS 16
 #define MOY_MATCH_SLEW_TARGET_MS 12
 #define MOY_MATCH_SLEW_BAND_MS 4
-#define MOY_MATCH_SLEW_SPREAD_MS 16
-#define MOY_MATCH_PEER_LOW 8
 // The desync check: every CHECK_EVERY frames each console stamps a checkpoint
 // (the hash of every input it applied, and the world digest its tier gave
 // it), and every input packet carries the sender's newest one.
@@ -241,13 +238,9 @@ typedef struct {
     // whole period late drops its debt, `late` when nothing was stalled
     // (this console's own frame ran long: a collection, a heavy frame); a
     // slot that passes while a tick waits on the peer's input is `stall`;
-    // `slew` is the guest's phase moved later, net of earlier.
+    // `slew` is the guest's phase moved later.
     uint32_t late_ms, stall_ms;
     int32_t slew_ms;
-    // The peer's delay: a packet's newest less the frame its sender waits
-    // on, which a resend after a tick reads one short, so the most of
-    // them, until PEER_LOW packets in a row read lower.
-    int peer_delay, peer_low, peer_low_max;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };

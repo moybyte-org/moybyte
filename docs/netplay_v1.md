@@ -124,20 +124,6 @@ sleeping out a whole one (a 5 ms miss used to cost 34 ms); and the GUEST slews
 its phase toward 12 ms of margin, the host's clock being the anchor. The S3 pair
 then measures 1.8–2.3% stalls at 29.5 ticks/s on delay 1.
 
-**The guest also pulls its phase earlier for a thinner host** (2026-11-07).
-The host never slews, so a phase that settled with the host's margin thin
-stalled the host on most ticks for good while the guest sat on a fat one, and
-the host's stalls raised the guest's delay. Every input packet already carries
-the sender's margin; a guest whose own margin is more than
-`MOY_MATCH_SLEW_SPREAD_MS` (16) fatter than the host's, and above its 16 ms
-band, pulls 1 ms earlier a tick, each side's margin taken less the other's
-lead beyond one tick so two delays compare as one. It never pulls itself under
-the band, which is what the 2026-08 pull on its own margin did. Host-measured
-only (a two-console simulation over the C core, eight seeds a scenario): the
-mean delay fell from 1.06–1.20 ticks to 1.00–1.04 where the frames have slack,
-the ticks/s held, and under a 30 ms radio blackout every 300 ms the raises rose
-(1.9 to 3.1 a match) at about the same mean delay (1.40 to 1.42 ticks).
-
 **Determinism is a precondition, enforced here rather than asked of carts:** a
 fixed `dt`, a re-seed each logic frame from (seed, frame) since drawing consumes
 the stream too, the HOST's cart config winning for the match, and a cart's
@@ -244,7 +230,7 @@ tick schedule given up per second, so their sum over the tick's ms is what
 `net=` fell short by: `late` is a tick that came due a whole period late with
 nothing stalled (this console's own frame: a collection, a heavy frame; read
 it beside `gc=`), `stall` a slot that passed while a tick waited on the peer's
-input, `slew` the guest's phase moved later, net of earlier. Then the input
+input, `slew` the guest's phase moved later. Then the input
 delay in ms and the margin the peer's inputs land with (`-` before one is
 timed). One console's `late` shows up as the other's `stall`. While a kernel
 run plays the match in front (a Lua cart), no console frame runs to push

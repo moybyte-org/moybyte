@@ -416,32 +416,6 @@ static void emit(moy_match_t *m, int32_t newest) {
     broadcast(m, p, (size_t)(MOY_MATCH_IN_HDR + n));
 }
 
-// The guest steers the phase; the host is the anchor. A thin margin at delay
-// one pushes the guest later. A host whose margin is thinner than the guest's
-// by more than SLEW_SPREAD_MS pulls it earlier, as long as the guest keeps
-// more than its target: a stall moves to the side with margin to spare. Each
-// side's margin is taken less the other's lead beyond one tick, so two
-// delays compare as one.
-static void slew(moy_lockstep_t *s, float e) {
-    float lo = (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS);
-    float hi = (float)(MOY_MATCH_SLEW_TARGET_MS + MOY_MATCH_SLEW_BAND_MS);
-    if (s->delay == 1 && e < lo) {
-        s->next_ms += 1u;
-        s->slew_ms++;
-        return;
-    }
-    if (s->peer_margin == 255u) {
-        return;
-    }
-    int tick = (int)s->tick_ms;
-    float mine = e - (float)((s->peer_delay > 1 ? s->peer_delay - 1 : 0) * tick);
-    float host = (float)s->peer_margin - (float)((s->delay - 1) * tick);
-    if (mine > hi && host + (float)MOY_MATCH_SLEW_SPREAD_MS < mine) {
-        s->next_ms -= 1u;
-        s->slew_ms--;
-    }
-}
-
 static void apply(moy_lockstep_t *s, int player, uint8_t mask) {
     s->held[player] = mask;
     s->pressed[player] = (uint8_t)(mask & ~s->prev[player]);
@@ -538,8 +512,13 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
             float e = s->has_ema ? s->m_ema * 0.9f + margin * 0.1f : margin;
             s->m_ema = e;
             s->has_ema = true;
-            if (s->index != 0) {
-                slew(s, e);
+            // The guest's phase at delay one, one-sided: a thin margin pushes
+            // it later; a fat one is left alone (pulling it earlier chased the
+            // stall cliff). The host is the anchor.
+            if (s->delay == 1 && s->index != 0
+                    && e < (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS)) {
+                s->next_ms += 1u;
+                s->slew_ms++;
             }
         }
     }
@@ -585,17 +564,6 @@ int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t 
     }
     int32_t newest = moy_lockstep_expand(m, (uint32_t)data[3] | ((uint32_t)data[4] << 8));
     s->peer_need = moy_lockstep_expand(m, (uint32_t)data[5] | ((uint32_t)data[6] << 8));
-    int pd = (int)(newest - s->peer_need);
-    if (pd >= s->peer_delay) {
-        s->peer_delay = pd;
-        s->peer_low = 0;
-    } else {
-        s->peer_low_max = s->peer_low == 0 || pd > s->peer_low_max ? pd : s->peer_low_max;
-        if (++s->peer_low >= MOY_MATCH_PEER_LOW) {
-            s->peer_delay = s->peer_low_max;
-            s->peer_low = 0;
-        }
-    }
     s->peer_win = data[18];
     if (data[19] != 0u && s->step_hz == 0 && s->index != 0 && data[19] < s->tick_hz) {
         s->step_hz = data[19];
