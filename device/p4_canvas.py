@@ -497,9 +497,18 @@ class P4SystemCanvas(SystemCanvas):
         npatch = self._patch(cf, gc, sx, sy, vw, vh, ox, oy, scale, rotated)
         if npatch < 0:
             return False
-        off = ppa.snap(scr, view)
-        self._snap_live = True
         try:
+            if not rotated:
+                # The scale is kicked before the snapshot: the engine's
+                # time is what the next frame's fence waits out.
+                blit = ppa.blit_async if defer else ppa.blit_scale
+                blit(self._buf, self.w, self.h, ox, oy, view, gw, gh, scale,
+                     sx, sy, vw, vh)
+                self._blit_patches(blit, gc._buf, gw, gh, scale, npatch)
+                if defer:
+                    comp._composite_pending = True
+            off = ppa.snap(scr, view)
+            self._snap_live = True
             if rotated:
                 self._fr = (cf.kept_view(scr, off, n), gw, gh, sx, sy, vw, vh,
                             ox, oy, scale, npatch)
@@ -508,13 +517,6 @@ class P4SystemCanvas(SystemCanvas):
                                True, frame=(sx, sy, vw, vh, self._pic,
                                             self.PATCH_ROWS,
                                             self._fr_patches, npatch))
-            else:
-                blit = ppa.blit_async if defer else ppa.blit_scale
-                blit(self._buf, self.w, self.h, ox, oy, view, gw, gh, scale,
-                     sx, sy, vw, vh)
-                self._blit_patches(blit, gc._buf, gw, gh, scale, npatch)
-                if defer:
-                    comp._composite_pending = True
         except (OSError, ValueError) as exc:
             print("Moybyte P4 frame composite refused -> canvas:", exc)
             ppa.sync()
