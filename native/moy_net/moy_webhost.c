@@ -4,6 +4,8 @@
 //   GET  /sync                                 open: {"sync":1}, "a board lives here"
 //   POST /auth                                 open: the sign-in (moy_seal.h, moy_webauth.c)
 //   GET  /carts.json, /files.json              sealed: the store, streamed
+//   GET  /media                                sealed: the music folder's songs, the
+//                                              bytes a browser's Music plays (below)
 //   POST /sync                                 sealed: a batch applied
 //   POST /sync of the system root              sealed: parked for the VM when it
 //                                              answers /console.json, else 400
@@ -66,6 +68,16 @@
 // file that does not read as UTF-8 is absent, and one that stops reading as it
 // mid-way ends its value.
 //
+// THE MEDIA ROUTE carries what the pull cannot: a song's bytes, for the
+// Music a board-served page plays in the browser. `GET /media` answers the
+// files root's music folder as {"<name>": size} for its MP3s; `GET
+// /media?f=<hex>&at=<offset>&len=<bytes>` answers that song's bytes from
+// `offset`, at most MOY_WEB_MEDIA_PIECE of them (fewer at its end, none past
+// it), read and sealed 4 KB at a time, so a long song is many short
+// requests and never sits whole in either heap. The name rides as its UTF-8
+// bytes in hex, since a query here is never percent-decoded; it names one
+// file of the music folder itself, no folder and no hidden name.
+//
 // THE GOODBYE: a stop with a reason answers every request, ahead of the sign-in,
 // with {"error":"closing","why":...} for MOY_WEB_CLOSING_MS before the socket
 // closes, so the page can tell a console switched off from one unplugged.
@@ -115,6 +127,8 @@ extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
 #define READ_CHUNK 4096
 #define BIN_CHUNK 3072              // READ_CHUNK * 3 / 4: whole base64 quanta
 #define WALK_DEPTH 16
+#define MEDIA_DIR "music"
+#define MEDIA_NAME_MAX 128
 #define IO_TRIES 3
 #define IO_BACKOFF_MS 20
 
@@ -1114,6 +1128,160 @@ static void pull(out_t *o, const char *root, const char *kinds) {
     chunked_end(o);
 }
 
+// -- the media route (the header's THE MEDIA ROUTE) --------------------------------------
+
+static int is_song(const char *name, size_t n) {
+    return n > 4 && name[0] != '.' && strncasecmp(name + n - 4, ".mp3", 4) == 0;
+}
+
+static int list_songs(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
+    out_t *o = ((void **)ctx)[0];
+    int *first = ((void **)ctx)[1];
+    if (is_dir || !is_song(name, len) || moy_store_skip(name, len, 0) || o->err) {
+        return 0;
+    }
+    char num[16];
+    snprintf(num, sizeof num, ":%u", (unsigned)size);
+    if (!*first) {
+        body(o, ",", 1);
+    }
+    *first = 0;
+    jstr(o, name, len);
+    bodyz(o, num);
+    return 0;
+}
+
+static uint32_t query_u32(const char *t, size_t tn, const char *name, int *ok) {
+    const char *v;
+    size_t vn;
+    moy_http_query(t, tn, name, strlen(name), &v, &vn);
+    uint64_t x = 0;
+    *ok = vn > 0 && vn <= 10;
+    for (size_t i = 0; *ok && i < vn; i++) {
+        *ok = v[i] >= '0' && v[i] <= '9';
+        x = x * 10u + (uint64_t)(v[i] - '0');
+    }
+    *ok = *ok && x <= 0xffffffffu;
+    return (uint32_t)x;
+}
+
+// `f`'s hex as a song's name in the music folder: its path into `path`, 1;
+// else 0.
+static int song_path(const char *t, size_t tn, char *path, size_t cap) {
+    const char *v;
+    size_t vn;
+    moy_http_query(t, tn, "f", 1, &v, &vn);
+    size_t n = vn / 2u;
+    char name[MEDIA_NAME_MAX + 1];
+    if (vn == 0 || vn % 2u || n > MEDIA_NAME_MAX) {
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        int hi = v[2 * i], lo = v[2 * i + 1], d[2] = {hi, lo};
+        for (int k = 0; k < 2; k++) {
+            int c = d[k];
+            d[k] = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+            if (d[k] < 0) {
+                return 0;
+            }
+        }
+        name[i] = (char)(d[0] << 4 | d[1]);
+        if (name[i] == '/' || name[i] == '\\' || name[i] == '\0') {
+            return 0;
+        }
+    }
+    name[n] = '\0';
+    if (!is_song(name, n) || moy_store_skip(name, n, 0) || !moy_utf8_valid(name, n)) {
+        return 0;
+    }
+    int k = snprintf(path, cap, "%s/" MEDIA_DIR "/%s", W->files, name);
+    return k > 0 && (size_t)k < cap;
+}
+
+// [at, at+n) of the open file, answered: sealed records of READ_CHUNK, or the
+// bytes in the clear on the open host. A read that fails mid-way cuts the
+// answer short, which the page reads as a failed request.
+static void song_bytes(out_t *o, moy_vol_file_t *f, uint32_t n) {
+    char head[256];
+    size_t k = moy_http_head(head, sizeof(head), 200, "application/octet-stream",
+                             o->seal != NULL ? sealed_len(n) : n);
+    raw(o, head, k < sizeof(head) ? k : sizeof(head) - 1u);
+    o->status = 200;
+    o->ri = 0;
+    uint8_t rh[MOY_SEAL_HEAD], tag[MOY_SEAL_TAG];
+    while (n > 0 && !o->err) {
+        size_t want = n < READ_CHUNK ? n : READ_CHUNK, got = 0;
+        if (read_some(f, W->io, want, &got) != 0 || got != want) {
+            o->err = 1;
+            return;
+        }
+        if (o->seal != NULL) {
+            moy_seal_rec(1, o->seal->kb, o->seal->seq, o->ri++, 200, 0, rh, (uint8_t *)W->io,
+                         want, tag);
+            raw(o, rh, sizeof rh);
+            raw(o, W->io, want);
+            raw(o, tag, sizeof tag);
+        } else {
+            raw(o, W->io, want);
+        }
+        n -= (uint32_t)want;
+    }
+    if (o->seal != NULL) {
+        moy_seal_rec(1, o->seal->kb, o->seal->seq, o->ri++, 200, 1, rh, NULL, 0, tag);
+        raw(o, rh, sizeof rh);
+        raw(o, tag, sizeof tag);
+    }
+}
+
+static void media(out_t *o, const char *t, size_t tn) {
+    store_gate();
+    const char *v;
+    size_t vn;
+    moy_http_query(t, tn, "f", 1, &v, &vn);
+    if (vn == 0) {
+        char dir[MOY_WEB_PATH_MAX + sizeof(MEDIA_DIR) + 1];
+        snprintf(dir, sizeof dir, "%s/" MEDIA_DIR, W->files);
+        int first = 1;
+        void *ctx[2] = {o, &first};
+        chunked_head(o);
+        body(o, "{", 1);
+        moy_vol_t vol;
+        const char *rest;
+        if (moy_vol_at(dir, &vol, &rest) == 0) {
+            moy_vol_list(&vol, rest, list_songs, ctx);
+        }
+        body(o, "}", 1);
+        chunked_end(o);
+        return;
+    }
+    char path[MOY_WEB_PATH_MAX + sizeof(MEDIA_DIR) + MEDIA_NAME_MAX + 4];
+    int ok_at, ok_n;
+    uint32_t at = query_u32(t, tn, "at", &ok_at), n = query_u32(t, tn, "len", &ok_n);
+    if (!song_path(t, tn, path, sizeof path) || !ok_at || !ok_n || n == 0
+        || n > MOY_WEB_MEDIA_PIECE) {
+        json(o, 400, "{\"error\":\"bad song\"}");
+        return;
+    }
+    moy_vol_file_t *f = NULL;
+    uint32_t size = 0;
+    if (open_read(path, &f) != 0 || moy_vol_size(f, &size) != 0) {
+        if (f != NULL) {
+            moy_vol_close(f);
+        }
+        json(o, 404, "{\"error\":\"no such song\"}");
+        return;
+    }
+    uint32_t take = at >= size ? 0u : size - at < n ? size - at : n;
+    if (take > 0 && moy_vol_seek(f, at) != 0) {
+        moy_vol_close(f);
+        json(o, 500, "{\"error\":\"read\"}");
+        return;
+    }
+    song_bytes(o, f, take);
+    moy_vol_close(f);
+}
+
 // Whether the route at path [p, p+pn) is a sealed one (the header's table).
 static int gated(int post, int get, const char *p, size_t pn) {
     if ((post || get) && in_list(W->defer, p, pn)) {
@@ -1121,7 +1289,8 @@ static int gated(int post, int get, const char *p, size_t pn) {
     }
     return (post && path_is(p, pn, "/sync"))
            || (get && (path_is(p, pn, "/carts.json") || path_is(p, pn, "/term")
-                       || (path_is(p, pn, "/files.json") && W->has_files)))
+                       || ((path_is(p, pn, "/files.json") || path_is(p, pn, "/media"))
+                           && W->has_files)))
            || ((post || get) && path_is(p, pn, "/gpio"));
 }
 
@@ -1201,6 +1370,10 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
             asset(o, ASSETS[i].name, ASSETS[i].ctype);
             return ROUTE_DONE;
         }
+    }
+    if (path_is(t, pn, "/media") && W->has_files) {
+        media(o, t, tn);
+        return ROUTE_DONE;
     }
     int carts = path_is(t, pn, "/carts.json");
     if (carts || (path_is(t, pn, "/files.json") && W->has_files)) {

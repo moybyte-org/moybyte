@@ -87,7 +87,7 @@ def built(tmp_path_factory):
 
 
 class Host:
-    def __init__(self, exe, out, sealed=True):
+    def __init__(self, exe, out, sealed=True, files=False):
         # A short root: the webhost refuses a system folder past
         # MOY_WEB_PATH_MAX (96), which an xdist worker's tmp_path can reach.
         tree = Path(tempfile.mkdtemp(prefix="tty", dir="/tmp"))
@@ -101,7 +101,8 @@ class Host:
         env = dict(os.environ, MOY_SH_ROOT=str(tree), ASAN_OPTIONS="detect_leaks=0")
         self.proc = subprocess.Popen(
             [exe, str(self.port), str(tree / "sd" / "moybyte" / "system") if sealed else "-",
-             str(tree / "sd" / "moybyte" / "carts")],
+             str(tree / "sd" / "moybyte" / "carts")]
+            + ([str(tree / "sd" / "moybyte" / "files")] if files else []),
             stdin=subprocess.PIPE, stdout=self.logf, stderr=subprocess.STDOUT, env=env)
         for _ in range(200):
             if "listening" in self.log():

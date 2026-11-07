@@ -15,7 +15,8 @@
 // password change does (`SIGNEDOUT N`). They run on the console's thread,
 // whose state the sign-in is. SYSTEM_DIR `-` is the open host.
 // The main thread prints a STATS line when a figure moves.
-// Usage: tty_main PORT SYSTEM_DIR CARTS_DIR
+// FILES_DIR, when given, is the webhost's files root (/files.json, /media).
+// Usage: tty_main PORT SYSTEM_DIR CARTS_DIR [FILES_DIR]
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -119,7 +120,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     return MOY_LOOP_ROLE_NEEDS_VM;
 }
 
-static const char *s_system, *s_carts;
+static const char *s_system, *s_carts, *s_files;
 static int s_port;
 static int s_cmd;                       // 1 token, 2 drop, 3 signout: the console's to run
 
@@ -131,6 +132,7 @@ static void *console(void *arg) {
     moy_web_cfg_t cfg = {0};
     cfg.port = (uint16_t)s_port;
     cfg.carts = s_carts;
+    cfg.files = s_files;
     cfg.system = s_system;
     cfg.defer = "";
     if (moy_web_start(&cfg) != 0) {
@@ -162,14 +164,15 @@ static void *console(void *arg) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s PORT SYSTEM_DIR CARTS_DIR\n", argv[0]);
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr, "usage: %s PORT SYSTEM_DIR CARTS_DIR [FILES_DIR]\n", argv[0]);
         return 2;
     }
     signal(SIGPIPE, SIG_IGN);
     s_port = atoi(argv[1]);
     s_system = strcmp(argv[2], "-") ? argv[2] : NULL;
     s_carts = argv[3];
+    s_files = argc == 5 ? argv[4] : NULL;
     pthread_t t;
     pthread_create(&t, NULL, console, NULL);
     fcntl(0, F_SETFL, fcntl(0, F_GETFL, 0) | O_NONBLOCK);

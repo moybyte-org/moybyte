@@ -253,6 +253,7 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 #define MOY_WEB_DEFER_MS 3000
 #define MOY_WEB_POLL_MAX 4          // new connections one poll accepts
 #define MOY_WEB_PATH_MAX 96
+#define MOY_WEB_MEDIA_PIECE 32768u  // GET /media's most bytes of a song per request
 
 // The sign-in's backoff (moy_webhost.c's header): wrong credentials a source
 // has free, wrong ones from anywhere before every source not signed in waits,
