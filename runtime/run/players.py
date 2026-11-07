@@ -70,6 +70,27 @@ class _Slot:
         self._pressed = self._held - self._prev
         self._prev = set(self._held)
 
+    def set_mask(self, mask, names):
+        """Held from `mask` (bit i is names[i]) and the press edge against
+        the last call, in one step and in place: a lockstep tick sets both
+        slots every tick, and two new sets a slot a tick were most of what a
+        match's frame allocated."""
+        held, prev, pressed = self._held, self._prev, self._pressed
+        bit = 1
+        for name in names:
+            if mask & bit:
+                if name in prev:
+                    pressed.discard(name)
+                else:
+                    pressed.add(name)
+                held.add(name)
+                prev.add(name)
+            else:
+                held.discard(name)
+                prev.discard(name)
+                pressed.discard(name)
+            bit <<= 1
+
     def held(self, name):
         return name in self._held
 
@@ -345,9 +366,11 @@ def mask_of(state, buttons, player=None):
     """An input's held buttons as one byte, in `buttons` order. `held`, not
     `pressed`: both consoles derive edges from consecutive held masks."""
     m = 0
-    for i, name in enumerate(buttons):
+    bit = 1
+    for name in buttons:                # enumerate allocates a tuple a button
         if state.held(name, player):
-            m |= 1 << i
+            m |= bit
+        bit <<= 1
     return m
 
 
@@ -467,9 +490,11 @@ class LockstepSession:
                     "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
                     "lowers", "peer_margin", "step_from", "tick_hz", "desync",
                     "desync_kind", "checks", "late_ms", "stall_ms", "slew_ms"):
-            return getattr(self.__dict__["_m"], name)
+            # self._m, never self.__dict__: on a board __dict__ is a copy
+            # of the instance's attributes, made at every read.
+            return getattr(self._m, name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
-            return getattr(self.__dict__["_m"], name[1:])
+            return getattr(self._m, name[1:])
         raise AttributeError(name)
 
     def __setattr__(self, name, value):
@@ -530,11 +555,8 @@ class LockstepSession:
         return True
 
     def _apply(self, slot, mask):
-        if slot is None:
-            return
-        for i, name in enumerate(self._buttons):
-            slot.set_held(name, bool(mask & (1 << i)))
-        slot.begin_frame()
+        if slot is not None:
+            slot.set_mask(mask, self._buttons)
 
     def _frame_seed(self, f):
         return _mp.seed_of(self.seed, f)

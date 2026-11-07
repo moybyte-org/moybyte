@@ -1831,3 +1831,79 @@ def test_a_splits_divider_drag_allocates_nothing(result):
     assert any(act and got for _b, act, got in at), at
     assert all(b == 0 for b, _act, got in at if not got), at
     assert all(b <= ANSWER for b, _act, got in at if got), at
+
+
+MATCH_DRIVER = r'''
+import sys
+sys.path.insert(0, @RUNTIME@)
+import gc
+import players
+
+NAMES = ("left", "right", "up", "down", "a", "b", "x", "y")
+MASKS = ((5, 3), (5, 0), (0, 3), (17, 130))
+
+
+class M:
+    """The C session's face as LockstepSession reads it, values held in
+    advance: what is measured is the console's Python around the C."""
+    index = 0
+    seed = 1
+    session = 0
+    config = None
+    frame_seed = 12345
+    waiting = False
+    frame = 7
+
+    def __init__(self):
+        self.held = MASKS[0]
+
+    def world_due(self):
+        return False
+
+    def advance(self, mask, now):
+        return 1
+
+
+class Inp:
+    def held(self, name, player=None):
+        return name == "left" or name == "a"
+
+
+inp = Inp()
+m = M()
+s = players.LockstepSession(0, 1, None, NAMES, players.PlayerRouter(inp), _m=m)
+
+
+def tick(k):
+    m.held = MASKS[k & 3]
+    s.advance(players.mask_of(inp, NAMES, None), k)
+    s.waiting
+    s.frame
+
+
+for k in range(8):
+    tick(k)
+gc.collect()
+m0 = gc.mem_alloc()
+for k in range(200):
+    tick(k)
+spent = gc.mem_alloc() - m0
+r = s.local
+print("RESULT", spent, int(r.held("a")), int(r.pressed("left")))
+'''
+
+
+def test_a_match_tick_allocates_nothing_around_the_c(tmp_path):
+    """A lockstep tick's Python on a board (2026-11-07): the buttons' mask,
+    both player slots' held and press edge, the forwarded reads of the
+    session. On glass a Python Brick Siege match collected every 13 s on
+    the T-Deck and the Guition S3 (~200 ms each, a tick lost for every 33)
+    against once in 40-115 s solo: the tick allocated ~600 bytes, enumerate's
+    tuples, two new sets a slot and a copy of the instance's __dict__ at
+    every forwarded read."""
+    spent, held, pressed = _mp_result(
+        tmp_path, MATCH_DRIVER,
+        "A match tick's Python runs 30 times a second on both consoles; only "
+        "the board-model MicroPython measures what it allocates.")
+    assert (held, pressed) == (1, 1), "the slots read the last tick's masks"
+    assert spent == 0, "200 match ticks allocated %d bytes" % spent
