@@ -249,6 +249,10 @@ def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts)
     on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_cart_out_of_native_stack_traps_with_its_numbers(board, wasm_carts):
+    on_glass.wasm_deep_recursion_traps_with_its_numbers(board, WASM_BOARD_DIR)
+
+
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
     on_glass.wasm_read_of_a_folder_reads_nothing(board, WASM_BOARD_DIR)
 

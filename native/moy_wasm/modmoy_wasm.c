@@ -801,6 +801,7 @@ typedef struct {
     void *volatile vm_arg;
     volatile bool waiting;          // the task is in sess_wait and can serve
     TaskHandle_t thread;            // the session's task, once it runs
+    uint8_t *stack_lo;              // its stack's low end when the boundary was set
     wasm_module_inst_t volatile inst;   // what moy_wasm_session_terminate stops
     lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
 } sess_t;
@@ -953,6 +954,32 @@ static int sess_fail(sess_t *s, const char *what, const char *detail)
     return 1;
 }
 
+// A "native stack overflow" carries the numbers the check compared, from
+// this thread's stack's low end at the open: where that end is now (the
+// RISC-V port moves it up as it carves coprocessor save areas), the boundary
+// the env holds and the one handed to it (MOY_WASM_STACK_GUARD), the least
+// this thread has had free, the largest frame an AOT entry check asks for,
+// and whether the env was last entered here.
+static void stack_note(sess_t *s, wasm_exec_env_t env)
+{
+    if (env == NULL || strstr(s->err, "native stack overflow") == NULL) {
+        return;
+    }
+    void *bound, *user;
+    pthread_t by;
+    uint32_t size_max;
+    moy_wasm_env_stack(env, &bound, &user, &by, &size_max);
+    uint8_t *lo = s->stack_lo;
+    size_t n = strlen(s->err);
+    snprintf(s->err + n, sizeof(s->err) - n,
+             " [stack %p%+d bound %+d set %+d free %u frame %u %s]", (void *)lo,
+             (int)(pxTaskGetStackStart(NULL) - lo), (int)((uint8_t *)bound - lo),
+             (int)((uint8_t *)user - lo),
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+             (unsigned)size_max, pthread_equal(by, pthread_self()) ? "here" : "elsewhere");
+    printf("moy_wasm: %s\n", s->err);
+}
+
 static void *sess_thread(void *arg)
 {
     sess_t *s = arg;
@@ -1046,8 +1073,8 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, OUT_OF_MEMORY, "no pool for the exec env");
         goto opened;
     }
-    wasm_runtime_set_native_stack_boundary(
-        env, pxTaskGetStackStart(NULL) + MOY_WASM_STACK_GUARD);
+    s->stack_lo = pxTaskGetStackStart(NULL);
+    wasm_runtime_set_native_stack_boundary(env, s->stack_lo + MOY_WASM_STACK_GUARD);
     err[0] = 0;
     if (ops->bound && ops->bound(ops->user, env, err, sizeof(err))) {
         rc = sess_fail(s, "bind", err);
@@ -1065,6 +1092,9 @@ opened:
         // A failed open is closed by its opener and never called.
         s->err[0] = 0;
         s->rc = ops->call(ops->user, s->what, s->dt, s->err, sizeof(s->err));
+        if (s->rc != 0) {
+            stack_note(s, env);
+        }
         xSemaphoreGive(s->back);
     }
     if (up && ops->unbound) {

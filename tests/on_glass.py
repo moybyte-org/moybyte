@@ -31,6 +31,7 @@ swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 import contextlib
 import hashlib
 import os
+import re
 import sys
 import time
 import warnings
@@ -4381,6 +4382,50 @@ def wasm_newer_cart_opens_the_notice(board, board_dir):
     notice = _notice_on_launch(board, NEWER_TITLE, NEWER_NOTICE)
     _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
     return notice
+
+
+# -- a cart that runs out of native stack ------------------------------------
+#
+# A compiled cart's native stack is its session thread's own, and the AOT
+# code checks it at every entry against the boundary the session handed the
+# runtime (native/moy_wasm/README.md). A trap there names the numbers the
+# check compared (modmoy_wasm.c's stack_note), so one that should not have
+# fired says why.
+
+DEEP_TITLE = "Deep Wasm"
+STACK_NOTE = re.compile(r"native stack overflow \[stack 0x[0-9a-f]+\+(\d+) bound \+(\d+) "
+                        r"set \+(\d+) free (\d+) frame (\d+) (here|elsewhere)\]")
+STACK_GUARD = 2048          # modmoy_wasm.c's MOY_WASM_STACK_GUARD
+
+
+def wasm_deep_recursion_traps_with_its_numbers(board, board_dir):
+    """The deep fixture recurses without end on its second frame: the native
+    stack check traps it -- "native stack overflow", never a real overflow --
+    and the trap says the env held the boundary it was handed, the guard above
+    the session thread's stack, and was entered on that thread. The board
+    stays healthy: the hello cart runs after it and reads its greeting.
+    Returns the note's numbers."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_deep_")
+    out = os.path.join(tmp, "deep.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "deep.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_deep.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    err = _wasm_run_error(board, DEEP_TITLE)
+    m = STACK_NOTE.search(err)
+    assert m, err
+    shift, bound, given, free, frame = (int(g) for g in m.groups()[:5])
+    assert bound == given == STACK_GUARD, err
+    assert m.group(6) == "here", err
+    assert shift < STACK_GUARD and frame < STACK_GUARD, err
+    print("\nWASM deep recursion: %r" % err)
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return shift, bound, given, free, frame
 
 
 # -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------

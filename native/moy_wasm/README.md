@@ -274,7 +274,14 @@ greeting check in every suite is the guard.
 The AOT native-stack check is live: the run hands the runtime its stack's low
 end plus a 2 KB guard (`wasm_runtime_set_native_stack_boundary`), and the fork
 reports the calling task's real stack start where upstream reported none. An
-overflow traps as "native stack overflow".
+overflow traps as "native stack overflow". A session's trap carries the
+numbers the check compared, from the session thread's stack's low end at the
+open: `[stack <low end>+<how far it has moved> bound +<the env's boundary> set
++<the boundary handed to it> free <least free> frame <largest entry check>
+here|elsewhere]`, the last word saying whether the env was last entered on the
+session's thread. A trap with bound and set at the guard, entered here, a
+small frame and plenty free is one the check should not have made. The P4
+suites' Deep Wasm fixture recurses without end to read them.
 
 ## A cart too big for the board
 
