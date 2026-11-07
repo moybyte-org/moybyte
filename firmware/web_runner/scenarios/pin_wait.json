@@ -1,0 +1,11 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 8000, "steps": [
+  {"note": "opened with NO ?pin= against a pinned twin that waits after one wrong pin: the three gated reads of one load are three wrong pins, so the boot meets a wait"},
+  {"js": "JSON.stringify({at:'waiting',overlay:getComputedStyle(document.getElementById('pin')).display,msg:document.getElementById('pinm').textContent,status:document.getElementById('s').textContent})"},
+  {"shot": "waiting"},
+
+  {"note": "the RIGHT pin, inside the window: the board never looks at it, the page says the wait again and keeps the pin it was given"},
+  {"js": "JSON.stringify({at:'sent-right',ok:(document.getElementById('pinf').value='4321',document.getElementById('pinb').click(),true)})"},
+  {"wait": 10000},
+  {"js": "JSON.stringify({at:'still',overlay:getComputedStyle(document.getElementById('pin')).display,msg:document.getElementById('pinm').textContent,search:location.search,stored:localStorage.getItem('moybyte.pin:'+location.origin)})"},
+  {"shot": "still"}
+]}

@@ -55,7 +55,13 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # This flag exists so the gate and
                                             # the page's pin prompt can be
                                             # driven in a real browser with no
-                                            # board on the desk.
+                                            # board on the desk. Wrong pins
+                                            # back off as a board's do (429
+                                            # {"error":"wait","ms":N}).
+    python serve.py ... --pin NNNN --pin-backoff FREE,MS  # ...with FREE wrong
+                                            # pins before the first wait of MS
+                                            # (a board's: 10,1000), so a test
+                                            # can reach a wait in one load.
     python serve.py ... --carts D --term HOST:PORT  # ...and GET /term passed
                                             # through, bytes both ways, to a
                                             # webhost that serves the board's
@@ -75,6 +81,7 @@ import http.server
 import json
 import os
 import sys
+import threading
 import time
 
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -131,6 +138,17 @@ if "--pin" in args:
     i = args.index("--pin")
     pin = args[i + 1]
     del args[i:i + 2]
+# The pin's backoff, native/moy_net/moy_webhost.c's for one source: FREE wrong
+# pins, then each one more shuts the source out for a window that starts at MS
+# and doubles to the board's cap; a right pin clears it.
+pin_free, pin_wait_ms, pin_wait_max_ms = 10, 1000, 300000
+if "--pin-backoff" in args:
+    i = args.index("--pin-backoff")
+    pin_free, pin_wait_ms = (int(v) for v in args[i + 1].split(","))
+    del args[i:i + 2]
+_pin_lock = threading.Lock()
+_pin_fails = 0
+_pin_until = 0.0
 root = os.path.join(_here, args[1] if len(args) > 1 else "dist")
 port = int(args[0]) if args else 8321
 if os.path.realpath(root) == os.path.realpath(os.path.join(_here, "dist")):
@@ -342,13 +360,28 @@ else:
             return True
 
         def _refused(self, sent):
-            """True (and the 403 already sent) when this request lacks the pin.
+            """True (and the 403 or 429 already sent) when this request lacks
+            the pin or its source is waiting out wrong ones.
 
             The predicate is moy_webhost's, imported rather than restated: a
             twin that gates differently from a board is a twin that proves
             nothing about the board."""
-            if moy_webhost.pin_ok(pin, sent):
+            global _pin_fails, _pin_until
+            if not pin:
                 return False
+            with _pin_lock:
+                now = time.monotonic()
+                if now < _pin_until:
+                    ms = int((_pin_until - now) * 1000) or 1
+                    self._send(429, json.dumps({"error": "wait", "ms": ms}).encode())
+                    return True
+                if moy_webhost.pin_ok(pin, sent):
+                    _pin_fails, _pin_until = 0, 0.0
+                    return False
+                _pin_fails += 1
+                if _pin_fails > pin_free:
+                    past = min(_pin_fails - pin_free - 1, 16)
+                    _pin_until = now + min(pin_wait_ms << past, pin_wait_max_ms) / 1000
             self._send(403, moy_webhost.PIN_REFUSED.encode())
             return True
 

@@ -58,7 +58,7 @@ def _seeded_store(tmp_path):
 
 
 @contextlib.contextmanager
-def _twin(store, pin=None):
+def _twin(store, pin=None, backoff=None):
     """serve.py's board twin over `store`, up and answering, then torn down.
 
     The health check is GET /sync and not /carts.json, because under `--pin`
@@ -69,6 +69,8 @@ def _twin(store, pin=None):
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
     if pin:
         argv += ["--pin", pin]
+    if backoff:
+        argv += ["--pin-backoff", backoff]
     server = subprocess.Popen(argv, cwd=RUNNER, stdout=subprocess.DEVNULL,
                               stderr=subprocess.STDOUT)
     base = "http://127.0.0.1:%d" % port
@@ -197,6 +199,43 @@ def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
         new = store / "local.new_cart.moy"
         assert new.is_dir(), \
             "no cart reached the store after pairing:\n%s" % out[-2000:]
+
+
+def _probes(out):
+    """browsershot's `js` results, keyed by their `at`. Each line is a JSON
+    string CONTAINING the JSON the expression returned."""
+    probes = {}
+    for m in re.findall(r"^   js -> (.*)$", out, re.M):
+        d = json.loads(json.loads(m))
+        probes[d["at"]] = d
+    return probes
+
+
+def test_a_board_holding_wrong_pins_off_says_how_long(tmp_path):
+    """THE PIN'S BACKOFF (native/moy_net/moy_webhost.c) answers 429
+    {"error":"wait","ms":N} while a source waits, its pin unread. The page
+    must say that -- in the one sentence every pin-gated call uses -- rather
+    than "that pin did not work", which would send a kid guessing again into a
+    window that only grows, and it must keep the pin it was given, since
+    nothing judged it."""
+    web_e2e.require("sync", "pin")
+    store = _seeded_store(tmp_path)
+    with _twin(store, pin="4321", backoff="1,60000") as base:
+        out = _browsershot("pin_wait.json", base, tmp_path / "shots")
+        probes = _probes(out)
+        for at in ("waiting", "still"):
+            assert at in probes, (at, out[-3000:])
+        wait = re.compile(r"^Too many wrong pins -- try again in \d+ s$")
+        assert probes["waiting"]["overlay"] == "flex", probes["waiting"]
+        assert wait.match(probes["waiting"]["msg"]), probes["waiting"]
+        assert wait.match(probes["waiting"]["status"]), probes["waiting"]
+        still = probes["still"]
+        assert still["overlay"] == "flex", still
+        assert wait.match(still["msg"]), still
+        assert "pin=4321" in still["search"], still
+        assert still["stored"] == "4321", \
+            "a wait judged nothing, so the pin it was given stays remembered"
+        assert not (store / "local.new_cart.moy").exists()
 
 
 def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):

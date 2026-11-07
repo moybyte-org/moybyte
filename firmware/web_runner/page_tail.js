@@ -61,7 +61,9 @@ else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAs
 if(m.report)p8Report(m.report,m.ok,m.dir);}
 else if(m.t==="update"){updBound(m);}
 else if(m.t==="edited"){window.__moyEdited=m.s;pzSay(m.s,!m.ok);}
-else if(m.t==="pin"){pinAsk(m.tried);}
+else if(m.t==="pin"){pinAsk(m.tried,m.wait);}
+else if(m.t==="wait"){linkWait(m.s);}
+else if(m.t==="pod"){podSaid(m.s);}
 else if(m.t==="pick"){pkAsk(m);}
 else if(m.t==="unpick"){pkDone(m.id);}
 else if(m.t==="installed"){window.__moyInstalled=m.folder;}
@@ -115,11 +117,13 @@ var p=pinStored();if(!p)return;
 q.set("pin",p);
 history.replaceState(null,"","?"+q.toString()+location.hash);}
 catch(e){/* no history, no storage: the prompt still works */}};
-function pinAsk(tried){if(!PINEL)return;
+function pinAsk(tried,wait){if(!PINEL)return;
 // A pin was offered and refused: say so plainly. Without this the same empty
-// box comes back and reads as the page having ignored the keystrokes.
-PINM.textContent=tried?"that pin did not work -- try again":"";
-if(tried){try{localStorage.removeItem(pinKey());}catch(e){}}
+// box comes back and reads as the page having ignored the keystrokes. A WAIT
+// (the board holding wrong pins off) never looked at the pin, so the
+// remembered one is kept.
+PINM.textContent=wait||(tried?"that pin did not work -- try again":"");
+if(tried&&!wait){try{localStorage.removeItem(pinKey());}catch(e){}}
 PINEL.style.display="flex";
 try{PINF.value="";PINF.focus();}catch(e){}}
 function pinSubmit(){var v=(PINF.value||"").trim();
@@ -291,19 +295,14 @@ fetch("sync",{method:"GET"}).then(function(r){podHost=r.ok;podSync();})
 // cart title arrives on every frame payload, so a string compare is the whole
 // cost and it needs no second detection of a change page_core already tracks.
 function podTick(){if(podLast!==assCart){podLast=assCart;podSync();}}
+// The POST is the worker's (podRun), with the pin it read off this page's url,
+// so a refusal is worded where every pin-gated call's is.
+var podWas="";
 if(POD)POD.addEventListener("click",function(e){e.preventDefault();
-if(!assCart)return;
-var was=POD.textContent;POD.textContent="starting...";
-// The pin rides THIS page's own url, exactly as the sync push's does: a page
-// opened from the board's QR carries it, one opened by hand does not, and the
-// board answers 403 either way rather than trusting the request.
-var pin=new URLSearchParams(location.search).get("pin");
-fetch("run",{method:"POST",headers:{"Content-Type":"application/json"},
-body:JSON.stringify({cart:assCart,pin:pin})})
-.then(function(r){return r.ok?r.json():Promise.reject(r.status);})
-.then(function(j){POD.textContent="playing on device: "+(j.run||assCart);})
-.catch(function(err){POD.textContent=(err===403)?"device refused the pin":was;
-console.log("[moy] play on device failed: "+err);});});
+if(!assCart||!WORKER)return;
+podWas=POD.textContent;POD.textContent="starting...";
+WORKER.postMessage({t:"pod",cart:assCart});});
+function podSaid(s){if(POD)POD.textContent=s||podWas;}
 // ---- the LINK surface: one panel, and the REASON is the point ---------------
 // A board stops answering for two very different reasons, and saying the same
 // thing about both is wrong in both directions:
@@ -357,6 +356,13 @@ LNK.style.display="block";
 // Readable by the browser harness without scraping, the way __moyReport is.
 window.__moyLink=kind;}
 window.__moyLinkLost=linkLost;
+// A pin wait on the sync push: the board is answering and holding this page
+// off, so the same panel says why and comes down when a push lands ("").
+function linkWait(s){if(linkGone)return;
+if(s){LNKH.textContent=s;
+LNKB.textContent="Your changes wait in this tab until then -- do not reload.";
+LNK.className="";LNK.style.display="block";window.__moyLink="wait";}
+else if(window.__moyLink==="wait"){LNK.style.display="none";window.__moyLink="";}}
 
 // The loader module calls this on the play-button gesture (which also unlocks
 // WebAudio), once the worker has booted and shipped its assets. It is the whole

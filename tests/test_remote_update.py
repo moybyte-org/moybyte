@@ -150,6 +150,7 @@ class _Link:
         self.posts = 0
         self.actions = []
         self.offline = False
+        self.wait = None          # worker.js's pinWaitSays sentence for a 429
 
     def pump(self):
         """One worker tick: send a queued request, else poll if asked to."""
@@ -157,6 +158,9 @@ class _Link:
         if body:
             self.posts += 1
             self.actions.append(json.loads(body).get("action"))
+            if self.wait:
+                self.remote.ack(False, json.dumps({"wait": self.wait}))
+                return
             if self.offline:
                 self.remote.ack(False)
                 return
@@ -490,6 +494,28 @@ def test_a_board_that_stops_answering_says_so(tmp_path):
     assert link.remote.dead is True
     assert ws.update_ui._upd_phase == "error"
     assert "stopped answering" in ws.update_ui._upd_msg
+
+
+def test_a_pin_wait_reaches_the_screen_and_the_link_stays_up(tmp_path):
+    """A board holding wrong pins off answers 429, and the worker acks it with
+    its one sentence. That is an answer, not silence: the screen says it at
+    once rather than sitting on CHECKING toward "stopped answering", and the
+    next check, once the wait is over, works."""
+    _ota, board = _zero()
+    link = _Link(board)
+    ws = _ws(tmp_path, link.remote)
+    link.wait = "Too many wrong pins -- try again in 5 s"
+    ws.update_ui.open_update_online()
+    _frames(ws, link, n=4)
+    assert ws.update_ui._upd_phase == "error"
+    assert ws.update_ui._upd_msg == link.wait
+    assert link.remote.dead is False
+    assert link.posts == 1, "a wait is not resent: the screen concluded"
+    ws.update_ui._exit_update()
+    link.wait = None
+    ws.update_ui.open_update_online()
+    _frames(ws, link, n=8)
+    assert ws.update_ui._upd_phase == "confirm_online"
 
 
 def test_one_request_in_flight_at_a_time(tmp_path):

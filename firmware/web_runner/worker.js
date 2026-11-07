@@ -37,6 +37,7 @@
 //   {t:"picked", id, name, buf}  the player's own copy of a file Get Carts
 //                        asked for ({t:"pick"}), TRANSFERRED; or
 //   {t:"picked", id, cancel}     ...the player closed the question
+//   {t:"pod", cart}      play `cart` on the serving board (POST /run)
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
@@ -52,7 +53,11 @@
 //                        the boot stopped before the VM: the page prompts.
 //                        `tried` = a pin WAS offered and refused (a wrong one),
 //                        which is the difference between "type it" and "that
-//                        one did not work".
+//                        one did not work". `wait` is pinWaitSays' sentence
+//                        when the board is holding wrong pins off, else "".
+//   {t:"wait", s}        the sync push meets a pin wait: the link panel says
+//                        `s`, and "" (a push landed) takes it down
+//   {t:"pod", s}         the play-on-device link's text after {t:"pod"}
 //   {t:"carts", names}   the shelf's folder names
 //   {t:"exported", name, buf}  a .moy zip, TRANSFERRED
 //   {t:"imported", s, ok, report, dir}  the result of an import, in the page's
@@ -115,6 +120,7 @@ let syncFailing = false;      // at least one failure since the last answer
 // a disconnect is frightening or merely inconvenient -- see syncLost.
 let outstanding = false;
 let syncLostSaid = false;
+let syncWaitSaid = false;     // the link panel is showing a pin wait
 
 function syncFailed(now) {
     syncFailing = true;
@@ -852,6 +858,26 @@ let pin = null;
 const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
                               + "pin=" + encodeURIComponent(pin) : url);
 
+// THE PIN'S BACKOFF, said one way. A source that gave too many wrong pins waits
+// (native/moy_net/moy_webhost.c, the pin's backoff), and while it waits every
+// pin-gated route answers 429 {"error":"wait","ms":N} with its pin unread. Each
+// gated call here that meets one says pinWaitSays' sentence, wherever it says
+// it: the pin prompt, the link panel, Settings' update screen, the play-on-
+// device link. "--", not a dash: the console's font draws Latin-1 and a few
+// symbols, and the update screen is drawn in it. The Terminal says its own
+// (native/moy_sh/moy_sh_link.c), from termWhy's ms.
+function pinWaitSays(ms) {
+    return "Too many wrong pins -- try again in "
+        + Math.max(1, Math.ceil(ms / 1000)) + " s";
+}
+// The ms a 429 asks this page to wait, or -1 for any other answer.
+async function pinWaitMs(r) {
+    if (r.status !== 429) return -1;
+    let ms = 0;
+    try { ms = (await r.json()).ms | 0; } catch (e) { }
+    return ms;
+}
+
 // A fatal error as {t:"error"}. V8's e.stack leads with String(e), JSC's
 // (Safari's) and SpiderMonkey's hold the frames alone -- so on an iPhone the
 // stack without the message is an abort with no reason. The message goes first
@@ -891,27 +917,35 @@ async function init(search, coarse, channel, scheme) {
     // -- stops draining once the browser's buffer is full, and the board cuts
     // it off: a board with more carts than that serves a console that cannot
     // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
-    const [mods, cartsRes, files, shelves, system] = await Promise.all([
+    // Each pin-gated read as {status, wait, json}, json for a 2xx alone.
+    const gated = (url) => fetch(withPin(url)).then(async (r) => {
+        const wait = await pinWaitMs(r);
+        return { status: r.status, wait: wait, json: r.ok ? await r.json() : null };
+    });
+    const none = () => ({ status: 0, wait: -1, json: null });
+    const [mods, cartsRes, filesRes, shelves, systemRes] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch(withPin("carts.json")).then(async (r) => (
-            { status: r.status, json: r.status === 403 ? null : await r.json() })),
-        fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
-            .catch(() => null),
+        gated("carts.json"),
+        gated("files.json").catch(none),
         fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         // The console's own documents, where the serving board keeps them
         // (its portable Settings and its badges); firmware before them 404s.
-        fetch(withPin("console.json")).then((r) => r.ok ? r.json() : null)
-            .catch(() => null)]);
-    if (cartsRes.status === 403) {
+        gated("console.json").catch(none)]);
+    // A wait from any of the three is the board's answer to all three: one
+    // source, one window.
+    const waitMs = Math.max(cartsRes.wait, filesRes.wait, systemRes.wait);
+    if (waitMs >= 0 || cartsRes.status === 403) {
         // A PINNED BOARD, and this page cannot read it. Stop the boot here --
         // there is nothing to boot, and seeding the VFS from an error body
         // would build a shelf out of the refusal. The page prompts; a submitted
         // pin comes back as a fresh load with ?pin= on it.
-        say("this console needs a pin");
-        self.postMessage({ t: "pin", tried: !!pin });
-        console.log("[moy] carts.json refused the pin");
+        const wait = waitMs >= 0 ? pinWaitSays(waitMs) : "";
+        say(wait || "this console needs a pin");
+        self.postMessage({ t: "pin", tried: !!pin, wait: wait });
+        console.log("[moy] carts.json: " + (wait || "the pin was refused"));
         return;
     }
+    const files = filesRes.json, system = systemRes.json;
     const carts = cartsRes.json;
     let boot = "";
     if (mods) {
@@ -1094,6 +1128,8 @@ async function probeGpio(pin) {
     try {
         const r = await fetch("gpio", { method: "POST", body: body,
             headers: { "Content-Type": "application/json" } });
+        const wait = await pinWaitMs(r);
+        if (wait >= 0) console.log("[moy] gpio: " + pinWaitSays(wait));
         if (!r.ok) return null;
         const d = await r.json();
         return (d && d.pins && d.pins.length) ? d.pins : null;
@@ -1111,6 +1147,8 @@ async function probeUpdate(pin) {
     try {
         const u = pin ? "update?pin=" + encodeURIComponent(pin) : "update";
         const r = await fetch(u);
+        const wait = await pinWaitMs(r);
+        if (wait >= 0) console.log("[moy] update: " + pinWaitSays(wait));
         if (!r.ok) return null;
         const d = await r.json();
         return (d && d.running) ? d : null;
@@ -1152,6 +1190,14 @@ function updatePump() {
                             headers: { "Content-Type": "application/json" } })
         : fetch(withPin("update"));
     req.then((r) => {
+            // A wait is the board answering: the screen says it and the link
+            // stays up (update_link.RemoteUpdater.ack).
+            if (r.status === 429) {
+                return pinWaitMs(r).then((ms) => {
+                    try { updateAck(0, JSON.stringify({ wait: pinWaitSays(ms) })); }
+                    catch (e) { }
+                });
+            }
             // The boot probe already cleared these, so meeting one HERE means
             // the host changed under us -- rebooted into setup, pin rotated.
             // Go inert once rather than retry-logging: the SCREEN stays up and
@@ -1522,6 +1568,22 @@ function syncPump() {
     fetch("sync", { method: "POST", body: body,
                     headers: { "Content-Type": "application/json" } })
         .then((r) => {
+            if (r.status === 429) {
+                // The board answered, so this is no loss: the batch requeues
+                // and the sweep holds off until the window ends, saying so on
+                // the link panel until a push lands.
+                syncOk(now);
+                try { syncAck(0); } catch (e) { }
+                return pinWaitMs(r).then((ms) => {
+                    lastSyncAt = performance.now() + ms - SYNC_MS;
+                    syncWaitSaid = true;
+                    self.postMessage({ t: "wait", s: pinWaitSays(ms) });
+                });
+            }
+            if (r.ok && syncWaitSaid) {
+                syncWaitSaid = false;
+                self.postMessage({ t: "wait", s: "" });
+            }
             if (r.status === 404 || r.status === 405 || r.status === 501) {
                 // A host with no push half (moybyte.com, an export, an older
                 // read-only board): one probe, then off for good.
@@ -1581,6 +1643,25 @@ function heartbeat(now) {
         })
         .catch(() => syncFailed(now))
         .finally(() => { syncBusy = false; });
+}
+
+// PLAY ON DEVICE (page_tail.js's link): POST /run, pin in the body as /run reads
+// it, and the link's new text back as {t:"pod", s} -- "" puts its old text back.
+async function podRun(cart) {
+    let s = "";
+    try {
+        const r = await fetch("run", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cart: cart, pin: pin }) });
+        const wait = await pinWaitMs(r);
+        if (wait >= 0) s = pinWaitSays(wait);
+        else if (r.ok) s = "playing on device: " + ((await r.json()).run || cart);
+        else if (r.status === 403) s = "device refused the pin";
+        if (!s) console.log("[moy] play on device failed: " + r.status);
+    } catch (e) {
+        console.log("[moy] play on device failed: " + e);
+    }
+    self.postMessage({ t: "pod", s: s });
 }
 
 // THE BOARD'S GOODBYE (moy_webhost's closing window). A console that is going
@@ -1739,13 +1820,19 @@ self.onmessage = async (ev) => {
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
             const [carts, files] = await Promise.all([
-                fetch(withPin("carts.json")).then((r) => r.json()),
+                fetch(withPin("carts.json")).then(async (r) => {
+                    const wait = await pinWaitMs(r);
+                    return wait >= 0 ? { wait: pinWaitSays(wait) } : r.json();
+                }),
                 fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
                     .catch(() => null)]);
+            if (typeof carts.wait === "string") { say(carts.wait); return; }
             writeStore(CARTS_ROOT, carts);
             if (files) writeStore(store.rootById("files").vfs, files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
+        } else if (m.t === "pod") {
+            podRun(m.cart);
         } else if (m.t === "kept") {
             keptAnswer(m.state);
         } else if (m.t === "carts") {
