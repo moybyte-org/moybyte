@@ -14,11 +14,12 @@ exit code; its output goes through the door to the session's fd 1, its
 complaints to fd 2. Imported at the first role command.
 
 Each is the face of one implementation, never a second copy, run as the shell
-(pid 1: full access, not gated); what the shell takes (the radio, the USB
+(pid 1: full access, not gated); what the shell takes (the BLE central, the USB
 host, a MIDI port, the audio ring) it gives back before the command ends,
-except a media stream, which plays until `media stop`. `mic` is served in C
-over the driver and its lease (native/moy_sh/moy_sh_board.c's C_ROLES).
-A command that waits (`http get`, `lora recv`, `ble scan`, `snd
+except a media stream, which plays until `media stop`. `mic` and `lora` are
+served in C over their drivers and leases (native/moy_sh/moy_sh_board.c's
+C_ROLES).
+A command that waits (`http get`, `ble scan`, `snd
 play`, `pkg`'s fetches and installs) is a generator the door steps
 (runtime/shell/sh_door.py, `role`): it yields where it waits (`_wait`, a bare
 `yield`; `yield True` where more work is ready at once), so the console's
@@ -44,8 +45,6 @@ the http worker's own wait), never `online()`.
                              the task manager's Stop is the same stop
   lease                      what the board leases and who holds it
   http get URL [CAP]         a GET, its body to stdout; not 2xx exits 1
-  lora send TEXT...          a raw packet
-  lora recv [MS]             the next packet within MS: "RSSI SNR TEXT"
   ble scan [MS]              what a scan hears: "ADDR RSSI NAME"
   usb [devices]              what is plugged in: "ADDR CLASS VID:PID NAME"
   midi                       the transports this console has
@@ -94,7 +93,6 @@ except ImportError:  # host: the runtime package
 USAGE = 2
 INTERRUPTED = 130
 WAIT_MS = 20000                 # an http request's wait, at most
-LORA_MS = 5000                  # a recv's wait, by default
 SCAN_MS = 3000                  # a BLE scan, by default
 POLL_MS = 10
 
@@ -541,35 +539,6 @@ def r_http(d, a):
         d.err("http", "status %d" % st[0])
         return 1
     return 0
-
-
-def r_lora(d, a):
-    if not a or a[0] not in ("send", "recv") or (a[0] == "send" and len(a) < 2) \
-            or (a[0] == "recv" and len(a) > 2):
-        return _usage(d, "lora", "send TEXT... | recv [MS]")
-    f = _api(d, "lora")
-    if f is None:
-        return 1
-    try:
-        if a[0] == "send":
-            f.send(" ".join(a[1:]).encode())
-            return 0
-        ms = _int(a[1], LORA_MS) if len(a) == 2 else LORA_MS
-        f.listen(True)
-        buf = bytearray(256)
-        t0 = _ticks_ms()
-        while _ticks_diff(_ticks_ms(), t0) < ms:
-            got = f.recv(buf)
-            if got is not None:
-                n, rssi, snr = got
-                d.out("%d %s %s\n" % (rssi, snr, bytes(buf[:n]).decode("utf-8", "replace")))
-                return 0
-            if (yield from _wait(d, POLL_MS)):
-                return INTERRUPTED
-        d.err("lora", "nothing heard")
-        return 1
-    finally:
-        f.close()
 
 
 def r_ble(d, a):

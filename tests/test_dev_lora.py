@@ -248,3 +248,23 @@ def test_a_forged_join_accept_is_refused():
     assert lora_sim.air(forged, freq, sf)
     N.step(5000)
     assert _as(pid, moybyte.lora.joined) is None
+
+
+def test_the_shells_lora_is_served_in_c_over_the_radios_lease(tmp_path):
+    """`lora send` in the shell (native/moy_sh/moy_sh_board.c, pid 1) holds
+    the radio's lease (moy_lease.h, MOY_LEASE_LORA) while it sends: refused
+    busy while a Python app holds it, and on the air once the app ends."""
+    from test_dev_mic import _shell
+    app_pid = L.spawn("t.lora")
+    _as(app_pid, moybyte.lora.listen)
+    term, line = _shell(tmp_path)
+    try:
+        assert line("lora send hi there")[-1] == "lora: busy"
+        assert term.face.status() == 1
+        moybyte.end(app_pid)
+        line("lora send hi there")
+        assert term.face.status() == 0 and lora_sim.sent()[0] == b"hi there"
+        assert N.owner() == 0
+        assert line("lora")[-1] == "usage: lora send TEXT... | recv [MS]"
+    finally:
+        term.close_session()

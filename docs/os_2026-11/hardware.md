@@ -137,8 +137,8 @@ BLE central's and the media service's holder is a lease of the device's class
 (`moy_lease.h`'s DEVICES), taken by the driver's own open for whoever opens it
 (a Python app's face, a process of another tier, the shell as pid 1) and
 swept with its holder's other leases, so the lease listing (`lease`) names
-it; the shell's `mic` is served in C over the driver and that lease
-(`native/moy_sh/moy_sh_board.c`). Their events are NET, LORA, BLE, USB and
+it; the shell's `mic` and `lora` are served in C over their drivers and
+those leases (`native/moy_sh/moy_sh_board.c`). Their events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
 on.
 

@@ -420,9 +420,6 @@ def test_device_faces_answer_through_the_door(console, monkeypatch):
     assert call(d, "role", "media", "next") == 1
     assert call(d, "role", "media", "stop") == 0
     assert media.calls == [("play", "/music/a.mp3"), ("stop",)]
-    io, d = door()
-    assert call(d, "role", "lora", "recv") == 1
-    assert io.err == "lora: this console has none\n"
 
 
 class _Stoppable:
@@ -466,8 +463,7 @@ class _Stoppable:
         self.opened -= 1
 
 
-@pytest.mark.parametrize("argv", [("http", "get", "http://x/"),
-                                  ("lora", "recv", "5000"), ("ble", "scan", "5000")])
+@pytest.mark.parametrize("argv", [("http", "get", "http://x/"), ("ble", "scan", "5000")])
 def test_ctrl_c_ends_a_waiting_command_and_gives_back_its_device(console, monkeypatch, argv):
     """A role command waiting on a device asks the session's face for Ctrl-C
     between polls (moy_sh.interrupted, the serial face's 0x03 or the screen

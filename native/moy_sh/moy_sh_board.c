@@ -308,7 +308,7 @@ static const char *const ROLES[] = {
     "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
     "passwd", "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
-static const char *const C_ROLES[] = { "mic", NULL };
+static const char *const C_ROLES[] = { "mic", "lora", NULL };
 
 // The files tree's root, as moy_sh_board_host gives it.
 static const char *files_root(void) {
@@ -430,14 +430,125 @@ static int b_mic(moy_sh_t *s, int argc, char **argv) {
     return code;
 }
 
+// The LoRa radio's driver (native/moy_net/moy_lora.h): weak, as the mic's.
+int moy_lora_open(uint32_t owner) __attribute__((weak));
+int moy_lora_close(uint32_t owner) __attribute__((weak));
+int moy_lora_listen(uint32_t owner, int on) __attribute__((weak));
+int moy_lora_send(uint32_t owner, const uint8_t *data, size_t n) __attribute__((weak));
+int moy_lora_recv(uint32_t owner, uint8_t *out, size_t cap, int16_t *rssi, int8_t *snr,
+                  uint8_t *port) __attribute__((weak));
+int moy_lora_present(void) __attribute__((weak));
+
+#define LORA_MS 5000                    // a recv's wait, by default
+#define LORA_PKT 256
+
+static void lora_open_here(void *arg) {
+    *(int *)arg = moy_lora_open(SHELL_PID);
+}
+
+static void lora_close_here(void *arg) {
+    (void)arg;
+    moy_lora_close(SHELL_PID);
+}
+
+// An SNR in quarter dB as Python prints its float: "8.0", "-2.25".
+static void snr_text(int q, char *out, size_t n) {
+    static const char *const frac[] = { "0", "25", "5", "75" };
+    int a = q < 0 ? -q : q;
+    snprintf(out, n, "%s%d.%s", q < 0 ? "-" : "", a / 4, frac[a % 4]);
+}
+
+// lora send TEXT...: a raw packet. lora recv [MS]: the next packet within MS
+// as "RSSI SNR TEXT". The radio held as the shell (pid 1) over its lease
+// while the command runs, refused (busy) while another process holds it.
+static int b_lora(moy_sh_t *s, int argc, char **argv) {
+    char line[LORA_PKT + 64];
+    bool send = argc >= 3 && strcmp(argv[1], "send") == 0;
+    bool recv = argc >= 2 && argc <= 3 && strcmp(argv[1], "recv") == 0;
+    if (!send && !recv) {
+        say(s, 2, "usage: lora send TEXT... | recv [MS]\n");
+        return 2;
+    }
+    if (moy_lora_present == NULL || !moy_lora_present()) {
+        say(s, 2, "lora: this console has none\n");
+        return 1;
+    }
+    int rc = 0;
+    moy_sh_hop(s, lora_open_here, &rc);
+    if (rc < 0) {
+        snprintf(line, sizeof line, "lora: %s\n", why_of(-rc));
+        say(s, 2, line);
+        return 1;
+    }
+    uint8_t pkt[LORA_PKT];
+    int code = 0;
+    if (send) {
+        size_t n = 0;
+        for (int i = 2; i < argc; i++) {
+            size_t k = strlen(argv[i]);
+            if (n + k + (i > 2) > sizeof pkt) {
+                k = sizeof pkt - n - (i > 2);
+            }
+            if (i > 2 && n < sizeof pkt) {
+                pkt[n++] = ' ';
+            }
+            memcpy(pkt + n, argv[i], k);
+            n += k;
+        }
+        rc = moy_lora_send(SHELL_PID, pkt, n);
+        if (rc < 0) {
+            snprintf(line, sizeof line, "lora: %s\n", why_of(-rc));
+            say(s, 2, line);
+            code = 1;
+        }
+    } else {
+        char *end = NULL;
+        long ms = argc == 3 ? strtol(argv[2], &end, 10) : LORA_MS;
+        if (argc == 3 && (end == NULL || *end != 0)) {
+            ms = LORA_MS;
+        }
+        moy_lora_listen(SHELL_PID, 1);
+        uint32_t t0 = run_ms();
+        code = 1;
+        while (run_ms() - t0 < (uint32_t)ms) {
+            int16_t rssi = 0;
+            int8_t snr = 0;
+            uint8_t port = 0;
+            int n = moy_lora_recv(SHELL_PID, pkt, sizeof pkt - 1u, &rssi, &snr, &port);
+            if (n > 0) {
+                char q[16];
+                snr_text(snr, q, sizeof q);
+                pkt[n] = 0;
+                snprintf(line, sizeof line, "%d %s %s\n", rssi, q, (const char *)pkt);
+                say(s, 1, line);
+                code = 0;
+                break;
+            }
+            if (moy_sh_interrupted(s)) {
+                code = INTERRUPTED;
+                break;
+            }
+            b_sleep(NULL, MIC_POLL_MS);
+        }
+        if (code == 1) {
+            say(s, 2, "lora: nothing heard\n");
+        }
+    }
+    moy_sh_hop(s, lora_close_here, NULL);
+    return code;
+}
+
 // A role command is a job the console steps: `role JOB ARGV...` starts it
 // and runs its first step, `step JOB` each one after, while it answers
 // RUNNING; between them the session waits (b_sleep: a runner's run parks,
 // so the console's frame goes on). Ctrl-C `stop`s it. JOB names the session.
 static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     (void)ctx;
-    if (argc > 0 && strcmp(argv[0], C_ROLES[0]) == 0) {
-        return b_mic(s, argc, argv);
+    static int (*const served[])(moy_sh_t *, int, char **) = { b_mic, b_lora };
+    for (size_t i = 0; argc > 0 && C_ROLES[i] != NULL; i++) {
+        if (strcmp(argv[0], C_ROLES[i]) == 0) {
+            return served[i](s, argc, argv);
+        }
     }
     char job[2 * sizeof(uintptr_t) + 1];
     snprintf(job, sizeof job, "%lx", (unsigned long)(uintptr_t)s);
