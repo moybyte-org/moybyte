@@ -12,7 +12,13 @@ against a **versioned, append-only OS function table**, loaded on demand, one
 build per chip, installed on the user's consent to "full access to the
 console" (the overview's §4): the tier for the engine wasm cannot serve (the
 sandbox's per-core cost is #158's) and for the person who would otherwise
-flash an image. C has no isolation: it runs at the kernel's own trust level.
+flash an image.
+
+**Decision (owner, 2026-11-07):** isolation is built for the P4 boards, the
+primary target: there a C app runs in RISC-V U-mode, confined by PMP to its own
+memory and what it is lent, and reaches the kernel only through the table. The
+S3s get none: their C tier runs at the kernel's own trust level, with the crash
+record and the strike ledger as its floor.
 
 - **Process model.** An ELF process has the same hooks as a wasm one
   (`moy_start`, `moy_stop`, `moy_timer`, `moy_on` for an event, the lane
