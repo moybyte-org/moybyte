@@ -2217,6 +2217,28 @@ def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
     assert before == after
 
 
+def test_a_roster_change_moves_the_desk_only_through_its_tiles(tmp_path):
+    """A game installed or removed is no tile of the desk's column, and a live
+    desk is a full repaint (on the Guition P4 a ~120 ms frame after every
+    `pkg install` and `pkg remove`): the sig keeps. An app cart no app claims
+    is a tile, and moves it."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    layer = ws.wm._backdrop_layer
+    before = layer._desk_sig()
+    game = {"path": str(tmp_path / "carts" / "teapot.moy"), "title": "Teapot",
+            "id": "jet.teapot", "type": "game"}
+    ws.carts.apply(list(ws.carts.all) + [game], [game["path"]])
+    assert layer._desk_sig() == before
+    ws.carts.apply([c for c in ws.carts.all if c is not game], [game["path"]])
+    assert layer._desk_sig() == before
+    app = {"path": str(tmp_path / "carts" / "clock.moy"), "title": "Clock",
+           "id": "someone.clock", "type": "app"}
+    ws.carts.apply(list(ws.carts.all) + [app], [app["path"]])
+    assert layer._desk_sig() != before
+
+
 def test_the_desk_sig_moves_with_the_theme_and_size(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)

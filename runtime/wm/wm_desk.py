@@ -73,6 +73,8 @@ class _BackdropLayer(Layer):
     def __init__(self, wm):
         self.wm = wm
         self.ws = wm.ws
+        self._cat_at = None           # what `_cat_sig` was made at (`_column_sig`)
+        self._cat_sig = None
 
     def draw(self, dt):
         wm = self.wm
@@ -223,14 +225,28 @@ class _BackdropLayer(Layer):
         Deliberately NOT the clock (repainted over the cache instead) and NOT
         ws.covers.gen: a cover landing in the picker would otherwise invalidate
         the desk on the very frames a scroll is trying to stay cheap. Cheap to
-        compute -- no per-frame scan of the cart list."""
+        compute -- no per-frame scan of the cart list (`_column_sig`)."""
         ws = self.ws
         cv = ws.sys_canvas
         lay = ws.layout
         return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
-                ws.look.wallpaper_id,
-                len(getattr(ws, "_apps", ())), len(ws.carts.all),
+                ws.look.wallpaper_id, self._column_sig(),
                 lay.cx, lay.cy, lay.cw, lay.ch, _ITEMS.gen)
+
+    def _column_sig(self):
+        """What the icon column takes from the apps and the roster: each
+        tile's key, label and cart folder (`_icon_catalog`). Made again only
+        when the roster or a title moves (`CartManager.gen`, `titled`) or
+        the apps do, so a cart installed or removed that is no tile of the
+        column leaves the desk's cache whole: a live desk is a full repaint."""
+        ws = self.ws
+        carts = ws.carts
+        at = (carts.gen, carts.titled, len(getattr(ws, "_apps", ())))
+        if at != self._cat_at:
+            self._cat_at = at
+            self._cat_sig = tuple((key, label, c.get("path") if c else None)
+                                  for key, label, c in self._icon_catalog())
+        return self._cat_sig
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt, quiet=self.quiet())
