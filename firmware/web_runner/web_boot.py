@@ -60,7 +60,7 @@ from audio_session import PcmPump
 
 _S = {}          # the runner singletons: ws / canvas / driver / sink
 # The rate the page's worklet resamples from: the mix is made at it.
-_AUDIO_RATE_HZ = 11025
+_AUDIO_RATE_HZ = 22050
 
 
 # The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.

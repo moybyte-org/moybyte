@@ -53,10 +53,11 @@ LONG = _long_tone()
 
 # What the page's audio path saw: a spy on the worker's frames, counting the
 # ones that carry PCM, the loudest sample, and the tone's zero crossings
-# (a 1 kHz tone at the page's 11,025 Hz crosses zero about 2,000 times a
-# second of what sounded).
+# (a 1 kHz tone crosses zero about 2,000 times a second of what sounded, at
+# the page's mix rate, which the spy reads from the page).
 _SPY = """(() => {
-  const was = onWorker; window.__pcm = {frames: 0, peak: 0, n: 0, cross: 0, last: 0};
+  const was = onWorker;
+  window.__pcm = {frames: 0, peak: 0, n: 0, cross: 0, last: 0, rate: AUDIO_RATE};
   onWorker = function (m) {
     if (m.t === 'frame' && m.s) {
       const a = JSON.parse(m.s).audio;
@@ -95,7 +96,7 @@ def _tagged(js, tag):
 def _assert_tone(pcm, out):
     assert pcm and pcm["frames"] > 0 and pcm["peak"] > 1000, \
         "the song's samples did not reach the page's audio: %r\n%s" % (pcm, out[-3000:])
-    hz = pcm["cross"] / 2 / (pcm["n"] / 11025)
+    hz = pcm["cross"] / 2 / (pcm["n"] / pcm["rate"])
     assert abs(hz - 1000) < 60, "not the fixture's 1 kHz tone: %.0f Hz %r" % (hz, pcm)
 
 

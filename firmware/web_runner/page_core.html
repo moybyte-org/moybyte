@@ -230,11 +230,11 @@ PERF.mb=0;PERF.sb=0;PERF.mu=0;PERF.su=0;PERF.sn=0;}
 // the worklet module finishes loading -- the swap happens only at a stream gap,
 // because the two paths' clocks aren't aligned and a mid-stream swap would
 // itself click.
-var AUDIO_RATE=11025,actx=null,audioNext=0,audioBlocked=false;
+var AUDIO_RATE=22050,actx=null,audioNext=0,audioBlocked=false;
 var awNode=null,awReady=false,awOn=false,awDepth=0;
 var AW_SRC="class MoyPCM extends AudioWorkletProcessor{"+
 "constructor(){super();this.b=new Float32Array(1<<16);this.r=0;this.w=0;this.n=0;"+
-"this.pos=0;this.rate=11025;this.last=0;this.k=0;"+
+"this.pos=0;this.rate=22050;this.last=0;this.k=0;"+
 "this.port.onmessage=(e)=>{var d=e.data;if(d.rate){this.rate=d.rate;return;}"+
 "var a=d.p;for(var i=0;i<a.length;i++){if(this.n>=this.b.length)break;"+
 "this.b[this.w]=a[i];this.w=(this.w+1)%this.b.length;this.n++;}};}"+
