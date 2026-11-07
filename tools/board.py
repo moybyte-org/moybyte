@@ -359,8 +359,9 @@ def cmd_sh(b, a):
     """Each line in the C shell's serial session (the kernel's `sh` word,
     native/moy_sh/moy_sh_board.h): its output as it comes, then its end.
     The session is the board's one serial session, so `cd` and variables
-    carry from one line to the next. Ctrl-C here sends the channel's 0x03,
-    which interrupts the command. Exit status: the last line's."""
+    carry from one line to the next. Ctrl-C here sends the channel's `sh ^C`
+    line, which interrupts the command; a raw 0x03 would reach the board's
+    REPL on the boards whose stdin the REPL owns. Exit status: the last line's."""
     status = 0
     also = re.compile(a.also) if a.also else None
     for line in a.lines:
@@ -380,8 +381,7 @@ def cmd_sh(b, a):
                     elif also is not None and also.search(got):
                         print(got)
         except KeyboardInterrupt:
-            b.ser.write(b"\x03")
-            b.ser.flush()
+            b._write_line("sh ^C")
             end = b.wait_line("SH end ", 10.0) or end
         if end is None:
             print("no end of %r in %.0f s" % (line, a.timeout), file=sys.stderr)

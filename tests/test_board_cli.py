@@ -978,3 +978,15 @@ def test_a_board_at_the_repl_is_named_as_one(monkeypatch):
         board.wait_for_desk("tdeck", DIRS, port="/dev/null", timeout=30,
                             quiet=True, reset=True)
     assert "REPL" in str(exc.value) and "reboot --soft" in str(exc.value)
+
+
+def test_sh_interrupt_sends_the_channels_line_not_a_raw_ctrl_c(clock):
+    """Ctrl-C in `board.py sh` is the dev channel's `sh ^C` line: a raw 0x03
+    reaches a board's MicroPython REPL instead of the shell."""
+    ws, wire, b = console(clock)
+    b._pump = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+    b.wait_line = lambda needle, timeout=10.0: "SH end 130"
+    code, out = run(board.cmd_sh, b, args(lines=["sleep 9"], also=None,
+                                          timeout=5.0, verbose=False))
+    assert wire.sent == ["sh sleep 9", "sh ^C"]
+    assert wire.pending == b"" and code == 130
