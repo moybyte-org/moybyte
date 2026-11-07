@@ -1679,7 +1679,8 @@ class Install:
 
     def _land(self, entry):
         """The checked build onto the shelf, a store op a step: the kid's
-        files carried from the copy it replaces and that copy set aside, the
+        config carried from the copy it replaces, then its saves in the op
+        that sets that copy aside (so the running cart's last save goes too), the
         build moved in by one rename, the record, then the old copy deleted
         an entry at a time (`recover` finishes what a cut leaves)."""
         old = _exists(self.target)
@@ -1687,13 +1688,12 @@ class Install:
         if old:
             prev = load_record(self.root).get(self.folder)
             yield
-            self._carry_saves()
-            yield
             self._carry_config(prev)
             if _exists(aside):
                 yield
                 yield from rmtree_steps(aside)
             yield
+            self._carry_saves()           # with the move aside: a save between is never left behind
             os.rename(self.target, aside)
         yield
         _moy_carts().adopt(self.stage, self.target)

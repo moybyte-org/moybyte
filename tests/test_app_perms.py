@@ -429,6 +429,24 @@ def test_a_required_permission_the_console_lacks_is_not_installed(tmp_path):
     assert not (tmp_path / "carts" / "radio.moy").exists()
 
 
+def test_closing_get_carts_mid_landing_records_the_consent_and_the_shelf(tmp_path):
+    """The app closed while the build lands: the cart lands, its consent is
+    recorded and the shelf shows it (pkg.land_now), not the cart alone."""
+    repo = _repo(moybyte={"permissions": ["prefs"]})
+    ws, app = _store_ws(tmp_path, repo)
+    _get(ws, app, "radio")
+    app._answer(True)
+    for _ in range(40):
+        _frames(ws, 1)
+        if app.job.landing:
+            break
+    assert app.job.landing and not app.job.finished
+    app.close()
+    assert (tmp_path / "carts" / "radio.moy").exists()
+    assert ws.consent.get("radio") == {"perms": ["prefs"], "off": []}
+    assert any(str(c.get("path", "")).endswith("/radio.moy") for c in ws.carts.all)
+
+
 def test_remove_forgets_the_consent(tmp_path):
     repo = _repo(moybyte={"permissions": ["prefs"]})
     ws, app = _store_ws(tmp_path, repo)

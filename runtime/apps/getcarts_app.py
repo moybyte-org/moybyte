@@ -430,8 +430,10 @@ class GetCartsAppLayer(ListShellApp):
             self.lic[2] = 0
 
     def close(self):
-        if self.job is not None:
-            self.job.finish()
+        job = self.job
+        if job is not None and job.landing and not job.finished:
+            consented, self._consented = self._consented, None
+            _pkg.land_now(self._inst, job, consented)
         self._end_tail()
         if self.job is not None and not self.job.finished and self.job.cancel():
             self._go("cart" if self.cur is not None else "list")

@@ -91,8 +91,10 @@
 # backup is not consulted at all); after it the backup is whole, so a torn
 # publish is the prefix case above. Keeping the marker beside the publish is
 # what lets another file's save land between the two ops: that save takes the
-# one marker, and this one takes it back in the op that publishes. A save of
-# the SAME file between them is the caller's to rule out.
+# one marker, and this one takes it back in the op that publishes. The second
+# op checks the backup's stamp first: when it is not this save's (a save of
+# the SAME file came between, or, outside every root, a read dropped it as
+# stale) it makes the whole save instead.
 #
 # THE BACKUP IS SPENT ONCE STEP 3 RETURNS, and `_claim_bak` is what that buys. The
 # marker's stamp then fits the published file, so no read reaches the backup again
@@ -397,8 +399,15 @@ def _publish_bak(path, data):
 
 def _publish_mark(path, data):
     """The marker and the publish together: `_write_atomic_steps`' second
-    store op."""
+    store op. The whole save instead when the backup beside `path` is not
+    this save's -- another save of the same file came between the two, or a
+    reader outside every root dropped it as a foreign write's stale one --
+    so a cut in the publish always finds its own backup."""
     n, crc = _stamp_of(data)
+    st = _bak_stamp(path)
+    if st is None or tuple(st) != (n, crc):
+        _write_atomic(path, data)
+        return
     _mark_publish(path, n, crc)
     _write(path, data)
 
@@ -409,8 +418,9 @@ def _write_atomic_steps(path, data):
     and the publish together. Every cut lands in a case the module docstring
     covers -- before the marker names `path` its previous save is what reads,
     after it the backup is whole -- and a save of ANOTHER file between the two
-    (which takes the one marker) cannot leave this publish unmarked. A save
-    of the SAME file between them is the caller's to rule out."""
+    (which takes the one marker) cannot leave this publish unmarked. A backup
+    that is no longer this save's makes the second op the whole save
+    (`_publish_mark`)."""
     _publish_bak(path, data)
     yield
     _publish_mark(path, data)

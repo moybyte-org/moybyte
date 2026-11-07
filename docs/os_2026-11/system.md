@@ -470,6 +470,8 @@ rename, the record, the old copy deleted an entry at a time),
 `pkg.landed` (the consent, the shelf's re-read) and `pkg.removed`
 (`cart_index.remove_steps`, the consent forgotten, the re-read). A record or a
 consent is saved in two store ops (`moy_fs._write_atomic_steps`: the backup,
-then the marker and the file together), and a verb stopped partway (Ctrl-C,
-the app closed) finishes what it started at once (`pkg.through`,
-`Install.finish`).
+then the marker and the file together, or the whole save when the backup is
+no longer its own), the saves are carried in the op that sets the old copy
+aside, and a verb stopped partway (Ctrl-C, the app closed) finishes what it
+started at once (`pkg.through`, `pkg.land_now`: the landing and its consent
+and re-read).

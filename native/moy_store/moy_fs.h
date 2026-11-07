@@ -58,7 +58,10 @@ int moy_fs_rename(const char *src, const char *dst);
 // back between store ops makes the same save in two, moy_fs_publish_bak and
 // then moy_fs_publish_mark (the marker and the file together), so a save of
 // another file between them never leaves this one's publish unmarked
-// (runtime/carts/moy_fs.py, _write_atomic_steps).
+// (runtime/carts/moy_fs.py, _write_atomic_steps). moy_fs_publish_mark makes
+// the whole save instead when the backup beside `path` is not this one's
+// (another save of the same file between the two, or a reader that dropped
+// it as stale).
 int moy_fs_publish(const char *path, const char *data, size_t n);
 int moy_fs_publish_bak(const char *path, const char *data, size_t n);
 int moy_fs_publish_mark(const char *path, const char *data, size_t n);

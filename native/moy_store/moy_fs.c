@@ -649,8 +649,11 @@ int moy_fs_publish_bak(const char *path, const char *data, size_t n) {
 }
 
 int moy_fs_publish_mark(const char *path, const char *data, size_t n) {
-    uint32_t chars, crc;
+    uint32_t chars, crc, c, k;
     moy_fs_stamp(data, n, &chars, &crc);
+    if (!moy_fs_bak_stamp(path, &c, &k) || c != chars || k != crc) {
+        return moy_fs_publish(path, data, n);
+    }
     mark_publish(path, strlen(path), chars, crc);
     return moy_fs_write(path, data, n);
 }

@@ -567,6 +567,54 @@ def test_a_landing_or_a_removal_stopped_partway_finishes(tmp_path):
     assert ci.load_record(inst.root()) == {}
 
 
+def test_ctrl_c_mid_landing_finishes_the_landing_and_what_follows_it(tmp_path, monkeypatch):
+    """Ctrl-C while the build lands: the cart lands (Install.finish) and so do
+    the consent it was installed with and the shelf's re-read (`land_now`)."""
+    repo = Repo(BASE)
+    repo.add("dm", name="Dungeon", moybyte={"permissions": ["internet"]})
+    inst, p, out, err = _pkg(tmp_path, repo)
+    jobs = []
+    orig = ci.Install.step
+
+    def step(self, *a, **kw):
+        jobs.append(self)
+        return orig(self, *a, **kw)
+    monkeypatch.setattr(ci.Install, "step", step)
+    verb = p.install(["dm"], yes=True)
+    for _ in range(500):
+        next(verb)
+        if jobs and jobs[-1].landing:
+            break
+    assert jobs[-1].landing and not jobs[-1].finished
+    verb.close()                                       # Ctrl-C
+    assert "dm.moy" in ci.load_record(inst.root())
+    assert inst.prefs.get("consent"), "the consent is recorded"
+    assert [f.replace("\\", "/").rsplit("/", 1)[-1] for f in inst.rescans] == ["dm.moy"], \
+        "the shelf re-read it"
+
+
+def test_a_save_made_while_an_upgrade_lands_goes_with_the_saves(tmp_path, monkeypatch):
+    """The saves are carried in the op that sets the old copy aside, so one
+    the running cart makes a frame into the landing is not left behind."""
+    repo = Repo(BASE)
+    repo.add("dm", name="Dungeon")
+    inst, p, out, err = _pkg(tmp_path, repo)
+    assert done(p.install(["dm"], yes=True)) == 0, err
+    saves = tmp_path / "carts" / "dm.moy" / ci.SAVES
+    saves.write_text('{"level": 1}')
+    repo.add("dm", version=2, name="Dungeon")
+    inst._net = MemNet(repo.routes())
+    assert done(p.update()) == 0
+    orig = ci.Install._carry_config
+
+    def carry_config(self, old):
+        saves.write_text('{"level": 2}')               # the running cart saves
+        return orig(self, old)
+    monkeypatch.setattr(ci.Install, "_carry_config", carry_config)
+    assert done(p.upgrade(yes=True)) == 0, err
+    assert saves.read_text() == '{"level": 2}'
+
+
 def test_a_bad_signature_is_refused_by_update(tmp_path, keys):
     repo = Repo(BASE)
     repo.add("dm")

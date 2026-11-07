@@ -1,6 +1,6 @@
 # Map (grep -n a name to jump there):
 #   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check
-#   -- the steps it shares           through, removed, landed: a store op a frame
+#   -- the steps it shares           through, removed, landed, land_now: a store op a frame
 #   Pkg                              the shell's `pkg`: the verbs over one installer
 #   Pkg.update                       fetch every source's index into the cache
 #   Pkg.install                      depends first, then each cart through cart_index.Install
@@ -233,6 +233,16 @@ def removed(inst, folder):
         yield from inst.consent().forget_steps(_perms.app_id(had))
     yield
     inst.rescan(folder)
+
+
+def land_now(inst, job, consented):
+    """What a face that stops stepping an install calls (Ctrl-C, Get Carts
+    closed): a landing begun is finished (`Install.finish`), and so is what
+    follows it, `landed`'s consent and re-read, all at once."""
+    job.finish()
+    if job.path:
+        for _ in landed(inst, job.path, consented):
+            pass
 
 
 def landed(inst, path, consented):
@@ -531,6 +541,7 @@ class Pkg:
                           accepted, archive=keep, keep=self.inst.keep(), ask=ask)
         self.out("Getting %s %d (%s)\n" % (c["id"], c["version"],
                                             size_text(p["download_bytes"])))
+        stepped_through = False
         try:
             while job.step(STEP_MS):
                 yield
@@ -543,8 +554,10 @@ class Pkg:
                         job.cancel()
                 elif self.stopped() and job.cancel():
                     raise Stopped()
+            stepped_through = True
         finally:
-            job.finish()
+            if not stepped_through:
+                land_now(self.inst, job, consented[0] if consented else None)
             self.release()
         if not job.path:
             self.err("%s: %s" % (c["id"], job.error or "Not installed. Nothing changed."))

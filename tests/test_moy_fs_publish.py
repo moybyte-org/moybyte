@@ -6,9 +6,11 @@ save cost the same, and the difference between them and the ~50ms an in-place
 overwrite costs was the five-op rename dance. So these count the ops through a
 fake filesystem, and drive a crash through every one of them."""
 
+import json
+
 import pytest
 
-from runtime import moy_fs
+from runtime import cart_index as ci, moy_fs
 
 
 class FakeFs:
@@ -251,29 +253,97 @@ def test_a_stepped_save_is_the_same_three_writes_backup_first(rooted):
     moy_fs._write_atomic("/c/main.py", OLD)
     fs.ops = []
     _stepped("/c/main.py", NEW)
-    assert fs.ops == ["write /c/main.py.bak", "write /c/.publish", "write /c/main.py"]
+    assert fs.ops == ["write /c/main.py.bak", "read /c/main.py.bak", "write /c/.publish",
+                      "write /c/main.py"]
     assert moy_fs._read_recover("/c/main.py") == NEW
 
 
-@pytest.mark.parametrize("step", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("step", [1, 2, 3, 4, 5, 6, 7])
 @pytest.mark.parametrize("landing", ["nothing", "half", "whole"])
 def test_a_crash_anywhere_in_a_stepped_save_still_reads_whole_files(rooted, step,
                                                                     landing):
     """The stepped save (`_write_atomic_steps`, a frame between its backup and
     its marker-and-publish) with ANOTHER file's whole save between the two:
-    every landing point of all six writes leaves both files whole."""
+    every landing point of all seven ops (the second op reads its backup's
+    stamp first) leaves both files whole."""
     fs = rooted
     moy_fs._write_atomic("/c/main.py", OLD)
     moy_fs._write_atomic("/c/other.py", OLD)
     fs.arm(step, landing)
-    with pytest.raises(_Crash):
+    try:
         _stepped("/c/main.py", NEW,
                  lambda: moy_fs._write_atomic("/c/other.py", NEW))
+    except _Crash:
+        pass
+    else:
+        assert fs.ops[step - 1].startswith("read "), "only a read does not cut"
     fs.crash_at = None
     moy_fs._marks.clear()
 
     assert moy_fs._read_recover("/c/main.py") in (OLD, NEW)
     assert moy_fs._read_recover("/c/other.py") in (OLD, NEW)
+
+
+REC = "/c/installed.json"
+
+
+def _carts_text(carts):
+    return json.dumps({"carts": carts})
+
+
+@pytest.mark.parametrize("landing", ["half", "whole"])
+def test_two_faces_stepping_the_record_then_a_cut_never_tear_it(rooted, monkeypatch,
+                                                                 landing):
+    """Get Carts landing a cart and `pkg remove` in a terminal each save the
+    record a store op a frame (cart_index._record_steps), interleaved: the
+    second face's backup lands over the first's before the first publishes,
+    and the power goes in that publish. The first face's second op finds a
+    backup that is not its own and makes the whole save, so the reboot reads
+    one whole record."""
+    fs = rooted
+    monkeypatch.setattr(ci, "_sibling_path", lambda root, name: REC)
+    old = {"x": {"v": 1}}
+    moy_fs._write_atomic(REC, _carts_text(old))
+    entry = {"v": 2, "name": "a long cart entry " * 4}
+    t1 = _carts_text(dict(yy=entry, **old))
+    t2 = _carts_text({})
+
+    def now1():
+        cur = dict(json.loads(moy_fs._read_recover(REC))["carts"])
+        cur.pop("yy", None)
+        return _carts_text(dict(yy=entry, **cur))
+    g1 = ci._record_steps("/c/carts", t1, now1)
+    g2 = ci._record_steps("/c/carts", t2, lambda: _carts_text({}))
+    next(g1)                          # face 1: its backup
+    next(g2)                          # face 2: its backup, over face 1's
+    fs.crash_at, fs.landing = None, landing
+    real = fs._op
+    fs._op = lambda name, path: real(name, path) or (name == "write" and path == REC)
+    with pytest.raises(_Crash):
+        next(g1, None)                # face 1: its publish, cut
+    fs._op = real
+    moy_fs._marks.clear()             # the reboot
+    got = moy_fs._read_recover(REC)
+    assert got in (_carts_text(old), t1, t2), "the record read back torn: %r" % got
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 4])
+@pytest.mark.parametrize("landing", ["nothing", "half", "whole"])
+def test_an_unrooted_read_between_the_halves_then_a_cut_reads_whole(fs, step, landing):
+    """Outside every registered root a read between a stepped save's two ops
+    drops the fresh backup as a foreign write's stale one; the second op then
+    makes the whole save, so a cut anywhere in it still reads whole."""
+    moy_fs._write_atomic("/c/a.py", OLD)
+    g = moy_fs._write_atomic_steps("/c/a.py", NEW)
+    next(g)
+    assert moy_fs._read_recover("/c/a.py") == OLD
+    fs.arm(step, landing)
+    try:
+        next(g, None)
+    except _Crash:
+        pass
+    fs.crash_at = None
+    assert moy_fs._read_recover("/c/a.py") in (OLD, NEW)
 
 
 def test_a_marker_naming_a_file_whose_backup_is_torn_trusts_the_file(rooted):
