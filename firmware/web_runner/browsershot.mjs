@@ -387,9 +387,18 @@ for (const step of scenario.steps || []) {
 if (logs.length) { console.log("-- page console --"); for (const l of logs.slice(-25)) console.log("  " + l); }
 // The default profile is this run's own and goes with it; a pinned one
 // (MOY_PROFILE) is the caller's to keep.
+// Closed as a person closes it, so what the page put in its storage is on
+// disk for the next run on a pinned profile: a SIGTERM drops the last few
+// seconds of localStorage (a key paired just before the end). The kill is
+// for a Chrome that does not go.
 const chromeGone = new Promise((r) => chrome.once("exit", r));
-chrome.kill();
-await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
+send("Browser.close").catch(() => {});
+const closed = await Promise.race([chromeGone.then(() => true),
+                                   new Promise((r) => setTimeout(() => r(false), 5000))]);
+if (!closed) {
+    chrome.kill();
+    await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
+}
 server.close();
 // Chrome's helpers can still be writing into it for a moment after the main
 // process exits; a profile that will not go is left, never a failed run.
