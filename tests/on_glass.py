@@ -1359,11 +1359,14 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         assert st == 0, out
         assert board.pyval("__import__('moy_net').clock_state()", strict=True) == 1
         assert board.pyval("__import__('moybyte').clock_synced()", strict=True) is True
-        lt = board.pyval("tuple(__import__('wallclock').localtime()[:6])", strict=True)
-        bar = board.pyval("ws.bar_layer._clock_text()", strict=True)
+        lt, bar, after = board.pyval(
+            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer._clock_text(),"
+            " tuple(__import__('wallclock').localtime()[:6]))", strict=True)
         board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
         assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
-        assert bar == "%02d:%02d" % tuple(lt[3:5]), (bar, lt)
+        # the bar may still show the minute that just ended
+        assert bar in {"%02d:%02d" % tuple(t[3:5]) for t in (lt, after)} | \
+            {"%02d:%02d" % divmod((lt[3] * 60 + lt[4] - 1) % 1440, 60)}, (bar, lt, after)
         assert board.pyval("sorted(ws.leases.holders())", strict=True) == \
             rest_holders(board), "the radio stayed held"
     finally:
