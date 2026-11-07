@@ -214,7 +214,7 @@ class PcmPump:
     cart's `snd` queue on the host (`wasm_binding.HostWasmRun`), mixed in after
     the synth under the console's level."""
 
-    def __init__(self, rate=11025):
+    def __init__(self, rate=22050):
         self.rate = int(rate)
         self._na = native()
         if self._na is not None:

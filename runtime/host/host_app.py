@@ -111,7 +111,7 @@ class SdlPump(PcmPump):
     device (headless, CI) it pulls and discards, so the sequencers still
     advance exactly as they do with one."""
 
-    def __init__(self, rate=11025):
+    def __init__(self, rate=22050):
         PcmPump.__init__(self, rate)
         self._ok = False
         self._pygame = None
