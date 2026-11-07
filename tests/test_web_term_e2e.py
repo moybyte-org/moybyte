@@ -20,10 +20,12 @@ gives the tab back.
 import base64
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -49,12 +51,22 @@ def tty_exe(tmp_path_factory):
     return test_moy_tty._build(tmp_path_factory.mktemp("tty"))
 
 
-def _board(tty_exe, tmp_path, password=None):
-    """The harness with the seed carts in its store (and the console's
-    password, as `passwd` writes it, when given)."""
+@pytest.fixture
+def short():
+    """The harness's folder: short enough for the webhost's paths, whose
+    system folder past MOY_WEB_PATH_MAX (96 bytes) is refused, however deep
+    pytest's tmp_path runs (xdist's popen-gwN, a long test name)."""
+    d = tempfile.mkdtemp(prefix="moyw")
+    yield pathlib.Path(d)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def _board(tty_exe, root, password=None):
+    """The harness under `root` with the seed carts in its store (and the
+    console's password, as `passwd` writes it, when given)."""
     import test_moy_tty
     from runtime.system import ssh_service
-    host = test_moy_tty.Host(tty_exe, tmp_path)
+    host = test_moy_tty.Host(tty_exe, root)
     store = host.tree / "sd" / "moybyte" / "carts"
     for cart in sorted((ROOT / "system_carts").glob("*.moy")):
         shutil.copytree(cart, store / cart.name)
@@ -168,8 +180,8 @@ def _play(tmp_path, name, base, steps, after="", profile="chrome"):
 
 
 def test_a_page_paired_by_the_qr_reloads_signed_in_and_its_terminal_is_sealed(
-        tty_exe, tmp_path):
-    host = _board(tty_exe, tmp_path)
+        tty_exe, tmp_path, short):
+    host = _board(tty_exe, short)
     server, base = _serve(tmp_path, host.port)
     try:
         steps = ([{"note": "paired by the token, the Terminal connects"}, _until(_SHELL),
@@ -219,8 +231,8 @@ def _end_when(host, sessions):
         time.sleep(0.1)
 
 
-def test_a_dropped_browser_is_asked_to_pair_again(tty_exe, tmp_path):
-    host = _board(tty_exe, tmp_path)
+def test_a_dropped_browser_is_asked_to_pair_again(tty_exe, tmp_path, short):
+    host = _board(tty_exe, short)
     server, base = _serve(tmp_path, host.port)
     try:
         steps = [_asks("p => p.keys === 1 && p.shown === 'none'"), _prompt("PAIRED")]
@@ -237,8 +249,8 @@ def test_a_dropped_browser_is_asked_to_pair_again(tty_exe, tmp_path):
         host.end()
 
 
-def test_a_page_pairs_by_the_console_s_password(tty_exe, tmp_path):
-    host = _board(tty_exe, tmp_path, password=PASSWORD)
+def test_a_page_pairs_by_the_console_s_password(tty_exe, tmp_path, short):
+    host = _board(tty_exe, short, password=PASSWORD)
     server, base = _serve(tmp_path, host.port)
     try:
         wrong = "that password did not work -- try again"
@@ -259,12 +271,12 @@ def test_a_page_pairs_by_the_console_s_password(tty_exe, tmp_path):
         host.end()
 
 
-def test_a_page_says_how_long_a_board_holding_wrong_tries_off_waits(tty_exe, tmp_path):
+def test_a_page_says_how_long_a_board_holding_wrong_tries_off_waits(tty_exe, tmp_path, short):
     """Wrong tokens from this source past its free tries open a window; the
     page's hello meets the wait, and its prompt says the backoff's one
     sentence."""
     import seal_client
-    host = _board(tty_exe, tmp_path)
+    host = _board(tty_exe, short)
     page = seal_client.Browser(host.send)
     board = page.hello()["id"]
     for _ in range(11):

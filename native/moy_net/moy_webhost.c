@@ -240,6 +240,11 @@ int moy_web_start(const moy_web_cfg_t *cfg) {
     if (!ensure()) {
         return MOY_ENOMEM;
     }
+    // The sign-in reads its keys and the password under the system folder: one
+    // that does not fit is refused, never cut short.
+    if (cfg->system != NULL && strlen(cfg->system) >= MOY_WEB_PATH_MAX) {
+        return MOY_EINVAL;
+    }
     if (W->lfd >= 0 && cfg->port != 0 && W->port != cfg->port) {
         close_conn(&W->lfd);
     }

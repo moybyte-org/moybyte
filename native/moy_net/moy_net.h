@@ -271,8 +271,9 @@ typedef struct {
     int err;                        // the last start's errno, 0 when it bound
 } moy_web_state_t;
 
-// Bind and serve: 0, or the errno the bind failed with. A host already
-// serving takes the new configuration and keeps its socket.
+// Bind and serve: 0, the errno the bind failed with, or MOY_EINVAL for a
+// system folder past MOY_WEB_PATH_MAX. A host already serving takes the new
+// configuration and keeps its socket.
 int moy_web_start(const moy_web_cfg_t *cfg);
 // Stop. With `why`, answer every request with {"error":"closing","why":...}
 // for MOY_WEB_CLOSING_MS first; without, close now.

@@ -105,6 +105,7 @@ drivers says what each logs.
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -2001,9 +2002,17 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     driver = SURVIVAL[name][0]
     work = tmp_path / ("%s_%s" % (name, tag))
     stage = work / "stage"
-    store = work / "store"
     stage.mkdir(parents=True)
-    store.mkdir()
+    # The store's root in a short folder: the webhost refuses a system folder
+    # past MOY_WEB_PATH_MAX (96 bytes), and pytest's tmp_path runs past it.
+    store = Path(tempfile.mkdtemp(prefix="moys"))
+    try:
+        return _run_survival(driver, exe, work, stage, store, prelude)
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def _run_survival(driver, exe, work, stage, store, prelude):
     # What a build stages under frozen names that the glass's canvas imports.
     shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     for f in ("moy_image.py", "moy_fs.py"):

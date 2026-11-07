@@ -35,7 +35,8 @@ enum {
 
 // The system folder the keys file (`webkeys`) and the password live in; NULL
 // leaves the sign-in off, which only a host may (an open host: a test, the
-// dev server). 0, or MOY_ENOMEM.
+// dev server). 0, MOY_ENOMEM, or MOY_EINVAL for a folder past
+// MOY_WEB_PATH_MAX, which is never cut short.
 int moy_wa_config(const char *system_dir, int64_t epoch);
 int moy_wa_open(void);                  // 1: no sign-in (an open host)
 

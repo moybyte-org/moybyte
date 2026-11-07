@@ -497,8 +497,9 @@ def web_stop(why=None):
 def web_auth(system):
     """The sign-in over the system folder (serving or not): the board's id,
     "" with no folder."""
-    if _lib().moy_web_auth(None if not system else _bytes(system), 0) != 0:
-        raise OSError(12, "ENOMEM")
+    rc = _lib().moy_web_auth(None if not system else _bytes(system), 0)
+    if rc != 0:
+        raise OSError(rc, os.strerror(rc))
     out = ctypes.create_string_buffer(33)
     _lib().moy_web_board_id(out)
     return out.value.decode()

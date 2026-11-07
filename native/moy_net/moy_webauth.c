@@ -411,6 +411,9 @@ int moy_wa_config(const char *system_dir, int64_t epoch) {
         A->on = 0;
         return 0;
     }
+    if (strlen(system_dir) >= sizeof A->dir) {
+        return MOY_EINVAL;              // never a sign-in over a path cut short
+    }
     int same = A->on && strcmp(A->dir, system_dir) == 0;
     A->epoch = epoch;
     if (same) {
