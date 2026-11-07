@@ -63,6 +63,9 @@ void moy_wa_board_id(char out[2 * MOY_SEAL_RAND + 1]);
 // The paired browsers, a line each: "KID CREATED SEEN NAME\n" (seconds on the
 // VM's clock). Its length (cut at cap).
 size_t moy_wa_keys(char *out, size_t cap);
+// A line's CREATED and SEEN, read from `p` (a board's scanf has no %lld), and
+// where NAME starts: 1, or 0 when either is missing.
+int moy_wa_scan_times(const char *p, long long *a, long long *b, const char **rest);
 // Forget one browser (16 hex digits) or every one ("all"): how many went.
 // Its sessions end, and a web terminal it holds is cut.
 int moy_wa_drop(const char *kid);

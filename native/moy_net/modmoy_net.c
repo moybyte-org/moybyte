@@ -13,6 +13,7 @@
 
 #include "moy_json.h"
 #include "moy_net.h"
+#include "moy_webauth.h"
 #include "moy_seal.h"
 #include "moy_ota.h"
 
@@ -811,10 +812,11 @@ static mp_obj_t mod_web_keys(void) {
         char kid[24];
         long long cr = 0, se = 0;
         int k = 0;
-        if (sscanf(b + at, "%20s %lld %lld %n", kid, &cr, &se, &k) == 3) {
+        const char *name = "";
+        if (sscanf(b + at, "%20s%n", kid, &k) == 1 && k > 0
+            && moy_wa_scan_times(b + at + k, &cr, &se, &name)) {
             mp_obj_t t[4] = {mp_obj_new_str(kid, strlen(kid)), mp_obj_new_int_from_ll(cr),
-                             mp_obj_new_int_from_ll(se),
-                             mp_obj_new_str(b + at + k, strlen(b + at + k))};
+                             mp_obj_new_int_from_ll(se), mp_obj_new_str(name, strlen(name))};
             mp_obj_list_append(out, mp_obj_new_tuple(4, t));
         }
         at = (size_t)(e - b) + 1;

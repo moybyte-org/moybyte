@@ -124,6 +124,39 @@ static int64_t now_s(void) {
     return (int64_t)time(NULL) - A->epoch;
 }
 
+// A board's printf and scanf (newlib nano) have no %lld: a time's decimal is
+// written here, ending at `buf`'s end, and read back with strtoll.
+static const char *dec64(int64_t v, char *buf, size_t cap) {
+    char *p = buf + cap;
+    uint64_t u = v < 0 ? 0u - (uint64_t)v : (uint64_t)v;
+    *--p = '\0';
+    do {
+        *--p = (char)('0' + u % 10u);
+        u /= 10u;
+    } while (u);
+    if (v < 0) {
+        *--p = '-';
+    }
+    return p;
+}
+
+int moy_wa_scan_times(const char *p, long long *a, long long *b, const char **rest) {
+    char *e;
+    *a = strtoll(p, &e, 10);
+    if (e == p) {
+        return 0;
+    }
+    p = e;
+    *b = strtoll(p, &e, 10);
+    if (e == p) {
+        return 0;
+    }
+    for (p = e; *p == ' '; p++) {
+    }
+    *rest = p;
+    return 1;
+}
+
 static int fresh(uint32_t at, uint32_t ms) {
     return (uint32_t)(moy_net_ms() - at) < ms;
 }
@@ -209,8 +242,10 @@ static void save(void) {
         char kid[2 * MOY_SEAL_KID + 1], key[2 * MOY_SEAL_KEY + 1];
         moy_seal_hex(k->kid, MOY_SEAL_KID, kid);
         moy_seal_hex(k->key, MOY_SEAL_KEY, key);
-        n += (size_t)snprintf(A->text + n, FILE_MAX - n, "%s %s %lld %lld %s\n", kid, key,
-                              (long long)k->created, (long long)k->seen, k->name);
+        char cr[24], se[24];
+        n += (size_t)snprintf(A->text + n, FILE_MAX - n, "%s %s %s %s %s\n", kid, key,
+                              dec64(k->created, cr, sizeof cr), dec64(k->seen, se, sizeof se),
+                              k->name);
     }
     if (n < FILE_MAX) {
         write_text(n);
@@ -244,13 +279,15 @@ static void load(void) {
             char kid[24], key[40];
             long long cr = 0, se = 0;
             int at = 0;
-            if (sscanf(line, "%20s %36s %lld %lld %n", kid, key, &cr, &se, &at) == 4
+            const char *name = "";
+            if (sscanf(line, "%20s %36s%n", kid, key, &at) == 2 && at > 0
+                && moy_wa_scan_times(line + at, &cr, &se, &name)
                 && moy_seal_unhex(kid, strlen(kid), w->kid, MOY_SEAL_KID)
                 && moy_seal_unhex(key, strlen(key), w->key, MOY_SEAL_KEY)) {
                 w->used = 1;
                 w->created = cr;
                 w->seen = se;
-                snprintf(w->name, sizeof w->name, "%s", at > 0 ? line + at : "");
+                snprintf(w->name, sizeof w->name, "%s", name);
                 k++;
             }
             moy_seal_wipe(line, sizeof line);
@@ -440,8 +477,9 @@ size_t moy_wa_keys(char *out, size_t cap) {
         }
         char kid[2 * MOY_SEAL_KID + 1];
         moy_seal_hex(k->kid, MOY_SEAL_KID, kid);
-        int w = snprintf(out + n, cap - n, "%s %lld %lld %s\n", kid, (long long)k->created,
-                         (long long)k->seen, k->name);
+        char cr[24], se[24];
+        int w = snprintf(out + n, cap - n, "%s %s %s %s\n", kid, dec64(k->created, cr, sizeof cr),
+                         dec64(k->seen, se, sizeof se), k->name);
         n = w > 0 && (size_t)w < cap - n ? n + (size_t)w : n;
     }
     return n;
