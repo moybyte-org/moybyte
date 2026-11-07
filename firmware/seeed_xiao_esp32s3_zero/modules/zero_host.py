@@ -533,9 +533,9 @@ class ZeroUpdate:
             return
         try:
             # The updater streams STRAIGHT INTO THE SLOT, which this board
-            # needs: the whole filesystem is smaller than the image (1.375MB
-            # against ~2.9MB), so a staged copy cannot fit on an EMPTY volume
-            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.25MB.
+            # needs: the whole filesystem is smaller than the image (896KB
+            # against ~3.5MB), so a staged copy cannot fit on an EMPTY volume
+            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.5MB.
             self.ota.begin_download(self.manifest)
         except Exception as exc:         # noqa: BLE001 -- bad url / non-200
             self.state = "error"
@@ -676,7 +676,7 @@ class ZeroUpdate:
                              staged=self.staged)
 
 
-def _frozen_or_pushed(names=("zero_host", "zero_setup",
+def _frozen_or_pushed(names=("zero_host", "zero_setup", "zero_shell",
                              "moy_webhost", "moy_sync", "moy_carts")):
     """Which of the image's own modules a PUSHED copy is shadowing.
 
@@ -788,11 +788,22 @@ def serve():
         # guarantees: these modules are running from /, not from this build.
         print("ZERO NOTE: pushed copies are SHADOWING the image for:",
               ", ".join(shadowed))
+    # The terminal over SSH (zero_shell): the server where a password is set,
+    # its sessions' hops served by this loop's `tail()`.
+    try:
+        import zero_shell
+        zero_shell.start(CARTS_DIR, name, host)
+        tail = zero_shell.tail
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO ssh: unavailable:", exc)
+        tail = None
     while True:
         # The console boards poll between frames; this board HAS no frames, so
         # a short sleep is its whole duty cycle. 10ms keeps a page load snappy
         # while idling at ~zero.
         host.poll()
+        if tail is not None:
+            tail()
         if task is not None:
             # THE ROLLBACK CONFIRM, on the only evidence this board has: the
             # host is up and the loop is still going round. `serving` is the

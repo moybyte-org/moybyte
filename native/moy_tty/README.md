@@ -94,5 +94,8 @@ bridge's two 2 KB buffers live while a page is connected.
 
 Every console takes the module (a `[native.shared]` default, with `moy_sh`,
 which the face runs; `tests/test_board_toml.py` holds that a board with
-`moy_ssh` has both). The Zero denies it with `moy_sh` and `moy_ssh` until
-the owner's call on its flash and its gate.
+`moy_ssh` has both). The Zero takes it without the web terminal's bridge
+(its `native/micropython.cmake` sets `MOY_TTY_WEB_TERM` OFF, so its GET /term
+answers 404): the page a Zero serves may carry no pin, and SSH is its one
+face. With no frame loop it serves a face's hops from its poll loop
+(`moy_tty.tail()`, `zero_host.serve`).

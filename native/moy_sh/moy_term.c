@@ -6,8 +6,8 @@
 #include "moy_term.h"
 
 // The console's palette, its first sixteen the base colours (native/moy_ui's
-// generated tables, linked wherever the shell is).
-extern const uint32_t moy_theme_moy64[64];
+// generated tables): weak, NULL in an image without the toolkit (the Zero).
+extern const uint32_t moy_theme_moy64[64] __attribute__((weak));
 
 #define BLANK ((uint32_t)' ' | (MOY_TERM_INK << MOY_TERM_FG_AT))
 #define PARAMS 16
@@ -201,6 +201,9 @@ static void drop_scrollback(moy_term_t *t) {
 }
 
 int moy_term_nearest(uint32_t rgb) {
+    if (moy_theme_moy64 == NULL) {
+        return -1;
+    }
     int best = 0;
     uint32_t bd = UINT32_MAX;
     for (int i = 0; i < 16; i++) {
@@ -601,6 +604,9 @@ static size_t utf8(uint32_t cp, char *o) {
 }
 
 static size_t rgb_sgr(char *o, int ground, int i) {
+    if (moy_theme_moy64 == NULL) {
+        return (size_t)snprintf(o, 24, "\x1b[%d;5;%dm", ground ? 48 : 38, i);
+    }
     uint32_t c = moy_theme_moy64[i];
     return (size_t)snprintf(o, 24, "\x1b[%d;2;%u;%u;%um", ground ? 48 : 38,
                             (unsigned)(c >> 16), (unsigned)((c >> 8) & 0xFF), (unsigned)(c & 0xFF));

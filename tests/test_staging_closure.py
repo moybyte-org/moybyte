@@ -97,10 +97,9 @@ NATIVE = {
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console
     # (moy_input compiles to nothing until its pass fills it); the Zero takes
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
-    # browser. moy_sh, the terminal's C shell, is taken by every console; the
-    # Zero denies it until its network face (its board.toml says why).
-    # moy_ssh, the SSH server, is taken by every console (native/moy_ssh/
-    # README.md); the Zero denies it with moy_sh until its phase.
+    # browser. moy_sh, the terminal's C shell, moy_tty, its face over a stream,
+    # and moy_ssh, the SSH server (native/moy_ssh/README.md), are taken by
+    # every board, the Zero's face SSH alone (its board.toml says why).
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -144,13 +143,14 @@ NATIVE = {
                    "moy_sh", "moy_ssh", "moy_tty"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. Besides the store, the kernel's entry (a serial-only
-    # floor) and moy_net, the links its webhost serves, `moy_web` is the
-    # shared C module it compiles in, and
-    # it is the module that justifies the board having an image at all -- the
+    # floor), moy_net, the links its webhost serves, and the terminal over SSH
+    # (moy_sh, moy_tty, moy_ssh), `moy_web` is the shared C module it compiles
+    # in, and it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
+    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel",
+             "moy_sh", "moy_tty", "moy_ssh"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
             "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui"},
@@ -844,7 +844,7 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     is structurally different) and stays hand-listed."""
     for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
                               ("guition-s3", GUITION),
-                              ("guition-p4", GUITION_P4)):
+                              ("guition-p4", GUITION_P4), ("zero", ZERO)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")

@@ -78,7 +78,9 @@ a key on a Dropbear server in the first, a current one in the home's.
 
 ## Boards
 
-Every console takes the module (each board.toml's `[native.shared]`) with
-`native/moy_tty`; the image cost and the internal SRAM are in #246. The Zero
-denies it with `moy_sh` and `moy_tty` until its phase (`docs/os_2026-11.md`
-§7, phase 4).
+Every board takes the module (each board.toml's `[native.shared]`) with
+`native/moy_tty`; the image cost and the internal SRAM are in #246. On the
+headless Zero SSH is the shell's one face, its sessions' hops served by its
+poll loop and its door `firmware/seeed_xiao_esp32s3_zero/modules/zero_shell.py`;
+it holds no `ssh` lease, its station and mDNS name being up while it serves
+its webhost (`runtime/system/ssh_service.py`).

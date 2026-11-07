@@ -17,8 +17,13 @@
 #include "moy_fs.h"
 
 #ifdef ESP_PLATFORM
+#include <errno.h>
+#include <time.h>
+
 #include "esp_heap_caps.h"
 #include "esp_random.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #else
 #include <sys/random.h>
 #endif
@@ -292,6 +297,20 @@ gid_t getegid(void) {
 struct passwd *getpwuid(uid_t uid) {
     (void)uid;
     return moy_ssh_getpwnam("moy");
+}
+
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+    if (rem != NULL) {
+        rem->tv_sec = 0;
+        rem->tv_nsec = 0;
+    }
+    if (req == NULL || req->tv_nsec < 0 || req->tv_nsec >= 1000000000) {
+        errno = EINVAL;
+        return -1;
+    }
+    TickType_t t = pdMS_TO_TICKS((uint32_t)req->tv_sec * 1000u + (uint32_t)(req->tv_nsec / 1000000));
+    vTaskDelay(t ? t : 1);
+    return 0;
 }
 
 char *dirname(char *path) {

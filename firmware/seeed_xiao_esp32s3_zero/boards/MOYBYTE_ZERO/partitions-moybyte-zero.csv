@@ -18,33 +18,33 @@
 # where a transposed digit between two S3 boards is a real hazard (the T-Deck's
 # 0x1D000 vs the P4's 0xD000 has already been typed wrong once, by hand).
 #
-# THE SLOT SIZE, and what it is sized against: 3.25 MiB (0x340000) per slot
-# since 2026-10-18 (owner), re-tabled from 3 MiB slots (2026-10-07; board.toml's
-# [image] says why) and before that from
-# the first table's 2.75 MiB slots and 2.375 MiB vfs.
+# THE SLOT SIZE, and what it is sized against: 3.5 MiB (0x380000) per slot
+# since 2026-11-07 (owner), each slot grown by 256 KiB out of the store for the
+# C shell, the SSH server and SFTP (docs/os_2026-11.md section 7, phase 4: the
+# Zero over SSH), which the 3.25 MiB slots of 2026-10-18 had no room for
+# (docs/os_2026-11/web_terminal_spike.md); before them 3 MiB (2026-10-07,
+# board.toml's [image] says why) and the first table's 2.75 MiB.
 #
-#   The image is ~2.91 MB (2,913,328 B at the last measurement), and most of it
-#   is the browser console every board bakes (native/moy_web, ~808 KB gzipped,
-#   91% of it micropython.wasm.gz), which grows with the console rather than
-#   with this board. On 3 MiB slots that left ~226 KB, against the 200 KB floor
-#   ([image] in board.toml holds the current one); the next console pass would
-#   have failed the build. 3.25 MiB slots leave 494,544 B (483 KB), about
-#   2.4 times the floor.
+#   Most of the image is the browser console every board bakes
+#   (native/moy_web, ~808 KB gzipped, 91% of it micropython.wasm.gz), which
+#   grows with the console rather than with this board; the shell, Dropbear
+#   and its libtomcrypt are this board's own growth. The build prints the
+#   headroom on every run.
 #
 #   Arithmetic, on 8 MiB (0x800000) of flash:
-#     ota_0  0x020000 + 0x340000 = 0x360000   (3,407,872 B, 64 KB aligned)
-#     ota_1  0x360000 + 0x340000 = 0x6A0000   (64 KB aligned)
-#     vfs    0x6A0000 + 0x160000 = 0x800000   (1.375 MiB, ends on the last byte)
+#     ota_0  0x020000 + 0x380000 = 0x3A0000   (3,670,016 B, 64 KB aligned)
+#     ota_1  0x3A0000 + 0x380000 = 0x720000   (64 KB aligned)
+#     vfs    0x720000 + 0x0E0000 = 0x800000   (896 KiB, ends on the last byte)
 #
 #   The price is the store, and it is the store that sets the ceiling: this
-#   board is a CART STORE, and the seed roster alone is ~820 KB of carts, so a
-#   kid's room for their own goes from ~1.1 MB to ~600 KB BY BYTES. By blocks
-#   (littlefs, 4 KiB; a file costs a block, a folder two) the roster's ~180
-#   files and ~37 folders fill the 352 blocks of this vfs (measured on glass
-#   2026-10-23), so the bytes were not the capacity. Every slot byte is
-#   paid for twice and comes off the store.
+#   board is a CART STORE. By blocks (littlefs, 4 KiB; a file costs a block, a
+#   folder two) the seed roster's files and folders filled the 352 blocks of
+#   the 1.375 MiB store (measured on glass 2026-10-23); this one has 224. No
+#   backup was taken for the change (owner, 2026-11-07): the table change wipes
+#   the store and the image's roster seeds the empty one on first boot. Every
+#   slot byte is paid for twice and comes off the store.
 #
-# WHAT WOULD FALSIFY IT: the app image crossing ~3.2 MB, or the store filling
+# WHAT WOULD FALSIFY IT: the app image crossing its slot, or the store filling
 # with the roster plus a kid's carts. The build says so on every run (the #168
 # guard reads THIS FILE's ota_0 size, prints the headroom beside board.toml's
 # floor, and fails the build under the floor), so the tell arrives before the
@@ -58,6 +58,6 @@
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x340000,
-ota_1,    app,  ota_1,   0x360000, 0x340000,
-vfs,      data, fat,     0x6A0000, 0x160000,
+ota_0,    app,  ota_0,   0x20000,  0x380000,
+ota_1,    app,  ota_1,   0x3A0000, 0x380000,
+vfs,      data, fat,     0x720000, 0xE0000,

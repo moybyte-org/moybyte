@@ -33,4 +33,11 @@
 #define mp_cmp moy_tm_mp_cmp
 #define mp_cmp_d moy_tm_mp_cmp_d
 
+// Dropbear's sign-in delay sleeps through nanosleep, which ESP-IDF's newlib
+// declares and no IDF component defines (a console image had one only by
+// WAMR's port, which the Zero denies): the server's own, in moy_ssh.c.
+#ifdef ESP_PLATFORM
+#define nanosleep moy_ssh_nanosleep
+#endif
+
 #endif // MOY_SSH_NAMES_H

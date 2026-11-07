@@ -12,6 +12,11 @@ module writes), `ssh` (`password_auth = no` turns passwords off),
 `authorized_keys` (ssh-copy-id's) and the host key it makes itself. No
 password: no SSH, and the radio is not held for it.
 
+A board whose station is its only I/O (the headless Zero) has no lease: its
+console's `wifi_hold` is None, its radio and its mDNS name are up while it
+serves its webhost, and the server rides them, holding, dialling and
+announcing nothing (`_leases`).
+
 A stop asked from a session's own command (`passwd -d` over SSH) ends the
 server only after that session (moy_ssh.h, THE RUN), so the radio and the
 name stay until the run reports its tasks parked: a shell wake looks every
@@ -31,6 +36,8 @@ PARK_MS. A start before then cancels the wake and keeps both.
   status()                 (serving, sessions, signed in, refused) or None
   fingerprint(ws)          the host key's SHA256 fingerprint as OpenSSH prints it,
                            or None before the server first made its key
+  passwd(door, args)       the shell's `passwd` (runtime/shell/sh_roles.py's
+                           role command, the Zero's door): its exit code
 
 The hash is moy_ssh's (`$moy1$SALT$HEX`, SHA-256 iterated), the same C on a
 board; the host computes it with hashlib, the formula tests/test_moy_ssh.py
@@ -50,7 +57,10 @@ except ImportError:  # host: the runtime package
 try:
     import moybyte as _moybyte
 except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+    try:
+        from runtime import moybyte as _moybyte
+    except ImportError:  # the Zero: no console, so no wakes (_leases)
+        _moybyte = None
 
 try:
     import moy_log as _L
@@ -63,7 +73,10 @@ except ImportError:  # pragma: no cover - an image without the kernel
 try:
     import devices as _D
 except ImportError:  # host: the runtime package
-    from runtime import devices as _D
+    try:
+        from runtime import devices as _D
+    except ImportError:  # the Zero: no console's processes
+        _D = None
 
 TAG = "ssh"
 PASSWORD = "password"
@@ -184,8 +197,15 @@ def _dial(ws):
         print("Moybyte ssh: wifi: %s" % (exc,))
 
 
+def _leases(ws):
+    """Whether the server holds the radio and the name for itself: a
+    console's radio is off unless held. A console with no lease
+    (`wifi_hold` None, the Zero) keeps both up for its webhost."""
+    return getattr(ws, "wifi_hold", None) is not None
+
+
 def rename(ws):
-    if _state["serving"] and _state["name"] != hostname(ws):
+    if _state["serving"] and _leases(ws) and _state["name"] != hostname(ws):
         _announce(ws)
 
 
@@ -197,16 +217,20 @@ def start(ws):
     if _state["serving"]:
         return True
     _unpark()
-    ws.wifi_hold(TAG)
+    lease = _leases(ws)
+    if lease:
+        ws.wifi_hold(TAG)
     try:
         _N.start(system_dir(ws))
     except Exception as exc:  # noqa: BLE001 -- a server that will not start serves nothing
         print("Moybyte ssh: %s" % (exc,))
-        ws.wifi_release(TAG)
+        if lease:
+            ws.wifi_release(TAG)
         return False
     _state["serving"] = True
-    _dial(ws)
-    _announce(ws)
+    if lease:
+        _dial(ws)
+        _announce(ws)
     return True
 
 
@@ -259,10 +283,11 @@ def stop(ws):
     try:
         _N.stop()
     finally:
-        if _N.parked():
-            _let_go(ws)
-        else:
-            _await_park(ws)
+        if _leases(ws):
+            if _N.parked():
+                _let_go(ws)
+            else:
+                _await_park(ws)
 
 
 def boot(ws):
@@ -303,6 +328,68 @@ def set_password(ws, password):
     _sign_out()
     start(ws)
     return True
+
+
+def _day(t):
+    try:
+        import wallclock as _wc
+    except ImportError:
+        try:  # host: the runtime package
+            from runtime import wallclock as _wc
+        except ImportError:  # the Zero: no zone, the date in UTC
+            import time
+            if time.gmtime(0)[0] == 2000:   # MicroPython's epoch; a stamp is Unix seconds
+                t -= 946684800
+            return "%d-%02d-%02d" % time.gmtime(t)[:3]
+    y, m, dd = _wc.localtime(t)[:3]
+    return "%d-%02d-%02d" % (y, m, dd)
+
+
+def passwd(d, a):
+    """The shell's `passwd` for a door `d` (its `ws`, `out(text)`,
+    `err(name, text)`): with no argument whether a password is set, what SSH
+    serves, its host key and the browsers paired; PASSWORD sets it, `-d`
+    removes it, `-l` lists the browsers paired with the console's webhost
+    (`ws.webhost`, None where it serves none) and `-r ID|all` forgets one or
+    every one. Its exit code."""
+    ws = d.ws
+    web = getattr(ws, "webhost", None)
+    if not a:
+        st = status()
+        d.out("password %s\n" % ("set" if is_set(ws) else "not set"))
+        if st is not None:
+            d.out("ssh %s as %s.local, %d session(s), %d refused\n"
+                  % ("serving" if st[0] else "off", hostname(ws), st[1], st[3]))
+        fp = fingerprint(ws)
+        d.out("host key %s\n" % (fp or "not made yet (the first SSH start makes it)"))
+        if web is not None:
+            d.out("%d browser(s) paired (passwd -l)\n" % len(web.browsers()))
+        return 0
+    if a == ["-d"]:
+        set_password(ws, None)
+        return 0
+    if a[0] in ("-l", "-r"):
+        if web is None:
+            d.err("passwd", "this console serves no browser")
+            return 1
+        if a == ["-l"]:
+            for kid, created, seen, name in web.browsers():
+                d.out("%s  paired %s  seen %s  %s\n" % (kid, _day(created), _day(seen), name))
+            return 0
+        if len(a) == 2:
+            if web.forget(a[1]) == 0:
+                d.err("passwd", "no browser " + a[1])
+                return 1
+            return 0
+        d.err("usage", "passwd -r ID|all")
+        return 2
+    if len(a) != 1 or a[0].startswith("-"):
+        d.err("usage", "passwd PASSWORD | -d | -l | -r ID|all")
+        return 2
+    if not set_password(ws, a[0]):
+        d.err("passwd", "not set: a password is %d characters or more" % MIN_PASSWORD)
+        return 1
+    return 0
 
 
 def status():

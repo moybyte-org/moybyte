@@ -1011,8 +1011,9 @@ static int clearcmd(int argc, char **argv) {
 #endif
 
 // The console's palette, its first sixteen the base colours (native/moy_ui's
-// generated tables, linked wherever the shell is).
-extern const uint32_t moy_theme_moy64[64];
+// generated tables): weak, NULL in an image without the toolkit (the Zero),
+// where neofetch draws plain.
+extern const uint32_t moy_theme_moy64[64] __attribute__((weak));
 
 #define FETCH_ROWS 16
 #define FETCH_VALUE 64
@@ -1316,7 +1317,8 @@ static int neofetchcmd(int argc, char **argv) {
     moy_sh_hfree(text);
 
     const char *term = moy_sh_getvar(s, "TERM");
-    int colour = isatty(1) && (term == NULL || strcmp(term, "dumb") != 0);
+    int colour = isatty(1) && (term == NULL || strcmp(term, "dumb") != 0)
+                 && moy_theme_moy64 != NULL;
     int cols = 80, rows = 0;
     if (s->host.size != NULL) {
         s->host.size(s->host.ctx, &cols, &rows);

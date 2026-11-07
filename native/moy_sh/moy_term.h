@@ -57,7 +57,9 @@
 #define MOY_TERM_BG(cell) ((cell) >> MOY_TERM_BG_AT)
 
 // The base colour nearest `rgb` (0xRRGGBB): its index, 0-15, among the
-// console's palette's first sixteen (native/moy_ui's moy_theme_moy64).
+// console's palette's first sixteen (native/moy_ui's moy_theme_moy64); -1 in
+// an image without the palette (the Zero, which takes no moy_ui), where a
+// cell's base colour reaches the client as its own (38;5;N).
 int moy_term_nearest(uint32_t rgb);
 
 typedef struct moy_term moy_term_t;

@@ -497,57 +497,12 @@ def r_lease(d, a):
     return 0
 
 
-def _day(t):
-    try:
-        import wallclock as _wc
-    except ImportError:  # host: the runtime package
-        from runtime import wallclock as _wc
-    y, m, dd = _wc.localtime(t)[:3]
-    return "%d-%02d-%02d" % (y, m, dd)
-
-
 def r_passwd(d, a):
     try:
         import ssh_service
     except ImportError:  # host: the runtime package
         from runtime import ssh_service
-    ws = d.ws
-    web = getattr(ws, "webhost", None)
-    if not a:
-        st = ssh_service.status()
-        d.out("password %s\n" % ("set" if ssh_service.is_set(ws) else "not set"))
-        if st is not None:
-            d.out("ssh %s as %s.local, %d session(s), %d refused\n"
-                  % ("serving" if st[0] else "off", ssh_service.hostname(ws), st[1], st[3]))
-        fp = ssh_service.fingerprint(ws)
-        d.out("host key %s\n" % (fp or "not made yet (the first SSH start makes it)"))
-        if web is not None:
-            d.out("%d browser(s) paired (passwd -l)\n" % len(web.browsers()))
-        return 0
-    if a == ["-d"]:
-        ssh_service.set_password(ws, None)
-        return 0
-    if a[0] in ("-l", "-r"):
-        if web is None:
-            d.err("passwd", "this console serves no browser")
-            return 1
-        if a == ["-l"]:
-            for kid, created, seen, name in web.browsers():
-                d.out("%s  paired %s  seen %s  %s\n" % (kid, _day(created), _day(seen), name))
-            return 0
-        if len(a) == 2:
-            if web.forget(a[1]) == 0:
-                d.err("passwd", "no browser " + a[1])
-                return 1
-            return 0
-        return _usage(d, "passwd", "-r ID|all")
-    if len(a) != 1 or a[0].startswith("-"):
-        return _usage(d, "passwd", "PASSWORD | -d | -l | -r ID|all")
-    if not ssh_service.set_password(ws, a[0]):
-        d.err("passwd", "not set: a password is %d characters or more"
-              % ssh_service.MIN_PASSWORD)
-        return 1
-    return 0
+    return ssh_service.passwd(d, a)
 
 
 # -- the device faces --------------------------------------------------------------------

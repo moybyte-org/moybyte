@@ -78,7 +78,8 @@ write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 
 **A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
-`0x6A0000` (since 2026-10-18; `0x620000` from 2026-10-07); a board flashed under
+`0x720000` (since 2026-11-07; `0x6A0000` from 2026-10-18, `0x620000` from
+2026-10-07); a board flashed under
 an older table, or the stock MicroPython one, has its filesystem elsewhere, so
 the new image comes up on a freshly formatted store (`tools/board_flash.py`
 erases the moved store's first blocks and says so). A table change needs a USB
@@ -117,7 +118,14 @@ them back on the next visit — but anything that existed *only* here is.
   ENOSPC and a kid's cart had no room), so this board's build leaves the two
   speed-test carts out of its roster (`--skip` in `build.sh`; owner,
   2026-10-23). The boot line says `the store is FULL` when a seed fails that
-  way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  way. On 2026-11-07 (owner) each slot grew by 256 KiB to **3.5 MiB**
+  (`0x380000`, at `0x20000` and `0x3A0000`) for the terminal over SSH (below),
+  and the store became the **896 KiB** `vfs` at `0x720000`, 224 blocks, with no
+  backup of the store: the table change wipes it and the roster seeds the empty
+  one. The roster does not fit it: on glass that day the first boot's seed
+  stopped at 17 of its 32 carts with the store FULL, leaving no block for the
+  system folder (`/moy/system`: the password, the SSH host key, the browsers'
+  keys) or a kid's cart, and every boot seeds the missing carts again. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
   overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
   `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
@@ -135,8 +143,8 @@ them back on the next visit — but anything that existed *only* here is.
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
   answer is yes, `runtime/` IS the console, and this board is not one.
-- **The shared C modules are the store, the kernel's floor, the links and
-  `moy_web`.** Every other one is denied with the hardware or the workload that
+- **The shared C modules are the store, the kernel's floor, the links,
+  `moy_web` and the terminal (`moy_sh`, `moy_tty`, `moy_ssh`).** Every other one is denied with the hardware or the workload that
   is missing. The driver halves with no caller here are off in the board's own
   files: wired Ethernet, WPA-Enterprise, ESP-NOW and I2S (`sdkconfig.board`,
   `mpconfigboard.h`), because the image's growth is the browser console it
@@ -338,12 +346,47 @@ it, its keys file `/moy/system/webkeys`. What is true *here*:
   browser's session: the store's pulls and pushes, and `/gpio`
   and `/update` on both methods — see the Pins and Updates sections for why
   neither `GET` is free.
-- **Forgetting a browser** is `passwd -r` on a console; this board has no shell
-  yet, so it is deleting `/moy/system/webkeys` over the cable (every browser
-  pairs again). Changing the password forgets no browser.
+- **Forgetting a browser** is `passwd -r ID|all` over SSH (below), or deleting
+  `/moy/system/webkeys` over the cable (every browser pairs again). Changing
+  the password forgets no browser.
 - **What stays open is the console's own boot files plus `GET /sync`.** A
   browser has to load the page before it can ask for anything, and the page has
   to know a board is here before it knows to ask.
+
+## The terminal, over SSH (2026-11-07)
+
+The consoles' C shell (`native/moy_sh`), its face over a stream
+(`native/moy_tty`) and the SSH server (`native/moy_ssh`), with SFTP
+(`docs/os_2026-11/system.md` sections 3 and 4). SSH is this board's one face:
+
+```bash
+ssh moybyte-zero.local            # any user name; the board's password
+sftp moybyte-zero.local           # the files tree, the store at /moy
+scp file moybyte-zero.local:/moy/ # scp -s before OpenSSH 9.0
+```
+
+- **The password is the board's one** (`/moy/system/password`): the one a
+  browser pairs with, set by the setup form or `provision.sh --password`, and
+  changed with `passwd NEW` over SSH. With none set there is no SSH.
+  `ssh-copy-id` keys go to `/etc` (`/moy/system/authorized_keys`).
+- **The C built-ins only**, until WASI commands arrive. `zero_shell.py` is the
+  door into Python: `passwd` (its `-l` and `-r` over this board's webhost),
+  `df`, `mem` and `ps`. What only a console answers (its processes, `/proc`'s
+  and `/dev`'s rows, the other role commands, `python`) says "needs the
+  console", as a console's shell does with its VM stopped; `settings` and
+  `pkg list` are the store's C.
+- **No web terminal**: the image leaves out its bridge
+  (`native/micropython.cmake`, `MOY_TTY_WEB_TERM`), so `GET /term` is 404: a
+  page's sign-in would be the shell's, and SSH's is the board's password.
+- **No WiFi lease**: the station and the `moybyte-zero.local` name are up
+  while the board serves, so the server rides them
+  (`runtime/system/ssh_service.py`).
+- **No frame**: what a session must do on the VM's task (the store's files,
+  the door) is served by the serve loop's `zero_shell.tail()` each turn
+  (`moy_tty.tail()`), about every 10 ms.
+- **No palette**: the toolkit's colours are not in this image, so `neofetch`
+  draws plain and a full-screen app's colours reach the client as its own base
+  colours.
 
 ## Pins (`native/moy_net/moy_gpio.c`, #9)
 
@@ -756,6 +799,8 @@ new image's host did not come up.
   carts root has a real journal here, the files root's `.history/` sidecars
   are a different mechanism and are neither synced nor written by the
   receiver.
+- **No web terminal and no console Terminal app** — the shell's face here is
+  SSH alone (the terminal section above).
 - **No on-glass suite.** Every console board has one
   (`tests/test_*_on_glass.py` over the shared dev channel); this board has no
   console, no `DevChannel` and no frames to assert about. Its equivalent is

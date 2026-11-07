@@ -146,6 +146,17 @@ wrap-safe ms clock its closing grace window is written against). `web_view_ws`
 was the other name here until 2026-09, when the WebSocket half of the transport
 went with it -- the RPC it was kept for shipped as plain HTTP."""
 
+[[modules.shared.group]]
+files = ["ssh_service.py"]
+why = """
+The SSH server's Python side (native/moy_ssh), the one every console runs:
+the password's hash in the store's system folder (`/moy/system`), the server
+started while one is set, `passwd`'s command. On this board the radio and the
+mDNS name are the board's, up while it serves its webhost, so the server holds
+no lease and announces nothing of its own (`wifi_hold` is None in the
+`zero_shell` console it is handed); its park wake, a console's way to let the
+radio go after a session's `passwd -d`, has nothing to let go here."""
+
 # What is DECLARED ABSENT rather than merely unlisted -----------------------
 
 [[modules.shared.lazy]]
@@ -273,7 +284,10 @@ otadata_size   = "0x2000"
 # the floor stayed. The floor is DROPPED since 2026-11-03 (owner): the OS
 # work's shell code (#246) took the image under it step after step, and the
 # Zero's way out is a card-backed Zero or one without OTA, not a trim per
-# step. Only the slot-fit guard (#168) holds this image now.
+# step. Only the slot-fit guard (#168) holds this image now. The slots grew by
+# 256 KiB each to 3.5 MiB (owner, 2026-11-07) for the C shell, the SSH server
+# and SFTP (the moy_sh, moy_tty and moy_ssh takes below), leaving an 896 KiB
+# store; the partition CSV carries the arithmetic.
 headroom_floor_kib = 0
 
 [serial]
@@ -393,6 +407,9 @@ the image is the guarantee, not the ceiling (.claude/rules/web.md).
 hook, MOY_INDEX_IMPL in tools/moy_index_spike.py, is `c` unless a build says
 `py`), and `moy_spine`, the kernel's spine, is native here as on every image;
 this board is one of the five targets both must link into.
+
+The terminal (`moy_sh`, `moy_tty`, `moy_ssh`) crossed on 2026-11-07, its
+face SSH alone, when the slots grew for it (`[image]`).
 
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
@@ -530,29 +547,40 @@ RPC this board serves are what the module is for. It is the batch codec and
 the HTTP parser and response writer the webserver, the sync stack and the GPIO
 routes import; its JSON scanner is moy_store's, which this board takes."""
 
-[[native.shared.deny]]
+[[native.shared.take]]
 module = "moy_sh"
 why = """
-The terminal's C shell (native/moy_sh/README.md). Its faces on a console are
-the screen and the dev channel; this board has neither (no glass, and its
-serial is a bare REPL with no dev channel). Its face is the network one, SSH
-and the web terminal (docs/os_2026-11/system.md section 3), and this board
-takes the shell with that face."""
+The terminal's C shell (native/moy_sh/README.md). A console's faces are the
+screen and the dev channel; this board has neither (no glass, and its serial
+is a bare REPL), so its one face is SSH's (docs/os_2026-11/system.md section
+3): `ssh` in from a laptop and run a command, the C built-ins until WASI
+commands arrive. A session's arena is PSRAM, made when SSH opens a face. What
+crosses the door into Python is `zero_shell.py`'s: `passwd`, `df`, `mem`, `ps`; the
+console's processes, /proc's and /dev's rows and the other role commands are
+the console's, which this board has not got, so they answer as on a console
+with its VM stopped."""
 
-[[native.shared.deny]]
-module = "moy_ssh"
-why = """
-The SSH server (native/moy_ssh/README.md): its session's shell is moy_sh,
-which this board denies until its network face; it takes the server with
-the shell (docs/os_2026-11.md section 7, phase 4)."""
-
-[[native.shared.deny]]
+[[native.shared.take]]
 module = "moy_tty"
 why = """
-The shell's face over a stream (native/moy_tty/README.md), SSH's and the web
-terminal's: it runs moy_sh, which this board denies until its network face
-(the owner's call on its flash and its gate, docs/os_2026-11/system.md
-section 3)."""
+The shell's face over a stream (native/moy_tty/README.md), the one SSH opens,
+and SFTP (moy_tty_sftp.c) into this board's store. The console's task that
+serves the face's hops is the VM's poll loop (zero_host.serve, `moy_tty.tail`):
+this board has no frame. Without the web terminal's bridge
+(native/micropython.cmake, MOY_TTY_WEB_TERM): the page this board serves may
+carry no pin, which on a console would gate the shell, so its GET /term
+answers 404 and the shell is reached over SSH's sign-in alone."""
+
+[[native.shared.take]]
+module = "moy_ssh"
+why = """
+The SSH server (native/moy_ssh/README.md), Dropbear with its own crypto, and
+with it SFTP: this board's way in for a terminal and for a computer that
+mounts its files (docs/os_2026-11/system.md sections 3 and 4). It serves
+while the board's password is set (the setup form's, `provision.sh
+--password`'s, `passwd` over SSH), over the station this board keeps up for its webhost and the mDNS
+name it already answers to: there is no `ssh` lease here (runtime/system/
+ssh_service.py)."""
 
 
 [[native.shared.deny]]
