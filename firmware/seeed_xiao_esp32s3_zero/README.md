@@ -119,13 +119,17 @@ them back on the next visit — but anything that existed *only* here is.
   speed-test carts out of its roster (`--skip` in `build.sh`; owner,
   2026-10-23). The boot line says `the store is FULL` when a seed fails that
   way. On 2026-11-07 (owner) each slot grew by 256 KiB to **3.5 MiB**
-  (`0x380000`, at `0x20000` and `0x3A0000`) for the terminal over SSH (below),
-  and the store became the **896 KiB** `vfs` at `0x720000`, 224 blocks, with no
-  backup of the store: the table change wipes it and the roster seeds the empty
-  one. The roster does not fit it: on glass that day the first boot's seed
-  stopped at 17 of its 32 carts with the store FULL, leaving no block for the
-  system folder (`/moy/system`: the password, the SSH host key, the browsers'
-  keys) or a kid's cart, and every boot seeds the missing carts again. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  (`0x380000`, at `0x20000` and `0x3A0000`) for the terminal (below), and the
+  store became the **896 KiB** `vfs` at `0x720000`, 224 blocks, with no backup
+  of the store: the table change wipes it and the roster seeds the empty one.
+  The whole roster overfilled it (on glass that day: 17 carts in, no block left
+  for the system folder), so the same day (owner) the roster was cut to the
+  apps, one desktop and five games, the shell's own carts first (board.toml's
+  `[roster]`), and the seed stops while `zero_host.SEED_RESERVE` (96 KiB) is
+  still free, so
+  the system folder (`/moy/system`: the password, the SSH host key, the
+  browsers' keys) and a kid's carts always fit. The seed is the EMPTY store's
+  only: a cart the kid deletes stays deleted (`zero_host.seed_carts`). The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
   overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
   `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
@@ -157,14 +161,14 @@ them back on the next visit — but anything that existed *only* here is.
 ```
 
 Default: make the directories, optionally write the credentials and (`--password`) the
-board's password, reboot, and print where to pair. It copies the seed roster
-**only onto a board that has no carts at all** — the image now writes out
-whatever its store is missing on every boot, so this is the safety net for an
-image built before the roster was baked in, and the emptiness question is asked
-on the board with the same read `store_is_empty()` does. `--carts` forces the push, for a roster that moved since the image was
-built; forcing it writes the repo's copy of a cart over whatever is on the
-board, which on the one board that is the store *of record* is a real thing to
-mean.
+board's password, reboot, and print where to pair. Every write is checked on
+the board: one it refuses (a full store) stops the script, non-zero, with what
+the board said. It pushes no carts by default, because the image seeds an
+empty store on the reboot it ends with; `--carts` pushes the image's roster
+(`system_carts/` less board.toml's `[roster] skip`), for a roster that moved
+since the image was built, and writes the repo's copy of a cart over whatever
+is on the board, which on the one board that is the store *of record* is a
+real thing to mean.
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -353,11 +357,14 @@ it, its keys file `/moy/system/webkeys`. What is true *here*:
   browser has to load the page before it can ask for anything, and the page has
   to know a board is here before it knows to ask.
 
-## The terminal, over SSH (2026-11-07)
+## The terminal (2026-11-07)
 
 The consoles' C shell (`native/moy_sh`), its face over a stream
 (`native/moy_tty`) and the SSH server (`native/moy_ssh`), with SFTP
-(`docs/os_2026-11/system.md` sections 3 and 4). SSH is this board's one face:
+(`docs/os_2026-11/system.md` sections 3 and 4). The browser is this board's
+only screen, so the browser console's Terminal on the page it serves is the
+shell's first face (`GET /term`, sealed to a browser paired with the board's
+password); SSH is the other:
 
 ```bash
 ssh moybyte-zero.local            # any user name; the board's password
@@ -367,7 +374,8 @@ scp file moybyte-zero.local:/moy/ # scp -s before OpenSSH 9.0
 
 - **The password is the board's one** (`/moy/system/password`): the one a
   browser pairs with, set by the setup form or `provision.sh --password`, and
-  changed with `passwd NEW` over SSH. With none set there is no SSH.
+  changed with `passwd NEW` in the shell. With none set no browser pairs, so
+  there is no Terminal, and there is no SSH.
   `ssh-copy-id` keys go to `/etc` (`/moy/system/authorized_keys`).
 - **The C built-ins only**, until WASI commands arrive. `zero_shell.py` is the
   door into Python: `passwd` (its `-l` and `-r` over this board's webhost),
@@ -375,9 +383,6 @@ scp file moybyte-zero.local:/moy/ # scp -s before OpenSSH 9.0
   and `/dev`'s rows, the other role commands, `python`) says "needs the
   console", as a console's shell does with its VM stopped; `settings` and
   `pkg list` are the store's C.
-- **No web terminal**: the image leaves out its bridge
-  (`native/micropython.cmake`, `MOY_TTY_WEB_TERM`), so `GET /term` is 404: a
-  page's sign-in would be the shell's, and SSH's is the board's password.
 - **No WiFi lease**: the station and the `moybyte-zero.local` name are up
   while the board serves, so the server rides them
   (`runtime/system/ssh_service.py`).
@@ -677,8 +682,10 @@ measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 
-**5. A cart in a browser drives a pin.** `Pin Light` ships in the roster for
-exactly this — open the paired url, open it from the launcher, tap the button.
+**5. A cart in a browser drives a pin.** `Pin Light` is the cart for exactly
+this, left out of this board's roster (board.toml's `[roster]`): push it with
+`mpremote cp -r system_carts/moybyte.pin_light.moy :/moy/carts/`, open the
+paired url, open it from the launcher, tap the button.
 (Or write your own calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer.) *Pass:* the LED blinks in step with the cart, and the network tab shows
 sealed `POST /gpio` batches. *Fail:* 401 `{"error":"session"}` → the page is
 not signed in; batches leaving with no LED → step 4's polarity;
@@ -753,11 +760,12 @@ new image's host did not come up.
     undo it — but it means the board is off the network until it is power-cycled.
   - **So do store surgery over HTTP, not over the cable.** The sync protocol has
     a whole-cart delete, which is the one store edit this board actually needs
-    (replacing a built-in that shipped broken — the seed reads presence, so a
-    new image will not overwrite it): deleting the cart from a paired page's
-    launcher sends it. It takes the journal with it; the next BOOT seeds the
-    image's copy, so it still wants a power cycle — there is no reset
-    endpoint. No cable, no stopped console, and nothing that can wedge USB.
+    (replacing a built-in that shipped broken — the seed never writes into a
+    store with carts, so a new image will not replace it): deleting the cart
+    from a paired page's launcher sends it, and it takes the journal with it.
+    The seed does not bring it back: the page's sync pushes its own copy, or
+    `./provision.sh --carts` the repo's. No stopped console, and nothing that
+    can wedge USB.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow
@@ -799,8 +807,6 @@ new image's host did not come up.
   carts root has a real journal here, the files root's `.history/` sidecars
   are a different mechanism and are neither synced nor written by the
   receiver.
-- **No web terminal and no console Terminal app** — the shell's face here is
-  SSH alone (the terminal section above).
 - **No on-glass suite.** Every console board has one
   (`tests/test_*_on_glass.py` over the shared dev channel); this board has no
   console, no `DevChannel` and no frames to assert about. Its equivalent is

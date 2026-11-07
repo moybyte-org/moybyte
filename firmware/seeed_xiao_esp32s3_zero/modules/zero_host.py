@@ -125,23 +125,54 @@ def identity():
 # got an empty console and no hint that a second, cabled step existed. There is
 # no second step now.
 #
-# ONLY WHAT IS MISSING, and this board is where that rule differs from the
-# console boards'. On a console board the store is a CACHE of the image's
-# built-ins, so #47 re-seeds a cart whose baked version is newer and accepts
-# that on-device edits to a built-in's code are discarded. Here the store is the
-# RECORD -- it is the only copy of a cart a kid made in the browser, it has a
-# `moy_journal` history behind it, and `seed_builtins` names a folder by the
-# TITLE slug, so a kid's edited "Hop Quest" is exactly what a version bump would
-# overwrite. So the gate is PRESENCE, not version.
+# AN EMPTY STORE, ONCE (owner, 2026-11-07). On a console board the store is a
+# CACHE of the image's built-ins, so #47 re-seeds a cart whose baked version is
+# newer. Here the store is the RECORD -- the only copy of a cart a kid made in
+# the browser, with a `moy_journal` history behind it -- so the image seeds a
+# store with no cart in it and leaves one with carts alone: a built-in the kid
+# deleted stays deleted, a kid's edited built-in is never rewritten, and a newer
+# image's new built-in does not reach a Zero already in use. A seed that did not
+# finish (a power cut, provision.sh's Ctrl-C) leaves SEEDING behind, and the
+# next boot writes what is still missing; a store emptied by hand is a new one.
 #
-# It was EMPTINESS until 2026-08-30, gating the whole roster on the store having
-# no cart at all, and that was too coarse in both directions. A cart that is not
-# there has nothing to overwrite, so refusing to write it protects nothing --
-# and the two things it cost were real: a new built-in could never reach a Zero
-# that had been used once (`Pin Light` shipped and no Zero could receive it),
-# and a seed interrupted by a power cut left a part-seeded store that the next
-# boot read as "not empty" and never finished. Per-cart presence fixes both and
-# gives up nothing: a kid's cart is still never rewritten.
+# SEED_RESERVE is the room a seed leaves: it stops while that much of the store
+# is still free, so the system folder (the password, the SSH host key, the
+# browsers' keys) and a kid's own carts always fit. The store is 896 KiB since
+# 2026-11-07, and the roster build.sh bakes is cut to fit it beside the reserve
+# (board.toml's [roster]). 96 KiB, not the 128 first set: the whole roster
+# leaves 28 of the store's 224 blocks (112 KiB) free (owner, 2026-11-07: all
+# five games, the reserve lowered as far as that takes, never below 64 KiB).
+SEED_RESERVE = 96 * 1024
+SEEDING = ".seeding"                # beside the carts folder, while a seed runs
+
+
+def _seeding_mark(root):
+    return root.rsplit("/", 1)[0] + "/" + SEEDING
+
+
+def _exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def _free_bytes(root):
+    try:
+        st = os.statvfs(root)
+    except (OSError, AttributeError):
+        return None
+    return st[0] * st[3]
+
+
+def seed_room(root=ROOT, reserve=None):
+    """True while more than `reserve` (SEED_RESERVE) bytes of the store are
+    free; a store whose free space cannot be read is not held back."""
+    if reserve is None:
+        reserve = SEED_RESERVE
+    free = _free_bytes(root)
+    return free is None or free > reserve
 
 
 def store_is_empty(root=CARTS_DIR):
@@ -176,10 +207,11 @@ def _space_note(root):
 
 
 def seed_carts(root=CARTS_DIR):
-    """Write any of the image's baked carts that this store is MISSING.
+    """Write the image's baked carts into an EMPTY store, or finish a seed
+    that did not end (SEEDING), up to SEED_RESERVE.
 
-    Returns the count written -- 0 on the ordinary warm boot, where this walks
-    the roster doing one directory stat per cart and inflates nothing.
+    Returns the count written -- 0 on the ordinary warm boot, which is one
+    listing of the store and inflates nothing.
 
     Best-effort in every direction, because none of the ways this can fail may
     cost the board its job -- which is serving whatever carts it DOES have. An
@@ -187,35 +219,18 @@ def seed_carts(root=CARTS_DIR):
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
 
-    TWO CONSEQUENCES, both said out loud because neither is obvious:
-
-      - a built-in a kid DELETED comes back on the next boot, because "missing"
-        is all this can see and a deletion leaves exactly that. The alternative
-        is a tombstone file, which is a store format change for a case a reflash
-        also undoes.
-      - a built-in that ships BROKEN cannot be fixed in place here. The console
-        boards take a #47 version bump and replace their copy; this board reads
-        presence and will not, so a new image with the fix in it changes
-        nothing. That is the price of never overwriting a kid's cart, and it is
-        the right way round on the board holding the only copy -- but it means
-        the recovery is manual and worth knowing. It needs no cable: the sync
-        protocol already has a whole-cart delete, `{"v":1,"ops":[{"p":
-        "hop_quest.moy","dc":1}]}` POSTed to /sync from a paired page (the
-        browser console's own sync does it, and a script does it through
-        tests/seal_client.py's Browser, since every request is sealed).
-
-        That removes it, journal and all -> `{"err": [], "ok": 1}`. The next
-        BOOT seeds the image's copy, so it still wants a power cycle; there is
-        no reset endpoint. `./provision.sh --carts` forces the push over USB if
-        the board is in your hand -- but prefer the POST: an `mpremote` command
-        stops the console, and getting back out of that has its own failure mode
-        (the README's hardware notes).
-
-    It bit immediately. `Pin Light` shipped crashing on its first frame
-    (2026-08-30, colour names where the draw verbs take indices), and the three
-    console boards took the fix from a version bump while this one had to have
-    the folder removed.
+    A built-in that ships BROKEN cannot be fixed in place here: the console
+    boards take a #47 version bump, and this board never rewrites a cart. It
+    needs no cable: the sync protocol has a whole-cart delete, `{"v":1,"ops":
+    [{"p":"hop_quest.moy","dc":1}]}` POSTed to /sync from a paired page (the
+    browser console's own sync does it, and a script does it through
+    tests/seal_client.py's Browser, since every request is sealed), and the
+    browser pushes its own copy back. `./provision.sh --carts` forces the
+    image roster's push over USB.
     """
+    mark = _seeding_mark(root)
+    if not _exists(mark) and not store_is_empty(root):
+        return 0
     try:
         from carts_data import CARTS_Z
     except ImportError:
@@ -231,27 +246,43 @@ def seed_carts(root=CARTS_DIR):
         import ticks
 
         moy_carts.ensure_dirs(root)
+        with open(mark, "w") as f:
+            f.write("1")
         # SAID BEFORE it starts, not only after. This runs before the radio and
-        # writes ~763 KB across 155 files to the internal VFS, so on a first
-        # boot it is the longest silence in the log -- and on a board with no
-        # screen a silence is what a hang looks like.
+        # writes the roster to the internal VFS, so on a first boot it is the
+        # longest silence in the log -- and on a board with no screen a
+        # silence is what a hang looks like.
         missing = sum(1 for t, _v, _b in CARTS_Z
                       if not moy_carts._exists(moy_carts.cart_path(
                           root, moy_carts.cart_folder(t, moy_carts.BUILTIN_NS))))
         if missing:
             print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()
-        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True)
+        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True,
+                                        room=lambda: seed_room(root))
         elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
-        if not written:
-            return 0
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
+        _unmark(mark)
         print("ZERO seed: FAILED (the store may be partly seeded):", exc,
               _space_note(root))
         return 0
-    print("ZERO seed: %d carts inflated from the image in %d ms"
-          % (written, elapsed))
+    # Only an interrupted seed (a KeyboardInterrupt, a power cut) keeps the
+    # mark: an ended one, or one that failed, is not tried again.
+    _unmark(mark)
+    if not written:
+        return 0
+    left = missing - written
+    print("ZERO seed: %d carts inflated from the image in %d ms %s%s"
+          % (written, elapsed, _space_note(root),
+             " -- %d left out, the store's reserve" % left if left > 0 else ""))
     return written
+
+
+def _unmark(mark):
+    try:
+        os.remove(mark)
+    except OSError:
+        pass
 
 
 def connect(wait_ms=15000, hostname=None):

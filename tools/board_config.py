@@ -315,6 +315,26 @@ def headroom_floor(board_dir):
     return ota, kib * 1024
 
 
+def roster_skip(board_dir):
+    """The system carts a board's seed roster leaves out, `[roster] skip`
+    (cart ids); () where the board bakes every one."""
+    skip = load(board_dir).get("roster", {}).get("skip", [])
+    if not isinstance(skip, list) or not all(isinstance(s, str) for s in skip):
+        raise ValueError("%s/board.toml: [roster] skip must be a list of cart ids"
+                         % board_dir)
+    return tuple(skip)
+
+
+def roster_first(board_dir):
+    """The manifest types a board's seed roster leads with, `[roster] first`;
+    () where the roster keeps its seed order."""
+    first = load(board_dir).get("roster", {}).get("first", [])
+    if not isinstance(first, list) or not all(isinstance(s, str) for s in first):
+        raise ValueError("%s/board.toml: [roster] first must be a list of cart types"
+                         % board_dir)
+    return tuple(first)
+
+
 # -- the hardware (docs/os_2026-11/hardware.md section 1) ---------------------
 #
 # Each chip's GPIO, and the pads no `lease` row may hold on any board: the
@@ -1159,6 +1179,12 @@ def main(argv):
         # The stale-sdkconfig guard's list, derived from the board's fragment.
         for s in sdkconfig_required(argv[2]):
             print(s.assignment)
+        return 0
+    if len(argv) >= 3 and argv[1] == "roster-skip":
+        print(",".join(roster_skip(argv[2])))
+        return 0
+    if len(argv) >= 3 and argv[1] == "roster-first":
+        print(",".join(roster_first(argv[2])))
         return 0
     if len(argv) >= 3 and argv[1] == "headroom-floor":
         ota, floor = headroom_floor(argv[2])

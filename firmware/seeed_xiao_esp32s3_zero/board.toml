@@ -241,6 +241,28 @@ boot verdict and the rollback confirm the frame loop drives."""
 
 # ---------------------------------------------------------------------------
 
+[roster]
+# The system carts the image's seed roster leaves out (build.sh, and
+# provision.sh's --carts), cut to the 896 KiB store beside the seed's reserve
+# (zero_host.SEED_RESERVE; owner, 2026-11-07). The roster keeps every app and
+# service, one desktop (Ocean Desktop) beside the Wallpaper app, and five games:
+# Brick Siege, Letter Blitz, Tap Game, Harpoon Pop and Star Catcher. Out: the
+# other games, the other wallpapers, the Lua twins, the perf and test fixtures,
+# and Pin Light, a demo of the pins a browser cart drives (README.md's
+# checklist pushes it). A
+# new system cart joins the roster unless it is named here.
+#
+# `first`: the shell's own carts lead the roster, so a seed the reserve cuts
+# short leaves out a game or a wallpaper, never the Terminal or Files.
+first = ["service", "app"]
+skip = [
+  "moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest", "moybyte.tap_only_red",
+  "moybyte.brick_siege_lua", "moybyte.sakura_lua",
+  "moybyte.bullet_storm", "moybyte.hop_quest", "moybyte.pixel_pet", "moybyte.sky_run",
+  "moybyte.tiny_runner", "moybyte.pin_light",
+  "moybyte.space_desktop", "moybyte.sakura", "moybyte.moy_night", "moybyte.open_machine",
+]
+
 [flash]
 # Read by tools/board_flash.py (#202 Phase A). S3 bootloader offset 0x0, and
 # the S3 layout's otadata at 0x1D000 -- shared with both console S3 boards on
@@ -409,7 +431,7 @@ hook, MOY_INDEX_IMPL in tools/moy_index_spike.py, is `c` unless a build says
 this board is one of the five targets both must link into.
 
 The terminal (`moy_sh`, `moy_tty`, `moy_ssh`) crossed on 2026-11-07, its
-face SSH alone, when the slots grew for it (`[image]`).
+faces SSH and the web terminal, when the slots grew for it (`[image]`).
 
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
@@ -552,24 +574,25 @@ module = "moy_sh"
 why = """
 The terminal's C shell (native/moy_sh/README.md). A console's faces are the
 screen and the dev channel; this board has neither (no glass, and its serial
-is a bare REPL), so its one face is SSH's (docs/os_2026-11/system.md section
-3): `ssh` in from a laptop and run a command, the C built-ins until WASI
-commands arrive. A session's arena is PSRAM, made when SSH opens a face. What
-crosses the door into Python is `zero_shell.py`'s: `passwd`, `df`, `mem`, `ps`; the
-console's processes, /proc's and /dev's rows and the other role commands are
-the console's, which this board has not got, so they answer as on a console
-with its VM stopped."""
+is a bare REPL), so its faces are the network's (docs/os_2026-11/system.md
+section 3): the browser console's Terminal on the page this board serves,
+and `ssh` from a laptop, the C built-ins until WASI commands arrive. A
+session's arena is PSRAM, made when a face opens. What crosses the door into
+Python is `zero_shell.py`'s: `passwd`, `df`, `mem`, `ps`; the console's
+processes, /proc's and /dev's rows and the other role commands are the
+console's, which this board has not got, so they answer as on a console with
+its VM stopped."""
 
 [[native.shared.take]]
 module = "moy_tty"
 why = """
-The shell's face over a stream (native/moy_tty/README.md), the one SSH opens,
-and SFTP (moy_tty_sftp.c) into this board's store. The console's task that
-serves the face's hops is the VM's poll loop (zero_host.serve, `moy_tty.tail`):
-this board has no frame. Without the web terminal's bridge
-(native/micropython.cmake, MOY_TTY_WEB_TERM): the page this board serves may
-carry no pin, which on a console would gate the shell, so its GET /term
-answers 404 and the shell is reached over SSH's sign-in alone."""
+The shell's face over a stream (native/moy_tty/README.md), the one SSH and
+the web terminal open, and SFTP (moy_tty_sftp.c) into this board's store. The
+browser is this board's only screen, so its Terminal is the shell's first face
+here (owner, 2026-11-07): GET /term is sealed to a browser paired with the
+board's password, the one SSH signs in with. The console's task that serves
+the face's hops is the VM's poll loop (zero_host.serve, `moy_tty.tail`): this
+board has no frame."""
 
 [[native.shared.take]]
 module = "moy_ssh"

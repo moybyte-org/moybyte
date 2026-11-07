@@ -345,9 +345,11 @@ stages 1–6 all absent. Its README is the authority; what bites:
 - 8 MB of flash: the console table does not fit, and the bootloader rejects an
   oversized table into a silent boot loop. Its partition CSV is authored.
 - It carries the seed roster COMPRESSED (`tools/gen_device_carts.py --packed`,
-  `CARTS_Z`), inflated one cart at a time into an EMPTY store on first boot —
-  gated on emptiness, not #47's version compare, because its store is the
-  record (the only copy of a browser-made cart), where a console's is a cache.
+  `CARTS_Z`, cut by board.toml's `[roster]`), inflated one cart at a time into
+  an EMPTY store on first boot, stopping while `zero_host.SEED_RESERVE` is
+  still free — gated on emptiness, not #47's version compare, because its
+  store is the record (the only copy of a browser-made cart), where a
+  console's is a cache: a seed cart the kid deletes stays deleted.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the

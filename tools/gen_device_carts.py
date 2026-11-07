@@ -388,15 +388,23 @@ def pack_cart(cart):
     return comp.compress(body) + comp.flush()
 
 
-def build_packed(system_carts_dir, skip=()):
+def build_packed(system_carts_dir, skip=(), first=()):
     """The packed roster: [(title, version, blob)], in seed order, less the
-    cart folders named in `skip`."""
-    folders = [f for f, _m in read_manifests(system_carts_dir)]
+    cart folders named in `skip`; with `first` (manifest types), the carts of
+    those types lead in that order, each group in seed order, so a seed cut
+    short (the Zero's reserve) leaves out the rest."""
+    mans = read_manifests(system_carts_dir)
+    folders = [f for f, _m in mans]
     unknown = set(skip) - set(folders)
     if unknown:
         raise ValueError("--skip names no system cart: %s" % ", ".join(sorted(unknown)))
-    return [(c["title"], int(c.get("version", 0)), pack_cart(c))
-            for f, c in zip(folders, build_carts(system_carts_dir)) if f not in skip]
+    rows = [(m, (c["title"], int(c.get("version", 0)), pack_cart(c)))
+            for (f, m), c in zip(mans, build_carts(system_carts_dir)) if f not in skip]
+
+    def rank(row):
+        kind = vendor(row[0]).get("type")
+        return first.index(kind) if kind in first else len(first)
+    return [r for _m, r in sorted(rows, key=rank)]
 
 
 def render_packed_module(packed):
@@ -499,9 +507,10 @@ def main(argv):
     """CLI.
 
       gen_device_carts.py [OUT [SYSTEM_CARTS]]   the frozen carts_data.py
-      gen_device_carts.py --packed OUT [SRC] [--skip F,F]
+      gen_device_carts.py --packed OUT [SRC] [--skip F,F] [--first T,T]
                                                  the same, PACKED (the Zero),
-                                                 less the named cart folders
+                                                 less the named cart folders,
+                                                 the named manifest types first
       gen_device_carts.py --app-decls [OUT]      regenerate runtime/shell/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
@@ -519,6 +528,11 @@ def main(argv):
     if "--skip" in argv:
         i = argv.index("--skip")
         skip = tuple(x for x in argv[i + 1].split(",") if x)
+        del argv[i:i + 2]
+    first = ()
+    if "--first" in argv:
+        i = argv.index("--first")
+        first = tuple(x for x in argv[i + 1].split(",") if x)
         del argv[i:i + 2]
     packed = False
     if argv and argv[0] == "--packed":
@@ -545,7 +559,7 @@ def main(argv):
     if len(argv) > 1:
         src = argv[1]
     if packed:
-        blobs = build_packed(src, skip)
+        blobs = build_packed(src, skip, first)
         text = render_packed_module(blobs)
         sys.stderr.write(
             "seed roster packed: %d carts, %d B compressed (%d KB), %d B plain\n"

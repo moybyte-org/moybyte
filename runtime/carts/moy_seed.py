@@ -289,7 +289,7 @@ def unpack_seed(blob):
 
 
 def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
-                ns=BUILTIN_NS):
+                ns=BUILTIN_NS, room=None):
     """`seed_builtins` over a PACKED roster, one cart inflated at a time.
 
     `packed` is `[(title, version, blob)]`. The title and the version ride
@@ -308,6 +308,11 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
     edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
     which is the whole difference: this seeds what is MISSING and never rewrites
     what is present.
+
+    `room`, where given, is asked before each cart and again once it has
+    landed: False before stops the seed, False after removes the cart just
+    written and stops it, so the room it keeps is never spent on a seed (the
+    Zero's SEED_RESERVE).
 
     Returns the number of carts actually written.
     """
@@ -328,6 +333,8 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
         if _has(names, root, name) and (only_new
                                         or int(version) <= _cart_version(d)):
             continue
+        if room is not None and not room():
+            break
         # One cart in flight. seed_builtins gets a ONE-element list so every
         # rule it owns still applies -- and no progress hook, because the
         # counting is this loop's (it would report 1-of-1, 35 times).
@@ -341,6 +348,9 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
         # whose heap is megabytes of PSRAM a full scan per cart is a real cost
         # paid 35 times for a bound it does not move.
         seed_builtins([unpack_seed(blob)], root, ns=ns)
+        if room is not None and not room():
+            _rmtree(d)
+            break
         if names is not None:
             names[name] = True
         written += 1

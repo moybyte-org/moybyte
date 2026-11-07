@@ -115,8 +115,22 @@ def test_provisioning_sets_the_password_as_a_hash_and_keeps_one_already_there():
     assert "ssh_service.hashed(" in SCRIPT
     assert "/moy/system/password" in SCRIPT
     body = SCRIPT[SCRIPT.index('if [ "${SET_PASSWORD}" = "1" ]'):SCRIPT.index("== pairing")]
-    assert "PW1}" not in body.split("HASH=")[1].split("run exec")[1], \
+    assert "PW1}" not in body.split("HASH=")[1].split("board_write")[1], \
         "the password itself reached the board"
+
+
+def test_a_write_the_board_refuses_stops_provisioning():
+    """A full store refuses a mkdir and the write under it (2026-11-07: the
+    password never landed and the script said done). Every write is checked
+    on the board, and a refusal exits non-zero with what the board said."""
+    helper = SCRIPT[SCRIPT.index("board_write() {"):SCRIPT.index("board_mkdir() {")]
+    assert "grep -qx 'MOYOK'" in helper and "exit 1" in helper
+    assert "if e.args[0] != 17: raise" in SCRIPT
+    body = SCRIPT[SCRIPT.index('echo "== dirs"'):SCRIPT.index("== pairing")]
+    assert "except OSError: pass" not in body
+    for what in ('board_write "wifi.json"', 'board_write "the password"',
+                 "board_mkdir /moy/system"):
+        assert what in body, what
 
 
 def test_provisioning_says_how_to_pair_and_says_so_when_it_cannot():

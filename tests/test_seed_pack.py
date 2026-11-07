@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(ROOT, "runtime"))
 import gen_device_carts as gen              # noqa: E402
 import moy_carts                            # noqa: E402
 import moy_seed                             # noqa: E402
+from tools import board_config
 from tools.board_config import runtime_file
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
@@ -87,17 +88,32 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
         "plain one (%d B)" % (comp, plain))
 
 
-def test_the_zero_build_leaves_the_speed_tests_out():
-    """The Zero's store is 352 littlefs blocks and the roster fills it, so its
-    build skips the two perf-ledger fixtures; every other cart still ships."""
+def test_the_zero_build_seeds_the_roster_its_board_toml_cuts():
+    """The Zero's roster is board.toml's `[roster] skip` (owner, 2026-11-07),
+    which its build passes to the generator; every app and service ships, and
+    of the games the five the owner kept."""
     with open(os.path.join(ZERO, "build.sh")) as f:
         build = f.read()
-    assert "--skip moybyte.bench,moybyte.bench_lua" in build
-    skip = ("moybyte.bench", "moybyte.bench_lua")
-    full = gen.build_packed(SYSTEM_CARTS)
-    zero = gen.build_packed(SYSTEM_CARTS, skip)
-    assert [t for t, _v, _b in full if (t, _v, _b) not in zero] == ["Bench", "Bench Lua"]
-    assert len(zero) == len(full) - 2
+    assert "roster-skip" in build and '--skip "${ZERO_SKIP}"' in build
+    assert "roster-first" in build and '--first "${ZERO_FIRST}"' in build
+    skip = board_config.roster_skip(ZERO)
+    order = [t for t, _v, _b in gen.build_packed(SYSTEM_CARTS, skip,
+                                                  board_config.roster_first(ZERO))]
+    zero = set(order)
+    kinds = {}
+    for name in os.listdir(SYSTEM_CARTS):
+        with open(os.path.join(SYSTEM_CARTS, name, "manifest.json")) as f:
+            m = json.load(f)
+        kinds[m["title"]] = m.get("moybyte", {}).get("type")
+    for title, kind in kinds.items():
+        if kind in ("app", "service"):
+            assert title in zero, title
+    assert {t for t in zero if kinds[t] == "game"} == {
+        "Brick Siege", "Letter Blitz", "Tap Game", "Harpoon Pop", "Star Catcher"}
+    assert {t for t in zero if kinds[t] == "wallpaper"} == {"Ocean Desktop", "Wallpaper"}
+    # the shell's own carts lead, so a seed the reserve cuts short keeps them
+    shell = [t for t in order if kinds[t] in ("app", "service")]
+    assert order[:len(shell)] == shell and kinds[order[0]] == "service"
 
 
 def test_a_skip_that_names_no_cart_is_refused():
@@ -219,52 +235,43 @@ def _fake_roster(monkeypatch):
     return mod
 
 
-def test_the_zeros_seed_never_rewrites_a_cart_that_is_there(tmp_path, monkeypatch):
-    """The rule that protects a kid's work: PRESENCE, not version.
-
-    A folder that exists is left exactly as it is, even though the roster
-    carries a cart of that name at a newer version -- because on this board that
-    folder may be the only copy of something a kid changed in a browser.
-    """
+def test_the_zeros_seed_never_touches_a_store_with_a_cart_in_it(tmp_path, monkeypatch):
+    """The rule that protects a kid's work: an EMPTY store is seeded, and one
+    with a cart in it is left exactly as it is, even though the roster carries
+    a cart of that name at a newer version -- because on this board that
+    folder may be the only copy of something a kid changed in a browser."""
     zero_host = _zero_host(tmp_path, monkeypatch)
-    mod = _fake_roster(monkeypatch)
+    _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root + "/moybyte.hop_quest.moy")
     with open(root + "/moybyte.hop_quest.moy/main.py", "w") as f:
         f.write("the kid's own")
 
-    written = zero_host.seed_carts(root)
-
+    assert zero_host.seed_carts(root) == 0
     with open(root + "/moybyte.hop_quest.moy/main.py") as f:
         assert f.read() == "the kid's own", \
             "a baked version bump overwrote a cart the kid edited"
-    # ...and everything the store did NOT have arrived, which is the half the
-    # emptiness gate used to refuse.
-    assert written == len(mod.CARTS_Z) - 1
-    assert len(os.listdir(root)) == len(mod.CARTS_Z)
+    assert os.listdir(root) == ["moybyte.hop_quest.moy"]
 
 
-def test_a_zero_that_has_been_used_still_receives_a_new_builtin(tmp_path, monkeypatch):
-    """The gap that made presence-gating necessary (2026-08-30).
-
-    Under the old emptiness gate a Zero with any cart at all took NOTHING from
-    a new image, so `Pin Light` shipped in four firmwares and could not reach
-    the one board it was written for.
-    """
+def test_a_seed_cart_the_kid_deleted_never_comes_back(tmp_path, monkeypatch):
+    """Owner, 2026-11-07: the seed is the empty store's, once. A built-in the
+    kid deleted stays deleted, and a newer image's new built-in does not reach
+    a store already in use."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
 
-    # A newer image: same roster plus one cart this store has never seen.
-    fresh = gen.build_carts(SYSTEM_CARTS)[0]
-    fresh = dict(fresh, title="Brand New")
+    gone = sorted(n for n in os.listdir(root) if n.endswith(".moy"))[0]
+    moy_carts._rmtree(root + "/" + gone)
+    fresh = dict(gen.build_carts(SYSTEM_CARTS)[0], title="Brand New")
     mod.CARTS_Z = mod.CARTS_Z + [("Brand New", 1, gen.pack_cart(fresh))]
 
-    assert zero_host.seed_carts(root) == 1, \
-        "a used Zero must still receive a built-in it has never had"
-    assert os.path.isdir(root + "/moybyte.brand_new.moy")
+    assert zero_host.seed_carts(root) == 0
+    assert not os.path.exists(root + "/" + gone)
+    assert not os.path.exists(root + "/moybyte.brand_new.moy")
 
 
 def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
@@ -319,19 +326,45 @@ def test_a_seed_into_a_full_store_names_the_store_as_full(tmp_path, monkeypatch,
     assert "FULL (0 of 352 blocks free)" in out
 
 
-def test_a_half_seeded_store_is_finished_on_the_next_boot(tmp_path, monkeypatch):
-    """The power-cut case the emptiness gate named as its own price: a store
-    with SOME carts in it read as "not empty" and was never completed."""
+def test_an_interrupted_seed_is_finished_on_the_next_boot(tmp_path, monkeypatch):
+    """A power cut, or provision.sh's Ctrl-C, mid-seed leaves the store not
+    empty; the seed's mark beside the carts folder says it never ended, so
+    the next boot writes what is still missing and then drops the mark."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
-    # Interrupted: only the first three ever landed.
+    mark = str(tmp_path / zero_host.SEEDING)
+    with open(mark, "w") as f:
+        f.write("1")
     moy_carts.seed_packed(mod.CARTS_Z[:3], root)
-    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == 3
 
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z) - 3
     assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == len(mod.CARTS_Z)
+    assert not os.path.exists(mark)
+    assert zero_host.seed_carts(root) == 0
+
+
+def test_the_seed_stops_while_the_reserve_is_still_free(tmp_path, monkeypatch, capsys):
+    """SEED_RESERVE: a cart that would leave less free is taken back out and
+    the seed ends, so the system folder and a kid's carts always fit; the
+    seed has ended, so the next boot does not try again."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+
+    def free(_root):
+        n = len([x for x in os.listdir(root) if x.endswith(".moy")])
+        return zero_host.SEED_RESERVE + 1 + (4 - n) * 50000
+
+    monkeypatch.setattr(zero_host, "_free_bytes", free)
+    assert zero_host.seed_carts(root) == 4
+    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == 4
+    assert free(root) > zero_host.SEED_RESERVE
+    assert "%d left out, the store's reserve" % (len(mod.CARTS_Z) - 4) in capsys.readouterr().out
+    assert not os.path.exists(str(tmp_path / zero_host.SEEDING))
+    assert zero_host.seed_carts(root) == 0
 
 
 # -- the build wiring ------------------------------------------------------

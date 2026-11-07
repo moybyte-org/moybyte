@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Provision a Moybyte Zero's STORE: the WiFi credentials, the board's password,
-# and a cart roster when the board has none. Idempotent -- run it again
-# whenever the credentials or the roster change.
+# Provision a Moybyte Zero's STORE: the WiFi credentials and the board's
+# password, and with --carts the image's roster. Idempotent -- run it again
+# whenever the credentials change. A write the board refuses (a full store)
+# stops the script with what the board said, and a non-zero exit.
 #
 #   ./provision.sh [--modules] [--carts] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 #
@@ -16,22 +17,21 @@
 #
 # AND NOT THE CARTS, since 2026-08-30 -- this header said "what an image cannot
 # carry: a kid's carts" and that stopped being true. The image carries the seed
-# roster COMPRESSED (`carts_data.CARTS_Z`: the same 35 carts as one raw-deflate
-# stream each, 202 KB where the plain form the console boards freeze is 732 KB
-# and leaves 51 KB of this board's OTA slot), and `zero_host.seed_carts()`
-# inflates it into an EMPTY store on first boot. That is what closed the real
-# gap: the website's flasher can write a Zero, and a person who used it got an
-# empty console with no hint that a second, cabled step existed.
+# roster COMPRESSED (`carts_data.CARTS_Z`, one raw-deflate stream a cart), and
+# `zero_host.seed_carts()` inflates it into an EMPTY store on first boot, up to
+# the store's reserve. That is what closed the real gap: the website's flasher
+# can write a Zero, and a person who used it got an empty console with no hint
+# that a second, cabled step existed. An empty store this script leaves is
+# seeded on the reboot it ends with.
 #
-# So the cart push became the SAME trade as `--modules`: a dev loop
-# for a roster that changed since the image was built, not the way carts
-# arrive. Default is "push only if the board has no carts at all", which is the
-# image's own rule so the two paths cannot fight; `--carts` forces the push.
-#
-# Forcing it OVERWRITES the repo's copy of a cart over whatever is on the
-# board, which on the one board that is the store OF RECORD is a thing to mean
-# rather than to do idly. The pushed folder is the one `seed_builtins` names
-# (system_carts/ ships each built-in under its id, `moybyte.<slug>.moy`).
+# So the cart push became the SAME trade as `--modules`: a dev loop for a
+# roster that changed since the image was built, not the way carts arrive.
+# `--carts` pushes the image's roster (system_carts/ less board.toml's
+# `[roster] skip`), and it OVERWRITES the repo's copy of a cart over whatever
+# is on the board, which on the one board that is the store OF RECORD is a
+# thing to mean rather than to do idly. The pushed folder is the one
+# `seed_builtins` names (system_carts/ ships each built-in under its id,
+# `moybyte.<slug>.moy`).
 #
 # The push did not go away, it became OPT-IN (`--modules`): a sub-minute dev
 # loop for a module that changed since the image was built. The hazard is why
@@ -76,6 +76,29 @@ PY="${REPO}/.venv/bin/python"
 DIST="${REPO}/firmware/web_runner/dist"
 
 run() { "${MP}" connect "${PORT}" "$@"; }
+
+# A write on the board, checked: CODE must run to its end and print MOYOK, or
+# the script stops with what the board said. mpremote's exec answers 0 even
+# when the code raised, and a full littlefs fails a write with a bare ENOENT
+# from the mkdir before it, which `except OSError: pass` used to swallow.
+board_write() {
+  local what="$1" code="$2" out
+  out="$(run exec "${code}
+print('MOY' + 'OK')" 2>&1 | tr -d '\r')" || true
+  if ! printf '%s\n' "${out}" | grep -qx 'MOYOK'; then
+    echo "!! ${what}: the board refused the write" >&2
+    printf '%s\n' "${out}" | sed 's/^/   /' >&2
+    exit 1
+  fi
+}
+
+# mkdir on the board, an existing folder fine and any other error fatal.
+board_mkdir() {
+  board_write "mkdir $1" "import os
+try: os.mkdir('$1')
+except OSError as e:
+    if e.args[0] != 17: raise"
+}
 
 # Stop a running serve() loop so the fs is quiet while we copy. (This is also
 # the check that the board's REPL is reachable at all -- it goes through the
@@ -137,37 +160,30 @@ fi
 
 echo "== dirs"
 for d in /moy /moy/carts /moy/update; do
-  run exec "import os
-try: os.mkdir('${d}')
-except OSError: pass" >/dev/null
+  board_mkdir "${d}"
 done
 
 
-# THE CARTS, and the question of whether they are already there. The image seeds
-# whatever a store is MISSING on every boot now (zero_host.seed_carts), so the
-# default job here is only to notice a board that has no carts at all -- an
-# image built before the roster was baked in -- and fill it; `--carts` forces
-# the push for a roster that moved since the image was built. The emptiness
-# question is asked ON THE BOARD, the same read `zero_host.store_is_empty()`
-# does, so the cable and the image cannot disagree about what "already there"
-# means.
-HAS_CARTS="$(run exec "import os
-try:
-    print('CARTS %d' % len([n for n in os.listdir('/moy/carts') if n.endswith('.moy')]))
-except OSError:
-    print('CARTS 0')" | tr -d '\r' | grep '^CARTS ' | cut -d' ' -f2 || echo 0)"
-if [ "${PUSH_CARTS}" = "1" ] || [ "${HAS_CARTS:-0}" = "0" ]; then
-  echo "== seed carts (the whole roster -- 763KB measured, against a 1.9MB vfs)"
+# THE CARTS. The image seeds an EMPTY store on its own (zero_host.seed_carts),
+# so nothing is pushed by default; `--carts` pushes the image's roster for one
+# that moved since the image was built, each cart's size checked on the board.
+if [ "${PUSH_CARTS}" = "1" ]; then
+  SKIP="$("${PY}" "${REPO}/tools/board_config.py" roster-skip "${HERE}")"
+  echo "== seed carts (the image's roster: system_carts/ less [roster] skip)"
   for cart in "${REPO}"/system_carts/*.moy; do
+    id="$(basename "${cart}" .moy)"
+    case ",${SKIP}," in *",${id},"*) continue ;; esac
     run cp -r "${cart}" :/moy/carts/ >/dev/null
+    board_write "${id}" "import os
+assert os.stat('/moy/carts/${id}.moy/manifest.json')[6] == $(wc -c < "${cart}/manifest.json")"
   done
-else
-  echo "== carts: ${HAS_CARTS} already on the board -- left alone (--carts to re-push)"
 fi
 
 if [ -n "${WIFI}" ]; then
   echo "== wifi creds"
   run cp "${WIFI}" :/moy/wifi.json >/dev/null
+  board_write "wifi.json" "import os
+assert os.stat('/moy/wifi.json')[6] == $(wc -c < "${WIFI}")"
 fi
 
 # THE BOARD'S PASSWORD. A browser pairs with this board by typing it once
@@ -193,10 +209,9 @@ print(ssh_service.hashed(os.environ["MOY_PW"], os.urandom(16).hex()))
 PYEOF
 )"
   unset PW1 PW2
-  run exec "import os
-try: os.mkdir('/moy/system')
-except OSError: pass
-with open('/moy/system/password', 'w') as f: f.write('${HASH}\n')" >/dev/null
+  board_mkdir /moy/system
+  board_write "the password" "with open('/moy/system/password', 'w') as f: f.write('${HASH}\n')
+assert open('/moy/system/password').read() == '${HASH}\n'"
 fi
 echo "== pairing"
 PW_STATE="$(run exec "try:
