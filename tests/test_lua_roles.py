@@ -231,3 +231,20 @@ function _draw() cls(0) end
     _ws, lua = _run(tmp_path, src, ["graphics", "files:music"])
     assert lua.get_global("OUT") == (
         "nil|nil|nil|../docs/note.md: Permission denied")
+
+
+def test_a_file_left_open_is_saved_when_the_app_exits(tmp_path):
+    """A kid's write lands though the app never closed its file: the run's
+    teardown closes its Lua state, which saves every file still open
+    through the run's grant, before that grant ends."""
+    src = """
+function _init()
+  NOTE = assert(io.open("unsaved.txt", "w"))
+  NOTE:write("written, never closed")
+end
+function _draw() cls(0) end
+"""
+    ws, _lua = _run(tmp_path, src, ["graphics", "files:docs"])
+    ws.exit()
+    files = ws.app_context("check", ("files",), prefs_ns="check").files
+    assert files.load("docs", "unsaved.txt") == ("written, never closed", None)

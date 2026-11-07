@@ -446,7 +446,10 @@ class Player(PlayerDiag):
 
     def _end_grant(self):
         """The run is over: its grant ends, and so does any store session it
-        left open (a session holds no gate; runtime/shell/shell_servers.py)."""
+        left open (a session holds no gate; runtime/shell/shell_servers.py).
+        A Lua or compiled run closes first: a Lua state saves the files it
+        left open at its close, through the grant, so the grant outlives it."""
+        self._close_lua()
         ctx, self._app_ctx = self._app_ctx, None
         if ctx is not None:
             ctx.end()
@@ -672,11 +675,12 @@ class Player(PlayerDiag):
         self._ui = None
         self._uh = None
         self._on_change = False
-        self._end_grant()
+        # The guard reads the kernel's run, which the run's close ends.
         if self._app_id is not None:
             self._app_id = None
             self._heal_front_run()
             self.ws.app_guard.release()
+        self._end_grant()
         # Nor may its SOUND. The device mixer is a global the cart only ever
         # posts notes to -- libmoy keeps sequencing a looping sfx or music track
         # long after the run that started it is gone, so a demo cart's tones

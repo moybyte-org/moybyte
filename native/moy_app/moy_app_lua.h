@@ -9,7 +9,9 @@
 // app's run as it makes a compiled app's, and the Lua run's open hands it
 // here, so two states are two runs and neither reaches the other's grant. A
 // role the permissions do not name has no name in the state (nil, never a
-// stub), and with no run (a game) nothing here is opened.
+// stub), and with no run (a game) nothing here is opened. The run's open
+// files are saved at the state's close, so its owner closes the state
+// before its grant ends.
 //
 // The names, each answering as the Python face (runtime/shell/system_api.py)
 // answers, Python's (value, err) as two results and its None as nil:

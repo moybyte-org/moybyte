@@ -123,7 +123,8 @@ runs at once are two grants, and neither reaches the other's
 (`tests/test_app_runs.py`). The Player makes the run (`moy_app.run`) and
 the launch's namespace hands it to the runtime's open; a run the kernel
 opens with no VM takes it from the kernel's state, where the Player held it
-across the stop (`moy_app_stop_hold`). A runaway export
+across the stop (`moy_app_stop_hold`). A Lua run's state closes before its
+grant ends, so a file it left open is saved. A runaway export
 calling no import cannot be stopped mid-loop, so a service's exports are
 OS-called and return; a callback that overruns strikes. **The wasm tier's
 OS interface is WASI preview1** (owner, 2026-11-03): files over the tree
