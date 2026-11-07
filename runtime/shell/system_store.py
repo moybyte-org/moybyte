@@ -155,6 +155,7 @@ class SystemStore:
         # nothing rebinds either name again -- `load()` replaces its rows.
         self.rows = _rows(self._write)
         self.safe = safe_mode()
+        self._landed = None           # the text save_steps just put down
 
     # -- system/settings ---------------------------------------------------------
 
@@ -189,7 +190,7 @@ class SystemStore:
         the next write carries it; True when it landed or when this build has
         nowhere to put one (`can_manage` is False where the carts are baked
         into the image: that is not a failure to retry)."""
-        if self.safe or not self.store.writable():
+        if self.safe or not self.store.writable() or text == self._landed:
             return True
         ws = self.ws
         try:
@@ -198,6 +199,33 @@ class SystemStore:
             print("Moybyte system save failed:", _err_text(exc))
             return False
         return True
+
+    def save_steps(self):
+        """`yield from` it: the rows a `set(..., False)` left dirty written as
+        `_write` writes them, a store op a frame (moy_docs.save_system_steps)
+        -- for a write that must not hold one frame for all three of its
+        writes (the install prompt's consent: 120 ms on the T-Deck's card).
+        A change to the rows between the two is written whole by `flush`."""
+        rows = self.rows
+        if self.safe or not self.store.writable() or not rows.dirty():
+            rows.flush()
+            return
+        gen = rows.gen()
+        text = rows.dump()
+        ws = self.ws
+        steps = ws.carts_store.save_system_steps(text, ws.carts_root)
+        try:
+            self.store.call(lambda: next(steps))
+            yield
+            if rows.gen() == gen:
+                self.store.call(lambda: next(steps, None))
+                self._landed = text
+        except Exception as exc:  # noqa: BLE001 -- flush below writes it whole
+            print("Moybyte system save failed:", _err_text(exc))
+        try:
+            rows.flush()
+        finally:
+            self._landed = None
 
     # -- achievements.json (#21) ---------------------------------------------
 

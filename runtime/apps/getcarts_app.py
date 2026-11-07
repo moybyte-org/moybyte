@@ -371,6 +371,7 @@ class GetCartsAppLayer(ListShellApp):
         self.asking = False           # Remove's dialog is up
         self.question = None          # the install prompt's lines, while it is up
         self._consented = None        # (app id, permissions) the install records
+        self._tail = None             # (steps, then, failed): a landing's or a removal's, a frame a step
         self.why = ""                 # the NOT INSTALLED page's reason
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
@@ -429,6 +430,9 @@ class GetCartsAppLayer(ListShellApp):
             self.lic[2] = 0
 
     def close(self):
+        if self.job is not None:
+            self.job.finish()
+        self._end_tail()
         if self.job is not None and not self.job.finished and self.job.cancel():
             self._go("cart" if self.cur is not None else "list")
         self._drop_fetch()
@@ -528,7 +532,11 @@ class GetCartsAppLayer(ListShellApp):
 
     def _pump(self):
         """The BUSY phases' slice of work, one per drawn frame; between them
-        the shelf's covers."""
+        the shelf's covers. A landing's or a removal's steps go first, one a
+        frame, and hold every key until they end."""
+        if self._tail is not None:
+            self._step_tail()
+            return
         if self.phase == "pick":
             self._poll_pick()
         if self.phase not in BUSY:
@@ -561,6 +569,31 @@ class GetCartsAppLayer(ListShellApp):
             self._fail(_ci.STOPPED)
         if self.phase in BUSY:
             self._damage.again()
+
+    def _run(self, steps, then, failed):
+        """`steps` (pkg's `landed` or `removed`) stepped a frame a step from
+        the next frame, then `then()`; `failed(exc)` when one raises."""
+        self._tail = (steps, then, failed)
+        self._damage.again()
+
+    def _step_tail(self):
+        steps, then, failed = self._tail
+        try:
+            if next(steps, _ci._DONE) is not _ci._DONE:
+                self._damage.again()
+                return
+        except Exception as exc:  # noqa: BLE001 -- the store never takes the shell down
+            self._tail = None
+            _ci._log("%r" % (exc,))
+            failed(exc)
+            return
+        self._tail = None
+        then()
+
+    def _end_tail(self):
+        """The steps in hand done at once: the app is closing."""
+        while self._tail is not None:
+            self._step_tail()
 
     def _online(self):
         """The lease taken and the link up: True; None while the saved
@@ -1019,19 +1052,20 @@ class GetCartsAppLayer(ListShellApp):
         self._release()
         self._unpick()
         if job.path:
-            if self._consented is not None:
-                self._inst.consent().record(*self._consented)
-                self._consented = None
-            self._inst.rescan(job.path)
-            self._build_rows()
-            self._go("done")
-            self._say("%s is on your shelf" % self.cur["cart"]["name"])
-            self._focus = vid(self._go_verb())
+            consented, self._consented = self._consented, None
+            self._run(_pkg.landed(self._inst, job.path, consented), self._got,
+                      lambda exc: self._fail(_ci.STOPPED))
         elif job.error:
             self._fail(job.error)
         else:
             self._go("cart")
             self._focus_go()
+
+    def _got(self):
+        self._build_rows()
+        self._go("done")
+        self._say("%s is on your shelf" % self.cur["cart"]["name"])
+        self._focus = vid(self._go_verb())
 
     def _cancel(self):
         """B, or a tap on CANCEL -- never A, which a kid presses at anything.
@@ -1094,18 +1128,19 @@ class GetCartsAppLayer(ListShellApp):
         what Remove's dialog said; and the consent it was installed with."""
         self.asking = False
         row = self.cur
-        try:
-            _pkg.removed(self._inst, row["cart"]["folder"])
-        except Exception as exc:  # noqa: BLE001 -- the folder stays; say so
-            _ci._log("remove failed: %s" % exc)
-            self._say("Can't remove it", "warn")
-            self._damage.all()
-            return
+        self._run(_pkg.removed(self._inst, row["cart"]["folder"]),
+                  lambda: self._removed(row), self._not_removed)
+
+    def _removed(self, row):
         self._build_rows()
         self.cur = None
         self._say("Removed " + row["cart"]["name"])
         self._go("list")
         self._focus = self._card_id(row)
+
+    def _not_removed(self, exc):
+        self._say("Can't remove it", "warn")
+        self._damage.all()
 
     def has_page(self):
         """Whether a page of the app is open, which `back` steps out of: a
@@ -1128,6 +1163,8 @@ class GetCartsAppLayer(ListShellApp):
         """Back one level (B, Esc, the bar's chevron): Remove's dialog closes,
         a licence is declined, a fetch or a pick cancelled, a cart's page goes
         back to the shelf. False on the shelf: the host leaves the app."""
+        if self._tail is not None:
+            return True
         if not self._paged() or self.layout.desk and self.phase in ("cart", "done") \
                 and not self.asking:
             return False
@@ -1158,7 +1195,7 @@ class GetCartsAppLayer(ListShellApp):
             return self._verbs()
         if ph == "licence":
             return ("NO", "I AGREE")
-        if ph == "getting" and self.job is not None and self.job.keeping:
+        if ph == "getting" and self._shelving():
             return ()
         if ph in BUSY or ph == "pick":
             return ("CANCEL",)
@@ -1171,6 +1208,8 @@ class GetCartsAppLayer(ListShellApp):
         return ()
 
     def handle_input(self, inp):
+        if self._tail is not None:
+            return True
         k = getattr(inp, "last_key", 0) or 0
         if not isinstance(k, int):
             k = ord(k[0]) if k else 0
@@ -1216,6 +1255,8 @@ class GetCartsAppLayer(ListShellApp):
         return max(1, (self.layout.well()[3] - 8) // max(1, lh))
 
     def handle_pointer(self, px, py, click):
+        if self._tail is not None:
+            return True
         down = bool(getattr(self._surf.pointer(), "down", False))
         if self.phase == "licence" and self.lic is not None and not self.asking:
             self._drag_licence(px, py, click, down)
@@ -1774,7 +1815,7 @@ class GetCartsAppLayer(ListShellApp):
         if self.phase == "consent":
             return ("Getting " + name, "", 1, 1)  # every byte in and checked
         if self.phase == "getting" and job is not None:
-            if job.keeping:
+            if self._shelving():
                 return ("Getting " + name, "Putting it on the shelf…", job.total, job.total)
             dot = " · " if ui.has_symbols() else ", "
             line = "%s of %s" % (_mb(job.done), _mb(job.total))
@@ -1784,6 +1825,12 @@ class GetCartsAppLayer(ListShellApp):
             return ("Getting " + name, line, job.done, job.total)
         title, line = self._busy_words()
         return (title, line, 0, 0)
+
+    def _shelving(self):
+        """Every byte is in and checked, and the cart is moving onto the
+        shelf: the keeper has it, or its landing's steps are under way."""
+        job = self.job
+        return job is not None and (job.keeping or job.landing)
 
     def _getting(self, cv):
         lay = self.layout
@@ -1798,12 +1845,12 @@ class GetCartsAppLayer(ListShellApp):
         ty += 24 * fs
         bx, bw = x + 34 * fs, w - 68 * fs
         ui.at(bx, ty, bw, 27 * fs)
-        if self.job is not None and self.job.keeping:
+        if self._shelving():
             ui.progress("Putting it on the shelf", total, total)
         else:
             ui.progress("Downloading", done, total)
         ty += 30 * fs
-        if line and not (self.job is not None and self.job.keeping):
+        if line and not self._shelving():
             ui.at(x, ty, w, 16 * fs)
             ui.label(line, {"tone": "dim", "face": "caption", "align": "center"})
         ty += 18 * fs

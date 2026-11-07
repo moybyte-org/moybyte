@@ -595,40 +595,45 @@ void moy_fs_forget_bak(const char *path) {
     }
 }
 
-int moy_fs_publish(const char *path, const char *data, size_t n) {
+// The marker naming `path` and its stamp, best effort (a save whose marker
+// cannot be written publishes without detection).
+static void mark_publish(const char *path, size_t plen, uint32_t chars, uint32_t crc) {
+    root_t *r = root_for(path);
+    if (r == NULL) {
+        return;
+    }
+    size_t mn = r->len + sizeof(PUBLISH);
+    char *mark = moy_store_alloc(mn);
+    char *line = moy_store_alloc(plen + 32u);
+    int rc = MOY_ENOMEM;
+    if (mark != NULL && line != NULL) {
+        memcpy(mark, r->root, r->len);
+        memcpy(mark + r->len, PUBLISH, sizeof(PUBLISH));
+        int ln = snprintf(line, plen + 32u, STAMP "%lu %lu ",
+                          (unsigned long)chars, (unsigned long)crc);
+        memcpy(line + ln, path, plen);
+        line[ln + (int)plen] = '\n';
+        rc = moy_fs_write(mark, line, (size_t)ln + plen + 1u);
+    }
+    if (line != NULL) {
+        moy_store_free(line, plen + 32u);
+    }
+    if (mark != NULL) {
+        moy_store_free(mark, mn);
+    }
+    if (rc == 0) {
+        set_mark(r, path, plen, chars, crc);
+    } else {
+        drop_mark(r);
+        r->state = MARK_NONE;
+    }
+}
+
+int moy_fs_publish_bak(const char *path, const char *data, size_t n) {
     uint32_t chars, crc;
     moy_fs_stamp(data, n, &chars, &crc);
-    size_t plen = strlen(path);
-    root_t *r = root_for(path);
-    if (r != NULL) {
-        size_t mn = r->len + sizeof(PUBLISH);
-        char *mark = moy_store_alloc(mn);
-        char *line = moy_store_alloc(plen + 32u);
-        int rc = MOY_ENOMEM;
-        if (mark != NULL && line != NULL) {
-            memcpy(mark, r->root, r->len);
-            memcpy(mark + r->len, PUBLISH, sizeof(PUBLISH));
-            int ln = snprintf(line, plen + 32u, STAMP "%lu %lu ",
-                              (unsigned long)chars, (unsigned long)crc);
-            memcpy(line + ln, path, plen);
-            line[ln + (int)plen] = '\n';
-            rc = moy_fs_write(mark, line, (size_t)ln + plen + 1u);
-        }
-        if (line != NULL) {
-            moy_store_free(line, plen + 32u);
-        }
-        if (mark != NULL) {
-            moy_store_free(mark, mn);
-        }
-        if (rc == 0) {
-            set_mark(r, path, plen, chars, crc);
-        } else {
-            drop_mark(r);           // this save publishes without detection
-            r->state = MARK_NONE;
-        }
-    }
     size_t bn;
-    char *bak = join(path, plen, ".bak", &bn);
+    char *bak = join(path, strlen(path), ".bak", &bn);
     if (bak == NULL) {
         return MOY_ENOMEM;
     }
@@ -638,11 +643,24 @@ int moy_fs_publish(const char *path, const char *data, size_t n) {
     int rc = write_parts(bak, head, (size_t)hn, data, n);
     if (rc != 0) {
         moy_fs_remove(bak);         // free the half-written backup
-        moy_store_free(bak, bn);
-        return rc;
     }
     moy_store_free(bak, bn);
+    return rc;
+}
+
+int moy_fs_publish_mark(const char *path, const char *data, size_t n) {
+    uint32_t chars, crc;
+    moy_fs_stamp(data, n, &chars, &crc);
+    mark_publish(path, strlen(path), chars, crc);
     return moy_fs_write(path, data, n);
+}
+
+int moy_fs_publish(const char *path, const char *data, size_t n) {
+    uint32_t chars, crc;
+    moy_fs_stamp(data, n, &chars, &crc);
+    mark_publish(path, strlen(path), chars, crc);
+    int rc = moy_fs_publish_bak(path, data, n);
+    return rc != 0 ? rc : moy_fs_write(path, data, n);
 }
 
 static void heal(const char *path, const moy_buf_t *b) {

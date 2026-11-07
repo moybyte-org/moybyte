@@ -1173,7 +1173,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # runtime/shell/crash_guard.py, "Two roles, two ledgers".
         self.app_guard = CrashGuard(self.system)
         self.consent = _app_perms.Consent(self.system,
-                                          lambda: _app_perms.services(self))
+                                          lambda: _app_perms.services(self),
+                                          saving=self.prefs.save_steps)
         self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each

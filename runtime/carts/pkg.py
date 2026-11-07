@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
-#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check, removed
+#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check
+#   -- the steps it shares           through, removed, landed: a store op a frame
 #   Pkg                              the shell's `pkg`: the verbs over one installer
 #   Pkg.update                       fetch every source's index into the cache
 #   Pkg.install                      depends first, then each cart through cart_index.Install
@@ -204,16 +205,46 @@ def install_check(inst, stage, folder, shelf):
     return aid, list(cart["permissions"]), _perms.prompt(cart, consent.get(aid))
 
 
+def through(steps):
+    """`yield from` it: the generator `steps` a resume a frame; closed
+    partway (Ctrl-C, the app shut), the rest done at once, so a removal or a
+    landing is never left half done."""
+    done = False
+    try:
+        while next(steps, _ci._DONE) is not _ci._DONE:
+            yield
+        done = True
+    finally:
+        if not done:
+            for _ in steps:
+                pass
+
+
 def removed(inst, folder):
-    """Take the cart in `folder` off the shelf with what it wrote and the
-    consent it was installed with (cart_index.remove)."""
+    """`yield from` it, a step a frame: the cart in `folder` taken off the
+    shelf with what it wrote (cart_index.remove_steps, a store op a step),
+    the consent it was installed with forgotten, and the shelf re-read
+    there. Get Carts' Remove and `pkg remove` both step it, through
+    `through`."""
     had = inst.find(folder)
-    root = inst.root()
-    keep = inst.keep()
-    inst.op(lambda: _ci.remove(root, folder, keep))
+    yield from _ci.stepped(inst.op, _ci.remove_steps(inst.root(), folder, inst.keep()))
     if had is not None:
-        inst.consent().forget(_perms.app_id(had))
+        yield
+        yield from inst.consent().forget_steps(_perms.app_id(had))
+    yield
     inst.rescan(folder)
+
+
+def landed(inst, path, consented):
+    """`yield from` it once an install put its cart at `path`, a step a
+    frame: the consent the install prompt was answered with (`(app id,
+    permissions)`, or None when it asked nothing) recorded, then the shelf
+    re-read there. Get Carts and `pkg install` both step it."""
+    if consented is not None:
+        yield
+        yield from inst.consent().record_steps(consented[0], consented[1])
+    yield
+    inst.rescan(path)
 
 
 # -- the verbs ------------------------------------------------------------------------
@@ -345,7 +376,9 @@ class Pkg:
         cache (a source it does not hold yet fetched when `fetch`)."""
         out = []
         for url in self.sources():
+            yield                       # each source's read and its parse a frame apart
             data = self._cached(url)
+            yield
             try:
                 if data is not None:
                     out.extend(_ci.parse_index(data, url))
@@ -436,9 +469,12 @@ class Pkg:
             for d in chain:
                 if d not in todo:
                     todo.append(d)
+        yield
         rows = dict((r[0]["id"], r) for r in self._rows(todo))
+        yield
         free = self.inst.free()
         for c in todo:
+            yield
             _c, p, state = rows[c["id"]]
             if state == "installed":
                 self.out("%s %d is installed\n" % (c["id"], c["version"]))
@@ -488,7 +524,7 @@ class Pkg:
 
         def ask(stage):
             got = install_check(self.inst, stage, c["folder"], self.inst.carts())
-            consented[:] = [got]
+            consented[:] = [got[:2]]
             return got[2]
 
         job = _ci.Install(c, p, self.inst.net(), self.inst.root(), self.inst.op,
@@ -505,17 +541,15 @@ class Pkg:
                         job.agree()
                     else:
                         job.cancel()
-                elif self.stopped():
-                    job.cancel()
+                elif self.stopped() and job.cancel():
                     raise Stopped()
         finally:
+            job.finish()
             self.release()
         if not job.path:
             self.err("%s: %s" % (c["id"], job.error or "Not installed. Nothing changed."))
             return 1
-        if consented:
-            self.inst.consent().record(consented[0][0], consented[0][1])
-        self.inst.rescan(job.path)
+        yield from through(landed(self.inst, job.path, consented[0] if consented else None))
         self.out("%s %d installed: %s\n" % (c["id"], c["version"], job.report()))
         return 0
 
@@ -528,7 +562,7 @@ class Pkg:
                 self.err("%s: not installed by pkg" % ident)
                 code = 1
                 continue
-            removed(inst, folder)
+            yield from through(removed(inst, folder))
             self.out("%s removed\n" % ident)
         return code
 

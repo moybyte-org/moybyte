@@ -1,6 +1,7 @@
 """The shelf's record and its removal on the CPython host: native/moy_store/
 moy_shelf.h over ctypes, with the names the boards' `moy_store` module gives
-them (`shelf_record`, `shelf_without`, `shelf_remove`, `shelf_find`), so
+them (`shelf_record`, `shelf_without`, `shelf_take`, `shelf_written`,
+`shelf_remove`, `shelf_find`), so
 runtime/carts/cart_index.py calls the one C on every tier.
 
 The C is in the host's one library (runtime/host/host_native.py, the store's
@@ -23,6 +24,8 @@ _PATH = 320
 _SIGS = (
     ("moy_shelf_record", [c.c_char_p, c.POINTER(_Buf)], c.c_int),
     ("moy_shelf_without", [c.c_char_p, c.c_char_p, c.POINTER(_Buf)], c.c_int),
+    ("moy_shelf_take", [c.c_char_p, c.c_char_p, c.c_char_p, c.c_size_t], c.c_int),
+    ("moy_shelf_written", [c.c_char_p, c.c_char_p, c.c_char_p, c.c_size_t], c.c_int),
     ("moy_shelf_remove", [c.c_char_p, c.c_char_p, c.c_char_p, c.c_size_t], c.c_int),
     ("moy_shelf_find", [c.c_char_p, c.c_char_p, c.c_char_p, c.c_size_t], c.c_int),
     ("moy_buf_free", [c.POINTER(_Buf)], None),
@@ -78,6 +81,22 @@ def shelf_record(root):
 def shelf_without(root, folder):
     lib, buf = _lib(), _Buf()
     return _text(lib, lib.moy_shelf_without(_b(root), _b(folder), c.byref(buf)), buf)
+
+
+def _path(fn, root, folder):
+    out = c.create_string_buffer(_PATH)
+    rc = fn(_b(root), _b(folder), out, _PATH)
+    if rc:
+        _raise(rc)
+    return out.value.decode()
+
+
+def shelf_take(root, folder):
+    return _path(_lib().moy_shelf_take, root, folder)
+
+
+def shelf_written(root, folder):
+    return _path(_lib().moy_shelf_written, root, folder)
 
 
 def shelf_remove(root, folder, text):

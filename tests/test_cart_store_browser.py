@@ -916,6 +916,7 @@ def test_remove_in_the_browser_sends_the_record_to_the_keeper(tmp_path):
     app._press("REMOVE")                          # asks
     assert app.asking
     app._remove()                                 # the dialog's Remove
+    _until(ws, app, net, lambda: app._tail is None)   # a store op a frame
     assert keep.records and keep.records[-1]["carts"] == {}
     assert not (tmp_path / "carts" / "rock.moy").exists()
 

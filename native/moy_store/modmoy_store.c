@@ -419,6 +419,33 @@ static mp_obj_t mod_publish(mp_obj_t path, mp_obj_t data) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_obj, mod_publish);
 
+// publish_bak(path, data) then publish_mark(path, data): publish's save in
+// two store ops (moy_fs.h).
+static mp_obj_t publish_half(mp_obj_t path, mp_obj_t data,
+                             int (*half)(const char *, const char *, size_t)) {
+    const char *p = path_arg(path);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(data, &bi, MP_BUFFER_READ);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = half(p, bi.buf, bi.len);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+
+static mp_obj_t mod_publish_bak(mp_obj_t path, mp_obj_t data) {
+    return publish_half(path, data, moy_fs_publish_bak);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_bak_obj, mod_publish_bak);
+
+static mp_obj_t mod_publish_mark(mp_obj_t path, mp_obj_t data) {
+    return publish_half(path, data, moy_fs_publish_mark);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_mark_obj, mod_publish_mark);
+
 static mp_obj_t mod_write(mp_obj_t path, mp_obj_t data) {
     const char *p = path_arg(path);
     mp_buffer_info_t bi;
@@ -1272,6 +1299,33 @@ static mp_obj_t mod_shelf_remove(mp_obj_t root, mp_obj_t folder, mp_obj_t text) 
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_shelf_remove_obj, mod_shelf_remove);
 
+// shelf_take(root, folder) -> the path `folder` was renamed to under install/.
+static mp_obj_t mod_shelf_take(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    char gone[MOY_SHELF_PATH];
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_take(r, f, gone, sizeof gone);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(gone, strlen(gone));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_take_obj, mod_shelf_take);
+
+// shelf_written(root, folder) -> the folder of the files that cart wrote.
+static mp_obj_t mod_shelf_written(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    char out[MOY_SHELF_PATH];
+    int rc = moy_shelf_written(r, f, out, sizeof out);
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(out, strlen(out));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_written_obj, mod_shelf_written);
+
 // shelf_find(root, ident) -> the folder of the entry `ident` names, or None.
 static mp_obj_t mod_shelf_find(mp_obj_t root, mp_obj_t ident) {
     const char *r = path_arg(root), *i = mp_obj_str_get_str(ident);
@@ -1480,6 +1534,8 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
     { MP_ROM_QSTR(MP_QSTR_set_publish_root), MP_ROM_PTR(&mod_set_publish_root_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_publish_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish_bak), MP_ROM_PTR(&mod_publish_bak_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish_mark), MP_ROM_PTR(&mod_publish_mark_obj) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mod_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_write_bytes), MP_ROM_PTR(&mod_write_bytes_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_recover), MP_ROM_PTR(&mod_read_recover_obj) },
@@ -1515,6 +1571,8 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_shelf_record), MP_ROM_PTR(&mod_shelf_record_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_without), MP_ROM_PTR(&mod_shelf_without_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_remove), MP_ROM_PTR(&mod_shelf_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_take), MP_ROM_PTR(&mod_shelf_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_written), MP_ROM_PTR(&mod_shelf_written_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_find), MP_ROM_PTR(&mod_shelf_find_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_files), MP_ROM_PTR(&mod_copy_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_canon), MP_ROM_PTR(&mod_canon_obj) },

@@ -218,6 +218,35 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
     assert len(sessions) == 4
 
 
+def test_a_stepped_save_is_two_sessions_and_yields_to_a_newer_write(tmp_path):
+    """`save_steps` (the install prompt's consent) writes the rows in two
+    store sessions a frame apart -- the backup, then the marker and the file
+    -- and leaves them clean; a write of the rows between the two is the one
+    that lands, whole."""
+    ws = _ws(tmp_path)
+    sessions = []
+    inner = ws._with_sd
+
+    def counting(fn):
+        sessions.append(1)
+        return inner(fn)
+    ws._with_sd = counting
+    ws.system.set("k", 1, False)
+    steps = ws.prefs.save_steps()
+    next(steps)
+    assert len(sessions) == 1 and ws.system.dirty()
+    assert next(steps, None) is None
+    assert len(sessions) == 2 and not ws.system.dirty()
+    assert moy_carts.load_system(ws.carts_root)["k"] == 1
+    ws.system.set("k", 2, False)
+    steps = ws.prefs.save_steps()
+    next(steps)
+    ws.system.set("other", 3)               # a toggle saves the rows meanwhile
+    assert next(steps, None) is None and not ws.system.dirty()
+    got = moy_carts.load_system(ws.carts_root)
+    assert got["k"] == 2 and got["other"] == 3
+
+
 def test_a_read_only_console_attempts_no_write(tmp_path):
     """`can_manage` False is a build with nowhere to put a write -- not a
     failure to report, and not a call to make."""

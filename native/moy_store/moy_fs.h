@@ -53,8 +53,15 @@ int moy_fs_remove(const char *path);
 // across volumes.
 int moy_fs_rename(const char *src, const char *dst);
 
-// The crash-safe write and its readers.
+// The crash-safe write and its readers. moy_fs_publish is the three writes
+// (the marker, the stamped backup, the file); a caller that gives a frame
+// back between store ops makes the same save in two, moy_fs_publish_bak and
+// then moy_fs_publish_mark (the marker and the file together), so a save of
+// another file between them never leaves this one's publish unmarked
+// (runtime/carts/moy_fs.py, _write_atomic_steps).
 int moy_fs_publish(const char *path, const char *data, size_t n);
+int moy_fs_publish_bak(const char *path, const char *data, size_t n);
+int moy_fs_publish_mark(const char *path, const char *data, size_t n);
 int moy_fs_read(const char *path, const char *at, moy_buf_t *out);
 // moy_fs_read with the file opened as `name` in the working folder `here`
 // (moy_vol_enter), or by `name` (a path) when `here` is NULL.

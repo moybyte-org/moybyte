@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   _load_store_json        a system JSON store's value, healed from its backup
 #   -- known WiFi networks  load_wifi, save_wifi, remember_wifi, forget_wifi
-#   -- system settings      parse_settings, settings_text, load_system, save_system
+#   -- system settings      parse_settings, settings_text, load_system, save_system(_steps)
 #   -- achievements         achievements_doc, load_achievements, save_achievements
 """The console's own documents beside the carts folder: the known WiFi
 networks and the achievements, each one JSON file read back through
@@ -18,11 +18,12 @@ import json
 
 try:
     from moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
-    from moy_fs import _mkdir, _read, _read_bak, _read_recover, _write, _write_atomic
+    from moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write, _write_atomic,
+                        _write_atomic_steps)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
     from runtime.moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write,
-                                _write_atomic)
+                                _write_atomic, _write_atomic_steps)
 
 
 def _load_store_json(path, pick):
@@ -229,6 +230,14 @@ def save_system(settings, root=CARTS_DIR):
     ensure_dirs(root)
     _mkdir(_sibling_path(root, SYSTEM_DIR))
     _write_atomic(system_store_path(root), settings_text(settings))
+
+
+def save_system_steps(settings, root=CARTS_DIR):
+    """`save_system` as two store ops, a resume each (moy_fs.
+    _write_atomic_steps)."""
+    ensure_dirs(root)
+    _mkdir(_sibling_path(root, SYSTEM_DIR))
+    yield from _write_atomic_steps(system_store_path(root), settings_text(settings))
 
 
 # --- achievements (#21) -----------------------------------------------------

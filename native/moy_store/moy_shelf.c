@@ -180,34 +180,54 @@ int moy_shelf_without(const char *root, const char *folder, moy_buf_t *out) {
     return 0;
 }
 
-int moy_shelf_remove(const char *root, const char *folder, const char *text, size_t n) {
-    char stage[MOY_SHELF_PATH], gone[MOY_SHELF_PATH], cart[MOY_SHELF_PATH];
+int moy_shelf_take(const char *root, const char *folder, char *gone, size_t cap) {
+    char stage[MOY_SHELF_PATH], cart[MOY_SHELF_PATH];
     if (!sibling(root, MOY_SHELF_STAGE, stage, sizeof stage)) {
         return MOY_EINVAL;
     }
-    int a = snprintf(gone, sizeof gone, "%s/%s.gone", stage, folder);
+    int a = snprintf(gone, cap, "%s/%s.gone", stage, folder);
     int c = snprintf(cart, sizeof cart, "%s/%s", root, folder);
-    if (a <= 0 || (size_t)a >= sizeof gone || c <= 0 || (size_t)c >= sizeof cart) {
+    if (a <= 0 || (size_t)a >= cap || c <= 0 || (size_t)c >= sizeof cart) {
         return MOY_EINVAL;
     }
     moy_fs_mkdir(stage);
     if (moy_fs_exists(gone)) {
         moy_cat_rmtree(gone);
     }
-    int rc = moy_fs_rename(cart, gone);
+    return moy_fs_rename(cart, gone);
+}
+
+int moy_shelf_publish(const char *root, const char *text, size_t n) {
+    char path[MOY_SHELF_PATH];
+    if (!sibling(root, MOY_SHELF_RECORD, path, sizeof path)) {
+        return MOY_EINVAL;
+    }
+    return moy_fs_publish(path, text, n);
+}
+
+int moy_shelf_written(const char *root, const char *folder, char *out, size_t cap) {
+    char cart[MOY_SHELF_PATH];
+    int c = snprintf(cart, sizeof cart, "%s/%s", root, folder);
+    if (c <= 0 || (size_t)c >= sizeof cart) {
+        return MOY_EINVAL;
+    }
+    return moy_files_folder(cart, out, cap) == 0 ? 0 : MOY_EINVAL;
+}
+
+int moy_shelf_remove(const char *root, const char *folder, const char *text, size_t n) {
+    char gone[MOY_SHELF_PATH];
+    int rc = moy_shelf_take(root, folder, gone, sizeof gone);
     if (rc != 0) {
         return rc;
     }
-    moy_cat_rmtree(gone);
     if (text != NULL) {
-        char path[MOY_SHELF_PATH];
-        sibling(root, MOY_SHELF_RECORD, path, sizeof path);
-        rc = moy_fs_publish(path, text, n);
+        rc = moy_shelf_publish(root, text, n);
         if (rc != 0) {
             return rc;
         }
     }
-    if (moy_files_folder(cart, gone, sizeof gone) == 0) {
+    moy_cat_rmtree(gone);
+    if (moy_shelf_written(root, folder, gone, sizeof gone) == 0) {
         moy_cat_rmtree(gone);
     }
     return 0;

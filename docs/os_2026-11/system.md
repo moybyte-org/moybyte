@@ -458,6 +458,18 @@ the console says to get that one first.
 the record without a cart (written as `json.dumps` writes it, and handed to
 a keeper before anything is deleted), the folder's rename out of the carts
 folder and delete, and the cart's written files. `cart_index`'s
-`load_record`, `find_installed` and `remove` call it on every tier, and with
-the VM stopped the C shell's `pkg list` and `pkg remove` serve it, the
+`load_record`, `find_installed` and `remove_steps` call it on every tier, and
+with the VM stopped the C shell's `pkg list` and `pkg remove` serve it, the
 removal forgetting the cart's consent through the settings rows.
+
+**An install's landing and a removal are stepped, a store op a frame**
+(2026-11-07), where one frame used to hold them whole (diag's HITCH lines
+named it). `pkg` and Get Carts step the same generators: `Install`'s
+staging folder made and its landing (the old copy aside, the build in by one
+rename, the record, the old copy deleted an entry at a time),
+`pkg.landed` (the consent, the shelf's re-read) and `pkg.removed`
+(`cart_index.remove_steps`, the consent forgotten, the re-read). A record or a
+consent is saved in two store ops (`moy_fs._write_atomic_steps`: the backup,
+then the marker and the file together), and a verb stopped partway (Ctrl-C,
+the app closed) finishes what it started at once (`pkg.through`,
+`Install.finish`).

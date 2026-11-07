@@ -13,14 +13,18 @@
 // which is republished in its place; a record whose "carts" is not an object
 // is no record.
 //
-// A REMOVAL is cart_index.remove's order. The record without the cart is
+// A REMOVAL is cart_index.remove_steps' order. The record without the cart is
 // made first (moy_shelf_without), so a keeper (the browser's store of record)
-// is handed it before anything is deleted; then moy_shelf_remove renames
-// `<root>/<folder>` to `install/<folder>.gone` beside the carts folder (a cut
-// mid-delete never leaves half a cart listed), deletes it, writes the record
-// crash-safe and deletes the files the cart wrote (`written/<id>`,
-// moy_files_folder). The consent the cart was installed with is the caller's
-// to forget (runtime/carts/pkg.py's removed, the shell's pkg remove).
+// is handed it before anything is deleted; then `<root>/<folder>` is renamed
+// to `install/<folder>.gone` beside the carts folder (moy_shelf_take: a cut
+// mid-delete never leaves half a cart listed, and cart_index.recover deletes
+// what a cut left there), the record is written crash-safe
+// (moy_shelf_publish), and the folder and the files the cart wrote
+// (`written/<id>`, moy_shelf_written) are deleted. moy_shelf_remove is the
+// four in one call, the C shell's; the VM steps them a store op a frame,
+// the trees an entry at a time. The consent the cart was installed with is
+// the caller's to forget (runtime/carts/pkg.py's removed, the shell's pkg
+// remove).
 
 #ifndef MOY_SHELF_H
 #define MOY_SHELF_H
@@ -63,6 +67,17 @@ int moy_shelf_find(const char *root, const char *ident, char *folder, size_t cap
 // writes it (CPython's json.dumps): 0 and `out`, MOY_FS_NONE when the record
 // does not hold `folder`, or an errno value.
 int moy_shelf_without(const char *root, const char *folder, moy_buf_t *out);
+
+// `<root>/<folder>` renamed to `install/<folder>.gone`, its path in `gone`
+// (one left by a cut deleted first): 0, or an errno value.
+int moy_shelf_take(const char *root, const char *folder, char *gone, size_t cap);
+
+// The record `text` written crash-safe beside the carts folder: 0, or an errno.
+int moy_shelf_publish(const char *root, const char *text, size_t n);
+
+// The folder of the files the cart in `folder` wrote (moy_files_folder): 0,
+// or MOY_EINVAL when `out` cannot hold it.
+int moy_shelf_written(const char *root, const char *folder, char *out, size_t cap);
 
 // `folder` taken off the shelf (above); `text` the record without it, or NULL
 // when the record did not hold it. 0, or the errno value of the rename out of

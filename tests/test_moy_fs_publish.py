@@ -238,6 +238,44 @@ def test_a_crash_at_any_landing_point_still_reads_a_whole_file(rooted, step,
     assert moy_fs._read_recover("/c/main.py") in (OLD, NEW)
 
 
+def _stepped(path, data, between=None):
+    steps = moy_fs._write_atomic_steps(path, data)
+    next(steps)
+    if between is not None:
+        between()
+    assert next(steps, None) is None
+
+
+def test_a_stepped_save_is_the_same_three_writes_backup_first(rooted):
+    fs = rooted
+    moy_fs._write_atomic("/c/main.py", OLD)
+    fs.ops = []
+    _stepped("/c/main.py", NEW)
+    assert fs.ops == ["write /c/main.py.bak", "write /c/.publish", "write /c/main.py"]
+    assert moy_fs._read_recover("/c/main.py") == NEW
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("landing", ["nothing", "half", "whole"])
+def test_a_crash_anywhere_in_a_stepped_save_still_reads_whole_files(rooted, step,
+                                                                    landing):
+    """The stepped save (`_write_atomic_steps`, a frame between its backup and
+    its marker-and-publish) with ANOTHER file's whole save between the two:
+    every landing point of all six writes leaves both files whole."""
+    fs = rooted
+    moy_fs._write_atomic("/c/main.py", OLD)
+    moy_fs._write_atomic("/c/other.py", OLD)
+    fs.arm(step, landing)
+    with pytest.raises(_Crash):
+        _stepped("/c/main.py", NEW,
+                 lambda: moy_fs._write_atomic("/c/other.py", NEW))
+    fs.crash_at = None
+    moy_fs._marks.clear()
+
+    assert moy_fs._read_recover("/c/main.py") in (OLD, NEW)
+    assert moy_fs._read_recover("/c/other.py") in (OLD, NEW)
+
+
 def test_a_marker_naming_a_file_whose_backup_is_torn_trusts_the_file(rooted):
     """The crash landed between the marker and the backup: the marker says a
     publish of this file was in flight, and the backup cannot vouch for itself.

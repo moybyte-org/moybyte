@@ -6,7 +6,7 @@
 #   -- the index                check_cart, cover_ref, parse_index (_read_listing)
 #   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
-#   -- the record               load_record, save_record, record_entry
+#   -- the record               load_record, save_record, record_entry, remove_steps, stepped
 #   -- fetching                 Worker, Fetch, Reach, FileCheck, index_fetch, cover_fetch
 #   Worker                      a transport with the http worker: documents whole, downloads streamed
 #   Fetch                       one small document, whole
@@ -151,7 +151,7 @@ try:
     from ticks import _ticks_ms, _ticks_diff
     from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
                                 cart_path)
-    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic
+    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
     import moy_carts as _store
     import cart_files as _cart_files
     import cart_listing as _cl
@@ -159,7 +159,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
                                         COVER_MAX_BYTES, cart_path)
-    from runtime.moy_fs import _exists, _mkdir, _read_recover, _write_atomic
+    from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
+                                _write_atomic_steps)
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
     from runtime import cart_listing as _cl
@@ -734,6 +735,23 @@ def save_record(root, rec):
     _store._write_sibling(root, RECORD_NAME, record_text(rec))
 
 
+def _record_steps(root, text, again):
+    """`yield from` it inside a generator whose every resume is a store op:
+    the record `text` written in two of them (moy_fs._write_atomic_steps).
+    `again()` is the text as it would be made now, asked before the second:
+    a record written meanwhile (another face's install or removal) is written
+    whole from it instead, or not at all when it is None."""
+    path = _sibling_path(root, RECORD_NAME)
+    steps = _write_atomic_steps(path, text)
+    next(steps)
+    yield
+    now = again()
+    if now == text:
+        next(steps, None)
+    elif now is not None:
+        _write_atomic(path, now)
+
+
 def record_entry(cart, p):
     return {"id": cart["id"], "index": cart.get("index", ""), "name": cart["name"],
             "version": cart["version"], "module": p["module"],
@@ -804,12 +822,13 @@ def recover(root):
     return len(names)
 
 
-def remove(root, folder, keep=None):
-    """Take `folder` off the shelf: one rename out of the carts folder (so a
-    crash mid-delete never leaves half a cart listed), then the delete, then
-    the record, then the files the cart wrote (runtime/carts/cart_files.py), which
-    live beside the store and go with it -- native/moy_store/moy_shelf.h's,
-    the C shell's `pkg remove` with no VM. Call inside one store session.
+def remove_steps(root, folder, keep=None):
+    """`folder` taken off the shelf, a store op a resume (`stepped` runs one
+    a frame): the record without it made (native/moy_store/moy_shelf.h), the
+    folder renamed out of the carts folder (so a crash mid-delete never leaves
+    half a cart listed; `recover` deletes what one left), the record written,
+    then the folder and the files the cart wrote (runtime/carts/cart_files.py),
+    which live beside the store, deleted an entry a resume.
 
     With a keeper the record without the cart goes to the store of record
     FIRST, ahead of the folder's deletion: a record that outlives its folder
@@ -818,10 +837,59 @@ def remove(root, folder, keep=None):
     text = _shelf.shelf_without(root, folder)
     if keep is not None and text is not None:
         keep.record(text)
-    _shelf.shelf_remove(root, folder, text)
+    yield
+    gone = _shelf.shelf_take(root, folder)
+    if text is not None:
+        yield
+        yield from _record_steps(root, text, lambda: _shelf.shelf_without(root, folder))
+    yield
+    yield from rmtree_steps(gone)
+    yield
+    yield from rmtree_steps(_shelf.shelf_written(root, folder))
     erased = getattr(keep, "erased", None)
     if erased is not None:
         erased(_cart_files.cart_id(folder), None)
+
+
+def remove(root, folder, keep=None):
+    """`remove_steps` in one go. Call inside one store session."""
+    for _ in remove_steps(root, folder, keep):
+        pass
+
+
+def rmtree_steps(path):
+    """The tree at `path` deleted, files before their folder, one entry a
+    resume (each a store op); nothing where there is none."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for n in names:
+        yield
+        p = path + "/" + n
+        if _is_dir(p):
+            yield from rmtree_steps(p)
+        else:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    yield
+    try:
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
+_DONE = object()
+
+
+def stepped(op, steps):
+    """`yield from` it: the generator `steps` resumed once a frame, each
+    resume inside `op` (one store op: the console's SD gate, a call-through on
+    flash), so no frame holds more than one of its units."""
+    while op(lambda: next(steps, _DONE)) is not _DONE:
+        yield
 
 
 # -- fetching -------------------------------------------------------------------
@@ -1324,6 +1392,9 @@ class Install:
         self._src = None
         self._opening = None
         self._started = None
+        self._steps = None                # store ops a step at a time: the staging made, the landing
+        self._then = None                 # what follows when they end
+        self.landing = False
         self._reported = False
 
     # -- the store, timed ------------------------------------------------------
@@ -1357,6 +1428,14 @@ class Install:
         try:
             if self._started is None:
                 self._begin()
+            if self._steps is not None:
+                if self.in_store(lambda: next(self._steps, _DONE)) is not _DONE:
+                    return True
+                self._steps = None
+                then, self._then = self._then, None
+                if then is not None:
+                    then()
+                return not self.finished
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
@@ -1406,13 +1485,19 @@ class Install:
         self.asking = None
 
     def cancel(self):
-        """Stop, keeping nothing. False once the keeper has the build: past
-        that point the cart lands."""
-        if self.keeping:
+        """Stop, keeping nothing. False once the build is landing, or the
+        keeper has it: past that point the cart lands."""
+        if self.keeping or self.landing:
             return False
         if not self.finished:
             self._fail(None, "cancelled")
         return True
+
+    def finish(self):
+        """A landing begun, done now: what a caller that stops stepping
+        (Ctrl-C, the app closed) calls, so a cart is never left half moved."""
+        while self.landing and not self.finished and self.step():
+            pass
 
     def rate(self):
         """Bytes per second so far, or 0."""
@@ -1435,13 +1520,17 @@ class Install:
             if e["path"] not in self.accepted:
                 raise InstallError(NO_LICENCE, "%s: %s not accepted"
                                    % (self.folder, e["path"]))
+        self._steps = self._fresh()
 
-        def _fresh():
-            _mkdir(stage_root(self.root))
-            if _exists(self.stage):
-                _rmtree(self.stage)
-            os.mkdir(self.stage)
-        self.in_store(_fresh)
+    def _fresh(self):
+        """The staging folder made empty, a store op a step: what a stopped
+        build left deleted an entry at a time, then the folder made."""
+        _mkdir(stage_root(self.root))
+        if _exists(self.stage):
+            yield
+            yield from rmtree_steps(self.stage)
+        yield
+        os.mkdir(self.stage)
 
     def _next(self):
         """The next file to fetch or copy: True when there was one."""
@@ -1554,8 +1643,9 @@ class Install:
                                % self.folder)
         entry = record_entry(self.cart, self.plan)
         if self.keep is None:
-            self.in_store(lambda: self._swap(entry, True))
-            self._landed()
+            self.landing = True
+            self._steps = self._land(entry)
+            self._then = self._landed
             return
 
         def _prepare():
@@ -1578,7 +1668,7 @@ class Install:
             if why:
                 raise InstallError(FULL if full else NO_WRITE,
                                    "%s: %s" % (self.folder, why))
-            self.in_store(lambda: self._swap(entry, False))
+            self.in_store(lambda: self._swap(entry))
             self.keep.landed(self.folder)
             self._landed()
         except Exception as exc:  # noqa: BLE001 -- an install never takes the shell down
@@ -1587,13 +1677,41 @@ class Install:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
 
-    def _swap(self, entry, carry):
-        """The build into the carts folder by one rename (the old copy aside
-        first), and the record. Inside one store session."""
+    def _land(self, entry):
+        """The checked build onto the shelf, a store op a step: the kid's
+        files carried from the copy it replaces and that copy set aside, the
+        build moved in by one rename, the record, then the old copy deleted
+        an entry at a time (`recover` finishes what a cut leaves)."""
+        old = _exists(self.target)
+        aside = self.stage + ".old"
+        if old:
+            prev = load_record(self.root).get(self.folder)
+            yield
+            self._carry_saves()
+            yield
+            self._carry_config(prev)
+            if _exists(aside):
+                yield
+                yield from rmtree_steps(aside)
+            yield
+            os.rename(self.target, aside)
+        yield
+        _moy_carts().adopt(self.stage, self.target)
+        yield
+
+        def made():
+            rec = load_record(self.root)
+            rec[self.folder] = entry
+            return record_text(rec)
+        yield from _record_steps(self.root, made(), made)
+        if old:
+            yield
+            yield from rmtree_steps(aside)
+
+    def _swap(self, entry):
+        """The keeper's build into the carts folder by one rename (the old
+        copy aside first), and the record. Inside one store session."""
         rec = load_record(self.root)
-        old = rec.get(self.folder)
-        if carry and _exists(self.target):
-            self._carry(old)
         _moy_carts().adopt(self.stage, self.target)
         rec[self.folder] = entry
         save_record(self.root, rec)
@@ -1605,9 +1723,15 @@ class Install:
     def _carry(self, old):
         """The kid's own files from the copy being replaced: the saves always,
         the config when it is not the one this store wrote."""
+        self._carry_saves()
+        self._carry_config(old)
+
+    def _carry_saves(self):
         prev = self.target + "/" + SAVES
         if _exists(prev):
             _copy_bytes(prev, self.stage + "/" + SAVES)
+
+    def _carry_config(self, old):
         prev = self.target + "/" + CONFIG
         if not _exists(prev):
             return

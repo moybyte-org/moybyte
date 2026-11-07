@@ -330,7 +330,7 @@ def test_update_caches_list_reads_the_cache_and_install_lands(tmp_path):
     assert done(p.upgrade(yes=True)) == 0 and "dm 2 installed" in out[-1]
     del out[:]
     del inst.rescans[:]
-    assert p.remove(["dm"]) == 0 and out == ["dm removed\n"]
+    assert done(p.remove(["dm"])) == 0 and out == ["dm removed\n"]
     assert not (tmp_path / "carts" / "dm.moy").exists()
     assert inst.rescans == ["dm.moy"], "a removal re-reads the folder it took away"
 
@@ -467,6 +467,104 @@ def test_a_no_at_the_prompt_installs_nothing(tmp_path):
     assert done(p.install(["cam"])) == 1
     assert not (tmp_path / "carts" / "cam.moy").exists()
     assert inst.prefs == {}, "no consent recorded"
+
+
+class _Units:
+    """What the store does that holds a frame -- a folder made, renamed or
+    deleted, a file deleted, the record or a consent written, the shelf
+    re-read; the record's backup and its publish each count -- between the
+    verb's frames (its bare yields)."""
+
+    SLOW = (("os", ("mkdir", "rename", "remove", "rmdir")),
+            ("shelf", ("shelf_take",)), ("fs", ("_publish_bak", "_publish_mark")),
+            ("ci", ("save_record", "_write_atomic")), ("carts", ("adopt",)))
+
+    def __init__(self, monkeypatch, inst):
+        self.now = 0
+        self.frames = []
+        self.depth = 0
+        from runtime import moy_fs
+        mods = {"os": os, "shelf": ci._shelf, "ci": ci, "carts": ci._moy_carts(),
+                "fs": moy_fs}
+        for mod, names in self.SLOW:
+            for name in names:
+                monkeypatch.setattr(mods[mod], name, self._unit(getattr(mods[mod], name)))
+        for name in ("set", "rescan"):
+            setattr(inst, name, self._unit(getattr(inst, name)))
+
+    def _unit(self, fn):
+        def counted(*a, **kw):
+            self.depth += 1
+            try:
+                return fn(*a, **kw)
+            finally:
+                self.depth -= 1
+                if self.depth == 0:
+                    self.now += 1
+        return counted
+
+    def run(self, verb):
+        """`verb` stepped to its end, a frame a bare yield (the door's
+        crossing ends there): its exit code."""
+        self.now = 0
+        while True:
+            try:
+                got = next(verb)
+            except StopIteration as e:
+                self.frames.append(self.now)
+                return e.value
+            if not got:
+                self.frames.append(self.now)
+                self.now = 0
+
+
+def test_install_and_remove_hold_no_frame_for_more_than_one_store_unit(tmp_path, monkeypatch):
+    """`pkg install` and `pkg remove` step their slow store work a unit a
+    frame -- the staging folder made, the build moved in, the old copy set
+    aside and deleted, the record, the consent, the shelf's re-read -- where
+    a frame used to hold all of it (380 ms on the T-Deck); Get Carts steps
+    the same generators (test_cart_store)."""
+    repo = Repo(BASE)
+    repo.add("dm", name="Dungeon", moybyte={"permissions": ["internet"]})
+    inst, p, out, err = _pkg(tmp_path, repo)
+    units = _Units(monkeypatch, inst)
+    assert units.run(p.install(["dm"], yes=True)) == 0, err
+    assert max(units.frames) <= 1, units.frames
+    assert sum(units.frames) >= 5, "the staging (2), the move, the record, the consent, " \
+        "the re-read: %r" % units.frames
+    assert inst.prefs, "the consent is recorded"
+    repo.add("dm", version=2, name="Dungeon", moybyte={"permissions": ["internet"]})
+    inst._net = MemNet(repo.routes())
+    assert done(p.update()) == 0
+    (tmp_path / "carts" / "dm.moy" / "pmem.json").write_text("{}")
+    units.frames = []
+    assert units.run(p.upgrade(yes=True)) == 0, err
+    assert max(units.frames) <= 1, units.frames
+    assert (tmp_path / "carts" / "dm.moy" / "pmem.json").exists(), "the saves are carried"
+    assert not os.listdir(tmp_path / "install"), "the old copy is deleted"
+    units.frames = []
+    assert units.run(p.remove(["dm"])) == 0
+    assert max(units.frames) <= 1, units.frames
+    assert not (tmp_path / "carts" / "dm.moy").exists() and not inst.prefs["consent"]
+    assert not os.listdir(tmp_path / "install")
+    assert ci.load_record(inst.root()) == {}
+
+
+def test_a_landing_or_a_removal_stopped_partway_finishes(tmp_path):
+    """Ctrl-C (the door closes the verb) never leaves a cart half moved or
+    half removed: what was left of the steps is done at once."""
+    repo = Repo(BASE)
+    repo.add("dm", name="Dungeon")
+    inst, p, out, err = _pkg(tmp_path, repo)
+    assert done(p.install(["dm"], yes=True)) == 0, err
+    verb = p.remove(["dm"])
+    for _ in range(3):
+        next(verb)
+    assert (tmp_path / "install").exists() and os.listdir(tmp_path / "install")
+    verb.close()
+    assert not (tmp_path / "carts" / "dm.moy").exists()
+    assert not os.listdir(tmp_path / "install") and inst.rescans[-1] == "dm.moy"
+    assert ci.load_record(inst.root()) == {}
 
 
 def test_a_bad_signature_is_refused_by_update(tmp_path, keys):

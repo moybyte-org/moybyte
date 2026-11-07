@@ -312,10 +312,11 @@ class Consent:
     read once and written on every change, and the checks of this console:
     `services()` answers the services it holds."""
 
-    def __init__(self, store, services=None, key=KEY):
+    def __init__(self, store, services=None, key=KEY, saving=None):
         self._store = store
         self._services = services
         self._key = key
+        self._saving = saving         # () -> the store's stepped save (SystemStore.save_steps)
         self._d = None
 
     def check(self, cart, install=False):
@@ -336,6 +337,15 @@ class Consent:
     def _put(self):
         self._store.set(self._key, self._d)
 
+    def _put_steps(self):
+        """`yield from` it: the records written a store op a frame where the
+        store steps its save, else at once."""
+        if self._saving is None:
+            self._put()
+            return
+        self._store.set(self._key, self._d, False)
+        yield from self._saving()
+
     def get(self, aid):
         """The record for app id `aid`, or None."""
         return _entry(self._all().get(aid))
@@ -346,14 +356,24 @@ class Consent:
     def record(self, aid, perms):
         """Consent given at install to every permission of `perms`: what was
         turned off before stays off."""
+        for _ in self.record_steps(aid, perms):
+            pass
+
+    def record_steps(self, aid, perms):
+        """`record`, its write stepped (`yield from` it)."""
         old = self.get(aid)
         off = [p for p in (old["off"] if old else ()) if p in perms]
         self._all()[aid] = {"perms": list(perms), "off": off}
-        self._put()
+        yield from self._put_steps()
 
     def forget(self, aid):
+        for _ in self.forget_steps(aid):
+            pass
+
+    def forget_steps(self, aid):
+        """`forget`, its write stepped (`yield from` it)."""
         if self._all().pop(aid, None) is not None:
-            self._put()
+            yield from self._put_steps()
 
     def turn(self, aid, perm, on):
         """Settings' switch for one permission of app `aid`."""

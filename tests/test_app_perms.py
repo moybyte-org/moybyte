@@ -302,6 +302,15 @@ def _frames(ws, n=3):
         ws.frame(DT)
 
 
+def _settle(ws, app):
+    """Frames until the app's landing or removal, a store op a frame, ends."""
+    for _ in range(40):
+        _frames(ws, 1)
+        if app._tail is None and app.phase not in ("getting",):
+            return
+    raise AssertionError("still busy: %s" % app.phase)
+
+
 def _get(ws, app, cid):
     """Open Get Carts, open `cid`'s page and press Get; frames until the
     install asks or ends."""
@@ -398,7 +407,7 @@ def test_an_update_that_adds_a_permission_asks_again(tmp_path):
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     app._answer(True)
-    _frames(ws, 6)
+    _settle(ws, app)
     assert ws.consent.get("radio")["perms"] == ["prefs"]
     repo.add("radio", version=2, name="Radio", runtime="lua", modules=(),
              moybyte={"permissions": ["prefs", "network"]})
@@ -425,9 +434,10 @@ def test_remove_forgets_the_consent(tmp_path):
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     app._answer(True)
-    _frames(ws, 6)
+    _settle(ws, app)
     assert ws.consent.get("radio") is not None
     app._remove()
+    _settle(ws, app)
     assert ws.consent.get("radio") is None
 
 

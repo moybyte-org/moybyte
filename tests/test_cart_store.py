@@ -641,8 +641,10 @@ def test_the_pipeline_writes_in_whole_buffers(tmp_path):
     job = _install(cart, root, MemNet(repo.routes()), session=session)
     assert job.error is None
     n_files = len(ci.plan(cart, "esp32s3", 2)["files"])
-    # one per full buffer of big.bin, one per file's end, the staging and the swap
-    assert calls[0] <= n_files + len(big) // ci.WRITE_CHUNK + 3
+    # one per full buffer of big.bin, one per file's end, the staging's two
+    # (the folder looked for, then made) and the landing's three (the rename,
+    # the record's backup, its publish)
+    assert calls[0] <= n_files + len(big) // ci.WRITE_CHUNK + 6
 
 
 # -- UPDATING AND REMOVING ----------------------------------------------------------
@@ -1056,7 +1058,7 @@ def _frames(ws, app, n=40):
         ws.frame(1 / 30)
         # ...and the covers the shelf fetches once it shows.
         if app.phase not in ("checking", "licence_fetch", "connecting", "getting") \
-                and not app._covers:
+                and not app._covers and app._tail is None:
             ws._dirty = True
             ws.frame(1 / 30)
             return
@@ -1131,7 +1133,7 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     _tap(ws, app, "btn", "GET")
     held = []
     for _ in range(40):
-        if app.phase == "getting":
+        if app.phase == "getting" and not app.job.finished:
             held.append("carts" in ws.leases.holders())
         ws._dirty = True
         ws.frame(1 / 30)
@@ -1325,7 +1327,18 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     assert not (tmp_path / "carts" / "jet.moy").exists()
 
 
-def test_remove_asks_first(tmp_path):
+def test_remove_asks_first(tmp_path, monkeypatch):
+    """...and Get Carts' Get and Remove step pkg's own `landed` and
+    `removed`, a frame a step, holding every key meanwhile."""
+    from runtime import pkg
+    stepped = []
+    for name in ("landed", "removed"):
+        def wrap(*a, _fn=getattr(pkg, name), _name=name):
+            for _ in _fn(*a):
+                stepped.append(_name)
+                assert app._tail is not None and app.handle_input(_In("b"))
+                yield
+        monkeypatch.setattr(pkg, name, wrap)
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
     _open(ws, app)
@@ -1347,9 +1360,11 @@ def test_remove_asks_first(tmp_path):
     _tap(ws, app, "btn", "REMOVE")
     b = app._ui.box("Remove")                     # the dialog's
     _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    _frames(ws, app)                          # the removal, a store op a frame
     assert app.phase == "list" and not (tmp_path / "carts" / "jet.moy").exists()
     assert app.rows[0]["state"] == "get"
     assert not any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
+    assert stepped.count("landed") >= 2 and stepped.count("removed") >= 5, stepped
 
 
 def test_a_cart_too_big_to_run_is_refused_before_its_download(tmp_path):
@@ -1838,6 +1853,7 @@ def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
         _tap(ws, app, "btn", "REMOVE")
         b = app._ui.box("Remove")                 # the dialog's
         _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+        _frames(ws, app)                          # the removal, a store op a frame
         assert not (tmp_path / "carts" / "dusk.moy").exists()
         assert ws.look.theme_name == chrome.DEFAULT_THEME
         assert ws.system.get("theme") == chrome.DEFAULT_THEME

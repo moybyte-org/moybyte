@@ -462,7 +462,7 @@ def r_pkg(d, a):
         if verb == "install" and rest:
             return (yield from _then_release(p, p.install(rest, yes)))
         if verb == "remove" and rest:
-            return p.remove(rest)
+            return (yield from p.remove(rest))
         if verb == "upgrade" and not rest:
             return (yield from _then_release(p, p.upgrade(yes)))
     except pkg.Stopped:
