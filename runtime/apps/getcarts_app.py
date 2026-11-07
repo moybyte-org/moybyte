@@ -372,6 +372,7 @@ class GetCartsAppLayer(ListShellApp):
         self.question = None          # the install prompt's lines, while it is up
         self._consented = None        # (app id, permissions) the install records
         self._tail = None             # (steps, then, failed): a landing's or a removal's, a frame a step
+        self._recovering = False      # the tail is open's recover
         self.why = ""                 # the NOT INSTALLED page's reason
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
@@ -434,6 +435,9 @@ class GetCartsAppLayer(ListShellApp):
         if job is not None and job.landing and not job.finished:
             consented, self._consented = self._consented, None
             _pkg.land_now(self._inst, job, consented)
+        if (job is not None and job.dropping) or self._recovering:
+            self._tail = None         # what is left in install/ is the next open's recover
+            self._recovering = False
         self._end_tail()
         if self.job is not None and not self.job.finished and self.job.cancel():
             self._go("cart" if self.cur is not None else "list")
@@ -524,13 +528,26 @@ class GetCartsAppLayer(ListShellApp):
         return data
 
     def _recover(self):
+        """What a cut or a closed app left in install/ finished, a store op a
+        frame from the next frame, ahead of any other work (`_run`)."""
         root = self._inst.root()
         if root is None or not self._inst.writable():
             return
-        try:
-            self._inst.op(lambda: _ci.recover(root))
-        except Exception as exc:  # noqa: BLE001 -- recover runs again next open
+
+        def done():
+            self._recovering = False
+
+        def failed(exc):              # recover runs again next open
+            self._recovering = False
             _ci._log("recover failed: %s" % exc)
+        self._recovering = True
+        self._run(_ci.stepped(self._inst.op, _ci.recover_steps(root)), done, failed)
+
+    def _drop(self):
+        """A stopped install's build deleted over the next frames, keys held
+        until it is gone (`_run`): a new install never meets it half deleted."""
+        if self.job is not None and self.job.dropping and not self.job.finished:
+            self._run(_ci.drain(self.job), lambda: None, lambda exc: None)
 
     def _pump(self):
         """The BUSY phases' slice of work, one per drawn frame; between them
@@ -1075,6 +1092,7 @@ class GetCartsAppLayer(ListShellApp):
         checking = self.phase == "checking"
         if self.job is not None and not self.job.finished and not self.job.cancel():
             return
+        self._drop()
         self._drop_fetch()
         self._unpick()
         self._release()
@@ -1120,6 +1138,7 @@ class GetCartsAppLayer(ListShellApp):
             return
         self._consented = None
         job.cancel()
+        self._drop()
         self._unpick()
         self._say("Not installed. Nothing changed.")
         self._go("cart")

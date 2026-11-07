@@ -21,6 +21,7 @@ MicroPython, which is where `deflate.DeflateIO` is (CPython's path is zlib).
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -611,6 +612,12 @@ def test_a_full_store_says_so_and_keeps_nothing(tmp_path):
     _untouched(root, "jet.moy")
 
 
+def _staged(job, n):
+    """`job` stepped until its staging folder holds `n` entries."""
+    while not (os.path.isdir(job.stage) and len(os.listdir(job.stage)) >= n):
+        assert job.step()
+
+
 def test_a_cancelled_install_keeps_nothing(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
@@ -618,10 +625,42 @@ def test_a_cancelled_install_keeps_nothing(tmp_path):
     cart = _cart(repo, "jet")
     p = ci.plan(cart, "esp32s3", 2)
     job = ci.Install(cart, p, MemNet(repo.routes()), root, _session, step_ms=0)
-    assert job.step() and job.step()
+    _staged(job, 2)
     job.cancel()
+    # The build goes a store op a step, never in one: on the T-Deck a folder
+    # deleted in one op is a frame held for as long as the card takes.
+    assert job.dropping and not job.finished
+    sessions = [0]
+
+    def counted(fn):
+        sessions[0] += 1
+        return fn()
+    job.session = counted
+    calls = 1
+    while job.step():
+        calls += 1
+    assert calls > 3 and sessions[0] == calls, (calls, sessions[0])
     assert job.finished and job.error is None and job.path is None
     assert not job.step()
+    _untouched(root, "jet.moy")
+
+
+def test_a_build_cut_mid_delete_is_finished_by_recover(tmp_path):
+    """A cut while a stopped build is being deleted leaves part of it in
+    install/, and the next recover finishes it, a store op a step."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet", extra={"big.bin": os.urandom(300000)})
+    cart = _cart(repo, "jet")
+    job = ci.Install(cart, ci.plan(cart, "esp32s3", 2), MemNet(repo.routes()),
+                     root, _session, step_ms=0)
+    _staged(job, 2)
+    job.cancel()
+    job.step()
+    job.step()                                    # one entry gone, then the cut
+    assert os.path.isdir(job.stage)
+    steps = list(ci.recover_steps(root))
+    assert len(steps) > 1
     _untouched(root, "jet.moy")
 
 
@@ -751,6 +790,28 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
         (stage / "jet.moy.archive").write_bytes(b"half an archive")
     assert ci.recover(root) >= 1
     assert (target / "pmem.json").read_text() == "saves"
+    assert os.listdir(stage) == []
+
+
+def test_an_old_copy_cut_mid_delete_never_comes_back(tmp_path):
+    """An old copy whose replacement is in place goes as a `.gone`, so half of
+    one a cut leaves is never put back as a cart once the new copy is removed
+    -- the `.old` rule (put back when nothing replaced it) is for whole ones."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    stage = Path(root).parent / ci.STAGE_DIR
+    old = stage / "jet.moy.old"
+    shutil.copytree(Path(root) / "jet.moy", old)
+    steps = ci.recover_steps(root)
+    while old.exists():
+        next(steps)
+    next(steps)                                   # renamed, one entry deleted: the cut
+    assert (stage / "jet.moy.gone").is_dir()
+    ci.remove(root, "jet.moy")
+    ci.recover(root)
+    assert not (Path(root) / "jet.moy").exists()
     assert os.listdir(stage) == []
 
 
@@ -1321,10 +1382,47 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     ws.frame(1 / 30)                              # the job starts
     assert app.phase == "getting" and "carts" in ws.leases.holders()
     app.job.step_ms = 0
+    job = app.job
     app.close()
-    assert app.job.finished and app.job.path is None
+    # The build is left to the next open's recover rather than deleted in the
+    # close's one frame.
+    assert job.dropping and job.path is None
     assert "carts" not in ws.leases.holders()
     assert not (tmp_path / "carts" / "jet.moy").exists()
+    _open(ws, app)
+    _untouched(str(tmp_path / "carts"), "jet.moy")
+
+
+def test_open_finishes_what_install_held_a_store_op_a_frame(tmp_path):
+    """What a cut or a closed app left in install/ goes at open through the
+    same tail a landing takes: one store op a frame, every key held, the
+    shelf's check after it."""
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    stage = tmp_path / ci.STAGE_DIR
+    stage.mkdir(exist_ok=True)
+    (stage / "jet.moy").mkdir()
+    for i in range(6):
+        (stage / "jet.moy" / ("f%d" % i)).write_text("x")
+    ops = [0]
+    op = app._inst.op
+
+    def counted(fn):
+        ops[0] += 1
+        return op(fn)
+    app._inst.op = counted
+    ws.open_app(app)
+    assert app._tail is not None and app._recovering
+    frames = 0
+    while app._recovering:
+        before = ops[0]
+        ws._dirty = True
+        ws.frame(1 / 30)
+        assert ops[0] - before <= 1, "more than one store op in a frame"
+        frames += 1
+    assert frames >= 8 and not (stage / "jet.moy").exists()
+    _frames(ws, app)
+    assert app.phase == "list"
 
 
 def test_remove_asks_first(tmp_path, monkeypatch):
