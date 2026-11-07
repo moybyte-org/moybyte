@@ -167,8 +167,8 @@ def test_a_lua_app_and_a_compiled_app_at_once_each_reach_only_their_own(tmp_path
     _write_lua_app(tmp_path / "carts", "Lua Prefs", LUA_PREFS, ["graphics", "prefs"])
     ws = build_ws(tmp_path)
     app = ws.app_abi
-    # The compiled app's instance first: the Lua run takes the console from
-    # it, and its instance and its run stay as they are.
+    # The compiled app's instance first; the Lua run opens a row of its own
+    # beside it (native/moycore/moycore_lua.h).
     c, gc = _compiled(app, cart, "test.compiled")
     try:
         calls = _Calls(c)

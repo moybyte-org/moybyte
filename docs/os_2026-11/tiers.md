@@ -100,8 +100,11 @@ table above; `tests/test_roles.py` pins the ordinals.
 ## 2. Lua
 
 One state per process (`lua_Alloc`, internal-SRAM-first,
-`docs/moycore_direction.md`), the safe stdlib. `native/moycore` runs one run
-at a time (`moycore_lua.h`); the run becomes a process-table row. **The
+`docs/moycore_direction.md`), the safe stdlib. `native/moycore` holds
+several runs at once, each a row with its own state, console and media
+(`moycore_lua.h`, P5.3, 2026-11-07), and the binding names a run by its
+row's handle (`tests/test_lua_runs.py`); the kernel's Player still plays one
+(`native/moy_play/moy_play.h`), and the rows join a process table next. **The
 role binding** is `native/moy_app/moy_app_lua.c` (P5.1, 2026-11-07), over the role
 table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
 state's own run (§3): the Player makes a Lua app's run, its state's open

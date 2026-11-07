@@ -152,6 +152,25 @@ def _p8_buffers():
     return _P8_BUFFERS
 
 
+_P8_HOLDER = [None]     # the run the reserved pair is lent to
+
+
+def _p8_for(run):
+    """The machine's buffers for `run`: the reserved pair while no open run
+    holds it, else a pair of its own (two p8 runs at once must not share a
+    machine), or [] when the heap cannot give one."""
+    held = _P8_HOLDER[0]
+    if held is None or not held._h:
+        bufs = _p8_buffers()
+        if bufs:
+            _P8_HOLDER[0] = run
+        return bufs
+    try:
+        return [bytearray(65536), bytearray(0x4300)]
+    except MemoryError:
+        return []
+
+
 def reserve_p8_memory():
     """Take the PICO-8 machine's buffers NOW, while the heap is still whole.
 
@@ -184,6 +203,8 @@ class MoycoreRun:
     # C side caps it too; this mirrors the constant so the array is the right
     # size rather than merely big.
     AUDIO_MAX = 32
+
+    _h = 0             # the run's row (run_begin's handle), 0 once closed
 
     def __init__(self, ws, ns, src):
         if _moycore is None:
@@ -256,13 +277,13 @@ class MoycoreRun:
         # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
         # once; moycore reseeds it per run.
         if hasattr(_moycore, "p8_memory"):
-            bufs = _p8_buffers()
+            bufs = _p8_for(self)
             if bufs:
                 _moycore.p8_memory(*bufs)
             else:
                 _moycore.p8_memory(None, None)      # no machine this run
 
-        _moycore.run_begin(
+        self._h = _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
@@ -440,6 +461,7 @@ class MoycoreRun:
         """The whole cart frame. `draw` is None because this already drew: the
         C loop runs _update and _draw back to back, which is the point."""
         self._refresh()
+        _moycore.use(self._h)
         # A tier that swaps framebuffers per frame (the P4's ping-pong, the
         # T-Deck's bounce) must re-point the canvas, exactly as
         # DeviceCanvas.sync_back does for the Python lanes.
@@ -473,7 +495,7 @@ class MoycoreRun:
         """An Editor flag edit into the run's own table
         (`ProjectStore.flag_edits`); a module built without it drops it."""
         fx = getattr(_moycore, "flag_xor", None)
-        if fx is not None:
+        if fx is not None and _moycore.use(self._h):
             fx(n, mask)
 
     def _last_buf(self):
@@ -515,6 +537,7 @@ class MoycoreRun:
         ws = self.ws
         inp = ws.input
         buf = ws.canvas._buf
+        _moycore.use(self._h)
         if buf is not self._buf:
             _moycore.retarget(buf)
             self._buf = buf
@@ -537,7 +560,7 @@ class MoycoreRun:
     def flush_pmem(self):
         """Write the C-side pmem image back into the console's Pmem, if it
         moved. Called at the same boundaries the deferred save already uses."""
-        if _moycore is None or not _moycore.active():
+        if _moycore is None or not _moycore.use(self._h) or not _moycore.active():
             return False
         if not _moycore.pmem_image(self.pmem_img):
             return False
@@ -558,16 +581,26 @@ class MoycoreRun:
 
     def get_global(self, name):
         """A cart global as a number or a string, or None."""
-        return _moycore.get_global(name) if _moycore is not None else None
+        if _moycore is None or not _moycore.use(self._h):
+            return None
+        return _moycore.get_global(name)
 
     def get_global_len(self, name):
         """The length of a table global, or None (a module that cannot say)."""
         f = getattr(_moycore, "get_global_len", None)
-        return f(name) if f is not None else None
+        return f(name) if f is not None and _moycore.use(self._h) else None
 
     def exec(self, src, name="probe"):
         """Run a chunk in the cart's state: None, or the error text."""
+        if not _moycore.use(self._h):
+            return "the run has closed"
         return _moycore.exec(src, name)
+
+    def heap(self):
+        """The run's Lua heap in bytes, Lua's own count, or None: a run with
+        no VM, or one that has closed."""
+        f = getattr(_moycore, "heap", None)
+        return f(self._h) if f is not None and self._h else None
 
     def close(self):
         # The hooks go with the state: the Player and its tests read
@@ -580,8 +613,9 @@ class MoycoreRun:
             # Drop the handle registries: they are what PIN the run's layers
             # and images, and a layer is a full-canvas allocation.
             self._pins = None
-            if _moycore is not None:
+            if _moycore is not None and _moycore.use(self._h):
                 _moycore.close()
+            self._h = 0
             layer_restore_end(self.ws.canvas, self)
             # After the runtime's close: the run's end returns whatever of its
             # loans the close left (native/moy_play).
@@ -997,7 +1031,7 @@ class WasmRun(MoycoreRun):
         swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
         cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
         self._pins = None
-        _moycore.run_begin(
+        self._h = _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),

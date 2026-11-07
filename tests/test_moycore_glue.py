@@ -183,7 +183,7 @@ class FakeMoycore(types.ModuleType):
                      "active", "view", "set_sram_floor", "alloc_stats",
                      "get_global", "wasm_open", "wasm_ran", "take_frames", "frame",
                      "frame_settle", "frame_presented", "frame_kept",
-                     "layer_bind", "scene_put", "image_put"):
+                     "layer_bind", "scene_put", "image_put", "use", "heap"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -204,6 +204,14 @@ class FakeMoycore(types.ModuleType):
             raise TypeError("run_begin: %d args" % RB_ARITY)
         self.run_begin_args = a
         self._log("run_begin")
+        return 9                          # the run's row, as the C's handle
+
+    def _use(self, h):
+        # Not logged: every call into a run makes its row current first.
+        return h == 9
+
+    def _heap(self, h):
+        return 4096 if h == 9 else None
 
     def rb(self, field):
         """One `run_begin` argument, by the C's own parameter name."""

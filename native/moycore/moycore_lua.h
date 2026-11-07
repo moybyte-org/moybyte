@@ -12,8 +12,14 @@
 // profilers reach a load and a frame through the binding's hooks
 // (moycore_lua_hooks), which do nothing while no profiler is armed.
 //
-// One run at a time: `moycore_RUN` is it.
-
+// THE RUNS ARE ROWS: several runs are open at once, each a row of its own --
+// its VM, its console, its layers, its paint images and scenes, its p8
+// machine and its OWNER -- and `moycore_RUN` is the CURRENT row, the one
+// every call below acts on. A caller makes its row current
+// (moycore_run_use) before it calls in; a row is current on the VM's task
+// alone, so nothing switches it under a call. The rows are MOYCORE_RUNS at
+// most, from PSRAM on a board: the first at the first ask, kept for good; a
+// second and later one while a run holds it (moycore_run_new, moycore_run_end).
 #ifndef MOYCORE_LUA_H
 #define MOYCORE_LUA_H
 
@@ -32,15 +38,60 @@
 #define MOYCORE_POOL 1
 #endif
 
-typedef struct {
+#ifndef MOYCORE_RUNS
+#define MOYCORE_RUNS 4          // the owner tags a run takes: cart, cart2..cart4
+#endif
+#if MOYCORE_RUNS > 8
+#error "a run's handle carries its slot in three bits"
+#endif
+
+typedef struct moycore_run {
     lua_State  *L;               // the cart's VM; NULL for a compiled cart
     int         wasm;            // a compiled cart's session is open
     moycore_run_t c;             // the console (moycore_run.h)
     moycore_layers layers;       // the cart's layers' canvases (moycore_layers.h)
     int         open;
+    // The run's own media and machine (moycore_lua.c).
+    moy_p8      p8;              // the PICO-8 machine's state
+    uint8_t    *p8mem, *p8rom;   // its buffers, the caller's (moycore_lua_p8_memory)
+    void       *imgs;            // the paint images' IMAGE table (moy_htab_t)
+    void       *lay;             // the layers made here, `nlay` of `caplay`
+    int         nlay, caplay;
+    void       *scenes;          // the .moyscene texts (moycore_scenes_t)
+    uint32_t    owner;           // its OWNER row (moycore_lua_owner), or 0
+    uint32_t    proc;            // its process row's handle (the binding's), or 0
+    uint16_t    gen;             // its run's number, which its handle carries
+    uint8_t     gc_gen;          // the collector is generational
+    uint8_t     slot;            // its index, 0 .. MOYCORE_RUNS - 1
 } moycore_run;
 
-extern moycore_run moycore_RUN;
+// The current row, NULL before the first ask; moycore_RUN reads it.
+extern moycore_run *moycore_run_row;
+moycore_run *moycore_run_first(void);
+static inline moycore_run *moycore_row(void)
+{
+    return moycore_run_row != NULL ? moycore_run_row : moycore_run_first();
+}
+#define moycore_RUN (*moycore_row())
+
+// A row for a new run, made current: the current one when it holds no run,
+// else a free one. NULL when MOYCORE_RUNS are open, or with no memory.
+moycore_run *moycore_run_new(void);
+// `r` made the current row, its console the one libmoy's callbacks read.
+void moycore_run_use(moycore_run *r);
+// Row `slot`, or NULL where none is made.
+moycore_run *moycore_run_at(int slot);
+// A row's run as a handle (its number and slot, never 0), and the row a
+// handle names while that run holds it, else NULL: a binding's name for a run.
+uint32_t moycore_run_handle(const moycore_run *r);
+moycore_run *moycore_run_of(uint32_t h);
+// The rows holding a run (open, a VM or a compiled session).
+int moycore_run_count(void);
+// After a row's run has closed: the row zeroed, and a row past the first
+// given back. The first row is current again when `r` was.
+void moycore_run_end(moycore_run *r);
+// The Lua heap of row `r` in bytes (Lua's own count, exact), 0 for none.
+size_t moycore_run_heap(const moycore_run *r);
 
 // What the profilers do around a load and a frame: the binding's table
 // (modmoycore.c), constant, so it costs no RAM. A frame's three hooks share
@@ -112,14 +163,17 @@ int moycore_lua_image_put(const char *name, const char *text, size_t n);
 // for no such layer. What a harness reads a layer's drawing through.
 int moycore_lua_layer(int i, moy_pixel **pix, int *w, int *h);
 
-// The run's OWNER row (native/moy_glass/moy_buf.h), set by the kernel's
-// Player at its launch: the run's layer and image pixels are BUF rows on loan
-// to it. 0 (and the close) leaves them plain allocations.
+// The next run's OWNER row (native/moy_glass/moy_buf.h), set by the kernel's
+// Player at its launch, which the run's row takes when it is made: the run's
+// layer and image pixels are BUF rows on loan to it. 0 leaves them plain
+// allocations.
 void moycore_lua_owner(uint32_t owner);
 
 int moycore_lua_scene_put(const char *name, const char *text, size_t n);
 
 // The p8 machine's buffers (65536 and 0x4300 bytes), or NULLs: no machine.
+// The next moycore_lua_open's: its row holds them from then, so two runs at
+// once are handed two pairs.
 void moycore_lua_p8_memory(uint8_t *mem, uint8_t *rom);
 
 // The collector: `mode` as lua_gc_mode() spells it (-1 read only, 0 stop,

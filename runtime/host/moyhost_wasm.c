@@ -72,6 +72,7 @@ typedef struct {
     moy_files_t *files;      /* the cart's written files (moy_files.h) */
     char       *writable;    /* the manifest's "writable", libmoy's form */
     moy_app_run_t app;       /* the app's run its "moybyte.app" imports serve */
+    uint32_t    rh;          /* its console's row (moycore_run_handle), 0 once released */
     void       *next;        /* the runs made and not freed */
 } host_wasm;
 
@@ -80,17 +81,32 @@ static int g_runtime;        /* 1 once WAMR is up and the table registered */
 /* The shared run (moyhost_lua.c): claim it, and the frame hook the Player's
  * wasm row reaches through moycore_frame. */
 void hl_claim(void (*release)(void));
+moycore_run *hl_row_for_new(void);
 extern int (*hl_wasm_tick)(float dt, int draw, char *err, size_t n);
 extern void (*hl_wasm_stuck)(void);
 static host_wasm *G_LIVE_W;
 int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen);
 
+/* The live run's console row made current: the row every moycore_RUN below
+ * names (WRUN). The current row as it is when no compiled run is live. */
+static moycore_run *hw_row(void)
+{
+    moycore_run *row = G_LIVE_W ? moycore_run_of(G_LIVE_W->rh) : NULL;
+    if (row) moycore_run_use(row);
+    return row ? row : &moycore_RUN;
+}
+#define WRUN (*hw_row())
+
 /* The live run's console goes; the run object stays its owner's to free. */
 static void hw_release_live(void)
 {
-    moycore_run_close(&moycore_RUN.c);
-    memset(&moycore_RUN, 0, sizeof(moycore_RUN));
-    moycore_run_cur = NULL;
+    moycore_run *row = G_LIVE_W ? moycore_run_of(G_LIVE_W->rh) : NULL;
+    if (row) {
+        moycore_run_use(row);
+        moycore_run_close(&row->c);
+        moycore_run_end(row);
+    }
+    if (G_LIVE_W) G_LIVE_W->rh = 0;
     hl_wasm_tick = NULL;
     hl_wasm_stuck = NULL;
     G_LIVE_W = NULL;
@@ -336,10 +352,13 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     if (!hw_runtime()) return NULL;
     r = (host_wasm *)calloc(1, sizeof(host_wasm));
     if (!r) return NULL;
-    hl_claim(hw_release_live);             /* one run at a time: this one */
+    hl_claim(hw_release_live);             /* one compiled run at a time: this one */
+    if (hl_row_for_new() == NULL) {        /* its console's own row */
+        free(r);
+        return NULL;
+    }
     r->next = G_RUNS;
     G_RUNS = r;
-    memset(&moycore_RUN, 0, sizeof(moycore_RUN));
     moy_canvas_init(&moycore_RUN.c.canvas, (moy_pixel *)pix, w, h);
     if (wire) moy_canvas_wire(&moycore_RUN.c.canvas, wire);
     moycore_run_open(&moycore_RUN.c, snap, aq, aq_cap);
@@ -355,6 +374,7 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     moycore_run_cur = &moycore_RUN.c;
     moycore_RUN.open = 1;
     moycore_RUN.wasm = 1;
+    r->rh = moycore_run_handle(&moycore_RUN);
     G_LIVE_W = r;
     hl_wasm_tick = hw_tick_live;
     hl_wasm_stuck = hw_stuck_live;
@@ -379,16 +399,16 @@ void *hw_env(host_wasm *r)
 }
 
 void hw_set_sheet(host_wasm *r, uint8_t *pix, int nbytes)
-{ (void)r; moycore_run_set_sheet(&moycore_RUN.c, pix, nbytes > 0 ? (size_t)nbytes : 0); }
+{ (void)r; moycore_run_set_sheet(&WRUN.c, pix, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_map(host_wasm *r, uint8_t *cells, int nbytes, int w, int h)
-{ (void)r; moycore_run_set_map(&moycore_RUN.c, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
+{ (void)r; moycore_run_set_map(&WRUN.c, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
 
 void hw_set_flags(host_wasm *r, const uint8_t *flags, int nbytes)
-{ (void)r; moycore_run_set_flags(&moycore_RUN.c, flags, nbytes > 0 ? (size_t)nbytes : 0); }
+{ (void)r; moycore_run_set_flags(&WRUN.c, flags, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_cfg(host_wasm *r, const char *blob, int len)
-{ (void)r; moycore_run_set_cfg(&moycore_RUN.c, blob, len > 0 ? (size_t)len : 0); }
+{ (void)r; moycore_run_set_cfg(&WRUN.c, blob, len > 0 ? (size_t)len : 0); }
 
 /* Load the cart's module from `dir`/`main`, check it against moy-spec SPEC.md 16's
  * shape and the manifest's `pages` BEFORE its memory exists, instantiate it
@@ -453,8 +473,8 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         put_err(err, errlen, "exec env", NULL);
         return 1;
     }
-    moycore_run_cur = &moycore_RUN.c;
-    if (moy_wasm_open(&r->w, &moycore_RUN.c.con, r->env) != 0) {
+    moycore_run_cur = &WRUN.c;
+    if (moy_wasm_open(&r->w, &WRUN.c.con, r->env) != 0) {
         put_err(err, errlen, "refused", "a hook is missing");
         return 1;
     }
@@ -468,8 +488,8 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
 static int trapped(host_wasm *r)
 {
     r->dead = 1;
-    moy_reset_state(&moycore_RUN.c.canvas);
-    moy_cls(&moycore_RUN.c.canvas, 0);
+    moy_reset_state(&WRUN.c.canvas);
+    moy_cls(&WRUN.c.canvas, 0);
     return 1;
 }
 
@@ -479,7 +499,7 @@ int hw_init(host_wasm *r, char *err, int errlen)
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    moycore_run_cur = &moycore_RUN.c;
+    moycore_run_cur = &WRUN.c;
     moycore_run_tick_begin();
     if (moy_wasm_init(&r->w, err, (size_t)errlen)) return trapped(r);
     return 0;
@@ -493,10 +513,10 @@ int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    moycore_run_cur = &moycore_RUN.c;
+    moycore_run_cur = &WRUN.c;
     moycore_run_tick_begin();              /* h_time counts from here */
     moycore_run_tick_dt(dt);
-    moy_reset_state(&moycore_RUN.c.canvas);
+    moy_reset_state(&WRUN.c.canvas);
     if (moy_wasm_update(&r->w, dt, err, (size_t)errlen)) return trapped(r);
     if (draw && !r->w.quitting && moy_wasm_draw(&r->w, err, (size_t)errlen))
         return trapped(r);
@@ -521,16 +541,16 @@ void hw_snd_counts(host_wasm *r, uint32_t *out)
 }
 
 void hw_retarget(host_wasm *r, void *pix)
-{ if (r == G_LIVE_W) moycore_RUN.c.canvas.pix = (moy_pixel *)pix; }
+{ if (r == G_LIVE_W) WRUN.c.canvas.pix = (moy_pixel *)pix; }
 
 int hw_pmem_image(host_wasm *r, int32_t *out, int n)
-{ return r == G_LIVE_W ? moycore_run_pmem_image(&moycore_RUN.c, out, n) : 0; }
+{ return r == G_LIVE_W ? moycore_run_pmem_image(&WRUN.c, out, n) : 0; }
 
 void hw_pmem_load(host_wasm *r, const int32_t *in, int n)
-{ if (r == G_LIVE_W) moycore_run_pmem_load(&moycore_RUN.c, in, n); }
+{ if (r == G_LIVE_W) moycore_run_pmem_load(&WRUN.c, in, n); }
 
 int hw_get_view(host_wasm *r, int *w, int *h)
-{ return r == G_LIVE_W ? moycore_run_view(&moycore_RUN.c, w, h) : 0; }
+{ return r == G_LIVE_W ? moycore_run_view(&WRUN.c, w, h) : 0; }
 
 /* The manifest's "audio_ring": `snd`'s queue `depth` frames deep, in the
  * boards' range (native/moy_audio/moy_audio_snd.h's 64..65536). 0, or -1

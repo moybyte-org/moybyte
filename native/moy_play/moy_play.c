@@ -282,6 +282,7 @@ typedef struct {
     int32_t window;                 // the console's: the run lies in a window
     uint32_t upc0[MOY_UPC_CLASSES];
     uint32_t owner;                 // the run's OWNER row (moy_buf.h), or 0
+    moycore_run *mc;                // its runtime's row (moycore_lua.h), from its open
     int view;                       // what the cart had declared last frame
     int view_w, view_h;
     uint32_t budget;                // the runaway watch's, for each tick (ms)
@@ -375,6 +376,7 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
         moy_play_end(R.h, MOY_PLAY_END_QUIT);
     }
     memset(&R.info, 0, sizeof(R.info));
+    R.mc = NULL;
     launch_ctx_t c = { &R.info, false, cart, flags };
     if (moy_cat_entry(cart, entry_seen, NULL, &c) != 0 || !c.seen) {
         return MOY_PLAY_NOCART;
@@ -442,6 +444,7 @@ int moy_play_open(uint32_t run) {
         r->info.raised = true;
         return MOY_PLAY_RAISED;
     }
+    r->mc = moycore_run_row;
     r->view = moycore_run_view(&moycore_RUN.c, &r->view_w, &r->view_h);
     r->info.stack_open = moy_play_stack_free();
     return MOY_PLAY_OK;
@@ -577,6 +580,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     if (r->info.raised) {
         return MOY_PLAY_RAISED;         // its runtime is broken: report, never rerun
     }
+    moycore_run_use(r->mc);             // its own row, whichever was current
     int32_t *snap = moycore_RUN.c.snap;
     int32_t *aq = moycore_RUN.c.aq;
     moy_match_t *lm = moy_match_kernel();

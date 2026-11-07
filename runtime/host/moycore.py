@@ -25,11 +25,23 @@ for _n in dir(_lb):
         globals()[_n] = getattr(_lb, _n)
 TICK_DRAW = 1
 
-_RUN = [None]
+_RUNS = {}          # handle -> HostLuaRun, the runs open at once
+_CUR = [0]          # the current run's handle: what every verb below acts on
+
+
+def _prune():
+    for h in [h for h, r in _RUNS.items() if r.handle() != h]:
+        del _RUNS[h]               # the C took its row back (moyhost_lua.c)
+        if _CUR[0] == h:
+            _CUR[0] = 0
+
+
+def _cur():
+    return _RUNS.get(_CUR[0])
 
 
 def _run():
-    r = _RUN[0]
+    r = _cur()
     if r is None:
         raise RuntimeError("moycore: no run")
     return r
@@ -45,20 +57,41 @@ class _Map:
 def run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h, snap, aq,
               pmem_img, cfg, flags, vm, app=None):
     """The console over the caller's buffers and the VM opened on it, as the
-    boards' run_begin; `cfg` is lua_ext.cfg_blob's bytes, `app` the app's
-    run (moy_app's `run()`) or None."""
+    boards' run_begin, in a row of its own beside the runs open: its handle,
+    which `use` makes current again. `cfg` is lua_ext.cfg_blob's bytes,
+    `app` the app's run (moy_app's `run()`) or None."""
     if not vm:
         raise RuntimeError("moycore: a compiled cart runs on wasm_host here")
-    # One run at a time, as on a board; a host harness that dropped its
-    # console without closing the run leaves it here, and the next one ends it.
-    close()
     r = _lb.HostLuaRun(fb, w, h, sheet_pix,
                        _Map(map_cells, map_w, map_h) if map_cells is not None else None,
                        wire=wire, flags=flags, snap=snap, aq=aq,
                        cfg=cfg, app=app)
     if pmem_img is not None:
         r.pmem_load(pmem_img)
-    _RUN[0] = r
+    _prune()
+    h = r.handle()
+    _RUNS[h] = r
+    _CUR[0] = h
+    return h
+
+
+def use(h):
+    """Run `h` made current: True, or False when it has closed."""
+    r = _RUNS.get(h)
+    if r is None or r.handle() != h:
+        _prune()
+        return False
+    _CUR[0] = h
+    return True
+
+
+def runs():
+    return _lb.play_lib().hl_runs()
+
+
+def heap(h):
+    r = _RUNS.get(h)
+    return r.heap() if r is not None and r.handle() == h else None
 
 
 def register(name, fn):
@@ -107,33 +140,33 @@ def retarget(buf):
 
 
 def flag_xor(n, mask):
-    r = _RUN[0]
+    r = _cur()
     if r is not None:
         r.flag_xor(n, mask)
 
 
 def view():
-    r = _RUN[0]
+    r = _cur()
     return r.view() if r is not None else None
 
 
 def active():
-    return _RUN[0] is not None
+    return _cur() is not None
 
 
 def get_global(name):
-    r = _RUN[0]
+    r = _cur()
     return r.get_global(name) if r is not None else None
 
 
 def get_global_len(name):
-    r = _RUN[0]
+    r = _cur()
     return r.get_global_len(name) if r is not None else None
 
 
 def pmem_image(out):
     """Fill `out` (256 int32) with the run's pmem; whether it moved."""
-    r = _RUN[0]
+    r = _cur()
     if r is None:
         return False
     dirty, img = r.pmem()
@@ -143,7 +176,8 @@ def pmem_image(out):
 
 
 def close():
-    r = _RUN[0]
-    _RUN[0] = None
+    """The current run closed."""
+    r = _RUNS.pop(_CUR[0], None)
+    _CUR[0] = 0
     if r is not None:
         r.close()

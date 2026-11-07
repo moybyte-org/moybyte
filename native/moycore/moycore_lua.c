@@ -21,7 +21,6 @@
 #include "moy_img.h"
 #include "moy_buf.h"
 
-moycore_run moycore_RUN;
 #define RUN moycore_RUN
 
 #define HOOK(name, ...) moycore_lua_hooks.name(__VA_ARGS__)
@@ -600,8 +599,10 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 // the last of Lua's own PSRAM fallback and every Lua cart dies with "not
 // enough memory" -- seen on both S3 boards.
 // See moy-spec proposals/p8-memory-map.md for what a byte costs.
-static moy_p8 g_p8;
-static uint8_t *g_p8mem, *g_p8rom;
+#define g_p8 (RUN.p8)
+#define g_p8mem (RUN.p8mem)
+#define g_p8rom (RUN.p8rom)
+static uint8_t *g_p8_next_mem, *g_p8_next_rom;   // the next open's, the row's from then
 
 static int mc_unhex(int ch)
 {
@@ -703,7 +704,7 @@ static int l_map_masked(lua_State *L)
 // so a caller can pass 0 for "the engine default" without meaning "keep").
 static int g_gc_mode = -1;                 // armed request, -1 = leave alone
 static int g_gc_a = -1, g_gc_b = -1, g_gc_c = -1;
-static uint8_t g_gc_gen;                   // the live mode, tracked: asking
+#define g_gc_gen (RUN.gc_gen)              // the live mode, tracked: asking
                                            // Lua costs a mode change
 
 static void lua_gc_apply(lua_State *L, int mode, int a, int b, int c)
@@ -739,8 +740,8 @@ int moycore_lua_gc_generational(void)
 
 void moycore_lua_p8_memory(uint8_t *mem, uint8_t *rom)
 {
-    g_p8mem = mem;
-    g_p8rom = rom;
+    g_p8_next_mem = mem;
+    g_p8_next_rom = rom;
 }
 
 // -- the meters ----------------------------------------------------------------
@@ -858,11 +859,13 @@ typedef struct {
     int w, h;
 } mc_layer_t;
 
-static moy_htab_t *g_imgs;            // IMAGE rows of mc_image_t
-static mc_layer_t *g_lay;
-static int g_nlay, g_caplay;
-static moycore_scenes_t *g_scenes;    // the cart's .moyscene texts (moycore_scene.h)
-static uint32_t g_owner;              // the run's OWNER row, or 0
+// The run's own, in its row (moycore_lua.h).
+#define g_imgs (*(moy_htab_t **)&RUN.imgs)       // IMAGE rows of mc_image_t
+#define g_lay (*(mc_layer_t **)&RUN.lay)
+#define g_nlay (RUN.nlay)
+#define g_caplay (RUN.caplay)
+#define g_scenes (*(moycore_scenes_t **)&RUN.scenes)   // the .moyscene texts
+#define g_owner (RUN.owner)                    // the run's OWNER row, or 0
 
 static void *media_alloc(size_t n)
 {
@@ -890,9 +893,133 @@ static void tab_release(void *p, size_t n)
 
 static const moy_htab_mem_t g_tab_mem = { media_alloc, tab_release };
 
+// -- the rows (moycore_lua.h's THE RUNS ARE ROWS) ------------------------------
+
+moycore_run *moycore_run_row;
+static moycore_run *g_rows[MOYCORE_RUNS];
+static uint16_t g_row_gen;
+// The next run's OWNER: the Player's launch comes before the runtime makes
+// the run's row, which takes it.
+static uint32_t g_owner_next;
+
+static moycore_run *row_make(int slot)
+{
+    moycore_run *r = g_rows[slot];
+    if (r == NULL) {
+        r = (moycore_run *)media_alloc(sizeof(*r));
+        if (r == NULL) return NULL;
+        g_rows[slot] = r;
+    }
+    memset(r, 0, sizeof(*r));
+    r->slot = (uint8_t)slot;
+    g_row_gen = (uint16_t)(g_row_gen >= 0x7fffu ? 1u : g_row_gen + 1u);
+    r->gen = g_row_gen;
+    return r;
+}
+
+static int row_held(const moycore_run *r)
+{
+    return r != NULL && (r->open || r->L != NULL || r->wasm);
+}
+
+moycore_run *moycore_run_first(void)
+{
+    if (g_rows[0] == NULL && row_make(0) == NULL) {
+        // No memory for even the first row: nothing can run, and every
+        // caller reads a zero row in flash rather than a NULL one (a write
+        // to it faults; only a made row is written).
+        static const moycore_run none;
+        return (moycore_run *)&none;
+    }
+    moycore_run_row = g_rows[0];
+    return moycore_run_row;
+}
+
+moycore_run *moycore_run_new(void)
+{
+    moycore_run *cur = moycore_row();
+    if (!row_held(cur) && g_rows[cur->slot] == cur) {
+        int slot = cur->slot;
+        moycore_run_use(row_make(slot));
+        moycore_run_row->owner = g_owner_next;
+        g_owner_next = 0;
+        return moycore_run_row;
+    }
+    for (int i = 0; i < MOYCORE_RUNS; i++) {
+        if (row_held(g_rows[i])) continue;
+        moycore_run *r = row_make(i);
+        if (r == NULL) return NULL;
+        moycore_run_use(r);
+        r->owner = g_owner_next;
+        g_owner_next = 0;
+        return r;
+    }
+    return NULL;
+}
+
+void moycore_run_use(moycore_run *r)
+{
+    if (r == NULL) return;
+    moycore_run_row = r;
+    moycore_run_cur = r->open ? &r->c : NULL;
+}
+
+moycore_run *moycore_run_at(int slot)
+{
+    return slot >= 0 && slot < MOYCORE_RUNS ? g_rows[slot] : NULL;
+}
+
+uint32_t moycore_run_handle(const moycore_run *r)
+{
+    return r != NULL ? (uint32_t)r->gen << 3 | r->slot : 0u;
+}
+
+moycore_run *moycore_run_of(uint32_t h)
+{
+    moycore_run *r = moycore_run_at((int)(h & 7u));
+    return r != NULL && h != 0u && r->gen == (h >> 3) && row_held(r) ? r : NULL;
+}
+
+int moycore_run_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < MOYCORE_RUNS; i++) n += row_held(g_rows[i]);
+    return n;
+}
+
+void moycore_run_end(moycore_run *r)
+{
+    if (r == NULL || g_rows[r->slot] != r) return;
+    int slot = r->slot;
+    if (slot == 0) {
+        memset(r, 0, sizeof(*r));
+    } else {
+        g_rows[slot] = NULL;
+        media_free(r);
+    }
+    if (moycore_run_row == r) {
+        moycore_run_row = g_rows[0];
+        moycore_run_cur = NULL;
+    }
+}
+
+size_t moycore_run_heap(const moycore_run *r)
+{
+    if (r == NULL || r->L == NULL) return 0;
+    return (size_t)lua_gc(r->L, LUA_GCCOUNT, 0) * 1024u + (size_t)lua_gc(r->L, LUA_GCCOUNTB, 0);
+}
+
+// Whether any row still has a VM: the pool's chunks are every state's.
+static int any_vm(void)
+{
+    for (int i = 0; i < MOYCORE_RUNS; i++)
+        if (g_rows[i] != NULL && g_rows[i]->L != NULL) return 1;
+    return 0;
+}
+
 void moycore_lua_owner(uint32_t owner)
 {
-    g_owner = owner;
+    g_owner_next = owner;
 }
 
 // `n` zeroed pixel bytes for the run: a BUF row on loan to its owner, or a
@@ -1133,7 +1260,7 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
         lua_close(RUN.L);
         RUN.L = NULL;
 #if MOYCORE_POOL
-        pool_release();              // a run that never opened still owns chunks
+        if (!any_vm()) pool_release();   // a run that never opened still owns chunks
 #endif
         put_err(err, n, "moycore: sandbox failed");
         return -1;
@@ -1162,6 +1289,8 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
     // probes for it, a moy cart never sees the globals it does not ask for. No
     // buffers means no machine and the shim's sparse table -- never a failed
     // run.
+    g_p8mem = g_p8_next_mem;
+    g_p8rom = g_p8_next_rom;
     if (g_p8mem) moy_p8_open(RUN.L, &RUN.c.con, &g_p8, g_p8mem, g_p8rom);
     g_gc_gen = 0;                    // a fresh lua_State is incremental
     return 0;
@@ -1370,7 +1499,8 @@ void moycore_lua_close(void)
 #if MOYCORE_POOL
     // AFTER lua_close, never before: until it returns, the chunks still hold
     // live Lua objects. Nothing may survive a run -- a cart that churned its
-    // way to twenty chunks must not keep them while the launcher is up.
-    pool_release();
+    // way to twenty chunks must not keep them while the launcher is up -- and
+    // the chunks are every state's, so the last VM's close gives them back.
+    if (!any_vm()) pool_release();
 #endif
 }

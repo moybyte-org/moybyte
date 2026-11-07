@@ -19,6 +19,21 @@ file. On a VM tier a run's frame is the kernel's Player's
 (`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
 plays the queue.
 
+**Several runs are open at once, each a row** (`moycore_lua.h`, THE RUNS ARE
+ROWS): its VM, console, layers, paint images and scenes, p8 machine and
+OWNER. `run_begin` answers the run's handle and makes its row current;
+`use(h)` makes it current again, and every other verb acts on the current
+row, so the glue (`device/moycore_glue.py`) calls `use` before each call into
+its run. A row comes from PSRAM on a board (the first at the first ask and
+kept, a later one while its run holds it), so the S3s' internal SRAM holds
+the pointers alone. What a row keeps against the gc -- its registered
+callables, its layer restore state, its last `view()`, its p8 buffers -- is
+one rooted list, a stretch per row. `runs()` counts the open runs and
+`heap(h)` reads a run's Lua heap, Lua's own count. The pool's chunks are
+every state's, given back at the last VM's close. The Player still plays one
+run (`native/moy_play/moy_play.h`), and admission keeps a Lua or compiled
+game alone (`docs/os_2026-11/processes.md` §6).
+
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |

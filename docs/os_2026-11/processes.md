@@ -457,9 +457,11 @@ beside it, Cancel and Close, whose Close closes what it names and opens the
 game. The Player's own fit check still runs at the load, against what is
 free.
 
-**Sessions.** Lua and wasm run one session at a time today
-(`native/moycore`, `native/moy_wasm`), so several Lua or wasm apps at once
-arrive with the process tables (phase 5); Python, stepped by the shell in
+**Sessions.** The Lua engine holds several runs at once, each a row
+(`native/moycore/moycore_lua.h`), while the kernel's Player plays one
+(`native/moy_play`) and wasm runs one session (`native/moy_wasm`), so
+several Lua or wasm apps at once arrive with the process tables (phase 5);
+Python, stepped by the shell in
 its one VM, gets several first: admission lets a Lua or compiled game run
 alone and names everything running to close. Each run takes one of four
 owner tags (`cart`, `cart2`..`cart4`) for its layer loans and its audio

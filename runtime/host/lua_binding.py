@@ -155,6 +155,9 @@ _SIGS = (
     ("hl_get_global_len", [_P, _C], _I),
     ("hl_heap_bytes", [_P], _I),
     ("hl_heap_peak_bytes", [_P], _I),
+    ("hl_heap_live", [_P], _I),
+    ("hl_handle", [_P], _U32),
+    ("hl_runs", [], _I),
     ("hl_get_view", [_P, ctypes.POINTER(_I), ctypes.POINTER(_I)], _I),
     ("hl_split", [ctypes.POINTER(_U32), ctypes.POINTER(_U32)], None),
     ("hl_free", [_P], None),
@@ -261,8 +264,8 @@ class PlayInfo(ctypes.Structure):
 
 
 class HostLuaRun:
-    """The host's one Lua cart run, in the C a board runs (the module's
-    docstring). `buf` is the canvas's RGB565 framebuffer, borrowed and never
+    """A Lua cart run on the host, in the C a board runs (the module's
+    docstring), beside the others open. `buf` is the canvas's RGB565 framebuffer, borrowed and never
     copied; `wire` its 64-entry index -> word table (None: libmoy's canonical
     palette). The sheet, map, flags and config are set before the VM opens,
     because the p8 machine seeds from them as it opens."""
@@ -543,6 +546,15 @@ class HostLuaRun:
         """The length of a table global (Lua's #t), or None."""
         n = self._d.hl_get_global_len(self._r, name.encode())
         return None if n < 0 else n
+
+    def handle(self):
+        """The run's handle, a row of the runs open at once
+        (native/moycore/moycore_lua.h), or 0 once it has closed."""
+        return self._d.hl_handle(self._r) if getattr(self, "_r", None) else 0
+
+    def heap(self):
+        """The run's Lua heap in bytes, Lua's own count: exact, no collect."""
+        return self._d.hl_heap_live(self._r) if getattr(self, "_r", None) else 0
 
     def close(self):
         if getattr(self, "_r", None):

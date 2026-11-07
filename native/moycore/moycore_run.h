@@ -8,7 +8,8 @@
 // the cart's config as a C table, the tile flags copied in. None of it calls
 // into a VM, which is what lets one copy serve every tier: modmoycore.c (the
 // boards, the browser and the desktop MicroPython) and the host's ctypes
-// shims (runtime/host/moyhost_lua.c, runtime/host/moyhost_wasm.c), one run at a time.
+// shims (runtime/host/moyhost_lua.c, runtime/host/moyhost_wasm.c); a run's
+// console is its row's (moycore_lua.h), the callbacks reading the current one.
 //
 // The callbacks take libmoy's `void *user` and read `moycore_run_cur`, the
 // run being driven.
