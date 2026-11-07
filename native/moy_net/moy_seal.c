@@ -456,6 +456,12 @@ int moy_seal_gcm(int seal, const uint8_t key[MOY_SEAL_KEY], int kind, uint32_t i
     for (int i = 0; i < 8; i++) {
         iv[4 + i] = (uint8_t)(seq >> (56 - 8 * i));
     }
+    // A board's GCM is ESP-IDF's (MBEDTLS_GCM_ALT), which refuses a NULL
+    // input even at length 0: an empty record's seal never wrote its tag.
+    uint8_t none[1];
+    if (p == NULL) {
+        p = none;
+    }
     mbedtls_gcm_context g;
     mbedtls_gcm_init(&g);
     int r = mbedtls_gcm_setkey(&g, MBEDTLS_CIPHER_ID_AES, key, 128);
