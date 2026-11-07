@@ -123,6 +123,10 @@ nor those docs will warn you about:
   the query string, and its body is AES-GCM opened in place before a route
   reads it. A route the VM answers (`/run`, `/update`, the system root's
   batches) parks with its body opened, and the C seals what the VM answers.
+  **A page never downgrades**: one that holds a key or has signed in treats
+  `{"open": true}`, a 404/405/501 from `/auth` and a 2xx in the clear as
+  errors; only a keyless page believes a host that says it has no sign-in
+  (the dev server). `firmware/web_runner/signin_test.mjs` holds the page's end.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files

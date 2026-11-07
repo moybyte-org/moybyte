@@ -78,8 +78,10 @@ int moy_http_recv(int fd, char *buf, size_t cap, moy_http_req_t *r,
 int moy_http_send(int fd, const void *p, size_t n);
 void moy_http_close(int fd);
 
-// The platform under the links: a millisecond clock, a sleep, and memory that
-// is the kernel's (PSRAM on a board), never the VM's heap.
+// The platform under the links: a millisecond clock since boot (moy_net_ms64,
+// which never wraps, and its low 32 bits), a sleep, and memory that is the
+// kernel's (PSRAM on a board), never the VM's heap.
+uint64_t moy_net_ms64(void);
 uint32_t moy_net_ms(void);
 void moy_net_sleep_ms(uint32_t ms);
 void *moy_net_alloc(size_t n);
@@ -253,12 +255,14 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 // The sign-in's backoff (moy_webhost.c's header): wrong credentials a source
 // has free, wrong ones from anywhere before every source not signed in waits,
 // the first window, its cap (each wrong one past the free ones doubles it),
-// the sources remembered, and the quiet that clears the count from anywhere.
+// the sources remembered, the quiet that gives back one wrong one from
+// anywhere past the free ones, and the quiet that clears a count within them.
 #define MOY_WEB_AUTH_FREE 10
 #define MOY_WEB_AUTH_FREE_ALL 30
 #define MOY_WEB_AUTH_WAIT_MS 1000u
 #define MOY_WEB_AUTH_WAIT_MAX_MS 300000u
 #define MOY_WEB_AUTH_SOURCES 8
+#define MOY_WEB_AUTH_DECAY_MS 600000u
 #define MOY_WEB_AUTH_FORGET_MS 3600000u
 
 enum {
@@ -310,12 +314,15 @@ size_t moy_web_shelf(char *out, size_t cap);
 // The sign-in's state, kept in `system` (moy_webauth.h): the sign-in set up
 // over that folder (it need not serve), the board's id and a fresh QR token
 // (32 hex digits, "" while the sign-in is off), the paired browsers ("KID
-// CREATED SEEN NAME" a line) and dropping one ("all": every one).
+// CREATED SEEN NAME" a line) and dropping one ("all": every one). A password
+// changed or removed signs every browser out: its sessions end and a web
+// terminal is cut, its key kept (moy_web_signout: how many sessions went).
 int moy_web_auth(const char *system);
 void moy_web_board_id(char out[33]);
 void moy_web_token(char out[33]);
 size_t moy_web_keys(char *out, size_t cap);
 int moy_web_key_drop(const char *kid);
+int moy_web_signout(void);
 
 // The parked request: 1 and its spans (good until moy_web_answer), or 0.
 int moy_web_take(const char **method, size_t *method_n, const char **target,

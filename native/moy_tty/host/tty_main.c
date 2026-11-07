@@ -11,7 +11,8 @@
 // `skew MS` moves the webhost's clock by MS (negative: back, so a lockout's
 // wait already running lasts that much longer). Each answers a line.
 // `token` prints `TOKEN <hex>`, a QR's token; `drop` forgets every paired
-// browser, cutting a terminal one holds. Both run on the console's thread,
+// browser, cutting a terminal one holds; `signout` ends every session as a
+// password change does (`SIGNEDOUT N`). They run on the console's thread,
 // whose state the sign-in is. SYSTEM_DIR `-` is the open host.
 // The main thread prints a STATS line when a figure moves.
 // Usage: tty_main PORT SYSTEM_DIR CARTS_DIR
@@ -33,7 +34,7 @@
 #include "moy_tty.h"
 
 extern const moy_tty_shell_t moy_tty_moy_sh;
-extern uint32_t moy_net_ms_skew;
+extern uint64_t moy_net_ms_skew;
 
 static pthread_t console_tid;
 static volatile int console_up;
@@ -120,7 +121,7 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 
 static const char *s_system, *s_carts;
 static int s_port;
-static int s_cmd;                       // 1 token, 2 drop: the console's to run
+static int s_cmd;                       // 1 token, 2 drop, 3 signout: the console's to run
 
 
 static void *console(void *arg) {
@@ -150,6 +151,9 @@ static void *console(void *arg) {
             fflush(stdout);
         } else if (cmd == 2) {
             printf("DROPPED %d\n", moy_web_key_drop("all"));
+            fflush(stdout);
+        } else if (cmd == 3) {
+            printf("SIGNEDOUT %d\n", moy_web_signout());
             fflush(stdout);
         }
         usleep(16000);
@@ -190,6 +194,8 @@ int main(int argc, char **argv) {
                 __atomic_store_n(&s_cmd, 1, __ATOMIC_RELEASE);
             } else if (strcmp(line, "drop") == 0) {
                 __atomic_store_n(&s_cmd, 2, __ATOMIC_RELEASE);
+            } else if (strcmp(line, "signout") == 0) {
+                __atomic_store_n(&s_cmd, 3, __ATOMIC_RELEASE);
             } else if (strcmp(line, "ssh") == 0 && ssh_fd < 0) {
                 moy_tty_hold(MOY_TTY_SSH, 1);
                 int r = moy_tty_open(MOY_TTY_SSH, "sleep 30", 0, 80, 24, NULL, &ssh_fd, &pid);
@@ -204,7 +210,7 @@ int main(int argc, char **argv) {
                 printf("NOSSH\n");
                 fflush(stdout);
             } else if (strncmp(line, "skew ", 5) == 0) {
-                moy_net_ms_skew += (uint32_t)strtol(line + 5, NULL, 10);
+                moy_net_ms_skew += (uint64_t)strtoll(line + 5, NULL, 10);
                 printf("SKEW %s\n", line + 5);
                 fflush(stdout);
             }

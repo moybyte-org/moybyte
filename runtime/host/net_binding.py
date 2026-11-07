@@ -24,7 +24,8 @@ same C built for the host.
   sync_apply       one batch's ops applied into a store (native/moy_store's C)
   web_*            the webhost: start, stop, poll, state, the parked request,
                    the router without a socket (web_handle), the pull and the
-                   sign-in's state (web_auth, web_keys, web_key_drop)
+                   sign-in's state (web_auth, web_keys, web_key_drop,
+                   web_signout)
   ota_*            the updater (moy_ota.h): the manifest's check, the
                    download into the slot or the C6, the copied image's
                    install, the keys and the signature
@@ -137,6 +138,7 @@ _SIGS = (
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
     ("moy_web_stop", [_P], None),
     ("moy_web_auth", [_P], _I),
+    ("moy_web_signout", [], _I),
     ("moy_web_board_id", [ctypes.c_void_p], None),
     ("moy_web_token", [ctypes.c_void_p], None),
     ("moy_web_keys", [ctypes.c_void_p, _Z], _Z),
@@ -527,6 +529,12 @@ def web_keys():
 
 def web_key_drop(kid):
     return _lib().moy_web_key_drop(_bytes(kid))
+
+
+def web_signout():
+    """Every session ended and a web terminal cut (the password changed):
+    how many sessions went. The paired browsers stay."""
+    return _lib().moy_web_signout()
 
 
 def pw_hash(password, salt):
@@ -926,5 +934,5 @@ def _drains():
 
 def _skew_clock(ms):
     """Move the links' clock on by `ms` (a window running out in a test)."""
-    v = ctypes.c_uint32.in_dll(_lib(), "moy_net_ms_skew")
-    v.value = (v.value + ms) & 0xFFFFFFFF
+    v = ctypes.c_uint64.in_dll(_lib(), "moy_net_ms_skew")
+    v.value = (v.value + ms) & 0xFFFFFFFFFFFFFFFF

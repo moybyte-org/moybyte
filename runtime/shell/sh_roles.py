@@ -65,10 +65,12 @@ the http worker's own wait), never `online()`.
   settings set KEY VALUE...  a JSON value, or the words as a string; applied
   settings unset KEY         at once where the console applies the key live
   settings reload            read the file again (an edit by hand) and apply it
-  passwd PASSWORD            the console's password, for SSH's sign-in and a
-                             browser's pairing (runtime/system/ssh_service.py):
-                             set, and the server serves; `passwd -d` removes
-                             it and stops it. Paired browsers keep their keys
+  passwd PASSWORD            the console's password, 8 characters or more, for
+                             SSH's sign-in and a browser's pairing
+                             (runtime/system/ssh_service.py): set, and the
+                             server serves; `passwd -d` removes it and stops
+                             it. Either signs every browser out; paired
+                             browsers keep their keys and sign in again
   passwd                     whether one is set, what SSH serves, the host
                              key's fingerprint and how many browsers are paired
   passwd -l                  the paired browsers: id, paired, last seen, name
@@ -542,7 +544,8 @@ def r_passwd(d, a):
     if len(a) != 1 or a[0].startswith("-"):
         return _usage(d, "passwd", "PASSWORD | -d | -l | -r ID|all")
     if not ssh_service.set_password(ws, a[0]):
-        d.err("passwd", "not set")
+        d.err("passwd", "not set: a password is %d characters or more"
+              % ssh_service.MIN_PASSWORD)
         return 1
     return 0
 

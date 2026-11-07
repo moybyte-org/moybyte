@@ -31,8 +31,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-uint32_t moy_net_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+uint64_t moy_net_ms64(void) {
+    return (uint64_t)(esp_timer_get_time() / 1000);
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
@@ -63,14 +63,14 @@ void moy_net_free(void *p) {
 #include <stdlib.h>
 #include <time.h>
 
-// What the host's tests move the clock by, so a window can run out in one.
-uint32_t moy_net_ms_skew;
+// What the host's tests move the clock by, so a window can run out in one
+// (modulo 2^64: a skew back is its two's complement).
+uint64_t moy_net_ms_skew;
 
-uint32_t moy_net_ms(void) {
+uint64_t moy_net_ms64(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)((uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u)
-           + moy_net_ms_skew;
+    return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u + moy_net_ms_skew;
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
@@ -103,6 +103,10 @@ int moy_clock_server(const char *name) {
 
 #if defined(ESP_PLATFORM) || MOY_NET_POSIX
 #include <stdlib.h>
+
+uint32_t moy_net_ms(void) {
+    return (uint32_t)moy_net_ms64();
+}
 
 int64_t moy_clock_cert_time(int64_t now, int64_t floor, int synced) {
     return synced || now >= floor ? now : floor;

@@ -352,12 +352,12 @@ not". A cart running in the browser calls `pin_write` / `pin_read`; the page
 batches them and POSTs to whoever served it.
 
 ```
-GET  /gpio?pin=1234  → {"v": 1, "pins": [...]}             the allowlist
-POST /gpio           → {"v": 1, "ops": [...], "pin": "1234"}
+GET  /gpio   → {"v": 1, "pins": [...]}             the allowlist
+POST /gpio   → {"v": 1, "ops": [...]}
              → {"ok": n, "reads": {"<pin>": 0|1}, "err": [...]}
 ```
 
-Both are gated. The `GET` was open until 2026-08-25 on the reasoning that it
+Both are sealed to a signed-in session (`docs/os_2026-11/system.md` §3). The `GET` was open until 2026-08-25 on the reasoning that it
 changes nothing; what it hands over is this board's wiring, which is a fact
 about somebody's house — and the page never needed it, because it probes with
 an empty `POST`, which was always gated.

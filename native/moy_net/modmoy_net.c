@@ -823,6 +823,12 @@ static mp_obj_t mod_web_key_drop(mp_obj_t kid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_key_drop_obj, mod_web_key_drop);
 
+// web_signout() -> the sessions ended: a password changed or removed.
+static mp_obj_t mod_web_signout(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_web_signout());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_signout_obj, mod_web_signout);
+
 // pw_hash(password, salt) -> "$moy1$SALT$HEX", the console password's stored
 // form (moy_seal_pw_hash; runtime/system/ssh_service.py), for a board that
 // sets one with no SSH server (the Zero's setup).
@@ -1209,6 +1215,7 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_auth), MP_ROM_PTR(&mod_web_auth_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&mod_web_key_drop_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&mod_web_signout_obj)},
     {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},

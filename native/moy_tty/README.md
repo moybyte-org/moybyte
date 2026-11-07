@@ -71,8 +71,10 @@ the bridge answers 404. The messages are `moy_tty_ws.c`'s header: binary keys
 in, binary bytes out, a text `{"size":[C,R]}` for a resize, and a close that
 says why it ended; under a session each message crosses as one sealed binary
 frame, its first byte `k` or `s` saying which, and one that fails its seal
-ends the socket (1008 "seal"). Forgetting the browser the session belongs to
-cuts its terminal (1008 "revoked"). The subprotocol is `moy.sh`; the board
+ends the socket (1008 "seal"). The end of its session cuts the terminal
+(1008 "revoked"): the browser forgotten, the password changed, the session
+unused for 30 minutes (the page's own frames count as use) or taken by newer
+sign-ins. The subprotocol is `moy.sh`; the board
 link (`docs/os_2026-11/web_terminal_spike.md` §7) is a route of its own whose
 shell channel carries this stream.
 

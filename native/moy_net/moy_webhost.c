@@ -43,14 +43,18 @@
 // shuts it out for a window that starts at MOY_WEB_AUTH_WAIT_MS and doubles
 // up to MOY_WEB_AUTH_WAIT_MAX_MS. Past MOY_WEB_AUTH_FREE_ALL wrong ones from
 // anywhere, every source that has not signed in since waits the same way, so
-// more addresses buy no more guesses, and a browser already paired keeps
-// working. While a source waits, POST /auth answers 429 {"error":"wait",
-// "ms":N} at once, its credential never looked at, so the window is no
-// oracle; the poll never sleeps. A right credential clears its source's
-// count; the count from anywhere clears after MOY_WEB_AUTH_FORGET_MS with no
-// wrong one. A PAKE counts as wrong from its start until its confirm checks.
-// A session's sealed requests are not credentials: a seal that does not open
-// is refused and counts nothing (its tag is 128 bits).
+// more addresses buy no more guesses; a hello, a confirm and a key the board
+// knows are not held by that window, so a browser already paired keeps
+// working from any address, after a reboot too. While a source waits, POST
+// /auth answers 429 {"error":"wait","ms":N} at once, its credential never
+// looked at, so the window is no oracle; the poll never sleeps. A right
+// credential clears its source's count. The count from anywhere past its free
+// ones gives one back every MOY_WEB_AUTH_DECAY_MS with no wrong one, and
+// within them clears after MOY_WEB_AUTH_FORGET_MS. A PAKE counts as wrong
+// from its start until its confirm checks. A credential whose nonce is gone
+// (409) counts nothing. A session's sealed requests are not credentials: a
+// seal that does not open is refused and counts nothing (its tag is 128
+// bits).
 //
 // THE BUNDLE is the image's own (native/moy_web, pre-gzipped), sent from flash
 // with nothing resident in between; there is no copy on storage to shadow it.
@@ -313,6 +317,10 @@ void moy_web_stop(const char *why) {
 
 int moy_web_auth(const char *system) {
     return moy_wa_config(system);
+}
+
+int moy_web_signout(void) {
+    return moy_wa_signout();
 }
 
 void moy_web_board_id(char out[33]) {
@@ -1412,6 +1420,7 @@ int moy_web_poll(void) {
         return 0;
     }
     later();
+    moy_wa_poll();
     if (W->closing
         && (uint32_t)(moy_net_ms() - W->closing_at) >= MOY_WEB_CLOSING_MS) {
         stop_now();

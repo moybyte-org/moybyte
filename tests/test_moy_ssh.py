@@ -484,14 +484,14 @@ def test_passwd_in_a_session_stops_the_server_after_it_and_a_new_one_withdraws_t
     _out, exe = built
     h = serve(exe, tmp_path)
     try:
-        r = ssh(h, PASSWORD, "moy@127.0.0.1", "passwd -d; passwd other; echo done")
+        r = ssh(h, PASSWORD, "moy@127.0.0.1", "passwd -d; passwd other-pw; echo done")
         assert r.returncode == 0, r.stderr
         assert b"done" in r.stdout
         assert not refused(h, wait=1.5)
-        r = ssh(h, "other", "moy@127.0.0.1", "echo in")
+        r = ssh(h, "other-pw", "moy@127.0.0.1", "echo in")
         assert r.returncode == 0 and r.stdout == b"in\n", r.stderr
         assert stats(h)["listening"] == "1"
-        r = ssh(h, "other", "moy@127.0.0.1", "passwd -d")
+        r = ssh(h, "other-pw", "moy@127.0.0.1", "passwd -d")
         assert r.returncode == 0, r.stderr
         assert refused(h)
         # the harness prints its figures every 20 ms: the refusal can come first

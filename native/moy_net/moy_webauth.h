@@ -13,6 +13,7 @@
 #define MOY_WA_KEYS 16                  // paired browsers kept
 #define MOY_WA_NAME 40                  // a browser's name, its NUL included
 #define MOY_WA_CHALLENGES 8
+#define MOY_WA_PEER_CHALLENGES 2        // one source's at once
 #define MOY_WA_SESSIONS 8
 #define MOY_WA_NONCE_MS 30000u          // a hello's nonce, and a PAKE's wait for its confirm
 #define MOY_WA_SESSION_MS 1800000u      // a session nobody used for this long is gone
@@ -24,7 +25,7 @@ typedef struct moy_wa_seal {
     uint8_t on;                         // 0: the open host, nothing sealed
     uint64_t seq;
     uint8_t kc[MOY_SEAL_KEY], kb[MOY_SEAL_KEY];
-    uint8_t kid[MOY_SEAL_KID];
+    uint8_t kid[MOY_SEAL_KID], sid[MOY_SEAL_SID];
 } moy_wa_seal_t;
 
 enum {
@@ -46,7 +47,11 @@ uint32_t moy_wa_wait(uint32_t peer);
 void moy_wa_note(uint32_t peer, int ok);
 
 // POST /auth: the answer's JSON into doc and its HTTP status, or 0 while the
-// password's PAKE runs (moy_wa_later answers it).
+// password's PAKE runs (moy_wa_later answers it). A credential is refused
+// 409 {"error":"nonce"} when its hello's nonce is gone (another hello took its
+// place, or it ran out: ask again, nothing counted), 403 {"error":"kid"} for a
+// key this board does not know (the page forgets it), and 403 with "key",
+// "token" or "password" for one that is wrong.
 int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap);
 // The PAKE's answer once its worker is done: its status, else 0.
 int moy_wa_later(char *doc, size_t cap);
@@ -70,9 +75,16 @@ int moy_wa_scan_times(const char *p, long long *a, long long *b, const char **re
 // Forget one browser (16 hex digits) or every one ("all"): how many went.
 // Its sessions end, and a web terminal it holds is cut.
 int moy_wa_drop(const char *kid);
+// Every session ended and a web terminal cut, the keys kept (a password
+// changed or removed): how many sessions went.
+int moy_wa_signout(void);
+// The webhost's poll: sessions unused past MOY_WA_SESSION_MS end, and a web
+// terminal whose session is gone is cut.
+void moy_wa_poll(void);
 // A browser paired since the last call: 1, and the flag cleared.
 int moy_wa_paired(void);
-// The /term upgrade's session, whose drop cuts the terminal.
+// The /term upgrade's session: its key dropped, the session's end (unused,
+// evicted, signed out) cuts the terminal.
 void moy_wa_term(const moy_wa_seal_t *s);
 
 #endif // MOY_WEBAUTH_H

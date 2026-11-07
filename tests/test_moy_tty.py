@@ -10,7 +10,9 @@ upgrade with no session, or an old pin's, refused before any upgrade; a
 source past its free wrong sign-ins answered 429 {"error":"wait"}; the sealed
 GET /term the page asks why a socket failed; every frame sealed each way, a
 tampered or replayed one closing the socket 1008 "seal"; a dropped key
-cutting its open terminal 1008 "revoked"; keys in and their echo out,
+cutting its open terminal 1008 "revoked", as a password change does and as
+its session's end does (unused past its time, its keys counting as use, or
+taken by newer sign-ins); keys in and their echo out,
 gathered into few frames; a resize the shell sees; Ctrl-C ending a command;
 `exit` closing the socket 1000 with its status; a page that closes freeing
 the session for the next; the face another transport holds refusing the page
@@ -25,7 +27,9 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
@@ -84,7 +88,9 @@ def built(tmp_path_factory):
 
 class Host:
     def __init__(self, exe, out, sealed=True):
-        tree = out / "tree"
+        # A short root: the webhost refuses a system folder past
+        # MOY_WEB_PATH_MAX (96), which an xdist worker's tmp_path can reach.
+        tree = Path(tempfile.mkdtemp(prefix="tty", dir="/tmp"))
         for sub in ("carts", "files", "system"):
             (tree / "sd" / "moybyte" / sub).mkdir(parents=True, exist_ok=True)
         with socket.socket() as s:
@@ -161,6 +167,7 @@ class Host:
         self.proc.kill()
         self.proc.wait()
         self.logf.close()
+        shutil.rmtree(self.tree, ignore_errors=True)
 
 
 @pytest.fixture
@@ -383,7 +390,7 @@ def test_a_dropped_key_cuts_its_open_terminal(host):
     assert e.value.status == 401
     with pytest.raises(seal_client.Refused) as e:
         host.page.sign_in()
-    assert e.value.status == 403 and e.value.doc["error"] == "key"
+    assert e.value.status == 403 and e.value.doc["error"] == "kid"
 
 
 def test_the_open_host_speaks_plain_frames(open_host):
@@ -497,3 +504,50 @@ def test_tab_completes_on_the_web_face_too(host):
     ws.send(b"\r")
     assert b"mew" in ws.read_until(b"mew")
     ws.close()
+
+
+def test_a_password_change_signs_out_and_cuts_the_terminal(host):
+    ws = WS(host)
+    ws.read_until(b"$ ")
+    at = len(host.log())
+    host.say("signout")
+    assert host.wait_line("SIGNEDOUT ", at) == "SIGNEDOUT 1"
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "revoked"), ws.closed
+    wait_stat(host, "live", 0)
+    with pytest.raises(seal_client.Refused) as e:
+        host.page.call("GET", "/term")
+    assert e.value.status == 401
+    host.page.sign_in()                                 # the key is kept
+    assert host.page.call("GET", "/term")[0] == 200
+
+
+SESSION_MS = 1800000
+
+
+def test_a_terminal_ends_with_its_session_unused(host):
+    ws = WS(host)
+    ws.read_until(b"$ ")
+    host.skew(SESSION_MS // 2)
+    ws.keys(b"e")                                       # the page's frames are its use
+    ws.read_until(b"e", 2.0)
+    host.skew(SESSION_MS // 2 + 1000)
+    ws.read_until(b"\xff", 0.5)
+    assert ws.closed is None, "used half a session ago: still its session"
+    host.skew(SESSION_MS)
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "revoked"), ws.closed
+    wait_stat(host, "live", 0)
+
+
+def test_a_terminal_ends_when_newer_sign_ins_take_its_session(host):
+    ws = WS(host)
+    ws.read_until(b"$ ")
+    keys = dict(host.page.keys)
+    for _ in range(8):
+        b = seal_client.Browser(host.send)
+        b.keys = dict(keys)
+        b.sign_in()
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "revoked"), ws.closed
+    wait_stat(host, "live", 0)

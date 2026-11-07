@@ -866,8 +866,18 @@ async function importP8(name, buf) {
 //   and the page stores it), or nothing -- the page asks to pair: by the
 //   console's password (SPAKE2, `{t:"password"}`), or by scanning the code.
 //
+// A credential whose hello's nonce the board no longer holds is answered 409
+// {"error":"nonce"} (other hellos took its place, or it ran out): the page
+// asks again, a few times, and nothing it holds is spent. A key the board
+// does not know (403 {"error":"kid"}) is forgotten; a wrong one is kept, and
+// the page asks to pair. A QR's token is spent once the board has judged it.
+//
 // A sealed call that meets 401 signs in again once and retries. A host that
-// answers the hello {"open": true} (the dev server) is spoken to in the clear.
+// answers the hello {"open": true} (the dev server, a test) is spoken to in
+// the clear, and so is a static host (no /auth, no board marker), but only by
+// a page that holds no key and has never signed in: a board always seals, so
+// to any other page an open answer, a missing /auth (404, 405, 501) or a 2xx
+// in the clear to a sealed call is an error.
 //
 // THE BACKOFF, said one way. A source that gave too many wrong credentials
 // waits (native/moy_net/moy_webhost.c, the backoff), and while it waits the
@@ -885,6 +895,8 @@ function signInWaitSays(ms) {
 let auth = { keys: {}, token: null, board: null, name: "a browser" };
 let authOpen = false;           // the host has no sign-in: plain requests
 let signedIn = false;
+let sealedOnce = false;         // this page has signed in: never plain again
+const NONCE_TRIES = 3;          // hellos a credential is sent after
 let signingIn = null;           // the sign-in in flight, which every caller shares
 let authNeed = null;            // why the last sign-in failed: {pw, wait, why}
 let SW = null;                  // moy_seal_web.c's entry points
@@ -943,13 +955,22 @@ async function authPost(text) {
     return { status: r.status, text: t, doc: doc || {} };
 }
 
-// A hello: the board's id, or the answer that stopped it (a wait, an open host).
+// A hello: the board's id, or the answer that stopped it (a wait, an error),
+// or {open} from a host with no sign-in to a page that may believe it: one
+// that holds no key and never signed in, told so by a host that answers
+// {"open": true} (the dev server, a test) or by one with no /auth that is no
+// board either (a static host: no GET /sync marker, moy_store.probeMode).
 async function hello() {
     const r = await authPost('{"op":"hello"}');
-    // No sign-in here: a host with no /auth (a static host, the site) or one
-    // that says it is open (the dev server) serves its routes in the clear.
-    if ((r.status === 200 && r.doc.open) || r.status === 404 || r.status === 405
-        || r.status === 501) return { open: true };
+    const open = r.status === 200 && r.doc.open === true;
+    const none = r.status === 404 || r.status === 405 || r.status === 501;
+    if (open || none) {
+        if (!sealedOnce && Object.keys(auth.keys).length === 0
+            && (open || (await store.probeMode((u, o) => fetch(u, o))) !== "board")) {
+            return { open: true };
+        }
+        return { r: open ? { status: 0, doc: {} } : r };
+    }
     if (r.status !== 200) return { r };
     if (sw().hello(swPut(utf8.encode(r.text))) !== 0) return { r: { status: 0, doc: {} } };
     return { id: sw().M.UTF8ToString(sw().board()), pw: !!r.doc.pw };
@@ -960,6 +981,7 @@ async function hello() {
 function finish(r, fresh) {
     if (r.status !== 200 || sw().done(swPut(utf8.encode(r.text))) !== 0) return false;
     signedIn = true;
+    sealedOnce = true;
     if (fresh) {
         const C = sw();
         const id = C.M.UTF8ToString(C.board());
@@ -970,18 +992,30 @@ function finish(r, fresh) {
     return true;
 }
 
+// A credential built by `build` (from the last hello's nonce) and its
+// answer, asked again after a fresh hello while the board says the nonce is
+// gone: {h, r}, `h` the hello it went with.
+async function withNonce(h, build) {
+    for (let i = 0; ; i++) {
+        const r = await authPost(utf8d.decode(swGet(build())));
+        if (r.status !== 409 || i + 1 >= NONCE_TRIES) return { h, r };
+        h = await hello();
+        if (!h.id) return { h, r: h.r || { status: 0, doc: {} } };
+    }
+}
+
 async function signInOnce() {
     let h = await hello();
     if (h.open) { authOpen = true; return true; }
     if (!h.id) return need(h.r, false);
     const k = auth.keys[h.id];
     if (k) {
-        const n = swCall(sw().key, k.kid, k.key);
-        const r = await authPost(utf8d.decode(swGet(n)));
+        let r;
+        ({ h, r } = await withNonce(h, () => swCall(sw().key, k.kid, k.key)));
         if (finish(r, false)) return true;
-        if (r.status === 429) return need(r, h.pw);
-        if (r.status === 403) {
-            delete auth.keys[h.id];          // this board dropped it: pair again
+        if (r.status !== 403) return need(r, h.pw);
+        if (r.doc.error === "kid") {
+            delete auth.keys[h.id];          // this board does not know it: pair again
             self.postMessage({ t: "unkey", id: h.id });
         }
         h = await hello();
@@ -989,14 +1023,17 @@ async function signInOnce() {
     }
     const tok = auth.token ? b64urlHex(auth.token) : "";
     const mine = auth.board ? b64urlHex(auth.board) : "";
-    auth.token = null;                     // single-use, whatever the answer
     if (tok && (!mine || h.id.startsWith(mine))) {
-        const n = swCall(sw().token, tok, auth.name);
-        const r = await authPost(utf8d.decode(swGet(n)));
+        let r;
+        ({ h, r } = await withNonce(h, () => swCall(sw().token, tok, auth.name)));
+        if (r.status === 200 || r.status === 403) auth.token = null;   // judged: spent
         if (finish(r, true)) return true;
-        if (r.status === 429) return need(r, h.pw);
-        return need(null, h.pw, "that code was used or has run out -- scan it again");
+        if (r.status === 403) {
+            return need(null, h.pw, "that code was used or has run out -- scan it again");
+        }
+        return need(r, h.pw);
     }
+    auth.token = null;
     return need(null, h.pw, tok ? "that code is another console's" : "");
 }
 // `gone`: no answer from the board at all (a fetch that failed, a 5xx from
@@ -1025,26 +1062,30 @@ function signIn() {
 async function pairPassword(pw, name) {
     let why = "";
     try {
-        const h = await hello();
-        if (h.r && h.r.status === 429) return need(h.r, true);
-        if (!h.id) return need(h.r, true);
-        const n = swCall(sw().pake, pw, name || auth.name);
-        let r = await authPost(utf8d.decode(swGet(n)));
-        if (r.status === 200) {
-            // The board's confirmation fails to check under a wrong password
-            // (and on another console, which the same sentence covers).
-            const c = sw().confirm(swPut(utf8.encode(r.text)));
-            if (c < 0) why = "that password did not work -- try again";
-            else {
-                r = await authPost(utf8d.decode(swGet(c)));
-                if (finish(r, "reload")) return true;
+        for (let i = 0; i < NONCE_TRIES; i++) {
+            const h = await hello();
+            if (!h.id) return need(h.r, true);
+            const n = swCall(sw().pake, pw, name || auth.name);
+            let r = await authPost(utf8d.decode(swGet(n)));
+            if (r.status === 409) continue;            // the nonce went: ask again
+            if (r.status === 200) {
+                // The board's confirmation fails to check under a wrong password
+                // (and on another console, which the same sentence covers).
+                const c = sw().confirm(swPut(utf8.encode(r.text)));
+                if (c < 0) why = "that password did not work -- try again";
+                else {
+                    r = await authPost(utf8d.decode(swGet(c)));
+                    if (finish(r, "reload")) return true;
+                    if (r.status === 409) why = "the console waited too long -- try again";
+                }
             }
+            if (r.status === 429) return need(r, true);
+            why = why || (r.doc.error === "nopw" ? "the console has no password set"
+                                                 : "that password did not work -- try again");
+            break;
         }
-        if (r.status === 429) return need(r, true);
-        why = why || (r.doc.error === "nopw" ? "the console has no password set"
-                                             : "that password did not work -- try again");
     } catch (e) { why = "the console did not answer"; }
-    return need(null, true, why);
+    return need(null, true, why || "the console did not answer");
 }
 function askToPair() {
     self.postMessage(Object.assign({ t: "pair" }, authNeed || { pw: false, wait: "", why: "" }));
@@ -1073,6 +1114,8 @@ async function sealed(method, path, body) {
         const r = await fetch(target.slice(1), n ? { method, body: swGet(n) } : { method });
         if (r.status === 401) { signedIn = false; continue; }
         if ((r.headers.get("Content-Type") || "").indexOf("application/octet-stream") < 0) {
+            // In the clear: a refusal at most, never the board's answer.
+            if (r.status >= 200 && r.status < 300) return { status: 0, text: "", wait: -1 };
             return { status: r.status, text: await r.text(), wait: -1, clear: true };
         }
         const got = new Uint8Array(await r.arrayBuffer());

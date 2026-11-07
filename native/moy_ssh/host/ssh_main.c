@@ -116,6 +116,9 @@ static int32_t passwd(const char *arg, size_t n) {
     if (n == 0 || n >= sizeof pw || memchr(arg, 0, n) != NULL) {
         return 2;
     }
+    if (n < 8) {
+        return 1;                       // ssh_service.MIN_PASSWORD
+    }
     memcpy(pw, arg, n);
     pw[n] = 0;
     FILE *f;

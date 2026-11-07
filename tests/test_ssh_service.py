@@ -54,10 +54,10 @@ def test_passwd_sets_and_removes_the_password(system):
     ws = WS()
     d = Door(ws)
     assert not ssh_service.is_set(ws)
-    assert sh_roles.r_passwd(d, ["s3cret"]) == 0
+    assert sh_roles.r_passwd(d, ["s3cret-pw"]) == 0
     text = (system / "password").read_text()
     salt = text.split("$")[2]
-    assert text == ssh_service.hashed("s3cret", salt) + "\n"
+    assert text == ssh_service.hashed("s3cret-pw", salt) + "\n"
     assert ssh_service.is_set(ws)
     assert sh_roles.r_passwd(d, []) == 0 and d.text.startswith("password set\nhost key ")
     assert sh_roles.r_passwd(d, ["-d"]) == 0
@@ -133,7 +133,7 @@ def test_serving_holds_the_ssh_lease_dials_the_last_network_and_answers_by_name(
     ws = WS("Desk 2")
     ws.wifi = Wifi(up)
     assert not ssh_service.start(ws) and ws.held == []
-    assert ssh_service.set_password(ws, "s3cret")
+    assert ssh_service.set_password(ws, "s3cret-pw")
     assert ws.held == ["ssh"] and server.calls == [("start", str(system))]
     # the station starts toward the last-joined network unless it is up
     assert ws.wifi.wlan.dialled == ([] if up else [("last", "pw")])
@@ -176,7 +176,7 @@ def test_a_stop_from_a_session_lets_the_radio_and_the_name_go_once_the_server_pa
                         type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
     ws = WS("Desk")
     ws.wifi = Wifi(True)
-    assert ssh_service.set_password(ws, "s3cret")
+    assert ssh_service.set_password(ws, "s3cret-pw")
     server.is_parked = False
     assert ssh_service.set_password(ws, None)
     assert server.calls[-1] == ("stop",)
@@ -187,10 +187,10 @@ def test_a_stop_from_a_session_lets_the_radio_and_the_name_go_once_the_server_pa
     wakes.tick()
     assert ws.held == [] and names == ["desk", ""] and wakes.live == {}
     # a start in the same session withdraws the stop: the radio stays held
-    assert ssh_service.set_password(ws, "s3cret")
+    assert ssh_service.set_password(ws, "s3cret-pw")
     server.is_parked = False
     assert ssh_service.set_password(ws, None)
-    assert ssh_service.set_password(ws, "again")
+    assert ssh_service.set_password(ws, "again-pw")
     assert wakes.live == {} and ws.held == ["ssh"]
     wakes.tick()
     assert ws.held == ["ssh"] and names[-1] == "desk"

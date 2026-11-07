@@ -317,7 +317,8 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
   minutes, a fresh one each time the screen draws it) and the first 8 bytes
   of the board's id after the address's `#`, which never reaches a server or
   a log. A browser that cannot scan types the console's password, the one
-  `passwd` sets for SSH: SPAKE2 over P-256 (RFC 9382's M and N and key
+  `passwd` sets for SSH (eight characters or more, as the Zero's setup form
+  asks): SPAKE2 over P-256 (RFC 9382's M and N and key
   schedule) from the stored hash, so the password never crosses the network
   and a recorded exchange gives nothing to guess against offline. With no
   password set a browser pairs by the QR alone; the Zero, with no screen,
@@ -327,7 +328,10 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
   origin's storage.
 - **A session**: a key login answers a fresh challenge with an HMAC over both
   sides' nonces, the board proves the key back, and HKDF gives one AES-128
-  key each way. A request carries its session and sequence number on the
+  key each way. A challenge is its source's and good for one credential; a
+  source's own hellos evict its own, and one that is gone is answered 409
+  (counting nothing) and the page asks again. A page forgets its key only
+  when the board says it does not know it (403 "kid"). A request carries its session and sequence number on the
   query and its body (or, bodiless, its tag) under AES-GCM bound to its method
   and target; the board takes each sequence number once, inside a window of
   64. An answer is sealed records bound to its status, its last record
@@ -342,16 +346,23 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
 - **The backoff**: every credential the sign-in checks (a key, a token, a
   password's PAKE) counts against its source, ten free, then a window from
   1 s doubling to 5 min, and thirty from anywhere shut out every source that
-  has not signed in since; a waiting source is answered 429 with its
-  credential unread. A sealed request is not a credential: its tag is 128
-  bits.
+  has not signed in since from everything but a key the board knows, so a
+  paired browser signs in from a new address or after a reboot; past the
+  thirty the count gives one back every ten quiet minutes, so neither more
+  addresses nor an hour's wait buys the thirty again. A waiting source is
+  answered 429 with its credential unread. A sealed request is not a
+  credential: its tag is 128 bits. Every timer runs on a 64-bit clock, so
+  none comes back after 49 days.
 - **Forgetting a browser**: Settings -> Paired browsers lists each (its name,
   the day it was last seen) and forgets one or all; `passwd -l` lists them and
   `passwd -r ID|all` forgets. A forgotten key's sessions end at once and a web
   terminal it holds is cut (1008 "revoked"). Changing or removing the password
-  (`passwd`, `passwd -d`) forgets no browser: a paired browser holds its own
-  key, and a household that changes the password should not have to re-pair
-  every tablet; forgetting is its own act, in the same two places. Both show
+  (`passwd`, `passwd -d`) ends every session and cuts a web terminal, but
+  forgets no browser: a paired browser holds its own key and signs in again,
+  and a household that changes the password should not have to re-pair every
+  tablet; forgetting is its own act, in the same two places. A web terminal
+  also ends with its session, unused for 30 minutes (its own frames count as
+  use) or taken by newer sign-ins. Both show
   the SSH host key's fingerprint (`SHA256:`, OpenSSH's form) to check a first
   `ssh` against.
 - **What it does not stop**: the page itself is served over plain HTTP, so an
@@ -359,7 +370,9 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
   password typed into it or a key it reads; only HTTPS with a certificate
   the browser trusts closes that, and a console has none. A passive listener
   learns nothing, a stolen QR token is spent or stale, and SSH, whose host
-  key a person can check, stays the full-security path. A device key lives in
+  key a person can check, stays the full-security path. A page that holds a
+  key or has signed in never falls back to the clear: an "open" answer, a
+  missing `/auth` or a plain 2xx to a sealed call is an error to it. A device key lives in
   the browser's storage for that origin: anyone with that browser profile is
   that browser, until it is forgotten. A session's keys come from the device
   key, so a key stolen later opens sessions recorded earlier; forgetting it

@@ -18,8 +18,10 @@ name stay until the run reports its tasks parked: a shell wake looks every
 PARK_MS. A start before then cancels the wake and keeps both.
 
   boot(ws)                 at the console's first frame: serve if a password is set
-  set_password(ws, pw)     store the password's hash (None: remove it), and
-                           serve or stop to match; False where it cannot
+  set_password(ws, pw)     store the password's hash (None: remove it), sign
+                           every browser out (its key kept), and serve or
+                           stop to match; False for one under MIN_PASSWORD
+                           characters
   system_dir(ws)           the store's system folder the server signs in from
   is_set(ws)               whether a password is set
   name(ws)                 the console's name: Settings' Name, or default_name()
@@ -65,6 +67,7 @@ except ImportError:  # host: the runtime package
 
 TAG = "ssh"
 PASSWORD = "password"
+MIN_PASSWORD = 8                # the Zero's setup form's floor too (zero_setup.CONSOLE_MIN)
 ROUNDS = 4096
 NAME_MAX = 63
 PREFIX = "moybyte"
@@ -269,20 +272,35 @@ def boot(ws):
         print("Moybyte ssh: %s" % (exc,))
 
 
+def _sign_out():
+    """Every browser's session ended and a web terminal cut: a session
+    proves the password it was paired under, not the new one."""
+    try:
+        import moy_net
+    except ImportError:  # host: the runtime package
+        from runtime import net_binding as moy_net
+    out = getattr(moy_net, "web_signout", None)
+    if out is not None:
+        out()
+
+
 def set_password(ws, password):
-    """The password's hash into system/password, or the file removed; the
-    server started or stopped to match."""
+    """The password's hash into system/password, or the file removed; every
+    browser signed out and the server started or stopped to match. False for
+    a password under MIN_PASSWORD characters, which changes nothing."""
     if password is None:
         try:
             import os
             os.remove(_path(ws, PASSWORD))
         except OSError:
             pass
+        _sign_out()
         stop(ws)
         return True
-    if not password:
+    if len(password) < MIN_PASSWORD:
         return False
     _write(ws, PASSWORD, hashed(password, _salt()) + "\n")
+    _sign_out()
     start(ws)
     return True
 

@@ -16,7 +16,13 @@ tampered request and a tampered, truncated or reordered answer refused; a
 dropped key ending its sessions; an old pin URL refused; the keys kept in
 system/webkeys across a restart and a broken file read as none; the open
 routes open and a refused request never reaching the store; /run and
-/update answered sealed by the VM; and /auth's parser fuzzed.
+/update answered sealed by the VM; /auth's parser fuzzed; a flood of hellos
+evicting its own source's nonces, and a nonce another's flood took answered
+409 and counted nothing; a known key signing in through the lockout from
+anywhere; the count from anywhere leaking slowly instead of clearing; the
+password's eight-character floor; nothing timed coming back after 2^32 ms;
+a password change signing every browser out; every stamp on the VM's clock;
+and the page's own end (signin_test.mjs).
 """
 
 import ctypes
@@ -25,7 +31,9 @@ import hmac
 import json
 import os
 import random
+import shutil
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,7 +53,7 @@ from runtime import ssh_service  # noqa: E402
 
 AESGCM = pytest.importorskip("cryptography.hazmat.primitives.ciphers.aead").AESGCM
 
-FREE, FREE_ALL, FIRST_MS, FORGET_MS = 10, 30, 1000, 3600 * 1000
+FREE, FREE_ALL, FIRST_MS, FORGET_MS, DECAY_MS = 10, 30, 1000, 3600 * 1000, 600 * 1000
 TOKEN_MS = 600000
 PASSWORD = "correct horse"
 
@@ -403,7 +411,7 @@ def test_a_stored_key_signs_in_and_a_wrong_one_is_refused(tmp_path):
     wrong.keys = {page.board: ("00" * 8, key)}
     with pytest.raises(Refused) as e:
         wrong.sign_in()
-    assert e.value.status == 403
+    assert (e.value.status, e.value.doc) == (403, {"error": "kid"})
 
 
 def test_a_password_pairs_and_a_wrong_one_fails_at_the_browser(tmp_path):
@@ -428,20 +436,21 @@ def test_with_no_password_a_browser_pairs_only_by_the_qr(tmp_path):
 
 
 def test_a_recorded_sign_in_does_not_sign_in_again(tmp_path):
-    """Every login answers a hello's fresh nonce, used once."""
+    """Every login answers a hello's fresh nonce, used once: a replay finds it
+    gone (409, which counts nothing)."""
     h = _host(tmp_path, password=PASSWORD)
     page = _paired(h)
     page.sign_in()
     body, _resp = page.last
-    assert status(h.handle_http("POST", "/auth", body)) == 403
+    assert doc(h.handle_http("POST", "/auth", body)) == {"error": "nonce"}
     other = _page(h)
     other.pair_password(PASSWORD)
     confirm, _resp = other.last
-    assert status(h.handle_http("POST", "/auth", confirm)) in (400, 403)
+    assert status(h.handle_http("POST", "/auth", confirm)) == 409
     token = nb.web_token()
     pairing = _page(h)
     pairing.pair_token(token)
-    assert status(h.handle_http("POST", "/auth", pairing.last[0])) == 403
+    assert status(h.handle_http("POST", "/auth", pairing.last[0])) == 409
 
 
 def test_a_replayed_request_is_refused_and_one_out_of_order_is_taken_once(tmp_path):
@@ -523,7 +532,7 @@ def test_a_dropped_key_ends_its_sessions_and_signs_in_no_more(tmp_path):
     assert e.value.status == 401
     with pytest.raises(Refused) as e:
         page.sign_in()
-    assert (e.value.status, e.value.doc) == (403, {"error": "key"})
+    assert (e.value.status, e.value.doc) == (403, {"error": "kid"})
     keep.sign_in()
     assert keep.json("GET", "/carts.json")[0] == 200
     assert nb.web_key_drop("all") == 1 and nb.web_keys() == []
@@ -605,13 +614,15 @@ def test_a_clock_past_two_to_the_31_holds_no_source_that_never_failed(tmp_path):
     assert 0 < _wait_ms(_wrong_token(h)) <= FIRST_MS
 
 
-def _from(host, src, body):
-    """POST /auth `body` from the address `src` over the serving socket."""
+def _from(host, src, body, method="POST", target="/auth"):
+    """POST /auth `body` (or another request) from the address `src` over the
+    serving socket."""
     c = socket.socket()
     c.settimeout(5)
     c.bind((src, 0))
     c.connect(("127.0.0.1", host.port))
-    c.sendall(b"POST /auth HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+    c.sendall(b"%s %s HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s"
+              % (method.encode(), target.encode(), len(body), body))
     got = b""
     for _ in range(400):
         host.poll()
@@ -737,7 +748,7 @@ def test_auth_bodies_that_are_not_a_sign_in_are_refused(tmp_path):
     for body in shapes:
         nb._skew_clock(FORGET_MS)                         # past any wait it earned
         r = h.handle_http("POST", "/auth", body)
-        assert status(r) in (400, 403, 413, 429), (body[:80], r[:120])
+        assert status(r) in (400, 403, 409, 413, 429), (body[:80], r[:120])
     assert nb.web_keys() == []
 
 
@@ -821,6 +832,197 @@ def test_passwd_lists_and_forgets_paired_browsers_and_shows_the_fingerprint(
     assert nb.web_keys() == []
 
 
+# -- a flood of hellos, the lockout and a paired page, the clock ------------------
+
+def _at(h, src):
+    """A transport from address `src`, movable: `send.src = ...`."""
+    def send(m, t, b):
+        return _from(h, send.src, b, m, t)
+    send.src = src
+    return send
+
+
+def _key_after_hello(page, between):
+    """A key login whose hello and key are split by `between()`."""
+    page.hello()
+    between()
+    kid, key = page.keys[page.board]
+    page._finish(page._request(seal_client.lib().moy_sw_key(kid.encode(), key.encode())))
+
+
+def test_a_sources_own_hellos_evict_only_its_own_nonces(serving):
+    h = serving()
+    page = seal_client.Browser(_at(h, "127.0.0.9"))
+    page.pair_token(nb.web_token())
+    flood = lambda: [_from(h, "127.0.0.2", b'{"op":"hello"}') for _ in range(20)]  # noqa: E731
+    _key_after_hello(page, flood)
+    assert page.json("GET", "/carts.json")[0] == 200
+
+
+def test_a_nonce_another_flood_took_answers_409_and_spends_nothing(serving):
+    h = serving()
+    page = seal_client.Browser(_at(h, "127.0.0.9"))
+    page.pair_token(nb.web_token())
+    srcs = ["127.0.0.%d" % i for i in range(2, 10)]
+
+    def flood():
+        for _ in range(4):
+            for s in srcs:
+                _from(h, s, b'{"op":"hello"}')
+    for _ in range(FREE + 1):
+        with pytest.raises(Refused) as e:
+            _key_after_hello(page, flood)
+        assert (e.value.status, e.value.doc) == (409, {"error": "nonce"})
+    page.sign_in()                                       # nothing was counted
+    assert page.json("GET", "/carts.json")[0] == 200
+    kid = page.keys[page.board][0]
+    assert [k[0] for k in nb.web_keys()] == [kid]
+
+
+def test_a_token_survives_a_nonce_a_flood_took(serving):
+    h = serving()
+    token = nb.web_token()
+    page = seal_client.Browser(_at(h, "127.0.0.9"))
+    page.hello()
+    for _ in range(4):
+        for s in ["127.0.0.%d" % i for i in range(2, 10)]:
+            _from(h, s, b'{"op":"hello"}')
+    with pytest.raises(Refused) as e:
+        page._finish(page._request(seal_client.lib().moy_sw_token(token.encode(),
+                                                                  page.name.encode())))
+    assert e.value.status == 409
+    page.pair_token(token)
+    assert len(nb.web_keys()) == 1
+
+
+def _past_free_all(h, srcs=("127.0.0.2", "127.0.0.3", "127.0.0.4", "127.0.0.5")):
+    wrong = 0
+    while wrong <= FREE_ALL:
+        for src in srcs:
+            if wrong <= FREE_ALL:
+                assert _guess(h, src).status == 403
+                wrong += 1
+
+
+def test_a_paired_key_signs_in_through_the_lockout_from_a_new_address(serving, tmp_path):
+    """The lockout from anywhere holds every source that has not signed in,
+    and a source's signed-in mark is RAM's and its address's: a reboot or a
+    new DHCP lease loses it. A key the board knows is no password guess."""
+    h = serving()
+    send = _at(h, "127.0.0.9")
+    page = seal_client.Browser(send)
+    page.pair_token(nb.web_token())
+    _past_free_all(h)
+    _wait_ms(_guess(h, "127.0.0.7"))
+    send.src = "127.0.0.10"                              # a new lease
+    page.sign_in()
+    nb.web_auth(None)                                    # a reboot
+    nb.web_auth(str(tmp_path / "system"))
+    _past_free_all(h)
+    page.sign_in()
+    stranger = seal_client.Browser(_at(h, "127.0.0.11"))
+    stranger.keys = {page.board: ("00" * 8, page.keys[page.board][1])}
+    with pytest.raises(Refused) as e:
+        stranger.sign_in()
+    _wait_ms(e.value)
+
+
+def test_waiting_an_hour_gives_back_a_few_guesses_not_the_budget(serving):
+    """Past the free ones the count from anywhere leaks one wrong guess a
+    DECAY_MS: rotating addresses and an hour's wait no longer buy the thirty
+    free ones again, only a shorter window. Quiet long enough to leak the
+    excess and then FORGET_MS clears it."""
+    h = serving()
+    srcs = ["127.0.0.%d" % i for i in range(2, 9)]
+    _past_free_all(h)
+    for k in range(9):
+        nb._skew_clock(min(FIRST_MS << k, 300000))
+        assert _guess(h, srcs[k % len(srcs)]).status == 403
+    nb._skew_clock(FORGET_MS)
+
+    def answered(first):
+        n = 0
+        for i in range(FREE_ALL + 1):
+            if _guess(h, "127.0.%d.%d" % (first, i + 1)).status == 429:
+                break
+            n += 1
+        return n
+    assert answered(1) == 1
+    nb._skew_clock(10 * DECAY_MS + FORGET_MS)
+    assert answered(2) == FREE_ALL + 1
+
+
+def test_a_console_password_is_eight_characters_or_more(tmp_path, monkeypatch):
+    from runtime import sh_roles
+    monkeypatch.setattr(ssh_service._docs, "system_store_path",
+                        lambda root=None: str(tmp_path / "system" / "settings"))
+    (tmp_path / "system").mkdir()
+
+    class Door:
+        def __init__(self):
+            self.ws, self.errs = _WS(), []
+
+        def out(self, t):
+            pass
+
+        def err(self, name, t):
+            self.errs.append(t)
+    d = Door()
+    assert sh_roles.r_passwd(d, ["1234567"]) == 1 and "8 characters" in d.errs[0]
+    assert not (tmp_path / "system" / "password").exists()
+    assert not ssh_service.set_password(d.ws, "short")
+    assert sh_roles.r_passwd(d, ["12345678"]) == 0
+    assert (tmp_path / "system" / "password").exists()
+
+
+class _WS:
+    carts_root = None
+
+    def wifi_hold(self, tag):
+        pass
+
+    def wifi_release(self, tag):
+        pass
+
+
+def test_nothing_timed_comes_back_after_two_to_the_32_ms(tmp_path):
+    """The sign-in's clock never wraps: a token and a session past their time
+    stay past it when a 32-bit millisecond count would read them fresh."""
+    h = _host(tmp_path)
+    page = _paired(h)
+    token = nb.web_token()
+    nb._skew_clock(TOKEN_MS + 1)
+    with pytest.raises(Refused) as e:
+        Ref(h.handle_http).pair_token(token)
+    assert e.value.status == 403
+    nb._skew_clock(2 ** 32 - TOKEN_MS - 1)
+    with pytest.raises(Refused) as e:
+        Ref(h.handle_http).pair_token(token)
+    assert (e.value.status, e.value.doc) == (403, {"error": "token"})
+    with pytest.raises(Refused) as e:
+        page.call("GET", "/carts.json")
+    assert e.value.status == 401
+
+
+def test_a_password_change_or_removal_signs_every_browser_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(ssh_service._docs, "system_store_path",
+                        lambda root=None: str(tmp_path / "system" / "settings"))
+    h = _host(tmp_path, password=PASSWORD)
+    page = _paired(h)
+    assert page.json("GET", "/carts.json")[0] == 200
+    assert ssh_service.set_password(_WS(), "another password")
+    with pytest.raises(Refused) as e:
+        page.call("GET", "/carts.json")
+    assert e.value.status == 401
+    page.sign_in()                                       # its key is kept
+    assert page.json("GET", "/carts.json")[0] == 200
+    assert ssh_service.set_password(_WS(), None)
+    with pytest.raises(Refused) as e:
+        page.call("GET", "/carts.json")
+    assert e.value.status == 401
+    page.sign_in()
+
+
 def test_every_stamp_is_unix_seconds(tmp_path):
     """A paired browser's times and a synced file's journal entry are Unix
     seconds on every tier, the console's wallclock's own (moy_net.h,
@@ -841,3 +1043,13 @@ def test_every_stamp_is_unix_seconds(tmp_path):
         src = (ROOT / "native" / "moy_net" / name).read_text()
         for word in ("time(NULL)", "mp_hal_time_ns", "VM_EPOCH", "epoch"):
             assert word not in src, (name, word)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_the_pages_sign_in_passes_its_own_suite():
+    """worker.js's end (firmware/web_runner/signin_test.mjs): a lost nonce asked
+    for again, a key forgotten only when the board does not know it, a token
+    kept until judged, and no page with a key or a session ever in the clear."""
+    p = subprocess.run(["node", "signin_test.mjs"], cwd=ROOT / "firmware" / "web_runner",
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stdout + p.stderr

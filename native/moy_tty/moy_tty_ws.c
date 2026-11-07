@@ -18,7 +18,9 @@
 //                           when another transport's face runs (one face at
 //                           a time), or this bridge serves another page;
 //                           1008 "seal" for a frame whose seal does not
-//                           open, "revoked" when the page's key was dropped
+//                           open, "revoked" when the page's session ended
+//                           (its key dropped, the password changed, the
+//                           session unused past its time or evicted)
 //
 // A SEALED SESSION (the webhost's, moy_seal.h) carries every message as a
 // binary frame of AES-GCM ciphertext and its tag: up under the session's kc,
@@ -61,13 +63,21 @@
 #define SEND_MS 5000                    // a page that takes nothing for this long is gone
 
 extern const moy_tty_shell_t moy_tty_moy_sh;
+// The webhost's clock (native/moy_net), which the page's idle time is read
+// against, where the image has it.
+uint32_t moy_net_ms(void) __attribute__((weak));
+
+static uint32_t now_ms(void) {
+    return moy_net_ms != NULL ? moy_net_ms() : moy_tty_ms();
+}
 
 typedef struct {
     volatile int fd;                    // the upgraded socket served or waiting, or -1
     int cols, rows;
     moy_wa_seal_t seal;                 // the session's, `on` 0 for the open host
     uint32_t up, down;                  // the next frame's index each way
-    volatile int cut;                   // the session's key was dropped
+    volatile int cut;                   // the session ended
+    volatile uint32_t heard;            // now_ms of the page's last bytes
     uintptr_t task;
     moy_tty_ws_stats_t stats;
 } ws_t;
@@ -280,6 +290,7 @@ static void pump(int ws, int sfd, pid_t pid, uint8_t *in, char *out) {
             if (m <= 0) {
                 return;
             }
+            W->heard = now_ms();
             n += (size_t)m;
             if (frames_in(ws, sfd, pid, in, &n, out) < 0) {
                 return;
@@ -371,12 +382,22 @@ int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal) {
     }
     W->up = W->down = 0;
     W->cut = 0;
+    W->heard = now_ms();
     __atomic_store_n(&W->fd, fd, __ATOMIC_RELEASE);
     moy_tty_poke(W->task);
     return 0;
 }
 
-// The webhost's: the page's key was dropped, so its session ends.
+// The webhost's (moy_webauth.c): how long since the page last sent bytes,
+// which count as its session's use; UINT32_MAX with no page.
+uint32_t moy_web_term_idle_ms(void) {
+    if (W == NULL || __atomic_load_n(&W->fd, __ATOMIC_ACQUIRE) < 0) {
+        return UINT32_MAX;
+    }
+    return now_ms() - W->heard;
+}
+
+// The webhost's: the page's session ended, so its terminal does.
 void moy_web_term_cut(void) {
     if (W != NULL && __atomic_load_n(&W->fd, __ATOMIC_ACQUIRE) >= 0) {
         W->cut = 1;

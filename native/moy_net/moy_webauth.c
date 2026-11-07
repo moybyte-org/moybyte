@@ -10,16 +10,27 @@
 // before a sign-in. Its keys are secrets: the file is the owner's, as
 // system/password is, and no route serves it.
 //
-// THE CHALLENGES: a hello's nonce is good for MOY_WA_NONCE_MS and one
-// credential, right or wrong. A new hello takes a free slot, else the oldest
-// one not running a PAKE.
+// THE CHALLENGES: a hello's nonce is its source's (the peer's address), good
+// for MOY_WA_NONCE_MS and one credential from that source, right or wrong. A
+// source holds MOY_WA_PEER_CHALLENGES: its next hello takes the place of its
+// own oldest one, so a source's flood evicts its own. Otherwise a hello takes
+// a free slot, else another source's oldest one still waiting for its
+// credential (never a PAKE's, never one waiting for its confirm), else is
+// answered 503. A credential whose nonce is gone or stale is answered 409
+// {"error":"nonce"} and counts nothing: the page asks for another.
 //
 // THE SESSIONS: MOY_WA_SESSIONS, each the keys of one sign-in, ended by
 // MOY_WA_SESSION_MS unused, by a newer sign-in needing its slot (the least
-// recently used goes), or by its browser's key being dropped. A request's
+// recently used goes), by its browser's key being dropped, or, every one, by
+// the password changing. A web terminal ends with its session; its frames
+// from the page count as the session's use. A request's
 // sequence number is taken once: above the highest seen, or within
 // MOY_WA_WINDOW below it and not yet taken (a page's parallel requests can
 // arrive out of order; none arrives twice).
+//
+// THE CLOCK is moy_net_ms64, which never wraps, so nothing timed here (a
+// nonce, a session, the QR's token, a window) comes back to life after 2^32
+// ms; a token found expired is wiped all the same.
 //
 // THE PAKE runs on a worker (a board's task with a PSRAM stack, made at the
 // first and parked between; a host's thread), so the console's task never
@@ -47,8 +58,10 @@
 #endif
 
 extern bool moy_flush_drain(void) __attribute__((weak));
-// The web terminal's bridge (native/moy_tty/moy_tty_ws.c): end its session.
+// The web terminal's bridge (native/moy_tty/moy_tty_ws.c): end its session,
+// and how long ago its page last sent a frame.
 extern void moy_web_term_cut(void) __attribute__((weak));
+extern uint32_t moy_web_term_idle_ms(void) __attribute__((weak));
 
 #define KEYS_FILE "/webkeys"
 #define PW_FILE "/password"
@@ -69,7 +82,8 @@ enum { CH_FREE, CH_ISSUED, CH_PAKE, CH_CONFIRM };
 typedef struct {
     uint8_t state;
     uint8_t nb[MOY_SEAL_RAND], nc[MOY_SEAL_RAND];
-    uint32_t at;
+    uint32_t peer;
+    uint64_t at;
     uint8_t ke[MOY_SEAL_KEY], ca[MOY_SEAL_MAC];
     char name[MOY_WA_NAME];
 } chal_t;
@@ -79,11 +93,12 @@ typedef struct {
     uint8_t sid[MOY_SEAL_SID], kid[MOY_SEAL_KID];
     moy_seal_keys_t k;
     uint64_t top, win;
-    uint32_t at;
+    uint64_t at;
 } sess_t;
 
 typedef struct {
-    uint32_t peer, seen, until;         // the address, its last try, its window's end
+    uint32_t peer;                      // the address
+    uint64_t seen, until;               // its last try, its window's end (0: none)
     uint16_t fails;                     // wrong credentials since its last right one
     uint8_t used, paired;               // paired: signed in since the count was cleared
 } src_t;
@@ -107,11 +122,12 @@ typedef struct {
     chal_t ch[MOY_WA_CHALLENGES];
     sess_t ss[MOY_WA_SESSIONS];
     uint8_t token[MOY_SEAL_RAND];
-    uint32_t token_at;
+    uint64_t token_at;
     uint8_t token_on, paired, term_on;
-    uint8_t term_kid[MOY_SEAL_KID];
+    uint8_t term_kid[MOY_SEAL_KID], term_sid[MOY_SEAL_SID];
     src_t src[MOY_WEB_AUTH_SOURCES];
-    uint32_t all_fails, all_last, all_until;
+    uint32_t all_fails;
+    uint64_t all_last, all_until;
     job_t job;
     uintptr_t worker;
     char text[FILE_MAX];                // the keys file, read or being written
@@ -156,8 +172,8 @@ int moy_wa_scan_times(const char *p, long long *a, long long *b, const char **re
     return 1;
 }
 
-static int fresh(uint32_t at, uint32_t ms) {
-    return (uint32_t)(moy_net_ms() - at) < ms;
+static int fresh(uint64_t at, uint32_t ms) {
+    return moy_net_ms64() - at < ms;
 }
 
 // -- the store ------------------------------------------------------------------------
@@ -311,19 +327,8 @@ static int password(uint8_t digest[32], char salt[SALT_MAX]) {
 
 // -- the backoff (moy_webhost.c's header) -------------------------------------------------
 
-// A window's end is never 0 (0: no window), so a clock past 2^31 ms of uptime
-// does not read an empty record as one ending 24 days on.
-static int32_t left(uint32_t until, uint32_t now) {
-    if (until == 0) {
-        return 0;
-    }
-    int32_t d = (int32_t)(until - now);
-    return d > 0 ? d : 0;
-}
-
-static uint32_t ends(uint32_t now, uint32_t ms) {
-    uint32_t t = now + ms;
-    return t != 0 ? t : 1;
+static uint32_t left(uint64_t until, uint64_t now) {
+    return until > now ? (uint32_t)(until - now) : 0u;
 }
 
 static uint32_t window(uint32_t past) {
@@ -333,7 +338,7 @@ static uint32_t window(uint32_t past) {
 
 // The source's record, or a new one in place of the least recently seen, a
 // signed-in source's last.
-static src_t *source(uint32_t peer, uint32_t now) {
+static src_t *source(uint32_t peer, uint64_t now) {
     src_t *best = NULL;
     for (int i = 0; i < MOY_WEB_AUTH_SOURCES; i++) {
         src_t *s = &A->src[i];
@@ -343,8 +348,7 @@ static src_t *source(uint32_t peer, uint32_t now) {
         }
         if (best == NULL || !s->used
             || (best->used && (s->paired < best->paired
-                               || (s->paired == best->paired
-                                   && (int32_t)(s->seen - best->seen) < 0)))) {
+                               || (s->paired == best->paired && s->seen < best->seen)))) {
             best = s;
         }
     }
@@ -355,28 +359,55 @@ static src_t *source(uint32_t peer, uint32_t now) {
     return best;
 }
 
+// The count from anywhere: past the free ones it leaks one wrong credential
+// per MOY_WEB_AUTH_DECAY_MS with none newer, so a wait buys a guess a
+// DECAY_MS and more addresses buy none; within them it clears after
+// MOY_WEB_AUTH_FORGET_MS with none newer.
+static void all_decay(uint64_t now) {
+    uint64_t q = now > A->all_last ? now - A->all_last : 0u;
+    if (A->all_fails > MOY_WEB_AUTH_FREE_ALL && q >= MOY_WEB_AUTH_DECAY_MS) {
+        uint64_t k = q / MOY_WEB_AUTH_DECAY_MS;
+        uint32_t over = A->all_fails - MOY_WEB_AUTH_FREE_ALL;
+        k = k < over ? k : over;
+        A->all_fails -= (uint32_t)k;
+        A->all_last += k * MOY_WEB_AUTH_DECAY_MS;
+        q -= k * MOY_WEB_AUTH_DECAY_MS;
+    }
+    if (A->all_fails <= MOY_WEB_AUTH_FREE_ALL) {
+        A->all_until = 0;
+        if (q >= MOY_WEB_AUTH_FORGET_MS) {
+            A->all_fails = 0;
+        }
+    }
+}
+
+// The ms `peer` waits: its own window, and with `all` the one from anywhere
+// too, unless it signed in since that count was cleared.
+static uint32_t wait_of(uint32_t peer, int all) {
+    uint64_t now = moy_net_ms64();
+    all_decay(now);
+    src_t *s = source(peer, now);
+    uint32_t w = left(s->until, now);
+    if (all && !s->paired) {
+        uint32_t a = left(A->all_until, now);
+        w = a > w ? a : w;
+    }
+    return w;
+}
+
 uint32_t moy_wa_wait(uint32_t peer) {
     if (A == NULL || !A->on) {
         return 0;
     }
-    uint32_t now = moy_net_ms();
-    if (A->all_fails && (uint32_t)(now - A->all_last) >= MOY_WEB_AUTH_FORGET_MS) {
-        A->all_fails = A->all_until = 0;
-    }
-    src_t *s = source(peer, now);
-    int32_t w = left(s->until, now);
-    if (!s->paired && A->all_until) {
-        int32_t a = left(A->all_until, now);
-        w = a > w ? a : w;
-    }
-    return (uint32_t)w;
+    return wait_of(peer, 1);
 }
 
 void moy_wa_note(uint32_t peer, int ok) {
     if (A == NULL || !A->on) {
         return;
     }
-    uint32_t now = moy_net_ms();
+    uint64_t now = moy_net_ms64();
+    all_decay(now);
     src_t *s = source(peer, now);
     if (ok) {
         s->fails = 0;
@@ -388,12 +419,12 @@ void moy_wa_note(uint32_t peer, int ok) {
         s->fails++;
     }
     if (s->fails > MOY_WEB_AUTH_FREE) {
-        s->until = ends(now, window(s->fails - MOY_WEB_AUTH_FREE - 1u));
+        s->until = now + window(s->fails - MOY_WEB_AUTH_FREE - 1u);
     }
     A->all_fails++;
     A->all_last = now;
     if (A->all_fails > MOY_WEB_AUTH_FREE_ALL) {
-        A->all_until = ends(now, window(A->all_fails - MOY_WEB_AUTH_FREE_ALL - 1u));
+        A->all_until = now + window(A->all_fails - MOY_WEB_AUTH_FREE_ALL - 1u);
     }
 }
 
@@ -420,7 +451,9 @@ int moy_wa_config(const char *system_dir) {
     memset(A->ss, 0, sizeof A->ss);
     memset(A->ch, 0, sizeof A->ch);
     memset(A->src, 0, sizeof A->src);
-    A->all_fails = A->all_until = 0;
+    A->all_fails = 0;
+    A->all_last = A->all_until = 0;
+    moy_seal_wipe(A->token, sizeof A->token);
     A->token_on = 0;
     A->on = 1;
     load();
@@ -449,7 +482,7 @@ void moy_wa_token(char out[2 * MOY_SEAL_RAND + 1]) {
         return;
     }
     moy_seal_random(A->token, MOY_SEAL_RAND);
-    A->token_at = moy_net_ms();
+    A->token_at = moy_net_ms64();
     A->token_on = 1;
     moy_seal_hex(A->token, MOY_SEAL_RAND, out);
 }
@@ -485,17 +518,73 @@ size_t moy_wa_keys(char *out, size_t cap) {
     return n;
 }
 
-static void end_sessions(const uint8_t *kid) {
+static void term_cut(void) {
+    A->term_on = 0;
+    moy_seal_wipe(A->term_sid, sizeof A->term_sid);
+    if (moy_web_term_cut != NULL) {
+        moy_web_term_cut();
+    }
+}
+
+// The web terminal's session, when it is still one: its frames from the page
+// counted as its use first.
+static sess_t *term_session(void) {
+    for (int i = 0; i < MOY_WA_SESSIONS; i++) {
+        sess_t *s = &A->ss[i];
+        if (s->used && memcmp(s->sid, A->term_sid, MOY_SEAL_SID) == 0) {
+            if (moy_web_term_idle_ms != NULL) {
+                uint64_t now = moy_net_ms64(), idle = moy_web_term_idle_ms();
+                if (idle < 0x80000000u && idle <= now && now - idle > s->at) {
+                    s->at = now - idle;
+                }
+            }
+            return s;
+        }
+    }
+    return NULL;
+}
+
+// Sessions unused past MOY_WA_SESSION_MS ended, and a web terminal whose
+// session is gone (expired, evicted, ended) cut.
+static void sweep_sessions(void) {
+    if (A->term_on) {
+        term_session();
+    }
+    for (int i = 0; i < MOY_WA_SESSIONS; i++) {
+        sess_t *s = &A->ss[i];
+        if (s->used && !fresh(s->at, MOY_WA_SESSION_MS)) {
+            moy_seal_wipe(s, sizeof *s);
+        }
+    }
+    if (A->term_on && term_session() == NULL) {
+        term_cut();
+    }
+}
+
+static int end_sessions(const uint8_t *kid) {
+    int n = 0;
     for (int i = 0; i < MOY_WA_SESSIONS; i++) {
         if (A->ss[i].used && (kid == NULL || memcmp(A->ss[i].kid, kid, MOY_SEAL_KID) == 0)) {
             moy_seal_wipe(&A->ss[i], sizeof A->ss[i]);
+            n++;
         }
     }
     if (A->term_on && (kid == NULL || memcmp(A->term_kid, kid, MOY_SEAL_KID) == 0)) {
-        A->term_on = 0;
-        if (moy_web_term_cut != NULL) {
-            moy_web_term_cut();
-        }
+        term_cut();
+    }
+    return n;
+}
+
+int moy_wa_signout(void) {
+    if (A == NULL || !A->on) {
+        return 0;
+    }
+    return end_sessions(NULL);
+}
+
+void moy_wa_poll(void) {
+    if (A != NULL && A->on) {
+        sweep_sessions();
     }
 }
 
@@ -529,41 +618,54 @@ void moy_wa_term(const moy_wa_seal_t *s) {
     A->term_on = s != NULL && s->on;
     if (A->term_on) {
         memcpy(A->term_kid, s->kid, MOY_SEAL_KID);
+        memcpy(A->term_sid, s->sid, MOY_SEAL_SID);
     }
 }
 
 // -- the sign-in ----------------------------------------------------------------------
 
-static chal_t *challenge_new(void) {
-    chal_t *best = NULL;
+// A slot for `peer`'s new challenge (the header's rules), wiped; NULL when
+// every slot is another source's PAKE or confirm.
+static chal_t *challenge_new(uint32_t peer) {
+    chal_t *own = NULL, *idle = NULL, *other = NULL;
+    int mine = 0;
     for (int i = 0; i < MOY_WA_CHALLENGES; i++) {
         chal_t *c = &A->ch[i];
-        if (c->state != CH_FREE && !fresh(c->at, MOY_WA_NONCE_MS) && c->state != CH_PAKE) {
-            c->state = CH_FREE;
+        if (c->state != CH_FREE && c->state != CH_PAKE && !fresh(c->at, MOY_WA_NONCE_MS)) {
+            moy_seal_wipe(c, sizeof *c);
         }
-        if (c->state == CH_PAKE) {
-            continue;
-        }
-        if (best == NULL || (best->state != CH_FREE
-                             && (c->state == CH_FREE || (int32_t)(c->at - best->at) < 0))) {
-            best = c;
+        if (c->state == CH_FREE) {
+            idle = idle != NULL ? idle : c;
+        } else if (c->peer == peer) {
+            mine++;
+            if (c->state != CH_PAKE && (own == NULL || c->at < own->at)) {
+                own = c;
+            }
+        } else if (c->state == CH_ISSUED && (other == NULL || c->at < other->at)) {
+            other = c;
         }
     }
+    chal_t *best = mine >= MOY_WA_PEER_CHALLENGES && own != NULL ? own
+                   : idle != NULL ? idle : other != NULL ? other : own;
     if (best != NULL) {
         moy_seal_wipe(best, sizeof *best);
     }
     return best;
 }
 
-// The challenge `nb` names in state `state`, fresh, taken (its slot freed for
-// the caller to refill); NULL when there is none.
-static chal_t *challenge_take(const uint8_t nb[MOY_SEAL_RAND], int state) {
+// The challenge `nb` names, issued to `peer` and in state `state`: fresh, it
+// is taken (its slot freed for the caller to refill); stale, it is wiped.
+// NULL when there is none. Another source's is left as it is.
+static chal_t *challenge_take(const uint8_t nb[MOY_SEAL_RAND], uint32_t peer, int state) {
     for (int i = 0; i < MOY_WA_CHALLENGES; i++) {
         chal_t *c = &A->ch[i];
-        if (c->state == state && memcmp(c->nb, nb, MOY_SEAL_RAND) == 0) {
-            int ok = fresh(c->at, MOY_WA_NONCE_MS);
+        if (c->state == state && c->peer == peer && memcmp(c->nb, nb, MOY_SEAL_RAND) == 0) {
+            if (!fresh(c->at, MOY_WA_NONCE_MS)) {
+                moy_seal_wipe(c, sizeof *c);
+                return NULL;
+            }
             c->state = CH_FREE;
-            return ok ? c : NULL;
+            return c;
         }
     }
     return NULL;
@@ -601,18 +703,22 @@ static wkey_t *key_new(const char *name) {
     return best;
 }
 
+// A slot for a new session: a free one, else the least recently used one's,
+// whose web terminal is then cut.
 static sess_t *session_new(void) {
+    sweep_sessions();
     sess_t *best = NULL;
     for (int i = 0; i < MOY_WA_SESSIONS; i++) {
         sess_t *s = &A->ss[i];
-        if (s->used && !fresh(s->at, MOY_WA_SESSION_MS)) {
-            moy_seal_wipe(s, sizeof *s);
-        }
-        if (best == NULL || (best->used && (!s->used || (int32_t)(s->at - best->at) < 0))) {
+        if (best == NULL || (best->used && (!s->used || s->at < best->at))) {
             best = s;
         }
     }
+    int term = A->term_on && best->used && memcmp(best->sid, A->term_sid, MOY_SEAL_SID) == 0;
     moy_seal_wipe(best, sizeof *best);
+    if (term) {
+        term_cut();
+    }
     return best;
 }
 
@@ -624,7 +730,7 @@ static int signed_in(wkey_t *k, const moy_seal_hs_t *h, char *doc, size_t cap,
     moy_seal_random(s->sid, MOY_SEAL_SID);
     memcpy(s->kid, k->kid, MOY_SEAL_KID);
     moy_seal_session(h, k->kid, k->key, &s->k);
-    s->at = moy_net_ms();
+    s->at = moy_net_ms64();
     uint8_t proof[MOY_SEAL_MAC];
     moy_seal_proof(h, k->kid, k->key, s->sid, proof);
     char sid[2 * MOY_SEAL_SID + 1], ph[2 * MOY_SEAL_MAC + 1];
@@ -772,7 +878,7 @@ int moy_wa_later(char *doc, size_t cap) {
                         j->err == MOY_SEAL_EPOINT ? "password" : "busy");
     } else {
         c->state = CH_CONFIRM;
-        c->at = moy_net_ms();
+        c->at = moy_net_ms64();
         memcpy(c->ke, j->ke, MOY_SEAL_KEY);
         memcpy(c->ca, j->ca, MOY_SEAL_MAC);
         char y[2 * MOY_SEAL_POINT + 1], cb[2 * MOY_SEAL_MAC + 1];
@@ -786,13 +892,14 @@ int moy_wa_later(char *doc, size_t cap) {
     return status;
 }
 
-static int hello(char *doc, size_t cap) {
-    chal_t *c = challenge_new();
+static int hello(uint32_t peer, char *doc, size_t cap) {
+    chal_t *c = challenge_new(peer);
     if (c == NULL) {
         return refuse(doc, cap, 503, "busy");
     }
     c->state = CH_ISSUED;
-    c->at = moy_net_ms();
+    c->peer = peer;
+    c->at = moy_net_ms64();
     moy_seal_random(c->nb, MOY_SEAL_RAND);
     char id[2 * MOY_SEAL_RAND + 1], nb[2 * MOY_SEAL_RAND + 1], salt[SALT_MAX];
     uint8_t digest[32];
@@ -803,6 +910,19 @@ static int hello(char *doc, size_t cap) {
     snprintf(doc, cap, "{\"v\":1,\"id\":\"%s\",\"nb\":\"%s\",\"pw\":%s,\"salt\":\"%s\"}", id, nb,
              pw ? "true" : "false", pw ? salt : "");
     return 200;
+}
+
+// The QR's token while it is good; one found expired is wiped.
+static int token_live(void) {
+    if (A->token_on && !fresh(A->token_at, MOY_WA_TOKEN_MS)) {
+        moy_seal_wipe(A->token, sizeof A->token);
+        A->token_on = 0;
+    }
+    return A->token_on;
+}
+
+static int nonce_gone(char *doc, size_t cap) {
+    return refuse(doc, cap, 409, "nonce");
 }
 
 int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap) {
@@ -822,27 +942,43 @@ int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap
         || moy_json_kind(o, oe) != MOY_JSON_OBJ || str_of(o, oe, "op", op, sizeof op) < 0) {
         return refuse(doc, cap, 400, "bad auth");
     }
-    uint32_t ms = moy_wa_wait(peer);
+    int is_hello = strcmp(op, "hello") == 0, is_key = strcmp(op, "key") == 0;
+    int is_confirm = strcmp(op, "confirm") == 0;
+    if (!is_hello && !is_key && !is_confirm && strcmp(op, "token") != 0
+        && strcmp(op, "pake") != 0) {
+        return refuse(doc, cap, 400, "bad auth");
+    }
+    moy_seal_hs_t h;
+    uint8_t kid[MOY_SEAL_KID];
+    wkey_t *k = NULL;
+    memcpy(h.id, A->id, MOY_SEAL_RAND);
+    if (!is_hello && !hex_of(o, oe, "nb", h.nb, MOY_SEAL_RAND)) {
+        return refuse(doc, cap, 400, "bad auth");
+    }
+    if (is_key) {
+        if (!hex_of(o, oe, "kid", kid, MOY_SEAL_KID)) {
+            return refuse(doc, cap, 400, "bad auth");
+        }
+        k = key_of(kid);
+    }
+    // A hello and a confirm carry no guess, and a paired browser's key is no
+    // password: the window from anywhere holds none of them.
+    uint32_t ms = wait_of(peer, !is_hello && !is_confirm && k == NULL);
     if (ms) {
         snprintf(doc, cap, "{\"error\":\"wait\",\"ms\":%u}", (unsigned)ms);
         return 429;
     }
-    if (strcmp(op, "hello") == 0) {
-        return hello(doc, cap);
+    if (is_hello) {
+        return hello(peer, doc, cap);
     }
-    moy_seal_hs_t h;
-    memcpy(h.id, A->id, MOY_SEAL_RAND);
-    if (!hex_of(o, oe, "nb", h.nb, MOY_SEAL_RAND)) {
-        return refuse(doc, cap, 400, "bad auth");
-    }
-    if (strcmp(op, "confirm") == 0) {
+    if (is_confirm) {
         uint8_t ca[MOY_SEAL_MAC];
-        chal_t *c = challenge_take(h.nb, CH_CONFIRM);
-        if (c == NULL || !hex_of(o, oe, "cA", ca, MOY_SEAL_MAC)
-            || !moy_seal_eq(ca, c->ca, MOY_SEAL_MAC)) {
-            if (c != NULL) {
-                moy_seal_wipe(c, sizeof *c);
-            }
+        chal_t *c = challenge_take(h.nb, peer, CH_CONFIRM);
+        if (c == NULL) {
+            return nonce_gone(doc, cap);
+        }
+        if (!hex_of(o, oe, "cA", ca, MOY_SEAL_MAC) || !moy_seal_eq(ca, c->ca, MOY_SEAL_MAC)) {
+            moy_seal_wipe(c, sizeof *c);
             return refuse(doc, cap, 403, "password");
         }
         memcpy(h.nc, c->nc, MOY_SEAL_RAND);
@@ -854,11 +990,20 @@ int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap
     if (!hex_of(o, oe, "nc", h.nc, MOY_SEAL_RAND)) {
         return refuse(doc, cap, 400, "bad auth");
     }
-    chal_t *c = challenge_take(h.nb, CH_ISSUED);
-    if (strcmp(op, "key") == 0) {
-        uint8_t kid[MOY_SEAL_KID], mac[MOY_SEAL_MAC], want[MOY_SEAL_MAC];
-        wkey_t *k = hex_of(o, oe, "kid", kid, MOY_SEAL_KID) ? key_of(kid) : NULL;
-        int ok = c != NULL && k != NULL && hex_of(o, oe, "mac", mac, MOY_SEAL_MAC);
+    chal_t *c = challenge_take(h.nb, peer, CH_ISSUED);
+    if (c == NULL) {
+        return nonce_gone(doc, cap);
+    }
+    if (strcmp(op, "pake") != 0) {
+        moy_seal_wipe(c, sizeof *c);            // nothing of it is read again
+    }
+    if (is_key) {
+        uint8_t mac[MOY_SEAL_MAC], want[MOY_SEAL_MAC];
+        if (k == NULL) {
+            moy_wa_note(peer, 0);
+            return refuse(doc, cap, 403, "kid");    // this board does not know the key
+        }
+        int ok = hex_of(o, oe, "mac", mac, MOY_SEAL_MAC);
         if (ok) {
             moy_seal_key_mac(&h, kid, k->key, want);
             ok = moy_seal_eq(mac, want, MOY_SEAL_MAC);
@@ -870,8 +1015,7 @@ int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap
     name_of(o, oe, name);
     if (strcmp(op, "token") == 0) {
         uint8_t mac[MOY_SEAL_MAC], want[MOY_SEAL_MAC];
-        int ok = c != NULL && A->token_on && fresh(A->token_at, MOY_WA_TOKEN_MS)
-                 && hex_of(o, oe, "mac", mac, MOY_SEAL_MAC);
+        int ok = token_live() && hex_of(o, oe, "mac", mac, MOY_SEAL_MAC);
         if (ok) {
             char raw[128];
             int rn = str_of(o, oe, "name", raw, sizeof raw);
@@ -890,35 +1034,33 @@ int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap
         moy_seal_wipe(t, sizeof t);
         return st;
     }
-    if (strcmp(op, "pake") == 0) {
-        job_t *j = &A->job;
-        uint8_t x[MOY_SEAL_POINT];
-        if (c == NULL || !hex_of(o, oe, "X", x, MOY_SEAL_POINT)) {
-            return refuse(doc, cap, 403, "password");
-        }
-        if (__atomic_load_n(&j->state, __ATOMIC_ACQUIRE) != JOB_IDLE) {
-            return refuse(doc, cap, 503, "busy");
-        }
-        char salt[SALT_MAX];
-        if (!password(j->digest, salt)) {
-            return refuse(doc, cap, 403, "nopw");
-        }
-        moy_wa_note(peer, 0);
-        c->state = CH_PAKE;
-        c->at = moy_net_ms();
-        memcpy(c->nc, h.nc, MOY_SEAL_RAND);
-        memcpy(c->name, name, sizeof c->name);
-        j->slot = (int)(c - A->ch);
-        j->hs = h;
-        memcpy(j->x, x, MOY_SEAL_POINT);
-        if (job_start() != 0) {
-            c->state = CH_FREE;
-            moy_seal_wipe(j, sizeof *j);
-            return refuse(doc, cap, 503, "busy");
-        }
-        return 0;
+    job_t *j = &A->job;
+    uint8_t x[MOY_SEAL_POINT];
+    if (!hex_of(o, oe, "X", x, MOY_SEAL_POINT)) {
+        return refuse(doc, cap, 403, "password");
     }
-    return refuse(doc, cap, 400, "bad auth");
+    if (__atomic_load_n(&j->state, __ATOMIC_ACQUIRE) != JOB_IDLE) {
+        return refuse(doc, cap, 503, "busy");
+    }
+    char salt[SALT_MAX];
+    if (!password(j->digest, salt)) {
+        return refuse(doc, cap, 403, "nopw");
+    }
+    moy_wa_note(peer, 0);
+    c->state = CH_PAKE;
+    c->peer = peer;
+    c->at = moy_net_ms64();
+    memcpy(c->nc, h.nc, MOY_SEAL_RAND);
+    memcpy(c->name, name, sizeof c->name);
+    j->slot = (int)(c - A->ch);
+    j->hs = h;
+    memcpy(j->x, x, MOY_SEAL_POINT);
+    if (job_start() != 0) {
+        c->state = CH_FREE;
+        moy_seal_wipe(j, sizeof *j);
+        return refuse(doc, cap, 503, "busy");
+    }
+    return 0;
 }
 
 // -- a sealed request -------------------------------------------------------------------
@@ -951,15 +1093,12 @@ int moy_wa_check(const char *method, size_t mn, const char *target, size_t tn, c
     if (!moy_seal_unhex(v, vn, sid, MOY_SEAL_SID)) {
         return MOY_WA_NONE;
     }
+    sweep_sessions();
     sess_t *s = NULL;
     for (int i = 0; i < MOY_WA_SESSIONS && s == NULL; i++) {
         sess_t *c = &A->ss[i];
         if (c->used && memcmp(c->sid, sid, MOY_SEAL_SID) == 0) {
-            if (fresh(c->at, MOY_WA_SESSION_MS)) {
-                s = c;
-            } else {
-                moy_seal_wipe(c, sizeof *c);
-            }
+            s = c;
         }
     }
     if (s == NULL) {
@@ -999,10 +1138,11 @@ int moy_wa_check(const char *method, size_t mn, const char *target, size_t tn, c
     } else {
         s->win |= (uint64_t)1 << (s->top - seq);
     }
-    s->at = moy_net_ms();
+    s->at = moy_net_ms64();
     *bn = pn;
     out->on = 1;
     out->seq = seq;
+    memcpy(out->sid, s->sid, MOY_SEAL_SID);
     memcpy(out->kc, s->k.kc, MOY_SEAL_KEY);
     memcpy(out->kb, s->k.kb, MOY_SEAL_KEY);
     memcpy(out->kid, s->kid, MOY_SEAL_KID);
