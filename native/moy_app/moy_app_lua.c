@@ -59,21 +59,15 @@ static const char *const ROW_NAME[R_N] = {
     "prefs.get", "prefs.set", "prefs.clear",
     "theme.set", "nav.open_app",
 };
-static int s_row[R_N] = { -1 };
-
-static void rows_find(void) {
-    if (s_row[R_N - 1] > 0) {
-        return;
-    }
-    for (int k = 0; k < R_N; k++) {
-        s_row[k] = -1;
-        for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
-            if (strcmp(moy_app_table_name(r), ROW_NAME[k]) == 0) {
-                s_row[k] = (int)r;
-                break;
-            }
+// Row `k`'s index in the table, or -1: looked up per call, so the binding keeps
+// no internal RAM of its own (an S3's idle desk is counted to the byte).
+static int row_of(int k) {
+    for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
+        if (strcmp(moy_app_table_name(r), ROW_NAME[k]) == 0) {
+            return (int)r;
         }
     }
+    return -1;
 }
 
 // -- a growing byte buffer held in a userdata at a fixed stack slot ------------------
@@ -156,7 +150,8 @@ static void field_kind(lua_State *L, buf_t *b) {
 // pushed; a grant that ended answers STALE from the row.
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
     lrun_t *u = lrun(L);
-    if (u == NULL || !moy_app_run_live(&u->run) || s_row[k] < 0) {
+    int row = row_of(k);
+    if (u == NULL || !moy_app_run_live(&u->run) || row < 0) {
         lua_pushnil(L);
         *ans = NULL;
         return -MOY_APP_STALE;
@@ -164,7 +159,7 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
     size_t cap = 1024u;
     for (;;) {
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
-        int32_t r = moy_app_role(u->run.a, u->run.g, (uint32_t)s_row[k],
+        int32_t r = moy_app_role(u->run.a, u->run.g, (uint32_t)row,
                                  b != NULL ? b->p : NULL, b != NULL ? b->n : 0u, p, cap);
         if (r != -MOY_APP_FULL || cap >= (64u << 20)) {
             *ans = p;
@@ -1110,7 +1105,6 @@ int moy_app_lua_open(lua_State *L, const struct moy_app_run *run) {
     u->kind[0] = 0;
     lua_rawsetp(L, LUA_REGISTRYINDEX, &RUN_KEY);
     uint32_t roles = run->roles;
-    rows_find();
     const moy_grant_t *gr;
     if (moy_app_grant_get(run->a, run->g, &gr) == MOY_APP_OK && gr->kind >= 0) {
         const char *k = moy_app_kind_name(gr->kind);
