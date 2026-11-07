@@ -102,8 +102,10 @@ void moy_net_free(void *p);
 // time. A board's system clock counts from 2000, MicroPython's epoch on the
 // esp32 port (machine.RTC sets it so, and the WiFi driver sets NTP's answer
 // MOY_NET_CLOCK_EPOCH back, moy_wifi.c), so its time() takes the epoch back;
-// the unix port, the browser and the host count from 1970.
-#ifdef ESP_PLATFORM
+// the unix port, the browser and the host count from 1970. A board is told by
+// the header it has: ESP_PLATFORM is not defined for a usermod's sources on
+// the esp32 port (the executable compiles them too, and its copy is linked).
+#if __has_include("esp_heap_caps.h")
 #define MOY_NET_CLOCK_EPOCH 946684800       // 1970-01-01 to 2000-01-01
 #else
 #define MOY_NET_CLOCK_EPOCH 0

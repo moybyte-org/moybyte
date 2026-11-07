@@ -49,11 +49,16 @@
 #include "moy_vol.h"
 #include "moy_webauth.h"
 
-#ifdef ESP_PLATFORM
+// A board, told by the header it has: ESP_PLATFORM is not defined for a
+// usermod's sources on the esp32 port (moy_net.h, MOY_NET_CLOCK_EPOCH).
+#if __has_include("esp_heap_caps.h")
+#define WA_BOARD 1
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #else
+#define WA_BOARD 0
 #include <pthread.h>
 #endif
 
@@ -461,7 +466,7 @@ int moy_wa_config(const char *system_dir) {
 }
 
 int moy_wa_open(void) {
-    #ifdef ESP_PLATFORM
+    #if WA_BOARD
     return 0;
     #else
     return A == NULL || !A->on;
@@ -802,7 +807,7 @@ static int refuse(char *doc, size_t cap, int status, const char *why) {
     return status;
 }
 
-#ifdef ESP_PLATFORM
+#if WA_BOARD
 static void job_task(void *arg);
 #else
 static void *job_thread(void *arg);
@@ -822,7 +827,7 @@ static void run_job(void) {
     __atomic_store_n(&j->state, JOB_DONE, __ATOMIC_RELEASE);
 }
 
-#ifdef ESP_PLATFORM
+#if WA_BOARD
 static void job_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -927,7 +932,7 @@ static int nonce_gone(char *doc, size_t cap) {
 
 int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap) {
     if (A == NULL || !A->on) {
-        #ifdef ESP_PLATFORM
+        #if WA_BOARD
         return refuse(doc, cap, 503, "auth");
         #else
         snprintf(doc, cap, "{\"v\":1,\"open\":true}");
