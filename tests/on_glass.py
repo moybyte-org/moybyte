@@ -3956,8 +3956,9 @@ def wasm_files_push(board, board_dir, fresh=True):
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/" + FILES_FOLDER)
     if fresh:
-        board.pyval("ws._with_sd(lambda: __import__('cart_files').remove("
-                    "str(ws.carts_root), %r)) or 1" % FILES_FOLDER, timeout=30)
+        board.pyval("ws._with_sd(lambda: __import__('moy_store_base')._rmtree("
+                    "__import__('cart_files').folder_of(str(ws.carts_root) + '/' + %r))) or 1"
+                    % FILES_FOLDER, timeout=30, strict=True)
     board.pyval("len(ws.rescan_carts() or ())", timeout=60)
 
 

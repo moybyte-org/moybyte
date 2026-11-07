@@ -174,7 +174,9 @@ to whoever called it.
   never refused either (2026-09-30, "A cart survives its firmware"): it plays
   on the interpreter instead, with a short notice naming the cause ("needs an
   update" or "isn't signed"), never a panel. Only tamper evidence -- a
-  signature present but not verifying -- still stays an error.
+  signature present but not verifying -- still stays an error, and so does a
+  trap once the module has run (`moycore.wasm_ran()`: a crash in `_init` is the
+  cart's own error and is never retried on the interpreter).
   `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
   implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine
