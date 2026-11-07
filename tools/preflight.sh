@@ -179,6 +179,34 @@ web_touched() {
   return 1
 }
 
+# The browser suites CI drives: the test files web-e2e.yml's drive step names,
+# read from it, so this lane cannot run fewer than CI does
+# (tests/test_preflight_web_filter.py).
+web_suites() {
+  sed -n '/- name: Drive the hosted console in real Chrome/,/- name:/p' \
+    .github/workflows/web-e2e.yml | grep -o 'tests/[A-Za-z0-9_]*\.py'
+}
+
+# Those suites as CI runs them: a missing prerequisite fails rather than skips
+# (MOYBYTE_REQUIRE_WEB_E2E), and a run that skipped anything fails as CI's
+# "A skipped browser suite proves nothing" step does.
+browser_suites() {
+  local xml="${TOUR_DIR}/web-e2e.xml" suites
+  mapfile -t suites < <(web_suites)
+  [ "${#suites[@]}" -gt 0 ] || { echo "no suites in web-e2e.yml's drive step"; return 1; }
+  env MOYBYTE_WEB_E2E=1 MOYBYTE_REQUIRE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
+    --junitxml="${xml}" "${suites[@]}" || return 1
+  "${PY}" - "${xml}" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+tests = sum(int(s.get("tests", 0)) for s in suites)
+skipped = sum(int(s.get("skipped", 0)) for s in suites)
+if skipped or not tests:
+    sys.exit("the browser suites did not run: %d collected, %d skipped" % (tests, skipped))
+PY
+}
+
 # Whether the change touches what firmware-build.yml's `paths:` covers: keep
 # this list and that one the same (tests/test_preflight_web_filter.py).
 firmware_touched() {
@@ -254,14 +282,9 @@ step "headless tour (fresh save dir)" \
 
 if [ "${WEB}" = "1" ]; then
   # Path-filtered in CI (`web_touched` above). The suites drive the `dist/`
-  # built at the top.
-  step "browser suites in real Chrome" \
-    env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
-      tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-      tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
-      tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
-      tests/test_web_fonts.py tests/test_web_look_parity.py \
-      tests/test_editor_ladder_icons.py
+  # built at the top and the site's `dist_site/`, built here as CI builds it.
+  step "the site's browser console builds"       firmware/web_runner/build.sh --site
+  step "browser suites in real Chrome, none skipped" browser_suites
 fi
 
 if [ "${FIRMWARE}" = "0" ] && [ "${NOFIRMWARE}" = "0" ] && firmware_touched; then
