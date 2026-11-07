@@ -329,6 +329,7 @@ class Player(PlayerDiag):
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._flag_put = None         # flag_edits' applier for the running cart
+        self._wasm = False            # the run is a compiled cart's
         self._lua = None              # #67: the running runtime cart's state -- the
                                       # handle a ws.runtimes factory returned, Lua or
                                       # wasm; _close_lua() on exit so the cart's whole
@@ -583,6 +584,7 @@ class Player(PlayerDiag):
         the exit path -- the state is unreachable either way and gc finishes it."""
         lua = self._lua
         self._lua = None
+        self._wasm = False
         self._lua_split = None
         self._play = None
         if lua is not None:
@@ -810,6 +812,7 @@ class Player(PlayerDiag):
         if err is not None:
             return self._refuse(err)
         _rt = project.cart.get("runtime", "python")
+        self._wasm = _rt == "wasm"
         run = 0
         self._run_handle = 0
         if _rt != "python":
@@ -2418,8 +2421,10 @@ class Player(PlayerDiag):
         # toggle (e.g. wifi entering/leaving its password screen) takes effect.
         ws._sync_cart_text_mode()
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
-        # its own UI overlays, so they're never offset/clipped/recoloured.
-        ws._reset_canvas_state()
+        # its own UI overlays, so they're never offset/clipped/recoloured. A
+        # compiled cart draws under libmoy's own state, never the canvas's.
+        if not self._wasm:
+            ws._reset_canvas_state()
         # A logic-only frame (#217): nothing below draws pixels this frame --
         # the crash panel/tool bar all repaint on the next drawn frame
         # (a crash disarms the pacing itself, so the panel is never starved).
