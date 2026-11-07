@@ -125,18 +125,31 @@ int moy_proc_state(uint32_t h, uint8_t state) {
     return MOY_PROC_OK;
 }
 
-int moy_proc_bind(uint32_t h, void *engine, const moy_app_run_t *app) {
+int moy_proc_bind(uint32_t h, void *engine, const struct moy_app_run *app) {
     moy_proc_row_t *r;
     if (moy_proc_get(h, &r) != MOY_PROC_OK) {
         return MOY_PROC_STALE;
     }
     r->engine = engine;
+    #ifdef MOY_PROC_GRANT
     if (app != NULL) {
         r->app = *app;
     } else {
         memset(&r->app, 0, sizeof(r->app));
     }
+    #else
+    (void)app;
+    #endif
     return MOY_PROC_OK;
+}
+
+uint32_t moy_proc_grant(const moy_proc_row_t *row) {
+    #ifdef MOY_PROC_GRANT
+    return row->app.g;
+    #else
+    (void)row;
+    return 0u;
+    #endif
 }
 
 uint32_t moy_proc_slots(void) {
@@ -171,13 +184,18 @@ uint32_t moy_proc_of_engine(const void *engine) {
     return 0u;
 }
 
-const moy_app_run_t *moy_proc_app_of(const void *engine) {
+const struct moy_app_run *moy_proc_app_of(const void *engine) {
+    #ifdef MOY_PROC_GRANT
     moy_proc_row_t *r;
     uint32_t h = moy_proc_of_engine(engine);
     if (h == 0u || moy_proc_get(h, &r) != MOY_PROC_OK || r->app.g == 0u) {
         return NULL;
     }
     return &r->app;
+    #else
+    (void)engine;
+    return NULL;
+    #endif
 }
 
 void moy_proc_reset(void) {

@@ -29,7 +29,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// The grant a row holds is moy_app's (native/moy_app/moy_app_run.h); an image
+// without native/moy_app (the Zero) holds none, and a row's grant reads
+// absent there.
+#if defined(__has_include)
+#if __has_include("moy_app_run.h")
 #include "moy_app_run.h"
+#define MOY_PROC_GRANT 1
+#endif
+#endif
+struct moy_app_run;
 
 enum {
     MOY_PROC_OK = 0,
@@ -55,7 +64,9 @@ typedef struct {
     uint32_t owner;             // its OWNER row (moy_buf.h), 0 none
     uint32_t run;               // the Player's run handle, 0 none
     void *engine;               // the tier's engine for it, NULL before its open
+#ifdef MOY_PROC_GRANT
     moy_app_run_t app;          // its grant, `g` 0: none (a game)
+#endif
     int32_t exit;
     uint8_t tier;
     uint8_t kind;
@@ -75,12 +86,15 @@ int moy_proc_get(uint32_t h, moy_proc_row_t **row);
 int moy_proc_state(uint32_t h, uint8_t state);
 // The runtime's open: the engine that runs it, and its grant copied (NULL:
 // none).
-int moy_proc_bind(uint32_t h, void *engine, const moy_app_run_t *app);
+int moy_proc_bind(uint32_t h, void *engine, const struct moy_app_run *app);
 // The live row of `pid` / of `engine`, or 0.
 uint32_t moy_proc_of_pid(uint32_t pid);
 uint32_t moy_proc_of_engine(const void *engine);
-// The grant the row of `engine` holds, or NULL: no row, or a run with none.
-const moy_app_run_t *moy_proc_app_of(const void *engine);
+// The grant the row of `engine` holds, or NULL: no row, a run with none, or
+// an image without grants.
+const struct moy_app_run *moy_proc_app_of(const void *engine);
+// The grant a row holds (`g`), 0: none.
+uint32_t moy_proc_grant(const moy_proc_row_t *row);
 // The live rows in slot order: slots() bounds the walk, at(slot) is a handle
 // or 0.
 uint32_t moy_proc_slots(void);

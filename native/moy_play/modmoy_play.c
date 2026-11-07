@@ -493,8 +493,10 @@ static mp_obj_t mod_mute(mp_obj_t run_obj, mp_obj_t on) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_mute_obj, mod_mute);
 
-// proc(run) -- the run's process row (moy_proc.h): (pid, tier, kind, state,
-// bound, grant), or None for a VM run or a stale handle.
+// proc_row(run) -- the run's process row (moy_proc.h): (pid, tier, kind,
+// state, bound, grant), or None for a VM run or a stale handle. Not `proc`:
+// the frozen console uses that name, and a qstr both pools carry collides
+// (native/moy_web/modmoy_web.c's `assets()` has the story).
 static mp_obj_t mod_proc(mp_obj_t run_obj) {
     moy_proc_row_t *p;
     if (moy_proc_get(moy_play_proc(run_arg(run_obj)), &p) != MOY_PROC_OK) {
@@ -503,7 +505,7 @@ static mp_obj_t mod_proc(mp_obj_t run_obj) {
     mp_obj_t t[6] = {
         mp_obj_new_int_from_uint(p->pid), MP_OBJ_NEW_SMALL_INT(p->tier),
         MP_OBJ_NEW_SMALL_INT(p->kind), MP_OBJ_NEW_SMALL_INT(p->state),
-        mp_obj_new_bool(p->engine != NULL), mp_obj_new_int_from_uint(p->app.g),
+        mp_obj_new_bool(p->engine != NULL), mp_obj_new_int_from_uint(moy_proc_grant(p)),
     };
     return mp_obj_new_tuple(6, t);
 }
@@ -567,7 +569,7 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_runs), MP_ROM_PTR(&mod_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_mute), MP_ROM_PTR(&mod_mute_obj) },
-    { MP_ROM_QSTR(MP_QSTR_proc), MP_ROM_PTR(&mod_proc_obj) },
+    { MP_ROM_QSTR(MP_QSTR_proc_row), MP_ROM_PTR(&mod_proc_obj) },
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&mod_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_live), MP_ROM_PTR(&mod_front_live_obj) },

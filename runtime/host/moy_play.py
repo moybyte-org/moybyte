@@ -587,7 +587,7 @@ class _ProcRow(ctypes.Structure):
                 ("state", _U8), ("id", ctypes.c_char * 32)]
 
 
-def proc(run):
+def proc_row(run):
     """The run's process row (moy_proc.h): (pid, tier, kind, state, bound,
     grant), or None for a VM run or a stale handle."""
     d, _ = _play()
