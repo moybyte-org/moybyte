@@ -44,6 +44,7 @@
 #include "moy_files.h"
 #include "moy_ui_wasm.h"
 #include "moy_app_run.h"
+#include "moy_proc.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -234,12 +235,15 @@ static int app_register(void)
 static host_wasm *G_RUNS;
 
 /* The run a "moybyte.app" native's call is for (moy_app_wasm.h): its exec
- * env's instance, whose custom data is the run's libmoy binding. Each run
- * holds its own, so two runs at once are two grants. */
+ * env's instance, whose custom data is the run's libmoy binding, the engine
+ * of its process row (moy_proc.h); a run no Player launched has none, and is
+ * found among the runs made. Each run holds its own, so two runs at once are
+ * two grants. */
 const moy_app_run_t *moy_app_wasm_run_of(void *e)
 {
     wasm_module_inst_t inst = e ? wasm_runtime_get_module_inst((wasm_exec_env_t)e) : NULL;
     void *w = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    if (w && moy_proc_of_engine(w)) return moy_proc_app_of(w);
     for (host_wasm *r = G_RUNS; r && w; r = (host_wasm *)r->next)
         if ((void *)&r->w == w) return r->app.g ? &r->app : NULL;
     return NULL;
@@ -375,6 +379,7 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     moycore_RUN.open = 1;
     moycore_RUN.wasm = 1;
     r->rh = moycore_run_handle(&moycore_RUN);
+    moy_proc_bind(moycore_RUN.proc, &r->w, NULL);
     G_LIVE_W = r;
     hl_wasm_tick = hw_tick_live;
     hl_wasm_stuck = hw_stuck_live;
@@ -388,6 +393,8 @@ int hw_set_app(host_wasm *r, const void *app, int len)
 {
     if (len != (int)sizeof(moy_app_run_t)) return 1;
     memcpy(&r->app, app, sizeof(r->app));
+    moycore_run *row = moycore_run_of(r->rh);
+    if (row) moy_proc_bind(row->proc, &r->w, &r->app);
     return 0;
 }
 

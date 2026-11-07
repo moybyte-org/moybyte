@@ -3,6 +3,7 @@
 // `files_keep`, `frame`, ...).
 
 #include "modmoycore_int.h"
+#include "moy_proc.h"
 
 // -- the compiled cart (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------
 //
@@ -74,18 +75,19 @@ int moy_app_wasm_admit(const struct moy_app_run *r, const uint8_t *head, size_t 
 
 // The run a native's call is for (moy_app_wasm.h): the engine's handle on the
 // call -- the instance's exec env, its custom data libmoy's binding, or in
-// the browser the binding itself -- to this run's, the one session there is.
+// the browser the binding itself -- to the process row that binding is the
+// engine of (moy_proc.h), or, for a run no Player launched, to the session's.
 #if MOYCORE_APP
 const struct moy_app_run *moy_app_wasm_run_of(void *e)
 {
-    if (!WR || !e) return NULL;
+    if (!e) return NULL;
 #if MOY_WASM
     wasm_module_inst_t inst = wasm_runtime_get_module_inst((wasm_exec_env_t)e);
-    if (!inst || wasm_runtime_get_custom_data(inst) != (void *)&WR->w) return NULL;
-#else
-    if (e != (void *)&WR->w) return NULL;
+    e = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    if (!e) return NULL;
 #endif
-    return WR->app.g ? &WR->app : NULL;
+    if (moy_proc_of_engine(e)) return moy_proc_app_of(e);
+    return WR && e == (void *)&WR->w && WR->app.g ? &WR->app : NULL;
 }
 #endif
 
@@ -560,9 +562,8 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     WR->w.wire_swapped = swapped;
 #if MOYCORE_APP
     if (app) WR->app = *app;
-#else
-    (void)app;
 #endif
+    moy_proc_bind(moycore_RUN.proc, &WR->w, app);
     // The manifest's "writable" entries, NUL-separated as Python joined them,
     // and two NULs to end libmoy's list.
     if (writable_len) {

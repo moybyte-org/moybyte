@@ -291,6 +291,13 @@ def test_two_lua_games_are_two_task_manager_rows_with_their_own_heaps(tmp_path):
     assert a[6] != b[6] and a[6] is not None, "two runs, two pids"
     assert a[5] and b[5] and a[5] > b[5] + 16000, (a[5], b[5])
     assert a[5] == one._lua.heap()
+    # each is a row of the kernel's process table: its pid, the Lua tier, a
+    # game, running, its engine bound
+    from runtime import moy_play
+    rows = [moy_play.proc(p.player._run_handle) for p in ws.procs.list] + [
+        moy_play.proc(ws.player._run_handle)]
+    assert [r[:4] for r in rows] == [(p, 2, 2, 1) for p in (a[6], b[6])], rows
+    assert all(r[4] for r in rows)
 
 
 def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_path):
@@ -309,6 +316,9 @@ def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_
     assert ws.procs.list == [], "the crashed game kept its row"
     rec = os_log.crash_of(pid)
     assert rec is not None and "boom at" in rec[1], rec
+    from runtime import moy_play
+    assert moy_play.proc(boom._run_handle) is None, "the crashed run kept its process row"
+    assert moy_play.proc(steady._run_handle)[:4] == (steady.pid, 2, 2, 1)
     assert steady.cart_error is None and ws.player is steady
     n = _n(steady)
     drv.frame(1 / 30)

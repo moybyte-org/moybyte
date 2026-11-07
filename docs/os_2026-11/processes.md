@@ -8,8 +8,11 @@ mini-VM spike. Read `docs/os_2026-11.md` first.
 ## 1. Processes
 
 A **process** is a program the OS runs: a cart `id` (#162), a tier, a grant, a
-row of a process table (a new handle kind, `MOY_KIND_PROC`, beside
-`native/moy_spine/moy_htab.h`'s kinds), and a lifecycle the kernel drives.
+row of a process table (handle kind `MOY_KIND_PROC`,
+`native/moy_kernel/moy_proc.h`), and a lifecycle the kernel drives. The
+table holds the processes outside the shell's VM: the kernel's Player adds a
+row per Lua or compiled run at its launch (its pid, tier, kind, the run's
+OWNER, its engine and its grant) and ends it after the runtime's close.
 The process row is **not** an OWNER row: a VM stop ends every OWNER row, and
 the grant table was kept off OWNER for that reason (`native/moy_app/README.md`,
 "The grant"). A process row holds an OWNER for its run's loans (canvases,

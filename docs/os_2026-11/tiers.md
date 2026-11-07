@@ -125,10 +125,12 @@ One instance per process. One session at a time today
 (`native/moy_wasm/README.md`). **The grant is per run** (P5.2, 2026-11-07):
 a run's grant is a value, `moy_app_run_t` (`native/moy_app/moy_app_run.h`:
 the state, the grant, the roles its permissions name), which the run's
-owner holds (the engine's per-run state today, the process row of
-`processes.md` §1 with the table), and the adapter's natives find it by the
-engine's handle on the call (`moy_app_wasm_run_of`: an instance's exec env,
-the browser's binding), as a Lua state finds its own in its registry. Two
+owner holds: the run's process row (`native/moy_kernel/moy_proc.h`), which
+the runtime's open binds to its engine. The adapter's natives find it by
+the engine's handle on the call (`moy_app_wasm_run_of`: an instance's exec
+env, the browser's binding, mapped to the row bound to it), as a Lua state
+finds its own in its registry; a run no Player launched has no row, and
+its engine's per-run state holds the grant. Two
 runs at once are two grants, and neither reaches the other's
 (`tests/test_app_runs.py`). The Player makes the run (`moy_app.run`) and
 the launch's namespace hands it to the runtime's open; a run the kernel

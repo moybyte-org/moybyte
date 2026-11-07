@@ -575,6 +575,40 @@ def mute(run, on):
     _rc(d.moy_play_mute(int(run), bool(on)))
 
 
+class _AppRun(ctypes.Structure):
+    """moy_app_run.h's moy_app_run_t."""
+    _fields_ = [("a", ctypes.c_void_p), ("sn", _U32), ("g", _U32), ("roles", _U32)]
+
+
+class _ProcRow(ctypes.Structure):
+    """moy_proc.h's moy_proc_row_t, field for field."""
+    _fields_ = [("pid", _U32), ("owner", _U32), ("run", _U32), ("engine", ctypes.c_void_p),
+                ("app", _AppRun), ("exit", ctypes.c_int32), ("tier", _U8), ("kind", _U8),
+                ("state", _U8), ("id", ctypes.c_char * 32)]
+
+
+def proc(run):
+    """The run's process row (moy_proc.h): (pid, tier, kind, state, bound,
+    grant), or None for a VM run or a stale handle."""
+    d, _ = _play()
+    d.moy_play_proc.argtypes = [_U32]
+    d.moy_play_proc.restype = _U32
+    d.moy_proc_get.argtypes = [_U32, ctypes.POINTER(ctypes.POINTER(_ProcRow))]
+    d.moy_proc_get.restype = ctypes.c_int
+    p = ctypes.POINTER(_ProcRow)()
+    if d.moy_proc_get(d.moy_play_proc(int(run)), ctypes.byref(p)) != 0:
+        return None
+    r = p.contents
+    return (r.pid, r.tier, r.kind, r.state, bool(r.engine), r.app.g)
+
+
+def procs():
+    """How many process rows are live (moy_proc.h)."""
+    d, _ = _play()
+    d.moy_proc_count.restype = _U32
+    return int(d.moy_proc_count())
+
+
 def runs():
     """How many runs are live (moy_play.h: MOY_PLAY_RUNS at once)."""
     d, _ = _play()

@@ -53,6 +53,7 @@
 
 #include "moy_cat.h"
 #include "moy_play.h"
+#include "moy_proc.h"
 #include "moy_rt.h"
 #include "moy_tick.h"
 #include "moy_input.h"
@@ -492,6 +493,22 @@ static mp_obj_t mod_mute(mp_obj_t run_obj, mp_obj_t on) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_mute_obj, mod_mute);
 
+// proc(run) -- the run's process row (moy_proc.h): (pid, tier, kind, state,
+// bound, grant), or None for a VM run or a stale handle.
+static mp_obj_t mod_proc(mp_obj_t run_obj) {
+    moy_proc_row_t *p;
+    if (moy_proc_get(moy_play_proc(run_arg(run_obj)), &p) != MOY_PROC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t t[6] = {
+        mp_obj_new_int_from_uint(p->pid), MP_OBJ_NEW_SMALL_INT(p->tier),
+        MP_OBJ_NEW_SMALL_INT(p->kind), MP_OBJ_NEW_SMALL_INT(p->state),
+        mp_obj_new_bool(p->engine != NULL), mp_obj_new_int_from_uint(p->app.g),
+    };
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_proc_obj, mod_proc);
+
 static mp_obj_t mod_runs(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_play_runs());
 }
@@ -550,6 +567,7 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_runs), MP_ROM_PTR(&mod_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_mute), MP_ROM_PTR(&mod_mute_obj) },
+    { MP_ROM_QSTR(MP_QSTR_proc), MP_ROM_PTR(&mod_proc_obj) },
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&mod_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_live), MP_ROM_PTR(&mod_front_live_obj) },

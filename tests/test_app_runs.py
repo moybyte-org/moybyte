@@ -135,6 +135,54 @@ def test_two_compiled_apps_each_reach_only_their_own_grant(tmp_path):
         a.close()
 
 
+def _proc_lib():
+    from runtime.host import host_native
+    lib = ctypes.CDLL(host_native.build())
+    U32 = ctypes.c_uint32
+    lib.moy_proc_add.argtypes = [U32, ctypes.c_uint8, ctypes.c_uint8, ctypes.c_char_p, U32, U32,
+                                 ctypes.POINTER(U32)]
+    lib.moy_proc_next.argtypes = [U32]
+    lib.moy_proc_end.argtypes = [U32, ctypes.c_int32]
+    lib.moy_proc_bind.argtypes = [U32, ctypes.c_void_p, ctypes.c_char_p]
+    lib.moy_proc_get.argtypes = [U32, ctypes.POINTER(ctypes.c_void_p)]
+    return lib
+
+
+def test_a_compiled_apps_calls_find_its_grant_through_its_process_row(tmp_path):
+    """moy_app_wasm_run_of maps the call's engine to the process row it is
+    bound to (native/moy_kernel/moy_proc.h): the row the Player names next is
+    the one the run's row takes, its open binds the engine and copies the
+    grant, and a call reads the grant the ROW holds."""
+    from runtime import moy_play
+    _binding_or_skip()
+    cart = _module(tmp_path)
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = ws.app_abi
+    lib = _proc_lib()
+    h = ctypes.c_uint32()
+    assert lib.moy_proc_add(77, 3, 1, b"test.alpha", 0, 0, ctypes.byref(h)) == 0
+    lib.moy_proc_next(h.value)
+    a, ga = _compiled(app, cart, "test.alpha")
+    b, gb = _compiled(app, cart, "test.beta")      # no row: found among the runs
+    try:
+        row = ctypes.c_void_p()
+        assert lib.moy_proc_get(h.value, ctypes.byref(row)) == 0
+        r = ctypes.cast(row, ctypes.POINTER(moy_play._ProcRow)).contents
+        assert r.engine and r.app.g == ga and r.pid == 77
+        ca, cb = _Calls(a), _Calls(b)
+        assert ca.put("k", "alpha") == 0 and cb.put("k", "beta") == 0
+        assert ca.get("k") == "alpha" and cb.get("k") == "beta"
+        roles, _ = moy_app.policy(("prefs",))
+        assert lib.moy_proc_bind(h.value, r.engine, bytes(app.run(gb, roles))) == 0
+        assert ca.get("k") == "beta", "the call did not read its row's grant"
+        assert lib.moy_proc_end(h.value, 0) == 0
+        assert ca.get("k") == "alpha", "with its row ended, the run's own"
+    finally:
+        lib.moy_proc_end(h.value, 0)
+        b.close()
+        a.close()
+
+
 LUA_PREFS = """
 SEEN = {}
 function _init() prefs.set("k", "lua") end

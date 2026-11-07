@@ -20,6 +20,7 @@
 #include "moycore_scene.h"
 #include "moy_img.h"
 #include "moy_buf.h"
+#include "moy_proc.h"
 
 #define RUN moycore_RUN
 
@@ -929,6 +930,7 @@ static moycore_run *row_make(int slot)
     r->gen = g_row_gen;
     r->owner = g_owner_next;
     g_owner_next = 0;
+    r->proc = moy_proc_take();
     return r;
 }
 
@@ -1283,6 +1285,7 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
 #endif
     media_open(RUN.L);
     if (moy_app_lua_open != NULL) moy_app_lua_open(RUN.L, app);
+    moy_proc_bind(RUN.proc, RUN.L, app);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded from the cart's file. The shim's
     // __moy_map_flags(gff) overwrites it at cart boot, which is what a p8

@@ -3,7 +3,8 @@
 # the trace tier the host drives them with (the module `moy_loop`), the OS
 # log (the module `moy_log`), the scheduler's callback guard (the module
 # `moy_guard`, where the build defines MICROPY_ENABLE_VM_ABORT), the lease
-# table with its host stand-in (the module `moy_lease`), and the
+# table with its host stand-in (the module `moy_lease`), the process table
+# (moy_proc.c), and the
 # VM-side stages a staged console's frames run through (moy_loop_board.c). The entry,
 # the crash record, the floor and the bus are the esp32 port's
 # (micropython.cmake).
@@ -15,5 +16,5 @@ SRC_USERMOD_C += $(MOY_KERNEL_DIR)/modmoy_loop.c $(MOY_KERNEL_DIR)/modmoy_log.c 
 SRC_USERMOD_LIB_C += $(MOY_KERNEL_DIR)/moy_loop.c $(MOY_KERNEL_DIR)/moy_idle.c \
     $(MOY_KERNEL_DIR)/moy_perf.c $(MOY_KERNEL_DIR)/moy_devch.c $(MOY_KERNEL_DIR)/moy_log.c \
     $(MOY_KERNEL_DIR)/moy_loop_host.c $(MOY_KERNEL_DIR)/moy_loop_board.c \
-    $(MOY_KERNEL_DIR)/moy_lease.c
+    $(MOY_KERNEL_DIR)/moy_lease.c $(MOY_KERNEL_DIR)/moy_proc.c
 CFLAGS_USERMOD += -I$(MOY_KERNEL_DIR)

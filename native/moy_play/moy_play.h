@@ -319,6 +319,9 @@ int  moy_play_info(uint32_t run, moy_play_info_t *out);
 uint32_t moy_play_current(void);       // the run launched last while live, or 0
 uint32_t moy_play_runs(void);          // how many runs are live
 uint32_t moy_play_run_at(uint32_t slot);   // row `slot`'s live run, or 0
+// A live Lua or compiled run's process row (native/moy_kernel/moy_proc.h), or
+// 0: a VM run, or none.
+uint32_t moy_play_proc(uint32_t run);
 // The calling task's stack high-water mark in bytes, MOY_PLAY_NO_STACK off a
 // board. FreeRTOS keeps the task's lifetime minimum, so a reading falls only
 // when the cart's path goes deeper than anything the task ran before it.

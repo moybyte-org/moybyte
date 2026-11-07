@@ -23,6 +23,7 @@
 #include "moycore_lua.h"
 #include "moycore_run.h"
 #include "moy_buf.h"
+#include "moy_proc.h"
 
 _Static_assert(MOY_PLAY_UPC == MOY_UPC_CLASSES, "a run's books carry every crossing class");
 
@@ -292,6 +293,7 @@ typedef struct {
     uint32_t budget;                // the runaway watch's, for each tick (ms)
     char what[96];                  // the stuck words its ticks end with
     uint32_t pid;                   // its process (moy_log.h's), 0 unknown
+    uint32_t proc;                  // its process row (moy_proc.h), 0 none: a VM run's
     bool muted;                     // held aside: its snapshot reads no input
     uint32_t gen;                   // its launch's number: the oldest is ended for a new one
     bool armed;                     // the crash record names this run
@@ -485,6 +487,17 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
         R.owner = 0;
     }
     moycore_lua_owner(R.owner);
+    // A run outside the VM is a process of the table's; its runtime's row
+    // takes it next.
+    R.proc = 0;
+    if (!rt->vm) {
+        uint8_t tier = strcmp(R.info.runtime, "wasm") == 0 ? MOY_PROC_WASM : MOY_PROC_LUA;
+        if (moy_proc_add(R.pid, tier, R.info.game ? MOY_PROC_GAME : MOY_PROC_APP, R.info.id,
+                         R.owner, R.h, &R.proc) != MOY_PROC_OK) {
+            R.proc = 0;
+        }
+    }
+    moy_proc_next(R.proc);
     uint32_t frame[MOY_UPC_CLASSES];
     moy_loop_upcalls(frame, R.upc0);
     *run = R.h;
@@ -514,6 +527,7 @@ int moy_play_open(uint32_t run) {
     }
     if (r->rt->open(r->info.error, sizeof(r->info.error)) != 0) {
         r->info.raised = true;
+        moy_proc_state(r->proc, MOY_PROC_RAISED);
         return MOY_PLAY_RAISED;
     }
     r->mc = moycore_run_row;
@@ -635,6 +649,7 @@ static void stuck(run_t *r, bool raised) {
         r->info.error[n] = 0;
     }
     r->info.raised = true;
+    moy_proc_state(r->proc, MOY_PROC_RAISED);
     r->info.stuck = true;
     if (moy_kernel_say != NULL) {
         char line[240];
@@ -692,6 +707,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
         }
         if (rc != 0) {
             r->info.raised = true;
+            moy_proc_state(r->proc, MOY_PROC_RAISED);
             return MOY_PLAY_RAISED;
         }
         r->info.ticks++;
@@ -769,6 +785,12 @@ int moy_play_end(uint32_t run, int why) {
             }
         }
         g_runs->cur = (uint8_t)best;
+    }
+    // The runtime's close came first: the process row and its copy of the
+    // grant go before the console ends the grant.
+    if (r->proc != 0u) {
+        moy_proc_end(r->proc, r->info.raised ? 1 : 0);
+        r->proc = 0;
     }
     if (r->owner != 0u) {
         moy_owner_end(r->owner);        // any loan the runtime's close left
@@ -851,6 +873,11 @@ uint32_t moy_play_last(void) {
 
 uint32_t moy_play_run_at(uint32_t slot) {
     return g_runs != NULL && slot < MOY_PLAY_RUNS ? g_runs->row[slot].h : 0u;
+}
+
+uint32_t moy_play_proc(uint32_t run) {
+    run_t *r = live(run);
+    return r != NULL ? r->proc : 0u;
 }
 
 uint32_t moy_play_runs(void) {
