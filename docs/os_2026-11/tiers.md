@@ -121,8 +121,9 @@ refused with `EACCES`.
 
 ## 3. wasm and WASI
 
-One instance per process. One session at a time today
-(`native/moy_wasm/README.md`). **The grant is per run** (P5.2, 2026-11-07):
+One instance per process, a session per compiled run
+(`native/moy_wasm/README.md`, "A cart's session"); the browser's engine
+holds one. **The grant is per run** (P5.2, 2026-11-07):
 a run's grant is a value, `moy_app_run_t` (`native/moy_app/moy_app_run.h`:
 the state, the grant, the roles its permissions name), which the run's
 owner holds: the run's process row (`native/moy_kernel/moy_proc.h`), which

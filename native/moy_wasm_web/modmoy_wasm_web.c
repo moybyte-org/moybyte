@@ -144,6 +144,17 @@ int moy_wasm_session_live(void)
     return g_sess.live;
 }
 
+// The page holds one session: the handle names it while it is open.
+void *moy_wasm_session_current(void)
+{
+    return g_sess.live ? &g_sess : NULL;
+}
+
+void moy_wasm_session_use(void *session)
+{
+    (void)session;
+}
+
 // The page runs one thread and no watcher reaches into a running export.
 void moy_wasm_session_terminate(void)
 {

@@ -34,8 +34,10 @@ one rooted list, a stretch per row. `runs()` counts the open runs and
 every state's, given back at the last VM's close. The kernel's Player holds a
 row per run too (`native/moy_play/moy_play.h`) and makes its run's row
 current before each frame, so Lua games run side by side in the shell's
-running set (`docs/os_2026-11/processes.md` §6); a compiled cart's engine
-runs one session.
+running set (`docs/os_2026-11/processes.md` §6). A compiled run's state
+hangs off its row too (`moycore_wasm.c`'s `wr`, with its engine session), so
+compiled games run side by side the same way; the speaker's `snd` stream and
+the timed lanes, which a board holds one of, are the newest compiled run's.
 
 | piece | how |
 |---|---|

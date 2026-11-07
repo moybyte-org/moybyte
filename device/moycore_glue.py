@@ -1109,11 +1109,25 @@ class WasmRun(MoycoreRun):
         # blit writes the canvas as it always has.
         self.frame = None
         sc = getattr(ws, "sys_canvas", None)
+        self._palette = bool(getattr(sc, "presents_palette_frames", True))
         if getattr(sc, "presents_frames", False):
             self.frame = CartFrame(canvas.w, canvas.h)
             ws.cart_frame = self.frame
-            _moycore.take_frames(
-                True, bool(getattr(sc, "presents_palette_frames", True)))
+            _moycore.take_frames(True, self._palette)
+
+    def mute(self, on):
+        """Held aside, the run's frames go to its canvas, which its window
+        shows: its blits stop leaving them in its memory and the one it
+        owes is written; given back, they go to the glass from there again.
+        The CartFrame travels with the run's world (runtime/shell/procs.py)."""
+        MoycoreRun.mute(self, on)
+        if self.frame is not None and self._h:
+            _moycore.use(self._h)
+            if on:
+                _moycore.take_frames(False)
+                _moycore.frame_settle()
+            else:
+                _moycore.take_frames(True, self._palette)
 
     def close(self):
         f = self.frame

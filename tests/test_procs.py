@@ -326,6 +326,65 @@ def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_
     assert os_log.crash_of(steady.pid) is None
 
 
+def _wasm_game(carts, title):
+    """A compiled game counting its updates into pmem cell 1 (test_wasm_cart's
+    COUNTER), built where the store finds it."""
+    import json
+    import os
+    from tools import wat
+    from test_wasm_cart import COUNTER
+    d = carts / (title.lower().replace(" ", "_") + ".moy")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.json").write_text(json.dumps(
+        {"format": "moy-1", "title": title, "runtime": "wasm", "main": "main.wasm",
+         "memory": 1, "moybyte": {"type": "game"}}))
+    (d / "main.wasm").write_bytes(wat.assemble(COUNTER))
+    assert os.path.isfile(str(d / "main.wasm"))
+
+
+def _ticks(pl):
+    return pl._lua._run.pmem()[1][1]
+
+
+def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
+    """A compiled game joins the running set as a Lua one does: two at once,
+    each its own engine session and process row, the held one's world as it
+    was until it is given back."""
+    from test_wasm_cart import _binding_or_skip
+    from runtime import moy_play
+    _binding_or_skip()
+    carts = tmp_path / "carts"
+    _wasm_game(carts, "Count One")
+    _wasm_game(carts, "Count Two")
+    ws = build_desktop_ws(tmp_path)
+    drv = make_drv(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    open_cart(ws, "Count One")
+    w1 = _windowed(ws, drv)
+    for _ in range(5):
+        drv.frame(1 / 30)
+    open_cart(ws, "Count Two")
+    _windowed(ws, drv)
+    assert [p.title() for p in ws.procs.list] == ["Count One"]
+    one, two = ws.procs.list[0].player, ws.player
+    assert ws.cart["title"] == "Count Two" and two.cart_error is None, two.cart_error
+    rows = [moy_play.proc_row(pl._run_handle) for pl in (one, two)]
+    assert [r[1:4] for r in rows] == [(3, 2, 1)] * 2 and rows[0][0] != rows[1][0], rows
+    ws.wm._minimize(w1, True)
+    drv.frame(1 / 30)
+    held = _ticks(one)
+    n2 = _ticks(two)
+    for _ in range(10):
+        drv.frame(1 / 30)
+    assert _ticks(one) == held, "a held compiled game ran"
+    assert _ticks(two) > n2
+    ws.wm._minimize(w1, False)
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert _ticks(one) > held
+
+
 # -- admission on each board's share (player_fit.admit) ------------------------
 
 MIB = 1 << 20
@@ -338,24 +397,31 @@ def test_two_big_games_do_not_fit_an_s3(board):
     assert share == 4 * MIB
     doom = 3 * MIB + 512 * 1024              # Doom's load footprint, about
     big = doom + fit.PY_WORLD
-    assert fit.admit((big, False), [], share, 4) is None
-    assert fit.admit((big, False), [("desktop", big, False)], share, 4) == ["desktop"]
+    assert fit.shares_runtime({"runtime": "wasm"})
+    assert fit.admit((big, True), [], share, 4) is None
+    assert fit.admit((big, True), [("desktop", big, True)], share, 4) == ["desktop"]
     # a big compiled game beside a Python one: the share names it
     py = fit.app_need({"title": "Star Catcher"})
-    assert fit.admit((big, False), [("run:1", py, True)], share, 4) == ["run:1"]
+    assert fit.admit((big, True), [("run:1", py, True)], share, 4) == ["run:1"]
+    # two small compiled games fit: the share decides, not the tier
+    small = 1 * MIB + fit.PY_WORLD
+    assert fit.admit((small, True), [("desktop", small, True)], share, 4) is None
     # two Python games fit
     assert fit.admit((py, True), [("desktop", py, True)], share, 4) is None
 
 
-def test_the_p4s_share_holds_a_big_game_beside_python_ones():
+def test_the_p4s_share_holds_a_big_compiled_game_beside_python_ones():
     from runtime import player_fit as fit
     share = fit.board_share("p4")
     big = 3 * MIB + 512 * 1024 + fit.PY_WORLD
     py = fit.app_need({"title": "Star Catcher"})
     run = [("run:1", py, True), ("desktop", py, True)]
-    assert fit.admit((big, False), run[:1], share, 4) == ["run:1"]  # the tier: alone
+    assert fit.admit((big, True), run, share, 4) is None
     assert fit.admit((py, True), run, share, 4) is None
-    assert fit.admit((big, False), [("desktop", big, False)], share, 4) == ["desktop"]
+    # two big compiled games are more than the share
+    assert fit.admit((big, True), [("desktop", big, True)], share, 4) == ["desktop"]
+    # a runtime that holds one run runs alone (the browser's compiled tier)
+    assert fit.admit((big, False), run[:1], share, 4) == ["run:1"]
     assert fit.board_share("guition_p4") == share
     assert fit.board_share("xiao_zero") is None   # a board with no share
 

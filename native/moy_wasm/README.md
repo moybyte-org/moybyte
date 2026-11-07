@@ -165,7 +165,16 @@ SPEC.md §16.12) -- are C over the kernel's volume
 (`native/moy_store/moy_files.h`) and run on the task, whose stack is internal
 where an internal-flash write needs it and whose mount table the volume is
 resolved through. No request calls Python.
-One session at a time, never beside a `start()` run.
+A session per compiled run, as many as memory allows, never beside a
+`start()` run. One runtime serves them all, up while any session is: the
+first session's thread makes it and the last one's takes it down. Each
+session keeps its own pool, sized by the footprint rule for its module, and
+the runtime allocates a session's load, instance, exec envs and import
+table registration from that session's pool (an allocator over the pools,
+`modmoy_wasm.c`), so a session's close gives back what it took; the
+runtime's own structures come from PSRAM's heap. The calls act on the
+current session (`moy_wasm_session_use`), and a session's close unregisters
+its import tables, which the runtime would otherwise keep pointing into.
 
 **A cart's `par` items run on the session's lanes** (SPEC.md §16.10's
 "The cart's own work across the cores"): one thread on each core but the

@@ -50,6 +50,7 @@
 typedef struct moycore_run {
     lua_State  *L;               // the cart's VM; NULL for a compiled cart
     int         wasm;            // a compiled cart's session is open
+    struct moycore_wrun *wr;     // a compiled run's state (moycore_wasm.c), or NULL
     moycore_run_t c;             // the console (moycore_run.h)
     moycore_layers layers;       // the cart's layers' canvases (moycore_layers.h)
     int         open;

@@ -186,30 +186,26 @@ static void close_run(host_lua *r)
     r->h = 0;
 }
 
-/* A compiled run is one at a time (moyhost_wasm.c): a run claims it, the
- * one before released first. A Lua run takes a row of its own and claims
- * nothing. */
-static void (*G_RELEASE)(void);
 
-void hl_claim(void (*release)(void))
-{
-    void (*f)(void) = G_RELEASE;
-    G_RELEASE = NULL;
-    if (f) f();
-    G_RELEASE = release;
-}
+/* A compiled run's row released (moyhost_wasm.c, where WAMR builds): its
+ * console goes, and its calls report it is not running. */
+void hw_release_row(moycore_run *row) __attribute__((weak));
 
 /* A row for a new run, Lua or compiled (moyhost_wasm.c): a free one, else
- * the oldest Lua run's, closed. */
+ * the oldest run's, closed. */
 moycore_run *hl_row_for_new(void)
 {
     moycore_run *row = moycore_run_new();
     while (row == NULL) {
-        host_lua *old = NULL;
-        for (int i = 0; i < MOYCORE_RUNS; i++)
-            if (G_ROWS[i] && (!old || G_ROWS[i]->gen < old->gen)) old = G_ROWS[i];
+        moycore_run *old = NULL;
+        for (int i = 0; i < MOYCORE_RUNS; i++) {
+            moycore_run *ri = moycore_run_at(i);
+            if (ri && (ri->L || ri->wasm) && (!old || ri->gen < old->gen)) old = ri;
+        }
         if (old == NULL) return NULL;
-        close_run(old);
+        if (G_ROWS[old->slot]) close_run(G_ROWS[old->slot]);
+        else if (hw_release_row) hw_release_row(old);
+        else return NULL;
         row = moycore_run_new();
     }
     return row;

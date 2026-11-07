@@ -278,7 +278,7 @@ class Procs:
                 return False
         if (pl._is_tool and not (hand and _is_app(ws.cart))) or pl._script \
                 or not _fit.shares_runtime(ws.cart) or pl._front \
-                or pl._netplay is not None or ws.cart_frame is not None:
+                or pl._netplay is not None:
             return False
         ed = getattr(ws, "editor_app", None)
         return ed is None or ed.project is not ws.project

@@ -23,6 +23,8 @@ widgets' `_err_text`, moy_carts' `cart_sources` and moy_play's census.
 MicroPython-safe.
 """
 
+import sys
+
 try:
     import chrome_ops as _ch
     from widgets import _err_text
@@ -354,13 +356,18 @@ def app_need(cart, make=None):
     return need + PY_WORLD
 
 
-SHARED_RUNTIMES = ("python", "lua")
+# The browser's engine holds one compiled session (native/moy_wasm_web); a
+# board's and the host's hold one per run.
+SHARED_RUNTIMES = ("python", "lua") if sys.platform == "webassembly" \
+    else ("python", "lua", "wasm")
 
 
 def shares_runtime(cart):
     """Whether `cart`'s runtime runs beside others: Python in the shell's
-    VM, Lua in a row of its own (native/moycore/moycore_lua.h). A compiled
-    cart's engine runs one session (native/moy_wasm/README.md)."""
+    VM, Lua in a row of its own (native/moycore/moycore_lua.h), a compiled
+    cart in a session of its own where the engine holds several
+    (native/moy_wasm/moy_wasm_session.h). Whether two FIT is the share's
+    to say (`admit`)."""
     return (cart or {}).get("runtime", "python") in SHARED_RUNTIMES
 
 
@@ -371,8 +378,7 @@ def admit(new, running, share, rows):
     order: the share (`share` None: none to count), the audio table's
     `rows` free for a run's session (a fifth source is refused), and the
     tiers -- a run `shares` when its runtime holds several runs at once
-    (Python, Lua: `shares_runtime`), and a compiled run holds its engine's
-    one session, so it runs alone."""
+    (`shares_runtime`); one that does not runs alone."""
     need, py = new
     if share is not None and need <= share:
         total = need

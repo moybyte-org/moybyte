@@ -53,6 +53,15 @@
 
 #include "wasm_export.h"
 #include "moy_wasm_footprint.h"
+
+// WAMR's allocator over a block (wamr/core/shared/mem-alloc/mem_alloc.h):
+// a session's pool.
+typedef void *mem_allocator_t;
+mem_allocator_t mem_allocator_create(void *mem, uint32_t size);
+int mem_allocator_destroy(mem_allocator_t allocator);
+void *mem_allocator_malloc(mem_allocator_t allocator, uint32_t size);
+void *mem_allocator_realloc(mem_allocator_t allocator, void *ptr, uint32_t size);
+void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasm_key.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
@@ -139,6 +148,8 @@ typedef struct {
 // PSRAM, taken by the first start: an idle console holds none of it in
 // internal SRAM.
 static run_t *g_run;
+// Every open cart session (below), which a run is never started beside.
+static struct sess *g_sessions;
 static SemaphoreHandle_t g_lock;
 static StaticSemaphore_t g_lock_buf;
 
@@ -654,7 +665,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     if (r->started) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a run is live; collect it with result()"));
     }
-    if (moy_wasm_session_live()) {
+    if (g_sessions != NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a cart's session is live"));
     }
     if (!g_lock) {
@@ -777,7 +788,7 @@ typedef struct {
 } lane_stats_t;
 static lane_stats_t g_lane_stats[LANES_MAX + 1];
 
-typedef struct {
+typedef struct sess {
     // the MicroPython side's
     bool live;
     bool interp;                    // running main.wasm on the interpreter --
@@ -804,11 +815,73 @@ typedef struct {
     uint8_t *stack_lo;              // its stack's low end when the boundary was set
     wasm_module_inst_t volatile inst;   // what moy_wasm_session_terminate stops
     lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
+    // its share of the runtime: the pool its load, instance and exec envs
+    // are allocated from (rt_malloc), and whether the runtime is being made
+    uint8_t *pool;
+    size_t pool_size;
+    mem_allocator_t alloc;
+    volatile bool rt_init;
+    struct sess *next;              // the next open session
 } sess_t;
 
-// The live session, or NULL. Allocated per session, from PSRAM, so an idle
-// desk carries a pointer and not the struct.
+// The session the calls act on (moy_wasm_session_use), or NULL; g_sessions
+// above lists every open one. Allocated per session, from PSRAM, so an idle
+// desk carries two pointers and not the structs.
 static sess_t *g_sess;
+
+// -- the runtime's allocator ---------------------------------------------------
+//
+// One runtime serves every open session (WAMR counts its inits): it is made
+// by the first session's thread and goes with the last's. Each session keeps
+// its own pool, sized by moy_wasm_footprint.h's rule for its module, and what
+// the runtime allocates for a session -- its module, instance, exec envs and
+// import table registration -- comes from that session's pool, freed with
+// it. The runtime's own structures, made while the first session brings it
+// up, come from PSRAM's heap, so they outlive the session that made them. A
+// free goes to the pool the block lies in. The session being served is the
+// current one: the VM's task calls one session at a time.
+
+static sess_t *pool_of(const void *p)
+{
+    for (sess_t *s = g_sessions; s != NULL; s = s->next) {
+        if (s->pool != NULL && (const uint8_t *)p >= s->pool
+            && (const uint8_t *)p < s->pool + s->pool_size) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+static void *rt_malloc(unsigned int n)
+{
+    sess_t *s = g_sess;
+    if (s != NULL && s->alloc != NULL && !s->rt_init) {
+        return mem_allocator_malloc(s->alloc, n);
+    }
+    return heap_caps_malloc(n, PSRAM_CAPS);
+}
+
+static void *rt_realloc(void *p, unsigned int n)
+{
+    if (p == NULL) {
+        return rt_malloc(n);
+    }
+    sess_t *s = pool_of(p);
+    return s != NULL ? mem_allocator_realloc(s->alloc, p, n) : heap_caps_realloc(p, n, PSRAM_CAPS);
+}
+
+static void rt_free(void *p)
+{
+    if (p == NULL) {
+        return;
+    }
+    sess_t *s = pool_of(p);
+    if (s != NULL) {
+        mem_allocator_free(s->alloc, p);
+    } else {
+        heap_caps_free(p);
+    }
+}
 
 // On the task: wait for the thread's answer, serving every VM request that
 // arrives first. The caller set `waiting` before it woke the thread, so a
@@ -1003,12 +1076,23 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         goto opened;
     }
+    s->alloc = mem_allocator_create(pool, (uint32_t)pool_size);
+    if (s->alloc == NULL) {
+        rc = sess_fail(s, "runtime init", "the pool would not take an allocator");
+        goto opened;
+    }
+    s->pool_size = pool_size;
+    s->pool = pool;
     RuntimeInitArgs init;
     memset(&init, 0, sizeof(init));
-    init.mem_alloc_type = Alloc_With_Pool;
-    init.mem_alloc_option.pool.heap_buf = pool;
-    init.mem_alloc_option.pool.heap_size = pool_size;
-    if (!wasm_runtime_full_init(&init)) {
+    init.mem_alloc_type = Alloc_With_Allocator;
+    init.mem_alloc_option.allocator.malloc_func = (void *)rt_malloc;
+    init.mem_alloc_option.allocator.realloc_func = (void *)rt_realloc;
+    init.mem_alloc_option.allocator.free_func = (void *)rt_free;
+    s->rt_init = true;
+    bool inited = wasm_runtime_full_init(&init);
+    s->rt_init = false;
+    if (!inited) {
         rc = sess_fail(s, "runtime init", NULL);
         goto opened;
     }
@@ -1112,7 +1196,12 @@ opened:
         wasm_runtime_unload(module);
     }
     if (up) {
-        wasm_runtime_destroy();
+        wasm_runtime_destroy();             // the last session's takes it down
+    }
+    s->pool = NULL;
+    if (s->alloc != NULL) {
+        mem_allocator_destroy(s->alloc);
+        s->alloc = NULL;
     }
     if (pool) {
         heap_caps_free(pool);
@@ -1148,10 +1237,26 @@ static void sess_free(sess_t *s)
     if (s->vm_done) {
         vSemaphoreDelete(s->vm_done);
     }
-    heap_caps_free(s);
+    for (sess_t **p = &g_sessions; *p != NULL; p = &(*p)->next) {
+        if (*p == s) {
+            *p = s->next;
+            break;
+        }
+    }
     if (g_sess == s) {
         g_sess = NULL;
     }
+    heap_caps_free(s);
+}
+
+void *moy_wasm_session_current(void)
+{
+    return g_sess;
+}
+
+void moy_wasm_session_use(void *s)
+{
+    g_sess = s;
 }
 
 void moy_wasm_session_close(void)
@@ -1174,7 +1279,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
                           int allow_unsigned, int interp, const moy_wasm_ops *ops,
                           char *err, size_t errlen)
 {
-    if (moy_wasm_session_live() || (g_run != NULL && g_run->started)) {
+    if (g_run != NULL && g_run->started) {
         snprintf(err, errlen, "a wasm run is already live");
         return 1;
     }
@@ -1183,6 +1288,8 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         snprintf(err, errlen, OUT_OF_MEMORY ": no PSRAM for the cart's session");
         return 1;
     }
+    s->next = g_sessions;
+    g_sessions = s;
     s->go = xSemaphoreCreateBinary();
     s->back = xSemaphoreCreateBinary();
     s->vm_done = xSemaphoreCreateBinary();

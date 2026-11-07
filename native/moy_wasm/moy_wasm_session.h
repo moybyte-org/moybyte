@@ -24,9 +24,15 @@
 // the page's one thread: moy_wasm_on_vm runs its request at once, and there
 // are no lanes (a cart's par items run in order, through the binding).
 //
-// One session at a time, and never beside a moy_wasm.start() run. A cart's
-// par items also run on the session's lanes, threads on the other cores that
-// the host half hands libmoy's binding (moy_wasm_session_lane_go below).
+// SEVERAL SESSIONS. The boards' engine holds a session per compiled run, as
+// many as memory allows, never beside a moy_wasm.start() run: one runtime
+// serves them all, each session's load and instance in its own pool
+// (modmoy_wasm.c's allocator). Every call below acts on the CURRENT session:
+// open makes its new session current, moy_wasm_session_use makes another
+// one current, and close leaves none. The browser's engine holds one. A
+// cart's par items also run on the session's lanes, threads on the other
+// cores that the host half hands libmoy's binding (moy_wasm_session_lane_go
+// below).
 
 #ifndef MOY_WASM_SESSION_H
 #define MOY_WASM_SESSION_H
@@ -92,15 +98,21 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
                           int allow_unsigned, int interp, const moy_wasm_ops *ops,
                           char *err, size_t errlen);
 
+// The current session, an opaque handle (NULL: none), and making one current
+// again: the host half's run keeps the handle its open made current.
+void *moy_wasm_session_current(void);
+void moy_wasm_session_use(void *session);
+
 // Run ops->call(what, dt) on the session's thread and wait for it. 0, or
 // ops->call's non-zero return with its `err`.
 int moy_wasm_session_call(int what, float dt, char *err, size_t errlen);
 
-// Tear the session down: ops->unbound, then the instance, the module and the
-// runtime, and join the thread. Safe to call on no session.
+// Tear the session down: ops->unbound, then the instance, the module and,
+// with the last session, the runtime, and join the thread. Safe to call on
+// no session.
 void moy_wasm_session_close(void);
 
-// Whether a session is open.
+// Whether the current session is open.
 int moy_wasm_session_live(void);
 
 // From any task, while a session call runs: raise "terminated by user" in

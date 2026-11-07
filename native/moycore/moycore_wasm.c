@@ -38,12 +38,17 @@ enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
 
 #if MOYCORE_WASM
 
-// A compiled cart's run state. Allocated per session, from PSRAM where there
-// is any: libmoy's per-run struct alone is about 4 KB (eight layer canvases),
-// and as static data it would sit in internal SRAM for the whole boot -- the
-// resource the S3 boards gate the tier on. Only the pointer is static.
-typedef struct {
+// A compiled cart's run state, its run's row's (`wr`): several compiled runs
+// are several rows, each with its engine session, and every call here reads
+// the CURRENT row's. Allocated per run, from PSRAM where there is any:
+// libmoy's per-run struct alone is about 4 KB (eight layer canvases), and as
+// static data it would sit in internal SRAM for the whole boot -- the
+// resource the S3 boards gate the tier on.
+typedef struct moycore_wrun {
     moy_wasm w;                  // libmoy's per-run state for the table
+    void *sess;                  // its engine session (moy_wasm_session_current)
+    int take;                    // take_frames' TAKE_* for this run
+    int tl;                      // the board's timed lanes are this run's
     int dead;                    // trapped: never called again
     char dir[192];               // the cart's folder: `read`'s only root
     char keep_dir[320];          // where its written files are kept
@@ -61,7 +66,7 @@ typedef struct {
 #endif
 } wrun_t;
 
-static wrun_t *WR;
+#define WR (moycore_RUN.wr)
 
 // The app ABI's import adapter (native/moy_app/moy_app_wasm.h): the rows a
 // compiled app imports from module "moybyte.app", WAMR's NativeSymbol field
@@ -141,6 +146,19 @@ static void wrun_free(wrun_t *r)
 #endif
     wmem_free(r->writable);
     wmem_free(r);
+}
+
+// What the board holds one of -- the speaker's `snd` stream (1) and the
+// timed lanes (2) -- is the newest compiled run's: the run taking it takes
+// it from every other row's.
+static __attribute__((unused)) void others_lose(int what)
+{
+    for (int i = 0; i < MOYCORE_RUNS; i++) {
+        moycore_run *r = moycore_run_at(i);
+        if (r == NULL || r == moycore_run_row || r->wr == NULL) continue;
+        if (what == 1) r->wr->w.snd = NULL;
+        else r->wr->tl = 0;
+    }
 }
 
 // -- the cart's files: its own folder and its written ones (SPEC.md 16.12) --
@@ -449,6 +467,8 @@ static int lanes_start(char *err, size_t errlen)
         sink.mute = moy_audio_snd_mute;
     }
 #endif
+    others_lose(2);
+    WR->tl = 1;
     return moy_wasm_tlanes_start(WR->w.env, &sink, err, errlen) < 0;
 }
 #endif
@@ -484,7 +504,11 @@ static void wo_unbound(void *user)
 {
     (void)user;
 #if MOY_WASM
-    moy_wasm_tlanes_stop();
+    if (WR->tl) moy_wasm_tlanes_stop();
+    // The runtime outlives this session where another is open: the import
+    // table's registration from this run's storage goes now.
+    if (WR->natives) wasm_runtime_unregister_natives(MOY_WASM_MODULE, WR->natives);
+    if (WR->app_natives) wasm_runtime_unregister_natives(APP_EXT, WR->app_natives);
 #endif
     moy_wasm_close(&WR->w);
 }
@@ -524,13 +548,12 @@ static void wo_lane_wait(void *user, int lane)
 // are the two layouts: blit565's words, and blit's indices with their colours.
 #define TAKE_565 1
 #define TAKE_PALETTE 2
-static volatile int g_take_frames;
 
 static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
 {
     (void)user;
     (void)pixels;
-    return g_take_frames & (lut ? TAKE_PALETTE : TAKE_565);
+    return WR->take & (lut ? TAKE_PALETTE : TAKE_565);
 }
 #endif // MOY_WASM
 
@@ -554,6 +577,7 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
         wrun_free(WR);
         WR = NULL;
     }
+    moy_wasm_session_use(NULL);         // another run's session is not this one's
     if ((WR = (wrun_t *)wmem_calloc(1, sizeof(wrun_t))) == NULL) {
         snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
         return 1;
@@ -591,7 +615,10 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     // a depth outside the range being the default; a deep one the RINGS row
     // refuses leaves `snd` to the binding's clock, silent.
     if (ring < MOY_AUDIO_SND_MIN || ring > MOY_AUDIO_SND_MAX) ring = 0;
-    if (moy_audio_snd_open(ring) > 0) WR->w.snd = wo_snd;
+    if (moy_audio_snd_open(ring) > 0) {
+        others_lose(1);
+        WR->w.snd = wo_snd;
+    }
 #else
     (void)ring;
 #endif
@@ -609,6 +636,7 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
         files_close();
         return 1;
     }
+    WR->sess = moy_wasm_session_current();
     RUN.wasm = 1;
     moycore_run_tick_begin();
     if (moy_wasm_session_call(WCALL_INIT, 0.0f, err, errlen) != 0) {
@@ -625,6 +653,7 @@ int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
         snprintf(err, errlen, "the cart is not running");
         return 1;
     }
+    moy_wasm_session_use(WR->sess);
     if (moy_wasm_session_call(WCALL_UPDATE, dt, err, errlen) != 0) {
         wasm_trapped();
         return 1;
@@ -642,13 +671,13 @@ int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
 
 void moycore_wasm_end(void)
 {
-    if (RUN.wasm) moy_wasm_session_close();
+    if (RUN.wasm && WR) {
+        moy_wasm_session_use(WR->sess);
+        moy_wasm_session_close();
+    }
     RUN.wasm = 0;
 #if MOY_AUDIO_SND
-    moy_audio_snd_close();
-#endif
-#if MOY_WASM
-    g_take_frames = 0;
+    if (WR && WR->w.snd) moy_audio_snd_close();    // the stream is this run's
 #endif
     if (WR) {
         wrun_free(WR);
@@ -820,11 +849,11 @@ static mp_obj_t mod_wasm_table(void)
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_table_obj, mod_wasm_table);
 
-// take_frames(on, palette=True) -- whether a compiled cart's blits leave
-// their frames in its memory for the board to show (frame/frame_presented)
-// instead of writing the canvas: blit565's when `on`, and blit's too unless
-// `palette` is false, for a board that cannot show a palette frame. Off at
-// every run's end.
+// take_frames(on, palette=True) -- whether the current compiled run's blits
+// leave their frames in its memory for the board to show
+// (frame/frame_presented) instead of writing the canvas: blit565's when
+// `on`, and blit's too unless `palette` is false, for a board that cannot
+// show a palette frame. Each run's own, off until it is asked.
 static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
 {
 #if MOY_WASM
@@ -833,7 +862,7 @@ static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
         take = TAKE_565;
         if (n_args < 2 || mp_obj_is_true(a[1])) take |= TAKE_PALETTE;
     }
-    g_take_frames = take;
+    if (WR) WR->take = take;
 #else
     (void)n_args;
     (void)a;
