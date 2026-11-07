@@ -83,6 +83,13 @@ uint32_t moy_app_wasm_grant(void) {
     return s_g;
 }
 
+moy_appabi_t *moy_app_wasm_run(uint32_t *g, uint32_t *roles) {
+    moy_appabi_t *a = s_a;
+    *g = a != NULL ? s_g : 0u;
+    *roles = a != NULL ? s_roles : 0u;
+    return a;
+}
+
 uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap) {
     moy_appabi_t *a = s_a != NULL ? s_a : s_live;

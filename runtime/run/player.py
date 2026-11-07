@@ -469,16 +469,19 @@ class Player(PlayerDiag):
             guard.heal()
 
     def _wasm_bind(self, cart):
-        """The run a compiled app's imports serve (native/moy_app/
+        """The run the app ABI's tier bindings serve (native/moy_app/
         moy_app_wasm.h): this run's grant and the roles its permissions name,
-        for a compiled user app that declares the app extension; none
-        otherwise, so its module's imports from it are refused at load."""
+        for a compiled user app that declares the app extension, whose
+        imports reach them, and for a Lua app or script, whose state opens
+        their names (moy_app_lua.h); none otherwise, so a module's imports
+        from the extension are refused at load and a Lua game holds none."""
         bind = getattr(getattr(self.ws, "app_abi", None), "wasm_bind", None)
         if bind is None:
             return
         ctx = self._app_ctx
-        if (cart is None or ctx is None or cart.get("runtime") != "wasm"
-                or APP_EXT not in (cart.get("extensions") or ())):
+        rt = cart.get("runtime") if cart is not None else None
+        if (ctx is None or not (rt == "lua" or (
+                rt == "wasm" and APP_EXT in (cart.get("extensions") or ())))):
             bind(0, ())
             return
         bind(ctx.grant, _moy_app.policy(self.granted)[0])
@@ -1986,8 +1989,10 @@ class Player(PlayerDiag):
                 if fit is not None and not _fits(fit):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
                                    _ch.say_title(_ch.SAY_FIT))
-            # A Lua run binds none, which leaves the console's state the
-            # one its `ui` reads the theme from (moy_app_wasm.h).
+            # A Lua app's run is bound before its state opens, which opens
+            # its role names; a Lua game binds none, which leaves the
+            # console's state the one its `ui` reads the theme from
+            # (moy_app_wasm.h).
             self._wasm_bind(ws.cart)
             # The cart's code loads and inits inside the app-cart boundary, as
             # a Python cart's exec and _init do (docs/theme_and_shell_2026-11.md §3.7).

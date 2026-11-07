@@ -970,7 +970,9 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     `files` permission, so its trampolines exist only for a cart that earned
     it and the prelude guards its whole block on their presence. Asserted in
     both states below rather than exempted, because "registered when granted"
-    is the actual invariant and a rename would still break it."""
+    is the actual invariant and a rename would still break it. The app names
+    that read the Python face's tables (`__themes`, `__files_badge`) are gated
+    the same way, on the role their permission names."""
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
@@ -983,7 +985,8 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
-    gated = {n for n in wanted if n.startswith("__ed_")}
+    gated = {n for n in wanted
+             if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
     assert gated, "the editor handles vanished from the prelude"
     got = {n for n in w.core.registered if n.startswith("__")}
     assert wanted - gated == got, "an UNGATED handle is missing"
@@ -1015,6 +1018,22 @@ def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
     w.run(ns=make_ns(open_editor=lambda name=None, mode=None: None))
     wanted = set(re.findall(r"__ed_\w+", PRELUDE_HANDLES))
     assert wanted <= {n for n in w.core.registered if n.startswith("__")}
+
+
+def test_the_app_tables_are_registered_for_a_run_holding_their_roles(w):
+    """`themes()` and `files.badge` answer from the Python face's tables;
+    the role names themselves are the run's C (native/moy_app/moy_app_lua.h)
+    and never a trampoline."""
+    class Files:
+        def badge(self, name):
+            return "TXT"
+
+    w.run(ns=make_ns(themes=lambda: ["moy", "contrast"], files=Files(),
+                     prefs=object(), set_theme=lambda name: None,
+                     open_app=lambda app_id: False))
+    reg = w.core.registered
+    assert {"__themes", "__files_badge"} <= set(reg)
+    assert not {"themes", "files", "prefs", "set_theme", "open_app"} & set(reg)
 
 
 def test_the_paint_images_go_to_the_run_before_the_prelude(w):

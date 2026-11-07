@@ -2442,7 +2442,7 @@ time.sleep_ms(50)
 '''
 
 
-def _roles_trace_board(exe, tmp_path):
+def _roles_trace_board(exe, tmp_path, driver=None):
     import test_frame_alloc as fa
     sys.path.insert(0, str(ROOT / "tools"))
     try:
@@ -2456,7 +2456,7 @@ def _roles_trace_board(exe, tmp_path):
         gen_device_carts.build_packed(str(ROOT / "system_carts"))))
     script = tmp_path / "roles_driver.py"
     script.write_text(ROLES_BOOT.replace("@ROOT@", repr(str(tmp_path)))
-                      .replace("@DRIVER@", repr(_roles_driver())))
+                      .replace("@DRIVER@", repr(driver or _roles_driver())))
     out = subprocess.run([exe, "-X", "heapsize=64M", str(script)],
                          capture_output=True, text=True, timeout=240,
                          stdin=subprocess.PIPE)
@@ -2557,3 +2557,272 @@ def test_roles_trace_is_the_interface_on_every_vm(tmp_path):
     b32 = _roles_trace_board(exe, tmp_path / "board")
     assert b32 == want, ("the T-Deck desktop diverges: "
                          + _first_difference(b32, want))
+
+
+# -- the roles' trace for a Lua app (docs/os_2026-11.md §7 phase 5 step 1) --------
+#
+# The verbs an app cart's permissions name (docs/moy_cart_api.md, "Turning a
+# cart into an APP"), driven once from a Python app and once from a Lua app
+# holding the same permissions, each over a fresh store: the two faces answer
+# every call alike, line for line. Python's `(value, err)` is Lua's two
+# results, its None Lua's nil. The Lua face is the role binding over the app
+# ABI's table and its ROLE door (native/moycore/moycore_app.h).
+
+APP_ROLES_PY = r'''
+LOG = []
+TRACE = ""
+
+
+def show(v):
+    if v is None:
+        return "nil"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return "%g" % v
+    if isinstance(v, str):
+        return "'" + v.replace("\n", "\\n") + "'"
+    if isinstance(v, (list, tuple)):
+        return "[" + ",".join(show(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ",".join(k + ":" + show(v[k]) for k in sorted(v)) + "}"
+    return "'" + str(v) + "'"
+
+
+def say(label, *a):
+    LOG.append(" ".join([label] + [show(x) for x in a]))
+
+
+def _init():
+    global TRACE
+    say("names", "clipboard" in globals(), "carts" in globals())
+    say("prefs absent", prefs.get("k"), prefs.get("k", 5))
+    say("prefs set", prefs.set("k", [1, "two"]), prefs.get("k"))
+    say("prefs map", prefs.set("m", {"a": 1, "b": True}), prefs.get("m"))
+    say("prefs text", prefs.set("s", "text"), prefs.get("s"))
+    say("prefs float", prefs.set("f", 1.5), prefs.get("f"))
+    say("prefs null", prefs.set("z", None), prefs.get("z", 7))
+    say("prefs cleared", prefs.clear("k"), prefs.get("k", "gone"))
+    say("ready", files.ready())
+    say("list", *files.list())
+    say("new_name", *files.new_name("trace note"))
+    say("auto name", *files.new_name())
+    say("save_text", *files.save_text("trace_note", "one\ntwo"))
+    say("load_text", *files.load_text("trace_note"))
+    say("load", *files.load("trace_note"))
+    say("duplicate", *files.duplicate("trace_note"))
+    say("rename", *files.rename("trace_note", "renamed"))
+    say("sorted", sorted(files.list()[0]))
+    say("delete", *files.delete("renamed"))
+    say("absent", *files.load("nope"))
+    say("absent text", *files.load_text("nope"))
+    say("refused", *files.load("a/b"))
+    say("save", *files.save("todo.txt", "x"))
+    say("badge", files.badge("todo.txt"), files.badge("trace_note_2"))
+    say("themes", "contrast" in themes())
+    say("set_theme", set_theme("contrast"))
+    say("open_app", open_app("nope"))
+    TRACE = "\n".join(LOG)
+
+
+def _draw():
+    cls(0)
+'''
+
+APP_ROLES_LUA = r'''
+LOG = {}
+TRACE = ""
+
+local function show(v)
+  if v == nil then return "nil" end
+  if v == true then return "true" end
+  if v == false then return "false" end
+  if math.type(v) == "integer" then return tostring(v) end
+  if type(v) == "number" then return string.format("%g", v) end
+  if type(v) == "string" then return "'" .. v:gsub("\n", "\\n") .. "'" end
+  if type(v) == "table" then
+    local keys = {}
+    for k in pairs(v) do
+      if type(k) == "string" then keys[#keys + 1] = k end
+    end
+    local out = {}
+    if #keys == 0 then
+      for i = 1, #v do out[i] = show(v[i]) end
+      return "[" .. table.concat(out, ",") .. "]"
+    end
+    table.sort(keys)
+    for i, k in ipairs(keys) do out[i] = k .. ":" .. show(v[k]) end
+    return "{" .. table.concat(out, ",") .. "}"
+  end
+  return "'" .. tostring(v) .. "'"
+end
+
+local function say(label, ...)
+  local t = {label}
+  for i = 1, select("#", ...) do t[#t + 1] = show((select(i, ...))) end
+  LOG[#LOG + 1] = table.concat(t, " ")
+end
+
+local function has(list, x)
+  for _, v in ipairs(list) do if v == x then return true end end
+  return false
+end
+
+function _init()
+  say("names", clipboard ~= nil, carts ~= nil)
+  say("prefs absent", prefs.get("k"), prefs.get("k", 5))
+  say("prefs set", prefs.set("k", {1, "two"}), prefs.get("k"))
+  say("prefs map", prefs.set("m", {a = 1, b = true}), prefs.get("m"))
+  say("prefs text", prefs.set("s", "text"), prefs.get("s"))
+  say("prefs float", prefs.set("f", 1.5), prefs.get("f"))
+  say("prefs null", prefs.set("z", nil), prefs.get("z", 7))
+  say("prefs cleared", prefs.clear("k"), prefs.get("k", "gone"))
+  say("ready", files.ready())
+  say("list", files.list())
+  say("new_name", files.new_name("trace note"))
+  say("auto name", files.new_name())
+  say("save_text", files.save_text("trace_note", "one\ntwo"))
+  say("load_text", files.load_text("trace_note"))
+  say("load", files.load("trace_note"))
+  say("duplicate", files.duplicate("trace_note"))
+  say("rename", files.rename("trace_note", "renamed"))
+  local names = files.list()
+  table.sort(names)
+  say("sorted", names)
+  say("delete", files.delete("renamed"))
+  say("absent", files.load("nope"))
+  say("absent text", files.load_text("nope"))
+  say("refused", files.load("a/b"))
+  say("save", files.save("todo.txt", "x"))
+  say("badge", files.badge("todo.txt"), files.badge("trace_note_2"))
+  say("themes", has(themes(), "contrast"))
+  say("set_theme", set_theme("contrast"))
+  say("open_app", open_app("nope"))
+  TRACE = table.concat(LOG, "\n")
+end
+
+function _draw()
+  cls(0)
+end
+'''
+
+APP_ROLES_PERMS = ["graphics", "input", "files:docs", "prefs", "appearance",
+                   "launch", "clipboard"]
+
+
+def _app_roles_trace(tmp_path, lua):
+    """The trace an app cart titled Tracer writes, run on the host's
+    Workstation: its lines, and the theme the console wears after it."""
+    import json
+    from ws_helpers import build_ws, select_on_home
+    d = tmp_path / "carts" / "Tracer.moy"
+    d.mkdir(parents=True)
+    man = {"title": "Tracer", "canvas": "320x240",
+           "moybyte": {"type": "app", "permissions": APP_ROLES_PERMS}}
+    if lua:
+        man.update({"runtime": "lua", "main": "main.lua"})
+    (d / "manifest.json").write_text(json.dumps(man))
+    (d / ("main.lua" if lua else "main.py")).write_text(
+        APP_ROLES_LUA if lua else APP_ROLES_PY)
+    (d / "config.json").write_text("{}")
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Tracer") is not None
+    ws.open()
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(1.0 / 30.0)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    trace = (ws.player._lua.get_global("TRACE") if lua
+             else ws.player.ns["TRACE"])
+    return trace.split("\n"), ws.look.theme_name
+
+
+# The Lua app on the boards' object model: the T-Deck's own desktop (the
+# roles trace's boot), the cart written into its store and launched from its
+# home, the frames stepped by the kernel's loop.
+APP_ROLES_BOARD = r'''
+def roles_trace(ws):
+    import json
+    import os
+    import moy_loop
+    d = ws.carts_root + "/Tracer.moy"
+    os.mkdir(d)
+    files = {"manifest.json": json.dumps(MANIFEST), "main.lua": SRC,
+             "config.json": "{}"}
+    for name in files:
+        with open(d + "/" + name, "w") as f:
+            f.write(files[name])
+    ws.rescan_carts()
+    cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
+    ws.select_cart(cart)
+    ws.open()
+    for _ in range(6):
+        moy_loop.step()
+    if ws.player.cart_error is not None:
+        print("T ERROR " + str(ws.player.cart_error))
+        return
+    for line in ws.player._lua.get_global("TRACE").split("\n"):
+        print("T " + line)
+    print("T theme " + ws.look.theme_name)
+'''
+
+
+def _app_roles_board_driver():
+    man = {"title": "Tracer", "canvas": "320x240", "runtime": "lua",
+           "main": "main.lua",
+           "moybyte": {"type": "app", "permissions": APP_ROLES_PERMS}}
+    return ("MANIFEST = %r\nSRC = %r\n" % (man, APP_ROLES_LUA)) + APP_ROLES_BOARD
+
+
+APP_ROLES_TRACE = """\
+names false false
+prefs absent nil 5
+prefs set nil [1,'two']
+prefs map nil {a:1,b:true}
+prefs text nil 'text'
+prefs float nil 1.5
+prefs null nil nil
+prefs cleared nil 'gone'
+ready true
+list [] nil
+new_name 'trace_note' nil
+auto name 'doc_1' nil
+save_text 'trace_note' nil
+load_text 'one\\ntwo' nil
+load 'one\\ntwo' nil
+duplicate 'trace_note_2' nil
+rename 'renamed' nil
+sorted ['renamed','trace_note_2']
+delete 'renamed' nil
+absent nil nil
+absent text '' nil
+refused nil nil
+save 'todo.txt' nil
+badge 'TXT' 'MD'
+themes true
+set_theme nil
+open_app false
+"""
+
+
+def test_roles_trace_for_a_lua_app_is_the_python_apps(tmp_path):
+    want = APP_ROLES_TRACE.splitlines()
+    py, py_theme = _app_roles_trace(tmp_path / "python", lua=False)
+    assert py == want, "the app roles trace moved: " + _first_difference(py, want)
+    lua, lua_theme = _app_roles_trace(tmp_path / "lua", lua=True)
+    assert lua == want, ("the Lua app's roles diverge: "
+                         + _first_difference(lua, want))
+    assert lua_theme == py_theme == "contrast"
+    exe = require_unix_mp(
+        "moycore", "moy_gfx", "moy_audio", board_model=True,
+        why="A Lua app's role names on the boards' object model: the device "
+            "Lua run (native/moycore) over native/moy_app's binding.")
+    (tmp_path / "board").mkdir()
+    b32 = _roles_trace_board(exe, tmp_path / "board", _app_roles_board_driver())
+    assert b32 == want + ["theme contrast"], (
+        "the T-Deck desktop's Lua app diverges: "
+        + _first_difference(b32, want + ["theme contrast"]))

@@ -324,6 +324,13 @@ NOT_REGISTRABLE = frozenset((
 # Python over them would shadow the C with a trampoline.
 NATIVE_NAMES = frozenset(("col", "mouse"))
 
+# The app ABI's names a Lua run's state holds in C (native/moy_app/moy_app_lua.h):
+# a Lua app's role binding over the role table, opened with the state for the
+# run the Player bound, so the namespace's Python faces of them are never
+# registered. `themes` and `files.badge` are the Python face's own tables,
+# which cross as text (`install_handles`, PRELUDE_APP).
+ROLE_NAMES = frozenset(("files", "prefs", "set_theme", "open_app", "themes"))
+
 
 def layer_restore(bind, canvas, run):
     """Hand a Lua run the screen canvas's layer restore state (device_canvas's
@@ -626,6 +633,25 @@ do
 end
 """
 
+PRELUDE_APP = """
+do
+  -- The app names whose answers are the console's Python tables: `themes()`
+  -- (the installed panel themes, crossing as lines) and `files.badge(name)`,
+  -- each only where the run's permissions name its role.
+  local themes_text, badge = __themes, __files_badge
+  __themes, __files_badge = nil, nil
+  if themes_text then
+    local gmatch = string.gmatch
+    function themes()
+      local t = {}
+      for n in gmatch(themes_text(), "[^\\n]+") do t[#t + 1] = n end
+      return t
+    end
+  end
+  if files and badge then files.badge = badge end
+end
+"""
+
 PRELUDE_FASTMATH = """
 do
   -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
@@ -646,7 +672,7 @@ end
 # second name would be a second thing to remember to send.
 PRELUDE_HANDLES = (PRELUDE_HANDLES.replace(
     "@LAYER_VERBS@", ", ".join('"%s"' % v for v in LAYER_VERBS))
-    + PRELUDE_EDITOR)
+    + PRELUDE_EDITOR + PRELUDE_APP)
 
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
@@ -677,7 +703,20 @@ def install_handles(ns, reg):
     registered."""
     pins = []
     _install_editor(ns, reg, pins)
+    _install_app(ns, reg)
     return pins
+
+
+def _install_app(ns, reg):
+    """The two app names a Lua run answers from the Python face's tables
+    (PRELUDE_APP): registered only where the namespace holds them, so a run
+    without the role has neither."""
+    themes = ns.get("themes")
+    if callable(themes):
+        reg("__themes", lambda: "\n".join(themes()))
+    files = ns.get("files")
+    if files is not None:
+        reg("__files_badge", lambda name: files.badge(str(name)))
 
 
 # The verbs the prelude reaches through ONE `__ed_do` trampoline: no arguments,

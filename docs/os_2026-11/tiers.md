@@ -95,12 +95,19 @@ table above; `tests/test_roles.py` pins the ordinals.
 
 One state per process (`lua_Alloc`, internal-SRAM-first,
 `docs/moycore_direction.md`), the safe stdlib. `native/moycore` runs one run
-at a time (`moycore_lua.h`); the run becomes a process-table row. Lua has
-**no role binding** today (only `moycore_wasm.c` links `moy_app`); a Lua
-binding over the same table is phase 5, and with it Lua's **`io` and
-`os` libraries** mapped onto the files tree under the app's permissions
-(owner, 2026-11-03), so Lua code written elsewhere reads and writes
-files the standard way.
+at a time (`moycore_lua.h`); the run becomes a process-table row. **The
+role binding** is `native/moy_app/moy_app_lua.c` (P5.1, 2026-11-07), over the role
+table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
+run the adapter binds (`moy_app_wasm_bind`, §3): the Player binds a Lua
+app's run before its state opens, and the state opens with the names its
+permissions grant (`files`, `prefs`, `set_theme`, `open_app`), each
+answering as the Python face does (the roles trace for a Lua app,
+`tests/test_semantic_traces.py`), and no others. With it Lua's **`io` and
+`os` libraries** are mapped onto the files tree under the app's permissions
+(owner, 2026-11-03), so Lua code written elsewhere reads and writes files
+the standard way: a path is a name of the grant's one kind, the process's
+working folder, and one that climbs, is absolute or names a folder is
+refused with `EACCES`.
 
 ## 3. wasm and WASI
 

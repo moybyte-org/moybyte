@@ -62,13 +62,13 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                          install_handles, put_scenes, layer_restore, layer_restore_end,
                          snap_slots, audio_ops, snap_shared, sync_view,
                          drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                                  install_handles, put_scenes, layer_restore,
                                  layer_restore_end, snap_slots, audio_ops,
                                  snap_shared, sync_view, drain_audio, cfg_blob)
@@ -275,13 +275,15 @@ class MoycoreRun:
         try:
             for name in ns:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
-                        and name not in NATIVE_NAMES and callable(ns[name])):
+                        and name not in NATIVE_NAMES and name not in ROLE_NAMES
+                        and callable(ns[name])):
                     _moycore.register(name, ns[name])
             # The object-valued verbs are the prelude's Lua over the run's C:
             # the layers, paint images and scenes are the run's own
             # (moycore_lua.c, moycore_scene.h), their texts handed over once,
             # here, so nothing of them crosses after. Only the editor handle
-            # stays a Python registry (lua_ext.install_handles).
+            # stays a Python registry, beside the app names that read the
+            # Python face's tables (lua_ext.install_handles).
             imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
             for name in (imgs or ()):
                 blob = imgs[name]

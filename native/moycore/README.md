@@ -430,6 +430,18 @@ a screen verb into a layer method that points `con->canvas` at that canvas for
 one protected call. The host's Lua shim (`runtime/host/moyhost_lua.c`) includes the
 same header, so both Lua hosts draw into a layer through one body.
 
+## A Lua app's role names
+
+A Lua app or script's state opens with its role names: `moycore_lua_open`
+calls `native/moy_app/moy_app_lua.h`'s opener (weak, so an image without
+`native/moy_app` opens none), which reads the run the Player bound for it
+(`moy_app_wasm_bind`) and installs `files`, `prefs`, `set_theme`,
+`open_app`, `io` and `os` as its permissions grant, before the prelude and
+the cart. The register loop never makes a trampoline over them
+(`lua_ext.ROLE_NAMES`); `themes()` and `files.badge` answer from the Python
+face's tables through two gated trampolines (`lua_ext.PRELUDE_APP`). A game
+binds no run and opens none of them.
+
 ## Testing
 
 `tests/test_moycore_loop.py`, `tests/test_moycore_pool.py` and

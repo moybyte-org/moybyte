@@ -1,0 +1,47 @@
+// The app ABI's Lua face (docs/os_2026-11/tiers.md section 2): the role
+// binding a Lua app's state holds, over the same table and the same ROLE door
+// (moy_app_role) the wasm import adapter reaches (moy_app_wasm.h), and Lua's
+// `io` and `os` over the files tree under the app's permissions.
+//
+// The run it serves is the one the adapter binds (moy_app_wasm_bind: the
+// state, the grant the Player made from the cart's permissions, the roles
+// they name): the Player binds a Lua user app's run as it binds a compiled
+// app's, before the Lua state opens. A role the permissions do not name has
+// no name in the state (nil, never a stub), and with no run bound (a game)
+// nothing here is opened.
+//
+// The names, each answering as the Python face (runtime/shell/system_api.py)
+// answers, Python's (value, err) as two results and its None as nil:
+//
+//   files (files, files:<kind>)  files.ready() / list() / load(name) /
+//                                save(name, blob) / delete(name) /
+//                                rename(name, new) / duplicate(name) /
+//                                new_name([title]) / save_text(name, text) /
+//                                load_text(name), one kind: the grant's
+//   prefs (prefs)                prefs.get(key[, default]) / set(key, value) /
+//                                clear(key), each value JSON in the settings row
+//   set_theme (appearance)       set_theme(name[, variant])
+//   open_app (launch)            open_app(id)
+//
+// and with files, `io` (open, lines, close, type; a file's read, write, lines,
+// seek, flush and close) and `os.remove` / `os.rename`: a path is a NAME of
+// the grant's kind, its folder the process's working directory; a path that
+// names a folder, climbs, or is absolute is refused (EACCES), never resolved.
+// A file opened for writing is saved whole through the files role at its
+// flush or close. `os.time`, `os.clock` and `os.difftime` are every app
+// run's. `files.badge` and `themes()` are the Python face's own tables, which
+// the Lua run's prelude hands over (runtime/run/lua_ext.py).
+//
+// Its caller is the VM's task: a Lua run's frame runs there, so a row is
+// called in place, a shell row crossing to the Python console through the
+// door (moy_app_door_bind).
+
+#ifndef MOY_APP_LUA_H
+#define MOY_APP_LUA_H
+
+#include "lua.h"
+
+// Open the bound run's names in `L`: 1 when a run is bound, else 0 and none.
+int moy_app_lua_open(lua_State *L);
+
+#endif // MOY_APP_LUA_H

@@ -5,10 +5,13 @@
 # module `moy_ufiles` (moy_ufiles.h): the files role's server, which an image
 # that denies this module (the Zero) carries none of. The layer reads covers
 # with native/moy_png and writes pictures with the port's `deflate` compressor.
+# A Lua app's role names (moy_app_lua.c) build against native/moy_lua's
+# headers, and to nothing in an image without them.
 
 MOY_APP_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_APP_DIR)/modmoy_app.c $(MOY_APP_DIR)/../moy_store/modmoy_ufiles.c
-SRC_USERMOD_LIB_C += $(MOY_APP_DIR)/moy_app.c $(MOY_APP_DIR)/moy_app_wasm.c $(MOY_APP_DIR)/../moy_store/moy_ufiles.c
+SRC_USERMOD_LIB_C += $(MOY_APP_DIR)/moy_app.c $(MOY_APP_DIR)/moy_app_wasm.c $(MOY_APP_DIR)/moy_app_lua.c $(MOY_APP_DIR)/../moy_store/moy_ufiles.c
 CFLAGS_USERMOD += -I$(MOY_APP_DIR) -I$(MOY_APP_DIR)/../moy_spine -I$(MOY_APP_DIR)/../moy_input \
-    -I$(MOY_APP_DIR)/../moy_store -I$(MOY_APP_DIR)/../moy_png
+    -I$(MOY_APP_DIR)/../moy_store -I$(MOY_APP_DIR)/../moy_png \
+    -I$(MOY_APP_DIR)/../moy_lua/lua

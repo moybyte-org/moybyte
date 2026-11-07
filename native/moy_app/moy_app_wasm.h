@@ -58,6 +58,9 @@ void moy_app_wasm_end(void);
 // `a` is going: unbound if it is the bound run's.
 void moy_app_wasm_forget(const moy_appabi_t *a);
 uint32_t moy_app_wasm_grant(void);
+// The bound run: its state, or NULL with none bound, and its grant and role
+// mask. A Lua app's role binding serves the same run (moy_app_lua.h).
+moy_appabi_t *moy_app_wasm_run(uint32_t *g, uint32_t *roles);
 
 // The module's imports from MOY_APP_EXT against the bound grant: 0, or
 // non-zero with the first one whose role the grant does not hold named in

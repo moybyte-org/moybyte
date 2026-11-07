@@ -145,7 +145,8 @@ The few Lua-specific notes:
   **dict** (`a.flags`) is a table too, read as `a.flags.size` or
   `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
-  `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
+  `string.*`, `table.*` (no `load`/`require`; `io` and `os` only as an
+  app's, "Turning a cart into an APP" below).
 - A Lua cart's files are **source text**. A precompiled chunk (`luac` output,
   or anything opening with Lua's binary signature, `ESC "Lua"`) is refused at
   load with Lua's own "attempt to load a binary chunk" error, on every tier:
@@ -779,6 +780,18 @@ console without Wi-Fi or pins gives `network` or `pins` no names at all, as
 above). A permission your app cannot work without goes in `required` too,
 and then the console refuses to start the app, or one without what it needs
 to install it, and says which one is missing:
+
+**In Lua** an app holds the same names, answering the same way: storage's
+`(value, error)` is two results (`local name, err = files.save_text("todo",
+text)`), Python's `None` is `nil` and a list is a sequence. A permission you
+did not ask for, or one turned off, is `nil`, so `if prefs == nil then` is the
+check. With `files`, Lua's own `io` (`io.open`, `io.lines`, a file's `read`,
+`write`, `lines`, `seek`, `flush`, `close`) and `os.remove`/`os.rename` work in
+your one folder: `"notes.txt"` is a document there, and a path that climbs,
+starts at `/` or names a folder (`"../x"`, `"/sd/moybyte/carts"`,
+`"drawings/pic"`) is refused with `Permission denied`. What you write is saved
+when you `flush` or `close` the file, and `os.remove` sends it to the trash.
+Every Lua app also has `os.time()`, `os.clock()` and `os.difftime()`.
 
 ```json
 "moybyte": {"type": "app", "permissions": ["graphics", "input", "prefs"], "required": ["prefs"]}
