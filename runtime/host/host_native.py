@@ -81,7 +81,7 @@ def parts(verbose=False):
     spike = _module("tools.moy_index_spike")
     out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
-    cflags, link = [], ["-lm"]
+    cflags, link = [], ["-lm", "-lpthread"]
     uf = _module("runtime.moy_ufiles_binding")
     if os.path.isdir(uf.UZLIB):
         out += [uf.part(), _module("runtime.moy_play").IMG_PART]
@@ -97,6 +97,10 @@ def parts(verbose=False):
                                            verbose)
     if sh is not None:
         link = link + ["-Wl,--whole-archive", sh, "-Wl,--no-whole-archive"]
+    seal = _module("runtime.seal_binding").archive(
+        ASAN if os.environ.get("MOYHOST_ASAN") else (), verbose)
+    if seal is not None:
+        link = link + ["-Wl,--whole-archive", seal, "-Wl,--no-whole-archive"]
     return out, cflags, link
 
 

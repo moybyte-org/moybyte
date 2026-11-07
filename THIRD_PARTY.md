@@ -27,6 +27,7 @@ separate question from what is committed.
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
+| mbedTLS 3.6.4, its crypto subset (the browser sign-in, host and wasm) | `native/moy_net/mbedtls/` | [Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls), as ESP-IDF v5.5.1 carries it | Apache-2.0 OR GPL-2.0-or-later (used under Apache-2.0) | No |
 | Jet software 3D rasteriser (the compiled Jet carts) | `ports/jet/jet/` | [CubeCoders/Jet](https://github.com/CubeCoders/Jet) | MIT | No |
 | Utah teapot mesh + the scene it is lit in (the showcase cart) | `ports/jet/teapot.moy/teapot.obj`, `ports/jet/teapot.moy/src/scene.cpp` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples), from freeglut's teapot data | MIT; freeglut's X11-style notice | Converted to OBJ; the scene ported |
 | ESP 88, the neon city film: its code and artwork (the ESP 88 cart) | `ports/jet/examples/`, `ports/jet/esp88.moy/assets.bin` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples) (`esp32-neon-film`) | MIT | One line (the film's frame size); artwork repacked, glow and credits scaled |
@@ -291,6 +292,26 @@ modules; nothing in any firmware image does. A module is a build product
   not published by this repository (moybyte-org/carts publishes them); before one ships
   in a product, its `LICENSES.txt` carries those libraries' notices as well
   (`ports/jet/README.md`, "Seeding").
+
+### 2.8 mbedTLS — the browser sign-in's crypto
+
+`native/moy_net/mbedtls/`
+
+The sign-in (`native/moy_net/moy_seal.h`) runs AES-GCM, SHA-256, HMAC, HKDF
+and SPAKE2 over P-256. A board links the copy ESP-IDF builds (its hardware AES
+and SHA); the host's library and the browser's wasm compile this one, the same
+release, under the config `native/moy_net/moy_seal_mbedtls.h`.
+
+- **Upstream:** mbedTLS 3.6.4 — <https://github.com/Mbed-TLS/mbedtls>, the
+  copy in ESP-IDF v5.5.1's `components/mbedtls/mbedtls` at the commit
+  `native/moy_net/mbedtls_vendor.json` records. `tools/vendor_mbedtls.py`
+  (`make vendor-mbedtls`) copies the sources and headers the subset needs,
+  under upstream's paths.
+- **Licence:** Apache-2.0 OR GPL-2.0-or-later; Moybyte uses it under
+  Apache-2.0. Full text:
+  [`native/moy_net/mbedtls/LICENSE`](native/moy_net/mbedtls/LICENSE).
+- **Modified: no.** `tests/test_mbedtls_vendor.py` fails on any edit to the
+  copy.
 
 ---
 
@@ -727,10 +748,11 @@ by §2.4, not by this table.
 | MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
 | Emscripten / emsdk | <https://github.com/emscripten-core/emsdk> | MIT (with NCSA for legacy components) |
 | Lua 5.4.7 | vendored, §2.1 | MIT |
+| mbedTLS 3.6.4, its crypto subset | vendored, §2.8 | Apache-2.0 |
 
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains
-MicroPython, Emscripten runtime support and Lua — all MIT — and any page
-hosting them should carry those notices.
+MicroPython, Emscripten runtime support and Lua — all MIT — and mbedTLS's
+crypto under Apache-2.0, and any page hosting them should carry those notices.
 
 ### 5.5 Guition JC3248W535, ESP32-S3 (`firmware/guition_jc3248w535/build.sh`)
 
