@@ -26,7 +26,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
   oversized image, or one under its board's headroom floor (`[image]
-  headroom_floor_kib` in board.toml), is a build FAILURE on every board.
+  headroom_floor_kib` in board.toml), is a build FAILURE on every board. Every
+  floor is 0 since 2026-11-07 (owner): with no users the slots are still ours
+  to resize, so only the slot fit holds until the first release.
 - **What crosses into an image is board.toml DATA** (#161), staged by
   `tools/board_config.py`: a denylist over every module under `runtime/`
   (each `[[deny]]` names a kind and a `why`; subfolders stage FLAT, one

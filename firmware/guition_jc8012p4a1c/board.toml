@@ -190,7 +190,11 @@ isr_iram = 1
 # to 7.875 MiB (owner, 2026-11-06) for the SSH server and its mDNS responder
 # (native/moy_ssh, about 67 KB, and the IDF's mdns, about 27 KB), which at
 # 7.75 MiB left the image under the floor; the internal vfs went to 192 KiB.
-headroom_floor_kib = 1024
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. THE LINE STATE AT OPEN IS BOARD-SPECIFIC AND

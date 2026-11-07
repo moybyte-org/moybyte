@@ -196,7 +196,11 @@ isr_iram = 1
 # the 2026-10 look's font set took the image near the floor they grew to 8 MiB
 # on this board's 32 MB (owner, 2026-10-15): the theme fonts stay in the image,
 # and the store (the card, the internal vfs its fallback) gives the room.
-headroom_floor_kib = 1024
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. THE LINE STATE AT OPEN IS BOARD-SPECIFIC AND

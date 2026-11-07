@@ -228,7 +228,11 @@ otadata_size   = "0x2000"
 # took the image near the floor, and to 7 MiB (owner, 2026-10-26) when the
 # look's theme mode took it back there: the theme fonts stay in the image, and
 # the vfs (the store's fallback without a card) gives the room.
-headroom_floor_kib = 512
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. This board's USB-Serial/JTAG is ON the SoC, which
