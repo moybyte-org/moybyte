@@ -241,6 +241,10 @@ def _lib():
             d.hw_set_files.restype = _I
             d.hw_set_ring.argtypes = [_P, ctypes.c_uint32]
             d.hw_set_ring.restype = _I
+            d.hw_set_app.argtypes = [_P, _C, _I]
+            d.hw_set_app.restype = _I
+            d.hw_env.argtypes = [_P]
+            d.hw_env.restype = _P
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
@@ -342,7 +346,7 @@ class HostWasmRun:
 
     def __init__(self, buf, w, h, cart_dir, main, pages, sheet=None,
                  tilemap=None, wire=None, wire_swapped=False, flags=None,
-                 cfg=None, files=None, writable=None, ring=None):
+                 cfg=None, files=None, writable=None, ring=None, app=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
@@ -397,12 +401,22 @@ class HostWasmRun:
         # boards' range keeps moy-spec's 2,048, as on a board.
         if ring:
             d.hw_set_ring(self._r, int(ring))
+        # The app's run (moy_app's `run()`): what its imports from the app
+        # extension serve, and what its load is checked against.
+        if app is not None and d.hw_set_app(self._r, bytes(app), len(app)):
+            self.close()
+            raise ValueError("host wasm: not an app run")
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):
             msg = err.value.decode("utf-8", "replace")
             self.close()
             raise RuntimeError(msg)
+
+    def env(self):
+        """The engine's handle this run's imports are called with (its exec
+        env): what the app extension's natives find the run's grant by."""
+        return self._d.hw_env(self._r)
 
     def init(self):
         """The cart's _init. None, or the trap's text."""

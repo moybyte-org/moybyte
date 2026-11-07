@@ -32,7 +32,7 @@ def cart_rows():
                   if r[5] == 1)
 
 run = moy_play.launch("@CART@", True)
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 moycore.image_put("bg", @TEXT@)
 print("EXEC", moycore.exec("IMG = __image_handle('bg') LAY = __layer_new(8, 4)"
                            " MISS = __image_handle('nope')", "probe"))

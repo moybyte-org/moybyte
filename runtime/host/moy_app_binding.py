@@ -64,6 +64,12 @@ class _Buf(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
 
 
+class _Run(c.Structure):
+    """moy_app_run.h's moy_app_run_t: an app's run on a tier binding."""
+    _fields_ = [("a", c.c_void_p), ("sn", c.c_uint32), ("g", c.c_uint32),
+                ("roles", c.c_uint32)]
+
+
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
 Pointer = collections.namedtuple("Pointer", ("x", "y", "down", "click", "visible"))
 
@@ -149,9 +155,11 @@ _SIGS = (
     ("moy_app_role", [_P, _U32, _U32, _P, _SIZE, _P, _SIZE], c.c_int32),
     ("moy_app_table_name", [_U32], _PCHAR),
     ("moy_app_door_bind", [_P], None),
-    ("moy_app_wasm_bind", [_P, _U32, _U32], None),
-    ("moy_app_wasm_end", [], None),
+    ("moy_app_wasm_live", [_P], None),
     ("moy_app_wasm_forget", [_P], None),
+    ("moy_app_run_make", [_P, _U32, _U32, _P], None),
+    ("moy_app_stop_hold", [_P, _P], None),
+    ("moy_app_stop_end", [_P], None),
     ("moy_app_wasm_natives", [_PU32], _P),
     ("moy_app_wasm_row", [_U32], c.c_int),
     ("moy_app_wasm_hops", [_PU32, _PU32, _PU32], None),
@@ -321,13 +329,28 @@ def binding(sanitize=False):
         def count(self):
             return lib.moy_app_grants(self._p)
 
-        def wasm_bind(self, g, roles=()):
-            """The run a compiled app's imports serve (moy_app_wasm_bind)."""
+        def run(self, g, roles=()):
+            """An app's run on a tier binding (native/moy_app/moy_app_run.h):
+            the bytes a Lua or wasm run's open copies, or None for g 0; and
+            this state the one the theme is read from (moy_app_wasm_live)."""
+            lib.moy_app_wasm_live(self._p)
             g = int(g) & 0xFFFFFFFF
-            lib.moy_app_wasm_bind(self._p, g, mask_of(roles) if g else 0)
+            if not g:
+                return None
+            r = _Run()
+            lib.moy_app_run_make(self._p, g, mask_of(roles), c.byref(r))
+            return bytes(r)
 
-        def wasm_end(self):
-            lib.moy_app_wasm_end()
+        def stop_hold(self, run):
+            """The run a VM stop carries (moy_app_stop_hold), None for none."""
+            if run is None:
+                lib.moy_app_stop_hold(self._p, None)
+                return
+            r = _Run.from_buffer_copy(bytes(run))
+            lib.moy_app_stop_hold(self._p, c.byref(r))
+
+        def stop_end(self):
+            lib.moy_app_stop_end(self._p)
 
         def role(self, g, row, args, cap):
             """The ROLE door (moy_app_role): (answer, the bytes it wrote)."""

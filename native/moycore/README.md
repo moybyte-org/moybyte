@@ -434,13 +434,17 @@ same header, so both Lua hosts draw into a layer through one body.
 
 A Lua app or script's state opens with its role names: `moycore_lua_open`
 calls `native/moy_app/moy_app_lua.h`'s opener (weak, so an image without
-`native/moy_app` opens none), which reads the run the Player bound for it
-(`moy_app_wasm_bind`) and installs `files`, `prefs`, `set_theme`,
+`native/moy_app` opens none) with the app's run the open was handed
+(`run_begin`'s `app`, the Player's `moy_app.run`), which the state copies,
+and installs `files`, `prefs`, `set_theme`,
 `open_app`, `io` and `os` as its permissions grant, before the prelude and
 the cart. The register loop never makes a trampoline over them
 (`lua_ext.ROLE_NAMES`); `themes()` and `files.badge` answer from the Python
 face's tables through two gated trampolines (`lua_ext.PRELUDE_APP`). A game
-binds no run and opens none of them.
+has no run and opens none of them. A compiled app's run holds its app run
+the same way (`wasm_open`'s `app`, `moycore_open_c_t.app` for a run opened
+with no VM), and the adapter's natives find it by the instance their call
+comes from (`moy_app_wasm_run_of`).
 
 ## Testing
 

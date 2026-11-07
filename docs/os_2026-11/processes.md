@@ -164,8 +164,10 @@ OS reads:
 grant is made and when a wasm module's imports are walked at load
 (`native/moy_app/moy_app_wasm.c`, `moy_app_wasm_admit`); a Python app's
 namespace holds only the granted names (`runtime/shell/system_api.py`), and a
-Lua app's state opens with them alone (`native/moy_app/moy_app_lua.h`). No
-draw verb or input read checks a grant. For **Lua and wasm** an ungranted
+Lua app's state opens with them alone (`native/moy_app/moy_app_lua.h`).
+Each Lua or wasm run holds its own grant, a value its owner keeps
+(`native/moy_app/moy_app_run.h`), and a role row it calls answers from that
+grant's row and no other run's. No draw verb or input read checks a grant. For **Lua and wasm** an ungranted
 capability has no name in the process. For **Python** the manifest is
 legible, not binding: a Python cart runs inside process 1's VM with the real
 builtins and can reach `machine` and the `never` roles (`system_api.py`: "NOT

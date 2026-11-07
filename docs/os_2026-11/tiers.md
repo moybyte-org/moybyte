@@ -98,8 +98,8 @@ One state per process (`lua_Alloc`, internal-SRAM-first,
 at a time (`moycore_lua.h`); the run becomes a process-table row. **The
 role binding** is `native/moy_app/moy_app_lua.c` (P5.1, 2026-11-07), over the role
 table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
-run the adapter binds (`moy_app_wasm_bind`, §3): the Player binds a Lua
-app's run before its state opens, and the state opens with the names its
+state's own run (§3): the Player makes a Lua app's run, its state's open
+copies it into the state, and the state opens with the names its
 permissions grant (`files`, `prefs`, `set_theme`, `open_app`), each
 answering as the Python face does (the roles trace for a Lua app,
 `tests/test_semantic_traces.py`), and no others. With it Lua's **`io` and
@@ -112,8 +112,18 @@ refused with `EACCES`.
 ## 3. wasm and WASI
 
 One instance per process. One session at a time today
-(`native/moy_wasm/README.md`), and the adapter binds **one global grant**
-(`moy_app_wasm_bind`); per-process binding is a change. A runaway export
+(`native/moy_wasm/README.md`). **The grant is per run** (P5.2, 2026-11-07):
+a run's grant is a value, `moy_app_run_t` (`native/moy_app/moy_app_run.h`:
+the state, the grant, the roles its permissions name), which the run's
+owner holds (the engine's per-run state today, the process row of
+`processes.md` §1 with the table), and the adapter's natives find it by the
+engine's handle on the call (`moy_app_wasm_run_of`: an instance's exec env,
+the browser's binding), as a Lua state finds its own in its registry. Two
+runs at once are two grants, and neither reaches the other's
+(`tests/test_app_runs.py`). The Player makes the run (`moy_app.run`) and
+the launch's namespace hands it to the runtime's open; a run the kernel
+opens with no VM takes it from the kernel's state, where the Player held it
+across the stop (`moy_app_stop_hold`). A runaway export
 calling no import cannot be stopped mid-loop, so a service's exports are
 OS-called and return; a callback that overruns strikes. **The wasm tier's
 OS interface is WASI preview1** (owner, 2026-11-03): files over the tree

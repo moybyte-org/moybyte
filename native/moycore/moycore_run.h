@@ -107,6 +107,7 @@ void moycore_run_close(moycore_run_t *c);
 // A compiled cart's run opened and closed from C with no VM (modmoycore.c, the
 // boards' binding: docs/history/kernel_cartpath_2026-10.md section 5.2). Every
 // pointer is the caller's and outlives the run.
+struct moy_app_run;
 typedef struct {
     uint16_t *fb;                // the canvas, w x h words
     int w, h;
@@ -127,6 +128,7 @@ typedef struct {
     size_t writable_len;
     int swapped, allow_unsigned, interp;
     uint32_t ring;               // the manifest's "audio_ring": `snd`'s depth, 0 the default
+    const struct moy_app_run *app;   // the app's run (native/moy_app/moy_app_run.h), or NULL
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);

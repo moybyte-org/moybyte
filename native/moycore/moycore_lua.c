@@ -1118,11 +1118,11 @@ static void media_open(lua_State *L)
 }
 
 // The app ABI's Lua face (native/moy_app/moy_app_lua.h): the role names of
-// the run the Player bound, opened before the cart can capture a global.
-// Weak: an image without native/moy_app opens none.
-int moy_app_lua_open(lua_State *L) __attribute__((weak));
+// the app's run, opened before the cart can capture a global. Weak: an image
+// without native/moy_app opens none.
+int moy_app_lua_open(lua_State *L, const struct moy_app_run *app) __attribute__((weak));
 
-int moycore_lua_open(char *err, size_t n)
+int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
 {
     RUN.L = lua_newstate(l_alloc, NULL);
     if (RUN.L == NULL) {
@@ -1152,7 +1152,7 @@ int moycore_lua_open(char *err, size_t n)
     moycore_ui_open(RUN.L);
 #endif
     media_open(RUN.L);
-    if (moy_app_lua_open != NULL) moy_app_lua_open(RUN.L);
+    if (moy_app_lua_open != NULL) moy_app_lua_open(RUN.L, app);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded from the cart's file. The shim's
     // __moy_map_flags(gff) overwrites it at cart boot, which is what a p8

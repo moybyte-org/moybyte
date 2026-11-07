@@ -110,9 +110,10 @@ PART = native_build.Part("lua", list(_RASTER) + [
 WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
-    "moy_ui_wasm.h", "moy.h", "moy_pixel.h"),
+    "moy_ui_wasm.h", "moy.h", "moy_pixel.h", "moy_app_run.h"),
     (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI,
-     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_AUDIO, "libmoy")))
+     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_AUDIO, "libmoy"),
+     os.path.join(_NATIVE, "moy_app")))
 
 
 def build(verbose=False):
@@ -129,7 +130,7 @@ _SIGS = (
     ("hl_kernel", [_I, _P], None),
     ("hl_img_decoder", [_P], None),
     ("hl_new", [_P, _I, _I, _I, _P, _P, _P, _I], _P),
-    ("hl_open", [_P, _P, _I], _I),
+    ("hl_open", [_P, _P, _P, _I], _I),
     ("hl_set_sheet", [_P, _P, _I], None),
     ("hl_set_map", [_P, _P, _I, _I, _I], None),
     ("hl_set_flags", [_P, _P, _I], None),
@@ -273,7 +274,9 @@ class HostLuaRun:
         return _lib() is not None
 
     def __init__(self, buf, w, h, sheet=None, tilemap=None, wire=None,
-                 indexed=None, flags=None, cfg=None, snap=None, aq=None):
+                 indexed=None, flags=None, cfg=None, snap=None, aq=None, app=None):
+        """`app` is the app's run, moy_app's `run()` bytes, whose role names
+        the state opens (native/moy_app/moy_app_lua.h), or None."""
         d = _lib()
         if d is None:
             raise RuntimeError("no host lua binding")
@@ -330,7 +333,8 @@ class HostLuaRun:
         if blob:
             d.hl_set_cfg(self._r, ctypes.c_char_p(blob), len(blob))
         err = ctypes.create_string_buffer(128)
-        if d.hl_open(self._r, ctypes.cast(err, _P), 128):
+        app = None if app is None else ctypes.c_char_p(bytes(app))
+        if d.hl_open(self._r, app, ctypes.cast(err, _P), 128):
             msg = err.value.decode("utf-8", "replace")
             self.close()
             raise RuntimeError("host lua: %s" % (msg or "no VM"))

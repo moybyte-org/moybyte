@@ -590,7 +590,7 @@ def _app_abi(rows):
     if returning:
         # A compiled app's run that stopped the VM held its grant across the
         # stop (Player._stop_grant); that run is over now.
-        app.wasm_end()
+        app.stop_end()
     return app
 
 

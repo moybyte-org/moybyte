@@ -449,7 +449,6 @@ class Player(PlayerDiag):
         left open (a session holds no gate; runtime/shell/shell_servers.py)."""
         ctx, self._app_ctx = self._app_ctx, None
         if ctx is not None:
-            self._wasm_bind(None)
             ctx.end()
         self.ws.store.end_all()
 
@@ -468,23 +467,25 @@ class Player(PlayerDiag):
         if info is not None and info[3] >= guard.HEAL_FRAMES and info[7] is None:
             guard.heal()
 
-    def _wasm_bind(self, cart):
-        """The run the app ABI's tier bindings serve (native/moy_app/
-        moy_app_wasm.h): this run's grant and the roles its permissions name,
-        for a compiled user app that declares the app extension, whose
-        imports reach them, and for a Lua app or script, whose state opens
-        their names (moy_app_lua.h); none otherwise, so a module's imports
-        from the extension are refused at load and a Lua game holds none."""
-        bind = getattr(getattr(self.ws, "app_abi", None), "wasm_bind", None)
-        if bind is None:
-            return
+    def _app_run(self, cart):
+        """The run the app ABI's tier bindings serve this launch
+        (native/moy_app/moy_app_run.h): this run's grant and the roles its
+        permissions name, for a compiled user app that declares the app
+        extension, whose imports reach them, and for a Lua app or script,
+        whose state opens their names (moy_app_lua.h). The run's own: the
+        namespace hands it to the runtime's open, which copies it, so two
+        runs hold two grants. None otherwise, so a module's imports from the
+        extension are refused at load and a Lua game holds none."""
+        app = getattr(self.ws, "app_abi", None)
+        run = getattr(app, "run", None)
+        if run is None:
+            return None
         ctx = self._app_ctx
         rt = cart.get("runtime") if cart is not None else None
         if (ctx is None or not (rt == "lua" or (
                 rt == "wasm" and APP_EXT in (cart.get("extensions") or ())))):
-            bind(0, ())
-            return
-        bind(ctx.grant, _moy_app.policy(self.granted)[0])
+            return run(0, ())
+        return run(ctx.grant, _moy_app.policy(self.granted)[0])
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
@@ -1693,11 +1694,12 @@ class Player(PlayerDiag):
         verdict's rule) runs with no Python to make its grant: the grant is
         made here, before the stop, as make_system_api makes a user app's
         (the C policy and key, the ungated theme and surface beside its
-        roles), and bound for its imports. It is kernel state, so the stop
-        leaves it; the start after the run ends it (console._app_abi)."""
+        roles), and held in the kernel's state as the run the stop carries,
+        which the kernel's open hands its imports. It is kernel state, so the
+        stop leaves it; the start after the run ends it (console._app_abi)."""
         ws = self.ws
         app = getattr(ws, "app_abi", None)
-        if (app is None or getattr(app, "wasm_bind", None) is None
+        if (app is None or getattr(app, "stop_hold", None) is None
                 or cart.get("runtime") != "wasm"
                 or APP_EXT not in (cart.get("extensions") or ())
                 or not ws.is_user_app(cart)):
@@ -1706,7 +1708,7 @@ class Player(PlayerDiag):
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True)
-        app.wasm_bind(g, roles)
+        app.stop_hold(app.run(g, roles))
 
     def _bind_play(self, run):
         """Give the launched run's frame to the kernel's Player when its
@@ -1989,11 +1991,11 @@ class Player(PlayerDiag):
                 if fit is not None and not _fits(fit):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
                                    _ch.say_title(_ch.SAY_FIT))
-            # A Lua app's run is bound before its state opens, which opens
-            # its role names; a Lua game binds none, which leaves the
-            # console's state the one its `ui` reads the theme from
-            # (moy_app_wasm.h).
-            self._wasm_bind(ws.cart)
+            # The app's run rides the namespace into the runtime's open: a
+            # Lua app's state opens its role names over it, a compiled app's
+            # imports serve it. A game has none, and the console's state is
+            # the one its `ui` reads the theme from (moy_app_wasm.h).
+            ns["_moy_app"] = self._app_run(ws.cart)
             # The cart's code loads and inits inside the app-cart boundary, as
             # a Python cart's exec and _init do (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(True)

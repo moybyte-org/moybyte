@@ -207,13 +207,15 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     return r;
 }
 
-int hl_open(host_lua *r, char *err, int errlen)
+/* `app` is the app's run (native/moy_app/moy_app_run.h) the state opens its
+ * role names over, or NULL. */
+int hl_open(host_lua *r, const struct moy_app_run *app, char *err, int errlen)
 {
     if (!LIVE(r)) return 1;
     if (!G_P8MEM) G_P8MEM = (uint8_t *)malloc(MOY_P8_MEM);
     if (!G_P8ROM) G_P8ROM = (uint8_t *)malloc(MOY_P8_ROM);
     moycore_lua_p8_memory(G_P8MEM && G_P8ROM ? G_P8MEM : NULL, G_P8ROM);
-    return moycore_lua_open(err, errlen > 0 ? (size_t)errlen : 0) != 0;
+    return moycore_lua_open(app, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
 /* The sheet, flags and map: moycore_run.h's, which says why each is checked

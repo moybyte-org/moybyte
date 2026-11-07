@@ -340,9 +340,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_layer_restore_obj, mod_layer_restore);
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
-//           snap, audio_q, pmem_bytes, cfg, flags, vm)
+//           snap, audio_q, pmem_bytes, cfg, flags, vm, app)
 //
 // Builds the console and opens the VM with libmoy's verb table -- and STOPS.
+// `app` is the app's run, moy_app's `run()` (moycore_app_run), whose role
+// names the Lua state opens, or None for a run with none.
 // `vm` False builds the console alone, for a compiled cart: wasm_open() then
 // hands it to the engine instead of a Lua state.
 // The cart is loaded by load() afterwards, because between the two the host
@@ -354,9 +356,27 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_layer_restore_obj, mod_layer_restore);
 // compositor presents, the sheet and tilemap the project holds, the snapshot
 // and queue the loop refreshes. Nothing is copied and nothing is allocated
 // here except the VM.
+// The app's run a launch hands over: the bytes moy_app's `run()` answers (a
+// moy_app_run_t, native/moy_app/moy_app_run.h), read in place for the open
+// that copies it, or NULL for None and in an image without native/moy_app.
+const struct moy_app_run *moycore_app_run(mp_obj_t o)
+{
+    if (o == mp_const_none) return NULL;
+#if MOYCORE_APP
+    size_t n = 0;
+    const void *p = moycore_buf_r(o, &n);
+    if (n != sizeof(moy_app_run_t))
+        mp_raise_ValueError(MP_ERROR_TEXT("moycore: not an app run"));
+    return (const struct moy_app_run *)p;
+#else
+    return NULL;
+#endif
+}
+
 static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 {
-    if (n_args != 14) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 14 args"));
+    if (n_args != 15) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 15 args"));
+    const struct moy_app_run *app = moycore_app_run(a[14]);
     int vm = mp_obj_is_true(a[13]);
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
@@ -463,7 +483,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
         return mp_const_none;
     }
     char err[64];
-    if (moycore_lua_open(err, sizeof(err)) != 0) {
+    if (moycore_lua_open(app, err, sizeof(err)) != 0) {
         mp_raise_msg_varg(RUN.L == NULL ? &mp_type_MemoryError : &mp_type_RuntimeError,
                           MP_ERROR_TEXT("%s"), err);
     }
@@ -473,7 +493,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     RUN.open = 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_begin);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 15, 15, mod_run_begin);
 
 // Run one chunk. Shared by exec() and load(); the only difference between them
 // is whether _init follows.
@@ -814,7 +834,8 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
     moycore_whead_len = o->head_len;
     moycore_wpages = o->pages;
     int rc = moycore_wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
-                                o->swapped, o->allow_unsigned, o->interp, o->ring, err, n);
+                                o->swapped, o->allow_unsigned, o->interp, o->ring, o->app,
+                                err, n);
     moycore_whead = NULL;
     moycore_whead_len = 0;
     return rc;

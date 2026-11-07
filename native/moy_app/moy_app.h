@@ -35,6 +35,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_app_run.h"
 #include "moy_htab.h"
 #include "moy_input.h"
 #include "moy_settings.h"
@@ -165,6 +166,22 @@ int moy_app_grant_get(const moy_appabi_t *a, uint32_t h, const moy_grant_t **g);
 uint32_t moy_app_grants(const moy_appabi_t *a);    // live grants
 // The kernel's live grants, 0 before it is made (the KSTOP line's).
 uint32_t moy_app_kernel_grants(void);
+
+// -- a run's grant (moy_app_run.h) ----------------------------------------------------
+
+// The run of grant `g` under `a`, its permissions naming `roles`: g 0 (or `a`
+// NULL) is no app run, `a` NULL.
+void moy_app_run_make(moy_appabi_t *a, uint32_t g, uint32_t roles, moy_app_run_t *r);
+// Whether `r` names a state still made: 0 for no run, and for one whose state
+// was freed (its pointer then never read). Its grant may still have ended.
+int moy_app_run_live(const moy_app_run_t *r);
+// The run a VM stop carries: a compiled app the kernel opens with no VM
+// (native/moy_play/moy_play_stop.c). The Player holds it in the state before
+// the stop, the kernel's open reads it (the kernel's state's, or NULL), and
+// the start after the stop ends its grant and lets it go.
+void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r);
+const moy_app_run_t *moy_app_stopped(void);
+void moy_app_stop_end(moy_appabi_t *a);
 
 // -- the policy -------------------------------------------------------------------
 

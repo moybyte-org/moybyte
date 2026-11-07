@@ -30,6 +30,9 @@ struct moy_app {
     char root[MOY_APP_ROOT_MAX + 1];
     uint32_t counts[MOY_ROW_N];
     uint32_t seq;               // the seqlock: odd while the look or the clipboard is written
+    uint32_t sn;                // this state's serial (moy_app_run_t)
+    moy_app_run_t stopped;      // the run a VM stop carries, or none
+    moy_appabi_t *next;         // the states made and not freed
 };
 
 // The seqlock's writer half, around every write of the look and the clipboard.
@@ -113,6 +116,11 @@ static const struct { const char *perm; int role; } PERMS[] = {
 
 // -- the state ---------------------------------------------------------------------
 
+// The states made and not freed, which a run's copy is checked against before
+// its pointer is read, and the serial the next one is made with.
+static moy_appabi_t *s_states;
+static uint32_t s_serial;
+
 moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     moy_appabi_t *a = mem->alloc(sizeof(moy_appabi_t));
     if (a == NULL) {
@@ -131,12 +139,21 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
         moy_app_free(a);
         return NULL;
     }
+    a->sn = ++s_serial != 0u ? s_serial : ++s_serial;
+    a->next = s_states;
+    s_states = a;
     return a;
 }
 
 void moy_app_free(moy_appabi_t *a) {
     if (a == NULL) {
         return;
+    }
+    for (moy_appabi_t **p = &s_states; *p != NULL; p = &(*p)->next) {
+        if (*p == a) {
+            *p = a->next;
+            break;
+        }
     }
     moy_htab_free(a->grants);
     if (a->clip != NULL) {
@@ -169,6 +186,45 @@ uint32_t moy_app_kernel_grants(void) {
     return s_kernel != NULL ? moy_app_grants(s_kernel) : 0u;
 }
 
+void moy_app_run_make(moy_appabi_t *a, uint32_t g, uint32_t roles, moy_app_run_t *r) {
+    r->a = g != 0u ? a : NULL;
+    r->sn = r->a != NULL ? a->sn : 0u;
+    r->g = r->a != NULL ? g : 0u;
+    r->roles = r->a != NULL ? roles : 0u;
+}
+
+int moy_app_run_live(const moy_app_run_t *r) {
+    if (r == NULL || r->a == NULL || r->g == 0u) {
+        return 0;
+    }
+    for (const moy_appabi_t *s = s_states; s != NULL; s = s->next) {
+        if (s == r->a) {
+            return s->sn == r->sn;
+        }
+    }
+    return 0;
+}
+
+void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r) {
+    if (r != NULL && r->a == a) {
+        a->stopped = *r;
+    } else {
+        memset(&a->stopped, 0, sizeof(a->stopped));
+    }
+}
+
+const moy_app_run_t *moy_app_stopped(void) {
+    return s_kernel != NULL && moy_app_run_live(&s_kernel->stopped) ? &s_kernel->stopped
+                                                                   : NULL;
+}
+
+void moy_app_stop_end(moy_appabi_t *a) {
+    if (a->stopped.a == a && a->stopped.g != 0u) {
+        moy_app_end(a, a->stopped.g);
+    }
+    memset(&a->stopped, 0, sizeof(a->stopped));
+}
+
 void moy_app_fresh(moy_appabi_t *a) {
     for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
         uint32_t h = moy_htab_at(a->grants, s);
@@ -178,6 +234,7 @@ void moy_app_fresh(moy_appabi_t *a) {
             moy_htab_release(a->grants, h);
         }
     }
+    memset(&a->stopped, 0, sizeof(a->stopped));
     a->damage = 0u;
     seq_open(a);
     a->clip_kind = MOY_CLIP_EMPTY;

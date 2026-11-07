@@ -48,6 +48,9 @@ typedef struct {
     char keep_dir[320];          // where its written files are kept
     moy_files_t *files;          // its files' session (moy_files.h)
     char *writable;              // the manifest's "writable", libmoy's form
+#if MOYCORE_APP
+    moy_app_run_t app;           // the app's run its imports from the extension serve
+#endif
 #if MOY_WASM
     // The import table's registration storage: WAMR sorts it in place and
     // points at it until the runtime is destroyed, so it lives as long as
@@ -66,18 +69,37 @@ static wrun_t *WR;
 // any import outside "moy" is.
 #define APP_EXT "moybyte.app"
 const NativeSymbol *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
-uint32_t moy_app_wasm_grant(void) __attribute__((weak));
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen)
-    __attribute__((weak));
+int moy_app_wasm_admit(const struct moy_app_run *r, const uint8_t *head, size_t n, char *err,
+                       size_t errlen) __attribute__((weak));
 
-// The extension's table for libmoy's check: only while a run's app grant is
-// bound (the Player binds it for a compiled user app that declares the
+// The run a native's call is for (moy_app_wasm.h): the engine's handle on the
+// call -- the instance's exec env, its custom data libmoy's binding, or in
+// the browser the binding itself -- to this run's, the one session there is.
+#if MOYCORE_APP
+const struct moy_app_run *moy_app_wasm_run_of(void *e)
+{
+    if (!WR || !e) return NULL;
+#if MOY_WASM
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst((wasm_exec_env_t)e);
+    if (!inst || wasm_runtime_get_custom_data(inst) != (void *)&WR->w) return NULL;
+#else
+    if (e != (void *)&WR->w) return NULL;
+#endif
+    return WR->app.g ? &WR->app : NULL;
+}
+#endif
+
+// The extension's table for libmoy's check: only for a run that holds an app
+// grant (the Player makes one for a compiled user app that declares the
 // extension), so a cart that declares none imports only from "moy".
 static uint32_t app_ext(moy_wasm_ext *x)
 {
     uint32_t n = 0;
-    if (moy_app_wasm_natives == NULL || moy_app_wasm_grant == NULL
-        || moy_app_wasm_grant() == 0) return 0;
+#if MOYCORE_APP
+    if (moy_app_wasm_natives == NULL || !WR || WR->app.g == 0) return 0;
+#else
+    return 0;
+#endif
     x->module = APP_EXT;
     x->rows = moy_app_wasm_natives(&n);
     x->count = n;
@@ -377,8 +399,15 @@ static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errle
 #endif
     // Each import from the extension against the run's grant, named when its
     // role is not one the cart's permissions name.
-    return nx && moy_app_wasm_admit != NULL ? moy_app_wasm_admit(head, head_len, err, errlen)
-                                            : 0;
+#if MOYCORE_APP
+    return nx && moy_app_wasm_admit != NULL
+               ? moy_app_wasm_admit(&WR->app, head, head_len, err, errlen) : 0;
+#else
+    (void)nx;
+    (void)head;
+    (void)head_len;
+    return 0;
+#endif
 }
 
 static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
@@ -516,8 +545,8 @@ static void wasm_trapped(void)
 
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
-                       int swapped, int allow_unsigned, int interp, uint32_t ring, char *err,
-                       size_t errlen)
+                       int swapped, int allow_unsigned, int interp, uint32_t ring,
+                       const struct moy_app_run *app, char *err, size_t errlen)
 {
     if (WR) {
         wrun_free(WR);
@@ -529,6 +558,11 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+#if MOYCORE_APP
+    if (app) WR->app = *app;
+#else
+    (void)app;
+#endif
     // The manifest's "writable" entries, NUL-separated as Python joined them,
     // and two NULs to end libmoy's list.
     if (writable_len) {
@@ -623,7 +657,7 @@ void moycore_wasm_end(void)
 #endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           allow_unsigned=False, interp=False, writable=None, ring=0)
+//           allow_unsigned=False, interp=False, writable=None, ring=0, app=None)
 //           -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
@@ -640,7 +674,9 @@ void moycore_wasm_end(void)
 // sources check, and `wasm_sha` is ignored. `writable` is the manifest's
 // "writable" entries joined by NUL characters (moy-spec SPEC.md 16.12; the
 // cart's files are moy_files', above). `ring` is the manifest's "audio_ring",
-// the depth of `snd`'s queue in frames (0: moy-spec's 2,048). A refusal or a
+// the depth of `snd`'s queue in frames (0: moy-spec's 2,048). `app` is the
+// app's run (moycore_app_run), which the run holds for its imports from the
+// app extension and its load's grant check, or None for none. A refusal or a
 // trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
@@ -661,7 +697,9 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                                 writable, wlen,
                                 mp_obj_is_true(a[5]), n_args > 6 && mp_obj_is_true(a[6]),
                                 n_args > 7 && mp_obj_is_true(a[7]),
-                                ring > 0 ? (uint32_t)ring : 0u, err, sizeof(err));
+                                ring > 0 ? (uint32_t)ring : 0u,
+                                moycore_app_run(n_args > 10 ? a[10] : mp_const_none),
+                                err, sizeof(err));
     moycore_whead = NULL;
     moycore_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -673,7 +711,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 10, mod_wasm_open);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 11, mod_wasm_open);
 
 // files_keep(on): the page's keeper is listening, or not (the browser's,
 // firmware/web_runner/carts_link.py); turning it off drops the log.

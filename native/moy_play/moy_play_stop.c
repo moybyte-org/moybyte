@@ -84,6 +84,9 @@
 // The kernel's (native/moy_kernel): the heaps line, the serial line out, the
 // task watchdog.
 void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
+// The app's run the stop carries (native/moy_app/moy_app.h), weak: an image
+// without native/moy_app has none.
+const struct moy_app_run *moy_app_stopped(void) __attribute__((weak));
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
 void moy_kernel_stamp(int part);
@@ -699,6 +702,7 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .writable = S->writable_len ? S->writable : NULL, .writable_len = S->writable_len,
         .swapped = MOY_KERNEL_PANEL_SWAP, .allow_unsigned = (flags & MOY_PLAY_UNSIGNED) != 0,
         .interp = S->m.interp, .ring = S->ring,
+        .app = moy_app_stopped != NULL ? moy_app_stopped() : NULL,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
     if (rc != 0 && !S->m.interp && !moycore_wasm_ran()

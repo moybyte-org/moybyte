@@ -50,7 +50,7 @@ fb = bytearray(W * H * 2)
 snap = array("i", bytearray(4 * moycore.SNAP_LEN))
 aq = array("i", bytearray(4 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
 pm = array("i", bytearray(4 * 256))
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, pm, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, pm, None, None, True, None)
 print("LOAD", moycore.load([(open("@CART@/main.lua").read(), "@cart")]))
 
 inp = moy_input.HostInputTable()

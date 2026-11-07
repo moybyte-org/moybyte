@@ -46,53 +46,32 @@ int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
 // the seqlock.
 enum { HOP = 0, SEQ = 1 };
 
-static moy_appabi_t *volatile s_a;
-static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads with no run
-static volatile uint32_t s_g, s_roles;
+static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads
 static uint32_t s_hops, s_hop_us, s_hop_work_us;
 
-void moy_app_wasm_bind(moy_appabi_t *a, uint32_t g, uint32_t roles) {
+void moy_app_wasm_live(moy_appabi_t *a) {
     if (a != NULL) {
         s_live = a;
-    }
-    a = g != 0u ? a : NULL;
-    s_a = a;
-    s_g = a != NULL ? g : 0u;
-    s_roles = a != NULL ? roles : 0u;
-}
-
-void moy_app_wasm_end(void) {
-    moy_appabi_t *a = s_a;
-    uint32_t g = s_g;
-    moy_app_wasm_bind(NULL, 0u, 0u);
-    if (a != NULL && g != 0u) {
-        moy_app_end(a, g);
     }
 }
 
 void moy_app_wasm_forget(const moy_appabi_t *a) {
-    if (a != NULL && s_a == a) {
-        moy_app_wasm_bind(NULL, 0u, 0u);
-    }
     if (a != NULL && s_live == a) {
         s_live = NULL;
     }
 }
 
-uint32_t moy_app_wasm_grant(void) {
-    return s_g;
-}
+// The run the engine's handle on a call is for: the engine glue's.
+const moy_app_run_t *moy_app_wasm_run_of(void *e) __attribute__((weak));
 
-moy_appabi_t *moy_app_wasm_run(uint32_t *g, uint32_t *roles) {
-    moy_appabi_t *a = s_a;
-    *g = a != NULL ? s_g : 0u;
-    *roles = a != NULL ? s_roles : 0u;
-    return a;
+static const moy_app_run_t *run_of(void *e) {
+    const moy_app_run_t *r = moy_app_wasm_run_of != NULL ? moy_app_wasm_run_of(e) : NULL;
+    return moy_app_run_live(r) ? r : NULL;
 }
 
 uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap) {
-    moy_appabi_t *a = s_a != NULL ? s_a : s_live;
+    moy_appabi_t *a = s_live;
     if (a == NULL) {
         return 0u;
     }
@@ -154,13 +133,14 @@ static void le32(uint8_t *q, uint32_t v) {
 
 // Row `row` with its text fields `s` and, where `num` is not NULL, one number
 // field first: packed as moy_app_role's fields, then run as `how` says.
-static int32_t run(int how, int row, const int32_t *num, const span_t *s, int ns,
+static int32_t run(void *e, int how, int row, const int32_t *num, const span_t *s, int ns,
                    uint8_t *ans, uint32_t cap) {
-    moy_appabi_t *a = s_a;
-    uint32_t g = s_g;
-    if (a == NULL || row < 0) {
+    const moy_app_run_t *rn = run_of(e);
+    if (rn == NULL || row < 0) {
         return -MOY_APP_STALE;
     }
+    moy_appabi_t *a = rn->a;
+    uint32_t g = rn->g;
     uint8_t stack[320];
     size_t n = num != NULL ? 8u : 0u;
     for (int i = 0; i < ns; i++) {
@@ -283,116 +263,93 @@ int moy_app_wasm_row(uint32_t i) {
 #define R(k) moy_app_wasm_row(k)
 
 static int32_t w_theme_token(void *e, int32_t role) {
-    (void)e;
-    return run(SEQ, R(N_THEME_TOKEN), &role, NULL, 0, NULL, 0);
+    return run(e, SEQ, R(N_THEME_TOKEN), &role, NULL, 0, NULL, 0);
 }
 static int32_t w_theme_gen(void *e) {
-    (void)e;
-    return run(SEQ, R(N_THEME_GEN), NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, R(N_THEME_GEN), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_theme_light(void *e) {
-    (void)e;
-    return run(SEQ, R(N_THEME_LIGHT), NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, R(N_THEME_LIGHT), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_theme_name(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_THEME_NAME), NULL, NULL, 0, buf, cap);
+    return run(e, SEQ, R(N_THEME_NAME), NULL, NULL, 0, buf, cap);
 }
 static int32_t w_theme_variant(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_THEME_VARIANT), NULL, NULL, 0, buf, cap);
+    return run(e, SEQ, R(N_THEME_VARIANT), NULL, NULL, 0, buf, cap);
 }
 static int32_t w_theme_set(void *e, const uint8_t *nm, uint32_t nn, const uint8_t *v,
                            uint32_t vn) {
-    (void)e;
     span_t s[2] = { { nm, nn }, { v, vn } };
-    return run(HOP, R(N_THEME_SET), NULL, s, 2, NULL, 0);
+    return run(e, HOP, R(N_THEME_SET), NULL, s, 2, NULL, 0);
 }
 static int32_t w_theme_set_variant(void *e, const uint8_t *v, uint32_t vn) {
-    (void)e;
     span_t s[1] = { { v, vn } };
-    return run(HOP, R(N_THEME_SET_VARIANT), NULL, s, 1, NULL, 0);
+    return run(e, HOP, R(N_THEME_SET_VARIANT), NULL, s, 1, NULL, 0);
 }
 static int32_t w_theme_edit_file(void *e) {
-    (void)e;
-    return run(HOP, R(N_THEME_EDIT_FILE), NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, R(N_THEME_EDIT_FILE), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_files_readable(void *e) {
-    (void)e;
-    return run(HOP, R(N_FILES_READABLE), NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, R(N_FILES_READABLE), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_files_ready(void *e) {
-    (void)e;
-    return run(HOP, R(N_FILES_READY), NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, R(N_FILES_READY), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_files_list(void *e, const uint8_t *k, uint32_t kn, uint8_t *buf,
                             uint32_t cap) {
-    (void)e;
     span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_FILES_LIST), NULL, s, 1, buf, cap);
+    return run(e, HOP, R(N_FILES_LIST), NULL, s, 1, buf, cap);
 }
 static int32_t w_files_count(void *e, const uint8_t *k, uint32_t kn) {
-    (void)e;
     span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_FILES_COUNT), NULL, s, 1, NULL, 0);
+    return run(e, HOP, R(N_FILES_COUNT), NULL, s, 1, NULL, 0);
 }
 static int32_t w_files_load(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
                             uint32_t nn, uint8_t *buf, uint32_t cap) {
-    (void)e;
     span_t s[2] = { { k, kn }, { nm, nn } };
-    return run(HOP, R(N_FILES_LOAD), NULL, s, 2, buf, cap);
+    return run(e, HOP, R(N_FILES_LOAD), NULL, s, 2, buf, cap);
 }
 static int32_t w_files_save(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
                             uint32_t nn, const uint8_t *d, uint32_t dn, uint8_t *out,
                             uint32_t cap) {
-    (void)e;
     span_t s[3] = { { k, kn }, { nm, nn }, { d, dn } };
-    return run(HOP, R(N_FILES_SAVE), NULL, s, 3, out, cap);
+    return run(e, HOP, R(N_FILES_SAVE), NULL, s, 3, out, cap);
 }
 static int32_t w_files_delete(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
                               uint32_t nn, uint8_t *out, uint32_t cap) {
-    (void)e;
     span_t s[2] = { { k, kn }, { nm, nn } };
-    return run(HOP, R(N_FILES_DELETE), NULL, s, 2, out, cap);
+    return run(e, HOP, R(N_FILES_DELETE), NULL, s, 2, out, cap);
 }
 static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t n) {
-    (void)e;
     span_t s[1] = { { id, n } };
-    return run(HOP, R(N_NAV_OPEN_APP), NULL, s, 1, NULL, 0);
+    return run(e, HOP, R(N_NAV_OPEN_APP), NULL, s, 1, NULL, 0);
 }
 static int32_t w_prefs_get(void *e, const uint8_t *k, uint32_t kn, uint8_t *buf,
                            uint32_t cap) {
-    (void)e;
     span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_PREFS_GET), NULL, s, 1, buf, cap);
+    return run(e, HOP, R(N_PREFS_GET), NULL, s, 1, buf, cap);
 }
 static int32_t w_prefs_set(void *e, const uint8_t *k, uint32_t kn, const uint8_t *j,
                            uint32_t jn) {
-    (void)e;
     span_t s[2] = { { k, kn }, { j, jn } };
-    return run(HOP, R(N_PREFS_SET), NULL, s, 2, NULL, 0);
+    return run(e, HOP, R(N_PREFS_SET), NULL, s, 2, NULL, 0);
 }
 static int32_t w_prefs_clear(void *e, const uint8_t *k, uint32_t kn) {
-    (void)e;
     span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_PREFS_CLEAR), NULL, s, 1, NULL, 0);
+    return run(e, HOP, R(N_PREFS_CLEAR), NULL, s, 1, NULL, 0);
 }
 static int32_t w_clipboard_put_text(void *e, const uint8_t *t, uint32_t n) {
-    (void)e;
     span_t s[1] = { { t, n } };
-    return run(HOP, R(N_CLIPBOARD_PUT_TEXT), NULL, s, 1, NULL, 0);
+    return run(e, HOP, R(N_CLIPBOARD_PUT_TEXT), NULL, s, 1, NULL, 0);
 }
 static int32_t w_clipboard_text(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_TEXT), NULL, NULL, 0, buf, cap);
+    return run(e, SEQ, R(N_CLIPBOARD_TEXT), NULL, NULL, 0, buf, cap);
 }
 static int32_t w_clipboard_kind(void *e) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_KIND), NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, R(N_CLIPBOARD_KIND), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_clipboard_seq(void *e) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_SEQ), NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, R(N_CLIPBOARD_SEQ), NULL, NULL, 0, NULL, 0);
 }
 
 #if defined(__GNUC__)
@@ -645,6 +602,7 @@ int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, vo
 }
 
 typedef struct {
+    const moy_app_run_t *r;
     char *err;
     size_t errlen;
 } admit_t;
@@ -660,7 +618,8 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
         return 0;
     }
     int row = moy_app_wasm_row_named((const char *)name, nn);
-    if (s_a == NULL) {
+    const moy_app_run_t *r = c->r;
+    if (r == NULL) {
         snprintf(c->err, c->errlen, "imports %s.%.*s, and this run has no app grant",
                  MOY_APP_EXT, (int)nn, (const char *)name);
         return 1;
@@ -675,7 +634,8 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
         return 0;                   // the toolkit's rows: every compiled app's, no grant
     }
     int ungated = role == MOY_ROLE_THEME && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL;
-    if ((!ungated && !(s_roles & (1u << role))) || moy_app_holds(s_a, s_g, role) != MOY_APP_OK) {
+    if ((!ungated && !(r->roles & (1u << role)))
+        || moy_app_holds(r->a, r->g, role) != MOY_APP_OK) {
         const char *perm = moy_app_perm_of(role);
         snprintf(c->err, c->errlen,
                  "imports %s.%.*s, and the manifest grants no %s (permission \"%s\")",
@@ -686,8 +646,9 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
     return 0;
 }
 
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen) {
-    admit_t c = { err, errlen };
+int moy_app_wasm_admit(const moy_app_run_t *run, const uint8_t *head, size_t n, char *err,
+                       size_t errlen) {
+    admit_t c = { moy_app_run_live(run) ? run : NULL, err, errlen };
     if (errlen) {
         err[0] = 0;
     }

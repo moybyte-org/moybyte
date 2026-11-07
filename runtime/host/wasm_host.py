@@ -154,7 +154,7 @@ class WasmHostRun:
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
             flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
             files=cart["path"], writable=cart.get("writable"),
-            ring=cart.get("audio_ring"))
+            ring=cart.get("audio_ring"), app=ns.get("_moy_app"))
         self._ns = ns
         self._ws = ws
         self._layers = self._images = None

@@ -267,7 +267,8 @@ class MoycoreRun:
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags, True)
+            self.snap, self.aq, self.pmem_img, cfg, flags, True,
+            ns.get("_moy_app") if hasattr(ns, "get") else None)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -1001,7 +1002,7 @@ class WasmRun(MoycoreRun):
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags, False)
+            self.snap, self.aq, self.pmem_img, cfg, flags, False, None)
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
         # moycore's C over the kernel's volume, inside the board's bus gate
@@ -1015,10 +1016,14 @@ class WasmRun(MoycoreRun):
         writable = cart.get("writable") or ()
         joined = "\0".join(writable) if writable else None
         ring = cart.get("audio_ring") or 0
+        # The app's run (the Player's, moy_app's `run()`): its imports from
+        # the app extension serve its grant, and its load is checked against it.
+        app = ns.get("_moy_app")
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, unknown_sources, interp, joined, ring)
+                                      swapped, unknown_sources, interp, joined, ring,
+                                      app)
 
         try:
             if has_module:

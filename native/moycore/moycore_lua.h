@@ -56,8 +56,11 @@ typedef struct {
 extern const moycore_lua_hooks_t moycore_lua_hooks;
 
 // The VM opened over moycore_RUN.c, whose console the caller has built: 0, or
-// -1 with the reason in `err`.
-int moycore_lua_open(char *err, size_t n);
+// -1 with the reason in `err`. `app` is the app's run (native/moy_app/
+// moy_app_run.h), which the state copies and holds its role names over, or
+// NULL for a run with none (a game).
+struct moy_app_run;
+int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n);
 // One chunk, as TEXT only (a binary chunk can reach outside the VM): 0, or -1
 // with Lua's message in `err`.
 int moycore_lua_exec(const char *src, size_t len, const char *name, char *err, size_t n);

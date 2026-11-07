@@ -304,13 +304,13 @@ _real = [None]
 
 
 def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
-              vm):
+              vm, app):
     return _real[0].run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq,
-                              pmem, cfg, flags, True)
+                              pmem, cfg, flags, True, app)
 
 
 def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
-              interp=False, writable=None, ring=0):
+              interp=False, writable=None, ring=0, app=None):
     return None
 
 

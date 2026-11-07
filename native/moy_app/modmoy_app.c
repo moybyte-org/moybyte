@@ -18,9 +18,13 @@
 //                        (moy_app_role): table row `row` with its packed
 //                        arguments, the answer and the first bytes of `cap`
 //                        it wrote
-//   app.wasm_bind(g, roles)   the run a compiled app's imports serve: its
-//                        grant and the roles its permissions name (g 0: none)
-//   app.wasm_end()       that run is over: its grant ended, unbound
+//   app.run(g, roles)    an app's run on a tier binding (moy_app_run.h): its
+//                        grant and the roles its permissions name, as the
+//                        bytes the Lua or wasm run's open copies, or None
+//                        for g 0; and this state the one the theme is read
+//                        from (moy_app_wasm_live)
+//   app.stop_hold(run)   the run a VM stop carries (None: none)
+//   app.stop_end()       that run is over: its grant ended, let go
 //   wasm_rows()          the import adapter's natives: (name, type, table row)
 //   wasm_hops()          (hops made, their microseconds end to end, the rows'
 //                        own microseconds on the VM's task)
@@ -475,26 +479,50 @@ static mp_obj_t app_role(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
 
-// wasm_bind(g, roles): the run a compiled app's imports serve.
-static mp_obj_t app_wasm_bind(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
+// run(g, roles): an app's run, as the bytes a tier's open copies.
+static mp_obj_t app_run(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t h = (uint32_t)mp_obj_get_int_truncated(g);
-    moy_app_wasm_bind(self->a, h, h ? roles_mask(roles) : 0u);
-    return mp_const_none;
+    moy_app_wasm_live(self->a);
+    if (h == 0u) {
+        return mp_const_none;
+    }
+    moy_app_run_t r;
+    moy_app_run_make(self->a, h, roles_mask(roles), &r);
+    return mp_obj_new_bytes((const byte *)&r, sizeof(r));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(app_wasm_bind_obj, app_wasm_bind);
+static MP_DEFINE_CONST_FUN_OBJ_3(app_run_obj, app_run);
 
-static mp_obj_t app_wasm_end(mp_obj_t self_in) {
-    (void)self_in;
-    moy_app_wasm_end();
+static mp_obj_t app_stop_hold(mp_obj_t self_in, mp_obj_t run) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (run == mp_const_none) {
+        moy_app_stop_hold(self->a, NULL);
+        return mp_const_none;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(run, &b, MP_BUFFER_READ);
+    if (b.len != sizeof(moy_app_run_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not an app run"));
+    }
+    moy_app_run_t r;
+    memcpy(&r, b.buf, sizeof(r));
+    moy_app_stop_hold(self->a, &r);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(app_wasm_end_obj, app_wasm_end);
+static MP_DEFINE_CONST_FUN_OBJ_2(app_stop_hold_obj, app_stop_hold);
+
+static mp_obj_t app_stop_end(mp_obj_t self_in) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    moy_app_stop_end(self->a);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_stop_end_obj, app_stop_end);
 
 static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&app_role_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wasm_bind), MP_ROM_PTR(&app_wasm_bind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wasm_end), MP_ROM_PTR(&app_wasm_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&app_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_hold), MP_ROM_PTR(&app_stop_hold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_end), MP_ROM_PTR(&app_stop_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_store_bind), MP_ROM_PTR(&app_store_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_end_all), MP_ROM_PTR(&app_files_end_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_gen), MP_ROM_PTR(&app_copy_gen_obj) },

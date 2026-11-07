@@ -3,12 +3,13 @@
 // (moy_app_role) the wasm import adapter reaches (moy_app_wasm.h), and Lua's
 // `io` and `os` over the files tree under the app's permissions.
 //
-// The run it serves is the one the adapter binds (moy_app_wasm_bind: the
-// state, the grant the Player made from the cart's permissions, the roles
-// they name): the Player binds a Lua user app's run as it binds a compiled
-// app's, before the Lua state opens. A role the permissions do not name has
-// no name in the state (nil, never a stub), and with no run bound (a game)
-// nothing here is opened.
+// The run it serves is the state's own (moy_app_run.h: the state, the grant
+// the Player made from the cart's permissions, the roles they name), copied
+// into the Lua state's registry at its open: the Player makes a Lua user
+// app's run as it makes a compiled app's, and the Lua run's open hands it
+// here, so two states are two runs and neither reaches the other's grant. A
+// role the permissions do not name has no name in the state (nil, never a
+// stub), and with no run (a game) nothing here is opened.
 //
 // The names, each answering as the Python face (runtime/shell/system_api.py)
 // answers, Python's (value, err) as two results and its None as nil:
@@ -40,8 +41,10 @@
 #define MOY_APP_LUA_H
 
 #include "lua.h"
+#include "moy_app_run.h"
 
-// Open the bound run's names in `L`: 1 when a run is bound, else 0 and none.
-int moy_app_lua_open(lua_State *L);
+// Open run `run`'s names in `L`: 1 for a live run, else 0 and none (`run`
+// NULL: a game).
+int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
 
 #endif // MOY_APP_LUA_H

@@ -43,6 +43,7 @@
 #include "moycore_lua.h"
 #include "moy_files.h"
 #include "moy_ui_wasm.h"
+#include "moy_app_run.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -70,6 +71,8 @@ typedef struct {
     int16_t    *pcm_deep;    /* a deeper queue the manifest asked for, or NULL */
     moy_files_t *files;      /* the cart's written files (moy_files.h) */
     char       *writable;    /* the manifest's "writable", libmoy's form */
+    moy_app_run_t app;       /* the app's run its "moybyte.app" imports serve */
+    void       *next;        /* the runs made and not freed */
 } host_wasm;
 
 static int g_runtime;        /* 1 once WAMR is up and the table registered */
@@ -198,8 +201,8 @@ void hw_interp_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
  * grant check, registered with WAMR once, beside the "moy" table, as
  * moycore_wasm.c registers them. */
 const NativeSymbol *moy_app_wasm_natives(uint32_t *count);
-uint32_t moy_app_wasm_grant(void);
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen);
+int moy_app_wasm_admit(const moy_app_run_t *r, const uint8_t *head, size_t n, char *err,
+                       size_t errlen);
 static NativeSymbol *g_app_store;
 static uint32_t g_app_n;
 
@@ -209,6 +212,21 @@ static int app_register(void)
     if (!(g_app_store = (NativeSymbol *)malloc(g_app_n * sizeof *g_app_store))) return 0;
     memcpy(g_app_store, rows, g_app_n * sizeof *g_app_store);
     return wasm_runtime_register_natives("moybyte.app", g_app_store, g_app_n) ? 1 : 0;
+}
+
+/* Every run made and not freed: what an import's exec env is matched against. */
+static host_wasm *G_RUNS;
+
+/* The run a "moybyte.app" native's call is for (moy_app_wasm.h): its exec
+ * env's instance, whose custom data is the run's libmoy binding. Each run
+ * holds its own, so two runs at once are two grants. */
+const moy_app_run_t *moy_app_wasm_run_of(void *e)
+{
+    wasm_module_inst_t inst = e ? wasm_runtime_get_module_inst((wasm_exec_env_t)e) : NULL;
+    void *w = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    for (host_wasm *r = G_RUNS; r && w; r = (host_wasm *)r->next)
+        if ((void *)&r->w == w) return r->app.g ? &r->app : NULL;
+    return NULL;
 }
 
 /* The canvas the ui rows draw on (native/moy_ui/moy_ui_wasm.h): the live
@@ -319,6 +337,8 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     r = (host_wasm *)calloc(1, sizeof(host_wasm));
     if (!r) return NULL;
     hl_claim(hw_release_live);             /* one run at a time: this one */
+    r->next = G_RUNS;
+    G_RUNS = r;
     memset(&moycore_RUN, 0, sizeof(moycore_RUN));
     moy_canvas_init(&moycore_RUN.c.canvas, (moy_pixel *)pix, w, h);
     if (wire) moy_canvas_wire(&moycore_RUN.c.canvas, wire);
@@ -339,6 +359,23 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     hl_wasm_tick = hw_tick_live;
     hl_wasm_stuck = hw_stuck_live;
     return r;
+}
+
+/* The app's run, `len` bytes of a moy_app_run_t (moy_app's `run()`): what its
+ * imports from "moybyte.app" serve and its load is checked against. Before
+ * hw_load. 0, or 1 for a buffer that is not one. */
+int hw_set_app(host_wasm *r, const void *app, int len)
+{
+    if (len != (int)sizeof(moy_app_run_t)) return 1;
+    memcpy(&r->app, app, sizeof(r->app));
+    return 0;
+}
+
+/* The engine's handle the run's imports are called with: its exec env, or
+ * NULL before its load. */
+void *hw_env(host_wasm *r)
+{
+    return r->env;
 }
 
 void hw_set_sheet(host_wasm *r, uint8_t *pix, int nbytes)
@@ -397,10 +434,10 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         return 1;
     }
     moy_wasm_ext x = { "moybyte.app", g_app_store, g_app_n };
-    uint32_t nx = moy_app_wasm_grant() ? 1u : 0u;
+    uint32_t nx = r->app.g ? 1u : 0u;
     if (moy_wasm_check_ext(r->module, copy, (size_t)n, (uint32_t)pages, &x, nx,
                            msg, sizeof msg)
-        || (nx && moy_app_wasm_admit(copy, (size_t)n, msg, sizeof msg))) {
+        || (nx && moy_app_wasm_admit(&r->app, copy, (size_t)n, msg, sizeof msg))) {
         free(copy);
         put_err(err, errlen, "refused", msg);
         return 1;
@@ -516,6 +553,11 @@ void hw_free(host_wasm *r)
 {
     if (!r) return;
     if (r == G_LIVE_W) hl_claim(NULL);     /* releases this one */
+    for (host_wasm **p = &G_RUNS; *p; p = (host_wasm **)&(*p)->next)
+        if (*p == r) {
+            *p = (host_wasm *)r->next;
+            break;
+        }
     moy_wasm_close(&r->w);
     if (r->env) wasm_runtime_destroy_exec_env(r->env);
     if (r->inst) wasm_runtime_deinstantiate(r->inst);

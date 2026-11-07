@@ -676,6 +676,21 @@ def test_run_begin_is_called_with_the_arity_the_c_demands(w):
     assert len(w.core.run_begin_args) == RB_ARITY == len(RB_FIELDS)
 
 
+def test_the_runs_app_run_reaches_the_open_and_never_the_globals(w):
+    """The Player's app run rides the namespace (`_moy_app`, moy_app's
+    `run()`) into run_begin, whose Lua state copies it: the run's own grant
+    (native/moy_app/moy_app_run.h). It is no verb, so nothing registers it."""
+    run = bytes(range(24))
+    w.run(ns=make_ns(_moy_app=run))
+    assert w.core.rb("app") is run
+    assert "_moy_app" not in w.core.registered
+
+
+def test_a_game_hands_no_app_run(w):
+    w.run()
+    assert w.core.rb("app") is None
+
+
 def test_run_begin_receives_the_live_framebuffer_and_its_dimensions(w):
     canvas = FakeCanvas(w=200, h=100)
     w.run(ws=FakeWs(canvas=canvas))
@@ -1865,7 +1880,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped,
-         allow_unsigned, interp, writable, ring) = world.core.calls[1]
+         allow_unsigned, interp, writable, ring, app) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
@@ -1877,6 +1892,8 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert writable is None
         # nor an audio ring: `snd` keeps moy-spec's queue
         assert ring == 0
+        # nor an app run: the namespace hands none for a game
+        assert app is None
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1900,7 +1917,24 @@ def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert len(call) == 11 and call[9] == "saves/\0options.cfg"
+        assert len(call) == 12 and call[9] == "saves/\0options.cfg"
+        assert call[11] is None
+    finally:
+        world.close()
+
+
+def test_the_compiled_apps_run_reaches_the_binding(tmp_path):
+    """The Player's app run (moy_app's `run()`, on the namespace) goes to
+    wasm_open, which the run holds for its imports from the app extension
+    and its load's grant check (native/moy_app/moy_app_wasm.h)."""
+    cart, _main = _compiled(tmp_path)
+    run = bytes(range(24))
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        world.mod.WasmRun(ws, make_ns(_moy_app=run), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open" and call[11] is run
     finally:
         world.close()
 
@@ -2008,7 +2042,7 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
-         _writable, _ring) = opens[0]
+         _writable, _ring, _app) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:

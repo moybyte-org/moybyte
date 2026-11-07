@@ -21,13 +21,29 @@
 
 #include "moy_app.h"
 #include "moy_app_lua.h"
-#include "moy_app_wasm.h"
 #include "moy_json.h"
 
-// The run this state's names serve, and its files kind's name.
-static moy_appabi_t *s_a;
-static uint32_t s_g;
-static char s_kind[16];
+// The run this state's names serve, and its files kind's name: the state's
+// own, a userdata its registry holds under RUN_KEY's address.
+typedef struct {
+    moy_app_run_t run;
+    char kind[16];
+} lrun_t;
+
+static const char RUN_KEY = 0;
+
+static lrun_t *lrun(lua_State *L) {
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &RUN_KEY);
+    lrun_t *u = lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    return u;
+}
+
+// The errno of the state's run's last IO answer.
+static int run_why(lua_State *L) {
+    lrun_t *u = lrun(L);
+    return u != NULL && moy_app_run_live(&u->run) ? moy_app_why(u->run.a) : EIO;
+}
 
 // The table rows the names call, found by name once.
 enum {
@@ -125,8 +141,10 @@ static void field_opt(lua_State *L, buf_t *b, int i) {
     buf_field(b, s, n);
 }
 
-static void field_kind(buf_t *b) {
-    buf_field(b, s_kind, strlen(s_kind));
+static void field_kind(lua_State *L, buf_t *b) {
+    lrun_t *u = lrun(L);
+    const char *k = u != NULL ? u->kind : "";
+    buf_field(b, k, strlen(k));
 }
 
 // -- calling a row ---------------------------------------------------------------------
@@ -134,10 +152,11 @@ static void field_kind(buf_t *b) {
 // Row `k` with the packed arguments in `b`: its answer (>= 0, the bytes left on
 // the stack's top as a userdata, `*ans` pointing at them) or a code negated. An
 // answer that does not fit is asked again into a buffer eight times the size.
-// A run no longer bound (ended, or its state gone) answers STALE, nil pushed.
+// A state with no run, or a run whose state is gone, answers STALE, nil
+// pushed; a grant that ended answers STALE from the row.
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
-    uint32_t g, roles;
-    if (s_a == NULL || moy_app_wasm_run(&g, &roles) != s_a || g != s_g || s_row[k] < 0) {
+    lrun_t *u = lrun(L);
+    if (u == NULL || !moy_app_run_live(&u->run) || s_row[k] < 0) {
         lua_pushnil(L);
         *ans = NULL;
         return -MOY_APP_STALE;
@@ -145,8 +164,8 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
     size_t cap = 1024u;
     for (;;) {
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
-        int32_t r = moy_app_role(s_a, s_g, (uint32_t)s_row[k], b != NULL ? b->p : NULL,
-                                 b != NULL ? b->n : 0u, p, cap);
+        int32_t r = moy_app_role(u->run.a, u->run.g, (uint32_t)s_row[k],
+                                 b != NULL ? b->p : NULL, b != NULL ? b->n : 0u, p, cap);
         if (r != -MOY_APP_FULL || cap >= (64u << 20)) {
             *ans = p;
             return r;
@@ -181,7 +200,7 @@ static void push_err(lua_State *L, int rc) {
             lua_pushliteral(L, "NO STORAGE");
             return;
         case MOY_APP_IO: {
-            int e = moy_app_why(s_a);
+            int e = run_why(L);
             lua_pushfstring(L, "[Errno %d] %s", e, strerror(e));
             return;
         }
@@ -228,7 +247,7 @@ static int l_files_ready(lua_State *L) {
 static int l_files_list(lua_State *L) {
     buf_t b;
     buf_init(L, &b, 64u);
-    field_kind(&b);
+    field_kind(L, &b);
     const uint8_t *ans;
     int32_t r = row_call(L, R_FILES_LIST, &b, &ans);
     if (r < 0) {
@@ -251,7 +270,7 @@ static int named(lua_State *L, int k, int nargs, int absent_nil) {
     lua_settop(L, nargs);
     buf_t b;
     buf_init(L, &b, 128u);
-    field_kind(&b);
+    field_kind(L, &b);
     for (int i = 1; i <= nargs; i++) {
         field_arg(L, &b, i);
     }
@@ -284,7 +303,7 @@ static int l_files_new_name(lua_State *L) {
     lua_settop(L, 1);
     buf_t b;
     buf_init(L, &b, 128u);
-    field_kind(&b);
+    field_kind(L, &b);
     field_opt(L, &b, 1);
     const uint8_t *ans;
     int32_t r = row_call(L, R_FILES_NEW_NAME, &b, &ans);
@@ -626,7 +645,7 @@ static int fail_rc(lua_State *L, const char *path, int rc) {
         case MOY_APP_ABSENT:
             return fail(L, path, ENOENT, NULL);
         case MOY_APP_IO:
-            return fail(L, path, moy_app_why(s_a), NULL);
+            return fail(L, path, run_why(L), NULL);
         case MOY_APP_BAD:
             return fail(L, path, EINVAL, NULL);
         default:
@@ -659,7 +678,7 @@ static int file_save(lua_State *L, file_t *f) {
     }
     buf_t b;
     buf_init(L, &b, f->n + 128u);
-    field_kind(&b);
+    field_kind(L, &b);
     buf_field(&b, f->name, strlen(f->name));
     buf_field(&b, f->p, f->n);
     const uint8_t *ans;
@@ -706,7 +725,7 @@ static int l_io_open(lua_State *L) {
     if (mode[0] != 'w') {
         buf_t b;
         buf_init(L, &b, 128u);
-        field_kind(&b);
+        field_kind(L, &b);
         buf_field(&b, name, strlen(name));
         r = row_call(L, R_FILES_LOAD, &b, &ans);
         if (r >= 0) {
@@ -999,7 +1018,7 @@ static int l_os_remove(lua_State *L) {
     }
     buf_t b;
     buf_init(L, &b, 128u);
-    field_kind(&b);
+    field_kind(L, &b);
     buf_field(&b, name, strlen(name));
     const uint8_t *ans;
     int32_t r = row_call(L, R_FILES_DELETE, &b, &ans);
@@ -1019,7 +1038,7 @@ static int l_os_rename(lua_State *L) {
     }
     buf_t b;
     buf_init(L, &b, 128u);
-    field_kind(&b);
+    field_kind(L, &b);
     buf_field(&b, a, strlen(a));
     buf_field(&b, z, strlen(z));
     const uint8_t *ans;
@@ -1082,24 +1101,24 @@ static int l_os_difftime(lua_State *L) {
 
 // -- opening ----------------------------------------------------------------------------
 
-int moy_app_lua_open(lua_State *L) {
-    uint32_t g, roles;
-    moy_appabi_t *a = moy_app_wasm_run(&g, &roles);
-    s_a = a;
-    s_g = g;
-    s_kind[0] = 0;
-    if (a == NULL) {
+int moy_app_lua_open(lua_State *L, const struct moy_app_run *run) {
+    if (!moy_app_run_live(run)) {
         return 0;
     }
+    lrun_t *u = lua_newuserdatauv(L, sizeof(lrun_t), 0);
+    u->run = *run;
+    u->kind[0] = 0;
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &RUN_KEY);
+    uint32_t roles = run->roles;
     rows_find();
     const moy_grant_t *gr;
-    if (moy_app_grant_get(a, g, &gr) == MOY_APP_OK && gr->kind >= 0) {
+    if (moy_app_grant_get(run->a, run->g, &gr) == MOY_APP_OK && gr->kind >= 0) {
         const char *k = moy_app_kind_name(gr->kind);
-        if (k != NULL && strlen(k) < sizeof s_kind) {
-            strcpy(s_kind, k);
+        if (k != NULL && strlen(k) < sizeof u->kind) {
+            strcpy(u->kind, k);
         }
     }
-    int files = (roles >> MOY_ROLE_FILES) & 1u && s_kind[0] != 0;
+    int files = (roles >> MOY_ROLE_FILES) & 1u && u->kind[0] != 0;
 
     lua_newtable(L);                    // os: every app run's clock
     static const luaL_Reg os_clock[] = {

@@ -43,9 +43,10 @@ class _Map:
 
 
 def run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h, snap, aq,
-              pmem_img, cfg, flags, vm):
+              pmem_img, cfg, flags, vm, app=None):
     """The console over the caller's buffers and the VM opened on it, as the
-    boards' run_begin; `cfg` is lua_ext.cfg_blob's bytes."""
+    boards' run_begin; `cfg` is lua_ext.cfg_blob's bytes, `app` the app's
+    run (moy_app's `run()`) or None."""
     if not vm:
         raise RuntimeError("moycore: a compiled cart runs on wasm_host here")
     # One run at a time, as on a board; a host harness that dropped its
@@ -54,7 +55,7 @@ def run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h, snap, aq,
     r = _lb.HostLuaRun(fb, w, h, sheet_pix,
                        _Map(map_cells, map_w, map_h) if map_cells is not None else None,
                        wire=wire, flags=flags, snap=snap, aq=aq,
-                       cfg=cfg)
+                       cfg=cfg, app=app)
     if pmem_img is not None:
         r.pmem_load(pmem_img)
     _RUN[0] = r
