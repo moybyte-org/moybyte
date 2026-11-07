@@ -1412,7 +1412,7 @@ bool moy_kernel_plain_web(void) {
     moy_rgeom_t g;              // on the loop task's stack
     moy_rview_t v;
     char url[96];
-    size_t n = moy_wc_url(url, sizeof(url), 1);
+    size_t n = moy_wc_url(url, sizeof(url), 0);
     url[n < sizeof(url) ? n : sizeof(url) - 1] = 0;
     k_geom(&g);
     moy_web_screen_view(&v, url);

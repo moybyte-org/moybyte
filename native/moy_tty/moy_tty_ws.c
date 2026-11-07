@@ -16,7 +16,18 @@
 //                           a scheduler tick, 10 ms on a board)
 //                   close:  1000 "exit N" when the shell ends; 1013 "busy"
 //                           when another transport's face runs (one face at
-//                           a time), or this bridge serves another page
+//                           a time), or this bridge serves another page;
+//                           1008 "seal" for a frame whose seal does not
+//                           open, "revoked" when the page's key was dropped
+//
+// A SEALED SESSION (the webhost's, moy_seal.h) carries every message as a
+// binary frame of AES-GCM ciphertext and its tag: up under the session's kc,
+// nonce (3, i, seq), down under kb, (4, i, seq), i counting each way from 0
+// and seq the upgrade's own sequence number, so a frame dropped, replayed or
+// moved ends the session. Up, the plaintext's first byte says what it is:
+// 'k' keys, 's' the size's JSON. The close frames stay plain: they say why,
+// and the page acts on none of them as a credential. The open host (no
+// sign-in: a test, the dev server) speaks the plain messages above.
 //
 // The subprotocol is `moy.sh` (echoed when the page asks for it): the board
 // link's channels (docs/os_2026-11/web_terminal_spike.md section 7) are a
@@ -41,10 +52,12 @@
 
 #include "moy_tty.h"
 #include "moy_tty_int.h"
+#include "moy_webauth.h"
 
 #define BRIDGE_STACK (6 * 1024)
 #define IN_CAP 2048                     // a page's frames waiting to be whole
 #define OUT_CAP 2048                    // the face's bytes gathered into one frame
+#define OUT_ALLOC (4 + OUT_CAP + MOY_SEAL_TAG)
 #define SEND_MS 5000                    // a page that takes nothing for this long is gone
 
 extern const moy_tty_shell_t moy_tty_moy_sh;
@@ -52,6 +65,9 @@ extern const moy_tty_shell_t moy_tty_moy_sh;
 typedef struct {
     volatile int fd;                    // the upgraded socket served or waiting, or -1
     int cols, rows;
+    moy_wa_seal_t seal;                 // the session's, `on` 0 for the open host
+    uint32_t up, down;                  // the next frame's index each way
+    volatile int cut;                   // the session's key was dropped
     uintptr_t task;
     moy_tty_ws_stats_t stats;
 } ws_t;
@@ -160,6 +176,23 @@ static int frames_in(int ws, int sfd, pid_t pid, uint8_t *in, size_t *n, char *s
         }
         if (op == 9) {
             frame_out(ws, 10, (const char *)pl, len < 125 ? len : 125, scratch);
+        } else if (W->seal.on && (op == 0 || op == 1 || op == 2)) {
+            if (op != 2 || len < MOY_SEAL_TAG + 1
+                || moy_seal_ws(0, W->seal.kc, MOY_SEAL_UP, W->up++, W->seal.seq, pl,
+                               len - MOY_SEAL_TAG, pl + len - MOY_SEAL_TAG) != MOY_SEAL_OK) {
+                close_out(ws, 1008, "seal");
+                return -1;
+            }
+            len -= MOY_SEAL_TAG;
+            if (pl[0] == 's') {
+                resize(pid, pl + 1, len - 1);
+            } else if (pl[0] == 'k' && len > 1) {
+                W->stats.in_bytes += (uint32_t)(len - 1);
+                if (send_all(sfd, pl + 1, len - 1) < 0) {
+                    return -1;
+                }
+            }
+            len += MOY_SEAL_TAG;
         } else if (op == 1) {
             resize(pid, pl, len);
         } else if ((op == 2 || op == 0) && len > 0) {
@@ -198,6 +231,10 @@ static ssize_t gather(int sfd, char *out) {
 static void pump(int ws, int sfd, pid_t pid, uint8_t *in, char *out) {
     size_t n = 0;
     for (;;) {
+        if (W->cut) {
+            close_out(ws, 1008, "revoked");
+            return;
+        }
         fd_set r;
         FD_ZERO(&r);
         FD_SET(ws, &r);
@@ -225,6 +262,15 @@ static void pump(int ws, int sfd, pid_t pid, uint8_t *in, char *out) {
                 return;
             }
             W->stats.out_bytes += (uint32_t)m;
+            if (W->seal.on) {
+                uint8_t *d = (uint8_t *)out + 4;
+                if (moy_seal_ws(1, W->seal.kb, MOY_SEAL_DOWN, W->down++, W->seal.seq, d,
+                                (size_t)m, d + m) != MOY_SEAL_OK) {
+                    close_out(ws, 1008, "seal");
+                    return;
+                }
+                m += MOY_SEAL_TAG;
+            }
             if (frame_out(ws, 2, out + 4, (size_t)m, out) < 0) {
                 return;
             }
@@ -249,7 +295,7 @@ static void serve(int ws) {
     setsockopt(ws, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none);
     setsockopt(ws, SOL_SOCKET, SO_SNDTIMEO, &snd, sizeof snd);
     uint8_t *in = moy_tty_calloc(1, IN_CAP);
-    char *out = moy_tty_calloc(1, OUT_CAP + 8);
+    char *out = moy_tty_calloc(1, OUT_ALLOC);
     if (in == NULL || out == NULL) {
         moy_tty_free(in);
         moy_tty_free(out);
@@ -285,11 +331,12 @@ static void bridge_task(void *arg) {
         close(ws);
         W->stats.live = 0;
         moy_tty_hold(MOY_TTY_WEB, 0);
+        moy_seal_wipe(&W->seal, sizeof W->seal);
         __atomic_store_n(&W->fd, -1, __ATOMIC_RELEASE);
     }
 }
 
-int moy_web_term(int fd, int cols, int rows) {
+int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal) {
     if (moy_tty_setup() != 0) {
         return MOY_TTY_ENOMEM;
     }
@@ -317,9 +364,24 @@ int moy_web_term(int fd, int cols, int rows) {
     }
     W->cols = cols;
     W->rows = rows;
+    if (seal != NULL) {
+        W->seal = *seal;
+    } else {
+        memset(&W->seal, 0, sizeof W->seal);
+    }
+    W->up = W->down = 0;
+    W->cut = 0;
     __atomic_store_n(&W->fd, fd, __ATOMIC_RELEASE);
     moy_tty_poke(W->task);
     return 0;
+}
+
+// The webhost's: the page's key was dropped, so its session ends.
+void moy_web_term_cut(void) {
+    if (W != NULL && __atomic_load_n(&W->fd, __ATOMIC_ACQUIRE) >= 0) {
+        W->cut = 1;
+        moy_tty_poke(W->task);
+    }
 }
 
 void moy_tty_ws_stats(moy_tty_ws_stats_t *out) {

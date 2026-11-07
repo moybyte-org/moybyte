@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   Root                one syncable store, described by data
 #   root_by_id          the Root for a wire root id
-#   parse_batch         a POST body -> (ops, pin, root id)
+#   parse_batch         a POST body -> (ops, root id)
 #   apply_ops           apply one batch into a store (the kernel's C)
 #   key_class           which Settings cross between a board and its page
 #   system_pull         a board's /console.json document
@@ -123,7 +123,7 @@ Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,
 so ops apply in order):
 
-    {"v": 1, "pin": "<optional>", "ops": [
+    {"v": 1, "ops": [
       {"p": "cart.moy/main.py", "t": "<whole text>"},        # atomic write
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 0},  # chunked: begin
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 1},  #   ...append
@@ -161,7 +161,7 @@ documents a board takes from its page:
 
     -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
 
-Its pull is GET /console.json (`?pin=`), `system_pull`'s document in the
+Its pull is GET /console.json, `system_pull`'s document in the
 pull's shape. Both are the VM's: a board without them (firmware before this
 root) answers the batch 400 and the pull 404, and the page then builds no
 system watcher and keeps its Settings and badges in the tab.
@@ -610,16 +610,16 @@ def _stat_file(path):
 
 
 def parse_batch(body):
-    """The POST body -> (ops, pin, root_id) or (None, None, None) on anything
+    """The POST body -> (ops, root_id) or (None, None) on anything
     malformed. Which store a batch speaks for is the C's rule: a v1 batch is
     carts by definition (one that names another root is refused, never read as
     carts), a v2 batch names a v2 root, and anything else is refused -- a
     receiver never guesses where a path lands."""
     got = sync_batch(body)
     if got is None:
-        return None, None, None
-    root_id, pin, ops = got
-    return _json.loads(ops), pin, root_id
+        return None, None
+    root_id, ops = got
+    return _json.loads(ops), root_id
 
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
@@ -692,7 +692,6 @@ SYSTEM_KEYS = {
     "service_restart": (LOCAL, None),
     "win_full": (LOCAL, None),
     "tz": (LOCAL, None),
-    "web_pin": (BOARD, None),
     "ota_channel": (BOARD, None),
     "unknown_sources": (BOARD, None),
     "ntp_server": (BOARD, None),
@@ -1206,7 +1205,7 @@ class StoreWatcher:
             self._partial = None
         return budget
 
-    def take_json(self, pin=None):
+    def take_json(self):
         """The next batch as wire JSON. A carts batch keeps the v1 shape older
         boards parse; any other root rides v2 + an explicit `root`, which is
         what makes those boards REFUSE it instead of misapplying its paths."""
@@ -1215,8 +1214,8 @@ class StoreWatcher:
             return ""
         root = root_by_id(self.root_id) or CARTS_ROOT
         if root.wire == PROTOCOL_V:
-            return encode_batch(PROTOCOL_V, None, ops, pin)
-        return encode_batch(root.wire, root.id, ops, pin)
+            return encode_batch(PROTOCOL_V, None, ops)
+        return encode_batch(root.wire, root.id, ops)
 
     def ack(self, ok):
         """Settle the in-flight batch. ok=False requeues everything it carried

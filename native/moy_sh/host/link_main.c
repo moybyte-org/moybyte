@@ -85,9 +85,9 @@ int main(void) {
     moy_sh_link_state(MOY_SH_LINK_LOST, 0);
     moy_sh_link_state(MOY_SH_LINK_UNREACHABLE, 0);
     show("lost, then no answer");
-    moy_sh_link_state(MOY_SH_LINK_PIN, 0);
+    moy_sh_link_state(MOY_SH_LINK_REFUSED, 0);
     moy_sh_link_state(MOY_SH_LINK_WAIT, 2400);
-    show("the pin refused, then a wait");
+    show("the sign-in refused, then a wait");
     moy_sh_link_state(MOY_SH_LINK_BUSY, 0);
     show("the board's face is SSH's");
     moy_sh_screen_free(S);

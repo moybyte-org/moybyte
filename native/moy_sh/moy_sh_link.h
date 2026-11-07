@@ -25,8 +25,8 @@ enum {
     MOY_SH_LINK_ENDED,                  // the far shell exited (n: its status)
     MOY_SH_LINK_LOST,                   // the socket closed under a session
     MOY_SH_LINK_UNREACHABLE,            // no answer from the board
-    MOY_SH_LINK_PIN,                    // the board refused the page's pin
-    MOY_SH_LINK_WAIT,                   // too many wrong pins: n ms to wait
+    MOY_SH_LINK_REFUSED,               // the board refused this browser's sign-in
+    MOY_SH_LINK_WAIT,                   // too many wrong sign-ins: n ms to wait
     MOY_SH_LINK_BUSY,                   // another transport holds the board's face
     MOY_SH_LINK_NONE,                   // no board serves a shell to this page
 };

@@ -1,9 +1,9 @@
 // The Zero's pins as the webhost's /gpio route (moy_net.h): a batch of digital
 // writes and reads, refused pin by pin against the board's allowlist table.
 //
-//   GET  /gpio?pin=NNNN  -> {"v": 1, "pins": [...]}
+//   GET  /gpio           -> {"v": 1, "pins": [...]}
 //   POST /gpio           {"v": 1, "ops": [{"p": 2, "mode": "out", "v": 1},
-//                                         {"p": 2, "mode": "read"}], "pin": "NNNN"}
+//                                         {"p": 2, "mode": "read"}]}
 //                        -> {"ok": n, "reads": {"2": 1}, "err": [[i, why], ...]}
 //
 // THE ALLOWLIST IS THE SECURITY MODEL: the pins a kid may drive are the board's
@@ -11,13 +11,13 @@
 // excluded pin would break), and a pin outside it is refused and never
 // touched. A bad op is skipped and reported; it never aborts the batch, whose
 // neighbours may be the write that turns a motor off. An empty batch is the
-// page's probe and answers with the allowlist, behind the pin like every write.
-// Both methods are pin-gated: the GET by `?pin=`, the POST in its body.
+// page's probe and answers with the allowlist. Both methods are sealed routes
+// of the webhost (moy_webhost.c's header): what reaches here is a signed-in
+// page's.
 //
 // THE PINS ARE LEASED (moy_lease.h, where the image has the table): a write
 // takes the pin's lease for the page, a process named "web" (MOY_LEASE_PINS,
-// the `pins` permission's digital subset; the pin that gates the route is the
-// page's grant), and keeps it, so the level it drove stays driven and `pins`
+// the `pins` permission's digital subset; the page's sign-in is its grant), and keeps it, so the level it drove stays driven and `pins`
 // and `ps` show who holds it; the webhost's stop drops them all
 // (moy_gpio_release). A pin another process holds -- a cart's lease -- is
 // refused "pin N: busy", a read as a write, and never touched. A board that
@@ -183,20 +183,14 @@ static const char *check(const char *o, const char *oe, const uint8_t *pins,
 }
 
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
-                     size_t bn, const char *pin, char *out, size_t cap) {
+                     size_t bn, char *out, size_t cap) {
     const uint8_t *pins = NULL;
     int count = moy_gpio_pins != NULL ? moy_gpio_pins(&pins) : 0;
     buf_t b = {out, 0, cap};
     out[0] = '\0';
-    int gated = pin != NULL && pin[0] != '\0';
+    (void)target;
+    (void)tn;
     if (!post) {
-        const char *q;
-        size_t qn;
-        moy_http_query(target, tn, "pin", 3, &q, &qn);
-        if (gated && (qn != strlen(pin) || memcmp(q, pin, qn) != 0)) {
-            put(&b, "{\"error\":\"pin\"}");
-            return 403;
-        }
         put(&b, "{\"v\": %d, \"pins\": ", GPIO_V);
         pin_list(&b, pins, count);
         put(&b, "}");
@@ -213,11 +207,6 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
         || !moy_json_get(o, oe, "ops", &ops, &ops_e) || moy_json_kind(ops, ops_e) != MOY_JSON_ARR) {
         put(&b, "{\"error\":\"bad batch\"}");
         return 400;
-    }
-    if (gated && !(moy_json_get(o, oe, "pin", &v, &ve) && moy_json_kind(v, ve) == MOY_JSON_STR
-                   && moy_json_str_is(v, ve, pin, strlen(pin)))) {
-        put(&b, "{\"error\":\"pin\"}");
-        return 403;
     }
     moy_json_iter_t it;
     const char *k, *ke, *e, *ee;

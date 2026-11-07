@@ -507,7 +507,7 @@ existing theme keeps its pixels. The surface painter's five (2026-10-12):
 | role | what it is | derived from |
 |---|---|---|
 | `shade_hi`, `shade_lo`, `shade_dark` | the bevel shades a surface's edges draw in (§3.4) | `hilite` (white in the light variant), `dim`, black |
-| `ink_accent` | emphasis text on the surface: the web console's pin | `accent`; `ink` in the light variant |
+| `ink_accent` | emphasis ink on the surface: the "+ New" card's plus | `accent`; `ink` in the light variant |
 | `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
 
 The last two are what were once `light_chrome()` branches

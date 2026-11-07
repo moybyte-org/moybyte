@@ -5,8 +5,8 @@ GET /console.json and sends its changes back as system batches; the board's C
 parks them for the VM (native/moy_net/moy_webhost.c), which merges them key by
 key (runtime/carts/moy_sync.py's SYSTEM_KEYS, merge_system, SystemReceiver). The
 board is of record, so most of what is pinned here is what a page can NOT do:
-change a key the board keeps for itself, turn on unsigned code, read the pin,
-or take a badge away. The real-browser round trip is
+change a key the board keeps for itself, turn on unsigned code, read or write
+anything without a paired session, or take a badge away. The real-browser round trip is
 tests/test_web_board_system_e2e.py.
 """
 
@@ -57,7 +57,7 @@ class _Rows(Settings):
 
 BOARD_DOC = {
     "theme": "dusk", "theme_variant": "dark", "name": "Mia", "author": "mia",
-    "show_fps": True, "volume": 2, "font_scale": 2, "web_pin": "4821",
+    "show_fps": True, "volume": 2, "font_scale": 2,
     "ota_channel": "stable", "unknown_sources": False,
     "app_guard": {"local.calc": [3, 0]},
     "favorites": ["/sd/moybyte/carts/moybyte.star_catcher.moy"],
@@ -80,7 +80,7 @@ BOARD_DOC = {
     ("chrome_scale", LOCAL), ("crisp_pixels", LOCAL), ("two_player", LOCAL),
     ("diag_live", LOCAL), ("diag_sd", LOCAL), ("app_guard", LOCAL),
     ("wallpaper_guard", LOCAL),
-    ("web_pin", BOARD), ("ota_channel", BOARD), ("unknown_sources", BOARD),
+    ("ota_channel", BOARD), ("unknown_sources", BOARD),
     ("frameskip", LOCAL), ("never_heard_of_it", LOCAL), ("paint_", LOCAL),
 ])
 def test_every_key_has_its_class_and_an_unknown_one_is_local(key, cls):
@@ -134,7 +134,7 @@ def test_the_pull_carries_the_portable_rows_and_never_the_boards_own():
         "theme": "dusk", "theme_variant": "dark", "name": "Mia",
         "author": "mia", "show_fps": True, "paint_doc": "sunset.moyimg",
         "favorites": ["moybyte.star_catcher.moy"]}
-    for key in ("web_pin", "ota_channel", "unknown_sources", "volume",
+    for key in ("ota_channel", "unknown_sources", "volume",
                 "app_guard", "retired_thing"):
         assert key not in sent
     assert json.loads(pull["achievements.json"]) == {
@@ -189,14 +189,12 @@ def test_a_page_cannot_change_a_key_the_board_keeps():
         assert rows.get(key) is None
 
 
-def test_a_page_can_never_turn_on_unsigned_code_or_move_the_pin():
-    """The board-only keys: a page that sends UNKNOWN SOURCES on, a pin of
-    its own and the unstable channel changes none of them."""
-    page = dict(BOARD_DOC, unknown_sources=True, web_pin="0000",
-                ota_channel="unstable")
+def test_a_page_can_never_turn_on_unsigned_code_or_move_the_channel():
+    """The board-only keys: a page that sends UNKNOWN SOURCES on and the
+    unstable channel changes neither."""
+    page = dict(BOARD_DOC, unknown_sources=True, ota_channel="unstable")
     rows, changed = _merge(page)
     assert rows.get("unknown_sources") is False
-    assert rows.get("web_pin") == "4821"
     assert rows.get("ota_channel") == "stable"
     assert "unknown_sources" not in changed
     # ...and a board that never had the row does not gain it either.
@@ -217,7 +215,7 @@ def test_a_portable_key_the_page_dropped_is_dropped_here():
     del page["paint_doc"]
     rows, changed = _merge(page)
     assert changed == ["paint_doc"] and rows.get("paint_doc") is None
-    assert rows.get("web_pin") == "4821", "a key the page never had stays"
+    assert rows.get("volume") == 2, "a key the page never had stays"
 
 
 def test_an_empty_document_says_nothing():
@@ -340,17 +338,27 @@ def _store(tmp_path):
     return root
 
 
-def _host(tmp_path, ws=None, pin="4821", **kw):
+def _host(tmp_path, ws=None, **kw):
+    """A host with its sign-in on over `tmp_path`/system, and a page paired
+    with it (`.page`, tests/seal_client.py)."""
     kw.setdefault("port", 0)
     system = None if ws is False else wh.ConsoleSystem(ws or _Ws())
-    return wh.WebHost(str(_store(tmp_path)), pin=pin, system=system, **kw)
+    folder = tmp_path / "system"
+    folder.mkdir(exist_ok=True)
+    h = wh.WebHost(str(_store(tmp_path)), auth=str(folder), system=system, **kw)
+    h.handle_http("GET", "/sync", b"")
+    return h
 
 
-def _batch(ops, pin="4821", v=2, root="system"):
-    doc = {"v": v, "root": root, "ops": ops}
-    if pin is not None:
-        doc["pin"] = pin
-    return json.dumps(doc).encode()
+def _paired(h, send=None):
+    import seal_client
+    page = seal_client.Browser(send or h.handle_http)
+    page.pair_token(nb.web_token())
+    return page
+
+
+def _batch(ops, v=2, root="system"):
+    return json.dumps({"v": v, "root": root, "ops": ops}).encode()
 
 
 def _status(resp):
@@ -361,24 +369,16 @@ def _json(resp):
     return json.loads(resp.split(b"\r\n\r\n", 1)[1])
 
 
-def test_the_pull_needs_the_pin(tmp_path):
-    h = _host(tmp_path)
-    assert _status(h.handle_http("GET", "/console.json", b"")) == 403
-    assert _status(h.handle_http("GET", "/console.json?pin=0000", b"")) == 403
-    r = h.handle_http("GET", "/console.json?pin=4821", b"")
-    assert _status(r) == 200
-    doc = _json(r)
-    assert _doc(doc[SETTINGS])["theme"] == "dusk"
-    assert "4821" not in doc[SETTINGS], "the pull carried the pin"
-
-
-def test_a_system_batch_needs_the_pin(tmp_path):
+def test_the_pull_and_a_system_batch_need_a_paired_page(tmp_path):
     ws = _Ws()
     h = _host(tmp_path, ws)
+    assert _status(h.handle_http("GET", "/console.json", b"")) == 401
+    assert _status(h.handle_http("GET", "/console.json?pin=4821", b"")) == 401
     ops = [{"p": SETTINGS, "t": _text({"theme": "night"})}]
-    for pin in (None, "0000"):
-        assert _status(h.handle_http("POST", "/sync", _batch(ops, pin))) == 403
+    assert _status(h.handle_http("POST", "/sync", _batch(ops))) == 401
     assert ws.system.get("theme") == "dusk" and ws.applied == []
+    st, doc = _paired(h).json("GET", "/console.json")
+    assert st == 200 and _doc(doc[SETTINGS])["theme"] == "dusk"
 
 
 def test_a_system_batch_is_merged_and_its_keys_re_applied(tmp_path):
@@ -386,10 +386,10 @@ def test_a_system_batch_is_merged_and_its_keys_re_applied(tmp_path):
     h = _host(tmp_path, ws)
     page = _doc(moy_sync.system_pull(ws.system, _NONE)[SETTINGS])
     page.update(theme="night", show_fps=False, unknown_sources=True)
-    r = h.handle_http("POST", "/sync", _batch([
+    st, doc = _paired(h).json("POST", "/sync", json.loads(_batch([
         {"p": SETTINGS, "t": _text(page)},
-        {"p": "achievements.json", "t": _badges(first_open=0)}]))
-    assert _status(r) == 200 and _json(r) == {"ok": 2, "err": []}
+        {"p": "achievements.json", "t": _badges(first_open=0)}])))
+    assert st == 200 and doc == {"ok": 2, "err": []}
     assert ws.system.get("theme") == "night"
     assert ws.system.get("show_fps") is False
     assert ws.system.get("unknown_sources") is False
@@ -403,19 +403,21 @@ def test_a_host_without_the_system_root_refuses_its_batch(tmp_path):
     its Settings in the tab) refuses the batch, never misfiles it; firmware
     from before the root refuses it too, as a batch it cannot parse."""
     h = _host(tmp_path, ws=False)
+    page = _paired(h)
     ops = [{"p": SETTINGS, "t": ""}]
-    r = h.handle_http("POST", "/sync", _batch(ops))
-    assert _status(r) == 400 and _json(r) == {"error": "no such store"}
-    assert _status(h.handle_http("GET", "/console.json?pin=4821", b"")) == 404
+    assert page.json("POST", "/sync", json.loads(_batch(ops))) == (
+        400, {"error": "no such store"})
+    target, _b, _seq = page.seal("GET", "/console.json")
+    assert _status(h.handle_http("GET", target, b"")) == 404
     assert not (tmp_path / "carts" / SETTINGS).exists()
     assert not (tmp_path / SETTINGS).exists()
 
 
 def test_a_carts_batch_still_applies_in_c_beside_the_system_root(tmp_path):
     h = _host(tmp_path)
-    r = h.handle_http("POST", "/sync", _batch(
-        [{"p": "hop.moy/main.py", "t": "x = 2\n"}], v=1, root=None))
-    assert _json(r)["ok"] == 1
+    st, doc = _paired(h).json("POST", "/sync", {"v": 1, "ops": [
+        {"p": "hop.moy/main.py", "t": "x = 2\n"}]})
+    assert doc["ok"] == 1
     assert (tmp_path / "carts" / "hop.moy" / "main.py").read_text() == "x = 2\n"
 
 
@@ -447,23 +449,25 @@ def _exchange(host, raw, polls=400):
 
 
 def test_over_a_socket_the_c_parks_the_batch_for_the_vm(tmp_path):
-    """The board's own path: the kernel's poll parks the pinned system batch,
-    the VM's poll takes it, merges it and answers on the same connection."""
+    """The board's own path: the kernel's poll opens the sealed system batch
+    and parks it, the VM's poll takes it, merges it and answers, and the C
+    seals that answer on the same connection."""
     ws = _Ws()
     h = _host(tmp_path, ws, port=free_port())
     h.start(ip="127.0.0.1")
     try:
-        body = _batch([{"p": SETTINGS, "t": _text(
+        def send(method, target, body):
+            return _exchange(h, ("%s %s HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
+                                 % (method, target, len(body))).encode() + body)
+        page = _paired(h, send)
+        st, doc = page.json("POST", "/sync", json.loads(_batch([{"p": SETTINGS, "t": _text(
             dict(_doc(moy_sync.system_pull(ws.system, _NONE)[SETTINGS]),
-                 theme="night"))}])
-        raw = (b"POST /sync HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
-               % len(body)) + body
-        r = _exchange(h, raw)
-        assert _status(r) == 200 and _json(r) == {"ok": 1, "err": []}
+                 theme="night"))}])))
+        assert st == 200 and doc == {"ok": 1, "err": []}
         assert ws.system.get("theme") == "night"
         assert ws.applied == [["theme"]]
-        r = _exchange(h, b"GET /console.json?pin=4821 HTTP/1.1\r\nHost: x\r\n\r\n")
-        assert _doc(_json(r)[SETTINGS])["theme"] == "night"
+        st, doc = page.json("GET", "/console.json")
+        assert _doc(doc[SETTINGS])["theme"] == "night"
     finally:
         h.stop()
 

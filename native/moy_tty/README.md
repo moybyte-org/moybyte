@@ -16,7 +16,7 @@ server could still serve the web terminal. How a face is reached is
 | `moy_tty_sftp.c` | the SFTP server a face runs in place of a command (`MOY_TTY_SFTP`, SSH's `sftp` subsystem): SFTP version 3 over the stream, on the session's files tree through the shell's paths, each request one hop to the console's task, the shelf told of changed cart folders through the door's `rescan` (its header; `docs/os_2026-11/system.md` §4) |
 | `moy_tty_ws.c` | the web terminal's bridge: the socket the webhost upgraded (`GET /term`), its WebSocket messages to and from a face |
 | `modmoy_tty.c` | the module `moy_tty`: `stats()` |
-| `host/tty_main.c` | the host harness `tests/test_moy_tty.py` builds: the kernel's webhost with a pin and the bridge in front of the face and shell SSH's harness runs (`native/moy_ssh/host/ssh_main.c`) |
+| `host/tty_main.c` | the host harness `tests/test_moy_tty.py` builds: the kernel's webhost with its sign-in (a system folder, or `-` for an open host; `token` and `drop` on stdin mint a QR token and forget every browser) and the bridge in front of the face and shell SSH's harness runs (`native/moy_ssh/host/ssh_main.c`) |
 
 ## What runs where
 
@@ -58,21 +58,27 @@ a stream face and the Terminal's run side by side.
 
 ## The web terminal
 
-`GET /term?pin=&cols=&rows=` with `Upgrade: websocket`, pin gated and behind
-the pin's backoff like every gated route (`native/moy_net/moy_webhost.c`):
-a wrong pin is 403 `{"error":"pin"}` and a source that waits is 429
-`{"error":"wait","ms":N}`, both before any upgrade. A browser's WebSocket
-reports neither, so the page asks the same route without the upgrade why a
-socket failed: 200 `{"term":1}` says the pin is good and a shell is here, and
-an image without the bridge answers 404. The messages are `moy_tty_ws.c`'s
-header: binary keys in, binary bytes out, a text `{"size":[C,R]}` for a
-resize, and a close that says why it ended. The subprotocol is `moy.sh`; the
-board link (`docs/os_2026-11/web_terminal_spike.md` §7) is a route of its own
-whose shell channel carries this stream.
+`GET /term?cols=&rows=` with `Upgrade: websocket`, sealed like every gated
+route (the browser sign-in, `docs/os_2026-11/system.md` §3; the protocol
+`native/moy_net/moy_seal.h`): a bodiless request's tag rides in `t=`, so a
+replayed upgrade is refused. No
+session is 401 `{"error":"session"}`, a seal that does not open 401
+`{"error":"auth"}` and a source the backoff holds 429 `{"error":"wait","ms":N}`,
+all before any upgrade. A browser's WebSocket reports none of them, so the page
+asks the same route without the upgrade why a socket failed: a sealed 200
+`{"term":1}` says the session is good and a shell is here, and an image without
+the bridge answers 404. The messages are `moy_tty_ws.c`'s header: binary keys
+in, binary bytes out, a text `{"size":[C,R]}` for a resize, and a close that
+says why it ended; under a session each message crosses as one sealed binary
+frame, its first byte `k` or `s` saying which, and one that fails its seal
+ends the socket (1008 "seal"). Forgetting the browser the session belongs to
+cuts its terminal (1008 "revoked"). The subprotocol is `moy.sh`; the board
+link (`docs/os_2026-11/web_terminal_spike.md` §7) is a route of its own whose
+shell channel carries this stream.
 
-The pin is the sign-in (owner, 2026-11-06, the spike's §4): on a console a
-pin holder can already run any code (`POST /sync` writes a cart, `POST /run`
-plays it), so a shell behind it adds no exposure.
+The page's sign-in is the terminal's (owner, 2026-11-06, the spike's §4): on a
+console a paired browser can already run any code (`POST /sync` writes a cart,
+`POST /run` plays it), so a shell behind the same sign-in adds no exposure.
 
 ## Memory
 

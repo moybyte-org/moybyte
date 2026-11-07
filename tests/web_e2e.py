@@ -57,8 +57,11 @@ FEATURES = {
              "dist/worker.js predates the sync client"),
     "store": (lambda: (DIST / "moy_store.mjs").exists(),
               "dist/ predates the browser store (no moy_store.mjs)"),
-    "pin": (lambda: "__moyPinRestore" in (DIST / "index.html").read_text(),
-            "dist/index.html predates the in-page pin prompt"),
+    # The sign-in: the page's pairing prompt and the browser's end of the
+    # crypto (native/moy_net/moy_seal_web.c) in the wasm.
+    "signin": (lambda: ("__moySignIn" in (DIST / "index.html").read_text()
+                        and "moy_sw_hello" in (DIST / "micropython.mjs").read_text()),
+               "dist/ predates the sign-in (no pairing prompt, or no moy_sw_* in the wasm)"),
     # #194. Two halves, both of which can be stale on their own: the page has
     # to carry the report card, and the WASM has to carry the frozen converter.
     # A dist/ with the first and not the second imports nothing and says so in

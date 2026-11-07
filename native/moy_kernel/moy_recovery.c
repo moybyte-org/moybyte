@@ -72,7 +72,7 @@ static void web_paint(moy_scr_t *s, const void *ctx) {
             pal[MOY_SPLASH_INK]);
     y += desk ? 32 : 22;
     int body = desk ? 16 : 13;
-    if (v->nlines < 3) {
+    if (v->nlines < 2) {
         if (v->nlines > 0) {
             centred(s, MOY_SCR_SANS, body, y + (desk ? 12 : 6), v->line[0], pal[MOY_SPLASH_DIM]);
         }
@@ -81,12 +81,6 @@ static void web_paint(moy_scr_t *s, const void *ctx) {
     centred(s, MOY_SCR_SANS, body, y, v->line[0], pal[MOY_SPLASH_DIM]);
     y += desk ? 40 : 24;
     centred(s, MOY_SCR_MONO, desk ? 26 : 15, y, v->line[1], pal[MOY_SPLASH_VALUE]);
-    if (v->line[2][0]) {
-        y += desk ? 30 : 20;
-        centred(s, MOY_SCR_SANS, desk ? 14 : 11, y, moy_str(MOY_S_WEB_PIN), pal[MOY_SPLASH_DIM]);
-        y += desk ? 52 : 30;
-        centred(s, MOY_SCR_BOLD, desk ? 44 : 26, y, v->line[2], pal[MOY_SPLASH_INK]);
-    }
 }
 
 int moy_web_screen_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *v,
@@ -127,7 +121,7 @@ void moy_web_screen_view(moy_rview_t *v, const char *url) {
     if (strncmp(at, "http://", 7) == 0) {
         at += 7;
     }
-    size_t n = strcspn(at, "/?");
+    size_t n = strcspn(at, "/?#");
     if (n == 0) {
         add(v, moy_str(MOY_S_WEB_RESTARTING));
         return;
@@ -137,8 +131,6 @@ void moy_web_screen_view(moy_rview_t *v, const char *url) {
         n = MOY_RV_COLS - 1;
     }
     memcpy(v->line[v->nlines++], at, n);
-    const char *pin = strstr(at + n, "pin=");
-    add(v, pin != NULL ? pin + 4 : "");
 }
 
 void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,

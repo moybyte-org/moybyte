@@ -13,6 +13,7 @@
 
 #include "moy_json.h"
 #include "moy_net.h"
+#include "moy_seal.h"
 #include "moy_ota.h"
 
 // The board's network halves: the HTTP server's parser and its responses, the
@@ -150,39 +151,29 @@ static void json_of(vstr_t *v, mp_obj_t o) {
     #endif
 }
 
-static mp_obj_t mod_encode_batch(size_t n_args, const mp_obj_t *args) {
-    vstr_t jv, jr, jo, jp;
-    json_of(&jv, args[0]);
-    int has_root = args[1] != mp_const_none;
-    int has_pin = n_args > 3 && mp_obj_is_true(args[3]);
+static mp_obj_t mod_encode_batch(mp_obj_t v, mp_obj_t root, mp_obj_t ops) {
+    vstr_t jv, jr, jo;
+    json_of(&jv, v);
+    int has_root = root != mp_const_none;
     if (has_root) {
-        json_of(&jr, args[1]);
+        json_of(&jr, root);
     }
-    json_of(&jo, args[2]);
-    if (has_pin) {
-        json_of(&jp, args[3]);
-    }
+    json_of(&jo, ops);
     size_t need = moy_sync_encode(NULL, 0, jv.buf, jv.len,
                                   has_root ? jr.buf : NULL, has_root ? jr.len : 0,
-                                  jo.buf, jo.len, has_pin ? jp.buf : NULL,
-                                  has_pin ? jp.len : 0);
+                                  jo.buf, jo.len);
     vstr_t out;
     vstr_init_len(&out, need);
     moy_sync_encode(out.buf, need, jv.buf, jv.len, has_root ? jr.buf : NULL,
-                    has_root ? jr.len : 0, jo.buf, jo.len,
-                    has_pin ? jp.buf : NULL, has_pin ? jp.len : 0);
+                    has_root ? jr.len : 0, jo.buf, jo.len);
     vstr_clear(&jv);
     vstr_clear(&jo);
     if (has_root) {
         vstr_clear(&jr);
     }
-    if (has_pin) {
-        vstr_clear(&jp);
-    }
     return mp_obj_new_str_from_vstr(&out);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_encode_batch_obj, 3, 4,
-                                           mod_encode_batch);
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_encode_batch_obj, mod_encode_batch);
 
 // The builtin json, straight from the module table: an import of an
 // extensible built-in searches every sys.path entry first, a filesystem
@@ -207,9 +198,9 @@ static mp_obj_t mod_decode_batch(mp_obj_t body) {
     }
     mp_obj_t json = json_module();
     mp_obj_t fn = mp_load_attr(json, MP_QSTR_loads);
-    mp_obj_t t[4] = {loads(fn, e.v, e.v_end), loads(fn, e.root, e.root_end),
-                     loads(fn, e.ops, e.ops_end), loads(fn, e.pin, e.pin_end)};
-    return mp_obj_new_tuple(4, t);
+    mp_obj_t t[3] = {loads(fn, e.v, e.v_end), loads(fn, e.root, e.root_end),
+                     loads(fn, e.ops, e.ops_end)};
+    return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_decode_batch_obj, mod_decode_batch);
 
@@ -613,7 +604,7 @@ static const char *str_or_null(mp_obj_t o) {
 #define VM_EPOCH 0
 #endif
 
-// sync_batch(body) -> (root id, pin or None, ops JSON text), or None.
+// sync_batch(body) -> (root id, ops JSON text), or None.
 static mp_obj_t mod_sync_batch(mp_obj_t body) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
@@ -621,14 +612,12 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     if (moy_sync_batch(b.buf, b.len, &bt) != MOY_SYNC_OK) {
         return mp_const_none;
     }
-    mp_obj_t fn = mp_load_attr(json_module(), MP_QSTR_loads);
-    mp_obj_t t[3] = {
+    mp_obj_t t[2] = {
         MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files
                         : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system : MP_QSTR_carts),
-        loads(fn, bt.pin, bt.pin_end),
         mp_obj_new_str(bt.ops, (size_t)(bt.ops_end - bt.ops)),
     };
-    return mp_obj_new_tuple(3, t);
+    return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
 
@@ -670,7 +659,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 6, mod_sync_ap
 
 #if MOY_NET_SERVE
 
-// web_start(port, carts, files, kinds, pin, defer): raises OSError on a bind.
+// web_start(port, carts, files, kinds, system, defer): raises OSError on a bind.
 static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
     moy_web_cfg_t cfg = {
@@ -678,7 +667,7 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
         .carts = mp_obj_str_get_str(args[1]),
         .files = str_or_null(args[2]),
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
-        .pin = str_or_null(args[4]),
+        .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
         .epoch = VM_EPOCH,
     };
@@ -692,7 +681,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_star
 
 // -- the web-console switch -----------------------------------------------------
 
-// wc_on(port, carts, files, kinds, pin, defer, ip): never waits; OSError when
+// wc_on(port, carts, files, kinds, system, defer, ip): never waits; OSError when
 // the configuration itself is refused.
 static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
@@ -701,7 +690,7 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
         .carts = mp_obj_str_get_str(args[1]),
         .files = str_or_null(args[2]),
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
-        .pin = str_or_null(args[4]),
+        .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
         .epoch = VM_EPOCH,
     };
@@ -777,12 +766,6 @@ static mp_obj_t mod_wc_phase(mp_obj_t port) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_phase_obj, mod_wc_phase);
 
-static mp_obj_t mod_wc_set_pin(mp_obj_t pin) {
-    moy_wc_set_pin(str_or_null(pin));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_set_pin_obj, mod_wc_set_pin);
-
 static mp_obj_t mod_wc_park(mp_obj_t on) {
     moy_wc_park(mp_obj_is_true(on));
     return mp_const_none;
@@ -790,7 +773,7 @@ static mp_obj_t mod_wc_park(mp_obj_t on) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_park_obj, mod_wc_park);
 
 static mp_obj_t mod_wc_url(mp_obj_t paired) {
-    char b[96];
+    char b[160];
     size_t n = moy_wc_url(b, sizeof(b), mp_obj_is_true(paired));
     return mp_obj_new_str(b, n < sizeof(b) ? n : sizeof(b) - 1);
 }
@@ -802,11 +785,71 @@ static mp_obj_t mod_web_stop(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_stop_obj, 0, 1, mod_web_stop);
 
-static mp_obj_t mod_web_set_pin(mp_obj_t pin) {
-    moy_web_set_pin(str_or_null(pin));
-    return mp_const_none;
+// web_auth(system) -> the board's id ("" with no folder): the sign-in set up
+// over the system folder, serving or not.
+static mp_obj_t mod_web_auth(mp_obj_t system) {
+    if (moy_web_auth(str_or_null(system), VM_EPOCH) != 0) {
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    char id[33];
+    moy_web_board_id(id);
+    return mp_obj_new_str(id, strlen(id));
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_set_pin_obj, mod_web_set_pin);
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_auth_obj, mod_web_auth);
+
+// web_keys() -> [(kid, created, seen, name)], the paired browsers.
+static mp_obj_t mod_web_keys(void) {
+    char *b = m_new(char, 2048);
+    size_t n = moy_web_keys(b, 2048);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (size_t at = 0; at < n;) {
+        char *e = memchr(b + at, '\n', n - at);
+        if (e == NULL) {
+            break;
+        }
+        *e = '\0';
+        char kid[24];
+        long long cr = 0, se = 0;
+        int k = 0;
+        if (sscanf(b + at, "%20s %lld %lld %n", kid, &cr, &se, &k) == 3) {
+            mp_obj_t t[4] = {mp_obj_new_str(kid, strlen(kid)), mp_obj_new_int_from_ll(cr),
+                             mp_obj_new_int_from_ll(se),
+                             mp_obj_new_str(b + at + k, strlen(b + at + k))};
+            mp_obj_list_append(out, mp_obj_new_tuple(4, t));
+        }
+        at = (size_t)(e - b) + 1;
+    }
+    m_del(char, b, 2048);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_keys_obj, mod_web_keys);
+
+static mp_obj_t mod_web_key_drop(mp_obj_t kid) {
+    return MP_OBJ_NEW_SMALL_INT(moy_web_key_drop(mp_obj_str_get_str(kid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_key_drop_obj, mod_web_key_drop);
+
+// pw_hash(password, salt) -> "$moy1$SALT$HEX", the console password's stored
+// form (moy_seal_pw_hash; runtime/system/ssh_service.py), for a board that
+// sets one with no SSH server (the Zero's setup).
+static mp_obj_t mod_pw_hash(mp_obj_t pw, mp_obj_t salt) {
+    size_t pn, sn;
+    const char *p = mp_obj_str_get_data(pw, &pn);
+    const char *s = mp_obj_str_get_data(salt, &sn);
+    if (sn == 0 || sn > 32 || memchr(s, '$', sn) != NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("salt"));
+    }
+    uint8_t d[32];
+    moy_seal_pw_hash(p, pn, s, sn, d);
+    char out[6 + 32 + 1 + 64 + 1];
+    memcpy(out, "$moy1$", 6);
+    memcpy(out + 6, s, sn);
+    out[6 + sn] = '$';
+    moy_seal_hex(d, sizeof d, out + 7 + sn);
+    moy_seal_wipe(d, sizeof d);
+    return mp_obj_new_str(out, 7 + sn + 64);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_pw_hash_obj, mod_pw_hash);
 
 static mp_obj_t mod_web_poll(void) {
     int did = 0;
@@ -871,34 +914,6 @@ static mp_obj_t mod_web_answer(mp_obj_t resp) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_answer_obj, mod_web_answer);
-
-static mp_obj_t out_bytes(char *p, size_t n) {
-    mp_obj_t o = mp_obj_new_bytes((const byte *)(p ? p : ""), n);
-    moy_net_free(p);
-    return o;
-}
-
-// web_handle(method, target, body) -> the whole response, or None when the
-// VM answers this request.
-static mp_obj_t mod_web_handle(mp_obj_t method, mp_obj_t target, mp_obj_t body) {
-    size_t mn, tn;
-    const char *m = mp_obj_str_get_data(method, &mn);
-    const char *t = mp_obj_str_get_data(target, &tn);
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
-    char *out = NULL;
-    size_t n = 0;
-    int done = 0;
-    WEB_GUARD_BEGIN
-    done = moy_web_handle(m, mn, t, tn, b.buf, b.len, &out, &n);
-    WEB_GUARD_END
-    if (!done) {
-        moy_net_free(out);
-        return mp_const_none;
-    }
-    return out_bytes(out, n);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(mod_web_handle_obj, mod_web_handle);
 
 // web_pack(root, kinds) -> the store under `root` as the pull's JSON text.
 static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
@@ -1197,14 +1212,16 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&mod_web_stop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_set_pin), MP_ROM_PTR(&mod_web_set_pin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_auth), MP_ROM_PTR(&mod_web_auth_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&mod_web_key_drop_obj)},
+    {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_shelf), MP_ROM_PTR(&mod_web_shelf_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&mod_web_answer_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_on), MP_ROM_PTR(&mod_wc_on_obj)},
@@ -1217,7 +1234,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_dns_reply), MP_ROM_PTR(&mod_dns_reply_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_poll), MP_ROM_PTR(&mod_dns_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_stop), MP_ROM_PTR(&mod_dns_stop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wc_set_pin), MP_ROM_PTR(&mod_wc_set_pin_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&mod_wc_park_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_url), MP_ROM_PTR(&mod_wc_url_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_keys), MP_ROM_PTR(&mod_ota_keys_obj)},

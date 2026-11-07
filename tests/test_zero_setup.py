@@ -32,7 +32,7 @@ import zero_host                                               # noqa: E402
 
 
 def _form(**kw):
-    fields = {"name": "zero", "pin": "1234", "ssid": "home", "password": ""}
+    fields = {"name": "zero", "console": "board-pass", "ssid": "home", "password": ""}
     fields.update(kw)
     return fields
 
@@ -49,8 +49,8 @@ def test_the_body_a_plain_html_form_posts_is_what_parses():
     decoding them one at a time yields a network name that looks right in a log
     and never matches the network."""
     got = zero_setup.parse_form(
-        b"name=attic+zero&pin=0042&ssid=Caf%C3%A9%20Wifi&password=hunter2%26co")
-    assert got == {"name": "attic zero", "pin": "0042",
+        b"name=attic+zero&console=b%26rd-pass&ssid=Caf%C3%A9%20Wifi&password=hunter2%26co")
+    assert got == {"name": "attic zero", "console": "b&rd-pass",
                    "ssid": "Café Wifi", "password": "hunter2&co"}
 
 
@@ -62,10 +62,9 @@ def test_a_junk_body_parses_to_nothing_rather_than_raising():
 @pytest.mark.parametrize("fields, word", [
     ({"ssid": ""}, "network"),
     ({"ssid": "   "}, "network"),
-    ({"pin": ""}, "4 digits"),
-    ({"pin": "12"}, "4 digits"),
-    ({"pin": "12345"}, "4 digits"),
-    ({"pin": "12a4"}, "4 digits"),
+    ({"console": ""}, "between 8 and 64"),
+    ({"console": "short"}, "between 8 and 64"),
+    ({"console": "x" * 65}, "between 8 and 64"),
     ({"name": ""}, "name"),
     ({"name": "---"}, "name"),          # nothing survives the label clean
     ({"password": "short"}, "8 and 63"),
@@ -116,27 +115,35 @@ def test_merge_survives_a_missing_or_odd_wifi_file():
 def test_setup_writes_the_consoles_own_wifi_shape_and_this_boards_identity():
     """wifi.json is the CONSOLE's document, not a new one -- zero_host reads it
     with the same code a board's WiFi panel writes it with, which is why a
-    creds file copied off a console board already works."""
-    written = {}
-    zero_setup.save_setup({"name": "attic", "pin": "4242",
+    creds file copied off a console board already works. The board's password
+    goes where the sign-in reads it, hashed as `passwd` hashes it."""
+    from runtime.system import ssh_service
+    written, texts = {}, {}
+    zero_setup.save_setup({"name": "attic", "console": "board-pass",
                            "ssid": "home", "password": "secret"},
-                          "/moy/wifi.json", "/moy/zero.json",
+                          "/moy/wifi.json", "/moy/zero.json", "/moy/system",
                           read=lambda p: None,
-                          write=lambda p, d: written.__setitem__(p, d))
+                          write=lambda p, d: written.__setitem__(p, d),
+                          write_text=lambda p, t: texts.__setitem__(p, t))
     assert written["/moy/wifi.json"] == {
         "networks": [{"ssid": "home", "password": "secret"}]}
-    assert written["/moy/zero.json"] == {"name": "attic", "pin": "4242"}
+    assert written["/moy/zero.json"] == {"name": "attic"}
+    stored = texts["/moy/system/password"]
+    assert "board-pass" not in stored
+    salt = stored.split("$")[2]
+    assert stored == ssh_service.hashed("board-pass", salt) + "\n"
 
 
 def test_a_real_round_trip_through_files(tmp_path):
     wifi = tmp_path / "wifi.json"
     zero = tmp_path / "zero.json"
     wifi.write_text('{"networks": [{"ssid": "school", "password": "s"}]}')
-    zero_setup.save_setup({"name": "attic", "pin": "0000",
+    zero_setup.save_setup({"name": "attic", "console": "board-pass",
                            "ssid": "home", "password": ""},
-                          str(wifi), str(zero))
+                          str(wifi), str(zero), str(tmp_path / "system"))
     assert json.loads(wifi.read_text())["networks"][0]["ssid"] == "home"
-    assert json.loads(zero.read_text()) == {"name": "attic", "pin": "0000"}
+    assert json.loads(zero.read_text()) == {"name": "attic"}
+    assert (tmp_path / "system" / "password").read_text().startswith("$moy1$")
 
 
 # -- the server --------------------------------------------------------------
@@ -184,7 +191,7 @@ def test_the_form_is_sized_for_a_thumb_and_asks_for_the_right_keyboard():
     assert body.count(b"min-height:44px") >= 1
     assert b"min-height:48px" in body              # the submit button
     assert b"font-size:1rem" in body
-    assert b'inputmode="numeric"' in body and b'pattern="[0-9]{4}"' in body
+    assert b'name="console" type="password"' in body and b'minlength="8"' in body
 
 
 def test_the_wifi_password_can_be_revealed_and_is_never_second_guessed():
@@ -199,6 +206,7 @@ def test_the_wifi_password_can_be_revealed_and_is_never_second_guessed():
     assert b'cb.type="checkbox"' in body
     assert b'pw.type=cb.checked?"text":"password"' in body
     pw = body.split(b'name="password"')[1].split(b"</label>")[0]
+    assert b'name="console" type="password"' in body
     for off in (b'autocapitalize="off"', b'autocorrect="off"',
                 b'autocomplete="off"', b'spellcheck="false"'):
         assert off in pw, off
@@ -226,9 +234,9 @@ def test_the_done_page_hands_back_an_address_and_a_way_to_find_it_anyway():
     idea, and it lists the board under the name just chosen."""
     srv = _server()
     body = srv.handle_http(
-        "POST", "/setup", b"name=attic&pin=4242&ssid=home&password=hunter2xyz")
-    assert b"?pin=4242" in body
-    assert b"attic.local" in body
+        "POST", "/setup", b"name=attic&console=board-pass&ssid=home&password=hunter2xyz")
+    assert b"http://attic.local/" in body and b"board-pass" not in body
+    assert b"pair your" in body
     assert b"router" in body and body.count(b"attic") >= 2
 
 
@@ -236,22 +244,19 @@ def test_a_good_post_saves_once_and_arms_the_reboot():
     got = []
     srv = _server(saved=got.append)
     body = srv.handle_http(
-        "POST", "/setup", b"name=attic&pin=4242&ssid=home&password=hunter2xyz")
+        "POST", "/setup", b"name=attic&console=board-pass&ssid=home&password=hunter2xyz")
     assert b"200 OK" in body
-    assert got == [{"name": "attic", "pin": "4242",
+    assert got == [{"name": "attic", "console": "board-pass",
                     "ssid": "home", "password": "hunter2xyz"}]
     assert srv.saved == got[0]
     assert srv.reboot_at is not None
-    # The DONE page hands back the pinned url, because a pin nobody is told is
-    # a board that silently refuses every edit made on it.
-    assert b"?pin=4242" in body
 
 
 def test_a_bad_post_re_serves_the_form_with_the_reason_and_saves_nothing():
     got = []
     srv = _server(saved=got.append)
-    body = srv.handle_http("POST", "/setup", b"name=attic&pin=9&ssid=home")
-    assert b"400 " in body and b"4 digits" in body
+    body = srv.handle_http("POST", "/setup", b"name=attic&console=9&ssid=home")
+    assert b"400 " in body and b"between 8 and 64" in body
     assert got == [] and srv.saved is None and srv.reboot_at is None
 
 
@@ -261,7 +266,7 @@ def test_a_failed_write_is_a_500_that_says_nothing_changed_not_a_reboot():
 
     srv = _server(saved=boom)
     body = srv.handle_http(
-        "POST", "/setup", b"name=attic&pin=4242&ssid=home&password=")
+        "POST", "/setup", b"name=attic&console=board-pass&ssid=home&password=")
     assert b"500 " in body and b"Nothing was changed" in body
     assert srv.reboot_at is None       # a board that saved nothing must not
     assert srv.saved is None           # reboot into the same empty state
@@ -597,12 +602,12 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
         lambda: seen.__setitem__("form", _read(0)),
         lambda: _get("/generate_204"),
         lambda: seen.__setitem__("probe", _read(1)),
-        lambda: _post("name=attic&pin=99&ssid=home&password=hunter2xyz"),
+        lambda: _post("name=attic&console=99&ssid=home&password=hunter2xyz"),
         _read_bad,
         # A real form as a phone sends it: `+` for the space, and an SSID whose
         # percent escapes are BYTES (decoding them one at a time is a network
         # name that looks right in a log and never matches the network).
-        lambda: _post("name=Attic+Zero&pin=4242&ssid=Caf%C3%A9"
+        lambda: _post("name=Attic+Zero&console=board-pass&ssid=Caf%C3%A9"
                       "&password=hunter2xyz"),
     ]
 
@@ -615,6 +620,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
         # something inferred from the state at the end of the test.
         seen["wifi"] = json.loads(wifi.read_text())
         seen["zero"] = json.loads(zero.read_text())
+        seen["password"] = (tmp_path / "system" / "password").read_text()
         seen["done"] = _read(3)
 
     ap = _FakeAP(log)
@@ -643,7 +649,8 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
     monkeypatch.setitem(sys.modules, "time", _FakeTime(_on_sleep))
     try:
         with pytest.raises(_Rebooted):
-            zero_setup.run(str(wifi), str(zero), port=free_port())
+            zero_setup.run(str(wifi), str(zero), str(tmp_path / "system"),
+                           port=free_port())
     finally:
         for c in clients:
             c.close()
@@ -654,16 +661,17 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
     assert b"302 Found" in seen["probe"]
     assert b"Location: http://192.168.4.1/" in seen["probe"]
 
-    assert b"400 " in seen["bad"] and b"4 digits" in seen["bad"]
+    assert b"400 " in seen["bad"] and b"between 8 and 64" in seen["bad"]
     assert seen["bad_left_wifi"] == old, "a refusal wrote to flash"
     assert seen["bad_wrote_zero"] is False
 
     assert b"200 OK" in seen["done"] and b"</html>" in seen["done"]
-    assert b"?pin=4242" in seen["done"]
+    assert b"http://atticzero.local/" in seen["done"]
     assert seen["wifi"]["networks"] == [
         {"ssid": "Café", "password": "hunter2xyz"},
         {"ssid": "school", "password": "sssssssss"}]
-    assert seen["zero"] == {"name": "atticzero", "pin": "4242"}
+    assert seen["zero"] == {"name": "atticzero"}
+    assert seen["password"].startswith("$moy1$")
 
     assert log == ["ap up", "sta up", "dns start 192.168.4.1",
                    "server stop", "dns stop", "ap down", "reset"]
@@ -686,7 +694,7 @@ def test_a_first_run_that_cannot_write_neither_reboots_nor_forgets_the_form(
 
     srv = zero_setup.SetupServer("moybyte-zero-973d", _boom, lambda: [])
     body = srv.handle_http("POST", "/setup",
-                           b"name=attic&pin=4242&ssid=home&password=")
+                           b"name=attic&console=board-pass&ssid=home&password=")
     assert b"500 " in body and b"Nothing was changed" in body
     assert b'action="/setup"' in body, "the form has to still be there"
     assert srv.due() is False and srv.saved is None
@@ -704,13 +712,13 @@ def test_a_boot_with_no_joinable_network_hosts_the_setup_ap(monkeypatch):
     monkeypatch.setattr(zero_host, "identity", lambda: {})
     monkeypatch.setattr(zero_setup, "run", lambda *a, **k: ran.append(a))
     zero_host.serve()
-    assert ran == [(zero_host.WIFI_STORE, zero_host.ZERO_STORE)]
+    assert ran == [(zero_host.WIFI_STORE, zero_host.ZERO_STORE, zero_host.SYSTEM_DIR)]
 
 
 def test_a_boot_that_joins_serves_and_never_hosts_the_ap(monkeypatch):
-    """...and carries the configured name and pin into the host it starts. The
-    pin is the whole consent story for this board's write half, so a boot that
-    quietly forgot it would be an open port with a padlock drawn on it."""
+    """...and gives the host it starts its sign-in folder. The sign-in is the
+    whole consent story for this board, so a boot that quietly started a host
+    without one would be an open port with a padlock drawn on it."""
     class _Stop(Exception):
         pass
 
@@ -719,19 +727,19 @@ def test_a_boot_that_joins_serves_and_never_hosts_the_ap(monkeypatch):
             self.kw = kw
 
         def start(self, ip):
-            raise _Stop("%s|%s" % (ip, self.kw.get("pin")))
+            raise _Stop("%s|%s" % (ip, self.kw.get("auth")))
 
     ran = []
     monkeypatch.setattr(zero_host, "_mkdir", lambda p: None)
     monkeypatch.setattr(zero_host, "connect",
                         lambda **kw: kw.get("hostname") and "192.168.1.9")
     monkeypatch.setattr(zero_host, "identity",
-                        lambda: {"name": "attic", "pin": "4242"})
+                        lambda: {"name": "attic"})
     monkeypatch.setattr(zero_host, "host_class", lambda: _Host)
     monkeypatch.setattr(zero_setup, "run", lambda *a, **k: ran.append(a))
     with pytest.raises(_Stop) as exc:
         zero_host.serve()
-    assert str(exc.value) == "192.168.1.9|4242"
+    assert str(exc.value) == "192.168.1.9|" + zero_host.SYSTEM_DIR
     assert ran == []
 
 
@@ -742,8 +750,8 @@ def test_identity_is_absent_rather_than_fatal_on_a_usb_provisioned_board(
     monkeypatch.setattr(zero_host, "ZERO_STORE", str(tmp_path / "nope.json"))
     assert zero_host.identity() == {}
     p = tmp_path / "zero.json"
-    p.write_text('{"name": "attic", "pin": "4242"}')
+    p.write_text('{"name": "attic"}')
     monkeypatch.setattr(zero_host, "ZERO_STORE", str(p))
-    assert zero_host.identity()["pin"] == "4242"
+    assert zero_host.identity()["name"] == "attic"
     p.write_text("not json at all")
     assert zero_host.identity() == {}

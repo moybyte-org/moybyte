@@ -59,7 +59,7 @@ def test_passwd_sets_and_removes_the_password(system):
     salt = text.split("$")[2]
     assert text == ssh_service.hashed("s3cret", salt) + "\n"
     assert ssh_service.is_set(ws)
-    assert sh_roles.r_passwd(d, []) == 0 and d.text == "password set\n"
+    assert sh_roles.r_passwd(d, []) == 0 and d.text.startswith("password set\nhost key ")
     assert sh_roles.r_passwd(d, ["-d"]) == 0
     assert not (system / "password").exists()
     assert sh_roles.r_passwd(d, ["a", "b"]) == 2

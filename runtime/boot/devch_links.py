@@ -53,9 +53,8 @@ def _settle(wh, limit_ms=25000):
 def web(chan, ws, parts, line):
     # Serve the wasm console FROM this board (moy_webhost), which since
     # #197 also parks the glass on the connection screen. The PAIRED url
-    # is what gets printed -- the pin is what the page must carry to
-    # write anything back, so a bare address would be an address that
-    # syncs nothing and says nothing about why.
+    # is what gets printed -- its token pairs the browser that opens it, so
+    # a bare address would be an address that signs nothing in.
     try:
         wh = getattr(ws, "webhost", None)
         if wh is None:

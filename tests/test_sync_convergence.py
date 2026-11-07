@@ -127,7 +127,7 @@ class Wire:
             if self.down:
                 self.w.ack(False)
                 return
-            ops, _pin, root_id = moy_sync.parse_batch(body)
+            ops, root_id = moy_sync.parse_batch(body)
             assert ops is not None, "the wire shape must parse"
             assert root_id == self.w.root_id, "a batch must name its own root"
             applied, errors, _ = moy_sync.apply_ops(self.dst, ops, root_id)
@@ -368,7 +368,7 @@ def test_reapplying_a_batch_is_idempotent(tmp_path):
     cart = _seed(a)
     w.sweep()
     body = w.take_json()
-    ops, _pin, _root = moy_sync.parse_batch(body)
+    ops, _root = moy_sync.parse_batch(body)
     moy_sync.apply_ops(b, ops)
     once = _visible(b)
     applied, errors, _ = moy_sync.apply_ops(b, ops)

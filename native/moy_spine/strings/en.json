@@ -74,7 +74,6 @@
     "recovery.hung": "console hung: no frame in %us",
     "web.title": "Web console",
     "web.open": "Open this in a browser:",
-    "web.pin": "Pin",
     "web.restarting": "The console is restarting...",
     "ui.on": "On",
     "ui.off": "Off"

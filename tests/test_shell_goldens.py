@@ -309,7 +309,7 @@ PARTS_PAGES = ("settings", "appearance")
 # Both the pin and the address are FIXED here. They are not decoration -- they
 # are the QR's input, and a minted pin would re-encode a different matrix on
 # every run, which is the one way this surface could be non-deterministic.
-GOLDEN_PIN = "4821"
+GOLDEN_LINK = "#t=q1w2e3r4t5y6u7i8o9p0aa&b=zxcvbnmasdf"
 GOLDEN_URL = "http://192.168.1.151/"
 
 # The TEXT CONSOLE (docs/history/text_editing_2026-09.md step 6), rendered as a real
@@ -345,7 +345,7 @@ class _GoldenWebHost:
         return GOLDEN_URL
 
     def paired_url(self):
-        return GOLDEN_URL + "?pin=" + GOLDEN_PIN
+        return GOLDEN_URL + GOLDEN_LINK
 
 
 # `diagonal_in` is the board fact behind the #203 tap-target floor; None is
@@ -810,7 +810,6 @@ def _surface_plan(ws, cfg):
     plan.append(("app_notes_script", lambda: ws.player.ns["_open"](NOTES_VAULT[1][0])))
 
     def park():
-        ws.system.set("web_pin", GOLDEN_PIN)
         if ws.webhost is None:
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():

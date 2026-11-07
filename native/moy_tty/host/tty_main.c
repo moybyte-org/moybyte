@@ -1,5 +1,5 @@
 // The host harness of the web terminal: the kernel's webhost (native/moy_net)
-// on a TCP port with a pin, its GET /term handing the upgraded socket to the
+// on a TCP port with its sign-in, its GET /term handing the upgraded socket to the
 // bridge (moy_tty_ws.c), the face and the board's shell (moy_tty_sh.c over
 // native/moy_sh's board table) on threads, and the console's task a thread
 // whose loop polls the webhost and serves the hops, as a board's frame does.
@@ -8,10 +8,13 @@
 //
 // Standard input takes a line at a time: `ssh` opens a face as SSH does
 // (a `sleep 30`), so the page finds the face another's; `nossh` ends it;
-// `skew MS` moves the webhost's clock by MS (negative: back, so a pin's wait
-// already running lasts that much longer). Each answers a line.
+// `skew MS` moves the webhost's clock by MS (negative: back, so a lockout's
+// wait already running lasts that much longer). Each answers a line.
+// `token` prints `TOKEN <hex>`, a QR's token; `drop` forgets every paired
+// browser, cutting a terminal one holds. Both run on the console's thread,
+// whose state the sign-in is. SYSTEM_DIR `-` is the open host.
 // The main thread prints a STATS line when a figure moves.
-// Usage: tty_main PORT PIN CARTS_DIR
+// Usage: tty_main PORT SYSTEM_DIR CARTS_DIR
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -115,8 +118,10 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     return MOY_LOOP_ROLE_NEEDS_VM;
 }
 
-static const char *s_pin, *s_carts;
+static const char *s_system, *s_carts;
 static int s_port;
+static int s_cmd;                       // 1 token, 2 drop: the console's to run
+
 
 static void *console(void *arg) {
     (void)arg;
@@ -125,7 +130,7 @@ static void *console(void *arg) {
     moy_web_cfg_t cfg = {0};
     cfg.port = (uint16_t)s_port;
     cfg.carts = s_carts;
-    cfg.pin = s_pin;
+    cfg.system = s_system;
     cfg.defer = "";
     if (moy_web_start(&cfg) != 0) {
         perror("listen");
@@ -137,6 +142,16 @@ static void *console(void *arg) {
     for (;;) {
         moy_web_poll();
         moy_tty_tail();
+        int cmd = __atomic_exchange_n(&s_cmd, 0, __ATOMIC_ACQ_REL);
+        if (cmd == 1) {
+            char t[33];
+            moy_web_token(t);
+            printf("TOKEN %s\n", t);
+            fflush(stdout);
+        } else if (cmd == 2) {
+            printf("DROPPED %d\n", moy_web_key_drop("all"));
+            fflush(stdout);
+        }
         usleep(16000);
     }
     return NULL;
@@ -144,12 +159,12 @@ static void *console(void *arg) {
 
 int main(int argc, char **argv) {
     if (argc != 4) {
-        fprintf(stderr, "usage: %s PORT PIN CARTS_DIR\n", argv[0]);
+        fprintf(stderr, "usage: %s PORT SYSTEM_DIR CARTS_DIR\n", argv[0]);
         return 2;
     }
     signal(SIGPIPE, SIG_IGN);
     s_port = atoi(argv[1]);
-    s_pin = argv[2];
+    s_system = strcmp(argv[2], "-") ? argv[2] : NULL;
     s_carts = argv[3];
     pthread_t t;
     pthread_create(&t, NULL, console, NULL);
@@ -171,7 +186,11 @@ int main(int argc, char **argv) {
             line[ln] = 0;
             ln = 0;
             static pid_t pid;
-            if (strcmp(line, "ssh") == 0 && ssh_fd < 0) {
+            if (strcmp(line, "token") == 0) {
+                __atomic_store_n(&s_cmd, 1, __ATOMIC_RELEASE);
+            } else if (strcmp(line, "drop") == 0) {
+                __atomic_store_n(&s_cmd, 2, __ATOMIC_RELEASE);
+            } else if (strcmp(line, "ssh") == 0 && ssh_fd < 0) {
                 moy_tty_hold(MOY_TTY_SSH, 1);
                 int r = moy_tty_open(MOY_TTY_SSH, "sleep 30", 0, 80, 24, NULL, &ssh_fd, &pid);
                 printf("SSH %d\n", r);

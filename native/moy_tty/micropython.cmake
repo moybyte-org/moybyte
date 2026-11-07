@@ -26,6 +26,7 @@ target_include_directories(moy_tty_core PRIVATE
     ${MOY_TTY}/../moy_sh
     ${MOY_TTY}/../moy_store
     ${MOY_TTY}/../moy_kernel
+    ${MOY_TTY}/../moy_net
     ${_moy_tty_cfg}
     "${_moy_tty_inc}")
 target_compile_definitions(moy_tty_core PRIVATE "${_moy_tty_defs}")

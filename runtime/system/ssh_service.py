@@ -27,6 +27,8 @@ PARK_MS. A start before then cancels the wake and keeps both.
   hostname(ws)             the mDNS name the console answers to
   rename(ws)               the name re-announced after Settings' Name changed
   status()                 (serving, sessions, signed in, refused) or None
+  fingerprint(ws)          the host key's SHA256 fingerprint as OpenSSH prints it,
+                           or None before the server first made its key
 
 The hash is moy_ssh's (`$moy1$SALT$HEX`, SHA-256 iterated), the same C on a
 board; the host computes it with hashlib, the formula tests/test_moy_ssh.py
@@ -290,3 +292,29 @@ def status():
         return None
     s = _N.stats()
     return (bool(s[7]), s[0], s[1], s[2])
+
+
+HOST_KEY = "ssh_host_key"
+_ED25519 = b"ssh-ed25519"
+
+
+def fingerprint(ws):
+    """`SHA256:<base64>` of the host key's public half, as `ssh` prints it on
+    a first connection, so a person can check they reached this console. The
+    key file is Dropbear's (native/moy_ssh): the type's name, then 64 bytes,
+    the private half and the public."""
+    try:
+        with open(_path(ws, HOST_KEY), "rb") as f:
+            raw = f.read(128)
+    except OSError:
+        return None
+    n = len(_ED25519)
+    if (len(raw) < 4 + n + 4 + 64 or raw[:4] != n.to_bytes(4, "big")
+            or raw[4:4 + n] != _ED25519 or raw[4 + n:8 + n] != (64).to_bytes(4, "big")):
+        return None
+    pub = raw[8 + n + 32:8 + n + 64]
+    blob = n.to_bytes(4, "big") + _ED25519 + (32).to_bytes(4, "big") + pub
+    import hashlib
+    import binascii
+    d = binascii.b2a_base64(hashlib.sha256(blob).digest()).strip().rstrip(b"=")
+    return "SHA256:" + d.decode()

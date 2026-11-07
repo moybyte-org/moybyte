@@ -7,7 +7,9 @@
 # The JSON scanner it reads a batch with is native/moy_spine/moy_json.c, and
 # the store it applies one into and pulls from is native/moy_store, which
 # compiles both: every image that takes moy_net takes moy_store. The bundle it
-# serves is native/moy_web's, where the image takes that too.
+# serves is native/moy_web's, where the image takes that too. The sign-in's
+# crypto (moy_seal.c) is the ESP-IDF's mbedTLS here; the host and the browser
+# compile the vendored copy (mbedtls/README.md).
 
 add_library(usermod_moy_net INTERFACE)
 
@@ -19,6 +21,8 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_link.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_sync_apply.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_webhost.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_webauth.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_seal.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ota.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_webconsole.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_gpio.c

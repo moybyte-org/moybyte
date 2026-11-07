@@ -171,6 +171,15 @@ their only caller is Paint, opening and saving a cart's cover.png -- which this
 board does not freeze, having no console. The covers themselves are served as
 the files they are; the browser console decodes them."""
 
+[[modules.shared.lazy]]
+module = "ssh_service"
+why = """
+`moy_webhost.make_webhost()` reads a console's sign-in folder through
+`ssh_service.system_dir` (the one place that names it, beside the password
+`passwd` writes), in a ladder like the two above. Its only callers are the
+console boards' runtimes: this board builds its WebHost in `zero_host.serve`
+with its own folder and runs no SSH server, so the 10 KB module stays out."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]
@@ -201,8 +210,8 @@ why = """
 The Settings contract over the kernel's webhost (native/moy_net): the store,
 the sync apply, /gpio over this board's pin table and the setup form's
 transport are C. On the console boards it is one Settings row; here it IS the
-board. native/moy_net/moy_webhost.c's header is the authority on the pin
-gate."""
+board. native/moy_net/moy_webhost.c's header is the authority on the
+sign-in."""
 
 [[modules.device.group]]
 files = ["moy_ota.py", "moy_ota_health.py"]

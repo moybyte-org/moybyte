@@ -256,7 +256,7 @@ _GROUPS = (
                  "volume", "brightness", "tz", "name")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
-    ("Updates", ("webhost", "ota_channel", "update_online", "update", "update_c6")),
+    ("Updates", ("webhost", "paired", "ota_channel", "update_online", "update", "update_c6")),
     ("Developer", ("diag_live", "diag_sd", "unknown_sources", "crash")),
 )
 
@@ -419,6 +419,12 @@ class SettingsLayer:
         # The Time zone picker: a page of wallclock.ZONES over the rows.
         self.tz_view = False
         self._tz_words = None         # its rows' words, made at its first open
+        # Paired browsers: the web console's keys (WebHost.browsers), read at
+        # each visit and each change, never per frame.
+        self.paired_view = False
+        self._paired = ()
+        self._paired_words = "None"
+        self._paired_fp = None
         self._tz_fresh = False        # opened this frame: focus goes to the list
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
@@ -460,10 +466,12 @@ class SettingsLayer:
         self.confirm_key = None
         self.crash_view = False
         self.tz_view = False
+        self.paired_view = False
         self.page = None
         self._name_bar("Settings")
         self._typing = False
         self._about = self._read_about()
+        self._read_paired()
 
     # -- About's pages: Achievements, Licences, the System log --------------------
 
@@ -1168,6 +1176,70 @@ class SettingsLayer:
             self.ws.set_time_zone(_wc.ZONES[got][1])
             self.close_tz()
 
+    # -- Paired browsers ---------------------------------------------------------------
+
+    def _read_paired(self):
+        """The paired browsers as the page lists them, (kid, name, seen), and
+        the row's count; the SSH host key's fingerprint beside them."""
+        web = getattr(self.ws, "webhost", None)
+        rows = ()
+        if web is not None:
+            try:
+                rows = tuple((kid, name or "A browser", _day(seen))
+                             for kid, _created, seen, name in web.browsers())
+            except Exception as exc:  # noqa: BLE001 -- a list is not worth a crash
+                print("SETTINGS paired browsers:", exc)
+        self._paired = rows
+        self._paired_words = str(len(rows)) if rows else "None"
+        self._paired_fp = _ssh.fingerprint(self.ws)
+
+    def open_paired(self):
+        self._read_paired()
+        self.paired_view = True
+        self.ws._dirty = True
+
+    def close_paired(self):
+        self.paired_view = False
+        self._read_paired()
+        self._want = say("PAIRED BROWSERS")
+        self.ws._dirty = True
+
+    def _forget(self, kid):
+        web = getattr(self.ws, "webhost", None)
+        if web is not None:
+            web.forget(kid)
+        self._read_paired()
+        self.ws._dirty = True
+
+    def _paired_page(self):
+        """Each browser this console paired, by its name and the day it was
+        last seen: choosing one forgets it (its key, its open sessions). Under
+        them, the SSH host key's fingerprint, for checking a first SSH
+        connection reached this console."""
+        _x, _y, w, _h = _ui.page("")
+        _ui.hints(("confirm", "Remove", "back", "Back"))
+        _ui.group("Paired browsers")
+        gone = None
+        if not self._paired:
+            _ui.label("None. Scan the code on Web console to pair one.")
+        for kid, name, seen in self._paired:
+            if _ui.link(name, "Seen " + seen, {"id": "pb" + kid}):
+                gone = kid
+        if len(self._paired) > 1 and _ui.button("Remove all", "danger"):
+            gone = "all"
+        _ui.group()
+        _ui.group("SSH host key")
+        fp = self._paired_fp
+        if fp is None:
+            _ui.label("Made at SSH's first start (set a password: passwd)")
+        else:
+            n = max(8, (w - 32) // max(1, self.ws.layout.font_w))
+            for at in range(0, len(fp), n):
+                _ui.label(fp[at:at + n])
+        _ui.group()
+        if gone is not None:
+            self._forget(gone)
+
     # -- the lent left zone (#46 zoned bar) -------------------------------------
 
     def draw_zone(self, cv, rect):
@@ -1273,7 +1345,8 @@ class SettingsLayer:
             # kind rather than a "diag" ON/OFF because when it is on the useful
             # thing to show is the ADDRESS -- an "ON" with no url is just an
             # instruction to go find the IP somewhere else.
-            rows = rows + (("webhost", "WEB CONSOLE", "webhost"),)
+            rows = rows + (("webhost", "WEB CONSOLE", "webhost"),
+                           ("paired", "PAIRED BROWSERS", "paired"))
         if upd:
             rows = rows + (("update", "UPDATE FW", "action"),)
         if onl:
@@ -1377,6 +1450,9 @@ class SettingsLayer:
             return
         if kind == "tz":                        # TIME ZONE: any step/tap opens the picker
             self.open_tz()
+            return
+        if kind == "paired":                    # PAIRED BROWSERS: their page
+            self.open_paired()
             return
         if kind == "idle":                      # the idle ladder's rungs: OFF, 30S .. 30M
             ws.idle_ladder.step(key, d)
@@ -1544,6 +1620,8 @@ class SettingsLayer:
             return v[:1].upper() + v[1:]
         if kind == "webhost":
             return ws.webhost_label() if ws.webhost_serving() else "Off"
+        if kind == "paired":
+            return self._paired_words
         if kind == "diag":
             return bool(getattr(ws, key, False))
         if kind == "font":
@@ -1627,6 +1705,10 @@ class SettingsLayer:
             self._kinds[s] = "link"
             if _ui.link(s, v):
                 self.open_tz()
+        elif kind == "paired":
+            self._kinds[s] = "link"
+            if _ui.link(s, v):
+                self.open_paired()
         elif kind == "webhost":
             self._kinds[s] = "link"
             if _ui.link(s, v):
@@ -1780,6 +1862,8 @@ class SettingsLayer:
             return "crash"
         if self.tz_view:
             return "tz"
+        if self.paired_view:
+            return "paired"
         return self.page
 
     def _input_host(self):
@@ -1824,6 +1908,8 @@ class SettingsLayer:
             self.close_crash()
         elif view == "tz":
             self.close_tz()
+        elif view == "paired":
+            self.close_paired()
         elif view == "achievements":
             if not self.achievements.back():
                 self.close_page()
@@ -1935,6 +2021,8 @@ class SettingsLayer:
                 self.permits.draw(self._content())
             elif view == "tz":
                 self._tz_page()
+            elif view == "paired":
+                self._paired_page()
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()
@@ -1942,6 +2030,12 @@ class SettingsLayer:
         if ws._dirty or self._page_of() != view or host.owed or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
         ws._dirty = was or ws._dirty
+
+
+def _day(t):
+    """`t` (seconds on the VM's clock) as the day it fell on."""
+    y, m, d = _wc.localtime(t)[:3]
+    return "%d-%02d-%02d" % (y, m, d)
 
 
 def board_name():

@@ -79,7 +79,7 @@ def test_what_is_baked_is_what_the_server_serves():
     try:
         nb.web_start(0, "/nonexistent", None, None, None, ())
         for n in ASSETS:
-            r = nb.web_handle("GET", "/" + n, b"")
+            r, _ = nb.web_handle("GET", "/" + n, b"")
             assert r.startswith(b"HTTP/1.1 200") and r.endswith(n.encode()), n
     finally:
         nb._bake({})

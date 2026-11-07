@@ -8,11 +8,17 @@ MOY_NET_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_NET_DIR)/modmoy_net.c
 SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_http.c $(MOY_NET_DIR)/moy_sync.c $(MOY_NET_DIR)/moy_sync_apply.c
+# The sign-in's crypto over the vendored mbedTLS (mbedtls/README.md): the
+# browser's client end (moy_seal_web.c) on every port, the board's end with
+# the webhost.
+SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_seal.c $(MOY_NET_DIR)/moy_seal_web.c \
+    $(wildcard $(MOY_NET_DIR)/mbedtls/library/*.c)
+CFLAGS_USERMOD += -I$(MOY_NET_DIR)/mbedtls/include -DMBEDTLS_CONFIG_FILE='"moy_seal_mbedtls.h"'
 ifeq ($(MOY_NET_SERVE),0)
 CFLAGS_USERMOD += -DMOY_NET_SERVE=0
 else
 SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_net_port.c $(MOY_NET_DIR)/moy_wifi.c $(MOY_NET_DIR)/moy_link.c \
-    $(MOY_NET_DIR)/moy_webhost.c $(MOY_NET_DIR)/moy_ota.c $(MOY_NET_DIR)/moy_webconsole.c $(MOY_NET_DIR)/moy_gpio.c $(MOY_NET_DIR)/moy_dns.c \
+    $(MOY_NET_DIR)/moy_webhost.c $(MOY_NET_DIR)/moy_webauth.c $(MOY_NET_DIR)/moy_ota.c $(MOY_NET_DIR)/moy_webconsole.c $(MOY_NET_DIR)/moy_gpio.c $(MOY_NET_DIR)/moy_dns.c \
     $(MOY_NET_DIR)/moy_fetch.c $(MOY_NET_DIR)/moy_aes.c $(MOY_NET_DIR)/moy_lorawan.c $(MOY_NET_DIR)/moy_lora.c
 SRC_USERMOD_C += $(MOY_NET_DIR)/modmoy_http.c $(MOY_NET_DIR)/modmoy_lora.c
 endif

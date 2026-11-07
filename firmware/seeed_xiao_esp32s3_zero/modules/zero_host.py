@@ -36,7 +36,12 @@ the BACKEND behind them -- the OTA flow every other board runs off its own
 Settings screen, driven here by a state machine in the poll loop because this
 board has no screen to put it on. The browser console this board serves is
 where a person triggers it and watches it, which is the whole point of the
-endpoints being pin-gated JSON rather than a UI.
+endpoints being sealed JSON rather than a UI.
+
+A browser signs in with a device key it got by pairing once with this board's
+password (the setup form sets it; native/moy_net/moy_webhost.c's header and
+docs/os_2026-11/system.md section 3), and every route but the bundle and the
+marker is sealed to its session.
 
 Runs on the board's own frozen image (`build.sh` -> MOYBYTE_ZERO). STA is the
 SERVING mode: the SoftAP lane measured too weak for the old streaming view and
@@ -57,7 +62,8 @@ except ImportError:                  # host: this module is import-only there
 ROOT = "/moy"
 CARTS_DIR = ROOT + "/carts"
 WIFI_STORE = ROOT + "/wifi.json"
-ZERO_STORE = ROOT + "/zero.json"   # this board's own name + write pin (setup)
+ZERO_STORE = ROOT + "/zero.json"   # this board's own name (setup)
+SYSTEM_DIR = ROOT + "/system"      # the sign-in's: `password` (setup), `webkeys`
 # The OTA directory (the pending marker; the image streams into the inactive
 # slot). On the internal VFS because there is no card
 # slot on this board at all -- moy_ota's default names /sd/update, which every
@@ -193,12 +199,10 @@ def seed_carts(root=CARTS_DIR):
         nothing. That is the price of never overwriting a kid's cart, and it is
         the right way round on the board holding the only copy -- but it means
         the recovery is manual and worth knowing. It needs no cable: the sync
-        protocol already has a whole-cart delete, and the pin rides in the BODY
-        for a POST (a `?pin=` on this endpoint is refused -- moy_webhost reads
-        `doc["pin"]`, which is what the protocol envelope declares):
-
-            curl -X POST http://<board>/sync -H "Content-Type: application/json" \
-                 -d '{"v":1,"pin":"NNNN","ops":[{"p":"hop_quest.moy","dc":1}]}'
+        protocol already has a whole-cart delete, `{"v":1,"ops":[{"p":
+        "hop_quest.moy","dc":1}]}` POSTed to /sync from a paired page (the
+        browser console's own sync does it, and a script does it through
+        tests/seal_client.py's Browser, since every request is sealed).
 
         That removes it, journal and all -> `{"err": [], "ok": 1}`. The next
         BOOT seeds the image's copy, so it still wants a power cycle; there is
@@ -284,13 +288,13 @@ def connect(wait_ms=15000, hostname=None):
 # Every other board triggers and reports an update on its own glass: Settings ->
 # UPDATE ONLINE draws a CHECKING screen, a progress bar, and the verdict of the
 # last install. This board has no glass, so the SAME OtaUpdater is driven by the
-# state machine below and reported as JSON on two pin-gated endpoints.
+# state machine below and reported as JSON on two sealed endpoints.
 #
 # THE DECISION, stated here because the README points at it: the TRIGGER is a
 # request, not a timer. A boot-time CHECK runs (once, after the running image
 # has certified itself) and its result is printed on serial and cached for
-# `GET /update`; it does not install. Installing is `POST /update` carrying the
-# pin -- the same act of consent that gates every other write to this board.
+# `GET /update`; it does not install. Installing is `POST /update` from a paired
+# browser -- the same act of consent that gates every other write to this board.
 #
 # THERE IS NO EXCEPTION, and there was one until 2026-08-29 (owner call): an
 # `"ota_auto": true` in /moy/zero.json made the boot check install what it
@@ -311,9 +315,8 @@ def connect(wait_ms=15000, hostname=None):
 #
 # HOW A HUMAN LEARNS IT HAPPENED, all three ways, none of them a UI:
 #   * serial -- every transition prints a `ZERO ota:` line, and the boot line
-#     names the running label; the cable is how a pin reaches a human on this
-#     board anyway.
-#   * `GET /update?pin=NNNN` -- the running version/label/channel/slot, the
+#     names the running label.
+#   * `GET /update` from a paired page -- the running version/label/channel/slot, the
 #     PREVIOUS install's verdict (moy_ota.boot_check: installed, or rolled back
 #     by the bootloader), and live progress.
 #   * the page itself -- the browser console is baked into the image, so a
@@ -474,7 +477,7 @@ class ZeroUpdate:
 
     def boot_check_once(self):
         """Queue the once-per-boot manifest check. It LOOKS and never installs
-        -- installing takes a request carrying the pin, and there is no setting
+        -- installing takes a paired browser's request, and there is no setting
         that changes that (see the ota_auto note in this module's header).
 
         Deliberately called only after the running image has been CONFIRMED
@@ -693,6 +696,14 @@ def _frozen_or_pushed(names=("zero_host", "zero_setup",
     return out
 
 
+def _has_password():
+    try:
+        with open(SYSTEM_DIR + "/password") as f:
+            return f.read(6) == "$moy1$"
+    except OSError:
+        return False
+
+
 def host_class():
     """The store host: the boards' own `WebHost`, whose kernel answers /gpio
     over this board's pin table. Imported here, not at the top: importing this
@@ -746,9 +757,10 @@ def serve():
         # board, and a board nobody fills in stays reachable until someone does.
         print("ZERO no wifi -- hosting the setup AP")
         import zero_setup
-        zero_setup.run(WIFI_STORE, ZERO_STORE)
+        zero_setup.run(WIFI_STORE, ZERO_STORE, SYSTEM_DIR)
         return
-    host = host_class()(CARTS_DIR, pin=me.get("pin"))
+    _mkdir(SYSTEM_DIR)
+    host = host_class()(CARTS_DIR, auth=SYSTEM_DIR)
     ota, task = make_updater(me)
     host.update = task
     if task is not None:
@@ -758,18 +770,15 @@ def serve():
         # after an unattended update wants to see first.
         task.boot_check()
     host.start(ip)
-    # The pin is PRINTED, and printed as part of the url. A page reaches this
-    # board's write half (POST /sync, POST /gpio, POST /update) by carrying
-    # `?pin=`, so a pin nobody is told is a board that silently refuses every
-    # edit made on it. Serial is the right channel for it: reading this line
-    # takes the cable.
-    pin = me.get("pin")
-    # Built by `paired_url()` rather than reassembled here: that is the one
-    # body that knows a port is spelled only when it is not 80, so this line
-    # cannot drift from the url the console's own screens show.
+    # Built by `url()` rather than reassembled here: that is the one body that
+    # knows a port is spelled only when it is not 80. A browser pairs with the
+    # password the setup form set; with none, nothing can (no screen for a
+    # pairing code), so the line says so.
+    has_pw = _has_password()
     print("ZERO serving %s  (mDNS %s.local)%s"
-          % (host.paired_url(), name,
-             "" if pin else "  [no pin -- writes are open]"))
+          % (host.url(), name,
+             "" if has_pw else "  [no password: no browser can pair -- run the setup "
+                               "form again, or provision.sh --password]"))
     if ota is not None:
         print("ZERO firmware %s (%s, %s)"
               % (ota.version_label(), ota.channel(), ota.slot()))

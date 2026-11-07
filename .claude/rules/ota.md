@@ -64,9 +64,9 @@ paths:
     lifetime below is not re-implemented. **Do NOT merge them behind a flag** —
     the argument list is where the claim about the hardware lives.
   - **THE UPDATE ROUTES ARE SHARED; THE BACKEND BEHIND THEM IS NOT**
-    (`device/moy_webhost.py`, 2026-08-29). `GET`/`POST /update` are pin-gated on
-    BOTH methods and both read the pin off `?pin=` — one endpoint may not spend
-    its credential in two places. The POST queues and answers; the work runs in
+    (`device/moy_webhost.py`, 2026-08-29). `GET`/`POST /update` are sealed on
+    BOTH methods (the browser sign-in, `docs/os_2026-11/system.md` §3): the VM
+    answers them and the C seals the answer. The POST queues and answers; the work runs in
     `WebHost.poll()`. Two backends, deliberately not one behind a flag (the same
     argument as the two confirm gates above): a HEADLESS board drives the
     install slice by slice (`zero_host.ZeroUpdate`), and a board WITH GLASS

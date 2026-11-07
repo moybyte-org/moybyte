@@ -1764,10 +1764,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # The switch itself lives in web_console.py; these keep the names its
     # callers already speak. Fixed signatures, one delegation each (#209).
 
-    def web_pin(self):
-        """`web.pin()` -- moy_webhost's start-time lambda + the tests."""
-        return self.web.pin()
-
     def web_console_url(self):
         """`web.url()` -- the dev channel's `web` and the tests."""
         return self.web.url()

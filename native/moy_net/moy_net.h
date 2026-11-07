@@ -51,7 +51,8 @@ int moy_http_parse(const char *buf, size_t n, moy_http_req_t *r);
 // The value of `name` in the target's query string: 1 and its span, or 0 (and
 // an empty span). Pairs split on '&' and at their first '='; a name with no
 // '=' has the empty value. No percent-decoding: what rides a query here is a
-// four-digit pin, and a decoder is code that can be wrong about a credential.
+// session id, a sequence number and a tag in hex, and a decoder is code that
+// can be wrong about a credential.
 int moy_http_query(const char *target, size_t n, const char *name,
                    size_t name_n, const char **val, size_t *val_n);
 
@@ -124,14 +125,13 @@ int moy_utf8_valid(const char *s, size_t n);
 
 // -- the sync batch's envelope -----------------------------------------------
 
-// The four fields a batch carries, each a span of the body's JSON (NULL when
+// The three fields a batch carries, each a span of the body's JSON (NULL when
 // the object has no such member; the LAST member by a name wins, as json.loads
 // keeps it).
 typedef struct {
     const char *v, *v_end;
     const char *root, *root_end;
     const char *ops, *ops_end;
-    const char *pin, *pin_end;
 } moy_sync_env_t;
 
 enum {
@@ -142,12 +142,12 @@ enum {
 int moy_sync_decode(const char *body, size_t n, moy_sync_env_t *e);
 
 // A batch's wire JSON from its fields as JSON texts: `v` and `ops` always,
-// `root` only when not NULL (the v1 shape names none), `pin` only when not
-// NULL. Writes at most `cap` bytes (no NUL) and returns the length the whole
-// needs.
+// `root` only when not NULL (the v1 shape names none). Writes at most `cap`
+// bytes (no NUL) and returns the length the whole needs. The batch carries no
+// credential: the webhost's sealed session is its sign-in.
 size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
                        const char *root, size_t root_n, const char *ops,
-                       size_t ops_n, const char *pin, size_t pin_n);
+                       size_t ops_n);
 
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
@@ -165,17 +165,12 @@ enum {
 typedef struct {
     int root;                       // MOY_SYNC_CARTS, _FILES or _SYSTEM
     const char *ops, *ops_end;      // the ops array
-    const char *pin, *pin_end;      // the pin's value, NULL when it has none
 } moy_sync_batch_t;
 
 // A POST /sync body read whole: OK, or BAD for anything moy_sync_decode
 // refuses, a `v` that is not the integer 1 or 2, a root that pair does not
 // serve, or `ops` that is not an array.
 int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b);
-
-// Whether the batch's pin is the string `pin` (a host with no pin, NULL, takes
-// any batch).
-int moy_sync_pin_ok(const moy_sync_batch_t *b, const char *pin);
 
 // -- the sync apply (moy_sync_apply.c, over native/moy_store) ------------------
 
@@ -220,35 +215,38 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 
 // -- the webhost (moy_webhost.c) ---------------------------------------------------
 //
-// The console's own HTTP server: the baked bundle (native/moy_web) open, the
-// capability marker open, and behind the pin the store's two pulls, the sync
-// apply, and whatever routes the VM answers (`defer`). A system batch is the
-// VM's too: it is parked, pin checked, when `defer` names its pull
-// (/console.json), and refused 400 "no such store" when it does not. It is the kernel's: its
-// listener, state and buffers are outside the VM's heap, so a soft reset leaves
-// it serving and the next VM finds it so. The poll calls no Python; a deferred
-// request is parked until the VM takes it (moy_web_take) and answers it
-// (moy_web_answer), and one nobody answers in MOY_WEB_DEFER_MS is a 503.
+// The console's own HTTP server: the baked bundle (native/moy_web) and the
+// capability marker open, the sign-in (POST /auth, moy_webauth.c) open, and
+// behind a sealed session the store's two pulls, the sync apply, the web
+// terminal and whatever routes the VM answers (`defer`). A system batch is
+// the VM's too: it is parked, its seal opened, when `defer` names its pull
+// (/console.json), and refused 400 "no such store" when it does not. It is the
+// kernel's: its listener, state and buffers are outside the VM's heap, so a
+// soft reset leaves it serving and the next VM finds it so. The poll calls no
+// Python; a deferred request is parked until the VM takes it (moy_web_take)
+// and answers it (moy_web_answer), and one nobody answers in MOY_WEB_DEFER_MS
+// is a 503.
 
 #define MOY_WEB_CLOSING_MS 5000     // the goodbye window: outlasts the page's 3 s heartbeat
 #define MOY_WEB_DEFER_MS 3000
 #define MOY_WEB_POLL_MAX 4          // new connections one poll accepts
 #define MOY_WEB_PATH_MAX 96
 
-// The pin's backoff (moy_webhost.c's header): wrong pins a source has free,
-// wrong pins from anywhere before every source without a right pin waits, the
-// first window, its cap (each wrong pin past the free ones doubles it), the
-// sources remembered, and the quiet that clears the count from anywhere.
-#define MOY_WEB_PIN_FREE 10
-#define MOY_WEB_PIN_FREE_ALL 30
-#define MOY_WEB_PIN_WAIT_MS 1000u
-#define MOY_WEB_PIN_WAIT_MAX_MS 300000u
-#define MOY_WEB_PIN_SOURCES 8
-#define MOY_WEB_PIN_FORGET_MS 3600000u
+// The sign-in's backoff (moy_webhost.c's header): wrong credentials a source
+// has free, wrong ones from anywhere before every source not signed in waits,
+// the first window, its cap (each wrong one past the free ones doubles it),
+// the sources remembered, and the quiet that clears the count from anywhere.
+#define MOY_WEB_AUTH_FREE 10
+#define MOY_WEB_AUTH_FREE_ALL 30
+#define MOY_WEB_AUTH_WAIT_MS 1000u
+#define MOY_WEB_AUTH_WAIT_MAX_MS 300000u
+#define MOY_WEB_AUTH_SOURCES 8
+#define MOY_WEB_AUTH_FORGET_MS 3600000u
 
 enum {
     MOY_WEB_EV_SHELF = 1,           // a batch changed the shelf: rescan
     MOY_WEB_EV_STOPPED = 2,         // the listener closed (the goodbye ran out)
+    MOY_WEB_EV_PAIRED = 4,          // a browser paired: the QR's token is spent
 };
 
 typedef struct {
@@ -256,7 +254,8 @@ typedef struct {
     const char *carts;              // the carts root
     const char *files;              // the files root, NULL when there is none
     const char *kinds;              // the files root's kinds (moy_sync_store_t's)
-    const char *pin;                // NULL or "": open end to end
+    const char *system;             // the system folder (webkeys, password); NULL: open,
+                                    // which only a host may be (a board refuses then)
     const char *defer;              // the paths the VM answers, NUL-separated, "" last
     int64_t epoch;                  // seconds the VM's clock starts after 1970's
 } moy_web_cfg_t;
@@ -278,7 +277,6 @@ int moy_web_start(const moy_web_cfg_t *cfg);
 // Stop. With `why`, answer every request with {"error":"closing","why":...}
 // for MOY_WEB_CLOSING_MS first; without, close now.
 void moy_web_stop(const char *why);
-void moy_web_set_pin(const char *pin);
 // One poll: accept and serve up to MOY_WEB_POLL_MAX connections. 1 when it
 // did any work.
 int moy_web_poll(void);
@@ -290,6 +288,16 @@ uint32_t moy_web_events(void);      // the pending events, cleared
 #define MOY_WEB_SHELF_BYTES 256u
 #define MOY_WEB_SHELF_ALL ((size_t)-1)
 size_t moy_web_shelf(char *out, size_t cap);
+
+// The sign-in's state, kept in `system` (moy_webauth.h): the sign-in set up
+// over that folder (it need not serve), the board's id and a fresh QR token
+// (32 hex digits, "" while the sign-in is off), the paired browsers ("KID
+// CREATED SEEN NAME" a line) and dropping one ("all": every one).
+int moy_web_auth(const char *system, int64_t epoch);
+void moy_web_board_id(char out[33]);
+void moy_web_token(char out[33]);
+size_t moy_web_keys(char *out, size_t cap);
+int moy_web_key_drop(const char *kid);
 
 // The parked request: 1 and its spans (good until moy_web_answer), or 0.
 int moy_web_take(const char **method, size_t *method_n, const char **target,
@@ -303,12 +311,16 @@ void moy_web_abort(void);
 // 0, or the errno the bind failed with. A listener already on `port` stays.
 int moy_web_bind(uint16_t port);
 
-// The router without a socket: a request's whole response appended to `out`
-// (moy_net_alloc'd, grown as needed; `*out_n` its length), or 0 when the
-// request is one the VM answers. The host's tests and the dev server.
+// The router without a socket (the host's tests and seam): a request's whole
+// response appended to `out` (moy_net_alloc'd, grown as needed; `*out_n` its
+// length), or 0 when the request is one the VM answers: then `body` is opened
+// in place, `*out_n` its plain length, and the VM's response goes through
+// moy_web_handle_answer, which seals it as the request was (a plain copy on
+// the open host) into `out` the same way: 0, or MOY_ENOMEM.
 int moy_web_handle(const char *method, size_t method_n, const char *target,
-                   size_t target_n, const char *body, size_t body_n,
+                   size_t target_n, char *body, size_t body_n,
                    char **out, size_t *out_n);
+int moy_web_handle_answer(const char *resp, size_t n, char **out, size_t *out_n);
 
 // A store root as the pull's JSON object, into `out` as moy_web_handle's.
 // `kinds` restricts the top-level folders walked (NULL: every one).
@@ -351,9 +363,10 @@ int moy_wc_on(const moy_web_cfg_t *cfg, uint32_t ip);
 void moy_wc_off(const char *why);
 int moy_wc_poll(void);              // 1 when the state moved
 void moy_wc_state(moy_wc_state_t *out);
-void moy_wc_set_pin(const char *pin);
 void moy_wc_park(int on);
-// "http://a.b.c.d[:port]/" (with "?pin=..." when `paired`): its length, 0 with no address.
+// "http://a.b.c.d[:port]/" (with "#t=TOKEN&b=ID" when `paired`: the QR's
+// link, a token minted for it, both base64url, ID the board id's first 8
+// bytes): its length, 0 with no address.
 size_t moy_wc_url(char *out, size_t cap, int paired);
 
 // The kernel's link where the image has one: whether it holds an address.
@@ -371,7 +384,7 @@ int moy_net_dialing(void);
 // routes it where the board has a pin table. A pin is driven under a lease
 // (moy_gpio.c's header): one another process holds is refused busy.
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
-                     size_t bn, const char *pin, char *out, size_t cap);
+                     size_t bn, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
 // MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).

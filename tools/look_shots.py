@@ -551,7 +551,6 @@ def _saver(g, ws):
 
 def _web(g, ws):
     _settings(g, ws)
-    ws.system.set("web_pin", "4821")
     if ws.webhost is None:
         ws.webhost = _LookWebHost()
     if not ws.webhost_serving():
@@ -574,7 +573,7 @@ class _LookWebHost:
         return "http://192.168.1.42/"
 
     def paired_url(self):
-        return "http://192.168.1.42/?pin=4821"
+        return "http://192.168.1.42/#t=Mk9yQ3hTbFdQSEV4dkZq&b=xZ7aKq2bYEo"
 
 
 _SCRIPT = ("print(\"Hello! I'm Ada's first script.\")\n"

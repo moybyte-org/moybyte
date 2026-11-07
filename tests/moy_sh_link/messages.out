@@ -119,24 +119,24 @@ drew=1
 |\e[2mo try again.\e[0m
 |
 want=0 size=40x8 sized=0 out=0
-== the pin refused, then a wait
+== the sign-in refused, then a wait
 drew=1
-|\e[2mess Enter to connect again.\e[0m
 |\e[2mThe board does not answer. Press Enter t\e[0m
 |\e[2mo try again.\e[0m
-|\e[2mThe board refused the pin. Enter it on t\e[0m
-|\e[2mhe page, then press Enter.\e[0m
-|\e[2mToo many wrong pins: wait 3 s, then pres\e[0m
-|\e[2ms Enter.\e[0m
+|\e[2mThe board no longer takes this browser.\e[0m
+|\e[2mPair it again (reload the page), then pr\e[0m
+|\e[2mess Enter.\e[0m
+|\e[2mToo many wrong sign-ins: wait 3 s, then\e[0m
+|\e[2mpress Enter.\e[0m
 |
 want=0 size=40x8 sized=0 out=0
 == the board's face is SSH's
 drew=1
-|\e[2mo try again.\e[0m
-|\e[2mThe board refused the pin. Enter it on t\e[0m
-|\e[2mhe page, then press Enter.\e[0m
-|\e[2mToo many wrong pins: wait 3 s, then pres\e[0m
-|\e[2ms Enter.\e[0m
+|\e[2mThe board no longer takes this browser.\e[0m
+|\e[2mPair it again (reload the page), then pr\e[0m
+|\e[2mess Enter.\e[0m
+|\e[2mToo many wrong sign-ins: wait 3 s, then\e[0m
+|\e[2mpress Enter.\e[0m
 |\e[2mThe board's shell is in an SSH session.\e[0m
 |\e[2mPress Enter to try again.\e[0m
 |

@@ -125,7 +125,7 @@ def test_the_face_reads_the_table_and_refuses_a_broken_entry():
             ui_draw.s("no.such_id")
     finally:
         ui_draw._C.str_reset()
-    assert ui_draw.s("web.pin") == en["web.pin"]
+    assert ui_draw.s("web.open") == en["web.open"]
 
 
 # --- the pseudo-locale ------------------------------------------------------------

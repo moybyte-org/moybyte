@@ -50,7 +50,8 @@ as carts are (`.claude/rules/web.md`, two web modes).
    bundle only, or decide the Zero's flash first (§1).
 4. **The pin suffices on a console; the Zero is an owner call** (§4). Before
    any shell sits behind the pin, the webhost needs a backoff on wrong pins:
-   it is four digits and nothing limits guesses.
+   it is four digits and nothing limits guesses. (The pin is gone since
+   2026-11-07: device keys and sealed sessions, `system.md` §3.)
 5. **The same socket becomes the board link**: channels for the shell, the
    pins, a leased UART, a device API's events, each opened as the board's
    own process under the board's lease table and consent (§7).
@@ -204,6 +205,11 @@ Terminal app on a board-served page opens `remote` instead of a local
 session. The key rows, the theme and the grid are the face's.
 
 ## 4. Sign-in
+
+**Superseded 2026-11-07** by the browser sign-in (`system.md` §3): a paired
+browser's device key and a sealed session replaced the pin on every route,
+the Zero's included, because four digits read in the clear were a weak gate
+for a shell. The reasoning below is what the pin decision rested on.
 
 **On a console, a pin holder can already run any code.** A pinned `POST
 /sync` writes any file of the carts root, a cart's `main.py` and manifest

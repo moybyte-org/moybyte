@@ -113,12 +113,16 @@ nor those docs will warn you about:
   both ends without a byte of history on the wire. **The wire predicate itself
   never moves**: `_skip` refuses journal paths and a board-mode batch is
   byte-identical to what it always was.
-- **THE PIN GATES EVERYTHING** (owner call), reversing the earlier read-half-open
-  design: handing any device on the WiFi a child's whole cart store for the asking
-  was the thing being fixed. Only the boot assets and `GET /sync` are open, by
-  necessity. **A GET carries its pin the only place a GET can**, so the request
-  parser (`moy_http_parse`) keeps the query string — stripping it once spent the
-  credential before any handler saw it.
+- **THE SIGN-IN GATES EVERYTHING** (owner call), reversing the earlier
+  read-half-open design: handing any device on the WiFi a child's whole cart
+  store for the asking was the thing being fixed. Only the boot assets and `GET
+  /sync` are open, by necessity. Since 2026-11-07 the gate is a paired
+  browser's device key and a sealed session (`docs/os_2026-11/system.md` §3,
+  the protocol `native/moy_net/moy_seal.h`): a request names its session and
+  sequence number on the query, so the request parser (`moy_http_parse`) keeps
+  the query string, and its body is AES-GCM opened in place before a route
+  reads it. A route the VM answers (`/run`, `/update`, the system root's
+  batches) parks with its body opened, and the C seals what the VM answers.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
@@ -132,9 +136,9 @@ nor those docs will warn you about:
   because a torn `system/settings` boots the console on its defaults. **On a
   board the root is the VM's, never the C's**: the page seeds from `GET
   /console.json` and pushes `{"v": 2, "root": "system"}` batches, which the C
-  parks (pin checked) for `moy_webhost.ConsoleSystem`; the board is of record
+  parks (its seal checked) for `moy_webhost.ConsoleSystem`; the board is of record
   and takes a page's change KEY BY KEY (`moy_sync.SYSTEM_KEYS`: an unknown key
-  is LOCAL, the pin, the update channel and UNKNOWN SOURCES are never sent and
+  is LOCAL, the update channel and UNKNOWN SOURCES are never sent and
   never taken, the badges are a union). Its directory is the carts folder's
   parent and proves nothing, so the page watches it only when the pull
   answered (the worker's `seeded` list); firmware without it 404s the pull and
@@ -238,10 +242,9 @@ nor those docs will warn you about:
   the WiFi driver's link has an address (the kernel dials the network it kept)
   and parks the glass then, and a join that outlives `MOY_WC_JOIN_MS` fails
   into the row's label. Only the dev word `web` waits for the outcome. The QR encoder is ours because there is no library on a board and
-  the pin is not a constant anything could be baked with. **The pin is read at
-  `start()`, never at construction** — boards build the webhost before
-  system/settings is loaded, so a pin captured then is one minted against an empty
-  store.
+  the QR's pairing token is minted each time the screen draws it. **The sign-in's
+  system folder is read at `start()`, never at construction** — boards build the
+  webhost before the store is up.
 - **Two Makefile patches are load-bearing and non-obvious.** `-Wno-unknown-pragmas`
   must be appended to the PORT's CFLAGS, not `CFLAGS_USERMOD`: py.mk folds usermod
   flags in at its include and the port adds `-Wall` afterwards, which re-enables

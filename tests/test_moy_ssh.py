@@ -26,6 +26,7 @@ import time
 import pytest
 
 import test_moy_sh as SH
+from runtime.host import seal_binding
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOD = os.path.join(ROOT, "native", "moy_ssh")
@@ -58,7 +59,7 @@ def _build(out):
              "-I" + os.path.join(DB, "src"),
              "-I" + os.path.join(DB, "libtomcrypt", "src", "headers"),
              "-I" + os.path.join(DB, "libtommath"),
-             "-I" + TTY,
+             "-I" + TTY, "-I" + os.path.join(native, "moy_net"),
              "-I" + os.path.join(native, "moy_sh"), "-I" + os.path.join(native, "moy_store"),
              "-I" + os.path.join(native, "moy_kernel"),
              "-DDROPBEAR_SERVER", "-DLOCALOPTIONS_H_EXISTS", "-DLTC_SOURCE",
@@ -76,7 +77,7 @@ def _build(out):
     subprocess.run([cc] + SH.CFLAGS + ["-Wl,--gc-sections", "-Wl,--wrap=moy_tty_pair",
                                        "-Wl,--wrap=send",
                                        "-o", exe] + objs + shell
-                   + ["-lpthread"], check=True)
+                   + [seal_binding.archive(), "-lpthread"], check=True)
     return exe
 
 
@@ -562,3 +563,20 @@ def test_up_at_the_prompt_walks_the_lines_run_before(harness):
                              (b"exit\r", 0.3)))
     lines = [ln for ln in out.replace(b"\r", b"").split(b"\n") if ln in (b"one", b"two", b"o_ne")]
     assert lines == [b"one", b"two", b"two", b"one", b"o_ne"], out
+
+
+def test_the_consoles_fingerprint_is_the_one_ssh_sees(harness, monkeypatch):
+    """`passwd` and Settings show the host key's fingerprint
+    (ssh_service.fingerprint, read from the key file the server wrote) so a
+    person can check a first connection reached this console: it is the one
+    OpenSSH computes from the key the server offers."""
+    from runtime.system import ssh_service
+    r = ssh(harness, PASSWORD, "moy@127.0.0.1", "echo in")
+    assert r.returncode == 0, r.stderr
+    monkeypatch.setattr(ssh_service, "system_dir", lambda ws: str(harness["system"]))
+    mine = ssh_service.fingerprint(None)
+    scan = subprocess.run(["ssh-keyscan", "-t", "ed25519", "-p", str(harness["port"]),
+                           "127.0.0.1"], capture_output=True, timeout=30)
+    seen = subprocess.run(["ssh-keygen", "-lf", "-"], input=scan.stdout,
+                          capture_output=True, timeout=30).stdout.decode()
+    assert mine and mine.startswith("SHA256:") and mine in seen, (mine, seen)

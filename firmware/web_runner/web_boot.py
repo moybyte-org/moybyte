@@ -898,13 +898,6 @@ def store_mode(mode=None, seeded=None):
     return ""
 
 
-def sync_config(pin=None):
-    """The page's ?pin= (if any), forwarded by the worker after init -- it
-    rides inside every batch body, where the board's WebHost checks it."""
-    _S["sync_pin"] = pin or None
-    return ""
-
-
 def sync_poll_json():
     """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
     batch is already awaiting its answer). The worker calls this about once a
@@ -923,7 +916,7 @@ def sync_poll_json():
             return ""
     for w in live:
         w.sweep()
-        body = w.take_json(_S.get("sync_pin"))
+        body = w.take_json()
         if body:
             _S["sync_took"] = w.root_id
             return body
@@ -1054,7 +1047,7 @@ def update_poll_json():
     there is nothing to send it answers "" and `update_wants_poll` decides
     whether to GET instead."""
     u = _S.get("update")
-    return u.take_json(_S.get("sync_pin")) if u is not None else ""
+    return u.take_json() if u is not None else ""
 
 
 def update_wants_poll():
@@ -1087,7 +1080,7 @@ def gpio_poll_json():
     """The next batch of queued pin ops, or "" -- the worker POSTs it to the
     relative /gpio of whoever served the page, exactly like the sync push."""
     g = _S.get("gpio")
-    return g.take_json(_S.get("sync_pin")) if g is not None else ""
+    return g.take_json() if g is not None else ""
 
 
 def gpio_ack_json(ok, text=""):

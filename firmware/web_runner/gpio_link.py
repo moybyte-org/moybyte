@@ -87,9 +87,9 @@ class GpioLink:
 
     # -- the pump ------------------------------------------------------------
 
-    def take_json(self, pin=None):
+    def take_json(self):
         """The next wire batch, or "" -- nothing to say, or one already in
-        flight. `pin` is the page's `?pin=`, which the board checks."""
+        flight."""
         if self.dead or self._sent is not None:
             return ""
         if not self._writes and not self._watch:
@@ -101,10 +101,7 @@ class GpioLink:
             ops.append({"p": n, "mode": "read"})
         self._sent = self._writes
         self._writes = {}
-        doc = {"v": PROTOCOL_V, "ops": ops}
-        if pin:
-            doc["pin"] = pin
-        return json.dumps(doc)
+        return json.dumps({"v": PROTOCOL_V, "ops": ops})
 
     def ack(self, ok, text=""):
         """Settle the in-flight batch. `text` is the board's answer body, whose

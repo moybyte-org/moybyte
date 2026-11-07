@@ -9,12 +9,9 @@ that verified the feature on 2026-08-25, committed so it stays one command:
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_sync_e2e.py
 
-Two runs now. The second one gives the twin a PIN (`--pin`, which routes
-through moy_webhost's own gate predicate) and drives the pairing gesture the
-2026-08-25 owner call created: a page that arrives without one is refused
-everything but the boot assets and has to ask for the pin in the page. The dev
-loop itself stays pinless and is meant to -- a password in the way of a rebuild
-is a password people route around -- so the flag exists for exactly this.
+The twin is an open host (no sign-in, as a host with no system folder is);
+the sign-in and its sealed routes run against the board's own C in
+tests/test_web_term_e2e.py.
 
 Env-gated like the on-glass suites, not tool-gated: it costs ~40s and a
 Chrome window, which does not belong in every `make test`. Prerequisites
@@ -58,19 +55,11 @@ def _seeded_store(tmp_path):
 
 
 @contextlib.contextmanager
-def _twin(store, pin=None, backoff=None):
-    """serve.py's board twin over `store`, up and answering, then torn down.
-
-    The health check is GET /sync and not /carts.json, because under `--pin`
-    the latter is a 403 -- which is the feature, and would read here as a twin
-    that never came up."""
+def _twin(store):
+    """serve.py's board twin over `store`, up and answering, then torn down."""
     web_e2e.warm_host_library()
     port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
-    if pin:
-        argv += ["--pin", pin]
-    if backoff:
-        argv += ["--pin-backoff", backoff]
     server = subprocess.Popen(argv, cwd=RUNNER, stdout=subprocess.DEVNULL,
                               stderr=subprocess.STDOUT)
     base = "http://127.0.0.1:%d" % port
@@ -150,57 +139,6 @@ def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
         assert "main.py" in {e["file"] for e in entries}, entries
 
 
-def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
-    """THE PIN GATES EVERYTHING (2026-08-25), so a page opened by hand -- typed
-    address, no QR -- can read nothing until it asks. This drives the whole
-    gesture in a real browser: the refused boot, the in-page prompt, a WRONG pin
-    coming back with a plain message, the right one landing, and a shelf that is
-    real enough to make a cart on.
-
-    The prompt is deliberately not `window.prompt`, and this test is half the
-    reason: a native dialog cannot be filled by CDP, screenshotted, or styled.
-    """
-    web_e2e.require("sync", "pin")
-    store = _seeded_store(tmp_path)
-    with _twin(store, pin="4321") as base:
-        # The gate itself, before any browser is involved.
-        with pytest.raises(urllib.error.HTTPError) as err:
-            urllib.request.urlopen(base + "/carts.json", timeout=5)
-        assert err.value.code == 403
-        assert json.loads(err.value.read()) == {"error": "pin"}
-        urllib.request.urlopen(base + "/carts.json?pin=4321", timeout=5).read()
-
-        out = _browsershot("pin_prompt.json", base, tmp_path / "shots")
-        # browsershot prints each `js` result as JSON, and the expressions here
-        # return JSON themselves -- so the line is a JSON string CONTAINING one.
-        # Keyed by `at` rather than by index: a scenario grows steps.
-        probes = {}
-        for m in re.findall(r"^   js -> (.*)$", out, re.M):
-            d = json.loads(json.loads(m))
-            probes[d["at"]] = d
-        for at in ("prompted", "refused", "opened"):
-            assert at in probes, (at, out[-3000:])
-        prompted, refused, opened = (probes["prompted"], probes["refused"],
-                                     probes["opened"])
-
-        assert prompted["overlay"] == "flex", prompted
-        assert prompted["msg"] == "", "nothing was tried yet"
-        assert refused["overlay"] == "flex", refused
-        assert "did not work" in refused["msg"], refused
-        assert "pin=0000" in refused["search"], refused
-        assert opened["overlay"] == "none", opened
-        assert "pin=4321" in opened["search"], opened
-        assert opened["stored"] == "4321", \
-            "the pin was not remembered; the kid retypes it every visit"
-        assert opened["status"] == "live", opened
-
-        # ...and the shelf behind it is the real console: a cart made on it
-        # reaches the store through the same pinned /sync.
-        new = store / "local.new_cart.moy"
-        assert new.is_dir(), \
-            "no cart reached the store after pairing:\n%s" % out[-2000:]
-
-
 def _probes(out):
     """browsershot's `js` results, keyed by their `at`. Each line is a JSON
     string CONTAINING the JSON the expression returned."""
@@ -209,33 +147,6 @@ def _probes(out):
         d = json.loads(json.loads(m))
         probes[d["at"]] = d
     return probes
-
-
-def test_a_board_holding_wrong_pins_off_says_how_long(tmp_path):
-    """THE PIN'S BACKOFF (native/moy_net/moy_webhost.c) answers 429
-    {"error":"wait","ms":N} while a source waits, its pin unread. The page
-    must say that -- in the one sentence every pin-gated call uses -- rather
-    than "that pin did not work", which would send a kid guessing again into a
-    window that only grows, and it must keep the pin it was given, since
-    nothing judged it."""
-    web_e2e.require("sync", "pin")
-    store = _seeded_store(tmp_path)
-    with _twin(store, pin="4321", backoff="1,60000") as base:
-        out = _browsershot("pin_wait.json", base, tmp_path / "shots")
-        probes = _probes(out)
-        for at in ("waiting", "still"):
-            assert at in probes, (at, out[-3000:])
-        wait = re.compile(r"^Too many wrong pins -- try again in \d+ s$")
-        assert probes["waiting"]["overlay"] == "flex", probes["waiting"]
-        assert wait.match(probes["waiting"]["msg"]), probes["waiting"]
-        assert wait.match(probes["waiting"]["status"]), probes["waiting"]
-        still = probes["still"]
-        assert still["overlay"] == "flex", still
-        assert wait.match(still["msg"]), still
-        assert "pin=4321" in still["search"], still
-        assert still["stored"] == "4321", \
-            "a wait judged nothing, so the pin it was given stays remembered"
-        assert not (store / "local.new_cart.moy").exists()
 
 
 def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):

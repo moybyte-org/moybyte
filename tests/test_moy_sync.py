@@ -39,11 +39,11 @@ def _bump_mtime(path):
     os.utime(path, (st.st_atime, st.st_mtime + 2))
 
 
-def _drain_batches(w, pin=None):
+def _drain_batches(w):
     """Every wire batch the watcher produces, acked ok -- the worker's pump."""
     out = []
     while True:
-        body = w.take_json(pin)
+        body = w.take_json()
         if not body:
             return out
         out.append(json.loads(body))
@@ -271,13 +271,13 @@ def test_publish_without_staged_tmp_is_an_error_not_a_truncation(tmp_path):
 
 
 def test_parse_batch_refuses_malformed_bodies():
-    none = (None, None, None)
+    none = (None, None)
     assert parse_batch(b"not json") == none
     assert parse_batch(b"[1,2]") == none
     assert parse_batch(json.dumps({"v": 99, "ops": []})) == none
     assert parse_batch(json.dumps({"v": 1, "ops": {}})) == none
-    ops, pin, root = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
-    assert (ops, pin, root) == ([], "77", "carts")
+    ops, root = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
+    assert (ops, root) == ([], "carts"), "a field the envelope no longer has is read past"
 
 
 # ---------------------------------------------------------------------------
@@ -502,18 +502,18 @@ def test_a_big_file_spans_batches_and_survives_a_mid_file_drop(tmp_path):
     assert published and "".join(parts) == big
 
 
-def test_take_json_carries_the_protocol_and_the_pin(tmp_path):
+def test_take_json_carries_the_protocol(tmp_path):
     root = _store(tmp_path)
     w = StoreWatcher(str(root))
     p = root / "hop.moy" / "main.py"
     p.write_text("v2")
     _bump_mtime(p)
     w.sweep()
-    doc = json.loads(w.take_json("1234"))
-    assert doc["v"] == moy_sync.PROTOCOL_V and doc["pin"] == "1234"
+    doc = json.loads(w.take_json())
+    assert doc["v"] == moy_sync.PROTOCOL_V and "pin" not in doc
     assert "root" not in doc, "a carts batch stays byte-shaped as v1 boards read it"
-    ops, pin, root = parse_batch(json.dumps(doc))
-    assert pin == "1234" and ops == doc["ops"] and root == "carts"
+    ops, root = parse_batch(json.dumps(doc))
+    assert ops == doc["ops"] and root == "carts"
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +550,7 @@ def test_a_files_batch_names_its_root_and_a_v1_board_refuses_it():
     its apply would read `drawings/sunset.moyimg` as a cart-relative path and
     write it into the CARTS root, inventing a `drawings` cart on the shelf."""
     body = _files_batch({"p": "drawings/sunset.moyimg", "t": "0,"})
-    ops, _pin, root = parse_batch(body)
+    ops, root = parse_batch(body)
     assert root == FILES_ROOT_ID and len(ops) == 1
 
     def old_parse_batch(doc):                # the shipped v1 receiver, verbatim
@@ -576,10 +576,10 @@ def test_a_v1_batch_may_not_smuggle_another_root():
     """The version is what a v1 receiver checks, so the two must never be able
     to disagree about the same bytes."""
     assert parse_batch(json.dumps(
-        {"v": 1, "root": "files", "ops": []})) == (None, None, None)
+        {"v": 1, "root": "files", "ops": []})) == (None, None)
     assert parse_batch(json.dumps(
-        {"v": 2, "root": "wifi", "ops": []})) == (None, None, None)
-    assert parse_batch(json.dumps({"v": 2, "ops": []})) == (None, None, None)
+        {"v": 2, "root": "wifi", "ops": []})) == (None, None)
+    assert parse_batch(json.dumps({"v": 2, "ops": []})) == (None, None)
 
 
 def test_files_paths_must_start_with_a_kind_the_store_knows(tmp_path):
@@ -657,11 +657,11 @@ def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     p.write_text("2,")
     _bump_mtime(p)
     w.sweep()
-    doc = json.loads(w.take_json("1234"))
+    doc = json.loads(w.take_json())
     assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED
-    assert doc["root"] == FILES_ROOT_ID and doc["pin"] == "1234"
-    ops, pin, root_id = parse_batch(json.dumps(doc))
-    assert (pin, root_id) == ("1234", FILES_ROOT_ID)
+    assert doc["root"] == FILES_ROOT_ID
+    ops, root_id = parse_batch(json.dumps(doc))
+    assert root_id == FILES_ROOT_ID
     assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
 
 
@@ -681,7 +681,7 @@ def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
     p.write_text("# Chapter two")
     _bump_mtime(p)
     assert w.sweep()
-    ops, _pin, root_id = parse_batch(w.take_json("1234"))
+    ops, root_id = parse_batch(w.take_json())
     assert root_id == FILES_ROOT_ID
     assert ops == [{"p": "docs/story.md", "t": "# Chapter two"}]
 
@@ -730,7 +730,6 @@ def _wired(tmp_path, files=True):
     wb._S["store_mode"] = None
     wb._S["watchers"] = wb._build_watchers(str(carts), False)
     wb._S.pop("sync_took", None)
-    wb._S.pop("sync_pin", None)
     return wb, carts
 
 
@@ -893,7 +892,7 @@ def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):
     so nothing lands even where a caller hands it one (the VM merges it)."""
     body = json.dumps({"v": moy_sync.PROTOCOL_V_ROOTED, "root": "system",
                        "ops": [{"p": "system/settings", "t": ""}]})
-    ops, _pin, root_id = parse_batch(body)
+    ops, root_id = parse_batch(body)
     assert root_id == "system" and ops == [{"p": "system/settings", "t": ""}]
     root = _store(tmp_path)
     applied, errors, _shelf = apply_ops(str(root), ops, root_id)
@@ -928,7 +927,6 @@ def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
     wb._S["store_mode"] = "site"
     wb._S["watchers"] = wb._build_watchers(str(top / "carts"), True)
     wb._S.pop("sync_took", None)
-    wb._S.pop("sync_pin", None)
     for p, text in ((top / "system" / "settings", 'theme = "night"\n'),
                     (top / "carts" / "hop.moy" / "main.py", "x = 3\n")):
         p.write_text(text)
@@ -972,7 +970,7 @@ def _push_all(src, dst, journal=False):
         body = w.take_json()
         if not body:
             return sent, dirty
-        ops, _pin, rid = parse_batch(body)
+        ops, rid = parse_batch(body)
         applied, errors, shelf = apply_ops(str(dst), ops, rid, journal=journal)
         assert not errors, errors
         dirty = dirty or shelf

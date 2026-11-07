@@ -61,7 +61,9 @@ else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAs
 if(m.report)p8Report(m.report,m.ok,m.dir);}
 else if(m.t==="update"){updBound(m);}
 else if(m.t==="edited"){window.__moyEdited=m.s;pzSay(m.s,!m.ok);}
-else if(m.t==="pin"){pinAsk(m.tried,m.wait);}
+else if(m.t==="pair"){pinAsk(m);}
+else if(m.t==="key"){keyGot(m);}
+else if(m.t==="unkey"){keyDrop(m.id);}
 else if(m.t==="wait"){linkWait(m.s);}
 else if(m.t==="pod"){podSaid(m.s);}
 else if(m.t==="pick"){pkAsk(m);}
@@ -86,54 +88,61 @@ var cm=m.msg==null?"":String(m.msg);var cl=(cm||cs).split("\n").slice(-12);
 if(cm&&cs.indexOf(cm)===0)cl=cl.concat(cs.slice(cm.length).split("\n")
 .filter(function(x){return x.trim();}).slice(0,4));
 ce.textContent=cl.join("\n");ce.style.display="block";}}
-// ---- the pin prompt (2026-08-25) --------------------------------------------
-// A board serves its console to anyone and its CARTS to nobody without the
-// pairing pin, so a page opened by hand -- typing the address instead of
-// scanning the QR -- has to ask. The worker discovers it (carts.json answers
-// 403) and stops before booting the VM; this is the asking.
+// ---- pairing (worker.js, THE SIGN-IN) -------------------------------------
+// A board serves its console to anyone and its carts only to a browser it has
+// paired: by the QR on its screen (a single-use token after the url's #), or
+// by the console's password. Pairing leaves this browser a DEVICE KEY, kept
+// here per board id in localStorage, and every later visit signs in with it
+// unasked. The crypto is the worker's wasm (no WebCrypto over plain HTTP); the
+// page keeps the keys and asks the questions.
 //
-// REMEMBERED PER ORIGIN, in localStorage: a kid types four digits once per
-// browser per board, not once per visit. Keyed by origin because that IS the
-// board -- two consoles on one network are two origins with two pins, and one
-// key would have them overwriting each other.
-//
-// SUBMITTING RELOADS with ?pin= on the url rather than re-messaging the worker.
-// It costs a wasm re-fetch (~1.5s off a board) on a gesture that happens once,
-// and it buys the one thing worth having here: after it, every path that reads
-// location.search -- the worker's own boot, PLAY ON DEVICE below, the sync
-// pump's batches -- sees the pin with no second source of truth to keep in step.
+// A QR ARRIVAL'S TOKEN leaves the url before anything else runs, so a reload,
+// a bookmark or a shared tab never carries it. An old `?pin=` link is dropped
+// the same way: the board refuses pins.
 var PINEL=document.getElementById("pin"),PINF=document.getElementById("pinf"),
-PINB=document.getElementById("pinb"),PINM=document.getElementById("pinm");
-function pinKey(){return "moybyte.pin:"+location.origin;}
-function pinStored(){try{return localStorage.getItem(pinKey())||"";}
-catch(e){return "";}}
-// Called by the loader BEFORE the worker is constructed: if this browser
-// already knows this board's pin, put it on the url so the worker's very first
-// carts.json carries it and nobody is asked anything.
-window.__moyPinRestore=function(){
-try{var q=new URLSearchParams(location.search);
-if(q.get("pin"))return;                       // a QR arrival: leave it alone
-var p=pinStored();if(!p)return;
-q.set("pin",p);
-history.replaceState(null,"","?"+q.toString()+location.hash);}
-catch(e){/* no history, no storage: the prompt still works */}};
-function pinAsk(tried,wait){if(!PINEL)return;
-// A pin was offered and refused: say so plainly. Without this the same empty
-// box comes back and reads as the page having ignored the keystrokes. A WAIT
-// (the board holding wrong pins off) never looked at the pin, so the
-// remembered one is kept.
-PINM.textContent=wait||(tried?"that pin did not work -- try again":"");
-if(tried&&!wait){try{localStorage.removeItem(pinKey());}catch(e){}}
-PINEL.style.display="flex";
-try{PINF.value="";PINF.focus();}catch(e){}}
-function pinSubmit(){var v=(PINF.value||"").trim();
-if(!v){PINM.textContent="type the four digits";return;}
-try{localStorage.setItem(pinKey(),v);}catch(e){/* private window: this visit only */}
-// Keep whatever the url already said (?handheld=1, ?dev=1, ?cart=...): dropping
-// those would answer the pin question by silently changing which console loads.
-var q=new URLSearchParams(location.search);q.set("pin",v);
-PINM.textContent="opening...";
-location.search="?"+q.toString();}
+PINB=document.getElementById("pinb"),PINM=document.getElementById("pinm"),
+PINP=document.getElementById("pinp"),PINR=document.getElementById("pinr");
+var KEYS="moybyte.keys";
+function keysStored(){try{return JSON.parse(localStorage.getItem(KEYS)||"{}")||{};}
+catch(e){return {};}}
+function keySave(id,kid,key){var k=keysStored();k[id]={kid:kid,key:key};
+try{localStorage.setItem(KEYS,JSON.stringify(k));}catch(e){/* private window: this visit only */}}
+function keyDrop(id){var k=keysStored();if(!k[id])return;delete k[id];
+try{localStorage.setItem(KEYS,JSON.stringify(k));}catch(e){}}
+// What a browser calls itself in the console's list of paired browsers.
+function browserName(){var u=navigator.userAgent||"";
+var b=/Edg\//.test(u)?"Edge":/Firefox\//.test(u)?"Firefox":/Chrome\//.test(u)?"Chrome"
+:/Safari\//.test(u)?"Safari":"A browser";
+var o=/iPhone|iPad/.test(u)?"iOS":/Android/.test(u)?"Android":/Mac OS/.test(u)?"macOS"
+:/Windows/.test(u)?"Windows":/Linux|CrOS/.test(u)?"Linux":"";
+return o?b+" on "+o:b;}
+// Called by the loader BEFORE the worker is constructed: the sign-in's input.
+window.__moySignIn=function(){var tok=null,bid=null;
+try{var h=new URLSearchParams((location.hash||"").replace(/^#/,""));
+tok=h.get("t");bid=h.get("b");
+var q=new URLSearchParams(location.search);var had=q.has("pin");q.delete("pin");
+if(tok||had){var s=q.toString();
+history.replaceState(null,"",location.pathname+(s?"?"+s:""));}}
+catch(e){/* no history: the token is spent on its first use either way */}
+return {keys:keysStored(),token:tok,board:bid,name:browserName()};};
+// The worker's word that pairing is needed: `pw` a password can do it, `why`
+// what went wrong last ("" the first time), `wait` the backoff's sentence.
+function pinAsk(m){if(!PINEL)return;
+PINM.textContent=m.wait||m.why||"";
+PINP.textContent=m.pw?"Scan the code on the console's WEB CONSOLE screen, or type the "
++"console's password.":"Scan the code on the console's WEB CONSOLE screen. To type a "
++"password instead, set one on the console (passwd).";
+PINR.style.display=m.pw?"":"none";
+PINEL.style.display="flex";PINB.disabled=false;
+if(m.pw){try{PINF.value="";PINF.focus();}catch(e){}}}
+function pinSubmit(){var v=PINF.value||"";
+if(!v){PINM.textContent="type the console's password";return;}
+PINM.textContent="pairing...";PINB.disabled=true;
+WORKER.postMessage({t:"password",pw:v,name:browserName()});PINF.value="";}
+// Paired: the key is this browser's from now on, and the page starts again
+// signed in with it.
+function keyGot(m){keySave(m.id,m.kid,m.key);
+if(m.reload){PINM.textContent="paired";location.reload();}}
 if(PINB)PINB.addEventListener("click",pinSubmit);
 if(PINF)PINF.addEventListener("keydown",function(e){
 if(e.key==="Enter"){e.preventDefault();pinSubmit();}});
@@ -295,8 +304,8 @@ fetch("sync",{method:"GET"}).then(function(r){podHost=r.ok;podSync();})
 // cart title arrives on every frame payload, so a string compare is the whole
 // cost and it needs no second detection of a change page_core already tracks.
 function podTick(){if(podLast!==assCart){podLast=assCart;podSync();}}
-// The POST is the worker's (podRun), with the pin it read off this page's url,
-// so a refusal is worded where every pin-gated call's is.
+// The POST is the worker's (podRun), sealed like every signed-in call, so a
+// refusal is worded where theirs are.
 var podWas="";
 if(POD)POD.addEventListener("click",function(e){e.preventDefault();
 if(!assCart||!WORKER)return;
@@ -356,8 +365,8 @@ LNK.style.display="block";
 // Readable by the browser harness without scraping, the way __moyReport is.
 window.__moyLink=kind;}
 window.__moyLinkLost=linkLost;
-// A pin wait on the sync push: the board is answering and holding this page
-// off, so the same panel says why and comes down when a push lands ("").
+// A sign-in wait on the sync push: the board is answering and holding this
+// page off, so the same panel says why and comes down when a push lands ("").
 function linkWait(s){if(linkGone)return;
 if(s){LNKH.textContent=s;
 LNKB.textContent="Your changes wait in this tab until then -- do not reload.";
@@ -417,14 +426,13 @@ try {
   // document is no-store from the board, so a reload always fetches this line
   // fresh, and a changed token makes the worker a different url the cache has
   // never seen.
-  // A pin this browser already knows for this board goes onto the url FIRST, so
-  // the worker's first carts.json carries it and a returning kid is never asked
-  // again (see __moyPinRestore). A QR arrival already has one and is untouched.
-  window.__moyPinRestore();
+  // The sign-in's input FIRST: a QR's token leaves the url before the worker
+  // exists, and the keys this browser holds go with the init.
+  const auth = window.__moySignIn();
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
   // A coarse pointer is a finger: the console's hints start on touch.
-  w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL,
+  w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL, auth: auth,
                   coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches),
                   scheme: moyScheme() });
   // Leaving the page ends the VM with it. A page the back-forward cache keeps

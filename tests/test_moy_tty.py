@@ -1,19 +1,21 @@
 """The web terminal on the host (native/moy_tty, docs/os_2026-11/system.md
-section 3): the kernel's webhost with a pin, its GET /term upgrade handing the
-socket to the bridge, and the board's shell on the face behind it, built with
-the host's compiler (native/moy_tty/host/tty_main.c), driven by a WebSocket
-client written here.
+section 3): the kernel's webhost with its sign-in, its GET /term upgrade
+handing the socket to the bridge, and the board's shell on the face behind
+it, built with the host's compiler (native/moy_tty/host/tty_main.c), driven by
+a WebSocket client written here over the browser's own C
+(tests/seal_client.py), paired by the QR's token.
 
-What it holds: the handshake (the accept key, the `moy.sh` subprotocol); a
-wrong pin refused before any upgrade, and a source past its free wrong pins
-answered 429 {"error":"wait"} whatever pin it sends, the right one included;
-the plain GET /term the page asks why a socket failed; keys in and their echo
-out, gathered into few frames; a resize the shell sees; Ctrl-C ending a
-command; `exit` closing the socket 1000 with its status; a page that closes
-freeing the session for the next; and the face another transport holds
-refusing the page with 1013 "busy".
+What it holds: the handshake (the accept key, the `moy.sh` subprotocol); an
+upgrade with no session, or an old pin's, refused before any upgrade; a
+source past its free wrong sign-ins answered 429 {"error":"wait"}; the sealed
+GET /term the page asks why a socket failed; every frame sealed each way, a
+tampered or replayed one closing the socket 1008 "seal"; a dropped key
+cutting its open terminal 1008 "revoked"; keys in and their echo out,
+gathered into few frames; a resize the shell sees; Ctrl-C ending a command;
+`exit` closing the socket 1000 with its status; a page that closes freeing
+the session for the next; the face another transport holds refusing the page
+with 1013 "busy"; and the open host's plain frames.
 """
-
 import base64
 import hashlib
 import json
@@ -28,7 +30,9 @@ import time
 import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
+import seal_client  # noqa: E402
 import test_moy_sh as SH  # noqa: E402
+from runtime.host import seal_binding  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NATIVE = os.path.join(ROOT, "native")
@@ -37,13 +41,13 @@ NET = os.path.join(NATIVE, "moy_net")
 STORE = os.path.join(NATIVE, "moy_store")
 SPINE = os.path.join(NATIVE, "moy_spine")
 WEB = os.path.join(NATIVE, "moy_web")
-PIN = "4321"
 FILES = "sd/moybyte/files"
 
 TTY_SOURCES = ("moy_tty.c", "moy_tty_sys.c", "moy_tty_sh.c", "moy_tty_ws.c", "moy_tty_sftp.c", "host/tty_main.c")
 NET_SOURCES = [os.path.join(NET, n) for n in (
     "moy_http.c", "moy_net_port.c", "moy_sync.c", "moy_sync_apply.c", "moy_webhost.c",
-    "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_net_host.c")]
+    "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_net_host.c",
+    "moy_webauth.c")]
 NET_SOURCES.append(os.path.join(STORE, "moy_journal.c"))
 
 pytestmark = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler")
@@ -66,7 +70,9 @@ def _build(out):
         _o, err = p.communicate()
         assert p.returncode == 0, (src, err.decode())
     exe = str(out / "tty_main")
-    subprocess.run([cc] + SH.CFLAGS + ["-o", exe] + objs + shell + ["-lpthread"], check=True)
+    seal = seal_binding.archive()
+    subprocess.run([cc] + SH.CFLAGS + ["-o", exe] + objs + shell + [seal, "-lpthread"],
+                   check=True)
     return exe
 
 
@@ -77,7 +83,7 @@ def built(tmp_path_factory):
 
 
 class Host:
-    def __init__(self, exe, out):
+    def __init__(self, exe, out, sealed=True):
         tree = out / "tree"
         for sub in ("carts", "files", "system"):
             (tree / "sd" / "moybyte" / sub).mkdir(parents=True, exist_ok=True)
@@ -88,7 +94,8 @@ class Host:
         self.logf = open(out / "tty.log", "w+")
         env = dict(os.environ, MOY_SH_ROOT=str(tree), ASAN_OPTIONS="detect_leaks=0")
         self.proc = subprocess.Popen(
-            [exe, str(self.port), PIN, str(tree / "sd" / "moybyte" / "carts")],
+            [exe, str(self.port), str(tree / "sd" / "moybyte" / "system") if sealed else "-",
+             str(tree / "sd" / "moybyte" / "carts")],
             stdin=subprocess.PIPE, stdout=self.logf, stderr=subprocess.STDOUT, env=env)
         for _ in range(200):
             if "listening" in self.log():
@@ -113,6 +120,39 @@ class Host:
             time.sleep(0.01)
         raise AssertionError(self.log())
 
+    def wait_line(self, prefix, after=0, timeout=5.0):
+        """The first line from `after` in the log that starts with `prefix`."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            for ln in self.log()[after:].splitlines():
+                if ln.startswith(prefix):
+                    return ln
+            time.sleep(0.02)
+        raise AssertionError("no %r in %s" % (prefix, self.log()[-2000:]))
+
+    def send(self, method, target, body=b""):
+        """One raw HTTP exchange: the response's bytes."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as c:
+            c.sendall(("%s %s HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
+                       % (method, target, len(body))).encode() + body)
+            data = b""
+            while True:
+                k = c.recv(65536)
+                if not k:
+                    return data
+                data += k
+
+    def token(self):
+        at = len(self.log())
+        self.say("token")
+        return self.wait_line("TOKEN ", at).split()[1]
+
+    def browser(self):
+        """A page paired by the QR's token and signed in."""
+        b = seal_client.Browser(self.send)
+        b.pair_token(self.token())
+        return b
+
     def stats(self):
         lines = [ln for ln in self.log().splitlines() if ln.startswith("STATS ")]
         return dict(kv.split("=") for kv in lines[-1].split()[1:])
@@ -126,6 +166,14 @@ class Host:
 @pytest.fixture
 def host(built, tmp_path):
     h = Host(built, tmp_path)
+    h.page = h.browser()
+    yield h
+    h.end()
+
+
+@pytest.fixture
+def open_host(built, tmp_path):
+    h = Host(built, tmp_path, sealed=False)
     yield h
     h.end()
 
@@ -145,14 +193,23 @@ def get(h, target):
 
 
 class WS:
-    """A page's WebSocket: the upgrade, masked frames out, frames in."""
+    """A page's WebSocket: the upgrade, masked frames out, frames in, each
+    sealed under the page's session when the host signs in."""
 
-    def __init__(self, h, pin=PIN, cols=80, rows=24, proto="moy.sh"):
+    def __init__(self, h, cols=80, rows=24, proto="moy.sh", target=None, browser=None):
+        self.page = getattr(h, "page", None) if browser is None else browser
+        self.sealed = self.page is not None and target is None
+        path = "/term?cols=%d&rows=%d" % (cols, rows)
+        if self.sealed:
+            path, _body, seq = self.page.seal("GET", path)
+            seal_client.lib().moy_sw_ws(seq)
+        elif target is not None:
+            path = target
         self.c = socket.create_connection(("127.0.0.1", h.port), timeout=5)
         key = base64.b64encode(os.urandom(16)).decode()
-        req = ("GET /term?pin=%s&cols=%d&rows=%d HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+        req = ("GET %s HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
                "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n"
-               % (pin, cols, rows, key))
+               % (path, key))
         if proto:
             req += "Sec-WebSocket-Protocol: %s\r\n" % proto
         self.c.sendall((req + "\r\n").encode())
@@ -169,10 +226,26 @@ class WS:
             (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
         self.frames = 0
         self.closed = None
+        self.last_up = None
+
+    def keys(self, data):
+        self.send(data)
+
+    def size(self, cols, rows):
+        self.send(json.dumps({"size": [cols, rows]}), op=1)
 
     def send(self, data, op=2):
+        """A message: keys (binary) or the size (text); sealed, its kind's
+        byte first, under a session."""
         if isinstance(data, str):
             data = data.encode()
+        if self.sealed and op in (1, 2):
+            n = seal_client.lib().moy_sw_ws_up(seal_client.put((b"s" if op == 1 else b"k") + data))
+            data, op = seal_client.got(n), 2
+            self.last_up = data
+        self.raw(data, op)
+
+    def raw(self, data, op=2):
         mask = os.urandom(4)
         n = len(data)
         head = bytes([0x80 | op])
@@ -212,12 +285,16 @@ class WS:
                 break
             if op == 2:
                 self.frames += 1
+                if self.sealed:
+                    n = seal_client.lib().moy_sw_ws_down(seal_client.put(pl))
+                    assert n >= 0, "a frame down that does not open"
+                    pl = seal_client.got(n)
                 got += pl
         return got
 
     def close(self):
         try:
-            self.send(b"\x03\xe8", op=8)
+            self.raw(b"\x03\xe8", op=8)
         except OSError:
             pass
         self.c.close()
@@ -244,25 +321,78 @@ def test_the_upgrade_answers_the_key_and_the_subprotocol(host):
     plain.close()
 
 
-def test_a_wrong_pin_is_refused_before_any_upgrade(host):
-    ws = WS(host, pin="0000")
-    assert ws.status == 403
-    assert get(host, "/term?pin=0000") == (403, b'{"error":"pin"}')
-    assert get(host, "/term?pin=%s" % PIN) == (200, b'{"term":1}')
+def test_an_upgrade_with_no_session_is_refused_before_it_upgrades(host):
+    for target in ("/term?cols=80&rows=24", "/term?pin=4321&cols=80&rows=24"):
+        ws = WS(host, target=target)
+        assert ws.status == 401, ws.head
+    assert get(host, "/term?pin=4321") == (401, b'{"error":"session"}')
+    assert host.page.json("GET", "/term") == (200, {"term": 1})
     assert host.stats()["sessions"] == "0"
 
 
-def test_a_source_past_its_free_pins_waits_whatever_pin_it_sends(host):
-    for _ in range(10):
-        assert get(host, "/term?pin=0000")[0] == 403
-    status, body = get(host, "/term?pin=0000")
-    assert status == 403
-    status, body = get(host, "/term?pin=%s" % PIN)
-    assert status == 429, body
-    doc = json.loads(body)
-    assert doc["error"] == "wait" and 0 < doc["ms"] <= 1000
+def test_a_replayed_upgrade_is_refused(host):
+    path, _b, seq = host.page.seal("GET", "/term?cols=80&rows=24")
+    seal_client.lib().moy_sw_ws(seq)
+    first = WS(host, target=path)
+    assert first.status == 101
+    first.close()
+    again = WS(host, target=path)
+    assert again.status == 401, again.head
+
+
+def test_a_source_past_its_free_sign_ins_waits_whatever_it_sends(host):
+    page = seal_client.Browser(host.send)
+    for _ in range(11):
+        with pytest.raises(seal_client.Refused) as e:
+            page.pair_token("00" * 16)
+        assert e.value.status == 403 and e.value.doc == {"error": "token"}
+    with pytest.raises(seal_client.Refused) as e:
+        page.pair_token(host.token())
+    assert e.value.status == 429 and e.value.doc["error"] == "wait"
+    assert 0 < e.value.doc["ms"] <= 1000
+
+
+def test_every_frame_is_sealed_and_a_tampered_one_ends_the_session(host):
     ws = WS(host)
-    assert ws.status == 429
+    out = ws.read_until(b"$ ")
+    assert b"$ " in out and ws.frames > 0
+    ws.raw(b"kecho hi\r")                                # a plain frame under a session
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "seal"), ws.closed
+    wait_stat(host, "live", 0)
+    ws = WS(host)
+    ws.read_until(b"$ ")
+    ws.keys(b"e")
+    ws.read_until(b"e", 2.0)
+    ws.raw(ws.last_up)                                  # the same frame again
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "seal"), ws.closed
+
+
+def test_a_dropped_key_cuts_its_open_terminal(host):
+    ws = WS(host)
+    ws.read_until(b"$ ")
+    at = len(host.log())
+    host.say("drop")
+    assert host.wait_line("DROPPED ", at) == "DROPPED 1"
+    ws.read_until(b"\xff", 3.0)
+    assert ws.closed == (1008, "revoked"), ws.closed
+    wait_stat(host, "live", 0)
+    with pytest.raises(seal_client.Refused) as e:
+        host.page.call("GET", "/term")
+    assert e.value.status == 401
+    with pytest.raises(seal_client.Refused) as e:
+        host.page.sign_in()
+    assert e.value.status == 403 and e.value.doc["error"] == "key"
+
+
+def test_the_open_host_speaks_plain_frames(open_host):
+    ws = WS(open_host)
+    assert ws.status == 101 and not ws.sealed
+    assert b"$ " in ws.read_until(b"$ ")
+    ws.send(b"echo plain\r")
+    assert b"plain\r\n" in ws.read_until(b"plain\r\n")
+    ws.close()
 
 
 def test_keys_go_in_and_their_echo_comes_back_in_few_frames(host):
@@ -288,7 +418,7 @@ def test_a_resize_reaches_the_shell(host):
     resized terminal's last."""
     ws = WS(host, cols=80, rows=24)
     ws.read_until(b"$ ")
-    ws.send('{"size":[100,30]}', op=1)
+    ws.size(100, 30)
     time.sleep(0.4)
     ws.send(b"top\r")
     out = ws.read_until(b"\x1b[30;1H", 5.0)

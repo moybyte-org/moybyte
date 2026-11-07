@@ -45,7 +45,6 @@ COLLABORATORS = ("web", "prefs", "covers", "carts", "look", "history")
 # answer rather than a guess.
 FORWARDS = {
     "web": {
-        "web_pin": "pin",                    # moy_webhost's start-time lambda
         "web_console_url": "url",            # dev_channel's `web`
         "park_web_console": "park",          # layers.py's contract comment
         "stop_web_console": "stop",          # the Guition on-glass suite (serial)

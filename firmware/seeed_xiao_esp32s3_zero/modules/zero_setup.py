@@ -13,7 +13,12 @@ takes to be told about a real one:
 
     GET  /        the form (one small self-contained page, no dependencies)
     GET  /scan    {"nets": [{"ssid", "rssi", "lock"}, ...]} -- what STA can see
-    POST /setup   name + 4-digit pin + ssid + password, urlencoded
+    POST /setup   name + the console's password + ssid + its password, urlencoded
+
+The console's password is how a browser pairs with this board: it has no
+screen for a pairing code, so the password is the only way in, and the form
+will not save without one (native/moy_net/moy_webauth.c; the hash goes into
+the system folder's `password`, as `passwd` writes it on a console).
 
 THE AP IS OPEN, deliberately. A WPA key would have to be printed on the board
 or guessed, and there is nothing behind this AP to protect: it exists only
@@ -124,6 +129,11 @@ SCAN_CACHE_MS = 10000
 # takes and nothing else.
 _NAME_OK = "abcdefghijklmnopqrstuvwxyz0123456789-"
 
+# The board's password: long enough that the pairing's backoff makes guessing
+# it hopeless, short enough to type on a phone.
+CONSOLE_MIN = 8
+CONSOLE_MAX = 64
+
 
 def ap_ssid(mac):
     """`moybyte-zero-XXXX` from the AP interface's MAC (its last two bytes).
@@ -214,9 +224,10 @@ def validate(fields):
     if not name:
         return None, ("The name needs at least one letter or digit "
                       "(a-z, 0-9 and dashes).")
-    pin = str(fields.get("pin") or "").strip()
-    if len(pin) != 4 or not pin.isdigit():
-        return None, "The pin has to be exactly 4 digits."
+    console = str(fields.get("console") or "")
+    if not (CONSOLE_MIN <= len(console) <= CONSOLE_MAX):
+        return None, ("The board's password is between %d and %d characters: a "
+                      "browser types it once, to pair." % (CONSOLE_MIN, CONSOLE_MAX))
     ssid = str(fields.get("ssid") or "").strip()
     if not ssid:
         return None, "Pick a WiFi network, or type its name."
@@ -228,7 +239,7 @@ def validate(fields):
     # would otherwise cost a reboot to discover.
     if password and not (8 <= len(password) <= 63):
         return None, "A WiFi password is between 8 and 63 characters."
-    return {"name": name, "pin": pin,
+    return {"name": name, "console": console,
             "ssid": ssid, "password": password}, None
 
 
@@ -249,9 +260,17 @@ def merge_network(doc, ssid, password):
     return {"networks": [{"ssid": ssid, "password": password}] + keep}
 
 
-def zero_doc(name, pin):
-    """The board's own identity file: the mDNS name and the write PIN."""
-    return {"name": name, "pin": pin}
+def zero_doc(name):
+    """The board's own identity file: the mDNS name."""
+    return {"name": name}
+
+
+def console_hash(password, salt=None):
+    """The board's password as the system folder's `password` keeps it."""
+    if salt is None:
+        import os
+        salt = "".join("%02x" % b for b in os.urandom(16))
+    return moy_net.pw_hash(password, salt)
 
 
 def scan_json(nets):
@@ -410,9 +429,10 @@ button{width:100%%;padding:.85rem;font-size:1.05rem;min-height:48px;border:0;
 <label><span>name for this board</span>
 <input name="name" value="%s" maxlength="24" autocapitalize="off"
  autocorrect="off" autocomplete="off" spellcheck="false"></label>
-<label><span>pin (4 digits, asked for before anything may change this board)</span>
-<input name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
- autocomplete="off" required></label>
+<label><span>a password for this board (a browser types it once, to pair)</span>
+<input name="console" type="password" minlength="8" maxlength="64"
+ autocapitalize="off" autocorrect="off" autocomplete="new-password"
+ spellcheck="false" required></label>
 <label><span>wifi network</span>
 <input name="ssid" list="netlist" maxlength="32" autocapitalize="off"
  autocorrect="off" autocomplete="off" spellcheck="false" required>
@@ -458,10 +478,9 @@ body{margin:0;padding:24px 18px 40px;font:16px/1.5 system-ui,sans-serif;
 b{overflow-wrap:anywhere}</style></head><body>
 <h1>saved</h1>
 <p>This board is restarting and will join <b>%s</b>.</p>
-<p>Find it again at <b>http://%s.local/?pin=%s</b> once it is up.</p>
-<p>Keep the whole address: the <b>?pin=</b> part is what lets the console save
-your work back onto this board. Without it you can play, but nothing you make
-is kept.</p>
+<p>Find it again at <b>http://%s.local/</b> once it is up, and pair your
+browser there with the password you just chose: it asks once, then
+remembers this board.</p>
 <p>If your phone cannot find that name, your router's list of connected
 devices will show it as <b>%s</b> &mdash; the address there works too.</p>
 <p>This setup network is about to disappear &mdash; rejoin your own WiFi.</p>
@@ -582,8 +601,7 @@ class SetupServer:
         self.reboot_at = ticks_ms() + REBOOT_MS
         print("ZERO SETUP saved: name=%s ssid=%s -- rebooting"
               % (clean["name"], clean["ssid"]))
-        return http_response(200, _DONE % (clean["ssid"], clean["name"],
-                                           clean["pin"], clean["name"]),
+        return http_response(200, _DONE % (clean["ssid"], clean["name"], clean["name"]),
                              "text/html; charset=utf-8")
 
     def due(self):
@@ -592,17 +610,22 @@ class SetupServer:
                 and ticks_diff(ticks_ms(), self.reboot_at) >= 0)
 
 
-def save_setup(clean, wifi_store, zero_store, read=None, write=None):
+def save_setup(clean, wifi_store, zero_store, system_dir, read=None, write=None,
+               write_text=None):
     """Persist one accepted form: the network into the console's own wifi.json
-    (merged), the name and pin into zero.json.
+    (merged), the name into zero.json, and the board's password's hash into
+    the system folder's `password`.
 
-    `read`/`write` are injected for the host test; on the board they are files.
+    `read`/`write`/`write_text` are injected for the host test; on the board
+    they are files.
     """
     _read = read or _read_json
     _write = write or _write_json
     _write(wifi_store, merge_network(_read(wifi_store), clean["ssid"],
                                      clean["password"]))
-    _write(zero_store, zero_doc(clean["name"], clean["pin"]))
+    _write(zero_store, zero_doc(clean["name"]))
+    (write_text or _write_text)(system_dir + "/password",
+                                console_hash(clean["console"]) + "\n")
 
 
 def _read_json(path):
@@ -618,13 +641,23 @@ def _write_json(path, doc):
         f.write(json.dumps(doc))
 
 
+def _write_text(path, text):
+    try:
+        import os
+        os.mkdir(path.rsplit("/", 1)[0])
+    except OSError:
+        pass
+    with open(path, "w") as f:
+        f.write(text)
+
+
 def _scan():
     """What the station sees, in the port's WLAN.scan shape scan_json reads."""
     return [(ssid.encode(), b"", 0, rssi, auth, False)
             for ssid, rssi, auth in moy_net.wifi_scan()]
 
 
-def run(wifi_store, zero_store, port=SETUP_PORT, sleep_ms=10):
+def run(wifi_store, zero_store, system_dir, port=SETUP_PORT, sleep_ms=10):
     """Host the setup AP and serve the form until it is filled in. Never
     returns: a good POST resets the board into STA. The access point is the
     kernel's WiFi driver's provisioning mode, the station beside it up for
@@ -635,7 +668,7 @@ def run(wifi_store, zero_store, port=SETUP_PORT, sleep_ms=10):
     ssid = ap_ssid(moy_net.wifi_ap_mac())
     ip = moy_net.wifi_ap(ssid) or AP_IP
     srv = SetupServer(ssid,
-                      lambda clean: save_setup(clean, wifi_store, zero_store),
+                      lambda clean: save_setup(clean, wifi_store, zero_store, system_dir),
                       _scan, port=port, ip=ip)
     if not srv.start(ip):
         raise OSError("setup port %d busy" % port)

@@ -174,9 +174,11 @@ void moy_tty_free(void *p);
 
 // -- the web terminal (moy_tty_ws.c) ----------------------------------------------------
 
-// The webhost's upgraded socket (GET /term), on the console's task: 0 when
-// the bridge took it, MOY_TTY_EBUSY while it serves one, MOY_TTY_ENOMEM.
-int moy_web_term(int fd, int cols, int rows);
+// The webhost's upgraded socket (GET /term), on the console's task, and the
+// session its frames are sealed under (moy_webauth.h; NULL on the open host):
+// 0 when the bridge took it, MOY_TTY_EBUSY while it serves one, MOY_TTY_ENOMEM.
+struct moy_wa_seal;
+int moy_web_term(int fd, int cols, int rows, const struct moy_wa_seal *seal);
 
 typedef struct {
     uint32_t sessions;                  // sockets the bridge served

@@ -87,9 +87,10 @@ void moy_rgeom_init(moy_rgeom_t *g, int w, int h, int rot, int swap);
 void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,
                        const char *label, const char *hint, int serial);
 
-// What the plain web-console screen says, from the web console's paired URL
-// ("http://a.b.c.d[:port]/?pin=..."): the sentence, the address and the pin;
-// with no address, that the console is restarting.
+// What the plain web-console screen says, from the web console's URL
+// ("http://a.b.c.d[:port]/"): the sentence and the address; with no address,
+// that the console is restarting. It has no QR, so it mints no pairing token:
+// a paired browser signs in, a new one pairs by the console's password.
 void moy_web_screen_view(moy_rview_t *v, const char *url);
 // The screen on `pal`'s ground (moy_scr.h's splash palette; NULL: Moy Day).
 int moy_web_screen_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *v,

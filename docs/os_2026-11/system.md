@@ -285,13 +285,13 @@ spike the owner approved on 2026-11-06):
   shell is the board's, on the same stream face SSH opens
   (`native/moy_tty/README.md`): one face at a time across the two, so a page
   that finds an SSH session's is told so. The transport is a WebSocket the
-  webhost upgrades, `GET /term?pin=&cols=&rows=` (subprotocol `moy.sh`),
-  handed off the console's task at once, so the frame never carries it.
-- **Its sign-in is the page's pin**, behind the pin's backoff like every
-  gated route (`native/moy_net/moy_webhost.c`): on a console a pin holder can
-  already write and run any cart, so a shell adds no exposure. The page says
-  in the Terminal when the board does not answer, refused the pin, or makes
-  it wait ("wait N s", the 429's `ms`).
+  webhost upgrades, `GET /term?cols=&rows=` (subprotocol `moy.sh`), sealed
+  like every route below, handed off the console's task at once, so the
+  frame never carries it.
+- **Its sign-in is the page's**, the browser sign-in below: on a console a
+  paired browser can already write and run any cart, so a shell adds no
+  exposure. The page says in the Terminal when the board does not answer, no
+  longer takes this browser, or makes it wait ("wait N s", the 429's `ms`).
 - **On the project site** the console runs the shell itself in the page
   (`firmware/web_runner/build.sh --site`), its root the browser's store
   (`/moy` in the page) and its home that store's `files`. A run holds the
@@ -303,6 +303,67 @@ apps are **the app model for the headless Zero**
 (`firmware/seeed_xiao_esp32s3_zero/README.md`): `ssh` in from a laptop and
 run a command. The Zero runs the C built-ins until WASI commands arrive
 (the WASI spike, or P5.5); installable commands reach it with WASI.
+
+**The browser sign-in** (owner, 2026-11-07: a device key and sealed
+sessions, the crypto in the wasm; it replaced the 4-digit pin of 2026-08-25).
+A browser pairs once and signs in with a device key from then on; every
+route but the public bundle and the `GET /sync` marker is sealed to its
+session. The protocol is `native/moy_net/moy_seal.h`'s, the board's end
+`native/moy_net/moy_webauth.c`, the page's `native/moy_net/moy_seal_web.c`
+compiled into the wasm (a page served over plain HTTP has no WebCrypto), both
+over mbedTLS: a board's ESP-IDF copy with its hardware AES and SHA, the
+host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.md`).
+- **Pairing**: the console's QR carries a single-use 128-bit token (ten
+  minutes, a fresh one each time the screen draws it) and the first 8 bytes
+  of the board's id after the address's `#`, which never reaches a server or
+  a log. A browser that cannot scan types the console's password, the one
+  `passwd` sets for SSH: SPAKE2 over P-256 (RFC 9382's M and N and key
+  schedule) from the stored hash, so the password never crosses the network
+  and a recorded exchange gives nothing to guess against offline. With no
+  password set a browser pairs by the QR alone; the Zero, with no screen,
+  sets its password in its setup form or `provision.sh --password`. A pairing
+  mints a random 128-bit device key with an id and the browser's name, kept in
+  `system/webkeys` (`/etc/webkeys`); the page keeps it per board id in its
+  origin's storage.
+- **A session**: a key login answers a fresh challenge with an HMAC over both
+  sides' nonces, the board proves the key back, and HKDF gives one AES-128
+  key each way. A request carries its session and sequence number on the
+  query and its body (or, bodiless, its tag) under AES-GCM bound to its method
+  and target; the board takes each sequence number once, inside a window of
+  64. An answer is sealed records bound to its status, its last record
+  marked, so a cut, reordered or replayed answer does not open. The
+  Terminal's WebSocket frames are sealed each way, counted from 0, and a frame
+  that does not open closes the socket 1008 "seal".
+- **Sealed routes**: the store's pulls (`GET /carts.json`, `GET
+  /files.json`, `GET /console.json`) and `POST /sync`, `/gpio`, `/term`, and
+  `/run` and `/update`, which the VM answers and the C seals. All of them read or change a person's work or the firmware, so none
+  is left open; the bundle is the same bytes for everybody and the marker
+  says only that a board lives here.
+- **The backoff**: every credential the sign-in checks (a key, a token, a
+  password's PAKE) counts against its source, ten free, then a window from
+  1 s doubling to 5 min, and thirty from anywhere shut out every source that
+  has not signed in since; a waiting source is answered 429 with its
+  credential unread. A sealed request is not a credential: its tag is 128
+  bits.
+- **Forgetting a browser**: Settings -> Paired browsers lists each (its name,
+  the day it was last seen) and forgets one or all; `passwd -l` lists them and
+  `passwd -r ID|all` forgets. A forgotten key's sessions end at once and a web
+  terminal it holds is cut (1008 "revoked"). Changing or removing the password
+  (`passwd`, `passwd -d`) forgets no browser: a paired browser holds its own
+  key, and a household that changes the password should not have to re-pair
+  every tablet; forgetting is its own act, in the same two places. Both show
+  the SSH host key's fingerprint (`SHA256:`, OpenSSH's form) to check a first
+  `ssh` against.
+- **What it does not stop**: the page itself is served over plain HTTP, so an
+  attacker ACTIVE on the LAN can swap the page for one that captures a
+  password typed into it or a key it reads; only HTTPS with a certificate
+  the browser trusts closes that, and a console has none. A passive listener
+  learns nothing, a stolen QR token is spent or stale, and SSH, whose host
+  key a person can check, stays the full-security path. A device key lives in
+  the browser's storage for that origin: anyone with that browser profile is
+  that browser, until it is forgotten. A session's keys come from the device
+  key, so a key stolen later opens sessions recorded earlier; forgetting it
+  is the remedy.
 
 ## 4. SFTP
 

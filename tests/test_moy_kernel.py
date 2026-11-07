@@ -490,16 +490,18 @@ def _web(lib, board, url, pal=None):
 def test_the_plain_web_screen_says_where_to_go(lib, board):
     """What the kernel draws while no VM runs and the web console serves
     (docs/history/kernel_survival_2026-10.md section 13, answer 8; docs/history/look_2026-10.md
-    step 33): the address to open and the pin, the shell's page without its
-    QR -- and the address is what the pixels carry. With no address, that the
-    console is restarting."""
-    v, crc, fb = _web(lib, board, b"http://192.168.1.7/?pin=1234")
+    step 33): the address to open, the shell's page without its QR or its
+    pairing token -- and the address is what the pixels carry. With no
+    address, that the console is restarting."""
+    v, crc, fb = _web(lib, board, b"http://192.168.1.7/")
     lines = [v.line[i].value.decode() for i in range(v.nlines)]
-    assert lines == ["Open this in a browser:", "192.168.1.7", "1234"]
+    assert lines == ["Open this in a browser:", "192.168.1.7"]
+    v, _crc, _fb = _web(lib, board, b"http://192.168.1.7/#t=AAAA&b=BBBB")
+    assert [v.line[i].value.decode() for i in range(v.nlines)] == lines
     png = os.environ.get("MOY_RECOVERY_PNG")
     if png:
         _write_png(os.path.join(png, "web-%s.png" % board), fb, *CONSOLES[board])
-    _v, other, _fb = _web(lib, board, b"http://10.0.0.2/?pin=9999")
+    _v, other, _fb = _web(lib, board, b"http://10.0.0.2/")
     assert other != crc
     v, waiting, fb = _web(lib, board, b"")
     assert [v.line[i].value for i in range(v.nlines)] == [b"The console is restarting..."]
@@ -509,11 +511,11 @@ def test_the_plain_web_screen_says_where_to_go(lib, board):
 
 
 def test_the_web_screen_keeps_a_port_and_draws_on_the_kept_ground(lib):
-    v, day, _fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/?pin=42")
-    assert [v.line[i].value for i in range(3)] == [b"Open this in a browser:",
-                                                   b"192.168.1.7:8080", b"42"]
+    v, day, _fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/")
+    assert [v.line[i].value for i in range(v.nlines)] == [b"Open this in a browser:",
+                                                          b"192.168.1.7:8080"]
     night = (u16 * 6)(0x0884, 0xEF9F, 0xA539, 0xB55E, 0x31CB, 0x31CB)
-    _v, kept, fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/?pin=42", night)
+    _v, kept, fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/", night)
     assert kept != day and fb[0] == 0x8408       # Night's ground, high byte first
 
 

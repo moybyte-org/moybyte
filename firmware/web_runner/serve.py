@@ -47,27 +47,18 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # 404s and a system batch is
                                             # refused 400, as that firmware's
                                             # C refuses it ("bad batch").
-    python serve.py ... --carts D --pin NNNN  # ...with a board's PIN GATE on
-                                            # top. The dev loop stays PINLESS by
-                                            # default and is meant to: a
-                                            # password in the way of a rebuild
-                                            # is a password people route around.
-                                            # This flag exists so the gate and
-                                            # the page's pin prompt can be
-                                            # driven in a real browser with no
-                                            # board on the desk. Wrong pins
-                                            # back off as a board's do (429
-                                            # {"error":"wait","ms":N}).
-    python serve.py ... --pin NNNN --pin-backoff FREE,MS  # ...with FREE wrong
-                                            # pins before the first wait of MS
-                                            # (a board's: 10,1000), so a test
-                                            # can reach a wait in one load.
-    python serve.py ... --carts D --term HOST:PORT  # ...and GET /term passed
-                                            # through, bytes both ways, to a
-                                            # webhost that serves the board's
-                                            # shell (native/moy_tty's host
+    python serve.py [port] [dir] --board HOST:PORT  # ...the bundle from
+                                            # here and every other request,
+                                            # bytes both ways, to a REAL C
+                                            # webhost (native/moy_tty's host
                                             # harness, tests/test_moy_tty.py):
-                                            # the web terminal with no board.
+                                            # its sign-in, its sealed routes
+                                            # and its shell on GET /term. The
+                                            # twin modes above are an open
+                                            # host (no sign-in, as a host with
+                                            # no system folder is); the sign-in
+                                            # is driven here, against the
+                                            # board's own C, never a copy.
 
 Bind the directory by PATH, never by chdir. Every build here REPLACES its output
 folder (build.sh and site/build.py both remove and recreate it), and a server
@@ -87,7 +78,6 @@ import time
 _here = os.path.dirname(os.path.abspath(__file__))
 args = [a for a in sys.argv[1:]]
 carts_dir = None
-pin = None
 if "--carts" in args:
     i = args.index("--carts")
     carts_dir = os.path.abspath(args[i + 1])
@@ -126,29 +116,14 @@ if one_link:
     args.remove("--one-link")
     if "--carts" not in sys.argv:
         raise SystemExit("--one-link needs --carts (it is part of the board twin)")
-term_to = None
-if "--term" in args:
-    i = args.index("--term")
+board_to = None
+if "--board" in args:
+    i = args.index("--board")
     h, _, p = args[i + 1].rpartition(":")
-    term_to = (h or "127.0.0.1", int(p))
+    board_to = (h or "127.0.0.1", int(p))
     del args[i:i + 2]
-    if "--carts" not in sys.argv:
-        raise SystemExit("--term needs --carts (it is part of the board twin)")
-if "--pin" in args:
-    i = args.index("--pin")
-    pin = args[i + 1]
-    del args[i:i + 2]
-# The pin's backoff, native/moy_net/moy_webhost.c's for one source: FREE wrong
-# pins, then each one more shuts the source out for a window that starts at MS
-# and doubles to the board's cap; a right pin clears it.
-pin_free, pin_wait_ms, pin_wait_max_ms = 10, 1000, 300000
-if "--pin-backoff" in args:
-    i = args.index("--pin-backoff")
-    pin_free, pin_wait_ms = (int(v) for v in args[i + 1].split(","))
-    del args[i:i + 2]
-_pin_lock = threading.Lock()
-_pin_fails = 0
-_pin_until = 0.0
+    if "--carts" in sys.argv:
+        raise SystemExit("--board takes no --carts: the board serves its own store")
 root = os.path.join(_here, args[1] if len(args) > 1 else "dist")
 port = int(args[0]) if args else 8321
 if os.path.realpath(root) == os.path.realpath(os.path.join(_here, "dist")):
@@ -173,7 +148,6 @@ else:
     sys.path.insert(0, _repo)
     sys.path.insert(0, os.path.join(_repo, "device"))   # flat sibling imports
     import moy_webhost                                  # noqa: E402
-    from runtime.net_binding import query_param as _query    # noqa: E402
     # A board's send budget: native/moy_net/moy_net.h's MOY_HTTP_SEND_MS.
     WEB_SEND_TIMEOUT = 2.0
     # The twin's piece of a body over `--one-link`. A board's is the kernel
@@ -350,62 +324,30 @@ else:
         def _closing(self):
             """True (and the 503 already sent) once the goodbye window opens.
 
-            Ahead of routing AND ahead of the pin, exactly as the board does it:
-            a page that was never given a pin still deserves to know the console
-            was switched off rather than be left to decide it vanished.
+            Ahead of routing AND ahead of the sign-in, exactly as the board
+            does it: a page that never signed in still deserves to know the
+            console was switched off rather than be left to decide it vanished.
             """
             if close_after is None or (time.time() - _started) < close_after:
                 return False
             self._send(503, b'{"error":"closing","why":"off"}')
             return True
 
-        def _refused(self, sent):
-            """True (and the 403 or 429 already sent) when this request lacks
-            the pin or its source is waiting out wrong ones.
-
-            The predicate is moy_webhost's, imported rather than restated: a
-            twin that gates differently from a board is a twin that proves
-            nothing about the board."""
-            global _pin_fails, _pin_until
-            if not pin:
-                return False
-            with _pin_lock:
-                now = time.monotonic()
-                if now < _pin_until:
-                    ms = int((_pin_until - now) * 1000) or 1
-                    self._send(429, json.dumps({"error": "wait", "ms": ms}).encode())
-                    return True
-                if moy_webhost.pin_ok(pin, sent):
-                    _pin_fails, _pin_until = 0, 0.0
-                    return False
-                _pin_fails += 1
-                if _pin_fails > pin_free:
-                    past = min(_pin_fails - pin_free - 1, 16)
-                    _pin_until = now + min(pin_wait_ms << past, pin_wait_max_ms) / 1000
-            self._send(403, moy_webhost.PIN_REFUSED.encode())
-            return True
-
         def do_GET(self):
             if self._closing():
                 return
             path = self.path.split("?", 1)[0]
-            if path == "/term" and term_to is not None:
-                self._term()
-                return
             if path == "/sync":
                 # The MODE MARKER (#193): a host that answers this owns the
                 # carts, so the page keeps nothing locally. Static hosting
                 # 404s here, which is how moybyte.com gets a browser store.
-                # OPEN even under --pin, exactly as a board's is: it says a
-                # board lives here and nothing else, and the page has to decide
-                # its mode before it has a pin to offer.
+                # Open on a board too: it says a board lives here and nothing
+                # else, and the page decides its mode before it signs in.
                 self._send(200, b'{"sync":1}')
                 return
             if path == "/carts.json":
                 # The board's own packer, over a plain directory -- one body,
                 # so this twin cannot drift from what a board serves.
-                if self._refused(_query(self.path, "pin")):
-                    return
                 body = json.dumps(moy_webhost.pack_store(carts_dir)).encode()
                 self._send(200, body)
                 return
@@ -413,8 +355,6 @@ else:
                 # The #108 user files beside the carts, kind-filtered so
                 # .history/ and trash/ stay home -- and serving this at all is
                 # what tells the page this twin speaks files.
-                if self._refused(_query(self.path, "pin")):
-                    return
                 body = json.dumps(moy_webhost.pack_store(
                     moy_sync.files_root(carts_dir),
                     tops=moy_sync.file_kinds())).encode()
@@ -422,54 +362,15 @@ else:
                 return
             if path == moy_sync.SYSTEM_PULL and console is not None:
                 # The console's own documents, as a board's VM answers them.
-                if self._refused(_query(self.path, "pin")):
-                    return
                 self._send(200, json.dumps(console.pull()).encode())
                 return
             if path == "/update":
-                # Both methods gate on the QUERY here, exactly as a board's do
-                # -- see moy_webhost._update for why one endpoint may not read
-                # its credential from two places.
                 if update is None:
                     self._send(404, b'{"error":"not found"}')
-                    return
-                if self._refused(_query(self.path, "pin")):
                     return
                 self._send(200, json.dumps(update.status()).encode())
                 return
             super().do_GET()          # the boot assets: never gated
-
-        def _term(self):
-            """The request as it came, to the shell's webhost, and then the
-            two sockets joined until either side closes."""
-            import socket
-            import threading
-            up = socket.create_connection(term_to)
-            head = self.requestline + "\r\n" + "".join(
-                "%s: %s\r\n" % kv for kv in self.headers.items()) + "\r\n"
-            up.sendall(head.encode())
-            down = self.connection
-
-            def pipe(a, b):
-                try:
-                    while True:
-                        d = a.recv(65536)
-                        if not d:
-                            break
-                        b.sendall(d)
-                except OSError:
-                    pass
-                try:
-                    b.shutdown(socket.SHUT_WR)
-                except OSError:
-                    pass
-
-            t = threading.Thread(target=pipe, args=(down, up), daemon=True)
-            t.start()
-            pipe(up, down)
-            t.join(2)
-            up.close()
-            self.close_connection = True
 
         def do_POST(self):
             if self._closing():
@@ -478,8 +379,6 @@ else:
             if path == "/update":
                 if update is None:
                     self._send(404, b'{"error":"not found"}')
-                    return
-                if self._refused(_query(self.path, "pin")):
                     return
                 n = int(self.headers.get("Content-Length") or 0)
                 try:
@@ -500,11 +399,9 @@ else:
                 self._send(404, b'{"error":"not found"}')
                 return
             n = int(self.headers.get("Content-Length") or 0)
-            ops, sent, root_id = moy_sync.parse_batch(self.rfile.read(n))
+            ops, root_id = moy_sync.parse_batch(self.rfile.read(n))
             if ops is None:
                 self._send(400, b'{"error":"bad batch"}')
-                return
-            if self._refused(sent):
                 return
             if root_id == moy_sync.SYSTEM_ROOT_ID:
                 if console is None:
@@ -539,6 +436,71 @@ else:
 
     handler = Handler
 
+if board_to is not None:
+    import socket
+
+    class BoardHandler(http.server.SimpleHTTPRequestHandler):
+        """The bundle from this folder; anything it does not hold, the board's."""
+
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=root, **kw)
+
+        def log_message(self, *a):
+            pass
+
+        def _asset(self):
+            path = self.path.split("?", 1)[0].split("#", 1)[0]
+            local = self.translate_path(path)
+            return path == "/" or os.path.isfile(local)
+
+        def do_GET(self):
+            if self._asset():
+                super().do_GET()
+            else:
+                self._pipe()
+
+        def do_POST(self):
+            self._pipe()
+
+        def _pipe(self):
+            """The request as it came, to the board, and then the two sockets
+            joined until either side closes (a /term upgrade's stream too)."""
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n) if n else b""
+            try:
+                up = socket.create_connection(board_to, timeout=5)
+            except OSError:
+                self.send_error(502)
+                return
+            up.settimeout(None)
+            head = self.requestline + "\r\n" + "".join(
+                "%s: %s\r\n" % kv for kv in self.headers.items()) + "\r\n"
+            up.sendall(head.encode() + body)
+            down = self.connection
+
+            def pipe(a, b):
+                try:
+                    while True:
+                        d = a.recv(65536)
+                        if not d:
+                            break
+                        b.sendall(d)
+                except OSError:
+                    pass
+                try:
+                    b.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+            t = threading.Thread(target=pipe, args=(down, up), daemon=True)
+            t.start()
+            pipe(up, down)
+            t.join(2)
+            up.close()
+            self.close_connection = True
+
+    handler = BoardHandler
+
 server_class = http.server.HTTPServer if one_link else http.server.ThreadingHTTPServer
 with server_class(("0.0.0.0", port), handler) as srv:
     note = (" + carts/sync over %s" % carts_dir) if carts_dir else ""
@@ -546,8 +508,7 @@ with server_class(("0.0.0.0", port), handler) as srv:
         note += " + a faked /update (%s)" % update_mode
     if one_link:
         note += " over one link at a time"
-    if term_to:
-        note += " + /term to %s:%d" % term_to
-    print("serving %s at http://127.0.0.1:%d/%s%s"
-          % (root, port, "?pin=%s" % pin if pin else "", note))
+    if board_to:
+        note += " + the board at %s:%d" % board_to
+    print("serving %s at http://127.0.0.1:%d/%s" % (root, port, note))
     srv.serve_forever()

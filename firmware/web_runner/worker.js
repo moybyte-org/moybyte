@@ -49,13 +49,16 @@
 //   {t:"keep"}           site mode: ask the browser to make this origin
 //                        durable. Sent to the PAGE because storage.persist()
 //                        is window-only -- a Worker cannot ask, only look.
-//   {t:"pin", tried}     this board is PINNED and this page cannot read it, so
-//                        the boot stopped before the VM: the page prompts.
-//                        `tried` = a pin WAS offered and refused (a wrong one),
-//                        which is the difference between "type it" and "that
-//                        one did not work". `wait` is pinWaitSays' sentence
-//                        when the board is holding wrong pins off, else "".
-//   {t:"wait", s}        the sync push meets a pin wait: the link panel says
+//   {t:"pair", pw, why, wait}  this board has not paired this browser, so the
+//                        boot stopped before the VM: the page asks. `pw` a
+//                        password can pair it (else only the QR can), `why`
+//                        what failed last ("" the first time), `wait`
+//                        signInWaitSays' sentence while the board holds wrong
+//                        tries off, else ""
+//   {t:"key", id, kid, key, reload}  a pairing's new device key for board `id`:
+//                        the page keeps it (and with `reload`, loads again)
+//   {t:"unkey", id}      board `id` refused this browser's key: the page drops it
+//   {t:"wait", s}        the sync push meets a sign-in wait: the link panel says
 //                        `s`, and "" (a push landed) takes it down
 //   {t:"pod", s}         the play-on-device link's text after {t:"pod"}
 //   {t:"carts", names}   the shelf's folder names
@@ -120,7 +123,7 @@ let syncFailing = false;      // at least one failure since the last answer
 // a disconnect is frightening or merely inconvenient -- see syncLost.
 let outstanding = false;
 let syncLostSaid = false;
-let syncWaitSaid = false;     // the link panel is showing a pin wait
+let syncWaitSaid = false;     // the link panel is showing a sign-in wait
 
 function syncFailed(now) {
     syncFailing = true;
@@ -850,32 +853,237 @@ async function importP8(name, buf) {
     return { ok: true, dir, title: r.title, report: r.report };
 }
 
-// THE PIN, on every request that needs it. A GET has nowhere else to carry a
-// credential, so it rides the query -- the same `?pin=` the page itself was
-// opened with (a QR scan, or the prompt's remembered value). A page with no pin
-// asks for the bare url and finds out from the answer.
-let pin = null;
-const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
-                              + "pin=" + encodeURIComponent(pin) : url);
-
-// THE PIN'S BACKOFF, said one way. A source that gave too many wrong pins waits
-// (native/moy_net/moy_webhost.c, the pin's backoff), and while it waits every
-// pin-gated route answers 429 {"error":"wait","ms":N} with its pin unread. Each
-// gated call here that meets one says pinWaitSays' sentence, wherever it says
-// it: the pin prompt, the link panel, Settings' update screen, the play-on-
+// THE SIGN-IN (native/moy_net/moy_seal.h; the threat model is
+// docs/os_2026-11/system.md section 3). A board's store, shell, pins and
+// updater answer only a sealed session: AES-GCM under keys a sign-in made.
+// Plain HTTP has no secure context, so there is no WebCrypto here; every MAC,
+// key and seal is the wasm's own C (moy_seal_web.c, the same mbedTLS the board
+// runs), and this file only moves bytes. The sign-in, once per page:
+//
+//   a hello (POST /auth), then the first of: this browser's DEVICE KEY for
+//   the board's id (the page keeps them, page_tail.js), the QR's single-use
+//   token from the url's # (which pairs this browser: the board mints its key
+//   and the page stores it), or nothing -- the page asks to pair: by the
+//   console's password (SPAKE2, `{t:"password"}`), or by scanning the code.
+//
+// A sealed call that meets 401 signs in again once and retries. A host that
+// answers the hello {"open": true} (the dev server) is spoken to in the clear.
+//
+// THE BACKOFF, said one way. A source that gave too many wrong credentials
+// waits (native/moy_net/moy_webhost.c, the backoff), and while it waits the
+// sign-in answers 429 {"error":"wait","ms":N} with its credential unread.
+// Each call that meets one says signInWaitSays' sentence, wherever it says it:
+// the pairing prompt, the link panel, Settings' update screen, the play-on-
 // device link. "--", not a dash: the console's font draws Latin-1 and a few
 // symbols, and the update screen is drawn in it. The Terminal says its own
 // (native/moy_sh/moy_sh_link.c), from termWhy's ms.
-function pinWaitSays(ms) {
-    return "Too many wrong pins -- try again in "
+function signInWaitSays(ms) {
+    return "Too many wrong tries -- try again in "
         + Math.max(1, Math.ceil(ms / 1000)) + " s";
 }
-// The ms a 429 asks this page to wait, or -1 for any other answer.
-async function pinWaitMs(r) {
-    if (r.status !== 429) return -1;
-    let ms = 0;
-    try { ms = (await r.json()).ms | 0; } catch (e) { }
-    return ms;
+
+let auth = { keys: {}, token: null, board: null, name: "a browser" };
+let authOpen = false;           // the host has no sign-in: plain requests
+let signedIn = false;
+let signingIn = null;           // the sign-in in flight, which every caller shares
+let authNeed = null;            // why the last sign-in failed: {pw, wait, why}
+let SW = null;                  // moy_seal_web.c's entry points
+const utf8 = new TextEncoder(), utf8d = new TextDecoder();
+
+function sw() {
+    if (SW) return SW;
+    const M = mp._module;
+    const f = (n) => M["_moy_sw_" + n];
+    SW = { M, buf: f("buf"), hello: f("hello"), board: f("board"), key: f("key"),
+           token: f("token"), pake: f("pake"), confirm: f("confirm"), done: f("done"),
+           kid: f("kid"), devkey: f("device_key"), seal: f("seal"), target: f("target"),
+           seq: f("seq"), open: f("open"), ws: f("ws"), up: f("ws_up"), down: f("ws_down"),
+           reset: f("reset") };
+    return SW;
+}
+// The exchange buffer: bytes in, bytes out. HEAPU8 read fresh: growth replaces it.
+function swPut(u8) {
+    const C = sw();
+    const p = C.buf(u8.length);
+    C.M.HEAPU8.set(u8, p);
+    return u8.length;
+}
+function swGet(n) {
+    const C = sw();
+    const p = C.buf(0);
+    return C.M.HEAPU8.slice(p, p + n);
+}
+// A C call with string arguments, each copied in and freed after.
+function swCall(fn, ...strs) {
+    const M = sw().M;
+    const ps = strs.map((s) => {
+        const n = M.lengthBytesUTF8(s) + 1;
+        const p = M._malloc(n);
+        M.stringToUTF8(s, p, n);
+        return p;
+    });
+    try { return fn(...ps); }
+    finally { for (const p of ps) { M.HEAPU8.fill(0, p, p + 1); M._free(p); } }
+}
+function b64urlHex(s) {
+    try {
+        const b = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
+        let h = "";
+        for (let i = 0; i < b.length; i++) h += b.charCodeAt(i).toString(16).padStart(2, "0");
+        return h;
+    } catch (e) { return ""; }
+}
+
+async function authPost(text) {
+    const r = await fetch("auth", { method: "POST", body: text,
+        headers: { "Content-Type": "application/json" } });
+    const t = await r.text();
+    let doc = null;
+    try { doc = JSON.parse(t); } catch (e) { }
+    return { status: r.status, text: t, doc: doc || {} };
+}
+
+// A hello: the board's id, or the answer that stopped it (a wait, an open host).
+async function hello() {
+    const r = await authPost('{"op":"hello"}');
+    // No sign-in here: a host with no /auth (a static host, the site) or one
+    // that says it is open (the dev server) serves its routes in the clear.
+    if ((r.status === 200 && r.doc.open) || r.status === 404 || r.status === 405
+        || r.status === 501) return { open: true };
+    if (r.status !== 200) return { r };
+    if (sw().hello(swPut(utf8.encode(r.text))) !== 0) return { r: { status: 0, doc: {} } };
+    return { id: sw().M.UTF8ToString(sw().board()), pw: !!r.doc.pw };
+}
+
+// The answer to a key login or a pairing: signed in, its key handed to the
+// page when it is new.
+function finish(r, fresh) {
+    if (r.status !== 200 || sw().done(swPut(utf8.encode(r.text))) !== 0) return false;
+    signedIn = true;
+    if (fresh) {
+        const C = sw();
+        const id = C.M.UTF8ToString(C.board());
+        const kid = C.M.UTF8ToString(C.kid()), key = C.M.UTF8ToString(C.devkey());
+        auth.keys[id] = { kid, key };
+        self.postMessage({ t: "key", id, kid, key, reload: fresh === "reload" });
+    }
+    return true;
+}
+
+async function signInOnce() {
+    let h = await hello();
+    if (h.open) { authOpen = true; return true; }
+    if (!h.id) return need(h.r, false);
+    const k = auth.keys[h.id];
+    if (k) {
+        const n = swCall(sw().key, k.kid, k.key);
+        const r = await authPost(utf8d.decode(swGet(n)));
+        if (finish(r, false)) return true;
+        if (r.status === 429) return need(r, h.pw);
+        if (r.status === 403) {
+            delete auth.keys[h.id];          // this board dropped it: pair again
+            self.postMessage({ t: "unkey", id: h.id });
+        }
+        h = await hello();
+        if (!h.id) return need(h.r, false);
+    }
+    const tok = auth.token ? b64urlHex(auth.token) : "";
+    const mine = auth.board ? b64urlHex(auth.board) : "";
+    auth.token = null;                     // single-use, whatever the answer
+    if (tok && (!mine || h.id.startsWith(mine))) {
+        const n = swCall(sw().token, tok, auth.name);
+        const r = await authPost(utf8d.decode(swGet(n)));
+        if (finish(r, true)) return true;
+        if (r.status === 429) return need(r, h.pw);
+        return need(null, h.pw, "that code was used or has run out -- scan it again");
+    }
+    return need(null, h.pw, tok ? "that code is another console's" : "");
+}
+// `gone`: no answer from the board at all (a fetch that failed, a 5xx from
+// whatever stands between), which the Terminal says apart from a refusal.
+function need(r, pw, why, gone) {
+    let wait = "", ms = -1;
+    if (r && r.status === 429) { ms = r.doc.ms | 0; wait = signInWaitSays(ms); }
+    else if (r && !why) {
+        why = "the console did not answer the sign-in (" + r.status + ")";
+        gone = gone || r.status >= 500;
+    }
+    authNeed = { pw: !!pw, wait, ms, why: why || "", gone: !!gone };
+    return false;
+}
+function signIn() {
+    if (authOpen || signedIn) return Promise.resolve(true);
+    if (!signingIn) {
+        signingIn = signInOnce().catch(() => need(null, false, "the console did not answer", true))
+            .finally(() => { signingIn = null; });
+    }
+    return signingIn;
+}
+
+// Pairing by the console's password (the page's prompt): SPAKE2, then the
+// key, then a fresh load signed in with it.
+async function pairPassword(pw, name) {
+    let why = "";
+    try {
+        const h = await hello();
+        if (h.r && h.r.status === 429) return need(h.r, true);
+        if (!h.id) return need(h.r, true);
+        const n = swCall(sw().pake, pw, name || auth.name);
+        let r = await authPost(utf8d.decode(swGet(n)));
+        if (r.status === 200) {
+            // The board's confirmation fails to check under a wrong password
+            // (and on another console, which the same sentence covers).
+            const c = sw().confirm(swPut(utf8.encode(r.text)));
+            if (c < 0) why = "that password did not work -- try again";
+            else {
+                r = await authPost(utf8d.decode(swGet(c)));
+                if (finish(r, "reload")) return true;
+            }
+        }
+        if (r.status === 429) return need(r, true);
+        why = why || (r.doc.error === "nopw" ? "the console has no password set"
+                                             : "that password did not work -- try again");
+    } catch (e) { why = "the console did not answer"; }
+    return need(null, true, why);
+}
+function askToPair() {
+    self.postMessage(Object.assign({ t: "pair" }, authNeed || { pw: false, wait: "", why: "" }));
+}
+
+// A call to a sealed route: {status, text, wait}. `text` is the answer's
+// plaintext, opened; `wait` the ms of a backoff, else -1. A refusal in the
+// clear (no session, a goodbye) is {status, text} as it came, never opened,
+// so nothing the network says without the session's key reads as the board's.
+async function sealed(method, path, body) {
+    for (let tries = 0; tries < 2; tries++) {
+        if (!(await signIn())) {
+            const ms = authNeed ? authNeed.ms : -1;
+            return { status: ms >= 0 ? 429 : 401, text: "", wait: ms };
+        }
+        if (authOpen) {
+            const r = await fetch(path.slice(1), body === undefined ? { method }
+                : { method, body, headers: { "Content-Type": "application/json" } });
+            return { status: r.status, text: await r.text(), wait: -1 };
+        }
+        const C = sw();
+        const raw = body === undefined ? null : utf8.encode(body);
+        const n = swCall((m, p) => C.seal(m, p, raw ? swPut(raw) : 0), method, path);
+        if (n < 0) return { status: 0, text: "", wait: -1 };
+        const target = C.M.UTF8ToString(C.target()), seq = C.seq();
+        const r = await fetch(target.slice(1), n ? { method, body: swGet(n) } : { method });
+        if (r.status === 401) { signedIn = false; continue; }
+        if ((r.headers.get("Content-Type") || "").indexOf("application/octet-stream") < 0) {
+            return { status: r.status, text: await r.text(), wait: -1, clear: true };
+        }
+        const got = new Uint8Array(await r.arrayBuffer());
+        const m = C.open(seq, r.status, got.length ? swPut(got) : 0);
+        if (m < 0) return { status: 0, text: "", wait: -1 };
+        return { status: r.status, text: utf8d.decode(swGet(m)), wait: -1 };
+    }
+    return { status: 401, text: "", wait: -1 };
+}
+function sealedJson(res) {
+    try { return JSON.parse(res.text); } catch (e) { return null; }
 }
 
 // A fatal error as {t:"error"}. V8's e.stack leads with String(e), JSC's
@@ -889,12 +1097,10 @@ function crashMessage(e) {
              s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
 }
 
-async function init(search, coarse, channel, scheme) {
+async function init(search, coarse, channel, scheme, signin) {
     opfsNav = store.channelNav(navigator, channel);
     const qs = new URLSearchParams(search || "");
-    // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
-    // half is gated too, so carts.json is the first request that needs it.
-    pin = qs.get("pin") || null;
+    if (signin) auth = Object.assign(auth, signin, { keys: Object.assign({}, signin.keys) });
     say("loading vm...");
     // 16MB: the per-frame GC sweep scales with heap SIZE under this build's
     // GC_SPLIT_HEAP_AUTO (~0.13ms/MB/frame, #176), so a generous heap is a
@@ -917,32 +1123,36 @@ async function init(search, coarse, channel, scheme) {
     // -- stops draining once the browser's buffer is full, and the board cuts
     // it off: a board with more carts than that serves a console that cannot
     // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
-    // Each pin-gated read as {status, wait, json}, json for a 2xx alone.
-    const gated = (url) => fetch(withPin(url)).then(async (r) => {
-        const wait = await pinWaitMs(r);
-        return { status: r.status, wait: wait, json: r.ok ? await r.json() : null };
-    });
+    // Each sealed read as {status, wait, json}, json for a 2xx alone (a host
+    // with no sign-in answers in the clear: worker's THE SIGN-IN).
+    const gated = (path) => sealed("GET", path)
+        .then((r) => ({ status: r.status, wait: r.wait,
+                        json: r.status >= 200 && r.status < 300 ? sealedJson(r) : null }));
     const none = () => ({ status: 0, wait: -1, json: null });
     const [mods, cartsRes, filesRes, shelves, systemRes] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        gated("carts.json"),
-        gated("files.json").catch(none),
+        gated("/carts.json"),
+        gated("/files.json").catch(none),
         fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         // The console's own documents, where the serving board keeps them
         // (its portable Settings and its badges); firmware before them 404s.
-        gated("console.json").catch(none)]);
-    // A wait from any of the three is the board's answer to all three: one
-    // source, one window.
-    const waitMs = Math.max(cartsRes.wait, filesRes.wait, systemRes.wait);
-    if (waitMs >= 0 || cartsRes.status === 403) {
-        // A PINNED BOARD, and this page cannot read it. Stop the boot here --
-        // there is nothing to boot, and seeding the VFS from an error body
-        // would build a shelf out of the refusal. The page prompts; a submitted
-        // pin comes back as a fresh load with ?pin= on it.
-        const wait = waitMs >= 0 ? pinWaitSays(waitMs) : "";
-        say(wait || "this console needs a pin");
-        self.postMessage({ t: "pin", tried: !!pin, wait: wait });
-        console.log("[moy] carts.json: " + (wait || "the pin was refused"));
+        gated("/console.json").catch(none)]);
+    if (!signedIn && !authOpen && !(authNeed && authNeed.gone)) {
+        // A BOARD THAT HAS NOT PAIRED THIS BROWSER: stop the boot here --
+        // there is nothing to boot, and seeding the VFS from a refusal would
+        // build a shelf out of it. The page asks; a pairing reloads it. A
+        // host that answered nothing boots on as before: no board behind it.
+        const a = authNeed || { pw: false, wait: "", why: "" };
+        say(a.wait || "pair this browser with the console");
+        askToPair();
+        console.log("[moy] sign-in: " + (a.wait || a.why || "not paired"));
+        return;
+    }
+    if (!signedIn && !authOpen && cartsRes.json === null) {
+        // The board went away between the page and its pulls: no shelf to
+        // seed, and nothing to sign in to.
+        say("the console does not answer");
+        console.log("[moy] sign-in: the console does not answer");
         return;
     }
     const files = filesRes.json, system = systemRes.json;
@@ -990,11 +1200,10 @@ async function init(search, coarse, channel, scheme) {
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
-    // probe (the board answers it with its allowlist), which also means the
-    // probe passes through the PIN gate: a page opened without the board's
-    // ?pin= is refused now rather than on every write it later makes.
-    const gpioPins = await probeGpio(pin);
-    const updateDoc = await probeUpdate(pin);
+    // probe (the board answers it with its allowlist), a sealed call like
+    // every write it later makes.
+    const gpioPins = await probeGpio();
+    const updateDoc = await probeUpdate();
     mp.runPython(boot + "import web_boot\n"
         // BEFORE boot(): the mode is what decides whether the carts watcher
         // sweeps the journal, and boot() is where that watcher is built.
@@ -1021,7 +1230,7 @@ async function init(search, coarse, channel, scheme) {
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
-        + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
+        + "sync_poll_json, sync_ack, sync_off, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
@@ -1087,7 +1296,6 @@ async function init(search, coarse, channel, scheme) {
                            bound: bound ? !!bound.updater : null,
                            services: bound });
     }
-    if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });
     wantAssets = false;      // the boot payload answers any pre-boot request
     say("live");
@@ -1118,20 +1326,16 @@ function shipFrame(s) {
     else self.postMessage({ t: "frame", s: s });
 }
 
-// The #9 probe. Returns the host's pin allowlist, or null for "this page is
+// The #9 probe. Returns the host's GPIO allowlist, or null for "this page is
 // not served by anything with pins" -- a static host (moybyte.com, an export),
-// a console board that spends its GPIOs on a panel, or a Zero whose pin gate
-// this page cannot pass. All four are the same answer to a cart: no verbs.
-async function probeGpio(pin) {
-    const body = JSON.stringify(pin ? { v: 1, ops: [], pin: pin }
-                                    : { v: 1, ops: [] });
+// a console board that spends its GPIOs on a panel, or a Zero this page is not
+// signed in to. All four are the same answer to a cart: no verbs.
+async function probeGpio() {
     try {
-        const r = await fetch("gpio", { method: "POST", body: body,
-            headers: { "Content-Type": "application/json" } });
-        const wait = await pinWaitMs(r);
-        if (wait >= 0) console.log("[moy] gpio: " + pinWaitSays(wait));
-        if (!r.ok) return null;
-        const d = await r.json();
+        const r = await sealed("POST", "/gpio", JSON.stringify({ v: 1, ops: [] }));
+        if (r.wait >= 0) console.log("[moy] gpio: " + signInWaitSays(r.wait));
+        if (r.status !== 200) return null;
+        const d = sealedJson(r);
         return (d && d.pins && d.pins.length) ? d.pins : null;
     } catch (e) {
         return null;                 // no such host, no such endpoint: fine
@@ -1140,17 +1344,15 @@ async function probeGpio(pin) {
 
 // Does whoever served this page have an UPDATER? One GET, before the console
 // exists, so `ws.updater` is decided exactly once and Settings either has an
-// update row or has never heard of one -- the same rule as the pin verbs, and
+// update row or has never heard of one -- the same rule as the GPIO verbs, and
 // the reason a static host (moybyte.com, an export) shows nothing rather than a
-// row that fails when tapped. The GET carries the pin the only place a GET can.
-async function probeUpdate(pin) {
+// row that fails when tapped.
+async function probeUpdate() {
     try {
-        const u = pin ? "update?pin=" + encodeURIComponent(pin) : "update";
-        const r = await fetch(u);
-        const wait = await pinWaitMs(r);
-        if (wait >= 0) console.log("[moy] update: " + pinWaitSays(wait));
-        if (!r.ok) return null;
-        const d = await r.json();
+        const r = await sealed("GET", "/update");
+        if (r.wait >= 0) console.log("[moy] update: " + signInWaitSays(r.wait));
+        if (r.status !== 200) return null;
+        const d = sealedJson(r);
         return (d && d.running) ? d : null;
     } catch (e) {
         return null;                 // no such host, no such endpoint: fine
@@ -1172,47 +1374,31 @@ function updatePump() {
         if (!wants) return;
     }
     updateBusy = true;
-    // BOTH METHODS PUT THE PIN ON THE QUERY, because that is what /update
-    // reads. moy_webhost._update says so in as many words -- "both read the pin
-    // off ?pin=, and that is deliberate even though /sync and /run take theirs
-    // from the body ... so the query is the rule here and the page puts it on
-    // both" -- and the page did not. The POST went out with the pin in the body
-    // only, where this endpoint never looks.
-    //
-    // The cost was total and silent: on ANY pinned board -- which is every real
-    // one -- the first update POST came back 403, and the 403 branch below
-    // calls updateOff(), which latches the link dead. So a kid pressing UPDATE
-    // ONLINE got "the console stopped answering" instantly, before any offer,
-    // on a board that was answering perfectly. `take_json` still adds it to the
-    // body as well; that is what /sync and /run want and is inert here.
-    const req = body
-        ? fetch(withPin("update"), { method: "POST", body: body,
-                            headers: { "Content-Type": "application/json" } })
-        : fetch(withPin("update"));
+    const req = body ? sealed("POST", "/update", body) : sealed("GET", "/update");
     req.then((r) => {
             // A wait is the board answering: the screen says it and the link
             // stays up (update_link.RemoteUpdater.ack).
-            if (r.status === 429) {
-                return pinWaitMs(r).then((ms) => {
-                    try { updateAck(0, JSON.stringify({ wait: pinWaitSays(ms) })); }
-                    catch (e) { }
-                });
+            if (r.wait >= 0) {
+                try { updateAck(0, JSON.stringify({ wait: signInWaitSays(r.wait) })); }
+                catch (e) { }
+                return null;
             }
             // The boot probe already cleared these, so meeting one HERE means
-            // the host changed under us -- rebooted into setup, pin rotated.
+            // the host changed under us -- rebooted into setup, this browser's
+            // key dropped.
             // Go inert once rather than retry-logging: the SCREEN stays up and
             // reads an error, which is the most a person looking at it can be
             // told.
             if (r.status === 404 || r.status === 405 || r.status === 501
-                || r.status === 403) {
+                || r.status === 401 || r.status === 0) {
                 try { updateAck(0, ""); updateOff(); } catch (e) { }
                 updatePoll = null;
                 console.log("[moy] update off: host stopped answering ("
                             + r.status + ")");
                 return null;
             }
-            const ok = r.ok ? 1 : 0;
-            return r.text().then((t) => {
+            const ok = r.status >= 200 && r.status < 300 ? 1 : 0;
+            return Promise.resolve(r.text).then((t) => {
                 try { updateAck(ok, t); } catch (e) { }
                 // The board said it is about to reboot. Said HERE rather than
                 // from the board's closing window because during an install the
@@ -1241,25 +1427,22 @@ function gpioPump() {
     try { body = gpioPoll(); } catch (e) { return; }
     if (!body) return;               // nothing queued and nothing watched
     gpioBusy = true;
-    fetch("gpio", { method: "POST", body: body,
-                    headers: { "Content-Type": "application/json" } })
+    sealed("POST", "/gpio", body)
         .then((r) => {
-            // The probe already cleared 404/405/403, so reaching one HERE means
-            // the host changed under us (rebooted into setup, a pin rotated).
+            // The probe already cleared 404/405/401, so reaching one HERE means
+            // the host changed under us (rebooted into setup, this browser's
+            // key dropped).
             // Stop for good rather than retry-logging: the verbs go inert and
             // say so once, which is the most a running cart can be told.
             if (r.status === 404 || r.status === 405 || r.status === 501
-                || r.status === 403) {
+                || r.status === 401 || r.status === 0) {
                 try { gpioAck(0, ""); gpioOff(); } catch (e) { }
                 gpioPoll = null;
                 console.log("[moy] gpio off: host stopped answering ("
                             + r.status + ")");
                 return null;
             }
-            const ok = r.ok ? 1 : 0;
-            return r.text().then((t) => {
-                try { gpioAck(ok, t); } catch (e) { }
-            });
+            try { gpioAck(r.status === 200 ? 1 : 0, r.text); } catch (e) { }
         })
         .catch(() => { try { gpioAck(0, ""); } catch (e) { } })
         .finally(() => { gpioBusy = false; });
@@ -1268,17 +1451,17 @@ function gpioPump() {
 // THE TERMINAL on a board-served page is a face of the board's shell
 // (web_boot's term_*, native/moy_sh/moy_sh_link.h): one WebSocket to the
 // board's GET /term (native/moy_tty), opened when the Terminal asks and
-// closed when it lets go. Its bytes and its fate queue here in arrival order
-// and are handed to the VM between steps, never inside one. A socket that
-// fails before it opens says nothing of why, so the same route without the
-// upgrade is asked: 403 the pin, 429 a wait, 404 no shell here.
-const TERM = { OPEN: 2, ENDED: 3, LOST: 4, UNREACHABLE: 5, PIN: 6, WAIT: 7, BUSY: 8, NONE: 9 };
+// closed when it lets go. The upgrade is a sealed request of the page's
+// session and every frame after it is sealed (moy_seal.h: 'k' keys and 's'
+// the size up, the face's bytes down). Its bytes and its fate queue here in
+// arrival order and are handed to the VM between steps, never inside one. A
+// socket that fails before it opens says nothing of why, so the same route
+// without the upgrade is asked: 401 this browser refused, a wait, 404 no
+// shell here.
+const TERM = { OPEN: 2, ENDED: 3, LOST: 4, UNREACHABLE: 5, REFUSED: 6, WAIT: 7, BUSY: 8, NONE: 9 };
 let termPoll = null, termFeed = null, termState = null;
-let termWs = null;
+let termWs = null, termSealed = false;
 const termQ = [];
-function termQuery(extra) {
-    return "term?" + (pin ? "pin=" + encodeURIComponent(pin) + "&" : "") + extra;
-}
 function termB64(u8) {
     let s = "";
     for (let i = 0; i < u8.length; i += 0x8000) {
@@ -1293,20 +1476,48 @@ function termClose() {
 }
 async function termWhy() {
     try {
-        const r = await fetch(termQuery("probe=1"));
-        if (r.status === 403) return [TERM.PIN, 0];
-        if (r.status === 429) {
-            let ms = 0;
-            try { ms = (await r.json()).ms | 0; } catch (e) { }
-            return [TERM.WAIT, ms];
-        }
+        const r = await sealed("GET", "/term?probe=1");
+        if (r.wait >= 0) return [TERM.WAIT, r.wait];
+        if (r.status === 401 || r.status === 0) return [TERM.REFUSED, 0];
         if (r.status === 404) return [TERM.NONE, 0];
     } catch (e) { }
     return [TERM.UNREACHABLE, 0];
 }
-function termOpen(cols, rows) {
+// One frame up: `kind` 'k' (keys) or 's' (the size), sealed on a signed-in
+// page; the open host's plain messages otherwise.
+function termSend(ws, kind, u8) {
+    if (!termSealed) {
+        ws.send(kind === "s" ? utf8d.decode(u8) : u8);
+        return;
+    }
+    const raw = new Uint8Array(u8.length + 1);
+    raw[0] = kind.charCodeAt(0);
+    raw.set(u8, 1);
+    const n = sw().up(swPut(raw));
+    if (n > 0) ws.send(swGet(n));
+}
+async function termOpen(cols, rows) {
     termClose();
-    const u = new URL(termQuery("cols=" + cols + "&rows=" + rows), self.location.href);
+    const path = "/term?cols=" + cols + "&rows=" + rows;
+    let target = path;
+    termSealed = false;
+    if (!(await signIn())) {
+        const a = authNeed || { ms: -1 };
+        termQ.push({ s: a.ms >= 0 ? TERM.WAIT : a.gone ? TERM.UNREACHABLE : TERM.REFUSED,
+                     n: a.ms >= 0 ? a.ms : 0 });
+        return;
+    }
+    if (!authOpen) {
+        const C = sw();
+        if (swCall((m, p) => C.seal(m, p, 0), "GET", path) < 0) {
+            termQ.push({ s: TERM.REFUSED, n: 0 });
+            return;
+        }
+        target = C.M.UTF8ToString(C.target());
+        C.ws(C.seq());
+        termSealed = true;
+    }
+    const u = new URL(target.slice(1), self.location.href);
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     let ws;
     try { ws = new WebSocket(u.href, "moy.sh"); } catch (e) {
@@ -1318,7 +1529,19 @@ function termOpen(cols, rows) {
     termWs = ws;
     ws.onopen = () => { if (termWs === ws) { opened = true; termQ.push({ s: TERM.OPEN, n: 0 }); } };
     ws.onmessage = (m) => {
-        if (termWs === ws && typeof m.data !== "string") termQ.push({ d: termB64(new Uint8Array(m.data)) });
+        if (termWs !== ws || typeof m.data === "string") return;
+        let u8 = new Uint8Array(m.data);
+        if (termSealed) {
+            const n = sw().down(swPut(u8));
+            if (n < 0) {                 // a frame that does not open: the session is over
+                termWs = null;
+                try { ws.close(1000); } catch (e) { }
+                termQ.push({ s: TERM.LOST, n: 0 });
+                return;
+            }
+            u8 = swGet(n);
+        }
+        termQ.push({ d: termB64(u8) });
     };
     ws.onclose = (c) => {
         if (termWs !== ws) return;
@@ -1326,6 +1549,7 @@ function termOpen(cols, rows) {
         const exit = /^exit (-?\d+)$/.exec(c.reason || "");
         if (c.code === 1000 && exit) termQ.push({ s: TERM.ENDED, n: +exit[1] });
         else if (c.code === 1013) termQ.push({ s: TERM.BUSY, n: 0 });
+        else if (c.code === 1008 && c.reason === "revoked") termQ.push({ s: TERM.REFUSED, n: 0 });
         else if (opened) termQ.push({ s: TERM.LOST, n: 0 });
         else termWhy().then(([st, n]) => termQ.push({ s: st, n: n }));
     };
@@ -1339,8 +1563,8 @@ function termPump() {
         if (d.want === 2) termClose();
         if (d.want === 1) termOpen(d.cols, d.rows);
         if (termWs && termWs.readyState === 1) {
-            if (d.size) termWs.send(JSON.stringify({ size: d.size }));
-            if (d.out) termWs.send(new Uint8Array(d.out));
+            if (d.size) termSend(termWs, "s", utf8.encode(JSON.stringify({ size: d.size })));
+            if (d.out) termSend(termWs, "k", new Uint8Array(d.out));
         }
     }
     while (termQ.length) {
@@ -1565,22 +1789,21 @@ function syncPump() {
     outstanding = true;
     syncBusy = true;
     if (mode === "site") { pumpLocal(body); return; }
-    fetch("sync", { method: "POST", body: body,
-                    headers: { "Content-Type": "application/json" } })
+    sealed("POST", "/sync", body)
         .then((r) => {
-            if (r.status === 429) {
+            const ok = r.status >= 200 && r.status < 300;
+            if (r.wait >= 0) {
                 // The board answered, so this is no loss: the batch requeues
                 // and the sweep holds off until the window ends, saying so on
                 // the link panel until a push lands.
                 syncOk(now);
                 try { syncAck(0); } catch (e) { }
-                return pinWaitMs(r).then((ms) => {
-                    lastSyncAt = performance.now() + ms - SYNC_MS;
-                    syncWaitSaid = true;
-                    self.postMessage({ t: "wait", s: pinWaitSays(ms) });
-                });
+                lastSyncAt = performance.now() + r.wait - SYNC_MS;
+                syncWaitSaid = true;
+                self.postMessage({ t: "wait", s: signInWaitSays(r.wait) });
+                return;
             }
-            if (r.ok && syncWaitSaid) {
+            if (ok && syncWaitSaid) {
                 syncWaitSaid = false;
                 self.postMessage({ t: "wait", s: "" });
             }
@@ -1592,26 +1815,27 @@ function syncPump() {
                 console.log("[moy] sync off: host has no /sync (" + r.status + ")");
                 return;
             }
-            if (r.status === 403) {
-                // The board wants a pin this page was not opened with
-                // (?pin=...). Retrying the same batch forever is noise.
+            if (r.status === 401 || r.status === 0) {
+                // The board no longer takes this browser's key (it was
+                // removed from its paired browsers), or its answer did not
+                // open. Retrying the same batch forever is noise.
                 try { syncAck(0); syncOff(); } catch (e) { }
                 syncPoll = null;
-                console.log("[moy] sync off: board refused the pin");
+                console.log("[moy] sync off: the board refused this browser");
                 // SAY SO. This is the silent-loss case in its purest form: the
                 // board is right there and answering, the page looks entirely
                 // healthy, and nothing a kid types will ever reach the console
                 // again. A devtools line is not a person being told.
                 syncLostSaid = false;
                 syncLost("the console refused this page",
-                         "It is asking for a pin this page was not opened with. "
-                         + "Re-scan the code on its WEB CONSOLE screen.");
+                         "This browser is no longer paired with it. "
+                         + "Scan the code on its WEB CONSOLE screen to pair again.");
                 return;
             }
-            if (r.ok) { syncOk(now); outstanding = false; }
-            else if (r.status === 503) { closing(r); }
+            if (ok) { syncOk(now); outstanding = false; }
+            else if (r.status === 503) { closingSaid(r.text); }
             else syncFailed(now);
-            try { syncAck(r.ok ? 1 : 0); } catch (e) { }
+            try { syncAck(ok ? 1 : 0); } catch (e) { }
         })
         .catch(() => {
             // The board is unreachable, not merely unhappy: no status at all.
@@ -1625,7 +1849,7 @@ function syncPump() {
 // POST there was nothing to fail -- so a tab left sitting on a console that was
 // then switched off noticed only when the reader happened to change something.
 // This is the question that keeps the clock honest: GET /sync, the open
-// capability marker, no pin and no store walk behind it.
+// capability marker, no sign-in and no store walk behind it.
 //
 // It shares syncOk/syncFailed with the push, so both paths feed ONE give-up
 // rather than two thresholds that could disagree about when a board is gone.
@@ -1645,18 +1869,15 @@ function heartbeat(now) {
         .finally(() => { syncBusy = false; });
 }
 
-// PLAY ON DEVICE (page_tail.js's link): POST /run, pin in the body as /run reads
-// it, and the link's new text back as {t:"pod", s} -- "" puts its old text back.
+// PLAY ON DEVICE (page_tail.js's link): POST /run, sealed, and the link's new
+// text back as {t:"pod", s} -- "" puts its old text back.
 async function podRun(cart) {
     let s = "";
     try {
-        const r = await fetch("run", { method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cart: cart, pin: pin }) });
-        const wait = await pinWaitMs(r);
-        if (wait >= 0) s = pinWaitSays(wait);
-        else if (r.ok) s = "playing on device: " + ((await r.json()).run || cart);
-        else if (r.status === 403) s = "device refused the pin";
+        const r = await sealed("POST", "/run", JSON.stringify({ cart: cart }));
+        if (r.wait >= 0) s = signInWaitSays(r.wait);
+        else if (r.status === 200) s = "playing on device: " + ((sealedJson(r) || {}).run || cart);
+        else if (r.status === 401) s = "device refused this browser";
         if (!s) console.log("[moy] play on device failed: " + r.status);
     } catch (e) {
         console.log("[moy] play on device failed: " + e);
@@ -1673,19 +1894,20 @@ async function podRun(cart) {
 // It is EXPECTED, so it carries no data-loss warning: the board is right there
 // and took everything it was given.
 function closing(r) {
-    r.text().then((t) => {
-        let why = "";
-        try { why = (JSON.parse(t) || {}).why || ""; } catch (e) { }
-        if (why === "update") {
-            expected("the console is updating itself",
-                     "It will restart on the new version. This page will not "
-                     + "work until it is back.");
-        } else {
-            expected("the console took its screen back",
-                     "WEB CONSOLE was switched off on the device. Turn it on "
-                     + "again there to carry on here.");
-        }
-    }).catch(() => expected("the console is shutting down", ""));
+    r.text().then(closingSaid).catch(() => expected("the console is shutting down", ""));
+}
+function closingSaid(t) {
+    let why = "";
+    try { why = (JSON.parse(t) || {}).why || ""; } catch (e) { }
+    if (why === "update") {
+        expected("the console is updating itself",
+                 "It will restart on the new version. This page will not "
+                 + "work until it is back.");
+    } else {
+        expected("the console took its screen back",
+                 "WEB CONSOLE was switched off on the device. Turn it on "
+                 + "again there to carry on here.");
+    }
 }
 
 function expected(head, body) {
@@ -1778,7 +2000,11 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search, !!m.coarse, m.channel || "", m.scheme);
+            await init(m.search, !!m.coarse, m.channel || "", m.scheme, m.auth);
+        } else if (m.t === "password") {
+            // The pairing prompt's password: a pairing reloads the page (its
+            // {t:"key"}), anything else asks again with why.
+            if (!(await pairPassword(m.pw, m.name))) askToPair();
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "ahead") {
@@ -1819,14 +2045,13 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const [carts, files] = await Promise.all([
-                fetch(withPin("carts.json")).then(async (r) => {
-                    const wait = await pinWaitMs(r);
-                    return wait >= 0 ? { wait: pinWaitSays(wait) } : r.json();
-                }),
-                fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
-                    .catch(() => null)]);
-            if (typeof carts.wait === "string") { say(carts.wait); return; }
+            const [cr, fr] = await Promise.all([
+                sealed("GET", "/carts.json"),
+                sealed("GET", "/files.json").catch(() => ({ status: 0 }))]);
+            if (cr.wait >= 0) { say(signInWaitSays(cr.wait)); return; }
+            const carts = cr.status === 200 ? sealedJson(cr) : null;
+            const files = fr.status === 200 ? sealedJson(fr) : null;
+            if (!carts) { say("the console did not send its carts"); return; }
             writeStore(CARTS_ROOT, carts);
             if (files) writeStore(store.rootById("files").vfs, files);
             reload();

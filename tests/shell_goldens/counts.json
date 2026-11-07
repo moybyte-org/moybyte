@@ -30,7 +30,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [26, 12],
     "unlock_banner": [95, 11],
-    "web_console": [165, 8]
+    "web_console": [294, 9]
   },
   "guition_480x320_fs1_dark": {
     "about": [9, 6],
@@ -63,7 +63,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [53, 22],
     "unlock_banner": [63, 16],
-    "web_console": [165, 8]
+    "web_console": [294, 8]
   },
   "guition_480x320_fs1_music": {
     "music_noaudio": [3, 6]
@@ -118,7 +118,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "guition_tapfloor_dark": {
     "about": [9, 6],
@@ -151,7 +151,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [54, 22],
     "unlock_banner": [63, 16],
-    "web_console": [165, 8]
+    "web_console": [294, 8]
   },
   "p4_1024x600_cs2_fs1_blocks": {
     "about": [11, 6],
@@ -187,7 +187,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [23, 22],
     "unlock_banner": [86, 30],
-    "web_console": [167, 8]
+    "web_console": [296, 7]
   },
   "p4_1024x600_cs2_fs1_console": {
     "about": [9, 6],
@@ -220,7 +220,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_cs2_fs1_contrast_light": {
     "about": [10, 6],
@@ -256,7 +256,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [23, 22],
     "unlock_banner": [549, 30],
-    "web_console": [167, 8]
+    "web_console": [296, 7]
   },
   "p4_1024x600_cs2_fs1_gnomebar": {
     "about": [9, 6],
@@ -292,7 +292,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_cs2_fs1_homegrid": {
     "launcher": [0, 0],
@@ -340,7 +340,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [23, 22],
     "unlock_banner": [86, 30],
-    "web_console": [167, 8]
+    "web_console": [296, 7]
   },
   "p4_1024x600_cs2_fs1_moy_menus": {
     "pause": [7, 14],
@@ -381,7 +381,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_cs2_fs1_music": {
     "music_desk": [0, 5],
@@ -446,7 +446,7 @@
     "settings_log": [4, 11],
     "settings_permissions": [22, 22],
     "unlock_banner": [79, 28],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_cs2_fs1_win95bar": {
     "about": [9, 6],
@@ -482,7 +482,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_cs2_fs1_windowed": {
     "about": [9, 6],
@@ -527,7 +527,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [21, 22],
     "unlock_banner": [79, 30],
-    "web_console": [166, 8]
+    "web_console": [295, 7]
   },
   "p4_1024x600_fs2_windowed": {
     "about": [9, 6],
@@ -563,7 +563,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [17, 17],
     "unlock_banner": [82, 26],
-    "web_console": [166, 9]
+    "web_console": [295, 9]
   },
   "p4_1024x600_fs2_windowed_light": {
     "about": [11, 6],
@@ -599,7 +599,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [19, 17],
     "unlock_banner": [88, 26],
-    "web_console": [167, 9]
+    "web_console": [296, 9]
   },
   "p4_1024x600_render2_moy_day": {
     "about": [11, 5],
@@ -635,7 +635,7 @@
     "settings_log": [3, 11],
     "settings_permissions": [19, 17],
     "unlock_banner": [73, 26],
-    "web_console": [167, 9]
+    "web_console": [296, 9]
   },
   "tdeck_320x240_fs1_blocks": {
     "about": [11, 6],
@@ -668,7 +668,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [39, 19],
     "unlock_banner": [67, 14],
-    "web_console": [166, 8]
+    "web_console": [295, 9]
   },
   "tdeck_320x240_fs1_bottombar": {
     "about": [9, 6],
@@ -701,7 +701,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [41, 19],
     "unlock_banner": [62, 14],
-    "web_console": [165, 8]
+    "web_console": [294, 8]
   },
   "tdeck_320x240_fs1_dark": {
     "about": [9, 6],
@@ -744,7 +744,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [41, 19],
     "unlock_banner": [62, 14],
-    "web_console": [165, 8]
+    "web_console": [294, 8]
   },
   "tdeck_320x240_fs1_homegrid": {
     "launcher": [0, 0],
@@ -799,7 +799,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [39, 19],
     "unlock_banner": [67, 14],
-    "web_console": [166, 8]
+    "web_console": [295, 8]
   },
   "tdeck_320x240_fs1_moy_day": {
     "about": [11, 6],
@@ -832,7 +832,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [39, 19],
     "unlock_banner": [67, 14],
-    "web_console": [166, 8]
+    "web_console": [295, 8]
   },
   "tdeck_320x240_fs1_moy_menus": {
     "pause": [7, 14],
@@ -870,7 +870,7 @@
     "settings_log": [2, 0],
     "settings_permissions": [41, 19],
     "unlock_banner": [62, 14],
-    "web_console": [165, 8]
+    "web_console": [294, 8]
   },
   "tdeck_320x240_fs1_music": {
     "music_add": [10, 10],

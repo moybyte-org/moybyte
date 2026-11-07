@@ -28,10 +28,14 @@ globalThis.self = {
 // A static host: the bundle's files, and a 404 for everything else -- /sync
 // included, which is what puts the page in site mode.
 globalThis.fetch = async (url) => {
+    // A static host's answers, whole: a status, its headers and the body. It
+    // has no /auth, so the worker serves it in the clear (worker.js, hello).
     const p = "dist/" + String(url).split("?")[0];
-    if (!existsSync(p)) return { ok: false, status: 404, json: async () => null };
-    const txt = readFileSync(p, "utf-8");
-    return { ok: true, status: 200, json: async () => JSON.parse(txt), text: async () => txt };
+    const hit = existsSync(p);
+    const txt = hit ? readFileSync(p, "utf-8") : "not found";
+    return { ok: hit, status: hit ? 200 : 404,
+             headers: { get: () => (hit ? "application/json" : "text/plain") },
+             json: async () => JSON.parse(txt), text: async () => txt };
 };
 
 await import(pathToFileURL(process.cwd() + "/dist/worker.js").href);

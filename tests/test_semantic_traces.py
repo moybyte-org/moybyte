@@ -1660,9 +1660,9 @@ BATCH = moy_net.encode_batch(1, None, [
     {"p": "hop.moy/journal/x", "t": "never"},
     {"p": "../escape", "t": "never"},
     {"p": "old.moy/main.py", "t": "x"},
-    {"p": "old.moy", "dc": 1}], "1234")
-ops, pin, root_id = moy_sync.parse_batch(BATCH.encode())
-say("parse", len(ops), pin, root_id)
+    {"p": "old.moy", "dc": 1}])
+ops, root_id = moy_sync.parse_batch(BATCH.encode())
+say("parse", len(ops), root_id)
 applied, errs, shelf = moy_sync.apply_ops(carts, ops, root_id)
 say("apply", applied, ",".join("%d:%s" % e for e in errs), int(shelf))
 say("rows", " ".join(tree(carts)))
@@ -1670,7 +1670,7 @@ say("refuse", moy_sync.parse_batch(moy_net.encode_batch(2, "nope", [])),
     moy_sync.parse_batch(moy_net.encode_batch(1, "files", [])),
     moy_sync.parse_batch(b"{"))
 files_ops = moy_sync.parse_batch(moy_net.encode_batch(2, "files", [{"p": "x"}]))
-say("files", files_ops[2], len(files_ops[0]))
+say("files", files_ops[1], len(files_ops[0]))
 
 # -- the OTA health machine on a canned install --------------------------------
 upd = ROOT + "/update"
@@ -1748,7 +1748,7 @@ except ValueError as e:
     say("dl", e)
 
 # -- the web-console switch (native/moy_net/moy_webconsole.c) ------------------
-moy_net.wc_on(0, carts, None, None, "1234", ("/run",), None)
+moy_net.wc_on(0, carts, None, None, ROOT + "/system", ("/run",), None)
 say("wc join", moy_net.wc_state()[0], moy_net.wc_url(True) == "")
 moy_net.wc_park(True)
 say("wc park", moy_net.wc_state()[1])
@@ -1766,10 +1766,10 @@ print("DRIVER_DONE")
 '''
 
 LINKS_TRACE = """\
-parse 9 1234 carts
+parse 9 carts
 apply 7 5:bad path,6:bad path 1
 rows hop.moy/big.lua=10 hop.moy/main.py=24 hop.moy/main.py.bak=46 hop.moy/manifest.json=16 hop.moy/manifest.json.bak=38
-refuse (None, None, None) (None, None, None) (None, None, None)
+refuse (None, None) (None, None) (None, None)
 files files 1
 boot ota_1 ota_1 ('ok', '0.8 -> 0.9')
 confirm [True, False] valid 0 marker 0

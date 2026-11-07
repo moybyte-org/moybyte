@@ -170,12 +170,12 @@ void moy_sh_link_state(int state, int n) {
         snprintf(msg, sizeof msg, "%sThe board does not answer. Press Enter to try again.%s\r\n",
                  DIM, PLAIN);
         break;
-    case MOY_SH_LINK_PIN:
-        snprintf(msg, sizeof msg, "%sThe board refused the pin. Enter it on the page, then press "
-                 "Enter.%s\r\n", DIM, PLAIN);
+    case MOY_SH_LINK_REFUSED:
+        snprintf(msg, sizeof msg, "%sThe board no longer takes this browser. Pair it again (reload "
+                 "the page), then press Enter.%s\r\n", DIM, PLAIN);
         break;
     case MOY_SH_LINK_WAIT:
-        snprintf(msg, sizeof msg, "%sToo many wrong pins: wait %d s, then press Enter.%s\r\n",
+        snprintf(msg, sizeof msg, "%sToo many wrong sign-ins: wait %d s, then press Enter.%s\r\n",
                  DIM, (n + 999) / 1000, PLAIN);
         break;
     case MOY_SH_LINK_BUSY:

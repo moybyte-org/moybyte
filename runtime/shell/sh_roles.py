@@ -2,7 +2,7 @@
 #   _wait                             a wait a step at a time (`yield from`), Ctrl-C ends it
 #   r_settings                        system/settings
 #   r_pkg                             runtime/carts/pkg.py's verbs, stepped
-#   r_passwd                          SSH's password
+#   r_passwd                          the console's password, the paired browsers
 #   r_http                            a GET by the http worker, stepped
 #   r_snd                             stdin through the audio ring
 #   r_python                          a REPL or code in the shell's VM
@@ -65,10 +65,14 @@ the http worker's own wait), never `online()`.
   settings set KEY VALUE...  a JSON value, or the words as a string; applied
   settings unset KEY         at once where the console applies the key live
   settings reload            read the file again (an edit by hand) and apply it
-  passwd PASSWORD            the console's password, for SSH's sign-in
-                             (runtime/system/ssh_service.py): set, and the
-                             server serves; `passwd -d` removes it and stops it
-  passwd                     whether one is set, and what SSH serves
+  passwd PASSWORD            the console's password, for SSH's sign-in and a
+                             browser's pairing (runtime/system/ssh_service.py):
+                             set, and the server serves; `passwd -d` removes
+                             it and stops it. Paired browsers keep their keys
+  passwd                     whether one is set, what SSH serves, the host
+                             key's fingerprint and how many browsers are paired
+  passwd -l                  the paired browsers: id, paired, last seen, name
+  passwd -r ID|all           forget one (its open sessions end) or every one
   python [-c CODE]           a REPL over stdin into the shell's VM (an
                              expression's value printed, a block ended by a
                              blank or unindented line), or CODE run; with
@@ -491,24 +495,52 @@ def r_lease(d, a):
     return 0
 
 
+def _day(t):
+    try:
+        import wallclock as _wc
+    except ImportError:  # host: the runtime package
+        from runtime import wallclock as _wc
+    y, m, dd = _wc.localtime(t)[:3]
+    return "%d-%02d-%02d" % (y, m, dd)
+
+
 def r_passwd(d, a):
     try:
         import ssh_service
     except ImportError:  # host: the runtime package
         from runtime import ssh_service
     ws = d.ws
+    web = getattr(ws, "webhost", None)
     if not a:
         st = ssh_service.status()
         d.out("password %s\n" % ("set" if ssh_service.is_set(ws) else "not set"))
         if st is not None:
             d.out("ssh %s as %s.local, %d session(s), %d refused\n"
                   % ("serving" if st[0] else "off", ssh_service.hostname(ws), st[1], st[3]))
+        fp = ssh_service.fingerprint(ws)
+        d.out("host key %s\n" % (fp or "not made yet (the first SSH start makes it)"))
+        if web is not None:
+            d.out("%d browser(s) paired (passwd -l)\n" % len(web.browsers()))
         return 0
     if a == ["-d"]:
         ssh_service.set_password(ws, None)
         return 0
+    if a[0] in ("-l", "-r"):
+        if web is None:
+            d.err("passwd", "this console serves no browser")
+            return 1
+        if a == ["-l"]:
+            for kid, created, seen, name in web.browsers():
+                d.out("%s  paired %s  seen %s  %s\n" % (kid, _day(created), _day(seen), name))
+            return 0
+        if len(a) == 2:
+            if web.forget(a[1]) == 0:
+                d.err("passwd", "no browser " + a[1])
+                return 1
+            return 0
+        return _usage(d, "passwd", "-r ID|all")
     if len(a) != 1 or a[0].startswith("-"):
-        return _usage(d, "passwd", "PASSWORD | -d")
+        return _usage(d, "passwd", "PASSWORD | -d | -l | -r ID|all")
     if not ssh_service.set_password(ws, a[0]):
         d.err("passwd", "not set")
         return 1

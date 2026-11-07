@@ -152,7 +152,7 @@ def forget_wifi(ssid, root=CARTS_DIR):
 
 # --- system settings: system/settings (#28; docs/os_2026-11/system.md §5) -----
 #
-# The console's settings (the theme, the font scale, the toggles, the pin, the
+# The console's settings (the theme, the font scale, the toggles, the
 # consent record, favorites and recents: every row `ws.system` holds) live in
 # ONE plain-text file under the console's `system/` folder BESIDE the carts dir,
 # so `cat`, the shell's `settings` and an editor all reach it:

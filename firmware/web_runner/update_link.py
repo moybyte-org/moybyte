@@ -76,7 +76,7 @@ _BUSY = {
 
 
 def _wait_said(text):
-    """The worker's sentence for a pin wait, from the {"wait": s} it acks a
+    """The worker's sentence for a sign-in wait, from the {"wait": s} it acks a
     429 with, or None."""
     try:
         doc = json.loads(text) if text else None
@@ -87,7 +87,7 @@ def _wait_said(text):
 
 
 class RemoteUpdater:
-    """`ws.updater` over a board's pin-gated /update, for the shared UpdateUI."""
+    """`ws.updater` over a board's sealed /update, for the shared UpdateUI."""
 
     def __init__(self, status, log=print):
         self._log = log
@@ -306,15 +306,13 @@ class RemoteUpdater:
 
     # -- the pump's end (worker.js) -----------------------------------------
 
-    def take_json(self, pin=None):
+    def take_json(self):
         """The next POST body, or "" -- nothing queued, or one in flight."""
         if self.dead or self._sent is not None or self._queued is None:
             return ""
         doc = self._queued
         self._queued = None
         self._sent = doc
-        if pin:
-            doc["pin"] = pin
         return json.dumps(doc)
 
     def wants_poll(self):
@@ -331,8 +329,8 @@ class RemoteUpdater:
         if not ok:
             wait = _wait_said(text)
             if wait:
-                # The board ANSWERED: it is holding wrong pins off for a while
-                # (worker.js's pinWaitSays). Not a failure toward MAX_FAILS and
+                # The board ANSWERED: it is holding wrong sign-ins off for a
+                # while (worker.js's signInWaitSays). Not a failure toward MAX_FAILS and
                 # not a request to resend; the screen reads it as its error.
                 self._fails = 0
                 self._queued = None

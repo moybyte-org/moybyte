@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome)")
 
 # What the board keeps for itself before the page ever opens.
-BOARD_ROWS = {"web_pin": "4821", "unknown_sources": False, "volume": 2,
+BOARD_ROWS = {"unknown_sources": False, "volume": 2,
               "ota_channel": "stable"}
 
 
