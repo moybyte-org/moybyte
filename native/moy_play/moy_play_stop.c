@@ -701,10 +701,12 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .interp = S->m.interp, .ring = S->ring,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
-    if (rc != 0 && !S->m.interp && strncmp(S->err, "refused: bad signature", 22) != 0
+    if (rc != 0 && !S->m.interp && !moycore_wasm_ran()
+        && strncmp(S->err, "refused: bad signature", 22) != 0
         && strncmp(S->err, "refused: malformed signature", 28) != 0) {
         // Not tamper evidence: this console cannot use its module, and the
-        // cart plays on the interpreter (WasmRun's retry).
+        // cart plays on the interpreter (WasmRun's retry). A module that
+        // ran its _init trapped in the cart's own code: that is its error.
         printf("STOP module refused: %s -- the interpreter instead\n", S->err);
         moycore_close_c();
         o.module = S->m.main;

@@ -130,6 +130,7 @@ typedef struct {
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
+int moycore_wasm_ran(void);
 void moycore_close_c(void);
 
 #endif // MOYCORE_RUN_H

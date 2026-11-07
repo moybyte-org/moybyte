@@ -211,6 +211,11 @@ module by this console's own name is not refused** (2026-09-30, "A cart
 survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
 `main.wasm` itself on the interpreter instead, with no key and no signature,
 and the Player's notice says it needs an update to run at full speed (below).
+A module that loaded and ran its `_init` (`moycore.wasm_ran`) is past every
+reason to retry: an error from it is a trap in the cart's own code, shown on
+the stop card as the cart's error, on the VM-stopped path
+(`native/moy_play/moy_play_stop.c`) as on the VM's. The Deep Init fixture
+traps in `_init` and counts its runs in a written file to hold both to it.
 The sync RPC
 declines binary files, so neither a module nor `main.wasm` crosses between a
 browser and a board (`runtime/moy_sync.py`): a compiled cart plays where it

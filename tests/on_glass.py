@@ -4428,6 +4428,98 @@ def wasm_deep_recursion_traps_with_its_numbers(board, board_dir):
     return shift, bound, given, free, frame
 
 
+DEEP_INIT_TITLE = "Deep Init"
+DEEP_INIT_FOLDER = "wasm_deep_init.moy"
+
+
+def _deep_init_push(board, board_dir):
+    """Deep Init (tests/fixtures/wasm/deep_init.moy: Deep Wasm's recursion in
+    _init) built for this board's chip and pushed; the cart's path on the
+    board. Its written "inits" outlives the push (cart_files.py)."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_deep_init_")
+    out = os.path.join(tmp, "deep_init.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "deep_init.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    _push_folder(board, board_dir, out, root + "/" + DEEP_INIT_FOLDER)
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    return root + "/" + DEEP_INIT_FOLDER
+
+
+def _deep_init_inits(board, path):
+    """How many times Deep Init's _init has run: the byte in its written
+    "inits" (mod 256), 0 before it was ever written."""
+    board.pyexec("def _deep_inits(p):\n"
+                 "    try:\n"
+                 "        with open(p, 'rb') as f:\n"
+                 "            return f.read(1)\n"
+                 "    except OSError:\n"
+                 "        return b''\n", strict=True)
+    got = board.pyval("ws._with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
+                      ".folder_of(%r) + '/inits'))" % path, timeout=30, strict=True)
+    return got[0] if got else 0
+
+
+def _assert_stack_trap(err):
+    assert "native stack overflow" in err and STACK_NOTE.search(err), err
+    assert "wasm_open wants" not in err and "operand stack" not in err, err
+
+
+def wasm_init_trap_is_the_carts_own_error(board, board_dir, stopped=False):
+    """Deep Init traps in _init, after its module loaded: the trap is the
+    cart's own error -- "native stack overflow" with the note the stack check
+    names its numbers in -- never a retry on the interpreter, which would run
+    _init a second time or be refused by the session still open. Its written
+    "inits" counts one more run. With `stopped`, the run is the S3s' with the VM down
+    (`vmstop force`, native/moy_play/moy_play_stop.c), whose panel the board
+    prints as "STOP error:". The hello cart runs after it. Returns the
+    error."""
+    import time
+    path = _deep_init_push(board, board_dir)
+    before = _deep_init_inits(board, path)
+    if not stopped:
+        err = _wasm_run_error(board, DEEP_INIT_TITLE)
+    else:
+        line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+        assert line is not None and "force" in line, line
+        n0 = len(board.lines)
+        ended = False
+        try:
+            line = board.cmd("run %s" % DEEP_INIT_TITLE.lower(), wait_for="REMOTE run",
+                             timeout=30)
+            assert line is not None and DEEP_INIT_TITLE in line, line
+            said = None
+            end = time.time() + 60
+            while said is None and time.time() < end:
+                said = next((ln for ln in board.lines[n0:] if "STOP error:" in ln), None)
+                if said is None:
+                    board.drain(0.2)
+            assert said is not None, "the stop never said its error"
+            err = said.split("STOP error:", 1)[1].strip()
+            # the panel waits for a press; a Ctrl-C ends it and brings the VM back
+            board.ser.write(b"\x03")
+            board.ser.flush()
+            ended = _said_since(board, n0, "STOP 1/1 ended", 30)
+            assert ended, "the run never ended"
+            _desk_back(board)
+        finally:
+            if not ended and not _said_since(board, n0, "STOP 1/1 ended", 0):
+                board.ser.write(b"\x03")
+                board.ser.flush()
+                board.wait_line("STOP 1/1 ended", 30)
+                _desk_back(board)
+            board.cmd("vmstop need", wait_for="REMOTE vmstop")
+    _assert_stack_trap(err)
+    assert _deep_init_inits(board, path) == (before + 1) % 256, err
+    print("\nWASM init trap%s: %r" % (" (VM down)" if stopped else "", err))
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return err
+
+
 # -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------
 #
 # Opt-in by construction: the cart links GPL code and carries the shareware

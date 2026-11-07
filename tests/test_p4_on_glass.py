@@ -249,6 +249,10 @@ def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts)
     on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
 
 
+def test_a_trap_in_init_is_the_carts_own_error(board, wasm_carts):
+    on_glass.wasm_init_trap_is_the_carts_own_error(board, WASM_BOARD_DIR)
+
+
 def test_a_compiled_cart_out_of_native_stack_traps_with_its_numbers(board, wasm_carts):
     on_glass.wasm_deep_recursion_traps_with_its_numbers(board, WASM_BOARD_DIR)
 

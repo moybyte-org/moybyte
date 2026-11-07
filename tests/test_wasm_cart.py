@@ -322,6 +322,32 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME)
 
 
+def test_a_trap_in_init_is_the_carts_error_and_init_runs_once(tmp_path):
+    """Deep Init recurses without end in _init: the run ends on the stop card
+    with the engine's stack overflow as the cart's error, and its written
+    file "inits" -- one more at every _init -- reads 1: nothing ran the cart
+    a second time. The hello cart runs after it."""
+    _binding_or_skip()
+
+    def _deep(root):
+        wasm_cart.build(os.path.join(FIXTURES, "deep_init.moy"),
+                        os.path.join(root, "deep_init.moy"))
+    root = _store(tmp_path, _deep, _hello)
+    ws = host_app.build_workstation(root)
+    open_cart(ws, "Deep Init")
+    _frames(ws, 3)
+    err = ws.player.cart_error
+    assert err and "stack overflow" in err, err
+    assert ws.pause.open and ws.pause.stopped
+    with open(os.path.join(os.path.dirname(root), "written", "deep_init", "inits"),
+              "rb") as f:
+        assert f.read() == b"\x01"
+    ws.player.release_world()
+    open_cart(ws, "Hello Wasm")
+    _frames(ws, 3)
+    assert ws.player.cart_error is None, ws.player.cart_error
+
+
 # A cart that keeps the console's sample queue full: every _update asks for
 # the room and fills it from a 441 Hz square wave, counting what the console
 # took into pmem slot 0.

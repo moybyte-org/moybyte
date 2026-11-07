@@ -746,6 +746,22 @@ static mp_obj_t mod_wasm_quit(void)
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_quit_obj, mod_wasm_quit);
 
+// Whether the run's module is open: it loaded, and its _init was called. A
+// refusal before that point leaves the run free for another open (a module
+// this console cannot use, retried on the interpreter); an error after it is
+// the cart's own, a trap in its code, and nothing retries it.
+int moycore_wasm_ran(void)
+{
+    return RUN.wasm;
+}
+
+// wasm_ran() -> moycore_wasm_ran(), for the binding's open.
+static mp_obj_t mod_wasm_ran(void)
+{
+    return mp_obj_new_bool(moycore_wasm_ran());
+}
+MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_ran_obj, mod_wasm_ran);
+
 // wasm_table() -> the names in this console's import table (libmoy's
 // moy_wasm_natives), every function a compiled cart may import from "moy":
 // what the Player holds a module's imports to before it loads one

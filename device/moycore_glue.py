@@ -1021,14 +1021,17 @@ class WasmRun(MoycoreRun):
         try:
             if has_module:
                 err = _open(module, sha, False)
-                if err and not err.startswith(_AOT_TAMPER_EVIDENCE):
+                if (err and not err.startswith(_AOT_TAMPER_EVIDENCE)
+                        and not _moycore.wasm_ran()):
                     # Not tamper evidence -- a mismatched or unsigned module,
                     # despite carrying this console's own file name (rare: a
                     # push tool built it unsigned, or the file is corrupt),
                     # or one calling a helper this firmware lacks. The cart
                     # itself is fine; only this console cannot use its
                     # module, so it plays on the interpreter, exactly as it
-                    # would have with no module at all.
+                    # would have with no module at all. A module that loaded
+                    # and ran its _init (`wasm_ran`) is past that: its error
+                    # is a trap in the cart's own code, the cart's to show.
                     self.interp = True
                     self.interp_cause = (
                         "unsigned" if err.startswith(_AOT_UNSIGNED)

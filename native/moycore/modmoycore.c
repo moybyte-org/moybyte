@@ -1031,6 +1031,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_files_room),  MP_ROM_PTR(&moycore_files_room_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_kept),  MP_ROM_PTR(&moycore_files_kept_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_quit),   MP_ROM_PTR(&moycore_wasm_quit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_ran),    MP_ROM_PTR(&moycore_wasm_ran_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_table),  MP_ROM_PTR(&moycore_wasm_table_obj) },
     { MP_ROM_QSTR(MP_QSTR_take_frames), MP_ROM_PTR(&moycore_take_frames_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame),       MP_ROM_PTR(&moycore_frame_obj) },

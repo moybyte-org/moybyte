@@ -180,6 +180,7 @@ MP_DECLARE_CONST_FUN_OBJ_1(moycore_files_keep_obj);
 MP_DECLARE_CONST_FUN_OBJ_2(moycore_files_room_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(moycore_files_kept_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(moycore_wasm_quit_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(moycore_wasm_ran_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(moycore_wasm_table_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_take_frames_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(moycore_frame_obj);

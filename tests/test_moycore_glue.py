@@ -170,14 +170,18 @@ class FakeMoycore(types.ModuleType):
         # A retry (native/moy_wasm/README.md, "A cart survives its
         # firmware") calls wasm_open a second time; set this to a list to
         # answer each call in turn instead of the same wasm_open_err always.
+        # An answer given as (text, True) is a trap after the module loaded
+        # and its _init ran: the session stays open (wasm_ran) and, as the C
+        # does, a further wasm_open before close() raises.
         self.wasm_open_errs = None
+        self.ran = False
         self.owed_frame = None
         self.owed_lut = None
         self.kept = False
         for verb in ("run_begin", "register", "exec", "load", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
-                     "get_global", "wasm_open", "take_frames", "frame",
+                     "get_global", "wasm_open", "wasm_ran", "take_frames", "frame",
                      "frame_settle", "frame_presented", "frame_kept",
                      "layer_bind", "scene_put", "image_put"):
             assert verb in C_NAMES, verb
@@ -247,6 +251,7 @@ class FakeMoycore(types.ModuleType):
 
     def _close(self):
         self.closes += 1
+        self.ran = False
         self._log("close")
 
     def _active(self):
@@ -266,9 +271,20 @@ class FakeMoycore(types.ModuleType):
 
     def _wasm_open(self, *a):
         self._log("wasm_open", *a)
+        if self.ran:
+            raise RuntimeError("moycore: wasm_open wants a run begun with vm=False")
         if self.wasm_open_errs is not None:
-            return self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
-        return self.wasm_open_err
+            err = self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
+        else:
+            err = self.wasm_open_err
+        if isinstance(err, tuple):
+            err, self.ran = err
+        else:
+            self.ran = err is None
+        return err
+
+    def _wasm_ran(self):
+        return self.ran
 
     def _take_frames(self, on, palette=True):
         self._log("take_frames", on, palette)
@@ -2061,6 +2077,28 @@ def test_a_key_mismatch_retries_then_a_trap_still_closes_the_console(tmp_path):
         ws = FakeWs(project=_CartProject(cart))
         with pytest.raises(RuntimeError, match="a trap in _init"):
             world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+def test_a_trap_in_init_is_the_carts_own_error_and_never_retries(tmp_path):
+    """A module that loaded and ran its _init is past every reason to retry
+    on the interpreter: a trap there is the cart's own error (here the
+    native stack check's, with its note), so WasmRun raises it, closes the
+    session once, and never opens the cart a second time -- which would run
+    _init twice, or be refused by the session still open."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    trap = ("Exception: native stack overflow [stack 0x4ff00000+0 bound +2048 "
+            "set +2048 free 13000 frame 96 here]")
+    world.core.wasm_open_errs = [(trap, True)]
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError) as exc:
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert str(exc.value) == trap
+        assert [c[0] for c in world.core.calls].count("wasm_open") == 1
         assert world.core.closes == 1
     finally:
         world.close()
