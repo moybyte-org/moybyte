@@ -181,22 +181,30 @@ int moy_sync_pin_ok(const moy_sync_batch_t *b, const char *pin);
 
 #define MOY_SYNC_PART_MAX (16 * 1024)
 #define MOY_SYNC_ERRS 8
+#define MOY_SYNC_SHELF_FULL 2
 
 // The store a receiver applies into. `kinds` is the files root's allowlist
 // (moy_files.FILE_KINDS), each name NUL-terminated and an empty one last; NULL
 // when the receiver has no files layer, which refuses every files op.
+// `shelf`, when not NULL, is where the apply notes each cart folder whose
+// change reached the shelf: the names NUL-terminated, an empty one last, each
+// once, added to what it already holds (`shelf[0]` is 0 for none).
 typedef struct {
     const char *carts;
     const char *files;              // NULL: no files layer
     const char *kinds;
     int journal;                    // of record: a published carts file is a commit
     int64_t ts;                     // what that commit records as its time
+    char *shelf;                    // NULL: the folders are not noted
+    size_t shelf_cap;
 } moy_sync_store_t;
 
 typedef struct {
     uint32_t applied;
     uint32_t refused;
-    int shelf;                      // a cart was born or died, or a shelf file changed
+    int shelf;                      // a cart was born or died, or a shelf file changed;
+                                    // MOY_SYNC_SHELF_FULL too when a folder did not
+                                    // fit the store's `shelf`
     uint32_t nerr;                  // the refusals held below, the first MOY_SYNC_ERRS
     struct {
         uint32_t index;
@@ -276,6 +284,12 @@ void moy_web_set_pin(const char *pin);
 int moy_web_poll(void);
 void moy_web_state(moy_web_state_t *out);
 uint32_t moy_web_events(void);      // the pending events, cleared
+// The cart folders the batches since the last call changed on the shelf, as
+// moy_sync_store_t's `shelf` list, copied into `out` and cleared: its length,
+// or MOY_WEB_SHELF_ALL when they did not all fit (the shelf reads every one).
+#define MOY_WEB_SHELF_BYTES 256u
+#define MOY_WEB_SHELF_ALL ((size_t)-1)
+size_t moy_web_shelf(char *out, size_t cap);
 
 // The parked request: 1 and its spans (good until moy_web_answer), or 0.
 int moy_web_take(const char **method, size_t *method_n, const char **target,

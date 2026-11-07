@@ -69,13 +69,13 @@ FORWARDS = {
     # the direct suites.
     "covers": {},
     # Landing C, commit 2. ONE forward, and it is the one #209's own 3d blind
-    # spot names: `moy_webhost` captures `lambda: ws.rescan_carts()` when the
+    # spot names: `moy_webhost` captures `lambda folders: ws.rescan_carts(folders)` when the
     # webhost is CONSTRUCTED, and the Guition on-glass suite's sync test drives
     # it end to end from a browser batch. Everything else migrated in-commit --
     # the roster attribute (`carts.all`) has no `ws` mirror at all, because a
     # re-scan REBINDS the list and an alias would go stale on the first sync.
     "carts": {
-        "rescan_carts": "rescan",            # device/moy_webhost's on_sync lambda
+        "rescan_carts": "synced",            # device/moy_webhost's on_sync lambda
     },
     # Landing D. ZERO forwards, like the cover cache, and for the same reason:
     # the look's callers are all IN this tree and all moved with it. The three

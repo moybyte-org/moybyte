@@ -570,6 +570,26 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
     return 0;
 }
 
+// Note cart folder `name` (n bytes) in the store's shelf list: 1 when it is
+// there, 0 when it did not fit.
+static int shelf_note(const moy_sync_store_t *s, const char *name, size_t n) {
+    char *p = s->shelf;
+    while (*p) {
+        size_t k = strlen(p);
+        if (k == n && memcmp(p, name, n) == 0) {
+            return 1;
+        }
+        p += k + 1u;
+    }
+    if ((size_t)(p - s->shelf) + n + 2u > s->shelf_cap) {
+        return 0;
+    }
+    memcpy(p, name, n);
+    p[n] = '\0';
+    p[n + 1u] = '\0';
+    return 1;
+}
+
 void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
                     const char *ops_end, moy_sync_result_t *res) {
     memset(res, 0, sizeof(*res));
@@ -599,7 +619,13 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
             res->refused++;
         } else {
             res->applied++;
-            res->shelf |= shelf;
+            if (shelf) {
+                res->shelf |= 1;
+                if (s->shelf != NULL
+                    && !shelf_note(s, o->rel + o->seg[0], o->seg_n[0])) {
+                    res->shelf |= MOY_SYNC_SHELF_FULL;
+                }
+            }
         }
         i++;
     }

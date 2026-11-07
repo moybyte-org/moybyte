@@ -833,6 +833,25 @@ static mp_obj_t mod_web_events(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_events_obj, mod_web_events);
 
+// web_shelf() -> the cart folders the batches since the last call changed on
+// the shelf (a tuple of names), or None for every folder; cleared.
+static mp_obj_t mod_web_shelf(void) {
+    char names[MOY_WEB_SHELF_BYTES];
+    size_t n = moy_web_shelf(names, sizeof(names));
+    if (n == MOY_WEB_SHELF_ALL) {
+        return mp_const_none;
+    }
+    mp_obj_t t = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; i += strlen(names + i) + 1u) {
+        mp_obj_list_append(t, mp_obj_new_str(names + i, strlen(names + i)));
+    }
+    size_t len;
+    mp_obj_t *items;
+    mp_obj_list_get(t, &len, &items);
+    return mp_obj_new_tuple(len, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_shelf_obj, mod_web_shelf);
+
 // web_take() -> (method, target, body bytes) for the parked request, or None.
 static mp_obj_t mod_web_take(void) {
     const char *m, *t, *b;
@@ -1182,6 +1201,7 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_shelf), MP_ROM_PTR(&mod_web_shelf_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&mod_web_answer_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},

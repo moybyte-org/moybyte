@@ -31,7 +31,9 @@ which keys a page may change is `moy_sync.SYSTEM_KEYS`.
 The C parks such a request until `poll()` takes it, answers it here, and hands
 the response back; one nobody answers within the kernel's window (a VM gone
 mid-request) is a 503. A batch that changed the SHELF is an event the poll
-turns into `on_sync` (the launcher re-scans), and the listener closing after
+turns into `on_sync(folders)` -- the cart folders the batches changed, None
+when they did not all fit the kernel's list (the launcher re-reads those, or
+every one), and the listener closing after
 its goodbye window is the event that releases the radio lease (`on_stop`).
 
 THE PIN is read at START, never at construction: a board builds this before
@@ -450,7 +452,7 @@ class WebHost:
         ev = moy_net.web_events()
         if ev & EV_SHELF and self.on_sync is not None:
             try:
-                self.on_sync()
+                self.on_sync(moy_net.web_shelf())
             except Exception as exc:     # noqa: BLE001
                 print("SYNC rescan failed:", exc)
         if ev & EV_STOPPED:
@@ -696,7 +698,7 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
                    dial=lambda: dial_saved(getattr(ws, "wifi", None)),
                    pin=pin,
                    pin_source=None if pin else lambda: ws.web_pin(),
-                   on_sync=lambda: ws.rescan_carts(),
+                   on_sync=lambda folders: ws.rescan_carts(folders),
                    on_run=lambda name: ws.launch_named(name),
                    on_stop=lambda: ws.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),

@@ -152,7 +152,7 @@ class Inst:
         self.prefs = {}
         self._consent = app_perms.Consent(self)
         self.held = 0
-        self.rescans = 0
+        self.rescans = []
 
     # the consent store
     def get(self, key, default=None):
@@ -205,8 +205,8 @@ class Inst:
         return {"id": folder[:-4], "path": self._root + "/" + folder} \
             if os.path.isdir(self._root + "/" + folder) else None
 
-    def rescan(self):
-        self.rescans += 1
+    def rescan(self, folder=None):
+        self.rescans.append(folder)
 
     def carts(self):
         return self.shelf
@@ -317,6 +317,8 @@ def test_update_caches_list_reads_the_cache_and_install_lands(tmp_path):
     assert done(p.install(["dm"], yes=True)) == 0, err
     assert (tmp_path / "carts" / "dm.moy" / "manifest.json").exists()
     assert out[0].startswith("Getting dm 1 (") and "dm 1 installed" in out[-1]
+    assert [f.replace("\\", "/").rsplit("/", 1)[-1] for f in inst.rescans] == ["dm.moy"], \
+        "an install re-reads the one folder it wrote, never the whole store"
     assert inst.held == 0, "the radio is let go"
     del out[:]
     assert done(p.list(["dun"])) == 0
@@ -327,8 +329,10 @@ def test_update_caches_list_reads_the_cache_and_install_lands(tmp_path):
     del out[:]
     assert done(p.upgrade(yes=True)) == 0 and "dm 2 installed" in out[-1]
     del out[:]
+    del inst.rescans[:]
     assert p.remove(["dm"]) == 0 and out == ["dm removed\n"]
     assert not (tmp_path / "carts" / "dm.moy").exists()
+    assert inst.rescans == ["dm.moy"], "a removal re-reads the folder it took away"
 
 
 class _WorkerReq:

@@ -213,7 +213,7 @@ def removed(inst, folder):
     inst.op(lambda: _ci.remove(root, folder, keep))
     if had is not None:
         inst.consent().forget(_perms.app_id(had))
-    inst.rescan()
+    inst.rescan(folder)
 
 
 # -- the verbs ------------------------------------------------------------------------
@@ -515,7 +515,7 @@ class Pkg:
             return 1
         if consented:
             self.inst.consent().record(consented[0][0], consented[0][1])
-        self.inst.rescan()
+        self.inst.rescan(job.path)
         self.out("%s %d installed: %s\n" % (c["id"], c["version"], job.report()))
         return 0
 

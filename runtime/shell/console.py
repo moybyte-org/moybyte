@@ -1804,11 +1804,12 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """`web.toggle()` -- settings_layer, the dev channel, push_cart_wifi."""
         return self.web.toggle()
 
-    def rescan_carts(self):
-        """`carts.rescan()` -- moy_webhost captures this name in its `on_sync`
-        lambda at construction, and the Guition on-glass suite's sync test
-        depends on the shelf following a browser batch with no reboot."""
-        return self.carts.rescan()
+    def rescan_carts(self, folders=None):
+        """`carts.synced(folders)` -- moy_webhost captures this name in its
+        `on_sync` lambda at construction, and the Guition on-glass suite's
+        sync test depends on the shelf following a browser batch with no
+        reboot."""
+        return self.carts.synced(folders)
 
     # `updater` is a PROPERTY so that injecting one INVALIDATES the two cached
     # availability answers below. Four places inject an updater -- three boards

@@ -130,11 +130,34 @@ def test_a_rescan_frees_a_blob_an_in_flight_job_was_reading(tmp_path, monkeypatc
     assert id(blob) in tr.live
     ws.covers._jobs[("half-built", 1)] = _FakeJob(src=blob)
 
-    ws.covers.invalidate_all()
+    ws.covers.invalidate()
 
     assert id(blob) not in tr.live, (
         "the file outlived the cart -- the frees ran before the jobs were dropped")
     assert ws.covers._jobs == {}
+
+
+def test_a_folder_rescan_drops_that_carts_cover_first_and_keeps_the_rest(
+        tmp_path, monkeypatch):
+    """`invalidate(paths)`: the named cart's job goes before its blob is
+    freed, and every other cart's decoded cover stays warm -- an install or a
+    removal must not make the whole shelf pop in again."""
+    one = _mk_cart(tmp_path, "One", value=3)
+    two = _mk_cart(tmp_path, "Two", value=4)
+    ws, tr = _tracked_ws(tmp_path, monkeypatch)
+    _land(ws, one)
+    kept = _land(ws, two)
+    blob = ws.covers._src_get(one["path"])
+    ws.covers._jobs[(one["path"], 7)] = _FakeJob(src=blob)
+    ws.covers._none["elsewhere"] = True
+
+    ws.covers.invalidate([one["path"]])
+
+    assert id(blob) not in tr.live, "the job outlived its blob's free"
+    assert ws.covers._jobs == {}
+    assert ws.covers.ready_for(one) is False
+    assert ws.covers.ready_for(two) is kept
+    assert ws.covers._none == {"elsewhere": True}
 
 
 def test_the_reversed_order_leaks_the_blob(tmp_path, monkeypatch):
@@ -179,7 +202,7 @@ def test_no_payload_is_freed_while_a_job_is_still_in_flight(tmp_path, monkeypatc
     covers._jobs[("half-built", 1)] = _FakeJob(src=None, pix=scratch)
     covers.diet_release()
     covers._jobs[("half-built", 2)] = _FakeJob(src=None)
-    covers.invalidate_all()
+    covers.invalidate()
 
     assert tr.jobs_at_free, "nothing was freed -- the test proves nothing"
     assert set(tr.jobs_at_free) == {0}, (
@@ -208,7 +231,7 @@ def test_both_drop_paths_are_the_same_body():
                         and tgt.value.id == "self"):
                     writers.add(fn.name)
     assert writers == {"__init__", "_drop_payloads"}, sorted(writers)
-    assert "self._drop_payloads(0)" in src                      # invalidate_all
+    assert "self._drop_payloads(0)" in src                      # invalidate
     assert "self._drop_payloads(_COVER_DIET_KEEP, scratch=True)" in src
 
 
@@ -301,7 +324,7 @@ def test_gen_bumps_on_a_build_a_diet_release_and_a_rescan(tmp_path):
     after_diet = covers.gen
     assert after_diet > after_build
 
-    ws.carts.apply(shelf(str(tmp_path / "carts")))   # invalidate_all
+    ws.carts.apply(shelf(str(tmp_path / "carts")))   # invalidate
     assert covers.gen > after_diet
 
 
@@ -487,7 +510,7 @@ def test_a_run_releases_the_caches_only_on_the_diet_tier(tmp_path):
     assert ws.covers.gen > warm             # ...and now it did
 
 
-# -- invalidate_all's own contract ----------------------------------------------
+# -- invalidate's own contract ----------------------------------------------
 
 def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
     """The cover-less set is a probe saved (22ms of flash per miss), but a

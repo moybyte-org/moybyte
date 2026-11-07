@@ -1022,7 +1022,7 @@ class GetCartsAppLayer(ListShellApp):
             if self._consented is not None:
                 self._inst.consent().record(*self._consented)
                 self._consented = None
-            self._inst.rescan()
+            self._inst.rescan(job.path)
             self._build_rows()
             self._go("done")
             self._say("%s is on your shelf" % self.cur["cart"]["name"])

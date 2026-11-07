@@ -503,9 +503,16 @@ class InstallServer:
         written, a file ended, the staging swapped -- never a whole install."""
         return self.__store.call(fn)
 
-    def rescan(self, g):
-        """Re-read the store, so the shelf shows what came and went."""
-        self.__ws.carts.rescan()
+    def rescan(self, g, folder=None):
+        """Re-read the cart folder `folder` (its name, or its path), so the
+        shelf shows what came or went there -- one entry's read, never a scan
+        of the store; with no folder, the whole store."""
+        ws = self.__ws
+        if folder is None:
+            ws.carts.rescan()
+        else:
+            name = folder.replace("\\", "/").rsplit("/", 1)[-1]
+            ws.carts.rescan([_catalogue().cart_path(ws.carts_root, name)])
 
     def wifi(self, g):
         """Open the Wi-Fi page: Settings' WIFI panel, on the desk its popover

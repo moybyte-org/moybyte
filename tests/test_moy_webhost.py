@@ -901,7 +901,7 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
     """The kernel raises an event; the VM's poll turns it into the rescan."""
     root = _store(tmp_path)
     hits = []
-    h = wh.WebHost(str(root), on_sync=lambda: hits.append(1))
+    h = wh.WebHost(str(root), on_sync=hits.append)
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
     h.poll()
@@ -909,12 +909,34 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/manifest.json", "t": '{"title":"H2"}'}))
     h.poll()
-    assert hits == [1]
+    assert hits == [("hop.moy",)], "the event names the folder it changed"
     h.handle_http("POST", "/sync", _batch({"p": "new.moy/main.py", "t": "y"}))
     h.poll()
-    assert hits == [1, 1], "a cart born is a shelf change"
+    assert hits[1:] == [("new.moy",)], "a cart born is a shelf change"
     h.poll()
-    assert hits == [1, 1], "an event fires once"
+    assert len(hits) == 2, "an event fires once"
+
+
+def test_a_sync_names_each_folder_once_and_every_one_past_the_list(tmp_path):
+    """The shelf re-reads only the folders a batch changed; batches between two
+    polls add up, a folder named twice is read once, and folders past the
+    kernel's list (MOY_WEB_SHELF_BYTES) ask for every one (None)."""
+    root = _store(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), on_sync=hits.append)
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "a.moy/manifest.json", "t": "{}"},
+        {"p": "a.moy/cover.png", "t": "x"}))
+    h.handle_http("POST", "/sync", _batch({"p": "b.moy/main.py", "t": "y"}))
+    h.poll()
+    assert hits == [("a.moy", "b.moy")]
+    many = [{"p": "c%03d.moy/main.py" % i, "t": "z"} for i in range(40)]
+    h.handle_http("POST", "/sync", _batch(*many))
+    h.poll()
+    assert hits[1:] == [None]
+    h.handle_http("POST", "/sync", _batch({"p": "d.moy/main.py", "t": "y"}))
+    h.poll()
+    assert hits[2:] == [("d.moy",)], "the overflow clears with its event"
 
 
 def test_the_pull_drains_the_feeder_once_not_per_file(tmp_path):
@@ -1021,8 +1043,7 @@ def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
     root = _store(tmp_path)
     _files(tmp_path)
     hits = []
-    h = wh.WebHost(str(root),
-                   on_sync=lambda: hits.append(1))
+    h = wh.WebHost(str(root), on_sync=hits.append)
     h.handle_http("POST", "/sync", _batch(
         {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
     assert not hits
@@ -1361,7 +1382,7 @@ def test_the_pin_is_read_at_START_not_at_construction():
             seen.append(1)
             return "1234"
 
-        def rescan_carts(self):
+        def rescan_carts(self, folders=None):
             pass
 
         def launch_named(self, name):
@@ -1390,7 +1411,7 @@ def test_an_explicit_pin_still_wins_over_the_consoles():
         def web_pin(self):
             raise AssertionError("the explicit pin was ignored")
 
-        def rescan_carts(self):
+        def rescan_carts(self, folders=None):
             pass
 
         def launch_named(self, name):

@@ -67,7 +67,8 @@ class _Batch(ctypes.Structure):
 
 class _Store(ctypes.Structure):
     _fields_ = [("carts", _P), ("files", _P), ("kinds", _P), ("journal", _I),
-                ("ts", ctypes.c_int64)]
+                ("ts", ctypes.c_int64), ("shelf", ctypes.c_void_p),
+                ("shelf_cap", _Z)]
 
 
 class _Err(ctypes.Structure):
@@ -129,6 +130,7 @@ _SIGS = (
     ("moy_web_poll", [], _I),
     ("moy_web_state", [ctypes.POINTER(_WebState)], None),
     ("moy_web_events", [], ctypes.c_uint32),
+    ("moy_web_shelf", [ctypes.c_void_p, _Z], _Z),
     ("moy_web_take", [ctypes.POINTER(ctypes.c_void_p), _PZ,
                       ctypes.POINTER(ctypes.c_void_p), _PZ,
                       ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
@@ -502,6 +504,20 @@ def web_state():
 
 def web_events():
     return _lib().moy_web_events()
+
+
+_SHELF_BYTES = 256
+_SHELF_ALL = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
+
+
+def web_shelf():
+    """The cart folders the batches since the last call changed on the shelf
+    (a tuple of names), or None for every folder; cleared."""
+    buf = ctypes.create_string_buffer(_SHELF_BYTES)
+    n = _lib().moy_web_shelf(buf, _SHELF_BYTES)
+    if n == _SHELF_ALL:
+        return None
+    return tuple(x.decode("utf-8") for x in buf.raw[:n].split(b"\0") if x)
 
 
 def web_take():

@@ -66,6 +66,10 @@ except ImportError:  # pragma: no cover - host package lane
 _SLIM_DROPS = PAYLOADS + ("icon_rows",)
 
 
+def _folder_order(cart):
+    return cart.get("path") or ""
+
+
 class CartManager:
     """The scanned cart list, its store-writing verbs and the #105 favorites.
 
@@ -119,27 +123,31 @@ class CartManager:
 
     # -- the roster ----------------------------------------------------------
 
-    def apply(self, items):
-        """Adopt a fresh scan as the live roster and re-sync BOTH display grids,
+    def apply(self, items, paths=None):
+        """Adopt `items` as the live roster and re-sync BOTH display grids,
         re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
+        `paths` names the cart folders that changed -- their entries in `items`
+        are fresh reads, every other entry the dict the roster already held --
+        and None means any of them may have (a whole scan).
 
-        The ONE body every roster change runs -- create, duplicate, delete, the
-        browser sync's re-scan, and `app_context`'s `Carts.apply`."""
+        The ONE body every roster change runs -- `rescan` (every create,
+        duplicate, delete, install, removal and the browser sync's re-scan),
+        and `app_context`'s `Carts.apply`."""
         if items:
             self.all = list(items)
             self.gen += 1
             ws = self.ws
-            # Cover bitmaps, parsed sources, the cover-less set AND the icon
-            # cache: a re-scan may carry new or changed art and may take a cart
-            # away entirely. BEFORE slim(), and that order is load-bearing:
-            # slim() bakes each cart's icon and then DELETES the rows it baked
-            # from, so it is the last moment the art exists in RAM -- clearing
-            # after it would leave a slimmed cart with no icon and nothing to
-            # rebuild one from, and clearing nothing (what this did before #209
-            # landing C) let slim()'s bake hit the STALE entry and make it
-            # permanent.
-            ws.covers.invalidate_all()
-            self.slim()                    # #66: bake the new entries' icons, mark them lazy
+            # Cover bitmaps, parsed sources, the cover-less mark AND the icon
+            # of every cart that changed: a re-scan may carry new or changed
+            # art and may take a cart away entirely. BEFORE slim(), and that
+            # order is load-bearing: slim() bakes each cart's icon and then
+            # DELETES the rows it baked from, so it is the last moment the art
+            # exists in RAM -- clearing after it would leave a slimmed cart
+            # with no icon and nothing to rebuild one from, and clearing
+            # nothing (what this did before #209 landing C) let slim()'s bake
+            # hit the STALE entry and make it permanent.
+            ws.covers.invalidate(paths)
+            self.slim(paths)               # #66: bake the new entries' icons, mark them lazy
             ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
             if ws.projects_grid is not None:
                 ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
@@ -147,72 +155,96 @@ class CartManager:
             if look is not None:
                 look.store_moved()      # the theme packages are carts too
 
-    def rescan(self):
-        """Re-read the store and rebuild both shelves -- the sync push's board
-        half (moy_webhost wires it as `on_sync`), fired when a browser batch
-        changed what the launcher shows: a manifest, a cover sheet, a cart
-        created or deleted. `apply` does the whole refresh (re-slim, cover
-        caches dropped, generation bumped), the same body every create/dup/
-        delete already runs. Safe between frames: the webhost polls at the frame
-        tail, after present."""
+    def rescan(self, paths=None):
+        """Re-read the store and rebuild both shelves: the cart folders
+        `paths` alone, else every folder.
+
+        With `paths`, each folder is one entry read (`moy_catalogue.reread`):
+        a folder that reads replaces its entry or joins the shelf in folder
+        order, and one that does not (removed, or no cart) leaves it -- the
+        rest of the shelf keeps its entries, icons and decoded covers. Every
+        roster change comes here that way: create, duplicate, delete, the
+        installer's install and removal (`pkg`, Get Carts), `adopt`/`moved`,
+        and the browser sync (`synced`: the folders its batches changed on
+        the shelf). Without, it reads the whole catalogue -- a sync whose
+        folders outgrew the kernel's list, a push from the dev channel, a
+        host tool.
+
+        `apply` does the rest of the refresh. Safe between frames: the
+        webhost polls at the frame tail, after present."""
         if not self.store.ready():
             return
         ws = self.ws
-        # The catalogue on every scan here: the payloads come back at open, and
-        # reading them mid-session is the allocation a fragmented heap refuses
-        # (see moy_carts.entry).
+        # Catalogue entries on every read here: the payloads come back at
+        # open, and reading them mid-session is the allocation a fragmented
+        # heap refuses (see moy_carts.entry).
         try:
-            self.apply(self.store.call(
-                lambda: moy_catalogue.catalogue(ws.carts_root)))
-        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
+            if paths is None:
+                items = self.store.call(
+                    lambda: moy_catalogue.catalogue(ws.carts_root))
+            else:
+                paths = list(paths)
+                items = self._merged(paths, self.store.call(
+                    lambda: [moy_catalogue.reread(p) for p in paths]))
+        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
             print("Moybyte rescan failed:", exc)
-        ws._dirty = True
+            return
+        finally:
+            ws._dirty = True
+        self.apply(items, paths)
+
+    def synced(self, folders=None):
+        """The sync push's board half: `rescan` of the cart folders a batch
+        changed, by name (`moy_net.web_shelf`), else of every one."""
+        root = self.ws.carts_root
+        self.rescan(None if folders is None or not root else
+                    [moy_catalogue.cart_path(root, f) for f in folders])
+
+    def _merged(self, paths, fresh):
+        """The roster with the entries at `paths` replaced by `fresh` (the
+        same order, None where a folder read as no cart), in folder order --
+        the catalogue's."""
+        gone = set(paths)
+        keep = [c for c in self.all if c.get("path") not in gone]
+        added = [e for e in fresh if e]
+        if not added:
+            return keep
+        keep.extend(added)
+        keep.sort(key=_folder_order)
+        return keep
 
     def adopt(self, path):
         """Read cart folder `path` (new, or written again whole) into the
-        roster: one entry read, not a scan (`custom`'s first write,
-        `Appearance.commit`)."""
-        if not self.store.ready():
-            return
-        try:
-            e = self.store.call(
-                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
-        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
-            print("Moybyte adopt failed:", exc)
-            return
-        if e:
-            self.apply([c for c in self.all if c.get("path") != path] + [e])
+        roster (`custom`'s first write, `Appearance.commit`)."""
+        self.rescan([path])
 
     def moved(self, old, path):
         """Cart folder `old` renamed to `path` (NAME…, `Appearance.name_custom`):
         the entry at `old` and any at `path` give way to `path` read again."""
-        if not self.store.ready():
-            return
-        try:
-            e = self.store.call(
-                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
-        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
-            print("Moybyte adopt failed:", exc)
-            e = None
-        keep = [c for c in self.all if c.get("path") not in (old, path)]
-        self.apply(keep + [e] if e else keep)
+        self.rescan([old, path])
 
     # -- the #66 live-set diet -----------------------------------------------
 
-    def slim(self):
+    def slim(self, paths=None):
         """The #66 live-set diet, run once the backend wires the cart store:
-        every SD-backed cart on the shelf becomes a catalogue entry marked
-        `lazy`. Its grid icon is baked into the icon cache first -- from the
+        every SD-backed cart on the shelf -- or those at `paths`, the ones a
+        rescan read again -- becomes a catalogue entry marked `lazy`. Its grid icon is baked into the icon cache first -- from the
         `icon_rows` a catalogue scan read, or from the sprite sheet of a cart
         that arrived whole -- and then its PAYLOADS and the rows go. Keeping
         them resident would cost ~300-500KB of live heap, most of a GC
         collect's mark cost (~0.2ms/KB on device). Embedded carts (no path /
-        no store) stay fat -- they cannot be reloaded."""
+        no store) stay fat -- they cannot be reloaded.
+
+        A cart that arrived whole (the boot's seed) has its payloads collected
+        on the spot; a catalogue entry carries none, only its icon rows, which
+        is why a rescan's slim costs no collect (one is ~100 ms on a P4)."""
         ws = self.ws
         if ws.carts_store is None:
             return
+        fat = False
         for cart in self.all:
-            if not cart.get("path") or cart.get("lazy"):
+            path = cart.get("path")
+            if not path or cart.get("lazy") or (paths is not None and path not in paths):
                 continue
             try:
                 ws.covers.sheet_icon(cart)   # bake the grid icon while the art is here
@@ -221,12 +253,14 @@ class CartManager:
             for k in _SLIM_DROPS:
                 if k in cart:
                     del cart[k]
+                    fat = fat or k in PAYLOADS
             cart["lazy"] = True
-        try:
-            import gc
-            gc.collect()                       # reclaim the dropped payloads NOW
-        except Exception:  # noqa: BLE001
-            pass
+        if fat:
+            try:
+                import gc
+                gc.collect()                   # reclaim the dropped payloads NOW
+            except Exception:  # noqa: BLE001
+                pass
 
     def rehydrate(self, cart):
         """Load a slimmed cart's full payloads back from the store IN PLACE (the
@@ -280,8 +314,8 @@ class CartManager:
 
     # -- cart management (SD) ------------------------------------------------
     #
-    # Each action mounts the SD card, mutates, and re-scans within a single
-    # storage session, then the card is unmounted before the next flush.
+    # Each action is one storage session for its write and one for the
+    # rescan of the folder it wrote; the card is free between them.
 
     def new(self):
         """Create a fresh GAME cart from the store's NEW_TEMPLATE, adopt the new
@@ -297,14 +331,14 @@ class CartManager:
             return None
         ws = self.ws
         try:
-            new, items = self.store.call(lambda: (
-                moy_catalogue.new(ws.carts_root, ns=self._ns()),
-                moy_catalogue.catalogue(ws.carts_root)))
+            new = self.store.call(
+                lambda: moy_catalogue.new(ws.carts_root, ns=self._ns()))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
             self._say_if_full(exc, "CAN'T MAKE")
             return None
-        self.apply(items)
+        if new:
+            self.rescan([new["path"]])
         return new
 
     def dup(self, sel):
@@ -315,12 +349,14 @@ class CartManager:
         if not self.store.writable() or sel is None:
             return
         try:
-            self.apply(self.store.call(lambda: (
-                moy_catalogue.duplicate(sel["h"], ws.carts_root, ns=self._ns()),
-                moy_catalogue.catalogue(ws.carts_root))[1]))
+            made = self.store.call(lambda: moy_catalogue.duplicate(
+                sel["h"], ws.carts_root, ns=self._ns()))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
             self._say_if_full(exc, "CAN'T COPY")
+            return
+        if made:
+            self.rescan([made["path"]])
 
     def _ns(self):
         """The author a made cart's id takes (#162): the Settings field, else
@@ -349,12 +385,12 @@ class CartManager:
             target = None
         if not self.store.writable() or target is None or len(self.all) <= 1:
             return
+        path = target["path"]
         try:
-            self.apply(self.store.call(lambda: (
-                moy_catalogue.delete(target["h"]),
-                moy_catalogue.catalogue(ws.carts_root))[1]))
+            self.store.call(lambda: moy_catalogue.delete(target["h"]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
+        self.rescan([path])
 
     # -- favorites + recents (#105) ------------------------------------------
 

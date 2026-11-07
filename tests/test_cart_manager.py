@@ -20,7 +20,7 @@ already draw that -- but four things a whole-screen hash cannot see:
     now, the same object `SystemStore` and `app_context`'s storage roles hold.
 
   * **`rescan_carts` is the one surviving forward**, because `moy_webhost`
-    captures `lambda: ws.rescan_carts()` at CONSTRUCTION -- a name that resolves
+    captures `lambda folders: ws.rescan_carts(folders)` at CONSTRUCTION -- a name that resolves
     then and never again is exactly the 3d blind spot the façade ratchet exists
     for, so the shape is pinned here as well as counted there.
 """
@@ -93,8 +93,8 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     ws.projects_grid.tab = "make"
     order = []
     real_slim = ws.carts.slim
-    ws.covers.invalidate_all = lambda: order.append("invalidate")
-    ws.carts.slim = lambda: (order.append("slim"), real_slim())[1]
+    ws.covers.invalidate = lambda paths=None: order.append("invalidate")
+    ws.carts.slim = lambda paths=None: (order.append("slim"), real_slim(paths))[1]
     ws.launcher.set_items = lambda items: order.append(("launcher", len(items)))
     ws.projects_grid.set_items = lambda items: order.append(("projects", len(items)))
 
@@ -153,16 +153,127 @@ def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path, monkeypatch):
 
 
 def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
-    """`moy_webhost` builds `on_sync=lambda: ws.rescan_carts()` when the webhost
-    is CONSTRUCTED and calls it per batch -- the name has to keep resolving on
-    the console, which is why this one forward stayed. Driven in the webhost's
-    own shape rather than by calling the method directly."""
+    """`moy_webhost` builds `on_sync=lambda folders: ws.rescan_carts(folders)`
+    when the webhost is CONSTRUCTED and calls it per batch with the folders the
+    batch changed (None: every one) -- the name has to keep resolving on the
+    console, which is why this one forward stayed. Driven in the webhost's own
+    shape rather than by calling the method directly."""
     ws = build_ws(tmp_path)
-    on_sync = lambda: ws.rescan_carts()          # noqa: E731 -- the webhost's shape
-    _mk(str(ws.carts_root), "Pushed")
-    on_sync()
+    on_sync = lambda folders: ws.rescan_carts(folders)   # noqa: E731 -- the webhost's shape
+    made = _mk(str(ws.carts_root), "Pushed")
+    on_sync((made["path"].rsplit("/", 1)[-1],))
     ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Pushed" in _titles(ws.launcher)
+    again = _mk(str(ws.carts_root), "Pushed Too")
+    on_sync(None)
+    assert "Pushed Too" in _titles(ws.launcher)
+    assert again["path"] in _paths(ws.carts.all)
+
+
+class _Reads:
+    """Counts the store reads a roster change makes: whole-store scans and
+    single-folder entry reads."""
+
+    def __init__(self, monkeypatch):
+        self.scans = 0
+        self.entries = []
+        real_cat, real_entry = moy_catalogue.catalogue, moy_carts.entry
+
+        def cat(*a, **kw):
+            self.scans += 1
+            return real_cat(*a, **kw)
+
+        def entry(path):
+            self.entries.append(path)
+            return real_entry(path)
+        monkeypatch.setattr(moy_catalogue, "catalogue", cat)
+        monkeypatch.setattr(moy_carts, "entry", entry)
+
+
+def _paths(carts):
+    return [c.get("path") for c in carts]
+
+
+def test_a_folder_rescan_reads_one_entry_and_matches_a_whole_scan(tmp_path, monkeypatch):
+    """An install, a removal, a delete: the roster change names its folder and
+    the shelf reads that one entry -- never the whole store, which cost a P4
+    a ~450 ms frame per `pkg install` -- and ends exactly where a whole scan
+    would: the new cart in folder order, every handle valid."""
+    ws = build_ws(tmp_path)
+    root = str(ws.carts_root)
+    before = list(ws.carts.all)
+    made = _mk(root, "Middling")
+    reads = _Reads(monkeypatch)
+    ws._dirty = False
+    ws.carts.rescan([made["path"]])
+    assert reads.scans == 0 and reads.entries == [made["path"]]
+    assert ws._dirty is True
+    whole = shelf(root)
+    assert _paths(ws.carts.all) == _paths(whole)
+    assert all(moy_catalogue.valid(c["h"]) for c in ws.carts.all if c.get("path"))
+    kept = [c for c in ws.carts.all if c["path"] != made["path"]]
+    assert all(a is b for a, b in zip(kept, before)), "the other entries are kept"
+    new = next(c for c in ws.carts.all if c["path"] == made["path"])
+    assert new["lazy"] is True and "icon_rows" not in new
+    ws.set_home_tab("mine")
+    assert "Middling" in _titles(ws.launcher)
+
+
+def test_a_folder_rescan_of_a_removed_cart_drops_it_and_stales_its_handle(
+        tmp_path, monkeypatch):
+    import shutil
+    ws = build_ws(tmp_path)
+    root = str(ws.carts_root)
+    made = _mk(root, "Leaver")
+    ws.carts.rescan([made["path"]])
+    h = next(c for c in ws.carts.all if c["path"] == made["path"])["h"]
+    count = len(ws.carts.all)
+    shutil.rmtree(made["path"])
+    reads = _Reads(monkeypatch)
+    ws.carts.rescan([made["path"]])
+    assert reads.scans == 0 and reads.entries == [made["path"]]
+    assert len(ws.carts.all) == count - 1
+    assert made["path"] not in _paths(ws.carts.all)
+    assert not moy_catalogue.valid(h)
+    assert _paths(ws.carts.all) == _paths(shelf(root))
+
+
+def test_a_folder_rescan_keeps_every_other_carts_icon_and_collects_nothing(
+        tmp_path, monkeypatch):
+    """The shelf's other covers and icons stay warm (no pop-in), and slimming
+    one catalogue entry drops no payload, so it runs no collect."""
+    import gc
+    ws = build_ws(tmp_path)
+    root = str(ws.carts_root)
+    icons = dict(ws.covers.icons)
+    assert icons, "the boot baked the shelf's icons"
+    made = _mk(root, "Quiet")
+    collects = []
+    monkeypatch.setattr(gc, "collect", lambda *a: collects.append(1))
+    ws.carts.rescan([made["path"]])
+    assert collects == []
+    for k, img in icons.items():
+        assert ws.covers.icons.get(k) is img
+    assert made["path"] in ws.covers.icons
+
+
+def test_every_store_writing_verb_rescans_only_its_folder(tmp_path, monkeypatch):
+    """create, duplicate, delete and the installer role's install/removal all
+    come through `rescan(paths)`; none of them scans the store."""
+    ws = build_ws(tmp_path)
+    reads = _Reads(monkeypatch)
+    new = ws.carts.new()
+    sel = next(c for c in ws.carts.all if c["path"] == new["path"])
+    ws.carts.dup(sel)
+    ws.carts.delete(sel)
+    assert reads.scans == 0
+    assert new["path"] not in _paths(ws.carts.all)
+    from runtime.shell_servers import InstallServer
+    root = str(ws.carts_root)
+    made = _mk(root, "Fetched")
+    InstallServer(ws).rescan(0, made["path"].rsplit("/", 1)[-1])
+    assert reads.scans == 0 and made["path"] in _paths(ws.carts.all)
+    assert _paths(ws.carts.all) == _paths(shelf(root))
 
 
 def test_the_rescan_forward_has_a_fixed_signature():
@@ -170,7 +281,7 @@ def test_the_rescan_forward_has_a_fixed_signature():
     The façade ratchet counts forwards; this pins the one that has a live
     caller outside the tree's own tests."""
     sig = inspect.signature(console.Workstation.rescan_carts)
-    assert list(sig.parameters) == ["self"]
+    assert list(sig.parameters) == ["self", "folders"]
 
 
 # -- the store guard ----------------------------------------------------------

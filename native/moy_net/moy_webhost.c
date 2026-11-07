@@ -125,6 +125,8 @@ typedef struct {
     uint8_t has_files;
     char kinds[96];
     char defer[96];
+    char shelf[MOY_WEB_SHELF_BYTES];   // the changed cart folders (moy_web_shelf)
+    uint8_t shelf_all;                 // ... and some that did not fit
     moy_http_req_t preq;            // the parked request, its spans in req
     size_t pgot;
     char *req;                      // MOY_HTTP_REQ_MAX + 1 bytes
@@ -320,6 +322,25 @@ uint32_t moy_web_events(void) {
     uint32_t e = W->events;
     W->events = 0;
     return e;
+}
+
+size_t moy_web_shelf(char *out, size_t cap) {
+    size_t n = 0;
+    if (W != NULL && !W->shelf_all) {
+        while (W->shelf[n] != '\0') {
+            n += strlen(W->shelf + n) + 1u;
+        }
+    }
+    int all = W != NULL && (W->shelf_all || n + 1u > cap);
+    if (!all && cap > 0) {
+        memcpy(out, W != NULL ? W->shelf : "", n);
+        out[n] = '\0';
+    }
+    if (W != NULL) {
+        W->shelf[0] = '\0';
+        W->shelf_all = 0;
+    }
+    return all ? MOY_WEB_SHELF_ALL : n;
 }
 
 const char *moy_web_stamp_text(void) {
@@ -1071,12 +1092,17 @@ static int sync_post(out_t *o, const char *b, size_t n) {
         .kinds = W->kinds[0] ? W->kinds : NULL,
         .journal = 1,
         .ts = (int64_t)time(NULL) - W->epoch,
+        .shelf = W->shelf,
+        .shelf_cap = sizeof(W->shelf),
     };
     moy_sync_result_t r;
     store_gate();
     moy_sync_apply(&s, batch.root, batch.ops, batch.ops_end, &r);
     if (r.shelf && batch.root == MOY_SYNC_CARTS) {
         W->events |= MOY_WEB_EV_SHELF;
+        if (r.shelf & MOY_SYNC_SHELF_FULL) {
+            W->shelf_all = 1;
+        }
     }
     if (r.refused) {
         printf("SYNC %u applied, %u refused: %s\n", (unsigned)r.applied,
