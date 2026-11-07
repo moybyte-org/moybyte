@@ -316,6 +316,30 @@ sends the secret in the clear and `native/moy_net` has only a TLS client;
 if the SSH spike says the S3s cannot carry a second TLS server, they mount
 over SFTP only (owner, 2026-11-03).
 
+**SFTP (P4.4, 2026-11-07)** is the SSH server's `sftp` subsystem, so
+`sftp moybyte-XXXX.local` and `scp file moybyte-XXXX.local:` (scp's protocol
+since OpenSSH 9.0; `scp -s` before it) reach the files tree below with SSH's
+sign-in (§3): wherever SSH serves, SFTP does. The server is our own SFTP
+version 3 in C (`native/moy_tty/moy_tty_sftp.c`), not a vendored one:
+Dropbear has none, OpenSSH's `sftp-server` is built on a process's POSIX
+files, and the free C servers we know of are GPL or LGPL. It runs as the
+session's face in place of a shell (`native/moy_tty/README.md`), so it
+counts as the one face: a shell open on the same console, over SSH or the
+web terminal, refuses it until the shell ends, and the server takes one
+connection at a time. Its paths are the shell's own mapping (a session's
+home its start, `/etc` the system folder, the root, `/dev`, `/proc` and `/bin`
+the shell's listings, a virtual file never opened). Each request is one hop
+to the console's task under the board's gate, opening, reading or writing
+at most 32 KB and closing, so a big file streams a request a frame and
+nothing stays open between them; a write appends at the file's end, as an
+upload's always does. Modes, owners and times are accepted and ignored
+(`setstat`), symlinks are unsupported, and a listing carries sizes, not
+times. A change under the carts folder (a cart folder written, made,
+removed or renamed) tells the shelf once the client has been quiet for
+300 ms or the session ends: the door's `rescan`, which re-reads those
+folders alone (`ws.rescan_carts`, as the browser sync does). System files
+stay writable: the owner is root on their own console.
+
 **What the files tree shows (2026-11-06).** Its root `/` is the console's
 real root: `/bin`, `/dev`, `/etc` and `/proc`, the names of the volume
 mounted at `/` (the internal flash, its `moy/` store among them) and the

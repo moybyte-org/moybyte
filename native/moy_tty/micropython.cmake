@@ -12,7 +12,8 @@ add_library(moy_tty_core STATIC
     ${MOY_TTY}/moy_tty.c
     ${MOY_TTY}/moy_tty_sys.c
     ${MOY_TTY}/moy_tty_sh.c
-    ${MOY_TTY}/moy_tty_ws.c)
+    ${MOY_TTY}/moy_tty_ws.c
+    ${MOY_TTY}/moy_tty_sftp.c)
 
 idf_build_get_property(_moy_tty_inc INCLUDE_DIRECTORIES GENERATOR_EXPRESSION)
 idf_build_get_property(_moy_tty_opts COMPILE_OPTIONS GENERATOR_EXPRESSION)

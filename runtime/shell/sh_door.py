@@ -418,6 +418,12 @@ class ShellDoor:
         used = gc.mem_alloc() if hasattr(gc, "mem_alloc") else 0
         return "%d %d" % (free + used, free) if free + used else ABSENT
 
+    def v_rescan(self, *names):
+        """The cart folders SFTP changed, by name: the shelf re-reads them, as
+        it does a browser sync's (`ws.rescan_carts`)."""
+        self.ws.rescan_carts(list(names) or None)
+        return 0
+
     def v_lookup(self, name):
         return 1 if find_command(self.ws, name) is not None else 0
 

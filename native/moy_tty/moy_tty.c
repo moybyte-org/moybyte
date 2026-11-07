@@ -33,6 +33,7 @@ struct moy_tty {
     void (*on_open)(void);      // its note that the shell opened, or NULL
     int fd;                     // the face's end of the pair
     int pty;                    // the client has a terminal: be its line discipline
+    int sftp;                   // the SFTP server, not a command (MOY_TTY_SFTP)
     int cols, rows;
     pid_t pid;
     char *cmd;                  // `exec`'s command; NULL: the interactive shell
@@ -304,6 +305,14 @@ long moy_tty_in(moy_tty_t *f, void *buf, size_t n) {
         }
     }
     return 0;
+}
+
+int moy_tty_ready(moy_tty_t *f, int ms) {
+    if (f->ahead_n || f->eof) {
+        return 1;
+    }
+    flush(f);
+    return readable(f, ms);
 }
 
 static void prompt(moy_tty_t *f) {
@@ -738,6 +747,10 @@ static void face_run(moy_tty_t *f) {
         finish(f, 1);
         return;
     }
+    if (f->sftp) {
+        finish(f, shell()->sftp != NULL ? shell()->sftp(f->sh) : 1);
+        return;
+    }
     if (f->cmd != NULL) {
         int r = shell()->run(f->sh, f->cmd, strlen(f->cmd));
         if (r == SH_MORE) {
@@ -877,7 +890,8 @@ int moy_tty_open(int via, const char *cmd, int pty, int cols, int rows, void (*s
     f->via = via;
     f->on_open = started;
     f->fd = fds[1];
-    f->pty = pty;
+    f->pty = pty == 1;
+    f->sftp = pty == MOY_TTY_SFTP;
     f->cols = cols;
     f->rows = rows;
     f->pid = 100 + t->next_pid++;

@@ -61,7 +61,10 @@
 #define DROPBEAR_SVR_PUBKEY_OPTIONS 0
 #define DROPBEAR_SVR_MULTIUSER 0
 #define DROPBEAR_SVR_DROP_PRIVS 0
-#define DROPBEAR_SFTPSERVER 0
+// The `sftp` subsystem is the command SFTPSERVER_PATH names, which
+// moy_ssh_command opens as the face's SFTP server (native/moy_tty/moy_tty_sftp.c)
+#define DROPBEAR_SFTPSERVER 1
+#define SFTPSERVER_PATH "internal-sftp"
 #define DROPBEAR_PLUGIN 0
 #define LOG_COMMANDS 0
 #define UNAUTH_CLOSE_DELAY 0

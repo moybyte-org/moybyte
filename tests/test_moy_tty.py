@@ -40,7 +40,7 @@ WEB = os.path.join(NATIVE, "moy_web")
 PIN = "4321"
 FILES = "sd/moybyte/files"
 
-TTY_SOURCES = ("moy_tty.c", "moy_tty_sys.c", "moy_tty_sh.c", "moy_tty_ws.c", "host/tty_main.c")
+TTY_SOURCES = ("moy_tty.c", "moy_tty_sys.c", "moy_tty_sh.c", "moy_tty_ws.c", "moy_tty_sftp.c", "host/tty_main.c")
 NET_SOURCES = [os.path.join(NET, n) for n in (
     "moy_http.c", "moy_net_port.c", "moy_sync.c", "moy_sync_apply.c", "moy_webhost.c",
     "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_net_host.c")]

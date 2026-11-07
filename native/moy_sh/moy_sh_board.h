@@ -24,6 +24,8 @@
 //   read PATH / list DIR    the bytes / a name a line (a folder's ends in /)
 //   write PATH BYTES        0, or an errno
 //   df PATH / mem           text: `total free`
+//   rescan NAME...          0: the shelf re-reads those cart folders (SFTP's
+//                           changes, native/moy_tty/moy_tty_sftp.c)
 // A spawned program and a role command write and read their streams through
 // the session that is running (moy_sh_running: the module's read and write).
 //
@@ -87,6 +89,11 @@ void moy_sh_board_home_late(moy_sh_t *s, int *homed);
 void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
                        void (*out)(void *ctx, int stream, const char *p, size_t n),
                        int (*poll)(void *ctx));
+
+// One crossing of the door (above) with `verb` and `argv`, through the
+// session's hop: its int answer, or MOY_SH_DOOR_NEEDS_VM while no VM runs.
+#define MOY_SH_DOOR_NEEDS_VM (-9)
+int32_t moy_sh_board_door(moy_sh_t *s, const char *verb, int argc, char *const *argv);
 
 // The store's commands with no VM (above): an exit status, or
 // MOY_SH_NOT_FOUND when `argv` names none of them. `root` is the store folder

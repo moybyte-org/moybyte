@@ -11,12 +11,22 @@ is `runtime/system/ssh_service.py`.
 
 | file | what it is |
 |---|---|
-| `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the counted PSRAM allocator, the POSIX names Dropbear asks for, its channel's command opened as a face (`moy_ssh_command` over `moy_tty_open`), `/etc` the server's system folder |
+| `moy_ssh.h`, `moy_ssh.c` | the server: setup (the host key read or made), the accept loop, a connection's sign-in read from the store, a session run to its end and its epoch freed, the counted PSRAM allocator, the POSIX names Dropbear asks for, its channel's command opened as a face (`moy_ssh_command` over `moy_tty_open`), the `sftp` subsystem as the face's SFTP server, `/etc` the server's system folder |
 | `moy_ssh_run.c` | the run: the server's task, made at the first start and parked between a stop and the next, and its hold on the face task; the console's start and stop (`moy_ssh.h`'s THE RUN) |
 | `modmoy_ssh.c` | the module `moy_ssh`: `start`, `stop`, `stats`, `hash`, over the run |
 | `port/` | Dropbear's options (`localoptions.h`), its `config.h`, the names the port renames (`moy_ssh_port.h`, `moy_ssh_names.h`), and in `port/esp/` the headers ESP-IDF lacks |
 | `dropbear/`, `patches/`, `dropbear_vendor.json` | the vendored Dropbear (`UPSTREAM.md`) |
 | `host/ssh_main.c` | the host harness `tests/test_moy_ssh.py` builds: the run, the face (`native/moy_tty`) and the board's shell over a folder, the console's task a thread, the face's socket pair a board's loopback (its bytes cross a thread, a little late, its sends counted), and a VM that answers `passwd` and the console's rows |
+
+## SFTP
+
+`sftp` and `scp` (`docs/os_2026-11/system.md` §4): Dropbear's `sftp`
+subsystem is on (`port/localoptions.h`), its command the name
+`SFTPSERVER_PATH` gives (`internal-sftp`), which `moy_ssh_command` opens as
+the face's SFTP server (`native/moy_tty/moy_tty_sftp.c`) instead of a shell
+command; an `exec` of that name does the same, as on OpenSSH. It signs in as
+a shell does, counts as the one face (`native/moy_tty/README.md`), and
+`tests/test_moy_sftp.py` drives it with OpenSSH's `sftp -b` and `scp -s`.
 
 ## Crypto
 

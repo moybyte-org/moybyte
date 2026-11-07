@@ -50,6 +50,7 @@ typedef struct moy_tty moy_tty_t;
 #define MOY_TTY_FRONT_LINE 2            // a line app: the lines are its
 
 #define MOY_TTY_LINE 1024               // a typed line's bytes
+#define MOY_TTY_SFTP 2                  // moy_tty_open's `pty`: the SFTP subsystem
 
 // The shell a face runs: moy_sh on a board (moy_tty_sh.c).
 typedef struct {
@@ -74,6 +75,9 @@ typedef struct {
     // (*nlist the names); answers the inserted bytes.
     size_t (*complete)(void *sh, const char *line, size_t col, char *ins, size_t cap,
                        char *list, size_t list_cap, int *nlist);
+    // The SFTP server over the session's files tree (MOY_TTY_SFTP), to the
+    // stream's end: its exit status (may be NULL: no SFTP).
+    int (*sftp)(void *sh);
 } moy_tty_shell_t;
 
 void moy_tty_set_shell(const moy_tty_shell_t *shell);
@@ -93,9 +97,12 @@ int moy_tty_hold(int via, int on);
 int moy_tty_busy(int via);
 
 // A face for transport `via`: `cmd` (NULL: the interactive shell), with a
-// terminal (`pty`) or not, `started` called on the face's task as its shell
-// opens (may be NULL). 0 with the transport's end in *fd and the face's id in
-// *pid, MOY_TTY_EBUSY or MOY_TTY_ENOMEM.
+// terminal (`pty` 1) or not (0), or with `pty` MOY_TTY_SFTP the session's SFTP
+// server in place of a command (moy_tty_sftp.c), `started` called on the
+// face's task as its shell opens (may be NULL). 0 with the transport's end in
+// *fd and the face's id in *pid, MOY_TTY_EBUSY or MOY_TTY_ENOMEM. An SFTP
+// server is the face while it runs: one at a time with a shell, across the
+// transports.
 int moy_tty_open(int via, const char *cmd, int pty, int cols, int rows, void (*started)(void),
                  int *fd, pid_t *pid);
 // A face of `via` whose status is final, since the last call: 1 with its id
@@ -114,11 +121,18 @@ void moy_tty_out(moy_tty_t *f, const char *p, size_t n);
 void moy_tty_raw(moy_tty_t *f, const char *p, size_t n);
 int moy_tty_poll(moy_tty_t *f);
 long moy_tty_in(moy_tty_t *f, void *buf, size_t n);
+// On the face's task, the output sent first: whether the stream has bytes to
+// read (or has ended) within `ms`.
+int moy_tty_ready(moy_tty_t *f, int ms);
 void moy_tty_size(const moy_tty_t *f, int *cols, int *rows);
 // Whether the client asked for a terminal.
 int moy_tty_pty(const moy_tty_t *f);
 // fn(arg) on the console's task (moy_tty_hop), what it wrote sent after.
 void moy_tty_face_hop(moy_tty_t *f, void (*fn)(void *arg), void *arg);
+// The SFTP server (moy_tty_sftp.c) over the face's stream and the files tree
+// of moy_sh session `s`, to the stream's end: its exit status.
+struct moy_sh;
+int moy_tty_sftp(moy_tty_t *f, struct moy_sh *s);
 
 typedef struct {
     uint32_t faces;                     // faces opened, by any transport

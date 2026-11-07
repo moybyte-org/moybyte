@@ -461,7 +461,12 @@ static size_t sh_complete(void *sh, const char *line, size_t col, char *ins, siz
     return k;
 }
 
+static int sh_sftp(void *sh) {
+    sh_t *h = sh;
+    return moy_tty_sftp(h->f, h->s);
+}
+
 const moy_tty_shell_t moy_tty_moy_sh = {
     sh_open, sh_run, sh_prompt, sh_status, sh_cancel, sh_close,
-    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize, sh_complete,
+    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize, sh_complete, sh_sftp,
 };

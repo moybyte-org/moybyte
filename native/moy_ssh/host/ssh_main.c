@@ -4,8 +4,9 @@
 // the run and whose loop serves the hops, as a board's frame tail does. The
 // files tree is the folder MOY_SH_ROOT names. Behind the door the VM answers
 // one role, `passwd`, as runtime/system/ssh_service.py does: the hash
-// written or removed, the run started or stopped. Every other crossing is
-// the VM's NEEDS_VM. The main thread prints the server's STATS line when
+// written or removed, the run started or stopped, and `rescan`, printed as a
+// RESCAN line with the cart folders it names. Every other crossing is the
+// VM's NEEDS_VM. The main thread prints the server's STATS line when
 // a connection ends, the server starts or stops listening, or its tasks
 // park. The face's socket pair is a board's: a byte one end sends crosses
 // another task before the other end can read it, as lwIP's loopback hands it
@@ -144,6 +145,18 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     }
     if ((n == 3 && memcmp(p0, "mem", 3) == 0) || (n > 3 && memcmp(p0, "df\0", 3) == 0)) {
         return (int32_t)snprintf((char *)ans, cap, "%u %u", 8000000u, 6000000u);
+    }
+    // `rescan NAME...`: the shelf told of the cart folders SFTP changed
+    if (n >= 6 && memcmp(p0, "rescan", 6) == 0 && (n == 6 || p0[6] == 0)) {
+        char line[512];
+        size_t k = 0;
+        for (size_t i = 0; i < n && k + 1 < sizeof line; i++) {
+            line[k++] = p0[i] ? p0[i] : ' ';
+        }
+        line[k] = 0;
+        printf("RESCAN %s\n", line + 6 + (n > 6));
+        fflush(stdout);
+        return 0;
     }
     // `role JOB passwd ARGS...`
     static const char verb[] = "role";

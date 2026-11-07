@@ -240,6 +240,17 @@ const moy_sh_host_t *moy_sh_host(const moy_sh_t *s);
 // The store path of shell path `path` (against the session's folder) into
 // `out`, from inside a run: 0, or an errno value (ENOENT for a virtual file).
 int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap);
+// Shell path `path` made absolute against the session's folder and folded
+// (`.`, `..`, repeated slashes) into `out`: 0, or ENAMETOOLONG.
+int moy_sh_abs(moy_sh_t *s, const char *path, char *out, size_t cap);
+// What `path` of the session's tree is, as `stat` finds it (the root, the
+// virtual folders, the mount points, the store): 0, or an errno value.
+typedef struct {
+    int is_dir;
+    uint32_t size;
+    int64_t mtime;              // seconds since 1970, 0 where none is kept
+} moy_sh_stat_t;
+int moy_sh_stat_at(moy_sh_t *s, const char *path, moy_sh_stat_t *out);
 // Run fn(arg) through the host's hop (moy_sh_host_t's), the session `s`
 // current for its length on whichever task runs it; in place without one.
 void moy_sh_hop(moy_sh_t *s, void (*fn)(void *arg), void *arg);

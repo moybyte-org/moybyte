@@ -38,7 +38,7 @@ bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 
 #define DOOR_ABSENT (-8)
-#define DOOR_NEEDS_VM (-9)
+#define DOOR_NEEDS_VM MOY_SH_DOOR_NEEDS_VM
 #define DOOR_RUNNING (-100)             // a role command goes on: `step` it again
 #define DOOR_FULL (-2)
 #define ANSWER_CAP 8192u
@@ -143,6 +143,15 @@ static int32_t door_int(const char *verb, int argc, char *const *argv) {
     int32_t r = door(verb, argc, argv, &ans, &n);
     b_free(NULL, ans);
     return r;
+}
+
+int32_t moy_sh_board_door(moy_sh_t *s, const char *verb, int argc, char *const *argv) {
+    char *ans = NULL;
+    size_t n = 0;
+    door_t d = { verb, argc, argv, &ans, &n, 0 };
+    moy_sh_hop(s, door_here, &d);
+    b_free(NULL, ans);
+    return d.r;
 }
 
 // -- the run in front ------------------------------------------------------------------

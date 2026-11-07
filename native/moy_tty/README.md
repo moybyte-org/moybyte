@@ -13,6 +13,7 @@ server could still serve the web terminal. How a face is reached is
 | `moy_tty.c` | the face: the socket pair's end, the terminal's line discipline (its caret keys, history and Tab), `exec` with the stream as its stdin, a text app's keys, the exit status a transport reaps |
 | `moy_tty_sh.c` | the face's shell: a `moy_sh` session over the board's host table (`native/moy_sh/moy_sh_board.h`), the entries that cross the door hopped, Tab's names (`moy_sh_cands`), a full-screen text app drawn as VT100 |
 | `moy_tty_sys.c` | the face task, the hop to the console's task and its tail (`moy_tty_tail`, a weak hook in `native/moy_kernel/moy_loop_board.c`), the socket pair, PSRAM |
+| `moy_tty_sftp.c` | the SFTP server a face runs in place of a command (`MOY_TTY_SFTP`, SSH's `sftp` subsystem): SFTP version 3 over the stream, on the session's files tree through the shell's paths, each request one hop to the console's task, the shelf told of changed cart folders through the door's `rescan` (its header; `docs/os_2026-11/system.md` §4) |
 | `moy_tty_ws.c` | the web terminal's bridge: the socket the webhost upgraded (`GET /term`), its WebSocket messages to and from a face |
 | `modmoy_tty.c` | the module `moy_tty`: `stats()` |
 | `host/tty_main.c` | the host harness `tests/test_moy_tty.py` builds: the kernel's webhost with a pin and the bridge in front of the face and shell SSH's harness runs (`native/moy_ssh/host/ssh_main.c`) |
@@ -48,6 +49,9 @@ server could still serve the web terminal. How a face is reached is
 **One face at a time** across the transports (owner choice open: two faces
 would take two arenas): a page that finds an SSH session's face is closed
 1013 `busy`, and an SSH client that finds the page's is refused its channel.
+An SFTP server is a face too, a session of the shell's for its paths: while a
+shell runs (on the page, or a channel of the same SSH connection) SFTP's
+channel is refused, and while SFTP runs a shell is.
 
 `moy_sh`'s running session is per task (`native/moy_sh/moy_sh.h`, TASKS), so
 a stream face and the Terminal's run side by side.
@@ -72,7 +76,8 @@ plays it), so a shell behind it adds no exposure.
 
 ## Memory
 
-A face's record (its line, history and output piece, about 7 KB), the
+An SFTP face adds its request and answer buffers (34 KB and 32 KB) and
+its handles, PSRAM, for its length. A face's record (its line, history and output piece, about 7 KB), the
 session's 32 KB arena (`moy_tty_sh.c`, the most one used is `stats()`'s
 `arena_peak`, measured in #246) and the face task's stack are PSRAM; the
 bridge's two 2 KB buffers live while a page is connected.

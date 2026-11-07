@@ -71,6 +71,17 @@ def test_kill_ends_a_run_as_the_task_manager_does(monkeypatch):
     assert call(door, "status", "99") == ABSENT
 
 
+def test_rescan_hands_sftp_s_cart_folders_to_the_shelf(monkeypatch):
+    """`rescan NAME...` (native/moy_tty/moy_tty_sftp.c): the folders by name,
+    as the browser sync's on_sync hands them; none, every folder."""
+    ws, door = _door(monkeypatch)
+    seen = []
+    ws.rescan_carts = seen.append
+    assert call(door, "rescan", "a.moy", "b.moy") == 0
+    assert door(b"rescan") == 0
+    assert seen == [["a.moy", "b.moy"], None]
+
+
 def test_proc_reads_and_lists_through_devfs(monkeypatch):
     _ws, door = _door(monkeypatch)
     assert call(door, "list", "/proc") == "1/\n12/\nconsole\n"

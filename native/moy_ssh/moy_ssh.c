@@ -479,7 +479,13 @@ static void mark_shell(void) {
 
 // -- Dropbear's side of the face (port/moy_ssh_port.h) -------------------------------
 
+// The `sftp` subsystem arrives as the command SFTPSERVER_PATH
+// (port/localoptions.h), and so does an `exec` of that name, as on OpenSSH.
 int moy_ssh_command(const char *cmd, int pty, int cols, int rows, int *fd, pid_t *pid) {
+    if (cmd != NULL && strcmp(cmd, SFTPSERVER_PATH) == 0) {
+        cmd = NULL;
+        pty = MOY_TTY_SFTP;
+    }
     return moy_tty_open(MOY_TTY_SSH, cmd, pty, cols, rows, mark_shell, fd, pid) == 0 ? 0 : -1;
 }
 

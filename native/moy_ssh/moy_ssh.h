@@ -10,7 +10,8 @@
 // THE SHELL is moy_sh's: a session's `shell` or `exec` request opens the
 // stream face (native/moy_tty, the one the web terminal opens too), a pair of
 // connected sockets with Dropbear's channel on one end, the face on the
-// other, which runs on the face task.
+// other, which runs on the face task. Its `sftp` subsystem opens that face
+// as the SFTP server (native/moy_tty/moy_tty_sftp.c).
 //
 // SIGN-IN (docs/os_2026-11/system.md section 3): a password against the
 // stored hash (moy_ssh_hash) or a key in authorized_keys, any user name the

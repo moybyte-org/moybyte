@@ -280,6 +280,26 @@ int moy_sh_resolve(moy_sh_t *s, const char *path, char *out, size_t cap) {
     return r;
 }
 
+int moy_sh_abs(moy_sh_t *s, const char *path, char *out, size_t cap) {
+    struct moy_sh_globals *was = enter(s);
+    int r = moy_sh_path(path, out, cap);
+    leave(was);
+    return r;
+}
+
+int moy_sh_stat_at(moy_sh_t *s, const char *path, moy_sh_stat_t *out) {
+    struct moy_sh_globals *was = enter(s);
+    struct stat st;
+    int r = stat(path, &st) == 0 ? 0 : (errno ? errno : ENOENT);
+    if (r == 0) {
+        out->is_dir = S_ISDIR(st.st_mode);
+        out->size = (uint32_t)st.st_size;
+        out->mtime = (int64_t)st.st_mtime;
+    }
+    leave(was);
+    return r;
+}
+
 typedef struct {
     moy_sh_t *s;
     void (*fn)(void *);
