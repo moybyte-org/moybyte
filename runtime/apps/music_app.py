@@ -1222,7 +1222,7 @@ class MusicAppLayer:
             ui.label(right, _DIM)
 
     def _strip(self, page):
-        if self.stream.card is None:
+        if self.k.c is None:
             return page
         h = 34 * self.fs
         strip, page = ui.cut_bottom(page, h)
@@ -1461,7 +1461,7 @@ class MusicAppLayer:
     def _desk(self, page):
         cv, th = self.cv, self.th
         s = self.stream
-        foot_h = 88 if s.card is not None else 0
+        foot_h = 88 if self.k.c is not None else 0
         foot, body = ui.cut_bottom(page, foot_h)
         side, main = ui.cut_left(body, 168)
         sx, sy, sw, sh = ui.inset(side, 6, 6)
@@ -1517,7 +1517,7 @@ class MusicAppLayer:
                 ui.at(rx - tw, my, tw + 2, head)
                 ui.label(text, _CAPTION)
                 rx -= 90
-        if s.card is not None:
+        if self.k.c is not None:
             cv.rect(foot[0], foot[1], foot[2], 1, th["border"])
             fx, fy, fw, fh = ui.inset(foot, 16, 12)
             self.k.wide(fx, fy, fw, fh)

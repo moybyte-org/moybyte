@@ -307,3 +307,31 @@ def test_the_folder_lists_the_songs_a_board_keeps_for_its_page(tmp_path, monkeyp
     (folder / "Mix.m3u").write_text("Board song.mp3\n")
     songs, lists = M._scan(str(folder))
     assert [s[0] for s in songs] == ["Board song"] and [x[0] for x in lists] == ["Mix"]
+
+
+def test_a_stream_that_starts_during_the_desks_draw_waits_for_the_next_frame(tmp_path, face):
+    """The card is drawn from the frame's snapshot: a station whose card
+    arrives while the desk window draws (the browser's pump runs the service
+    inside the frame) shows on the next frame, never as a card with no state."""
+    ws = build_desktop_ws(tmp_path)
+    app = _app(ws)
+    ws.open_desk()
+    ws.open_app(app)
+    _settle(ws)
+    assert M.STREAM.card is None
+    rows_of = app._station_rows
+    started = []
+
+    def rows_that_start_a_station():
+        rows = rows_of()
+        if not started:
+            started.append(1)
+            app._open_row(0, 1, rows)
+        return rows
+
+    app._station_rows = rows_that_start_a_station
+    _settle(ws, 1)
+    assert started and M.STREAM.card is not None
+    app._station_rows = rows_of
+    _settle(ws)
+    assert app.k.c is not None
