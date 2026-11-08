@@ -324,9 +324,20 @@ static void daemon_task(void *arg) {
 
 // -- the ops -------------------------------------------------------------------------
 
+// USB mass storage on the same port (native/moy_usbdisk), where the image
+// has it: each refuses while the other holds the port.
+extern int moy_usbdisk_on(void) __attribute__((weak));
+
+int moy_usb_host_up(void) {
+    return H != NULL;
+}
+
 static int op_start(void) {
     if (H != NULL) {
         return 0;
+    }
+    if (moy_usbdisk_on != NULL && moy_usbdisk_on()) {
+        return -MOY_USB_EBUSY;
     }
     host_t *h = heap_caps_calloc(1, sizeof(*h), MALLOC_CAP_SPIRAM);
     if (h == NULL) {

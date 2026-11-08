@@ -385,6 +385,13 @@ build.sh silently encoded; now it is a decision with a reason someone can
 check. (native/p4/ has no micropython.cmake of its own, so this scan never
 sees it -- that tier is the second source, [native.p4] below.)"""
 
+[[native.shared.take]]
+module = "moy_usbdisk"
+why = """
+USB mass storage (docs/os_2026-11/between_apps.md section 2) on the
+high-speed OTG port, which the `usb` device API's host also drives: each
+refuses while the other holds it. The dev channel is the CH343 and stays."""
+
 [[native.shared.deny]]
 module = "moy_flush"
 why = """

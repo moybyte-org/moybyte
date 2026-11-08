@@ -105,12 +105,24 @@ cart's session reads its folder once, when it opens (`cart_files.py`), so a
 batch that lands while the same cart plays on the board's glass is what
 that session finds the next time it opens. A board-served page edits the
 board's tree, a site page its OPFS copy; SFTP mounts it from a computer
-(`system.md` §4). **USB mass storage** (owner, 2026-11-03) exposes the card's
-`moybyte/` folder while the store is held closed, never both at once: on the
-P4s, and on the T-Deck as a mode in Settings that switches the S3's one USB
-port from Serial/JTAG to mass storage, so the dev channel is lost while it
-is on; turning it off switches back and remounts the card, and the BOOT
-button still reaches the ROM loader. **No migration** (CLAUDE.md
+(`system.md` §4). **USB mass storage** (owner, 2026-11-03) puts the card, its `moybyte/`
+folder with it, on a computer while the store is held closed, never both at
+once (`runtime/system/usb_drive.py`): the card volume closes and the C holds
+it (`moy_store.card_hold`, every mount then answering EBUSY) before the
+board's driver starts (`native/moy_usbdisk`, which refuses a card not held),
+and the driver stops before the store mounts again and the shelf rescans. It
+is Settings' USB drive page, refused with no card or while a game or an app
+runs; while it is on the console opens nothing and the page holds the
+screen until its Turn off, or the computer ejecting the card, gives it back.
+On the Waveshare P4 it is the high-speed OTG port (the `usb` host's port:
+each refuses while the other holds it) and the dev channel stays; on the
+T-Deck it switches the S3's one USB port from Serial/JTAG to the OTG
+controller, so the dev channel is lost while it is on, turning it off
+switches back, a restart switches back first, and the BOOT button still
+reaches the ROM loader. The Guition P4's high-speed connector is unknown and
+its USB-C is the Serial/JTAG, whose other PHY's pad is its panel's reset, so
+it denies the driver, as the Guition S3 does (each board.toml says why).
+**No migration** (CLAUDE.md
 "Settled"): `written/<cart>/` → `apps/<id>/` shipped as a strict reader, a
 legacy `written/` folder reading as absent until wiped by hand (owner,
 2026-11-03); a compiled cart's saves on a dev board are disposable.

@@ -100,7 +100,9 @@ NATIVE = {
     # browser. moy_sh, the terminal's C shell, moy_tty, its face over a stream,
     # and moy_ssh, the SSH server (native/moy_ssh/README.md), are taken by
     # every board, the Zero's too (its board.toml says why). moy_elf, the
-    # native tier, stages on every console and not on the Zero.
+    # native tier, stages on every console and not on the Zero. moy_usbdisk,
+    # USB mass storage, is the T-Deck's and the Waveshare P4's alone (each
+    # other board.toml says why it denies it).
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -111,7 +113,8 @@ NATIVE = {
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
-                       "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
+                       "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty",
+                       "moy_usbdisk"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
@@ -123,8 +126,8 @@ NATIVE = {
            "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm", "moy_elf",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
            "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
-           "moy_sh", "moy_ssh", "moy_tty"},
-    # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
+           "moy_sh", "moy_ssh", "moy_tty", "moy_usbdisk"},
+    # The Guition P4 (2026-09-06): the Waveshare's set less moy_usbdisk, because the
     # P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
     # authors no native module of its own, and moy_dsi drives its JD9365

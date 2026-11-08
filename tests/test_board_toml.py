@@ -638,8 +638,10 @@ def test_the_p4_denies_exactly_its_missing_hardware():
     # docs/board_ports_2026-08.md), named with its stage in board.toml; its
     # card opens through moy_sd (the store's card volume). Update there first,
     # this pin second. The media service plays into that mix, and THE SHARES
-    # give this board no MEDIA row, so it denies moy_media too.
-    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_media"]
+    # give this board no MEDIA row, so it denies moy_media too. USB mass
+    # storage is the P4s' and the T-Deck's (docs/os_2026-11/between_apps.md §2).
+    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_media",
+                                                             "moy_usbdisk"]
 
 
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------

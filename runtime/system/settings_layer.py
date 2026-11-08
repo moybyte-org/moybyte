@@ -267,7 +267,7 @@ _USB_SAYS = ("Show your memory card on a computer over the USB cable. "
              "Waiting for a computer. Plug the USB cable in.",
              "On the computer now, as a drive.",
              "The computer let the card go.")
-_USB_EJECT = "Eject it on the computer, then turn this off."
+_USB_EJECT = "Eject it on the computer and it comes back here."
 _USB_SERIAL_OFF = "The serial port is off while it is on."
 _USB_SERIAL_BACK = "The serial port comes back when it is off."
 
@@ -533,10 +533,11 @@ class SettingsLayer:
 
     def usb_moved(self):
         """The USB drive page is up and the drive's state moved since it
-        drew (a computer took the card or let it go)."""
+        drew (a computer took the card or let it go). A card the computer
+        let go comes back here (`UsbDrive.poll`)."""
         if not self.usb_view:
             return False
-        return self.ws.usb_drive.state() != self._usb_seen
+        return self.ws.usb_drive.poll(self.ws) != self._usb_seen
 
     def log_moved(self):
         """The System log page is up and a record came since it drew: the

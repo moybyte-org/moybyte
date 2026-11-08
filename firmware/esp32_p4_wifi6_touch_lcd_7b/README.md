@@ -62,7 +62,10 @@ OTA is wired on this board like every other. The high-speed USB OTG port is
 the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`: HID reports,
 CDC-ACM serial and USB-MIDI for the process holding it), so MicroPython's
 TinyUSB device is off (`MICROPY_HW_ENABLE_USBDEV` 0 in `mpconfigboard.h`);
-the console's own USB keyboard, mouse and gamepad are #83's. Open
+the console's own USB keyboard, mouse and gamepad are #83's. The same port
+is Settings' USB drive (native/moy_usbdisk: the card as a drive on a
+computer, the store held closed meanwhile), which refuses while the host is
+up this boot and the host while it is on; the CH343 dev channel stays. Open
 performance work lives in #58 and #77.
 
 ### Serial dev commands (the REPL-alive board's affordance)

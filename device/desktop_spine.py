@@ -324,6 +324,35 @@ def _stamp(kernel, part):
         stamp(part)
 
 
+def wire_usb_drive(ws, carts_root, with_sd, log):
+    """`ws.usb_drive` (runtime/system/usb_drive.py) where the image has the
+    driver (native/moy_usbdisk): the store held closed and reopened through
+    the board's card gate, `with_sd`, which on the T-Deck drains the panel
+    first. On the card only: a store on the internal flash has nothing to
+    lend."""
+    try:
+        import moy_usbdisk
+    except ImportError:
+        return
+    import usb_drive
+
+    sd = with_sd if with_sd is not None else (lambda fn: fn())
+    on_card = str(carts_root).startswith(usb_drive.MOUNT + "/")
+
+    def volume():
+        import moy_sd
+        import moy_store
+        return moy_store.card(moy_sd.up())
+
+    ws.usb_drive = usb_drive.UsbDrive(
+        moy_usbdisk,
+        lambda: sd(usb_drive.hold_closed),
+        lambda: sd(lambda: usb_drive.reopen(volume)),
+        lambda: on_card,
+        dev_channel=moy_usbdisk.SERIAL)
+    log("boot", "usb drive %s" % ("ready" if on_card else "needs a card"))
+
+
 def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   keyboard, seed_carts, power_save_ms,
                   game_wh=None, font_scale=1, panel_diagonal_in=None,
@@ -426,6 +455,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # hook and the web console, in that order (device/wire_links.py).
     wire_links.wire_links(ws, link_id, update_dir, carts_root, with_sd,
                           c6_updater, log, _census)
+    wire_usb_drive(ws, carts_root, with_sd, log)
     if after_services is not None:
         after_services(ws)
     _census("services")

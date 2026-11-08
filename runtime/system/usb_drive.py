@@ -19,7 +19,7 @@ while the store is on the internal flash (no card) and while a game or an
 app runs: everything the console writes is closed first, and a run would
 find its saves failing. While it is on the console opens nothing
 (`Workstation.open`), and Settings' page holds the screen until it is turned
-off. Where the board's one USB port is also its dev channel (the T-Deck: the
+off, by its button or by the computer ejecting the card. Where the board's one USB port is also its dev channel (the T-Deck: the
 S3's PHY switched from USB-Serial/JTAG to the OTG controller), the page says
 so; turning it off switches back, and the BOOT button reaches the ROM loader
 either way.
@@ -31,6 +31,8 @@ has no `ws.usb_drive` (None): the row is absent.
 """
 
 STOPPED, WAITING, MOUNTED, EJECTED = 0, 1, 2, 3
+
+MOUNT = "/sd"                   # where every board mounts its card
 
 EBUSY = 16
 
@@ -60,7 +62,7 @@ def _vfs():
     return vfs
 
 
-def hold_closed(mount_point="/sd"):
+def hold_closed(mount_point=MOUNT):
     """The store closed: the card's volume unmounted, held in C, and `Closed`
     mounted in its place."""
     import moy_store
@@ -72,7 +74,7 @@ def hold_closed(mount_point="/sd"):
         vfs.mount(Closed(), mount_point)
 
 
-def reopen(make_volume, mount_point="/sd"):
+def reopen(make_volume, mount_point=MOUNT):
     """The store open again: `Closed` gone, the hold let go and the volume
     `make_volume()` returns (the card's, mounted afresh) at `mount_point`."""
     import moy_store
@@ -147,6 +149,14 @@ class UsbDrive(object):
         self._open()
         ws.rescan_carts()
         ws.request_frame()
+
+    def poll(self, ws):
+        """Take the card back where the computer let it go: it ejected the
+        card, or the driver gave the port back by itself (no computer came,
+        or it went: native/moy_usbdisk's timeouts). The drive's state after."""
+        if self.on and self.lever.state() in (STOPPED, EJECTED):
+            self.turn_off(ws)
+        return self.state()
 
     def state(self):
         """STOPPED, WAITING, MOUNTED or EJECTED."""

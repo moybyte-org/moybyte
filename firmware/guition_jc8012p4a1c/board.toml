@@ -344,6 +344,16 @@ reason. (native/p4/ has no micropython.cmake of its own, so this
 scan never sees it -- that tier is the second source, [native.p4] below.)"""
 
 [[native.shared.deny]]
+module = "moy_usbdisk"
+why = """
+USB mass storage wants the high-speed OTG port, and which connector, if any,
+reaches it on this unit is not known (README's USB row). The USB-C is the
+USB-Serial/JTAG on full-speed PHY 0; moving the OTG controller there puts
+USB-Serial/JTAG on PHY 1, whose pad 27 is the panel's reset, and ESP-IDF
+v5.5.1's usb_wrap_ll_phy_select falls through its PHY 0 case, so that route
+is not taken."""
+
+[[native.shared.deny]]
 module = "moy_flush"
 why = """
 There is no flush on this board to feed. moy_flush is the banded-flush engine

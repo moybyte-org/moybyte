@@ -251,3 +251,28 @@ def test_settings_turns_it_on_and_holds_the_page_until_it_is_off(ws):
     d.turn_off(ws)
     sl.back()
     assert sl._page_of() is None and sl._want == say("USB DRIVE")
+
+
+def test_a_computer_that_ejects_the_card_gives_it_back(ws):
+    sl, _say = _settings(ws)
+    log = []
+    d = _drive(ws, log)
+    sl.open_usb()
+    d.turn_on(ws)
+    sl._draw_page()
+    d.lever.st = usb_drive.EJECTED
+    assert sl.usb_moved() and not d.on
+    assert log == ["close", "start", "stop", "open"]
+
+
+def test_a_driver_that_gave_the_port_back_by_itself_reopens_the_store(ws):
+    """native/moy_usbdisk ends a drive no computer took (or one it left):
+    the console finds it stopped and takes the card back."""
+    sl, _say = _settings(ws)
+    log = []
+    d = _drive(ws, log)
+    sl.open_usb()
+    d.turn_on(ws)
+    sl._draw_page()
+    d.lever.st = usb_drive.STOPPED
+    assert sl.usb_moved() and not d.on and log[-1] == "open"
