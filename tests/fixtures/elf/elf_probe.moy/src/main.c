@@ -40,8 +40,8 @@ static void line(const char *k, long v) {
     put("\n");
 }
 
-// atoi's own: the C library's reaches its locale through newlib's reentrancy
-// record, which no module links (sdk/README.md).
+// A decimal reader of its own: the probe exercises the rows, not the C
+// library.
 static int toint(const char *s) {
     int v = 0;
     while (*s >= '0' && *s <= '9') {

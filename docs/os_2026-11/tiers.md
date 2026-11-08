@@ -44,9 +44,10 @@ record and the strike ledger as its floor.
 - **Runtime.** No libc, libgcc or C++ runtime code crosses the table: the
   POSIX rows are the table's own functions behind the IDF's newlib headers
   in the sysroot (owner, 2026-11-03), and a module links the rest
-  statically, picolibc or newlib (memcpy, string, the soft-float helpers it
-  needs), the loader runs `.init_array`, and a module asks for **no internal
-  SRAM** on the S3s.
+  statically: the SDK's own C library over those headers (stdio, printf,
+  the heap, getopt; 2026-11-08, why in `sdk/README.md`), the toolchain's
+  stateless string members and libgcc. The loader runs `.init_array`, and a
+  module asks for **no internal SRAM** on the S3s.
 - **The loader**: a relocatable ELF per chip, text and data in PSRAM,
   Espressif's `elf_loader` vendored with our fixes
   (`native/moy_elf/UPSTREAM.md`). A module resolves **no** symbol by name:

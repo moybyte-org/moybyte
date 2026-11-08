@@ -7,6 +7,8 @@ sdk/README.md).
     python3 tools/elf_cart.py SRC DST --chip host          # the host's, for its tests
     python3 tools/elf_cart.py SRC DST --chip esp32s3 --unsigned
     python3 tools/elf_cart.py module a.c b.c --chip esp32p4 -o out.elf
+    python3 tools/elf_cart.py sdk --chip esp32s3            # the flags another build takes
+    python3 tools/elf_cart.py finish built.elf --chip esp32s3   # strip and sign one it linked
 
 A cart in this tree carries its SOURCE, `src/*.c`; this compiles it per chip
 with that chip's toolchain (the ESP-IDF's, from ~/.espressif) into
@@ -14,9 +16,9 @@ with that chip's toolchain (the ESP-IDF's, from ~/.espressif) into
 `"moybyte": {"native": [...]}`, and copies everything else as it is. A module
 is a relocatable ELF that imports nothing: it links the SDK's runtime,
 libmoyos.a (sdk/src/: the entry, and a stub per row of the OS table that calls
-it by ordinal), and the rest of the C library statically from the
-toolchain's own (memcpy, strlen, the soft-float helpers), every one of its
-symbols hidden. The host's chip links the host's C library dynamically.
+it by ordinal; sdk/libc/: the SDK's C library), the toolchain's PURE C
+library members and its libm and libgcc, every symbol hidden. The host's
+chip links the host's C library dynamically behind the SDK's own.
 
 EVERY MODULE IS SIGNED, as a compiled cart's AOT module is (tools/wasm_module.py,
 the OTA signing key), over the text native/moy_elf/moy_elf.h's
@@ -41,26 +43,41 @@ if ROOT not in sys.path:
 SDK = os.path.join(ROOT, "sdk")
 SDK_INCLUDE = os.path.join(SDK, "include")
 SDK_SRC = os.path.join(SDK, "src")
+SDK_LIBC = os.path.join(SDK, "libc")
+SDK_SYSROOT = os.path.join(SDK, "sysroot", "include")
 CACHE = os.path.join(ROOT, ".build", "sdk")
 TABLE = os.path.join(ROOT, "native", "moy_elf", "os_table.json")
 ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
 
-# Per chip: the toolchain's folder and prefix, the code flags, and the
-# sections strip takes off (elf_loader's project_elf(), 2.1.0).
+# Per chip: the toolchain's folder and prefix, the code flags, the link
+# flags, and the sections strip takes off (elf_loader's project_elf(), 2.1.0).
+# The S3's ld (esp-14.2.0) double-frees on some module links, depending on
+# the output path; --no-keep-memory re-reads symbol tables instead of
+# caching them, and those links come out byte-identical.
 CHIPS = {
     "esp32s3": {"tools": "xtensa-esp-elf", "prefix": "xtensa-esp32s3-elf-",
-                "flags": ["-mlongcalls"],
+                "flags": ["-mlongcalls"], "link": ["-Wl,--no-keep-memory"],
                 "strip": [".xt.lit", ".xt.prop", ".xtensa.info"]},
     "esp32p4": {"tools": "riscv32-esp-elf", "prefix": "riscv32-esp-elf-",
-                "flags": ["-march=rv32imafc_zicsr_zifencei", "-mabi=ilp32f"],
+                "flags": ["-march=rv32imafc_zicsr_zifencei", "-mabi=ilp32f"], "link": [],
                 "strip": [".riscv.attributes"]},
-    "host": {"tools": None, "prefix": "", "flags": [], "strip": []},
+    "host": {"tools": None, "prefix": "", "flags": [], "link": [], "strip": []},
 }
 
 CFLAGS = ["-Os", "-fPIC", "-ffunction-sections", "-fdata-sections", "-fvisibility=hidden",
           "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0", "-fno-stack-protector"]
 LINK = ["-shared", "-nostartfiles", "-e", "_moy_entry", "-Wl,--gc-sections",
         "-Wl,--exclude-libs,ALL"]
+
+# The toolchain's C library objects a board's module may take as they are:
+# each touches no state of its own (no reentrancy record, locale, errno or
+# heap), so it is position-independent wherever it was built.
+# pure_libc() takes the members that define these and refuses one that
+# needs anything but another such member or libgcc.
+PURE = ("memcpy memmove memset memcmp memchr memrchr memccpy mempcpy memmem bzero bcmp "
+        "bcopy strlen strnlen strcmp strncmp strcpy strncpy stpcpy stpncpy strcat strncat "
+        "strchr strrchr strchrnul strstr strspn strcspn strpbrk strtok_r strsep strlcpy "
+        "strlcat index rindex qsort bsearch abs labs llabs div ldiv lldiv imaxabs ffs").split()
 
 
 class ToolError(Exception):
@@ -111,14 +128,32 @@ def _rows():
         return len(json.load(f)["rows"])
 
 
-def libmoyos(chip):
-    """The SDK runtime for `chip` (built once per content into .build/sdk/):
-    the entry and one object per row, so a module links only what it calls."""
-    cc, ar, _strip = toolchain(chip)
+def includes(chip):
+    """The SDK's include folders for `chip`: its own, and on a board the
+    sysroot's headers a board's C library lacks (sockets, poll, mmap)."""
+    out = ["-I", SDK_INCLUDE]
+    if chip != "host":
+        out += ["-isystem", SDK_SYSROOT]
+    return out
+
+
+def _sdk_sources():
     srcs = [os.path.join(SDK_SRC, n) for n in ("moyos_crt.c", "moyos_stubs.c", "moyos_rt.h")]
     srcs.append(os.path.join(SDK_INCLUDE, "moybyte", "os.h"))
+    srcs += sorted(glob.glob(os.path.join(SDK_LIBC, "*.[ch]")))
+    srcs += sorted(glob.glob(os.path.join(SDK_SYSROOT, "**", "*.h"), recursive=True))
+    return srcs
+
+
+def libmoyos(chip):
+    """The SDK runtime for `chip` (built once per content into .build/sdk/):
+    the entry, one object per row, so a module links only what it calls,
+    and the SDK's C library (sdk/libc/)."""
+    cc, ar, _strip = toolchain(chip)
+    srcs = _sdk_sources()
     h = hashlib.sha256()
     for p in srcs:
+        h.update(os.path.relpath(p, SDK).encode())
         with open(p, "rb") as f:
             h.update(f.read())
     flags = CFLAGS + CHIPS[chip]["flags"]
@@ -129,14 +164,73 @@ def libmoyos(chip):
         return lib
     tmp = out_dir + ".%d.tmp" % os.getpid()
     os.makedirs(tmp, exist_ok=True)
-    base = [cc] + flags + ["-I", SDK_INCLUDE, "-I", SDK_SRC, "-c"]
+    base = [cc] + flags + includes(chip) + ["-I", SDK_SRC, "-c"]
     objs = [os.path.join(tmp, "crt.o")]
     _run(base + [os.path.join(SDK_SRC, "moyos_crt.c"), "-o", objs[0]])
     for i in range(_rows()):
         o = os.path.join(tmp, "row%03d.o" % i)
         _run(base + ["-DMOY_OS_ONLY=%d" % i, os.path.join(SDK_SRC, "moyos_stubs.c"), "-o", o])
         objs.append(o)
+    for src in sorted(glob.glob(os.path.join(SDK_LIBC, "*.c"))):
+        o = os.path.join(tmp, "lc_" + os.path.basename(src)[:-2] + ".o")
+        _run(base + ["-fno-builtin", "-I", SDK_LIBC, src, "-o", o])
+        objs.append(o)
     _run([ar, "rcs", os.path.join(tmp, "libmoyos.a")] + objs)
+    if os.path.isdir(out_dir):
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        os.replace(tmp, out_dir)
+    return lib
+
+
+def _tool(chip, name):
+    cc = toolchain(chip)[0]
+    return cc[:-3] + name if cc.endswith("gcc") else name
+
+
+def pure_libc(chip):
+    """The toolchain's PURE members of its C library for board `chip`, as
+    one archive (built once per toolchain into .build/sdk/)."""
+    cc, ar, _strip = toolchain(chip)
+    flags = CHIPS[chip]["flags"]
+    libc = _run([cc] + flags + ["-print-file-name=libc.a"]).strip()
+    libgcc = _run([cc] + flags + ["-print-libgcc-file-name"]).strip()
+    h = hashlib.sha256(repr((libc, os.path.getsize(libc), PURE)).encode()).hexdigest()[:16]
+    out_dir = os.path.join(CACHE, chip, "pure-" + h)
+    lib = os.path.join(out_dir, "libcpure.a")
+    if os.path.exists(lib):
+        return lib
+    nm = _tool(chip, "nm")
+    tmp = out_dir + ".%d.tmp" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+
+    def table(archive):
+        defined, undefined = {}, {}
+        member = None
+        for line in _run([nm, "-A", archive]).splitlines():
+            parts = line.rsplit(" ", 2)
+            where = parts[0].split(":")
+            if len(where) < 2:
+                continue
+            member = where[-2]
+            kind, sym = parts[-2], parts[-1]
+            if kind == "U":
+                undefined.setdefault(member, set()).add(sym)
+            elif kind.upper() in "TDRBWVC" and kind != "w":
+                defined.setdefault(member, set()).add(sym)
+        return defined, undefined
+
+    defined, undefined = table(libc)
+    take = sorted(m for m, syms in defined.items() if syms & set(PURE))
+    gcc_defined = set().union(*table(libgcc)[0].values())
+    have = set().union(*(defined[m] for m in take))
+    for m in take:
+        stray = undefined.get(m, set()) - have - gcc_defined
+        if stray:
+            raise ToolError("%s's %s needs %s, which no module links"
+                            % (os.path.basename(libc), m, ", ".join(sorted(stray))))
+    subprocess.run([ar, "x", libc] + take, cwd=tmp, check=True)
+    _run([ar, "rcs", os.path.join(tmp, "libcpure.a")] + [os.path.join(tmp, m) for m in take])
     if os.path.isdir(out_dir):
         shutil.rmtree(tmp, ignore_errors=True)
     else:
@@ -149,19 +243,31 @@ def sig_scheme():
     return re.search(r'#define MOY_ELF_SIG_SCHEME "([^"]+)"', text).group(1)
 
 
+def libs(chip):
+    """What a module for `chip` links after its own objects."""
+    if chip == "host":
+        return [libmoyos(chip)]
+    # A group, so a helper any of them needs comes from the first that
+    # defines it: the SDK's own before the toolchain's.
+    return ["-nostdlib", "-Wl,--no-undefined", "-Wl,--start-group", libmoyos(chip),
+            pure_libc(chip), "-lm", "-lgcc", "-Wl,--end-group"]
+
+
 def build_module(sources, chip, out, cflags=(), signed=True, sign_with=None):
     """Compile `sources` (C files) for `chip` into the module file `out`,
     signed unless `signed` is False (the host's never is). Returns `out`."""
-    cc, _ar, strip = toolchain(chip)
-    lib = libmoyos(chip)
-    cmd = ([cc] + CFLAGS + CHIPS[chip]["flags"] + list(cflags) + ["-I", SDK_INCLUDE]
-           + list(sources) + LINK)
-    if chip == "host":
-        cmd += [lib]
-    else:
-        cmd += ["-nostdlib", "-Wl,--no-undefined", lib, "-lc", "-lm", "-lgcc"]
+    cc, _ar, _strip = toolchain(chip)
+    cmd = ([cc] + CFLAGS + CHIPS[chip]["flags"] + list(cflags) + includes(chip)
+           + list(sources) + LINK + CHIPS[chip]["link"] + libs(chip))
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     _run(cmd + ["-o", out])
+    return finish(out, chip, signed=signed, sign_with=sign_with)
+
+
+def finish(out, chip, signed=True, sign_with=None):
+    """A linked module made one a console loads: stripped and, unless
+    `signed` is False, signed (the host's is neither). Returns `out`."""
+    strip = toolchain(chip)[2]
     if chip != "host":
         args = [strip, "--strip-unneeded", "--remove-section=.comment"]
         args += ["--remove-section=%s" % s for s in CHIPS[chip]["strip"]]
@@ -205,15 +311,36 @@ def build(src, dst, chips, signed=True, sign_with=None):
     return out
 
 
+def sdk(chip):
+    """What another build needs to make a module for `chip` (sdk/cmake/):
+    its compiler, its flags, its link flags and libraries, its strip."""
+    cc, _ar, strip = toolchain(chip)
+    return {"CC": cc, "STRIP": strip,
+            "CFLAGS": " ".join(CFLAGS + CHIPS[chip]["flags"] + includes(chip)),
+            "LDFLAGS": " ".join(LINK + CHIPS[chip]["link"]), "LIBS": " ".join(libs(chip))}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("src", help="a cart folder with src/*.c, or `module`")
-    ap.add_argument("rest", nargs="*", help="the built cart's folder, or the module's C files")
+    ap.add_argument("src", help="a cart folder with src/*.c, or `module`, `sdk` or `finish`")
+    ap.add_argument("rest", nargs="*", help="the built cart's folder, the module's C files, "
+                                            "or the linked module to finish")
     ap.add_argument("--chip", action="append", default=[], help="a chip to build for")
     ap.add_argument("-o", "--out", help="the module file (module mode)")
     ap.add_argument("--unsigned", action="store_true", help="leave the signature off")
     args = ap.parse_args(argv)
     try:
+        if args.src == "sdk":
+            if len(args.chip) != 1:
+                raise ToolError("sdk mode takes one --chip")
+            for k, v in sdk(args.chip[0]).items():
+                print("%s=%s" % (k, v))
+            return 0
+        if args.src == "finish":
+            if len(args.chip) != 1 or len(args.rest) != 1:
+                raise ToolError("finish mode takes one --chip and the module")
+            print(finish(args.rest[0], args.chip[0], signed=not args.unsigned))
+            return 0
         if args.src == "module":
             if len(args.chip) != 1 or not args.out:
                 raise ToolError("module mode takes one --chip and -o")

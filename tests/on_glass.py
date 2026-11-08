@@ -3673,10 +3673,15 @@ def elf_commands_run(board, board_dir):
     an unsigned module runs too). Args, a pipe in and out, a file through
     redirections, env, exit codes, threads and a mutex; a module built
     against rows this console lacks refused; `sh ^C` ending a run the door
-    steps with 130, the console's frames going on meanwhile;
-    what the loads cost (`moy_elf.load()`) printed for the ledger."""
+    steps with 130, the console's frames going on meanwhile; the SDK's C
+    library through unmodified programs (head; the libc probe, whose stdout
+    is the same program's built against this machine's glibc); netcat both
+    ways with a socket on this machine, when the board's network reaches
+    it (skipped, last, when it does not); what the loads cost
+    (`moy_elf.load()`) printed for the ledger."""
     import json
     import shutil
+    import subprocess
     import tempfile
     from tools import elf_cart, wasm_module
     chip = _wasm_chip(board_dir)
@@ -3686,7 +3691,7 @@ def elf_commands_run(board, board_dir):
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
     tmp = tempfile.mkdtemp(prefix="moy_elf_")
     fixtures = ROOT / "tests" / "fixtures" / "elf"
-    for name in ("elf_hello", "elf_cat", "elf_probe"):
+    for name in ("elf_hello", "elf_cat", "elf_probe", "elf_head", "elf_libc", "elf_nc"):
         out = os.path.join(tmp, name + ".moy")
         elf_cart.build(str(fixtures / (name + ".moy")), out, [chip], signed=signed)
         _push_folder(board, board_dir, out, root + "/" + name + ".moy")
@@ -3729,13 +3734,100 @@ def elf_commands_run(board, board_dir):
     # KeyboardInterrupt while the console runs)
     board._write_line("sh ^C")
     assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
-    runs("rm elf.txt elf2.txt", (0, []))
+    runs("elf.head/head -n 1 elf.txt", (0, ["one"]))
+    args = "-a -b x -a op1 op2"
+    st, got = _sh(board, "echo 'first line' | elf.libc/libc %s > elf3.txt 2> /dev/null; "
+                  "elf.cat/cat elf3.txt" % args, timeout=60)
+    exe = os.path.join(tmp, "libc_native")
+    subprocess.run(["cc", "-O1", "-w", "-o", exe,
+                    str(fixtures / "elf_libc.moy" / "src" / "libc.c")], check=True)
+    want = subprocess.run([exe] + args.split(), input=b"first line\n", capture_output=True,
+                          check=True).stdout.decode().splitlines()
+    assert (st, got) == (0, want), (st, got)
+    runs("rm elf.txt elf2.txt elf3.txt", (0, []))
     stats = board.pyval("__import__('moy_elf').stats()", strict=True)
     assert stats[3] == 0, stats                  # no thread left running
     mem = board.pyval("__import__('moy_elf').mem()", strict=True)
     print("\nELF %s load: read %d us, check %d us, relocate %d us; internal free "
           "%d before, %d loaded, %d after; stats %r"
           % (chip, load[0], load[1], load[2], load[3], load[4], mem[0], stats))
+    _elf_nc_both_ways(board)
+
+
+def _elf_nc_both_ways(board):
+    """The SDK's netcat on the board against a socket on this machine: it
+    dials one listening here, then listens for this machine to dial it. The
+    board joins its kept network for the socket's "native" hold; a board
+    whose network does not reach this machine skips."""
+    import socket
+    import threading
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))         # no packet: the route's own address
+        here = probe.getsockname()[0]
+    finally:
+        probe.close()
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", 0))
+    srv.listen(1)
+    srv.settimeout(60)
+    port = srv.getsockname()[1]
+    heard = []
+
+    def serve():
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            return
+        with conn:
+            data = b""
+            while True:
+                b = conn.recv(256)
+                if not b:
+                    break
+                data += b
+            heard.append(data)
+            conn.sendall(b"world\n")
+
+    th = threading.Thread(target=serve, daemon=True)
+    th.start()
+    st, got = _sh(board, "echo hello | elf.nc/nc %s %d" % (here, port), timeout=90)
+    srv.close()
+    th.join(5)
+    if not heard:
+        pytest.skip("the board's network does not reach %s (%s: %r)" % (here, st, got))
+    assert heard == [b"hello\n"] and (st, got) == (0, ["world"]), (heard, st, got)
+    ip = board.pyval("ws.wifi.status()[2]", timeout=20, strict=True)
+    lport = 7000 + os.getpid() % 1000
+    answered = []
+
+    def dial():
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 60:
+            try:
+                conn = socket.create_connection((ip, lport), timeout=5)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            with conn:
+                conn.sendall(b"pong\n")
+                data = b""
+                while True:
+                    b = conn.recv(256)
+                    if not b:
+                        break
+                    data += b
+                answered.append(data)
+            return
+
+    th = threading.Thread(target=dial, daemon=True)
+    th.start()
+    st, got = _sh(board, "echo ping | elf.nc/nc -l -p %d" % lport, timeout=90)
+    th.join(10)
+    assert answered == [b"ping\n"] and (st, got) == (0, ["pong"]), (answered, st, got)
+    held = board.state().get("wifi_held", [])
+    assert "native" not in held, held
 
 
 APP_ROLES = ("app_roles", "App Roles Wasm")

@@ -22,7 +22,7 @@ if native_build.cc() is None:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "elf")
-NAMES = ("elf_hello", "elf_cat", "elf_probe", "elf_svc")
+NAMES = ("elf_hello", "elf_cat", "elf_probe", "elf_svc", "elf_nc", "elf_head", "elf_libc")
 
 
 @pytest.fixture(scope="module")
@@ -57,6 +57,12 @@ def term(tmp_path, built):
     man["id"], man["title"] = "elf.blind", "Blind Native"
     man["moybyte"]["permissions"] = []
     (blind / "manifest.json").write_text(json.dumps(man))
+    ncblind = carts / "elf_ncblind.moy"
+    shutil.copytree(built["elf_nc"], str(ncblind))
+    man = json.loads((ncblind / "manifest.json").read_text())
+    man["id"], man["title"] = "elf.ncblind", "Netcat Blind"
+    man["moybyte"]["permissions"] = ["native"]
+    (ncblind / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
     assert "elf" in ws.runtimes
     app = ws.terminal_app

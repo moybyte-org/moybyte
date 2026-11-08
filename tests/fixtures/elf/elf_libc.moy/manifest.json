@@ -1,0 +1,10 @@
+{
+  "title": "Libc Native",
+  "id": "elf.libc",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "native"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "title": "Netcat Native",
+  "id": "elf.nc",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "native",
+      "network"
+    ]
+  }
+}
