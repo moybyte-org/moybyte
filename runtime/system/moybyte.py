@@ -19,7 +19,8 @@ one, `time.ticks_us()`.
                      MESSAGE the OS routes to this process by that name
                      ("achieve", "award": the notify role's events, which the
                      shell sends the achievements process, section 8; "net",
-                     "ble": the radios, below)
+                     "ble": the radios, below; "app": what a process of its
+                     own app tells it, `tell`)
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -57,6 +58,11 @@ one, `time.ticks_us()`.
                      the room. From the loop or a `_thread`; allocates nothing
   snd_close()        the ring given back; snd_counts() its (queued, played,
                      starved, room, open, depth) counters, None before any open
+  tell(*args)        message "app" with `args` to every other process of
+                     the caller's own app (its id, the grant's key) that
+                     waits on it: an app's to its service, a service's to its
+                     app's run. How many took it; the OS routes it as it
+                     routes any message (`send`), each tier's alike
   notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
@@ -162,7 +168,7 @@ SOURCES = {"keys": _I.EV_KEYS, "touch": _I.EV_TOUCH, "pad": _I.EV_PAD,
 # A Lua service's row takes the same names and the same depth
 # (native/moycore/moycore_svc.h: MOYCORE_SVC_MESSAGES, MOYCORE_SVC_MAIL),
 # pinned by tests/test_lua_services.py.
-MESSAGES = ("achieve", "award", "net", "ble")
+MESSAGES = ("achieve", "award", "net", "ble", "app")
 MAIL_MAX = 16
 
 # The radios' messages, by the kind of their records.
@@ -208,6 +214,7 @@ class Wakes:
         self.radio = None           # the radios' router, a wake of the shell's
         self.radio_keep = False     # something beside a wake wants the router
         self.routed = None          # fn(name, args) told each radio change routed
+        self.teller = None          # fn(pid, args) -> n: `tell` from process pid (the scheduler's)
         self._rbuf = None
 
     def bind(self, table):
@@ -686,6 +693,11 @@ def _intents():
 
 def open_with(item, choose=False):
     return _intents().open_with(_pid(), item, bool(choose))
+
+
+def tell(*args):
+    t = WAKES.teller
+    return t(_pid(), args) if t is not None else 0
 
 
 def share(data, mime):

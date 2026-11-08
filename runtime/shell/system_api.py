@@ -338,8 +338,8 @@ def make_system_api(ctx_factory, cart, canvas=None,
     ns["bar_h"] = ctx.surface.bar_h     # content_rect()[1]
 
     # -- GATED ----------------------------------------------------------------
+    ns.update(granted_names(ctx, roles, kind))
     if "files" in roles:
-        ns["files"] = ScopedFiles(ctx.files, kind)
         if editor is not None:
             # The editor handle (docs/history/text_editing_2026-09.md step 3). The cart
             # passes a NAME and never a kind: with one it edits an item of the
@@ -369,6 +369,17 @@ def make_system_api(ctx_factory, cart, canvas=None,
                 return editor(files, kind, str(name), mode, canvas, clip)
 
             ns["open_editor"] = _open_editor
+    return ns
+
+
+def granted_names(ctx, roles, kind):
+    """The names `roles` (the grant's, `moy_app.policy`'s) publish over
+    context `ctx`: `files` (its one `kind`), `prefs`, `set_theme` and
+    `themes`, `open_app`. A user app's namespace holds them beside its
+    drawing riders (`make_system_api`), a service's alone (`service_api`)."""
+    ns = {}
+    if "files" in roles:
+        ns["files"] = ScopedFiles(ctx.files, kind)
     if "prefs" in roles:
         ns["prefs"] = ctx.prefs
     if "theme" in roles:
@@ -376,7 +387,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
         # privilege -- reading is already ungated above. So publish two bound
         # functions, not the role: an app with "appearance" can restyle the
         # console, and cannot reach anything else through the same object.
-        ns["set_theme"] = theme.set
+        ns["set_theme"] = ctx.theme.set
 
         def _themes():
             """The installed panel-theme names, so a picker has valid choices.
@@ -403,6 +414,23 @@ def make_system_api(ctx_factory, cart, canvas=None,
 
         ns["open_app"] = _open_app
     return ns
+
+
+def service_api(ctx_factory, cart, perms, owner):
+    """`(ctx, roles, names)` for service `cart` started as process `owner`
+    under its granted permissions `perms`: its app's roles, as a foreground
+    run of the same app is handed them (the same policy, the same app id,
+    files kind and prefs namespace), on a run grant of its own whose owner
+    is its pid; the names its Python namespace holds (`granted_names`).
+    `(None, (), {})` where the permissions grant no role. A service has no
+    canvas, so it holds no drawing rider and no `open_editor`."""
+    roles, kind = _moy_app.policy(perms)
+    if not roles:
+        return None, (), {}
+    app_id = _moy_app.id_for(cart.get("id") if cart else None,
+                             cart.get("title") if cart else None)
+    ctx = ctx_factory(app_id, roles, app_id, run=True, kind=kind, owner=owner)
+    return ctx, roles, granted_names(ctx, roles, kind)
 
 
 # -- the responsive opt-in ---------------------------------------------------

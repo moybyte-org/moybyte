@@ -107,14 +107,16 @@ def _svc_check(rc):
         raise OSError(e, os.strerror(e))
 
 
-def svc_start(pid, name, src, env=None):
+def svc_start(pid, name, src, env=None, app=None):
     """Service `pid` started (moycore_svc_start): its handle. `env` is what
-    the console hands it, the JSON text [values, calls], or None."""
+    the console hands it, the JSON text [values, calls], or None; `app` its
+    app's run, moy_app's `run()` bytes, or None."""
     b = src.encode() if isinstance(src, str) else bytes(src)
     e = env.encode() if isinstance(env, str) else env
     h = _lb.ctypes.c_uint32()
     _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), b, len(b), e,
                                                 len(e) if e is not None else 0,
+                                                bytes(app) if app is not None else None,
                                                 _lb.ctypes.byref(h)))
     return h.value
 

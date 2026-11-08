@@ -147,8 +147,10 @@ class Notices:
         self.ach.start()
 
     def service_env(self, cart):
-        """What the console hands service `cart` in its namespace: the
-        achievements process's document, write and day; None for any other."""
+        """What the console hands service `cart` in its namespace beside
+        its app's roles: the achievements process's document, write and day
+        (achievements.json is a system document no role serves); None for
+        any other."""
         if _ach.is_proc(cart):
             return self.ach.env()
         return None

@@ -2706,7 +2706,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
         return True
 
-    def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None):
+    def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None,
+                    owner=0):
         """Build the narrowed shell interface for one system app
         (docs/app_api_v1.md, runtime/shell/app_context.py).
 
@@ -2715,8 +2716,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         raises here rather than growing an invisible dependency. That filter is
         the whole point: Phase 7's `make_system_api(ctx, cart)` is this same
         call with a cart's manifest permissions in place of a class constant,
-        its grant a RUN grant (`run`) scoped to its files `kind`."""
-        return AppContext(self, app_id, needs, prefs_ns, run, kind)
+        its grant a RUN grant (`run`) scoped to its files `kind`; a
+        service's names its pid as the grant's `owner`."""
+        return AppContext(self, app_id, needs, prefs_ns, run, kind, owner)
 
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #

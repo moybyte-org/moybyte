@@ -50,7 +50,9 @@ open picture, the clipboard's 4 KiB of text); a shell row calls the server the
 console registers for its role (runtime/shell/shell_servers.py) with the grant first.
 A shipped app's grant is idempotent by its id, so a start re-registering the
 app finds the row it had; a user app's (`run=True`) is its run's, ended when
-the run ends (`AppContext.end`).
+the run ends (`AppContext.end`). A service's run grant names its pid as the
+grant's `owner`, so it is a row apart from its app's foreground run's, over
+the same files kind and the same prefs namespace (runtime/system/scheduler.py).
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
 the first almost exclusively (a document is a user file); an app that writes a
@@ -116,7 +118,7 @@ class AppContext:
     path."""
 
     def __init__(self, ws, app_id, needs=(), prefs_ns=None, run=False,
-                 kind=None):
+                 kind=None, owner=0):
         self.app_id = str(app_id)
         for name in needs:
             if name not in ROLES:
@@ -124,7 +126,7 @@ class AppContext:
         app = ws.app_abi
         self._app = app
         self.grant = app.grant(self.app_id, needs, kind=kind,
-                               ns=prefs_ns or self.app_id, run=run)
+                               ns=prefs_ns or self.app_id, run=run, owner=owner)
         if "damage" in needs:
             self.damage = _moy_app.Damage(app, self.grant)
         if "surface" in needs:

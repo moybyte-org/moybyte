@@ -82,6 +82,10 @@ try:
 except ImportError:  # host: no kernel loop to pace
     _loop = None
 try:
+    import moy_app as _moy_app
+except ImportError:  # host: the runtime package
+    from runtime import moy_app as _moy_app
+try:
     import scheduler as _sched
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import scheduler as _sched
@@ -893,6 +897,17 @@ class Procs:
         if sp is not None and sp.kind in _GRANTED and sp.state != _sched.EXITED:
             return _poster(sp.cart, sp.granted)
         return (None, None, False)
+
+    def app_id(self, pid):
+        """The app id process `pid` runs under (the grant's key,
+        `moy_app.id_for`): its run's cart's or its service's; None for the
+        shell and a pid with no live run."""
+        if pid == _sched.SHELL:
+            return None
+        cart = self.who(pid)[1]
+        if cart is None:
+            return None
+        return _moy_app.id_for(cart.get("id"), cart.get("title"))
 
     def granted(self, pid):
         """The permissions process `pid`'s run, service or command was granted, as a

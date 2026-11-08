@@ -57,7 +57,8 @@ cancelled. A SystemExit from a service's callback is its exit, with its code.
 
 SERVICES (`"type": "service"`). `start(cart)` checks the launch under the
 cart's consent (runtime/shell/app_perms.py), spawns its pid, runs its main
-with `moybyte` in its namespace and then its `moy_start()`; it runs until it
+with `moybyte` and its app's role names in its namespace and then its
+`moy_start()`; it runs until it
 has no wakes left (exit 0), crashes, or is stopped, and a suspended service
 holds its wakes unserved. `stop(pid)` is the TERM: its `moy_stop()` hook runs
 under a guard of MOY_SERVICE_STOP_MS, and a service whose hook is still
@@ -65,15 +66,26 @@ running then gets the KILL (EXIT_KILLED); either way its wakes and readers
 end. A start that runs past the same limit is killed too. Every start, stop,
 kill, exit and rung is one line of the OS log under the service's pid.
 
+ITS APP'S ROLES (owner, 2026-11-08; docs/os_2026-11/processes.md section 5).
+A service started on a console holds the roles a foreground run of its app
+is granted, under its granted permissions, on a run grant of its own whose
+owner is its pid (system_api.service_api), held on its row and ended at its
+end: a Python service's namespace holds the names a Python app's does, a Lua
+service's state opens the names a Lua app's does. `tell` routes
+`moybyte.tell`: message "app" to the other processes of the caller's app
+(`app_of`, the console's, bound at `attach`).
+
 LUA SERVICES (`"runtime": "lua"`). The start hands the cart's source to
 moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
 task of its own on a P4's core 0, refused where the chip runs none (the S3s,
 logged and exited 1), with what the console hands a system process (its
-`env`: the values as globals, the functions as console calls). `poll()`, a
+`env`: the values as globals, the functions as console calls) and its app's
+run, whose role names its state opens. `poll()`, a
 wake of the shell's every POLL_MS while one lives, steps them where they
 have no task (the host, the desktop MicroPython), answers the console calls
-they wait on (`moybyte.notify` and the `env` functions, run here on the VM's
-task as the service's process, at most CALLS_MAX a service a poll), reads
+they wait on (`moybyte.notify`, `tell` and the `env` functions, run here on
+the VM's task as the service's process, at most CALLS_MAX a service a poll,
+and, on a P4, the role row its task posted), reads
 each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
 C side's KILL past MOY_SERVICE_STOP_MS. `send` routes a message to a Lua
@@ -123,7 +135,7 @@ except ImportError:  # host: the runtime package, `import moybyte` for a service
 # The console calls every Lua service holds (native/moycore/moycore_svc.c's
 # `moybyte` table), answered by the console's own verbs.
 _CALLS = {"moybyte.notify": _moybyte.notify, "moybyte.open_with": _moybyte.open_with,
-          "moybyte.share": _moybyte.share}
+          "moybyte.share": _moybyte.share, "moybyte.tell": _moybyte.tell}
 
 try:
     import json as _json
@@ -200,6 +212,7 @@ def allocated():
 
 _W = _moybyte._OWNER, _moybyte._HOW, _moybyte._AFTER, _moybyte._AT
 _OWNER, _HOW, _AFTER, _AT = _W
+_MS = _moybyte._MS
 
 ABORTED = _guard.ABORTED if _guard is not None else object()
 
@@ -229,6 +242,14 @@ class Proc:
         self.cpu = None         # its last sample's busy us a second (Procs.account)
         self.seen_us = 0        # cost_us at that sample
         self.native = 0         # a Lua service's handle (moycore_svc.h), 0: Python
+        self.ctx = None         # a service's context: its run grant over its app's roles
+
+
+def _end_grant(p):
+    """A service's end: its run grant ends with it."""
+    ctx, p.ctx = p.ctx, None
+    if ctx is not None:
+        ctx.end()
 
 
 def _let_go(p):
@@ -274,6 +295,7 @@ class Scheduler:
         self._budget = 0
         self._poll = 0              # the Lua services' poll, a wake of the shell's
         self.svc_mail = False       # a message sent to a Lua service, not yet polled
+        self.app_of = None          # fn(pid) -> the app id it runs, the console's (`attach`)
         self.wakes.ended = self._ended
         self.wakes.routed = self._routed
 
@@ -349,6 +371,28 @@ class Scheduler:
         if took:
             self.svc_mail = True
         return took
+
+    def tell(self, pid, args):
+        """`moybyte.tell` from process `pid`: message "app" with `args` to
+        every other live process of its app (`app_of`: the app id a run or
+        a service runs under, the grant's key) that waits on it, a Lua
+        service's row alike. Answers how many took it."""
+        of = self.app_of
+        aid = of(pid) if of is not None else None
+        if aid is None:
+            return 0
+        to = []
+        for w in self.wakes.mail:
+            if w[_MS] == "app" and w[_OWNER] not in to:
+                to.append(w[_OWNER])
+        for p in self.procs.values():
+            if p.native and p.state != EXITED and p.pid not in to:
+                to.append(p.pid)
+        n = 0
+        for q in to:
+            if q != pid and of(q) == aid and self.send(q, "app", tuple(args)):
+                n += 1
+        return n
 
     def wakes_of(self, pid):
         """How many wakes process `pid` holds: its timers, readers and
@@ -589,13 +633,20 @@ class Scheduler:
             p.state, p.code = EXITED, EXIT_CRASHED
             return None
         _log(INFO, pid, "start", name)
+        try:
+            roles, names = self._grant(p, ws, cart)
+        except (OSError, ValueError) as e:     # the grant table full, a refused kind
+            _log(ERR, pid, "its grant: %s" % e)
+            p.state, p.code = EXITED, EXIT_CRASHED
+            return None
         if cart.get("runtime") == "lua":
-            return self._start_lua(p, cart.get("src") or "", env)
+            return self._start_lua(p, cart.get("src") or "", env, roles)
         if "asyncio" in src_of(cart):
             _aio().install(self)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
         if env:
             ns.update(env)
+        ns.update(names)
         for n in app_perms.absent_names(absent, rec):
             ns[n] = None
         p.ns = ns
@@ -622,26 +673,48 @@ class Scheduler:
             return None
         return pid
 
+    def _grant(self, p, ws, cart):
+        """Service `p`'s roles on console `ws`: its app's, under the
+        permissions its start was granted, on a run grant of its own owned by
+        its pid (system_api.service_api), held on its row until its end.
+        Answers (its roles, the names a Python service's namespace holds);
+        ((), {}) on no console."""
+        factory = getattr(ws, "app_context", None)
+        if factory is None:
+            return (), {}
+        try:
+            import system_api
+        except ImportError:  # host: the runtime package
+            from runtime import system_api
+        p.ctx, roles, names = system_api.service_api(factory, cart, p.granted, p.pid)
+        return roles, names
+
     # -- the Lua services -------------------------------------------------
 
-    def _start_lua(self, p, src, env=None):
+    def _start_lua(self, p, src, env=None, roles=()):
         """Lua service `p` (native/moycore/moycore_svc.h): its own state, on a
         task of its own on the P4s and at this scheduler's poll elsewhere,
-        handed `env` (its values as globals, its functions as console calls);
+        handed `env` (its values as globals, its functions as console calls)
+        and its app's run over `roles` (its role names, moy_app_lua.h);
         refused on a chip that runs none (the S3s) or with no Lua runtime."""
         svc = _svc()
+        run = None
+        if p.ctx is not None:
+            run = p.ws.app_abi.run(p.ctx.grant, roles)
         try:
             if svc is None:
                 raise OSError(EINVAL, "no Lua runtime")
-            p.native = svc.svc_start(p.pid, p.name, src, _env_text(env))
+            p.native = svc.svc_start(p.pid, p.name, src, _env_text(env), run)
         except (TypeError, ValueError) as e:
             _log(ERR, p.pid, "what the console hands it is not JSON: %s" % e)
             p.state, p.code = EXITED, EXIT_CRASHED
+            _end_grant(p)
             return None
         except OSError as e:
             _log(ERR, p.pid, "a Lua service does not run on this console"
                  if e.args and e.args[0] == EINVAL else "no room for a Lua service: %s" % e)
             p.state, p.code = EXITED, EXIT_CRASHED
+            _end_grant(p)
             return None
         if not self._poll:
             self._poll = self.plain_every(POLL_MS, self.poll)
@@ -706,28 +779,30 @@ class Scheduler:
 
     def _answer(self, p, svc, stepped):
         """The console calls Lua service `p` waits on, answered on this
-        task as its process: `moybyte.notify`, `open_with` or `share`
-        (`_CALLS`), or a function of the `env`
-        its start was handed. A stepped service runs on to its next call at
+        task as its process: `moybyte.notify`, `open_with`, `share` or
+        `tell` (`_CALLS`), or a function of the `env` its start was handed;
+        a role row its own task posted runs first, in the call that asks
+        (moycore_svc_call). A stepped service runs on to its next call at
         once."""
         env = p.args[2] if len(p.args) > 2 else None
         for _ in range(CALLS_MAX):
-            req = svc.svc_call(p.native)
-            if req is None:
-                return
-            name, args = req
-            fn = _CALLS.get(name)
-            if fn is None and env:
-                fn = env.get(name)
-            ans = None
             was = _L.current() if _L is not None else SHELL
             if _L is not None:
                 _L.current(p.pid)
             try:
-                if fn is not None:
-                    ans = _json.dumps(fn(*_json.loads(args)))
-            except Exception as exc:  # noqa: BLE001 -- refused, the service told
-                _log(ERR, p.pid, "%s: %s: %s" % (name, type(exc).__name__, exc))
+                req = svc.svc_call(p.native)
+                if req is None:
+                    return
+                name, args = req
+                fn = _CALLS.get(name)
+                if fn is None and env:
+                    fn = env.get(name)
+                ans = None
+                try:
+                    if fn is not None:
+                        ans = _json.dumps(fn(*_json.loads(args)))
+                except Exception as exc:  # noqa: BLE001 -- refused, the service told
+                    _log(ERR, p.pid, "%s: %s: %s" % (name, type(exc).__name__, exc))
             finally:
                 if _L is not None:
                     _L.current(was)
@@ -802,6 +877,7 @@ class Scheduler:
         p.state = EXITED
         p.code = code
         p.ns = None
+        _end_grant(p)
         self.wakes.end(p.pid)
         _log(INFO, p.pid, "exit %d" % code)
         if asked or p.kind != SERVICE or not self._unasked(p, code):
@@ -908,13 +984,13 @@ class Scheduler:
         """Every service ended and every row forgotten (a test's teardown)."""
         for name in list(self.pending):
             self.forgive(name)
+        svc = _svc()
+        if svc is not None and not svc.svc_tasks():
+            svc.svc_reset()             # its states close under their grants
         for p in list(self.procs.values()):
             if p.kind == SERVICE and p.state != EXITED:
                 p.state = STOPPING
                 self._exit(p, EXIT_KILLED)
-        svc = _svc()
-        if svc is not None and not svc.svc_tasks():
-            svc.svc_reset()
         if self._poll:
             self.wakes.cancel(self._poll)
             self._plain.pop(self._poll, None)
@@ -968,6 +1044,7 @@ def _aio():
 
 
 SCHED = Scheduler()
+_moybyte.WAKES.teller = SCHED.tell      # `moybyte.tell`: the console's scheduler
 
 
 def tick(slack_us=0):
@@ -1001,8 +1078,12 @@ def prepared(ws, cart):
 
 
 def attach(ws, sched=None):
-    """The console whose settings hold the restart policies."""
-    (sched or SCHED).store = getattr(ws, "system", None)
+    """The console whose settings hold the restart policies and whose
+    processes `tell` reads the app ids of."""
+    sched = sched or SCHED
+    sched.store = getattr(ws, "system", None)
+    procs = getattr(ws, "procs", None)
+    sched.app_of = getattr(procs, "app_id", None)
 
 
 def start_cart(ws, cart, sched=None):

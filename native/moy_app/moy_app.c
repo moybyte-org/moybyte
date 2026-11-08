@@ -288,7 +288,8 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     for (uint32_t s = 0; s < moy_htab_slots(a->grants) && row == NULL; s++) {
         uint32_t at = moy_htab_at(a->grants, s);
         moy_grant_t *r = at != 0u ? grant_row(a, at) : NULL;
-        if (r != NULL && r->cls == cls && r->id_len == n && memcmp(r->id, id, n) == 0) {
+        if (r != NULL && r->cls == cls && r->owner == owner && r->id_len == n
+            && memcmp(r->id, id, n) == 0) {
             row = r;
             *h = at;
         }

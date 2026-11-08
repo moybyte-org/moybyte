@@ -37,7 +37,10 @@
 //
 // Its caller is the VM's task: a Lua run's frame runs there, so a row is
 // called in place, a shell row crossing to the Python console through the
-// door (moy_app_door_bind).
+// door (moy_app_door_bind). A state on a task of its own (a Lua service on a
+// P4's core 0, native/moycore/moycore_svc.h) opens with a HOP, which runs
+// what must run on the VM's task there and waits for it: every row it calls,
+// and the open's own reads of the run.
 
 #ifndef MOY_APP_LUA_H
 #define MOY_APP_LUA_H
@@ -48,6 +51,13 @@
 // Open run `run`'s names in `L`: 1 for a live run, else 0 and none (`run`
 // NULL: a game).
 int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
+
+// A hop: fn(arg) run on the VM's task while the caller waits, 0; or -1 where
+// nothing serves it, fn not run (a row then answers NEEDS_VM).
+typedef int (*moy_app_lua_hop_fn)(lua_State *L, void (*fn)(void *arg), void *arg);
+// moy_app_lua_open for a state whose calls take `hop` (NULL: in place).
+int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
+                         moy_app_lua_hop_fn hop);
 
 // The JSON the prefs names read and write, for another binding's state (a
 // Lua service's messages and console calls, native/moycore/moycore_svc.h):

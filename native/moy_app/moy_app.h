@@ -134,7 +134,7 @@ typedef struct {
     uint8_t id_len, ns_len, cls;
     int8_t kind;                // a files folder, 0 .. MOY_APP_KINDS - 1, or -1
     uint32_t roles;
-    uint32_t owner;             // an OWNER handle the grant names, or 0
+    uint32_t owner;             // an OWNER handle or a service's pid the grant names, or 0
     char id[MOY_APP_ID_MAX + 1];
     char ns[MOY_APP_ID_MAX + 1];
     moy_app_surface_t surf;     // written by the shell, zero until then
@@ -156,8 +156,11 @@ void moy_app_vm_stop(void);
 // -- the grants -----------------------------------------------------------------
 
 // Grant `roles` to `id` as `cls`: OK and the handle, BAD (an empty or long id
-// or namespace, a kind out of range), FULL or NOMEM. A row of the same id and
-// class is reused, its fields replaced: the same handle back.
+// or namespace, a kind out of range), FULL or NOMEM. A row of the same id,
+// class and owner is reused, its fields replaced: the same handle back. The
+// owner keeps two runs of one app apart: a service's grant is made with its
+// pid as the owner, so the app's foreground run, owner 0, holds a row of its
+// own and ending either leaves the other's.
 int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
                   uint32_t roles, int kind, const char *ns, size_t ns_n,
                   uint32_t owner, uint32_t *h);

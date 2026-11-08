@@ -1108,7 +1108,8 @@ static mp_obj_t mod_pool_check(void)
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
 // -- the Lua tier's services (moycore_svc.h) ---------------------------------
-//   svc_start(pid, name, src[, env]) -> h   svc_stop(h)   svc_reap(h)
+//   svc_start(pid, name, src[, env[, app]]) -> h   svc_stop(h)   svc_reap(h)
+//                                 (app: its app's run, moy_app's `run()`)
 //   svc_send(h, name, args) -> bool   svc_call(h) -> (name, args) or None
 //   svc_answer(h, ans or None)
 //   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
@@ -1131,12 +1132,13 @@ static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
     if (n_args > 3 && args[3] != mp_const_none) {
         env = mp_obj_str_get_data(args[3], &envn);
     }
+    const struct moy_app_run *app = n_args > 4 ? moycore_app_run(args[4]) : NULL;
     uint32_t h;
     svc_check(moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
-                                text, n, env, envn, &h));
+                                text, n, env, envn, app, &h));
     return mp_obj_new_int_from_uint(h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 4, mod_svc_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 5, mod_svc_start);
 
 static mp_obj_t mod_svc_stop(mp_obj_t h)
 {

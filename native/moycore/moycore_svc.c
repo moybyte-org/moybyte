@@ -48,17 +48,31 @@ enum { LOG_ERR = 3, LOG_WARNING = 4, LOG_INFO = 6 };
 int moy_app_lua_json_push(lua_State *L, const char *text, size_t n) __attribute__((weak));
 const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) __attribute__((weak));
 
+// The role names of its app's run (moy_app_lua.h), where the image has the
+// app ABI.
+#if defined(__has_include)
+#if __has_include("moy_app_run.h")
+#include "moy_app_run.h"
+#define SVC_APP 1
+int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
+                         int (*hop)(lua_State *L, void (*fn)(void *), void *arg))
+    __attribute__((weak));
+#endif
+#endif
+
 #ifdef SVC_NONE
 
 // The S3s: no user service in Lua, and no table in their internal RAM.
 int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, uint32_t *h) {
+                      const char *env, size_t envn, const struct moy_app_run *app,
+                      uint32_t *h) {
     (void)pid;
     (void)id;
     (void)src;
     (void)n;
     (void)env;
     (void)envn;
+    (void)app;
     (void)h;
     return MOYCORE_SVC_BAD;
 }
@@ -128,6 +142,8 @@ enum { CALL_OK, CALL_ERR, CALL_ABORT, CALL_EXIT, CALL_WAIT };
 enum { THEN_CHUNK, THEN_START, THEN_STOP, THEN_CB };
 // A console call's passage: posted by the service, answered by the VM.
 enum { REQ_NONE, REQ_POSTED, REQ_ANSWERED };
+// A hop's: posted by the service's task, run by the VM's.
+enum { HOP_NONE, HOP_POSTED, HOP_DONE };
 
 static const char *const MESSAGES[] = { MOYCORE_SVC_MESSAGES };
 
@@ -196,8 +212,15 @@ typedef struct {
     size_t ans_n;
     char id[32];
     char why[MOYCORE_SVC_WHY];
+#ifdef SVC_APP
+    moy_app_run_t run;          // its app's run, g 0 for none
+#endif
 #ifdef SVC_TASKS
     TaskHandle_t task;
+    // the hop under way: posted by its task, run by the VM's (moycore_svc_call)
+    uint8_t hop;                // HOP_*, atomically
+    void (*hop_fn)(void *);
+    void *hop_arg;
 #endif
 } svc_t;
 
@@ -647,7 +670,60 @@ static void open_names(lua_State *L) {
     lua_pushliteral(L, "moybyte.share");
     lua_pushcclosure(L, l_console, 1);
     lua_setfield(L, -2, "share");
+    lua_pushliteral(L, "moybyte.tell");
+    lua_pushcclosure(L, l_console, 1);
+    lua_setfield(L, -2, "tell");
     lua_setglobal(L, "moybyte");
+}
+
+#ifdef SVC_APP
+// fn(arg) on the VM's task, for a row of the app's run (moy_app_lua.h's hop).
+// From the service's own task the hop is posted on its row and the task waits
+// until the VM's task has run it (moycore_svc_call), the wait not counted
+// against the call's budget nor its time; anywhere else (a stepped tier, the
+// VM's task) fn runs in place.
+static int vm_hop(lua_State *L, void (*fn)(void *), void *arg) {
+    #ifdef SVC_TASKS
+    svc_t *s = of_state(L);
+    if (xTaskGetCurrentTaskHandle() == s->task) {
+        s->hop_fn = fn;
+        s->hop_arg = arg;
+        int64_t t = now_us();
+        __atomic_store_n(&s->hop, (uint8_t)HOP_POSTED, __ATOMIC_RELEASE);
+        while (__atomic_load_n(&s->hop, __ATOMIC_ACQUIRE) != HOP_DONE) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+        }
+        __atomic_store_n(&s->hop, (uint8_t)HOP_NONE, __ATOMIC_RELEASE);
+        int64_t waited = now_us() - t;
+        s->t0 += waited;
+        s->seg += waited;
+        xTaskNotifyGive(s->task);      // a wake the wait took is the loop's again
+        return 0;
+    }
+    #else
+    (void)L;
+    #endif
+    fn(arg);
+    return 0;
+}
+#endif
+
+// The role names its app's run grants (moy_app_lua.h), each row hopping to
+// the VM's task, with os.clock kept the service's own. Run protected.
+static int l_open_run(lua_State *L) {
+    #ifdef SVC_APP
+    svc_t *s = of_state(L);
+    if (s->run.g != 0u && moy_app_lua_open_hop != NULL
+        && moy_app_lua_open_hop(L, &s->run, vm_hop)) {
+        lua_getglobal(L, "os");
+        lua_pushcfunction(L, l_clock);
+        lua_setfield(L, -2, "clock");
+        lua_pop(L, 1);
+    }
+    #else
+    (void)L;
+    #endif
+    return 0;
 }
 
 // What the console hands the service, [values, calls]: each value a global,
@@ -828,6 +904,13 @@ static void start(svc_t *s) {
     }
     *(svc_t **)lua_getextraspace(s->L) = s;
     open_names(s->L);
+    lua_pushcfunction(s->L, l_open_run);
+    if (lua_pcall(s->L, 0, 0, 0) != LUA_OK) {
+        const char *m = lua_tostring(s->L, -1);
+        snprintf(s->why, sizeof s->why, "%s", m != NULL ? m : "its roles do not open");
+        end(s, MOYCORE_SVC_EXIT_CRASHED);
+        return;
+    }
     lua_pushcfunction(s->L, l_open_env);
     if (lua_pcall(s->L, 0, 0, 0) != LUA_OK) {
         const char *m = lua_tostring(s->L, -1);
@@ -1008,7 +1091,8 @@ static uint32_t handle_of(uint32_t slot) {
 }
 
 int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, uint32_t *h) {
+                      const char *env, size_t envn, const struct moy_app_run *app,
+                      uint32_t *h) {
     uint32_t slot = 0;
     while (slot < MOYCORE_SVCS && s_row[slot] != NULL) {
         slot++;
@@ -1030,6 +1114,13 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
     s->env = envc;
     s->envn = envn;
     s->pid = pid;
+    #ifdef SVC_APP
+    if (app != NULL) {
+        s->run = *app;
+    }
+    #else
+    (void)app;
+    #endif
     snprintf(s->id, sizeof s->id, "=%s", id != NULL ? id : "service");
     if (++s_gen == 0) {
         s_gen = 1;
@@ -1111,6 +1202,13 @@ int moycore_svc_call(uint32_t h, const char **name, const char **args, size_t *n
     if (s == NULL) {
         return MOYCORE_SVC_STALE;
     }
+    #ifdef SVC_TASKS
+    if (__atomic_load_n(&s->hop, __ATOMIC_ACQUIRE) == HOP_POSTED) {
+        s->hop_fn(s->hop_arg);
+        __atomic_store_n(&s->hop, (uint8_t)HOP_DONE, __ATOMIC_RELEASE);
+        wake(s);
+    }
+    #endif
     if (__atomic_load_n(&s->req, __ATOMIC_ACQUIRE) != REQ_POSTED) {
         return MOYCORE_SVC_BAD;
     }

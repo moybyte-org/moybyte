@@ -181,7 +181,12 @@ namespace holds only the granted names (`runtime/shell/system_api.py`), and a
 Lua app's state opens with them alone (`native/moy_app/moy_app_lua.h`).
 Each Lua or wasm run holds its own grant, a value its owner keeps
 (`native/moy_app/moy_app_run.h`), and a role row it calls answers from that
-grant's row and no other run's. No draw verb or input read checks a grant. For **Lua and wasm** an ungranted
+grant's row and no other run's. **A service holds its app's roles (owner,
+2026-11-08)**: the grant its start makes from its granted permissions is the
+one a foreground run of the same app is made from (the same policy, app id,
+files kind and prefs namespace), a run grant whose owner is the service's
+pid, so it is a row of its own that neither run's end takes from the other
+(`runtime/shell/system_api.py`'s `service_api`, §5). No draw verb or input read checks a grant. For **Lua and wasm** an ungranted
 capability has no name in the process. For **Python** the manifest is
 legible, not binding: a Python cart runs inside process 1's VM with the real
 builtins and can reach `machine` and the `never` roles (`system_api.py`: "NOT
@@ -410,7 +415,28 @@ its consent as it stands then, a new process. The policies are a
 in `runtime/system/scheduler.py`), and a manifest declares none. `service
 start/stop/status/restart` and the task manager are the two faces of one
 implementation, and `service policy [NAME [never|on-crash|always]]` shows
-and sets the policy. The `moy_stop` hook is the TERM; a service still running after
+and sets the policy. **A service's storage is its app's (owner, 2026-11-08: "wouldn't a well
+written app just call its background service? I don't know its on us to
+sync them").** The OS gives the pieces, not a sync engine. A service gets the
+same `files` and `prefs` roles as its app, and whatever else its manifest's
+grants give, under the same consent (§2): a Python service's namespace holds
+the names a Python app's does (`files`, `prefs`, `set_theme`, `open_app`;
+`None` while Settings turns one off), a Lua service's state opens the names a
+Lua app's does (`tiers.md` §2), and what it is not granted has no name. Each
+write lands whole or not at all, by the paths a foreground run takes: a file
+through the user-files layer's crash-safe publish (`moy_fs_publish`), a Lua
+`io` file saved whole at its flush or close, and a pref as one settings row
+of `system/settings`, whose file is written atomically
+(`moy_docs.save_system`). An app talks to its own service through messages:
+`moybyte.tell(...)` queues `"app"` with its arguments on every other process
+of the caller's app that waits on it (`moybyte.on("app", fn)`), the app's run
+to its service and back, each tier's alike (the scheduler's `send`).
+Concurrent edits of one file or pref are the app's to order, as on any OS.
+The install prompt says so: a service's lines end with "Runs in the
+background, and can do all of this with no window open"
+(`app_perms.BACKGROUND`).
+
+The `moy_stop` hook is the TERM; a service still running after
 `MOY_SERVICE_STOP_MS` (configuration, 2000) gets the KILL: its task deleted, its
 OWNER swept, the ledger told. A Python service's row is the scheduler's
 (`runtime/system/scheduler.py`): its `moy_stop` runs under a guard of
@@ -607,7 +633,10 @@ end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
   (`load_achievements`, again on a reload; one process a host, so a second
   console on a host stops the first's), handing it, in its namespace, the
   document `achievements.json` holds, the write and the day off the bar's
-  clock (`Workstation.service_env`). The process records into its document
+  clock (`Workstation.service_env`): `achievements.json` is a system
+  document beside the carts that the sync and the web console carry, in no
+  files kind and no prefs namespace, so no role serves it and the console
+  hands it over. The process records into its document
   and hands it back; the console writes it at its next frame, outside any
   slice, because a store write on a card can outlast a callback's 20 ms and
   its abort. Before a VM stop the console writes what is waiting.

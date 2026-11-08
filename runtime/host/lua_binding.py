@@ -137,7 +137,7 @@ class SvcInfo(ctypes.Structure):
 
 
 _SIGS = (
-    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, _C, ctypes.c_size_t,
+    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, _C, ctypes.c_size_t, _C,
                            ctypes.POINTER(_U32)], _I),
     ("moycore_svc_stop", [_U32], _I),
     ("moycore_svc_send", [_U32, _C, _C, ctypes.c_size_t], _I),

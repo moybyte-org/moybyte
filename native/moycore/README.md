@@ -47,7 +47,9 @@ the scheduler's poll (`runtime/system/scheduler.py`), and the S3s run none.
 Its messages (`svc_send`) queue on its row, and its console calls
 (`moybyte.notify`, the functions the console hands it) wait there for the
 VM's task to answer (`svc_call`, `svc_answer`); their JSON is the prefs
-names' (`native/moy_app/moy_app_lua.h`).
+names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
+names over the run its start was handed (`moy_app_lua_open_hop`), each row
+on a P4 hopped to the VM's task, which `svc_call` runs in place.
 
 | piece | how |
 |---|---|

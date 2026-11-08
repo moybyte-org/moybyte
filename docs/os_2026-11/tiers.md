@@ -127,15 +127,23 @@ own, not a row of the runs (`native/moycore/moycore_svc.h`): the safe stdlib,
 P4's core 0 (`processes.md` §1). Each call runs on a coroutine under a count
 hook that yields it past its budget, so a `pcall` cannot keep a runaway
 callback. `moybyte.on` takes the OS's messages (`processes.md` §8's
-`achieve` and `award`, `between_apps.md` §4's `net` and `ble`), queued on
+`achieve` and `award`, `between_apps.md` §4's `net` and `ble`, and `app`,
+what its own app tells it, `processes.md` §5), queued on
 the service's row. What enters the console
 is the VM task's: `moybyte.notify` and the functions the console hands a
 system process (its `env`, whose values become globals) are CONSOLE CALLS,
 which yield the call's coroutine with the call posted on the row until the
 VM's task answers it at the scheduler's poll, so a service on its own task
 never enters Python and its wait is not counted against its budget. The
-role names a run's state opens are not opened in a service's state, as a
-Python service holds no role objects either.
+state also opens the role names its app's run would (owner, 2026-11-08,
+`processes.md` §5): the start makes the service's grant from its granted
+permissions, owned by its pid, and hands its run to the state, which opens
+`files`, `io`, `prefs`, `set_theme` and `open_app` through the one binding,
+`moy_app_lua.c`, as a Lua app's does. A role row runs on the VM's task: on a
+P4 the binding's HOP posts it on the service's row and the task waits until
+the VM's task runs it in place at the poll (`moycore_svc_call`), its wait
+not counted against its budget; a stepped service is on the VM's task and
+calls it in place. `moybyte.tell` is a console call.
 
 **The tier-conformance test** (P5, `docs/os_2026-11.md`) runs
 `tests/test_achievements_proc.py`'s bodies once per tier over the

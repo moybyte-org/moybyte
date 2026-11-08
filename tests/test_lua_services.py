@@ -146,6 +146,7 @@ def test_the_message_names_are_the_os_ones(sched):
     for name in moybyte.MESSAGES:
         pid = sched.start(_cart('moybyte.on("%s", function() end)' % name, "t." + name))
         assert sched.procs[pid].state == S.BACKGROUND
+        sched.stop(pid)                         # MOYCORE_SVCS rows at once
     sched.start(_cart('moybyte.on("lora", function() end)', "t.lora"))
     p = sched.find("t.lora") or [q for q in sched.services() if q.name == "t.lora"][0]
     assert p.code == S.EXIT_CRASHED

@@ -99,6 +99,10 @@ PERM, GRANTS, TIERS, PROMPT, NEEDS, NAMES = range(6)
 # binding (processes.md §2), so the prompt says what it is.
 TRUSTED = "A trusted app: Python can reach the whole console"
 
+# The install prompt's line for a service (processes.md §5, owner
+# 2026-11-08): it holds its app's grant and uses it with no window open.
+BACKGROUND = "Runs in the background, and can do all of this with no window open"
+
 KEY = "consent"
 
 # A raw lease's line: full access to one of the board's resources (the
@@ -268,8 +272,8 @@ def absent_names(absent, rec):
 
 def manifest_cart(man, folder):
     """What the checks read of a cart, from its manifest `man` (a dict) and
-    its `folder` name: id, title, runtime, permissions, required and native, as the
-    store's cart dict carries them."""
+    its `folder` name: id, title, runtime, type, permissions, required and native,
+    as the store's cart dict carries them."""
     ven = vendor(man)
     cid = man.get("id") if isinstance(man, dict) else None
     if not is_cart_id(cid):
@@ -279,6 +283,7 @@ def manifest_cart(man, folder):
     chips = ven.get("native")
     return {"id": cid, "title": man.get("title") if isinstance(man, dict) else None,
             "runtime": (man.get("runtime") if isinstance(man, dict) else None) or "python",
+            "type": ven.get("type"),
             "permissions": perms if isinstance(perms, list) else [],
             "required": req if isinstance(req, list) else [],
             "native": chips if isinstance(chips, list) else None}
@@ -293,7 +298,9 @@ def app_id(cart):
 def prompt(cart, rec=None):
     """The install prompt's lines for `cart`, or None when there is nothing
     to ask: no permission it lists has a line that `rec` does not already
-    hold, and it is not a Python app installed for the first time."""
+    hold, and it is not a Python app installed for the first time. A
+    service's lines end with BACKGROUND: what it is granted, it uses with no
+    window open."""
     perms = (cart.get("permissions") if cart else None) or ()
     want = asked(perms)
     held = rec["perms"] if rec is not None and rec["perms"] is not None else None
@@ -303,6 +310,8 @@ def prompt(cart, rec=None):
     if not new and not (python and first):
         return None
     lines = [line(p) for p in want]
+    if lines and cart.get("type") == "service":
+        lines.append(BACKGROUND)
     if python:
         lines.append(TRUSTED)
     return lines

@@ -23,11 +23,14 @@
 #include "moy_app_lua.h"
 #include "moy_json.h"
 
-// The run this state's names serve, and its files kind's name: the state's
-// own, a userdata its registry holds under RUN_KEY's address.
+// The run this state's names serve, its files kind's name, the hop its calls
+// take to the VM's task (NULL: they run in place) and the errno of its last
+// row: the state's own, a userdata its registry holds under RUN_KEY's address.
 typedef struct {
     moy_app_run_t run;
     char kind[16];
+    moy_app_lua_hop_fn hop;
+    int why;
 } lrun_t;
 
 static const char RUN_KEY = 0;
@@ -42,7 +45,17 @@ static lrun_t *lrun(lua_State *L) {
 // The errno of the state's run's last IO answer.
 static int run_why(lua_State *L) {
     lrun_t *u = lrun(L);
-    return u != NULL && moy_app_run_live(&u->run) ? moy_app_why(u->run.a) : EIO;
+    return u != NULL ? u->why : EIO;
+}
+
+// fn(arg) on the VM's task: through `hop` where the state has one, else here.
+// 0, or -1 where the hop found nobody to serve it (fn not run).
+static int on_vm(lua_State *L, moy_app_lua_hop_fn hop, void (*fn)(void *), void *arg) {
+    if (hop == NULL) {
+        fn(arg);
+        return 0;
+    }
+    return hop(L, fn, arg);
 }
 
 // The table rows the names call, found by name once.
@@ -148,10 +161,33 @@ static void field_kind(lua_State *L, buf_t *b) {
 // answer that does not fit is asked again into a buffer eight times the size.
 // A state with no run, or a run whose state is gone, answers STALE, nil
 // pushed; a grant that ended answers STALE from the row.
+typedef struct {
+    const moy_app_run_t *run;
+    uint32_t row;
+    const uint8_t *arg;
+    size_t n;
+    uint8_t *ans;
+    size_t cap;
+    int32_t r;
+    int why;
+} role_t;
+
+// On the VM's task: the row called through the ROLE door, its errno kept.
+static void role_run(void *p) {
+    role_t *c = p;
+    if (!moy_app_run_live(c->run)) {
+        c->r = -MOY_APP_STALE;
+        c->why = EIO;
+        return;
+    }
+    c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->ans, c->cap);
+    c->why = moy_app_why(c->run->a);
+}
+
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
     lrun_t *u = lrun(L);
     int row = row_of(k);
-    if (u == NULL || !moy_app_run_live(&u->run) || row < 0) {
+    if (u == NULL || row < 0) {
         lua_pushnil(L);
         *ans = NULL;
         return -MOY_APP_STALE;
@@ -159,11 +195,13 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
     size_t cap = 1024u;
     for (;;) {
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
-        int32_t r = moy_app_role(u->run.a, u->run.g, (uint32_t)row,
-                                 b != NULL ? b->p : NULL, b != NULL ? b->n : 0u, p, cap);
-        if (r != -MOY_APP_FULL || cap >= (64u << 20)) {
+        role_t c = { &u->run, (uint32_t)row, b != NULL ? b->p : NULL, b != NULL ? b->n : 0u,
+                     p, cap, -MOY_APP_NEEDS_VM, EIO };
+        on_vm(L, u->hop, role_run, &c);
+        u->why = c.why;
+        if (c.r != -MOY_APP_FULL || cap >= (64u << 20)) {
             *ans = p;
-            return r;
+            return c.r;
         }
         lua_pop(L, 1);
         cap *= 8u;
@@ -1117,22 +1155,44 @@ static int l_os_difftime(lua_State *L) {
 
 // -- opening ----------------------------------------------------------------------------
 
+// What the open reads of the run, on the VM's task: whether its state is
+// made, and its grant's files kind's name.
+typedef struct {
+    const moy_app_run_t *run;
+    int live;
+    char kind[16];
+} open_t;
+
+static void open_read(void *p) {
+    open_t *o = p;
+    o->live = moy_app_run_live(o->run);
+    const moy_grant_t *gr;
+    if (o->live && moy_app_grant_get(o->run->a, o->run->g, &gr) == MOY_APP_OK
+        && gr->kind >= 0) {
+        const char *k = moy_app_kind_name(gr->kind);
+        if (k != NULL && strlen(k) < sizeof o->kind) {
+            strcpy(o->kind, k);
+        }
+    }
+}
+
 int moy_app_lua_open(lua_State *L, const struct moy_app_run *run) {
-    if (!moy_app_run_live(run)) {
+    return moy_app_lua_open_hop(L, run, NULL);
+}
+
+int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
+                         moy_app_lua_hop_fn hop) {
+    open_t o = { run, 0, { 0 } };
+    if (run == NULL || on_vm(L, hop, open_read, &o) != 0 || !o.live) {
         return 0;
     }
     lrun_t *u = lua_newuserdatauv(L, sizeof(lrun_t), 0);
     u->run = *run;
-    u->kind[0] = 0;
+    memcpy(u->kind, o.kind, sizeof u->kind);
+    u->hop = hop;
+    u->why = 0;
     lua_rawsetp(L, LUA_REGISTRYINDEX, &RUN_KEY);
     uint32_t roles = run->roles;
-    const moy_grant_t *gr;
-    if (moy_app_grant_get(run->a, run->g, &gr) == MOY_APP_OK && gr->kind >= 0) {
-        const char *k = moy_app_kind_name(gr->kind);
-        if (k != NULL && strlen(k) < sizeof u->kind) {
-            strcpy(u->kind, k);
-        }
-    }
     int files = (roles >> MOY_ROLE_FILES) & 1u && u->kind[0] != 0;
 
     lua_newtable(L);                    // os: every app run's clock

@@ -153,13 +153,13 @@ class App:
         if not app_id or len(app_id.encode()) > ID_MAX or len(ns.encode()) > ID_MAX:
             raise ValueError("an argument the role refuses")
         for h, g in self._grants.items():
-            if g[0] == app_id and g[1] == bool(run):
-                self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
+            if g[0] == app_id and g[1] == bool(run) and g[5] == owner:
+                self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 return h
         for slot in range(SLOTS):
             if not any((h & 0xFF) == slot for h in self._grants):
                 h = self._gen[slot] << 12 | 12 << 8 | slot
-                self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
+                self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
         raise OSError(_ENOSPC, "the grant table is full")

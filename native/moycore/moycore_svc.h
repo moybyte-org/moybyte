@@ -14,7 +14,8 @@
 // the caller's task, the same code with the caller's clock.
 //
 // THE STATE has base (no dofile, no loadfile), coroutine, table, string and
-// math, `os.time` and `os.clock`, and `moybyte`:
+// math, `os.time` and `os.clock` (the service's own time), the role names
+// its app's run grants (below), and `moybyte`:
 //   moybyte.every(ms, fn) -> id    fn every `ms` (1 at least), from now
 //   moybyte.after(ms, fn) -> id    fn once, `ms` from now
 //   moybyte.cancel(id)
@@ -23,7 +24,8 @@
 //   moybyte.on(name, fn) -> id     fn(...) for each message `name` the OS
 //                                  routes to it (MOYCORE_SVC_MESSAGES:
 //                                  "net" and "ble" are fn(up, why) as WiFi or
-//                                  BLE comes up or goes down); a message
+//                                  BLE comes up or goes down, "app" what its
+//                                  own app tells it); a message
 //                                  wake, which `cancel` ends too
 //   moybyte.notify(summary[, body[, icon]]) -> id
 //                                  a notification, the console's
@@ -33,6 +35,9 @@
 //                                  an item (a URL or a user file's path, "Documents/todo.md") or
 //                                  text routed to the app that opens it, the
 //                                  console's own (runtime/system/intents.py)
+//   moybyte.tell(...) -> n         message "app" with these arguments to the
+//                                  other processes of its own app that wait
+//                                  on it (runtime/system/moybyte.py's tell)
 // and `print`, which logs at info. Its allocator counts every byte it holds,
 // in PSRAM on a board, so the task manager's figure is exact
 // (moycore_svc_info's `heap`), and refuses past MOYCORE_SVC_HEAP_MAX.
@@ -58,6 +63,17 @@
 // answer. A call from a coroutine the service made itself, or from where it
 // cannot yield, is an error.
 //
+// ITS APP'S ROLES. The run a start is handed (native/moy_app/moy_app_run.h:
+// the service's own grant, made from its permissions as its app's
+// foreground run's is, owned by its pid) opens the same names a Lua app's
+// state opens (native/moy_app/moy_app_lua.h): `files`, `io` and
+// `os.remove`/`os.rename` with files, `prefs`, `set_theme`, `open_app`, and
+// none it is not granted. Each row runs on the VM's task: on the service's
+// own task the binding's hop posts it on the row and the task waits until the
+// VM's task runs it in place at its next moycore_svc_call (the scheduler's
+// poll), its wait not counted against the call's budget; a stepped service is
+// on the VM's task already and calls the row in place.
+//
 // THE LIFE. The chunk, then `moy_start()` where it is defined, each under
 // MOYCORE_SVC_STOP_MS: an error ends the service with exit 1, and one that
 // leaves no wake (a timer or a message wake) ends it with 0. Each due timer's callback runs under
@@ -78,8 +94,10 @@
 // reset; step is the stepping caller's. A row's state, exit, heap and cpu are
 // written by the service's task and read by the VM's, its mail is taken
 // under a lock, and a console call passes between the two with the row's
-// `req` (posted by the service, answered by the VM); a row is reaped (its
-// slot freed) only after it has exited and its task is done.
+// `req` (posted by the service, answered by the VM) and a role row with the
+// row's `hop` (posted by the service's task, run by the VM's in
+// moycore_svc_call); a row is reaped (its slot freed) only after it has
+// exited and its task is done.
 
 #ifndef MOYCORE_SVC_H
 #define MOYCORE_SVC_H
@@ -110,9 +128,10 @@ enum {
 #define MOYCORE_SVC_MAIL 16u            // messages queued on a service (moybyte.py's MAIL_MAX)
 #define MOYCORE_SVC_NAME 24u            // a message's or a console call's name, its NUL counted
 // The messages the OS routes to a process (runtime/system/moybyte.py's
-// MESSAGES): the notify role's events, and the radios' changes ("net" and
-// "ble", each `(up, why)`; docs/os_2026-11/between_apps.md section 4).
-#define MOYCORE_SVC_MESSAGES "achieve", "award", "net", "ble"
+// MESSAGES): the notify role's events, the radios' changes ("net" and
+// "ble", each `(up, why)`; docs/os_2026-11/between_apps.md section 4), and
+// "app", what a process of its own app tells it (moybyte.tell).
+#define MOYCORE_SVC_MESSAGES "achieve", "award", "net", "ble", "app"
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
 #define MOYCORE_SVC_ABORT_US 300000u    // a callback's limit
 #define MOYCORE_SVC_STRIKES 3u          // aborted callbacks to the end
@@ -139,17 +158,20 @@ typedef struct {
 
 // Start service `pid` (the OS log's) running Lua source `src` of `n` bytes,
 // named `id`, with what the console hands it in `env` (envn bytes, the JSON
-// array [values, calls]; NULL for nothing): OK with *h, FULL, NOMEM, BAD
-// where this chip runs none. The start itself runs on the service's task, or
-// at the next step.
+// array [values, calls]; NULL for nothing) and its app's run `app` (copied;
+// NULL for none, no role names): OK with *h, FULL, NOMEM, BAD where this chip
+// runs none. The start itself runs on the service's task, or at the next step.
+struct moy_app_run;
 int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, uint32_t *h);
+                      const char *env, size_t envn, const struct moy_app_run *app,
+                      uint32_t *h);
 // Message `name` with `args` (a JSON array, n bytes) to the service: OK
 // queued, STALE, BAD where it holds no wake on `name`.
 int moycore_svc_send(uint32_t h, const char *name, const char *args, size_t n);
 // The console call the service waits on, unanswered: OK with its name and
 // its arguments (a JSON array, *n bytes), which stay the row's until it is
-// answered; STALE; BAD where it waits on none.
+// answered; STALE; BAD where it waits on none. A role row its task posted is
+// run here first, in place.
 int moycore_svc_call(uint32_t h, const char **name, const char **args, size_t *n);
 // The console's answer to that call: a JSON value of `n` bytes, or NULL
 // where the console refused it. OK, STALE, BAD where it waits on none.
