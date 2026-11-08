@@ -506,7 +506,9 @@ def check(src):
                 raise TableError("%s: the door's Python half serves shell rows" % name)
             if "in" not in r or outs:
                 raise TableError("%s: a door row's fields are its in, no out" % name)
-        lua, py = r.get("lua") or [], r.get("py") or []
+        lua, py = r.get("lua") or [], list(r.get("py") or [])
+        if role_of(r) in ctx_roles(src):
+            py.append(r["name"])
         if not set(lua) <= set(py):
             raise TableError("%s: Lua's names are Python's, verbatim: %s" % (
                 name, sorted(set(lua) - set(py))))
@@ -1092,8 +1094,9 @@ def gen_ui_h(src):
 
 
 def lua_names(src):
-    """[(role, table or None, name, C function, row)] of the names a Lua run's
-    role binding holds, in the source's order."""
+    """[(role, table or None, name, C function, row, read)] of the names a Lua
+    run's role binding holds, in the source's order; `read` where the row is
+    a read under the seqlock, held where the run's grant holds its role."""
     out = []
     for r in door_rows(src):
         role = role_of(r)
@@ -1101,7 +1104,8 @@ def lua_names(src):
             continue
         for n in r.get("lua") or ():
             tbl, _, fn = n.rpartition(".")
-            out.append((role, tbl or None, fn, "l_" + ident(n), r["name"]))
+            out.append((role, tbl or None, fn, "l_" + ident(n), r["name"],
+                        r.get("how") == "seq"))
     return out
 
 
@@ -1112,25 +1116,40 @@ def lua_calls(src):
 
 
 def lua_run_calls(src):
-    """The console calls a Lua RUN holds as moybyte.<verb> (runtime/run/
-    lua_ext.py): a service's that no permission gates."""
-    return [verb_of(r) for r in door_rows(src)
-            if role_of(r) == "moybyte" and r.get("lua") and r.get("perm") is None]
+    """The console calls a Lua app's run holds as moybyte.<verb> (runtime/run/
+    lua_ext.py): a service's, each gated where its server is, as a Python
+    app's."""
+    return lua_calls(src)
+
+
+def lua_own(src):
+    """The moybyte.<verb> names every Lua program holds that are no console
+    call: its wakes and the log, each a service's own C
+    (native/moycore/moycore_svc.c) and an app run's prelude over the moybyte
+    module (runtime/run/lua_ext.py)."""
+    calls = set(lua_calls(src))
+    out = []
+    for r in src["rows"]:
+        for n in r.get("lua") or ():
+            if n.startswith("moybyte.") and n[8:] not in calls and n[8:] not in out:
+                out.append(n[8:])
+    return out
 
 
 def gen_lua_h(src):
     o = [HEAD,
          "// The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role\n"
          "// binding, each X(role, its table or NULL for a global, its name, the C\n"
-         "// function moy_app_lua.c serves it with, the table row it calls), opened\n"
-         "// for the roles the run holds; and the console calls a Lua service's\n"
+         "// function moy_app_lua.c serves it with, the table row it calls, 1 for a\n"
+         "// read), opened for the roles the run's permissions name, a read for the\n"
+         "// roles its grant holds; and the console calls a Lua service's\n"
          "// `moybyte` table holds (native/moycore/moycore_svc.c), each answered by\n"
          "// the console's Python as the service's process.\n",
          "#ifndef MOY_APP_LUA_ROWS_H", "#define MOY_APP_LUA_ROWS_H", "",
          "#define MOY_APP_LUA_NAMES(X) \\"]
-    for role, tbl, fn, cfn, row in lua_names(src):
-        o.append('    X(MOY_ROLE_%s, %s, "%s", %s, MOY_T_%s) \\' % (
-            upper(role), '"%s"' % tbl if tbl else "NULL", fn, cfn, upper(row)))
+    for role, tbl, fn, cfn, row, read in lua_names(src):
+        o.append('    X(MOY_ROLE_%s, %s, "%s", %s, MOY_T_%s, %d) \\' % (
+            upper(role), '"%s"' % tbl if tbl else "NULL", fn, cfn, upper(row), read))
     o += ["", "#define MOY_APP_LUA_CALLS(X) \\"]
     for v in lua_calls(src):
         o.append('    X("%s") \\' % v)
@@ -1214,12 +1233,12 @@ def gen_calls(src):
 
 def gen_lua_ext(src):
     heads = []
-    for _role, tbl, fn, _c, _row in lua_names(src):
+    for _role, tbl, fn, _c, _row, _read in lua_names(src):
         h = tbl or fn
         if h not in heads:
             heads.append(h)
-    return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\n"
-                   % (_tup(heads), _tup(lua_run_calls(src))))
+    return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\nLUA_OWN = %s\n"
+                   % (_tup(heads), _tup(lua_run_calls(src)), _tup(lua_own(src))))
 
 
 def _cell(names):

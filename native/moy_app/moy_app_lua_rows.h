@@ -2,8 +2,9 @@
 
 // The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role
 // binding, each X(role, its table or NULL for a global, its name, the C
-// function moy_app_lua.c serves it with, the table row it calls), opened
-// for the roles the run holds; and the console calls a Lua service's
+// function moy_app_lua.c serves it with, the table row it calls, 1 for a
+// read), opened for the roles the run's permissions name, a read for the
+// roles its grant holds; and the console calls a Lua service's
 // `moybyte` table holds (native/moycore/moycore_svc.c), each answered by
 // the console's Python as the service's process.
 
@@ -11,21 +12,30 @@
 #define MOY_APP_LUA_ROWS_H
 
 #define MOY_APP_LUA_NAMES(X) \
-    X(MOY_ROLE_THEME, NULL, "set_theme", l_set_theme, MOY_T_THEME_SET) \
-    X(MOY_ROLE_FILES, "files", "ready", l_files_ready, MOY_T_FILES_READY) \
-    X(MOY_ROLE_FILES, "files", "list", l_files_list, MOY_T_FILES_LIST) \
-    X(MOY_ROLE_FILES, "files", "load", l_files_load, MOY_T_FILES_LOAD) \
-    X(MOY_ROLE_FILES, "files", "load_text", l_files_load_text, MOY_T_FILES_LOAD) \
-    X(MOY_ROLE_FILES, "files", "save", l_files_save, MOY_T_FILES_SAVE) \
-    X(MOY_ROLE_FILES, "files", "save_text", l_files_save_text, MOY_T_FILES_SAVE) \
-    X(MOY_ROLE_FILES, "files", "delete", l_files_delete, MOY_T_FILES_DELETE) \
-    X(MOY_ROLE_FILES, "files", "duplicate", l_files_duplicate, MOY_T_FILES_DUPLICATE) \
-    X(MOY_ROLE_FILES, "files", "rename", l_files_rename, MOY_T_FILES_RENAME) \
-    X(MOY_ROLE_FILES, "files", "new_name", l_files_new_name, MOY_T_FILES_NEW_NAME) \
-    X(MOY_ROLE_NAV, NULL, "open_app", l_open_app, MOY_T_NAV_OPEN_APP) \
-    X(MOY_ROLE_PREFS, "prefs", "get", l_prefs_get, MOY_T_PREFS_GET) \
-    X(MOY_ROLE_PREFS, "prefs", "set", l_prefs_set, MOY_T_PREFS_SET) \
-    X(MOY_ROLE_PREFS, "prefs", "clear", l_prefs_clear, MOY_T_PREFS_CLEAR) \
+    X(MOY_ROLE_THEME, "theme", "token", l_theme_token, MOY_T_THEME_TOKEN, 1) \
+    X(MOY_ROLE_THEME, "theme", "gen", l_theme_gen, MOY_T_THEME_GEN, 1) \
+    X(MOY_ROLE_THEME, "theme", "light", l_theme_light, MOY_T_THEME_LIGHT, 1) \
+    X(MOY_ROLE_THEME, "theme", "name", l_theme_name, MOY_T_THEME_NAME, 1) \
+    X(MOY_ROLE_THEME, "theme", "variant", l_theme_variant, MOY_T_THEME_VARIANT, 1) \
+    X(MOY_ROLE_THEME, NULL, "set_theme", l_set_theme, MOY_T_THEME_SET, 0) \
+    X(MOY_ROLE_FILES, "files", "ready", l_files_ready, MOY_T_FILES_READY, 0) \
+    X(MOY_ROLE_FILES, "files", "list", l_files_list, MOY_T_FILES_LIST, 0) \
+    X(MOY_ROLE_FILES, "files", "load", l_files_load, MOY_T_FILES_LOAD, 0) \
+    X(MOY_ROLE_FILES, "files", "load_text", l_files_load_text, MOY_T_FILES_LOAD, 0) \
+    X(MOY_ROLE_FILES, "files", "save", l_files_save, MOY_T_FILES_SAVE, 0) \
+    X(MOY_ROLE_FILES, "files", "save_text", l_files_save_text, MOY_T_FILES_SAVE, 0) \
+    X(MOY_ROLE_FILES, "files", "delete", l_files_delete, MOY_T_FILES_DELETE, 0) \
+    X(MOY_ROLE_FILES, "files", "duplicate", l_files_duplicate, MOY_T_FILES_DUPLICATE, 0) \
+    X(MOY_ROLE_FILES, "files", "rename", l_files_rename, MOY_T_FILES_RENAME, 0) \
+    X(MOY_ROLE_FILES, "files", "new_name", l_files_new_name, MOY_T_FILES_NEW_NAME, 0) \
+    X(MOY_ROLE_NAV, NULL, "open_app", l_open_app, MOY_T_NAV_OPEN_APP, 0) \
+    X(MOY_ROLE_PREFS, "prefs", "get", l_prefs_get, MOY_T_PREFS_GET, 0) \
+    X(MOY_ROLE_PREFS, "prefs", "set", l_prefs_set, MOY_T_PREFS_SET, 0) \
+    X(MOY_ROLE_PREFS, "prefs", "clear", l_prefs_clear, MOY_T_PREFS_CLEAR, 0) \
+    X(MOY_ROLE_CLIPBOARD, "clipboard", "put_text", l_clipboard_put_text, MOY_T_CLIPBOARD_PUT_TEXT, 0) \
+    X(MOY_ROLE_CLIPBOARD, "clipboard", "text", l_clipboard_text, MOY_T_CLIPBOARD_TEXT, 1) \
+    X(MOY_ROLE_CLIPBOARD, "clipboard", "kind", l_clipboard_kind, MOY_T_CLIPBOARD_KIND, 1) \
+    X(MOY_ROLE_CLIPBOARD, "clipboard", "seq", l_clipboard_seq, MOY_T_CLIPBOARD_SEQ, 1) \
 
 #define MOY_APP_LUA_CALLS(X) \
     X("notify") \
@@ -34,5 +44,6 @@
     X("send") \
     X("award") \
     X("progress") \
+    X("pick") \
 
 #endif // MOY_APP_LUA_ROWS_H

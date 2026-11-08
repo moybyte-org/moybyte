@@ -66,12 +66,13 @@ def test_a_permission_s_tiers_are_the_tiers_that_serve_what_it_grants():
 
 
 def test_a_tier_that_serves_no_row_of_a_permission_is_not_asked_for_it():
-    """A Lua cart asking for the clipboard (no Lua name serves it) is not
-    prompted for it, and holds it absent; a Python cart is."""
-    lua = {"runtime": "lua", "permissions": ["clipboard", "prefs"]}
+    """A Lua cart asking for Wi-Fi (no Lua name serves it) is not prompted
+    for it, and holds it absent; a Python cart is."""
+    lua = {"runtime": "lua", "permissions": ["network", "prefs"]}
     assert P.prompt(lua) == ["Keep its own settings"]
-    assert "clipboard" not in P.check(lua, None, ())[0]
-    assert P.prompt({"runtime": "python", "permissions": ["clipboard"]})[0] == "Use the clipboard"
+    assert "network" not in P.check(lua, None, ())[0]
+    assert P.prompt({"runtime": "python", "permissions": ["network"]})[0] == \
+        "Use Wi-Fi and the internet"
 
 
 def test_the_table_is_well_formed():

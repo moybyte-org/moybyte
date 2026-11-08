@@ -115,9 +115,9 @@ enum {
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
     MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
     MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_PROGRESS,
+    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_PICK,
 };
-#define MOY_APP_TABLE_N 167u
+#define MOY_APP_TABLE_N 168u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -288,6 +288,7 @@ enum {
     { "moybyte.send", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.award", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.progress", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.pick", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

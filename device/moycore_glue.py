@@ -63,14 +63,15 @@ from array import array
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                          LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                         install_handles, put_scenes, layer_restore, layer_restore_end,
+                         install_handles, end_handles, put_scenes, layer_restore,
+                         layer_restore_end,
                          snap_slots, audio_ops, snap_shared, sync_view,
                          drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                                 install_handles, put_scenes, layer_restore,
-                                 layer_restore_end, snap_slots, audio_ops,
+                                 install_handles, end_handles, put_scenes,
+                                 layer_restore, layer_restore_end, snap_slots, audio_ops,
                                  snap_shared, sync_view, drain_audio, cfg_blob)
 
 try:
@@ -317,7 +318,7 @@ class MoycoreRun:
                 if isinstance(blob, (str, bytes)):
                     _moycore.image_put(name, blob)
             put_scenes(ns, _moycore.scene_put)
-            self._pins = install_handles(ns, _moycore.register)
+            self._pins = install_handles(ns, _moycore.register, self.exec)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
@@ -343,6 +344,7 @@ class MoycoreRun:
         err = _moycore.load(cart_chunks(ns, src))
         if err:
             try:
+                end_handles(self._pins)
                 _moycore.close()
                 layer_restore_end(canvas, self)
             finally:
@@ -626,7 +628,9 @@ class MoycoreRun:
             self.flush_pmem()
         finally:
             # Drop the handle registries: they are what PIN the run's layers
-            # and images, and a layer is a full-canvas allocation.
+            # and images, and a layer is a full-canvas allocation; its wakes
+            # end with it.
+            end_handles(self._pins)
             self._pins = None
             if _moycore is not None and _moycore.use(self._h):
                 _moycore.close()

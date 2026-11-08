@@ -473,8 +473,10 @@ calls `native/moy_app/moy_app_lua.h`'s opener (weak, so an image without
 `native/moy_app` opens none) with the app's run the open was handed
 (`run_begin`'s `app`, the Player's `moy_app.run`), which the state copies,
 and installs `files`, `prefs`, `set_theme`,
-`open_app`, `io` and `os` as its permissions grant, before the prelude and
-the cart. The register loop never makes a trampoline over them
+`open_app`, `clipboard`, `io` and `os` as its permissions grant, and the
+theme's reads (`theme.token`, `gen`, `light`, `name`, `variant`) where its
+grant holds the theme, which every app's does, before the prelude and the
+cart. The register loop never makes a trampoline over them
 (`lua_ext.ROLE_NAMES`); `themes()` and `files.badge` answer from the Python
 face's tables through two gated trampolines (`lua_ext.PRELUDE_APP`). A game
 has no run and opens none of them. A compiled app's run holds its app run

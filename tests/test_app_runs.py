@@ -267,3 +267,77 @@ function _draw() cls(0) end
         assert calls.get("k") == DENIED, "a run kept a role Settings turned off"
     finally:
         c.close()
+
+
+LUA_LOOK = """
+function _init()
+  PUT = clipboard.put_text("from lua") and 1 or 0
+  CLIP, KIND, SEQ = clipboard.text(), clipboard.kind(), clipboard.seq()
+  NAME, VARIANT, GEN = theme.name(), theme.variant(), theme.gen()
+  LIGHT = theme.light() and 1 or 0
+  TOK = theme.token(0)
+end
+function _draw() cls(0) end
+"""
+
+
+def test_a_lua_app_reads_the_clipboard_and_the_theme_as_python_does(tmp_path):
+    """The clipboard's rows and the theme's reads, each under its role's
+    permission, answer a Lua app what the Python face answers the same
+    grant."""
+    _write_lua_app(tmp_path / "carts", "Lua Look", LUA_LOOK,
+                   ["graphics", "clipboard", "appearance"])
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Lua Look") is not None
+    ws.open()
+    _frame(ws)
+    lua, g = ws.run.player._lua, ws.run.player._app_ctx.grant
+    clip, look = moy_app.Clipboard(ws.app_abi, g), moy_app.Theme(ws.app_abi, g)
+    assert lua.get_global("PUT") == 1
+    assert clip.text() == lua.get_global("CLIP") == "from lua"
+    assert lua.get_global("KIND") == clip.kind() == "text"
+    assert lua.get_global("SEQ") == clip.seq()
+    assert lua.get_global("NAME") == look.name()
+    assert lua.get_global("VARIANT") == look.variant()
+    assert lua.get_global("GEN") == look.gen()
+    assert lua.get_global("LIGHT") == int(look.light())
+    assert lua.get_global("TOK") == look.token(0)
+
+
+def test_a_lua_app_without_the_permission_has_no_clipboard_and_reads_the_theme(tmp_path):
+    """The clipboard is its permission's; the theme's reads are every app's,
+    as the Python face's `theme()` and a compiled app's imports are."""
+    src = """
+function _init() NAMES = type(clipboard) .. "," .. type(theme) end
+function _draw() cls(0) end
+"""
+    _write_lua_app(tmp_path / "carts", "Lua Bare", src, ["graphics"])
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Lua Bare") is not None
+    ws.open()
+    _frame(ws)
+    assert ws.run.player._lua.get_global("NAMES") == "nil,table"
+
+
+def test_a_lua_app_hears_its_window_events_and_reads_what_it_was_handed(tmp_path):
+    """Player.window_event reaches a Lua app's own globals as a Python app's:
+    `_minimise`, and `moy_open` with the granted item as a table whose
+    `read()` is the grant's."""
+    from runtime.intents import Grant
+    src = """
+MIN, OPENED = 0, ""
+function _minimise() MIN = MIN + 1 end
+function moy_open(item) OPENED = item.mime .. " " .. item.name .. " " .. item.read() end
+function _draw() cls(0) end
+"""
+    _write_lua_app(tmp_path / "carts", "Lua Events", src, ["graphics"])
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Lua Events") is not None
+    ws.open()
+    _frame(ws)
+    pl = ws.run.player
+    assert pl.window_event("_minimise") and pl.window_event("_restore")
+    g = Grant("text/plain", "r", "todo.txt", data="milk")
+    assert pl.window_event("moy_open", g)
+    assert pl._lua.get_global("MIN") == 1
+    assert pl._lua.get_global("OPENED") == "text/plain todo.txt milk"

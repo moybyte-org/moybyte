@@ -902,8 +902,8 @@ same here as on any other console that implements the spec.
 ### Moybyte-side verbs
 
 A cart also reaches Moybyte's own OS through the `moybyte` module (`import
-moybyte` in Python; a Lua run holds `moybyte.send`, `award` and
-`progress`): notifications, alarms, opening with another app, picking a
+moybyte` in Python; a Lua run holds the same `moybyte` table):
+notifications, alarms, opening with another app, picking a
 file, messages between processes and achievements. They are not moy-spec's,
 and `docs/app_api_v1.md` is their guide (§5 to §9).
 

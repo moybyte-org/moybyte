@@ -56,7 +56,7 @@ role is granted by, the files folders, the manifest refusal
     ---------------   -----------------------------   ---------------
     "files"           files.*  + open_editor()        ctx.files
     "files:<folder>"  the same, that folder only      ctx.files
-    "clipboard"       (the editor handle's cut/copy)  ctx.clipboard
+    "clipboard"       clipboard.*                     ctx.clipboard
     "prefs"           prefs.get / prefs.set           ctx.prefs (namespaced)
     "appearance"      set_theme() / themes()          ctx.theme
     "launch"          open_app(id)                    ctx.nav
@@ -99,10 +99,7 @@ lost feature rather than a granted capability.)
     A cart's context holds `surface` for the ungated `content_rect()` and
     `bar_h()` alone, and no other surface verb has a name in its namespace.
   * `notify` -- not refused on principle, just not mapped yet. A grant with no
-    consumer is a capability granted for nothing. `clipboard` sat here for the
-    same reason until the editor handle became its consumer; it is mapped now,
-    and a cart still never touches the buffer -- the handle's `cut`/`copy`/
-    `paste` are the only things that read it.
+    consumer is a capability granted for nothing.
   * Firmware update and reboot are not roles at all -- they live on
     `ws.updater` / `machine`, and no role hands out the console.
 
@@ -374,14 +371,16 @@ def make_system_api(ctx_factory, cart, canvas=None,
 
 def granted_names(ctx, roles, kind):
     """The names `roles` (the grant's, `moy_app.policy`'s) publish over
-    context `ctx`: `files` (its one `kind`), `prefs`, `set_theme` and
-    `themes`, `open_app`. A user app's namespace holds them beside its
+    context `ctx`: `files` (its one `kind`), `prefs`, `clipboard`,
+    `set_theme` and `themes`, `open_app`. A user app's namespace holds them beside its
     drawing riders (`make_system_api`), a service's alone (`service_api`)."""
     ns = {}
     if "files" in roles:
         ns["files"] = ScopedFiles(ctx.files, kind)
     if "prefs" in roles:
         ns["prefs"] = ctx.prefs
+    if "clipboard" in roles:
+        ns["clipboard"] = ctx.clipboard
     if "theme" in roles:
         # The theme ROLE also carries read verbs, but only the write half is a
         # privilege -- reading is already ungated above. So publish two bound

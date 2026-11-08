@@ -169,8 +169,8 @@ As built (phase 6 step 3): NTP, the TZ string (Settings' Time zone) and
 `moybyte.clock_synced()` are `runtime/system/wallclock.py` over
 `native/moy_net/moy_wifi.c`'s clock. An alarm is a wake of the registry's
 on the wall clock (`runtime/system/moybyte.py`): `moybyte.at(t, fn)`, Unix
-seconds, refused with EPERM without `alarms` (a Python permission: a Lua
-service's verbs are `tiers.md` §2's), runs `fn` no earlier than `t` and
+seconds, refused with EPERM without `alarms` (a Lua app's and a Lua
+service's alike, `tiers.md` §2), runs `fn` no earlier than `t` and
 lights the screen from the idle ladder as it goes off. The board's sleep
 today is the ladder's BLANK rung, the system menu's Sleep, through which the
 board keeps running; the SLEEP rung's RTC timer is #130's. The crontab is

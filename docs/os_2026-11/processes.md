@@ -472,7 +472,7 @@ print(...) / input()                   a script's stdio; its print also reaches 
 logging.getLogger(name).info(...)      micropython-lib logging, routed to the OS log (§9)
 moybyte.every(ms, fn) / after(ms, fn) / on(source, fn) / at(t, fn)   wake sources (§1); at needs "alarms"
 moybyte.notify(summary, body, icon=None, actions=(), urgency=1, replaces_id=0) -> id   §7
-moybyte.log(severity, text)            the OS log, for Lua and wasm (§9)
+moybyte.log(severity, text)            the OS log as this process (§9); ERR, WARNING, INFO
 ```
 
 ## 4. The guaranteed background slice
@@ -818,8 +818,8 @@ the shell's diag lines; each run's start, exit and crash (a Python
 traceback, or the Lua and wasm panel text, at crit); a console script's
 `print` (still mirrored to serial); `logging` (`moy_logging`, installed as
 `logging` on a VM that has none; on the host a cart's `import logging` is
-CPython's own and misses the ring); `moybyte.log` for Lua and wasm arrives
-in phase 5. A **cart's** `print` is the draw verb, never routed. A run the
+CPython's own and misses the ring); `moybyte.log(severity, text)`, on Python's
+and Lua's `moybyte` alike. A **cart's** `print` is the draw verb, never routed. A run the
 VM stops for writes its exit record once the kernel's run end has the
 process table. Readers: the kernel word `log [level] [+seq] [name]`, which
 answers with no VM running; Settings → About → System log

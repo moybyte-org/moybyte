@@ -1,8 +1,10 @@
 """The app guide's worked examples (docs/app_api_v1.md), written from the guide
 alone and run on the real console: a Python app whose list scrolls and whose
-choice survives a reopen through prefs, and a Lua service that answers a
-message from another app. A failure here is the guide promising something the
-console does not do."""
+choice survives a reopen through prefs, a Lua service that answers a message
+from another app, and a Lua app that pings that service and hears the answer
+through `moybyte.on`, posts a notification (and gets none without the
+permission), sets an alarm and writes the OS log. A failure here is the guide
+promising something the console does not do."""
 
 import json
 import shutil
@@ -10,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from runtime import host_app, moy_evq, scheduler as S
+from runtime import app_perms, host_app, moy_evq, notifications, os_log, scheduler as S
 from runtime import moy_log as L
 
 from ws_helpers import build_ws, select_on_home
@@ -117,3 +119,47 @@ def test_an_answer_reaches_an_app_only_on_a_name_it_receives(echo):
         assert moy_evq.take(peer) is None
     finally:
         moy_evq.close(peer)
+
+
+def _pinger(ws, off=()):
+    """The Lua app opened beside the running Echo service, its permissions
+    `off` turned off in Settings first, its frames and the scheduler's
+    serves run until the answer could have come back."""
+    cart = _install(ws, "pinger_lua.moy")
+    for perm in off:
+        ws.consent.turn(app_perms.app_id(cart), perm, False)
+    _ns, drv = _open(ws, "Pinger")
+    for _ in range(4):
+        _serve()
+        S.SCHED.tick(0)
+        _frames(drv, 1)
+    return ws.run.player._lua
+
+
+def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    ws = build_ws(tmp_path)
+    echo = S.start_cart(ws, _install(ws, "echo_lua.moy"))
+    assert echo is not None
+    since = L.next()
+    try:
+        lua = _pinger(ws)
+        assert lua.get_global("ANSWER") == "local.echo says 42"
+        assert lua.get_global("RANG") == 1
+        pid = ws.run.player.pid
+        assert "pinged the echo" in [t for _s, _t, _l, q, t in os_log.records(since, 128)
+                                     if q == pid]
+        nid = lua.get_global("NOTE")
+        assert isinstance(nid, int) and notifications.NOTES.find(nid) is not None
+    finally:
+        S.SCHED.stop(echo)
+
+
+def test_the_lua_app_posts_no_notification_without_the_permission(tmp_path):
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    ws = build_ws(tmp_path)
+    lua = _pinger(ws, off=("notifications",))
+    assert lua.get_global("NOTE") is None
+    assert lua.get_global("RANG") == 1, "the alarm is the alarms permission's"

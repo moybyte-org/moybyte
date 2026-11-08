@@ -2774,7 +2774,7 @@ def _app_roles_board_driver():
 
 
 APP_ROLES_TRACE = """\
-names false false
+names true false
 prefs absent nil 5
 prefs set nil [1,'two']
 prefs map nil {a:1,b:true}

@@ -182,9 +182,11 @@ callback, and its cost is charged to the one supervisor
 `moybyte.on(name, fn)` listens on its event queue, `fn(sender, ...)` for
 each message of the name (the radios' `net` and `ble` from the system,
 `between_apps.md` §4; what its app or another sends it). What enters the
-console is the VM task's: `moybyte.notify`, `open_with`, `share` and `send`
-(the source's console calls, §1, generated into the state's `moybyte`
-table and the scheduler's `_CALLS`) and the functions the console hands a
+console is the VM task's: `moybyte.notify`, `open_with`, `share`, `send`,
+`award`, `progress` and `pick` (the source's console calls, §1, generated
+into the state's `moybyte` table and the scheduler's `_CALLS`), the console
+half of `moybyte.at` (an alarm of the console's, heard as the system's
+message `"moybyte.at"`) and the functions the console hands a
 system process (its `env`, whose values become globals) are CONSOLE CALLS,
 posted on the VM's queue (`native/moy_kernel/moy_vmq.h`), which yield the
 call's coroutine until the VM's task answers it at the scheduler's poll, so
@@ -193,8 +195,9 @@ against its budget. The
 state also opens the role names its app's run would (owner, 2026-11-08,
 `processes.md` §5): the start makes the service's grant from its granted
 permissions, owned by its pid, and hands its run to the state, which opens
-`files`, `io`, `prefs`, `set_theme` and `open_app` through the one binding,
-`moy_app_lua.c`, as a Lua app's does. A role row runs on the VM's task: on a
+`files`, `io`, `prefs`, `set_theme`, `open_app`, `clipboard` and the
+theme's reads through the one binding, `moy_app_lua.c`, as a Lua app's
+does. A role row runs on the VM's task: on a
 P4 the binding's HOP is a hop on the VM's queue and the task waits until the
 VM's task runs it at the poll (`moy_vmq_serve`), its wait not counted
 against its budget; a stepped service is on the VM's task and calls it in

@@ -629,9 +629,40 @@ static void open_names(lua_State *L) {
     lua_pushcclosure(L, l_console, 1);      \
     lua_setfield(L, -2, name);
     MOY_APP_LUA_CALLS(CALL)
+    CALL("at")                          // the alarm's console half (ALARMS)
 #undef CALL
     lua_setglobal(L, "moybyte");
 }
+
+// `moybyte.at(t, fn)`, an alarm, over its console half: the console's wake
+// (runtime/system/moybyte.py, at_message, under the `alarms` permission)
+// posts the service the system's message "moybyte.at" with the alarm's id,
+// which one message wake, held while an alarm is due, hears. The wake is
+// made before the call, so an alarm already due finds it listening. An
+// alarm's id is negative, apart from the service's own wakes'.
+static const char ALARMS[] =
+    "local m = moybyte\n"
+    "local call, on, cancel = m.at, m.on, m.cancel\n"
+    "local fns, n, ear = {}, 0, nil\n"
+    "local function drop() n = n - 1; if n == 0 then cancel(ear); ear = nil end end\n"
+    "local function hear(_, w)\n"
+    "  local fn = fns[-w]\n"
+    "  if fn == nil then return end\n"
+    "  fns[-w] = nil; drop(); fn()\n"
+    "end\n"
+    "function m.at(t, fn)\n"
+    "  if type(fn) ~= 'function' then error('moybyte.at needs a function', 2) end\n"
+    "  if ear == nil then ear = on('moybyte.at', hear) end\n"
+    "  n = n + 1\n"
+    "  local w, why = call(t)\n"
+    "  if w == nil then drop(); error(why, 2) end\n"
+    "  fns[-w] = fn\n"
+    "  return -w\n"
+    "end\n"
+    "function m.cancel(id)\n"
+    "  if type(id) == 'number' and id < 0 and fns[id] ~= nil then fns[id] = nil; drop(); return end\n"
+    "  return cancel(id)\n"
+    "end\n";
 
 #ifdef SVC_APP
 // fn(arg) on the VM's task, for a row of the app's run (moy_app_lua.h's hop).
@@ -844,6 +875,12 @@ static void start(svc_t *s) {
     }
     *(svc_t **)lua_getextraspace(s->L) = s;
     open_names(s->L);
+    if (luaL_loadbufferx(s->L, ALARMS, sizeof ALARMS - 1u, "=alarms", "t") != LUA_OK
+        || lua_pcall(s->L, 0, 0, 0) != LUA_OK) {
+        snprintf(s->why, sizeof s->why, "its alarms do not open");
+        end(s, MOYCORE_SVC_EXIT_CRASHED);
+        return;
+    }
     lua_pushcfunction(s->L, l_open_run);
     if (lua_pcall(s->L, 0, 0, 0) != LUA_OK) {
         const char *m = lua_tostring(s->L, -1);

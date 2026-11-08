@@ -203,6 +203,37 @@ def test_console_calls_are_answered_on_the_vms_task(sched, monkeypatch):
     notifications.NOTES.reset()
 
 
+ALARMS = """
+local late = moybyte.at(os.time() + 3600, function() print("late") end)
+moybyte.at(os.time(), function() print("rang") end)
+moybyte.cancel(late)
+print(late < 0)
+"""
+
+
+def test_an_alarm_rings_once_and_its_service_then_has_no_wakes(sched):
+    """`moybyte.at` is the console's alarm (under `alarms`), heard as a
+    message; a cancelled one never rings, and once the last has rung the
+    service holds no wake and has exited."""
+    since = L.next()
+    pid = sched.start(_cart(ALARMS))
+    for _ in range(5):
+        sched.tick(0)
+        sched.mail()
+        sched.poll()
+    assert _texts(since, pid) == ["start t.lua", "true", "rang", "exit 0"]
+
+
+def test_an_alarm_without_its_permission_is_refused(sched, monkeypatch):
+    from runtime import devices
+    monkeypatch.setattr(devices, "grants", lambda p: ())
+    since = L.next()
+    sched.start(_cart('moybyte.at(os.time(), function() end)'))
+    sched.poll()
+    texts = [t for _s, _t, _l, _q, t in os_log.records(since, 128)]
+    assert any("the console refused moybyte.at" in t for t in texts), texts
+
+
 @pytest.fixture
 def desk(tmp_path, monkeypatch):
     boot_on_fixture(monkeypatch)

@@ -100,6 +100,9 @@ one, `time.ticks_us()`.
                      `moy_open(h)` as a grant of `mode` ("r" or "rw") for
                      its run, None where the picker was cancelled; False
                      where no file has the type
+  log(level, text)   a record of the OS log (native/moy_kernel/moy_log.h) as
+                     this process, at syslog severity `level` (0 emerg to 7
+                     debug; ERR, WARNING and INFO name three)
   clock_synced()     whether the wall clock holds real time: NTP has answered
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
@@ -201,6 +204,7 @@ _RADIO_KINDS = (1 << NET) | (1 << BLE)
 SHELL = 1
 ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
+ERR, WARNING, INFO = 3, 4, 6    # the OS log's severities `log` names most (syslog's)
 _ON, _EVERY, _AFTER, _MAIL, _RING, _ALARM = 0, 1, 2, 3, 4, 5
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
 # `ms` is its name (its messages wait on its process's event queue), a ring
@@ -590,14 +594,32 @@ def after(ms, fn):
     return WAKES.after(ms, fn)
 
 
-def at(t, fn):
+def _may_alarm(pid):
     try:
         import devices
     except ImportError:  # host: the runtime package
         from runtime import devices
-    if not devices.may(_pid(), ALARMS):
+    if not devices.may(pid, ALARMS):
         raise OSError(EPERM, 'needs "%s"' % ALARMS)
+
+
+def at(t, fn):
+    _may_alarm(_pid())
     return WAKES.alarm(t, fn, True)
+
+
+AT = "moybyte.at"           # the message an alarm of at_message posts
+
+
+def at_message(t):
+    """`at` for a process whose callbacks are not the VM's (a Lua service,
+    native/moycore/moycore_svc.c's ALARMS): the alarm posts it message AT
+    from the system, its one argument the alarm's id, which it answers."""
+    pid = _pid()
+    _may_alarm(pid)
+    w = [0]
+    w[0] = WAKES.alarm(t, lambda: WAKES.post(pid, AT, (w[0],)), True)
+    return w[0]
 
 
 def cancel(wid):
@@ -757,6 +779,11 @@ def _intents_end(pid):
 
 
 ENDS.append(_intents_end)
+
+
+def log(level, text):
+    if _L is not None:
+        _L.write(max(0, min(7, int(level))), _pid(), str(text))
 
 
 def clock_synced():

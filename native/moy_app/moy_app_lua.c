@@ -635,6 +635,104 @@ static int l_open_app(lua_State *L) {
     return 1;
 }
 
+// -- the theme's reads and the clipboard, as the Python face's ----------------------------
+
+// A row that takes nothing and answers a number: the number, or the grant's error.
+static int32_t scalar_row(lua_State *L, int k) {
+    const uint8_t *ans;
+    int32_t r = row_call(L, k, NULL, &ans);
+    if (r < 0) {
+        raise_rc(L, -r);
+    }
+    return r;
+}
+
+// A row that takes nothing and answers text.
+static int text_row(lua_State *L, int k) {
+    const uint8_t *ans;
+    int32_t r = row_call(L, k, NULL, &ans);
+    if (r < 0) {
+        return raise_rc(L, -r);
+    }
+    lua_pushlstring(L, (const char *)ans, (size_t)r);
+    return 1;
+}
+
+// theme.token(role): a token's value by its role id, nil where the look has none.
+static int l_theme_token(lua_State *L) {
+    lua_Integer role = luaL_checkinteger(L, 1);
+    uint8_t q[4] = { (uint8_t)role, (uint8_t)(role >> 8), (uint8_t)(role >> 16),
+                     (uint8_t)(role >> 24) };
+    buf_t b;
+    buf_init(L, &b, 16u);
+    buf_field(&b, q, 4);
+    const uint8_t *ans;
+    int32_t r = row_call(L, MOY_T_THEME_TOKEN, &b, &ans);
+    if (r == -MOY_APP_ABSENT) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (r < 0) {
+        return raise_rc(L, -r);
+    }
+    lua_pushinteger(L, (lua_Integer)r);
+    return 1;
+}
+
+static int l_theme_gen(lua_State *L) {
+    lua_pushinteger(L, (lua_Integer)scalar_row(L, MOY_T_THEME_GEN));
+    return 1;
+}
+
+static int l_theme_light(lua_State *L) {
+    lua_pushboolean(L, scalar_row(L, MOY_T_THEME_LIGHT) != 0);
+    return 1;
+}
+
+static int l_theme_name(lua_State *L) {
+    return text_row(L, MOY_T_THEME_NAME);
+}
+
+static int l_theme_variant(lua_State *L) {
+    return text_row(L, MOY_T_THEME_VARIANT);
+}
+
+// clipboard.put_text(text): true where it was put, false for a text the
+// clipboard refuses (too long).
+static int l_clipboard_put_text(lua_State *L) {
+    size_t n;
+    luaL_checklstring(L, 1, &n);
+    buf_t b;
+    buf_init(L, &b, n + 16u);
+    field_arg(L, &b, 1);
+    const uint8_t *ans;
+    int32_t r = row_call(L, MOY_T_CLIPBOARD_PUT_TEXT, &b, &ans);
+    if (r < 0 && r != -MOY_APP_BAD) {
+        return raise_rc(L, -r);
+    }
+    lua_pushboolean(L, r >= 0);
+    return 1;
+}
+
+static int l_clipboard_text(lua_State *L) {
+    return text_row(L, MOY_T_CLIPBOARD_TEXT);
+}
+
+// clipboard.kind(): "text", or nil for an empty clipboard.
+static int l_clipboard_kind(lua_State *L) {
+    if (scalar_row(L, MOY_T_CLIPBOARD_KIND) == 1) {
+        lua_pushliteral(L, "text");
+    } else {
+        lua_pushnil(L);
+    }
+    return 1;
+}
+
+static int l_clipboard_seq(lua_State *L) {
+    lua_pushinteger(L, (lua_Integer)scalar_row(L, MOY_T_CLIPBOARD_SEQ));
+    return 1;
+}
+
 // -- io and os over the grant's kind ---------------------------------------------------
 
 #define FILE_MT "moybyte.file"
@@ -1136,6 +1234,7 @@ static int l_os_difftime(lua_State *L) {
 typedef struct {
     const moy_app_run_t *run;
     int live;
+    uint32_t held;              // the roles the grant holds
     char kind[16];
 } open_t;
 
@@ -1143,6 +1242,9 @@ static void open_read(void *p) {
     open_t *o = p;
     o->live = moy_app_run_live(o->run);
     const moy_grant_t *gr;
+    if (o->live && moy_app_grant_get(o->run->a, o->run->g, &gr) == MOY_APP_OK) {
+        o->held = gr->roles | MOY_ROLE_FLOOR;
+    }
     if (o->live && moy_app_grant_get(o->run->a, o->run->g, &gr) == MOY_APP_OK
         && gr->kind >= 0) {
         const char *k = moy_app_kind_name(gr->kind);
@@ -1162,22 +1264,24 @@ static int l_files_save_text(lua_State *L) {
 
 // The names a run's role binding holds, each opened for the role it serves
 // (moy_app_lua_rows.h, generated from native/os_calls.json): a global, or a
-// function of a global table.
+// function of a global table. A read is opened where the run's grant holds
+// its role, as the Python face's ungated `theme()` is; any other name where
+// the run's permissions name it.
 typedef struct {
-    int8_t role;
+    int8_t role, read;
     const char *tbl, *name;
     lua_CFunction fn;
 } lname_t;
 
 static const lname_t NAMES[] = {
-#define NAME(role, tbl, name, fn, row) { role, tbl, name, fn },
+#define NAME(role, tbl, name, fn, row, read) { role, read, tbl, name, fn },
     MOY_APP_LUA_NAMES(NAME)
 #undef NAME
 };
 
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop) {
-    open_t o = { run, 0, { 0 } };
+    open_t o = { run, 0, 0u, { 0 } };
     if (run == NULL || on_vm(L, hop, open_read, &o) != 0 || !o.live) {
         return 0;
     }
@@ -1231,7 +1335,8 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
     }
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++) {
         const lname_t *nm = &NAMES[i];
-        if (!((roles >> nm->role) & 1u) || (nm->role == MOY_ROLE_FILES && !files)) {
+        uint32_t has = nm->read ? o.held : roles;
+        if (!((has >> nm->role) & 1u) || (nm->role == MOY_ROLE_FILES && !files)) {
             continue;
         }
         if (nm->tbl == NULL) {

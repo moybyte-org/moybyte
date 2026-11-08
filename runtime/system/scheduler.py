@@ -170,8 +170,10 @@ _CALLS = {
     "moybyte.send": _moybyte.send,
     "moybyte.award": _moybyte.award,
     "moybyte.progress": _moybyte.progress,
+    "moybyte.pick": _moybyte.pick,
 }
 # END GENERATED
+_CALLS["moybyte.at"] = _moybyte.at_message      # the alarm's console half (moycore_svc.c)
 
 try:
     import json as _json
@@ -532,7 +534,7 @@ class Scheduler:
         if p is None:
             p = self.procs.get(pid)
         if p is not None and p.kind == SERVICE and p.state != EXITED \
-                and not self.wakes.count(pid):
+                and not self.wakes_of(pid):
             self._exit(p, EXIT_OK)
 
     def step(self, pid, fn):
@@ -906,9 +908,10 @@ class Scheduler:
     def _answer(self, svc, stepped):
         """The VM's queue (moy_vmq.h): the role rows the services' tasks
         hopped with run, then the console calls they wait on answered on
-        this task as their processes: `moybyte.notify`, `open_with`,
-        `share` or `send` (`_CALLS`), or a function of the `env` a start
-        was handed. A stepped service runs on to its next call at once."""
+        this task as their processes: a console call of `_CALLS` (the
+        moybyte module's own verbs, and `at`'s console half), or a
+        function of the `env` a start was handed. A stepped service runs
+        on to its next call at once."""
         for _ in range(CALLS_MAX * 4):
             if not _E.serve():
                 return

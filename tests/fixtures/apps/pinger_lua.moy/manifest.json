@@ -1,0 +1,10 @@
+{
+  "format": "moy-1",
+  "title": "Pinger",
+  "id": "local.pinger",
+  "canvas": "320x240",
+  "runtime": "lua",
+  "main": "main.lua",
+  "moybyte": {"type": "app", "permissions": ["graphics", "notifications", "alarms"],
+              "receives": ["pong"]}
+}

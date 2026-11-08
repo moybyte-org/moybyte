@@ -74,7 +74,7 @@ def test_a_lua_app_holding_a_role_gets_its_verbs(tmp_path):
                      "clipboard"])
     assert lua.get_global("SEEN") == (
         "files=table prefs=table set_theme=function themes=function "
-        "open_app=function io=table os=table clipboard=nil "
+        "open_app=function io=table os=table clipboard=table "
         "os.remove=function os.rename=function os.time=function")
 
 

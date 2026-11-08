@@ -1003,11 +1003,13 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
-    # Fields and a metamethod, not handles: a layer's id, canvas and edited
-    # mark, an image's id. And the layer and scene natives are the RUNTIME's
+    # Fields, a metamethod and the prelude's own functions, not handles: a
+    # layer's id, canvas and edited mark, an image's id, and the `moybyte`
+    # table's fire, event and grant, which the console's chunks call. And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index"}
+    fields = {"__id", "__img", "__c", "__e", "__index",
+              "__moybyte_fire", "__moybyte_event", "__moybyte_grant"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
@@ -1662,9 +1664,9 @@ def test_closing_persists_pmem_and_then_closes_the_vm(w):
 
 def test_closing_drops_the_registry_that_pins_the_editors(w):
     run = w.run(ns=make_ns(open_editor=lambda name=None, mode=None: object()))
-    assert run._pins == []
+    wakes = len(run._pins)                  # the run's wakes (lua_ext.end_handles)
     w.core.registered["__ed_open"]("notes", "")
-    assert len(run._pins) == 1
+    assert len(run._pins) == wakes + 1
     run.close()
     assert run._pins is None
 
