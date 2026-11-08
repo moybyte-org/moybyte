@@ -52,10 +52,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 # The site's console runs the Terminal's shell in the page (build.sh --site);
 # a tree built without it serves the boards' bundle, whose Terminal says it
-# has no shell.
-PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist_site")
+# has no shell. A Pages run that a firmware run triggers runs master's
+# pages.yml (a workflow_run runs the default branch's file), whose build step
+# may predate --site, so under CI this tree builds its own site bundle
+# (site_player) rather than publish the boards'.
+SITE_PLAYER = os.path.join(ROOT, "firmware", "web_runner", "dist_site")
+PLAYER_SRC = SITE_PLAYER
 if not os.path.exists(os.path.join(PLAYER_SRC, "index.html")):
     PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
+
+
+def site_player():
+    """Under CI, the site bundle this tree's build.sh makes when no step
+    made it: the player is then dist_site, never the boards' dist."""
+    global PLAYER_SRC
+    if PLAYER_SRC == SITE_PLAYER or not os.environ.get("CI"):
+        return
+    script = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
+    print("== no site bundle: %s --site" % script, flush=True)
+    if subprocess.call([script, "--site"]) == 0 and os.path.exists(
+            os.path.join(SITE_PLAYER, "index.html")):
+        PLAYER_SRC = SITE_PLAYER
+    else:
+        print("!! build.sh --site failed -- publishing the boards' bundle")
 VENDOR_SRC = os.path.join(HERE, "vendor")
 FIRMWARE_SRC = os.path.join(ROOT, "dist", "ci-firmware")
 sys.path.insert(0, ROOT)
@@ -1397,6 +1416,7 @@ def main():
 
     has_player = False
     if not args.no_player:
+        site_player()
         if os.path.isdir(PLAYER_SRC) and os.path.exists(
                 os.path.join(PLAYER_SRC, "index.html")):
             shutil.copytree(PLAYER_SRC, os.path.join(out, "player"))
