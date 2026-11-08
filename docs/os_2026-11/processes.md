@@ -134,7 +134,13 @@ hardware engines. Python's `asyncio` rides the same scheduler (§3);
 kernel owns; its callbacks run on that task. A Python process runs inside
 the shell's one VM (§3): its callbacks run in the shell loop's slack after
 a frame is presented and before the next. Services run on core 0 on the P4s;
-what the S3s get is the overview's §5.
+what the S3s get is the overview's §5. As built for Lua
+(`native/moycore/moycore_svc.h`, P5.3): a Lua service is a state of its own
+on a task of its own, pinned to core 0 on the P4s, which waits for its next
+timer or a stop and runs what is due; the S3s refuse one, and the host and
+the desktop MicroPython, which have no task to give, step their services at
+the scheduler's poll (`runtime/system/scheduler.py`, LUA SERVICES). A wasm
+service and an ELF one are later steps.
 
 ## 2. The app manifest and the permission table
 
@@ -420,9 +426,10 @@ rows too, beside the bar's indicator and its stop control (owner,
 2026-11-03).
 
 As built (runtime/system/tasks_ui.py, the kernel kind `tasks`), phase 1
-lists Python runs and services, and phase 5 Lua runs, whose memory is their
-own state's heap, Lua's exact count (`moycore.heap`); compiled rows arrive
-with the wasm sessions. The
+lists Python runs and services, and phase 5 Lua runs and Lua services, whose
+memory is their own state's heap, exact (`moycore.heap` for a run, Lua's own
+count; `moycore.svc_info` for a service, its allocator's count); compiled rows
+arrive with the wasm sessions. The
 Player times its run's `update`, `draw` and window events in microseconds,
 and the scheduler a process's callbacks (`Proc.cost_us`); every
 `METER_MS` (2 s) `Procs.account` turns each into busy microseconds a second,

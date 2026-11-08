@@ -94,6 +94,55 @@ def heap(h):
     return r.heap() if r is not None and r.handle() == h else None
 
 
+# -- the Lua tier's services (native/moycore/moycore_svc.h) --------------------
+
+_SVC_ERR = (0, 9, 28, 12, 22)          # STALE EBADF, FULL ENOSPC, NOMEM, BAD EINVAL
+
+
+def _svc_check(rc):
+    if rc:
+        import errno
+        import os
+        e = _SVC_ERR[rc] if 0 < rc < len(_SVC_ERR) else errno.EIO
+        raise OSError(e, os.strerror(e))
+
+
+def svc_start(pid, name, src):
+    b = src.encode() if isinstance(src, str) else bytes(src)
+    h = _lb.ctypes.c_uint32()
+    _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), b, len(b),
+                                                _lb.ctypes.byref(h)))
+    return h.value
+
+
+def svc_stop(h):
+    _svc_check(_lb.play_lib().moycore_svc_stop(h))
+
+
+def svc_info(h):
+    """(state, exit, heap, cpu_us, strikes, why), or None for a stale handle."""
+    i = _lb.SvcInfo()
+    if _lb.play_lib().moycore_svc_info(h, _lb.ctypes.byref(i)):
+        return None
+    return (i.state, i.exit, i.heap, i.cpu_us, i.strikes, i.why.decode("utf-8", "replace"))
+
+
+def svc_reap(h):
+    _svc_check(_lb.play_lib().moycore_svc_reap(h))
+
+
+def svc_tasks():
+    return bool(_lb.play_lib().moycore_svc_tasks())
+
+
+def svc_step(now_ms):
+    return _lb.play_lib().moycore_svc_step(now_ms & 0xFFFFFFFF)
+
+
+def svc_reset():
+    _lb.play_lib().moycore_svc_reset()
+
+
 def register(name, fn):
     _run().register(name, fn)
 

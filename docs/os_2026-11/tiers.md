@@ -119,6 +119,15 @@ the standard way: a path is a name of the grant's one kind, the process's
 working folder, and one that climbs, is absolute or names a folder is
 refused with `EACCES`.
 
+**A Lua service** (`"type": "service"`, `"runtime": "lua"`) is a state of its
+own, not a row of the runs (`native/moycore/moycore_svc.h`): the safe stdlib,
+`os.time` and `os.clock`, and `moybyte.every`, `after`, `cancel`, `log` and
+`exit`, with `print` to the OS log, on its own task on a P4's core 0
+(`processes.md` §1). Each call runs on a coroutine under a count hook that
+yields it past its budget, so a `pcall` cannot keep a runaway callback; the
+role names a run's state opens are the VM task's to serve, and a service's
+state opens none of them.
+
 ## 3. wasm and WASI
 
 One instance per process, a session per compiled run

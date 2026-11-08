@@ -65,6 +65,15 @@ running then gets the KILL (EXIT_KILLED); either way its wakes and readers
 end. A start that runs past the same limit is killed too. Every start, stop,
 kill, exit and rung is one line of the OS log under the service's pid.
 
+LUA SERVICES (`"runtime": "lua"`). The start hands the cart's source to
+moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
+task of its own on a P4's core 0, refused where the chip runs none (the S3s,
+logged and exited 1). `poll()`, a wake of the shell's every POLL_MS while
+one lives, steps them where they have no task (the host, the desktop
+MicroPython), reads each one's heap (exact) and its calls' time onto its
+row, and hands an end to the same exit, log line and restart policy; a stop
+is its TERM there, the C side's KILL past MOY_SERVICE_STOP_MS.
+
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
 (Settings turns it off per app), and every service the resume record says
@@ -123,6 +132,9 @@ MOY_SERVICE_STOP_MS = 2000      # TERM to KILL: a start or stop hook's limit
 MOY_RESTART_BACKOFF_MS = 1000  # the first restart's wait, doubled for each end in a row
 MOY_RESTART_HEAL_MS = 10000     # a run this long before its end starts the count afresh
 DUE_MAX = 16                    # wakes taken from the registry at a time
+POLL_MS = 20                    # the Lua services' poll (a stepped tier's timer grain)
+SVC_EXITED = 4                  # moycore_svc.h's MOYCORE_SVC_EXITED
+EINVAL = 22
 _WRAP = 0x3FFFFFFF              # a counter wraps as ticks do: a small int on a board
 
 EXIT_OK, EXIT_CRASHED, EXIT_KILLED = 0, 1, 137
@@ -198,6 +210,7 @@ class Proc:
         self.mem = None         # what its start allocated (`allocated`), bytes
         self.cpu = None         # its last sample's busy us a second (Procs.account)
         self.seen_us = 0        # cost_us at that sample
+        self.native = 0         # a Lua service's handle (moycore_svc.h), 0: Python
 
 
 def _let_go(p):
@@ -241,6 +254,7 @@ class Scheduler:
         self.pending = {}           # service id -> the wake of its restart
         self._t0 = 0                # this tick's start and budget (left_us)
         self._budget = 0
+        self._poll = 0              # the Lua services' poll, a wake of the shell's
         self.wakes.ended = self._ended
 
     # -- the tick ---------------------------------------------------------
@@ -505,6 +519,8 @@ class Scheduler:
             p.state, p.code = EXITED, EXIT_CRASHED
             return None
         _log(INFO, pid, "start", name)
+        if cart.get("runtime") == "lua":
+            return self._start_lua(p, cart.get("src") or "")
         if "asyncio" in src_of(cart):
             _aio().install(self)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
@@ -535,6 +551,63 @@ class Scheduler:
             self._exit(p, EXIT_OK)
             return None
         return pid
+
+    # -- the Lua services -------------------------------------------------
+
+    def _start_lua(self, p, src):
+        """Lua service `p` (native/moycore/moycore_svc.h): its own state, on a
+        task of its own on the P4s and at this scheduler's poll elsewhere;
+        refused on a chip that runs none (the S3s) or with no Lua runtime."""
+        svc = _svc()
+        try:
+            if svc is None:
+                raise OSError(EINVAL, "no Lua runtime")
+            p.native = svc.svc_start(p.pid, p.name, src)
+        except OSError as e:
+            _log(ERR, p.pid, "a Lua service does not run on this console"
+                 if e.args and e.args[0] == EINVAL else "no room for a Lua service: %s" % e)
+            p.state, p.code = EXITED, EXIT_CRASHED
+            return None
+        if not self._poll:
+            self._poll = self.plain_every(POLL_MS, self.poll)
+        self.poll()
+        return p.pid if p.state != EXITED else None
+
+    def poll(self):
+        """The Lua services: stepped where they have no task of their own,
+        then each one's figures read onto its row (its heap exact, its
+        calls' time) and an end handed to `_exit`, which its restart policy
+        follows. The poll's wake goes with the last service."""
+        svc = _svc()
+        if svc is None:
+            return
+        if not svc.svc_tasks():
+            svc.svc_step(_ticks_ms())
+        live = False
+        for pid in list(self.procs):
+            p = self.procs[pid]
+            if not p.native:
+                continue
+            got = svc.svc_info(p.native)
+            if got is None:
+                p.native = 0
+                continue
+            state, code, heap, cpu_us, _strikes, why = got
+            p.mem = heap
+            p.cost_us = cpu_us & ALLOC_WRAP
+            if state != SVC_EXITED:
+                live = True
+                continue
+            h, p.native = p.native, 0
+            svc.svc_reap(h)
+            if p.state != EXITED:
+                if why:
+                    _log(ERR if code else INFO, p.pid, why)
+                self._exit(p, code)
+        if not live and self._poll:
+            self.wakes.cancel(self._poll)
+            self._plain.pop(self._poll, None)
+            self._poll = 0
 
     def hook(self, pid, name, *args):
         """Run live service `pid`'s hook `name(*args)` (`moy_action`, a
@@ -576,6 +649,10 @@ class Scheduler:
             return False
         _log(INFO, pid, "stop")
         p.state = STOPPING
+        if p.native:
+            _svc().svc_stop(p.native)
+            self.poll()
+            return True
         hook = p.ns.get("moy_stop") if p.ns is not None else None
         r = None
         if hook is not None:
@@ -709,11 +786,30 @@ class Scheduler:
             if p.kind == SERVICE and p.state != EXITED:
                 p.state = STOPPING
                 self._exit(p, EXIT_KILLED)
+        svc = _svc()
+        if svc is not None and not svc.svc_tasks():
+            svc.svc_reset()
+        if self._poll:
+            self.wakes.cancel(self._poll)
+            self._plain.pop(self._poll, None)
+            self._poll = 0
         self.procs.clear()
         self.down.clear()
         self.store = None
         self._n = self._i = 0
         self.resumed = ()
+
+
+def _svc():
+    """The Lua tier's services (moycore's svc_* names), or None."""
+    try:
+        import moycore
+    except ImportError:
+        try:
+            from runtime import moycore
+        except ImportError:
+            return None
+    return moycore if hasattr(moycore, "svc_start") else None
 
 
 def src_of(cart):

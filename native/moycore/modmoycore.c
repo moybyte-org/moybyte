@@ -53,6 +53,8 @@
 // deletion commit records what that cost).
 
 #include "modmoycore_int.h"
+#include "moycore_svc.h"
+#include "py/mperrno.h"
 
 // -- helpers -----------------------------------------------------------------
 
@@ -1105,6 +1107,78 @@ static mp_obj_t mod_pool_check(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
+// -- the Lua tier's services (moycore_svc.h) ---------------------------------
+//   svc_start(pid, name, src) -> h   svc_stop(h)   svc_reap(h)
+//   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why), None when stale
+//   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
+
+static void svc_check(int rc)
+{
+    static const int err[] = { 0, MP_EBADF, MP_ENOSPC, MP_ENOMEM, MP_EINVAL };
+    if (rc != MOYCORE_SVC_OK) {
+        mp_raise_OSError(rc > 0 && rc < (int)(sizeof(err) / sizeof(err[0])) ? err[rc] : MP_EIO);
+    }
+}
+
+static mp_obj_t mod_svc_start(mp_obj_t pid, mp_obj_t name, mp_obj_t src)
+{
+    size_t n;
+    const char *text = mp_obj_str_get_data(src, &n);
+    uint32_t h;
+    svc_check(moycore_svc_start((uint32_t)mp_obj_get_int(pid), mp_obj_str_get_str(name),
+                                text, n, &h));
+    return mp_obj_new_int_from_uint(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_svc_start_obj, mod_svc_start);
+
+static mp_obj_t mod_svc_stop(mp_obj_t h)
+{
+    svc_check(moycore_svc_stop((uint32_t)mp_obj_get_int(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_stop_obj, mod_svc_stop);
+
+static mp_obj_t mod_svc_info(mp_obj_t h)
+{
+    moycore_svc_info_t i;
+    if (moycore_svc_info((uint32_t)mp_obj_get_int(h), &i) != MOYCORE_SVC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t t[6] = {
+        MP_OBJ_NEW_SMALL_INT(i.state), mp_obj_new_int(i.exit), mp_obj_new_int_from_uint(i.heap),
+        mp_obj_new_int_from_uint(i.cpu_us), MP_OBJ_NEW_SMALL_INT(i.strikes),
+        mp_obj_new_str(i.why, strlen(i.why)),
+    };
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_info_obj, mod_svc_info);
+
+static mp_obj_t mod_svc_reap(mp_obj_t h)
+{
+    svc_check(moycore_svc_reap((uint32_t)mp_obj_get_int(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_reap_obj, mod_svc_reap);
+
+static mp_obj_t mod_svc_tasks(void)
+{
+    return mp_obj_new_bool(moycore_svc_tasks());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_tasks_obj, mod_svc_tasks);
+
+static mp_obj_t mod_svc_step(mp_obj_t now)
+{
+    return mp_obj_new_int_from_uint(moycore_svc_step((uint32_t)mp_obj_get_int_truncated(now)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_step_obj, mod_svc_step);
+
+static mp_obj_t mod_svc_reset(void)
+{
+    moycore_svc_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_reset_obj, mod_svc_reset);
+
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
@@ -1153,6 +1227,13 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_use),         MP_ROM_PTR(&mod_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_runs),        MP_ROM_PTR(&mod_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_heap),        MP_ROM_PTR(&mod_heap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_start),   MP_ROM_PTR(&mod_svc_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_stop),    MP_ROM_PTR(&mod_svc_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_info),    MP_ROM_PTR(&mod_svc_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_reap),    MP_ROM_PTR(&mod_svc_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_tasks),   MP_ROM_PTR(&mod_svc_tasks_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_step),    MP_ROM_PTR(&mod_svc_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_reset),   MP_ROM_PTR(&mod_svc_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },

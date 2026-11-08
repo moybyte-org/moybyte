@@ -39,6 +39,12 @@ hangs off its row too (`moycore_wasm.c`'s `wr`, with its engine session), so
 compiled games run side by side the same way; the speaker's `snd` stream and
 the timed lanes, which a board holds one of, are the newest compiled run's.
 
+**A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
+verbs): no console, no row of the runs, its timers and `moybyte` names, its
+own counting allocator in PSRAM. On the P4s each runs on a task of its own on
+core 0; the host and the desktop MicroPython step them at the scheduler's
+poll (`runtime/system/scheduler.py`), and the S3s run none.
+
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |

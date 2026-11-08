@@ -100,7 +100,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
     "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
     "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
     "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
-    "moy_proc.h", "moy_proc.c", "moy_app_run.h",
+    "moy_proc.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c",
 ] + _lua_names(), (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
                    _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI,
                    os.path.join(_NATIVE, "moy_app")), shim=_SHIM)
@@ -129,7 +129,22 @@ def build(verbose=False):
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 _U32 = ctypes.c_uint32
 
+class SvcInfo(ctypes.Structure):
+    """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
+    _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
+                ("heap", ctypes.c_uint32), ("cpu_us", ctypes.c_uint32), ("pid", ctypes.c_uint32),
+                ("why", ctypes.c_char * 96)]
+
+
 _SIGS = (
+    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moycore_svc_stop", [_U32], _I),
+    ("moycore_svc_info", [_U32, ctypes.POINTER(SvcInfo)], _I),
+    ("moycore_svc_reap", [_U32], _I),
+    ("moycore_svc_at", [_U32], _U32),
+    ("moycore_svc_tasks", [], ctypes.c_bool),
+    ("moycore_svc_step", [_U32], _U32),
+    ("moycore_svc_reset", [], None),
     ("hl_kernel", [_I, _P], None),
     ("hl_img_decoder", [_P], None),
     ("hl_new", [_P, _I, _I, _I, _P, _P, _P, _I], _P),
