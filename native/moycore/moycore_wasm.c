@@ -696,12 +696,12 @@ void moycore_wasm_end(void)
 // before its memory exists, refuse it unless its key names `wasm_sha`, bind it
 // to this console and run _init. `cart_dir` is the only folder `read` sees;
 // `wire_swapped` says the canvas stores its words byte-swapped, which a
-// palette blit must match. `allow_unsigned` is the owner's Unknown sources
-// setting: true lets an AOT module with no signature load
+// palette blit must match. `allow_unsigned` is the cart's consent
+// (app_perms.run_admits_unsigned): true lets an AOT module with no signature load
 // (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
 // main.wasm, run on the interpreter tier (native/moy_wasm/README.md, "A
-// cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
-// sources check, and `wasm_sha` is ignored. `writable` is the manifest's
+// cart survives its firmware", 2026-09-30): no key, no signature, no
+// admission, and `wasm_sha` is ignored. `writable` is the manifest's
 // "writable" entries joined by NUL characters (moy-spec SPEC.md 16.12; the
 // cart's files are moy_files', above). `ring` is the manifest's "audio_ring",
 // the depth of `snd`'s queue in frames (0: moy-spec's 2,048). `app` is the

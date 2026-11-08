@@ -7,7 +7,7 @@
 #   -- the Player path                wasm_carts_push, wasm_cart_fps
 #   -- WASI commands in the shell     wasi_commands_run
 #   -- native (ELF) commands          elf_commands_run
-#   -- Settings -> UNKNOWN SOURCES    unknown_sources
+#   -- an unsigned module's admission  wasm_unsigned_cart_follows_its_consent
 #   -- a cart too big for the board   wasm_fit, wasm_too_big_cart_opens_the_notice
 #   -- Doom, built by the recipe      doom_push, doom_frames_match_the_host
 """The three on-glass suites' shared body (#206 item 3).
@@ -32,6 +32,7 @@ swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import sys
@@ -3169,7 +3170,7 @@ def wasm_modules(chip):
     compiled-code format version, other flags (the key saying so), another
     chip, no signature, and a signed module with one byte of its key changed
     -- plus an unsigned module keyed for another format, which the board
-    refuses by its key once Unknown sources lets it past the signature."""
+    refuses by its key once the consent lets it past the signature."""
     if chip not in _WASM_BUILT:
         import tempfile
         from tools import wasm_module as wm
@@ -3351,13 +3352,14 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
         assert r["error"].startswith(why), (name, r["error"])
 
 
-def wasm_unknown_sources_lets_only_a_missing_signature_through(board, paths):
-    """The engine with the owner's switch on (`allow_unsigned`, what
-    Settings -> UNKNOWN SOURCES hands every load): a module with no signature
-    loads and runs, its provenance key still checked -- an unsigned module
-    keyed for another runtime is refused by the key -- and a module whose
-    signature is present but does not verify is refused exactly as with the
-    switch off. The switch lets a missing signature through, nothing else."""
+def wasm_consent_lets_only_a_missing_signature_through(board, paths):
+    """The engine with the cart's consent given (`allow_unsigned`, what
+    app_perms.admits_unsigned hands a load of a cart granted "native"): a
+    module with no signature loads and runs, its provenance key still
+    checked -- an unsigned module keyed for another runtime is refused by
+    the key -- and a module whose signature is present but does not verify
+    is refused exactly as without it. The consent lets a missing signature
+    through, nothing else."""
     r = wasm_run(board, paths["unsigned"], "step", (20000,), allow_unsigned=True)
     assert r["ok"], r["error"]
     assert r["value"] == WASM_STEP_20000, r
@@ -4279,59 +4281,52 @@ def wasm_tampered_module_is_refused(board, board_dir):
     return err
 
 
-# -- Settings -> UNKNOWN SOURCES (the owner's switch, 2026-09-29) --------------
+# -- an unsigned module's admission (moy_ota_admit_module) -------------------
 #
-# A compiled cart whose module carries no signature runs at full speed only
-# while the owner has the switch on; with it off, it is ignored -- same as
-# no module at all -- and the cart plays on the interpreter with the short
-# notice (2026-09-30, "A cart survives its firmware"). `unknown_sources 0|1`
-# is the dev channel's word for the switch: it sets it without the screen's
-# warning and never persists.
+# A compiled cart whose module carries no signature runs natively only when
+# its consent grants "native" (app_perms.admits_unsigned; a cart pushed by
+# hand has no consent record, so its manifest decides); without it the module
+# is refused -- same as no module at all -- and the cart plays on the
+# interpreter with the short notice (2026-09-30, "A cart survives its
+# firmware").
 
 UNSIGNED_TITLE = "Unsigned Wasm"
+UNSIGNED_NATIVE_TITLE = "Unsigned Native Wasm"
 
 
-def unknown_sources(board, on):
-    """Set the switch over the dev channel and check the console reached it."""
-    word = "on" if on else "off"
-    line = board.cmd("unknown_sources %d" % (1 if on else 0),
-                     wait_for="REMOTE unknown_sources")
-    assert line == "REMOTE unknown_sources " + word, line
-    assert board.state()["unknown_sources"] is bool(on)
+def _asks_native(folder):
+    path = os.path.join(folder, "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man.setdefault("moybyte", {}).setdefault("permissions", []).append("native")
+    with open(path, "w") as f:
+        json.dump(man, f)
 
 
-def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
-    """The hello cart with its module built unsigned: with the switch off it
-    is IGNORED, same as an absent module, and plays on the interpreter with
-    the short "isn't signed" notice; with the switch on the same module runs
-    natively (native trust) and reads its greeting, with no notice. A cart
-    whose module was tampered with after signing is still refused either
-    way -- that is tamper evidence, not staleness. The switch is left OFF
-    whatever happens."""
+def wasm_unsigned_cart_follows_its_consent(board, board_dir):
+    """The hello cart with its module built unsigned: a cart that does not
+    ask for "native" has the module REFUSED, same as an absent one, and plays
+    on the interpreter with the short "isn't signed" notice; the same module
+    in a cart that asks for "native" runs natively and reads its greeting,
+    with no notice. A cart whose module was tampered with after signing is
+    refused either way -- that is tamper evidence, not staleness."""
     wasm_signing_key()
     chip = _wasm_chip(board_dir)
     _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_TITLE, "unsigned",
                           signed=False)
+    _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_NATIVE_TITLE,
+                          "unsigned_native", change=_asks_native, signed=False)
     _tampered_cart(board, board_dir, chip)
-    try:
-        unknown_sources(board, False)
-        notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
-                                      check=hello_read_its_greeting)
-        unknown_sources(board, True)
+    notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
+                                  check=hello_read_its_greeting)
 
-        def _native_and_greets(b):
-            hello_read_its_greeting(b)
-            assert b.pyval("bool(ws.player._lua.interp)", strict=True) is False
-        _runs_clean(board, UNSIGNED_TITLE, check=_native_and_greets)
-        err = _wasm_run_error(board, TAMPERED_TITLE)
-        assert "refused: bad signature" in err, err
-        unknown_sources(board, False)
-        assert _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
-                                    check=hello_read_its_greeting) == notice
-    finally:
-        board.cmd("unknown_sources 0", wait_for="REMOTE unknown_sources")
-    assert board.state()["unknown_sources"] is False
-    print("\nWASM unsigned cart: %r notice with the switch off, native with it on"
+    def _native_and_greets(b):
+        hello_read_its_greeting(b)
+        assert b.pyval("bool(ws.player._lua.interp)", strict=True) is False
+    _runs_clean(board, UNSIGNED_NATIVE_TITLE, check=_native_and_greets)
+    err = _wasm_run_error(board, TAMPERED_TITLE)
+    assert "refused: bad signature" in err, err
+    print("\nWASM unsigned cart: %r notice without \"native\", native with it"
           % (notice,))
     return notice
 
@@ -4531,8 +4526,8 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # all, one built for another chip, and one left over from an older format --
 # every one of those is simply the wrong file name to this console, so the
 # Player cannot tell them apart and shows the same "needs an update"; a
-# module that matched this console's name but carried no signature while
-# Unknown sources is off is "unsigned"; one whose load stopped on a helper
+# module that matched this console's name but carried no signature, its cart
+# not granted "native", is "unsigned"; one whose load stopped on a helper
 # this firmware does not register is "firmware".
 INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
                      "firmware": "console needs an update"}

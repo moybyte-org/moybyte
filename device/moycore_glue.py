@@ -112,6 +112,11 @@ try:
 except ImportError:                      # host tests importing the device module
     from runtime.ticks import _since_ms
 
+try:
+    from app_perms import run_admits_unsigned
+except ImportError:                      # host tests importing the device module
+    from runtime.app_perms import run_admits_unsigned
+
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
 # its own reason) -- is imported above from lua_ext, with the full rationale
@@ -638,8 +643,8 @@ class MoycoreRun:
 # The only two AOT refusals that are TAMPER EVIDENCE -- a module whose
 # signature bytes are present but do not verify -- and so stay a hard
 # refusal to the ordinary error panel. Every other reason an AOT open can
-# fail (no file by this console's name, unsigned while Unknown sources is
-# off, a corrupted key) means only that THIS console's copy of the module is
+# fail (no file by this console's name, unsigned without the cart's consent
+# to `native`, a corrupted key) means only that THIS console's copy of the module is
 # unusable, not that the cart is; WasmRun retries those on the interpreter
 # instead ("A cart survives its firmware", 2026-09-30).
 _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")
@@ -1049,13 +1054,13 @@ class WasmRun(MoycoreRun):
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
         # moycore's C over the kernel's volume, inside the board's bus gate
-        # (native/moy_store/moy_files.h). The owner's Unknown sources
-        # setting, as it stands at this load, decides whether an AOT module
-        # with no signature may load; the engine checks everything else
-        # either way. The engine raises MemoryError when it cannot hold the
-        # module file, and a run left open here would refuse every later
-        # cart's run_begin.
-        unknown_sources = bool(getattr(ws, "unknown_sources", False))
+        # (native/moy_store/moy_files.h). The cart's consent, as it stands at
+        # this load, decides whether an AOT module with no signature may load
+        # (app_perms.run_admits_unsigned, the engine's moy_ota_admit_module);
+        # the engine checks everything else either way. The engine raises
+        # MemoryError when it cannot hold the module file, and a run left
+        # open here would refuse every later cart's run_begin.
+        unsigned_ok = run_admits_unsigned(ws, cart)
         writable = cart.get("writable") or ()
         joined = "\0".join(writable) if writable else None
         ring = cart.get("audio_ring") or 0
@@ -1065,7 +1070,7 @@ class WasmRun(MoycoreRun):
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, unknown_sources, interp, joined, ring,
+                                      swapped, unsigned_ok, interp, joined, ring,
                                       app)
 
         try:
@@ -1289,7 +1294,7 @@ class WasmRuntime:
         path = cart["path"]
         main = cart.get("main", "main.wasm")
         joined = "".join(r + "\0" for r in roots) or None
-        unknown_sources = bool(getattr(self.ws, "unknown_sources", False))
+        unsigned_ok = run_admits_unsigned(self.ws, cart)
         argv = tuple(argv)
         if _moy_wasm.CHIP is not None:
             module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
@@ -1299,11 +1304,11 @@ class WasmRuntime:
                 module = None
             if module is not None:
                 sha = _sha256_file(path + "/" + main)
-                code, err = start(module, sha, False, unknown_sources, argv, joined,
+                code, err = start(module, sha, False, unsigned_ok, argv, joined,
                                   bg_pid, budget_ms)
                 if code != -3 or err.startswith(_AOT_TAMPER_EVIDENCE):
                     return code, err
-        return start(path + "/" + main, None, True, unknown_sources, argv, joined,
+        return start(path + "/" + main, None, True, unsigned_ok, argv, joined,
                      bg_pid, budget_ms)
 
 

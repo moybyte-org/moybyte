@@ -142,8 +142,8 @@ nor those docs will warn you about:
   /console.json` and pushes `{"v": 2, "root": "system"}` batches, which the C
   parks (its seal checked) for `moy_webhost.ConsoleSystem`; the board is of record
   and takes a page's change KEY BY KEY (`moy_sync.SYSTEM_KEYS`: an unknown key
-  is LOCAL, the update channel and UNKNOWN SOURCES are never sent and
-  never taken, the badges are a union). Its directory is the carts folder's
+  is LOCAL, so the consent records are never taken; the update channel is
+  never sent and never taken, the badges are a union). Its directory is the carts folder's
   parent and proves nothing, so the page watches it only when the pull
   answered (the worker's `seeded` list); firmware without it 404s the pull and
   400s the batch, and that page keeps them in the tab. Cart paths in
@@ -195,7 +195,7 @@ nor those docs will warn you about:
   web-player adapters over libmoy's import table); moycore, `WasmRun`, the
   Player and the canvas are the boards'. What bites:
   - **Nothing on a board is reimplemented here, and nothing native applies**:
-    no AOT module, key, signature or Unknown sources -- `moy_wasm.CHIP` is None,
+    no AOT module, key, signature or admission -- `moy_wasm.CHIP` is None,
     so WasmRun opens `main.wasm` and is never "slow" for it.
   - **A hook's catch rethrows anything that is not an `Error`**: the VM's own
     longjmp unwinds as a JavaScript exception through the cart's frames, and

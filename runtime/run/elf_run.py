@@ -19,6 +19,9 @@ is let go when no native process holds it.
 A native cart carries one module a chip, `main.<chip>.elf` beside its
 manifest (tools/elf_cart.py), and its manifest's `"moybyte": {"native":
 [chips]}` names them; a cart with none for this console does not run here.
+A module that carries a signature must verify; one with none runs only when
+its consent admits it (`app_perms.run_admits_unsigned`, the engine's UNSIGNED
+flag), the one rule the compiled tier's AOT modules follow too.
 """
 
 REFUSED = -3
@@ -56,8 +59,14 @@ class ElfRuntime:
             if not self.netted and getattr(ws, "wifi_release", None) is not None:
                 ws.wifi_release(NET_TAG)
 
-    def _flags(self, net):
-        return getattr(self.engine, "NET", 1) if net else 0
+    def _flags(self, cart, net):
+        try:
+            import app_perms
+        except ImportError:  # host: the runtime package
+            from runtime import app_perms
+        unsigned = app_perms.run_admits_unsigned(self.ws, cart)
+        return ((getattr(self.engine, "NET", 1) if net else 0)
+                | (getattr(self.engine, "UNSIGNED", 2) if unsigned else 0))
 
     def module(self, cart):
         """The path of the cart's module for this console, or None."""
@@ -75,13 +84,15 @@ class ElfRuntime:
         """The cart's module run as `argv` in the shell session the door's
         crossing runs in (runtime/shell/sh_door.py), reaching the `roots`
         (store-relative folders) its permissions grant, with sockets when
-        `net`: (exit status, None), or (REFUSED, why) when it did not run."""
+        `net`, a module with no signature admitted when its consent admits
+        one (app_perms.run_admits_unsigned): (exit status, None), or
+        (REFUSED, why) when it did not run."""
         path = self.module(cart)
         if path is None:
             return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.command(path, tuple(argv), joined, pid, cart.get("id") or "",
-                                   bg_pid, budget_ms, self._flags(net))
+                                   bg_pid, budget_ms, self._flags(cart, net))
 
     def start(self, cart, argv, roots=(), pid=0, budget_ms=0, net=False):
         """command's run started as process `pid` and left running: (0,
@@ -91,7 +102,7 @@ class ElfRuntime:
             return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.start(path, tuple(argv), joined, pid, cart.get("id") or "",
-                                 budget_ms, self._flags(net))
+                                 budget_ms, self._flags(cart, net))
 
     def step(self, pid, max_ms):
         """Serve the run's session calls for `max_ms` at most: (RUNNING,

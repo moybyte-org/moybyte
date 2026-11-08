@@ -69,7 +69,8 @@ console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 argument says which: False builds the console alone, and `wasm_open(module,
 wasm_head, pages, wasm_sha, cart_dir, wire_swapped, gate, allow_unsigned)`
 hands it to the ENGINE, `native/moy_wasm`, which owns the runtime, the
-signature (`allow_unsigned` is the console's Unknown sources setting), the
+admission (`allow_unsigned` is the cart's consent to `native`,
+`app_perms.run_admits_unsigned`), the
 load, the provenance key and the thread everything WAMR does runs on. This half binds
 and nothing else: it registers the table, checks the module's shape against
 the manifest's pages before its memory exists, binds the instance to the

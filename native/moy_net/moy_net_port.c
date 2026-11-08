@@ -59,6 +59,12 @@ void moy_net_free(void *p) {
     }
     heap_caps_free(p);
 }
+
+#include "mbedtls/sha256.h"
+
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
+    mbedtls_sha256(p, n, out, 0);
+}
 #elif MOY_NET_POSIX
 #include <stdlib.h>
 #include <time.h>
@@ -84,6 +90,13 @@ void *moy_net_alloc(size_t n) {
 
 void moy_net_free(void *p) {
     free(p);
+}
+
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
+    moy_sha256_t h;
+    moy_sha256_init(&h);
+    moy_sha256_update(&h, p, n);
+    moy_sha256_final(&h, out);
 }
 
 // The machine's own clock, which its system keeps.

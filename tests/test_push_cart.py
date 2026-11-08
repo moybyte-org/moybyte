@@ -1086,19 +1086,27 @@ def test_a_compiled_cart_with_no_main_wasm_says_to_build_it(tmp_path):
 
 
 @needs_wamrc
-@pytest.mark.parametrize("unknown_sources", [False, True])
+@pytest.mark.parametrize("native", [False, True])
 def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
-        monkeypatch, tmp_path, capsys, unknown_sources):
+        monkeypatch, tmp_path, capsys, native):
     """The board runs the cart only from a module for its chip, and a cart
     made with `moy build` carries none: the push compiles one, unsigned, and
     sends it beside main.wasm, leaving the cart folder as it was. Unsigned
-    runs only with Unknown sources on, which the tool asks the console about
-    and says plainly before the push when it is off."""
+    runs natively only for a cart that asks for "native", which the tool
+    reads from the manifest and says plainly before the push when it does
+    not."""
+    import json
     from tools import wasm_module as wm
     cart = _compiled_cart(tmp_path)
+    if native:
+        path = os.path.join(cart, "manifest.json")
+        with open(path, encoding="utf-8") as f:
+            man = json.load(f)
+        man.setdefault("moybyte", {}).setdefault("permissions", []).append("native")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(man, f)
     before = sorted(os.listdir(cart))
     dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
-    dev.ws.unknown_sources = unknown_sources
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "tdeck"]) == 0
     module = dev.fs.files["/sd/carts/demo.moy/main.esp32s3.f%s.aot"
@@ -1110,7 +1118,7 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
     assert wm.split(module)[1] is None                  # unsigned
     assert sorted(os.listdir(cart)) == before           # the cart is untouched
     out = capsys.readouterr().out
-    assert ("Unknown sources off" in out) is (not unknown_sources)
+    assert ('does not ask for "native"' in out) is (not native)
     assert out.index("compiling one, unsigned") < out.index("demo.moy ->")
 
 
@@ -1126,7 +1134,6 @@ def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
     wm.build(b"\0asm\1\0\0\0", "esp32p4", stale,
              signed=False)
     dev = _FakeConsole(board="p4", carts_root="/moy/carts")
-    dev.ws.unknown_sources = True
     monkeypatch.setattr(p4_autotest.P4Board, "reset", lambda self, **kw: None)
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "p4"]) == 0

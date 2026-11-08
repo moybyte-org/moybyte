@@ -76,9 +76,10 @@ typedef struct {
 
 // Open a session on the module file `path` (read through the VFS into
 // PSRAM; a tampered AOT module, or an unsigned one while `allow_unsigned` is
-// 0, is refused before the thread exists). `allow_unsigned` is the owner's
-// Unknown sources setting as the caller read it: non-zero lets an AOT module
-// with no signature load, its provenance key still checked.
+// 0, is refused before the thread exists: moy_ota_admit_module). `allow_unsigned`
+// is the cart's consent as the caller read it (app_perms.admits_unsigned):
+// non-zero lets an AOT module with no signature load, its provenance key
+// still checked.
 // `want_sha` is the canonical .wasm's sha256 as 64 hex characters, which an
 // AOT module's key must name, or NULL to take whatever wasm the key names.
 // `memory` is the linear memory the manifest declares, in bytes: the file is
@@ -89,7 +90,7 @@ typedef struct {
 // `interp` is non-zero when `path` is a cart's own main.wasm, run on the
 // interpreter tier (native/moy_wasm/README.md, "A cart survives its
 // firmware", 2026-09-30): no moybyte.key section, no signature and no
-// Unknown sources check -- WAMR's bytecode validation is the sandbox, not
+// admission -- WAMR's bytecode validation is the sandbox, not
 // provenance -- and moy_wasm_session_lanes() reports 0 lanes for the
 // session's life, so a cart's par items run in declaration order instead of
 // across cores (the same fallback a board with MOY_WASM_ITEM_LANES 0 takes).

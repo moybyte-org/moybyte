@@ -32,6 +32,7 @@ TRAPPED, REFUSED = -1, -3       # moy_os.h's MOY_OS_REFUSED; a host module that 
 _C, _I, _P, _U32 = ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32
 _LIB = [None]
 NET = 1                 # moy_os.h's MOY_OS_NET
+UNSIGNED = 2            # moy_os.h's MOY_OS_UNSIGNED: the consent admits an unsigned module
 _NET_FN = ctypes.CFUNCTYPE(None, _P, _U32, _I)
 _NET = [None]           # the hook, kept alive while the library holds it
 
@@ -73,9 +74,9 @@ def _lib():
         d.moy_os_command_step.restype = _I
         d.moy_os_command_stop.argtypes = [_U32]
         d.moy_os_command_stop.restype = _I
-        d.hl_elf_service.argtypes = [_C, _U32, _C, _C, _I]
+        d.hl_elf_service.argtypes = [_C, _U32, _C, _U32, _C, _I]
         d.hl_elf_service.restype = _I
-        d.hl_elf_check.argtypes = [_C, _C, _I]
+        d.hl_elf_check.argtypes = [_C, _U32, _C, _I]
         d.hl_elf_check.restype = _I
         d.moy_os_poll_services.argtypes = [ctypes.POINTER(_U32), ctypes.POINTER(ctypes.c_int32), _U32]
         d.moy_os_poll_services.restype = _U32
@@ -105,8 +106,8 @@ def command(path, argv, roots=None, pid=0, cid="", bg_pid=0, budget_ms=0, flags=
     """A native command, as the boards' `moy_elf.command`: the module at
     `path` run as `argv` in the shell session running on this thread,
     reaching `roots` (folders relative to the store, each ending in a NUL;
-    None for none), with what `flags` grants (NET: its sockets). (exit
-    status, None), or (REFUSED, why)."""
+    None for none), with what `flags` grants (NET: its sockets; UNSIGNED: a
+    module with no signature runs). (exit status, None), or (REFUSED, why)."""
     d = _lib()
     if d is None:
         return REFUSED, "no host library"
@@ -147,20 +148,23 @@ def cancel(pid):
     return _lib().moy_os_command_stop(int(pid))
 
 
-def check(path):
-    """None when the module at `path` would load here, else why not."""
+def check(path, flags=0):
+    """None when the module at `path` would load here under `flags`
+    (UNSIGNED: the consent admits one with no signature), else why not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
-    if d.hl_elf_check(path.encode(), err, len(err)) != 0:
+    if d.hl_elf_check(path.encode(), int(flags), err, len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
 
 
-def service(path, pid, cid=""):
-    """Start the native service at `path` as process `pid`: None, or why not."""
+def service(path, pid, cid="", flags=0):
+    """Start the native service at `path` as process `pid`, admitted under
+    `flags` (UNSIGNED): None, or why not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
-    if d.hl_elf_service(path.encode(), int(pid), (cid or "").encode(), err, len(err)) != 0:
+    if d.hl_elf_service(path.encode(), int(pid), (cid or "").encode(), int(flags), err,
+                        len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
 

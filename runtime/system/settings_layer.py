@@ -186,33 +186,8 @@ SETTINGS_TOGGLES = (
     # play-then-read-diag.log workflow. Crash/cart-exit flushes stay
     # unconditional either way (the safety net).
     ("diag_sd", "DIAG SD LOG", False, "set_diag_sd", None, None),
-    # UNKNOWN SOURCES (owner, 2026-09-29, native/moy_wasm/README.md): a
-    # compiled cart whose module carries no signature may load -- a cart
-    # somebody rebuilt from its source, on their own console. The module's
-    # provenance key is still checked, and one whose signature is present but
-    # does not verify is refused either way (native/moy_wasm/README.md).
-    # Default OFF; ON goes through the warning in TOGGLE_CONFIRMS, OFF is
-    # immediate. Every tier carries the row, though only a board checks
-    # signatures.
-    ("unknown_sources", "UNKNOWN SOURCES", False, "set_unknown_sources", None,
-     "unknown_sources"),
 )
 
-# The toggles whose ON goes through a warning first: key -> (the warning's
-# title, what turning it on means in one or two Spoken sentences, the button
-# that turns it on). A tap, a step or A on the row opens the warning instead of
-# flipping the toggle, and the warning's keyboard focus starts on KEEP OFF, so
-# turning it on is a deliberate move and a press; turning it OFF is immediate.
-# The boot apply and the dev channel's word call the setter directly: neither
-# is somebody deciding at the screen.
-TOGGLE_CONFIRMS = {
-    "unknown_sources": (
-        "UNKNOWN SOURCES",
-        "Unsigned carts can do anything on this console. "
-        "Only run ones you trust.",
-        "TURN ON"),
-}
-KEEP_OFF = "KEEP OFF"
 
 
 # What a row's label says on the page (sentence case; the registry and the
@@ -257,7 +232,7 @@ _GROUPS = (
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "paired", "ota_channel", "update_online", "update", "update_c6")),
-    ("Developer", ("diag_live", "diag_sd", "unknown_sources", "crash")),
+    ("Developer", ("diag_live", "diag_sd", "crash")),
 )
 
 # The USB drive page's words, by the drive's state (usb_drive.STOPPED ..
@@ -422,9 +397,6 @@ class SettingsLayer:
         # it was built from in a PREALLOCATED list compared element-wise.
         self._toggle_cache = None
         self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
-        # The warning a TOGGLE_CONFIRMS toggle shows before it turns ON: the
-        # toggle's key while it is up (its page replaces the rows).
-        self.confirm_key = None
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
@@ -477,7 +449,6 @@ class SettingsLayer:
             self.close_wifi()
         if self.bt_view:
             self.close_bluetooth()
-        self.confirm_key = None
         self.crash_view = False
         self.tz_view = False
         self.paired_view = False
@@ -1084,57 +1055,6 @@ class SettingsLayer:
         elif pick == 0:
             self._wifi_cancel()
 
-    # -- the warning before a TOGGLE_CONFIRMS toggle turns ON -------------------
-
-    def open_confirm(self, key):
-        """Show `key`'s warning in place of the rows, KEEP OFF focused."""
-        self.confirm_key = key
-        self.ws._dirty = True
-
-    @property
-    def confirm_sel(self):
-        """Which of the warning's buttons holds focus: 0 KEEP OFF, 1 the one
-        that turns the toggle on."""
-        key = self.confirm_key
-        if key is None:
-            return 0
-        return 1 if self._sub_focused == say(TOGGLE_CONFIRMS[key][2]) else 0
-
-    def close_confirm(self):
-        """Back to the rows with the toggle as it was."""
-        key = self.confirm_key
-        self.confirm_key = None
-        for t in SETTINGS_TOGGLES:
-            if t[0] == key:
-                self._want = say(t[1])
-        self.ws._dirty = True
-
-    def _confirm_accept(self):
-        """The confirming button: turn the toggle ON through its verb (which
-        persists it) and go back to the rows."""
-        key = self.confirm_key
-        self.close_confirm()
-        for t in SETTINGS_TOGGLES:
-            if t[0] == key:
-                getattr(self.ws, t[3])(True)
-                return
-
-    def _confirm_page(self):
-        """The warning: the toggle's name over what turning it on means, then
-        KEEP OFF (focused when it opens) and the danger button that turns it
-        on."""
-        title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
-        _x, _y, w, _h = _ui.page("")
-        _ui.hints(("back", "Back"))
-        _ui.group(say(title))
-        for line in _wrap(text, max(8, (w - 32) // max(1, self.ws.layout.font_w))):
-            _ui.label(line)
-        if _ui.button(say(KEEP_OFF)):
-            self.close_confirm()
-        elif _ui.button(say(yes), "danger"):
-            self._confirm_accept()
-        _ui.group()
-
     # -- LAST CRASH page (the kernel's record, read-only) -----------------------
 
     def open_crash(self):
@@ -1479,11 +1399,7 @@ class SettingsLayer:
         ws = self.ws
         for t in SETTINGS_TOGGLES:
             if t[0] == key:
-                on = not getattr(ws, key, False)
-                if on and key in TOGGLE_CONFIRMS:
-                    self.open_confirm(key)
-                    return
-                getattr(ws, t[3])(on)
+                getattr(ws, t[3])(not getattr(ws, key, False))
                 return
 
     def row_index(self, key):
@@ -1940,8 +1856,6 @@ class SettingsLayer:
             return "wifi"
         if self.bt_view:
             return "bt"
-        if self.confirm_key is not None:
-            return "confirm"
         if self.crash_view:
             return "crash"
         if self.tz_view:
@@ -1964,8 +1878,6 @@ class SettingsLayer:
                 i.pressed("home") or i.pressed("b") or i.pressed("stop")):
             return True                   # the page holds while the drive is on
         if i.pressed("home"):
-            if view == "confirm":
-                self.close_confirm()
             ws.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
@@ -1978,7 +1890,7 @@ class SettingsLayer:
 
     def has_page(self):
         """Whether a page is open over Settings' rows (Wi-Fi, Bluetooth, a
-        confirmation, a crash report), which `back` steps out of: a desk
+        crash report), which `back` steps out of: a desk
         window shows the back chevron in its title strip then."""
         return self._page_of() is not None
 
@@ -1991,8 +1903,6 @@ class SettingsLayer:
             pass                          # the first back cancels the field
         elif view == "bt":
             self.close_bluetooth()
-        elif view == "confirm":
-            self.close_confirm()
         elif view == "crash":
             self.close_crash()
         elif view == "tz":
@@ -2100,8 +2010,6 @@ class SettingsLayer:
                 self.wifi_page()
             elif view == "bt":
                 self._bt_page()
-            elif view == "confirm":
-                self._confirm_page()
             elif view == "achievements":
                 self.achievements.draw(self._content())
             elif view == "licences":

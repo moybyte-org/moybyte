@@ -1893,7 +1893,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
-        # a console that never turned Unknown sources on loads signed modules only
+        # a cart that does not ask for "native" loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
         # the cart declares no writable paths; its files are moycore's C
@@ -1962,26 +1962,26 @@ def test_the_cart_s_audio_ring_reaches_the_binding(tmp_path):
         world.close()
 
 
-def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
-    """The owner's switch rides every load as it stands at that load: the
-    engine lets a module with no signature through only when it is on, and a
-    flip reaches the next cart started."""
+def test_the_load_asks_the_engine_what_the_cart_s_consent_says_now(tmp_path):
+    """The cart's consent rides every load as it stands at that load
+    (app_perms.run_admits_unsigned): the engine lets a module with no
+    signature through only for a cart granted "native"."""
     cart, _main = _compiled(tmp_path)
-    for on in (True, False, True):
+    for native in (True, False, True):
         world = _wasm_world()
         try:
-            ws = FakeWs(project=_CartProject(cart))
-            ws.unknown_sources = on
+            perms = ["native"] if native else []
+            ws = FakeWs(project=_CartProject(dict(cart, permissions=perms)))
             world.mod.WasmRun(ws, make_ns(), None)
             assert world.core.calls[1][0] == "wasm_open"
-            assert world.core.calls[1][7] is on
+            assert world.core.calls[1][7] is native
         finally:
             world.close()
 
 
 def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
-    """The engine's refusal for a module with no signature (Unknown sources
-    off) is not tamper evidence, so WasmRun retries the open on the
+    """The engine's refusal for a module with no signature (its cart not
+    granted "native") is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
     (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). The cart plays; run.interp says so, and interp_cause says

@@ -4,8 +4,9 @@
 // above the load -- the verdict, the process, the rows, the session's calls --
 // is the boards' C (native/moy_elf/moy_os.c, moy_elf_check.c).
 //
-// A signature that is present must verify (moy_ota_verify_module), as on a
-// board; an unsigned module runs.
+// A module is admitted as on a board (moy_ota_admit_module): a signature that
+// is present must verify, and an unsigned module runs on `flags`'
+// MOY_OS_UNSIGNED, the cart's consent.
 //
 // A host module links its C library dynamically (memcpy and the like come from
 // the host's), so its verdict lets it import symbols; the table's rows it calls
@@ -43,8 +44,9 @@ static void unload(void *h) {
     dlclose(h);
 }
 
-// The module at `path` checked and mapped into *m: 0, or -3 with the reason.
-static int load(const char *path, moy_os_module_t *m, char *err, int errlen) {
+// The module at `path` admitted, checked and mapped into *m: 0, or -3 with
+// the reason.
+static int load(const char *path, uint32_t flags, moy_os_module_t *m, char *err, int errlen) {
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
         put(err, errlen, "no module", path);
@@ -63,8 +65,9 @@ static int load(const char *path, moy_os_module_t *m, char *err, int errlen) {
         return -3;
     }
     size_t len = (size_t)n;
-    const char *bad = moy_ota_verify_module(b, (size_t)n, MOY_ELF_SIG_SCHEME, "host", &len);
-    if (bad != NULL && strcmp(bad, MOY_OTA_MODULE_UNSIGNED) != 0) {
+    const char *bad = moy_ota_admit_module(b, (size_t)n, MOY_ELF_SIG_SCHEME, "host",
+                                           (flags & MOY_OS_UNSIGNED) != 0, NULL, 0, &len);
+    if (bad != NULL) {
         free(b);
         put(err, errlen, "refused", bad);
         return -3;
@@ -117,7 +120,7 @@ int hl_elf_command(const char *path, int argc, const char **argv, const char *ro
         return -3;
     }
     moy_os_module_t m;
-    if (load(path, &m, err, errlen) != 0) {
+    if (load(path, flags, &m, err, errlen) != 0) {
         return -3;
     }
     return moy_os_command(s, &m, NULL, argc, argv, roots, pid, id, bg_pid, budget_ms, flags,
@@ -133,24 +136,25 @@ int hl_elf_start(const char *path, int argc, const char **argv, const char *root
         return -3;
     }
     moy_os_module_t m;
-    if (load(path, &m, err, errlen) != 0) {
+    if (load(path, flags, &m, err, errlen) != 0) {
         return -3;
     }
     return moy_os_command_start(s, &m, NULL, argc, argv, roots, pid, id, 0, budget_ms, flags,
                                 err, (size_t)errlen);
 }
 
-int hl_elf_service(const char *path, uint32_t pid, const char *id, char *err, int errlen) {
+int hl_elf_service(const char *path, uint32_t pid, const char *id, uint32_t flags, char *err,
+                   int errlen) {
     moy_os_module_t m;
-    if (load(path, &m, err, errlen) != 0) {
+    if (load(path, flags, &m, err, errlen) != 0) {
         return -3;
     }
     return moy_os_service(&m, NULL, pid, id, err, (size_t)errlen) != NULL ? 0 : -3;
 }
 
-int hl_elf_check(const char *path, char *err, int errlen) {
+int hl_elf_check(const char *path, uint32_t flags, char *err, int errlen) {
     moy_os_module_t m;
-    if (load(path, &m, err, errlen) != 0) {
+    if (load(path, flags, &m, err, errlen) != 0) {
         return -3;
     }
     dlclose(m.loaded);

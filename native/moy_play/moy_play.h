@@ -126,8 +126,8 @@ bool moy_play_is_game(const moy_cat_entry_t *e);
 struct moy_input;                               // moy_input.h
 
 // Launch flags: on the tick model; the run's route is HOME (the launcher
-// started it, and its exit lands there); the owner's Unknown sources setting
-// (an unsigned compiled module may load).
+// started it, and its exit lands there); the cart's consent admits an
+// unsigned compiled module (moy_ota_admit_module's `consented`).
 enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 
 // THE SHARES (2026-10-05; configuration, derived from #224's measurements,

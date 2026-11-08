@@ -63,8 +63,8 @@ the same watcher into a site-mode browser's OPFS, and between a board and the
 page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
 board is of record, its C parks a system batch for the VM, and the VM merges
 it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
-the badges a union. A board's pin, update channel and UNKNOWN SOURCES are
-never sent to a page and never taken from one. A fourth root, the apps'
+the badges a union. A board's pin, update channel and NTP server are never
+sent to a page and never taken from one, and its consent records stay its own. A fourth root, the apps'
 private folders (`apps/<id>/<key>`, what a compiled cart wrote: `APPS_ROOT`),
 crosses between a board and the page it serves, every file as bytes.
 
@@ -731,9 +731,9 @@ BOARD = "board"         # never sent to a browser, never taken from one
 # Every key a console writes, by what crossing does to it; a key not named here
 # (a retired setting, one added without an entry) is LOCAL. A PORTABLE key
 # carries the shape its value must have to be taken (None: any JSON value).
-# BOARD keys guard the board: its pairing pin, its update channel, the NTP
-# server its certificate dates rest on, and whether it loads unsigned code --
-# a page must never be able to turn that on.
+# BOARD keys guard the board: its pairing pin, its update channel and the NTP
+# server its certificate dates rest on. The consent records (`consent`, which
+# admit unsigned code through `native`) are LOCAL: a page's are ignored.
 SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),
@@ -762,7 +762,6 @@ SYSTEM_KEYS = {
     "win_full": (LOCAL, None),
     "tz": (LOCAL, None),
     "ota_channel": (BOARD, None),
-    "unknown_sources": (BOARD, None),
     "ntp_server": (BOARD, None),
 }
 

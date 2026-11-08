@@ -51,7 +51,9 @@ except ImportError:  # pragma: no cover - host fallback
 ALL = ("python", "lua", "wasm", "elf")
 
 # A native module's one line (the overview's section 4): it runs at the
-# kernel's trust, so its prompt says so, and every native app asks for it.
+# kernel's trust, so its prompt says so, and every native app asks for it; a
+# wasm cart asks for it to run an AOT module that carries no signature
+# (`admits_unsigned`).
 NATIVE = "Full access to the console"
 PY = ("python",)
 
@@ -73,7 +75,7 @@ TABLE = (
     ("front", "api:front", ALL, "Take over the screen from the background", None, ()),
     ("autostart", "boot", ALL, "Start when the console starts", None, ()),
     ("lease", "lease", PY, "full", "lease", ()),
-    ("native", "native", ("elf",), NATIVE, None, ()),
+    ("native", "native", ("elf", "wasm"), NATIVE, None, ()),
     ("http", "api:http", PY, "Fetch pages from the internet", "wifi", ()),
     ("mic", "api:mic", PY, "Record with the microphone", "mic", ()),
     ("lora", "api:lora", PY, "Send and receive on the LoRa radio", "lora", ()),
@@ -204,6 +206,26 @@ def _why_absent(perm, tier, have, rec):
         if rec["perms"] is not None and perm not in rec["perms"] and r[PROMPT] is not None:
             return "unconsented"
     return None
+
+
+def admits_unsigned(granted):
+    """Whether a run granted the permissions `granted` may load a compiled
+    module that carries no signature (an AOT or a native module: the
+    `consented` of native/moy_net/moy_ota.h's moy_ota_admit_module, the one
+    admission both tiers make). An unsigned module runs at the kernel's
+    trust, so it takes the consent that says so: `native`, the install
+    prompt's "Full access to the console". There is no console-wide switch
+    (docs/os_2026-11.md section 1); a signature that is present must verify
+    whatever this says."""
+    return "native" in (granted or ())
+
+
+def run_admits_unsigned(ws, cart):
+    """`admits_unsigned` for `cart` on console `ws`, under its consent record
+    (none: its manifest as written)."""
+    consent = getattr(ws, "consent", None)
+    granted = consent.check(cart)[0] if consent is not None else check(cart, None, ())[0]
+    return admits_unsigned(granted)
 
 
 def board_words():

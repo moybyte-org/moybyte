@@ -278,12 +278,6 @@ def capture(cfg, carts_dir):
     sl.close_tz()
     ws.set_time_zone(None, persist=False)
 
-    from runtime.settings_layer import KEEP_OFF, TOGGLE_CONFIRMS
-    for key in sorted(TOGGLE_CONFIRMS):
-        sl.open_confirm(key)
-        for sel, label in enumerate((KEEP_OFF, TOGGLE_CONFIRMS[key][2])):
-            out["confirm_%s_%d" % (key, sel)] = page(sl._sub, say(label))
-        sl.close_confirm()
     sl._draw_page()
 
     # USB DRIVE: a board's row (absent on the host), its page off -- with the

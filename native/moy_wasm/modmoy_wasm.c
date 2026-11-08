@@ -12,9 +12,9 @@
 //
 // The Python side reads the module FILE (through the VFS, so the T-Deck's SD
 // and the P4s' flash store look the same) into a PSRAM buffer, checks its
-// signature (moy_wasm_key.h) -- a module whose signature does not verify never
-// reaches the runtime, and one with no signature reaches it only when the
-// caller allows unsigned modules (the owner's Unknown sources setting) --
+// admission (moy_ota_admit_module) -- a module whose signature does not verify
+// never reaches the runtime, and one with no signature reaches it only when
+// the cart's consent admits it (app_perms.admits_unsigned) --
 // starts the thread, and collects a report when it ends. One run at a time.
 //
 // A cart the Player runs is a SESSION (phase 3, moy_wasm_session.h): the same
@@ -50,8 +50,6 @@
 #include "freertos/semphr.h"
 #include "freertos/idf_additions.h"   // pxTaskGetStackStart
 
-#include "mbedtls/sha256.h"
-
 #include "wasm_export.h"
 #include "moy_wasm_footprint.h"
 
@@ -68,14 +66,12 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasm_thread.h"
 #include "moy_wasi.h"
 #include "moy_sh.h"
+#include "../moy_net/moy_ota.h"
 #include "../moy_store/moy_vol.h"
 
 // A VM runs (native/moy_kernel's loop): weak, so an image without the kernel
 // always has one.
 bool moy_loop_vm(void) __attribute__((weak));
-// The kernel's RSA check (native/moy_net/moy_ota.h), where the image has it.
-int moy_ota_verify(const void *payload, size_t n, const char *sig_hex, size_t sig_n,
-                   const void *keys, int nkeys) __attribute__((weak));
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
 
@@ -536,91 +532,18 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
     *out_len = (uint32_t)size;
 }
 
-// The module's signature (moy_wasm_key.h): NULL when the file may load, with
-// *module_len set to the module's length without any trailer; otherwise the
-// refusal. The RSA check is moy_ota.verify_sig -- the body and the keys every
-// OTA manifest is checked with -- so this runs on the MicroPython task, before
-// the run's thread exists.
-//
-// A file with no trailer loads only when `unsigned_ok`, the owner's Unknown
-// sources setting as the caller read it; its provenance key is checked on the
-// thread as every module's is. A trailer that is present must verify whatever
-// `unsigned_ok` says: a signature that does not is a module changed after it
-// was signed, or one signed with a key this image does not trust, and neither
-// is a module somebody built without signing.
-static const char *verify_module(const uint8_t *file, uint32_t len, bool unsigned_ok,
-                                 uint32_t *module_len)
+// The module's admission (moy_ota_admit_module, native/moy_net/moy_ota.h):
+// NULL when the file may load, with *module_len set to the module's length
+// without any trailer; otherwise the refusal. `consented` is the cart's
+// consent as the caller read it (app_perms.admits_unsigned); its provenance
+// key is checked on the thread as every module's is.
+static const char *admit(const uint8_t *file, uint32_t len, bool consented,
+                         uint32_t *module_len)
 {
-    const uint32_t magic = sizeof(MOY_WASM_SIG_MAGIC) - 1;
-    if (len < magic + 4 || memcmp(file + len - magic, MOY_WASM_SIG_MAGIC, magic) != 0) {
-        *module_len = len;
-        return unsigned_ok ? NULL : "unsigned module";
-    }
-    const uint8_t *lp = file + len - magic - 4;
-    uint32_t k = lp[0] | (uint32_t)lp[1] << 8 | (uint32_t)lp[2] << 16 | (uint32_t)lp[3] << 24;
-    if (k < 64 || k > 1024 || k > len - magic - 4) {
-        return "malformed signature";
-    }
-    uint32_t n = len - magic - 4 - k;
-
-    uint8_t digest[32];
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);
-    for (uint32_t at = 0; at < n; at += 65536) {
-        mbedtls_sha256_update(&ctx, file + at, n - at < 65536 ? n - at : 65536);
-    }
-    mbedtls_sha256_finish(&ctx, digest);
-    mbedtls_sha256_free(&ctx);
-
-    static const char hex[] = "0123456789abcdef";
-    char text[sizeof(MOY_WASM_SIG_SCHEME) + sizeof(KEY_CHIP) + 16 + 64];
-    int tl = snprintf(text, sizeof(text), MOY_WASM_SIG_SCHEME "\n%s\n%u\n", KEY_CHIP,
-                      (unsigned)n);
-    for (int i = 0; i < 32; i++) {
-        text[tl++] = hex[digest[i] >> 4];
-        text[tl++] = hex[digest[i] & 15];
-    }
-    const char *why = "bad signature";
-    if (moy_ota_verify != NULL) {
-        char *sig = heap_caps_malloc(2 * k, PSRAM_CAPS);
-        if (sig == NULL) {
-            why = "the signature could not be checked";
-        } else {
-            const uint8_t *sp = lp - k;
-            for (uint32_t i = 0; i < k; i++) {
-                sig[2 * i] = hex[sp[i] >> 4];
-                sig[2 * i + 1] = hex[sp[i] & 15];
-            }
-            if (moy_ota_verify(text, (size_t)tl, sig, 2 * k, NULL, 0)) {
-                why = NULL;
-            }
-            heap_caps_free(sig);
-        }
-        *module_len = n;
-        return why;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        vstr_t sig;
-        vstr_init(&sig, 2 * k);
-        const uint8_t *sp = lp - k;
-        for (uint32_t i = 0; i < k; i++) {
-            vstr_add_byte(&sig, hex[sp[i] >> 4]);
-            vstr_add_byte(&sig, hex[sp[i] & 15]);
-        }
-        mp_obj_t ota = mp_import_name(MP_QSTR_moy_ota, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-        mp_obj_t ok = mp_call_function_2(mp_load_attr(ota, MP_QSTR_verify_sig),
-                                         mp_obj_new_bytes((const byte *)text, tl),
-                                         mp_obj_new_str_from_vstr(&sig));
-        if (mp_obj_is_true(ok)) {
-            why = NULL;
-        }
-        nlr_pop();
-    } else {
-        why = "the signature could not be checked";
-    }
-    *module_len = n;
+    size_t n = len;
+    const char *why = moy_ota_admit_module(file, len, MOY_WASM_SIG_SCHEME, KEY_CHIP,
+                                           consented, NULL, 0, &n);
+    *module_len = (uint32_t)n;
     return why;
 }
 
@@ -637,8 +560,8 @@ static void read_file(run_t *r, mp_obj_t path)
 // `psram_stack` and `pool` override the board's settings and the pool's
 // sizing rule for this run (a measurement, not a product knob: result()'s
 // `pool_peak` under a pool bigger than the rule's is what the rule must
-// hold). `allow_unsigned` lets a module with no signature load, as the Unknown
-// sources setting does for a cart. done() says when it ended, result()
+// hold). `allow_unsigned` lets a module with no signature load, as a cart's
+// consent to `native` does. done() says when it ended, result()
 // collects it; a module refused for its signature ends at once, with no
 // thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)
@@ -711,8 +634,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
                          ? MOY_WASM_STACK_PSRAM : mp_obj_is_true(a[ARG_psram_stack].u_obj);
     r->pool_asked = (uint32_t)pool;
     read_file(r, a[ARG_path].u_obj);
-    const char *why = verify_module(r->file, r->file_len, a[ARG_allow_unsigned].u_bool,
-                                    &r->file_len);
+    const char *why = admit(r->file, r->file_len, a[ARG_allow_unsigned].u_bool, &r->file_len);
     if (why) {
         fail(r, "refused", why);
         r->started = true;
@@ -1339,10 +1261,9 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         }
     }
     // main.wasm carries no signature and needs none: the interpreter is the
-    // sandbox (moy_wasm_key.h). Everything else -- AOT modules -- still goes
-    // through the Unknown sources gate as before.
+    // sandbox (moy_wasm_key.h). An AOT module is native code, and is admitted.
     if (!s->interp) {
-        const char *why = verify_module(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
+        const char *why = admit(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
         if (why) {
             snprintf(err, errlen, "refused: %s", why);
             sess_free(s);

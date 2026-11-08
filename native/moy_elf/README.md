@@ -86,10 +86,13 @@ budget). No row is a second implementation of a shell or WASI call.
 
 ## Signing
 
-A signed module carries the AOT modules' trailer (`moy_ota_verify_module`,
-`native/moy_net/moy_ota.h`) under its own scheme, `moybyte-elf-sig 1`, so a
-signature for one chip's module never verifies another kind. An unsigned
-module runs (consent is the gate); a signature that is present must verify.
+A signed module carries the AOT modules' trailer under its own scheme,
+`moybyte-elf-sig 1`, so a signature for one chip's module never verifies
+another kind. It is admitted by the call the AOT tier makes,
+`moy_ota_admit_module` (`native/moy_net/moy_ota.h`): a signature that is
+present must verify, and an unsigned module runs only with the loader's
+UNSIGNED flag, which `runtime/run/elf_run.py` sets from the cart's consent to
+`native` (`app_perms.run_admits_unsigned`).
 `tools/elf_cart.py` signs as `tools/wasm_module.py` does.
 
 ## The cart

@@ -58,7 +58,7 @@ class _Rows(Settings):
 BOARD_DOC = {
     "theme": "dusk", "theme_variant": "dark", "name": "Mia", "author": "mia",
     "show_fps": True, "volume": 2, "font_scale": 2,
-    "ota_channel": "stable", "unknown_sources": False,
+    "ota_channel": "stable", "consent": {"a.b": {"perms": [], "off": []}},
     "app_guard": {"local.calc": [3, 0]},
     "favorites": ["/sd/moybyte/carts/moybyte.star_catcher.moy"],
     "paint_doc": "sunset.moyimg", "retired_thing": 7,
@@ -80,7 +80,7 @@ BOARD_DOC = {
     ("chrome_scale", LOCAL), ("crisp_pixels", LOCAL), ("two_player", LOCAL),
     ("diag_live", LOCAL), ("diag_sd", LOCAL), ("app_guard", LOCAL),
     ("wallpaper_guard", LOCAL),
-    ("ota_channel", BOARD), ("unknown_sources", BOARD),
+    ("ota_channel", BOARD), ("ntp_server", BOARD), ("consent", LOCAL),
     ("frameskip", LOCAL), ("never_heard_of_it", LOCAL), ("paint_", LOCAL),
 ])
 def test_every_key_has_its_class_and_an_unknown_one_is_local(key, cls):
@@ -134,7 +134,7 @@ def test_the_pull_carries_the_portable_rows_and_never_the_boards_own():
         "theme": "dusk", "theme_variant": "dark", "name": "Mia",
         "author": "mia", "show_fps": True, "paint_doc": "sunset.moyimg",
         "favorites": ["moybyte.star_catcher.moy"]}
-    for key in ("ota_channel", "unknown_sources", "volume",
+    for key in ("ota_channel", "consent", "volume",
                 "app_guard", "retired_thing"):
         assert key not in sent
     assert json.loads(pull["achievements.json"]) == {
@@ -189,18 +189,20 @@ def test_a_page_cannot_change_a_key_the_board_keeps():
         assert rows.get(key) is None
 
 
-def test_a_page_can_never_turn_on_unsigned_code_or_move_the_channel():
-    """The board-only keys: a page that sends UNKNOWN SOURCES on and the
-    unstable channel changes neither."""
-    page = dict(BOARD_DOC, unknown_sources=True, ota_channel="unstable")
+NATIVE = {"a.b": {"perms": ["native"], "off": []}}
+
+
+def test_a_page_can_never_consent_to_unsigned_code_or_move_the_channel():
+    """A page that sends a consent record granting "native" (what admits
+    unsigned code) and the unstable channel changes neither."""
+    page = dict(BOARD_DOC, consent=NATIVE, ota_channel="unstable")
     rows, changed = _merge(page)
-    assert rows.get("unknown_sources") is False
+    assert rows.get("consent") == BOARD_DOC["consent"]
     assert rows.get("ota_channel") == "stable"
-    assert "unknown_sources" not in changed
+    assert "consent" not in changed
     # ...and a board that never had the row does not gain it either.
-    rows, _ = _merge({"unknown_sources": True, "theme": "dusk"},
-                     board={"theme": "dusk"})
-    assert rows.get("unknown_sources") is None
+    rows, _ = _merge({"consent": NATIVE, "theme": "dusk"}, board={"theme": "dusk"})
+    assert rows.get("consent") is None
 
 
 def test_a_value_of_the_wrong_shape_is_passed_over():
@@ -385,14 +387,14 @@ def test_a_system_batch_is_merged_and_its_keys_re_applied(tmp_path):
     ws = _Ws(ids=["first_run"])
     h = _host(tmp_path, ws)
     page = _doc(moy_sync.system_pull(ws.system, _NONE)[SETTINGS])
-    page.update(theme="night", show_fps=False, unknown_sources=True)
+    page.update(theme="night", show_fps=False, consent=NATIVE)
     st, doc = _paired(h).json("POST", "/sync", json.loads(_batch([
         {"p": SETTINGS, "t": _text(page)},
         {"p": "achievements.json", "t": _badges(first_open=0)}])))
     assert st == 200 and doc == {"ok": 2, "err": []}
     assert ws.system.get("theme") == "night"
     assert ws.system.get("show_fps") is False
-    assert ws.system.get("unknown_sources") is False
+    assert ws.system.get("consent") == BOARD_DOC["consent"]
     assert ws.system.get("favorites") == BOARD_DOC["favorites"]
     assert [sorted(k) for k in ws.applied] == [["show_fps", "theme"]]
     assert sorted(ws.ach.unlocked) == ["first_open", "first_run"]

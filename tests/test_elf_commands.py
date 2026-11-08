@@ -240,19 +240,21 @@ def test_a_module_needing_a_newer_console_is_refused(tmp_path):
     src.write_text('__asm__(".pushsection .moy.rows,\\"\\",@progbits\\n.4byte 4000\\n.popsection");\n'
                    'int main(void) { return 0; }\n')
     mod = elf_cart.build_module([str(src)], "host", str(tmp_path / "newer.elf"), signed=False)
-    why = elf_binding.check(mod)
+    why = elf_binding.check(mod, elf_binding.UNSIGNED)
     assert why is not None and "needs a console update" in why
     ok = tmp_path / "ok.c"
     ok.write_text("int main(void) { return 0; }\n")
-    assert elf_binding.check(elf_cart.build_module([str(ok)], "host", str(tmp_path / "ok.elf"),
-                                                   signed=False)) is None
+    unsigned = elf_cart.build_module([str(ok)], "host", str(tmp_path / "ok.elf"), signed=False)
+    assert elf_binding.check(unsigned, elf_binding.UNSIGNED) is None
+    # without its cart's consent to "native", a module with no signature is not admitted
+    assert elf_binding.check(unsigned) == "refused: unsigned module"
 
 
 def test_a_service_s_hooks_on_its_task_and_its_sweep(built):
     from runtime import elf_binding, moy_log
     path = os.path.join(built["elf_svc"], "main.host.elf")
     pid = moy_log.spawn("svc")
-    assert elf_binding.service(path, pid, "elf.svc") is None
+    assert elf_binding.service(path, pid, "elf.svc", elf_binding.UNSIGNED) is None
     t0 = time.monotonic()
     while (elf_binding.info(pid) or {}).get("timers", 0) < 3 and time.monotonic() - t0 < 5:
         time.sleep(0.01)
@@ -323,6 +325,7 @@ def test_a_signature_that_is_present_must_verify(built, tmp_path):
     forged.write_bytes(wasm_module.sign(data, "host", lambda text: b"\x01" * 256,
                                         scheme=elf_cart.sig_scheme()))
     assert elf_binding.check(str(forged)) == "refused: bad signature"
+    assert elf_binding.check(str(forged), elf_binding.UNSIGNED) == "refused: bad signature"
     cut = tmp_path / "cut.elf"
     cut.write_bytes(data + b"\x00\x00\x00\x00moybyte-sig1")
     assert elf_binding.check(str(cut)) == "refused: malformed signature"

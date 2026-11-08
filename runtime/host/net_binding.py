@@ -167,6 +167,8 @@ _SIGS = (
     ("moy_ota_key_hex", [_P, _Z, ctypes.c_void_p], _I),
     ("moy_ota_key", [_I], ctypes.c_void_p),
     ("moy_ota_verify", [ctypes.c_void_p, _Z, _P, _Z, ctypes.c_void_p, _I], _I),
+    ("moy_ota_admit_module", [_P, _Z, _P, _P, _I, ctypes.c_void_p, _I,
+                              ctypes.POINTER(_Z)], _P),
     ("moy_ota_canonical", [_P, _Z, ctypes.c_void_p, _Z], _Z),
     ("moy_ota_canonical_c6", [_P, _Z, ctypes.c_void_p, _Z], _Z),
     ("moy_ota_judge", [_P, _Z, _P, _I, ctypes.c_void_p, _I,
@@ -714,6 +716,19 @@ def ota_verify(payload, sig, keys=None):
     got = _with_keys(keys, lambda arr, n: _lib().moy_ota_verify(
         p, len(p), s, len(s), arr, n))
     return bool(got)
+
+
+def ota_admit_module(data, scheme, chip, consented, keys=None):
+    """moy_ota_admit_module, every tier's admission of a compiled module
+    file: (None, the module's length without its trailer) when it may load,
+    else (the refusal, that length). `keys` as (modulus_hex, exponent) pairs,
+    None for the baked ones."""
+    arr, n = _keys_arg(keys)
+    b = _bytes(data)
+    got = ctypes.c_size_t(0)
+    why = _lib().moy_ota_admit_module(b, len(b), _bytes(scheme), _bytes(chip),
+                                      1 if consented else 0, arr, max(n, 0), ctypes.byref(got))
+    return (None if why is None else why.decode()), got.value
 
 
 def _canon(fn, manifest_text):

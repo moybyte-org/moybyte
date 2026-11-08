@@ -723,9 +723,6 @@ def _remote_state(ws):
         st["notice"] = notice
         st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
-        # Settings -> UNKNOWN SOURCES: whether a compiled cart whose module
-        # carries no signature may load on this console.
-        st["unknown_sources"] = bool(getattr(ws, "unknown_sources", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.
         # The kernel's ladder (native/moy_kernel/moy_idle.c): [asleep, the
@@ -794,8 +791,6 @@ def _remote_state(ws):
             "focus": f, "focus_box": None if box is None else list(box),
             "wifi_view": bool(sl.wifi_view),
             "bt_view": bool(getattr(sl, "bt_view", False)),
-            # the toggle whose warning is up before it turns ON, or None
-            "confirm": getattr(sl, "confirm_key", None),
             # the kernel's last-crash panel is up (Settings -> LAST CRASH)
             "crash_view": bool(getattr(sl, "crash_view", False)),
         }
@@ -1026,10 +1021,7 @@ class DevChannel:
                       and every periodic line, PERF included
       steady 0|1      the tick model's STEADY / FREE knob (#217)
       crisp 0|1       the #204 nearest-neighbour composite of palette-based
-                      game frames
-      unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled
-                      cart's unsigned module may load, set without the
-                      screen's warning -- these three are SETTINGS_TOGGLES
+                      game frames -- these two are SETTINGS_TOGGLES
                       entries that declared a serial word, not branches
                       written here; a board whose capability gate says no
                       declines the word. None persists, so a test or a

@@ -1619,12 +1619,13 @@ class Player(PlayerDiag):
         paced = not self._is_tool and cart.get("fps") != "free"
         ws = self.ws
         # What the kernel's stop verdict reads beside the catalogue entry:
-        # the run's route is HOME (the home shelf started it), and the owner's
-        # Unknown sources setting, which the load after a stop applies.
+        # the run's route is HOME (the home shelf started it), and whether the
+        # cart's consent admits an unsigned module (app_perms.run_admits_unsigned),
+        # which the load after a stop applies.
         flags = 0
         if getattr(ws, "_home_launch", False) and not self._is_tool:
             flags |= getattr(_moy_play, "HOME", 0)
-        if getattr(ws, "unknown_sources", False):
+        if _perms.run_admits_unsigned(ws, cart):
             flags |= getattr(_moy_play, "UNSIGNED", 0)
         try:
             return launch(path, paced, flags) if flags else launch(path, paced)

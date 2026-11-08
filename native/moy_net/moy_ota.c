@@ -476,12 +476,13 @@ int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
     return ok;
 }
 
-const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *scheme,
-                                  const char *chip, size_t *module_len) {
+const char *moy_ota_admit_module(const uint8_t *file, size_t len, const char *scheme,
+                                 const char *chip, int consented, const moy_ota_key_t *keys,
+                                 int nkeys, size_t *module_len) {
     const size_t magic = sizeof(MOY_OTA_MODULE_MAGIC) - 1;
     *module_len = len;
     if (len < magic + 4 || memcmp(file + len - magic, MOY_OTA_MODULE_MAGIC, magic) != 0) {
-        return MOY_OTA_MODULE_UNSIGNED;
+        return consented ? NULL : MOY_OTA_MODULE_UNSIGNED;
     }
     const uint8_t *lp = file + len - magic - 4;
     size_t k = lp[0] | (size_t)lp[1] << 8 | (size_t)lp[2] << 16 | (size_t)lp[3] << 24;
@@ -491,10 +492,7 @@ const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *s
     size_t n = len - magic - 4 - k;
     *module_len = n;
     uint8_t digest[32];
-    moy_sha256_t h;
-    moy_sha256_init(&h);
-    moy_sha256_update(&h, file, n);
-    moy_sha256_final(&h, digest);
+    moy_net_sha256(file, n, digest);
     static const char hex[] = "0123456789abcdef";
     char text[160];
     int tl = snprintf(text, sizeof text - 64, "%s\n%s\n%u\n", scheme, chip, (unsigned)n);
@@ -514,7 +512,7 @@ const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *s
         sig[2 * i] = hex[sp[i] >> 4];
         sig[2 * i + 1] = hex[sp[i] & 15];
     }
-    int ok = moy_ota_verify(text, (size_t)tl, sig, 2 * k, NULL, 0);
+    int ok = moy_ota_verify(text, (size_t)tl, sig, 2 * k, keys, nkeys);
     moy_net_free(sig);
     return ok ? NULL : "bad signature";
 }

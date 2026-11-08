@@ -35,8 +35,9 @@ product), with the owner's later calls dated where they land.
   surface, there is no firmware symbol table to version, and the cart's memory
   is one block its manifest sizes. The author's toolchain is clang. C apps as
   ELF modules against a versioned OS interface are a tier too (owner,
-  2026-11-01; #227, #246): trusted native code behind Unknown sources, where
-  wasm stays the sealed one the store lists.
+  2026-11-01; #227, #246): trusted native code under the consent its
+  install asks for (`native`, "Full access to the console"), where wasm
+  stays the sealed one the store lists.
 - **A per-chip module is native code, trusted only by provenance.** The
   sandbox is in the compiler's output, not the loader, so a board loads a
   module only when its key matches and its signature verifies ("Provenance").
@@ -123,8 +124,8 @@ moy_wasm.result()        # waits (the VM lock released), then a dict
 allow_unsigned=False)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
 same) into a PSRAM buffer, checks its signature (see Provenance; a refused
-module ends the run at once, with no thread; `allow_unsigned` is what the
-Unknown sources setting gives a cart's load) and starts a thread that does,
+module ends the run at once, with no thread; `allow_unsigned` is what a
+cart's consent to `native` gives its load) and starts a thread that does,
 `loops` times over: load, check the key, instantiate, call `export(*args)`
 with i32 arguments, and unload. `stack`/`psram_stack` override the board's
 setting and `pool` the pool's sizing rule, for a measurement: a module's
@@ -162,8 +163,8 @@ of its module's).
 
 ## A cart's session
 
-A compiled cart the Player runs is a session: the same signature check
-(with the console's Unknown sources setting as it stands at that load),
+A compiled cart the Player runs is a session: the same admission (with the
+cart's consent as it stands at that load),
 thread, pool, load and provenance check as a run, held open for the cart's
 life, with moycore — the host half, which owns the console — supplying the
 callbacks (`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
@@ -483,41 +484,46 @@ runs it and wants 0.
 module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic
 `moybyte-sig1`; the signature covers a text naming the chip, the module's
 length and its sha256, so every byte of the module -- the key section included
--- is under it (`moy_wasm_key.h` states the layout and the text, and
-`tools/wasm_module.py` reads them from there). The check runs on the
-MicroPython task the moment the file is read, before the thread exists: the
-engine hashes the module and hands the text to `moy_ota.verify_sig`, the one
-body every OTA manifest is checked with, against the keys the image trusts
-(`moy_ota.OTA_PUBLIC_KEYS`). An unsigned module, a malformed trailer, a
-signature for another chip, a byte changed anywhere or a key the image does not
-trust is refused as `refused: unsigned module` / `malformed signature` /
-`bad signature`, and the runtime never sees it -- an unsigned module only
-while the owner's Unknown sources setting is off (below).
-`tools/wasm_module.py` signs every module it builds with the OTA signing key
-(`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen` writes) and
-`verify` answers as a board would (`--unknown-sources` as a board with the
-setting on); `--unsigned` builds a module with no signature, and so does
+-- is under it (`moy_wasm_key.h` states the layout and the text, the magic is
+`native/moy_net/moy_ota.h`'s, and `tools/wasm_module.py` reads them from
+there). The module is ADMITTED by one call, `moy_ota_admit_module`
+(`native/moy_net/moy_ota.h`), the same the native tier's loader makes
+(`native/moy_elf/`): on the MicroPython task the moment the file is read,
+before the thread exists, it hashes the module and checks the text with the
+RSA body every OTA manifest is checked with, against the keys the image
+trusts. A malformed trailer, a signature for another chip, a byte changed
+anywhere or a key the image does not trust is refused as `refused: malformed
+signature` / `bad signature`, and the runtime never sees it; an unsigned
+module is `refused: unsigned module` unless the cart's consent admits it
+(below). `tools/wasm_module.py` signs every module it builds with the OTA
+signing key (`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen`
+writes) and its `verify` IS the board's call, through the host's binding
+(`runtime/host/net_binding.py`; `--consented` answers for a cart granted
+`native`); `--unsigned` builds a module with no signature, and so does
 `tools/wasm_cart.py --unsigned` for a whole cart.
 
-### Unknown sources
+### An unsigned module
 
-Signing is the default, not a lock (owner, 2026-09-29).
-Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
-a module with **no** signature load AT FULL SPEED (native trust), so someone
-who rebuilds a cart from its source -- Doom from moybyte-org/carts, their
-own game -- runs it on their own console. The setting is the console's
-(`ws.unknown_sources`, persisted in `system/settings`, on every tier); the engine
-is told it per load: `moycore_glue.WasmRun` hands it to `moycore.wasm_open`,
-which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
-`verify_module` reads it on the MicroPython task before the runtime sees a
-byte, as it reads the signature.
+Signing is the default, not a lock (owner, 2026-09-29). A module with **no**
+signature loads AT FULL SPEED (native trust) for a cart whose consent grants
+`native`: the install prompt's "Full access to the console", the one line
+that says what native code can do; there is no console-wide switch
+(`docs/os_2026-11.md` section 1). So
+someone who rebuilds a cart from its source -- Doom from moybyte-org/carts,
+their own game -- adds `native` to its manifest and runs it on their own
+console; a cart pushed by hand has no consent record and runs on its manifest
+as written. The consent is the cart's (`app_perms.run_admits_unsigned`); the
+engine is told it per load: `moycore_glue.WasmRun` hands it to
+`moycore.wasm_open`, which hands it to `moy_wasm_session_open` as
+`allow_unsigned`, and `moy_ota_admit_module` reads it on the MicroPython task
+before the runtime sees a byte, after the signature.
 
-**With the setting off an unsigned module is IGNORED, not refused**
+**Without the consent an unsigned module is IGNORED, not refused**
 ("A cart survives its firmware" above): `WasmRun` catches
 the engine's `refused: unsigned module` and retries the open on the
-interpreter, `main.wasm` itself, which needs neither signature nor switch, so
-the cart plays regardless -- natively when the switch is on, interpreted with
-a short "isn't signed" notice when it is off. The same retry covers a
+interpreter, `main.wasm` itself, which needs neither signature nor consent, so
+the cart plays regardless -- natively with `native` granted, interpreted with
+a short "isn't signed" notice without it. The same retry covers a
 corrupted or mismatched AOT module (rare: its file name matched this
 console's chip and format, its content did not; that one reads as "needs an
 update", the same as no module at all) and a module calling a helper this
@@ -528,7 +534,7 @@ PRESENT but does not verify is the one case that still refuses to the
 ordinary error panel, because that module was changed after it was signed,
 which is not staleness.
 
-| the module file | setting off | setting on |
+| the module file | no `native` | `native` granted |
 |---|---|---|
 | signed with a key the image trusts | loads natively | loads natively |
 | no signature trailer | interpreter, "isn't signed" | loads natively |
@@ -539,8 +545,8 @@ which is not staleness.
 | no module by this console's name at all | interpreter, "needs an update" | interpreter, "needs an update" |
 | calls a helper this firmware's runtime does not register (the loader's `resolve symbol <name> failed`) | interpreter, "console needs an update" | interpreter, "console needs an update" |
 
-Whatever passes signing goes on to the provenance key, which is checked
-either way: the setting says nothing about which format or chip a module was
+Whatever is admitted goes on to the provenance key, which is checked
+either way: the consent says nothing about which format or chip a module was
 built for. In the ordinary case the key never even matters for staleness,
 because the FILE NAME already encodes chip and format (Provenance above) --
 what the key still guards against is a same-named file whose content lies.
@@ -650,7 +656,7 @@ the margin and the classic-vs-fast decision are #158's.
 **The engine never decides to fall back; `device/moycore_glue.WasmRun` does**,
 in Python: it looks for this console's own module by name first, and only
 opens the interpreter when there is none, or when the one it found does not
-check out for a reason that is not tamper evidence (Unknown sources, ESP 88's
+check out for a reason that is not tamper evidence (an unsigned module, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
 `runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
 (`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
@@ -709,18 +715,13 @@ console's task until the loop returns.
   preprocesses it (#229: the P4's rv32f table lacked `__fixsfdi` and
   `__fixunssfdi`). CI fetches the pinned compilers for it and fails rather
   than skips without them.
-- `tests/test_wasm_signing.py`: the signature, through the device's own
-  `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
+- `tests/test_wasm_signing.py`: the admission, executing the board's own
+  `moy_ota_admit_module` with a throwaway key -- a signed module verifies and
   comes back as it was built; a byte changed anywhere, the key section
   included, another chip's signature, another key's, an unsigned module and a
-  malformed trailer are refused -- and the table above, each kind of file with
-  Unknown sources off and on, through the tool's twin of `verify_module`; and
+  malformed trailer are refused -- and the table above, each kind of file
+  without and with the consent; that the consent is `native` granted; and
   that only the two tamper-evidence refusals are what `WasmRun` never retries.
-- `tests/test_unknown_sources.py`: the setting -- off on a fresh console,
-  persisted, the warning before it turns on, off at once, the dev channel's
-  `unknown_sources 0|1` -- and that an unsigned cart plays on the interpreter
-  with the toast (switch off) or natively with none (switch on), never the
-  old blocking notice.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
   (the arguments `wasm_open` gets, AOT and interpreted), the retry -- an
   unsigned or key-mismatched AOT open falls back to the interpreter and
@@ -766,10 +767,9 @@ console's task until the loop returns.
   nothing, as a missing file does. **The interpreter tier, on every board**:
   a cart with no module, one built for another chip, and one named for a
   stale format all play on the interpreter with the short "needs an update"
-  notice and the hello cart's greeting check; an unsigned cart follows
-  Unknown sources -- the interpreter and its "isn't signed" notice with the
-  switch off, native and no notice with it on, a tampered one still refused
-  either way. The suites build the
+  notice and the hello cart's greeting check; an unsigned cart follows its
+  consent -- the interpreter and its "isn't signed" notice without `native`,
+  native and no notice with it, a tampered one still refused either way. The suites build the
   modules with the pinned compilers (`python3 tools/wasm_module.py
   compilers`), sign them with the OTA signing key (a suite without it skips
   the wasm checks, saying why), and push them into the board's store: the

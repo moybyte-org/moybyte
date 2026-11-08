@@ -184,7 +184,7 @@
     {"perm": "front", "grants": "api:front", "tiers": ["python", "lua", "wasm", "elf"], "prompt": "Take over the screen from the background", "needs": null, "py": []},
     {"perm": "autostart", "grants": "boot", "tiers": ["python", "lua", "wasm", "elf"], "prompt": "Start when the console starts", "needs": null, "py": []},
     {"perm": "lease", "grants": "lease", "tiers": ["python"], "prompt": "full", "needs": "lease", "py": []},
-    {"perm": "native", "grants": "native", "tiers": ["elf"], "prompt": "Full access to the console", "needs": null, "py": []},
+    {"perm": "native", "grants": "native", "tiers": ["elf", "wasm"], "prompt": "Full access to the console", "needs": null, "py": []},
     {"perm": "http", "grants": "api:http", "tiers": ["python"], "prompt": "Fetch pages from the internet", "needs": "wifi", "py": []},
     {"perm": "mic", "grants": "api:mic", "tiers": ["python"], "prompt": "Record with the microphone", "needs": "mic", "py": []},
     {"perm": "lora", "grants": "api:lora", "tiers": ["python"], "prompt": "Send and receive on the LoRa radio", "needs": "lora", "py": []},

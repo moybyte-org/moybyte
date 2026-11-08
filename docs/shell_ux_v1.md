@@ -504,18 +504,15 @@ play), and **DIAG SD LOG** separately gates the periodic
 diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
 stutter-free; crash/cart-exit diag flushes happen regardless.
 
-**UNKNOWN SOURCES** (owner, 2026-09-29; persisted, default OFF) is the owner's
-switch for compiled carts whose module carries no signature — a cart somebody
-rebuilt from its source. Turning it ON replaces the rows with a warning
-("Unsigned carts can do anything on this console. Only run ones you
-trust.") whose focus starts on KEEP OFF, so it takes the
-TURN ON button, or a move and a press; turning it OFF is one tap. With it on,
-an unsigned module runs at full native speed; with it off the module is
+There is no Unknown sources switch in Settings: a compiled cart whose module
+carries no signature (a cart somebody rebuilt from its source) runs at full
+native speed when its consent grants `native`, the install prompt's "Full
+access to the console" (`docs/os_2026-11.md` §1); without it the module is
 ignored and the cart plays on the interpreter instead, with a short system
 notice ("isn't signed") saying so (2026-09-30, "A cart survives its
 firmware") — never the blocking crash panel, either way. A module whose
 signature is present and fails is refused either way
-(`native/moy_wasm/README.md`, "Unknown sources").
+(`native/moy_wasm/README.md`, "An unsigned module").
 
 ---
 

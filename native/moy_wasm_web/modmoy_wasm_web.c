@@ -20,11 +20,11 @@
 // order through the binding (moy_wasm_session_lanes is 0).
 //
 // What a board does and this engine does not: a compiled (AOT) module, its
-// provenance key, its signature, and the Unknown sources gate. All four exist
-// because an AOT module is native code whose sandbox is whatever the compiler
-// emitted. main.wasm is not native code: the browser validates it and runs it
+// provenance key, its signature, and its admission (moy_ota_admit_module).
+// All four exist because an AOT module is native code whose sandbox is
+// whatever the compiler emitted. main.wasm is not native code: the browser validates it and runs it
 // bounds-checked in its own memory, which is the sandbox SPEC.md 16 assumes,
-// so it needs no signature and no switch, and every open here is main.wasm
+// so it needs no signature and no admission, and every open here is main.wasm
 // (`interp`'s meaning on a board).
 //
 // The MicroPython module is `moy_wasm`, the engine's name on every tier, with

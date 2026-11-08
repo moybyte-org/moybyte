@@ -76,8 +76,8 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
-def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
-    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+def test_consent_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_consent_lets_only_a_missing_signature_through(
         board, wasm)
 
 
@@ -193,8 +193,8 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
-def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
-    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
+def test_an_unsigned_cart_runs_natively_only_with_native_granted(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_its_consent(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):

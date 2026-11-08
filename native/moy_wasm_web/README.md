@@ -56,14 +56,15 @@ same finished PCM the page plays through its AudioWorklet.
 ## What does not apply here
 
 A board's compiled module is NATIVE code, trusted by provenance: a key naming
-its chip and format, a signature, and the owner's Unknown sources switch for
-an unsigned one. The browser never loads one. `main.wasm` is validated by the
-browser and runs bounds-checked in its own memory, the sandbox SPEC.md §16
-assumes, so it needs no key, no signature and no switch: `CHIP` and `FORMAT`
+its chip and format, and its admission (`moy_ota_admit_module`: a signature,
+or the cart's consent to `native` for an unsigned one). The browser never
+loads one. `main.wasm` is validated by the browser and runs bounds-checked in
+its own memory, the sandbox SPEC.md §16 assumes, so it needs no key, no
+signature and no admission: `CHIP` and `FORMAT`
 are None, Get Carts installs no module (`cart_index.plan` with no chip), and
 WasmRun opens `main.wasm` itself and is never "slow" for it — the slow-play
-notice is about a board missing ITS module. The Unknown sources row is on
-every tier's Settings and has nothing to govern here.
+notice is about a board missing ITS module. A cart's `native` consent has
+nothing to govern here.
 
 The fit check is the browser's own: a cart's load takes its declared memory,
 one block of its own (the module's `WebAssembly.Memory`), and its module

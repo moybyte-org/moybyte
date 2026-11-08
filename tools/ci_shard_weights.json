@@ -302,7 +302,6 @@
  "tests/test_ui_twin.py": 0.84,
  "tests/test_undefined_names.py": 0.98,
  "tests/test_unix_mp_gil.py": 0.08,
- "tests/test_unknown_sources.py": 5.86,
  "tests/test_unreadable_cart.py": 5.66,
  "tests/test_upcall_sites.py": 0.03,
  "tests/test_user_apps.py": 11.26,

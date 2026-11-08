@@ -165,8 +165,9 @@ OS reads:
   `camera`, `http`, `network`, `multiplayer`, `media`, `media:url`,
   `notifications` §7), `front` (below), `autostart` (§5), a lease
   (`lease:<resource>` naming a row of the board's resource table,
-  `hardware.md` §1), or `native`. A
-  permission the manifest also lists in `"moybyte": {"required": [...]}`
+  `hardware.md` §1), or `native` (full access: what a native cart must
+  ask for, and what admits a module with no signature on either compiled
+  tier, `moy_ota_admit_module`). A permission the manifest also lists in `"moybyte": {"required": [...]}`
   is required: absent, it makes the launch refused with a message naming
   it, where any other absent permission reads `None`;
 - **handles**: the MIME types its app opens (`between_apps.md` §1), what

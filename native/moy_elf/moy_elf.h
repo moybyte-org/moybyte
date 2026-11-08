@@ -15,10 +15,11 @@
 // against a newer table that calls only rows this one has runs.
 //
 // THE SIGNATURE is the compiled tier's (native/moy_wasm/moy_wasm_key.h's
-// layout and MOY_WASM_SIG_MAGIC), over MOY_ELF_SIG_SCHEME's text naming the
-// chip, the module's length and its sha256 (tools/elf_cart.py signs). A file
-// that carries one must verify; one that carries none runs on the consent
-// its install asked for ("full access to the console").
+// layout and moy_ota.h's MOY_OTA_MODULE_MAGIC), over MOY_ELF_SIG_SCHEME's
+// text naming the chip, the module's length and its sha256 (tools/elf_cart.py
+// signs), admitted by the one call both tiers make, moy_ota_admit_module: a
+// file that carries one must verify; one that carries none runs on the
+// consent its install asked for, `native` ("Full access to the console").
 
 #ifndef MOY_ELF_H
 #define MOY_ELF_H

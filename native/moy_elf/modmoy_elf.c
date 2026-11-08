@@ -1,7 +1,8 @@
 // moy_elf: the native tier's loader and its MicroPython module (README.md).
 //
 // A module file is read from the store into PSRAM, its signature checked
-// (moy_ota_verify_module: a present one must verify), its verdict taken
+// (moy_ota_admit_module: a present one must verify, an absent one needs the
+// UNSIGNED flag, the cart's consent), its verdict taken
 // (moy_elf_check), and Espressif's elf_loader (elf_loader/, vendored)
 // relocates it into PSRAM, resolving no name: a module imports nothing. Its
 // constructors run once (esp_elf_request), and the process is moy_os's.
@@ -10,10 +11,11 @@
 //   moy_elf.command(path, argv, roots, pid, id, bg_pid, budget_ms[, flags]) -> (status, err)
 //   moy_elf.start(path, argv, roots, pid, id, budget_ms[, flags]) -> (0 or -3, err): the
 //       same run left going; step(pid, max_ms) -> -100 (running) or its exit
-//       status; cancel(pid) -> 130. flags: NET (1), the socket rows
+//       status; cancel(pid) -> 130. flags: NET (1), the socket rows; UNSIGNED
+//       (2), the cart's consent admits a module with no signature
 //   moy_elf.on_net(fn): fn(pid, hold) when a process opens its first socket
 //       (1) and at its end (0), on this task; None: nothing holds the network
-//   moy_elf.service(path, pid, id) -> None, or the reason it did not start
+//   moy_elf.service(path, pid, id[, flags]) -> None, or the reason it did not start
 //   moy_elf.poll() -> [(pid, status)] of the services that ended by themselves
 //   moy_elf.stop(pid) -> status, or -1 for no such service
 //   moy_elf.info(pid) -> (threads, handles, calls, timers, events) or None
@@ -82,9 +84,10 @@ static void unload(void *loaded) {
     heap_caps_free(elf);
 }
 
-// The file at `path` read, checked and relocated into *m: 0, or -1 with the
-// reason in err. Raises only when the file cannot be read.
-static int load(mp_obj_t path, moy_os_module_t *m, char *err, size_t errlen) {
+// The file at `path` read, admitted (`flags`' MOY_OS_UNSIGNED: the cart's
+// consent), checked and relocated into *m: 0, or -1 with the reason in err.
+// Raises only when the file cannot be read.
+static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, size_t errlen) {
     g_load.int_before = heap_caps_get_free_size(INTERNAL_CAPS);
     int64_t t0 = esp_timer_get_time();
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
@@ -114,8 +117,9 @@ static int load(mp_obj_t path, moy_os_module_t *m, char *err, size_t errlen) {
     }
     size_t len = (size_t)size;
     int64_t t1 = esp_timer_get_time();
-    const char *bad = moy_ota_verify_module(buf, len, MOY_ELF_SIG_SCHEME, CHIP, &len);
-    if (bad != NULL && strcmp(bad, MOY_OTA_MODULE_UNSIGNED) != 0) {
+    const char *bad = moy_ota_admit_module(buf, len, MOY_ELF_SIG_SCHEME, CHIP,
+                                           (flags & MOY_OS_UNSIGNED) != 0, NULL, 0, &len);
+    if (bad != NULL) {
         heap_caps_free(buf);
         snprintf(err, errlen, "refused: %s", bad);
         return -1;
@@ -180,15 +184,15 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args) {
     if (s == NULL) {
         return result(MOY_OS_REFUSED, "needs a shell session");
     }
+    uint32_t flags = n_args > 7 ? (uint32_t)mp_obj_get_int(args[7]) : 0u;
     moy_os_module_t m;
-    if (load(args[0], &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, &m, err, sizeof err) != 0) {
         return result(MOY_OS_REFUSED, err);
     }
     const char **argv = m_new(const char *, argc ? argc : 1);
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
-    uint32_t flags = n_args > 7 ? (uint32_t)mp_obj_get_int(args[7]) : 0u;
     int status = moy_os_command(s, &m, NULL, (int)argc, argv, roots, pid, id, bg_pid, budget,
                                 flags, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
@@ -212,15 +216,15 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     if (s == NULL) {
         return result(MOY_OS_REFUSED, "needs a shell session");
     }
+    uint32_t flags = n_args > 6 ? (uint32_t)mp_obj_get_int(args[6]) : 0u;
     moy_os_module_t m;
-    if (load(args[0], &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, &m, err, sizeof err) != 0) {
         return result(MOY_OS_REFUSED, err);
     }
     const char **argv = m_new(const char *, argc ? argc : 1);
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
-    uint32_t flags = n_args > 6 ? (uint32_t)mp_obj_get_int(args[6]) : 0u;
     int status = moy_os_command_start(s, &m, NULL, (int)argc, argv, roots, pid, id, 0, budget,
                                       flags, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
@@ -263,19 +267,20 @@ static mp_obj_t mod_cancel(mp_obj_t pid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_cancel_obj, mod_cancel);
 
-static mp_obj_t mod_service(mp_obj_t path, mp_obj_t pid, mp_obj_t id) {
+static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
     char err[ERR_MAX];
+    uint32_t flags = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 0u;
     moy_os_module_t m;
-    if (load(path, &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, &m, err, sizeof err) != 0) {
         return mp_obj_new_str(err, strlen(err));
     }
-    if (moy_os_service(&m, NULL, (uint32_t)mp_obj_get_int(pid), mp_obj_str_get_str(id), err,
-                       sizeof err) == NULL) {
+    if (moy_os_service(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
+                       err, sizeof err) == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(mod_service_obj, mod_service);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 4, mod_service);
 
 static mp_obj_t mod_poll(void) {
     uint32_t pids[MOY_OS_PROCS];
@@ -353,6 +358,7 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&mod_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_on_net), MP_ROM_PTR(&mod_on_net_obj) },
     { MP_ROM_QSTR(MP_QSTR_NET), MP_ROM_INT(MOY_OS_NET) },
+    { MP_ROM_QSTR(MP_QSTR_UNSIGNED), MP_ROM_INT(MOY_OS_UNSIGNED) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&mod_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&mod_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_service), MP_ROM_PTR(&mod_service_obj) },

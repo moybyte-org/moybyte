@@ -147,8 +147,8 @@ def _compiled(cart):
 _OUT_OF_MEMORY = "out of memory"
 
 # A compiled cart whose module does not run natively on this console -- none
-# for this chip and compiled-code format, one with no signature while the
-# owner has Unknown sources off, or one whose content is corrupt -- is never
+# for this chip and compiled-code format, one with no signature whose cart's
+# consent does not grant `native`, or one whose content is corrupt -- is never
 # refused for it (native/moy_wasm/README.md, "A cart survives its
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
@@ -158,13 +158,13 @@ _OUT_OF_MEMORY = "out of memory"
 # expires on its own rather than needing a dismissal). A module whose
 # SIGNATURE is present and does not verify keeps the ordinary error panel --
 # that module was changed after it was signed, which is tamper evidence, not
-# staleness, and no switch and no interpreter runs it.
+# staleness, and no consent and no interpreter runs it.
 #
 # The sub-line says what to do, by cause (`WasmRun.interp_cause`): a cart
 # with no module by this console's own name -- none built yet, or one left
 # over from a format this console has moved past -- needs a fresh build;
-# one whose module matched but carried no signature while Unknown sources is
-# off is simply not signed; one whose module calls a helper this firmware's
+# one whose module matched but carried no signature, its cart not granted
+# `native`, is simply not signed; one whose module calls a helper this firmware's
 # runtime does not register is waiting on the CONSOLE, not the cart. Any
 # other non-tamper refusal (a corrupt or foreign-chip key despite a matching
 # file name) reads the same as "missing": this console's copy is not one it

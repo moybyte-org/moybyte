@@ -125,7 +125,7 @@ def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):
     x = lay.cx + lay.cw // 2
     _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2, still=4)
     assert _band(ws) != top, "the rows moved under the finger"
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key), \
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view), \
         "letting go of a drag opened nothing"
     moved = _band(ws)
     for _ in range(10):
@@ -150,7 +150,7 @@ def test_a_fling_coasts_the_page_and_the_gate_recloses(tmp_path):
     drv.frame(_DT)
     assert _band(ws) != at, "the page coasts on with no finger"
     _settle(ws, drv)
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key)
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view)
     drv.frame(_DT)
     drawn = ws.frame_state.frames_drawn
     for _ in range(5):

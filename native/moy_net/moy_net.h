@@ -86,6 +86,10 @@ uint32_t moy_net_ms(void);
 void moy_net_sleep_ms(uint32_t ms);
 void *moy_net_alloc(size_t n);
 void moy_net_free(void *p);
+// The SHA-256 of `n` bytes at `p`, at the platform's speed: the board's SHA
+// engine (mbedtls) on a board, moy_ota.h's software digest elsewhere. A
+// compiled module's admission hashes megabytes with it (moy_ota_admit_module).
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]);
 
 // The wall clock (docs/os_2026-11/hardware.md section 1). A board's clock
 // counts from power-on until NTP sets it: the WiFi driver asks whenever the

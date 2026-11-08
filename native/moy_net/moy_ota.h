@@ -84,16 +84,24 @@ int moy_ota_key_hex(const char *hex, size_t n, moy_ota_key_t *out);
 int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
                    size_t sig_n, const moy_ota_key_t *keys, int nkeys);
 
-// A signed module FILE (native/moy_wasm/moy_wasm_key.h's layout: the module,
-// its signature, the signature's length in 4 little-endian bytes, then
-// MOY_OTA_MODULE_MAGIC): NULL when its signature verifies under the baked keys
-// over "<scheme>\n<chip>\n<module length>\n<sha256 hex>", else the refusal:
-// MOY_OTA_MODULE_UNSIGNED (no trailer), "malformed signature", "bad
-// signature". *module_len is the module's length without any trailer.
+// A compiled module's ADMISSION, every tier's: an AOT module
+// (native/moy_wasm/moy_wasm_key.h) and a native one (native/moy_elf/moy_elf.h)
+// alike. The FILE is the module, its signature, the signature's length in 4
+// little-endian bytes, then MOY_OTA_MODULE_MAGIC; the signature covers
+// "<scheme>\n<chip>\n<module length>\n<sha256 hex>" under `keys` (`nkeys`
+// of them; NULL: the baked ones). A signature that is present must verify,
+// whatever the consent. A file with no trailer is admitted only when
+// `consented`: the cart's install consent grants `native`, the prompt's
+// "Full access to the console" (runtime/shell/app_perms.py's
+// admits_unsigned), since an unsigned module runs at the kernel's trust.
+// NULL when the module may load, else the refusal: MOY_OTA_MODULE_UNSIGNED,
+// "malformed signature", "bad signature", or that it could not be checked.
+// *module_len is the module's length without any trailer.
 #define MOY_OTA_MODULE_MAGIC "moybyte-sig1"
 #define MOY_OTA_MODULE_UNSIGNED "unsigned module"
-const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *scheme,
-                                  const char *chip, size_t *module_len);
+const char *moy_ota_admit_module(const uint8_t *file, size_t len, const char *scheme,
+                                 const char *chip, int consented, const moy_ota_key_t *keys,
+                                 int nkeys, size_t *module_len);
 
 // The bytes a manifest's signature covers ("moybyte-ota-v2\n<board>\n
 // <channel>\n<version>\n<size>\n<sha256 lowercased>") and the c6 block's

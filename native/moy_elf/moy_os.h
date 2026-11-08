@@ -117,6 +117,10 @@ void moy_os_default_caps(moy_os_caps_t *caps);
 // MOY_OS_REFUSED with the reason in `err`. The module is unloaded (m->unload)
 // before it answers, whatever it answers.
 #define MOY_OS_NET 1u
+// A loader's flag, read before the module is handed here: the cart's consent
+// admits a module with no signature (moy_ota_admit_module's `consented`,
+// app_perms.admits_unsigned: its `native` granted).
+#define MOY_OS_UNSIGNED 2u
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
                    const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
