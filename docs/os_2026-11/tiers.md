@@ -70,8 +70,8 @@ record and the strike ledger as its floor.
   frozen separately from the spec, which is not append-only by index.
   WASI's imports (§3) and the POSIX rows (above) are the same C
   functions under two standard names; neither is a second implementation.
-- **Trust** is the overview's §4 C row: once an ELF has loaded, child mode is
-  not guaranteed. The strike ledger and crash record are the floor, keyed for
+- **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
+  kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
   an unsigned module by **content hash**, since an id is the author's to
   change (`processes.md` §10).
 

@@ -153,7 +153,10 @@ on.
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
   stop leaves alone), its body kept up to a cap; `https` verifies (above),
   `moybyte.http.tls()` says whether it can here, and a request holds the WiFi
-  lease's `http` tag while it runs.
+  lease's `http` tag while it runs. The `http` permission gates
+  `moybyte.http` and nothing else: a Python app's `socket` and `requests`
+  reach the network with or without it (Python is trusted, `processes.md`
+  §2).
 - **`mic`** (`native/moy_audio/moy_mic.h`): PCM16 mono at the speaker's
   rate (44,100 Hz on a P4, 22,050 on the T-Deck: a reader takes `rate()`)
   from the ES7210 on the kernel's I²C bus, on the T-Deck's own I2S1, on
@@ -433,8 +436,7 @@ events of kind `MEDIA` (§2) the service answers when no focused app takes
 them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
 **Permissions:** `media` for a file or the console's own library;
 `media:url` and `http` for a URL (a `play(url)` without `http` would be a
-fetch of any URL by an app that never asked for the network, child mode
-included). **A stream lives as long as its process (owner, 2026-11-03)**:
+fetch of any URL by an app that never asked for the network). **A stream lives as long as its process (owner, 2026-11-03)**:
 closing the app ends it (its end sweeps it), minimising keeps it
 (`processes.md` §1); a control standing on the glass in kernel chrome, as the
 recording indicator does, is not built. A Python app making

@@ -196,7 +196,10 @@ legible, not binding: a Python cart runs inside process 1's VM with the real
 builtins and can reach `machine` and the `never` roles (`system_api.py`: "NOT
 a sandbox"); the import scanner rejecting illegal imports at install and at
 PLAY is a lint (`__import__`, `exec`, `getattr` walk past it), and there is
-no boundary (§3). For **ELF** permissions
+no boundary (§3). What a Python app's grants gate is the names its
+namespace is handed: `files` the role row, `wifi` and `moybyte.http` their
+device APIs; `open`, `os`, `socket`, `requests` and `machine` are the real
+modules, reached with or without a grant. For **ELF** permissions
 are informational (`tiers.md` §1). Where the manifest does not bind, the
 **install prompt** does the telling (the overview's §1).
 
@@ -352,9 +355,9 @@ own for what this area serves:
 ```
 time.ticks_us() -> int                 wrapping microseconds, the kernel's clock
 time.time() -> int                     wall time; moybyte.clock_synced() says whether NTP answered (between_apps.md §3)
-open(path, mode)                       a tree path; refused outside the app's grants
+open(path, mode)                       the builtin: any tree path (Python is trusted, §2)
 os.listdir / stat / remove / mkdir     the same
-socket.socket(...)                     lwIP's, under "network"
+socket.socket(...)                     lwIP's; it imports and connects with or without "network"
 requests.get(url)                      micropython-lib over socket; non-blocking use rides asyncio
 asyncio.sleep(s) / sleep_ms(ms) / StreamReader over a UART or a socket
 machine.UART / I2C / SPI / Pin / PWM / ADC   handed back by a lease (hardware.md §1), invalid after the sweep
