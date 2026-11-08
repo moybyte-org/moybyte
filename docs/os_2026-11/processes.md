@@ -168,9 +168,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   the same two rows, `moy_on` and `moy_send` (a WASI program's `moybyte.os`
   imports), the kernel's own on the program's thread. A compiled command's
   process gets a queue from the shell's door (`runtime/shell/sh_door.py`),
-  its app id and `receives`; an ELF service's start opens one where none is
-  (`moy_os_service`), and its stop hangs the descriptor up (`POLLHUP`, a
-  read's end of file) for its `main` to return. `sdk/include/moybyte/os.h`
+  and an ELF service's from the scheduler, its app id and `receives`; its
+  stop hangs the descriptor up (`POLLHUP`, a read's end of file) for its
+  `main` to return. `sdk/include/moybyte/os.h`
   carries the record and both rows for either tier, and the example service
   of each, a loop that blocks in poll and answers a "ping" with a "pong",
   is `tests/fixtures/elf/elf_svc.moy` and `tests/fixtures/wasm/wasi_svc.moy`.
@@ -178,9 +178,14 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   and strikes (§3's rungs) for every tier's callbacks, charged by the tier
   that ran the callback, logged under its pid. A compiled program's callback
   is a wake: from a poll of its event descriptor's return to its next poll
-  of it, less (on WASI) what its calls waited for the session's task; native
-  code is not aborted mid-wake, and a suspended program's poll waits
-  unserved until it is resumed.
+  of it, less what its calls waited for the VM's task (a WASI command's
+  session calls, an ELF service's hops); a suspended program's poll waits
+  unserved until it is resumed. Native code is not aborted mid-wake: an ELF
+  service's wake that never polls again is struck by a watchdog at the
+  scheduler's poll (`moy_os_reap`), once for each `MOY_SUPER_ABORT_US` it
+  runs on, and the strike that suspends it kills it (137), since a
+  suspension cannot hold a wake that is still running; a start that reaches
+  no poll within `MOY_OS_STOP_US` is killed too.
 - **The VM's queue** (`native/moy_kernel/moy_vmq.h`): the one way a process
   on its own task enters the console. A HOP runs C on the VM's task while
   the poster waits (a role row of its app's run); a CALL is a console call
@@ -218,12 +223,17 @@ refuse one, and the host and the desktop MicroPython, which have no task to
 give, step their services at the scheduler's poll
 (`runtime/system/scheduler.py`, LUA SERVICES). What a Lua service asks of
 the console (a notification, a message, a function the console handed it)
-goes through the VM's queue (`tiers.md` §2). A compiled program's
-`moy_send` posts from its own thread; the door notices one that reached the
-VM's processes after each step of the program (`sh_door._noticed`), and
-the frame's start serves it. The scheduler starts no compiled service: an
-ELF service runs through `moy_os_service` (the boards' `moy_elf.service`),
-and a WASI program in the service model runs as a command.
+goes through the VM's queue (`tiers.md` §2). An ELF service is the
+scheduler's as a Python or Lua one is, started, listed, stopped, restarted
+and autostarted the same way (`runtime/system/scheduler.py`, COMPILED
+SERVICES): its `main` on a task of its own, on core 0 on the P4s, its app
+calls (`moy_notify` and the rest) hops on the VM's queue under a run grant
+of its own, served at the scheduler's poll, which also reaps its end. A
+compiled program's `moy_send` posts from its own thread; the door notices
+one that reached the VM's processes after each step of a command
+(`sh_door._noticed`), the scheduler's poll after a service's, and the
+frame's start serves it. A WASI program in the service model runs as a
+command.
 
 ## 2. The app manifest and the permission table
 
@@ -471,12 +481,14 @@ game's lost time shows in the task manager as the slice's cost (§6).
 
 A service sleeps on its declared wake sources (§1), and the idle ladder
 (`native/moy_kernel/moy_idle.h`) treats a running service as activity for
-those sources only. Across a VM stop (the S3s) an OS service (and, on a
-board that runs them, a Lua, wasm or ELF service) keeps running. A Python
-service cannot be held through it, since the stop ends the VM's heap: the
-Player TERMs every running service just before the stop (its `moy_stop`
-persists what it needs), the resume record names them, and the console that
-starts after the stop starts them again (`moy_start`), so its timers start
+those sources only. Across a VM stop (the S3s) an OS service keeps
+running. A service the scheduler runs is not held through it, whatever its
+tier, since the stop ends the VM's heap, which holds its row (an ELF
+service's app calls are the VM's to serve, too): the Player TERMs every
+running service just before the stop (its `moy_stop`, or its loop at its
+descriptor's end of file, persists what it needs), the resume record names
+them, and the console that starts after the stop starts them again
+(`moy_start`, `main`), so its timers start
 afresh and the records its sources took during the stop are not delivered
 (the owner's 2026-11-03 answer asked for them with their real timestamps,
 which a restart cannot give; #246 holds the question). The mini-VM

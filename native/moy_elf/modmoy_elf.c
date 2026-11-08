@@ -18,10 +18,12 @@
 //       (2), the cart's consent admits a module with no signature
 //   moy_elf.on_net(fn): fn(pid, hold) when a process opens its first socket
 //       (1) and at its end (0), on this task; None: nothing holds the network
-//   moy_elf.service(path, pid, id[, flags]) -> None, or the reason it did not start
-//   moy_elf.reap() -> [(pid, status)] of the services that ended by themselves
+//   moy_elf.service(path, pid, id[, flags[, run]]) -> None, or the reason it did not
+//       start; run the bytes of its app run (moy_app's `run`), its app calls' grant
+//   moy_elf.reap() -> [(pid, status)] of the services that ended, by themselves or
+//       killed by the watchdog (moy_os_reap); the scheduler's poll calls it
 //   moy_elf.stop(pid) -> status, or -1 for no such service
-//   moy_elf.info(pid) -> (threads, handles, wakes, events) or None
+//   moy_elf.info(pid) -> (threads, handles, wakes, events, mapped, cpu_us) or None
 //   moy_elf.stats() -> (started, swept, killed, leaked)
 //   moy_elf.mem() -> (internal free, internal largest, psram free, psram largest)
 //   moy_elf.load() -> (read_us, check_us, reloc_us, internal free before, after):
@@ -435,17 +437,19 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_cancel_obj, mod_cancel);
 static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
     char err[ERR_MAX];
     uint32_t flags = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 0u;
+    moy_app_run_t run;
+    const moy_app_run_t *rp = run_of(n_args > 4 ? args[4] : mp_const_none, &run);
     moy_os_module_t m;
     if (load(args[0], flags, &m, err, sizeof err) != 0) {
         return mp_obj_new_str(err, strlen(err));
     }
     if (moy_os_service(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
-                       err, sizeof err) == NULL) {
+                       rp, err, sizeof err) == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 4, mod_service);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 5, mod_service);
 
 static mp_obj_t mod_reap(void) {
     uint32_t pids[MOY_OS_PROCS];
@@ -470,11 +474,12 @@ static mp_obj_t mod_info(mp_obj_t pid) {
     if (moy_os_info((uint32_t)mp_obj_get_int(pid), &i) != 0) {
         return mp_const_none;
     }
-    mp_obj_t t[4] = {
+    mp_obj_t t[6] = {
         mp_obj_new_int_from_uint(i.threads), mp_obj_new_int_from_uint(i.handles),
         mp_obj_new_int_from_uint(i.wakes), mp_obj_new_int_from_uint(i.events),
+        mp_obj_new_int_from_uint(i.mapped), mp_obj_new_int_from_uint(i.cpu_us),
     };
-    return mp_obj_new_tuple(4, t);
+    return mp_obj_new_tuple(6, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_info_obj, mod_info);
 

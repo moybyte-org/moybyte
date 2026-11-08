@@ -588,7 +588,8 @@ class ShellDoor:
         p.granted = tuple(granted)
         S._open(pid, False)
         roots = wasi_roots(granted)
-        net = ("network" in granted, self._grant(p, run)) if tier == "elf" else ()
+        net = ("network" in granted, _sched.compiled_run(self.ws, p, run)) \
+            if tier == "elf" else ()
         if job is not None and not bg and hasattr(rt, "start"):
             self.v_stop(job)
             code, why = self._as_pid(pid, rt.start, run, argv, roots, pid, COMMAND_MS, *net)
@@ -630,22 +631,6 @@ class ShellDoor:
                 code, why = self._as_pid(pid, rt.cancel, pid)
             code = self._compiled_end(name, pid, code, why, False)
         return code
-
-    def _grant(self, p, cart):
-        """Native command `p`'s app run (native/moy_app/moy_app_run.h): a run
-        grant of its own, owned by its pid, over the roles its granted
-        permissions name, as a service's is (system_api.service_api), so its
-        app calls (docs/app_api_v1.md's call table) are its app's; the run's
-        bytes for the native runtime, or None on a console with no app ABI.
-        The grant ends with the process (`_compiled_gone`)."""
-        factory = getattr(self.ws, "app_context", None)
-        app = getattr(self.ws, "app_abi", None)
-        if factory is None or app is None:
-            return None
-        roles, kind = _moy_app.policy(p.granted)
-        app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
-        p.ctx = factory(app_id, roles, app_id, run=True, kind=kind, owner=p.pid)
-        return app.run(p.ctx.grant, roles)
 
     @staticmethod
     def _as_pid(pid, fn, *args):

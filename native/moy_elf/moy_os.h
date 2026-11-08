@@ -38,8 +38,11 @@
 // queue reads the same descriptor. Each wake, from the poll's return to its
 // next poll of the descriptor, is charged to the one supervisor
 // (moy_super.h); a suspended process's poll waits, unserved, until it is
-// resumed. A service has no session, so its file and stdin rows answer
-// EACCES and its stdout and stderr are the OS log's lines.
+// resumed. Native code is not aborted where it stands: a wake that never
+// polls again is struck by the watchdog at moy_os_reap and killed once it
+// strikes out. A service has no session, so its file and stdin rows answer
+// EACCES and its stdout and stderr are the OS log's lines; its app calls
+// are hops on the VM's queue (moy_vmq.h), answered at the scheduler's poll.
 //
 // MEMORY. mmap's anonymous mappings (the SDK's malloc takes its arenas so)
 // are PSRAM on a board, each in its process's record and freed at its end.
@@ -168,13 +171,17 @@ void moy_os_set_net(moy_os_net_fn net, void *ctx);
 // Service module `m` started as process `pid` (`id` its cart's id): the
 // process, its main running on its own task, or NULL with the reason in
 // `err` (the module unloaded). Its event queue is the one the OS opened for
-// `pid`, or one opened here with `id` as its app, closed at its end.
+// `pid`, or one opened here with `id` as its app, closed at its end. `run` is
+// its app run (NULL: none), its app calls hopping to the VM's task.
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
-                              uint32_t pid, const char *id, char *err, size_t errlen);
+                              uint32_t pid, const char *id, const moy_app_run_t *run,
+                              char *err, size_t errlen);
 
-// On the console's task: a service that ended by itself (main returned,
-// exit) swept. The pids swept go to `ended` (up to `n`), with their exit
-// statuses in `codes`; answers how many.
+// On the console's task, at the scheduler's poll: every service that has
+// ended swept -- main returned or exit called, or killed by the watchdog
+// (moy_os.c's THE WATCHDOG: a wake struck out without a poll, or a start
+// past MOY_OS_STOP_US, MOY_PROC_KILLED). The pids swept go to `ended` (up to
+// `n`), with their exit statuses in `codes`; answers how many.
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n);
 
 // Stop service `pid`: its event descriptor hung up, main given
@@ -195,6 +202,7 @@ typedef struct {
     uint8_t net;                // 1 while it holds the network
     uint32_t sockets;           // sockets open
     uint32_t mapped;            // bytes of its mappings
+    uint32_t cpu_us;            // its wakes' cost, summed (wrapping)
 } moy_os_info_t;
 int moy_os_info(uint32_t pid, moy_os_info_t *out);
 

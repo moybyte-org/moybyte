@@ -106,9 +106,10 @@ costs are #227's.
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
   the console calls pass the front's gate and `notifications` as the
-  process; a service, which has no session for the call to run on, answers
-  EAGAIN until the service model gives it one queue into the VM's task. The
-  toolkit's `ui` rows are deferred for this tier.
+  process. A service has no session: its rows hop to the VM's task on the
+  VM's queue (`native/moy_kernel/moy_vmq.h`), its thread waiting until the
+  scheduler's poll runs them, and answer EAGAIN only when that queue is
+  full. The toolkit's `ui` rows are deferred for this tier.
 - **A permission's tiers are derived.** The permission table's tiers column
   is the set of tiers that serve the calls the permission hands an app (the
   rows of its role, the rows naming it, and moy-spec's tiers where its verbs

@@ -25,6 +25,7 @@
 #include "moy_proc.h"
 #include "moy_sh_prog.h"
 #include "moy_super.h"
+#include "moy_vmq.h"
 
 #ifdef MOY_OS_UMODE
 #include "moy_umode.h"
@@ -305,6 +306,12 @@ struct moy_os_proc {
     volatile uint8_t hup;       // a service's stop asked: the descriptor hangs up
     uint8_t own_q;              // its event queue opened here, closed at its end
     int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
+    int64_t started_us;         // a service's start: its first wake runs from here
+    volatile uint8_t polling;   // inside a poll of the descriptor: no wake runs
+    volatile uint8_t hopping;   // threads waiting on the VM's queue (moy_vmq.h)
+    uint8_t struck;             // aborted strikes the watchdog charged the wake running
+    uint8_t reaped;             // its end reported (moy_os_reap)
+    uint32_t cpu_us;            // its wakes' cost, summed (wrapping)
     sem_t_ stopped;
     // what it holds
     thr_t thr[MOY_OS_THREADS];
@@ -770,10 +777,12 @@ static int on_session(thr_t *t, void (*fn)(void *arg), void *arg) {
 //
 // An app call (docs/app_api_v1.md's call table) is the role table's row for the
 // process's app run, its fields packed as the door takes them
-// (native/moy_app/moy_app.h's moy_app_role): run on the task that serves the
-// process's session, which is the VM's, or a read of what the look and the
-// clipboard write where it is called, under the state's seqlock. A process
-// with no session (a service) has no task to run it on: EAGAIN.
+// (native/moy_app/moy_app.h's moy_app_role): run on the VM's task -- a
+// command's through the task that serves its session, a service's as a hop
+// on the VM's queue (moy_vmq.h), which the scheduler's poll serves -- or a
+// read of what the look and the clipboard write where it is called, under the
+// state's seqlock. A hop's wait is not its wake's cost; a queue that is full
+// answers EAGAIN.
 
 typedef struct {
     const moy_app_run_t *run;
@@ -784,6 +793,26 @@ typedef struct {
     size_t cap;
     int32_t r;
 } role_call_t;
+
+// fn(arg) on the VM's task for service `p`, the calling thread waiting until
+// it has run (moy_vmq_hop): its wait is moved out of the wake that made it.
+// False when the queue is full, fn not run.
+static bool vm_hop(moy_os_proc_t *p, void (*fn)(void *), void *arg) {
+    uint32_t waited = 0;
+    lock();
+    p->hopping++;
+    unlock();
+    int rc = moy_vmq_hop(p->pid, fn, arg, &waited);
+    lock();
+    p->hopping--;
+    if (p->woke_us != 0) {
+        p->woke_us += waited;
+    } else {
+        p->started_us += waited;
+    }
+    unlock();
+    return rc == MOY_VMQ_OK;
+}
 
 static void role_body(void *arg) {
     role_call_t *c = arg;
@@ -858,6 +887,8 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
                         }
                     }
                 }
+            } else if (p->s == NULL) {
+                vm_hop(p, role_body, &c);
             } else if (on_session(t, role_body, &c) != 0) {
                 c.r = -MOY_APP_NEEDS_VM;
             }
@@ -2498,15 +2529,25 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
 }
 
 // A poll of `p`'s event descriptor: the wake that ends here charged to the
-// supervisor, and while it holds the process suspended, no wake served.
+// supervisor (unless the watchdog struck it while it ran, moy_os_reap), and
+// while the supervisor holds the process suspended, no wake served.
 static int wake_end(thr_t *t) {
     moy_os_proc_t *p = t->p;
+    lock();
+    p->polling = 1;
+    int64_t now = mono_us();
+    int64_t cost = p->woke_us != 0 ? now - p->woke_us : 0;
+    bool struck = p->struck != 0;
+    p->struck = 0;
+    if (cost > 0) {
+        p->cpu_us += (uint32_t)cost;
+    }
+    unlock();
     if (!moy_evq_has(p->pid)) {
         return 0;
     }
-    int64_t now = mono_us();
-    if (p->woke_us != 0) {
-        moy_super_charge(p->pid, (uint32_t)(now - p->woke_us), false);
+    if (p->woke_us != 0 && !struck) {
+        moy_super_charge(p->pid, (uint32_t)(cost > 0 ? cost : 0), false);
     }
     while (moy_super_held(p->pid) && !p->hup) {
         if (doze(t, MOY_OS_SLICE_US) != 0) {
@@ -2536,9 +2577,12 @@ int moy_os_poll(struct pollfd *fds, nfds_t n, int timeout) {
         if (r == 0) {
             r = poll_in(t, fds, n, timeout);
         }
-        if (evq && r >= 0) {
-            t->p->wakes++;
+        if (evq) {
+            lock();
+            t->p->wakes += r >= 0;
             t->p->woke_us = mono_us();
+            t->p->polling = 0;
+            unlock();
         }
         if (r < 0) {
             moy_os_errno_set(-r);
@@ -2793,10 +2837,14 @@ static bool proc_end(moy_os_proc_t *p) {
             return false;
         }
         // A thread in a row leaves at its end; one serving the session gets its
-        // answer refused.
+        // answer refused, and a service's hop on the VM's queue is run (its
+        // end is the VM's task's: moy_os_stop, moy_os_reap).
         if (p->hop_fn != NULL) {
             p->hop_fn = NULL;
             sem_give(&p->hop_done);
+        }
+        if (p->service && p->hopping) {
+            moy_vmq_serve();
         }
         sem_take(&p->stopped, MOY_OS_SLICE_US);
     }
@@ -3023,7 +3071,8 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
 }
 
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
-                              uint32_t pid, const char *id, char *err, size_t errlen) {
+                              uint32_t pid, const char *id, const moy_app_run_t *run,
+                              char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, true, err, errlen);
     if (p == NULL) {
         if (m->unload != NULL) {
@@ -3032,6 +3081,9 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
         return NULL;
     }
     p->prog.bg_pid = pid;
+    if (run != NULL) {
+        p->run = *run;
+    }
     const char *name = id != NULL && *id ? id : "service";
     size_t k = strlen(name) + 1;
     p->argv = os_alloc(2 * sizeof(char *) + k);
@@ -3058,6 +3110,7 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
     }
     p->thr[0].p = p;
     p->thr[0].gen = 1;
+    p->started_us = mono_us();
     if (thr_spawn(&p->thr[0]) != 0) {
         snprintf(err, errlen, "no task for it");
         proc_end(p);
@@ -3076,19 +3129,78 @@ static moy_os_proc_t *proc_of(uint32_t pid) {
     return NULL;
 }
 
+// THE WATCHDOG. Native code is not aborted where it stands by a timer: a
+// wake that runs on is struck here, on the console's task, once for each
+// MOY_SUPER_ABORT_US it runs without polling its descriptor again (the
+// strikes its tier's abort would have charged), and its own poll charges it
+// nothing more. A wake waiting on the VM's queue is not running. Where the
+// strikes suspend it while its wake still runs, suspension cannot hold it,
+// so it is killed (MOY_PROC_KILLED), as a stop past its time is; a service
+// whose start runs MOY_OS_STOP_US without a first poll is killed too, as a
+// Python service's start past the same limit is. Answers the reason it is
+// killed, or NULL.
+static const char *watch(moy_os_proc_t *p, int64_t now) {
+    lock();
+    if (p->main_done || p->ending || p->polling || p->hopping) {
+        unlock();
+        return NULL;
+    }
+    if (p->woke_us == 0) {
+        bool late = now - p->started_us >= MOY_OS_STOP_US;
+        unlock();
+        return late ? "its start ran past its time without a poll" : NULL;
+    }
+    int64_t ran = now - p->woke_us;
+    bool due = ran >= (int64_t)MOY_SUPER_ABORT_US * (p->struck + 1);
+    if (due) {
+        p->struck++;
+    }
+    unlock();
+    if (!due) {
+        return NULL;
+    }
+    moy_super_charge(p->pid, (uint32_t)ran, true);
+    lock();
+    bool out = moy_super_held(p->pid) && !p->polling && !p->main_done;
+    unlock();
+    return out ? "a wake ran past its strikes without a poll" : NULL;
+}
+
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
+    int64_t now = mono_us();
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         moy_os_proc_t *p = g_proc[i];
-        if (p == NULL || !p->service || !p->main_done) {
+        if (p == NULL || !p->service) {
             continue;
+        }
+        if (!p->main_done) {
+            const char *why = watch(p, now);
+            if (why == NULL) {
+                continue;
+            }
+            char text[96];
+            snprintf(text, sizeof text, "killed: %s", why);
+            log_line(p, MOY_LOG_ERR, text);
+            lock();
+            if (!p->main_done) {
+                p->code = MOY_PROC_KILLED;
+                p->main_done = 1;
+            }
+            unlock();
+        }
+        if (p->reaped) {
+            continue;                   // left running (a host's thread): reported once
         }
         int code = p->code;
         uint32_t pid = p->pid;
         if (p->row) {
             moy_proc_end(p->row, code);
+            p->row = 0;
         }
-        if (proc_end(p) && got < n) {
+        p->reaped = 1;
+        proc_end(p);
+        if (got < n) {
             ended[got] = pid;
             codes[got] = code;
             got++;
@@ -3099,14 +3211,17 @@ uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
 
 int moy_os_stop(uint32_t pid) {
     moy_os_proc_t *p = proc_of(pid);
-    if (p == NULL || !p->service) {
+    if (p == NULL || !p->service || p->reaped) {
         return -1;
     }
     p->hup = 1;
     moy_evq_kick(pid);
     int64_t end = mono_us() + MOY_OS_STOP_US;
     while (!p->main_done && mono_us() < end) {
-        sem_take(&p->stopped, MOY_OS_SLICE_US);
+        if (p->hopping) {
+            moy_vmq_serve();            // its hop is this task's to run
+        }
+        sem_take(&p->stopped, p->hopping ? 1000 : MOY_OS_SLICE_US);
     }
     int code = p->main_done ? p->code : MOY_PROC_KILLED;
     if (p->row) {
@@ -3245,6 +3360,7 @@ int moy_os_info(uint32_t pid, moy_os_info_t *out) {
         out->sockets += p->h[i].kind == H_SOCK;
     }
     out->mapped = (uint32_t)p->mapped;
+    out->cpu_us = p->cpu_us;
     return 0;
 }
 

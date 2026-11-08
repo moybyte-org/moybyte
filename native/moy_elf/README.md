@@ -78,7 +78,11 @@ permissions name (`runtime/shell/sh_door.py`, as a service's is), handed to
 `moy_os_command`; the console calls answer as that pid, under its
 `notifications` and the front's gate. An answer is a number or a length, or
 -1 with errno (EACCES a role or a folder the grant lacks, ERANGE a buffer too
-small, EAGAIN a process with no session to run it on: a service). The
+small, EAGAIN the VM's queue full). A service has no session: its calls run
+for a run grant the scheduler makes it the same way
+(`scheduler.compiled_run`), as hops on the VM's queue
+(`native/moy_kernel/moy_vmq.h`) that the scheduler's poll runs, its thread
+waiting meanwhile and the wait not its wake's cost. The
 toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 
 ## The process model
@@ -96,7 +100,14 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   the one kernel wait (`moy_evq_wait`), so nothing is dispatched to it and
   nothing drains for it. Its stop hangs the descriptor up; its wakes are
   charged to the one supervisor (`moy_super.h`); a service that returns by
-  itself is swept on the console's task (`moy_os_reap`).
+  itself is swept on the console's task (`moy_os_reap`), at the
+  scheduler's poll (`runtime/system/scheduler.py`, COMPILED SERVICES),
+  which starts, stops and restarts it as any service.
+- Native code is not aborted where it stands by a timer. A wake that runs
+  on without polling its descriptor again is struck at that poll by
+  `moy_os_reap`'s watchdog (`moy_os.c`, THE WATCHDOG), once for each
+  `MOY_SUPER_ABORT_US`, and killed (137) by the strike that suspends it; a
+  kill deletes its threads where they stand, as a stop past its time does.
 - Every registration is a handle in the process's record, swept with its
   pid's leases however the process ends (`moy_os_stats`' `swept`).
 - A command's rows that touch the session run on the task that serves it.

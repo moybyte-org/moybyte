@@ -23,7 +23,7 @@ PART = native_build.Part("elf", (
     "moy_os.h", "moy_os.c", "moy_os_table.h", "moy_os_rows.h", "moy_os_table.c",
     "moy_elf.h", "moy_elf_check.c", "moyhost_elf.c", "moy_ota.h",
     "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc.h", "moy_proc_exit.h", "moy_evq.h",
-    "moy_super.h", "moy_app.h", "moy_app_rows.h", "moy_app_run.h"),
+    "moy_super.h", "moy_vmq.h", "moy_app.h", "moy_app_rows.h", "moy_app_run.h"),
     (_ELF, _HERE, os.path.join(_NATIVE, "moy_sh"), os.path.join(_NATIVE, "moy_kernel"),
      os.path.join(_NATIVE, "moy_input"), os.path.join(_NATIVE, "moy_net"),
      os.path.join(_NATIVE, "moy_app"), os.path.join(_NATIVE, "moy_spine"),
@@ -44,7 +44,7 @@ class Info(ctypes.Structure):
     _fields_ = [("pid", _U32), ("threads", _U32), ("handles", _U32), ("wakes", _U32),
                 ("events", _U32), ("service", ctypes.c_uint8),
                 ("ending", ctypes.c_uint8), ("net", ctypes.c_uint8), ("sockets", _U32),
-                ("mapped", _U32)]
+                ("mapped", _U32), ("cpu_us", _U32)]
 
 
 class Stats(ctypes.Structure):
@@ -70,7 +70,7 @@ def _lib():
         d.moy_os_command_step.restype = _I
         d.moy_os_command_stop.argtypes = [_U32]
         d.moy_os_command_stop.restype = _I
-        d.hl_elf_service.argtypes = [_C, _U32, _C, _U32, _C, _I]
+        d.hl_elf_service.argtypes = [_C, _U32, _C, _U32, _C, _C, _I]
         d.hl_elf_service.restype = _I
         d.hl_elf_check.argtypes = [_C, _U32, _C, _I]
         d.hl_elf_check.restype = _I
@@ -168,19 +168,21 @@ def check(path, flags=0):
     return None
 
 
-def service(path, pid, cid="", flags=0):
+def service(path, pid, cid="", flags=0, run=None):
     """Start the native service at `path` as process `pid`, admitted under
-    `flags` (UNSIGNED): None, or why not."""
+    `flags` (UNSIGNED), its app calls answered for `run` (as `command`'s):
+    None, or why not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
-    if d.hl_elf_service(path.encode(), int(pid), (cid or "").encode(), int(flags), err,
-                        len(err)) != 0:
+    if d.hl_elf_service(path.encode(), int(pid), (cid or "").encode(), int(flags), _run(run),
+                        err, len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
 
 
 def reap():
-    """[(pid, exit status)] of the services that ended by themselves."""
+    """[(pid, exit status)] of the services that ended, by themselves or
+    killed by the watchdog (moy_os_reap)."""
     d = _lib()
     pids = (_U32 * 8)()
     codes = (ctypes.c_int32 * 8)()

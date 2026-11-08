@@ -2,8 +2,11 @@
 // model). main is its loop: it blocks in poll on its event descriptor, with
 // its next tick's deadline as the timeout, and answers each "ping" with a
 // "pong" carrying the same arguments, sent to the app the ping came from.
-// Its stop is the descriptor's end of file. A thread it makes sleeps until
-// the process's end sweeps it.
+// A "note" posts a notification (an app call, answered on the VM's task) and
+// answers "noted" with what it answered; a "quit" returns 7; a "spin" runs
+// on without polling again, sleeping in slices. Its stop is the
+// descriptor's end of file. A thread it makes sleeps until the process's end
+// sweeps it.
 #include <poll.h>
 #include <pthread.h>
 #include <string.h>
@@ -49,8 +52,11 @@ int main(int argc, char **argv) {
     (void)argc;
     pthread_t t;
     say("start", 0);
-    if (moy_on("ping", 1) < 0) {
-        return 1;
+    static const char *const hears[] = { "ping", "note", "quit", "spin" };
+    for (unsigned i = 0; i < sizeof hears / sizeof hears[0]; i++) {
+        if (moy_on(hears[i], 1) < 0) {
+            return 1;
+        }
     }
     pthread_create(&t, NULL, nap, NULL);
     write(1, "started\n", 8);
@@ -78,10 +84,22 @@ int main(int argc, char **argv) {
         if (got == 0) {
             break;                              // stopped
         }
-        if (got > 0 && strcmp(m.ev.name, "ping") == 0) {
+        if (got <= 0) {
+            continue;
+        }
+        if (strcmp(m.ev.name, "ping") == 0) {
             pings++;
             say("ping", (int)m.ev.n);
             moy_send(m.ev.app, "pong", m.b + sizeof m.ev);
+        } else if (strcmp(m.ev.name, "note") == 0) {
+            int r = moy_notify("Hello", "from a service");
+            moy_send(m.ev.app, "noted", r >= 0 ? "[1]" : "[-1]");
+        } else if (strcmp(m.ev.name, "quit") == 0) {
+            return 7;
+        } else if (strcmp(m.ev.name, "spin") == 0) {
+            for (;;) {
+                usleep(10000);
+            }
         }
     }
     say("stop", ticks >= 2 && pings >= 1 && strcmp(argv[0], "elf.svc") == 0);

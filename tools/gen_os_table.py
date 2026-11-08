@@ -811,7 +811,7 @@ def gen_sdk_h(table):
           "// capacity. Each answers its number (a length, for an answer written),",
           "// or -1 with errno: EACCES a permission it lacks, ERANGE a buffer too",
           "// small, EINVAL an argument refused, ENOENT nothing of that name, EAGAIN",
-          "// no console to serve it now (a service, a command in the background)."]
+          "// no console to serve it now (its queue full, or the process ending)."]
     for r in rows:
         if r["door"] is not None:
             o.append("%s;   // %s" % (r["c"], r["src"]["name"]))

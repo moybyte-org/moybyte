@@ -96,7 +96,7 @@ int moy_on(const char *name, int on);
 // capacity. Each answers its number (a length, for an answer written),
 // or -1 with errno: EACCES a permission it lacks, ERANGE a buffer too
 // small, EINVAL an argument refused, ENOENT nothing of that name, EAGAIN
-// no console to serve it now (a service, a command in the background).
+// no console to serve it now (its queue full, or the process ending).
 int32_t moy_files_readable(void);   // files.readable
 int32_t moy_files_ready(void);   // files.ready
 int32_t moy_files_list(const char *kind, void *names, size_t names_cap);   // files.list

@@ -8,7 +8,9 @@ shell's door takes for a foreground command so the console goes on while it
 runs: start(path, argv, roots, pid, id, budget_ms) -> (0 or REFUSED, why),
 step(pid, max_ms) -> RUNNING or the exit status, cancel(pid) -> 130. The
 runtime answers the door's job contract, the WASI runtime's too: start ->
-(0, None) or (REFUSED, why), step and cancel -> (code, why).
+(0, None) or (REFUSED, why), step and cancel -> (code, why). A service is
+the scheduler's (runtime/system/scheduler.py, COMPILED SERVICES):
+service(cart, pid, run) -> None or why, stop(pid), reap() and figures(pid).
 
 A command granted the "network" permission runs with the socket rows
 (`net=True`, the engine's NET flag), and its first socket holds the radio
@@ -105,6 +107,37 @@ class ElfRuntime:
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.start(path, tuple(argv), joined, pid, cart.get("id") or "",
                                  budget_ms, self._flags(cart, net), run)
+
+    def service(self, cart, pid, run=None):
+        """The cart's module started as service `pid` (native/moy_elf/
+        moy_os.h, A SERVICE): its main on a task of its own, its app calls
+        answered for `run` as command's are, hopping to the VM's task.
+        None, or why it did not start."""
+        path = self.module(cart)
+        if path is None:
+            return "it has no module for this console (%s)" % self.engine.CHIP
+        return self.engine.service(path, pid, cart.get("id") or "", self._flags(cart, False),
+                                   run)
+
+    def stop(self, pid):
+        """Service `pid` stopped: its descriptor hung up, killed (137) past
+        its time. Its exit status, or -1 for no such service."""
+        return self.engine.stop(pid)
+
+    def reap(self):
+        """[(pid, exit status)] of the services that ended: by themselves, or
+        killed by the watchdog (moy_os_reap)."""
+        return self.engine.reap()
+
+    def figures(self, pid):
+        """(bytes mapped, its wakes' cost in us) of live service `pid`, or
+        None once it has ended."""
+        got = self.engine.info(pid)
+        if got is None:
+            return None
+        if isinstance(got, dict):
+            return got["mapped"], got["cpu_us"]
+        return got[4], got[5]
 
     def step(self, pid, max_ms):
         """Serve the run's session calls for `max_ms` at most: (RUNNING,
