@@ -5,7 +5,7 @@
 #   -- the rungs             overrun, strike, suspend, resume, a crash
 #   -- services              start, hook, stop, kill, exit, pause, reset
 #   -- the Lua services      _start_lua, poll, the VM's queue answered
-#   -- the compiled services _start_compiled, a native service at the poll
+#   -- the compiled services  _start_compiled, a native service at the poll
 #   -- restart policies      policy, set_policy, forgive, the back-off
 #   start_cart               a shelf cart started under its consent
 #   boot                     the autostart services at the first frame
