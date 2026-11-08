@@ -52,7 +52,8 @@ def _sources():
     dash += [os.path.join(_DASH, "bltin", n) for n in ("printf.c", "test.c")]
     dash += [os.path.join(SH, n) for n in ("moy_sh.c", "moy_sh_sys.c", "moy_sh_cmds.c")]
     own = [os.path.join(SH, n) for n in ("moy_sh_arena.c", "moy_sh_fmt.c", "moy_sh_cands.c", "moy_sh_board.c",
-                                         "moy_sh_screen.c", "moy_sh_store.c", "moy_term.c",
+                                         "moy_sh_screen.c", "moy_sh_job.c", "moy_sh_store.c",
+                                         "moy_term.c",
                                          "moy_sh_app.c", "moy_sh_edit.c", "moy_sh_top.c",
                                          "moy_sh_face.c", "moy_sh_floor.c")]
     return [(s, shim) for s in dash] + [(s, plain) for s in own]
@@ -121,6 +122,11 @@ _SIGS = (
     ("moy_sh_arena_in_use", [_P], _SZ),
     ("moy_sh_board_line", [_S], ctypes.c_bool),
     ("moy_sh_interrupted", [_P], _I),
+    ("moy_sh_job_new", [ctypes.c_uint32, _S], _P),
+    ("moy_sh_job_free", [_P], None),
+    ("moy_sh_job_run", [_P, _S, _SZ], _I),
+    ("moy_sh_job_ended", [_P, ctypes.POINTER(_I)], _I),
+    ("moy_sh_job_interrupt", [_P], None),
     ("moy_sh_screen_new", [_I, _I, _S], _P),
     ("moy_sh_screen_free", [_P], None),
     ("moy_sh_screen_run", [_P, _S, _SZ], _I),
@@ -340,6 +346,43 @@ class Screen:
     def cancel(self):
         self._face()
         _lib().moy_sh_cancel(self._s)
+
+
+class Job:
+    """A line run with no face, its output into the OS log under `pid`
+    (native/moy_sh/moy_sh_job.h): modmoy_sh.c's Job. `root` names the files
+    tree on the host."""
+
+    PARKED = -1
+
+    def __init__(self, pid, root=None):
+        self._j = _lib().moy_sh_job_new(int(pid), None if root is None else str(root).encode())
+        if not self._j:
+            raise OSError(12, "no memory")
+
+    def _job(self):
+        if not self._j:
+            raise OSError(9, "closed")
+        return self._j
+
+    def close(self):
+        if self._j:
+            _lib().moy_sh_job_free(self._j)
+            self._j = None
+
+    __del__ = close
+
+    def run(self, text):
+        b = text.encode() if isinstance(text, str) else bytes(text)
+        r = _lib().moy_sh_job_run(self._job(), b, len(b))
+        return None if r == self.PARKED else r
+
+    def ended(self):
+        st = _I()
+        return st.value if _lib().moy_sh_job_ended(self._job(), ctypes.byref(st)) else None
+
+    def interrupt(self):
+        _lib().moy_sh_job_interrupt(self._job())
 
 
 class _Frame(ctypes.Structure):

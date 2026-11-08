@@ -15,6 +15,7 @@
 # A usermod runs inside the main component's CMakeLists, so the library takes
 # the IDF build's flags explicitly. The screen face (moy_sh_screen.c) and its
 # grid (moy_term.c) ride in it beside the serial face, without the shim too,
+# and so does the faceless job (moy_sh_job.c),
 # and on an image that carries the toolkit (native/moy_ui staged beside it)
 # the Terminal's face (moy_sh_face.c), which draws through its engine, and
 # the recovery floor's screen over it (moy_sh_floor.c).
@@ -34,6 +35,7 @@ add_library(moy_sh_core STATIC ${MOY_SH_DASH_SRCS}
     ${MOY_SH}/moy_sh_cands.c
     ${MOY_SH}/moy_sh_board.c
     ${MOY_SH}/moy_sh_screen.c
+    ${MOY_SH}/moy_sh_job.c
     ${MOY_SH}/moy_sh_store.c
     ${MOY_SH}/moy_term.c
     ${MOY_SH}/moy_sh_app.c

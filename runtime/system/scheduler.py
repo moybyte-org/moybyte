@@ -375,6 +375,17 @@ class Scheduler:
         runtime/system/aio.py). Answers its id."""
         return self._plain_wake(self.wakes.every, ms, fn)
 
+    def plain_alarm(self, t, fn):
+        """An alarm of the shell's at Unix time `t` that the tick runs without
+        the guard and that lights nothing (cron's and at's,
+        runtime/system/cron.py). Answers its id."""
+        return self._plain_wake(lambda t, fn: self.wakes.alarm(t, fn, False), t, fn)
+
+    def plain_cancel(self, wid):
+        """A plain wake undone."""
+        self._plain.pop(wid, None)
+        return self.wakes.cancel(wid)
+
     def _plain_wake(self, make, ms, fn):
         was = _L.current() if _L is not None else SHELL
         if _L is not None:

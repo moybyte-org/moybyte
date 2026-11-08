@@ -1100,6 +1100,25 @@ manager's Notifications tab, which holding the console's key opens) brings
 your cart to the front and calls your `moy_action(id, key)`; ignoring it
 leaves it in that list. `docs/os_2026-11/processes.md` §7 has the rules.
 
+### Alarms (a Moybyte-side verb)
+
+`moybyte.at(t, fn)` calls `fn()` once, no earlier than `t`, the wall
+clock's Unix seconds (`time.time()`; `moybyte.clock_synced()` says whether
+NTP has set it). It needs the `"alarms"` permission
+(`"moybyte": {"permissions": ["alarms"]}`), raises `OSError` without it,
+and answers an id `moybyte.cancel` takes. As it goes off it lights the
+screen if the console had gone dark, so a background app can wake its
+player; `docs/os_2026-11/between_apps.md` §3 has the rules.
+
+```python
+import moybyte, time
+
+def ring():
+    moybyte.notify("Tea is ready", urgency=2)
+
+moybyte.at(time.time() + 4 * 60, ring)
+```
+
 ### Opening with another app, and picking a file (Moybyte-side verbs)
 
 `moybyte.open_with`, `moybyte.share` and `moybyte.pick` are Moybyte's own,

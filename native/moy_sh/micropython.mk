@@ -25,7 +25,8 @@ MOY_SH_DASH_SRC := $(wildcard $(MOY_SH_DIR)/dash/*.c) \
 
 SRC_USERMOD_LIB_C += $(MOY_SH_DASH_SRC) \
     $(MOY_SH_DIR)/moy_sh_arena.c $(MOY_SH_DIR)/moy_sh_fmt.c $(MOY_SH_DIR)/moy_sh_cands.c \
-    $(MOY_SH_DIR)/moy_sh_board.c $(MOY_SH_DIR)/moy_sh_screen.c $(MOY_SH_DIR)/moy_sh_store.c \
+    $(MOY_SH_DIR)/moy_sh_board.c $(MOY_SH_DIR)/moy_sh_screen.c $(MOY_SH_DIR)/moy_sh_job.c \
+    $(MOY_SH_DIR)/moy_sh_store.c \
     $(MOY_SH_DIR)/moy_term.c $(MOY_SH_DIR)/moy_sh_app.c $(MOY_SH_DIR)/moy_sh_edit.c \
     $(MOY_SH_DIR)/moy_sh_top.c $(MOY_SH_DIR)/moy_sh_face.c
 

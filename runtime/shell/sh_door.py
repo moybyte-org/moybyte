@@ -91,6 +91,14 @@ EXITS = 8                       # background commands' exit codes kept for `wait
 LINE = 256                      # what a stdin read takes at a time
 
 
+def _cron():
+    try:
+        import cron
+    except ImportError:  # host: the runtime package
+        from runtime import cron
+    return cron
+
+
 def _module(name):
     try:
         return __import__(name)
@@ -406,7 +414,9 @@ class ShellDoor:
             return EPERM
         row = _row(self.ws, pid)
         if row is None:
-            return 0 if sig == 0 and pid in _devfs._procs() else ESRCH
+            if pid in _devfs._procs():
+                return 0 if sig == 0 or _cron().CRON.kill(pid) else ESRCH
+            return ESRCH
         if sig == 0:
             return 0
         if row[2] == "service":

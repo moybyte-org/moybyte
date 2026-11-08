@@ -83,8 +83,8 @@ SHELL_NAMES = (
     "shift", "sleep", "tail", "test", "top", "touch", "trap", "true", "type", "umask",
     "unalias", "uname", "unset", "wait", "wc",
     # the role commands (runtime/shell/sh_roles.py)
-    "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "passwd",
-    "perm", "pkg", "python", "service", "settings", "snd", "usb",
+    "at", "ble", "cron", "http", "lease", "lora", "media", "mic", "midi", "notify",
+    "passwd", "perm", "pkg", "python", "service", "settings", "snd", "usb",
 )
 
 

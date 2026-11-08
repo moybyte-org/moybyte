@@ -27,7 +27,8 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 | `moy_sh_edit.c` | `edit FILE`, the terminal's editor (#117): a gap buffer, saved through the store's crash-safe write, the floor's way to fix `system/settings` |
 | `moy_sh_top.c` | `top`: the rows `ps` reads with the task manager's CPU and memory, a second at a time; Kill sends SIGTERM |
 | `moy_term.c`, `moy_term.h` | the terminal's cell grid: the VT100 subset a line program and a full-screen app write, a scrollback ring, its lines as SGR text for `ui.text_view` |
-| `modmoy_sh.c`, `micropython.cmake` | the MicroPython module (a door command's streams, `line`, `interrupted`, the screen face's `Screen`) and the board build: the shell is its own static library, so dash's shim reaches no other file |
+| `moy_sh_job.c`, `moy_sh_job.h` | a line run with no face (cron's and at's jobs, `runtime/system/cron.py`): a session of its own on its runner, its output a record of the OS log a line under the job's pid |
+| `modmoy_sh.c`, `micropython.cmake` | the MicroPython module (a door command's streams, `line`, `interrupted`, the screen face's `Screen`, the faceless `Job`) and the board build: the shell is its own static library, so dash's shim reaches no other file |
 | `host/sh_main.c`, `host/board_main.c` | the host harnesses the suite runs: a session over a folder, and the serial face (or with `-screen` the screen face) over the board's table |
 
 On CPython the module is `runtime/host/moy_sh.py`: the same names by ctypes,

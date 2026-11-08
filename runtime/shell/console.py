@@ -184,6 +184,24 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ssh_service as _ssh
 
+
+try:
+    import moy_log as _L
+except ImportError:  # pragma: no cover - an image without the kernel
+    _L = None
+
+
+def _log_info(pid, text):
+    if _L is not None:
+        _L.write(_L.INFO, pid, text)
+
+
+# The crontab's lines and the shell's at jobs (cron.py), read at the first frame.
+try:
+    import cron as _cron
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import cron as _cron
+
 # The hardware leases (leases.py): the `pins` verbs' local service, and the
 # grants a lease and a device API (devices.py) check; devfs.py's process rows.
 try:
@@ -1057,6 +1075,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.procs = Procs(self)
         _hwleases.LEASES.grants = self.procs.granted
         _devices.grants = self.procs.granted
+        _moybyte.WAKES.woke = self.alarm_woke
         _devices.console = self
         _devfs.RUNS = self.procs.runs
         # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
@@ -3348,15 +3367,25 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # system-domain now and always fully covered the backdrop anyway, so the tabs
     # just reset the game canvas's draw state and paint their own opaque body.)
 
+    def alarm_woke(self, pid):
+        """An alarm that wakes went off (moybyte.at): the idle ladder's
+        sleep ends, the light back on, where the board has a ladder, and the
+        log says so under the alarm's process where it was asleep."""
+        lad = getattr(self, "idle_ladder", None)
+        if lad is not None and lad.wake():
+            _log_info(pid, "an alarm woke the screen")
+
     def boot_services(self):
         """The services that start with the console: every service cart
         holding `autostart`, those a VM stop paused (scheduler.boot), and the
-        SSH server where a password is set (ssh_service.boot)."""
+        SSH server where a password is set (ssh_service.boot) and the
+        crontab's lines (cron.boot)."""
         try:
             _scheduler.boot(self)
         except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
             print("Moybyte services: %s" % (exc,))
         _ssh.boot(self)
+        _cron.boot(self)
 
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK

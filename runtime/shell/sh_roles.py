@@ -6,6 +6,7 @@
 #   r_http                            a GET by the http worker, stepped
 #   r_snd                             stdin through the audio ring
 #   r_python                          a REPL or code in the shell's VM
+#   r_cron, r_at                      the crontab and the at jobs (cron.py)
 """The C shell's role commands (docs/os_2026-11/system.md section 1): the
 command faces of the console's Python services, which the shell reaches
 through its door (runtime/shell/sh_door.py's `role`) and refuses with "needs
@@ -72,6 +73,15 @@ the http worker's own wait), never `online()`.
                              key's fingerprint and how many browsers are paired
   passwd -l                  the paired browsers: id, paired, last seen, name
   passwd -r ID|all           forget one (its open sessions end) or every one
+  cron [list]                each crontab line (/etc/crontab) and its next
+                             run, local, or `-` while the clock is not set
+  cron reload                read the crontab again (an edit by hand) and arm it
+  at TIME COMMAND...         run COMMAND at TIME, its output into the log
+                             (runtime/system/cron.py): now, now + N UNIT
+                             (seconds .. weeks) or HH:MM [tomorrow|YYYY-MM-DD];
+                             prints its id. One word is the line itself
+  at [-l]                    the jobs waiting: id, time, command
+  at -r ID...                remove them
   python [-c CODE]           a REPL over stdin into the shell's VM (an
                              expression's value printed, a block ended by a
                              blank or unindented line), or CODE run; with
@@ -248,6 +258,67 @@ def r_notify(d, a):
             return 1
         return 0
     return _usage(d, "notify", "[list] | send ... | open ID | clear [ID]")
+
+
+# -- cron and at ----------------------------------------------------------------------
+
+
+def _cron():
+    try:
+        import cron
+    except ImportError:  # host: the runtime package
+        from runtime import cron
+    return cron
+
+
+def r_cron(d, a):
+    C = _cron()
+    tab = C.CRON
+    if tab.ws is None:
+        tab.bind(d.ws)
+    if not a or a == ["list"]:
+        for spec, _cmd, line in tab.lines:
+            t = tab.next_of(spec)
+            d.out("%s  %s\n" % (C.when(t) if t is not None else "-", line))
+        return 0
+    if a == ["reload"]:
+        n, passed = tab.reload()
+        for num, line in tab.passed:
+            d.err("cron", "line %d passed over: %s" % (num, line))
+        d.out("%d line%s\n" % (n, "" if n == 1 else "s"))
+        return 1 if passed else 0
+    return _usage(d, "cron", "[list] | reload")
+
+
+def r_at(d, a):
+    C = _cron()
+    tab = C.CRON
+    if tab.ws is None:
+        tab.bind(d.ws)
+    if not a or a == ["-l"]:
+        for jid in sorted(tab.ats):
+            t, cmd, _wid = tab.ats[jid]
+            d.out("%d  %s  %s\n" % (jid, C.when(t), cmd))
+        return 0
+    if a[0] == "-r":
+        if len(a) < 2:
+            return _usage(d, "at", "-r ID...")
+        bad = 0
+        for w in a[1:]:
+            if not tab.remove_at(_int(w, -1)):
+                d.err("at", "%s: no such job" % w)
+                bad = 1
+        return bad
+    t, took = C.at_time(a, C._wc.now())
+    if t is None:
+        d.err("at", took)
+        return _usage(d, "at", "TIME COMMAND... | -l | -r ID...")
+    words = a[took:]
+    if not words:
+        return _usage(d, "at", "TIME COMMAND...")
+    jid = tab.add_at(t, C.command_line(words))
+    d.out("job %d at %s\n" % (jid, C.when(t)))
+    return 0
 
 
 # -- service --------------------------------------------------------------------------

@@ -82,6 +82,7 @@ TABLE = (
     ("camera", "api:camera", PY, "Take pictures with the camera", "camera", ()),
     ("media", "api:media", PY, "Play music in the background", "media", ()),
     ("media:url", "api:media", PY, "Play radio streams from the internet", "wifi", ()),
+    ("alarms", "api:alarms", PY, "Wake the console at set times", None, ()),
     ("editor", "marker", PY, None, None, ()),
     ("calc", "marker", PY, None, None, ()),
     ("terminal", "marker", PY, None, None, ()),

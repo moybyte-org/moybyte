@@ -193,6 +193,7 @@
     {"perm": "camera", "grants": "api:camera", "tiers": ["python"], "prompt": "Take pictures with the camera", "needs": "camera", "py": []},
     {"perm": "media", "grants": "api:media", "tiers": ["python"], "prompt": "Play music in the background", "needs": "media", "py": []},
     {"perm": "media:url", "grants": "api:media", "tiers": ["python"], "prompt": "Play radio streams from the internet", "needs": "wifi", "py": []},
+    {"perm": "alarms", "grants": "api:alarms", "tiers": ["python"], "prompt": "Wake the console at set times", "needs": null, "py": []},
     {"perm": "editor", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "calc", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},
     {"perm": "terminal", "grants": "marker", "tiers": ["python"], "prompt": null, "needs": null, "py": []},

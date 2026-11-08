@@ -333,7 +333,7 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
 // for each but those C serves here (C_ROLES, each over the driver and its
 // lease, moy_lease.h's DEVICES; tests/test_sh_door.py holds the lists equal).
 static const char *const ROLES[] = {
-    "ble", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
+    "at", "ble", "cron", "http", "lease", "lora", "media", "mic", "midi", "notify", "perm",
     "passwd", "pkg", "python", "service", "settings", "snd", "usb", NULL,
 };
 static const char *const C_ROLES[] = { "mic", "lora", "ble", NULL };

@@ -90,7 +90,7 @@ everything the console knows (its processes, /proc and /dev through
 `runtime/system/devfs.py`, the installed and role commands, `df`) crosses the
 ROLE door on the shell's own row to `runtime/shell/sh_door.py`, so with the VM
 stopped `ps` shows the console stopped and the run in front. The role commands
-served today are `perm`, `notify`, `service`, `lease`, `python` and the device
+served today are `perm`, `notify`, `service`, `lease`, `python`, `cron`, `at` and the device
 faces `http`, `usb`, `midi`, `media` and `snd`, each a face of its service's
 one implementation run as the shell (pid 1), giving back what it took before
 it ends, a media stream excepted; `runtime/shell/sh_roles.py` lists their
@@ -449,8 +449,9 @@ shell, SFTP and the app see one home; the home's `.ssh` is `/etc`, as
 **`system/`** holds the console's documents **as plain-text files like
 `/etc`** (owner, 2026-11-03), beside the carts folder (`/sd/moybyte/system/`
 on a card): `settings` and `sources` (§6), `password`, `ssh`,
-`authorized_keys` and the SSH host key (§3), and `wifi`, `crontab` and
-`hostname` as the phases that need them arrive; the shell reaches them as
+`authorized_keys` and the SSH host key (§3), `crontab` (`between_apps.md`
+§3), and `wifi` and `hostname` as the phases that need them arrive; the
+shell reaches them as
 `/etc`, and `settings` works over them.
 
 **`system/settings`** (P3.2, `runtime/carts/moy_docs.py`) is every row

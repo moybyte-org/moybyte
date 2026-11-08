@@ -30,6 +30,13 @@
 //                     starting with p
 //     cwd() status() arena()
 //     interrupt()     the face's own Ctrl-C; cancel() drops a held `more`
+//   Job(pid[, root])  a line run with no face, its output into the OS log
+//                     under `pid` (moy_sh_job.h: cron's and at's jobs), its
+//                     files tree `root` off a board, taken here and given
+//                     back by close():
+//     run(text)       the exit status, or None while the run is parked
+//     ended()         the exit status once a parked run has ended, else None
+//     interrupt()     Ctrl-C at its next poll
 //   Face()            the Terminal's face (moy_sh_face.h), on an image that
 //                     carries the toolkit: a session made at its first need,
 //                     the prompt's line, the history, completion and the key
@@ -61,6 +68,7 @@
 #include "py/runtime.h"
 
 #include "moy_sh.h"
+#include "moy_sh_job.h"
 #include "moy_sh_screen.h"
 #if MOY_SH_LINK
 #include "moy_sh_link.h"
@@ -310,6 +318,77 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     screen_type, MP_QSTR_Screen, MP_TYPE_FLAG_NONE,
     make_new, screen_make_new,
     locals_dict, &screen_locals
+    );
+
+// -- a job -------------------------------------------------------------------------
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_sh_job_t *j;
+} job_obj_t;
+
+static moy_sh_job_t *job_of(mp_obj_t self) {
+    job_obj_t *o = MP_OBJ_TO_PTR(self);
+    if (o->j == NULL) {
+        mp_raise_OSError(EBADF);
+    }
+    return o->j;
+}
+
+static mp_obj_t job_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw,
+                             const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 1, 2, false);
+    job_obj_t *o = mp_obj_malloc_with_finaliser(job_obj_t, type);
+    o->j = moy_sh_job_new((uint32_t)mp_obj_get_int(args[0]),
+                          n_args > 1 ? mp_obj_str_get_str(args[1]) : NULL);
+    if (o->j == NULL) {
+        mp_raise_OSError(ENOMEM);
+    }
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static mp_obj_t job_close(mp_obj_t self) {
+    job_obj_t *o = MP_OBJ_TO_PTR(self);
+    moy_sh_job_free(o->j);
+    o->j = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(job_close_obj, job_close);
+
+static mp_obj_t job_run(mp_obj_t self, mp_obj_t text) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
+    int r = moy_sh_job_run(job_of(self), b.buf, b.len);
+    return r == MOY_SH_JOB_PARKED ? mp_const_none : MP_OBJ_NEW_SMALL_INT(r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(job_run_obj, job_run);
+
+static mp_obj_t job_ended(mp_obj_t self) {
+    int status;
+    return moy_sh_job_ended(job_of(self), &status) ? MP_OBJ_NEW_SMALL_INT(status)
+                                                    : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(job_ended_obj, job_ended);
+
+static mp_obj_t job_interrupt(mp_obj_t self) {
+    moy_sh_job_interrupt(job_of(self));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(job_interrupt_obj, job_interrupt);
+
+static const mp_rom_map_elem_t job_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&job_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ended), MP_ROM_PTR(&job_ended_obj) },
+    { MP_ROM_QSTR(MP_QSTR_interrupt), MP_ROM_PTR(&job_interrupt_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&job_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&job_close_obj) },
+};
+static MP_DEFINE_CONST_DICT(job_locals, job_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    job_type, MP_QSTR_Job, MP_TYPE_FLAG_NONE,
+    make_new, job_make_new,
+    locals_dict, &job_locals
     );
 
 #endif
@@ -677,6 +756,7 @@ static const mp_rom_map_elem_t moy_sh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_line), MP_ROM_PTR(&sh_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_interrupted), MP_ROM_PTR(&sh_interrupted_obj) },
     { MP_ROM_QSTR(MP_QSTR_Screen), MP_ROM_PTR(&screen_type) },
+    { MP_ROM_QSTR(MP_QSTR_Job), MP_ROM_PTR(&job_type) },
     #endif
     #if MOY_SH_FACE
     { MP_ROM_QSTR(MP_QSTR_Face), MP_ROM_PTR(&face_type) },

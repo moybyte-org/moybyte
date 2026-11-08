@@ -324,6 +324,10 @@ def test_the_clock_syncs_when_the_network_comes_up(board):
     on_glass.the_clock_syncs_when_the_network_comes_up(board)
 
 
+def test_an_alarm_wakes_the_screen_and_at_logs(board):
+    on_glass.an_alarm_wakes_the_screen_and_at_logs(board)
+
+
 def test_the_shell_answers_with_the_vm_down(board):
     on_glass.the_shell_answers_with_the_vm_down(board)
 

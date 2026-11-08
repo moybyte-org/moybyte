@@ -1377,6 +1377,36 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
             board.pyval("ws.system.delete('tz') or 1", strict=True)
 
 
+def an_alarm_wakes_the_screen_and_at_logs(board):
+    """docs/os_2026-11/between_apps.md section 3 on glass: `at` runs its line
+    as a process (`at`) whose output is in the OS log, and an alarm that
+    wakes (`moybyte.at`'s, made here as the registry's) lights the screen from the idle ladder's sleep, the BLANK
+    rung `power off` takes, with nothing said on the line meanwhile (any
+    serial word is input and would wake it): the log then says the alarm
+    woke it, after the job ran. Both alarms are on the wall clock as it
+    reads, synced or not."""
+    st, out = _sh(board, "at now + 4 seconds echo on-glass-at")
+    assert st == 0 and out and out[0].startswith("job "), out
+    line = board.cmd('py __import__("moybyte").WAKES.alarm(__import__("wallclock").now() + 6, '
+                     'lambda: None) and 1', wait_for="PY ")
+    assert line is not None and line.startswith("PY "), line
+    seq = board.pyval('__import__("moy_log").next()', strict=True)
+    board.cmd("power off", wait_for="REMOTE power")
+    board.drain(9.0)                       # say nothing: the alarms are the stimulus
+    try:
+        n0 = len(board.lines)
+        end = board.cmd("log info +%d" % seq, wait_for="LOG end")
+        assert end is not None, board.lines[n0:]
+        got = [l for l in board.lines[n0:] if l.startswith("LOG ")]
+        ran = [i for i, l in enumerate(got) if " at/" in l and "on-glass-at" in l]
+        woke = [i for i, l in enumerate(got) if "an alarm woke the screen" in l]
+        assert len(ran) == 2 and any(" at/" in l and "exit 0" in l for l in got), got
+        assert woke and woke[0] > ran[-1], got
+        assert board.state()["psave"][0] is False
+    finally:
+        board.cmd("power on", wait_for="REMOTE power")
+
+
 def the_shell_answers_with_the_vm_down(board, title="Doom"):
     """docs/os_2026-11.md P3.1's check: with the VM stopped for a compiled
     run, `ps`, `log` and `kill` answer over the serial face from the kernel

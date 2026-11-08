@@ -6,6 +6,8 @@ known, and the time of day in the console's time zone.
                     the host, the unix port and the browser read their
                     machine's clock, which counts as synced once it is past
                     2020. Allocates nothing
+  now()             the clock in Unix seconds, synced or not (a board's
+                    counts from power-on until NTP answers)
   localtime(t=None) the local (year, month, day, hour, minute, second,
                     weekday from Monday 0, yearday from 1) of `t`, Unix
                     seconds, now when None -- None while the clock is not
@@ -326,6 +328,10 @@ _EPOCH = 946684800 if time.gmtime(0)[0] == 2000 else 0
 
 def _now():
     return int(time.time()) + _EPOCH
+
+
+def now():
+    return _now()
 
 
 _floor = _days(_FLOOR_YEAR, 1, 1) * 86400

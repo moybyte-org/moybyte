@@ -129,6 +129,25 @@ scheduling commands over the same alarms, a line's command spawned as a
 process whose output goes to the log. The `alarms` permission gates
 `moybyte.at` waking an app or the board, and nothing else.
 
+As built (phase 6 step 3): NTP, the TZ string (Settings' Time zone) and
+`moybyte.clock_synced()` are `runtime/system/wallclock.py` over
+`native/moy_net/moy_wifi.c`'s clock. An alarm is a wake of the registry's
+on the wall clock (`runtime/system/moybyte.py`): `moybyte.at(t, fn)`, Unix
+seconds, refused with EPERM without `alarms` (a Python permission: a Lua
+service's verbs are `tiers.md` §2's), runs `fn` no earlier than `t` and
+lights the screen from the idle ladder as it goes off. The board's sleep
+today is the ladder's BLANK rung, the system menu's Sleep, through which the
+board keeps running; the SLEEP rung's RTC timer is #130's. The crontab is
+`system/crontab`, cron's five fields and a command, local in the console's
+zone and read strictly at the first frame and by `cron reload`; `at TIME
+COMMAND` keeps its jobs in RAM. Both are `runtime/system/cron.py`, whose
+alarms are the shell's and light nothing, and a job runs its line in a
+shell session of its own with no face (`native/moy_sh/moy_sh_job.h`) as a
+process named `cron` or `at`, its output in the OS log under its pid, one
+job at a time. The shell's `cron` and `at` are role commands
+(`runtime/shell/sh_roles.py`), so with the VM stopped they need the
+console, and so do the alarms, which a stopped VM does not serve.
+
 ## 4. Connectivity events
 
 WiFi and BLE up and down as records in the

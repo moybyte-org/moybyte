@@ -21,6 +21,13 @@ one, `time.ticks_us()`.
                      shell sends the achievements process, section 8)
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
+  at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
+                     seconds on the wall clock (runtime/system/wallclock.py's
+                     `now`, from 1970 on every tier), and light the screen
+                     from the idle ladder's sleep. Under the `alarms`
+                     permission (OSError(EPERM) without it; the shell is not
+                     gated). An alarm set while the clock is not synced is on
+                     the clock as it reads then
   cancel(wid)        a wake undone
   lease(name, **cfg) a resource the board leases, held by this process until
                      it ends: "gpio<n>" a machine.Pin, "uart<n>" a
@@ -79,7 +86,7 @@ one, `time.ticks_us()`.
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
 
-on/every/after answer the wake's id. A timer means "no earlier than": a wake is
+on/every/after/at answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
 keeps its period from the deadline, never bursting to catch up. Precise timing
 is C's (hardware.md section 2).
@@ -89,8 +96,10 @@ it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
 preallocated list) and runs each with `call(wid)`, which points events() at the
 wake's reader for the call; `count(pid)` answers how many wakes a process
 holds; `end(pid)` drops a process's wakes and readers and tells `ended`, the
-scheduler's hook. Each wake belongs to the process that made it (the OS log's
-`current`). This module registers and queues; running a callback under a
+scheduler's hook; `alarm(t, fn, wake)` is `at` with the screen's waking a
+choice (cron's and at's jobs, runtime/system/cron.py, wake nothing), and
+`woke(pid)` the console's hook an alarm that wakes calls. Each wake belongs
+to the process that made it (the OS log's `current`). This module registers and queues; running a callback under a
 slice is the scheduler's (runtime/system/scheduler.py).
 
 The rings are the input table the shell binds (`bind`, the Workstation's
@@ -143,10 +152,14 @@ MESSAGES = ("achieve", "award")
 MAIL_MAX = 16
 
 SHELL = 1
-_ON, _EVERY, _AFTER, _MAIL, _RING = 0, 1, 2, 3, 4
+ALARMS = "alarms"           # the permission `at` needs
+EPERM = 1
+_ON, _EVERY, _AFTER, _MAIL, _RING, _ALARM = 0, 1, 2, 3, 4, 5
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
 # `ms` is its name and its `deadline` the queue of its messages, a ring
-# wake's `ms` the ring source it reads alone and its `deadline` the kinds.
+# wake's `ms` the ring source it reads alone and its `deadline` the kinds,
+# an alarm's `ms` whether it wakes the screen and its `deadline` its Unix
+# seconds.
 _WID, _OWNER, _HOW, _MS, _AT, _FN, _READER = range(7)
 
 
@@ -172,6 +185,8 @@ class Wakes:
                                     # loop then makes the scheduler's upcall)
         self.holds = None           # fn(pid) -> what else keeps a process running:
                                     # its asyncio tasks (runtime/system/aio.py)
+        self.woke = None            # fn(pid) told when an alarm of process pid's that
+                                    # wakes goes off: the console lights the screen
 
     def bind(self, table):
         """The input table whose rings the readers read. A new table starts
@@ -228,6 +243,12 @@ class Wakes:
     def after(self, ms, fn):
         ms = max(0, int(ms))
         return self._add(_AFTER, ms, _ticks_add(_ticks_ms(), ms), fn, -1)
+
+    def alarm(self, t, fn, wake=True):
+        """Wake `fn()` once at wall time `t` (Unix seconds, rounded up),
+        `woke` told as it goes off when `wake`."""
+        t = int(-(-t // 1))
+        return self._add(_ALARM, bool(wake), t, fn, -1)
 
     def send(self, pid, name, args):
         """The OS routes message `name` with `args` to process `pid`: queued
@@ -293,10 +314,12 @@ class Wakes:
     def due(self, now, out):
         """The wakes due at `now` (ticks_ms) into `out`, a list of at least
         one slot a wake; answers how many. A timer due is re-armed (`every`)
-        or spent (`after`, cancelled by its `call`). Allocates nothing."""
+        or spent (`after`, an alarm: cancelled by its `call`). Allocates
+        nothing."""
         n = 0
         cap = len(out)
         t = self.table
+        wall = None
         for w in self.list:
             if n == cap:
                 break
@@ -304,6 +327,17 @@ class Wakes:
             if how == _ON or how == _RING:
                 if t is None or w[_READER] < 0 or not t.pending(w[_READER]):
                     continue
+            elif how == _ALARM:
+                at = w[_AT]
+                if at is None:
+                    continue
+                if wall is None:
+                    wall = _wall()
+                if wall < at:
+                    continue
+                w[_AT] = None
+                if w[_MS] and self.woke is not None:
+                    self.woke(w[_OWNER])
             else:
                 at = w[_AT]
                 if at is None or _ticks_diff(now, at) < 0:
@@ -329,7 +363,7 @@ class Wakes:
     def call(self, wid):
         """Run wake `wid`'s function, events() reading its reader (an `on`)
         or its process's. Its exception is the caller's. An `after` is spent
-        by the call."""
+        by the call, and so is an alarm."""
         w = self.by_id.get(wid)
         if w is None:
             return
@@ -347,7 +381,7 @@ class Wakes:
             w[_FN]()
         finally:
             cur[0] = was
-            if w[_HOW] == _AFTER:
+            if w[_HOW] == _AFTER or w[_HOW] == _ALARM:
                 self.cancel(wid)
 
     def _reader_of(self, pid):
@@ -366,6 +400,21 @@ class Wakes:
         if r < 0:
             r = self._reader_of(_pid())
         return t.events(into, r)
+
+
+_WC = [None]
+
+
+def _wall():
+    """The wall clock's Unix seconds (wallclock.now)."""
+    wc = _WC[0]
+    if wc is None:
+        try:
+            import wallclock as wc
+        except ImportError:  # host: the runtime package
+            from runtime import wallclock as wc
+        _WC[0] = wc
+    return wc.now()
 
 
 # fn(pid) told when a process ends, before its wakes go: the lease sweep
@@ -398,6 +447,16 @@ def every(ms, fn):
 
 def after(ms, fn):
     return WAKES.after(ms, fn)
+
+
+def at(t, fn):
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    if not devices.may(_pid(), ALARMS):
+        raise OSError(EPERM, 'needs "%s"' % ALARMS)
+    return WAKES.alarm(t, fn, True)
 
 
 def cancel(wid):
