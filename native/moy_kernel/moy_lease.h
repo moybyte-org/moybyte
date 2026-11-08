@@ -39,6 +39,17 @@
 // in any tier -- the row ends the driver's hold too (the driver's
 // moy_<driver>_lease_end, weak: an image without the driver has none).
 //
+// THE RADIO. The WiFi station is off unless something holds it (the
+// consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class,
+// one row while anything holds it, owned by the shell (pid 1, which powers
+// the station up and down), whose `tags` are its holders, each a bit of the
+// closed table moy_lease_wifi_tag names ("web", "update", "settings", "cart",
+// "link", "carts", "dev", "http", "media", "ssh"). A hold is idempotent per
+// tag; the last release lets the row go. The row survives a VM stop with the
+// table; a VM's fresh start (not a return start) lets it go with
+// moy_lease_wifi_reset. Dropped any other way, the holders are forgotten and
+// the station is powered down at the next release.
+//
 // EDGES. moy_lease_edge opens a held pin's edges as a ring source of the
 // kernel's input table: on a board moy_edge.h's ISR source (BAD on one that
 // stages no moy_input, the Zero), on the host a stand-in whose edges
@@ -73,6 +84,7 @@ enum {
     MOY_LEASE_LORA = 5,
     MOY_LEASE_BLE = 6,
     MOY_LEASE_MEDIA = 7,
+    MOY_LEASE_WIFI = 8,         // THE RADIO above
 };
 #define MOY_LEASE_DEVICE_FIRST MOY_LEASE_MIC
 #define MOY_LEASE_DEVICE_LAST MOY_LEASE_MEDIA
@@ -94,6 +106,8 @@ enum {
 #define MOY_LEASE_EDGES 4u          // edge sources a lease holds
 #define MOY_LEASE_NAME 7u
 #define MOY_LEASE_PIN_MAX 64u
+#define MOY_LEASE_WIFI_TAGS 10u     // the radio's holder tags
+#define MOY_LEASE_SHELL 1u          // the radio row's owner, the shell's pid
 
 typedef struct {
     char name[MOY_LEASE_NAME + 1u];     // "gpio", "uart1", "spi2"
@@ -109,13 +123,15 @@ typedef struct {
     uint32_t owner;
     uint32_t edge[MOY_LEASE_EDGES];     // ring source handles, 0: none
     uint8_t edge_pin[MOY_LEASE_EDGES];
+    uint32_t tags;                      // a WIFI row: its holders' tag bits
     uint8_t cls;
     uint8_t unit;
     uint8_t flags;
 } moy_lease_row_t;
 
 // The offers made again from `spec` (NULL or "" offers nothing): BAD for a
-// malformed one, which leaves none. Refused while a lease is held.
+// malformed one, which leaves none. Refused (BUSY) while a pin or unit lease
+// is held; a device row or the radio's does not hold an offer.
 int moy_lease_offer(const char *spec);
 // The board's MOY_LEASE_ROWS, where its build defines one.
 int moy_lease_offer_board(void);
@@ -148,8 +164,21 @@ uint32_t moy_lease_of_pin(int pin);
 int moy_lease_hold(uint32_t owner, uint8_t cls);
 int moy_lease_let(uint32_t owner, uint8_t cls);
 uint32_t moy_lease_holder(uint8_t cls);
-// A device class's name ("mic", "lora", "ble", "media"), or NULL.
+// A device class's name ("mic", "lora", "ble", "media", and "wifi" for the
+// radio's row), or NULL.
 const char *moy_lease_device_name(uint8_t cls);
+
+// The radio's holders (THE RADIO). Tag i's name (NULL past the table) and a
+// tag's bit (0: no such tag). Hold: OK with the holders' mask after, BAD for
+// a tag outside the table, FULL or NOMEM when the row cannot be made. Release:
+// OK with the mask after (a tag nobody holds is no error), BAD. The mask, 0
+// while nothing holds the radio; reset lets every holder go.
+const char *moy_lease_wifi_tag(uint32_t i);
+uint32_t moy_lease_wifi_bit(const char *tag, size_t n);
+int moy_lease_wifi_hold(const char *tag, size_t n, uint32_t *mask);
+int moy_lease_wifi_release(const char *tag, size_t n, uint32_t *mask);
+uint32_t moy_lease_wifi_mask(void);
+void moy_lease_wifi_reset(void);
 
 // Pin `pin` of lease `h` as an edge source of `depth` records; a `loop` pin is
 // an output too (moy_edge.h). *src is the ring source's handle.

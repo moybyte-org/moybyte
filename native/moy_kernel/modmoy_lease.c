@@ -13,7 +13,12 @@
 //   pin_state(pin) -> PIN_* bits
 //   sim_pin(pin, state, level)  sim_level(pin, level)  sim_get(pin)   the host's stand-in
 //   reset()
-//   GPIO UART SPI, VM PINS, PIN_IN PIN_OUT PIN_PU PIN_PD PIN_PERIPH PIN_SAFE, ROWS_MAX
+//   Wifi()               the radio's holders (moy_lease.h's THE RADIO), a view
+//                        of the one row: hold(tag) -> mask, release(tag) -> mask,
+//                        mask(), held(tag), holders() -> [tag, ...]; a tag
+//                        outside WIFI_TAGS is a ValueError, a non-str a TypeError
+//   wifi_reset()         every holder let go (a fresh start)
+//   GPIO UART SPI WIFI, WIFI_TAGS, VM PINS, PIN_IN PIN_OUT PIN_PU PIN_PD PIN_PERIPH PIN_SAFE, ROWS_MAX
 
 #include <string.h>
 
@@ -197,6 +202,107 @@ static mp_obj_t lease_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(lease_reset_obj, lease_reset);
 
+// -- the radio -----------------------------------------------------------------
+
+typedef struct {
+    mp_obj_base_t base;
+} wifi_obj_t;
+
+static mp_obj_t wifi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw,
+                              const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 0, 0, false);
+    return MP_OBJ_FROM_PTR(mp_obj_malloc(wifi_obj_t, type));
+}
+
+static const char *wifi_arg(mp_obj_t tag, size_t *n) {
+    if (!mp_obj_is_str(tag)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("a lease tag is a str"));
+    }
+    const char *s = mp_obj_str_get_data(tag, n);
+    if (moy_lease_wifi_bit(s, *n) == 0u) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("unknown lease tag %s"), s);
+    }
+    return s;
+}
+
+static mp_obj_t wifi_hold(mp_obj_t self, mp_obj_t tag) {
+    (void)self;
+    size_t n;
+    const char *s = wifi_arg(tag, &n);
+    uint32_t mask;
+    check(moy_lease_wifi_hold(s, n, &mask));
+    return MP_OBJ_NEW_SMALL_INT(mask);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(wifi_hold_obj, wifi_hold);
+
+static mp_obj_t wifi_release(mp_obj_t self, mp_obj_t tag) {
+    (void)self;
+    size_t n;
+    const char *s = wifi_arg(tag, &n);
+    uint32_t mask;
+    check(moy_lease_wifi_release(s, n, &mask));
+    return MP_OBJ_NEW_SMALL_INT(mask);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(wifi_release_obj, wifi_release);
+
+static mp_obj_t wifi_mask(mp_obj_t self) {
+    (void)self;
+    return MP_OBJ_NEW_SMALL_INT(moy_lease_wifi_mask());
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(wifi_mask_obj, wifi_mask);
+
+static mp_obj_t wifi_held(mp_obj_t self, mp_obj_t tag) {
+    (void)self;
+    size_t n;
+    const char *s = wifi_arg(tag, &n);
+    return mp_obj_new_bool(moy_lease_wifi_mask() & moy_lease_wifi_bit(s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(wifi_held_obj, wifi_held);
+
+static mp_obj_t wifi_holders(mp_obj_t self) {
+    (void)self;
+    uint32_t mask = moy_lease_wifi_mask();
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (uint32_t i = 0; i < MOY_LEASE_WIFI_TAGS; i++) {
+        if (mask & (1u << i)) {
+            const char *tag = moy_lease_wifi_tag(i);
+            mp_obj_list_append(out, MP_OBJ_NEW_QSTR(qstr_from_strn(tag, strlen(tag))));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(wifi_holders_obj, wifi_holders);
+
+static const mp_rom_map_elem_t wifi_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_hold), MP_ROM_PTR(&wifi_hold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_release), MP_ROM_PTR(&wifi_release_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mask), MP_ROM_PTR(&wifi_mask_obj) },
+    { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&wifi_held_obj) },
+    { MP_ROM_QSTR(MP_QSTR_holders), MP_ROM_PTR(&wifi_holders_obj) },
+};
+static MP_DEFINE_CONST_DICT(wifi_locals, wifi_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    wifi_type, MP_QSTR_Wifi, MP_TYPE_FLAG_NONE,
+    make_new, wifi_make_new,
+    locals_dict, &wifi_locals
+    );
+
+static mp_obj_t lease_wifi_reset(void) {
+    moy_lease_wifi_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(lease_wifi_reset_obj, lease_wifi_reset);
+
+static const mp_rom_obj_tuple_t wifi_tags_tuple = {
+    { &mp_type_tuple }, MOY_LEASE_WIFI_TAGS, {
+        MP_ROM_QSTR(MP_QSTR_web), MP_ROM_QSTR(MP_QSTR_update), MP_ROM_QSTR(MP_QSTR_settings),
+        MP_ROM_QSTR(MP_QSTR_cart), MP_ROM_QSTR(MP_QSTR_link), MP_ROM_QSTR(MP_QSTR_carts),
+        MP_ROM_QSTR(MP_QSTR_dev), MP_ROM_QSTR(MP_QSTR_http), MP_ROM_QSTR(MP_QSTR_media),
+        MP_ROM_QSTR(MP_QSTR_ssh),
+    }
+};
+
 static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_lease) },
     { MP_ROM_QSTR(MP_QSTR_offer), MP_ROM_PTR(&lease_offer_obj) },
@@ -217,6 +323,10 @@ static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_sim_level), MP_ROM_PTR(&lease_sim_level_obj) },
     { MP_ROM_QSTR(MP_QSTR_sim_get), MP_ROM_PTR(&lease_sim_get_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&lease_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_Wifi), MP_ROM_PTR(&wifi_type) },
+    { MP_ROM_QSTR(MP_QSTR_wifi_reset), MP_ROM_PTR(&lease_wifi_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_WIFI_TAGS), MP_ROM_PTR(&wifi_tags_tuple) },
+    { MP_ROM_QSTR(MP_QSTR_WIFI), MP_ROM_INT(MOY_LEASE_WIFI) },
     { MP_ROM_QSTR(MP_QSTR_GPIO), MP_ROM_INT(MOY_LEASE_GPIO) },
     { MP_ROM_QSTR(MP_QSTR_UART), MP_ROM_INT(MOY_LEASE_UART) },
     { MP_ROM_QSTR(MP_QSTR_SPI), MP_ROM_INT(MOY_LEASE_SPI) },

@@ -134,8 +134,10 @@ static int parse_row(const char *s, size_t n, moy_lease_offer_t *o) {
     return MOY_LEASE_OK;
 }
 
+static bool pin_rows_held(void);
+
 int moy_lease_offer(const char *spec) {
-    if (moy_lease_held(0) != 0) {
+    if (pin_rows_held()) {
         return MOY_LEASE_BUSY;
     }
     s_offered = true;
@@ -491,7 +493,96 @@ uint32_t moy_lease_holder(uint8_t cls) {
 
 const char *moy_lease_device_name(uint8_t cls) {
     static const char *const names[] = { "mic", "lora", "ble", "media" };
-    return is_device(cls) ? names[cls - MOY_LEASE_DEVICE_FIRST] : NULL;
+    return is_device(cls) ? names[cls - MOY_LEASE_DEVICE_FIRST]
+           : cls == MOY_LEASE_WIFI ? "wifi" : NULL;
+}
+
+static bool pin_rows_held(void) {
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        if (moy_htab_at(s_tab, s) != 0
+            && ((moy_lease_row_t *)moy_htab_row(s_tab, s))->cls <= MOY_LEASE_SPI) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// -- the radio -------------------------------------------------------------------
+
+static const char *const wifi_tags[MOY_LEASE_WIFI_TAGS] = {
+    "web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
+};
+
+const char *moy_lease_wifi_tag(uint32_t i) {
+    return i < MOY_LEASE_WIFI_TAGS ? wifi_tags[i] : NULL;
+}
+
+uint32_t moy_lease_wifi_bit(const char *tag, size_t n) {
+    for (uint32_t i = 0; tag != NULL && i < MOY_LEASE_WIFI_TAGS; i++) {
+        if (strlen(wifi_tags[i]) == n && memcmp(wifi_tags[i], tag, n) == 0) {
+            return 1u << i;
+        }
+    }
+    return 0u;
+}
+
+uint32_t moy_lease_wifi_mask(void) {
+    uint32_t at = device_row(MOY_LEASE_WIFI);
+    return at != 0 ? row_of(at)->tags : 0u;
+}
+
+int moy_lease_wifi_hold(const char *tag, size_t n, uint32_t *mask) {
+    uint32_t bit = moy_lease_wifi_bit(tag, n);
+    if (bit == 0u) {
+        return MOY_LEASE_BAD;
+    }
+    uint32_t at = device_row(MOY_LEASE_WIFI);
+    moy_lease_row_t *r;
+    if (at != 0) {
+        r = row_of(at);
+    } else {
+        int rc = table();
+        if (rc != MOY_LEASE_OK) {
+            return rc;
+        }
+        void *row;
+        rc = moy_htab_add(s_tab, &at, &row);
+        if (rc != MOY_HTAB_OK) {
+            return rc == MOY_HTAB_FULL ? MOY_LEASE_FULL : MOY_LEASE_NOMEM;
+        }
+        r = row;
+        memset(r, 0, sizeof(*r));
+        r->owner = MOY_LEASE_SHELL;
+        r->cls = MOY_LEASE_WIFI;
+    }
+    r->tags |= bit;
+    *mask = r->tags;
+    return MOY_LEASE_OK;
+}
+
+int moy_lease_wifi_release(const char *tag, size_t n, uint32_t *mask) {
+    uint32_t bit = moy_lease_wifi_bit(tag, n);
+    if (bit == 0u) {
+        return MOY_LEASE_BAD;
+    }
+    uint32_t at = device_row(MOY_LEASE_WIFI);
+    *mask = 0u;
+    if (at != 0) {
+        moy_lease_row_t *r = row_of(at);
+        r->tags &= ~bit;
+        *mask = r->tags;
+        if (r->tags == 0u) {
+            moy_htab_release(s_tab, at);
+        }
+    }
+    return MOY_LEASE_OK;
+}
+
+void moy_lease_wifi_reset(void) {
+    uint32_t at = device_row(MOY_LEASE_WIFI);
+    if (at != 0) {
+        moy_htab_release(s_tab, at);
+    }
 }
 
 int moy_lease_drop(uint32_t h) {

@@ -57,7 +57,6 @@
 #include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_play.h"
-#include "moy_route.h"
 #include "moy_tick.h"
 #include "moy_vol.h"
 #include "moycore_lua.h"
@@ -209,12 +208,9 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     if (!(flags & MOY_PLAY_HOME)) {
         return MOY_PLAY_KEEP_PLACE;
     }
-    const moy_spine_kernel_t *k = moy_spine_kernel(NULL);
-    if (k != NULL) {
-        uint32_t kernel_holders = moy_lease_bit("link", 4) | moy_lease_bit("cart", 4);
-        if (moy_leases_mask(k->leases) & ~kernel_holders) {
-            return MOY_PLAY_KEEP_LEASE;
-        }
+    uint32_t kernel_holders = moy_lease_wifi_bit("link", 4) | moy_lease_wifi_bit("cart", 4);
+    if (moy_lease_wifi_mask() & ~kernel_holders) {
+        return MOY_PLAY_KEEP_LEASE;
     }
     if (moy_lease_held(MOY_LEASE_VM) != 0) {
         return MOY_PLAY_KEEP_LEASE;

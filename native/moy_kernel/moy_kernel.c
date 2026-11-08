@@ -110,6 +110,7 @@
 #include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_kernel.h"
+#include "moy_lease.h"
 #include "moy_log.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
@@ -121,9 +122,6 @@
 extern __typeof__(moy_spine_kernel) moy_spine_kernel __attribute__((weak));
 extern __typeof__(moy_returns_run) moy_returns_run __attribute__((weak));
 extern __typeof__(moy_returns_caller) moy_returns_caller __attribute__((weak));
-extern __typeof__(moy_leases_hold) moy_leases_hold __attribute__((weak));
-extern __typeof__(moy_leases_release) moy_leases_release __attribute__((weak));
-extern __typeof__(moy_leases_mask) moy_leases_mask __attribute__((weak));
 // The run a stop was for, with no VM (native/moy_play's moy_play_stop.c).
 void moy_play_stopped_run(void) __attribute__((weak));
 // The app ABI's live grants (native/moy_app), where the image has it, and
@@ -1488,7 +1486,7 @@ static bool s_kstop_stop;           // `kstop N stop`: each cycle a real stop an
 // -- drives the kernel's frame until the stop's run ends (moy_play_stopped_run).
 // Then the first area is allocated again and the next VM starts where the
 // soft reset's does, as a RETURN start: the console's tables the kernel holds
-// (the back-stack, the return records, the leases) and the resume record are
+// (the back-stack, the return records, the radio's lease row) and the resume record are
 // as the stopped VM left them.
 static volatile int s_stop;
 static int s_start = MOY_START_BOOT;
@@ -1628,7 +1626,7 @@ static void moy_kernel_kstop_mark(void) {
     }
     uint32_t mask;
     moy_returns_run(k->returns, "kstop", 5);
-    moy_leases_hold(k->leases, "dev", 3, &mask);
+    moy_lease_wifi_hold("dev", 3, &mask);
 }
 
 // What the mark reads after the stop, cleared: "route=kstop lease=dev" when
@@ -1642,8 +1640,7 @@ static void moy_kernel_kstop_readback(char *out, size_t n) {
     }
     const moy_kind_t *c = moy_returns_caller(k->returns);
     bool route = c != NULL && moy_kind_is(c, "kstop", 5);
-    // "dev" is the lease table's seventh tag (moy_route.c).
-    bool lease = (moy_leases_mask(k->leases) & (1u << 6)) != 0;
+    bool lease = (moy_lease_wifi_mask() & moy_lease_wifi_bit("dev", 3)) != 0;
     if (moy_app_kernel_grants != NULL) {
         snprintf(out, n, "route=%s lease=%s grants=%u", route ? "kstop" : "lost",
                  lease ? "dev" : "lost", (unsigned)moy_app_kernel_grants());
@@ -1653,7 +1650,7 @@ static void moy_kernel_kstop_readback(char *out, size_t n) {
     }
     uint32_t mask;
     moy_returns_run(k->returns, NULL, 0);
-    moy_leases_release(k->leases, "dev", 3, &mask);
+    moy_lease_wifi_release("dev", 3, &mask);
 }
 
 void moy_kernel_kstop(int n) {

@@ -87,7 +87,7 @@ _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the pump r
  _LEN_MS) = range(23)
 
 # The stream's process and what the pump holds for it.
-_s = {"pid": 0, "wake": None, "radio": False, "file": None, "gen": 0, "eof": False,
+_s = {"pid": 0, "wake": None, "file": None, "gen": 0, "eof": False,
       "stopping": False, "sized": False}
 _buf = [None]
 
@@ -165,11 +165,17 @@ def _rate():
     return a.rate() if a is not None else 22050
 
 
+def _holds(ws):
+    """Whether the stream holds the radio: the lease table's radio row says
+    (a console with no radio has none)."""
+    leases = getattr(ws, "leases", None)
+    return leases is not None and leases.held(TAG)
+
+
 def _hold():
     ws = _D.console
-    if ws is None or _s["radio"]:
+    if ws is None or _holds(ws):
         return
-    _s["radio"] = True
     ws.wifi_hold(TAG)
     dial = getattr(getattr(ws, "cart_net", None), "dial", None)
     if dial is not None:
@@ -177,11 +183,9 @@ def _hold():
 
 
 def _let_go():
-    if _s["radio"]:
-        _s["radio"] = False
-        ws = _D.console
-        if ws is not None:
-            ws.wifi_release(TAG)
+    ws = _D.console
+    if _holds(ws):
+        ws.wifi_release(TAG)
 
 
 def _close_file():

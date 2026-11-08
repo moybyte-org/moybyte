@@ -503,7 +503,7 @@ typedef struct {
 
 #define MOY_WIFI_SCAN_MAX 24
 
-// Up and down are the lease's halves: the spine's WiFi lease calls them, and
+// Up and down are the lease's halves: the radio's lease calls them, and
 // nothing else starts or stops the radio. A connect is asked once and kept
 // (the driver re-associates on a loss) until a disconnect or the radio goes
 // down; its result is the state, polled.

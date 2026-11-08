@@ -1,13 +1,15 @@
 """The lease table (native/moy_kernel/moy_lease.h) and its Python face
 (runtime/system/leases.py, docs/os_2026-11/hardware.md section 1): the board's
 offers, a take and what refuses one, the sweep a process's exit, crash and kill
-make, pins left safe, a kept machine object raising, `pins`, the permission
+make, pins left safe, the radio's row (THE RADIO: the WiFi station's
+holders, one row of tags), a kept machine object raising, `pins`, the permission
 rows and their "full access" lines, /dev and /proc (runtime/system/devfs.py),
 and a micropython-lib driver unchanged on a leased bus in the desktop
 MicroPython. The machine objects are the host's stand-in
 (runtime/host/lease_sim.py) over the C table's stand-in pins."""
 
 import errno
+import random
 import subprocess
 import sys
 import time
@@ -375,3 +377,113 @@ def test_a_micropython_lib_driver_runs_unchanged_on_a_leased_bus(tmp_path):
     assert out[1] == "SAFE [1, 1, 1, 1, 1, 1]", out
     assert out[2] == "RAISED 9", out
 
+
+
+# -- the radio ---------------------------------------------------------------------
+
+def test_the_radios_tags_are_the_closed_set():
+    assert N.WIFI_TAGS == ("web", "update", "settings", "cart", "link", "carts", "dev",
+                           "http", "media", "ssh")
+    w = N.Wifi()
+    for i, tag in enumerate(N.WIFI_TAGS):
+        assert w.hold(tag) == (1 << (i + 1)) - 1 and w.held(tag)
+    assert w.holders() == list(N.WIFI_TAGS)
+
+
+def test_the_radio_is_one_row_of_the_shells_holding_a_mask_of_tags():
+    w = N.Wifi()
+    assert w.mask() == 0 and not N.leases()
+    assert w.hold("update") == w.hold("update") != 0
+    w.hold("web")
+    rows = [N.get(h) for h in N.leases()]
+    assert [(r[0], r[1], r[4]) for r in rows] == [(1, N.WIFI, ())]
+    assert N.device_name(N.WIFI) == "wifi"
+    assert w.holders() == ["web", "update"] and w.held("web")
+    assert N.held(N.VM) == 0                      # a VM stop is not refused by it
+    assert w.release("update") != 0
+    assert w.release("link") == w.mask()          # never held: not an error
+    assert w.release("web") == 0 and w.holders() == [] and not N.leases()
+    with pytest.raises(ValueError):
+        w.hold("wasm")
+    with pytest.raises(ValueError):
+        w.release("nobody")
+    with pytest.raises(TypeError):
+        w.held(None)
+
+
+def test_the_radios_row_takes_no_pin_and_holds_no_offer():
+    N.Wifi().hold("ssh")
+    h = N.take(2, N.GPIO, 0, (4,))
+    assert N.of_pin(0) == 0 and N.of_pin(4) == h
+    N.drop(h)
+    N.offer(SPEC)                                 # only a pin or unit row holds the offers
+    assert N.Wifi().holders() == ["ssh"]
+    N.wifi_reset()
+    assert N.Wifi().mask() == 0 and not N.leases()
+
+
+def test_a_full_table_refuses_the_radio_and_the_console_reads_it_offline():
+    pins = [p for name, cls, unit, named, every in N.offers() if cls == N.GPIO
+            for p in every]
+    taken = [N.take(2, N.GPIO, 0, (p,)) for p in pins[:N.ROWS_MAX]]
+    assert len(taken) == N.ROWS_MAX
+    assert _errno(lambda: N.Wifi().hold("web")) == errno.ENOSPC
+    from runtime.console_spine import SpineVerbs
+
+    class Radio:
+        def radio_on(self):
+            return True
+
+    ws = SpineVerbs.__new__(SpineVerbs)
+    ws.wifi, ws.leases = Radio(), N.Wifi()
+    assert ws.wifi_hold("web") is False
+    N.drop(taken[0])
+    assert ws.wifi_hold("web") is True and ws.leases.holders() == ["web"]
+
+
+def test_a_random_walk_of_the_radio_agrees_with_its_mask():
+    """Holds and releases of every tag and of tags outside the table, in a
+    seeded order: the row answers as a plain mask does, and is in the table
+    exactly while the mask is not 0."""
+    rnd = random.Random(1)
+    w, mask = N.Wifi(), 0
+    tags = list(N.WIFI_TAGS) + ["", "wasm", "we", "Dev", "carts "]
+    for _ in range(4000):
+        tag, hold = rnd.choice(tags), rnd.random() < 0.5
+        if tag not in N.WIFI_TAGS:
+            with pytest.raises(ValueError):
+                (w.hold if hold else w.release)(tag)
+            continue
+        bit = 1 << N.WIFI_TAGS.index(tag)
+        mask = mask | bit if hold else mask & ~bit
+        assert (w.hold if hold else w.release)(tag) == mask == w.mask()
+        assert len(N.leases()) == (1 if mask else 0)
+
+
+VM_RADIO = """
+import moy_lease as N
+w = N.Wifi()
+print("hold", w.hold("update"), w.hold("web"), w.hold("update"), ",".join(w.holders()))
+print("held", w.held("web"), w.held("cart"), w.mask(), len(N.leases()))
+print("release", w.release("link"), w.release("update"), w.release("web"), w.holders(),
+      len(N.leases()))
+for fn, arg in ((w.hold, "wasm"), (w.release, None), (w.held, "nobody")):
+    try:
+        fn(arg)
+        print("taken")
+    except ValueError:
+        print("VALUE")
+    except TypeError:
+        print("TYPE")
+"""
+
+
+def test_the_radio_answers_alike_on_the_vm_a_board_runs(tmp_path):
+    exe = require_unix_mp("moy_lease", why="the radio's row on the VM a board runs")
+    script = tmp_path / "radio.py"
+    script.write_text(VM_RADIO)
+    done = subprocess.run([str(exe), str(script)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.splitlines() == [
+        "hold 2 3 3 web,update", "held True False 3 1", "release 3 1 0 [] 0",
+        "VALUE", "TYPE", "VALUE"]

@@ -4,10 +4,6 @@
 
 #include "moy_route.h"
 
-static const char *const lease_tags[MOY_LEASE_TAGS] = {
-    "web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
-};
-
 static int kind_ok(size_t n) {
     return n >= 1u && n <= MOY_ID_MAX;
 }
@@ -343,70 +339,6 @@ int moy_returns_take_back(moy_returns_t *r, moy_kind_t *out) {
     return had;
 }
 
-// -- the WiFi leases ---------------------------------------------------------
-
-struct moy_leases {
-    const moy_htab_mem_t *mem;
-    uint32_t mask;
-};
-
-moy_leases_t *moy_leases_new(const moy_htab_mem_t *mem) {
-    moy_leases_t *l = mem->alloc(sizeof(moy_leases_t));
-    if (l != NULL) {
-        l->mem = mem;
-    }
-    return l;
-}
-
-void moy_leases_reset(moy_leases_t *l) {
-    l->mask = 0;
-}
-
-void moy_leases_free(moy_leases_t *l) {
-    if (l != NULL) {
-        l->mem->release(l, sizeof(moy_leases_t));
-    }
-}
-
-const char *moy_lease_tag(uint32_t i) {
-    return i < MOY_LEASE_TAGS ? lease_tags[i] : NULL;
-}
-
-uint32_t moy_lease_bit(const char *tag, size_t n) {
-    for (uint32_t i = 0; i < MOY_LEASE_TAGS; i++) {
-        if (strlen(lease_tags[i]) == n && memcmp(lease_tags[i], tag, n) == 0) {
-            return 1u << i;
-        }
-    }
-    return 0u;
-}
-
-int moy_leases_hold(moy_leases_t *l, const char *tag, size_t n,
-                    uint32_t *mask) {
-    uint32_t bit = moy_lease_bit(tag, n);
-    if (bit == 0u) {
-        return MOY_ROUTE_BAD;
-    }
-    l->mask |= bit;
-    *mask = l->mask;
-    return MOY_ROUTE_OK;
-}
-
-int moy_leases_release(moy_leases_t *l, const char *tag, size_t n,
-                       uint32_t *mask) {
-    uint32_t bit = moy_lease_bit(tag, n);
-    if (bit == 0u) {
-        return MOY_ROUTE_BAD;
-    }
-    l->mask &= ~bit;
-    *mask = l->mask;
-    return MOY_ROUTE_OK;
-}
-
-uint32_t moy_leases_mask(const moy_leases_t *l) {
-    return l->mask;
-}
-
 // -- the kernel's own tables ---------------------------------------------------
 
 static moy_spine_kernel_t s_kernel;
@@ -423,15 +355,12 @@ const moy_spine_kernel_t *moy_spine_kernel(const moy_htab_mem_t *mem) {
     k.apps = moy_apps_new(mem);
     k.back = moy_back_new(mem);
     k.returns = k.apps != NULL ? moy_returns_new(mem, k.apps) : NULL;
-    k.leases = moy_leases_new(mem);
     k.settings = moy_settings_new(mem);
-    if (k.apps == NULL || k.back == NULL || k.returns == NULL || k.leases == NULL
-        || k.settings == NULL) {
+    if (k.apps == NULL || k.back == NULL || k.returns == NULL || k.settings == NULL) {
         moy_settings_free(k.settings);
         moy_returns_free(k.returns);
         moy_apps_free(k.apps);
         moy_back_free(k.back);
-        moy_leases_free(k.leases);
         return NULL;
     }
     s_kernel = k;

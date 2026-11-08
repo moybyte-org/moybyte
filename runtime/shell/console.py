@@ -533,7 +533,8 @@ try:
     from console_saves import SaveVerbs
     from console_notices import Notices
     from console_spine import SpineVerbs
-    from moy_spine import AppRegistry, Leases, Returns
+    from moy_spine import AppRegistry, Returns
+    from moy_lease import Wifi, wifi_reset
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_input import InputVerbs
     from runtime.console_home import HomeVerbs
@@ -544,16 +545,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_saves import SaveVerbs
     from runtime.console_notices import Notices
     from runtime.console_spine import SpineVerbs
-    from runtime.moy_spine import AppRegistry, Leases, Returns
+    from runtime.moy_spine import AppRegistry, Returns
+    from runtime.moy_lease import Wifi, wifi_reset
 
 
 def _kernel_tables():
-    """(apps, back, returns, leases) as views of the kernel's own tables where
-    the console runs on a kernel (a board: `moy_kernel` is in the image), so a
-    VM stop leaves its routes and leases for the next VM
-    (docs/history/kernel_cartpath_2026-10.md section 5.4); None elsewhere, where each
-    console owns its own. A return start keeps them as they were; every other
-    start puts them back as they are made."""
+    """(apps, back, returns) as views of the kernel's own tables where the
+    console runs on a kernel (a board: `moy_kernel` is in the image), so a VM
+    stop leaves its routes, like the radio's holders in the lease table, for
+    the next VM (docs/history/kernel_cartpath_2026-10.md section 5.4); None
+    elsewhere, where each console owns its own. A return start keeps them and
+    the radio's holders as they were; every other start puts them back as they
+    are made."""
     try:
         import moy_kernel
         import moy_spine
@@ -565,7 +568,9 @@ def _kernel_tables():
     start = getattr(moy_kernel, "start", None)
     returning = start is not None and start() == "return"
     tables = kernel(not returning)
-    if returning:
+    if not returning:
+        wifi_reset()
+    else:
         # The route the stop recorded: a run that stopped the VM was HOME's
         # (moy_play_launch refuses any other), so its exit is the launcher.
         tables[1].goto("launcher")
@@ -901,8 +906,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # LEASE (console_spine's wifi_hold/wifi_release): the tags holding it,
         # and the last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
-        kt = self._kernel_tables
-        self.leases = kt[3] if kt is not None else Leases()
+        self.leases = Wifi()        # the radio's lease row (moy_lease.h, THE RADIO)
+        if self._kernel_tables is None:
+            wifi_reset()            # a console with no kernel starts with no holders
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace

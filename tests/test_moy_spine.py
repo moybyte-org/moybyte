@@ -19,8 +19,6 @@ pins the rules:
   * the back-stack's root is the launcher, goto answers STAYED / PUSHED /
     RETURNED, a kind is on it at most once;
   * a run's exit route follows its caller's kind; the app-return only sets;
-  * a lease tag outside LEASE_TAGS is refused, a release of one never held
-    is not;
   * settings rows hold JSON text and `set` is the one way in: it marks the
     store dirty and persists it through the save hook, a failed write leaves it
     dirty for the next, `get` decodes a row afresh, a load that is refused
@@ -293,56 +291,27 @@ def test_the_app_return_only_sets_and_only_for_an_app(sp):
     assert rt.take_back() == "files" and rt.back() is None
 
 
-# -- WiFi leases ------------------------------------------------------------
-
-def test_the_lease_tags_are_the_closed_set(sp):
-    assert tuple(sp.LEASE_TAGS) == ("web", "update", "settings", "cart", "link",
-                                    "carts", "dev", "http", "media", "ssh")
-    ls = sp.Leases()
-    for i, tag in enumerate(sp.LEASE_TAGS):
-        assert ls.hold(tag) == (1 << (i + 1)) - 1 and ls.held(tag)
-    assert ls.holders() == list(sp.LEASE_TAGS)
-
-
-def test_leases_are_a_mask_over_a_closed_set_of_tags(sp):
-    ls = sp.Leases()
-    assert ls.hold("update") == ls.hold("update") != 0
-    ls.hold("web")
-    assert ls.holders() == ["web", "update"] and ls.held("web")
-    assert ls.release("update") != 0
-    assert ls.release("link") == ls.mask()       # never held: not an error
-    assert ls.release("web") == 0 and ls.holders() == []
-    with pytest.raises(ValueError):
-        ls.hold("wasm")
-    with pytest.raises(ValueError):
-        ls.release("nobody")
-    with pytest.raises(TypeError):
-        ls.held(None)
-
-
 def test_the_kernels_tables_outlive_their_views(sp):
     """kernel(fresh): the console's tables as the kernel's own
     (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
     a view dropping (a VM stop's sweep) does not free. A return start
-    (fresh False) reads the route and the lease the stopped VM left; every
-    start clears the registry, and any other start puts the rest back."""
-    apps, back, returns, leases = sp.kernel(True)
+    (fresh False) reads the route the stopped VM left; every start clears the
+    registry, and any other start puts the rest back."""
+    apps, back, returns = sp.kernel(True)
     apps.register("files", "Files")
     back.goto("desktop")
     returns.run("menu")
-    leases.hold("dev")
-    del apps, back, returns, leases
+    del apps, back, returns
     import gc
     gc.collect()
-    apps, back, returns, leases = sp.kernel(False)
+    apps, back, returns = sp.kernel(False)
     assert back.kinds() == ["launcher", "desktop"]
     assert returns.caller() == "menu"
-    assert leases.holders() == ["dev"]
     assert apps.count() == 0 and apps.find("files") == 0
     assert apps.register("files", "Files") != 0
-    apps, back, returns, leases = sp.kernel(True)
+    apps, back, returns = sp.kernel(True)
     assert back.kinds() == ["launcher"] and returns.caller() is None
-    assert leases.mask() == 0 and apps.count() == 0
+    assert apps.count() == 0
 
 
 def test_the_kernels_settings_rows_outlive_their_views(sp):

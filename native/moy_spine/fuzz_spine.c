@@ -10,8 +10,8 @@
 // An input is a program: an op byte, then its operands. Each component has a
 // model, the obvious version with arrays scanned linearly, and every answer the
 // implementation gives is checked against it: a handle table of a random kind
-// and size, the app registry, the back-stack, the return records, the leases
-// and the settings rows. The allocator counts every byte, holds each release to
+// and size, the app registry, the back-stack, the return records and the
+// settings rows. The allocator counts every byte, holds each release to
 // the size it was allocated with, and refuses an allocation on a countdown the
 // input sets, so the out-of-memory paths run too and must leave a component
 // exactly as it was. Two ops feed the settings scanner raw and corrupted text:
@@ -550,42 +550,6 @@ static void rt_op(input_t *in, uint8_t op) {
     rt_verify();
 }
 
-// -- the leases -------------------------------------------------------------------------------
-
-static struct {
-    moy_leases_t *l;
-    uint32_t mask;
-} ls;
-
-static const char *const TAGS[] = {
-    "web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
-    "", "wasm", "webx", "we", "carts ", "Dev",
-};
-
-static void ls_op(input_t *in) {
-    int hold = next(in) & 1;
-    const char *tag = TAGS[next(in) % (sizeof TAGS / sizeof TAGS[0])];
-    size_t n = strlen(tag);
-    int idx = -1;
-    for (int i = 0; i < (int)MOY_LEASE_TAGS; i++) {
-        if (strlen(moy_lease_tag((uint32_t)i)) == n
-            && memcmp(moy_lease_tag((uint32_t)i), tag, n) == 0) {
-            idx = i;
-        }
-    }
-    uint32_t mask = 0xdeadu;
-    int rc = hold ? moy_leases_hold(ls.l, tag, n, &mask)
-                  : moy_leases_release(ls.l, tag, n, &mask);
-    if (idx < 0) {
-        CHECK(rc == MOY_ROUTE_BAD && mask == 0xdeadu);
-    } else {
-        ls.mask = hold ? ls.mask | (1u << idx) : ls.mask & ~(1u << idx);
-        CHECK(rc == MOY_ROUTE_OK && mask == ls.mask);
-    }
-    CHECK(moy_leases_mask(ls.l) == ls.mask);
-    CHECK(moy_lease_tag(MOY_LEASE_TAGS) == NULL);
-}
-
 // -- the settings rows -------------------------------------------------------------------------
 
 #define ROWS 24
@@ -1022,15 +986,13 @@ static void st_scan(input_t *in) {
 static void make_all(void) {
     ap.a = moy_apps_new(&mem);
     bk.b = moy_back_new(&mem);
-    ls.l = moy_leases_new(&mem);
     st.s = moy_settings_new(&mem);
-    CHECK(ap.a && bk.b && ls.l && st.s);
+    CHECK(ap.a && bk.b && st.s);
     rt.r = moy_returns_new(&mem, ap.a);
     CHECK(rt.r != NULL);
     ap.n = 0;
     bk_reset();
     rt.clen = rt.blen = 0;
-    ls.mask = 0;
     st.n = 0;
     st.dirty = 0;
 }
@@ -1039,7 +1001,6 @@ static void free_all(void) {
     moy_returns_free(rt.r);
     moy_apps_free(ap.a);
     moy_back_free(bk.b);
-    moy_leases_free(ls.l);
     moy_settings_free(st.s);
     moy_htab_free(tm.t);
     tm.t = NULL;
@@ -1051,7 +1012,6 @@ static void verify_all(void) {
     bk_verify();
     rt_verify();
     st_verify();
-    CHECK(moy_leases_mask(ls.l) == ls.mask);
 }
 
 static void run(const uint8_t *data, size_t size) {
@@ -1120,11 +1080,8 @@ static void run(const uint8_t *data, size_t size) {
                 CHECK(moy_back_index(bk.b, k, n) == bk_index(k, n));
                 break;
             }
-            case 15: case 16:
+            case 15: case 16: case 17:
                 rt_op(&in, next(&in) % 5u);
-                break;
-            case 17:
-                ls_op(&in);
                 break;
             case 18: case 19:
                 st_set(&in);

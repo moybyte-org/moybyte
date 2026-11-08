@@ -13,7 +13,7 @@ sanitizers.
 | file | what it is |
 |---|---|
 | `moy_htab.h`, `moy_htab.c` | the handle table: `gen << 12 \| kind << 8 \| slot`, never 0, generation-checked, lowest-first reuse. Unkinded (kind 0, 12 bits of slot) it is `native/moy_index`'s slot bookkeeping too |
-| `moy_route.h`, `moy_route.c` | the app registry (a kinded `moy_htab`), the back-stack, the return records and `route()`, the WiFi lease mask, and the kernel's own copies of them and of the settings rows (`moy_spine_kernel`) |
+| `moy_route.h`, `moy_route.c` | the app registry (a kinded `moy_htab`), the back-stack, the return records and `route()`, and the kernel's own copies of them and of the settings rows (`moy_spine_kernel`) |
 | `moy_settings.h`, `moy_settings.c` | system/settings as rows of JSON text, the count of changes since it was last clean, the saver a flush writes the file through, and the plain-text file's one reader and one writer (`Settings.load_file`, `Settings.file`), which `runtime/carts/moy_docs.py` and the C shell's `settings` both call |
 | `moy_json.h`, `moy_json.c` | the kernel's JSON scanner, one body for the settings store and the cart store (manifests, journal lines, the seed roster): spans walked in place, CPython's json.loads as the reference, and json.dumps's text for a span. `native/moy_store`'s fragment compiles it, since every image links the store |
 | `moy_ledger.h`, `moy_ledger.c` | the strike ledger's slot (`runtime/shell/crash_guard.py`) as text in, text out: the edits `CrashGuard` makes, written as `json.dumps` would write them |

@@ -128,7 +128,6 @@ def round_():
         t.new(i)
     st = sp.BackStack()
     st.goto("menu")
-    sp.Leases().hold("web")
 
 
 for _ in range(300):
@@ -207,7 +206,6 @@ def _outcome(fn, *a):
 KINDS = ["launcher", "menu", "desk", "desktop", "settings", "files", "artwork",
          "calc"] + ["k%d" % i for i in range(40)] + ["", "x" * 16, "éé",
                                                        "x" * 15, None, 3]
-TAGS = list(moy_spine.LEASE_TAGS) + ["", "wasm", "we", None, 4]
 KEYS = ["a", "b", "theme", "fs", "app_guard", 'q"q', "b\\s", "n\nl", "é",
         "\U0001f600", "k\x7f", "x y", "", None, 5]
 VALUES = ["1", "-0", "0.5e+3", "true", "null", "NaN", '"s"', '"\\u00e9\\n"',
@@ -246,7 +244,6 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
     apps = pair(lambda m: m.AppRegistry())
     back = pair(lambda m: m.BackStack())
     returns = (ref.Returns(apps[0]), nat.Returns(apps[1]))
-    leases = pair(lambda m: m.Leases())
     saved = ([], [])                # what each save hook was handed, in order
     landing = [True]                # whether a write lands: the hooks' answer
 
@@ -347,11 +344,6 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 agree(both(returns, op), step)
             agree(both(returns, "caller"), (step, "caller"))
             agree(both(returns, "back"), (step, "back"))
-        elif k < 0.68:                                   # the leases
-            op = rnd.choice(("hold", "release", "held"))
-            agree(both(leases, op, rnd.choice(TAGS)), step)
-            assert leases[0].mask() == leases[1].mask()
-            assert leases[0].holders() == leases[1].holders()
         else:                                            # the settings rows
             op = rnd.choice(("set", "set", "set_text", "set_text", "get", "text",
                              "delete", "load", "adopt", "flush", "land"))

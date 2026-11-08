@@ -83,7 +83,7 @@ EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
 trace, the SPINE's (its Python oracle tests/spine_twin.py, and the strike ledger in
 runtime/shell/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
-the return routes, the WiFi leases, the settings rows (the setter that
+the return routes, the settings rows (the setter that
 persists, the dirty store and its retried write, the read decoded afresh) and
 the ledger's arm / heal / strike / forgive / proof bracket over those rows,
 pinned verbatim on every VM like the store's: the handle values are kind.slot.generation. Mutation-tested: the
@@ -1062,12 +1062,6 @@ for i in range(st.DEPTH - st.depth()):
     st.goto("k%d" % i)
 say("deep", st.depth(), tried(st.goto, "more"), st.goto("desk"), st.depth())
 
-ls = sp.Leases()
-say("hold", ls.hold("update"), ls.hold("web"), ls.hold("update"), ",".join(ls.holders()))
-say("held", ls.held("web"), ls.held("cart"), ls.mask())
-say("release", ls.release("link"), ls.release("update"), ls.release("web"), ls.holders())
-say("tags", tried(ls.hold, "wasm"), tried(ls.release, None), tried(ls.held, "nobody"))
-
 written = []
 s = sp.Settings(lambda text: written.append(text))
 say("load", s.load('{"theme": "outline", "fs": 2, "favorites": ["/a.moy"]}'),
@@ -1165,10 +1159,6 @@ remove True False False launcher/desk/settings
 refused TYPE VALUE VALUE TYPE TYPE
 index 2 -1 True 3 settings
 deep 32 OSERROR 28 2 2
-hold 2 3 3 web,update
-held True False 3
-release 3 1 0 []
-tags VALUE TYPE VALUE
 load 3 ['favorites', 'fs', 'theme'] False
 rows 3 ['/a.moy'] {"open": "files"} None 7 False 2
 written {"theme": "outline", "fs": 3, "favorites": ["/a.moy"]} {"theme": "outline", "fs": 3, "favorites": ["/a.moy"], "guard": {"open": "files"}}

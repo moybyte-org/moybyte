@@ -1,7 +1,6 @@
-// Routing as a C ABI: the app registry, the back-stack, the return records and
-// the WiFi leases.
+// Routing as a C ABI: the app registry, the back-stack and the return records.
 //
-// runtime/moy_spine.py's AppRegistry, BackStack, Returns and Leases are the
+// runtime/moy_spine.py's AppRegistry, BackStack and Returns are the
 // interface and the reference; this header is their native form
 // (docs/history/kernel_spine_2026-10.md section 3). Each holds KINDS, never objects: a
 // kind is 1 .. MOY_ID_MAX bytes of any value, an app id or a back-stack kind,
@@ -145,29 +144,9 @@ int moy_returns_note(moy_returns_t *r, const char *kind, size_t n, int *set);
 const moy_kind_t *moy_returns_back(const moy_returns_t *r);     // NULL: none
 int moy_returns_take_back(moy_returns_t *r, moy_kind_t *out);
 
-// -- the WiFi leases ---------------------------------------------------------
-
-// A mask over a closed tag table, bit i the tag moy_lease_tag(i) names.
-#define MOY_LEASE_TAGS 10u
-
-typedef struct moy_leases moy_leases_t;
-
-moy_leases_t *moy_leases_new(const moy_htab_mem_t *mem);
-void moy_leases_free(moy_leases_t *l);
-void moy_leases_reset(moy_leases_t *l);                 // nothing held
-
-const char *moy_lease_tag(uint32_t i);                  // NULL past the table
-uint32_t moy_lease_bit(const char *tag, size_t n);      // 0: no such tag
-// OK with the mask after; BAD for a tag outside the table. A hold is
-// idempotent, and releasing a tag nobody holds is not an error.
-int moy_leases_hold(moy_leases_t *l, const char *tag, size_t n, uint32_t *mask);
-int moy_leases_release(moy_leases_t *l, const char *tag, size_t n,
-                       uint32_t *mask);
-uint32_t moy_leases_mask(const moy_leases_t *l);
-
 // -- the kernel's own tables --------------------------------------------------
 
-// The console's registry, back-stack, return records, leases and settings rows
+// The console's registry, back-stack, return records and settings rows
 // (system/settings, moy_settings.h) as kernel
 // singletons (docs/history/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
 // the first call that passes one, and never freed, so a VM stop's sweep leaves
@@ -178,7 +157,6 @@ typedef struct {
     moy_apps_t *apps;
     moy_back_t *back;
     moy_returns_t *returns;
-    moy_leases_t *leases;
     moy_settings_t *settings;
 } moy_spine_kernel_t;
 

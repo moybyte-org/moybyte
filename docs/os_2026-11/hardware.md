@@ -124,7 +124,7 @@ its lease, which closes its edge sources and returns its pins to a safe state
 uninstalled); `moy_lease_pin_state` reads a pin back from the GPIO matrix. An
 object kept past its process raises `OSError(EBADF)`. **A VM stop is refused
 while a Python process holds a lease** (`MOY_LEASE_VM`, read by
-`native/moy_play/moy_play_stop.c` beside the WiFi leases); a Lua, wasm or ELF
+`native/moy_play/moy_play_stop.c` beside the radio's row); a Lua, wasm or ELF
 process's lease will live outside the VM, untouched by a stop.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
@@ -138,7 +138,12 @@ BLE central's and the media service's holder is a lease of the device's class
 (a Python app's face, a process of another tier, the shell as pid 1) and
 swept with its holder's other leases, so the lease listing (`lease`) names
 it; the shell's `mic`, `lora` and `ble scan` are served in C over their drivers and
-those leases (`native/moy_sh/moy_sh_board.c`). Their events are NET, LORA, BLE, USB and
+those leases (`native/moy_sh/moy_sh_board.c`). The WiFi station's holders
+are a row of the same table, the radio's (`MOY_LEASE_WIFI`, `moy_lease.h`'s
+THE RADIO): one row the shell owns while anything holds the station, its
+holders a mask of tags (`web`, `update`, `cart`, `media`, ...), which
+`Workstation.wifi_hold` and `wifi_release` take and let go and which a VM stop
+keeps. The faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
 on.
 

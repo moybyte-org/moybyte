@@ -2,10 +2,11 @@
 the run and exit verbs, app registration and resolution, the WiFi lease and
 the settings wiring, as a mixin over `self`.
 
-The state these verbs keep lives in the spine's components (native/moy_spine) --
-`self.apps` (AppRegistry), `self.wm.stack` (BackStack), `self.returns`
-(Returns), `self.leases` (Leases) and `self.prefs.rows` (Settings) -- which
-hold ids, kinds and JSON text, never a Python object. What stays here is the
+The state these verbs keep lives in C -- the spine's components
+(native/moy_spine): `self.apps` (AppRegistry), `self.wm.stack` (BackStack),
+`self.returns` (Returns) and `self.prefs.rows` (Settings), and the lease
+table's radio row (native/moy_kernel/moy_lease.h): `self.leases` (Wifi) --
+which hold ids, kinds, tags and JSON text, never a Python object. What stays here is the
 Python side of each verb: the app objects (`_apps`, `_apps_by_id`), the
 surfaces a route lands on, and the radio service the lease powers.
 """
@@ -488,13 +489,18 @@ class SpineVerbs:
         stream while a URL of its list may play, dev_media.py), "ssh" (the SSH
         server while it serves, ssh_service.py). A new consumer
         of the network takes a tag here and releases it on its way out, or the
-        radio never goes off again. The tags are `moy_spine.LEASE_TAGS`, and
-        any other is refused (ValueError)."""
+        radio never goes off again. The holders are the lease table's radio
+        row (`moy_lease.Wifi`), its tags `moy_lease.WIFI_TAGS`, and any other
+        is refused (ValueError); a table with no row left is a radio that
+        cannot start (False)."""
         w = self.wifi
         if w is None:
             self.leases.held(tag)          # refused even with no radio to hold
             return False
-        self.leases.hold(tag)
+        try:
+            self.leases.hold(tag)
+        except OSError:
+            return False
         on = getattr(w, "radio_on", None)
         if on is None:
             return True

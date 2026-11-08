@@ -22,6 +22,8 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 PART = native_build.Part("lease", ("moy_lease.h", "moy_lease.c"), (_KERNEL,))
 
 GPIO, UART, SPI = 1, 2, 3
+WIFI = 8
+WIFI_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh")
 VM, PINS = 0x01, 0x02
 PIN_IN, PIN_OUT, PIN_PU, PIN_PD, PIN_PERIPH = 0x01, 0x02, 0x04, 0x08, 0x10
 PIN_SAFE = PIN_IN
@@ -40,7 +42,7 @@ class _Offer(ctypes.Structure):
 
 class _Row(ctypes.Structure):
     _fields_ = [("pins", _U64), ("owner", _U32), ("edge", _U32 * EDGES),
-                ("edge_pin", _U8 * EDGES), ("cls", _U8), ("unit", _U8), ("flags", _U8)]
+                ("edge_pin", _U8 * EDGES), ("tags", _U32), ("cls", _U8), ("unit", _U8), ("flags", _U8)]
 
 
 _SIGS = (
@@ -63,6 +65,11 @@ _SIGS = (
     ("moy_lease_sim_level", [_I, _I], None),
     ("moy_lease_sim_get", [_I], _I),
     ("moy_lease_reset", [], None),
+    ("moy_lease_wifi_bit", [ctypes.c_char_p, ctypes.c_size_t], _U32),
+    ("moy_lease_wifi_hold", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moy_lease_wifi_release", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moy_lease_wifi_mask", [], _U32),
+    ("moy_lease_wifi_reset", [], None),
 )
 
 _LIB = [None]
@@ -185,3 +192,41 @@ def sim_get(pin):
 
 def reset():
     _lib().moy_lease_reset()
+
+
+class Wifi:
+    """The radio's holders (moy_lease.h's THE RADIO): a view of the one row."""
+
+    @staticmethod
+    def _tag(tag):
+        if not isinstance(tag, str):
+            raise TypeError("a lease tag is a str")
+        b = tag.encode()
+        if not _lib().moy_lease_wifi_bit(b, len(b)):
+            raise ValueError("unknown lease tag %s" % tag)
+        return b
+
+    def hold(self, tag):
+        b, mask = self._tag(tag), _U32()
+        _check(_lib().moy_lease_wifi_hold(b, len(b), ctypes.byref(mask)))
+        return mask.value
+
+    def release(self, tag):
+        b, mask = self._tag(tag), _U32()
+        _check(_lib().moy_lease_wifi_release(b, len(b), ctypes.byref(mask)))
+        return mask.value
+
+    def mask(self):
+        return _lib().moy_lease_wifi_mask()
+
+    def held(self, tag):
+        b = self._tag(tag)
+        return bool(self.mask() & _lib().moy_lease_wifi_bit(b, len(b)))
+
+    def holders(self):
+        mask = self.mask()
+        return [WIFI_TAGS[i] for i in range(len(WIFI_TAGS)) if mask >> i & 1]
+
+
+def wifi_reset():
+    _lib().moy_lease_wifi_reset()
