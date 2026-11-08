@@ -3792,9 +3792,11 @@ def hello_read_its_greeting(board):
     """The hello cart's `read` crossed to the VM and back: its greeting's
     black band spans the text (8 pixels a character) only when the read
     returned the file's bytes; with nothing read it is 8 pixels wide and row 9
-    at x=100 is the blit's gradient."""
+    at x=24 is the blit's gradient. x=24 is left of the system notice an
+    interpreted run shows ("RUNNING SLOWLY"), which the kernel's front draws
+    centred over the top of the run's canvas."""
     px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
-                     "(ws.canvas._buf, 2 * (9 * ws.canvas.w + 100))", strict=True)
+                     "(ws.canvas._buf, 2 * (9 * ws.canvas.w + 24))", strict=True)
     black = board.pyval("ws.canvas._wire[0]", strict=True)
     assert px == black, "the greeting was not read: pixel %#06x" % px
 
@@ -4807,17 +4809,20 @@ def _ff_proof():
 
 def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
                                                   seconds=6.0):
-    """The frame fold on a banded board: run `title` from the launcher with
-    the FPS chip on -- the default, and an opaque rect over every frame --
-    and every frame it draws is folded from the cart's memory (the frame
-    fold's count climbs with the fold's own), the snapshot DMA takes them all
-    and never times out, frames are in layout `fmt` (1 blit565, 2 blit), and
-    the proof above reads 0. Returns the frames folded in `seconds`."""
+    """The frame fold on a banded board, on the console's frame: run `title`
+    from the launcher with the FPS chip on -- the default, and an opaque rect
+    over every frame -- and the kernel's front held off (its own fold is
+    a_compiled_run_shows_its_frames_in_front's), and every frame it draws is
+    folded from the cart's memory (the frame fold's count climbs with the
+    fold's own), the snapshot DMA takes them all and never times out, frames
+    are in layout `fmt` (1 blit565, 2 blit), and the proof above reads 0.
+    Returns the frames folded in `seconds`."""
     assert board.state().get("wifi_held") == rest_holders(board), \
         "WiFi is held: not a cart's state"
     st = board.state()
     fps_was = board.pyval("ws.show_fps", strict=True)
-    board.pyexec("ws.show_fps = True", strict=True)
+    board.pyexec("ws.show_fps = True\nws._g['_bind_was'] = ws.front_bind\n"
+                 "ws.front_bind = lambda: False", strict=True)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:
@@ -4836,7 +4841,8 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
     finally:
         board.leave_cart()
         board.drain(1.0)
-        board.pyexec("ws.show_fps = %r" % bool(fps_was))
+        board.pyexec("ws.show_fps = %r\nws.front_bind = ws._g['_bind_was']"
+                     % bool(fps_was))
     print("\nFRAME FOLD %s: folded %d of %d flushes' folds in %.0fs, snap %r -> %r, "
           "proof %r" % (title, ff1 - ff0, f1 - f0, seconds, snaps0, snaps1, bad))
     assert ff1 - ff0 > 0, "no frame was folded from the cart's memory"
@@ -5152,7 +5158,13 @@ def _front_settle_proof(kind):
     if kind != 'fold':
         return binascii.crc32(gc._buf) == want
     # An S3 canvas holds the panel's byte order, the cart's frame its own.
-    c = memoryview(gc._buf)
+    # A front over the whole panel draws the run into the compositor's back
+    # buffer, which its present flips; the console's canvas re-points only
+    # on its own frames, so the frame shown last is the compositor's.
+    buf = gc._buf
+    if gc is ws.sys_canvas:
+        buf = ws.comp.last_buffer() or buf
+    c = memoryview(buf)
     for i in range(0, n, 2):
         if c[i] != kept[i + 1] or c[i + 1] != kept[i]:
             return False
