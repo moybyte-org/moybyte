@@ -1325,36 +1325,29 @@ class WasmRuntime:
         SERVICE): its `_start` on a task of its own, its argv the cart's id;
         its module chosen as `command`'s is. `run`, the app grant
         compiled_run made, has no import to reach it: a WASI program imports
-        no app call. None, or why it did not start; this firmware's answer
-        where it runs no services (the S3s, as for Lua services)."""
+        no app call. None, or why it did not start."""
         del run
-        go = getattr(_moy_wasm, "service_start", None)
-        if go is None:
-            return "this firmware runs no wasm services"
         app_id = cart.get("id") or ""
 
         def start(path, sha, interp, unsigned_ok):
-            why = go(path, sha, interp, unsigned_ok, pid, app_id)
+            why = _moy_wasm.service_start(path, sha, interp, unsigned_ok, pid, app_id)
             return (0, None) if why is None else (-3, why)
         return self._launch(cart, start)[1]
 
     def stop(self, pid):
         """Service `pid` stopped: its descriptor hung up, killed (137) past
         its time. Its exit status, or -1 for no such service."""
-        stop = getattr(_moy_wasm, "service_stop", None)
-        return -1 if stop is None else stop(pid)
+        return _moy_wasm.service_stop(pid)
 
     def reap(self):
         """[(pid, exit status)] of the services that ended: by themselves, a
         trap (134), or killed by the watchdog (137)."""
-        reap = getattr(_moy_wasm, "service_reap", None)
-        return [] if reap is None else reap()
+        return _moy_wasm.service_reap()
 
     def figures(self, pid):
         """(linear memory bytes, its wakes' cost in us) of live service
         `pid`, or None once it has ended."""
-        info = getattr(_moy_wasm, "service_info", None)
-        return None if info is None else info(pid)
+        return _moy_wasm.service_info(pid)
 
 
 def make_wasm_runtime(ws):

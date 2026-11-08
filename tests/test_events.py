@@ -449,6 +449,25 @@ def test_the_readers_are_counted_and_a_freed_one_is_taken_again():
         t.reader_free(99)
 
 
+def test_the_vm_stop_frees_every_reader_of_the_kernels_table():
+    """The kernel's table outlives a VM stop, and only the VM's processes
+    take its readers: the stop frees them all, or each stop would leave the
+    shell's poll reader taken until every wake's call fails with ENOSPC."""
+    t = mi.kernel()
+    got = []
+    try:
+        while True:
+            got.append(t.reader())
+    except OSError:
+        pass
+    assert got
+    mi._lib().moy_input_vm_stop()
+    again = [t.reader() for _ in range(8)]
+    assert sorted(again) == list(range(8))
+    for r in got:                       # the ones this worker's other tests hold stay taken
+        t.reader_free(r)
+
+
 def test_a_post_refuses_the_readers_own_kind():
     t = mi.InputTable()
     with pytest.raises(ValueError):

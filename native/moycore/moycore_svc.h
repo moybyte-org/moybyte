@@ -9,13 +9,12 @@
 // event queue (native/moy_kernel/moy_evq.h), its rungs the one supervisor's
 // (moy_super.h) and its calls into the console the VM's queue (moy_vmq.h).
 //
-// WHERE IT RUNS. On the P4s each service runs on a task of its own, pinned to
-// core 0 (MOYCORE_SVC_CORE) at MOYCORE_SVC_PRIO: the task makes the state,
-// runs the chunk and `moy_start`, then blocks in the one kernel wait
-// (moy_evq_wait) until its next deadline, a message, an answer or a stop, and
-// runs what is due, so a callback never runs on the VM's task. The S3s get
-// no user service in Lua (the overview's section 5): a start there is BAD.
-// The host and the desktop MicroPython have no task to give: their services
+// WHERE IT RUNS. On a board each service runs on a task of its own at
+// MOYCORE_SVC_PRIO, pinned to core 0 on the P4s and to core 1 on the S3s,
+// whose stack is in PSRAM there: the task makes the state, runs the chunk and
+// `moy_start`, then blocks in the one kernel wait (moy_evq_wait) until its
+// next deadline, a message, an answer or a stop, and runs what is due, so a
+// callback never runs on the VM's task. The host and the desktop MicroPython have no task to give: their services
 // run when moycore_svc_step is called (the scheduler's poll, once a frame), on
 // the caller's task, the same code with the caller's clock.
 //
@@ -120,7 +119,7 @@ enum {
     MOYCORE_SVC_STALE = 1,      // no service by that handle
     MOYCORE_SVC_FULL = 2,       // every row is taken
     MOYCORE_SVC_NOMEM = 3,
-    MOYCORE_SVC_BAD = 4,        // no Lua services on this chip
+    MOYCORE_SVC_BAD = 4,        // a reap before its service has exited
 };
 
 // A service's states.
@@ -137,7 +136,6 @@ enum {
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
 #define MOYCORE_SVC_HEAP_MAX (1024u * 1024u)
 #define MOYCORE_SVC_WHY 96u
-#define MOYCORE_SVC_CORE 0
 #define MOYCORE_SVC_PRIO 2
 #define MOYCORE_SVC_STACK 12288u
 
@@ -173,7 +171,7 @@ int moycore_svc_info(uint32_t h, moycore_svc_info_t *out);
 int moycore_svc_reap(uint32_t h);
 // The rows' handles, in slot order (0 where empty).
 uint32_t moycore_svc_at(uint32_t slot);
-// Whether each service has a task of its own here (the P4s).
+// Whether each service has a task of its own here (a board).
 bool moycore_svc_tasks(void);
 // Where services have no task: run what is due on every service at
 // `now_ms`. Answers the milliseconds to the next deadline (UINT32_MAX: none).
@@ -181,5 +179,12 @@ uint32_t moycore_svc_step(uint32_t now_ms);
 // Every service ended where it stands and its row freed (a test's teardown;
 // a stepped tier only).
 void moycore_svc_reset(void);
+// The VM is going (a VM stop, on the VM's task while the VM stands): each
+// service, TERMed by its scheduler just before, is given until
+// MOYCORE_SVC_STOP_MS to end, its console calls refused and its hops served
+// meanwhile, and its row and its event queue freed, since no reaper outlives
+// the VM; one that has not ended by then is freed by the first start after
+// it ends. A stepped tier's are reset.
+void moycore_svc_vm_stop(void);
 
 #endif // MOYCORE_SVC_H

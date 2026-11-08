@@ -299,7 +299,7 @@ SERVICE): a run with no shell session, its argv its cart's id, no env, no
 preopen, stdin empty, stdout and stderr the OS log's lines under its pid,
 its calls run in place on its own task with no hop. `service_start()` opens
 a session of its own for it, its module chosen as a command's is, its task
-on core 0 at a Lua service's priority (`MOY_WASM_SVC_CORE`,
+on a Lua service's core and priority (`MOY_WASM_SVC_CORE`,
 `MOY_WASM_SVC_PRIO`), and begins its call into `_start` there; the VM's task
 never serves it. Several run at once, each a session. `service_stop()`
 hangs its event descriptor up and waits `MOY_WASI_STOP_US` for `_start` to

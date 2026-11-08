@@ -992,6 +992,16 @@ static inline bool reads(const moy_input_t *t, int r, uint8_t s) {
     return t->ev_only[r] == 0 || t->ev_only[r] == (uint8_t)(s + 1);
 }
 
+void moy_input_vm_stop(void) {
+    moy_input_t *t = s_kernel;
+    if (t == NULL) {
+        return;
+    }
+    LOCK(t);
+    t->ev_used = 0;
+    UNLOCK(t);
+}
+
 int moy_input_reader_free(moy_input_t *t, int r) {
     if (!reader_ok(t, r)) {
         return MOY_INPUT_STALE;

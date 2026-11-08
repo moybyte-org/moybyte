@@ -269,6 +269,10 @@ moy_input_t *moy_input_new(uint8_t nbuttons);
 void moy_input_free(moy_input_t *t);
 // The drivers' table: all fifteen buttons, made on first call, never freed.
 moy_input_t *moy_input_kernel(void);
+// The VM's end (a stop, a soft reset): every reader of the kernel's table
+// freed. Only the VM's processes take one (modmoy_input's reader), and the
+// table outlives the VM, so a reader the ending VM held would stay taken.
+void moy_input_vm_stop(void);
 uint8_t moy_input_nbuttons(const moy_input_t *t);
 
 // The source named `name` (1 .. MOY_INPUT_NAME bytes), made on first ask with

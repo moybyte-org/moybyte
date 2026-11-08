@@ -181,6 +181,46 @@ def test_a_console_without_the_wasm_tier_refuses_one(svc):
     assert not moy_evq.has(p.pid)
 
 
+def test_the_pinger_wakes_a_wasi_service_that_receives_its_ping(tmp_path, built):
+    """tests/fixtures/pinger_py.moy, the Python service the S3 measurements
+    wake a service with (#246): every PERIOD_MS a "ping" from another app,
+    which the WASI service takes because its manifest lists it."""
+    from runtime.host_app import build_workstation
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    shutil.copytree(built, str(carts / "wasi_svc.moy"))
+    man_path = carts / "wasi_svc.moy" / "manifest.json"
+    man = json.loads(man_path.read_text())
+    man["moybyte"]["receives"] = ["ping"]
+    man_path.write_text(json.dumps(man))
+    shutil.copytree(os.path.join(ROOT, "tests", "fixtures", "pinger_py.moy"),
+                    str(carts / "pinger_py.moy"))
+    ws = build_workstation(str(carts))
+    by_id = {c.get("id"): c for c in ws.carts.all}
+    wakes = moybyte.WAKES
+    _clear(wakes)
+    s = S.SCHED
+    s.reset()
+    try:
+        since = L.next()
+        svc_pid = S.start_cart(ws, by_id["wasi.svc"], s)
+        pinger = S.start_cart(ws, by_id["local.pinger"], s)
+        assert svc_pid is not None and pinger is not None
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5:
+            s.tick(20000)
+            s.poll()
+            if sum(t.startswith("ping ") and " from local.pinger" in t
+                   for t in _texts(since, svc_pid)) >= 2:
+                break
+            time.sleep(0.01)
+        pings = [t for t in _texts(since, svc_pid) if t.startswith("ping ")]
+        assert len(pings) >= 2 and all(" from local.pinger: " in t for t in pings)
+    finally:
+        s.reset()
+        _clear(wakes)
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)

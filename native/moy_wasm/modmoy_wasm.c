@@ -1722,12 +1722,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
 
 // -- WASI services (moy_wasi.h, A SERVICE) ---------------------------------------------
 //
-// The P4s: each service is a session of its own (a task, its pool, its
-// module), its task on core 0 at MOY_WASM_SVC_PRIO, as a Lua service's
-// (moycore_svc.h); its call into `_start` begun there and left running, its
-// calls run in place on that task (no session, no hop), so the VM's task
-// never serves it. The S3s run none, as they run no Lua service
-// (moycore_svc.c's SVC_NONE): the functions are absent and the glue refuses.
+// Each service is a session of its own (a task, its pool, its module), its
+// task at MOY_WASM_SVC_PRIO on a Lua service's core (moycore_svc.h: core 0
+// on the P4s, core 1 on the S3s), its stack in PSRAM as every session's;
+// its call into `_start` begun there and left running, its calls run in
+// place on that task (no session, no hop), so the VM's task never serves it.
 //
 // service_start(path, want_sha, interp, allow_unsigned, pid, id) -> None or
 // why; service_stop(pid) -> its exit status, or -1 for none: its descriptor
@@ -1735,14 +1734,12 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
 // status)] of the ended ones, the watchdog (moy_wasi_watch) run over the
 // live ones first; service_info(pid) -> (linear memory bytes, its wakes'
 // time in us) or None once reaped. A service's session closes at its reap.
-#if CONFIG_IDF_TARGET_ESP32P4
-#define MOY_WASM_SVC 1
-#endif
-
-#ifdef MOY_WASM_SVC
-
 #ifndef MOY_WASM_SVC_CORE
+#if CONFIG_IDF_TARGET_ESP32P4
 #define MOY_WASM_SVC_CORE 0
+#else
+#define MOY_WASM_SVC_CORE 1
+#endif
 #endif
 #ifndef MOY_WASM_SVC_PRIO
 #define MOY_WASM_SVC_PRIO 2
@@ -1975,7 +1972,6 @@ static mp_obj_t mod_service_info(mp_obj_t pid_in)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_info_obj, mod_service_info);
 
-#endif // MOY_WASM_SVC
 
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
@@ -1996,12 +1992,10 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_command_start), MP_ROM_PTR(&mod_command_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_command_step), MP_ROM_PTR(&mod_command_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_command_stop), MP_ROM_PTR(&mod_command_stop_obj) },
-#ifdef MOY_WASM_SVC
     { MP_ROM_QSTR(MP_QSTR_service_start), MP_ROM_PTR(&mod_service_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_service_stop), MP_ROM_PTR(&mod_service_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_service_reap), MP_ROM_PTR(&mod_service_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_service_info), MP_ROM_PTR(&mod_service_info_obj) },
-#endif
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

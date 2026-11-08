@@ -218,13 +218,13 @@ the service's reply the app's.
 **Where processes run.** A Lua, wasm or ELF process runs on a task the
 kernel owns; its callbacks run on that task. A Python process runs inside
 the shell's one VM (§3): its callbacks run in the shell loop's slack after
-a frame is presented and before the next. Services run on core 0 on the P4s;
-what the S3s get is the overview's §5. As built for Lua
+a frame is presented and before the next. Services run on core 0 on the P4s
+and on core 1 on the S3s, their task stacks in PSRAM there. As built for Lua
 (`native/moycore/moycore_svc.h`, P5.3): a Lua service is a state of its own
-on a task of its own, pinned to core 0 on the P4s, which blocks in the one
-wait until its next timer, a message or a stop and runs what is due; the S3s
-refuse one, and the host and the desktop MicroPython, which have no task to
-give, step their services at the scheduler's poll
+on a task of its own, which blocks in the one wait until its next timer, a
+message or a stop and runs what is due; the host and the desktop
+MicroPython, which have no task to give, step their services at the
+scheduler's poll
 (`runtime/system/scheduler.py`, LUA SERVICES). What a Lua service asks of
 the console (a notification, a message, a function the console handed it)
 goes through the VM's queue (`tiers.md` §2). A compiled service, ELF or
@@ -236,9 +236,9 @@ core 0 on the P4s and core 1 on the S3s, its app calls (`moy_notify` and
 the rest) hops on the VM's queue under a run grant of its own, served at
 the scheduler's poll. A WASI service (a wasm cart with no source,
 `native/moy_wasm/moy_wasi.h`, A SERVICE) is its `_start` on a task of its
-own with no shell session: a session of its own on core 0 on the P4s, a
-thread of its own on the host (several at once, apart from the door's one
-command job); the S3s refuse one, as they refuse a Lua service. Its stdout
+own with no shell session: a session of its own on a board, a thread of
+its own on the host (several at once, apart from the door's one command
+job). Its stdout
 and stderr are the OS log's lines under its pid, its stdin and env are
 empty, and a path answers NOTCAPABLE; it imports no app call. A compiled
 program's `moy_send` posts from its own thread; the door notices one that
@@ -499,7 +499,10 @@ running. A service the scheduler runs is not held through it, whatever its
 tier, since the stop ends the VM's heap, which holds its row (an ELF
 service's app calls are the VM's to serve, too): the Player TERMs every
 running service just before the stop (its `moy_stop`, or its loop at its
-descriptor's end of file, persists what it needs), the resume record names
+descriptor's end of file, persists what it needs; the Player waits for a
+Lua service's to end on its own task, and one still running then ends inside
+the stop, its console calls refused, `moycore_svc_vm_stop`), the resume
+record names
 them, and the console that starts after the stop starts them again
 (`moy_start`, `main`), so its timers start
 afresh and the records its sources took during the stop are not delivered

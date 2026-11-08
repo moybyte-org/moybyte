@@ -2637,15 +2637,13 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
 
 def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
     """The scheduler's compiled-service contract (runtime/system/scheduler.py,
-    COMPILED SERVICES) over moy_wasm's service_* (the P4s'): the module for
-    this console where the cart carries one, main.wasm on the interpreter
-    where it is refused; a firmware without them (the S3s) refuses one."""
+    COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
+    has: the module for this console where the cart carries one, main.wasm
+    on the interpreter where it is refused."""
     world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])
     try:
         mod = world.mod._moy_wasm
         rt = world.mod.WasmRuntime(FakeWs())
-        assert rt.service(cart, 9) == "this firmware runs no wasm services"
-        assert rt.stop(9) == -1 and rt.reap() == [] and rt.figures(9) is None
         starts = []
         answers = ["refused: unsigned module", None]
 

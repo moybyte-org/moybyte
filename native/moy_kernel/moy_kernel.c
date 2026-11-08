@@ -129,6 +129,9 @@ void moy_play_stopped_run(void) __attribute__((weak));
 // its letting go of what the ending VM's heap held.
 uint32_t moy_app_kernel_grants(void) __attribute__((weak));
 void moy_app_vm_stop(void) __attribute__((weak));
+// The input table's readers, which the ending VM's processes held
+// (native/moy_input), where the image has it.
+void moy_input_vm_stop(void) __attribute__((weak));
 
 void moy_loop_board_vm_start(void);
 void moy_loop_board_vm_stop(void);
@@ -1989,6 +1992,9 @@ soft_reset_exit:
     moy_text_vm_stop();
     moy_net_vm_stop();
     moy_evq_vm_stop();      // the VM's processes' event queues end with it
+    if (moy_input_vm_stop != NULL) {
+        moy_input_vm_stop();    // and the input table's readers
+    }
     if (moy_app_vm_stop != NULL) {
         moy_app_vm_stop();
     }

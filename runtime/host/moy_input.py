@@ -152,6 +152,7 @@ class Pointer(ctypes.Structure):
 _SIGS = (
     ("moy_input_new", [_U8], _P),
     ("moy_input_kernel", [], _P),
+    ("moy_input_vm_stop", [], None),
     ("moy_input_free", [_P], None),
     ("moy_input_source", [_P, ctypes.c_char_p, _U8, _PU32], _I),
     ("moy_input_source_player", [_P, _U32, ctypes.POINTER(_U8)], _I),

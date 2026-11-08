@@ -1530,6 +1530,47 @@ def the_scheduler_stops_a_runaway_service(board):
                      strict=True)
 
 
+def a_lua_service_runs_on_a_task_of_its_own(board):
+    """A Lua service on glass (native/moycore/moycore_svc.h, WHERE IT RUNS):
+    on its own task on every console board (the S3s' stack in PSRAM), its
+    timer firing there while the desk draws, and its stop reaped into exit
+    0."""
+    import time
+    board.pyexec("import scheduler as S, moycore\n"
+                 "SRC = 'n = 0\\nfunction moy_start() moybyte.every(20, "
+                 "function() n = n + 1 end) end\\n'\n"
+                 "ws._lt = moycore.svc_tasks()\n"
+                 "ws._lp = S.SCHED.start({'id': 't.lua_svc', 'title': 'lua svc', "
+                 "'runtime': 'lua', 'src': SRC, 'permissions': []})",
+                 strict=True)
+    try:
+        time.sleep(1.0)
+        tasks, pid = board.pyval("(ws._lt, ws._lp)", strict=True)
+        assert tasks is True and pid is not None, (tasks, pid)
+        state, cpu = board.pyval(
+            "(lambda p: (p.state, p.cost_us))(__import__('scheduler').SCHED.procs[ws._lp])",
+            strict=True)
+        assert state == "background", state
+        assert cpu > 0, cpu                    # its timer ran on its task
+        board.pyexec("import scheduler as S\nS.SCHED.stop(ws._lp)", strict=True)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            state, code = board.pyval(
+                "(lambda p: (p.state, p.code))(__import__('scheduler').SCHED.procs[ws._lp])",
+                strict=True)
+            if state == "exited":
+                break
+            time.sleep(0.2)
+        assert (state, code) == ("exited", 0), (state, code)
+        assert board.cmd("state", wait_for="STATE ") is not None
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.procs.get(ws._lp)\n"
+                     "if p is not None and p.state != 'exited':\n"
+                     "    S.SCHED.stop(ws._lp)",
+                     strict=True)
+
+
 def an_asyncio_service_runs_beside_the_desk(board):
     """The shell's asyncio loop (runtime/system/aio.py) on glass: a service
     whose main is `asyncio.run(main())` steps on the scheduler, each step its

@@ -173,7 +173,7 @@ refused with `EACCES`.
 own, not a row of the runs (`native/moycore/moycore_svc.h`): the safe stdlib,
 `os.time` and `os.clock`, and `moybyte.every`, `after`, `on`, `cancel`,
 `log`, `notify`, `send` and `exit`, with `print` to the OS log, on its own
-task on a P4's core 0, blocked between its callbacks in the one kernel wait
+task (core 0 on the P4s, core 1 on the S3s), blocked between its callbacks in the one kernel wait
 (`processes.md` §1, the service model: `every`/`after`/`on` are Lua's
 library over its event queue). Each call runs on a coroutine under a count
 hook that yields it past its budget, so a `pcall` cannot keep a runaway

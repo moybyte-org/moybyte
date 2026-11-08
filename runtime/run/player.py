@@ -1689,7 +1689,7 @@ class Player(PlayerDiag):
                 resume(rec())
             except Exception as exc:  # noqa: BLE001 -- a lost place is not a lost run
                 print("PLAY resume:", exc)
-        # The VM's heap goes with the stop: every Python service TERMed now,
+        # The VM's heap goes with the stop: every service TERMed now,
         # started again by the console after it (the resume record's `svc`).
         _scheduler.SCHED.pause()
         self._stop_grant(cart)

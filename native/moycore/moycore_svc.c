@@ -44,10 +44,16 @@
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
 #include "sdkconfig.h"
-#if CONFIG_IDF_TARGET_ESP32P4
 #define SVC_TASKS 1
+#if CONFIG_IDF_TARGET_ESP32P4
+#define SVC_CORE 0
 #else
-#define SVC_NONE 1              // the S3s: no user service in Lua
+// The S3s: core 1, the VM's (core 0 has the flush feed and fold, input and
+// the radios), and the task's stack in PSRAM, so a service holds no internal
+// SRAM past its task's control block (the shares' internal cap, moy_play.h).
+// The task never touches flash itself: its file rows hop to the VM's task.
+#define SVC_CORE 1
+#define SVC_STACK_PSRAM 1
 #endif
 #endif
 
@@ -71,58 +77,6 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
     __attribute__((weak));
 #endif
 #endif
-
-#ifdef SVC_NONE
-
-// The S3s: no user service in Lua, and no table in their internal RAM.
-int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, const struct moy_app_run *app,
-                      uint32_t *h) {
-    (void)pid;
-    (void)id;
-    (void)src;
-    (void)n;
-    (void)env;
-    (void)envn;
-    (void)app;
-    (void)h;
-    return MOYCORE_SVC_BAD;
-}
-
-int moycore_svc_stop(uint32_t h) {
-    (void)h;
-    return MOYCORE_SVC_STALE;
-}
-
-int moycore_svc_info(uint32_t h, moycore_svc_info_t *out) {
-    (void)h;
-    (void)out;
-    return MOYCORE_SVC_STALE;
-}
-
-int moycore_svc_reap(uint32_t h) {
-    (void)h;
-    return MOYCORE_SVC_STALE;
-}
-
-uint32_t moycore_svc_at(uint32_t slot) {
-    (void)slot;
-    return 0;
-}
-
-bool moycore_svc_tasks(void) {
-    return false;
-}
-
-uint32_t moycore_svc_step(uint32_t now_ms) {
-    (void)now_ms;
-    return UINT32_MAX;
-}
-
-void moycore_svc_reset(void) {
-}
-
-#else
 
 #define HOOK_COUNT 1000         // instructions between the hook's looks at the clock
 
@@ -164,6 +118,7 @@ typedef struct {
     svc_timer_t tm[MOYCORE_SVC_TIMERS];
     svc_on_t on[MOYCORE_SVC_ONS];
     uint8_t own_q;              // its event queue is its own, opened at its start
+    uint8_t orphan;             // its VM stopped before its task was done
     // the call under way: its coroutine (anchored at co_ref), NULL for none
     lua_State *co;
     int co_ref;
@@ -1057,8 +1012,17 @@ static void svc_task(void *arg) {
         moy_evq_wait(s->pid, wait > 0 ? wait : 1u);     // the one kernel wait
     }
     moy_evq_unwait(s->pid);             // the queue may outlive this task
+    #ifdef SVC_STACK_PSRAM
+    // A task made with its caps is deleted by another (row_free): its own
+    // delete would make a helper task, in internal SRAM, to free its stack.
+    s->done = 1;
+    for (;;) {
+        vTaskSuspend(NULL);
+    }
+    #else
     s->done = 1;
     vTaskDelete(NULL);
+    #endif
 }
 #endif
 
@@ -1077,6 +1041,29 @@ static svc_t *row_of(uint32_t h) {
     return s_row[slot];
 }
 
+// A row whose service has exited and whose task is done, freed with its
+// task where a reaper deletes it.
+static void row_free(uint32_t slot) {
+    svc_t *s = s_row[slot];
+    s_row[slot] = NULL;
+    #ifdef SVC_STACK_PSRAM
+    if (s->task != NULL) {
+        vTaskDeleteWithCaps(s->task);
+    }
+    #endif
+    free(s);
+}
+
+// A done row no scheduler will reap (its VM stopped), freed with the event
+// queue that scheduler opened for it.
+static void orphan_free(uint32_t slot) {
+    uint32_t pid = s_row[slot]->pid;
+    row_free(slot);
+    if (moy_evq_has(pid)) {
+        moy_evq_close(pid);
+    }
+}
+
 static uint32_t handle_of(uint32_t slot) {
     return s_row[slot] != NULL ? ((uint32_t)s_row[slot]->gen << 8) | (slot + 1u) : 0u;
 }
@@ -1085,11 +1072,15 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
                       const char *env, size_t envn, const struct moy_app_run *app,
                       uint32_t *h) {
     uint32_t slot = 0;
-    while (slot < MOYCORE_SVCS && s_row[slot] != NULL) {
+    while (slot < MOYCORE_SVCS && s_row[slot] != NULL
+           && !(s_row[slot]->orphan && s_row[slot]->done)) {
         slot++;
     }
     if (slot == MOYCORE_SVCS) {
         return MOYCORE_SVC_FULL;
+    }
+    if (s_row[slot] != NULL) {
+        orphan_free(slot);
     }
     svc_t *s = mem_calloc(sizeof(svc_t));
     char *copy = mem_copy(src, n);
@@ -1129,8 +1120,15 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
     }
     s_row[slot] = s;
     #ifdef SVC_TASKS
-    if (xTaskCreatePinnedToCore(svc_task, "moy_svc", MOYCORE_SVC_STACK, s, MOYCORE_SVC_PRIO,
-                                &s->task, MOYCORE_SVC_CORE) != pdPASS) {
+    #ifdef SVC_STACK_PSRAM
+    BaseType_t made = xTaskCreatePinnedToCoreWithCaps(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
+                                                      MOYCORE_SVC_PRIO, &s->task, SVC_CORE,
+                                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    #else
+    BaseType_t made = xTaskCreatePinnedToCore(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
+                                              MOYCORE_SVC_PRIO, &s->task, SVC_CORE);
+    #endif
+    if (made != pdPASS) {
         s_row[slot] = NULL;
         if (s->own_q) {
             moy_evq_close(pid);
@@ -1195,8 +1193,7 @@ int moycore_svc_reap(uint32_t h) {
     if (s->state != MOYCORE_SVC_EXITED || !s->done) {
         return MOYCORE_SVC_BAD;
     }
-    s_row[(h & 0xFFu) - 1u] = NULL;
-    free(s);
+    row_free((h & 0xFFu) - 1u);
     return MOYCORE_SVC_OK;
 }
 
@@ -1243,4 +1240,44 @@ void moycore_svc_reset(void) {
     #endif
 }
 
-#endif // SVC_NONE
+void moycore_svc_vm_stop(void) {
+    #ifdef SVC_TASKS
+    // The scheduler TERMed each service just before the stop; what follows
+    // its TERM runs now. No console answers a call any more, so each is
+    // refused, and the hops its role rows wait on are served here, on the
+    // VM's task while the VM still stands.
+    int64_t until = now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
+    for (;;) {
+        bool live = false;
+        for (uint32_t i = 0; i < MOYCORE_SVCS; i++) {
+            svc_t *s = s_row[i];
+            if (s != NULL && !s->done) {
+                s->stop_req = 1;
+                moy_vmq_drop(s->pid);
+                wake(s);
+                live = true;
+            }
+        }
+        if (!live || now_us() >= until) {
+            break;
+        }
+        moy_vmq_serve();
+        vTaskDelay(1);
+    }
+    // No reaper outlives the VM: each row and the queue its scheduler opened
+    // go now, and one still running goes at the next start once it is done.
+    for (uint32_t i = 0; i < MOYCORE_SVCS; i++) {
+        svc_t *s = s_row[i];
+        if (s == NULL) {
+            continue;
+        }
+        if (s->done) {
+            orphan_free(i);
+        } else {
+            s->orphan = 1;
+        }
+    }
+    #else
+    moycore_svc_reset();
+    #endif
+}

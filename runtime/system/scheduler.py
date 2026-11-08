@@ -87,15 +87,15 @@ lets through within one app.
 
 LUA SERVICES (`"runtime": "lua"`). The start hands the cart's source to
 moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
-task of its own on a P4's core 0, refused where the chip runs none (the S3s,
-logged and exited 1), with what the console hands a system process (its
+task of its own on a board (a P4's core 0, an S3's core 1), with what the
+console hands a system process (its
 `env`: the values as globals, the functions as console calls) and its app's
 run, whose role names its state opens. `poll()`, a
 wake of the shell's every POLL_MS while one lives, steps them where they
 have no task (the host, the desktop MicroPython), answers the console calls
 they wait on the VM's queue (native/moy_kernel/moy_vmq.h: `moybyte.notify`,
 `send` and the `env` functions, run here on the VM's task as the service's
-process, and, on a P4, the role rows its task hopped), reads
+process, and, on a board, the role rows its task hopped), reads
 each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
 C side's KILL past MOY_SERVICE_STOP_MS. A message reaches a Lua service's
@@ -141,9 +141,11 @@ policy}, read at the end: `service policy` sets and shows them
 (runtime/shell/sh_roles.py), and every start, end, restart and the cap are
 lines of the OS log.
 
-ACROSS A VM STOP (the S3s). The stop ends the VM's heap, so a Python service
-cannot be held through it: `pause()`, just before the stop, TERMs every
-running service (its `moy_stop` persists what it needs) and the resume
+ACROSS A VM STOP (the S3s). The stop ends the VM's heap, so a service's row
+cannot be held through it, whatever its tier: `pause()`, just before the
+stop, TERMs every running service (its `moy_stop` persists what it needs; a
+Lua one's, on its own task, is polled to its end, and one still running then
+ends inside the stop, moycore_svc_vm_stop) and the resume
 record names them; the console that starts after the stop starts them again
 (`moy_start`). Records their sources took during the stop are not delivered.
 """
@@ -152,6 +154,14 @@ try:
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
 except ImportError:  # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+
+try:
+    from time import sleep_ms as _sleep_ms
+except ImportError:  # CPython
+    import time as _time
+
+    def _sleep_ms(ms):
+        _time.sleep(ms / 1000)
 
 try:
     import moybyte as _moybyte
@@ -756,10 +766,10 @@ class Scheduler:
 
     def _start_lua(self, p, src, env=None, roles=()):
         """Lua service `p` (native/moycore/moycore_svc.h): its own state, on a
-        task of its own on the P4s and at this scheduler's poll elsewhere,
+        task of its own on a board and at this scheduler's poll elsewhere,
         handed `env` (its values as globals, its functions as console calls)
         and its app's run over `roles` (its role names, moy_app_lua.h);
-        refused on a chip that runs none (the S3s) or with no Lua runtime."""
+        refused with no Lua runtime."""
         svc = _svc()
         run = None
         if p.ctx is not None:
@@ -1102,7 +1112,11 @@ class Scheduler:
 
     def pause(self):
         """Before a VM stop: every live service TERMed, its wakes ended.
-        Answers the carts' paths, which the resume record carries."""
+        A Lua service's TERM runs on its own task, so the poll is run until
+        each has ended, MOY_SERVICE_STOP_MS at most: its end (its grant, its
+        row) is then this VM's, where the stop would otherwise leave what it
+        held in the memory the stop frees for the run. Answers the carts'
+        paths, which the resume record carries."""
         out = []
         for p in list(self.procs.values()):
             if p.kind == SERVICE and p.state != EXITED:
@@ -1110,6 +1124,11 @@ class Scheduler:
                 if path:
                     out.append(path)
                 self.stop(p.pid)
+        t0 = _ticks_ms()
+        while (any(p.native and p.state == STOPPING for p in self.procs.values())
+               and _ticks_diff(_ticks_ms(), t0) < MOY_SERVICE_STOP_MS):
+            self.poll()
+            _sleep_ms(1)
         return out
 
     def running_paths(self):

@@ -508,6 +508,10 @@ def test_the_scheduler_stops_a_runaway_service(board):
     on_glass.the_scheduler_stops_a_runaway_service(board)
 
 
+def test_a_lua_service_runs_on_a_task_of_its_own(board):
+    on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
+
+
 def test_an_asyncio_service_runs_beside_the_desk(board):
     on_glass.an_asyncio_service_runs_beside_the_desk(board)
 
