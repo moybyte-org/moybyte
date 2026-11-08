@@ -156,8 +156,11 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 // memory the OS hands out beside the VM:
 //   PROCS  what the running set's apps hold together (admission,
 //          runtime/run/player_fit.py: a compiled cart's load footprint, else
-//          its canvas, and a Python world beside it). On the S3s it is the
-//          cart's floor above; on the P4s what a desk keeps free beside its
+//          its canvas, and a Python world beside it), and the PSRAM the
+//          services hold beside the VM's heap (runtime/system/scheduler.py,
+//          THE SHARES: a compiled one's start and linear memory, a Lua one's
+//          stack and heap), counted at a service's start and at a game's
+//          admission. On the S3s it is the cart's floor above; on the P4s what a desk keeps free beside its
 //          Python heap's room to grow with a game running;
 //   MEDIA  the media service: its stream buffer, its decoder and its task's
 //          PSRAM stack;

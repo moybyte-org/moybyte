@@ -372,22 +372,26 @@ def shares_runtime(cart):
     return (cart or {}).get("runtime", "python") in SHARED_RUNTIMES
 
 
-def admit(new, running, share, rows):
+def admit(new, running, share, rows, held=()):
     """Whether a run of `new` -- (need, shares) -- fits beside `running`,
-    the running set oldest first as (key, need, shares): None when it does,
-    else the keys whose closing makes room, fewest first. The rules, in
-    order: the share (`share` None: none to count), the audio table's
-    `rows` free for a run's session (a fifth source is refused), and the
-    tiers -- a run `shares` when its runtime holds several runs at once
-    (`shares_runtime`); one that does not runs alone."""
+    the running set oldest first as (key, need, shares), and the services'
+    `held` PSRAM as (key, bytes): None when it does, else the keys whose
+    closing makes room, fewest first. The rules, in order: the share
+    (`share` None: none to count), the audio table's `rows` free for a
+    run's session (a fifth source is refused), and the tiers -- a run
+    `shares` when its runtime holds several runs at once
+    (`shares_runtime`); one that does not runs alone. A service counts in
+    the share alone."""
     need, py = new
     if share is not None and need <= share:
         total = need
         for r in running:
             total += r[1]
+        for r in held:
+            total += r[1]
         if total > share:
             out = []
-            for r in sorted(running, key=lambda r: -r[1]):
+            for r in sorted(list(running) + list(held), key=lambda r: -r[1]):
                 out.append(r[0])
                 total -= r[1]
                 if total <= share:

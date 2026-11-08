@@ -324,6 +324,37 @@ class Procs:
                 out.append((FRONT, _fit.app_need(c, rts.get(rt)), False))
         return out
 
+    def need(self):
+        """The PSRAM the running set's apps hold against THE SHARES' PROCS
+        row, the front run's included wherever a game plays: what a
+        service's start is counted beside."""
+        ws = self.ws
+        rts = getattr(ws, "runtimes", None) or {}
+        total = 0
+        for p in self.list:
+            total += _fit.app_need(p.run.project.cart)
+        c = ws.cart
+        if c is not None and (self._front_live() or getattr(ws.run.player, "_front", False)):
+            total += _fit.app_need(c, rts.get(c.get("runtime", "python")))
+        return total
+
+    def room(self, held):
+        """Why services holding `held` bytes do not fit THE SHARES' PROCS
+        row beside the running set (the scheduler's `room`), or None where
+        they fit or the build has no share."""
+        share = _fit.board_share()
+        if share is None:
+            return None
+        used = self.need()
+        if used + held <= share:
+            return None
+        return "no room: services would hold %d KiB beside the running set's %d KiB, " \
+               "over the %d KiB share" % (held >> 10, used >> 10, share >> 10)
+
+    def held(self):
+        """The services' PSRAM as admission counts it: (key, bytes)."""
+        return [(SVC + str(pid), n) for pid, n in _sched.SCHED.holding()]
+
     def _rows(self):
         """The audio table's rows a run's session may take: those the
         other owners (the Music editor) do not hold."""
@@ -372,12 +403,13 @@ class Procs:
         if front is not None and front.get("path") == cart.get("path"):
             return True             # the front's own cart: a re-run, as ever
         running = self.running()
-        if not running:
+        held = self.held()
+        if not running and not held:
             return True
         rt = cart.get("runtime", "python")
         rts = getattr(ws, "runtimes", None) or {}
         close = _fit.admit((_fit.app_need(cart, rts.get(rt)), _fit.shares_runtime(cart)),
-                           running, _fit.board_share(), self._rows())
+                           running, _fit.board_share(), self._rows(), held)
         if close:
             self.refuse(cart, close)
             return False
@@ -407,6 +439,9 @@ class Procs:
         if key == FRONT:
             c = self.ws.cart or {}
             return str(c.get("title") or "Game")
+        if key.startswith(SVC):
+            sp = _sched.SCHED.procs.get(int(key[len(SVC):]))
+            return str(((sp.cart or {}).get("title") or sp.name) if sp is not None else key)
         p = self.by_key.get(key)
         return p.title() if p is not None else key
 
@@ -666,9 +701,13 @@ class Procs:
         self.ws._dirty = True
 
     def close_key(self, key):
-        """Close the run `key` names: a Proc, or the front's by its exit."""
+        """Close the run `key` names: a Proc, the front's by its exit, or a
+        service by its stop."""
         if key == FRONT:
             self.ws._exit_to_caller()
+            return
+        if key.startswith(SVC):
+            self.stop_service(int(key[len(SVC):]))
             return
         p = self.by_key.get(key)
         if p is not None:

@@ -135,6 +135,16 @@ poll a wake of the shell's every POLL_MS while one lives. Either way the
 task manager's accounting reads the rows' figures (`figures`) once a
 second.
 
+THE SHARES. What a service holds beside the VM's heap counts in THE SHARES'
+PROCS row (native/moy_play/moy_play.h) with the running set's apps, as
+`held` on its row: a compiled one's what its start took (its runtime's free
+PSRAM before and after) or its linear memory or mappings once they pass it,
+a Lua one's stack and heap (LUA_SVC_NEED before its start); a Python one's
+world is the VM heap's own. A start that does not fit beside the running set
+(`room`, the console's) is refused, logged, exit 1, and a game's admission
+counts the services and names them among what to close
+(runtime/run/player_fit.py's `admit`).
+
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
 (Settings turns it off per app), and every service the resume record says
@@ -231,6 +241,8 @@ MOY_RESTART_HEAL_MS = 10000     # a run this long before its end starts the coun
 DUE_MAX = 16                    # wakes taken from the registry at a time
 POLL_MS = 20                    # the Lua services' poll (a stepped tier's timer grain)
 CALLS_MAX = 16                  # console calls answered a Lua service a poll
+LUA_SVC_STACK = 12288           # moycore_svc.h's MOYCORE_SVC_STACK, in PSRAM on a board
+LUA_SVC_NEED = 40 << 10         # a Lua service at its start: its stack and its state
 SVC_EXITED = 4                  # moycore_svc.h's MOYCORE_SVC_EXITED
 EINVAL = 22
 _WRAP = 0x3FFFFFFF              # a counter wraps as ticks do: a small int on a board
@@ -314,6 +326,7 @@ class Proc:
         self.cpu = None         # its last sample's busy us a second (Procs.account)
         self.seen_us = 0        # cost_us at that sample
         self.native = 0         # a Lua service's handle (moycore_svc.h), 0: Python
+        self.held = 0           # PSRAM it holds beside the VM's heap (THE SHARES, below)
         self.rt = None          # a compiled service's runtime (ws.runtimes), None: none
         self.ctx = None         # a service's context: its run grant over its app's roles
 
@@ -372,6 +385,8 @@ class Scheduler:
         self.svc_mail = False       # a message sent to a stepped Lua service, not yet polled
         self.app_of = None          # fn(pid) -> the app id it runs, the console's (`attach`)
         self.cart_of = None         # fn(pid) -> the cart a run runs, the console's (`attach`)
+        self.room = None            # fn(held) -> why services holding `held` do not
+                                    # fit beside the running set, or None (`attach`)
         self._fns = []              # the handlers of the message being served
         self.wakes.ended = self._ended
         self.wakes.opener = self._open
@@ -788,6 +803,13 @@ class Scheduler:
         and its app's run over `roles` (its role names, moy_app_lua.h);
         refused with no Lua runtime."""
         svc = _svc()
+        why = self._no_room(LUA_SVC_NEED)
+        if why is not None:
+            _log(ERR, p.pid, why)
+            p.state, p.code = EXITED, EXIT_CRASHED
+            _end_grant(p)
+            return None
+        p.held = LUA_SVC_NEED
         run = None
         if p.ctx is not None:
             run = p.ws.app_abi.run(p.ctx.grant, roles)
@@ -849,6 +871,24 @@ class Scheduler:
         if got & _E.WANT_POLL:
             self.poll()
 
+    def holding(self):
+        """The PSRAM the live services hold beside the VM's heap, as
+        [(pid, bytes)], those that hold none left out (THE SHARES)."""
+        return [(p.pid, p.held) for p in self.procs.values()
+                if p.kind == SERVICE and p.state != EXITED and p.held]
+
+    def _no_room(self, need=0):
+        """Why the live services and `need` more bytes do not fit THE
+        SHARES' PROCS row beside the running set (`room`, the console's),
+        or None where they fit or there is no share to count against."""
+        if self.room is None:
+            return None
+        total = need
+        for q in self.procs.values():
+            if q.kind == SERVICE and q.state != EXITED:
+                total += q.held
+        return self.room(total)
+
     def figures(self):
         """Each Lua and compiled service's figures read onto its row (its
         heap or mappings, its time, its rungs), nothing reaped: the task
@@ -875,8 +915,17 @@ class Scheduler:
                 why = "its grant: %s" % e
         if why is None:
             self._open(p.pid, False)
+            mem = getattr(rt, "memory", None)
+            free = mem()[0] if mem is not None else None
             why = rt.service(cart, p.pid, run)
+            if why is None:
+                if free is not None:
+                    p.held = max(0, free - mem()[0])
+                why = self._no_room()
+                if why is not None:
+                    rt.stop(p.pid)
         if why is not None:
+            p.held = 0
             _log(ERR, p.pid, why)
             p.state, p.code = EXITED, EXIT_CRASHED
             _end_grant(p)
@@ -902,6 +951,8 @@ class Scheduler:
         if fig is not None:
             p.mem = fig[0]
             p.cost_us = fig[1] & ALLOC_WRAP
+            if fig[0] > p.held:
+                p.held = fig[0]
             held = _E.held(p.pid)
             if p.state == BACKGROUND and held:
                 p.state = SUSPENDED
@@ -960,6 +1011,7 @@ class Scheduler:
             why = got[5]
             p.mem = heap
             p.cost_us = cpu_us & ALLOC_WRAP
+            p.held = LUA_SVC_STACK + heap
             if state != SVC_EXITED or ends is None:
                 live = True
                 if p.state == BACKGROUND and _E.held(pid):
@@ -1335,6 +1387,7 @@ def attach(ws, sched=None):
     sched.store = getattr(ws, "system", None)
     procs = getattr(ws, "procs", None)
     sched.app_of = getattr(procs, "app_id", None)
+    sched.room = getattr(procs, "room", None)
     who = getattr(procs, "who", None)
     sched.cart_of = (lambda pid: who(pid)[1]) if who is not None else None
 

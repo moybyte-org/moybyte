@@ -630,9 +630,13 @@ P4s, under what a P4 desk keeps free beside its Python heap's room to grow
 with a game running; a build with no line (the host, the browser, the Zero)
 has no share to count against. An app holds
 its compiled module's load footprint where its runtime reports one, else
-its canvas in RGB565, and a Python world (384 KiB) beside either. So on the
-S3s two big games do not fit, and a big one beside a Python game names the
-Python game. The refusal is the delete confirm's dialog
+its canvas in RGB565, and a Python world (384 KiB) beside either. A Lua or
+compiled service counts in the same row by the PSRAM it holds beside the
+VM's heap (`runtime/system/scheduler.py`, THE SHARES): its start is refused
+when it does not fit beside the running set, the front game included, and a
+game's admission names it among what to close, whose Close stops it. So on
+the S3s two big games do not fit, a big one beside a Python game names the
+Python game, and Doom beside a WASI service names the service. The refusal is the delete confirm's dialog
 (`DeleteConfirm.ask_close`): "Close <name>?", the game that does not fit
 beside it, Cancel and Close, whose Close closes what it names and opens the
 game. The Player's own fit check still runs at the load, against what is

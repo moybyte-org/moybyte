@@ -624,3 +624,43 @@ def test_a_board_runs_no_poll_and_woken_serves_what_was_wanted(sched):
     assert p.state == S.EXITED and p.code == 3 and not sched._tasks
     assert E.wants() == 0
 
+
+def test_a_service_that_does_not_fit_the_share_is_refused(sched):
+    """THE SHARES: a Lua service's start is counted beside what runs
+    (`room`, the console's) before it starts, and a compiled one's by what
+    its start took, which is stopped when it does not fit."""
+    asked = []
+
+    def room(held):
+        asked.append(held)
+        return "no room" if held > 100 << 10 else None
+    sched.room = room
+    since = _since()
+    assert sched.start({"id": "t.lua", "runtime": "lua", "type": "service",
+                        "src": "function moy_start() end"}) is None
+    assert asked == [S.LUA_SVC_NEED]
+
+    class Rt:
+        stopped = []
+
+        def service(self, cart, pid, run):
+            self.free -= 200 << 10
+            return None
+
+        def memory(self):
+            return (self.free, self.free)
+
+        def stop(self, pid):
+            self.stopped.append(pid)
+            return 0
+    rt = Rt()
+    rt.free = 1 << 20
+
+    class Ws:
+        runtimes = {"wasm": rt}
+    assert sched.start({"id": "t.wsvc", "runtime": "wasm", "type": "service"}, ws=Ws()) is None
+    p = [q for q in sched.procs.values() if q.name == "t.wsvc"][0]
+    assert asked[-1] == 200 << 10 and rt.stopped == [p.pid]
+    assert p.state == S.EXITED and p.code == S.EXIT_CRASHED and p.held == 0
+    assert (3, "no room") in _lines(since, p.pid)
+    assert sched.holding() == []

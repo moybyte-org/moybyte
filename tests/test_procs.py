@@ -432,6 +432,52 @@ def test_the_share_closes_the_fewest_largest_first():
     assert fit.admit((2 * MIB, True), run, 4 * MIB, 4) == ["run:2"]
 
 
+@pytest.mark.parametrize("board", ["tdeck", "guition_s3"])
+def test_a_services_psram_counts_in_an_s3s_share(board):
+    """THE SHARES: what a service holds beside the VM's heap counts with the
+    running set, so a WASI service leaves Doom no floor and is named among
+    what to close, and a Lua service leaves room."""
+    from runtime import player_fit as fit
+    share = fit.board_share(board)
+    big = 3 * MIB + 512 * 1024 + fit.PY_WORLD
+    wasi = ("svc:7", 480 * 1024)
+    lua = ("svc:8", 40 * 1024)
+    assert fit.admit((big, True), [], share, 4, [wasi]) == ["svc:7"]
+    assert fit.admit((big, True), [], share, 4, [lua]) is None
+    py = fit.app_need({"title": "Star Catcher"})
+    assert fit.admit((py, True), [], share, 4, [wasi, lua]) is None
+    # a service counts in the share alone: no audio row, no tier
+    assert fit.admit((py, False), [], share, 1, [wasi, lua]) is None
+
+
+def test_a_launch_names_a_service_that_holds_its_floor_and_close_stops_it(tmp_path, monkeypatch):
+    """The share counts the services' PSRAM (`Procs.holding`): a game that
+    does not fit beside a service is refused naming it, Close stops the
+    service and opens the game, and a service's start is counted beside the
+    game that plays (`Procs.room`)."""
+    from runtime import player_fit as fit, scheduler as S
+    monkeypatch.setattr(fit, "board_share", lambda board=None: 4 * MIB)
+    ws, drv, wa, wb = _two(tmp_path)
+    sch = S.SCHED
+    S.attach(ws)
+    pid = sch.start({"id": "t.hog", "title": "Hog", "type": "service",
+                     "src": "import moybyte\ndef moy_start():\n"
+                            "    moybyte.every(1000, lambda: None)\n"})
+    try:
+        assert pid is not None
+        sch.procs[pid].held = 4 * MIB - ws.procs.need() + 1
+        assert ws.procs.room(sch.procs[pid].held).startswith("no room")
+        assert ws.procs.room(0) is None
+        open_cart(ws, "Coin Quest")
+        assert ws.confirm.open and ws.confirm.title == "Close Hog?"
+        act = ws.confirm._act
+        ws.confirm.cancel()
+        act()
+        assert sch.procs[pid].state == S.EXITED and ws.cart["title"] == "Coin Quest"
+    finally:
+        sch.reset()
+
+
 def test_the_audio_rows_refuse_a_fifth_source():
     from runtime import player_fit as fit
     run = [("run:%d" % i, MIB // 2, True) for i in range(3)]
