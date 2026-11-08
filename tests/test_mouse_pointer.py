@@ -372,7 +372,7 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
 # -- the desk: a held press is its window's, a window-bound app its window's size --
 
 def _desk_files(tmp_path, n=60):
-    """Files on the desk over `n` drawings, its Art place open: (ws, driver,
+    """Files on the desk over `n` drawings, its Pictures place open: (ws, driver,
     a point on the list, the window's content rect)."""
     from ws_helpers import build_desktop_ws
     from test_files_app import _files, _frames, _press, _seed_drawing

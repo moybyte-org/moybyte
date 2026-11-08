@@ -155,7 +155,7 @@ to whoever called it.
     `blit565_resize`, one call a card -- with no per-size variants
     (docs/history/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
-  - **A FILE's DELETE moves it to `files/trash/`, restorable, and never confirms**; emptying
+  - **A FILE's DELETE moves it to `files/.Trash/`, restorable, and never confirms**; emptying
     the Trash is Files' one verb that asks first (a `ui.dialog`). A CART has no
     Trash: its delete removes the folder, so every route asks first in the
     same `ui.dialog`. WALL/GAME/wallpaper

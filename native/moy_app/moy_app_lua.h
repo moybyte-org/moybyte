@@ -16,7 +16,7 @@
 // The names, each answering as the Python face (runtime/shell/system_api.py)
 // answers, Python's (value, err) as two results and its None as nil:
 //
-//   files (files, files:<kind>)  files.ready() / list() / load(name) /
+//   files (files, files:<folder>)  files.ready() / list() / load(name) /
 //                                save(name, blob) / delete(name) /
 //                                rename(name, new) / duplicate(name) /
 //                                new_name([title]) / save_text(name, text) /

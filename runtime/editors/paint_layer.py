@@ -704,7 +704,7 @@ class PaintLayer:
             ws.share_tile_put()              # save the tile to the shared sheet
         elif (getattr(lay, "files_btn", None) is not None
               and _in(px, py, lay.files_btn)):
-            ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
+            ws.send_sprites_to_files()       # export the sheet to files/Pictures/Sprites/ (#108)
 
     # -- tool row (#90) ------------------------------------------------------
 

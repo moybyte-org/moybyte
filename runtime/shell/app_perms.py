@@ -7,7 +7,7 @@ JSON row for row, and whose `role:` rows are native/moy_app's allowlist
 
 A row is `(perm, grants, tiers, prompt, needs, py)`:
 
-  perm    the manifest name; `files` also matches `files:<kind>`, `lease`
+  perm    the manifest name; `files` also matches `files:<folder>`, `lease`
           only `lease:<row>`, a row of the board's resource table
   grants  `floor` (ungated), `role:<role>` (the app ABI's grant policy),
           `api:<service>` (a device API the Player hands the run), `boot`
@@ -15,7 +15,7 @@ A row is `(perm, grants, tiers, prompt, needs, py)`:
           `moybyte.lease`, runtime/system/leases.py) or `marker` (names a
           shipped app's cart, grants nothing)
   tiers   the cart runtimes that may hold it
-  prompt  its line in the install prompt (`%s` takes a files kind), `full`
+  prompt  its line in the install prompt (`%s` takes a files folder), `full`
           (FULL, naming the lease's row: "full access" to it), or None: no
           line, nothing to consent to, and nothing Settings can turn off
   needs   the console's service it needs (`wifi`, `net`, `gpio`), a device
@@ -108,7 +108,7 @@ _BY = {r[PERM]: r for r in TABLE}
 
 
 def row(perm):
-    """The table's row for `perm` (`files:<kind>` is the files row), or None
+    """The table's row for `perm` (`files:<folder>` is the files row), or None
     for a name the table does not hold."""
     if not isinstance(perm, str):
         return None
@@ -128,7 +128,7 @@ def line(perm):
     if r[PROMPT] == "full":
         return FULL % perm[6:]
     if "%s" in r[PROMPT]:
-        kind = perm[6:] if perm.startswith("files:") else "docs"
+        kind = perm[6:] if perm.startswith("files:") else "documents"
         return r[PROMPT] % kind
     return r[PROMPT]
 

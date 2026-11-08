@@ -5,7 +5,8 @@ and libmoy's binding holds every `write`, `erase` and `list` to them before a
 path reaches this module. What is here is the store: where a cart's files are
 kept, a write that is whole or not at all, and the listing.
 
-WHERE: beside the carts store, `written/<cart>/` -- <cart> the cart folder's
+WHERE: beside the carts store, the app's private folder `apps/<id>/`
+(docs/os_2026-11/between_apps.md section 2) -- <id> the cart folder's
 name less ".moy" (`cart_id`) -- so an install, an update or a push replaces
 the cart's folder and never touches them, and Get Carts' REMOVE takes them
 with the cart (native/moy_store/moy_shelf.h, runtime/carts/cart_index.py's
@@ -53,7 +54,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import _sibling_path, _is_dir
     from runtime.moy_fs import _mkdir, _remove
 
-WRITTEN_DIR = "written"
+WRITTEN_DIR = "apps"
 NO_ROOM, FAILED = -2, -3              # SPEC.md 16.12's write answers
 PART, DONE = "~part", "~done"
 ENOSPC = 28

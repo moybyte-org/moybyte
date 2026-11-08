@@ -3,7 +3,7 @@
 samples reaching the page's audio.
 
 SITE: a song dropped on the page lands in the browser's OPFS store
-(files/music), never in the VFS; on the next load Music lists it, plays it
+(files/Music), never in the VFS; on the next load Music lists it, plays it
 from OPFS a range at a time, and the page's audio receives the tone.
 
 BOARD-SERVED: the page a board serves keeps no song. The board is real C,
@@ -122,7 +122,7 @@ def test_site_a_dropped_song_is_kept_in_opfs_and_plays_from_it(tmp_path):
             {"waitFor": "window.__moyImported", "timeout": 15000},
             {"js": "'IMPORTED ' + JSON.stringify(window.__moyImported)"},
             {"js": "navigator.storage.getDirectory().then(d => d.getDirectoryHandle('files'))"
-                   ".then(f => f.getDirectoryHandle('music')).then(m => m.getFileHandle(%s))"
+                   ".then(f => f.getDirectoryHandle('Music')).then(m => m.getFileHandle(%s))"
                    ".then(h => h.getFile()).then(f => 'KEPT ' + f.size)" % json.dumps(SONG)},
         ], base, profile, boot_ms=30000)
         assert _tagged(js, "IMPORTED") == "added %s to your music" % SONG, out[-3000:]
@@ -133,7 +133,7 @@ def test_site_a_dropped_song_is_kept_in_opfs_and_plays_from_it(tmp_path):
             _playing(), {"js": _MEDIA}, {"wait": 1500}, {"js": _PCM}, {"shot": "playing"},
         ], base, profile, boot_ms=30000)
         media = _tagged(js, "MEDIA")
-        assert media and media["src"] == "/moy/files/music/" + SONG, (media, out[-3000:])
+        assert media and media["src"] == "/moy/files/Music/" + SONG, (media, out[-3000:])
         assert media["state"] == "playing" and 9 <= media["len"] <= 11, media
         _assert_tone(_tagged(js, "PCM"), out)
     finally:
@@ -204,7 +204,7 @@ def board(tty_exe):
     store = host.tree / "sd" / "moybyte" / "carts"
     for cart in sorted((ROOT / "system_carts").glob("*.moy")):
         shutil.copytree(cart, store / cart.name)
-    music = host.tree / "sd" / "moybyte" / "files" / "music"
+    music = host.tree / "sd" / "moybyte" / "files" / "Music"
     music.mkdir(parents=True)
     (music / SONG).write_bytes(LONG)
     yield host
@@ -225,7 +225,7 @@ def test_board_served_a_song_streams_through_the_sealed_route_and_plays(tmp_path
         ], base, tmp_path / "chrome", boot_ms=30000)
         assert _tagged(js, "MODE") == "board", js
         media = _tagged(js, "MEDIA")
-        assert media and media["src"] == "/moy/files/music/" + SONG, (media, out[-3000:])
+        assert media and media["src"] == "/moy/files/Music/" + SONG, (media, out[-3000:])
         assert media["state"] == "playing" and 9 <= media["len"] <= 11, media
         _assert_tone(_tagged(js, "PCM"), out)
     finally:

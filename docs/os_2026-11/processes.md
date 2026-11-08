@@ -223,7 +223,7 @@ removes the build, and Remove forgets the record.
 equal to it, and its `role:` rows to the C policy's allowlist, by
 `tests/test_app_perms.py`), which the prompt, the install check, the launch
 check and Settings all read. Each row: the name (`files` also matches
-`files:<kind>`), what it grants (`floor`, `role:<role>`, `api:<service>`,
+`files:<folder>`), what it grants (`floor`, `role:<role>`, `api:<service>`,
 `boot`, or `marker`: a shipped app's claim on its cart, granting nothing),
 the tiers that may hold it, its line of the install prompt (None for the
 floor and the markers: nothing to consent to and nothing to turn off), the

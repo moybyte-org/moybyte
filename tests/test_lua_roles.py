@@ -70,7 +70,7 @@ function _draw() cls(0) end
 
 def test_a_lua_app_holding_a_role_gets_its_verbs(tmp_path):
     _ws, lua = _run(tmp_path, NAMES_LUA,
-                    ["graphics", "files:docs", "prefs", "appearance", "launch",
+                    ["graphics", "files:documents", "prefs", "appearance", "launch",
                      "clipboard"])
     assert lua.get_global("SEEN") == (
         "files=table prefs=table set_theme=function themes=function "
@@ -86,8 +86,8 @@ def test_a_lua_app_without_a_role_has_no_name_for_it(tmp_path):
 
 
 def test_a_permission_turned_off_reads_nil_in_lua(tmp_path):
-    _ws, lua = _run(tmp_path, NAMES_LUA, ["graphics", "files:docs", "prefs"],
-                    off=("files:docs", "prefs"))
+    _ws, lua = _run(tmp_path, NAMES_LUA, ["graphics", "files:documents", "prefs"],
+                    off=("files:documents", "prefs"))
     assert lua.get_global("SEEN") == (
         "files=nil prefs=nil set_theme=nil themes=nil open_app=nil io=nil "
         "os=table clipboard=nil os.remove=nil os.rename=nil os.time=function")
@@ -164,7 +164,7 @@ function _draw() cls(0) end
 
 
 def test_lua_io_and_os_reach_only_the_granted_files(tmp_path):
-    ws, lua = _run(tmp_path, IO_LUA, ["graphics", "files:docs"])
+    ws, lua = _run(tmp_path, IO_LUA, ["graphics", "files:documents"])
     assert lua.get_global("TRACE").split("\n") == [
         "type file nil",
         "write true",
@@ -244,7 +244,7 @@ function _init()
 end
 function _draw() cls(0) end
 """
-    ws, _lua = _run(tmp_path, src, ["graphics", "files:docs"])
+    ws, _lua = _run(tmp_path, src, ["graphics", "files:documents"])
     ws.exit()
     files = ws.app_context("check", ("files",), prefs_ns="check").files
     assert files.load("docs", "unsaved.txt") == ("written, never closed", None)

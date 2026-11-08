@@ -723,14 +723,14 @@ def _files(tmp_path):
     """The #108 files root beside the carts one, holding both things that must
     never leave the board."""
     root = Path(wh.moy_sync.files_root(str(tmp_path / "carts")))
-    (root / "drawings").mkdir(parents=True)
-    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
-    (root / "recordings" / "take_1").mkdir(parents=True)
-    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / "Pictures").mkdir(parents=True)
+    (root / "Pictures" / "sunset.moyimg").write_text("0,1,")
+    (root / "Recordings" / "take_1").mkdir(parents=True)
+    (root / "Recordings" / "take_1" / "part0.json").write_text("[1]")
     (root / ".history" / "drawings").mkdir(parents=True)
     (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
-    (root / "trash" / "drawings").mkdir(parents=True)
-    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    (root / ".Trash" / "drawings").mkdir(parents=True)
+    (root / ".Trash" / "drawings" / "gone.moyimg").write_text("9,")
     return root
 
 
@@ -742,8 +742,8 @@ def test_files_json_serves_the_kinds_and_nothing_else(tmp_path):
     h = _host(tmp_path)
     r = h.handle_http("GET", "/files.json", b"")
     assert "application/json" in _head(r)
-    assert _json(r) == {"drawings/sunset.moyimg": "0,1,",
-                        "recordings/take_1/part0.json": "[1]"}
+    assert _json(r) == {"Pictures/sunset.moyimg": "0,1,",
+                        "Recordings/take_1/part0.json": "[1]"}
 
 
 def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
@@ -763,7 +763,7 @@ def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
     h = wh.WebHost(str(_store(tmp_path)))
     assert b"404" in h_status(h.handle_http("GET", "/files.json", b""))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/x.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/x.moyimg", "t": "0,"}, root="files"))
     assert b"400" in h_status(r)
 
 
@@ -780,11 +780,11 @@ def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
     files = _files(tmp_path)
     h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/sunset.moyimg", "t": "7,"}, root="files"))
+        {"p": "Pictures/sunset.moyimg", "t": "7,"}, root="files"))
     assert b"200" in r.split(b"\r\n")[0]
     assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 1, "err": []}
-    assert (files / "drawings" / "sunset.moyimg").read_text() == "7,"
-    assert not (root / "drawings").exists(), "it must not land among the carts"
+    assert (files / "Pictures" / "sunset.moyimg").read_text() == "7,"
+    assert not (root / "Pictures").exists(), "it must not land among the carts"
 
 
 def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
@@ -792,11 +792,11 @@ def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
     files = _files(tmp_path)
     h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "trash/drawings/gone.moyimg", "t": "stolen"},
+        {"p": ".Trash/drawings/gone.moyimg", "t": "stolen"},
         {"p": ".history/drawings/sunset.jsonl", "t": "stolen"}, root="files"))
     body = json.loads(r.split(b"\r\n\r\n", 1)[1])
     assert body["ok"] == 0 and len(body["err"]) == 2
-    assert (files / "trash" / "drawings" / "gone.moyimg").read_text() == "9,"
+    assert (files / ".Trash" / "drawings" / "gone.moyimg").read_text() == "9,"
 
 
 def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
@@ -807,7 +807,7 @@ def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
     hits = []
     h = wh.WebHost(str(root), on_sync=hits.append)
     h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/new.moyimg", "t": "0,"}, root="files"))
     assert not hits
 
 
@@ -819,7 +819,7 @@ def test_the_files_apply_drains_the_feeder_too(tmp_path):
     h = wh.WebHost(str(root))
     before = nb._drains()
     h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/new.moyimg", "t": "0,"}, root="files"))
     assert nb._drains() == before + 1
 
 

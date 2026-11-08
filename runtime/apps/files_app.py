@@ -9,15 +9,18 @@
 """Files -- the kid file manager system app (#108), drawn with the public UI
 API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
-Places down the side (Projects, Notes, Art, Music, Themes once there are
-any, and the Trash), and the place's files in columns: each file's picture
+Places down the side (Projects, the shared folders Documents, Pictures and
+Music as they are named on disk, Themes once there are any, and the Trash),
+and the place's files in columns: each file's picture
 (an icon by what it is; a project's cover, else its generated one), its
 Name (a project's title) and its Kind (docs/media/look_2026-10/DESIGN.md,
 Files). No paths and no extensions. The handheld shows the places, then a
 place's files, one page at a time; the desk shows both. A file's verbs
 ride a foot bar under the list, at its right, the one Enter does last: OPEN
 in the owning app (Enter, or a second tap on the current row, does the
-same), RENAME in a dialog (Paint's open picture follows it,
+same), OPEN WITH (the "open with" menu of the apps whose manifest opens the
+file's type, runtime/system/intents.py, the one picked becoming the choice),
+RENAME in a dialog (Paint's open picture follows it,
 `artwork.follow`), COPY (Duplicate), WALL / GAME / USE for a
 drawing (`picture_copies.PictureCopies`), and DELETE, which moves it to the
 restorable Trash and never destroys -- the Trash restores, and emptying it
@@ -57,6 +60,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
 
+try:
+    import intents as _intents
+    import moybyte as _moybyte
+except ImportError:  # pragma: no cover - direct host import
+    from runtime import intents as _intents
+    from runtime import moybyte as _moybyte
+
 
 # The carts root, as a place beside the user-files kinds. NOT a
 # `moy_carts.FILE_KINDS` name and never passed to the files store: its items
@@ -65,16 +75,19 @@ PROJECTS = "projects"
 # The store's theme packages: a theme is data the Appearance app picks,
 # never a project the Editor opens (docs/history/theming_2026-09.md §9 phase 6).
 THEMES = "themes"
-ART = "art"
+DOCUMENTS = "documents"
+PICTURES = "pictures"
 MUSIC = "music"
 TRASH = "trash"
 
 # The places, in the sidebar's order: key, label, icon, and the store kinds
-# a place lists. THEMES shows once there are any; the rest always do.
+# a place lists. The shared folders are named as on disk
+# (moy_store_base.SHARED_FOLDERS); THEMES shows once there are any; the rest
+# always do.
 PLACES = (
     (PROJECTS, "Projects", "projects", ()),
-    ("docs", "Notes", "notes", ("docs",)),
-    (ART, "Art", "paint", ("drawings", "sprites")),
+    (DOCUMENTS, "Documents", "notes", ("docs",)),
+    (PICTURES, "Pictures", "paint", ("drawings", "sprites")),
     (MUSIC, "Music", "music", ("music", "recordings")),
     (THEMES, "Themes", "wallpaper", ()),
     (TRASH, "Trash", "trash", ()),
@@ -103,6 +116,7 @@ CART_KIND = {
 PRIMARY = ("OPEN", "RUN", "RESTORE")
 VERB = {
     "OPEN": ("Open", "folder_open"),
+    "WITH": ("Open with\u2026", "app"),
     "RUN": ("Run", "run"),
     "PLAY": ("Play", "play"),
     "NAME": ("Rename", "pencil"),
@@ -227,13 +241,13 @@ class FilesAppLayer(ListShellApp):
              "wallpaper")
     UI = True
 
-    PICTURE_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
-    DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # the kinds the router opens
+    PICTURE_ACTIONS = ("OPEN", "WITH", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
+    DOC_ACTIONS = ("OPEN", "WITH", "NAME", "COPY", "DEL")   # the kinds the router opens
     # A vault SCRIPT is a PROGRAM, so RUN leads (docs/history/text_editing_2026-09.md
     # step 6). OPEN stays beside it: a script is still text, and editing it is
     # the other thing you do with one.
-    SCRIPT_ACTIONS = ("RUN", "OPEN", "NAME", "COPY", "DEL")
-    PLAIN_ACTIONS = ("NAME", "COPY", "DEL")     # kinds with no opener/reuse yet
+    SCRIPT_ACTIONS = ("RUN", "OPEN", "WITH", "NAME", "COPY", "DEL")
+    PLAIN_ACTIONS = ("WITH", "NAME", "COPY", "DEL")     # kinds the shell opens no door to
     PROJECT_ACTIONS = ("OPEN", "PLAY")
     THEME_ACTIONS = ("OPEN",)
     TRASH_ACTIONS = ("RESTORE", "EMPTY")
@@ -557,6 +571,12 @@ class FilesAppLayer(ListShellApp):
                 self.status = why
         elif verb == "OPEN":
             self._open_row(self.cur)
+        elif verb == "WITH":
+            # The apps whose manifest opens its type, asked always
+            # (runtime/system/intents.py): the one picked becomes the choice.
+            item = _intents.item_of(kind, name)
+            if item is None or not _moybyte.open_with(item, True):
+                self.status = "No app opens it"
         elif verb == "PLAY":
             self._nav.play(row[4])
         elif verb == "RESTORE":
@@ -869,7 +889,9 @@ class FilesAppLayer(ListShellApp):
         gap = 6 if lay.desk else 3 * fs
         side = 16 * fs
         pad = (12 if lay.desk else 6 * fs)
-        widths = [ui.text_size(VERB[v][0])[0] + side + 2 * fs + 2 * pad for v in verbs]
+        widths = [ui.text_size(VERB[v][0] if ui.has_symbols()
+                               else VERB[v][0].replace("\u2026", "..."))[0]
+                  + side + 2 * fs + 2 * pad for v in verbs]
         labelled = sum(widths) + gap * (len(verbs) - 1) <= w
         if not labelled:
             widths = [side + 2 * pad for _v in verbs]
@@ -879,6 +901,8 @@ class FilesAppLayer(ListShellApp):
             ui.label(self.status)
         for i, v in enumerate(verbs):
             label, icon = VERB[v]
+            if not ui.has_symbols():
+                label = label.replace("\u2026", "...")
             o = {"id": "verb " + v}
             if none and v != "EMPTY" or (v == "EMPTY" and not self.trash):
                 o["disabled"] = True

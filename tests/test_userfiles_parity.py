@@ -156,12 +156,19 @@ def test_the_palette_is_the_canvas_palette():
 
 
 def test_the_sync_reads_the_layers_kinds():
-    """The sync names the files root and its kinds from the on-card layout
-    (runtime/carts/moy_store_base.py), which the Zero carries without the layer:
-    they are the layer's own."""
+    """The sync names the files root, its kinds and their folders from the
+    on-card layout (runtime/carts/moy_store_base.py), which the Zero carries
+    without the layer: they are the layer's own, and every kind lives in one
+    of the shared folders."""
     import moy_ufiles_binding
-    from runtime import moy_store_base
+    from runtime import moy_store_base as b
     uf = moy_ufiles_binding.binding()
-    assert tuple(uf.kinds()) == moy_store_base.FILE_KIND_NAMES
+    assert tuple(uf.kinds()) == b.FILE_KIND_NAMES
+    assert tuple(b.FILE_KIND_DIRS) == b.FILE_KIND_NAMES
     for root in ("/sd/moybyte/carts", "carts", "/carts", "/a/b/c/"):
-        assert moy_store_base.files_root(root) == uf.files_root(root), root
+        assert b.files_root(root) == uf.files_root(root), root
+        for k in b.FILE_KIND_NAMES:
+            assert uf.file_kind_dir(k, root) == b.files_root(root) + "/" + b.FILE_KIND_DIRS[k]
+    for d in b.FILE_KIND_DIRS.values():
+        assert d.split("/")[0] in b.SHARED_FOLDERS
+    assert uf.TRASH_DIR == ".Trash"

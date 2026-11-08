@@ -11,7 +11,7 @@
 #                                      `carts` in this file is a NameError, not
 #                                      a locked door. That is the whole sandbox.
 #
-# The one that matters here is `files:docs`, which brings BOTH the storage verbs
+# The one that matters here is `files:documents`, which brings BOTH the storage verbs
 # (`files.list()`, `files.new_name()`, `files.rename()`, `files.duplicate()`,
 # `files.delete()`, `files.badge()`) and `open_editor(name)` -- a handle onto
 # one note, over the console's own editor. The editor is not in this file: the

@@ -707,6 +707,7 @@ static mp_obj_t mod_clock_fix(mp_obj_t ts) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_clock_fix_obj, mod_clock_fix);
 
 static MP_DEFINE_STR_OBJ(carts_dir_obj, "/sd/moybyte/carts");
+static MP_DEFINE_STR_OBJ(trash_dir_obj, ".Trash");
 static MP_DEFINE_STR_OBJ(history_dir_obj, ".history");
 static MP_DEFINE_STR_OBJ(history_ext_obj, ".jsonl");
 static MP_DEFINE_STR_OBJ(doc_ext_obj, ".md");
@@ -716,7 +717,7 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ufiles) },
     { MP_ROM_QSTR(MP_QSTR_CARTS_DIR), MP_ROM_PTR(&carts_dir_obj) },
     { MP_ROM_QSTR(MP_QSTR_FILES_DIR), MP_ROM_QSTR(MP_QSTR_files) },
-    { MP_ROM_QSTR(MP_QSTR_TRASH_DIR), MP_ROM_QSTR(MP_QSTR_trash) },
+    { MP_ROM_QSTR(MP_QSTR_TRASH_DIR), MP_ROM_PTR(&trash_dir_obj) },
     { MP_ROM_QSTR(MP_QSTR_TRASH_KEEP), MP_ROM_INT(MOY_UF_TRASH_KEEP) },
     { MP_ROM_QSTR(MP_QSTR_HISTORY_DIR), MP_ROM_PTR(&history_dir_obj) },
     { MP_ROM_QSTR(MP_QSTR_HISTORY_EXT), MP_ROM_PTR(&history_ext_obj) },

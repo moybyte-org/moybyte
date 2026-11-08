@@ -250,7 +250,7 @@ def test_running_a_script_creates_no_folder_and_writes_nothing(tmp_path):
     root = ws.carts_root
     _seed(ws, "hi.py", "print('hi')\n")
     before_carts = sorted(os.listdir(root))
-    docs = os.path.join(os.path.dirname(root), "files", "docs")
+    docs = os.path.join(os.path.dirname(root), "files", "Documents")
     before_docs = sorted(os.listdir(docs))
     ok, _why = ws.run_script("docs", "hi.py")
     assert ok
@@ -346,7 +346,7 @@ def test_files_offers_RUN_on_a_script_and_not_on_a_note(tmp_path):
     _seed(ws, "hi.py", "print('hi')\n")
     _seed(ws, "shopping", "milk\n")
     app = _files_app(ws)
-    app.open_place("docs", keep="hi.py")
+    app.open_place("documents", keep="hi.py")
     assert app._action_labels()[0] == "RUN"
     app.select("shopping")
     assert "RUN" not in app._action_labels()
@@ -356,7 +356,7 @@ def test_the_files_RUN_action_starts_the_script(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('from files')\n")
     app = _files_app(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("RUN", "hi.py")
     _frame(ws)
     assert ws.wm.top_is_player()
@@ -370,7 +370,7 @@ def test_the_router_sends_a_script_to_the_text_page_not_the_editor(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('hi')\n")
     app = _files_app(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     assert app.door("hi.py", "docs") == (text_modes.CODE, "hi.py")
     assert app.route("hi.py", kind="docs") == text_modes.CODE
     # OPEN edits the script: the Player is running Notes' editor skin over it

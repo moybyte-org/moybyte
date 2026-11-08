@@ -79,7 +79,7 @@ EV_PAIRED = 4
 
 
 def _kinds():
-    kinds = moy_sync.file_kinds()
+    kinds = moy_sync.file_folders()
     return None if kinds is None else tuple(kinds)
 
 

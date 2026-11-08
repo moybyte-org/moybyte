@@ -124,7 +124,7 @@ and adopt) and the leaf `cart_listing` (how a manifest's description, genre
 and tags read, SPEC.md 3.7) -- imported and re-exported, so the umbrella
 cannot load without them. The user-files layer behind its
 other names (list, save, the trash, the sidecars) is native/moy_store's, built
-with `moy_app`, which this board denies: it syncs `files/<kind>/` by path and
+with `moy_app`, which this board denies: it syncs the shared folders of `files/` by path and
 runs no app that edits one."""
 
 [[modules.shared.group]]

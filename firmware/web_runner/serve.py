@@ -357,7 +357,7 @@ else:
                 # what tells the page this twin speaks files.
                 body = json.dumps(moy_webhost.pack_store(
                     moy_sync.files_root(carts_dir),
-                    tops=moy_sync.file_kinds())).encode()
+                    tops=moy_sync.file_folders())).encode()
                 self._send(200, body)
                 return
             if path == moy_sync.SYSTEM_PULL and console is not None:

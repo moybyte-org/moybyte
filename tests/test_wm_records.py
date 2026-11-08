@@ -421,7 +421,7 @@ def _art(p):
         _drawings(ws)
         f = _inst(ws, "FilesAppLayer")
         f._refresh_counts()
-        f.open_place(files_app.ART)
+        f.open_place(files_app.PICTURES)
         f._focus = "files"
     p.settle()
 

@@ -39,7 +39,7 @@ def _files(tmp_path):
     ws = host_app.build_workstation(carts)
     _open(ws, "Files")
     app = ws.files_app
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("NAME", LONG)
     drv = host_app.ConsoleDriver(ws)
     _frames(drv, 3)

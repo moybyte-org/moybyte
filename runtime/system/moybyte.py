@@ -61,13 +61,20 @@ one, `time.ticks_us()`.
                      (runtime/system/status_items.py). The process's end
                      takes it out
   open_with(item, choose=False)
-                     open `item` (a URL, a user file "<kind>/<name>", or a
-                     grant this process was handed) in the app that handles
-                     its MIME type: the one match, else the last one chosen,
-                     else the "open with" menu, which `choose` asks always;
-                     False where no app handles it (runtime/system/intents.py)
+                     open `item` (a URL, a user file by its path,
+                     "Documents/todo.md", or a grant this process was
+                     handed) in the app that handles its MIME type: the one
+                     match, else the last one chosen, else the "open with"
+                     menu, which `choose` asks always; False where no app
+                     handles it (runtime/system/intents.py)
   share(data, mime)  hand `data` (str or bytes) of type `mime` to the app
                      that handles it, routed as open_with routes
+  pick(mime, mode="r")
+                     the console's file picker over the user's files of
+                     type `mime`: the one picked reaches this process's
+                     `moy_open(h)` as a grant of `mode` ("r" or "rw") for
+                     its run, None where the picker was cancelled; False
+                     where no file has the type
   clock_synced()     whether the wall clock holds real time: NTP has answered
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
@@ -524,6 +531,10 @@ def open_with(item, choose=False):
 
 def share(data, mime):
     return _intents().share(_pid(), data, mime)
+
+
+def pick(mime, mode="r"):
+    return _intents().pick(_pid(), mime, mode)
 
 
 def _intents_end(pid):

@@ -66,9 +66,9 @@ def _walk(root, rel, out):
 
 
 def _files_visible(carts_root):
-    """{rel: text} for everything the FILES protocol owns: known kind dirs
+    """{rel: text} for everything the FILES protocol owns: the shared folders
     only, skip-filtered -- the set both stores must agree on. Anything outside
-    a kind (.history/, trash/) is invisible here by the same rule that keeps it
+    them (.history/, .Trash/) is invisible here by the same rule that keeps it
     off the wire."""
     root = moy_carts.files_root(carts_root)
     out = {}
@@ -76,9 +76,9 @@ def _files_visible(carts_root):
         entries = sorted(moy_sync._entries(root))
     except OSError:
         return out                            # nothing made yet: no files root
-    for kind, isdir in entries:
-        if isdir and kind in moy_carts.FILE_KINDS:
-            _walk(root, kind, out)
+    for folder, isdir in entries:
+        if isdir and folder in moy_carts.SHARED_FOLDERS:
+            _walk(root, folder, out)
     return out
 
 
@@ -93,7 +93,7 @@ def _files_wire(a, b):
 def _record(carts_root, name, clips):
     """A folder-valued item (#70 recordings): one DIRECTORY per recording, its
     parts written in place by the recorder rather than through save_file."""
-    d = Path(moy_carts.files_root(carts_root)) / "recordings" / name
+    d = Path(moy_carts.files_root(carts_root)) / "Recordings" / name
     d.mkdir(parents=True)
     for clip, text in clips.items():
         (d / clip).write_text(text)
@@ -256,8 +256,8 @@ def test_user_files_converge_including_a_folder_item(tmp_path):
     wire.pump()
     va, vb = _files_visible(a), _files_visible(b)
     assert va == vb != {}
-    assert vb["drawings/sunset.moyimg"] == "0,1,2,3,"
-    assert vb["recordings/take_1/part1.json"] == "[2]"
+    assert vb["Pictures/sunset.moyimg"] == "0,1,2,3,"
+    assert vb["Recordings/take_1/part1.json"] == "[2]"
 
 
 def test_a_folder_item_dies_as_one_dc_and_a_kind_dir_never_does(tmp_path):
@@ -271,19 +271,45 @@ def test_a_folder_item_dies_as_one_dc_and_a_kind_dir_never_does(tmp_path):
     # The whole recording folder goes: ONE dc, not a spray of file deletes.
     import shutil
     mark = len(wire.sent)
-    shutil.rmtree(Path(moy_carts.files_root(a)) / "recordings" / "take_1")
+    shutil.rmtree(Path(moy_carts.files_root(a)) / "Recordings" / "take_1")
     wire.pump()
-    assert wire.sent[mark:] == [{"p": "recordings/take_1", "dc": 1}]
+    assert wire.sent[mark:] == [{"p": "Recordings/take_1", "dc": 1}]
     assert _files_visible(a) == _files_visible(b)
-    assert not (Path(moy_carts.files_root(b)) / "recordings" / "take_1").exists()
+    assert not (Path(moy_carts.files_root(b)) / "Recordings" / "take_1").exists()
     # ...and emptying a KIND dir travels as plain file deletes: a kind dir is
     # never a dc unit, or one lost item would wipe the peer's whole drawings.
     mark = len(wire.sent)
     moy_carts.delete_file("drawings", "sunset", root=a)
     wire.pump()
-    assert wire.sent[mark:] == [{"p": "drawings/sunset.moyimg", "d": 1}]
+    assert wire.sent[mark:] == [{"p": "Pictures/sunset.moyimg", "d": 1}]
     assert _files_visible(a) == _files_visible(b)
-    assert (Path(moy_carts.files_root(b)) / "drawings").is_dir()
+    assert (Path(moy_carts.files_root(b)) / "Pictures").is_dir()
+
+
+def test_a_subfolder_kinds_unit_is_its_item_never_its_folder(tmp_path):
+    """`Documents/Stories/` and `Pictures/Sprites/` are kinds' folders inside
+    shared ones: a story dies as one dc of its own folder, and a sheet as a
+    plain delete, never a dc of the folder that holds the rest."""
+    import shutil
+    a = _mkstore(tmp_path, "browser")
+    b = _mkstore(tmp_path, "board")
+    wire = _files_wire(a, b)
+    story = Path(moy_carts.files_root(a)) / "Documents" / "Stories" / "tale"
+    story.mkdir(parents=True)
+    (story / "story.json").write_text("{}")
+    moy_carts.save_file("sprites", "hero", "0,", root=a)
+    moy_carts.save_file("sprites", "boss", "1,", root=a)
+    wire.pump()
+    assert _files_visible(a) == _files_visible(b) != {}
+    mark = len(wire.sent)
+    shutil.rmtree(story)
+    moy_carts.delete_file("sprites", "hero", root=a)
+    wire.pump()
+    assert sorted(wire.sent[mark:], key=lambda o: o["p"]) == [
+        {"p": "Documents/Stories/tale", "dc": 1},
+        {"p": "Pictures/Sprites/hero.moygfx", "d": 1}]
+    assert _files_visible(a) == _files_visible(b)
+    assert (Path(moy_carts.files_root(b)) / "Pictures" / "Sprites" / "boss.moygfx").exists()
 
 
 def test_the_history_sidecars_and_the_trash_stay_home(tmp_path):
@@ -297,15 +323,15 @@ def test_the_history_sidecars_and_the_trash_stay_home(tmp_path):
     moy_carts.history_commit("drawings", "sunset", [{"op": "px"}],
                              keyframe="0,", root=a)
     moy_carts.save_file("drawings", "doomed", "9,", root=a)
-    moy_carts.delete_file("drawings", "doomed", root=a)   # -> files/trash/
+    moy_carts.delete_file("drawings", "doomed", root=a)   # -> files/.Trash/
     wire.pump()
     fa, fb = Path(moy_carts.files_root(a)), Path(moy_carts.files_root(b))
-    assert (fa / ".history").is_dir() and (fa / "trash").is_dir(), \
+    assert (fa / ".history").is_dir() and (fa / ".Trash").is_dir(), \
         "the local store really does hold both"
     assert not (fb / ".history").exists(), "undo history is each side's own"
-    assert not (fb / "trash").exists(), "a recovery bin is local, always"
+    assert not (fb / ".Trash").exists(), "a recovery bin is local, always"
     assert _files_visible(a) == _files_visible(b)
-    assert list(_files_visible(b)) == ["drawings/sunset.moyimg"]
+    assert list(_files_visible(b)) == ["Pictures/sunset.moyimg"]
 
 
 def test_a_two_sided_collision_on_a_drawing_is_lww(tmp_path):
@@ -320,7 +346,7 @@ def test_a_two_sided_collision_on_a_drawing_is_lww(tmp_path):
     moy_carts.save_file("drawings", "sunset", "BROWSER,", root=a)
     wire.pump()
     assert _files_visible(a) == _files_visible(b)
-    assert _files_visible(b)["drawings/sunset.moyimg"] == "BROWSER,"
+    assert _files_visible(b)["Pictures/sunset.moyimg"] == "BROWSER,"
 
 
 def test_files_drop_and_reattach_loses_nothing(tmp_path):
@@ -338,7 +364,7 @@ def test_files_drop_and_reattach_loses_nothing(tmp_path):
     wire.down = False
     wire.pump()
     assert _files_visible(a) == _files_visible(b)
-    assert _files_visible(b)["drawings/sunset.moyimg"] == "1,", \
+    assert _files_visible(b)["Pictures/sunset.moyimg"] == "1,", \
         "reattach ships the FRESHEST bytes, not a replay of the backlog"
 
 
@@ -355,7 +381,7 @@ def test_the_two_roots_ship_separate_batches(tmp_path):
     assert _visible(a) == _visible(b) != {}
     assert _files_visible(a) == _files_visible(b) != {}
     # The carts side never saw a drawing and the files side never saw a cart.
-    assert not any(k.startswith("drawings/") for k in _visible(b))
+    assert not any(k.startswith("Pictures/") for k in _visible(b))
     assert not any(k.endswith(".moy") for k in _files_visible(b))
 
 

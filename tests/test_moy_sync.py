@@ -423,10 +423,10 @@ def test_a_files_push_is_never_journaled(tmp_path):
     drawing pushed from a browser lands as a file and nothing else."""
     _store(tmp_path)
     files = _files_store(tmp_path)
-    apply_ops(str(files), [{"p": "drawings/sunset.moyimg", "t": "0,1,"}],
+    apply_ops(str(files), [{"p": "Pictures/sunset.moyimg", "t": "0,1,"}],
               root_id=moy_sync.FILES_ROOT_ID, journal=True)
-    assert (files / "drawings" / "sunset.moyimg").read_text() == "0,1,"
-    assert not (files / "drawings" / "journal").exists()
+    assert (files / "Pictures" / "sunset.moyimg").read_text() == "0,1,"
+    assert not (files / "Pictures" / "journal").exists()
     assert not any(p.name == "journal.jsonl" for p in files.rglob("*"))
 
 
@@ -527,14 +527,14 @@ def _files_store(tmp_path, name="files"):
     """A files root shaped like a real one: two kinds, a folder-valued
     recording, and the two directories that must never travel."""
     root = tmp_path / name
-    (root / "drawings").mkdir(parents=True)
-    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
-    (root / "recordings" / "take_1").mkdir(parents=True)
-    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / "Pictures").mkdir(parents=True)
+    (root / "Pictures" / "sunset.moyimg").write_text("0,1,")
+    (root / "Recordings" / "take_1").mkdir(parents=True)
+    (root / "Recordings" / "take_1" / "part0.json").write_text("[1]")
     (root / ".history" / "drawings").mkdir(parents=True)
     (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
-    (root / "trash" / "drawings").mkdir(parents=True)
-    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    (root / ".Trash" / "drawings").mkdir(parents=True)
+    (root / ".Trash" / "drawings" / "gone.moyimg").write_text("9,")
     return root
 
 
@@ -549,7 +549,7 @@ def test_a_files_batch_names_its_root_and_a_v1_board_refuses_it():
     before files sync checks `v != 1` and answers "bad batch"; without the bump
     its apply would read `drawings/sunset.moyimg` as a cart-relative path and
     write it into the CARTS root, inventing a `drawings` cart on the shelf."""
-    body = _files_batch({"p": "drawings/sunset.moyimg", "t": "0,"})
+    body = _files_batch({"p": "Pictures/sunset.moyimg", "t": "0,"})
     ops, root = parse_batch(body)
     assert root == FILES_ROOT_ID and len(ops) == 1
 
@@ -566,9 +566,9 @@ def test_a_files_batch_misrouted_to_carts_would_have_made_a_bogus_cart(tmp_path)
     'simplifies' the two versions back into one."""
     root = _store(tmp_path)
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "drawings/sunset.moyimg", "t": "0,"}], "carts")
+        str(root), [{"p": "Pictures/sunset.moyimg", "t": "0,"}], "carts")
     assert (applied, errors) == (1, []) and shelf
-    assert (root / "drawings" / "sunset.moyimg").exists(), \
+    assert (root / "Pictures" / "sunset.moyimg").exists(), \
         "a carts receiver has no way to know this was never a cart"
 
 
@@ -588,14 +588,14 @@ def test_files_paths_must_start_with_a_kind_the_store_knows(tmp_path):
     root = _files_store(tmp_path)
     applied, errors, _ = apply_ops(str(root), [
         {"p": ".history/drawings/sunset.jsonl", "t": "no"},
-        {"p": "trash/drawings/gone.moyimg", "t": "no"},
+        {"p": ".Trash/drawings/gone.moyimg", "t": "no"},
         {"p": "wifi.json", "t": "no"},
         {"p": "carts/hop.moy/main.py", "t": "no"},
-        {"p": "drawings/ok.moyimg", "t": "1,"},
+        {"p": "Pictures/ok.moyimg", "t": "1,"},
     ], FILES_ROOT_ID)
     assert applied == 1
     assert [i for i, _ in errors] == [0, 1, 2, 3]
-    assert (root / "drawings" / "ok.moyimg").read_text() == "1,"
+    assert (root / "Pictures" / "ok.moyimg").read_text() == "1,"
     assert (root / ".history" / "drawings" / "sunset.jsonl").read_text() \
         == '{"t": "kf"}\n'
 
@@ -604,22 +604,22 @@ def test_dc_deletes_an_item_and_never_a_whole_kind(tmp_path):
     """A recording is folder-valued and must die as a unit; a kind dir must
     not, or one item leaving our copy would wipe the peer's whole drawings."""
     root = _files_store(tmp_path)
-    _, errors, _ = apply_ops(str(root), [{"p": "drawings", "dc": 1}],
+    _, errors, _ = apply_ops(str(root), [{"p": "Pictures", "dc": 1}],
                              FILES_ROOT_ID)
-    assert errors and (root / "drawings").is_dir()
+    assert errors and (root / "Pictures").is_dir()
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "recordings/take_1", "dc": 1}], FILES_ROOT_ID)
+        str(root), [{"p": "Recordings/take_1", "dc": 1}], FILES_ROOT_ID)
     assert (applied, errors) == (1, [])
-    assert not (root / "recordings" / "take_1").exists()
-    assert (root / "recordings").is_dir(), "the kind dir survives its item"
+    assert not (root / "Recordings" / "take_1").exists()
+    assert (root / "Recordings").is_dir(), "the kind dir survives its item"
     assert not shelf, "the launcher renders no recordings"
 
 
 def test_a_files_batch_never_dirties_the_shelf(tmp_path):
     root = _files_store(tmp_path)
-    for ops in ([{"p": "drawings/new.moyimg", "t": "0,"}],
-                [{"p": "drawings/sunset.moyimg", "d": 1}],
-                [{"p": "docs/story.md", "t": "hi"}]):
+    for ops in ([{"p": "Pictures/new.moyimg", "t": "0,"}],
+                [{"p": "Pictures/sunset.moyimg", "d": 1}],
+                [{"p": "Documents/story.md", "t": "hi"}]):
         _, errors, shelf = apply_ops(str(root), ops, FILES_ROOT_ID)
         assert not errors and not shelf
 
@@ -629,9 +629,9 @@ def test_the_files_root_is_created_on_demand(tmp_path):
     makes something -- and the first thing a peer sends may BE that."""
     root = tmp_path / "files"
     applied, errors, _ = apply_ops(
-        str(root), [{"p": "drawings/first.moyimg", "t": "0,"}], FILES_ROOT_ID)
+        str(root), [{"p": "Pictures/first.moyimg", "t": "0,"}], FILES_ROOT_ID)
     assert (applied, errors) == (1, [])
-    assert (root / "drawings" / "first.moyimg").read_text() == "0,"
+    assert (root / "Pictures" / "first.moyimg").read_text() == "0,"
 
 
 def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
@@ -639,11 +639,11 @@ def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
     assert not w.sweep(), "the freshly pulled files root has nothing to tell"
     shipped = {rel for rel in w._snap}
-    assert shipped == {"drawings/sunset.moyimg", "recordings/take_1/part0.json"}
-    assert not any(r.startswith(".history/") or r.startswith("trash/")
+    assert shipped == {"Pictures/sunset.moyimg", "Recordings/take_1/part0.json"}
+    assert not any(r.startswith(".history/") or r.startswith(".Trash/")
                    for r in shipped)
     # A write inside either stays invisible, sweep after sweep.
-    p = root / "trash" / "drawings" / "gone.moyimg"
+    p = root / ".Trash" / "drawings" / "gone.moyimg"
     p.write_text("still here")
     _bump_mtime(p)
     assert not w.sweep()
@@ -653,7 +653,7 @@ def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
 def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     root = _files_store(tmp_path)
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
-    p = root / "drawings" / "sunset.moyimg"
+    p = root / "Pictures" / "sunset.moyimg"
     p.write_text("2,")
     _bump_mtime(p)
     w.sweep()
@@ -662,7 +662,7 @@ def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     assert doc["root"] == FILES_ROOT_ID
     ops, root_id = parse_batch(json.dumps(doc))
     assert root_id == FILES_ROOT_ID
-    assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
+    assert ops == [{"p": "Pictures/sunset.moyimg", "t": "2,"}]
 
 
 def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
@@ -671,10 +671,10 @@ def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
     the file the board holds is the file the browser gets, byte for byte."""
     root = _files_store(tmp_path)
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "docs/story.md", "t": "# Chapter one\n\nIt began."}],
+        str(root), [{"p": "Documents/story.md", "t": "# Chapter one\n\nIt began."}],
         FILES_ROOT_ID)
     assert (applied, errors, shelf) == (1, [], False)
-    p = root / "docs" / "story.md"
+    p = root / "Documents" / "story.md"
     assert p.read_text() == "# Chapter one\n\nIt began."
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
     w.sweep()                                  # the first sweep is the baseline
@@ -683,7 +683,7 @@ def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
     assert w.sweep()
     ops, root_id = parse_batch(w.take_json())
     assert root_id == FILES_ROOT_ID
-    assert ops == [{"p": "docs/story.md", "t": "# Chapter two"}]
+    assert ops == [{"p": "Documents/story.md", "t": "# Chapter two"}]
 
 
 def test_a_missing_files_root_is_an_empty_watcher_not_a_crash(tmp_path):
@@ -751,7 +751,7 @@ def test_the_pump_drains_carts_first_then_files(tmp_path):
     p = carts / "hop.moy" / "main.py"
     p.write_text("x = 2\n")
     _bump_mtime(p)
-    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d = tmp_path / "files" / "Pictures" / "sunset.moyimg"
     d.write_text("9,")
     _bump_mtime(d)
     first = json.loads(wb.sync_poll_json())
@@ -760,7 +760,7 @@ def test_the_pump_drains_carts_first_then_files(tmp_path):
     wb.sync_ack(True)
     second = json.loads(wb.sync_poll_json())
     assert second["root"] == FILES_ROOT_ID
-    assert second["ops"] == [{"p": "drawings/sunset.moyimg", "t": "9,"}]
+    assert second["ops"] == [{"p": "Pictures/sunset.moyimg", "t": "9,"}]
     wb.sync_ack(True)
     assert wb.sync_poll_json() == ""
 
@@ -769,7 +769,7 @@ def test_the_ack_goes_back_to_the_watcher_that_took(tmp_path):
     """Acking the wrong root would strand its batch in flight forever and
     requeue nothing -- the edit would be silently dropped."""
     wb, _carts = _wired(tmp_path)
-    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d = tmp_path / "files" / "Pictures" / "sunset.moyimg"
     d.write_text("9,")
     _bump_mtime(d)
     batch = json.loads(wb.sync_poll_json())
@@ -805,7 +805,7 @@ def _console_dir(tmp_path):
     top = tmp_path / "moy"
     (top / "carts" / "hop.moy").mkdir(parents=True)
     (top / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
-    (top / "files" / "drawings").mkdir(parents=True)
+    (top / "files" / "Pictures").mkdir(parents=True)
     (top / "system").mkdir()
     (top / "system" / "settings").write_text('show_fps = false\ntheme = "dusk"\n')
     (top / "system.json").write_text('{"theme": "dusk"}')

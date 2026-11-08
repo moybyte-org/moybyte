@@ -14,8 +14,8 @@
 // registered under WASI's module name like any other table.
 //
 // FILES UNDER THE APP'S PERMISSIONS. A command reaches the folders its
-// consent grants (`files`: the user's files folder; `files:<kind>`: that
-// kind's), named relative to the store and handed in as `roots`. Descriptor 3
+// consent grants (`files`: the user's files folder; `files:<folder>`: that
+// shared folder, runtime/shell/sh_door.py's `wasi_roots`), named relative to the store and handed in as `roots`. Descriptor 3
 // is the preopen ".", the session's working folder, so a relative path is the
 // shell's; each root follows under its absolute shell path, so an absolute
 // one under it resolves too. A path that leaves every root answers

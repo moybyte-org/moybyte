@@ -323,14 +323,20 @@ def commands(ws):
 
 def wasi_roots(granted):
     """The folders a compiled command's granted permissions name, relative
-    to the store: `files` the user's files folder, `files:<kind>` that
-    kind's (native/moy_store/moy_ufiles.h)."""
+    to the store: `files` the user's files folder, `files:<folder>` that
+    shared folder (moy_store_base.SHARED_FOLDERS, named in lower case)."""
+    try:
+        from moy_store_base import SHARED_FOLDERS
+    except ImportError:  # host: the runtime package
+        from runtime.moy_store_base import SHARED_FOLDERS
     out = []
     for perm in granted:
         if perm == "files":
             out.append("files")
         elif perm.startswith("files:"):
-            out.append("files/" + perm[6:])
+            for f in SHARED_FOLDERS:
+                if f.lower() == perm[6:]:
+                    out.append("files/" + f)
     return out
 
 

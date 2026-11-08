@@ -1,6 +1,6 @@
 > sh pkg list
 SH end 0
-> sh mkdir -p /sd/moybyte/carts/jet.moy /sd/moybyte/carts/doom.moy /sd/moybyte/carts/mine.moy /sd/moybyte/written/jet /sd/moybyte/written/doom /sd/moybyte/system
+> sh mkdir -p /sd/moybyte/carts/jet.moy /sd/moybyte/carts/doom.moy /sd/moybyte/carts/mine.moy /sd/moybyte/apps/jet /sd/moybyte/apps/doom /sd/moybyte/system
 SH end 0
 > sh printf '{"title": "Jet", "id": "moybyte.jet"}' > /sd/moybyte/carts/jet.moy/manifest.json
 SH end 0
@@ -12,9 +12,9 @@ SH end 0
 SH end 0
 > sh printf 'pass\n' > /sd/moybyte/carts/mine.moy/main.py
 SH end 0
-> sh printf 'x' > /sd/moybyte/written/jet/options.cfg
+> sh printf 'x' > /sd/moybyte/apps/jet/options.cfg
 SH end 0
-> sh printf 'x' > /sd/moybyte/written/doom/options.cfg
+> sh printf 'x' > /sd/moybyte/apps/doom/options.cfg
 SH end 0
 > sh printf '{"version": 1, "carts": {"jet.moy": {"id": "moybyte.jet", "index": "", "name": "Jet", "version": 3, "module": null, "files": {}}, "doom.moy": {"id": "id.doom", "index": "", "name": "Doom \\u00e9t\\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "moybyte.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}' > /sd/moybyte/installed.json
 SH end 0
@@ -41,10 +41,10 @@ SH end 0
 SH {"version": 1, "carts": {"doom.moy": {"id": "id.doom", "index": "", "name": "Doom \u00e9t\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "moybyte.gone", "index": "", "name": "Gone", "version": 2, "module": null, "fil
 SH es": {}}}}
 SH end 0
-> sh ls /sd/moybyte/carts /sd/moybyte/written
+> sh ls /sd/moybyte/carts /sd/moybyte/apps
 SH /sd/moybyte/carts:
 SH doom.moy/  mine.moy/
-SH /sd/moybyte/written:
+SH /sd/moybyte/apps:
 SH doom/
 SH end 0
 > sh settings get consent

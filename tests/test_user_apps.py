@@ -134,17 +134,19 @@ def test_a_manifest_asking_for_shell_or_carts_gets_neither():
     (["graphics", "input"], (), None),
     (["files"], ("files",), "docs"),
     (["files:music"], ("files",), "music"),
-    (["files:recordings"], (), None),      # folder-valued: not a text/blob kind
+    (["files:recordings"], ("files",), "recordings"),
+    (["files:pictures"], ("files",), "drawings"),   # a folder names its own kind
+    (["files:docs"], (), None),            # a kind is no folder: nothing
     (["files:nonsense"], (), None),        # a typo NARROWS, it never widens
     (["prefs"], ("prefs",), None),
     (["appearance"], ("theme",), None),
     (["launch"], ("nav",), None),
-    (["files:docs", "prefs"], ("files", "prefs"), "docs"),
-    (["prefs", "files:docs"], ("files", "prefs"), "docs"),  # the table's order
-    (["files:docs", "files:docs"], ("files",), "docs"),   # a repeat is one kind
+    (["files:documents", "prefs"], ("files", "prefs"), "docs"),
+    (["prefs", "files:documents"], ("files", "prefs"), "docs"),  # the table's order
+    (["files:documents", "files:documents"], ("files",), "docs"),   # a repeat is one kind
     # TWO kinds is a manifest error (below); the residual here fails CLOSED
     # rather than keeping whichever was declared last.
-    (["files:docs", "files:music"], (), None),
+    (["files:documents", "files:music"], (), None),
     (["files", "files:music", "prefs"], ("prefs",), None),
 ])
 def test_the_policy_reads_the_manifest(perms, roles, kind):
@@ -152,12 +154,12 @@ def test_the_policy_reads_the_manifest(perms, roles, kind):
 
 
 @pytest.mark.parametrize("perms,bad", [
-    (["files:docs"], False),
+    (["files:documents"], False),
     (["files"], False),
-    (["files", "files:docs"], False),           # the same kind, spelled twice
-    (["files:nonsense", "files:docs"], False),  # the typo already narrowed away
-    (["files:docs", "files:music"], True),
-    (["files", "files:music"], True),          # bare `files` IS the docs kind
+    (["files", "files:documents"], False),           # the same folder, spelled twice
+    (["files:nonsense", "files:documents"], False),  # the typo already narrowed away
+    (["files:documents", "files:music"], True),
+    (["files", "files:music"], True),          # bare `files` IS documents
 ])
 def test_two_file_kinds_is_a_manifest_error(perms, bad):
     """`files` is ONE kind-bound handle, so a second kind has nowhere to go.
@@ -168,7 +170,7 @@ def test_two_file_kinds_is_a_manifest_error(perms, bad):
     if not bad:
         assert err is None, err
     else:
-        assert err and "file kinds" in err and "pick one" in err, err
+        assert err and "file folders" in err and "pick one" in err, err
 
 
 def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
@@ -177,11 +179,11 @@ def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
     permission is not a crash)."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Greedy", "raise SystemExit\n",
-                perms=["files:docs", "files:music"])
+                perms=["files:documents", "files:music"])
     ws = build_ws(tmp_path)
     _open(ws, "Greedy")
     assert ws.player.cart_error is not None
-    assert "file kinds" in ws.player.cart_error, ws.player.cart_error
+    assert "file folders" in ws.player.cart_error, ws.player.cart_error
     assert ws.app_guard.strikes("Greedy") == 0
 
 
@@ -251,7 +253,7 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     # A real user-files document, in the kind Files browses -- a plain `.md` on
     # the card holding exactly what the handle held.
     names = moy_carts.list_files("docs", ws.carts_root)
-    assert names, "nothing landed in files/docs"
+    assert names, "nothing landed in files/Documents"
     blob = moy_carts.load_file("docs", names[0], ws.carts_root)
     assert blob == "HELLO\nWORLD"
     assert moy_carts.file_path("docs", names[0], ws.carts_root).endswith(".md")
@@ -298,7 +300,7 @@ def test_a_user_app_is_always_exitable_through_the_hosts_bar(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
-    """The same cart body, minus `files:docs` from its manifest.
+    """The same cart body, minus `files:documents` from its manifest.
 
     Two assertions, and both matter: the name is not in the namespace at all
     (not a stub, not a disabled object), and the cart consequently dies with a
@@ -329,7 +331,7 @@ def test_the_grant_is_the_only_difference_between_the_two_namespaces(tmp_path):
     sets differ by exactly `files` and by nothing else."""
     ws = build_ws(tmp_path)
     with_perm = system_api.make_system_api(
-        ws.app_context, {"title": "N", "permissions": ["files:docs", "prefs"]})
+        ws.app_context, {"title": "N", "permissions": ["files:documents", "prefs"]})
     without = system_api.make_system_api(
         ws.app_context, {"title": "N", "permissions": ["prefs"]})
     assert set(with_perm) - set(without) == {"files"}
@@ -340,7 +342,7 @@ def test_with_the_permission_the_same_source_runs(tmp_path):
     """The control arm: identical bytes, one manifest line back."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Sneaky", NOTES_SRC,
-                perms=["graphics", "input", "files:docs", "prefs"])
+                perms=["graphics", "input", "files:documents", "prefs"])
     ws = build_ws(tmp_path)
     _open(ws, "Sneaky")
     _frames(ws)
@@ -397,7 +399,7 @@ def test_a_game_gets_no_app_api_at_all(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Gamey", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
                                 "    cls(0)\n",
-                perms=["files:docs", "prefs", "appearance"], type="game")
+                perms=["files:documents", "prefs", "appearance"], type="game")
     ws = build_ws(tmp_path)
     _open(ws, "Gamey")
     _frames(ws)

@@ -129,9 +129,9 @@ nor those docs will warn you about:
   (the dev server). `firmware/web_runner/signin_test.mjs` holds the page's end.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
-  REFUSE the batch instead of writing `drawings/…` into its carts store. A files
-  path must start with a `FILE_KINDS` kind, which is the one rule keeping
-  `.history/` and `trash/` home in both directions.
+  REFUSE the batch instead of writing `Pictures/…` into its carts store. A files
+  path must start with a shared folder (`moy_store_base.SHARED_FOLDERS`), which
+  is the one rule keeping `.history/` and `.Trash/` home in both directions.
 - **The console's own documents are a THIRD root** (`moy_sync.SYSTEM_ROOT`,
   owner 2026-10-20): `system/settings` (the theme and every Setting),
   `achievements.json`, the edited bar icons and the shared sheet ride the
@@ -206,7 +206,7 @@ nor those docs will warn you about:
   BROWSER), its face fed by `ws.media_net` (`media_link.py`) in both modes.
   What bites:
   - **A song never enters the VFS.** A site-mode page's songs stay in OPFS
-    (`moy_store.readAll` leaves `files/music/*.mp3` out; a dropped MP3 is
+    (`moy_store.readAll` leaves `files/Music/*.mp3` out; a dropped MP3 is
     written there), a board-served page's on the board, read through its
     sealed `GET /media` 32 KiB a request; the worker lists either into
     `/moy/net/media.json` at boot, which is what Music's folder shows.

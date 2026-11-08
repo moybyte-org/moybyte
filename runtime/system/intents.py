@@ -6,9 +6,11 @@ THE TABLE. `TYPES` maps a file's extension to its MIME type, our formats
 under `x-moy*` names; a URL's type is `x-scheme-handler/<scheme>`; anything
 else is `application/octet-stream`. `mime_of(item)` answers an item's type.
 
-AN ITEM is a URL (`"https://..."`), a user file named `"<kind>/<name>"` the
-way the user-files layer names it (`"docs/todo"`, `"docs/hi.py"`,
-`"drawings/cat"`), or a Grant an app was handed.
+AN ITEM is a URL (`"https://..."`), a user file named by its path under
+`files/` as USB, SFTP and the Files app show it (`"Documents/todo.md"`,
+`"Documents/hi.py"`, `"Pictures/cat.moyimg"`, `"Pictures/Sprites/hero.moygfx"`,
+`"Recordings/take_1"`), or a Grant an app was handed. `split` reads one as the
+user-files layer's (kind, name) and `item_of` writes one.
 
 THE ROUTE. An app declares the types it opens in its manifest
 (`"moybyte": {"handles": ["text/markdown", "image/*"]}`; `type/*` matches
@@ -25,12 +27,23 @@ THE GRANT. The receiver gets the item as a Grant, never a permission: its
 until its run ends (`end(pid)`, from moybyte's ENDS). A file opened with
 `open_with` is "rw"; shared data and a URL are "r".
 
+THE PICKER. An app holding no `files:<folder>` permission reaches a user's
+file one at a time: `pick(pid, mime, mode)` puts up the console's question
+over the files of that type (`type/*` takes every subtype), newest first
+under their folders, and the one the user picks reaches the calling
+process as a Grant of `mode` ("r", or "rw" to write it back), held for its
+run as an opened one is; a cancel hands it None. It answers True where the
+picker is up, False where no file has the type (#231's console-drawn
+picker, every tier's).
+
 What the console supplies (`bind`): the carts that may handle an item
 (`handlers()`), a cart's key (`key(cart)`, the id its grant is made under),
 the delivery (`deliver(cart, grant)`: the receiving process's pid, or None
 where it did not open), the menu (`ask(label, carts, then)`: `then(i)` with
-the row picked, None where it was cancelled) and the file store (`read(kind, name)`,
-`write(kind, name, data)`)."""
+the row picked, None where it was cancelled), the file store
+(`read(kind, name)`, `write(kind, name, data)`, `listing(kind)`: its names,
+newest first), and the picker (`ask_pick(pid, mime, items, then)` over
+the items' paths, and `hand(pid, grant)`: True where the process took it)."""
 
 TYPES = {
     ".md": "text/markdown",
@@ -57,30 +70,57 @@ def _ext(name):
 
 
 def _file_name(kind, name):
+    return _modes().file_name(kind, name)
+
+
+def _dirs():
+    try:
+        from moy_store_base import FILE_KIND_DIRS
+    except ImportError:  # host: the runtime package
+        from runtime.moy_store_base import FILE_KIND_DIRS
+    return FILE_KIND_DIRS
+
+
+def _modes():
     try:
         import text_modes
     except ImportError:  # host: the runtime package
         from runtime import text_modes
-    return text_modes.file_name(kind, name)
+    return text_modes
 
 
-def _kinds():
-    try:
-        from moy_store_base import FILE_KIND_NAMES
-    except ImportError:  # host: the runtime package
-        from runtime.moy_store_base import FILE_KIND_NAMES
-    return FILE_KIND_NAMES
+def item_of(kind, name):
+    """The item naming the layer's `name` of `kind`: its kind's folder and its
+    file's name (`("docs", "todo")` is `"Documents/todo.md"`), None for a
+    kind the layer does not have."""
+    d = _dirs().get(kind)
+    return None if d is None else d + "/" + _file_name(kind, name)
 
 
 def split(item):
-    """`"<kind>/<name>"` as (kind, name), a kind of the user-files layer's
-    and one name in it, else None."""
+    """A user file's item as the layer's (kind, name): its folder one kind's
+    and its file one that kind keeps (a note's `.md` dropped, a vault file's
+    whole name kept, a folder item's name as it is), else None."""
     if not isinstance(item, str) or "://" in item:
         return None
-    k = item.find("/")
-    if k <= 0 or k == len(item) - 1 or "/" in item[k + 1:] or item[:k] not in _kinds():
+    k = item.rfind("/")
+    if k <= 0 or k == len(item) - 1:
         return None
-    return item[:k], item[k + 1:]
+    folder, f = item[:k], item[k + 1:]
+    for kind, d in _dirs().items():
+        if d == folder:
+            break
+    else:
+        return None
+    modes = _modes()
+    if kind == "docs" and modes.is_whole_name(f):
+        return kind, f
+    ext = modes.file_name(kind, "")
+    if not ext:
+        return kind, f
+    if len(f) > len(ext) and f[-len(ext):] == ext:
+        return kind, f[:-len(ext)]
+    return None
 
 
 def mime_of(item):
@@ -93,9 +133,7 @@ def mime_of(item):
     k = item.find("://")
     if k > 0:
         return SCHEME + item[:k].lower()
-    kn = split(item)
-    name = _file_name(kn[0], kn[1]) if kn is not None else item
-    return TYPES.get(_ext(name), OCTET)
+    return TYPES.get(_ext(item), OCTET)
 
 
 def matches(pattern, mime):
@@ -166,12 +204,18 @@ class Intents:
         self.store_read = None    # fn(kind, name) -> content, or None
         self.store_write = None   # fn(kind, name, data) -> bool
         self.prefs = None         # the console's system/settings rows
+        self.listing = None       # fn(kind) -> its names, newest first
+        self.ask_pick = None      # fn(pid, mime, items, then) -> bool
+        self.hand = None          # fn(pid, grant or None) -> bool
         self.held = {}            # pid -> the grants its run holds
         self.asking = None        # (grant, candidates) while the menu is up
+        self.picking = None       # (pid, mime, mode, items) while the picker is
 
-    def bind(self, handlers, key, deliver, ask, read, write, prefs):
+    def bind(self, handlers, key, deliver, ask, read, write, prefs,
+             listing=None, ask_pick=None, hand=None):
         self.handlers, self.key, self.deliver, self.ask = handlers, key, deliver, ask
         self.store_read, self.store_write, self.prefs = read, write, prefs
+        self.listing, self.ask_pick, self.hand = listing, ask_pick, hand
 
     def reset(self):
         for gs in self.held.values():
@@ -179,6 +223,7 @@ class Intents:
                 g.end()
         self.held = {}
         self.asking = None
+        self.picking = None
 
     # -- the store a file grant reads through ----------------------------------
 
@@ -296,10 +341,66 @@ class Intents:
             self.held.setdefault(pid, []).append(g)
         return True
 
+    # -- the picker --------------------------------------------------------------
+
+    def files_of(self, mime):
+        """The user files of type `mime`, as their items: each kind's in the
+        layer's order, its newest first."""
+        out = []
+        if self.listing is None:
+            return out
+        for kind, d in _dirs().items():
+            try:
+                names = self.listing(kind) or ()
+            except Exception:  # noqa: BLE001 -- an unreadable kind lists nothing
+                names = ()
+            for n in names:
+                item = d + "/" + _file_name(kind, n)
+                if matches(mime, mime_of(item)):
+                    out.append(item)
+        return out
+
+    def pick(self, pid, mime, mode="r"):
+        if mode not in ("r", "rw") or not isinstance(mime, str) or "/" not in mime:
+            return False
+        items = self.files_of(mime)
+        if not items or self.ask_pick is None:
+            return False
+        if not self.ask_pick(pid, mime, items, self.picked):
+            return False
+        self.picking = (pid, mime, mode, items)   # after: a picker it replaced was answered
+        return True
+
+    def picked(self, i):
+        """The picker's answer: row `i` (None: cancelled). The file goes to
+        the process that asked as a Grant; a cancel hands it None."""
+        picking, self.picking = self.picking, None
+        if picking is None:
+            return False
+        pid, _mime, mode, items = picking
+        g = None
+        if i is not None and 0 <= i < len(items):
+            kn = split(items[i])
+            if kn is not None:
+                g = Grant(mime_of(items[i]), mode, _file_name(kn[0], kn[1]),
+                          kind=kn[0], file=kn[1])
+                g._io = self
+        took = bool(self.hand(pid, g)) if self.hand is not None else False
+        if g is None:
+            return False
+        if not took:
+            g.end()
+            return False
+        self.held.setdefault(pid, []).append(g)
+        return True
+
     def end(self, pid):
-        """Process `pid` ended: the grants it was handed end with it."""
+        """Process `pid` ended: the grants it was handed end with it, and a
+        picker it put up hands nothing."""
         for g in self.held.pop(pid, ()):
             g.end()
+        if self.picking is not None and self.picking[0] == pid:
+            self.picking = (None,) + self.picking[1:]
 
 
 INTENTS = Intents()

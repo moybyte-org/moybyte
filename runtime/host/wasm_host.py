@@ -22,7 +22,7 @@ notice a board with too little free PSRAM gives it, by the boards' own
 footprint arithmetic (`WasmHostRuntime`).
 
 The cart's written files (moy-spec SPEC.md 16.12) are kept beside the carts
-store, `written/<cart>/`, by native/moy_store/moy_files.c, as on a board.
+store, `apps/<id>/`, by native/moy_store/moy_files.c, as on a board.
 
 Its frames are the kernel's Player's (native/moy_play), launched before the
 load as a Lua run's are: `play_begin` binds the launched run and the Player

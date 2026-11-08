@@ -413,13 +413,13 @@ def test_a_song_the_page_reads_plays_where_the_console_does_not_keep_it(media, p
     """A board-served page: the board's song is not in the page's store, so
     play() takes it on the page's word and the pump feeds the page's reader,
     waiting while it has nothing, to its end."""
-    path = "/moy/files/music/Tone.mp3"
+    path = "/moy/files/Music/Tone.mp3"
     pid = L.spawn("t.page")
     with pytest.raises(OSError) as e:
         _as(pid, lambda: moybyte.media.play(path))
     assert e.value.args[0] == errno.ENOENT
     page.media_net = _Net({path: MP3})
-    assert dev_media.held("/moy/files/music") == (("Tone.mp3", len(MP3)),)
+    assert dev_media.held("/moy/files/Music") == (("Tone.mp3", len(MP3)),)
     assert dev_media.held("/moy/files/other") == ()
     _as(pid, lambda: moybyte.media.play(path))
     pcm = array("h")
@@ -432,7 +432,7 @@ def test_a_song_the_page_reads_plays_where_the_console_does_not_keep_it(media, p
 
 
 def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):
-    path = "/moy/files/music/Tone.mp3"
+    path = "/moy/files/Music/Tone.mp3"
     page.media_net = _Net({path: MP3}, err=errno.EACCES)
     pid = L.spawn("t.refused")
     _as(pid, lambda: moybyte.media.play(path))

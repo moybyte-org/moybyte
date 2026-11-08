@@ -104,6 +104,11 @@ _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "du
 
 
 _OPEN_WITH = "Open with"           # the "open with" menu's title
+# The picker's title by the type asked for, and a row's icon by its file's kind.
+_PICK_TITLE = (("image/", "Choose a picture"), ("text/", "Choose a document"),
+               ("audio/", "Choose a song"), ("", "Choose a file"))
+_PICK_ICON = {"docs": "notes", "drawings": "art", "sprites": "sprite", "music": "music",
+              "recordings": "music", "stories": "storybook"}
 
 
 def _row(kind, sid, action=None):
@@ -280,11 +285,13 @@ class Notices:
         """The intents' hooks are this console's (runtime/system/intents.py):
         the app carts that may open an item, a cart's key, the delivery, the
         "open with" menu (the console's question, `DeleteConfirm.choose`),
-        the user-files store a file grant reads through, and the row the
-        last choices are kept in."""
+        the user-files store a file grant reads through, the row the last
+        choices are kept in, and the picker: its listing, its question and
+        the running app it hands a pick to."""
         _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
                       self._intent_ask, self._intent_read, self._intent_write,
-                      self.system)
+                      self.system, self._intent_list, self._intent_ask_pick,
+                      self._intent_hand)
 
     def _intent_handlers(self):
         return [c for c in self.carts.all
@@ -307,6 +314,45 @@ class Notices:
         return self.confirm.choose(_OPEN_WITH, label,
                                    [str(c.get("title") or "") for c in carts],
                                    [self._intent_icon(c) for c in carts], then)
+
+    def _intent_ask_pick(self, pid, mime, items, then):
+        """The picker: the console's one question, its title the type asked
+        for, a row a file (its name as the Files app shows it, its kind's
+        icon), the asking app's title under the title."""
+        title = _PICK_TITLE[-1][1]
+        for head, t in _PICK_TITLE:
+            if mime.startswith(head):
+                title = t
+                break
+        rows, icons = [], []
+        for item in items:
+            kn = _intents.split(item)
+            rows.append(kn[1] if kn else item)
+            icons.append(_PICK_ICON.get(kn[0], "doc") if kn else "doc")
+        try:
+            who = self.procs.who(pid)[0]
+        except Exception:  # noqa: BLE001 -- a caption is never worth a crash
+            who = ""
+        return self.confirm.choose(title, ("For " + who) if who else "", rows, icons, then)
+
+    def _intent_list(self, kind):
+        h = self.store
+        if self.carts_store is None or not h.ready():
+            return ()
+        try:
+            return h.call(lambda: self.carts_store.list_files(kind, self.carts_root))
+        except Exception:  # noqa: BLE001 -- an unreadable kind lists nothing
+            return ()
+
+    def _intent_hand(self, pid, g):
+        """A pick to the running app that asked: its `moy_open(h)`, True where
+        it took it (None, a cancel, reaches it too)."""
+        pl = self.player
+        if pid is None or pl is None or pl.pid != pid or pl.cart_error is not None:
+            return False
+        if (pl.ns or {}).get("moy_open") is None:
+            return False
+        return pl.window_event("moy_open", g)
 
     def _intent_read(self, kind, name):
         h = self.store

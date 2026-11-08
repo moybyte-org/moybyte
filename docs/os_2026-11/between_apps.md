@@ -12,7 +12,8 @@ here" seam (`docs/app_api_v1.md`); intents are the one an app reaches
 **handles** (`"moybyte": {"handles": ["text/markdown", "image/*",
 "x-scheme-handler/https"]}`; `type/*` takes every subtype), which the shelf's
 catalogue entry carries. An app calls `moybyte.open_with(item)` (a URL, a user
-file named `"<kind>/<name>"`, or a grant it was handed) or
+file named by its path in the shared folders, `"Documents/todo.md"` (§2), or
+a grant it was handed) or
 `moybyte.share(data, mime)`; the OS routes to the one app that matches, or,
 when several do, to **the last app chosen** for that type (owner,
 2026-11-03), kept in `system/settings`' `open_with` row. With none chosen yet,
@@ -39,55 +40,71 @@ moybyte.open_with(item, choose=False) / share(data, mime) / pick(mime, mode) -> 
 
 ## 2. The files model
 
-Today (the owner: "detached from the real picture"):
-carts under `/sd/moybyte/carts` (`runtime/carts/moy_store_base.py`'s
-`CARTS_DIR`); a person's creations beside them as `files/<kind>/<name>`
-(`native/moy_store/moy_ufiles.h`); a compiled cart's writable files in
-`written/<cart>/` (`runtime/carts/cart_files.py`); the console's documents
-(`system/settings`, `wifi.json`, `achievements.json`, `runtime/carts/moy_docs.py`)
-beside the carts; every volume one library behind `native/moy_store/moy_vol.h`.
-#231 decided (2026-10-03) that a user's own files reach a compiled cart
-through a console-drawn picker.
-
-The design, one visible hierarchy under one root (`moybyte/` on the card,
-the same shape on flash without one):
+One visible hierarchy under one root (`moybyte/` on the card, the same shape
+on flash without one), replacing a layout the owner called "detached from
+the real picture" (2026-11-03):
 
 | folder | holds | who reaches it |
 |---|---|---|
 | `carts/` | installed carts and the kid's projects | the shell (`carts`, `install`), the Editor; an app only through `nav` |
-| `apps/<id>/` | **app-private storage**: what `written/<cart>/` and an app's prefs hold today | its own app, no permission |
-| `files/` | the **shared user folders**, named on disk as the OS shows them: `Documents/` (today's docs; stories in `Documents/Stories/`), `Pictures/` (drawings; sprites in `Pictures/Sprites/`), `Music/`, `Recordings/`, `Downloads/` and `.Trash/` | an app with `files:<folder>` (`files:documents`, `files:pictures`, …; per-app consent, one folder a grant), or one file at a time through the picker |
+| `apps/<id>/` | **app-private storage**: a compiled cart's written files (`runtime/carts/cart_files.py`, `native/moy_store/moy_files.h`; `<id>` its folder less `.moy`), and an app's prefs to come (they are `system/settings` rows today) | its own app, no permission |
+| `files/` | the **shared user folders**, named on disk as the OS shows them: `Documents/` (notes; stories in `Documents/Stories/`), `Pictures/` (drawings; sprite sheets in `Pictures/Sprites/`), `Music/`, `Recordings/`, `Downloads/`, and the layer's own `.Trash/` and `.history/` | an app with `files:<folder>` (`files:documents`, `files:pictures`, `files:music`, `files:recordings`; one folder a grant), or one file at a time through the picker |
 | `system/` | the console's documents as plain-text files (`system.md` §5) | the shell |
 
 **The shared folders carry their real names on disk (owner, 2026-11-03)**,
-so USB and SFTP show what the OS shows. The rename ships as a
-strict reader plus a seed bump: no migration, a legacy `files/<kind>/`
-folder reading as absent until wiped by hand (dev boards hold nothing of
-value). **Types are MIME types** (owner, 2026-11-03) wherever an
-app sees them: `handles`, the picker, intents, share and the clipboard
-(`text/markdown`, `image/x-moyimg`, `audio/x-moysong` for our formats,
-registered in one table, `intents.TYPES`). **File types**
-map to default apps through the `handles`
-table of §1. **The picker** is OS chrome: an app with no `files:*`
-permission calls `moybyte.pick(mime, mode)` and receives a handle to
-the one file or folder the user chose, read or read-write, for its run (the
-#231 shape, generalised from compiled carts to every tier). **The Files
-app** (`runtime/apps`' files app today, the router's seam) becomes the
-tree's browser and the first test of the picker and of "open with".
-**Sync, the web and USB see the same tree**: the sync RPC's three roots are
-three of the top folders and `apps/` becomes a fourth, with the same strict
-reader rule; a board-served page edits the board's tree, a site page its
-OPFS copy; SFTP mounts it from a computer (`system.md` §4).
-**USB mass storage** (owner,
-2026-11-03) exposes the card's `moybyte/` folder while the store is held
-closed, never both at once: on the P4s, and on the T-Deck as a mode in
-Settings that switches the S3's one USB port from Serial/JTAG to mass
-storage, so the dev channel is lost while it is on; turning it off switches
-back and remounts the card, and the BOOT button still reaches the ROM
-loader. **No migration** (CLAUDE.md "Settled"): `written/<cart>/` →
-`apps/<id>/` ships as a strict reader plus a seed bump, a legacy `written/`
-folder reading as absent until wiped by hand (owner, 2026-11-03); a
-compiled cart's saves on a dev board are disposable.
+so USB and SFTP show what the OS shows. The user-files layer
+(`native/moy_store/moy_ufiles.h`) keeps its kinds as the names every verb
+takes and files each in its folder (`moy_store_base.FILE_KIND_DIRS`, held to
+the C by `tests/test_userfiles_parity.py`); an app, an intent and the Files
+app name a file by its path there (`intents.item_of`, `split`). The rename
+shipped as a strict reader (no migration): a legacy `files/<kind>/` folder
+reads as absent until wiped by hand (dev boards hold nothing of value).
+**Types are MIME types** (owner, 2026-11-03) wherever an app sees them:
+`handles`, the picker, intents, share and the clipboard (`text/markdown`,
+`image/x-moyimg`, `audio/x-moysong` for our formats, registered in one
+table, `intents.TYPES`), routed to default apps by the `handles` table of §1.
+
+**`files:<folder>`** names a shared folder in lower case
+(`native/moy_app/moy_app.c`'s policy, `app_perms`' prompt line "Read and save
+your pictures"; bare `files` is `files:documents`). The grant reaches every
+kind in its folder (`files:pictures`: drawings and sprite sheets) and no
+other; a Python app's `files` and a Lua run's io work in the folder's own
+kind (documents' notes, pictures' drawings). Downloads has no kind of the
+layer's: a compiled command reaches it, as it reaches any folder its
+`files` permissions name, by path (`sh_door.wasi_roots`).
+
+**The picker** is OS chrome: an app with no `files:*` permission calls
+`moybyte.pick(mime, mode)` and the console's one question
+(`DeleteConfirm.choose`) lists the user's files of that type, a row a file
+(its name as Files shows it, its kind's icon), under "Choose a picture"
+(or a document, a song, a file) and the asking app's title; its body
+scrolls the focused row into view, under keys, a pad or touch alone. The
+file picked reaches the asking process's `moy_open(h)` as the §1 grant in
+`mode` (`"r"`, or `"rw"` to write it back), held for its run; a cancel
+hands it None (#231's shape). `pick` answers False where no file has the
+type. It is a Python app's verb: a Lua service and a compiled cart hold no
+import of it, and picking a folder is not offered.
+
+**The Files app** (`runtime/apps/files_app.py`) is the tree's browser: its
+places are Projects, the shared folders by their names, Themes and the
+Trash, and a file's verbs include **Open with…**, which asks the "open
+with" menu of §1 always (`open_with(item, True)`), the app picked becoming
+the choice for the type.
+
+**Sync, the web and USB see the same tree**: the sync RPC's files root
+takes and walks the shared folders alone (`moy_sync.file_folders`, the one
+allowlist that keeps `.Trash/` and `.history/` home), and `apps/` becomes a
+fourth root, with the same strict reader rule; a board-served page edits
+the board's tree, a site page its OPFS copy; SFTP mounts it from a computer
+(`system.md` §4). **USB mass storage** (owner, 2026-11-03) exposes the card's
+`moybyte/` folder while the store is held closed, never both at once: on the
+P4s, and on the T-Deck as a mode in Settings that switches the S3's one USB
+port from Serial/JTAG to mass storage, so the dev channel is lost while it
+is on; turning it off switches back and remounts the card, and the BOOT
+button still reaches the ROM loader. **No migration** (CLAUDE.md
+"Settled"): `written/<cart>/` → `apps/<id>/` shipped as a strict reader, a
+legacy `written/` folder reading as absent until wiped by hand (owner,
+2026-11-03); a compiled cart's saves on a dev board are disposable.
 
 ## 3. Clock and alarms
 

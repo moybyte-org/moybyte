@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-MUSIC = "/moy/files/music"
+MUSIC = "/moy/files/Music"
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def test_the_listing_names_the_songs_and_follows_the_workers_rewrite(net):
     assert n.held(MUSIC) == () and not n.holds(MUSIC + "/a.mp3")
     (spool / "media.json").write_text(json.dumps({"b.mp3": 20, "a.mp3": 10, "x": "no"}))
     assert n.held(MUSIC) == (("a.mp3", 10), ("b.mp3", 20))
-    assert n.held("/moy/files/docs") == ()
+    assert n.held("/moy/files/Documents") == ()
     assert n.holds(MUSIC + "/a.mp3") and not n.holds("/elsewhere/a.mp3")
     (spool / "media.json").write_text(json.dumps({"a.mp3": 10, "b.mp3": 20, "c.mp3": 300}))
     assert len(n.held(MUSIC)) == 3

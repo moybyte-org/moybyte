@@ -57,7 +57,7 @@ static bool native_perm(const char *v, const char *e) {
 }
 
 // A permission a compiled app may hold VM-free: one whose role's rows it
-// imports are C-served (its imports decide, below). "files:<kind>" is files.
+// imports are C-served (its imports decide, below). "files:<folder>" is files.
 static bool role_perm(const char *v, const char *e) {
     char p[24];
     size_t n = moy_json_strlen(v, e);

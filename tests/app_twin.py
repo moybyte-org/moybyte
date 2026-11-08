@@ -62,7 +62,12 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
 _FLAGS = ("surface_light", "bar_light", "band_light")
 NAME_MAX = 31
 DOC_MAX = 255
-_KINDS = ("docs", "drawings", "sprites", "music")
+# The shared folders a files grant is made for, each by its name and its own
+# kind; a grant reaches every kind in its folder (moy_store_base.FILE_KIND_DIRS).
+_FOLDERS = ("documents", "pictures", "music", "recordings")
+_KINDS = ("docs", "drawings", "music", "recordings")
+_KIND_FOLDER = {"docs": "documents", "stories": "documents", "drawings": "pictures",
+                "sprites": "pictures", "music": "music", "recordings": "recordings"}
 _PERMS = (("appearance", "theme"), ("files", "files"), ("launch", "nav"),
           ("prefs", "prefs"), ("clipboard", "clipboard"))
 _ALL, _AGAIN = 1, 2
@@ -429,9 +434,9 @@ def _read(perms):
         if role is None:
             continue
         if role == "files":
-            kind = "docs" if colon < 0 else perm[colon + 1:]
-            if kind in _KINDS and kind not in kinds:
-                kinds.append(kind)
+            folder = "documents" if colon < 0 else perm[colon + 1:]
+            if folder in _FOLDERS and folder not in kinds:
+                kinds.append(folder)
             continue
         if role not in roles:
             roles.append(role)
@@ -443,13 +448,13 @@ def policy(perms):
     if len(kinds) == 1:
         roles.append("files")
     return (tuple(r for r in _ROLES if r in roles),
-            kinds[0] if len(kinds) == 1 else None)
+            _KINDS[_FOLDERS.index(kinds[0])] if len(kinds) == 1 else None)
 
 
 def manifest_error(perms):
     _roles, kinds = _read(perms)
     if len(kinds) > 1:
-        return ("manifest asks for %d file kinds (%s) - pick one"
+        return ("manifest asks for %d file folders (%s) - pick one"
                 % (len(kinds), ", ".join(kinds)))
     return None
 
@@ -516,7 +521,8 @@ class Files(_Role):
         """(True, None) when the row may run, else (False, its `err`)."""
         app = self._app
         g = app._hold(self._g, "files", "files." + row)
-        if kind is not None and g[3] is not None and kind != g[3]:
+        if (kind is not None and g[3] is not None
+                and _KIND_FOLDER.get(kind) != _KIND_FOLDER[g[3]]):
             raise ValueError("a role the grant does not hold")
         root, readable, writable, no_store = app._store
         if root is None or (need == "read" and not readable) or (

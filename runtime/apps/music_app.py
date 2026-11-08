@@ -14,7 +14,7 @@ docs/media/music_2026-11/README.md.
     station: an http:// address, or https:// where the console verifies
     it, and a name), kept in the app's prefs;
   * My music: the MP3s and the .m3u/.pls playlists in the music folder of
-    the user files (`files/music/` on the SD card);
+    the user files (`files/Music/` on the SD card);
   * Now playing: the media card at its full density, its keys the page's
     own (Enter plays or pauses, Q E step, W S the volume, M the list);
   * on the desk one window: the Library's two places beside the table, the
@@ -93,7 +93,7 @@ ART_PAIRS = ((58, 40), (60, 22), (61, 43), (59, 42), (54, 12), (56, 36), (57, 37
              (52, 20), (46, 28))
 
 TABS = ("Radio", "My music")
-MUSIC_DIR = "music"
+MUSIC_DIR = "Music"
 SONG_EXT = (".mp3",)
 LIST_EXT = (".m3u", ".pls")
 STATIONS_KEY = "stations"

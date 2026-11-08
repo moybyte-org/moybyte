@@ -1,4 +1,4 @@
-"""The #108 user-files layer: files/<kind>/ beside the carts dir -- the kind
+"""The #108 user-files layer: the shared folders beside the carts dir -- the kind
 registry, list/load/save/rename/duplicate verbs, the restorable trash, and the
 one-shot artwork.moyimg move. Same shared runtime/carts/moy_carts.py the device
 freezes."""
@@ -28,7 +28,7 @@ def test_files_root_is_a_sibling_of_the_carts_dir(tmp_path):
     root = _root(tmp_path)
     assert moy_carts.files_root(root) == str(tmp_path / "files")
     assert moy_carts.file_path("drawings", "dragon", root) == str(
-        tmp_path / "files" / "drawings" / "dragon.moyimg")
+        tmp_path / "files" / "Pictures" / "dragon.moyimg")
 
 
 def test_save_load_roundtrip_and_listing(tmp_path):

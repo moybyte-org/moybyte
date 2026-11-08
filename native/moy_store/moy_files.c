@@ -135,8 +135,8 @@ int moy_files_folder(const char *cart_path, char *out, size_t cap) {
     }
     parent = parent > 0 ? parent - 1 : root_n;
     int w = parent > 0
-        ? snprintf(out, cap, "%.*s/written/%.*s", (int)parent, cart_path, (int)fn, folder)
-        : snprintf(out, cap, "written/%.*s", (int)fn, folder);
+        ? snprintf(out, cap, "%.*s/apps/%.*s", (int)parent, cart_path, (int)fn, folder)
+        : snprintf(out, cap, "apps/%.*s", (int)fn, folder);
     return w < 0 || (size_t)w >= cap ? -1 : 0;
 }
 

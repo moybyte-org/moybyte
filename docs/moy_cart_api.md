@@ -754,7 +754,7 @@ level, a console reads them as absent):
 
 | permission | what the cart gets |
 |---|---|
-| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
+| `files` / `files:<folder>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one shared folder only (`files:documents`, the default: your documents, the ones Files shows; `files:pictures`, `files:music`, `files:recordings`) — **and `open_editor`, below** |
 | `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
@@ -1100,16 +1100,18 @@ manager's Notifications tab, which holding the console's key opens) brings
 your cart to the front and calls your `moy_action(id, key)`; ignoring it
 leaves it in that list. `docs/os_2026-11/processes.md` §7 has the rules.
 
-### Opening with another app (a Moybyte-side verb)
+### Opening with another app, and picking a file (Moybyte-side verbs)
 
-`moybyte.open_with` and `moybyte.share` are Moybyte's own, like `notify`,
-and need no permission; a Lua service holds them too. Your manifest says
-what your app opens (`"moybyte": {"handles": ["text/markdown", "image/*"]}`).
+`moybyte.open_with`, `moybyte.share` and `moybyte.pick` are Moybyte's own,
+like `notify`, and need no permission; a Lua service holds the first two.
+Your manifest says what your app opens (`"moybyte": {"handles":
+["text/markdown", "image/*"]}`). A file is named by its path in your shared
+folders, as the Files app and a computer show it.
 
 ```python
 import moybyte
 
-moybyte.open_with("docs/todo")              # a note, in the app that opens Markdown
+moybyte.open_with("Documents/todo.md")     # a note, in the app that opens Markdown
 moybyte.open_with("https://moybyte.org", True)   # always ask which app
 moybyte.share("a line of text", "text/plain")
 
@@ -1121,7 +1123,13 @@ def moy_open(h):            # an item routed to this app
 Where several apps open the type, the console asks once with its "open with"
 menu and keeps the answer; `True` as the second argument asks again. The
 handle reaches one item and ends with your run.
-`docs/os_2026-11/between_apps.md` §1 has the rules.
+
+`moybyte.pick("image/*")` asks the user for one of their files of that type
+in the console's picker, with no `files` permission; the one they pick
+reaches your `moy_open(h)` the same way (`moybyte.pick(mime, "rw")` to write
+it back), and `None` reaches it when they cancel. It answers `False` where
+they have no file of that type. `docs/os_2026-11/between_apps.md` §1 and §2
+have the rules.
 
 ---
 

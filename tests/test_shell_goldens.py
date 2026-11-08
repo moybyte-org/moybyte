@@ -831,6 +831,8 @@ def _surface_plan(ws, cfg):
     plan.append(("web_console", park))
     plan += _terminal_plan(ws, cfg)
     plan.append(("open_with", lambda: _open_with(ws, home)))
+    plan.append(("pick", lambda: _pick(ws, home)))
+    plan.append(("app_files_document", lambda: _files_document(ws)))
     return plan
 
 
@@ -855,7 +857,46 @@ def _open_with(ws, home):
     ws.carts.apply(shelf(root))
     ws.carts_store.save_file("docs", "todo", "# milk\n", root)
     intents.INTENTS.reset()
-    assert moybyte.open_with("docs/todo", True)
+    assert moybyte.open_with("Documents/todo.md", True)
+
+
+def _pin_file_times(ws):
+    """Every user file at one mtime, so a listing's newest-first order is
+    its names' and no second boundary a plan's saves straddle moves it."""
+    top = ws.carts_store.files_root(str(ws.carts_root))
+    for d, dirs, files in os.walk(top):
+        for n in dirs + files:
+            os.utime(os.path.join(d, n), (1_000_000, 1_000_000))
+
+
+def _pick(ws, home):
+    """The picker (runtime/system/intents.py): a running app asks for a
+    picture, and the drawings and sprite sheets the user has are the rows,
+    more than the card holds."""
+    from runtime import intents
+    ws.confirm.cancel()
+    home()
+    root = str(ws.carts_root)
+    for i in range(9):
+        ws.carts_store.save_file("drawings", "sky_%d" % i, "0,", root)
+    ws.carts_store.save_file("sprites", "hero", "0,", root)
+    _pin_file_times(ws)
+    ws.open(_cart_by_title(ws, "Jot"))
+    intents.INTENTS.reset()
+    assert intents.INTENTS.pick(ws.player.pid, "image/*")
+
+
+def _files_document(ws):
+    """Files on Documents, a note current: its verbs at the foot, Open
+    with among them."""
+    from runtime import files_app
+    ws.confirm.cancel()
+    _pin_file_times(ws)
+    ws.open_app(ws._apps_by_id["files"])
+    app = ws.files_app
+    app._refresh_counts()
+    app.open_place(files_app.DOCUMENTS, keep="todo")
+    app.level = "files"
 
 
 def _terminal_plan(ws, cfg):
@@ -1705,7 +1746,7 @@ def surface_names(config_name):
             names.append("app_terminal_touch")
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
-    names.append("open_with")
+    names += ["open_with", "pick", "app_files_document"]
     return names
 
 

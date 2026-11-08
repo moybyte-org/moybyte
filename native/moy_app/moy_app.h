@@ -10,7 +10,7 @@
 // once, never freed, so a VM stop leaves it and a return start reads it, its
 // rows moy_spine_kernel's); elsewhere each console owns one.
 //
-// A grant is a row: the app's id, its class, its role mask, its files kind,
+// A grant is a row: the app's id, its class, its role mask, its files folder,
 // its prefs namespace and an OWNER handle it names. A SHIPPED grant is the
 // console's own app's and is idempotent by id: a start registering the app
 // again gets the row it had, so a stop leaves the count where it was. A RUN
@@ -24,7 +24,7 @@
 // at every switch of the look) and the pointer (moy_app_pointer_bind, the
 // console's moy_input_ptr_t, read live).
 //
-// The policy is C's: the permission each role is granted by, the files kinds,
+// The policy is C's: the permission each role is granted by, the files folders,
 // the manifest refusal and the key a cart's grant is made under.
 //
 // Every byte comes from the moy_htab_mem_t the state is made with.
@@ -104,7 +104,7 @@ enum {
 #define MOY_APP_ID_MAX 63u      // an id's, and a prefs namespace's, bytes
 #define MOY_APP_KEY_MAX 127u    // a namespaced prefs key's bytes
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
-#define MOY_APP_KINDS 4u        // the files kinds a permission may name
+#define MOY_APP_KINDS 4u        // the shared folders a files permission may name
 #define MOY_APP_NAME_MAX 31u    // a theme's and a variant's name bytes
 #define MOY_APP_TOKENS 38u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
@@ -132,7 +132,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id_len, ns_len, cls;
-    int8_t kind;                // a files kind, 0 .. MOY_APP_KINDS - 1, or -1
+    int8_t kind;                // a files folder, 0 .. MOY_APP_KINDS - 1, or -1
     uint32_t roles;
     uint32_t owner;             // an OWNER handle the grant names, or 0
     char id[MOY_APP_ID_MAX + 1];
@@ -190,15 +190,28 @@ void moy_app_stop_end(moy_appabi_t *a);
 // clipboard. Every other role is never granted.
 const char *moy_app_perm_of(int role);
 int moy_app_role_of(const char *perm, size_t n);
-// The files kinds, by index: docs, drawings, sprites, music. -1 for another.
+// The shared folders a files grant is made for, by index: documents,
+// pictures, music, recordings (docs/os_2026-11/between_apps.md section 2).
+// Each has its own kind, the user-files kind its own files are (docs,
+// drawings, music, recordings): what a grant names it by, what a Python app's
+// `files` and a Lua run's io reach. A grant reaches every kind in its folder
+// (pictures: drawings and Pictures/Sprites' sprites; documents: docs and
+// Documents/Stories' stories). moy_app_kind_name and moy_app_kind_of name a
+// folder by its own kind, -1 for a kind that is no folder's own;
+// moy_app_folder_name and moy_app_folder_of by its name; moy_app_kind_folder
+// is the folder any kind lies in, -1 for none.
 const char *moy_app_kind_name(int kind);
 int moy_app_kind_of(const char *name, size_t n);
-#define MOY_APP_DEFAULT_KIND 0  // "files" with no kind: docs
+const char *moy_app_folder_name(int folder);
+int moy_app_folder_of(const char *name, size_t n);
+int moy_app_kind_folder(const char *kind, size_t n);
+#define MOY_APP_DEFAULT_KIND 0  // "files" with no folder: documents
 
 // A manifest's permissions, read one by one (moy_app_policy_add) into what
-// they grant. `files` with no kind is the default kind, `files:<kind>` a
-// known kind; an unknown kind grants nothing. Two kinds or more are a manifest
-// error, and then no files grant is made.
+// they grant. `files` with no folder is the default folder, `files:<folder>`
+// a known folder; an unknown folder grants nothing (Downloads has no kind of
+// the layer's: a compiled command reaches it by path). Two folders or more
+// are a manifest error, and then no files grant is made.
 typedef struct {
     uint32_t roles;
     uint8_t nkinds;
@@ -352,7 +365,7 @@ uint32_t moy_app_copy_gen(const moy_appabi_t *a);
 // -- files ---------------------------------------------------------------------------
 
 // The user-files layer over the bound store (moy_ufiles.h has each verb's
-// rules). A grant made with a files kind reaches that kind alone: another
+// rules). A grant made for a folder reaches the kinds in it alone: another
 // answers DENIED. A read answers NOSTORE with no store to read, a write with
 // none to write; a store that failed answers IO (moy_app_why), nothing there
 // ABSENT, a refused argument BAD. Names come back NUL-terminated in `name_out`

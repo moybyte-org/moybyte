@@ -445,7 +445,7 @@ a depth greater than a GC pause.
 (`MOY_MEDIA_CLIENT` 0), so a URL's bytes are fed as a file's are, from the
 page's fetch (`ws.media_net`, `firmware/web_runner/media_link.py`), with no
 ICY metadata (a page may not ask for it). A page keeps no song in its VFS: a
-static host's are the browser's OPFS (`files/music`, where a dropped MP3
+static host's are the browser's OPFS (`files/Music`, where a dropped MP3
 lands), a board-served page's are the board's music folder, read through
 its sealed `GET /media` a range a request (`native/moy_net/moy_webhost.c`,
 THE MEDIA ROUTE), since the sync wire carries no binaries. A station plays

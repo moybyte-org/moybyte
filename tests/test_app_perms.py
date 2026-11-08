@@ -79,7 +79,8 @@ def test_every_permission_the_console_reads_is_a_row():
 def test_files_kinds_share_the_files_row_and_name_their_kind():
     assert P.row("files:music") is P.row("files")
     assert P.line("files:music") == "Read and save your music"
-    assert P.line("files") == "Read and save your docs"
+    assert P.line("files") == "Read and save your documents"
+    assert P.line("files:pictures") == "Read and save your pictures"
     assert P.line("graphics") is None and P.line("editor") is None
 
 
@@ -198,7 +199,7 @@ def _start(ws, title):
     return ok, cart
 
 
-ROLE_PERMS = ["files:docs", "prefs", "appearance", "launch"]
+ROLE_PERMS = ["files:documents", "prefs", "appearance", "launch"]
 
 
 def test_every_granted_permissions_names_are_in_the_namespace(tmp_path):
@@ -490,3 +491,13 @@ def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_pa
     assert not ws.consent.is_on(aid, "prefs") and ws.consent.is_on(aid, "network")
     sl.back()
     assert sl.page is None
+
+
+def test_a_compiled_commands_files_permissions_name_the_shared_folders():
+    """The WASI and ELF tiers' preopen roots come from the one folder list
+    (moy_store_base.SHARED_FOLDERS): `files:<folder>` is that folder, and a
+    name that is no folder reaches nothing."""
+    from runtime import sh_door
+    assert sh_door.wasi_roots(["files", "files:pictures", "files:downloads",
+                               "files:docs", "prefs"]) == [
+        "files", "files/Pictures", "files/Downloads"]

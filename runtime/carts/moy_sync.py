@@ -100,11 +100,12 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     page's changes to those two (`merge_system`, `merge_achievements`), while
     the edited icons and the shared sheet stay on each console.
   * In the files root, anything whose first segment is not one of the
-    user-files kinds (moy_store_base.FILE_KIND_NAMES) -- which is how `files/.history/` and `files/trash/`
-    stay home, in BOTH directions, with no second skip list to keep in step.
+    shared folders (moy_store_base.SHARED_FOLDERS) -- which is how
+    `files/.history/` and `files/.Trash/` stay home, in BOTH directions, with
+    no second skip list to keep in step.
     `.history` is the files layer's journal-equivalent (#111 op sidecars), so
     it stays for the same reason journal/ does: each side keeps its own undo
-    history. `trash` is a LOCAL recovery bin, and syncing a deletion that is
+    history. `.Trash` is a LOCAL recovery bin, and syncing a deletion that is
     still recoverable here but not there turns last-writer-wins into data
     loss -- a peer would land the trashed copy back as a live file, or drop
     the only copy the kid could still restore.
@@ -137,14 +138,14 @@ so ops apply in order):
 A files batch is the same ops under a VERSION BUMP that names its root:
 
     {"v": 2, "root": "files", "ops": [
-      {"p": "drawings/sunset.moyimg", "t": "<whole text>"},
-      {"p": "recordings/take_1", "dc": 1}]}                  # a folder item
+      {"p": "Pictures/sunset.moyimg", "t": "<whole text>"},
+      {"p": "Recordings/take_1", "dc": 1}]}                  # a folder item
 
 The bump is the back-compat mechanism, and it is a safety property rather
 than politeness. A board flashed before this reads `v != 1` and answers 400
 "bad batch"; without the bump its `apply_ops` would happily take
-`drawings/sunset.moyimg` for a cart-relative path and write it into the CARTS
-root, inventing a `drawings` cart on the kid's shelf. A refusal is the only
+`Pictures/sunset.moyimg` for a cart-relative path and write it into the CARTS
+root, inventing a `Pictures` cart on the kid's shelf. A refusal is the only
 acceptable failure. `v: 1` keeps the carts batch byte-identical to what those
 boards already parse, so the pull-and-push loop they have keeps working
 untouched -- and a v1 batch that tries to smuggle a `root` key is refused too.
@@ -335,21 +336,33 @@ def _moy_carts():
     return _CARTS[0]
 
 
-def file_kinds():
-    """The names a files-root path may start with: the user-files layer's
-    kinds as the on-card layout names them (moy_store_base.FILE_KIND_NAMES,
-    which tests/test_userfiles_parity.py holds to native/moy_store's registry),
-    so a kind added there reaches the wire by default. The layout and not the
+def file_folders():
+    """The names a files-root path may start with: the shared folders as the
+    on-card layout names them (moy_store_base.SHARED_FOLDERS, which
+    tests/test_userfiles_parity.py holds to native/moy_store's registry), so a
+    folder added there reaches the wire by default. The layout and not the
     layer, because the Zero serves and takes these folders without carrying
     the layer.
 
-    This ONE allowlist is also what keeps `files/.history/` and `files/trash/`
-    home in both directions: neither is a kind, so no walker descends into them
-    and no op naming one is ever applied. Returns None when there is no store
-    module to ask, which every caller reads as "refuse", never as "allow".
+    This ONE allowlist is also what keeps `files/.history/` and `files/.Trash/`
+    home in both directions: neither is a shared folder, so no walker descends
+    into them and no op naming one is ever applied. Returns None when there is
+    no store module to ask, which every caller reads as "refuse", never as
+    "allow".
     """
     mc = _moy_carts()
-    return None if mc is None else mc.FILE_KIND_NAMES
+    return None if mc is None else mc.SHARED_FOLDERS
+
+
+def kind_dir_of(rel):
+    """The folder of the user-files kind a files-root path `rel` lies in (the
+    deepest of moy_store_base.FILE_KIND_DIRS it is under), or None."""
+    mc = _moy_carts()
+    best = None
+    for d in (mc.FILE_KIND_DIRS.values() if mc is not None else ()):
+        if rel.startswith(d + "/") and (best is None or len(d) > len(best)):
+            best = d
+    return best
 
 
 def files_root(carts_root):
@@ -385,8 +398,8 @@ class Root:
                it rather than misapply its paths.
       path     (carts_root) -> where this store lives. Carts IS carts_root; the
                files root is its sibling.
-      kinds    the first path segment must be a user-files kind (`file_kinds`) --
-               which is also what keeps `.history`/`trash` home, in both
+      kinds    the first path segment must be a shared folder (`file_folders`) --
+               which is also what keeps `.history`/`.Trash` home, in both
                directions, with no second skip list.
       site_keep_journal
                in SITE mode (the browser's OPFS is of record) this root's watcher
@@ -452,7 +465,7 @@ FILES_ROOT = Root(
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
 # system/sources (the serving host's, written at boot), pkg/ (the cached
-# indexes), installed.json and written/
+# indexes), installed.json and apps/
 # (each has its own crash-safe keeper, moy_store.commitInstall /
 # commitWritten), and install/ (staging).
 SYSTEM_ROOT_ID = "system"
@@ -638,7 +651,7 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     line and a cursor per file), which is why a scratch receiver (the
     convergence harness) passes False.
     """
-    kinds = file_kinds()
+    kinds = file_folders()
     applied, errors, shelf, _refused = sync_apply(
         root, root if root_id == FILES_ROOT_ID else None,
         None if kinds is None else tuple(kinds), root_id, _json.dumps(ops),
@@ -1034,25 +1047,30 @@ class StoreWatcher:
         the file is its own unit and a plain `d` is the right op.
 
         In the carts root the unit is the cart folder. In the files root it is
-        the ITEM -- `<kind>/<name>` -- and only for a path deeper than that: a
-        flat drawing is one file, and shipping `dc drawings/x.moyimg` would ask
-        the receiver to rmtree a file (which quietly does nothing), while a kind
-        dir is never a unit at all, or losing one recording would delete the
-        peer's whole recordings folder.
+        the ITEM of a folder-valued kind -- `Recordings/<take>`,
+        `Documents/Stories/<story>` -- and only for a path deeper than its
+        kind's folder: a flat drawing is one file, and shipping `dc
+        Pictures/x.moyimg` would ask the receiver to rmtree a file (which
+        quietly does nothing), while a kind's folder is never a unit at all,
+        or losing one sheet would delete the peer's whole `Pictures/Sprites`.
         """
         if self.top is not None:
             return None                       # each file is its own unit
         parts = rel.split("/")
         if self.root_id != FILES_ROOT_ID:
             return parts[0]
-        return parts[0] + "/" + parts[1] if len(parts) > 2 else None
+        d = kind_dir_of(rel)
+        if d is None:
+            return None
+        rest = rel[len(d) + 1:].split("/")
+        return d + "/" + rest[0] if len(rest) > 1 else None
 
     def _walk(self):
         """Yield (rel, size, mtime) for every syncable file, skip-filtered at
         every level. A store of named top-level files (`top`, the system root)
         is those files and nothing beside them; in every other root top-level
         FILES are never syncable, and in the files root a top-level dir must be
-        a known kind -- which is what leaves `.history` and `trash` unwalked."""
+        a shared folder -- which is what leaves `.history` and `.Trash` unwalked."""
         if self.top is not None:
             listed = {}
             for name in sorted(self.top):
@@ -1067,7 +1085,7 @@ class StoreWatcher:
                 if st is not None:
                     yield name, st[0], st[1]
             return
-        kinds = file_kinds() if self.root_id == FILES_ROOT_ID else None
+        kinds = file_folders() if self.root_id == FILES_ROOT_ID else None
         for top, isdir in self._sorted_entries(self.root):
             if not isdir or self.skip(top):
                 continue

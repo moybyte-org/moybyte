@@ -210,7 +210,7 @@ class SaveVerbs:
         return True
 
     def send_sprites_to_files(self):
-        """Export the open cart's sprite sheet to files/sprites/ as a named user
+        """Export the open cart's sprite sheet to files/Pictures/Sprites/ as a named user
         file (#108 the "send to Files" producer for the sprites kind). The whole
         sheet travels as one .moygfx (the same hex the cart stores), auto-named
         (sheet_1, ...) and browsable in the Files app; from there it re-imports

@@ -566,7 +566,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
             _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
             f = _app(ws, "files")
             f._refresh_counts()
-            f.open_place(files_app.ART)
+            f.open_place(files_app.PICTURES)
         p.settle()
     lay = p.a.layout
     p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch, steps=3)

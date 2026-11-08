@@ -68,7 +68,7 @@ if _store is not None and not hasattr(_store, "catalogue"):
     _store = None
 
 try:
-    from moy_store_base import (FILE_KIND_NAMES, files_root, CARTS_DIR,
+    from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root, CARTS_DIR,
                                 CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
@@ -80,7 +80,7 @@ try:
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
                                 is_cart_id, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (FILE_KIND_NAMES, files_root,
+    from runtime.moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root,
                                         CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
@@ -449,7 +449,7 @@ def load_artwork(root=CARTS_DIR):
 def encode_text(body):
     """A doc body string -> the bytes its file holds.
 
-    A document IS its own text now (`files/docs/<name>.md`), so this is `str`
+    A document IS its own text now (`files/Documents/<name>.md`), so this is `str`
     and nothing else. It stays a named seam because `ctx.files.encode_text` and
     `system_api.ScopedFiles` reach it (#181): a cart writing a document goes
     through one place wherever the format lands next."""

@@ -15,15 +15,15 @@
 // -- the registry ---------------------------------------------------------------------
 
 static const struct {
-    const char *name, *ext, *base;
+    const char *name, *ext, *base, *dir;
     uint8_t folder;
 } KINDS[MOY_UF_KINDS] = {
-    { "drawings", ".moyimg", "drawing", 0 },
-    { "docs", ".md", "doc", 0 },
-    { "sprites", ".moygfx", "sheet", 0 },
-    { "music", ".moysong", "song", 0 },
-    { "recordings", "", "recording", 1 },
-    { "stories", "", "story", 1 },
+    { "drawings", ".moyimg", "drawing", "Pictures", 0 },
+    { "docs", ".md", "doc", "Documents", 0 },
+    { "sprites", ".moygfx", "sheet", "Pictures/Sprites", 0 },
+    { "music", ".moysong", "song", "Music", 0 },
+    { "recordings", "", "recording", "Recordings", 1 },
+    { "stories", "", "story", "Documents/Stories", 1 },
 };
 #define DOCS 1
 
@@ -32,7 +32,7 @@ static const char *const VAULT_EXTS[] = { ".py", ".lua", ".txt", ".json" };
 #define NVAULT 4u
 
 static const char FILES_DIR[] = "files";
-static const char TRASH_DIR[] = "trash";
+static const char TRASH_DIR[] = ".Trash";
 static const char HISTORY_DIR[] = ".history";
 static const char HISTORY_EXT[] = ".jsonl";
 static const char PROJECT[] = "project:";
@@ -231,7 +231,7 @@ static const char *item_ext(int kind, const char *name) {
 
 static char *kind_dir(const char *root, int kind) {
     char *f = files_root(root);
-    char *out = f ? cat(f, "/", KINDS[kind].name, NULL) : NULL;
+    char *out = f ? cat(f, "/", KINDS[kind].dir, NULL) : NULL;
     str_free(f);
     return out;
 }
@@ -443,6 +443,16 @@ static int mkdirs(const char *root, int with_root, const char *a, const char *b,
         if (next == NULL) {
             return MOY_ENOMEM;
         }
+        // A kind's folder may be a subfolder (`Pictures/Sprites`): each
+        // folder on the way is made first.
+        size_t base = strlen(next) - strlen(parts[i]);
+        for (char *s = next + base; *s != 0; s++) {
+            if (*s == '/') {
+                *s = 0;
+                moy_fs_mkdir(next);
+                *s = '/';
+            }
+        }
         moy_fs_mkdir(next);
         at = next;
     }
@@ -451,7 +461,7 @@ static int mkdirs(const char *root, int with_root, const char *a, const char *b,
 }
 
 static int ensure_kind_dir(const char *root, int kind) {
-    return mkdirs(root, 1, KINDS[kind].name, NULL, NULL);
+    return mkdirs(root, 1, KINDS[kind].dir, NULL, NULL);
 }
 
 static int ensure_history_dir(const char *root, int kind) {
@@ -966,7 +976,7 @@ int moy_uf_save(const char *root, const char *kind, const char *name,
         if (rc == 0) {
             memcpy(item, name, item_n);
             item[item_n] = 0;
-            rc = mkdirs(root, 1, KINDS[k].name, item, NULL);
+            rc = mkdirs(root, 1, KINDS[k].dir, item, NULL);
         }
         if (rc == 0) {
             rc = moy_fs_publish(m, data, n);

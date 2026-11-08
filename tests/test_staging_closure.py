@@ -699,7 +699,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
 
     The positive half is the owner call of 2026-08-25 ("the Zero supports all
     features"): before it, the board carried the minimum that BOOTS, which meant
-    `moy_sync.file_kinds()` found no store module and answered None -- read as
+    `moy_sync.file_folders()` found no store module and answered None -- read as
     "refuse" everywhere, so the board 404'd /files.json and the kid's drawings
     could not travel. Every name below is a feature, not a dependency detail.
 

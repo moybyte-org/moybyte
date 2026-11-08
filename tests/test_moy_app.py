@@ -81,7 +81,7 @@ def run(sp, ap, say, mi, root):
         except ValueError:
             say("refused", bad[0][:4])
     try:
-        app.grant("x", ("prefs",), kind="recordings")
+        app.grant("x", ("prefs",), kind="stories")
     except ValueError:
         say("refused kind")
 
@@ -309,7 +309,7 @@ def run(sp, ap, say, mi, root):
 
     # -- the policy
     for perms in (["graphics"], ["files"], ["files:music", "prefs"],
-                  ["prefs", "files:docs", "launch", "appearance", "clipboard"],
+                  ["prefs", "files:documents", "launch", "appearance", "clipboard"],
                   ["files:nonsense"], ["files", "files:music"], None, [3]):
         say("policy", perms, ap.policy(perms), ap.manifest_error(perms))
     for cid, title in (("moybyte.notes", "Notes"), (None, "My Notes!"),

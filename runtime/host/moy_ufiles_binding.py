@@ -172,7 +172,7 @@ def binding():
     m.__doc__ = __doc__
     m.CARTS_DIR = CARTS_DIR
     m.FILES_DIR = "files"
-    m.TRASH_DIR = "trash"
+    m.TRASH_DIR = ".Trash"
     m.TRASH_KEEP = 50
     m.HISTORY_DIR = ".history"
     m.HISTORY_EXT = ".jsonl"

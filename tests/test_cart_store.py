@@ -709,7 +709,7 @@ def test_an_update_keeps_the_saves_and_an_edited_config(tmp_path):
     folder = Path(root) / "jet.moy"
     (folder / "pmem.json").write_text('{"0": 900}')
     (folder / "config.json").write_text('{"speed": 9}')         # the kid's own
-    written = Path(root).parent / "written" / "jet"
+    written = Path(root).parent / "apps" / "jet"
     written.mkdir(parents=True)
     (written / "saves%2fslot1.sav").write_bytes(b"level 3")    # what the cart wrote
     repo.add("jet", version=2, config=b'{"speed": 2}')
@@ -822,7 +822,7 @@ def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     repo.add("doom")
     _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
     _install(_cart(repo, "doom"), root, MemNet(repo.routes()))
-    base = Path(root).parent / "written"
+    base = Path(root).parent / "apps"
     for cid in ("jet", "doom"):
         (base / cid).mkdir(parents=True)
         (base / cid / "options.cfg").write_bytes(b"x")

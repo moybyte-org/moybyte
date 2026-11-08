@@ -119,7 +119,7 @@ def _dc_depths(root):
     with tempfile.TemporaryDirectory() as d:
         ok = []
         for n in (1, 2, 3, 4):
-            path = "/".join(["drawings"] + ["x%d" % i for i in range(n - 1)])
+            path = "/".join(["Pictures"] + ["x%d" % i for i in range(n - 1)])
             if root_id == "carts":
                 path = "/".join(["a.moy"] + ["x%d" % i for i in range(n - 1)])
             applied, _errs, _shelf = moy_sync.apply_ops(

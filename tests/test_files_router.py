@@ -42,9 +42,9 @@ def test_the_shelf_carries_the_three_roots_a_person_touches(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
     shown = app.shown_places()
-    assert [p[0] for p in shown[:3]] == [files_app.PROJECTS, "docs", files_app.ART]
-    assert [p[1] for p in shown[:3]] == ["Projects", "Notes", "Art"]
-    assert dict((p[0], p[3]) for p in shown)[files_app.ART] == ("drawings", "sprites")
+    assert [p[0] for p in shown[:3]] == [files_app.PROJECTS, files_app.DOCUMENTS, files_app.PICTURES]
+    assert [p[1] for p in shown[:3]] == ["Projects", "Documents", "Pictures"]
+    assert dict((p[0], p[3]) for p in shown)[files_app.PICTURES] == ("drawings", "sprites")
     # the carts root is NOT a files kind and is never asked of the files store
     assert files_app.PROJECTS not in moy_carts.FILE_KINDS
 
@@ -108,7 +108,7 @@ def test_an_image_lands_in_paint(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
 
     assert app.door("dragon", kind="drawings") == ("paint", "dragon")
     app._act("OPEN", "dragon")
@@ -125,7 +125,7 @@ def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
     moy_carts.save_file("docs", "story", "once upon a time", carts)
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app.open_place("docs")
+    app.open_place(files_app.DOCUMENTS)
 
     assert app.door("story", kind="docs") == (text_modes.MD, "story")
     assert app.route("story", kind="docs") == text_modes.MD
@@ -221,7 +221,7 @@ def test_a_note_comes_back_to_files_and_files_still_exits(tmp_path):
     ws.frame(1 / 30)
     _key(ws, app, "a")                         # Notes
     ws.frame(1 / 30)
-    assert (app.place, app.level) == ("docs", "files")
+    assert (app.place, app.level) == (files_app.DOCUMENTS, "files")
     app._act("OPEN", "story")
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -229,7 +229,7 @@ def test_a_note_comes_back_to_files_and_files_still_exits(tmp_path):
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert (app.place, app.level, app.sel_name()) == ("docs", "files", "story")
+    assert (app.place, app.level, app.sel_name()) == (files_app.DOCUMENTS, "files", "story")
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "launcher"
@@ -240,7 +240,7 @@ def test_a_drawing_comes_back_from_paint_to_the_same_shelf(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
     app.level = "files"
     app._act("OPEN", "dragon")
     ws.input.begin_frame()
@@ -249,7 +249,7 @@ def test_a_drawing_comes_back_from_paint_to_the_same_shelf(tmp_path):
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert (app.place, app.level) == (files_app.ART, "files")
+    assert (app.place, app.level) == (files_app.PICTURES, "files")
 
 
 def test_a_project_comes_back_from_the_editor_to_the_projects_root(tmp_path):
@@ -300,7 +300,7 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
     app._act("OPEN", "dragon")
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -516,7 +516,7 @@ def test_a_gallery_drawing_still_opens_on_the_drawings_kind(tmp_path):
 
     ws.artwork.new_doc(320, 240)
     assert ws.artwork.doc_kind() == "drawings"
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
     app._act("OPEN", "dragon")
     assert ws.artwork.doc_kind() == "drawings"
 

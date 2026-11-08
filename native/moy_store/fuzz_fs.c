@@ -517,8 +517,8 @@ static int seed_once(const char *src, size_t n, int version) {
 // (moy_ufiles.h): the item docs/a holds v1, with a sidecar of two records.
 
 #define UF_ROOT "/sd/carts"
-#define UF_ITEM "/sd/files/docs/a.md"
-#define UF_TRASHED "/sd/files/trash/docs/a.md"
+#define UF_ITEM "/sd/files/Documents/a.md"
+#define UF_TRASHED "/sd/files/.Trash/docs/a.md"
 
 static void uf_before(void) {
     char name[MOY_UF_NAME_MAX + 1];

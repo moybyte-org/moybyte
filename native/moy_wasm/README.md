@@ -88,9 +88,11 @@ product), with the owner's later calls dated where they land.
 - **Cart storage is the board's**: the store's card, or its internal volume
   without one. Assets are read through the cart's own folder and nothing else.
 - **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
-  `writable` paths, kept beside the carts store in `written/<cart>/`
-  (`runtime/cart_files.py`) on every tier, untouched by an install, an update
-  or a push. A user's own files are a separate capability (#231).
+  `writable` paths, kept beside the carts store in its app folder
+  `apps/<id>/` (`runtime/cart_files.py`) on every tier, untouched by an
+  install, an update or a push. A user's own files are a separate
+  capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
+  §2), which a compiled cart holds no import of.
 - **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in

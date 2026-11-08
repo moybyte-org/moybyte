@@ -410,7 +410,7 @@ def test_the_last_note_reopens_on_the_next_launch(tmp_path):
 
 
 def test_the_carts_files_see_no_drawing(tmp_path):
-    """The cart is granted `files:docs`: a drawing a note names is not its
+    """The cart is granted `files:documents`: a drawing a note names is not its
     to load."""
     ws = build_ws(tmp_path)
     blob = moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64)
@@ -438,7 +438,7 @@ def test_files_opens_a_note_in_notes_and_x_returns_to_files(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "letter", "dear you", ws.carts_root)
     app = _open_files(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("OPEN", "letter")
     _frames(host_app.ConsoleDriver(ws))
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
@@ -452,7 +452,7 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_list(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "letter", "dear you", ws.carts_root)
     app = _open_files(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("OPEN", "letter")
     _frames(host_app.ConsoleDriver(ws))
     assert ws._text_request is None
@@ -494,7 +494,7 @@ def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "hi.py", "print('hello')\n", ws.carts_root)
     app = _open_files(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("OPEN", "hi.py")
     drv = host_app.ConsoleDriver(ws)
     _frames(drv)

@@ -127,7 +127,7 @@ extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
 #define READ_CHUNK 4096
 #define BIN_CHUNK 3072              // READ_CHUNK * 3 / 4: whole base64 quanta
 #define WALK_DEPTH 16
-#define MEDIA_DIR "music"
+#define MEDIA_DIR "Music"
 #define MEDIA_NAME_MAX 128
 #define IO_TRIES 3
 #define IO_BACKOFF_MS 20

@@ -100,8 +100,18 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
 #define TOKEN_BAR_LIGHT 23
 #define TOKEN_BAND_LIGHT 32
 
+// The shared folders a grant is made for, each by its name and its own kind;
+// then every kind in one (moy_store_base.FILE_KIND_DIRS, which
+// tests/test_moy_app.py holds this to).
+static const char *const FOLDER_NAMES[MOY_APP_KINDS] = {
+    "documents", "pictures", "music", "recordings",
+};
 static const char *const KIND_NAMES[MOY_APP_KINDS] = {
-    "docs", "drawings", "sprites", "music",
+    "docs", "drawings", "music", "recordings",
+};
+static const struct { const char *kind; int8_t folder; } KIND_FOLDERS[] = {
+    { "docs", 0 }, { "stories", 0 }, { "drawings", 1 }, { "sprites", 1 },
+    { "music", 2 }, { "recordings", 3 },
 };
 
 // The allowlist: a role absent here is never granted.
@@ -347,10 +357,31 @@ const char *moy_app_kind_name(int kind) {
     return kind >= 0 && kind < (int)MOY_APP_KINDS ? KIND_NAMES[kind] : NULL;
 }
 
-int moy_app_kind_of(const char *name, size_t n) {
+static int name_at(const char *const *names, const char *name, size_t n) {
     for (int k = 0; k < (int)MOY_APP_KINDS; k++) {
-        if (strlen(KIND_NAMES[k]) == n && memcmp(KIND_NAMES[k], name, n) == 0) {
+        if (strlen(names[k]) == n && memcmp(names[k], name, n) == 0) {
             return k;
+        }
+    }
+    return -1;
+}
+
+int moy_app_kind_of(const char *name, size_t n) {
+    return name_at(KIND_NAMES, name, n);
+}
+
+const char *moy_app_folder_name(int folder) {
+    return folder >= 0 && folder < (int)MOY_APP_KINDS ? FOLDER_NAMES[folder] : NULL;
+}
+
+int moy_app_folder_of(const char *name, size_t n) {
+    return name_at(FOLDER_NAMES, name, n);
+}
+
+int moy_app_kind_folder(const char *kind, size_t n) {
+    for (size_t i = 0; i < sizeof KIND_FOLDERS / sizeof KIND_FOLDERS[0]; i++) {
+        if (strlen(KIND_FOLDERS[i].kind) == n && memcmp(KIND_FOLDERS[i].kind, kind, n) == 0) {
+            return KIND_FOLDERS[i].folder;
         }
     }
     return -1;
@@ -368,10 +399,10 @@ void moy_app_policy_add(moy_app_policy_t *p, const char *perm, size_t n) {
         return;
     }
     if (role == MOY_ROLE_FILES) {
-        // A scoped grant names its kind; an unknown kind narrows to nothing,
-        // never widens to the default.
+        // A scoped grant names its folder; an unknown folder narrows to
+        // nothing, never widens to the default.
         int kind = colon == NULL ? MOY_APP_DEFAULT_KIND
-                                 : moy_app_kind_of(colon + 1, n - head - 1u);
+                                 : moy_app_folder_of(colon + 1, n - head - 1u);
         if (kind < 0) {
             return;
         }
@@ -414,10 +445,10 @@ size_t moy_app_policy_error(const moy_app_policy_t *p, char *out, size_t cap) {
     char num[4] = { (char)('0' + p->nkinds), '\0' };
     size_t at = put(out, cap, 0u, "manifest asks for ");
     at = put(out, cap, at, num);
-    at = put(out, cap, at, " file kinds (");
+    at = put(out, cap, at, " file folders (");
     for (uint8_t i = 0; i < p->nkinds; i++) {
         at = put(out, cap, at, i ? ", " : "");
-        at = put(out, cap, at, KIND_NAMES[p->kinds[i]]);
+        at = put(out, cap, at, FOLDER_NAMES[p->kinds[i]]);
     }
     at = put(out, cap, at, ") - pick one");
     out[at < cap ? at : cap - 1u] = '\0';
@@ -1064,7 +1095,8 @@ static int uf_rc(moy_appabi_t *a, int rc) {
 enum { NEED_LAYER = 0, NEED_READ = 1, NEED_WRITE = 2 };
 
 // The grant of a files row, counted: NULL and `*rc` when it cannot run. A
-// kind the grant was not made for is DENIED; `need` is what the store must do.
+// kind outside the folder the grant was made for is DENIED; `need` is what the
+// store must do.
 static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
                                     const char *kind, int need, int *rc) {
     a->counts[row]++;
@@ -1072,7 +1104,8 @@ static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
     if (gr == NULL) {
         return NULL;
     }
-    if (kind != NULL && gr->kind >= 0 && strcmp(kind, KIND_NAMES[(int)gr->kind]) != 0) {
+    if (kind != NULL && gr->kind >= 0
+        && moy_app_kind_folder(kind, strlen(kind)) != gr->kind) {
         *rc = MOY_APP_DENIED;
         return NULL;
     }

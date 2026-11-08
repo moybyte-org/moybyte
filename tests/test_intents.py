@@ -88,18 +88,36 @@ def _jot_ns(ws):
 
 
 def test_the_table_types_each_item():
-    assert I.mime_of("docs/todo") == "text/markdown"       # a bare vault name is a note
-    assert I.mime_of("docs/todo.txt") == "text/plain"
-    assert I.mime_of("docs/data.json") == "application/json"
-    assert I.mime_of("docs/hi.py") == "text/x-python"
-    assert I.mime_of("docs/hi.lua") == "text/x-lua"
-    assert I.mime_of("drawings/cat") == "image/x-moyimg"
-    assert I.mime_of("music/tune") == "audio/x-moysong"
+    assert I.mime_of("Documents/todo.md") == "text/markdown"
+    assert I.mime_of("Documents/todo.txt") == "text/plain"
+    assert I.mime_of("Documents/data.json") == "application/json"
+    assert I.mime_of("Documents/hi.py") == "text/x-python"
+    assert I.mime_of("Documents/hi.lua") == "text/x-lua"
+    assert I.mime_of("Pictures/cat.moyimg") == "image/x-moyimg"
+    assert I.mime_of("Music/tune.moysong") == "audio/x-moysong"
     assert I.mime_of("https://moybyte.org/a") == "x-scheme-handler/https"
-    assert I.mime_of("stories/tale") == I.OCTET
-    assert I.split("nowhere/x") is None and I.split("docs/a/b") is None
+    assert I.mime_of("Documents/Stories/tale") == I.OCTET
     assert I.matches("image/*", "image/x-moyimg") and I.matches("text/plain", "text/plain")
     assert not I.matches("image/*", "text/plain") and not I.matches("text", "text/plain")
+
+
+def test_an_item_is_its_path_in_the_shared_folders():
+    """A user file is named as USB and the Files app show it, and reads back
+    as the layer's (kind, name): a note's `.md` dropped, a vault file's whole
+    name kept, a subfolder's kind its own."""
+    for item, kn in (("Documents/todo.md", ("docs", "todo")),
+                     ("Documents/list.txt", ("docs", "list.txt")),
+                     ("Pictures/cat.moyimg", ("drawings", "cat")),
+                     ("Pictures/Sprites/hero.moygfx", ("sprites", "hero")),
+                     ("Music/tune.moysong", ("music", "tune")),
+                     ("Recordings/take_1", ("recordings", "take_1")),
+                     ("Documents/Stories/tale", ("stories", "tale"))):
+        assert I.split(item) == kn, item
+        assert I.item_of(*kn) == item
+    for bad in ("nowhere/x", "docs/todo", "Documents/todo", "Pictures/cat.md",
+                "Pictures/Sprites", "Documents/", "/x.md", "https://a/b.md", 3):
+        assert I.split(bad) is None, bad
+    assert I.item_of("selfies", "x") is None
 
 
 def test_the_manifest_field_reaches_the_shelf(tmp_path):
@@ -116,7 +134,7 @@ def test_the_manifest_field_reaches_the_shelf(tmp_path):
 
 def test_one_match_opens_without_asking(tmp_path):
     ws, drv = _ws(tmp_path)
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
     assert not ws.confirm.open
     assert ws.cart.get("title") == "Notes"
@@ -125,7 +143,7 @@ def test_one_match_opens_without_asking(tmp_path):
 
 def test_a_drawing_opens_paint(tmp_path):
     ws, drv = _ws(tmp_path)
-    assert moybyte.open_with("drawings/cat")
+    assert moybyte.open_with("Pictures/cat.moyimg")
     _frames(drv)
     assert not ws.confirm.open and ws.wm.top_kind() == "artwork"
 
@@ -145,7 +163,7 @@ def test_what_no_app_opens_goes_nowhere(tmp_path):
 
 def test_several_ask_and_the_choice_is_reused(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     c = _menu(ws, drv)
     assert c.rows == ["Jot", "Notes"] and c.icons == ["app", "notes"]
     assert c.line == "todo.md"
@@ -155,7 +173,7 @@ def test_several_ask_and_the_choice_is_reused(tmp_path):
     assert ws.system.get(I.KEY, None) == {"text/markdown": _key(ws, "Notes")}
     ws.go_home()
     _frames(drv)
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
     assert not ws.confirm.open, "the last choice is reused, unasked"
     assert ws.cart.get("title") == "Notes"
@@ -164,7 +182,7 @@ def test_several_ask_and_the_choice_is_reused(tmp_path):
 def test_the_menu_changes_the_choice(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
     ws.system.set(I.KEY, {"text/markdown": _key(ws, "Notes")})
-    assert moybyte.open_with("docs/todo", True)
+    assert moybyte.open_with("Documents/todo.md", True)
     c = _menu(ws, drv)
     assert c.rows == ["Notes", "Jot"], "the last choice first"
     assert c.focused == "Notes"
@@ -174,7 +192,7 @@ def test_the_menu_changes_the_choice(tmp_path):
     assert len(got) == 1
     ws.go_home()
     _frames(drv)
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
     assert not ws.confirm.open and len(_jot_ns(ws)["got"]) == 1, "a fresh run, unasked"
 
@@ -182,7 +200,7 @@ def test_the_menu_changes_the_choice(tmp_path):
 def test_cancel_opens_nothing_and_keeps_the_choice(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
     for how in ("b", "home", "esc"):
-        assert moybyte.open_with("docs/todo")
+        assert moybyte.open_with("Documents/todo.md")
         c = _menu(ws, drv)
         if how == "esc":
             drv.escape()
@@ -196,7 +214,7 @@ def test_cancel_opens_nothing_and_keeps_the_choice(tmp_path):
 def test_the_pad_alone_picks(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
     ui_draw.input_kind("pad")
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _menu(ws, drv)
     _press(drv, "a")
     assert len(_jot_ns(ws)["got"]) == 1
@@ -205,7 +223,7 @@ def test_the_pad_alone_picks(tmp_path):
 def test_touch_alone_picks(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
     ui_draw.input_kind("touch")
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     c = _menu(ws, drv)
     x, y, w, h = c._host.box("Notes")
     drv.click(x + w // 2, y + h // 2)
@@ -220,7 +238,7 @@ def test_touch_alone_picks(tmp_path):
 def test_the_receiver_holds_one_file_read_write_for_its_run(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown"])
     ws.system.set(I.KEY, {"text/markdown": _key(ws, "Jot")})
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
     h = _jot_ns(ws)["got"][0]
     assert (h.name, h.mime, h.mode, h.url) == ("todo.md", "text/markdown", "rw", None)
@@ -266,7 +284,7 @@ def test_a_lua_service_opens_and_shares_through_the_same_verbs(tmp_path):
     ws, drv = _ws(tmp_path, ["text/*"])
     ws.system.set(I.KEY, {"text/markdown": _key(ws, "Jot"), "text/plain": _key(ws, "Jot")})
     src = ('ok = {}\n'
-           'moybyte.on("achieve", function() moybyte.open_with("docs/todo") end)\n'
+           'moybyte.on("achieve", function() moybyte.open_with("Documents/todo.md") end)\n'
            'moybyte.on("award", function() moybyte.share("hi", "text/plain") end)\n')
     try:
         pid = S.SCHED.start({"id": "t.lua", "title": "t.lua", "type": "service",
@@ -290,12 +308,138 @@ def test_a_lua_service_opens_and_shares_through_the_same_verbs(tmp_path):
 def test_a_second_item_while_the_menu_is_up_replaces_the_question(tmp_path):
     ws, drv = _ws(tmp_path, ["text/markdown", "text/plain"])
     ws.carts_store.save_file("docs", "list.txt", "eggs\n", ws.carts_root)
-    assert moybyte.open_with("docs/todo")
+    assert moybyte.open_with("Documents/todo.md")
     _menu(ws, drv)
-    assert moybyte.open_with("docs/list.txt")
+    assert moybyte.open_with("Documents/list.txt")
     c = _menu(ws, drv)
     assert c.line == "list.txt" and I.INTENTS.asking is not None
     _press(drv, "a")
     h = _jot_ns(ws)["got"][0]
     assert h.read() == "eggs\n"
     assert ws.system.get(I.KEY, None) == {"text/plain": _key(ws, "Jot")}
+
+
+# -- the picker -----------------------------------------------------------------
+
+
+def _picker(tmp_path, n=9):
+    """Jot running, the user's drawings, one sprite sheet and a note."""
+    ws, drv = _ws(tmp_path, [])
+    root = ws.carts_root
+    for i in range(n):
+        ws.carts_store.save_file("drawings", "sky_%d" % i, "%d," % i, root)
+    ws.carts_store.save_file("sprites", "hero", "0,", root)
+    ws.open(next(c for c in ws.carts.all if c.get("title") == "Jot"))
+    _frames(drv)
+    return ws, drv, ws.player.pid
+
+
+def _picker_up(ws, drv, title="Choose a picture"):
+    _frames(drv)
+    c = ws.confirm
+    assert c.open and c.title == title and c.line == "For Jot"
+    return c
+
+
+def test_the_picker_lists_the_files_of_the_type(tmp_path):
+    ws, drv, pid = _picker(tmp_path, 2)
+    assert I.INTENTS.files_of("image/*") == ["Pictures/sky_0.moyimg", "Pictures/sky_1.moyimg",
+                                             "Pictures/Sprites/hero.moygfx"]
+    assert I.INTENTS.files_of("image/x-moygfx") == ["Pictures/Sprites/hero.moygfx"]
+    assert I.INTENTS.files_of("text/markdown") == ["Documents/todo.md"]
+    assert not I.INTENTS.pick(pid, "audio/*"), "no file has the type"
+    assert not I.INTENTS.pick(pid, "image/*", "w") and not ws.confirm.open
+    assert I.INTENTS.pick(pid, "text/*")
+    c = _picker_up(ws, drv, "Choose a document")
+    assert c.rows == ["todo"] and c.icons == ["notes"]
+
+
+def test_keys_reach_a_row_past_the_card_and_hand_it_over(tmp_path):
+    ws, drv, pid = _picker(tmp_path)
+    assert I.INTENTS.pick(pid, "image/*", "rw")
+    c = _picker_up(ws, drv)
+    assert c.rows[-1] == "hero" and c.icons[-1] == "sprite"
+    for _ in range(9):
+        _press(drv, "down")
+    assert c.focused == "hero"
+    x, y, w, h = c._host.box("hero")
+    cx, cy, cw, ch = c._host.box(c.title)
+    assert (ws.sys_canvas.w, ws.sys_canvas.h) == (320, 240)
+    assert cy <= y and y + h <= cy + ch, "the card's body scrolled the row into view"
+    _press(drv, "a")
+    assert not c.open
+    h = _jot_ns(ws)["got"][-1]
+    assert (h.name, h.mime, h.mode) == ("hero.moygfx", "image/x-moygfx", "rw")
+    assert h.read() == "0,"
+    assert h.write("1,") and ws.carts_store.load_file("sprites", "hero", ws.carts_root) == "1,"
+
+
+def test_the_pad_alone_picks_a_file(tmp_path):
+    ws, drv, pid = _picker(tmp_path, 2)
+    ui_draw.input_kind("pad")
+    assert I.INTENTS.pick(pid, "image/x-moyimg")
+    _picker_up(ws, drv)
+    _press(drv, "down", "a")
+    h = _jot_ns(ws)["got"][-1]
+    assert (h.name, h.mode, h.read()) == ("sky_1.moyimg", "r", "1,")
+    assert not h.write("x"), "a read grant writes nothing"
+
+
+def test_touch_alone_picks_a_file(tmp_path):
+    ws, drv, pid = _picker(tmp_path, 2)
+    ui_draw.input_kind("touch")
+    assert I.INTENTS.pick(pid, "image/*")
+    c = _picker_up(ws, drv)
+    x, y, w, h = c._host.box("sky_1")
+    drv.click(x + w // 2, y + h // 2)
+    _frames(drv, 2)
+    assert _jot_ns(ws)["got"][-1].name == "sky_1.moyimg"
+
+
+def test_a_cancelled_picker_hands_none_and_the_grant_ends_with_the_run(tmp_path):
+    ws, drv, pid = _picker(tmp_path, 1)
+    assert I.INTENTS.pick(pid, "image/*")
+    _picker_up(ws, drv)
+    _press(drv, "b")
+    assert _jot_ns(ws)["got"] == [None] and I.INTENTS.picking is None
+    assert I.INTENTS.pick(pid, "image/*")
+    _picker_up(ws, drv)
+    _press(drv, "a")
+    h = _jot_ns(ws)["got"][-1]
+    assert h.read() == "0,"
+    ws.go_home()
+    _frames(drv)
+    assert h.read() is None and not h.live
+
+
+# -- Files' "Open with" ---------------------------------------------------------
+
+
+def test_files_open_with_asks_and_the_pick_becomes_the_choice(tmp_path):
+    ws, drv = _ws(tmp_path, ["text/markdown"])
+    files = next(c for c in ws.carts.all if c.get("title") == "Files")
+    ws.open(files)
+    _frames(drv)
+    app = ws.files_app
+    from runtime import files_app
+    app.open_place(files_app.DOCUMENTS, keep="todo")
+    assert "WITH" in app._action_labels()
+    app._act("WITH")
+    c = _menu(ws, drv)
+    assert c.line == "todo.md" and c.rows == ["Jot", "Notes"]
+    _press(drv, "a")
+    assert _jot_ns(ws)["got"][-1].name == "todo.md"
+    assert ws.system.get(I.KEY, None) == {"text/markdown": _key(ws, "Jot")}
+
+
+def test_files_open_with_says_so_where_no_app_opens_it(tmp_path):
+    ws, drv = _ws(tmp_path, [])
+    ws.carts_store.save_file("music", "tune", "{}", ws.carts_root)
+    ws.open(next(c for c in ws.carts.all if c.get("title") == "Files"))
+    _frames(drv)
+    app = ws.files_app
+    from runtime import files_app
+    app.open_place(files_app.MUSIC, keep="tune")
+    app._act("WITH")
+    _frames(drv)
+    assert not ws.confirm.open and app.status == "No app opens it"

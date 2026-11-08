@@ -28,7 +28,7 @@
 //                                  moybyte.notify under the service's pid
 //   moybyte.open_with(item[, choose]) -> bool
 //   moybyte.share(data, mime) -> bool
-//                                  an item (a URL or "<kind>/<name>") or
+//                                  an item (a URL or a user file's path, "Documents/todo.md") or
 //                                  text routed to the app that opens it, the
 //                                  console's own (runtime/system/intents.py)
 // and `print`, which logs at info. Its allocator counts every byte it holds,

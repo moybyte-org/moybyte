@@ -29,7 +29,7 @@ def built(tmp_path_factory):
 @pytest.fixture
 def host(built, tmp_path):
     h = T.Host(built, tmp_path, files=True)
-    music = h.tree / "sd" / "moybyte" / "files" / "music"
+    music = h.tree / "sd" / "moybyte" / "files" / "Music"
     music.mkdir(parents=True)
     shutil.copy(TONE, music / NAME)
     (music / "notes.txt").write_text("not a song")
@@ -97,7 +97,7 @@ def test_a_host_with_no_files_root_has_no_media_route(built, tmp_path):
 def test_the_open_host_answers_in_the_clear(built, tmp_path):
     h = T.Host(built, tmp_path, sealed=False, files=True)
     try:
-        music = h.tree / "sd" / "moybyte" / "files" / "music"
+        music = h.tree / "sd" / "moybyte" / "files" / "Music"
         music.mkdir(parents=True)
         shutil.copy(TONE, music / NAME)
         status, body = T.get(h, _q(NAME, 0, 100))

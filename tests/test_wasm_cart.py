@@ -339,7 +339,7 @@ def test_a_trap_in_init_is_the_carts_error_and_init_runs_once(tmp_path):
     err = ws.player.cart_error
     assert err and "stack overflow" in err, err
     assert ws.pause.open and ws.pause.stopped
-    with open(os.path.join(os.path.dirname(root), "written", "deep_init", "inits"),
+    with open(os.path.join(os.path.dirname(root), "apps", "deep_init", "inits"),
               "rb") as f:
         assert f.read() == b"\x01"
     ws.player.release_world()
@@ -437,7 +437,7 @@ def _files(root):
 
 def _written(root):
     """The Files Wasm cart's written folder, beside the carts store."""
-    d = os.path.join(os.path.dirname(root), "written", "wasm_files")
+    d = os.path.join(os.path.dirname(root), "apps", "wasm_files")
     return sorted(os.listdir(d)) if os.path.isdir(d) else []
 
 
@@ -474,7 +474,7 @@ def test_a_write_cut_short_leaves_the_last_whole_copy(tmp_path):
     from runtime import cart_files
     cart = tmp_path / "carts" / "wasm_files.moy"
     cart.mkdir(parents=True)
-    d = tmp_path / "written" / "wasm_files"
+    d = tmp_path / "apps" / "wasm_files"
     d.mkdir(parents=True)
     (d / "options.cfg").write_bytes(b"old")
     (d / "options.cfg~done").write_bytes(b"new")

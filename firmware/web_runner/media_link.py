@@ -3,7 +3,7 @@ media face (runtime/system/dev_media.py) feeds the C decoder from where the
 console has no HTTP client and keeps no song.
 
 A page keeps no song in its VFS, in either mode: a site-mode page's songs
-are the browser's OPFS store's (`files/music`), a board-served page's are the
+are the browser's OPFS store's (`files/Music`), a board-served page's are the
 serving board's music folder. The worker lists them at boot into LISTING
 ({name: size}), and rewrites it when a song is dropped on the page, so
 `held()` names them for the Music app and `holds()` lets the face play one.
@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover
 
 SPOOL = "/moy/net"
 LISTING = SPOOL + "/media.json"
-MUSIC = "music"                    # the files root's folder of songs
+MUSIC = "Music"                    # the files root's folder of songs
 EIO = 5
 
 

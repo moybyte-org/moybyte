@@ -9,7 +9,9 @@ last positional argument, as every one of them does. The digests in
 tests/fixtures/userfiles_golden.json were made from the Python layer the C
 replaced (runtime/moy_files.py and runtime/moy_file_ops.py, deleted in the
 same change), so a store the C writes is byte for byte the one the Python
-wrote, the publish marker, the backups, the sidecars and the journal included.
+wrote, the publish marker, the backups, the sidecars and the journal included,
+under the folder each kind lives in now (the fixture's "about" says how the
+shared folders' rename re-made them).
 
 The clock is the workload's: after each verb every path whose mtime is a real
 one is set to the verb's step, so "newest first" means the same order in every
@@ -202,7 +204,7 @@ def _tail(api, root, rng, top):
     yield "history_ops", _call(api["history_ops"], "docs", "long", root)
     yield "prune", _call(api["prune_history"], "docs", "long", root, 3)
     yield "history", _call(api["load_history"], "docs", "long", root)
-    take = os.path.join(api["files_root"](root), "recordings", "take1")
+    take = os.path.join(api["files_root"](root), "Recordings", "take1")
     os.makedirs(os.path.join(take, "inner"), exist_ok=True)
     for n, body in (("a.wav", "A"), ("inner/b.wav", "B")):
         with open(os.path.join(take, n), "w") as f:

@@ -2700,7 +2700,7 @@ function _draw()
 end
 '''
 
-APP_ROLES_PERMS = ["graphics", "input", "files:docs", "prefs", "appearance",
+APP_ROLES_PERMS = ["graphics", "input", "files:documents", "prefs", "appearance",
                    "launch", "clipboard"]
 
 

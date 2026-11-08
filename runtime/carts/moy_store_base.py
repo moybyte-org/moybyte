@@ -165,12 +165,19 @@ def _sibling_path(root, name):
     return (parent + "/" + name) if parent else name
 
 
-# The user-files layer's root and kinds, as the sync names them: the layer is
-# native/moy_store/moy_ufiles.h's (module `moy_ufiles`), and the Zero, which
-# denies it, still serves and takes `files/<kind>/` by path.
-# tests/test_userfiles_parity.py holds these to the C.
+# The user-files layer's root, its kinds and the folder each lives in: the
+# layer is native/moy_store/moy_ufiles.h's (module `moy_ufiles`), and the
+# Zero, which denies it, still serves and takes the shared folders by path.
+# The shared folders are the top of `files/` as the OS shows them
+# (docs/os_2026-11/between_apps.md section 2); `files:<folder>` names one in
+# lower case. tests/test_userfiles_parity.py holds these to the C.
 FILES_DIR = "files"
 FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories")
+FILE_KIND_DIRS = {
+    "drawings": "Pictures", "docs": "Documents", "sprites": "Pictures/Sprites",
+    "music": "Music", "recordings": "Recordings", "stories": "Documents/Stories",
+}
+SHARED_FOLDERS = ("Documents", "Pictures", "Music", "Recordings", "Downloads")
 
 
 def files_root(root):

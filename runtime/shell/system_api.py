@@ -11,7 +11,7 @@ whoever owns the console -- that asks for shell capabilities in its
 `manifest.json`, in its `"moybyte"` object (Moybyte's own fields):
 
     "moybyte": {"type": "app",
-                "permissions": ["graphics", "input", "files:docs", "prefs"]}
+                "permissions": ["graphics", "input", "files:documents", "prefs"]}
 
 `make_system_api` is the FILTER between the two. It is not a second interface:
 it maps each declared permission to a role on the SAME `AppContext`, builds one
@@ -31,9 +31,9 @@ mentions a capability provably cannot use it.
 A cart runs `exec` in a plain namespace with the real builtins: it can
 `import`, walk `gc.get_objects()`, or reach an attribute on anything it was
 handed. The role objects are native/moy_app's, which hold a grant and the
-console's app ABI state, and a grant made with a files kind reaches that kind
-alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
-from an app granted `files:docs` is refused wherever the role object is
+console's app ABI state, and a grant made for a shared folder reaches the
+kinds in it alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
+from an app granted `files:documents` is refused wherever the role object is
 reached from. That is the files role, not containment: a cart that goes
 looking through `gc` or its imports will find the console's own objects.
 
@@ -48,14 +48,14 @@ here changes that, and no amount of wrapper would.
 ## The map
 
 The policy is C's (native/moy_app, `moy_app.policy`): the permission each
-role is granted by, the files kinds, the manifest refusal
+role is granted by, the files folders, the manifest refusal
 (`moy_app.manifest_error`) and the key a cart's grant is made under
 (`moy_app.id_for`: the cart's `id`, #162, else its title's slug).
 
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
     "files"           files.*  + open_editor()        ctx.files
-    "files:<kind>"    the same, that kind only        ctx.files
+    "files:<folder>"  the same, that folder only      ctx.files
     "clipboard"       (the editor handle's cut/copy)  ctx.clipboard
     "prefs"           prefs.get / prefs.set           ctx.prefs (namespaced)
     "appearance"      set_theme() / themes()          ctx.theme
@@ -182,14 +182,15 @@ def draws_in_look(cart):
 # -- the kind-scoped user-files handle ---------------------------------------
 
 class ScopedFiles:
-    """`ctx.files` narrowed to ONE user-files kind (#108).
+    """`ctx.files` narrowed to ONE user-files kind (#108): the granted
+    folder's own (`files:pictures` is drawings).
 
     The role itself takes `(kind, name)` on every verb, which would let an app
-    granted `"files:docs"` read the kid's drawings by passing another kind.
+    granted `"files:documents"` read the kid's drawings by passing another kind.
     This binds the kind at construction and never takes it as an argument, so
     every published verb spells one kind, the granted one; the grant itself
-    reaches no other (native/moy_app checks the kind on every row), so the
-    role it holds refuses another kind however it is reached.
+    reaches no kind outside its folder (native/moy_app checks the kind on
+    every row), so the role it holds refuses one however it is reached.
 
     Same `(value, err)` contract as the role -- nothing here raises."""
 
@@ -246,7 +247,7 @@ class ScopedFiles:
 
     # -- text documents ------------------------------------------------------
     #
-    # A document on disk is plain Markdown (`files/docs/<name>.md`), so these
+    # A document on disk is plain Markdown (`files/Documents/<name>.md`), so these
     # two are thin -- but they stay the verbs a cart calls, because they are
     # what says a document is TEXT and not a blob. `save`/`load` above stay raw
     # for the kinds that are not text.

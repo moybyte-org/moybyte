@@ -20,7 +20,7 @@
 // mid-delete never leaves half a cart listed, and cart_index.recover deletes
 // what a cut left there), the record is written crash-safe
 // (moy_shelf_publish), and the folder and the files the cart wrote
-// (`written/<id>`, moy_shelf_written) are deleted. moy_shelf_remove is the
+// (`apps/<id>`, moy_shelf_written) are deleted. moy_shelf_remove is the
 // four in one call, the C shell's; the VM steps them a store op a frame,
 // the trees an entry at a time. The consent the cart was installed with is
 // the caller's to forget (runtime/carts/pkg.py's removed, the shell's pkg

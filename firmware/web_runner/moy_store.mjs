@@ -106,12 +106,12 @@ export function skipLocal(name) {
 // host has no server to ask for this, so it is a constant, pinned against the
 // Python registry by tests/test_web_store.py (a drift there fails the build).
 // The per-root behaviour the browser store needs is the whole-folder delete
-// ARITY (a cart is one segment, a files item is a kind/name or a folder below
-// it; null: no folder delete at all), and for the console's own documents the
+// ARITY (a cart is one segment, a files item a folder's file or a folder item
+// below it; null: no folder delete at all), and for the console's own documents the
 // named files the store IS, each a path in it (`top`, moy_sync.SYSTEM_FILES), which a
 // board serves through its VM (`console.json`) when its firmware has the root.
 // Kinds are not validated here -- these ops are the browser's own
-// sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
+// sweep of its own store, and `.history`/`.Trash` persisting to a SITE-mode OPFS
 // is the kid's own undo/recovery surviving the tab, which is correct.
 export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
@@ -515,7 +515,7 @@ async function walk(dir, prefix, out, depth, leave) {
 // THE SONGS: a files store's music folder keeps MP3s the VFS never holds
 // (readAll leaves them out); Music reads one a range at a time
 // (media_link.py), so a library never sits in the page's memory.
-export const MUSIC_DIR = "music";
+export const MUSIC_DIR = "Music";
 
 export function isSong(rel) {
     const parts = String(rel).split("/");
@@ -780,14 +780,14 @@ async function settleFiles(dir) {
 
 // ---------------------------------------------------------------------------
 // A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
-// carts: written/<cart>/<key>, runtime/carts/cart_files.py's layout, so the VFS the
+// carts: apps/<id>/<key>, runtime/carts/cart_files.py's layout, so the VFS the
 // console reads and this store of record hold the same names. The console
 // writes the VFS and queues the file here (carts_link's WebCartKeep), and a
 // write lands with `commitFile`'s crash-safety, so readWritten finds the old
 // copy or the new one.
 // ---------------------------------------------------------------------------
 
-export const WRITTEN_ROOT = "written";
+export const WRITTEN_ROOT = "apps";
 
 // The written store, or null with no OPFS (the console then keeps written
 // files in this tab alone, like every other edit there).

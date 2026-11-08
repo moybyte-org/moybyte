@@ -15,7 +15,7 @@
 //      keeps the VM.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
-// `network`, `console`, `pins`, `files` and every `files:<kind>`, `prefs`, and
+// `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and
 // every role permission runtime/shell/system_api.py grants. The census pins the
 // verdict against every seed cart's and PICO-8 import's real manifest.
 //
