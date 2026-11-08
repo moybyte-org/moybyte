@@ -40,10 +40,14 @@ compiled games run side by side the same way; the speaker's `snd` stream and
 the timed lanes, which a board holds one of, are the newest compiled run's.
 
 **A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
-verbs): no console, no row of the runs, its timers and `moybyte` names, its
-own counting allocator in PSRAM. On the P4s each runs on a task of its own on
-core 0; the host and the desktop MicroPython step them at the scheduler's
-poll (`runtime/system/scheduler.py`), and the S3s run none.
+verbs): no console, no row of the runs, its timers, message wakes and
+`moybyte` names, its own counting allocator in PSRAM. On the P4s each runs on
+a task of its own on core 0; the host and the desktop MicroPython step them at
+the scheduler's poll (`runtime/system/scheduler.py`), and the S3s run none.
+Its messages (`svc_send`) queue on its row, and its console calls
+(`moybyte.notify`, the functions the console hands it) wait there for the
+VM's task to answer (`svc_call`, `svc_answer`); their JSON is the prefs
+names' (`native/moy_app/moy_app_lua.h`).
 
 | piece | how |
 |---|---|

@@ -121,6 +121,9 @@ EVENT_VERSION = _I.EV_VERSION
 SOURCES = {"keys": _I.EV_KEYS, "touch": _I.EV_TOUCH, "pad": _I.EV_PAD,
            "input": _I.EV_KEYS | _I.EV_TOUCH | _I.EV_PAD}
 
+# A Lua service's row takes the same names and the same depth
+# (native/moycore/moycore_svc.h: MOYCORE_SVC_MESSAGES, MOYCORE_SVC_MAIL),
+# pinned by tests/test_lua_services.py.
 MESSAGES = ("achieve", "award")
 MAIL_MAX = 16
 
@@ -226,6 +229,10 @@ class Wakes:
                 q.append(args)
                 took = True
         return took
+
+    def mail_of(self, pid):
+        """How many messages wait on process `pid`'s wakes."""
+        return sum(len(w[_AT]) for w in self.mail if w[_OWNER] == pid)
 
     def cancel(self, wid):
         w = self.by_id.pop(wid, None)

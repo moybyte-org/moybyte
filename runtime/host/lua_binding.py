@@ -133,12 +133,17 @@ class SvcInfo(ctypes.Structure):
     """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
     _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
                 ("heap", ctypes.c_uint32), ("cpu_us", ctypes.c_uint32), ("pid", ctypes.c_uint32),
-                ("why", ctypes.c_char * 96)]
+                ("why", ctypes.c_char * 96), ("wakes", ctypes.c_uint8), ("mail", ctypes.c_uint8)]
 
 
 _SIGS = (
-    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, _C, ctypes.c_size_t,
+                           ctypes.POINTER(_U32)], _I),
     ("moycore_svc_stop", [_U32], _I),
+    ("moycore_svc_send", [_U32, _C, _C, ctypes.c_size_t], _I),
+    ("moycore_svc_call", [_U32, ctypes.POINTER(_P), ctypes.POINTER(_P),
+                          ctypes.POINTER(ctypes.c_size_t)], _I),
+    ("moycore_svc_answer", [_U32, _C, ctypes.c_size_t], _I),
     ("moycore_svc_info", [_U32, ctypes.POINTER(SvcInfo)], _I),
     ("moycore_svc_reap", [_U32], _I),
     ("moycore_svc_at", [_U32], _U32),

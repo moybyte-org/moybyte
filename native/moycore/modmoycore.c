@@ -1108,8 +1108,10 @@ static mp_obj_t mod_pool_check(void)
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
 // -- the Lua tier's services (moycore_svc.h) ---------------------------------
-//   svc_start(pid, name, src) -> h   svc_stop(h)   svc_reap(h)
-//   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why), None when stale
+//   svc_start(pid, name, src[, env]) -> h   svc_stop(h)   svc_reap(h)
+//   svc_send(h, name, args) -> bool   svc_call(h) -> (name, args) or None
+//   svc_answer(h, ans or None)
+//   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
 //   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
 
 static void svc_check(int rc)
@@ -1120,16 +1122,21 @@ static void svc_check(int rc)
     }
 }
 
-static mp_obj_t mod_svc_start(mp_obj_t pid, mp_obj_t name, mp_obj_t src)
+static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
 {
     size_t n;
-    const char *text = mp_obj_str_get_data(src, &n);
+    const char *text = mp_obj_str_get_data(args[2], &n);
+    const char *env = NULL;
+    size_t envn = 0;
+    if (n_args > 3 && args[3] != mp_const_none) {
+        env = mp_obj_str_get_data(args[3], &envn);
+    }
     uint32_t h;
-    svc_check(moycore_svc_start((uint32_t)mp_obj_get_int(pid), mp_obj_str_get_str(name),
-                                text, n, &h));
+    svc_check(moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
+                                text, n, env, envn, &h));
     return mp_obj_new_int_from_uint(h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(mod_svc_start_obj, mod_svc_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 4, mod_svc_start);
 
 static mp_obj_t mod_svc_stop(mp_obj_t h)
 {
@@ -1138,18 +1145,53 @@ static mp_obj_t mod_svc_stop(mp_obj_t h)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_stop_obj, mod_svc_stop);
 
+static mp_obj_t mod_svc_send(mp_obj_t h, mp_obj_t name, mp_obj_t args)
+{
+    size_t n;
+    const char *text = mp_obj_str_get_data(args, &n);
+    int rc = moycore_svc_send((uint32_t)mp_obj_get_int(h), mp_obj_str_get_str(name), text, n);
+    if (rc == MOYCORE_SVC_BAD) {
+        return mp_const_false;
+    }
+    svc_check(rc);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_svc_send_obj, mod_svc_send);
+
+static mp_obj_t mod_svc_call(mp_obj_t h)
+{
+    const char *name, *args;
+    size_t n;
+    if (moycore_svc_call((uint32_t)mp_obj_get_int(h), &name, &args, &n) != MOYCORE_SVC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t t[2] = { mp_obj_new_str(name, strlen(name)), mp_obj_new_str(args, n) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_call_obj, mod_svc_call);
+
+static mp_obj_t mod_svc_answer(mp_obj_t h, mp_obj_t ans)
+{
+    size_t n = 0;
+    const char *text = ans != mp_const_none ? mp_obj_str_get_data(ans, &n) : NULL;
+    svc_check(moycore_svc_answer((uint32_t)mp_obj_get_int(h), text, n));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_svc_answer_obj, mod_svc_answer);
+
 static mp_obj_t mod_svc_info(mp_obj_t h)
 {
     moycore_svc_info_t i;
     if (moycore_svc_info((uint32_t)mp_obj_get_int(h), &i) != MOYCORE_SVC_OK) {
         return mp_const_none;
     }
-    mp_obj_t t[6] = {
+    mp_obj_t t[8] = {
         MP_OBJ_NEW_SMALL_INT(i.state), mp_obj_new_int(i.exit), mp_obj_new_int_from_uint(i.heap),
         mp_obj_new_int_from_uint(i.cpu_us), MP_OBJ_NEW_SMALL_INT(i.strikes),
-        mp_obj_new_str(i.why, strlen(i.why)),
+        mp_obj_new_str(i.why, strlen(i.why)), MP_OBJ_NEW_SMALL_INT(i.wakes),
+        MP_OBJ_NEW_SMALL_INT(i.mail),
     };
-    return mp_obj_new_tuple(6, t);
+    return mp_obj_new_tuple(8, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_info_obj, mod_svc_info);
 
@@ -1229,6 +1271,9 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_heap),        MP_ROM_PTR(&mod_heap_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_start),   MP_ROM_PTR(&mod_svc_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_stop),    MP_ROM_PTR(&mod_svc_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_send),    MP_ROM_PTR(&mod_svc_send_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_call),    MP_ROM_PTR(&mod_svc_call_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_answer),  MP_ROM_PTR(&mod_svc_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_info),    MP_ROM_PTR(&mod_svc_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_reap),    MP_ROM_PTR(&mod_svc_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_tasks),   MP_ROM_PTR(&mod_svc_tasks_obj) },

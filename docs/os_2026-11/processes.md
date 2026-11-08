@@ -139,8 +139,10 @@ what the S3s get is the overview's §5. As built for Lua
 on a task of its own, pinned to core 0 on the P4s, which waits for its next
 timer or a stop and runs what is due; the S3s refuse one, and the host and
 the desktop MicroPython, which have no task to give, step their services at
-the scheduler's poll (`runtime/system/scheduler.py`, LUA SERVICES). A wasm
-service and an ELF one are later steps.
+the scheduler's poll (`runtime/system/scheduler.py`, LUA SERVICES). What a
+Lua service asks of the console (a notification, a function the console
+handed it) waits on its row for the VM's task to answer (`tiers.md` §2). A
+wasm service and an ELF one are later steps.
 
 ## 2. The app manifest and the permission table
 
@@ -563,7 +565,8 @@ notifications, updated in place under its id.
 
 **Decision (owner, 2026-11-03): achievements become a small background
 process**, not part of the shell. Because the portable draw and UI API exist
-it could be written in any tier; it is Python for now. It is the first user
+it could be written in any tier; it ships in Python, and its Lua port is the
+tier-conformance test (`tiers.md` §2). It is the first user
 of background processes, events, notifications and the task manager on every
 board, and it is testable with no LoRa.
 
@@ -589,9 +592,12 @@ end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
 - **The `notify` role is its API.** In `roles.json` its rows' `server` is
   `"proc:achievements"` and the grant stays `never`. The console registers
   the link for the role (to `native/moy_app` the row is served as a shell
-  row): `achieve` and `award` are the messages, and `count`, `has`,
-  `found_on`, `progress` and `today` call the process's functions of those
-  names. Settings' Achievements page reads them through the role as before.
+  row): `achieve` and `award` are the messages (the scheduler's `send`,
+  which reaches a Lua service's row as well), and `count`, `has`,
+  `found_on`, `progress` and `today` call a Python process's functions of
+  those names; a Lua process, whose state is its own task's, is read from
+  the document it last handed back, which holds all of its state. Settings'
+  Achievements page reads them through the role as before.
   `award` answers True where the badge is unfound and the process took the
   message.
 - **Its store.** The console starts the process when it loads its store

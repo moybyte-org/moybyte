@@ -3371,8 +3371,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self._services_due and fs.frames_drawn:
             self._services_due = False
             self.boot_services()
-        if _scheduler.SCHED.wakes.queued:
-            _scheduler.SCHED.mail()   # messages the input sent: served before the draw
+        sched = _scheduler.SCHED
+        if sched.wakes.queued or sched.svc_mail:
+            sched.mail()              # messages the input sent: served before the draw
         if self.ach.pending is not None:
             self.ach.flush()          # the badges the achievements process handed back
         if self._press_owed:

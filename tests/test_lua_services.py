@@ -4,6 +4,8 @@ scheduler runs its timers in a state of its own, ends with its exit code, is
 struck out of a callback that will not return (a `pcall` cannot keep it),
 gets its `moy_stop` on a stop and the KILL past its limit, lists in the task
 manager with the exact heap of its state, and runs on through an app switch.
+It takes the OS's messages on its message wakes and makes console calls (the
+names its start was handed, `moybyte.notify`), which the VM's task answers.
 The host steps the services at the scheduler's poll; a P4 runs each on a task
 of its own on core 0, and an S3 refuses one (on glass)."""
 
@@ -11,7 +13,7 @@ import time
 
 import pytest
 
-from runtime import moybyte, moycore, os_log, scheduler as S
+from runtime import moybyte, moycore, notifications, os_log, scheduler as S
 from runtime import moy_log as L
 from runtime import tasks_ui
 from test_scheduler import Guard, _clear
@@ -126,6 +128,78 @@ def test_the_c_side_refuses_what_it_does_not_run():
     assert moycore.svc_tasks() is False         # the host steps them
 
 
+def test_a_message_reaches_its_handler_with_its_arguments_in_place(sched):
+    since = L.next()
+    pid = sched.start(_cart(
+        'moybyte.on("achieve", function(a, b, c) print(tostring(a) .. "|" .. tostring(b)'
+        ' .. "|" .. tostring(c)) end)'))
+    assert sched.wakes_of(pid) == 1
+    assert sched.send(pid, "achieve", ("x", None, 5)) is True
+    assert sched.send(pid, "award", ("konami",)) is False       # no wake on it
+    assert sched.mail_of(pid) == 1 and sched.svc_mail
+    sched.mail()                                # the frame's start serves it
+    assert sched.mail_of(pid) == 0
+    assert _texts(since, pid)[-1] == "x|nil|5"
+
+
+def test_the_message_names_are_the_os_ones(sched):
+    for name in moybyte.MESSAGES:
+        pid = sched.start(_cart('moybyte.on("%s", function() end)' % name, "t." + name))
+        assert sched.procs[pid].state == S.BACKGROUND
+    sched.start(_cart('moybyte.on("lora", function() end)', "t.lora"))
+    p = sched.find("t.lora") or [q for q in sched.services() if q.name == "t.lora"][0]
+    assert p.code == S.EXIT_CRASHED
+
+
+def test_a_full_mailbox_drops_the_oldest(sched):
+    since = L.next()
+    pid = sched.start(_cart('moybyte.on("achieve", function(k, i) print(i) end)'))
+    for i in range(moybyte.MAIL_MAX + 3):
+        sched.send(pid, "achieve", ("open", i))
+    assert sched.mail_of(pid) == moybyte.MAIL_MAX
+    sched.mail()
+    assert _texts(since, pid)[1:] == [str(i) for i in range(3, moybyte.MAIL_MAX + 3)]
+
+
+CALLS = """
+moybyte.on("achieve", function()
+    print(double(base))
+    local v, why = boom()
+    print(tostring(v) .. " " .. why)
+    print(slow())
+    local ok, err = pcall(coroutine.wrap(function() return double(1) end))
+    print(tostring(ok) .. " " .. err)
+    moybyte.notify("Hi", "there", "star")
+end)
+"""
+
+
+def test_console_calls_are_answered_on_the_vms_task(sched, monkeypatch):
+    """The names the start was handed answer from the console, a refusal is
+    nil and why, the time the console takes is not the callback's, a call
+    from a coroutine the service made is an error, and `moybyte.notify`
+    posts as the service."""
+    notifications.NOTES.reset()
+    monkeypatch.setattr(notifications.NOTES, "who", lambda pid: ("t.lua", None, True))
+    since = L.next()
+
+    def boom():
+        raise ValueError("no")
+
+    env = {"base": 21, "double": lambda x: 2 * x, "boom": boom,
+           "slow": lambda: time.sleep(0.4) or "slept"}
+    pid = sched.start(_cart(CALLS), env=env)
+    sched.send(pid, "achieve", ())
+    sched.mail()
+    texts = _texts(since, pid)
+    assert texts[1:5] == ["42", "boom: ValueError: no", "nil the console refused boom", "slept"]
+    assert texts[5].startswith("false ") and "outside the service's own call" in texts[5]
+    assert not [t for t in texts if "strike" in t]
+    n = notifications.NOTES.list[0]
+    assert (n.summary, n.body, n.icon, n.pid) == ("Hi", "there", "star", pid)
+    notifications.NOTES.reset()
+
+
 @pytest.fixture
 def desk(tmp_path, monkeypatch):
     boot_on_fixture(monkeypatch)
@@ -198,12 +272,37 @@ print(moycore.svc_info(h))
 """
 
 
-def test_the_vm_a_board_runs_steps_its_services_alike(tmp_path):
+VM_MSG = """
+import moycore
+src = "moybyte.on('achieve', function(k, key) moybyte.exit(day() + #k) end)"
+h = moycore.svc_start(9, "t.msg", src, '[{}, ["day"]]')
+moycore.svc_step(0)
+print(moycore.svc_send(h, "achieve", '["run", null]'), moycore.svc_send(h, "award", '[]'))
+print(moycore.svc_info(h)[6:])
+moycore.svc_step(1)
+print(moycore.svc_call(h))
+moycore.svc_answer(h, "7")
+moycore.svc_step(2)
+i = moycore.svc_info(h)
+print(i[0], i[1])
+moycore.svc_reap(h)
+"""
+
+
+def _vm(tmp_path, src):
     import subprocess
     from unix_mp import require_unix_mp
     exe = require_unix_mp("moycore", why="the Lua services on the VM a board runs")
     script = tmp_path / "svc.py"
-    script.write_text(VM_SVC)
+    script.write_text(src)
     done = subprocess.run([str(exe), str(script)], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.splitlines() == ["False 1", "4 3 0 True", "None"]
+    return done.stdout.splitlines()
+
+
+def test_the_vm_a_board_runs_steps_its_services_alike(tmp_path):
+    assert _vm(tmp_path, VM_SVC) == ["False 1", "4 3 0 True", "None"]
+
+
+def test_the_vm_a_board_runs_routes_messages_and_console_calls(tmp_path):
+    assert _vm(tmp_path, VM_MSG) == ["True False", "(1, 1)", "('day', '[]')", "4 10"]

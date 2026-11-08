@@ -7,7 +7,17 @@ it records into its document, which the console writes at its next frame, and
 posts a notification, which the console shows as the unlock banner. A message
 wake with nothing queued costs a frame nothing, and with the process stopped
 an event goes nowhere while the reads answer the last document.
+
+THE TIER-CONFORMANCE TEST (docs/os_2026-11.md, phase 5): every test over the
+`ws` fixture runs once per tier, the same body over the same process ported
+to it -- the same events in, the same store, the same notifications out. The
+Python process is the seed cart; the Lua one is a service of its own state
+(native/moycore/moycore_svc.h), tests/fixtures/achievements_lua.moy, put in
+the seed's place in the store.
 """
+
+import os
+import shutil
 
 import pytest
 
@@ -16,11 +26,30 @@ from runtime import achievements as A
 
 from ws_helpers import build_ws, make_drv
 
+LUA_TWIN = os.path.join(os.path.dirname(__file__), "fixtures", "achievements_lua.moy")
+WASM_WHY = ("a compiled service needs an ABI the owner has not chosen: its timer "
+            "callbacks as exports the OS calls, or WASI's poll_oneoff")
 
-@pytest.fixture
-def ws(tmp_path):
+
+def _lua_twin(ws):
+    """The Lua process in the seed's folder, and the console's load of it."""
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    dst = os.path.join(ws.carts_root, "moybyte.achievements.moy")
+    shutil.rmtree(dst)
+    shutil.copytree(LUA_TWIN, dst)
+    ws.carts.rescan()
+    ws.load_achievements()
+    assert S.SCHED.procs[ws.ach.pid].native
+
+
+@pytest.fixture(params=["python", "lua", pytest.param(
+    "wasm", marks=pytest.mark.xfail(run=False, reason=WASM_WHY))])
+def ws(request, tmp_path):
     notifications.NOTES.reset()
     w = build_ws(tmp_path)
+    if request.param == "lua":
+        _lua_twin(w)
     yield w
     S.SCHED.stop(w.ach.pid) if w.ach.pid is not None else None
     notifications.NOTES.reset()
@@ -36,7 +65,7 @@ def test_the_console_starts_the_process_over_its_store(ws):
     assert p.name == A.PROC and p.cart["type"] == "service"
     assert "notifications" in p.granted
     # it holds a wake on each of its messages, and nothing a frame serves
-    assert moybyte.WAKES.count(ws.ach.pid) == 2
+    assert S.SCHED.wakes_of(ws.ach.pid) == 2
     assert not [w for w in moybyte.WAKES.list if w[1] == ws.ach.pid]
     # the task manager lists it as a service
     rows = [r for r in ws.procs.rows() if r[6] == ws.ach.pid]
@@ -51,11 +80,11 @@ def test_an_achieve_from_a_cart_reaches_the_store_and_posts(ws):
     handed back."""
     notify = ws.app_context("probe", ("notify",)).notify
     notify.achieve("paint_save")
-    assert not notify.has("first_paint") and moybyte.WAKES.queued == 1
+    assert not notify.has("first_paint") and S.SCHED.mail_of(ws.ach.pid) == 1
     assert ws._toast_until == 0
     drv = make_drv(ws)
     drv.frame(1 / 30)
-    assert notify.has("first_paint") and moybyte.WAKES.queued == 0
+    assert notify.has("first_paint") and S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.toast[0] == "first_paint" and ws._toast_until
     notes = notifications.NOTES
     assert [(n.app, n.summary, n.pid) for n in notes.list] == [
@@ -97,9 +126,9 @@ def test_with_the_process_stopped_events_go_nowhere_and_reads_hold(ws):
     S.SCHED.tick(0)
     assert ws.ach.has("first_run")
     S.SCHED.stop(ws.ach.pid)                # the task manager's Stop
-    assert not ws.ach.running() and moybyte.WAKES.count(ws.ach.pid) == 0
+    assert not ws.ach.running() and S.SCHED.wakes_of(ws.ach.pid) == 0
     ws.ach.note("open", "x")
-    assert moybyte.WAKES.queued == 0
+    assert S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.award("konami") is False
     assert ws.ach.has("first_run") and ws.ach.count() == 1   # the last document
     assert ws.ach.today() == ws._today_ymd()

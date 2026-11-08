@@ -49,4 +49,13 @@
 // NULL: a game).
 int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
 
+// The JSON the prefs names read and write, for another binding's state (a
+// Lua service's messages and console calls, native/moycore/moycore_svc.h):
+// the one JSON value `text` holds (n bytes) pushed as prefs.get decodes it,
+// 1, or 0 with nothing pushed where it holds none; and the value at `idx` as
+// prefs.set encodes it, pushed as a string whose bytes are answered (raising
+// on a value that is not JSON).
+int moy_app_lua_json_push(lua_State *L, const char *text, size_t n);
+const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n);
+
 #endif // MOY_APP_LUA_H

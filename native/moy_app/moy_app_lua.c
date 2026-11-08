@@ -512,6 +512,27 @@ static void json_push(lua_State *L, const char *v, const char *end) {
     }
 }
 
+int moy_app_lua_json_push(lua_State *L, const char *text, size_t n) {
+    const char *end = text + n;
+    const char *v = moy_json_ws(text, end);
+    const char *past = moy_json_value(v, end, 0u);
+    if (past == NULL || moy_json_ws(past, end) != end) {
+        return 0;
+    }
+    json_push(L, v, past);
+    return 1;
+}
+
+const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) {
+    idx = lua_absindex(L, idx);
+    buf_t j;
+    buf_init(L, &j, 128u);
+    json_put(L, &j, idx, 0);
+    lua_pushlstring(L, (const char *)j.p, j.n);
+    lua_remove(L, j.idx);
+    return lua_tolstring(L, -1, n);
+}
+
 static int l_prefs_get(lua_State *L) {
     lua_settop(L, 2);
     buf_t b;

@@ -2,17 +2,21 @@
 section 8): `ws.ach`, and the notify role's server.
 
 The badges are the process's (system_carts/moybyte.achievements.moy, PROC):
-a Python service the console starts when it loads its store (`Link.start`),
+a service the console starts when it loads its store (`Link.start`),
 handing it the document the store holds, the write and the day
 (`Link.env`). The notify role's rows name it (`"server":
 "proc:achievements"`, native/moy_app/roles.json):
 
-  achieve, award    MESSAGES to the process (moybyte's `send`): it wakes on
-                    them in the scheduler's slice, records, and posts a
-                    notification on a fresh find, which the console shows as
-                    the unlock banner (console_notices.Notices._note_shown)
+  achieve, award    MESSAGES to the process (the scheduler's `send`): it
+                    wakes on them in the scheduler's slice, records, and
+                    posts a notification on a fresh find, which the console
+                    shows as the unlock banner
+                    (console_notices.Notices._note_shown)
   count, has, found_on, progress, today
-                    the process's functions of those names, called as reads
+                    a Python process's functions of those names, called as
+                    reads; a process of another tier (a Lua service, whose
+                    state is its own task's) is read from the document it
+                    last handed back, which is the whole of its state
 
 The process hands the document back and the console writes it at its next
 frame (`flush`), outside any slice: a store write on a card can outlast a
@@ -27,10 +31,6 @@ try:
     import scheduler as _sched
 except ImportError:  # host: the runtime package
     from runtime import scheduler as _sched
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
 try:
     from widgets import Achievements, ACH_TITLE, ACH_GLYPH, ACH_HIDDEN
 except ImportError:  # host: the runtime package
@@ -106,6 +106,7 @@ class Link:
     def _handed(self, doc):
         self.badges = doc
         self.pending = doc
+        self._last = None
 
     def flush(self):
         """Write the document the process handed back, where one waits."""
@@ -118,19 +119,22 @@ class Link:
         except Exception as exc:  # noqa: BLE001 -- a failed save is not remembered
             print("Moybyte achievements save failed:", _err_text(exc))
 
-    def _ns(self):
+    def _proc(self):
         pid = self.pid
-        if pid is None:
-            return None
-        p = _sched.SCHED.procs.get(pid)
+        return None if pid is None else _sched.SCHED.procs.get(pid)
+
+    def _ns(self):
+        """A running Python process's namespace, else None."""
+        p = self._proc()
         return None if p is None else p.ns
 
     def running(self):
-        return self._ns() is not None
+        p = self._proc()
+        return p is not None and p.state != _sched.EXITED
 
     def tracker(self):
-        """The process's tracker: while it is not running, the one it
-        stopped with, or one over the last document."""
+        """A running Python process's tracker; else the one it stopped
+        with, or one over the last document."""
         ns = self._ns()
         if ns is not None and ns.get("ACH") is not None:
             self._last = ns["ACH"]
@@ -158,7 +162,7 @@ class Link:
     def note(self, event, key=None):
         """A milestone `event` (with its `key`) to the process."""
         if self.pid is not None:
-            _moybyte.WAKES.send(self.pid, "achieve", (event, key))
+            _sched.SCHED.send(self.pid, "achieve", (event, key))
 
     def award(self, ach_id, quiet=False, day=None):
         """Badge `ach_id` to the process: True where it is a badge not yet
@@ -166,7 +170,7 @@ class Link:
         on another console, uncelebrated."""
         if ach_id not in ACH_TITLE or self.pid is None or self.has(ach_id):
             return False
-        return _moybyte.WAKES.send(self.pid, "award", (ach_id, quiet, day))
+        return _sched.SCHED.send(self.pid, "award", (ach_id, quiet, day))
 
     # -- the reads: the process's functions ----------------------------------
 

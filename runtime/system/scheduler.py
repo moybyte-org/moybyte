@@ -68,11 +68,17 @@ kill, exit and rung is one line of the OS log under the service's pid.
 LUA SERVICES (`"runtime": "lua"`). The start hands the cart's source to
 moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
 task of its own on a P4's core 0, refused where the chip runs none (the S3s,
-logged and exited 1). `poll()`, a wake of the shell's every POLL_MS while
-one lives, steps them where they have no task (the host, the desktop
-MicroPython), reads each one's heap (exact) and its calls' time onto its
-row, and hands an end to the same exit, log line and restart policy; a stop
-is its TERM there, the C side's KILL past MOY_SERVICE_STOP_MS.
+logged and exited 1), with what the console hands a system process (its
+`env`: the values as globals, the functions as console calls). `poll()`, a
+wake of the shell's every POLL_MS while one lives, steps them where they
+have no task (the host, the desktop MicroPython), answers the console calls
+they wait on (`moybyte.notify` and the `env` functions, run here on the VM's
+task as the service's process, at most CALLS_MAX a service a poll), reads
+each one's heap (exact) and its calls' time onto its row, and hands an end
+to the same exit, log line and restart policy; a stop is its TERM there, the
+C side's KILL past MOY_SERVICE_STOP_MS. `send` routes a message to a Lua
+service's row, and the console's frame start (`mail`) and a tick that runs
+first serve it with a poll, as they serve a Python service's.
 
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
@@ -114,6 +120,11 @@ except ImportError:  # host: the runtime package, `import moybyte` for a service
     _sys.modules.setdefault("moybyte", _moybyte)
 
 try:
+    import json as _json
+except ImportError:  # pragma: no cover - every VM has it
+    _json = None
+
+try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
@@ -133,6 +144,7 @@ MOY_RESTART_BACKOFF_MS = 1000  # the first restart's wait, doubled for each end 
 MOY_RESTART_HEAL_MS = 10000     # a run this long before its end starts the count afresh
 DUE_MAX = 16                    # wakes taken from the registry at a time
 POLL_MS = 20                    # the Lua services' poll (a stepped tier's timer grain)
+CALLS_MAX = 16                  # console calls answered a Lua service a poll
 SVC_EXITED = 4                  # moycore_svc.h's MOYCORE_SVC_EXITED
 EINVAL = 22
 _WRAP = 0x3FFFFFFF              # a counter wraps as ticks do: a small int on a board
@@ -255,6 +267,7 @@ class Scheduler:
         self._t0 = 0                # this tick's start and budget (left_us)
         self._budget = 0
         self._poll = 0              # the Lua services' poll, a wake of the shell's
+        self.svc_mail = False       # a message sent to a Lua service, not yet polled
         self.wakes.ended = self._ended
 
     # -- the tick ---------------------------------------------------------
@@ -268,6 +281,9 @@ class Scheduler:
             self._n = self._i = 0
             self.spent_us = 0
             return 0
+        if self.svc_mail:
+            self.svc_mail = False
+            self.poll()
         budget = slack_us
         if f == 0 and budget < MOY_BG_SLICE_US:
             budget = MOY_BG_SLICE_US
@@ -300,13 +316,49 @@ class Scheduler:
         in the frame of the input that sent it. Answers the microseconds
         spent."""
         w = self.wakes
-        if not w.queued:
+        if not w.queued and not self.svc_mail:
             return 0
         t0 = _ticks_us()
+        if self.svc_mail:
+            self.svc_mail = False
+            self.poll()
         for wake in list(w.mail):
             if wake[_AT]:
                 self._run(wake[0])
         return _ticks_diff(_ticks_us(), t0)
+
+    def send(self, pid, name, args):
+        """The OS routes message `name` with `args` to process `pid`
+        (moybyte's `send`, or a Lua service's row): False where it holds no
+        wake on `name`."""
+        p = self.procs.get(pid)
+        if p is None or not p.native:
+            return self.wakes.send(pid, name, args)
+        svc = _svc()
+        try:
+            took = svc.svc_send(p.native, name, _json.dumps(list(args)))
+        except (OSError, TypeError, ValueError):
+            return False
+        if took:
+            self.svc_mail = True
+        return took
+
+    def wakes_of(self, pid):
+        """How many wakes process `pid` holds: its timers, readers and
+        message wakes."""
+        p = self.procs.get(pid)
+        if p is not None and p.native:
+            got = _svc().svc_info(p.native)
+            return got[6] if got is not None else 0
+        return self.wakes.count(pid)
+
+    def mail_of(self, pid):
+        """How many messages wait for process `pid`."""
+        p = self.procs.get(pid)
+        if p is not None and p.native:
+            got = _svc().svc_info(p.native)
+            return got[7] if got is not None else 0
+        return self.wakes.mail_of(pid)
 
     def left_us(self):
         """What is left of this tick's budget, microseconds."""
@@ -520,7 +572,7 @@ class Scheduler:
             return None
         _log(INFO, pid, "start", name)
         if cart.get("runtime") == "lua":
-            return self._start_lua(p, cart.get("src") or "")
+            return self._start_lua(p, cart.get("src") or "", env)
         if "asyncio" in src_of(cart):
             _aio().install(self)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
@@ -554,15 +606,20 @@ class Scheduler:
 
     # -- the Lua services -------------------------------------------------
 
-    def _start_lua(self, p, src):
+    def _start_lua(self, p, src, env=None):
         """Lua service `p` (native/moycore/moycore_svc.h): its own state, on a
-        task of its own on the P4s and at this scheduler's poll elsewhere;
+        task of its own on the P4s and at this scheduler's poll elsewhere,
+        handed `env` (its values as globals, its functions as console calls);
         refused on a chip that runs none (the S3s) or with no Lua runtime."""
         svc = _svc()
         try:
             if svc is None:
                 raise OSError(EINVAL, "no Lua runtime")
-            p.native = svc.svc_start(p.pid, p.name, src)
+            p.native = svc.svc_start(p.pid, p.name, src, _env_text(env))
+        except (TypeError, ValueError) as e:
+            _log(ERR, p.pid, "what the console hands it is not JSON: %s" % e)
+            p.state, p.code = EXITED, EXIT_CRASHED
+            return None
         except OSError as e:
             _log(ERR, p.pid, "a Lua service does not run on this console"
                  if e.args and e.args[0] == EINVAL else "no room for a Lua service: %s" % e)
@@ -581,18 +638,21 @@ class Scheduler:
         svc = _svc()
         if svc is None:
             return
-        if not svc.svc_tasks():
+        stepped = not svc.svc_tasks()
+        if stepped:
             svc.svc_step(_ticks_ms())
         live = False
         for pid in list(self.procs):
             p = self.procs[pid]
             if not p.native:
                 continue
+            self._answer(p, svc, stepped)
             got = svc.svc_info(p.native)
             if got is None:
                 p.native = 0
                 continue
-            state, code, heap, cpu_us, _strikes, why = got
+            state, code, heap, cpu_us = got[0], got[1], got[2], got[3]
+            why = got[5]
             p.mem = heap
             p.cost_us = cpu_us & ALLOC_WRAP
             if state != SVC_EXITED:
@@ -608,6 +668,35 @@ class Scheduler:
             self.wakes.cancel(self._poll)
             self._plain.pop(self._poll, None)
             self._poll = 0
+
+    def _answer(self, p, svc, stepped):
+        """The console calls Lua service `p` waits on, answered on this
+        task as its process: `moybyte.notify`, or a function of the `env`
+        its start was handed. A stepped service runs on to its next call at
+        once."""
+        env = p.args[2] if len(p.args) > 2 else None
+        for _ in range(CALLS_MAX):
+            req = svc.svc_call(p.native)
+            if req is None:
+                return
+            name, args = req
+            fn = _moybyte.notify if name == "moybyte.notify" else (
+                env.get(name) if env else None)
+            ans = None
+            was = _L.current() if _L is not None else SHELL
+            if _L is not None:
+                _L.current(p.pid)
+            try:
+                if fn is not None:
+                    ans = _json.dumps(fn(*_json.loads(args)))
+            except Exception as exc:  # noqa: BLE001 -- refused, the service told
+                _log(ERR, p.pid, "%s: %s: %s" % (name, type(exc).__name__, exc))
+            finally:
+                if _L is not None:
+                    _L.current(was)
+            svc.svc_answer(p.native, ans)
+            if stepped:
+                svc.svc_step(_ticks_ms())
 
     def hook(self, pid, name, *args):
         """Run live service `pid`'s hook `name(*args)` (`moy_action`, a
@@ -795,6 +884,7 @@ class Scheduler:
             self._poll = 0
         self.procs.clear()
         self.down.clear()
+        self.svc_mail = False
         self.store = None
         self._n = self._i = 0
         self.resumed = ()
@@ -814,6 +904,21 @@ def _svc():
 
 def src_of(cart):
     return cart.get("src") or ""
+
+
+def _env_text(env):
+    """What the console hands a Lua service, as moycore_svc_start takes it:
+    the JSON text [values, calls], or None for nothing."""
+    if not env:
+        return None
+    vals = {}
+    calls = []
+    for k, v in env.items():
+        if callable(v):
+            calls.append(k)
+        else:
+            vals[k] = v
+    return _json.dumps([vals, calls])
 
 
 def _aio():

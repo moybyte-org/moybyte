@@ -107,10 +107,14 @@ def _svc_check(rc):
         raise OSError(e, os.strerror(e))
 
 
-def svc_start(pid, name, src):
+def svc_start(pid, name, src, env=None):
+    """Service `pid` started (moycore_svc_start): its handle. `env` is what
+    the console hands it, the JSON text [values, calls], or None."""
     b = src.encode() if isinstance(src, str) else bytes(src)
+    e = env.encode() if isinstance(env, str) else env
     h = _lb.ctypes.c_uint32()
-    _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), b, len(b),
+    _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), b, len(b), e,
+                                                len(e) if e is not None else 0,
                                                 _lb.ctypes.byref(h)))
     return h.value
 
@@ -119,12 +123,43 @@ def svc_stop(h):
     _svc_check(_lb.play_lib().moycore_svc_stop(h))
 
 
+def svc_send(h, name, args):
+    """Message `name` with `args` (JSON text, an array) queued on service
+    `h`: True, or False where it holds no wake on `name` (or has ended)."""
+    b = args.encode()
+    rc = _lb.play_lib().moycore_svc_send(h, name.encode(), b, len(b))
+    if rc == 4:                         # BAD: no wake on it
+        return False
+    _svc_check(rc)
+    return True
+
+
+def svc_call(h):
+    """The console call service `h` waits on: (name, its arguments' JSON
+    text), or None."""
+    ct = _lb.ctypes
+    name, args, n = ct.c_void_p(), ct.c_void_p(), ct.c_size_t()
+    if _lb.play_lib().moycore_svc_call(h, ct.byref(name), ct.byref(args), ct.byref(n)):
+        return None
+    return (ct.string_at(name.value).decode(),
+            ct.string_at(args.value, n.value).decode() if n.value else "")
+
+
+def svc_answer(h, ans):
+    """The console's answer (JSON text, or None: refused) to service `h`'s
+    call."""
+    b = ans.encode() if ans is not None else None
+    _svc_check(_lb.play_lib().moycore_svc_answer(h, b, len(b) if b is not None else 0))
+
+
 def svc_info(h):
-    """(state, exit, heap, cpu_us, strikes, why), or None for a stale handle."""
+    """(state, exit, heap, cpu_us, strikes, why, wakes, mail), or None for a
+    stale handle."""
     i = _lb.SvcInfo()
     if _lb.play_lib().moycore_svc_info(h, _lb.ctypes.byref(i)):
         return None
-    return (i.state, i.exit, i.heap, i.cpu_us, i.strikes, i.why.decode("utf-8", "replace"))
+    return (i.state, i.exit, i.heap, i.cpu_us, i.strikes, i.why.decode("utf-8", "replace"),
+            i.wakes, i.mail)
 
 
 def svc_reap(h):
