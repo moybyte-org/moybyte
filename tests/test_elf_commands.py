@@ -164,6 +164,18 @@ def test_a_path_outside_its_folders_is_refused(term, tmp_path):
     assert out(app, "elf.bare/bare deny /files/Documents/a.txt") == ["open -1"]
 
 
+def test_a_command_s_grant_ends_with_it(term):
+    """Each native command's run grant (sh_door._grant) ends with the
+    process: run after run, the grant table holds what it held."""
+    ws, app = term
+    out(app, "elf.hello/hello")
+    held = ws.app_abi.count()
+    for _ in range(5):
+        out(app, "elf.hello/hello")
+        out(app, "elf.hello/hello & wait")
+    assert ws.app_abi.count() == held
+
+
 def test_exit_codes_from_main_and_from_a_thread(term):
     _ws, app = term
     assert out(app, "elf.probe/probe exit 7; echo status $?") == ["status 7"]

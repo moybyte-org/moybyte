@@ -660,8 +660,10 @@ class ShellDoor:
 
     @staticmethod
     def _compiled_gone(pid):
-        _moybyte.WAKES.end(pid)
+        # The row first: the wakes' end drops a command's row (the
+        # scheduler's _ended), and its grant would outlive it.
         p = _sched.SCHED.procs.pop(pid, None)
+        _moybyte.WAKES.end(pid)
         ctx = getattr(p, "ctx", None)
         if ctx is not None:
             p.ctx = None
