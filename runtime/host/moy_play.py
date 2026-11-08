@@ -640,21 +640,27 @@ _FCANVAS = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(cty
 _FPRESENT = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_bool)
 _FMAP = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32),
                          ctypes.POINTER(ctypes.c_int32))
+_FFRAME = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                           ctypes.POINTER(ctypes.c_void_p))
+_FFENCE = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
 
 class _FrontOps(ctypes.Structure):
     """moy_front_ops_t (native/moy_play/moy_play.h)."""
     _fields_ = [("canvas", _FCANVAS), ("present", _FPRESENT), ("map", _FMAP),
-                ("ctx", ctypes.c_void_p)]
+                ("ctx", ctypes.c_void_p), ("frame", _FFRAME), ("frame_fence", _FFENCE)]
 
 
 _FRONT = []
 
 
-def front_ops(buf, w, h, presents=None):
+def front_ops(buf, w, h, presents=None, frames=None):
     """Stand a compositor in for the front: the run draws into `buf` (a
     ctypes array of w*h uint16), and each present appends whether the frame
-    drew to `presents`. None withdraws."""
+    drew to `presents`. With `frames` (a list) the stand-in shows a compiled
+    run's frames from the cart's memory too, as a board's `frame` op does:
+    each one shown is copied into a kept buffer, whose bytes are appended to
+    `frames`, and every fence appends None. None withdraws."""
     d, _ = _play()
     d.moy_play_front_ops.argtypes = [ctypes.c_void_p]
     if buf is None:
@@ -673,11 +679,34 @@ def front_ops(buf, w, h, presents=None):
     def map_(ctx, x, y):
         return 0 <= x[0] < w and 0 <= y[0] < h
 
-    cbs = (_FCANVAS(canvas), _FPRESENT(present), _FMAP(map_))
-    ops = _FrontOps(cbs[0], cbs[1], cbs[2], None)
-    _FRONT[:] = [buf, cbs, ops]
+    kept = (ctypes.c_uint8 * (2 * w * h))()
+
+    def frame(ctx, px, lut, out):
+        if lut:
+            return False                # a palette frame: written into the canvas
+        ctypes.memmove(kept, px, 2 * w * h)
+        frames.append(bytes(kept))
+        out[0] = ctypes.addressof(kept)
+        return True
+
+    def fence(ctx):
+        frames.append(None)
+
+    cbs = (_FCANVAS(canvas), _FPRESENT(present), _FMAP(map_),
+           _FFRAME(frame) if frames is not None else _FFRAME(),
+           _FFENCE(fence) if frames is not None else _FFENCE())
+    ops = _FrontOps(cbs[0], cbs[1], cbs[2], None, cbs[3], cbs[4])
+    _FRONT[:] = [buf, cbs, ops, kept]
     d.moy_play_front_ops(ctypes.byref(ops))
     return True
+
+
+def wasm_take(take):
+    """moycore_wasm_take: which layouts the current compiled run's blits leave
+    in its memory (1 blit565's, 2 blit's), as a board's glue asks for them."""
+    d, _ = _play()
+    d.moycore_wasm_take.argtypes = [ctypes.c_int]
+    d.moycore_wasm_take(int(take))
 
 
 def front_frame(now_ms, dt_us):

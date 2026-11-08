@@ -546,8 +546,8 @@ static void wo_lane_wait(void *user, int lane)
 // when something needs it -- a verb over it, a settle, or the cart's next
 // hook. On the engine's thread, so it only answers. TAKE_565 and TAKE_PALETTE
 // are the two layouts: blit565's words, and blit's indices with their colours.
-#define TAKE_565 1
-#define TAKE_PALETTE 2
+#define TAKE_565 MOYCORE_TAKE_565
+#define TAKE_PALETTE MOYCORE_TAKE_PALETTE
 
 static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
 {
@@ -934,15 +934,7 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_kept_obj, mod_frame_kept);
 // and with the colours of the blit that made it.
 static mp_obj_t mod_frame_settle(void)
 {
-#if MOY_WASM
-    if (RUN.wasm && WR) {
-        if (!WR->w.owed && WR->w.kept) {
-            WR->w.owed = WR->w.kept;
-            WR->w.kept = NULL;
-        }
-        moy_wasm_settle(&WR->w);
-    }
-#endif
+    moycore_wasm_settle();
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_settle_obj, mod_frame_settle);
@@ -999,3 +991,51 @@ static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_frame_presented_obj, 0, 2,
                                     mod_frame_presented);
+
+// The same hand-off for the kernel's front (moycore_lua.h).
+void moycore_wasm_take(int take)
+{
+#if MOY_WASM
+    if (WR) WR->take = take & (TAKE_565 | TAKE_PALETTE);
+#else
+    (void)take;
+#endif
+}
+
+const uint8_t *moycore_wasm_owed(const uint16_t **lut, bool *kept)
+{
+    *lut = NULL;
+    *kept = false;
+#if MOY_WASM
+    if (!RUN.wasm || !WR) return NULL;
+    *kept = WR->w.kept != NULL;
+    const moy_pixel *l = NULL;
+    const uint8_t *px = moy_wasm_frame(&WR->w, &l);
+    *lut = (const uint16_t *)l;
+    return px;
+#else
+    return NULL;
+#endif
+}
+
+void moycore_wasm_presented(const uint8_t *kept)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) moy_wasm_presented(&WR->w, kept);
+#else
+    (void)kept;
+#endif
+}
+
+void moycore_wasm_settle(void)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) {
+        if (!WR->w.owed && WR->w.kept) {
+            WR->w.owed = WR->w.kept;
+            WR->w.kept = NULL;
+        }
+        moy_wasm_settle(&WR->w);
+    }
+#endif
+}

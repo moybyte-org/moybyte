@@ -16,7 +16,8 @@ and `_draw` back to back with no return to Python, and the kernel's Player
 engine nor the cart's loop: a VM-free Lua run (`native/moy_play/moy_play.h`)
 is the kernel loop's foreground on the boards — its input, ticks, chrome and
 present in C, no upcall from launch to exit — and the VM stays up only
-for the shell around it. There is exactly **one** Lua runtime on every tier —
+for the shell around it. A compiled cart's run is too, on a board whose
+compositor shows its frames from the cart's memory (`moy_glass.front`). There is exactly **one** Lua runtime on every tier —
 boards, browser, host — and `import moy_lua` is meant to fail.
 
 The ladder that got there, one line each, because none of it is direction any

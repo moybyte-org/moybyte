@@ -74,6 +74,7 @@ typedef struct {
     char       *writable;    /* the manifest's "writable", libmoy's form */
     moy_app_run_t app;       /* the app's run its "moybyte.app" imports serve */
     uint32_t    rh;          /* its console's row (moycore_run_handle), 0 once released */
+    int         take;        /* the layouts its blits leave in its memory (moycore_lua.h) */
     void       *next;        /* the runs made and not freed */
 } host_wasm;
 
@@ -287,6 +288,50 @@ void *moycore_ui_target(void)
     return w->target;
 }
 
+/* The frame hand-off, as the board's module offers it: a blit of a layout
+ * the run takes leaves its frame in the cart's memory (moycore_lua.h). */
+static int hw_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
+{
+    (void)pixels;
+    return ((host_wasm *)user)->take & (lut ? MOYCORE_TAKE_PALETTE : MOYCORE_TAKE_565);
+}
+
+void moycore_wasm_take(int take)
+{
+    host_wasm *r = hw_current();
+    if (r) r->take = take & (MOYCORE_TAKE_565 | MOYCORE_TAKE_PALETTE);
+}
+
+const uint8_t *moycore_wasm_owed(const uint16_t **lut, bool *kept)
+{
+    host_wasm *r = hw_current();
+    const moy_pixel *l = NULL;
+    *lut = NULL;
+    *kept = false;
+    if (!r || !r->bound) return NULL;
+    *kept = r->w.kept != NULL;
+    const uint8_t *px = moy_wasm_frame(&r->w, &l);
+    *lut = (const uint16_t *)l;
+    return px;
+}
+
+void moycore_wasm_presented(const uint8_t *kept)
+{
+    host_wasm *r = hw_current();
+    if (r && r->bound) moy_wasm_presented(&r->w, kept);
+}
+
+void moycore_wasm_settle(void)
+{
+    host_wasm *r = hw_current();
+    if (!r || !r->bound) return;
+    if (!r->w.owed && r->w.kept) {
+        r->w.owed = r->w.kept;
+        r->w.kept = NULL;
+    }
+    moy_wasm_settle(&r->w);
+}
+
 /* 1 when WAMR is up with the import table registered -- once per process. */
 int hw_runtime(void)
 {
@@ -390,6 +435,8 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     moycore_RUN.c.con.rng = (uint32_t)moycore_run_now_ms() | 1u;
     r->w.read = hw_read;
     r->w.read_user = r;
+    r->w.frame = hw_frame;
+    r->w.frame_user = r;
     r->w.wire_swapped = wire_swapped ? 1 : 0;
     moy_stream_init(&r->pcm, r->pcm_ring, MOY_WASM_SND_DEPTH, MOY_WASM_SND_RATE);
     r->w.snd = hw_snd;
@@ -513,6 +560,7 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
 static int trapped(host_wasm *r)
 {
     r->dead = 1;
+    r->w.kept = NULL;
     moy_reset_state(&WRUN.c.canvas);
     moy_cls(&WRUN.c.canvas, 0);
     return 1;

@@ -293,6 +293,14 @@ def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
         board, on_glass.JET_TITLE, glass=True)
 
 
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# same scale and snapshot, in C (moy_glass.front's frame op), and the glass
+# holds the scale of the copy the front kept, byte for byte.
+def test_a_compiled_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "dsi")
+
+
 # Doom, built by the recipe (experiments/wasm_aot/doom/): its frames are the
 # host's, and the run's median drawn fps holds a floor about a fifth under
 # what this board drew when it was set (2026-09-28, the figures are #158's).

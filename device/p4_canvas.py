@@ -450,6 +450,14 @@ class P4SystemCanvas(SystemCanvas):
 
     presents_palette_frames = False
 
+    def frame_scratch(self, cf, gw, gh):
+        """The scratch `cf`'s frames are snapshotted into, sized as
+        present_frame takes it, for a run the kernel's front shows from the
+        cart's memory (moy_glass.front): the same buffer either way, so
+        neither path frees the other's. None when there is none to be had."""
+        n = 2 * gw * gh
+        return cf.scratch(((n + 191) & ~63) + 2 * gw * self.PATCH_ROWS)
+
     def present_frame(self, cf, view, gc, ox, oy, scale, src=None,
                       defer=False):
         """Show a compiled cart's blit565 frame where blit_game would have

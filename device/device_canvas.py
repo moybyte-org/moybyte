@@ -1558,6 +1558,15 @@ class DeviceCanvas:
         frames."""
         return self.presents_frames
 
+    def frame_scratch(self, cf, gw, gh, n=0):
+        """The scratch `cf`'s frames are folded from -- an `n`-byte frame's
+        span (a direct-colour one's where `n` is 0), a palette frame's colours
+        and the patches' pixels -- for present_frame and for a run the
+        kernel's front shows from the cart's memory (moy_glass.front): the
+        run's one scratch, which a smaller request keeps as it is. None when
+        there is none to be had."""
+        return cf.scratch((n or 2 * gw * gh) + 128 + 512 + cf.PATCH_BYTES)
+
     def present_frame(self, cf, view, gc, ox, oy, scale, src=None):
         """Hand the flush a compiled cart's frame straight from its memory in
         place of blit_game: `view` is the frame the CartFrame `cf` owes (the
@@ -1585,7 +1594,7 @@ class DeviceCanvas:
         fmt = 2 if n == gw * gh else 1
         nr = cf.nrects
         comp.fold_fence()
-        scr = cf.scratch(n + 128 + 512 + cf.PATCH_BYTES)
+        scr = self.frame_scratch(cf, gw, gh, n)
         if scr is None:
             return False
         try:

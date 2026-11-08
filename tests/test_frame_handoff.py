@@ -268,7 +268,9 @@ class ScratchFrame(FakeCartFrame):
 
 def _canvas(comp):
     from device.device_canvas import DeviceCanvas
-    return DeviceCanvas, SimpleNamespace(_comp=comp, _snap_live=False)
+    cv = SimpleNamespace(_comp=comp, _snap_live=False)
+    cv.frame_scratch = lambda cf, gw, gh, n=0: DeviceCanvas.frame_scratch(cv, cf, gw, gh, n)
+    return DeviceCanvas, cv
 
 
 GC = SimpleNamespace(w=320, h=240, _buf=bytearray(320 * 240 * 2))

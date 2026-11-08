@@ -374,6 +374,15 @@ bool moy_play_lock_seed(uint32_t *seed);
 // board gives none keeps the console's foreground, which drives the same
 // Player through its frame upcall.
 //
+// A compiled run's frame is the canvas too, unless the board shows it from
+// the cart's memory (`frame`): its blits then leave their frames where the
+// cart made them (moycore_lua.h's hand-off), the board scales or folds one
+// to the glass from there and keeps a copy, and the front writes a frame
+// into the canvas only where it must (a banner over it, a layout the board
+// does not show). With the VM up the front takes such a run only from a
+// board that shows its frames: the console's own composite is what shows
+// them otherwise (CartFrame).
+//
 // The front hands the frame back to the console -- the run still live --
 // when the run needs it: the cart declared a view the board's present does
 // not compose, it raised (the console's next frame reports it), or the link
@@ -388,6 +397,17 @@ typedef struct {
     // A panel point into the run's canvas; false when outside it.
     bool (*map)(void *ctx, int32_t *x, int32_t *y);
     void *ctx;
+    // A compiled run's owed frame shown from the cart's memory, and
+    // presented: `px` is the canvas's size, little-endian RGB565 words, or
+    // with `lut` (its 256 wire colours) an index byte a pixel. True when the
+    // board showed it, `*kept` then the copy it keeps (alive until the cart's
+    // next blit, the canvas written from it if the cart draws before then)
+    // or NULL; false: the front writes the frame into the canvas and
+    // presents that. NULL: the board shows only its canvas.
+    bool (*frame)(void *ctx, const uint8_t *px, const uint16_t *lut, const uint8_t **kept);
+    // Nothing still reads the cart's memory or writes the copy `frame`
+    // kept: before the cart's next hook, and before the run leaves the front.
+    void (*frame_fence)(void *ctx);
 } moy_front_ops_t;
 #define MOY_PLAY_FREE_DT 0.1f           // a free-running cart's dt clamp
 void moy_play_front_ops(const moy_front_ops_t *ops);

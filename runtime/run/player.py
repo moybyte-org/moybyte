@@ -290,6 +290,7 @@ class Player(PlayerDiag):
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self.verdict = None           # the run's (runtime, vm_free, why): _verdict
         self._front = False           # the run is the kernel loop's foreground
+        self._front_want = False      # ...not yet, and the console's frames ask again
         self._stopping = False        # the kernel stops the VM for the run
         self._paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
         self._audio_held = 0          # the session the pause took the mix from
@@ -639,6 +640,7 @@ class Player(PlayerDiag):
         reclaim + collect leave a compact heap for the next build. Idempotent;
         safe on the crash path (the error panel reads cart_error, never ns)."""
         self._front = False
+        self._front_want = False
         self._paused_at = 0
         self._audio_held = 0
         _os_log.end(self.pid)
@@ -1743,18 +1745,35 @@ class Player(PlayerDiag):
         loop makes no console upcall until the run ends or needs the console
         (docs/history/kernel_cartpath_2026-10.md §4). Where the board's compositor
         gives no front (`ws.front_bind`), or this canvas is not the one it
-        composes, the console's frame keeps driving the same Player."""
-        if self._play is None or self._is_tool or not (self.verdict and self.verdict[1]):
+        composes, the console's frame keeps driving the same Player. Where the
+        WM has no rect for it yet (`play_viewport`: a game full screen on the
+        desk before the glass around it is still, a window, a cart's view),
+        `_front_want` stays up and the console's next frames ask again
+        (`_front_again`); a bind the kernel then refuses asks no more until
+        the next start or resume."""
+        self._front_want = False
+        if (self._play is None or self._is_tool or self.cart_error is not None
+                or not (self.verdict and self.verdict[1])):
             return False
-        bind = getattr(self.ws, "front_bind", None)
+        ws = self.ws
+        bind = getattr(ws, "front_bind", None)
         take = getattr(_moy_play, "front", None)
         if bind is None or take is None:
             return False
         try:
-            return bool(bind()) and bool(take(self._run_handle))
+            if not bind():
+                self._front_want = True
+                return False
+            return bool(take(self._run_handle))
         except Exception as exc:  # noqa: BLE001 -- the console's frame still runs it
             print("PLAY front:", exc)
             return False
+
+    def _front_again(self):
+        """A console frame of a run that wants the front: ask for it again."""
+        if self._paused_at or self.detached:
+            return
+        self._front = self._take_front()
 
     def _resume_from_front(self, ws):
         """The console's first frame after the kernel's front gave it back:
@@ -2110,6 +2129,10 @@ class Player(PlayerDiag):
             return
         if self._paused_at:
             return                     # the pause menu holds it: the frame stays
+        if self._front_want:
+            self._front_again()
+            if self._front:
+                return                 # the kernel draws it from the next frame
         _perf = (ws.perf_hud or ws.perf_capture) and not self.detached
         if self.cart_error is None:
             if not self.detached:

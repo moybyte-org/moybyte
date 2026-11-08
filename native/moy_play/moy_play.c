@@ -910,6 +910,11 @@ int moy_play_info(uint32_t run, moy_play_info_t *out) {
 // Whether a VM runs (moy_loop.c): weak, for a build of the Player without
 // the loop (the host's), where one always does.
 extern __typeof__(moy_loop_vm) moy_loop_vm __attribute__((weak));
+// The compiled run's frame hand-off (moycore_lua.h): weak, for an image whose
+// moycore runs no compiled cart.
+extern __typeof__(moycore_wasm_owed) moycore_wasm_owed __attribute__((weak));
+extern __typeof__(moycore_wasm_presented) moycore_wasm_presented __attribute__((weak));
+extern __typeof__(moycore_wasm_settle) moycore_wasm_settle __attribute__((weak));
 
 // -- the run in front ------------------------------------------------------------
 
@@ -938,12 +943,14 @@ int moy_play_front(uint32_t run) {
         return MOY_PLAY_STALE;
     }
     moycore_run_use(r->mc);
-    // A Lua run: its frame is the console's canvas. A compiled cart's frame
-    // is its own memory, which the console's present composes (CartFrame).
-    // A run with the VM down is the exception: the kernel's present shows
-    // its canvas, which the cart's blits write (no frame hand-off is taken).
+    // A Lua run: its frame is the console's canvas. A compiled cart's is its
+    // own memory, which only a board that shows frames from there takes in
+    // front (moy_play.h); with the VM down no frame hand-off is taken, and
+    // the kernel's present shows the canvas the cart's blits write.
+    bool wasm = moycore_RUN.wasm;
     if (F.ops == NULL || r->rt->vm || r->in == NULL || r->view || r->info.raised
-            || (!r->info.vm_down && (strcmp(r->rt->name, "lua") != 0 || moycore_RUN.wasm))) {
+            || (!r->info.vm_down && (wasm ? F.ops->frame == NULL || moycore_wasm_owed == NULL
+                                          : strcmp(r->rt->name, "lua") != 0))) {
         return MOY_PLAY_NORT;
     }
     int w = 0, h = 0;
@@ -956,7 +963,25 @@ int moy_play_front(uint32_t run) {
     return MOY_PLAY_OK;
 }
 
+// A compiled run's frame as the console takes it back: nothing the board
+// started still reads the cart's memory or its copy, and the canvas holds
+// the frame (the console's composite shows the canvas).
+static void front_settle(void) {
+    if (!moycore_RUN.wasm || F.ops->frame == NULL || moycore_wasm_settle == NULL) {
+        return;
+    }
+    if (F.ops->frame_fence != NULL) {
+        F.ops->frame_fence(F.ops->ctx);
+    }
+    moycore_wasm_settle();
+}
+
 static int front_ended(int why) {
+    run_t *r = live(F.run);
+    if (r != NULL) {
+        moycore_run_use(r->mc);
+        front_settle();
+    }
     moy_play_end(F.run, why);
     F.live = false;
     return -1;
@@ -971,6 +996,7 @@ bool moy_play_front_end(int why) {
 }
 
 static int front_back(void) {
+    front_settle();
     F.live = false;                     // the console drives the run from here
     return -1;
 }
@@ -1037,6 +1063,12 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         return front_back();
     }
     moycore_RUN.c.canvas.pix = (moy_pixel *)px;
+    // A compiled run's frame: what the board started on the last one reads
+    // the cart's memory no more once its next hook runs.
+    bool shows = moycore_RUN.wasm && F.ops->frame != NULL && moycore_wasm_owed != NULL;
+    if (shows && F.ops->frame_fence != NULL) {
+        F.ops->frame_fence(F.ops->ctx);
+    }
     uint32_t out = 0;
     int rc = moy_play_frame(F.run, ticks, dt, render, &out);
     if (rc == MOY_PLAY_RAISED) {
@@ -1050,6 +1082,27 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     }
     if (out & MOY_PLAY_VIEW) {
         return front_back();            // a view the console composes
+    }
+    if (render && shows) {
+        // The frame the cart blitted goes from its memory; a banner over it,
+        // or a layout the board does not show, is written into the canvas
+        // first. A frame the cart did not replace is on the glass already.
+        const uint16_t *lut = NULL;
+        bool kept = false;
+        const uint8_t *fr = moycore_wasm_owed(&lut, &kept);
+        if (moy_chrome_overlay_up(now)) {
+            moycore_wasm_settle();
+        } else if (fr != NULL) {
+            const uint8_t *copy = NULL;
+            if (F.ops->frame(F.ops->ctx, fr, lut, &copy)) {
+                moycore_wasm_presented(copy);
+                return 1;
+            }
+            moycore_wasm_settle();
+        } else if (kept) {
+            F.ops->present(F.ops->ctx, false);
+            return 0;
+        }
     }
     if (render) {
         moy_chrome_overlay_draw(px, w, h, moycore_RUN.c.canvas.wire, now);

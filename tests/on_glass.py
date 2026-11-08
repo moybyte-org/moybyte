@@ -2231,9 +2231,9 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     it runs, so reading it and leaving it cross nothing either; the books
     frozen at the end are read back once the console has the frame again.
     `clear` is cart_runs_and_exits's. `front` False: a board whose
-    compositor gives the kernel no front (the Guition P4's rotated one), where
-    the console's frame drives the same Player -- its CONSOLE crossing a
-    frame is the only one, and the run is left by the shell."""
+    compositor gives the kernel no front, where the console's frame drives
+    the same Player -- its CONSOLE crossing a frame is the only one, and the
+    run is left by the shell."""
     import time
     _clear_to_console(board, clear)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
@@ -5011,6 +5011,199 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
     if glass:
         assert bad == 0, "the glass differs from the snapshot's scale: %d bytes" % bad
     return snaps1[0] - snaps0[0]
+
+
+# A compiled run in the kernel's front with the VM up (moy_glass.front's
+# frame op, native/moy_play/moy_play.h): its frames go to the glass from the
+# cart's memory in C. The proof, between two front frames, over the copy the
+# front kept (`moy_glass.front_stats`: how many it showed, where the last
+# copy sits in the run's scratch, its layout) and the game rect it was bound
+# to: on a DSI board ("dsi") the buffer the last frame drew into holds, in
+# that rect, byte for byte the PPA's scale of the copy; on the rotated one
+# ("rot") the scan buffer it was shown in holds the PPA's scale and rotate of
+# it; on a banded panel ("fold") the fold over the copy synthesizes the bands
+# of the CPU composite of it. Each is taken again one pixel off, which must
+# differ. Every family: the copy settles into the canvas exactly.
+
+_FRONT_FRAME_PROOF = """
+def _ff_rect():
+    wm = ws.wm
+    r = getattr(ws, 'render_scale', 1)
+    if getattr(wm, 'mode', None) == 'desktop':
+        ox, oy, scale = wm._player_view(wm._wins['desktop'])
+    else:
+        ox, oy, scale = wm.play_viewport()
+    return ox * r, oy * r, scale * r
+
+def _front_frame_proof(kind, shift):
+    import binascii, moy_glass
+    cf = ws.cart_frame
+    comp = ws.comp
+    gc = ws.canvas
+    gw, gh = gc.w, gc.h
+    st = moy_glass.front_stats()
+    off, fmt = st[1], st[2]
+    n = gw * gh * (1 if fmt == 2 else 2)
+    kept = memoryview(cf._scratch)[off:off + n]
+    ox, oy, scale = _ff_rect()
+    bad = -1
+    if kind == 'fold':
+        import array, moy_alloc
+        comp.fold_fence()
+        comp.snap_fence()
+        fbw, fbh = comp.size()
+        scr = moy_alloc.alloc(len(cf._scratch), moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        back = comp._back
+        fb = comp._fbs[back]
+        # The palette the front resolved: the fold's own copy, after the
+        # frame's 64-aligned span (the console never saw this frame's).
+        tail = (off + n + 63) & ~63
+        lut = array.array('H', bytes(memoryview(cf._scratch)[tail:tail + 512]))
+        try:
+            comp.frame_fold(kept, fmt, lut if fmt == 2 else None, scr, gw, gh,
+                            0, 0, gw, gh, ox, oy, scale, None, None)
+            comp.snap_fence()
+            z = bytes(2 * fbw)
+            for y in range(fbh):
+                fb[2 * fbw * y:2 * fbw * (y + 1)] = z
+            row = bytearray(2 * gw * scale)
+            for y in range(gh):
+                for x in range(gw):
+                    if fmt == 2:
+                        v = lut[kept[y * gw + x]]
+                        lo, hi = v & 0xFF, v >> 8
+                    else:
+                        j = 2 * (y * gw + x)
+                        lo, hi = kept[j + 1], kept[j]
+                    for s in range(scale):
+                        row[2 * (x * scale + s)] = lo
+                        row[2 * (x * scale + s) + 1] = hi
+                for s in range(scale):
+                    a = 2 * ((oy + y * scale + s) * fbw + ox + shift)
+                    m = min(len(row), len(fb) - a)
+                    fb[a:a + m] = row[:m]
+            bad = comp._lcd.fold_test(back)
+        finally:
+            comp.disarm_scale_fold()
+            moy_alloc.free(scr)
+        return bad
+    import moy_alloc, moy_ppa
+    moy_ppa.sync()
+    moy_ppa.snap_wait()
+    if kind == 'dsi':
+        fbw, fbh = comp.size()
+        fb = comp._fbs[(comp._back - 1) % len(comp._fbs)]
+        x0, y0, w, h = ox, oy, gw * scale, gh * scale
+        dst = moy_alloc.alloc(2 * fbw * fbh, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        try:
+            moy_ppa.blit_scale(dst, fbw, fbh, ox + shift, oy, kept, gw, gh, scale)
+            bad = _ff_diff(fb, dst, fbw, x0, y0, w, h)
+        finally:
+            moy_alloc.free(dst)
+        return bad
+    comp.sync()
+    pw, ph = comp._pw, comp._ph
+    lw, lh = comp._w, comp._h
+    angle = comp.angle
+    w, h = gw * scale, gh * scale
+    if angle == 90:
+        x0, y0 = oy, lw - (ox + shift) - w
+    else:
+        x0, y0 = lh - oy - h, ox + shift
+    fb = comp._fbs[comp._front]
+    dst = moy_alloc.alloc(2 * pw * ph, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+    try:
+        moy_ppa.rotate_scale(dst, pw, ph, x0, y0, kept, gw, gh, scale, angle)
+        if angle == 90:
+            x0, y0 = oy, lw - ox - w
+        else:
+            x0, y0 = lh - oy - h, ox
+        bad = _ff_diff(fb, dst, pw, x0, y0, h, w)
+    finally:
+        moy_alloc.free(dst)
+    return bad
+
+def _ff_diff(fb, dst, stride, x0, y0, w, h):
+    bad = 0
+    for y in range(y0, y0 + h):
+        a = 2 * (y * stride + x0)
+        b = a + 2 * w
+        if fb[a:b] != dst[a:b]:
+            bad += sum(1 for i in range(a, b) if fb[i] != dst[i])
+    return bad
+
+def _front_settle_proof(kind):
+    import binascii, moy_glass, moycore
+    st = moy_glass.front_stats()
+    gc = ws.canvas
+    n = gc.w * gc.h * (1 if st[2] == 2 else 2)
+    kept = memoryview(ws.cart_frame._scratch)[st[1]:st[1] + n]
+    # The front's frame fence first, as its hand-back takes it: the copy
+    # of the frame shown last may still be landing.
+    if kind == 'fold':
+        ws.comp.snap_fence()
+    else:
+        import moy_ppa
+        moy_ppa.snap_wait()
+    want = binascii.crc32(kept)
+    moycore.frame_settle()
+    if st[2] == 2:
+        return True
+    if kind != 'fold':
+        return binascii.crc32(gc._buf) == want
+    # An S3 canvas holds the panel's byte order, the cart's frame its own.
+    c = memoryview(gc._buf)
+    for i in range(0, n, 2):
+        if c[i] != kept[i + 1] or c[i + 1] != kept[i]:
+            return False
+    return True
+"""
+
+
+def a_compiled_run_shows_its_frames_in_front(board, title, kind, seconds=4.0):
+    """`title`, a compiled cart, plays fullscreen in the kernel's front with
+    the VM up: the front is live, the frames it shows from the cart's memory
+    (`front_stats`) climb with the frames drawn, the game canvas is never
+    written meanwhile, and the proof above for this board's family (`kind`:
+    "dsi", "rot" or "fold") reads 0 -- and not 0 one pixel off. Returns the
+    frames shown."""
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    crc = "__import__('binascii').crc32(ws.canvas._buf)"
+    try:
+        board.drain(3.0)
+        assert board.pyval("__import__('moy_play').front_live()", strict=True), \
+            "the run did not take the front"
+        assert board.pyexec(_FRONT_FRAME_PROOF, strict=True)
+        s0 = board.pyval("__import__('moy_glass').front_stats()", strict=True)
+        c0 = board.pyval(crc, strict=True)
+        f0 = board.state()["frames"]
+        board.drain(seconds)
+        f1 = board.state()["frames"]
+        s1 = board.pyval("__import__('moy_glass').front_stats()", strict=True)
+        c1 = board.pyval(crc, strict=True)
+        bad = board.pyval("ws._g['_front_frame_proof'](%r, 0)" % kind, timeout=180,
+                          strict=True)
+        off = board.pyval("ws._g['_front_frame_proof'](%r, 1)" % kind, timeout=180,
+                          strict=True)
+        settled = board.pyval("ws._g['_front_settle_proof'](%r)" % kind, timeout=60,
+                              strict=True)
+        live = board.pyval("__import__('moy_play').front_live()", strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nFRONT FRAMES %s (%s): %d shown over %d frames in %.0fs, proof %r, "
+          "one pixel off %r, settle %r" % (title, kind, s1[0] - s0[0], f1 - f0, seconds,
+                                           bad, off, settled))
+    assert s1[0] - s0[0] >= (f1 - f0) // 2 > 0, "the front did not show its frames"
+    assert c1 == c0, "a frame was written into the game canvas"
+    assert bad == 0, "the glass differs from the front's frame: %d bytes" % bad
+    assert off > 0, "the proof cannot see a one-pixel shift"
+    assert settled, "the settled canvas is not the front's copy"
+    assert live, "the proof took the run out of the front"
+    return s1[0] - s0[0]
 
 
 def p4_palette_frames_keep_the_blit(board, title, seconds=2.0):

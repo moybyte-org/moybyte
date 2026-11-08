@@ -3,7 +3,10 @@
 //
 // THE LEVER is the board's MOY_VM_STOP (its mpconfigboard.h): the S3 boards,
 // whose PSRAM a Doom-sized compiled cart needs whole. A board without it (the
-// P4s) has no verdict here and keeps the VM for every run (KEEP_LEVER).
+// P4s) has no verdict here and keeps the VM for every run (KEEP_LEVER). A
+// run that keeps the VM is the loop's foreground all the same where its
+// board's compositor takes it (moy_play.h): a Lua run, and a compiled one
+// whose frames the compositor shows from the cart's memory.
 //
 // THE VERDICT (moy_play_stop_verdict, at the launch, the VM up): a VM-free
 // game stops the VM only when every clause of moy_play.h's verdict lets it -- its

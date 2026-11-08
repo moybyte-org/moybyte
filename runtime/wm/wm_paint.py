@@ -48,6 +48,10 @@ class WindowPaint:
     """The window buffers, the backdrop cache, the game's composite, the
     windows' draw and the shown ring of `WindowedWM` (its first base)."""
 
+    # play_viewport's wait on the desk: the frame the game's full-screen
+    # window took its rect at, and the rect (-1: none taken).
+    _pv_since = -1
+    _pv_x = _pv_y = _pv_w = _pv_h = 0
 
     # -- window buffer lifetime ------------------------------------------------
     #
@@ -463,13 +467,35 @@ class WindowPaint:
         self._blit_game(sc, gc, ox, oy, scale, src=src)
 
     def play_viewport(self):
-        """Console mode's fullscreen game rect, (ox, oy, scale): what a run
-        the kernel drives in front composes (native/moy_play's front). None in
-        the desk world and for a cart-declared view, which the console
+        """The game rect, (ox, oy, scale), a run the kernel drives in front
+        composes (native/moy_play's front): console mode's fullscreen game,
+        or on the desk a game full screen at the top of the windows, once
+        the console has drawn the glass around it into every buffer it
+        scans (the front keeps that glass and draws only the game). None
+        otherwise, and for a cart-declared view, which the console
         composes."""
-        if self._order or self._view_src() is not None:
+        if self._view_src() is not None:
             return None
-        return FullscreenStackWM.viewport(self)
+        if self.mode != "desktop":
+            return None if self._order else FullscreenStackWM.viewport(self)
+        win = self._wins.get("desktop")
+        order = self._order
+        if (win is None or self.ws.app_window_canvas or not self.game_full()
+                or not order or order[-1] != "desktop"):
+            self._pv_since = -1
+            return None
+        drawn = self.ws.frame_state.frames_drawn
+        if (self._pv_since < 0 or self._pv_x != win.x or self._pv_y != win.y
+                or self._pv_w != win.w or self._pv_h != win.h):
+            self._pv_since = drawn
+            self._pv_x = win.x
+            self._pv_y = win.y
+            self._pv_w = win.w
+            self._pv_h = win.h
+            return None
+        if drawn - self._pv_since <= self._retained_n():
+            return None
+        return self._player_view(win)
 
     def _play_bezel(self, sc, ox, oy, scale, src):
         """Console mode's letterbox bezel, at most once a frame.

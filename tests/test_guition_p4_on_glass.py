@@ -269,6 +269,14 @@ def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
         board, on_glass.JET_TITLE, glass=False)
 
 
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# same scale and snapshot, in C (moy_glass.front's frame op), and the glass
+# holds the scale of the copy the front kept, byte for byte.
+def test_a_compiled_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "rot")
+
+
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
 # developer has built the cart, which is never in the repository or CI.
 def test_doom_frames_match_the_host(board):
@@ -666,15 +674,13 @@ def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
 
 
-# The rotated compositor gives the kernel no front: the console's frame
-# drives the same C Player, and its CONSOLE crossing is the only one.
 @pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
 def test_a_front_run_makes_no_crossing(board, spec, title):
-    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3, front=False)
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3)
 
 
 def test_a_ctrl_c_ends_a_front_run_and_reaches_the_repl(board):
-    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3, front=False)
+    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3)
 
 
 def test_bluetooth_stops_and_starts_again(board):

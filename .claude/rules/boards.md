@@ -238,7 +238,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   skipping the root composite and its read-back, and no bounce slot crosses
   into Python. A compiled cart's frame folds straight from the cart's memory
   (blit's palette or blit565's byte swap resolved per band), so no canvas holds
-  it. The game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
+  it -- from the console's frame, or in C from the kernel's front, which
+  takes a fullscreen compiled play with the VM up (`moy_glass.front`). The
+  game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
   keeps the bezels. `moy_fold.h` is the authority.
 - **The panel rules live in `native/moy_lcd`'s C**: DMA only from internal
   SRAM, only the first band carries a command (what "a full-screen flush must
@@ -314,7 +316,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   written into the canvas only when something needs it there (the CartFrame
   rules). A palette frame keeps the blit: ESP-IDF disables the PPA's palette
   mode. CRISP PIXELS is the canvas composite's alone; a direct-colour frame
-  is always the bilinear scale.
+  is always the bilinear scale. A fullscreen compiled play (console mode, or
+  a game full screen on the desk once the glass around it is still) runs in
+  the kernel's front with the VM up, and the same scale and snapshot are C
+  (`moy_glass.front`'s frame op, `moy_play.h`): no console Python a frame.
 - **An async PPA op must be the frame's LAST write**, and `moy_ppa` must
   C2M-writeback a CPU-painted destination before submit, because the IDF
   driver invalidates the out window at submit. Both are ROW-SCOPED

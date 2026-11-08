@@ -25,6 +25,7 @@
 #ifndef MOYCORE_LUA_H
 #define MOYCORE_LUA_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -146,6 +147,24 @@ void moycore_lua_unstuck(void);
 // Defined by the binding (modmoycore.c; a compiled cart's session is
 // moycore_wasm.c's).
 int moycore_frame(float dt, int draw, char *err, size_t n);
+
+// The open compiled run's frame hand-off (libmoy/moy_wasm.h's `frame`), for
+// the kernel's front (moy_play.c). moycore_wasm_take sets which layouts its
+// blits leave in the cart's memory (MOYCORE_TAKE_565 blit565's words,
+// MOYCORE_TAKE_PALETTE blit's indices); moycore_wasm_owed answers the frame
+// owed, or NULL, a palette frame's colours in `*lut` (NULL for blit565's),
+// and in `*kept` whether the canvas lacks the last frame shown, which the
+// copy the board named holds; moycore_wasm_presented says the board showed
+// the owed frame, `kept` its copy (NULL: the canvas holds it);
+// moycore_wasm_settle writes the owed frame, or the kept one, into the
+// canvas. Defined by the binding that runs compiled carts (moycore_wasm.c,
+// the host's moyhost_wasm.c); weak where a build has none.
+#define MOYCORE_TAKE_565 1
+#define MOYCORE_TAKE_PALETTE 2
+void moycore_wasm_take(int take);
+const uint8_t *moycore_wasm_owed(const uint16_t **lut, bool *kept);
+void moycore_wasm_presented(const uint8_t *kept);
+void moycore_wasm_settle(void);
 
 // The open run's frame is past the runaway watch's budget: from the
 // watcher's task, end it -- a Lua run raises `what` at its next instruction

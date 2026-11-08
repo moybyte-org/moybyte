@@ -467,7 +467,7 @@ _REFRESHES = ctypes.CFUNCTYPE(ctypes.c_int32, _P)
 
 class _DsiOps(ctypes.Structure):
     _fields_ = [("show", _SHOW), ("msync", _VOID), ("ppa_sync", _VOID),
-                ("ppa_done", _BOOL), ("ticks_us", _TICKS),
+                ("ppa_done", _BOOL), ("snap_wait", _VOID), ("ticks_us", _TICKS),
                 ("refreshes", _REFRESHES), ("ctx", _P)]
 
 
@@ -614,7 +614,11 @@ class DsiCompositor:
         def refreshes(_ctx):
             return dsi.refreshes()
 
+        snap_wait = getattr(ppa, "snap_wait", None) if ppa is not None else None
+
         self._cb = (_SHOW(show), _VOID(msync), _VOID(ppa_sync), _BOOL(ppa_done),
+                    _VOID(lambda _ctx: snap_wait()) if snap_wait is not None
+                    else _VOID(),
                     _TICKS(lambda _ctx: _now_us()),
                     _REFRESHES(refreshes) if hasattr(dsi, "refreshes")
                     else _REFRESHES())

@@ -160,6 +160,8 @@ void moy_chrome_note(const char *head, const char *name, const char *icon, uint3
 // moy_ui_unlock: the notice, the unlock banner, then the notification
 // banner; last, while a process holds the microphone, the recording
 // indicator (moy_ui_rec) at the top right. False: nothing was.
+// Whether moy_chrome_overlay_draw would draw anything at `now`.
+bool moy_chrome_overlay_up(uint32_t now);
 bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now);
 
 #endif // MOY_CHROME_H

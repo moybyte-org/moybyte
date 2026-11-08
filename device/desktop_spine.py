@@ -170,15 +170,27 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
     banded panel larger than the game canvas folds it into console mode's
     rect through the flush (the scratch is the system canvas's fold
     snapshot, blit_game's); a DSI board scales the game canvas into that
-    rect. The desk world (a window's run) and a cart-declared view leave the
-    run to the console. A bind that took pushes the console's half of the
-    PERF line once for the run: the console's frame does not run while it is
-    in front."""
+    rect. A compiled run's frame goes from the cart's memory where the run
+    has a CartFrame and the system canvas a `frame_scratch` (the scratch its
+    present_frame snapshots into, which the front's snapshot shares). The
+    rect is the WM's `play_viewport`: console mode's fullscreen game, or a
+    game full screen on the desk once the glass around it is still, whose
+    surround the bind keeps (no bezel cleared). A window's run and a
+    cart-declared view leave the run to the console. A bind that took pushes
+    the console's half of the PERF line once for the run: the console's
+    frame does not run while it is in front."""
     fold = getattr(comp, "snap_scale_fold", None) is not None
+    frame_scratch = getattr(sys_canvas, "frame_scratch", None)
+
+    def frames():
+        cf = ws.cart_frame
+        if cf is None or frame_scratch is None:
+            return None
+        return frame_scratch(cf, game.w, game.h)
 
     def bind():
         if game is sys_canvas:
-            took = glass.front(comp)
+            took = glass.front(comp, None, frames())
         else:
             vp = getattr(ws.wm, "play_viewport", None)
             g = vp() if vp is not None else None
@@ -190,9 +202,11 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
             if fold:
                 scr = sys_canvas.front_scratch(game.w, game.h)
                 took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
-                                          scr))
+                                          scr), frames())
             else:
-                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+                bezel = getattr(ws.wm, "mode", None) != "desktop"
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
+                                          bezel), frames())
         if took:
             ws.perf_push(loop, front=True)
         return took

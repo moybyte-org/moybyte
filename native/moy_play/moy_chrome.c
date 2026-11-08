@@ -413,7 +413,7 @@ __attribute__((weak)) uint32_t moy_mic_owner(void) {
     return 0;
 }
 
-bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
+bool moy_chrome_overlay_up(uint32_t now) {
     if (K.up && (int32_t)(K.until - now) <= 0) {
         K.up = false;
     }
@@ -423,10 +423,14 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
     if (K.note_up && (int32_t)(K.note_until - now) <= 0) {
         K.note_up = false;
     }
-    bool rec = moy_mic_owner() != 0;
-    if (!K.up && !K.toast_up && !K.note_up && !rec) {
+    return K.up || K.toast_up || K.note_up || moy_mic_owner() != 0;
+}
+
+bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
+    if (!moy_chrome_overlay_up(now)) {
         return false;
     }
+    bool rec = moy_mic_owner() != 0;
     // the run's canvas lent as a row of the shell's look: its palette below,
     // the theme's block above, the theme's faces (a cart's boundary put aside
     // for the banner, which is the system's)

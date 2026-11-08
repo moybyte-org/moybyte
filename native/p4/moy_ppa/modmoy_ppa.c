@@ -1327,35 +1327,44 @@ static void snap_wait_inner(void) {
 //   (64-aligned, at least the span long), by DMA when the engine takes it;
 //   fence with snap_wait(). A frame that already sits where its copy would
 //   land -- the last frame shown, shown again -- is not copied.
-static mp_obj_t moy_ppa_snap(mp_obj_t scratch_in, mp_obj_t frame_in) {
-    mp_buffer_info_t scr, fr;
-    mp_get_buffer_raise(scratch_in, &scr, MP_BUFFER_WRITE);
-    mp_get_buffer_raise(frame_in, &fr, MP_BUFFER_READ);
-    uintptr_t a0 = (uintptr_t)fr.buf & ~(uintptr_t)63u;
-    size_t off = (size_t)((uintptr_t)fr.buf - a0);
-    size_t span = (off + fr.len + 63u) & ~(size_t)63u;
-    if (fr.len == 0 || scr.len < span || ((uintptr_t)scr.buf & 63u) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("snap scratch"));
+// snap's body, shared with the kernel's front: the frame's offset in `scr`,
+// or -1 where `scr` cannot hold the span.
+static long snap_do(uint8_t *dst, size_t len, const uint8_t *frame, size_t n) {
+    uintptr_t a0 = (uintptr_t)frame & ~(uintptr_t)63u;
+    size_t off = (size_t)((uintptr_t)frame - a0);
+    size_t span = (off + n + 63u) & ~(size_t)63u;
+    if (n == 0 || len < span || ((uintptr_t)dst & 63u) != 0) {
+        return -1;
     }
-    uint8_t *dst = (uint8_t *)scr.buf;
     snap_wait_inner();
-    if ((const uint8_t *)fr.buf == dst + off) {
-        return MP_OBJ_NEW_SMALL_INT(off);
+    if (frame == dst + off) {
+        return (long)off;
     }
     if (!s_snap_dead && rb_dma_install()) {
         s_snap_busy = true;
         esp_err_t err = esp_async_memcpy(s_mcp, dst, (void *)a0, span, snap_done_cb, NULL);
         if (err == ESP_OK) {
             s_snaps++;
-            return MP_OBJ_NEW_SMALL_INT(off);
+            return (long)off;
         }
         s_snap_busy = false;
         if (err == ESP_ERR_INVALID_ARG) {
             s_snap_dead = true;
         }
     }
-    memcpy(dst + off, fr.buf, fr.len);
+    memcpy(dst + off, frame, n);
     s_snaps_sync++;
+    return (long)off;
+}
+
+static mp_obj_t moy_ppa_snap(mp_obj_t scratch_in, mp_obj_t frame_in) {
+    mp_buffer_info_t scr, fr;
+    mp_get_buffer_raise(scratch_in, &scr, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(frame_in, &fr, MP_BUFFER_READ);
+    long off = snap_do((uint8_t *)scr.buf, scr.len, (const uint8_t *)fr.buf, fr.len);
+    if (off < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("snap scratch"));
+    }
     return MP_OBJ_NEW_SMALL_INT(off);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(moy_ppa_snap_obj, moy_ppa_snap);
@@ -1665,6 +1674,29 @@ static mp_obj_t moy_ppa_shift_in_stats(void) {
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_shift_in_stats_obj, moy_ppa_shift_in_stats);
+
+// The kernel's front (native/moy_glass's front ops): a compiled cart's frame
+// scaled from its memory, queued (moy_ppa_k_sync fences it); 0, the driver's
+// error, or -1 before init.
+int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src,
+                       int sw, int sh, int scale) {
+    if (s_srm == NULL) {
+        return -1;
+    }
+    mp_int_t blk[4] = {0, 0, sw, sh};
+    return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
+                       scale < 1 ? 1 : scale, blk, PPA_TRANS_MODE_NON_BLOCKING);
+}
+
+// ...and its snapshot into `scr`: snap()'s copy, the frame's offset in
+// `scr`, or -1 where `scr` cannot hold it.
+long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n) {
+    return snap_do(scr, len, frame, n);
+}
+
+void moy_ppa_k_snap_wait(void) {
+    snap_wait_inner();
+}
 
 // The kernel's teardown (native/moy_glass): no snapshot and no transaction
 // still reads or writes a buffer the VM is about to free.

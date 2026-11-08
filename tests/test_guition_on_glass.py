@@ -218,6 +218,19 @@ def test_a_blit565_frame_goes_to_the_glass_from_the_carts_memory(board):
     on_glass.compiled_frames_go_to_the_glass_from_the_cart(board, on_glass.JET_TITLE, 1)
 
 
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# frame fold takes its frames from the cart's memory in C (moy_glass.front's
+# frame op), a palette frame (the blit fixture) and a blit565 one (Jet), and
+# its bands are the composite the frame makes, byte for byte.
+def test_a_compiled_palette_run_shows_its_frames_in_front(board, wasm_carts):
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, wasm_carts["blit"], "fold")
+
+
+def test_a_compiled_blit565_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "fold")
+
+
 def test_a_compiled_cart_with_no_module_runs_on_the_interpreter(board, wasm_carts):
     on_glass.wasm_no_module_at_all_runs_on_the_interpreter(board, WASM_BOARD_DIR)
 
