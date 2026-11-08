@@ -409,6 +409,23 @@ int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap) {
     return rc;
 }
 
+_Static_assert(sizeof(moy_evq_ev_t) == 8u + MOY_EVQ_APP + MOY_EVQ_NAME,
+               "the record a compiled program reads has no padding");
+
+int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) {
+    moy_evq_ev_t ev;
+    size_t head = sizeof ev;
+    int rc = moy_evq_take(pid, &ev, cap > head ? (char *)buf + head : NULL,
+                          cap > head ? cap - head : 0u);
+    if ((rc == MOY_EVQ_OK || rc == MOY_EVQ_RANGE) && cap >= head) {
+        memcpy(buf, &ev, head);
+    }
+    if (rc == MOY_EVQ_OK) {
+        *len = head + ev.n;
+    }
+    return rc;
+}
+
 uint32_t moy_evq_queued(uint32_t pid) {
     MOY_SYNC_LOCK(&s_lock);
     int i = slot_of(pid);
@@ -457,6 +474,15 @@ void moy_evq_kick(uint32_t pid) {
     if (i >= 0) {
         wake((uint32_t)i);
     }
+}
+
+void moy_evq_unwait(uint32_t pid) {
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    if (i >= 0) {
+        s_who[i] = NULL;
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
 }
 
 void moy_evq_reset(void) {

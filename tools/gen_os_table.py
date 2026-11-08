@@ -17,10 +17,14 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     native/moy_elf/moy_os_rows.h    the kernel's prototype of each row (moy_os_<name>)
     native/moy_elf/moy_os_table.c   the table, a retired row's typed stub, and the
                                     body of each row the role door serves
-    sdk/include/moybyte/os.h        a module's header: the hooks, the moybyte rows,
-                                    the event record (from native/moy_input/moy_event.h)
+    sdk/include/moybyte/os.h        a program's header: the moybyte rows, the event
+                                    descriptor and its record (from
+                                    native/moy_kernel/moy_evq.h), a WASI program's
+                                    moybyte.os imports
     sdk/src/moyos_stubs.c           a module's side of every row: the function by
                                     its C library name, calling the table by ordinal
+  the WASI tier
+    native/moy_wasm/moy_wasi_os_rows.h  a WASI program's moybyte.os imports
   the app ABI (native/moy_app)
     native/moy_app/moy_app_rows.h   the roles, the C rows, the door's table, the
                                     permission map
@@ -51,7 +55,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from board_config import runtime_file  # noqa: E402
 SOURCE = os.path.join(ROOT, "native", "os_calls.json")
-EVENT_H = os.path.join(ROOT, "native", "moy_input", "moy_event.h")
+EVQ_H = os.path.join(ROOT, "native", "moy_kernel", "moy_evq.h")
 
 KERNEL_H = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.h")
 ROWS_H = os.path.join(ROOT, "native", "moy_elf", "moy_os_rows.h")
@@ -62,6 +66,9 @@ APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
+WASI_OS_H = os.path.join(ROOT, "native", "moy_wasm", "moy_wasi_os_rows.h")
+# The module a WASI program imports a "wasi" row from.
+WASI_OS = "moybyte.os"
 APP_CONTEXT = str(runtime_file("app_context.py"))
 APP_PERMS = str(runtime_file("app_perms.py"))
 SHELL_SERVERS = str(runtime_file("shell_servers.py"))
@@ -146,7 +153,7 @@ def role_table(src=None):
         src = load()
     return [{"role": role_of(r), "verb": verb_of(r), "server": r["server"],
              "grant": grant_of(src, role_of(r)),
-             "wasm": wasm_sig(r) if r.get("wasm") else None} for r in door_rows(src)]
+             "wasm": wasm_sig(r) if r.get("wasm") is True else None} for r in door_rows(src)]
 
 
 def roles(src):
@@ -177,6 +184,26 @@ def params(r):
 def wasm_sig(r):
     """The WAMR signature string of a row's moybyte.app import."""
     return "(%s)i" % "".join("i" if t == "int" else "*~" for _n, t in params(r))
+
+
+def wasi_rows(src):
+    """The rows a WASI program imports from moybyte.os."""
+    return [r for r in src["rows"] if r.get("wasm") == "wasi"]
+
+
+def wasi_params(r):
+    """[(name, kind)] of a "wasi" row's C prototype: "s" a text (a pointer and
+    a length in the import), "i" a number."""
+    out = []
+    for p in parse(r["c"])[2]:
+        name = _param_name(p)
+        out.append((name, "s" if p.startswith("const char *") else "i"))
+    return out
+
+
+def wasi_sig(r):
+    """The WAMR signature string of a row's moybyte.os import."""
+    return "(%s)i" % "".join("*~" if k == "s" else "i" for _n, k in wasi_params(r))
 
 
 def door_kinds(r):
@@ -273,6 +300,8 @@ def elf(src):
         if "c" in r:
             e = {k: r[k] for k in ("name", "kind", "c", "fail") if k in r}
             e.update({k: r[k] for k in ELF_FIELDS if k in r})
+            e["name"] = parse(r["c"])[1]
+            e["kind"] = r.get("kind", "moybyte")
             e["door"] = None
         else:
             e = {"name": c_name(r), "kind": "moybyte",
@@ -409,7 +438,17 @@ def check(src):
         outs = [n for n, t in params(r) if t == "out"]
         if (r.get("ret") == "len") != bool(outs) and r.get("how") != "direct":
             raise TableError("%s: a len answer is what an out parameter holds" % name)
-        if r.get("wasm"):
+        if r.get("wasm") not in (None, True, "wasi"):
+            raise TableError("%s's wasm: %r" % (name, r["wasm"]))
+        if r.get("wasm") == "wasi":
+            if "c" not in r or not isinstance(r.get("elf"), int) or kind != "moybyte":
+                raise TableError("%s: a WASI import is a moybyte row the kernel serves" % name)
+            ps = parse(r["c"])[2]
+            if parse(r["c"])[0] != "int" or not all(
+                    p.startswith("const char *") or p.startswith("int ") for p in ps):
+                raise TableError("%s: a WASI import takes texts and numbers, and answers a "
+                                 "number" % name)
+        elif r.get("wasm"):
             if not ("in" in r and "ret" in r and "how" in r):
                 raise TableError("%s: an import needs in, ret and how" % name)
             if (r["how"] == "direct") != (role_of(r) == "ui"):
@@ -554,6 +593,8 @@ def gen_rows_h(table):
           "int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out,",
           "                    size_t cap);", ""]
     for r in rows:
+        if r.get("retired"):
+            continue
         attr = " __attribute__((noreturn))" if r.get("noreturn") else ""
         o.append("%s%s;" % (kernel_proto(r), attr))
     o += ["", "#endif // MOY_OS_ROWS_H", ""]
@@ -625,51 +666,89 @@ def gen_kernel_c(table):
     return "\n".join(o)
 
 
-def _event_block(path=EVENT_H):
-    """MOY_EVENT_VERSION, the record and its kinds, as moy_event.h states them."""
+def _evq_block(path=EVQ_H):
+    """The event descriptor, its record's version and the record, as
+    moy_evq.h states them."""
     with open(path) as f:
         text = f.read()
     out = []
-    for pat in (r"#define MOY_EVENT_VERSION \d+",
-                r"typedef struct \{[^}]*\} moy_event_t;",
-                r"enum \{\s*MOY_EV_NONE = 0,[^}]*\};"):
+    for pat in (r"#define MOY_EVQ_FD \d+", r"#define MOY_EVQ_VERSION \d+",
+                r"#define MOY_EVQ_NAME \d+u", r"#define MOY_EVQ_APP \d+u",
+                r"typedef struct \{[^}]*\} moy_evq_ev_t;"):
         m = re.search(pat, text, re.S)
         if not m:
-            raise TableError("moy_event.h no longer has %r" % pat)
+            raise TableError("moy_evq.h no longer has %r" % pat)
         out.append(m.group(0))
-    return "\n\n".join(out)
+    return "\n".join(out[:4]) + "\n\n" + out[4]
+
+
+def _wasi_import(r):
+    """A WASI program's side of a "wasi" row: its moybyte.os import, and the
+    function by the row's C name over it (each text a pointer and a length)."""
+    ret, name, ps, _v = parse(r["c"])
+    verb = verb_of(r)
+    args, call = [], []
+    for p, (n, k) in zip(ps, wasi_params(r)):
+        if k == "s":
+            args += ["const char *%s" % n, "size_t %s_len" % n]
+            call += [n, "%s ? __builtin_strlen(%s) : 0" % (n, n)]
+        else:
+            args.append(p)
+            call.append(n)
+    imp = "__moy_os_%s" % verb
+    return ["int32_t %s(%s)" % (imp, ", ".join(args)),
+            '    __attribute__((import_module("%s"), import_name("%s")));' % (WASI_OS, verb),
+            "static inline %s {" % r["c"],
+            "    int32_t r = %s(%s);" % (imp, ", ".join(call)),
+            "    if (r < 0) {",
+            "        errno = (int)-r;",
+            "        return -1;",
+            "    }",
+            "    return (int)r;",
+            "}"]
 
 
 def gen_sdk_h(table):
     rows = table["rows"]
+    src = load()
     o = [HEAD,
-         "// A Moybyte native module's header (sdk/README.md): what a module defines for\n"
-         "// the OS to call, and the OS's own functions that have no POSIX name. The\n"
-         "// POSIX functions are the C library's own headers' (unistd.h, fcntl.h, ...),\n"
-         "// served by the same table.\n",
+         "// A Moybyte program's header (sdk/README.md): the OS's own functions that\n"
+         "// have no POSIX name, and the event descriptor a program reads its messages\n"
+         "// from. A native module's POSIX functions are the C library's own headers'\n"
+         "// (unistd.h, fcntl.h, poll.h, ...), served by the OS table; a WASI\n"
+         "// program's are WASI's, and the calls it shares with a native module are\n"
+         "// its moybyte.os imports, under the same names.\n",
          "#ifndef MOYBYTE_OS_H", "#define MOYBYTE_OS_H", "",
          "#include <stddef.h>", "#include <stdint.h>", "",
          "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
          "// The OS table this header was made from: a module built against it runs",
          "// on a console whose table has every row the module calls.",
          "#define MOY_OS_VERSION %d" % table["version"], "",
-         "// The table the OS hands a module at its load (sdk/src/moyos_crt.c).",
-         TABLE_T, "",
-         "// The event record (version 1, 16 bytes).",
-         _event_block(), "",
-         "// What the OS calls, each optional. A command is main(argc, argv); an app or",
-         "// a service is moy_start, then moy_timer for each tick of a timer it",
-         "// started (moy_timer_every) and moy_on for each event of the kinds it asked",
-         "// for (moy_events), then moy_stop. Every call is on the module's own task.",
-         "int moy_start(void);",
-         "void moy_stop(void);",
-         "void moy_timer(uint32_t t_us);",
-         "void moy_on(const moy_event_t *e);", "",
-         "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
-         "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
-         "#define MOY_LOG_DEBUG 7", ""]
+         "// THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service",
+         "// model): the process's event queue, readable while a message is queued.",
+         "// A program blocks in poll (poll_oneoff) on it, its nearest deadline the",
+         "// timeout, and each read takes one record: a moy_evq_ev_t, then its",
+         "// arguments (a JSON array, `n` bytes), then a NUL. A read never blocks: -1",
+         "// with EAGAIN while nothing is queued, EMSGSIZE where the buffer is short",
+         "// (the record's head written, its `n` what the arguments need, the",
+         "// message kept). A native service that is stopped reads end of file (0),",
+         "// its poll answering POLLHUP, and returns from main. A message reaches",
+         "// the process only on a name it listens on (moy_on); moy_send answers",
+         "// how many processes took one.",
+         _evq_block(), "",
+         "#ifdef __wasm__", "",
+         "#include <errno.h>", ""]
+    for r in wasi_rows(src):
+        o += _wasi_import(r)
+        o.append("")
+    o += ["#else", "",
+          "// The table the OS hands a module at its load (sdk/src/moyos_crt.c).",
+          TABLE_T, "",
+          "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
+          "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
+          "#define MOY_LOG_DEBUG 7", ""]
     for r in rows:
-        if r["kind"] == "moybyte" and r["door"] is None:
+        if r["kind"] == "moybyte" and r["door"] is None and not r.get("retired"):
             o.append("%s;" % r["c"])
     o += ["",
           "// The app's calls (docs/app_api_v1.md, the call table): each the console's",
@@ -682,7 +761,22 @@ def gen_sdk_h(table):
     for r in rows:
         if r["door"] is not None:
             o.append("%s;   // %s" % (r["c"], r["src"]["name"]))
-    o += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_OS_H", ""]
+    o += ["", "#endif // __wasm__", "",
+          "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_OS_H", ""]
+    return "\n".join(o)
+
+
+def gen_wasi_h(src):
+    o = [HEAD,
+         "// A WASI program's moybyte.os imports (native/moy_wasm/moy_wasi.h): each\n"
+         "// X(verb, its WAMR signature), a text a pointer and a length, the rows of\n"
+         "// native/os_calls.json marked \"wasi\", whose C function the kernel serves an\n"
+         "// ELF module too.\n",
+         "#ifndef MOY_WASI_OS_ROWS_H", "#define MOY_WASI_OS_ROWS_H", "",
+         "#define MOY_WASI_OS_ROWS(X) \\"]
+    for r in wasi_rows(src):
+        o.append('    X(%s, "%s") \\' % (verb_of(r), wasi_sig(r)))
+    o += ["", "#endif // MOY_WASI_OS_ROWS_H", ""]
     return "\n".join(o)
 
 
@@ -693,7 +787,8 @@ def gen_stubs_c(table):
          "// name that calls the table's row by its ordinal. Built once per row\n"
          "// (-DMOY_OS_ONLY=<row>) into libmoyos.a, so a module links only the rows it\n"
          "// calls, and each records its ordinal in the non-loaded section .moy.rows,\n"
-         "// which the loader reads to refuse a module that needs a newer console.\n",
+         "// which the loader reads to refuse a module that needs a newer console. A\n"
+         "// retired row has none: a module built now cannot call it.\n",
          "#define _DEFAULT_SOURCE 1", "#define _GNU_SOURCE 1",
          "#undef _FORTIFY_SOURCE", "",
          "#include <stdarg.h>", "#include <stdint.h>", "#include <stddef.h>",
@@ -708,6 +803,10 @@ def gen_stubs_c(table):
          "#define MOY_OS_USED(n) __asm__(\".pushsection .moy.rows,\\\"\\\",@progbits\\n"
          ".4byte \" MOY_OS_STR(n) \"\\n.popsection\")", ""]
     for i, r in enumerate(rows):
+        if r.get("retired"):
+            o.append("// %d %s: retired %s" % (i, r["name"], r["retired"].split(":")[0]))
+            o.append("")
+            continue
         ret, name, ps, variadic = parse(r["c"])
         kparams = kernel_params(r)
         args = ", ".join(_param_name(p) for p in kparams)
@@ -865,7 +964,7 @@ def _ui_c_params(r):
 
 
 def wasm_rows(src):
-    return [r for r in door_rows(src) if r.get("wasm")]
+    return [r for r in door_rows(src) if r.get("wasm") is True]
 
 
 def gen_wasm_h(src):
@@ -1075,7 +1174,7 @@ def gen_doc(src):
     o += ["", "The calls a program reaches on more than one tier, each by its name",
           "there (`docs/os_2026-11/tiers.md` §1; the toolkit's `ui` rows are",
           "`docs/ui_api_2026-10.md`'s):", "",
-          "| call | permission | Python | Lua | wasm (`moybyte.app`) | C (ELF) |",
+          "| call | permission | Python | Lua | wasm (`moybyte.app`; a WASI program's `moybyte.os`) | C (ELF) |",
           "|---|---|---|---|---|---|"]
     table = elf(src)
     cnames = {}
@@ -1085,8 +1184,11 @@ def gen_doc(src):
     for r in src["rows"]:
         if r.get("kind") == "posix" or role_of(r) == "ui":
             continue
-        cname = cnames.get(r["name"]) or (r["name"] if r.get("server") == "kernel" else None)
-        imported = ident(r["name"]) if r.get("wasm") else None
+        if r.get("retired"):
+            continue
+        cname = cnames.get(r["name"]) or (parse(r["c"])[1] if "c" in r else None)
+        imported = (ident(r["name"]) if r.get("wasm") is True
+                    else "%s.%s" % (WASI_OS, verb_of(r)) if r.get("wasm") else None)
         if not (cname or imported or r.get("lua")):
             continue
         perms = perms_of(r, src)
@@ -1109,7 +1211,7 @@ def outputs(src=None):
             (KERNEL_C, gen_kernel_c(table)), (SDK_H, gen_sdk_h(table)),
             (STUBS_C, gen_stubs_c(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
-            (LUA_H, gen_lua_h(src)),
+            (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
             (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),
             (SHELL_SERVERS, gen_door_args(src)), (SCHEDULER, gen_calls(src)),
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src))]

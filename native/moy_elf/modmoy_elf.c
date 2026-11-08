@@ -16,9 +16,9 @@
 //   moy_elf.on_net(fn): fn(pid, hold) when a process opens its first socket
 //       (1) and at its end (0), on this task; None: nothing holds the network
 //   moy_elf.service(path, pid, id[, flags]) -> None, or the reason it did not start
-//   moy_elf.poll() -> [(pid, status)] of the services that ended by themselves
+//   moy_elf.reap() -> [(pid, status)] of the services that ended by themselves
 //   moy_elf.stop(pid) -> status, or -1 for no such service
-//   moy_elf.info(pid) -> (threads, handles, calls, timers, events) or None
+//   moy_elf.info(pid) -> (threads, handles, wakes, events) or None
 //   moy_elf.stats() -> (started, swept, killed, leaked)
 //   moy_elf.mem() -> (internal free, internal largest, psram free, psram largest)
 //   moy_elf.load() -> (read_us, check_us, reloc_us, internal free before, after):
@@ -301,10 +301,10 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 4, mod_service);
 
-static mp_obj_t mod_poll(void) {
+static mp_obj_t mod_reap(void) {
     uint32_t pids[MOY_OS_PROCS];
     int32_t codes[MOY_OS_PROCS];
-    uint32_t n = moy_os_poll_services(pids, codes, MOY_OS_PROCS);
+    uint32_t n = moy_os_reap(pids, codes, MOY_OS_PROCS);
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (uint32_t i = 0; i < n; i++) {
         mp_obj_t t[2] = { mp_obj_new_int_from_uint(pids[i]), mp_obj_new_int(codes[i]) };
@@ -312,7 +312,7 @@ static mp_obj_t mod_poll(void) {
     }
     return out;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_poll_obj, mod_poll);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_reap_obj, mod_reap);
 
 static mp_obj_t mod_stop(mp_obj_t pid) {
     return mp_obj_new_int(moy_os_stop((uint32_t)mp_obj_get_int(pid)));
@@ -324,12 +324,11 @@ static mp_obj_t mod_info(mp_obj_t pid) {
     if (moy_os_info((uint32_t)mp_obj_get_int(pid), &i) != 0) {
         return mp_const_none;
     }
-    mp_obj_t t[5] = {
+    mp_obj_t t[4] = {
         mp_obj_new_int_from_uint(i.threads), mp_obj_new_int_from_uint(i.handles),
-        mp_obj_new_int_from_uint(i.calls), mp_obj_new_int_from_uint(i.timers),
-        mp_obj_new_int_from_uint(i.events),
+        mp_obj_new_int_from_uint(i.wakes), mp_obj_new_int_from_uint(i.events),
     };
-    return mp_obj_new_tuple(5, t);
+    return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_info_obj, mod_info);
 
@@ -381,7 +380,7 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&mod_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&mod_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_service), MP_ROM_PTR(&mod_service_obj) },
-    { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&mod_poll_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reap), MP_ROM_PTR(&mod_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&mod_stats_obj) },

@@ -82,6 +82,20 @@ def test_a_retired_row_answers_through_a_typed_stub():
     assert "    return NULL;" in c and "moy_os_errno_set(ENOSYS);" in c
 
 
+def test_the_retired_rows_keep_their_slots_and_answer_enosys():
+    """A service's timers and input readers went with the one service model
+    (2026-11-08): their ordinals stay, each a typed stub, and neither the SDK's
+    header nor its archive offers them to a module built now."""
+    rows = _table()["rows"]
+    c = open(gen_os_table.KERNEL_C).read()
+    sdk = open(gen_os_table.SDK_H).read()
+    stubs = open(gen_os_table.STUBS_C).read()
+    for i, name in ((38, "moy_timer_every"), (39, "moy_timer_cancel"), (40, "moy_events")):
+        assert rows[i]["name"] == name and rows[i]["retired"].startswith("2026-11-08")
+        assert "(void *)moy_os_retired_%s," % name in c
+        assert name + "(" not in sdk and "int %s(" % name not in stubs
+
+
 def test_the_sdk_s_log_levels_and_event_record_are_the_kernel_s():
     sdk = open(gen_os_table.SDK_H).read()
     log = open(os.path.join(ROOT, "native", "moy_kernel", "moy_log.h")).read()
@@ -89,7 +103,7 @@ def test_the_sdk_s_log_levels_and_event_record_are_the_kernel_s():
     order = ["MOY_LOG_EMERG"] + [n.strip() for n in names.split(",") if n.strip()]
     for name, value in re.findall(r"#define (MOY_LOG_\w+) (\d+)", sdk):
         assert order.index(name) == int(value), name
-    assert gen_os_table._event_block() in sdk
+    assert gen_os_table._evq_block() in sdk
 
 
 @pytest.fixture(scope="module")

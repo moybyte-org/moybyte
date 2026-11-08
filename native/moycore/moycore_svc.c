@@ -1019,6 +1019,7 @@ static void svc_task(void *arg) {
         }
         moy_evq_wait(s->pid, wait > 0 ? wait : 1u);     // the one kernel wait
     }
+    moy_evq_unwait(s->pid);             // the queue may outlive this task
     s->done = 1;
     vTaskDelete(NULL);
 }

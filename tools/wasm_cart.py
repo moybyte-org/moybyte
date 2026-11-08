@@ -79,7 +79,9 @@ def assemble(src):
     by the vendored assembler; a WASI command's `src/main.c` by wasi-sdk's
     clang (`tools/jet_cart.py` finds or fetches it) or `src/main.rs` by
     rustc for `wasm32-wasip1`, each as the toolchain builds any program,
-    with no flag of ours, and its DWARF stripped (`strip_debug`)."""
+    with no flag of ours but the SDK's headers on a C program's include path
+    (`moybyte/os.h`: the event descriptor and the moybyte.os imports), and
+    its DWARF stripped (`strip_debug`)."""
     wat_src = os.path.join(src, SOURCE)
     if os.path.isfile(wat_src):
         with open(wat_src, encoding="utf-8") as f:
@@ -97,7 +99,7 @@ def assemble(src):
                 raise ToolchainMissing("no wasi-sdk")
             cmd = [os.path.join(sdk, "bin", "clang"), "--target=wasm32-wasip1",
                    "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
-                   "-o", out, c_src]
+                   "-I", os.path.join(ROOT, "sdk", "include"), "-o", out, c_src]
         elif os.path.isfile(rs_src):
             rustc = shutil.which("rustc")
             if rustc is None or not rust_wasip1():

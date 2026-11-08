@@ -4,7 +4,8 @@
 // name that calls the table's row by its ordinal. Built once per row
 // (-DMOY_OS_ONLY=<row>) into libmoyos.a, so a module links only the rows it
 // calls, and each records its ordinal in the non-loaded section .moy.rows,
-// which the loader reads to refuse a module that needs a newer console.
+// which the loader reads to refuse a module that needs a newer console. A
+// retired row has none: a module built now cannot call it.
 
 #define _DEFAULT_SOURCE 1
 #define _GNU_SOURCE 1
@@ -423,35 +424,11 @@ int moy_term_size(int *cols, int *rows)
 }
 #endif
 
-#if MOY_OS_ROW(38)
-#include "moybyte/os.h"
-typedef int moy_os_fn_moy_timer_every(uint32_t period_us);
-MOY_OS_USED(38);
-int moy_timer_every(uint32_t period_us)
-{
-    return ((moy_os_fn_moy_timer_every *)__moy_os->fn[38])(period_us);
-}
-#endif
+// 38 moy_timer_every: retired 2026-11-08
 
-#if MOY_OS_ROW(39)
-#include "moybyte/os.h"
-typedef int moy_os_fn_moy_timer_cancel(int timer);
-MOY_OS_USED(39);
-int moy_timer_cancel(int timer)
-{
-    return ((moy_os_fn_moy_timer_cancel *)__moy_os->fn[39])(timer);
-}
-#endif
+// 39 moy_timer_cancel: retired 2026-11-08
 
-#if MOY_OS_ROW(40)
-#include "moybyte/os.h"
-typedef int moy_os_fn_moy_events(uint32_t kinds);
-MOY_OS_USED(40);
-int moy_events(uint32_t kinds)
-{
-    return ((moy_os_fn_moy_events *)__moy_os->fn[40])(kinds);
-}
-#endif
+// 40 moy_events: retired 2026-11-08
 
 #if MOY_OS_ROW(41)
 #include <sys/mman.h>
@@ -847,5 +824,25 @@ MOY_OS_USED(79);
 int32_t moy_share(const void *data, size_t data_len, const char *mime)
 {
     return ((moy_os_fn_moy_share *)__moy_os->fn[79])(data, data_len, mime);
+}
+#endif
+
+#if MOY_OS_ROW(80)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_send(const char *app, const char *name, const char *args);
+MOY_OS_USED(80);
+int moy_send(const char *app, const char *name, const char *args)
+{
+    return ((moy_os_fn_moy_send *)__moy_os->fn[80])(app, name, args);
+}
+#endif
+
+#if MOY_OS_ROW(81)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_on(const char *name, int on);
+MOY_OS_USED(81);
+int moy_on(const char *name, int on)
+{
+    return ((moy_os_fn_moy_on *)__moy_os->fn[81])(name, on);
 }
 #endif

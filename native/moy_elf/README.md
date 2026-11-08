@@ -30,9 +30,11 @@ decisions the code rests on.
   `.moy.rows` below this console's row count (else "needs a console update",
   naming the row), and on a board no undefined dynamic symbol.
 - **The entry's ops** are `moy_os.h`'s `MOY_ELF_OP_*`: BIND hands the table
-  and answers which hooks the module defines (a hook it lacks is a hidden
-  weak reference the link resolves to 0); MAIN, START, STOP, TIMER and ON
-  call them. The loader's own call (no table) runs the constructors.
+  and answers whether the module defines `main` (a hidden weak reference the
+  link resolves to 0 where it lacks it); MAIN calls it, a command's run and a
+  service's loop alike. Ops 2 to 5, a service's dispatched hooks, were
+  retired with the one service model (2026-11-08) and are never reused. The
+  loader's own call (no table) runs the constructors.
 - **errno is a row** (`__errno`, the glibc name `__errno_location` on the
   host): a slot per thread in the kernel, so a module's C library and the
   rows agree on one errno.
@@ -40,9 +42,13 @@ decisions the code rests on.
 ## The table's rules
 
 The table is the rows of `native/os_calls.json` that carry an ordinal: the
-POSIX rows and the kernel's own (`moy_log`, the timers, the events) with
+POSIX rows and the kernel's own (`moy_log`, `moy_term_size`, and the service
+model's `moy_send` and `moy_on`, which a WASI program imports too) with
 their C prototypes as written there, and the app calls, whose prototypes
-the generator writes from the row's neutral types. `tools/gen_os_table.py`
+the generator writes from the row's neutral types. The service timers and
+input readers (`moy_timer_every`, `moy_timer_cancel`, `moy_events`, 38 to
+40) are retired: their slots answer ENOSYS, and the SDK no longer offers
+them. `tools/gen_os_table.py`
 checks the source: a row keeps its slot and its
 prototype forever, a retired row answers through a stub typed like it (its
 `fail` value, `ENOSYS`), and the version is the row count, so it moves on an
@@ -81,9 +87,13 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   VM's priority on an S3 and core 0 on a P4, where core 1 is the frame's.
   `pthread_create` is the one thread verb; the table has no task, timer or
   ISR primitive.
-- A service's hooks are dispatched on its own task from one mailbox; a timer
-  is an OS-owned `esp_timer` posting to it, an event a reader of the input
-  ring (`moy_input`) the VM task drains into it (`moy_os_poll_services`).
+- A service is `main` on its own task, a loop blocked in `poll` on its
+  event descriptor (`MOY_EVQ_FD`, its kernel event queue,
+  `native/moy_kernel/moy_evq.h`) with its nearest deadline as the timeout:
+  the one kernel wait (`moy_evq_wait`), so nothing is dispatched to it and
+  nothing drains for it. Its stop hangs the descriptor up; its wakes are
+  charged to the one supervisor (`moy_super.h`); a service that returns by
+  itself is swept on the console's task (`moy_os_reap`).
 - Every registration is a handle in the process's record, swept with its
   pid's leases however the process ends (`moy_os_stats`' `swept`).
 - A command's rows that touch the session run on the task that serves it.

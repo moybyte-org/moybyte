@@ -130,6 +130,27 @@ int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
     return moy_os_call(167u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
 }
 
+// Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
+static int moy_os_retired_moy_timer_every(uint32_t period_us) {
+    (void)period_us;
+    moy_os_errno_set(ENOSYS);
+    return -1;
+}
+
+// Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
+static int moy_os_retired_moy_timer_cancel(int timer) {
+    (void)timer;
+    moy_os_errno_set(ENOSYS);
+    return -1;
+}
+
+// Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
+static int moy_os_retired_moy_events(uint32_t kinds) {
+    (void)kinds;
+    moy_os_errno_set(ENOSYS);
+    return -1;
+}
+
 const moy_os_table_t moy_os_table = {
     MOY_OS_VERSION, MOY_OS_ROWS, {
         (void *)moy_os_open,
@@ -170,9 +191,9 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_pthread_mutex_unlock,
         (void *)moy_os_moy_log,
         (void *)moy_os_moy_term_size,
-        (void *)moy_os_moy_timer_every,
-        (void *)moy_os_moy_timer_cancel,
-        (void *)moy_os_moy_events,
+        (void *)moy_os_retired_moy_timer_every,
+        (void *)moy_os_retired_moy_timer_cancel,
+        (void *)moy_os_retired_moy_events,
         (void *)moy_os_mmap,
         (void *)moy_os_munmap,
         (void *)moy_os_socket,
@@ -212,6 +233,8 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_notify,
         (void *)moy_os_moy_open_with,
         (void *)moy_os_moy_share,
+        (void *)moy_os_moy_send,
+        (void *)moy_os_moy_on,
     },
 };
 
@@ -296,4 +319,6 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_notify",
     "moy_open_with",
     "moy_share",
+    "moy_send",
+    "moy_on",
 };

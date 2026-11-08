@@ -1,8 +1,25 @@
 // moy_wasi: WASI preview1 for a compiled command (docs/os_2026-11/tiers.md
 // section 3): the imports a module built by wasi-sdk, Rust's
-// `wasm32-wasip1` or Zig makes from `wasi_snapshot_preview1`, plus
-// `moybyte.term`'s `term_size`, the one thing WASI lacks. A command is its
-// module's `_start`, run in a shell session's process (moy_sh.h's spawn).
+// `wasm32-wasip1` or Zig makes from `wasi_snapshot_preview1`, plus what WASI
+// lacks: `moybyte.term`'s `term_size`, and `moybyte.os`'s `send` and `on`,
+// the rows of native/os_calls.json a WASI program shares with an ELF module
+// (moy_wasi_os_rows.h, generated; sdk/include/moybyte/os.h declares them
+// under the C names moy_send and moy_on). A command is its module's
+// `_start`, run in a shell session's process (moy_sh.h's spawn).
+//
+// THE EVENT DESCRIPTOR. The run's process is its background pid, else the
+// OS log's current one when the run was made (the shell door's process for
+// it). Descriptor MOY_EVQ_FD reads that process's event queue (moy_evq.h,
+// THE EVENT DESCRIPTOR): fd_read takes one record into its first buffer
+// that is not empty (MSGSIZE where it is short, AGAIN while nothing is
+// queued), and poll_oneoff reports it readable while an event is queued.
+// A poll_oneoff that waits on it blocks on the module's thread in the one
+// kernel wait (moy_evq_wait), until an event, the run's end or its nearest
+// clock. Each wake, from a poll of the descriptor's return to the next
+// poll of it, is charged to the one supervisor (moy_super.h), less what its
+// calls waited for the session's task; while the supervisor holds the
+// process suspended, its poll waits unserved. send and on are the kernel's
+// calls on the module's thread, answering a number or a WASI errno below 0.
 //
 // ADAPTERS, NOT A SECOND OS. Each import keeps WASI's name and calls the C a
 // shell built-in calls: stdio is the session's descriptors 0, 1 and 2 (the
@@ -55,6 +72,7 @@
 
 #define MOY_WASI_MODULE "wasi_snapshot_preview1"
 #define MOY_WASI_TERM "moybyte.term"
+#define MOY_WASI_OS "moybyte.os"
 
 #define MOY_WASI_FDS 32                 // a command's descriptors, stdio included
 #define MOY_WASI_POLL_US 10000          // Ctrl-C and the budget, at most this often
@@ -81,9 +99,10 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
 // closed, its last background line logged, the record freed.
 void moy_wasi_free(moy_wasi_t *w);
 
-// The natives (WAMR's NativeSymbol rows) for WASI's module and for
-// moybyte.term, copied into `store` (moy_wasi_natives' count of each), which
-// WAMR sorts in place and keeps while they are registered: 0, or -1.
+// The natives (WAMR's NativeSymbol rows) for WASI's module, and for
+// moybyte.term and moybyte.os together (`term`), copied into `store`
+// (moy_wasi_count's counts), which WAMR sorts in place and keeps while they
+// are registered: 0, or -1.
 uint32_t moy_wasi_count(uint32_t *term);
 int moy_wasi_register(NativeSymbol *store);
 void moy_wasi_unregister(NativeSymbol *store);

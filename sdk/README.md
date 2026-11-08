@@ -4,16 +4,17 @@ What a C program needs to become a native module for a console
 (`native/moy_elf/README.md`; the design is `docs/os_2026-11/tiers.md` §1).
 
 - `include/moybyte/os.h` (generated, `tools/gen_os_table.py`): the table's
-  version, its type, the event block a service's `moy_on` receives and the
-  Moybyte rows: the kernel's (`moy_log`, `moy_term_size`, `moy_timer_every`,
-  `moy_timer_cancel`, `moy_events`) and the app calls (`moy_files_*`,
+  version, its type, the event descriptor (`MOY_EVQ_FD`) and the record a
+  read of it takes (`moy_evq_ev_t`, from `native/moy_kernel/moy_evq.h`), and
+  the Moybyte rows: the kernel's (`moy_log`, `moy_term_size`, `moy_send`,
+  `moy_on`) and the app calls (`moy_files_*`,
   `moy_prefs_*`, `moy_clipboard_*`, `moy_nav_open_app`, `moy_notify`,
   `moy_open_with`, `moy_share`: `docs/app_api_v1.md`'s call table), all from
   `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `src/moyos_crt.c`: the module's entry, `_moy_entry`, and its
   `.moy.table` note.
-- `src/moyos_stubs.c` (generated): one stub a row, each compiled on its own
+- `src/moyos_stubs.c` (generated): one stub a row but a retired one, each compiled on its own
   (`-DMOY_OS_ONLY=<row>`) so the link takes only the rows a program calls.
 - `libc/`: the SDK's C library (below), compiled into `libmoyos.a` with the
   stubs.
@@ -27,8 +28,14 @@ What a C program needs to become a native module for a console
 chip and table (cached under `.build/sdk/`), compiles a cart's `src/*.c` with
 the chip's ESP-IDF toolchain, links it against that archive, strips it, signs
 it, and writes `main.<chip>.elf` into the cart. A program's hooks are plain
-functions: `main(argc, argv)` for a command; `moy_start`, `moy_stop`,
-`moy_timer`, `moy_on` for a service.
+function: `main(argc, argv)`, a command's run and a service's loop alike.
+A service blocks in `poll` on `MOY_EVQ_FD` with its nearest deadline as the
+timeout, reads each message it is woken for, and returns when the
+descriptor reads end of file (its stop); `tests/fixtures/elf/elf_svc.moy`
+is the example. A WASI program built by wasi-sdk includes the same header:
+under `__wasm__` it declares `moy_send` and `moy_on` as its `moybyte.os`
+imports (`tests/fixtures/wasm/wasi_svc.moy`, built by
+`tools/wasm_cart.py`, which puts `include/` on its include path).
 
 The chips: `esp32s3` (Xtensa, `-mlongcalls`), `esp32p4` (RISC-V,
 `rv32imafc`, `ilp32f`), and `host`, the simulator's, which links the host's C

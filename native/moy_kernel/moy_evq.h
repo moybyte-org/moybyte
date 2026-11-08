@@ -30,6 +30,15 @@
 // processes run in the one MicroPython VM, whose loop looks at
 // moy_evq_ready() rather than blocking per process.
 //
+// THE EVENT DESCRIPTOR. A compiled program reads its queue as descriptor
+// MOY_EVQ_FD, the same number on both compiled tiers (WASI's fd_read and
+// poll_oneoff, native/moy_wasm/moy_wasi.h; an ELF module's read and poll,
+// native/moy_elf/moy_os.h). It is readable while an event is queued, and a
+// read takes one RECORD (moy_evq_read): the event's moy_evq_ev_t, then its
+// arguments, then a NUL. A read never blocks; the wait is the poll's, with
+// the program's nearest deadline as its timeout. sdk/include/moybyte/os.h
+// carries the record, MOY_EVQ_FD and MOY_EVQ_VERSION from here.
+//
 // Any task may call any function; no ISR may. Posting allocates the
 // message's copy (outside the lock); nothing else allocates but an open.
 
@@ -59,6 +68,9 @@ enum {
 #define MOY_EVQ_SYSTEM "system"     // the app a message from pid 0 or 1 is from
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
+
+#define MOY_EVQ_FD 31               // the event descriptor
+#define MOY_EVQ_VERSION 1           // the record's layout
 
 // Process `pid`'s queue opened (or, open already, its app and receives
 // replaced): `app` its app id, `receives` the names its manifest lists, one
@@ -100,6 +112,12 @@ typedef struct {
 // (cap bytes, NUL-terminated where they fit). OK, STALE, EMPTY, RANGE (ev->n
 // says what it needs; the event stays queued).
 int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap);
+// `pid`'s oldest event taken as the event descriptor's RECORD into `buf`
+// (cap bytes): its moy_evq_ev_t, its arguments and a NUL, *len the record's
+// bytes (the NUL not counted). OK, STALE, EMPTY, RANGE (the event stays; its
+// moy_evq_ev_t is written where cap holds one, its `n` what the arguments
+// need).
+int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len);
 // The events queued on `pid`'s queue (0 for none).
 uint32_t moy_evq_queued(uint32_t pid);
 // A MOY_EVQ_VM queue with an event queued whose process the supervisor has
@@ -113,6 +131,9 @@ uint32_t moy_evq_ready(void);
 uint32_t moy_evq_wait(uint32_t pid, uint32_t ms);
 // `pid`'s waiter woken with no event (a stop, an answer, a resume).
 void moy_evq_kick(uint32_t pid);
+// `pid`'s waiter forgotten, so no wake reaches it: its task is about to be
+// deleted while the queue lives on (the queue's owner closes it later).
+void moy_evq_unwait(uint32_t pid);
 
 // Every queue closed (a test's teardown).
 void moy_evq_reset(void);

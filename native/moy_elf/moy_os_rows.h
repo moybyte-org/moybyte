@@ -118,9 +118,6 @@ int moy_os_pthread_mutex_trylock(pthread_mutex_t *m);
 int moy_os_pthread_mutex_unlock(pthread_mutex_t *m);
 int moy_os_moy_log(int level, const char *text);
 int moy_os_moy_term_size(int *cols, int *rows);
-int moy_os_moy_timer_every(uint32_t period_us);
-int moy_os_moy_timer_cancel(int timer);
-int moy_os_moy_events(uint32_t kinds);
 void *moy_os_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 int moy_os_munmap(void *addr, size_t len);
 int moy_os_socket(int domain, int type, int protocol);
@@ -160,5 +157,7 @@ int32_t moy_os_moy_clipboard_seq(void);
 int32_t moy_os_moy_notify(const char *summary, const char *body);
 int32_t moy_os_moy_open_with(const char *item, int32_t choose);
 int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime);
+int moy_os_moy_send(const char *app, const char *name, const char *args);
+int moy_os_moy_on(const char *name, int on);
 
 #endif // MOY_OS_ROWS_H

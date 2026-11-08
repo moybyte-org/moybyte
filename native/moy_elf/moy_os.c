@@ -19,10 +19,12 @@
 #include <string.h>
 
 #include "moy_app.h"
+#include "moy_evq.h"
 #include "moy_os.h"
 #include "moy_os_rows.h"
 #include "moy_proc.h"
 #include "moy_sh_prog.h"
+#include "moy_super.h"
 
 #ifdef MOY_OS_BOARD
 #include "sdkconfig.h"
@@ -64,13 +66,8 @@ int moy_net_link(uint32_t *ip) __attribute__((weak));
 #define SK(f) f
 #endif
 
-// The input table's readers and the lease table's sweep, where the image has them.
-#include "moy_input.h"
+// The lease table's sweep, where the image has it.
 uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
-moy_input_t *moy_input_kernel(void) __attribute__((weak));
-int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r) __attribute__((weak));
-int moy_input_reader_free(moy_input_t *t, int r) __attribute__((weak));
-size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n) __attribute__((weak));
 
 #define MAGIC 0x6d6f796fu
 
@@ -223,8 +220,7 @@ static bool task_is(task_t a, task_t b) {
 // -- the records ------------------------------------------------------------------
 
 enum { T_FREE = 0, T_LIVE, T_DONE };
-enum { H_FREE = 0, H_TIMER, H_MUTEX, H_DIR, H_READER, H_FD, H_SOCK, H_ADDR };
-enum { M_START = 1, M_TIMER, M_ON, M_STOP };
+enum { H_FREE = 0, H_MUTEX, H_DIR, H_FD, H_SOCK, H_ADDR };
 
 typedef struct {
     struct moy_os_proc *p;
@@ -254,9 +250,8 @@ typedef struct {
 typedef struct {
     uint8_t kind;
     uint8_t gen;
-    int fd;                     // H_FD: the session's descriptor; H_READER: the reader, -1 before
-                                // the poll makes it; H_SOCK: the stack's descriptor
-    uint32_t kinds;             // H_READER: the event kinds asked for; H_SOCK: SK_NONBLOCK
+    int fd;                     // H_FD: the session's descriptor; H_SOCK: the stack's descriptor
+    uint32_t kinds;             // H_SOCK: SK_NONBLOCK
     void *ptr;                  // H_ADDR: the stack's lookup answer
     uint32_t rcv_ms, snd_ms;    // H_SOCK: SO_RCVTIMEO and SO_SNDTIMEO (0: none)
 } handle_t;
@@ -268,25 +263,6 @@ typedef struct map {
     size_t len;
 } map_t;
 #define MAP_HDR ((sizeof(map_t) + 15u) & ~(size_t)15u)
-
-typedef struct {
-    uint8_t kind;
-    uint32_t a;
-    moy_event_t e;
-} mail_t;
-
-typedef struct {
-    struct moy_os_proc *p;
-    int h;
-    uint32_t period_us;
-#ifdef MOY_OS_BOARD
-    esp_timer_handle_t t;
-#else
-    pthread_t t;
-    volatile int stop;
-#endif
-    volatile int pending;
-} timer_t_;
 
 struct moy_os_proc {
     uint32_t magic;
@@ -312,11 +288,10 @@ struct moy_os_proc {
     sem_t_ hop_lock;
     void (*hop_fn)(void *arg);
     void *hop_arg;
-    // a service's calls
-    sem_t_ mail_lock;
-    mail_t mail[MOY_OS_MAIL];
-    uint8_t mail_at, mail_n;
-    sem_t_ mail_go;
+    // its event descriptor
+    volatile uint8_t hup;       // a service's stop asked: the descriptor hangs up
+    uint8_t own_q;              // its event queue opened here, closed at its end
+    int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
     sem_t_ stopped;
     // what it holds
     thr_t thr[MOY_OS_THREADS];
@@ -326,7 +301,7 @@ struct moy_os_proc {
     uint32_t flags;             // MOY_OS_NET
     moy_app_run_t run;          // its app run: what its app calls are answered for
     volatile uint8_t net_held;
-    uint32_t calls, timers, events;
+    uint32_t wakes, events;
 };
 
 static moy_os_proc_t *g_proc[MOY_OS_PROCS];
@@ -436,62 +411,14 @@ static void *thr_main(void *arg)
     }
 #endif
     if (t == &p->thr[0]) {
-        if (!p->service) {
-            int code = p->mod.entry(&moy_os_table, MOY_ELF_OP_MAIN, p->argc, p->argv, NULL);
-            lock();
-            if (!p->main_done) {
-                p->code = code;
-                p->main_done = 1;
-            }
-            unlock();
-        } else {
-            // A service's dispatch: its start, then its calls, in order.
-            p->calls++;
-            int code = p->mod.entry(&moy_os_table, MOY_ELF_OP_START, 0, NULL, NULL);
-            bool stop = code != 0;
-            if (stop) {
-                p->code = code;
-            }
-            while (!stop && !p->ending) {
-                if (!sem_take(&p->mail_go, MOY_OS_SLICE_US)) {
-                    continue;
-                }
-                for (;;) {
-                    mail_t m;
-                    sem_take(&p->mail_lock, -1);
-                    bool got = p->mail_n > 0;
-                    if (got) {
-                        m = p->mail[p->mail_at];
-                        p->mail_at = (uint8_t)((p->mail_at + 1u) % MOY_OS_MAIL);
-                        p->mail_n--;
-                    }
-                    sem_give(&p->mail_lock);
-                    if (!got || p->ending) {
-                        break;
-                    }
-                    p->calls++;
-                    if (m.kind == M_TIMER) {
-                        timer_t_ *tm = p->h[m.a].kind == H_TIMER ? p->h[m.a].ptr : NULL;
-                        if (tm != NULL) {
-                            tm->pending = 0;
-                        }
-                        p->timers++;
-                        p->mod.entry(&moy_os_table, MOY_ELF_OP_TIMER, (int)(uint32_t)mono_us(),
-                                     NULL, NULL);
-                    } else if (m.kind == M_ON) {
-                        p->events++;
-                        p->mod.entry(&moy_os_table, MOY_ELF_OP_ON, 0, NULL, &m.e);
-                    } else if (m.kind == M_STOP) {
-                        p->mod.entry(&moy_os_table, MOY_ELF_OP_STOP, 0, NULL, NULL);
-                        stop = true;
-                        break;
-                    }
-                }
-            }
-            lock();
+        // A command's main, or a service's loop.
+        int code = p->mod.entry(&moy_os_table, MOY_ELF_OP_MAIN, p->argc, p->argv, NULL);
+        lock();
+        if (!p->main_done) {
+            p->code = code;
             p->main_done = 1;
-            unlock();
         }
+        unlock();
     } else {
         t->out = t->start(t->arg);
     }
@@ -561,15 +488,10 @@ static int handle_new(moy_os_proc_t *p, uint8_t kind, void *ptr, int fd) {
     return -1;
 }
 
-static void timer_stop(timer_t_ *tm);
-
 // Handle `i` given back: what it holds let go.
 static void handle_drop(moy_os_proc_t *p, uint32_t i) {
     handle_t *h = &p->h[i];
     switch (h->kind) {
-    case H_TIMER:
-        timer_stop(h->ptr);
-        break;
     case H_MUTEX:
         sem_fini(h->ptr);
         os_free(h->ptr);
@@ -577,11 +499,6 @@ static void handle_drop(moy_os_proc_t *p, uint32_t i) {
     case H_DIR:
         os_free(((dir_t *)h->ptr)->names);
         os_free(h->ptr);
-        break;
-    case H_READER:
-        if (h->fd >= 0 && moy_input_kernel != NULL && moy_input_kernel() != NULL) {
-            moy_input_reader_free(moy_input_kernel(), h->fd);
-        }
         break;
     case H_FD:
         if (p->s != NULL) {
@@ -756,6 +673,8 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
 // A socket descriptor's handle slot in `p`, or -1 (the sockets' rows, below).
 static int sock_slot(moy_os_proc_t *p, int fd);
 static long sock_io(thr_t *t, int slot, void *buf, size_t n, int flags, bool wr);
+// The event descriptor's read (the rows: the event descriptor, below).
+static long evq_read(moy_os_proc_t *p, void *buf, size_t n);
 
 typedef struct {
     moy_os_proc_t *p;
@@ -1025,7 +944,9 @@ int moy_os_close(int fd) {
     thr_t *t = enter();
     long r;
     int k = t != NULL ? sock_slot(t->p, fd) : -1;
-    if (k >= 0) {
+    if (t != NULL && fd == MOY_EVQ_FD) {
+        r = 0;                  // the process's own: it stays open
+    } else if (k >= 0) {
         lock();
         handle_drop(t->p, (uint32_t)k);
         unlock();
@@ -1042,7 +963,9 @@ ssize_t moy_os_read(int fd, void *buf, size_t n) {
     thr_t *t = enter();
     long r;
     int k = t != NULL ? sock_slot(t->p, fd) : -1;
-    if (k >= 0) {
+    if (t != NULL && fd == MOY_EVQ_FD) {
+        r = evq_read(t->p, buf, n);
+    } else if (k >= 0) {
         r = sock_io(t, k, buf, n, 0, false);
     } else {
         fcall_t c = { .op = F_READ, .fd = fd, .buf = buf, .n = n };
@@ -1607,137 +1530,78 @@ int moy_os_moy_term_size(int *cols, int *rows) {
     return r >= 0 ? 0 : -1;
 }
 
-static void mail_post(moy_os_proc_t *p, const mail_t *m) {
-    sem_take(&p->mail_lock, -1);
-    bool ok = p->mail_n < MOY_OS_MAIL;
-    if (ok) {
-        p->mail[(p->mail_at + p->mail_n) % MOY_OS_MAIL] = *m;
-        p->mail_n++;
+// -- the rows: the event descriptor ------------------------------------------------
+//
+// The process's event queue (moy_evq.h), read as descriptor MOY_EVQ_FD: by
+// read (evq_read), poll and select (poll_in), on the calling thread.
+
+// A record of `p`'s queue into buf: its bytes, 0 once its stop hung the
+// descriptor up, or -1 with errno.
+static long evq_read(moy_os_proc_t *p, void *buf, size_t n) {
+    if (p->hup) {
+        return 0;
     }
-    sem_give(&p->mail_lock);
-    if (ok) {
-        sem_give(&p->mail_go);
+    size_t len = 0;
+    switch (moy_evq_read(p->pid, buf, n, &len)) {
+    case MOY_EVQ_OK:
+        p->events++;
+        return (long)len;
+    case MOY_EVQ_EMPTY:
+        moy_os_errno_set(EAGAIN);
+        return -1;
+    case MOY_EVQ_RANGE:
+        moy_os_errno_set(EMSGSIZE);
+        return -1;
+    default:
+        moy_os_errno_set(EBADF);
+        return -1;
     }
 }
 
-static void timer_tick(timer_t_ *tm) {
-    if (tm->pending || tm->p->ending) {
-        return;                 // a tick still waiting is the one the module gets
+static int evq_errno(int rc) {
+    switch (rc) {
+    case MOY_EVQ_STALE: return EBADF;
+    case MOY_EVQ_FULL: return EMFILE;
+    case MOY_EVQ_NOMEM: return ENOMEM;
+    default: return EINVAL;
     }
-    tm->pending = 1;
-    mail_t m = { .kind = M_TIMER, .a = (uint32_t)tm->h };
-    mail_post(tm->p, &m);
 }
 
-#ifdef MOY_OS_BOARD
-static void timer_cb(void *arg) {
-    timer_tick(arg);
-}
-#else
-static void *timer_thread(void *arg) {
-    timer_t_ *tm = arg;
-    int64_t next = mono_us() + tm->period_us;
-    while (!tm->stop) {
-        int64_t d = next - mono_us();
-        if (d > 0) {
-            struct timespec ts = { 0, (long)(d < 5000 ? d : 5000) * 1000 };
-            nanosleep(&ts, NULL);
-            continue;
-        }
-        next += tm->period_us;
-        timer_tick(tm);
-    }
-    return NULL;
-}
-#endif
-
-static void timer_stop(timer_t_ *tm) {
-#ifdef MOY_OS_BOARD
-    esp_timer_stop(tm->t);
-    esp_timer_delete(tm->t);
-#else
-    tm->stop = 1;
-    pthread_join(tm->t, NULL);
-#endif
-    os_free(tm);
-}
-
-int moy_os_moy_timer_every(uint32_t period_us) {
+int moy_os_moy_send(const char *app, const char *name, const char *args) {
     thr_t *t = enter();
     int r = -1;
-    if (t == NULL || !t->p->service) {
-        moy_os_errno_set(ENOTSUP);
-    } else if (period_us < 1000) {
+    const char *a = args != NULL && *args ? args : "[]";
+    while (*a == ' ' || *a == '\t' || *a == '\n') {
+        a++;
+    }
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else if (app == NULL || name == NULL || !*name || strlen(name) >= MOY_EVQ_NAME || *a != '[') {
         moy_os_errno_set(EINVAL);
     } else {
-        timer_t_ *tm = os_alloc(sizeof *tm);
-        lock();
-        int h = tm != NULL ? handle_new(t->p, H_TIMER, tm, -1) : -1;
-        unlock();
-        if (h < 0) {
-            os_free(tm);
-            moy_os_errno_set(tm != NULL ? EMFILE : ENOMEM);
-        } else {
-            tm->p = t->p;
-            tm->h = h;
-            tm->period_us = period_us;
-#ifdef MOY_OS_BOARD
-            esp_timer_create_args_t a = { .callback = timer_cb, .arg = tm, .name = "moy_elf" };
-            bool ok = esp_timer_create(&a, &tm->t) == ESP_OK;
-            if (ok && esp_timer_start_periodic(tm->t, period_us) != ESP_OK) {
-                esp_timer_delete(tm->t);
-                ok = false;
-            }
-#else
-            bool ok = pthread_create(&tm->t, NULL, timer_thread, tm) == 0;
-#endif
-            if (!ok) {
-                lock();
-                t->p->h[h].kind = H_FREE;
-                unlock();
-                os_free(tm);
-                moy_os_errno_set(EAGAIN);
-            } else {
-                r = (int)handle_id(t->p, h);
-            }
+        r = moy_evq_send(t->p->pid, app, name, a, strlen(a), NULL);
+        if (r < 0) {
+            moy_os_errno_set(evq_errno(-r));
+            r = -1;
         }
     }
     leave(t);
     return r;
 }
 
-int moy_os_moy_timer_cancel(int timer) {
-    thr_t *t = enter();
-    int h = t != NULL ? handle_of(t->p, (uint32_t)timer, H_TIMER) : -1;
-    if (h >= 0) {
-        lock();
-        handle_drop(t->p, (uint32_t)h);
-        unlock();
-    } else {
-        moy_os_errno_set(EINVAL);
-    }
-    leave(t);
-    return h >= 0 ? 0 : -1;
-}
-
-int moy_os_moy_events(uint32_t kinds) {
+int moy_os_moy_on(const char *name, int on) {
     thr_t *t = enter();
     int r = -1;
-    if (t == NULL || !t->p->service) {
-        moy_os_errno_set(ENOTSUP);
-    } else if ((kinds & MOY_EV_ALL) == 0) {
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else if (name == NULL || !*name || strlen(name) >= MOY_EVQ_NAME) {
         moy_os_errno_set(EINVAL);
     } else {
-        // The reader itself is the poll's to make, on the console's task.
-        lock();
-        int h = handle_new(t->p, H_READER, NULL, -1);
-        if (h >= 0) {
-            t->p->h[h].kinds = kinds & MOY_EV_ALL;
-            r = (int)handle_id(t->p, h);
-        }
-        unlock();
-        if (r < 0) {
-            moy_os_errno_set(EMFILE);
+        int rc = moy_evq_listen(t->p->pid, name, on != 0);
+        if (rc == MOY_EVQ_OK) {
+            r = 0;
+        } else {
+            moy_os_errno_set(evq_errno(rc));
         }
     }
     leave(t);
@@ -2244,6 +2108,7 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
     nfds_t at[MOY_OS_HANDLES];
     for (;;) {
         int ready = 0, m = 0;
+        bool evq = false;
         for (nfds_t i = 0; i < n; i++) {
             struct pollfd *f = &fds[i];
             f->revents = 0;
@@ -2251,7 +2116,16 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
                 continue;
             }
             int k = sock_slot(p, f->fd);
-            if (k >= 0) {
+            if (f->fd == MOY_EVQ_FD) {
+                if (p->hup) {
+                    f->revents = (short)(POLLHUP | (f->events & POLLIN));
+                } else if (!moy_evq_has(p->pid)) {
+                    f->revents = POLLNVAL;
+                } else if (moy_evq_queued(p->pid) > 0) {
+                    f->revents = (short)(f->events & POLLIN);
+                }
+                evq |= f->revents == 0;
+            } else if (k >= 0) {
                 if (m < (int)MOY_OS_HANDLES) {
                     lfd[m] = p->h[k].fd;
                     want[m] = (short)(f->events & (POLLIN | POLLOUT));
@@ -2277,6 +2151,9 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
                 fds[at[j]].revents = (short)(got[j] & (fds[at[j]].events | POLLERR | POLLHUP));
                 ready += fds[at[j]].revents != 0;
             }
+        } else if (m == 0 && slice > 0 && evq) {
+            // The one wait: woken by an event, a stop or the slice's end.
+            moy_evq_wait(p->pid, (uint32_t)((slice + 999) / 1000));
         } else if (m == 0 && slice > 0 && doze(t, slice) != 0) {
             return -EINTR;
         }
@@ -2289,13 +2166,49 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
     }
 }
 
+// A poll of `p`'s event descriptor: the wake that ends here charged to the
+// supervisor, and while it holds the process suspended, no wake served.
+static int wake_end(thr_t *t) {
+    moy_os_proc_t *p = t->p;
+    if (!moy_evq_has(p->pid)) {
+        return 0;
+    }
+    int64_t now = mono_us();
+    if (p->woke_us != 0) {
+        moy_super_charge(p->pid, (uint32_t)(now - p->woke_us), false);
+    }
+    while (moy_super_held(p->pid) && !p->hup) {
+        if (doze(t, MOY_OS_SLICE_US) != 0) {
+            return EINTR;
+        }
+    }
+    return 0;
+}
+
+static bool polls_evq(const struct pollfd *fds, nfds_t n) {
+    for (nfds_t i = 0; i < n; i++) {
+        if (fds[i].fd == MOY_EVQ_FD) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int moy_os_poll(struct pollfd *fds, nfds_t n, int timeout) {
     thr_t *t = enter();
     int r = -1;
     if (t == NULL) {
         moy_os_errno_set(EPERM);
     } else {
-        r = poll_in(t, fds, n, timeout);
+        bool evq = polls_evq(fds, n);
+        r = evq ? -wake_end(t) : 0;
+        if (r == 0) {
+            r = poll_in(t, fds, n, timeout);
+        }
+        if (evq && r >= 0) {
+            t->p->wakes++;
+            t->p->woke_us = mono_us();
+        }
         if (r < 0) {
             moy_os_errno_set(-r);
             r = -1;
@@ -2438,8 +2351,6 @@ static moy_os_proc_t *proc_new(const moy_os_module_t *m, const moy_os_caps_t *ca
     sem_init(&p->wake, false);
     sem_init(&p->hop_done, false);
     sem_init(&p->hop_lock, true);
-    sem_init(&p->mail_lock, true);
-    sem_init(&p->mail_go, false);
     sem_init(&p->stopped, false);
     p->hooks = (uint32_t)p->mod.entry(&moy_os_table, MOY_ELF_OP_BIND, 0, NULL, NULL);
     lock();
@@ -2465,7 +2376,8 @@ static bool proc_end(moy_os_proc_t *p) {
     lock();
     p->ending = 1;
     unlock();
-    sem_give(&p->mail_go);
+    moy_evq_kick(p->pid);
+    moy_evq_unwait(p->pid);             // a task deleted below may be its waiter
     sem_give(&p->hop_done);
     int64_t end = mono_us() + MOY_OS_REAP_US;
     while (live_threads(p) > 0) {
@@ -2503,6 +2415,7 @@ static bool proc_end(moy_os_proc_t *p) {
         }
         sem_take(&p->stopped, MOY_OS_SLICE_US);
     }
+    moy_evq_unwait(p->pid);             // one may have waited again on its way out
     lock();
     for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
         if (p->thr[k].state == T_DONE) {
@@ -2537,6 +2450,12 @@ static bool proc_end(moy_os_proc_t *p) {
     if (moy_lease_sweep != NULL) {
         moy_lease_sweep(p->pid);
     }
+    if (p->own_q) {
+        moy_evq_close(p->pid);
+    }
+    if (p->woke_us != 0) {
+        moy_super_forget(p->pid);
+    }
     if (p->mod.unload != NULL) {
         p->mod.unload(p->mod.loaded);
     }
@@ -2551,8 +2470,6 @@ static bool proc_end(moy_os_proc_t *p) {
     sem_fini(&p->wake);
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
-    sem_fini(&p->mail_lock);
-    sem_fini(&p->mail_go);
     sem_fini(&p->stopped);
     p->magic = 0;
     os_free(p);
@@ -2718,6 +2635,30 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
         return NULL;
     }
     p->prog.bg_pid = pid;
+    const char *name = id != NULL && *id ? id : "service";
+    size_t k = strlen(name) + 1;
+    p->argv = os_alloc(2 * sizeof(char *) + k);
+    if (p->argv == NULL) {
+        snprintf(err, errlen, "out of memory");
+        proc_end(p);
+        return NULL;
+    }
+    p->argv[0] = memcpy((char *)(p->argv + 2), name, k);
+    p->argv[1] = NULL;
+    p->argc = 1;
+    if (!(p->hooks & MOY_ELF_H_MAIN)) {
+        snprintf(err, errlen, "not a service: it defines no main");
+        proc_end(p);
+        return NULL;
+    }
+    if (!moy_evq_has(pid)) {
+        if (moy_evq_open(pid, name, NULL, 0u) != MOY_EVQ_OK) {
+            snprintf(err, errlen, "no event queue for it");
+            proc_end(p);
+            return NULL;
+        }
+        p->own_q = 1;
+    }
     p->thr[0].p = p;
     p->thr[0].gen = 1;
     if (thr_spawn(&p->thr[0]) != 0) {
@@ -2738,66 +2679,25 @@ static moy_os_proc_t *proc_of(uint32_t pid) {
     return NULL;
 }
 
-uint32_t moy_os_poll_services(uint32_t *ended, int32_t *codes, uint32_t n) {
+uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
-    moy_input_t *in = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         moy_os_proc_t *p = g_proc[i];
-        if (p == NULL || !p->service) {
+        if (p == NULL || !p->service || !p->main_done) {
             continue;
         }
-        if (p->main_done) {
-            int code = p->code;
-            uint32_t pid = p->pid;
-            if (p->row) {
-                moy_proc_end(p->row, code);
-            }
-            if (proc_end(p) && got < n) {
-                ended[got] = pid;
-                codes[got] = code;
-                got++;
-            }
-            continue;
+        int code = p->code;
+        uint32_t pid = p->pid;
+        if (p->row) {
+            moy_proc_end(p->row, code);
         }
-        for (uint32_t k = 0; in != NULL && k < MOY_OS_HANDLES; k++) {
-            if (p->h[k].kind != H_READER) {
-                continue;
-            }
-            if (p->h[k].fd < 0) {
-                int rd = -1;
-                if (moy_input_reader(in, p->h[k].kinds, &rd) != 0) {
-                    continue;
-                }
-                p->h[k].fd = rd;
-            }
-            moy_event_t ev[8];
-            size_t c;
-            while ((c = moy_input_events(in, p->h[k].fd, ev, 8)) > 0) {
-                for (size_t j = 0; j < c; j++) {
-                    mail_t mm = { .kind = M_ON, .e = ev[j] };
-                    mail_post(p, &mm);
-                }
-            }
+        if (proc_end(p) && got < n) {
+            ended[got] = pid;
+            codes[got] = code;
+            got++;
         }
     }
     return got;
-}
-
-void moy_os_post_event(const moy_event_t *e) {
-    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
-        moy_os_proc_t *p = g_proc[i];
-        if (p == NULL || !p->service || !(p->hooks & MOY_ELF_H_ON)) {
-            continue;
-        }
-        bool wants = false;
-        for (uint32_t k = 0; k < MOY_OS_HANDLES; k++) {
-            wants |= p->h[k].kind == H_READER && (p->h[k].kinds & MOY_EV_BIT(e->kind));
-        }
-        if (wants) {
-            mail_t m = { .kind = M_ON, .e = *e };
-            mail_post(p, &m);
-        }
-    }
 }
 
 int moy_os_stop(uint32_t pid) {
@@ -2805,8 +2705,8 @@ int moy_os_stop(uint32_t pid) {
     if (p == NULL || !p->service) {
         return -1;
     }
-    mail_t m = { .kind = M_STOP };
-    mail_post(p, &m);
+    p->hup = 1;
+    moy_evq_kick(pid);
     int64_t end = mono_us() + MOY_OS_STOP_US;
     while (!p->main_done && mono_us() < end) {
         sem_take(&p->stopped, MOY_OS_SLICE_US);
@@ -2830,8 +2730,7 @@ int moy_os_info(uint32_t pid, moy_os_info_t *out) {
     for (uint32_t i = 0; i < MOY_OS_HANDLES; i++) {
         out->handles += p->h[i].kind != H_FREE;
     }
-    out->calls = p->calls;
-    out->timers = p->timers;
+    out->wakes = p->wakes;
     out->events = p->events;
     out->service = p->service;
     out->ending = p->ending;

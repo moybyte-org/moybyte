@@ -98,7 +98,9 @@ product), with the owner's later calls dated where they land.
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in
   calls: the session's descriptors, its files tree under the command's
-  permissions, its variables. libc-wasi would reach the IDF's POSIX and VFS
+  permissions, its variables; and `moybyte.os`, the service model's calls a
+  WASI program shares with an ELF module (`moy_send`, `moy_on`), beside its
+  event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR). libc-wasi would reach the IDF's POSIX and VFS
   past the session's pipes and the permissions, and brings a socket and
   thread layer; the table leaves the vendored runtime and the compiler as
   they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed
@@ -269,7 +271,7 @@ Player's glue opens a cart's (its module for this console where the cart
 carries one, `main.wasm` on the interpreter otherwise or when that one is
 refused for anything but tamper evidence, `device/moycore_glue.py`'s
 `WasmRuntime`), registers the WASI table when the runtime is up, refuses a
-module importing anything but WASI and `moybyte.term` or exporting no
+module importing anything but WASI, `moybyte.term` and `moybyte.os` or exporting no
 `_start` once it is loaded, begins its call into `_start` on the session's
 thread and answers at once, making whichever session was current current
 again. The run then goes in steps (`moy_wasi.h`, "IN STEPS"): each

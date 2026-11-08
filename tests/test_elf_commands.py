@@ -268,31 +268,101 @@ def test_a_module_needing_a_newer_console_is_refused(tmp_path):
     assert elf_binding.check(unsigned) == "refused: unsigned module"
 
 
-def test_a_service_s_hooks_on_its_task_and_its_sweep(built):
-    from runtime import elf_binding, moy_log
+def _until(cond, s=5):
+    """cond() polled until it holds or `s` seconds pass: whether it held."""
+    t0 = time.monotonic()
+    while True:
+        if cond():
+            return True
+        if time.monotonic() - t0 >= s:
+            return False
+        time.sleep(0.01)
+
+
+def test_a_service_is_a_loop_over_its_event_descriptor(built):
+    """The service model's native face (moy_os.h, A SERVICE): main blocks in
+    poll on MOY_EVQ_FD with its tick's deadline, a ping from its own app is
+    read as one record and answered with moy_send, its stop is the
+    descriptor's end of file, and what it held is swept."""
+    from runtime import elf_binding, moy_evq, moy_log
     path = os.path.join(built["elf_svc"], "main.host.elf")
     pid = moy_log.spawn("svc")
-    assert elf_binding.service(path, pid, "elf.svc", elf_binding.UNSIGNED) is None
-    t0 = time.monotonic()
-    while (elf_binding.info(pid) or {}).get("timers", 0) < 3 and time.monotonic() - t0 < 5:
-        time.sleep(0.01)
-    info = elf_binding.info(pid)
-    assert info["service"] == 1 and info["timers"] >= 3
-    assert info["threads"] == 2                 # its task and the thread it made
-    assert info["handles"] == 2                 # the timer and the reader
-    elf_binding.post_event(1, a=42)             # MOY_EV_KEY_DOWN
-    t0 = time.monotonic()
-    while elf_binding.info(pid)["events"] < 1 and time.monotonic() - t0 < 5:
-        time.sleep(0.01)
-    before = elf_binding.stats()
-    assert elf_binding.stop(pid) == 0
-    assert elf_binding.info(pid) is None
-    after = elf_binding.stats()
-    assert after["swept"] - before["swept"] == 2
-    assert after["leaked"] == before["leaked"]
-    text = log_text()
-    for line in ("start 0", "tick 1", "tick 2", "key 42", "stop 1", "started"):
-        assert line in text, line
+    peer = moy_log.spawn("peer")
+    assert moy_evq.open(peer, "elf.svc", "", True) == moy_evq.OK
+    try:
+        assert moy_evq.listen(peer, "pong", True) == moy_evq.OK
+        assert elf_binding.service(path, pid, "elf.svc", elf_binding.UNSIGNED) is None
+        assert moy_evq.app(pid) == "elf.svc"            # its queue, opened by its start
+        assert _until(lambda: (elf_binding.info(pid) or {}).get("wakes", 0) >= 3)
+        info = elf_binding.info(pid)
+        assert info["service"] == 1
+        assert info["threads"] == 2                     # its task and the thread it made
+        assert info["handles"] == 0                     # a deadline is no registration
+        assert _until(lambda: moy_evq.send(peer, "elf.svc", "ping", "[42, \"x\"]")[0] == 1)
+        assert _until(lambda: moy_evq.queued(peer) == 1)
+        assert moy_evq.take(peer) == (pid, "elf.svc", "pong", '[42, "x"]')
+        assert elf_binding.info(pid)["events"] == 1
+        before = elf_binding.stats()
+        assert elf_binding.stop(pid) == 0
+        assert elf_binding.info(pid) is None
+        assert not moy_evq.has(pid)                     # its queue closed with it
+        after = elf_binding.stats()
+        assert after["leaked"] == before["leaked"]
+        text = log_text()
+        for line in ("start 0", "tick 1", "tick 2", "ping 9", "stop 1", "started"):
+            assert line in text, line
+    finally:
+        moy_evq.close(peer)
+
+
+def test_a_service_that_returns_is_reaped_and_one_that_will_not_is_killed(tmp_path):
+    """main returning ends a service by itself (moy_os_reap); one that
+    ignores its stop is killed at MOY_OS_STOP_US with 137."""
+    from runtime import elf_binding, moy_log
+    from tools import elf_cart
+    quick = tmp_path / "quick.c"
+    quick.write_text('#include "moybyte/os.h"\nint main(void) { return 7; }\n')
+    stubborn = tmp_path / "stubborn.c"
+    stubborn.write_text('#include <poll.h>\n'
+                        "int main(void) { for (;;) { poll(0, 0, 1000); } }\n")
+    q = elf_cart.build_module([str(quick)], "host", str(tmp_path / "q.elf"), signed=False)
+    pid = moy_log.spawn("quick")
+    assert elf_binding.service(q, pid, "elf.quick", elf_binding.UNSIGNED) is None
+    got = []
+    assert _until(lambda: got.extend(elf_binding.reap()) or (pid, 7) in got)
+    s = elf_cart.build_module([str(stubborn)], "host", str(tmp_path / "s.elf"), signed=False)
+    pid = moy_log.spawn("stubborn")
+    assert elf_binding.service(s, pid, "elf.stubborn", elf_binding.UNSIGNED) is None
+    time.sleep(0.05)
+    assert elf_binding.stop(pid) == 137
+
+
+def test_a_service_s_wakes_are_charged_to_the_one_supervisor(tmp_path):
+    """Each wake, from a poll of the event descriptor's return to the next,
+    is a callback of the one supervisor's (moy_super.h): a wake over its
+    slice is an overrun, the strikes suspend the service, and a suspended
+    service's poll waits unserved until it is resumed."""
+    from runtime import elf_binding, moy_evq, moy_log
+    from tools import elf_cart
+    slow = tmp_path / "slow.c"
+    slow.write_text('#include <poll.h>\n#include <unistd.h>\n#include "moybyte/os.h"\n'
+                    "int main(void) { for (;;) {\n"
+                    "    struct pollfd p = { MOY_EVQ_FD, POLLIN, 0 };\n"
+                    "    if (poll(&p, 1, 0) < 0 || (p.revents & POLLHUP)) { return 0; }\n"
+                    "    usleep(30000); } }\n")
+    m = elf_cart.build_module([str(slow)], "host", str(tmp_path / "slow.elf"), signed=False)
+    pid = moy_log.spawn("slow")
+    assert elf_binding.service(m, pid, "elf.slow", elf_binding.UNSIGNED) is None
+    try:
+        assert _until(lambda: moy_evq.held(pid))
+        assert moy_evq.rungs(pid)[1] >= 3              # its strikes
+        held = elf_binding.info(pid)["wakes"]
+        time.sleep(0.15)
+        assert elf_binding.info(pid)["wakes"] == held  # nothing served while suspended
+        assert moy_evq.resume(pid)
+        assert _until(lambda: elf_binding.info(pid)["wakes"] > held)
+    finally:
+        assert elf_binding.stop(pid) == 0
 
 
 def test_the_install_prompt_says_full_access():

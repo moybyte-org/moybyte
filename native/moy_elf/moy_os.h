@@ -11,8 +11,8 @@
 // every thread of it, a task with the process's caps (a priority, a core,
 // a stack in PSRAM); the table exports no task, timer or ISR primitive.
 // pthread_create is the one thread verb, and it makes another such task.
-// Every registration (a timer, a mutex, an open folder, an event reader, a
-// descriptor) is a handle in the process's record, swept at its end with
+// Every registration (a mutex, an open folder, a descriptor, a socket) is a
+// handle in the process's record, swept at its end with
 // the leases its pid holds (moy_lease_sweep), however it ends.
 //
 // A COMMAND is main(argc, argv) in a shell session (moy_sh.h's spawn), as a
@@ -25,11 +25,21 @@
 // rules). Ctrl-C ends it with 130 and its budget with 137, at the next row it
 // calls; a board also ends one that calls none.
 //
-// A SERVICE is moy_start on its task, then moy_timer for each tick of a timer
-// it started and moy_on for each event of the kinds it asked for, in order,
-// then moy_stop: all OS-owned dispatch on its one task. A service has no
-// session, so its file and stdin rows answer EACCES and its stdout and stderr
-// are the OS log's lines.
+// A SERVICE is main(argc, argv) on its task, argv its cart's id: a loop that
+// blocks in poll on its EVENT DESCRIPTOR, MOY_EVQ_FD, with its nearest
+// deadline as the timeout, and reads each message it is woken for
+// (docs/os_2026-11/processes.md section 1, the service model). The
+// descriptor is the process's event queue (moy_evq.h): readable while an
+// event is queued, each read one record (moy_evq_read), never blocking
+// (EAGAIN). It listens with moy_on and sends with moy_send, both the
+// kernel's, under the queue's rule. Its stop makes the descriptor hang up
+// (poll's POLLHUP, a read's end of file), and main returns within
+// MOY_OS_STOP_US or the process is killed. A command whose process has a
+// queue reads the same descriptor. Each wake, from the poll's return to its
+// next poll of the descriptor, is charged to the one supervisor
+// (moy_super.h); a suspended process's poll waits, unserved, until it is
+// resumed. A service has no session, so its file and stdin rows answer
+// EACCES and its stdout and stderr are the OS log's lines.
 //
 // MEMORY. mmap's anonymous mappings (the SDK's malloc takes its arenas so)
 // are PSRAM on a board, each in its process's record and freed at its end.
@@ -60,16 +70,14 @@
 #include <stdint.h>
 
 #include "moy_app_run.h"
-#include "moy_event.h"
 #include "moy_os_table.h"
 #include "moy_sh.h"
 
-// What the OS asks a module's entry (sdk/src/moyos_crt.c).
-enum { MOY_ELF_OP_BIND = 0, MOY_ELF_OP_MAIN, MOY_ELF_OP_START, MOY_ELF_OP_STOP,
-       MOY_ELF_OP_TIMER, MOY_ELF_OP_ON };
+// What the OS asks a module's entry (sdk/src/moyos_crt.c). Ops 2 to 5 were
+// a service's dispatched hooks, retired 2026-11-08, and are never reused.
+enum { MOY_ELF_OP_BIND = 0, MOY_ELF_OP_MAIN };
 // OP_BIND's answer: a bit per hook the module defines.
-enum { MOY_ELF_H_MAIN = 1, MOY_ELF_H_START = 2, MOY_ELF_H_STOP = 4, MOY_ELF_H_TIMER = 8,
-       MOY_ELF_H_ON = 16 };
+enum { MOY_ELF_H_MAIN = 1 };
 
 typedef int (*moy_elf_entry_fn)(const moy_os_table_t *os, int op, int argc, char **argv,
                                 const void *arg);
@@ -93,7 +101,6 @@ typedef struct {
 #define MOY_OS_PROCS 4u             // processes at once
 #define MOY_OS_THREADS 8u           // threads a process has at once, its first included
 #define MOY_OS_HANDLES 32u          // registrations a process holds at once
-#define MOY_OS_MAIL 16u             // a service's waiting calls
 #define MOY_OS_SLICE_US 20000       // a row's wait between looks at the process's end
 #define MOY_OS_REAP_US 2000000      // a stop's wait for the process's threads
 #define MOY_OS_STOP_US 2000000      // moy_stop's budget
@@ -151,20 +158,21 @@ typedef void (*moy_os_net_fn)(void *ctx, uint32_t pid, int hold);
 void moy_os_set_net(moy_os_net_fn net, void *ctx);
 
 // Service module `m` started as process `pid` (`id` its cart's id): the
-// process, its moy_start running on its own task, or NULL with the reason in
-// `err` (the module unloaded).
+// process, its main running on its own task, or NULL with the reason in
+// `err` (the module unloaded). Its event queue is the one the OS opened for
+// `pid`, or one opened here with `id` as its app, closed at its end.
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
                               uint32_t pid, const char *id, char *err, size_t errlen);
 
-// On the console's task, once a frame: each service's event readers drained
-// into its waiting calls, and a service that ended by itself (exit, its
-// moy_start failing) swept. The pids swept go to `ended` (up to `n`), with
-// their exit statuses in `codes`; answers how many.
-uint32_t moy_os_poll_services(uint32_t *ended, int32_t *codes, uint32_t n);
+// On the console's task: a service that ended by itself (main returned,
+// exit) swept. The pids swept go to `ended` (up to `n`), with their exit
+// statuses in `codes`; answers how many.
+uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n);
 
-// Stop service `pid`: moy_stop on its task within MOY_OS_STOP_US, then every
-// thread ended and every registration swept. Its exit status (137 when
-// moy_stop ran out of time), or -1 for no such service.
+// Stop service `pid`: its event descriptor hung up, main given
+// MOY_OS_STOP_US to return, then every thread ended and every registration
+// swept. Its exit status (137 when main ran out of time), or -1 for no such
+// service.
 int moy_os_stop(uint32_t pid);
 
 // What the OS knows of process `pid`: 0, or -1 for none.
@@ -172,9 +180,8 @@ typedef struct {
     uint32_t pid;
     uint32_t threads;           // live threads
     uint32_t handles;           // registrations held
-    uint32_t calls;             // hook calls made (start, timer, on, stop)
-    uint32_t timers;            // moy_timer calls made
-    uint32_t events;            // moy_on calls made
+    uint32_t wakes;             // polls of its event descriptor that returned
+    uint32_t events;            // records it read from it
     uint8_t service;            // 1 a service, 0 a command
     uint8_t ending;
     uint8_t net;                // 1 while it holds the network
@@ -191,9 +198,5 @@ typedef struct {
     uint32_t leaked;            // processes left running (a host thread that would not end)
 } moy_os_stats_t;
 void moy_os_stats(moy_os_stats_t *out);
-
-// An event for every service whose reader takes `e`'s kind, as the poll
-// would hand it (the host's tests, a source with no ring).
-void moy_os_post_event(const moy_event_t *e);
 
 #endif // MOY_OS_H

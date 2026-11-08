@@ -83,3 +83,5 @@
 77 moy_notify | int32_t moy_notify(const char *summary, const char *body)
 78 moy_open_with | int32_t moy_open_with(const char *item, int32_t choose)
 79 moy_share | int32_t moy_share(const void *data, size_t data_len, const char *mime)
+80 moy_send | int moy_send(const char *app, const char *name, const char *args)
+81 moy_on | int moy_on(const char *name, int on)

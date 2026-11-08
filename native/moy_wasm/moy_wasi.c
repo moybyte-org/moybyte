@@ -13,12 +13,16 @@
 #include <time.h>
 
 #include "moy_wasi.h"
+#include "moy_evq.h"
 #include "moy_sh_board.h"
 #include "moy_log.h"
 #include "moy_sh_prog.h"
+#include "moy_super.h"
+#include "moy_wasi_os_rows.h"
 
 _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
                "a spawned program's ends are moy_sh_prog.h's");
+_Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descriptor is a slot");
 
 // A board is told by the header it has: ESP_PLATFORM is not defined for a
 // usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
@@ -40,7 +44,7 @@ _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MO
 enum {
     W_OK = 0, W_2BIG = 1, W_ACCES = 2, W_AGAIN = 6, W_BADF = 8, W_BUSY = 10, W_EXIST = 20,
     W_FAULT = 21, W_FBIG = 22, W_INTR = 27, W_INVAL = 28, W_IO = 29, W_ISDIR = 31,
-    W_LOOP = 32, W_MFILE = 33, W_NAMETOOLONG = 37, W_NOENT = 44, W_NOMEM = 48,
+    W_LOOP = 32, W_MFILE = 33, W_MSGSIZE = 35, W_NAMETOOLONG = 37, W_NOENT = 44, W_NOMEM = 48,
     W_NOSPC = 51, W_NOSYS = 52, W_NOTDIR = 54, W_NOTEMPTY = 55, W_NOTSOCK = 57,
     W_NOTSUP = 58, W_PERM = 63, W_PIPE = 64, W_ROFS = 69, W_SPIPE = 70, W_XDEV = 75,
     W_NOTCAPABLE = 76,
@@ -52,6 +56,7 @@ enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 #define R_FD_SEEK (1ull << 2)
 #define R_FD_TELL (1ull << 5)
 #define R_FD_WRITE (1ull << 6)
+#define R_POLL (1ull << 27)
 #define R_ALL 0x1fffffffull
 
 #define O_CREAT_W 1
@@ -64,7 +69,7 @@ enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 #define PATH_CAP 512
 #define MAGIC 0x77617369u
 
-enum { K_FREE = 0, K_STREAM, K_DIR };
+enum { K_FREE = 0, K_STREAM, K_DIR, K_EVQ };
 
 typedef struct {
     int kind;
@@ -86,6 +91,9 @@ struct moy_wasi {
     int envc;
     wfd_t fd[MOY_WASI_FDS];
     moy_sh_prog_t prog;         // the roots, the background streams, the run's end
+    uint32_t pid;               // its process, whose queue MOY_EVQ_FD reads (0: none)
+    int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
+    int64_t hopped_us;          // what its calls waited for the session's task since
 };
 
 // -- the host's pieces ------------------------------------------------------------
@@ -258,6 +266,10 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
         w->fd[i].kind = K_STREAM;
         w->fd[i].sh = i;
     }
+    uint32_t pid = bg_pid != 0 ? bg_pid : moy_log_current();
+    w->pid = pid > 1u ? pid : 0u;       // the shell's own is no process of the run's
+    w->fd[MOY_EVQ_FD].kind = K_EVQ;
+    w->fd[MOY_EVQ_FD].sh = -1;
     char cwd[PATH_CAP];
     snprintf(cwd, sizeof cwd, "%s", moy_sh_cwd(s));
     if (moy_sh_environ(s, env_add, w) != 0 || preopen(w, ".", cwd) != 0) {
@@ -276,6 +288,9 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
 void moy_wasi_free(moy_wasi_t *w) {
     if (w == NULL) {
         return;
+    }
+    if (w->pid != 0) {
+        moy_evq_unwait(w->pid);         // the module's thread goes; its queue is the door's
     }
     for (int i = 0; i < MOY_WASI_FDS; i++) {
         if (w->fd[i].kind == K_STREAM && i >= 3 && w->fd[i].sh >= 3) {
@@ -307,9 +322,13 @@ struct call {
     uint32_t r;
 };
 
-// The run's end as proc_exit's, from inside a call.
+// The run's end as proc_exit's, from inside a call; a wait on its event
+// queue woken to see it.
 static void stop(moy_wasi_t *w, int code) {
     moy_sh_prog_stop(&w->prog, code);
+    if (w->pid != 0) {
+        moy_evq_kick(w->pid);
+    }
 }
 
 static void run_body(void *arg) {
@@ -333,8 +352,12 @@ static uint32_t go(wasm_exec_env_t env, body_fn fn, call_t *c) {
     c->r = W_NOSYS;
     if (w->hop == NULL) {
         run_body(c);
-    } else if (w->hop(run_body, c) != 0) {
-        c->r = W_IO;                    // no task to touch the session on
+    } else {
+        int64_t t0 = mono_us();
+        if (w->hop(run_body, c) != 0) {
+            c->r = W_IO;                // no task to touch the session on
+        }
+        w->hopped_us += mono_us() - t0;
     }
     if (w->prog.exited) {
         wasm_runtime_set_exception(c->inst, EXIT_MSG);
@@ -538,6 +561,105 @@ static uint32_t w_proc_raise(wasm_exec_env_t e, uint32_t sig) {
     return go(e, b_nosys, &c);
 }
 
+// -- the event descriptor --------------------------------------------------------
+//
+// MOY_EVQ_FD reads the process's event queue (moy_evq.h, THE EVENT
+// DESCRIPTOR): fd_read takes one record into its first buffer that is not
+// empty, poll_oneoff waits on it in the one kernel wait (w_poll_oneoff).
+
+// fd_read on it: a[1] the iovs, a[2] their count, a[3] where the count goes,
+// a[4] 1 to write, a[5] 1 with an offset.
+static void b_evq_read(call_t *c) {
+    moy_wasi_t *w = c->w;
+    if (c->a[4] || c->a[5]) {
+        c->r = c->a[4] ? W_BADF : W_SPIPE;
+        return;
+    }
+    if (w->pid == 0 || !moy_evq_has(w->pid)) {
+        c->r = W_BADF;
+        return;
+    }
+    const uint32_t *iov = mem(c, c->a[1], (uint64_t)c->a[2] * 8);
+    if (iov == NULL) {
+        c->r = W_FAULT;
+        return;
+    }
+    uint32_t base = 0, len = 0;
+    for (uint32_t i = 0; i < c->a[2] && len == 0; i++) {
+        memcpy(&base, iov + 2 * i, 4);
+        memcpy(&len, iov + 2 * i + 1, 4);
+    }
+    char *p = len ? mem(c, base, len) : NULL;
+    if (p == NULL) {
+        c->r = len ? W_FAULT : W_INVAL;
+        return;
+    }
+    size_t got = 0;
+    int rc = moy_evq_read(w->pid, p, len, &got);
+    c->r = rc == MOY_EVQ_OK ? (put32(c, c->a[3], (uint32_t)got) ? W_OK : W_FAULT)
+           : rc == MOY_EVQ_EMPTY ? W_AGAIN : rc == MOY_EVQ_RANGE ? W_MSGSIZE : W_BADF;
+}
+
+// The moybyte.os imports (moy_wasi_os_rows.h): the kernel's calls on the
+// module's own thread, as an ELF module's rows are. Each answers its number,
+// or a WASI errno below 0.
+static moy_wasi_t *os_run(wasm_exec_env_t e) {
+    moy_wasi_t *w = (moy_wasi_t *)wasm_runtime_get_user_data(e);
+    return w != NULL && w->magic == MAGIC ? w : NULL;
+}
+
+// A text the module passed, copied NUL-terminated into `out` (cap bytes): its
+// length, or -1.
+static int os_text(const char *p, uint32_t n, char *out, size_t cap) {
+    if (n >= cap || (n && p == NULL)) {
+        return -1;
+    }
+    memcpy(out, p, n);
+    out[n] = 0;
+    return memchr(out, 0, n) != NULL ? -1 : (int)n;
+}
+
+static int32_t os_errno(int rc) {
+    return -(int32_t)(rc == MOY_EVQ_STALE ? W_BADF : rc == MOY_EVQ_FULL ? W_MFILE
+                      : rc == MOY_EVQ_NOMEM ? W_NOMEM : W_INVAL);
+}
+
+static int32_t w_os_send(wasm_exec_env_t e, const char *app, uint32_t app_n, const char *name,
+                         uint32_t name_n, const char *args, uint32_t args_n) {
+    moy_wasi_t *w = os_run(e);
+    char a[MOY_EVQ_APP], nm[MOY_EVQ_NAME];
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    if (os_text(app, app_n, a, sizeof a) < 0 || os_text(name, name_n, nm, sizeof nm) <= 0) {
+        return -(int32_t)W_INVAL;
+    }
+    const char *j = args_n ? args : "[]";
+    size_t jn = args_n ? args_n : 2u;
+    while (jn && (*j == ' ' || *j == '\t' || *j == '\n')) {
+        j++;
+        jn--;
+    }
+    if (!jn || *j != '[') {
+        return -(int32_t)W_INVAL;
+    }
+    int took = moy_evq_send(w->pid, a, nm, j, jn, NULL);
+    return took < 0 ? os_errno(-took) : took;
+}
+
+static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int32_t on) {
+    moy_wasi_t *w = os_run(e);
+    char nm[MOY_EVQ_NAME];
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    if (os_text(name, name_n, nm, sizeof nm) <= 0) {
+        return -(int32_t)W_INVAL;
+    }
+    int rc = moy_evq_listen(w->pid, nm, on != 0);
+    return rc == MOY_EVQ_OK ? 0 : os_errno(rc);
+}
+
 // -- streams -------------------------------------------------------------------------
 
 // fd_read, fd_write and their positioned twins: a[0] fd, a[1] iovs, a[2]
@@ -547,6 +669,10 @@ static void b_rw(call_t *c) {
     moy_wasi_t *w = c->w;
     wfd_t *f = fd_of(c, c->a[0]);
     bool writing = c->a[4] != 0;
+    if (f != NULL && f->kind == K_EVQ) {
+        b_evq_read(c);
+        return;
+    }
     if (f == NULL || f->kind != K_STREAM) {
         c->r = f == NULL ? W_BADF : W_ISDIR;
         return;
@@ -677,6 +803,10 @@ static void b_close(call_t *c) {
         c->r = W_BADF;
         return;
     }
+    if (f->kind == K_EVQ) {
+        c->r = W_OK;            // the process's own: it stays open
+        return;
+    }
     int r = 0;
     if (f->kind == K_STREAM && f->sh >= 3) {
         r = moy_sh_fd_close(c->w->s, f->sh);
@@ -698,6 +828,10 @@ static int describe(call_t *c, wfd_t *f, uint64_t *rights, uint32_t *size) {
     if (f->kind == K_DIR) {
         *rights = R_ALL;
         return FT_DIR;
+    }
+    if (f->kind == K_EVQ) {
+        *rights = R_FD_READ | R_POLL;
+        return FT_UNKNOWN;
     }
     int what = moy_sh_fd_what(c->w->s, f->sh, size);
     *rights = what == MOY_SH_FD_FILE ? R_ALL : R_ALL & ~(R_FD_SEEK | R_FD_TELL);
@@ -893,7 +1027,7 @@ static uint32_t w_fd_prestat_dir_name(wasm_exec_env_t e, uint32_t fd, void *p_at
 
 static void b_renumber(call_t *c) {
     wfd_t *f = fd_of(c, c->a[0]);
-    if (f == NULL || c->a[1] >= MOY_WASI_FDS) {
+    if (f == NULL || c->a[1] >= MOY_WASI_FDS || f->kind == K_EVQ || c->a[1] == MOY_EVQ_FD) {
         c->r = W_BADF;
         return;
     }
@@ -1194,12 +1328,16 @@ static uint32_t w_path_symlink(wasm_exec_env_t e, void *p_at, uint32_t n, uint32
     return go(e, b_path_notsup, &c);
 }
 
-// -- poll_oneoff: clocks wait, every descriptor is ready ---------------------------
+// -- poll_oneoff: clocks wait, the event descriptor waits, every other is ready ---
 
 static bool h_sleeps(moy_wasi_t *w) {
     return moy_sh_host(w->s)->sleep_ms != NULL;
 }
 
+// a[0] the subscriptions, a[1] the events, a[2] their count, a[3] where the
+// count goes. Answers in a[4] 1 where the module's thread is to wait b[0] us
+// (-1: no clock), and in a[5] 1 where the wait is on the event queue (none
+// of its subscriptions ready yet; a[6] 1 where it subscribes to it at all).
 static void b_poll(call_t *c) {
     moy_wasi_t *w = c->w;
     uint32_t n = c->a[2];
@@ -1216,17 +1354,32 @@ static void b_poll(call_t *c) {
     uint32_t events = 0;
     int64_t wait_us = -1;
     int clock_at = -1;
+    bool evq_wait = false;
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t *s = in + 48 * i;
         if (s[8] != 0) {
-            uint8_t *ev = out + 32 * events++;
             uint32_t fd;
             memcpy(&fd, s + 16, 4);
+            wfd_t *f = fd_of(c, fd);
+            uint16_t err = f != NULL ? W_OK : W_BADF;
+            uint64_t nbytes = 0;
+            if (f != NULL && f->kind == K_EVQ) {
+                c->a[6] = 1;
+                if (s[8] != 1 || w->pid == 0 || !moy_evq_has(w->pid)) {
+                    err = W_BADF;
+                } else if (moy_evq_queued(w->pid) == 0) {
+                    evq_wait = true;
+                    continue;
+                } else {
+                    nbytes = sizeof(moy_evq_ev_t);
+                }
+            }
+            uint8_t *ev = out + 32 * events++;
             memset(ev, 0, 32);
             memcpy(ev, s, 8);
-            uint16_t err = fd_of(c, fd) != NULL ? W_OK : W_BADF;
             memcpy(ev + 8, &err, 2);
             ev[10] = s[8];
+            memcpy(ev + 16, &nbytes, 8);
             continue;
         }
         uint64_t timeout;
@@ -1245,14 +1398,20 @@ static void b_poll(call_t *c) {
             clock_at = (int)i;
         }
     }
+    bool none = events == 0;
+    c->b[0] = (uint64_t)-1;
     if (events == 0 && clock_at >= 0) {
+        // The clock's event, which stands unless the queue wakes the wait first.
         uint8_t *ev = out;
         memset(ev, 0, 32);
         memcpy(ev, in + 48 * (uint32_t)clock_at, 8);
         events = 1;
         c->b[0] = (uint64_t)wait_us;
-        c->a[4] = (uint32_t)(h_sleeps(w) ? 1 : 0);
+        c->a[4] = (uint32_t)(h_sleeps(w) || evq_wait ? 1 : 0);
+    } else if (events == 0 && evq_wait) {
+        c->a[4] = 1;
     }
+    c->a[5] = none && evq_wait;
     c->r = put32(c, c->a[3], events) ? W_OK : W_FAULT;
 }
 
@@ -1275,15 +1434,84 @@ static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
     return W_OK;
 }
 
+// The one kernel wait on the run's event queue until an event is queued or
+// `us` passes (<0: no deadline), in slices: W_OK with *woke where an event
+// came, W_INTR as soon as the run has ended.
+static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *woke) {
+    int64_t end = us < 0 ? 0 : mono_us() + us;
+    *woke = false;
+    for (;;) {
+        if (moy_evq_queued(w->pid) > 0 && !moy_super_held(w->pid)) {
+            *woke = true;
+            return W_OK;
+        }
+        int64_t left = end ? end - mono_us() : 20000;
+        if (left <= 0) {
+            return W_OK;
+        }
+        moy_evq_wait(w->pid, left > 20000 ? 20u : (uint32_t)((left + 999) / 1000));
+        if (w->hop == NULL) {
+            moy_sh_prog_poll(&w->prog, mono_us());
+        }
+        if (w->prog.exited) {
+            wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), EXIT_MSG);
+            return W_INTR;
+        }
+    }
+}
+
+// A poll of the event descriptor ends a wake, charged to the supervisor less
+// what its calls waited for the session's task; while the supervisor holds
+// the process suspended, the poll waits unserved. W_OK with *held where it
+// waited so, W_INTR where the run ended meanwhile.
+static uint32_t wake_end(wasm_exec_env_t e, moy_wasi_t *w, bool *held) {
+    int64_t now = mono_us();
+    if (w->woke_us != 0) {
+        int64_t cost = now - w->woke_us - w->hopped_us;
+        moy_super_charge(w->pid, (uint32_t)(cost > 0 ? cost : 0), false);
+    }
+    *held = false;
+    while (moy_super_held(w->pid)) {
+        bool woke;
+        *held = true;
+        if (evq_rest(e, w, 20000, &woke) != W_OK) {
+            return W_INTR;
+        }
+    }
+    return W_OK;
+}
+
 static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint32_t n, void *nout_at) {
     uint32_t in = app_off(e, in_at);
     uint32_t out = app_off(e, out_at);
     uint32_t nout = app_off(e, nout_at);
     call_t c = { .a = { in, out, n, nout } };
     uint32_t r = go(e, b_poll, &c);
-    if (r == W_OK && c.a[4] && c.b[0] > 0) {
-        r = rest(e, c.w, (int64_t)c.b[0]);
+    moy_wasi_t *w = c.w;
+    if (r != W_OK || !c.a[6] || w->pid == 0 || !moy_evq_has(w->pid)) {
+        if (r == W_OK && c.a[4] && c.b[0] > 0) {
+            r = rest(e, w, (int64_t)c.b[0]);
+        }
+        return r;
     }
+    bool held;
+    r = wake_end(e, w, &held);
+    if (r == W_OK && held) {
+        c = (call_t){ .a = { in, out, n, nout } };
+        r = go(e, b_poll, &c);
+    }
+    int64_t end = (int64_t)c.b[0] >= 0 ? mono_us() + (int64_t)c.b[0] : -1;
+    while (r == W_OK && c.a[5]) {
+        bool woke;
+        r = evq_rest(e, w, end < 0 ? -1 : end - mono_us(), &woke);
+        if (r != W_OK || !woke) {
+            break;                      // the clock's event stands
+        }
+        c = (call_t){ .a = { in, out, n, nout } };
+        r = go(e, b_poll, &c);
+    }
+    w->woke_us = mono_us();
+    w->hopped_us = 0;
     return r;
 }
 
@@ -1404,12 +1632,18 @@ static const NativeSymbol TERM[] = {
     ROW(term_size, "(ii)i"),
 };
 
+#define OS_ROW(verb, sig) { #verb, (void *)w_os_##verb, sig, NULL },
+static const NativeSymbol OS[] = {
+    MOY_WASI_OS_ROWS(OS_ROW)
+};
+
 #define N_WASI (uint32_t)(sizeof WASI / sizeof WASI[0])
 #define N_TERM (uint32_t)(sizeof TERM / sizeof TERM[0])
+#define N_OS (uint32_t)(sizeof OS / sizeof OS[0])
 
 uint32_t moy_wasi_count(uint32_t *term) {
     if (term != NULL) {
-        *term = N_TERM;
+        *term = N_TERM + N_OS;
     }
     return N_WASI;
 }
@@ -1417,10 +1651,16 @@ uint32_t moy_wasi_count(uint32_t *term) {
 int moy_wasi_register(NativeSymbol *store) {
     memcpy(store, WASI, sizeof WASI);
     memcpy(store + N_WASI, TERM, sizeof TERM);
+    memcpy(store + N_WASI + N_TERM, OS, sizeof OS);
     if (!wasm_runtime_register_natives(MOY_WASI_MODULE, store, N_WASI)) {
         return -1;
     }
     if (!wasm_runtime_register_natives(MOY_WASI_TERM, store + N_WASI, N_TERM)) {
+        wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
+        return -1;
+    }
+    if (!wasm_runtime_register_natives(MOY_WASI_OS, store + N_WASI + N_TERM, N_OS)) {
+        wasm_runtime_unregister_natives(MOY_WASI_TERM, store + N_WASI);
         wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
         return -1;
     }
@@ -1430,6 +1670,7 @@ int moy_wasi_register(NativeSymbol *store) {
 void moy_wasi_unregister(NativeSymbol *store) {
     wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
     wasm_runtime_unregister_natives(MOY_WASI_TERM, store + N_WASI);
+    wasm_runtime_unregister_natives(MOY_WASI_OS, store + N_WASI + N_TERM);
 }
 
 int moy_wasi_check(wasm_module_t module, char *err, size_t errlen) {
@@ -1438,7 +1679,8 @@ int moy_wasi_check(wasm_module_t module, char *err, size_t errlen) {
         wasm_import_t im;
         wasm_runtime_get_import_type(module, i, &im);
         bool ours = strcmp(im.module_name, MOY_WASI_MODULE) == 0
-                    || strcmp(im.module_name, MOY_WASI_TERM) == 0;
+                    || strcmp(im.module_name, MOY_WASI_TERM) == 0
+                    || strcmp(im.module_name, MOY_WASI_OS) == 0;
         if (!ours || im.kind != WASM_IMPORT_EXPORT_KIND_FUNC || !im.linked) {
             snprintf(err, errlen, "imports %s.%s, which a command on this console cannot",
                      im.module_name, im.name);

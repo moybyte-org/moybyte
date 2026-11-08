@@ -27,15 +27,15 @@ truth for a module at the kernel's trust. The plan for the P4s is the line
 module cannot reach the rest of the console; `app_perms.FULL_ACCESS_LINES` is
 where a board's line goes, and until then every board says the S3s'.
 
-- **Process model.** An ELF process has the same hooks as a wasm one
-  (`moy_start`, `moy_stop`, `moy_timer`, `moy_on` for an event, the lane
-  exports; a command is `main(argc, argv)` over the POSIX rows, as a wasm
-  command is WASI's `_start`, §3) and
-  **no raw RTOS**: the table exports no task, timer or ISR primitive. The OS
-  creates the module's task with a priority and core cap (core 1 only on the
-  S3s), dispatches edges as ring events and timers as OS-owned `esp_timer`
-  entries calling the module on its own task. Every registration is a handle
-  under the process's OWNER, so "leases end with the process" stays true.
+- **Process model.** A command is `main(argc, argv)` over the POSIX rows,
+  as a WASI command is its `_start` (§3); a service is `main` too, a loop
+  that blocks in `poll` on its event descriptor with its nearest deadline as
+  the timeout (`processes.md` §1, the service model; `moy_os.h`, A
+  SERVICE): no hook is dispatched to it, and a timer is a deadline it
+  passes. It has **no raw RTOS**: the table exports no task, timer or ISR
+  primitive, and the OS creates the module's task with a priority and core
+  cap (core 1 only on the S3s). Every registration is a handle under the
+  process's OWNER, so "leases end with the process" stays true.
   `pthread_create` is the one thread verb (below): it makes an OS-owned task
   under the OWNER with the module's caps, swept on stop, never a raw
   FreeRTOS task. PSRAM text is never an ISR and never runs during a flash
@@ -195,9 +195,10 @@ place.
 achievements process ported to it: the Lua tier's is
 `tests/fixtures/achievements_lua.moy`, a Lua service in the seed's place
 in the store, with the same events in, the same store and the same
-notifications out. Its wasm parameter is an xfail: a compiled service has
-no ABI yet (its timer callbacks as exports the OS calls, or WASI's
-`poll_oneoff`), which is the owner's call.
+notifications out. Its wasm parameter is an xfail: a compiled service's ABI
+is the event descriptor (owner, 2026-11-08: WASI's `poll_oneoff`, built in
+`native/moy_wasm/moy_wasi.h`), and the achievements process is not ported
+to it.
 
 ## 3. wasm and WASI
 
@@ -241,7 +242,8 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
-for the rest; and an app's `moybyte.app`, its roles' rows. Those are rows of
+for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
+model's, below); and an app's `moybyte.app`, its roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated
 from it (`native/moy_app/moy_app_wasm_rows.h`,

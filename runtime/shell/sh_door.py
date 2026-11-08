@@ -286,6 +286,14 @@ def traceback_text(exc):
     return tt(exc) or repr(exc)
 
 
+def _noticed():
+    """What a compiled program sent from its own thread to a process the VM
+    serves (moy_send) is served at the next frame's start, as a send from
+    Python is (moybyte's MESSAGES)."""
+    if _sched._E.ready():
+        _moybyte.WAKES.queued = 1
+
+
 def run_program(pid, fn, stderr):
     """fn() as process `pid`, under the guard: its exit code."""
     was = _L.current() if _L is not None else None
@@ -551,7 +559,9 @@ class ShellDoor:
         consent grants, the folder its `files` permission names its only
         files. Its exit code, or in the background its pid (the code kept for
         `status`). In the foreground with a `job` it is a job the door steps
-        (`_compiled_steps`): RUNNING."""
+        (`_compiled_steps`): RUNNING. Its process has an event queue (its app
+        id and its manifest's `receives`), which the program reads as its
+        event descriptor (native/moy_kernel/moy_evq.h) and its end closes."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
@@ -576,6 +586,7 @@ class ShellDoor:
         pid = _L.spawn(name) if _L is not None else S._next_pid()
         p = S.procs[pid] = _sched.Proc(pid, _sched.COMMAND, name, run)
         p.granted = tuple(granted)
+        S._open(pid, False)
         roots = wasi_roots(granted)
         net = ("network" in granted, self._grant(p, run)) if tier == "elf" else ()
         if job is not None and not bg and hasattr(rt, "start"):
@@ -595,6 +606,7 @@ class ShellDoor:
         except BaseException:
             self._compiled_gone(pid)
             raise
+        _noticed()
         code = self._compiled_end(name, pid, code, why, bg)
         if not bg:
             return code
@@ -610,6 +622,7 @@ class ShellDoor:
         try:
             while code == rt.RUNNING:
                 code, why = self._as_pid(pid, rt.step, pid, STEP_MS)
+                _noticed()
                 if code == rt.RUNNING:
                     yield False
         finally:

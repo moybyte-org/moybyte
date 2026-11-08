@@ -106,7 +106,8 @@ process-table slot and generation; the states are `running`, `throttled`,
 `minimised`, `paused` (held across a VM stop, §5), `background`,
 `suspended` (an overrun's last rung, §3),
 `stopping` and `exited` (with the code the task
-manager and `ps` show); a stop is TERM (the `moy_stop`/`close` hook) and, after
+manager and `ps` show); a stop is TERM (the `moy_stop`/`close` hook, a
+compiled service's event descriptor hung up) and, after
 `MOY_SERVICE_STOP_MS`, KILL (§5), the same for an app, a command and a
 service. The codes the OS gives are the shell's, defined once
 (`native/moy_kernel/moy_proc_exit.h`, Python's through `moy_log`): 126 a
@@ -114,9 +115,10 @@ start refused, 130 Ctrl-C, 134 a trap, 137 a kill.
 
 **Lifecycle verbs:** `open`/`close` for an app (`docs/shell_ux_v1.md` §11),
 `main(argv) → exit code` for a command, `moy_start`/`moy_stop` for a
-service on every tier that may be one (`tiers.md`), with `moy_stop` the hook
-under which a service persists what a kill would lose (a LoRaWAN frame
-counter). A crash is an exit, recorded in the strike ledger (§10).
+Python or Lua service, with `moy_stop` the hook under which a service
+persists what a kill would lose (a LoRaWAN frame counter), and for a
+compiled service `main`, whose loop persists the same when its event
+descriptor reads end of file (`tiers.md`). A crash is an exit, recorded in the strike ledger (§10).
 
 **The tick model.** The foreground app keeps frames: `update(dt)`/`draw()`
 as today; a minimised app keeps its `update` and a minimised game is paused (above). **A background process, on every tier, never gets a per-frame
@@ -152,13 +154,30 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   share one task, so the shell loop is their wait: a queue the VM serves is
   flagged so, and the scheduler takes its events at the frame's start
   (`moy_evq_ready`, `Scheduler.mail`), `asyncio` and `every`/`on` riding the
-  same scheduler (§3). A compiled service's face is decided (owner,
-  2026-11-08): a WASI program blocks in `poll_oneoff` over an event
-  descriptor that reads the queue, and an ELF module in `poll` over the
-  same descriptor (`tiers.md` §1, §3).
+  same scheduler (§3). A compiled program's face is its **event
+  descriptor**, `MOY_EVQ_FD` (owner, 2026-11-08; `moy_evq.h`, THE EVENT
+  DESCRIPTOR): readable while an event is queued, each read one record (the
+  sender's pid and app id, the name, then the arguments), never blocking. A
+  WASI program blocks in `poll_oneoff` on it (`native/moy_wasm/moy_wasi.h`)
+  and an ELF module in `poll` (`native/moy_elf/moy_os.h`), each wait the
+  one kernel wait with the program's nearest deadline as its timeout, so a
+  timer is a deadline and no hook is dispatched. Both listen and send with
+  the same two rows, `moy_on` and `moy_send` (a WASI program's `moybyte.os`
+  imports), the kernel's own on the program's thread. A compiled command's
+  process gets a queue from the shell's door (`runtime/shell/sh_door.py`),
+  its app id and `receives`; an ELF service's start opens one where none is
+  (`moy_os_service`), and its stop hangs the descriptor up (`POLLHUP`, a
+  read's end of file) for its `main` to return. `sdk/include/moybyte/os.h`
+  carries the record and both rows for either tier, and the example service
+  of each, a loop that blocks in poll and answers a "ping" with a "pong",
+  is `tests/fixtures/elf/elf_svc.moy` and `tests/fixtures/wasm/wasi_svc.moy`.
 - **The supervisor** (`native/moy_kernel/moy_super.h`): one ladder of budgets
   and strikes (§3's rungs) for every tier's callbacks, charged by the tier
-  that ran the callback, logged under its pid.
+  that ran the callback, logged under its pid. A compiled program's callback
+  is a wake: from a poll of its event descriptor's return to its next poll
+  of it, less (on WASI) what its calls waited for the session's task; native
+  code is not aborted mid-wake, and a suspended program's poll waits
+  unserved until it is resumed.
 - **The VM's queue** (`native/moy_kernel/moy_vmq.h`): the one way a process
   on its own task enters the console. A HOP runs C on the VM's task while
   the poster waits (a role row of its app's run); a CALL is a console call
@@ -196,8 +215,12 @@ refuse one, and the host and the desktop MicroPython, which have no task to
 give, step their services at the scheduler's poll
 (`runtime/system/scheduler.py`, LUA SERVICES). What a Lua service asks of
 the console (a notification, a message, a function the console handed it)
-goes through the VM's queue (`tiers.md` §2). A wasm service and an ELF one
-are later steps.
+goes through the VM's queue (`tiers.md` §2). A compiled program's
+`moy_send` posts from its own thread; the door notices one that reached the
+VM's processes after each step of the program (`sh_door._noticed`), and
+the frame's start serves it. The scheduler starts no compiled service: an
+ELF service runs through `moy_os_service` (the boards' `moy_elf.service`),
+and a WASI program in the service model runs as a command.
 
 ## 2. The app manifest and the permission table
 

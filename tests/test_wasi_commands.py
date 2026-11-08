@@ -50,7 +50,7 @@ def built(tmp_path_factory):
         pytest.skip("no wasi-sdk: %s" % exc)
     out = tmp_path_factory.mktemp("wasi")
     got = {}
-    for name in ("wasi_cat", "wasi_probe", "wasi_hello"):
+    for name in ("wasi_cat", "wasi_probe", "wasi_hello", "wasi_svc"):
         if name == "wasi_hello" and not wasm_cart.rust_wasip1():
             continue
         dst = str(out / (name + ".moy"))
@@ -112,7 +112,7 @@ def out(app, text):
 
 def test_the_commands_are_on_the_path(term, built):
     _ws, app = term
-    want = ["bare", "cat"] + (["hello"] if "wasi_hello" in built else []) + ["probe"]
+    want = ["bare", "cat"] + (["hello"] if "wasi_hello" in built else []) + ["probe", "svc"]
     assert " ".join(out(app, "ls /bin")).split() == want
 
 
@@ -227,6 +227,55 @@ def test_a_long_command_is_a_job_the_door_steps(term, monkeypatch):
     assert "not-after" not in "".join(app.face.lines())
     assert out(app, "wasi.probe/probe exit 4; echo status $?") == [
         "leaving with 4", "status 4"]
+
+
+def _steps(cond, s=10.0):
+    """The shell's jobs stepped until cond() holds or `s` seconds pass:
+    whether it held."""
+    from runtime import moy_sh
+    t0 = time.monotonic()
+    while True:
+        if cond():
+            return True
+        if time.monotonic() - t0 >= s:
+            return False
+        moy_sh.jobs()
+        time.sleep(0.002)
+
+
+def test_a_program_blocks_in_poll_on_its_event_descriptor(term):
+    """The service model's WASI face (moy_wasi.h, THE EVENT DESCRIPTOR): the
+    run's process has an event queue under its app id; its poll_oneoff on
+    MOY_EVQ_FD blocks in the one kernel wait between its clock's deadlines,
+    a ping from its own app is read as one record and answered with its
+    moybyte.os send, and its end closes the queue."""
+    from runtime import moy_evq, moy_log, scheduler
+    _ws, app = term
+    peer = moy_log.spawn("peer")
+    assert moy_evq.open(peer, "wasi.svc", "", False) == moy_evq.OK
+    try:
+        assert moy_evq.listen(peer, "pong", True) == moy_evq.OK
+        app.face.set_line("wasi.svc/svc")
+        app.face.submit()
+        assert _steps(lambda: app.face.take() or "listening" in app.face.lines()), \
+            app.face.lines()
+        pid = next(p.pid for p in scheduler.SCHED.procs.values() if p.name == "svc")
+        assert moy_evq.app(pid) == "wasi.svc"
+        assert moy_evq.send(peer, "wasi.svc", "ping", "[7]")[0] == 1
+        assert _steps(lambda: moy_evq.queued(peer) == 1)
+        assert moy_evq.take(peer) == (pid, "wasi.svc", "pong", "[7]")
+        t0 = time.monotonic()
+        _steps(lambda: time.monotonic() - t0 > 0.1)           # its clock ticks meanwhile
+        assert moy_evq.send(peer, "wasi.svc", "bye", "[]")[0] == 1
+        assert _steps(lambda: not app.face.busy())
+        assert app.face.status() == 0
+        app.face.take()
+        lines = app.face.lines()
+        assert "ping 3 from wasi.svc: 1" in lines
+        assert "bye after 1 pings, ticking" in lines
+        assert not moy_evq.has(pid)
+    finally:
+        moy_evq.close(peer)
 
 
 def test_a_sleeping_command_past_its_budget_is_killed(term, monkeypatch):
