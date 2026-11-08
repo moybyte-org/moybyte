@@ -28,7 +28,9 @@ A row is `(perm, grants, tiers, prompt, needs, py)`:
 
 A permission is ABSENT for a run when Settings turned it off, when an update
 added it and nobody consented, when the console lacks what it needs or when
-the cart's tier may not hold it. Turned off or unconsented, each of its `py`
+the cart's tier may not hold it. A `files:<folder>` naming a folder this
+console has none of refuses the launch by name, required or not: the cart
+would otherwise run with no `files` and fail on its first use. Turned off or unconsented, each of its `py`
 names reads `None`; on a console without the service, it has no name, as
 the console has no verb. An absent permission the manifest's `"required"`
 lists refuses the launch with a message naming it. A cart with no consent record -- one written in the
@@ -214,6 +216,8 @@ def _why_absent(perm, tier, have, rec):
     r = row(perm)
     if r is None:
         return "unknown"
+    if perm.startswith("files:") and _moy_app.policy((perm,))[1] is None:
+        return "folder"
     if tier not in r[TIERS]:
         return "tier"
     if r[NEEDS] == "lease":
@@ -265,6 +269,8 @@ def _refusal(perm, why, tier):
         return 'needs "%s" - install it again to allow it' % perm
     if why == "needs":
         return 'needs "%s" - the %s has none' % (perm, board_words() or "console")
+    if why == "folder":
+        return 'needs "%s" - this console has no such folder' % perm
     if why == "tier":
         return 'needs "%s" - not for a %s cart' % (perm, tier)
     return 'needs "%s" - this console does not know it' % perm
@@ -287,7 +293,7 @@ def check(cart, rec, have):
             granted.append(p)
             continue
         absent.append(p)
-        if refusal is None and p in req:
+        if refusal is None and (p in req or why == "folder"):
             refusal = _refusal(p, why, tier)
     if refusal is None:
         for p in req:

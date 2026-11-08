@@ -20,6 +20,7 @@ under CI, where a suite that asks to run and then skips proves nothing.
 ~4 Chrome boots, ~90s.
 """
 
+import json
 import os
 import re
 import shutil
@@ -98,6 +99,105 @@ def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
         assert js2[2].startswith("loaded "), \
             "the second load did not read the local store: %r\n%s" % (js2[2], out2[-3000:])
         print("persist reload: %s" % js2[2])
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
+def _stale_notes():
+    """Notes' manifest as a browser kept it from an older console: one version
+    back, and asking for the Documents folder by a name the console no
+    longer has (`files:docs`, before the files model named the folders)."""
+    man = json.loads((ROOT / "system_carts" / "moybyte.notes.moy" / "manifest.json")
+                     .read_text())
+    man["version"] = int(man["version"]) - 1
+    perms = man["moybyte"]["permissions"]
+    perms[perms.index("files:documents")] = "files:docs"
+    return json.dumps(man)
+
+
+def _stale_achievements():
+    """The achievements process's manifest a version back: the one whose
+    handler took no sender, which the scheduler's `fn(sender, *args)` crashed
+    (`TypeError: note() takes 3 positional arguments`)."""
+    man = json.loads((ROOT / "system_carts" / "moybyte.achievements.moy" / "manifest.json")
+                     .read_text())
+    man["version"] = int(man["version"]) - 1
+    return json.dumps(man)
+
+
+# Page-side OPFS reads and writes, for the steps below (the worker's store is
+# the origin's, so the page reaches the same files).
+_OPFS = ("async function opfsDir(path, create) {"
+         " let d = await navigator.storage.getDirectory();"
+         " for (const n of path) d = await d.getDirectoryHandle(n, {create: !!create});"
+         " return d; }"
+         " async function opfsPut(path, name, text) {"
+         " const w = await (await (await opfsDir(path, true)).getFileHandle(name,"
+         " {create: true})).createWritable(); await w.write(text); await w.close(); }"
+         " async function opfsGet(path, name) {"
+         " return await (await (await opfsDir(path)).getFileHandle(name)).getFile()"
+         ".then((f) => f.text()); }"
+         " async function opfsNames(path) { const out = [];"
+         " for await (const [n] of (await opfsDir(path)).entries()) out.push(n);"
+         " return out.sort(); }")
+
+
+def test_a_system_cart_kept_from_an_older_console_is_replaced_and_runs(tmp_path):
+    """A returning browser's store holds Notes and the achievements process
+    as an older console seeded them (a version back; Notes asking for
+    `files:docs`), and the bundle carries the newer ones. The
+    store wins over the bundle for the kid's work, but a system cart is
+    re-seeded when the bundled version is newer, as a board's seed_builtins
+    does (#47): without it Notes ran on its stale manifest, was granted no
+    folder, and stopped with "NameError: name 'files' isn't defined" on its
+    first files.list(). Launched, it lists the notes and makes one."""
+    web_e2e.require("store")
+    port = web_e2e.free_port()
+    profile = tmp_path / "chrome"
+    server, base = _serve(port)
+    try:
+        # First visit seeds OPFS; then the page puts the older Notes over it
+        # and a note in Documents, as an older console's visit would have.
+        out, js = web_e2e.run(tmp_path, "stale", "?handheld=1&dev=1", [
+            {"wait": 2500},
+            {"js": "(async () => { %s; await opfsPut(['carts', 'moybyte.notes.moy'],"
+                   " 'manifest.json', %s); await opfsPut(['files', 'Documents'], 'hello.md',"
+                   " '# hello\\n'); await opfsPut(['carts', 'moybyte.achievements.moy'],"
+                   " 'manifest.json', %s); await opfsPut(['carts', 'moybyte.achievements.moy'],"
+                   " 'main.py', 'OLD = 1\\n'); return 'staled'; })()"
+                   % (_OPFS, json.dumps(_stale_notes()), json.dumps(_stale_achievements()))},
+        ], base, profile)
+        assert js[-1] == "staled", out[-3000:]
+
+        out2, js2 = web_e2e.run(tmp_path, "notes", "?handheld=1&dev=1&cart=moybyte.notes.moy", [
+            {"wait": 3000},
+            {"js": "window.__moyState().then((s) => ({cart: s.cart, err: s.cart_error}))"},
+            {"key": "n"}, {"wait": 300},
+            {"key": "z"}, {"key": "e"}, {"key": "d"}, {"wait": 300},
+            {"key": "Enter"},
+            # The files root's sweep carries the new note into OPFS.
+            {"waitFor": "(async () => { %s; return (await opfsNames(['files', 'Documents']))"
+                        ".some((n) => n.toLowerCase().startsWith('zed')); })()" % _OPFS,
+             "timeout": 15000},
+            {"shot": "notes"},
+            {"js": "(async () => { %s; return {docs: await opfsNames(['files', 'Documents']),"
+                   " man: JSON.parse(await opfsGet(['carts', 'moybyte.notes.moy'],"
+                   " 'manifest.json'))}; })()" % _OPFS},
+            {"js": "window.__moyState().then((s) => s.cart_error)"},
+            {"js": "(async () => { %s; return opfsGet(['carts', 'moybyte.achievements.moy'],"
+                   " 'main.py'); })()" % _OPFS},
+        ], base, profile)
+        st, kept, err, ach = js2[0], js2[-3], js2[-2], js2[-1]
+        assert st == {"cart": "Notes", "err": None}, (st, out2[-3000:])
+        assert "files:documents" in kept["man"]["moybyte"]["permissions"], kept["man"]
+        assert "hello.md" in kept["docs"], kept["docs"]
+        assert any(n.lower().startswith("zed") and n.endswith(".md") for n in kept["docs"]), \
+            "Notes made no note in Documents: %r\n%s" % (kept["docs"], out2[-3000:])
+        assert err is None, err
+        # Every system cart takes the same rule: the achievements process too.
+        assert ach == (ROOT / "system_carts" / "moybyte.achievements.moy" / "main.py") \
+            .read_text(), ach[:200]
     finally:
         server.terminate()
         server.wait(timeout=10)

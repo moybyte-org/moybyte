@@ -446,13 +446,23 @@ for (const sync of [true, false]) {
        await store.readRecord(s1) === '{"version": 1, "carts": {}}');
 }
 
-// ---- a returning browser still gets a system cart it never had ---------------
+// ---- a returning browser gets the bundle's system carts as a board would ----
 {
     const local = { "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true}}',
+                    "star.moy/main.py": "old code",
+                    "star.moy/old.lua": "gone",
+                    "star.moy/pmem.json": "[7]",
+                    "star.moy/journal/journal.jsonl": "{}",
+                    "same.moy/manifest.json": '{"title":"Same","moybyte":{"system":true},"version":3}',
+                    "same.moy/main.py": "kid's edit",
                     "mine.moy/manifest.json": '{"title":"Mine"}' };
     const bundle = {
         "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true},"version":9}',
         "star.moy/main.py": "new code",
+        "star.moy/pmem.json": "[]",
+        "star.moy/config.json": "{}",
+        "same.moy/manifest.json": '{"title":"Same","moybyte":{"system":true},"version":3}',
+        "same.moy/main.py": "seed",
         "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","moybyte":{"system":true}}',
         "moybyte.get_carts.moy/main.py": "pass",
         "moybyte.get_carts.moy/cover.png": { b: "AAAA" },
@@ -461,15 +471,25 @@ for (const sync of [true, false]) {
         "loose.moy/manifest.json": '{"title":"Loose","system":true}',
         "loose.moy/main.py": "x",
     };
-    const got = store.missingSystemCarts(local, bundle);
+    const got = store.systemSeeds(local, bundle);
+    const added = Object.keys(got.add);
     ok("a system cart the store lacks comes from the bundle, whole",
-       Object.keys(got).sort().join() ===
-       "moybyte.get_carts.moy/cover.png,moybyte.get_carts.moy/main.py,moybyte.get_carts.moy/manifest.json",
-       JSON.stringify(Object.keys(got)));
-    ok("one the store has is never touched, and a non-system cart never added",
-       !("star.moy/main.py" in got) && !("demo.moy/main.py" in got));
+       ["moybyte.get_carts.moy/cover.png", "moybyte.get_carts.moy/main.py",
+        "moybyte.get_carts.moy/manifest.json"].every((k) => added.includes(k)),
+       JSON.stringify(added));
+    ok("one whose bundled version is newer is replaced, its manifest last",
+       got.add["star.moy/main.py"] === "new code"
+       && added[added.length - 1] === "star.moy/manifest.json", JSON.stringify(added));
+    ok("its saves stay, and tuning it never had comes with it",
+       !("star.moy/pmem.json" in got.add) && "star.moy/config.json" in got.add);
+    ok("the old version's other files go, the saves stay",
+       got.drop.sort().join() === "star.moy/journal/journal.jsonl,star.moy/old.lua",
+       JSON.stringify(got.drop));
+    ok("one at the same version is never touched, and a non-system cart never added",
+       !("same.moy/main.py" in got.add) && !("demo.moy/main.py" in got.add)
+       && !got.drop.some((r) => r.startsWith("same.moy/")));
     ok("a top-level \"system\" is not Moybyte's field and reads as absent",
-       !("loose.moy/main.py" in got));
+       !("loose.moy/main.py" in got.add));
 }
 
 // The two predicates are two QUESTIONS, and the answers differ on exactly one

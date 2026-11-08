@@ -81,10 +81,14 @@ nor those docs will warn you about:
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and
   after three gives up ONCE and says that too. A returning browser's shelf is
-  OPFS's, never the bundle's -- except a SYSTEM cart the store has never had
-  (a new app, a new seed game), which is seeded into it the way a board seeds a
-  built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
-  had visited before a system cart shipped would ever see it.
+  OPFS's, never the bundle's -- except the bundle's SYSTEM carts, which reach
+  it as a board's built-ins reach its SD (`moy_store.systemSeeds`, #47): one
+  the store has never had (a new app, a new seed game) is seeded whole, and one
+  whose bundled manifest `version` is newer replaces the store's copy, its
+  `pmem.json` and `config.json` kept. Without the first, nobody who had visited
+  before a system cart shipped would ever see it; without the second, an app
+  kept from an older console runs its old manifest on the new one (Notes'
+  `files:docs` after the folders took their names: no `files`, a NameError).
 - **A channel's site keeps its own storage.** The stable site (`/moybyte/`)
   and the dev site (`/moybyte/dev/`, both from `.github/workflows/pages.yml`)
   share the origin moybyte-org.github.io, so they share its OPFS.

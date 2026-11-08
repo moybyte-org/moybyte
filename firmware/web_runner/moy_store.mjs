@@ -567,29 +567,81 @@ export async function isEmpty(store) {
     return true;
 }
 
-// The served bundle's SYSTEM carts (manifest "system": true) that the local
-// store lacks, as bundle entries. The local store wins over the bundle -- it is
-// the kid's work -- but a console that ships a system cart the store has never
-// had (a new app like Get Carts, a new seed game) must still reach a browser
-// that has kept its shelf since an older visit, the way a board seeds a
-// built-in it does not have (runtime/carts/moy_seed.py). A cart the store has is
-// never touched.
-export function missingSystemCarts(local, bundle) {
-    const have = new Set(Object.keys(local).map((k) => k.split("/")[0]));
-    const system = new Set();
+// A cart manifest's integer "version", or 0 when it has none or does not
+// read: a pre-versioning copy counts as the oldest (moy_seed._cart_version).
+function cartVersion(text) {
+    try {
+        const v = parseInt(JSON.parse(text).version, 10);
+        return isNaN(v) ? 0 : v;
+    } catch (e) { return 0; }
+}
+
+// The kid's files a re-seed keeps (moy_seed._RESEED_PRESERVE): the saves and
+// the "Make it mine" tuning, and their crash backups.
+const RESEED_PRESERVE = ["pmem.json", "config.json"];
+
+function preserved(name) {
+    return RESEED_PRESERVE.includes(name)
+        || (name.endsWith(".bak") && RESEED_PRESERVE.includes(name.slice(0, -4)));
+}
+
+// What the served bundle's SYSTEM carts (manifest "system": true) change in a
+// returning browser's store, as a board's seed_builtins changes its SD
+// (runtime/carts/moy_seed.py, #47): `add` the bundle's files of each system
+// cart the store lacks, and of each whose bundled "version" is newer than the
+// store's, and `drop` the store's files of the latter, all but the kid's saves
+// and tuning, which stay over the fresh copy. The local store wins over the
+// bundle otherwise -- it is the kid's work. A replaced cart's manifest comes
+// last in `add`, so a reload part-way leaves the old version's manifest and
+// the next boot replaces it again.
+export function systemSeeds(local, bundle) {
+    const have = new Map();                  // folder -> its local files' names
+    for (const rel in local) {
+        const cut = rel.indexOf("/");
+        if (cut < 0) continue;
+        const top = rel.slice(0, cut);
+        if (!have.has(top)) have.set(top, []);
+        have.get(top).push(rel.slice(cut + 1));
+    }
+    const whole = new Set(), newer = new Set();
     for (const rel in bundle) {
         const cut = rel.indexOf("/");
         if (cut < 0 || rel.slice(cut + 1) !== "manifest.json") continue;
         const top = rel.slice(0, cut);
-        if (have.has(top) || typeof bundle[rel] !== "string") continue;
+        if (typeof bundle[rel] !== "string") continue;
         try {
             const m = JSON.parse(bundle[rel]);
-            if (m && m.moybyte && m.moybyte.system === true) system.add(top);
-        } catch (e) { /* not a manifest anything reads: not a cart to add */ }
+            if (!(m && m.moybyte && m.moybyte.system === true)) continue;
+        } catch (e) { continue; }      // not a manifest anything reads: not a cart
+        if (!have.has(top)) whole.add(top);
+        else if (cartVersion(bundle[rel]) > cartVersion(local[top + "/manifest.json"]))
+            newer.add(top);
     }
-    const out = {};
-    for (const rel in bundle) if (system.has(rel.split("/")[0])) out[rel] = bundle[rel];
-    return out;
+    const add = {}, drop = [], last = {};
+    for (const rel in bundle) {
+        const top = rel.split("/")[0];
+        const name = rel.slice(top.length + 1);
+        if (whole.has(top)) add[rel] = bundle[rel];
+        else if (newer.has(top) && !(preserved(name) && (top + "/" + name) in local)) {
+            if (name === "manifest.json") last[rel] = bundle[rel];
+            else add[rel] = bundle[rel];
+        }
+    }
+    Object.assign(add, last);
+    for (const top of newer) {
+        for (const name of have.get(top)) {
+            const rel = top + "/" + name;
+            if (!preserved(name) && !(rel in bundle)) drop.push(rel);
+        }
+    }
+    return { add, drop };
+}
+
+// One file of a cart store removed; one already gone is no error.
+export async function removeFile(store, rel) {
+    const parts = localParts(store.root, rel);
+    if (!parts) return;
+    try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
 }
 
 // First visit: adopt the served carts.json as the local baseline.

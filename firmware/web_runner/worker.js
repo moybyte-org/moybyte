@@ -621,13 +621,18 @@ async function seedRoot(root, data, site) {
         // The local store WINS over the served bundle: it is the kid's work, and
         // the bundle is only ever the factory seed. "load" (vs "seed") is the
         // evidence that a reload READ FROM local rather than re-seeding fresh.
-        // The one thing the bundle still brings is a system cart this store has
-        // never had, seeded into it like a first visit's.
+        // What the bundle still brings is its system carts as a board seeds
+        // its built-ins: one this store has never had, and one whose bundled
+        // version is newer, its saves and tuning kept (store.systemSeeds).
         const local = await store.readAll(s);
-        const added = root.id === "carts" ? store.missingSystemCarts(local, data) : {};
-        if (Object.keys(added).length) await store.seed(s, added);
+        const sys = root.id === "carts" ? store.systemSeeds(local, data) : { add: {}, drop: [] };
+        for (const rel of sys.drop) {
+            await store.removeFile(s, rel);
+            delete local[rel];
+        }
+        if (Object.keys(sys.add).length) await store.seed(s, sys.add);
         writeStore(root.vfs, local);
-        writeStore(root.vfs, added);
+        writeStore(root.vfs, sys.add);
         return "load";
     } catch (e) {
         writeStore(root.vfs, data);

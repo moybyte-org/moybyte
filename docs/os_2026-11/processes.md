@@ -310,7 +310,9 @@ its names read `None`; a permission naming what this console has not (`pins`
 on a board without them) installs and leaves no name, as the board has no
 verb, and only a `required` one is refused, **at install** naming the board
 and **again at launch** (a card moves between boards; an update may drop a
-class). **Install is all or
+class). A `files:<folder>` naming a folder the console has none of is
+refused at install and at launch whether required or not: the grant would
+hold no folder, and the cart would stop at its first `files` call. **Install is all or
 nothing (owner, 2026-11-03)**: accepting the prompt installs the app with
 every permission it lists, denying installs nothing. Any single permission
 can be turned off later in Settings (About → App permissions,

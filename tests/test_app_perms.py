@@ -194,6 +194,19 @@ def test_a_tier_a_row_excludes_is_absent():
     assert P.check(cart, None, ())[2] == 'needs "editor" - not for a lua cart'
 
 
+def test_a_files_folder_the_console_has_none_of_refuses_by_name():
+    """A cart whose `files:<folder>` names no folder would run with no
+    `files` at all and stop on its first use with a NameError: the launch
+    names it instead, required or not (a seed kept from before its folder was
+    renamed: Notes' `files:docs`)."""
+    cart = {"runtime": "python", "permissions": ["files:docs", "prefs"], "required": []}
+    g, a, why = P.check(cart, None, ())
+    assert g == ["prefs"] and a == ["files:docs"]
+    assert why == 'needs "files:docs" - this console has no such folder'
+    cart["permissions"] = ["files:documents", "prefs"]
+    assert P.check(cart, None, ()) == (["files:documents", "prefs"], [], None)
+
+
 class _Store(dict):
     def set(self, k, v):
         self[k] = json.loads(json.dumps(v))
@@ -303,6 +316,16 @@ def test_a_turned_off_required_permission_refuses_the_launch(tmp_path):
     ws.consent.turn(P.app_id(cart), "prefs", True)
     ok, _cart = _start(ws, "Needy")
     assert ok, ws.run.player.cart_error
+
+
+def test_a_files_folder_the_console_has_none_of_refuses_the_launch(tmp_path):
+    _write_cart(str(tmp_path / "carts"), "Stale", ["files:docs"],
+                src="got, err = files.list()\n" + APP_SRC)
+    ws = build_ws(tmp_path)
+    ok, cart = _start(ws, "Stale")
+    assert ok is False
+    assert ws.run.player.cart_error == 'needs "files:docs" - this console has no such folder'
+    assert ws.app_guard.strikes(P.app_id(cart)) == 0
 
 
 def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
