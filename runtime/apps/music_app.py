@@ -66,7 +66,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 from array import array
 
 # The curated stations: name, style, address (each answers 200 with
-# audio/mpeg MP3 over plain http to the media client's request).
+# audio/mpeg MP3 over plain http to the media client's request, and over
+# https, every redirect https too, to a browser page's).
 STATIONS = (
     ("Groove Salad", "Ambient beats", "http://ice1.somafm.com/groovesalad-128-mp3"),
     ("Drone Zone", "Ambient", "http://ice1.somafm.com/dronezone-128-mp3"),
@@ -81,7 +82,7 @@ STATIONS = (
     ("Folk Forward", "Folk", "http://ice1.somafm.com/folkfwd-128-mp3"),
     ("Thistle Radio", "Celtic", "http://ice1.somafm.com/thistle-128-mp3"),
     ("Radio Paradise", "Eclectic", "http://stream.radioparadise.com/mp3-128"),
-    ("Radio Swiss Jazz", "Jazz", "http://stream.srg-ssr.ch/m/rsj/mp3_128"),
+    ("Radio Swiss Jazz", "Jazz", "http://stream.srg-ssr.ch/srgssr/rsj/mp3/128"),
 )
 
 # A station's (or list's) art: a colour field, two MOY64 colours top to

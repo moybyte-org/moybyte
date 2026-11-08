@@ -13,7 +13,8 @@ bundle in front of it. Music lists the board's music folder and plays a song
 read through the sealed GET /media, a range a request.
 
 RADIO (site): a station is the page's fetch. One that sends CORS headers
-plays; one that does not says so ("Blocks browsers").
+plays; one that does not says so ("Blocks browsers"). The station refuses a
+request that names its page, as SomaFM's do, so the fetch names none.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_music_e2e.py
 """
@@ -142,7 +143,7 @@ def test_site_a_dropped_song_is_kept_in_opfs_and_plays_from_it(tmp_path):
 
 
 def _station(tmp_path, cors):
-    host = web_e2e.Host(cors=cors)
+    host = web_e2e.Host(cors=cors, referer=False)
     host.files["/live"] = LONG
     return host
 
@@ -173,6 +174,7 @@ def test_site_a_station_plays_when_it_lets_a_page_read_it_and_says_so_when_not(
         media = [j for j in js if isinstance(j, str) and j.startswith("MEDIA ")]
         last = json.loads(media[-1][6:]) if media else None
         assert last, (js, out[-3000:])
+        assert not station.refused, station.refused
         if cors:
             assert last["src"] == url and last["state"] == "playing", last
             _assert_tone(_tagged(js, "PCM"), out)

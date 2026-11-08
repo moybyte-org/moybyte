@@ -230,7 +230,10 @@ nor those docs will warn you about:
   - **A station without CORS headers cannot be read**, and from the page
     that looks like no network; a `no-cors` fetch that answers tells them
     apart, and the face fails the entry with EACCES. A page on https asks
-    for an `http://` station over https (mixed content).
+    for an `http://` station over https (mixed content), and a station whose
+    https address redirects to http cannot play there. The fetch names no
+    page (`referrerPolicy: "no-referrer"`): SomaFM answers a Referer naming a
+    github.io or localhost page with an empty 403.
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board

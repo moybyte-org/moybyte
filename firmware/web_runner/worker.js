@@ -1848,11 +1848,15 @@ async function mediaGet(j) {
 async function mediaUrl(j, live, mine, put, room, fail) {
     // A page served over https may not fetch http (mixed content): it asks
     // for the same station over https, which a station without it refuses.
+    // A station's request names no page: SomaFM's servers answer 403 to a
+    // Referer naming a github.io or localhost page, and a board's request
+    // names none either.
     let url = j.url;
     if (self.location.protocol === "https:" && /^http:/i.test(url)) url = "https:" + url.slice(5);
+    const how = { cache: "no-store", referrerPolicy: "no-referrer" };
     let r;
     try {
-        r = await fetch(url, { signal: live.ac.signal, cache: "no-store" });
+        r = await fetch(url, Object.assign({ signal: live.ac.signal }, how));
     } catch (e) {
         if (!mine()) return;
         // CORS and no network look the same from here; a no-cors fetch that
@@ -1860,7 +1864,7 @@ async function mediaUrl(j, live, mine, put, room, fail) {
         let there = false;
         const ac = new AbortController();
         const t = setTimeout(() => ac.abort(), 8000);
-        try { await fetch(url, { mode: "no-cors", signal: ac.signal, cache: "no-store" }); there = true; }
+        try { await fetch(url, Object.assign({ mode: "no-cors", signal: ac.signal }, how)); there = true; }
         catch (e2) { /* not there */ }
         clearTimeout(t);
         ac.abort();

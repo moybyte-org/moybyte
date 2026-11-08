@@ -189,13 +189,16 @@ class Host:
     206 with those bytes and is written down in `ranges`, as GitHub Pages
     answers one; a preflight (OPTIONS) is refused with 405, as Pages refuses
     it, and written down in `preflights` -- a page that needed one could not
-    have read the host."""
+    have read the host. `referer` False refuses a request that names its
+    page (a Referer) with an empty 403, as SomaFM's stations refuse one from a
+    github.io or localhost page, and writes it down in `refused`."""
 
-    def __init__(self, cors):
+    def __init__(self, cors, referer=True):
         self.files = {}
         self.asked = []
         self.ranges = []
         self.preflights = []
+        self.refused = []
         host = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -211,6 +214,15 @@ class Host:
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
                 host.asked.append(path)
+                if not referer and self.headers.get("Referer"):
+                    host.refused.append((path, self.headers.get("Referer")))
+                    self.send_response(403)
+                    if cors:
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 body = host.files.get(path)
                 m = re.match(r"bytes=(\d+)-(\d+)$", self.headers.get("Range") or "")
                 if body is not None and m:
